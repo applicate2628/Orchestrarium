@@ -18,7 +18,7 @@
 ## Claude-side repository concretization
 
 - Adjacent findings и `BLOCKED:prerequisite` идут в `work-items/bugs/`.
-- Recovery начинается с `work-items/index.md`; active items живут в `work-items/active/<date>-<slug>/`, а archive target — `work-items/archive/<date>-<slug>/`.
+- Human-readable recovery начинается с generated `work-items/README.md`; состояние определяется по физическим `work-items/backlog/`, `work-items/active/<date>-<slug>/` и `work-items/archive/YYYY-MM/<date>-<slug>/` плюс owning artifacts. `work-items/index.md` остаётся только compatibility snapshot.
 - Periodic controls остаются pack-local в [periodic-control-matrix.md](periodic-control-matrix.md).
 - Claude-side examples используют `Gate: PASS | REVISE | BLOCKED:<class> | RETURN(role)`.
 - Claude runtime docs дополнительно держат явные `Artifact invalidation protocol` и `Parallel execution protocol`; используйте их вместе с shared core.

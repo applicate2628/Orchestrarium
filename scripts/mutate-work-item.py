@@ -14,6 +14,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import sys
 import tempfile
 from dataclasses import dataclass, field
@@ -33,9 +34,17 @@ MIGRATION_DIGEST_ALGORITHMS = {
     "directory": "sha256-tree-entries-v1",
 }
 V1_TERMINALIZATION_OWNER = "work-items-lifecycle-v1-terminalization"
-V1_TERMINALIZATION_SCHEMA_VERSION = 1
+V1_TERMINALIZATION_SCHEMA_VERSION = 2
 V1_TERMINALIZATION_AUTHORIZATION = "operator-authorized-v1-terminalization"
 V1_TERMINALIZATION_FAILURE = "WI-CATEGORY-TERMINAL-EVIDENCE-MISSING"
+LEGACY_RETIREMENT_OWNER = "work-items-lifecycle-v1-legacy-retirement"
+LEGACY_RETIREMENT_SCHEMA_VERSION = 1
+LEGACY_RETIREMENT_FILE = "legacy-retirement.json"
+LEGACY_CLEANUP_OWNER = "work-items-lifecycle-v1-legacy-candidate-cleanup"
+LEGACY_CLEANUP_SCHEMA_VERSION = 1
+LEGACY_CLEANUP_FILE = "legacy-candidate-cleanup.json"
+CURRENT_IDENTITY_NORMALIZATION_OWNER = "work-items-lifecycle-v1-current-identity-normalization"
+CURRENT_IDENTITY_NORMALIZATION_SCHEMA_VERSION = 1
 WORK_ITEM_SCHEMA_KEY = "Lifecycle-schema"
 WORK_ITEM_SCHEMA_VALUE = "work-items-physical-v1"
 WORK_ITEM_SCHEMA_MARKER = f"{WORK_ITEM_SCHEMA_KEY}: {WORK_ITEM_SCHEMA_VALUE}"
@@ -48,10 +57,13 @@ README_SECTIONS = (
     "Recently completed",
 )
 UTC_INSTANT_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
-SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]*(?:\.[a-z0-9][a-z0-9-]*)*$")
 OPTIONAL_RELATION_ABSENCE_MARKERS = frozenset({"none"})
 FIELD_RE = re.compile(
     r"^\s*(?:-\s*)?(?:\*\*)?([A-Za-z][A-Za-z0-9 -]*?)(?:\*\*)?\s*:\s*(.*?)\s*$"
+)
+FENCED_CODE_OPEN_RE = re.compile(
+    r"^ {0,3}(?P<fence>`{3,}|~{3,})(?P<info>[^\r\n]*)$"
 )
 WORK_ITEM_SCHEMA_OCCURRENCE_RE = re.compile(
     r"^\s*(?:-\s*)?(?:\*\*)?(lifecycle-schema)(?:\*\*)?\s*:\s*(.*?)\s*$",
@@ -148,6 +160,9 @@ class CategoryAdmission:
     terminal_validator: str
     utc_field_owner: str
     negative_fixture: str
+    utc_field: str
+    detail_field: str
+    evidence_field: str
 
 
 def _work_items_root(root: Path) -> Path:
@@ -155,24 +170,148 @@ def _work_items_root(root: Path) -> Path:
     return root if root.name == "work-items" else root / "work-items"
 
 
+def is_valid_slug(slug: str) -> bool:
+    """Return whether *slug* satisfies the canonical lifecycle identity grammar."""
+    return isinstance(slug, str) and SLUG_RE.fullmatch(slug) is not None
+
+
 def _validate_slug(slug: str) -> None:
-    if not SLUG_RE.fullmatch(slug):
+    if not is_valid_slug(slug):
         raise LifecycleError("WI-INVALID-SLUG", f"invalid bare slug: {slug!r}")
+
+
+def _authoritative_markdown_lines(text: str) -> Iterable[tuple[int, str]]:
+    """Yield positioned Markdown lines that can own lifecycle fields.
+
+    Fenced code is evidence/content, not record metadata.  Reject an opened
+    fence without a valid close so malformed Markdown cannot silently widen or
+    shrink the authoritative field surface.
+    """
+    fence_char: str | None = None
+    fence_length = 0
+    for line_number, line in enumerate(text.splitlines(), start=1):
+        if fence_char is not None:
+            closing = re.fullmatch(
+                rf" {{0,3}}{re.escape(fence_char)}{{{fence_length},}}[ \t]*",
+                line,
+            )
+            if closing:
+                fence_char = None
+                fence_length = 0
+            continue
+
+        opening = FENCED_CODE_OPEN_RE.fullmatch(line)
+        if opening:
+            fence = opening.group("fence")
+            info = opening.group("info")
+            if fence[0] == "`" and "`" in info:
+                yield line_number, line
+                continue
+            fence_char = fence[0]
+            fence_length = len(fence)
+            continue
+        yield line_number, line
+
+    if fence_char is not None:
+        raise LifecycleError(
+            "WI-CATEGORY-MARKDOWN-INVALID",
+            "unterminated fenced code block in lifecycle record",
+        )
+
+
+def _authoritative_field_occurrences(
+    text: str,
+) -> tuple[tuple[int, str, str, str], ...]:
+    occurrences: list[tuple[int, str, str, str]] = []
+    for line_number, line in _authoritative_markdown_lines(text):
+        match = FIELD_RE.fullmatch(line)
+        if match:
+            occurrences.append(
+                (
+                    line_number,
+                    match.group(1).strip().casefold(),
+                    match.group(2).strip(),
+                    line,
+                )
+            )
+    return tuple(occurrences)
 
 
 def _parse_fields(text: str) -> dict[str, str]:
     fields: dict[str, str] = {}
-    for line in text.splitlines():
-        match = FIELD_RE.fullmatch(line)
-        if match:
-            fields[match.group(1).strip().casefold()] = match.group(2).strip()
+    for _line_number, name, value, _line in _authoritative_field_occurrences(text):
+        fields[name] = value
     return fields
 
 
-def _terminalization_authoritative_field_occurrences(text: str) -> tuple[str, ...]:
-    authoritative = {"terminal-at", "v1-migration-evidence"}
+def _validate_canonical_candidate_header(data: bytes) -> None:
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise LifecycleError(
+            "WI-CATEGORY-STATUS-INVALID",
+            "canonical candidate header must be UTF-8",
+        ) from exc
+
+    lines = text.splitlines()
+    if lines and lines[0].strip() == "---":
+        closing = next(
+            (index for index, line in enumerate(lines[1:], start=2) if line.strip() == "---"),
+            None,
+        )
+        if closing is None:
+            raise LifecycleError(
+                "WI-CATEGORY-STATUS-INVALID",
+                "canonical candidate frontmatter is unterminated",
+            )
+        header_start, header_end = 2, closing - 1
+        malformed_header_end = header_end
+    else:
+        header_start, header_end = 1, 0
+        for line_number, line in enumerate(lines, start=1):
+            if not FIELD_RE.fullmatch(line):
+                break
+            header_end = line_number
+        malformed_header_end = 0
+        for line_number, line in enumerate(lines, start=1):
+            if not line.strip():
+                break
+            malformed_header_end = line_number
+
+    occurrences = _authoritative_field_occurrences(text)
+    statuses = [
+        (line_number, value)
+        for line_number, name, value, _line in occurrences
+        if name == "status"
+    ]
+    malformed_status = any(
+        re.match(
+            r"^\s*(?:-\s*)?(?:\*\*)?status(?:\*\*)?(?:\s|$)",
+            line,
+            re.IGNORECASE,
+        )
+        and not FIELD_RE.fullmatch(line)
+        for line_number, line in _authoritative_markdown_lines(text)
+        if header_start <= line_number <= malformed_header_end
+    )
+    if (
+        malformed_status
+        or len(statuses) != 1
+        or not (header_start <= statuses[0][0] <= header_end)
+        or statuses[0][1] != "candidate"
+    ):
+        raise LifecycleError(
+            "WI-CATEGORY-STATUS-INVALID",
+            "canonical candidate header requires exactly one 'status: candidate' field",
+        )
+
+
+def _terminalization_authoritative_field_occurrences(
+    text: str, utc_field: str = "Terminal-at"
+) -> tuple[str, ...]:
+    authoritative = {utc_field.casefold(), "v1-migration-evidence"}
     occurrences: list[str] = []
-    for line in text.splitlines():
+    for _line_number, line in _authoritative_markdown_lines(text):
         match = FIELD_RE.fullmatch(line)
         if match:
             name = match.group(1).strip().casefold()
@@ -190,7 +329,7 @@ def _schema_marker_occurrences(data: bytes, member: str) -> tuple[tuple[str, str
             f"{member} schema marker source must be UTF-8",
         ) from exc
     occurrences: list[tuple[str, str, str]] = []
-    for line in text.splitlines():
+    for _line_number, line in _authoritative_markdown_lines(text):
         match = WORK_ITEM_SCHEMA_OCCURRENCE_RE.fullmatch(line)
         if match:
             occurrences.append((line, match.group(1), match.group(2)))
@@ -419,7 +558,127 @@ def _status_entry(root: Path, item: Path) -> ReadmeEntry:
     return entry
 
 
+def _legacy_retirement_entry(item: Path, metadata: Path) -> ReadmeEntry:
+    try:
+        payload = json.loads(metadata.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise LifecycleError(
+            "WI-LEGACY-RETIREMENT-INVALID",
+            f"invalid legacy retirement metadata: {metadata}",
+        ) from exc
+    expected_scalars = {
+        "schemaVersion": LEGACY_RETIREMENT_SCHEMA_VERSION,
+        "owner": LEGACY_RETIREMENT_OWNER,
+        "kind": "legacy-backlog-retirement",
+        "slug": item.name,
+        "status": "rejected-before-admission",
+        "admissionHistory": "never-admitted",
+    }
+    if not isinstance(payload, dict) or any(
+        payload.get(key) != value for key, value in expected_scalars.items()
+    ):
+        raise LifecycleError(
+            "WI-LEGACY-RETIREMENT-INVALID",
+            f"legacy retirement identity differs: {item}",
+        )
+    terminal_at = payload.get("terminalAt")
+    if not isinstance(terminal_at, str):
+        raise LifecycleError(
+            "WI-LEGACY-RETIREMENT-INVALID", f"missing terminalAt: {metadata}"
+        )
+    _strict_utc(terminal_at)
+    if archive_month(terminal_at) != item.parent.name:
+        raise LifecycleError(
+            "WI-CATEGORY-ARCHIVE-MONTH-MISMATCH",
+            f"{item.name} belongs in archive/{archive_month(terminal_at)}",
+        )
+    disposition = payload.get("productDisposition")
+    if not isinstance(disposition, str) or not disposition.strip():
+        raise LifecycleError(
+            "WI-LEGACY-RETIREMENT-INVALID",
+            f"missing product disposition: {metadata}",
+        )
+    if payload.get("syntheticTransitions") != []:
+        raise LifecycleError(
+            "WI-LEGACY-RETIREMENT-INVALID",
+            f"legacy retirement must not synthesize lifecycle transitions: {metadata}",
+        )
+    incoming = payload.get("incomingLinks")
+    try:
+        _validate_incoming_link_snapshot(f"work-item:{item.name}", incoming, label="stored")
+    except LifecycleError as exc:
+        raise LifecycleError(
+            "WI-LEGACY-RETIREMENT-INVALID",
+            f"invalid incoming-link inventory: {metadata}",
+        ) from exc
+    rows = payload.get("sourceFiles")
+    if not isinstance(rows, list) or not rows:
+        raise LifecycleError(
+            "WI-LEGACY-RETIREMENT-INVALID", f"missing source file inventory: {metadata}"
+        )
+    sources: list[Path] = [metadata]
+    seen: set[str] = set()
+    for row in rows:
+        if not isinstance(row, dict):
+            raise LifecycleError(
+                "WI-LEGACY-RETIREMENT-INVALID", f"invalid source row: {metadata}"
+            )
+        relative = row.get("path")
+        if not isinstance(relative, str) or relative in seen:
+            raise LifecycleError(
+                "WI-LEGACY-RETIREMENT-INVALID", f"duplicate source path: {metadata}"
+            )
+        candidate = Path(relative)
+        if candidate.is_absolute() or ".." in candidate.parts or relative == LEGACY_RETIREMENT_FILE:
+            raise LifecycleError(
+                "WI-LEGACY-RETIREMENT-INVALID", f"unsafe source path: {relative!r}"
+            )
+        source = item / candidate
+        if source.is_symlink() or not source.is_file():
+            raise LifecycleError(
+                "WI-LEGACY-RETIREMENT-INVALID", f"missing source payload: {relative}"
+            )
+        data = source.read_bytes()
+        if (
+            row.get("byteLength") != len(data)
+            or row.get("sha256") != hashlib.sha256(data).hexdigest()
+        ):
+            raise LifecycleError(
+                "WI-LEGACY-RETIREMENT-INVALID", f"source digest differs: {relative}"
+            )
+        seen.add(relative)
+        sources.append(source)
+    actual = {
+        path.relative_to(item).as_posix()
+        for path in item.rglob("*")
+        if path.is_file() and path != metadata
+    }
+    if actual != seen:
+        raise LifecycleError(
+            "WI-LEGACY-RETIREMENT-INVALID",
+            f"source inventory does not cover the retirement payload: {item}",
+        )
+    return ReadmeEntry(
+        "Recently completed",
+        f"work-item:{item.name}",
+        f"Rejected before admission: {item.name}",
+        metadata,
+        True,
+        disposition.strip().splitlines()[0],
+        sources,
+        "WI-LEGACY-RETIRED-BEFORE-ADMISSION",
+    )
+
+
 def _archived_work_item_entry(item: Path) -> ReadmeEntry:
+    retirement = item / LEGACY_RETIREMENT_FILE
+    if retirement.is_file():
+        if (item / "status.md").exists() or (item / "closure.md").exists():
+            raise LifecycleError(
+                "WI-LEGACY-RETIREMENT-INVALID",
+                f"direct legacy retirement must not carry active/closure history: {item}",
+            )
+        return _legacy_retirement_entry(item, retirement)
     closure = item / "closure.md"
     if not closure.is_file():
         raise LifecycleError(
@@ -582,6 +841,18 @@ def _canonical_timestamp(entries: Iterable[ReadmeEntry]) -> str:
     instants: list[str] = []
     for entry in entries:
         for path in entry.source_paths:
+            if path.name == LEGACY_RETIREMENT_FILE:
+                try:
+                    value = json.loads(path.read_text(encoding="utf-8")).get("terminalAt")
+                except (OSError, UnicodeError, json.JSONDecodeError, AttributeError) as exc:
+                    raise LifecycleError(
+                        "WI-LEGACY-RETIREMENT-INVALID",
+                        f"cannot read terminal instant: {path}",
+                    ) from exc
+                if isinstance(value, str) and UTC_INSTANT_RE.fullmatch(value):
+                    _strict_utc(value)
+                    instants.append(value)
+                continue
             fields = _parse_fields(path.read_text(encoding="utf-8"))
             for key in ("updated", "closed", "terminal-at"):
                 value = fields.get(key)
@@ -812,6 +1083,500 @@ def create_candidate(root: Path, slug: str, data: bytes, *, inject_readme_failur
     return target
 
 
+def _legacy_backlog_source(root: Path, slug: str) -> Path:
+    _validate_slug(slug)
+    locations = _category_locations(root, CATEGORIES["work-item"], slug)
+    if locations:
+        raise LifecycleError(
+            "WI-CATEGORY-DUAL-LOCATION", f"canonical work-item identity already exists: {slug}"
+        )
+    source = _work_items_root(root) / "backlog" / slug
+    if source.is_symlink() or not source.is_dir():
+        raise LifecycleError(
+            "WI-INVALID-TARGET", f"legacy backlog folder is missing: {slug}"
+        )
+    return source
+
+
+def _legacy_source_rows(source: Path) -> list[tuple[str, bytes, str]]:
+    rows: list[tuple[str, bytes, str]] = []
+    for path in sorted(source.rglob("*"), key=lambda item: item.relative_to(source).as_posix()):
+        if path.is_symlink():
+            raise LifecycleError(
+                "WI-CATEGORY-MIGRATION-PAYLOAD", f"symbolic-link source is not admitted: {path}"
+            )
+        if path.is_dir():
+            continue
+        if not path.is_file():
+            raise LifecycleError(
+                "WI-CATEGORY-MIGRATION-PAYLOAD", f"unsupported legacy source: {path}"
+            )
+        relative = path.relative_to(source).as_posix()
+        if relative == LEGACY_RETIREMENT_FILE:
+            raise LifecycleError(
+                "WI-CATEGORY-MIGRATION-PAYLOAD",
+                f"legacy source uses reserved owner metadata name: {relative}",
+            )
+        data = path.read_bytes()
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise LifecycleError(
+                "WI-CATEGORY-MIGRATION-PAYLOAD", f"legacy source is not UTF-8 text: {path}"
+            ) from exc
+        rows.append((relative, data, text))
+    if not rows:
+        raise LifecycleError(
+            "WI-CATEGORY-MIGRATION-PAYLOAD", f"legacy backlog folder is empty: {source}"
+        )
+    return rows
+
+
+def _candidate_with_legacy_appendices(
+    candidate_data: bytes,
+    rows: Iterable[tuple[str, bytes, str]],
+) -> bytes:
+    try:
+        candidate_data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise LifecycleError(
+            "WI-CATEGORY-MIGRATION-PAYLOAD", "candidate input must be UTF-8 text"
+        ) from exc
+    result = bytearray(candidate_data)
+    if not result.endswith(b"\n"):
+        result.extend(b"\n")
+    result.extend(b"\n## Preserved legacy source appendices\n")
+    for relative, data, text in rows:
+        longest = max((len(match.group(0)) for match in re.finditer(r"`+", text)), default=0)
+        fence = "`" * max(3, longest + 1)
+        header = (
+            f"\n### `{relative}`\n\n"
+            f"Source SHA-256: `{hashlib.sha256(data).hexdigest()}`\n\n"
+            f"Source byte length: `{len(data)}`\n\n"
+            f"{fence}markdown\n"
+        ).encode("utf-8")
+        result.extend(header)
+        result.extend(data)
+        if not data.endswith(b"\n"):
+            result.extend(b"\n")
+        result.extend(f"{fence}\n".encode("utf-8"))
+    return bytes(result)
+
+
+def _restore_readme_snapshot(readme: Path, before: bytes | None) -> None:
+    if before is None:
+        readme.unlink(missing_ok=True)
+    else:
+        _atomic_write(readme, before)
+
+
+def _preflight_legacy_transition_admission(
+    root: Path,
+    source: Path,
+    reference: str,
+) -> dict:
+    """Reject a legacy transition before it can orphan a physical consumer."""
+    incoming = _incoming_link_result(root, {source}, reference)
+    _validate_incoming_link_snapshot(reference, incoming, label="legacy transition")
+    return incoming
+
+
+def _legacy_cleanup_metadata(
+    slug: str,
+    target: Path,
+    transaction: Path,
+    converted: bytes,
+    rows: Iterable[tuple[str, bytes, str]],
+) -> bytes:
+    payload = {
+        "schemaVersion": LEGACY_CLEANUP_SCHEMA_VERSION,
+        "owner": LEGACY_CLEANUP_OWNER,
+        "slug": slug,
+        "transactionId": transaction.name,
+        "canonicalTarget": f"{target.parent.name}/{target.name}",
+        "candidateSha256": hashlib.sha256(converted).hexdigest(),
+        "sourceFiles": [
+            {
+                "path": relative,
+                "byteLength": len(data),
+                "sha256": hashlib.sha256(data).hexdigest(),
+            }
+            for relative, data, _text in rows
+        ],
+    }
+    return (json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode("utf-8")
+
+
+def _legacy_cleanup_sidecar(backlog: Path, transaction_id: str) -> Path:
+    return backlog / f".legacy-candidate-cleanup.{transaction_id.removeprefix('.')}.json"
+
+
+def _validated_legacy_cleanup_residue(
+    backlog: Path, slug: str, target: Path
+) -> tuple[Path | None, Path, str]:
+    prefix = f".{slug}.legacy-candidate."
+    parent = backlog.resolve()
+    residues = sorted(path for path in backlog.glob(f"{prefix}*") if path.name.startswith(prefix))
+    if len(residues) > 1:
+        raise LifecycleError(
+            "WI-LEGACY-CLEANUP-REPLAY-INVALID",
+            f"committed cleanup requires exactly one owned residue for {slug}, found {len(residues)}",
+        )
+    residue = residues[0] if residues else None
+    if residue is not None and (
+        residue.is_symlink() or not residue.is_dir() or residue.resolve().parent != parent
+    ):
+        raise LifecycleError(
+            "WI-LEGACY-CLEANUP-REPLAY-INVALID",
+            f"unsafe committed-cleanup residue for {slug}: {residue}",
+        )
+    sidecar_prefix = f".legacy-candidate-cleanup.{slug}.legacy-candidate."
+    sidecars = sorted(backlog.glob(f"{sidecar_prefix}*.json"))
+    markers = list(sidecars)
+    if residue is not None:
+        embedded_marker = residue / LEGACY_CLEANUP_FILE
+        if embedded_marker.exists() or embedded_marker.is_symlink():
+            markers.append(embedded_marker)
+    if len(markers) != 1:
+        raise LifecycleError(
+            "WI-LEGACY-CLEANUP-REPLAY-INVALID",
+            f"committed cleanup requires exactly one owner marker for {slug}, found {len(markers)}",
+        )
+    marker = markers[0]
+    if marker.is_symlink() or not marker.is_file() or marker.resolve().parent not in {parent, residue}:
+        raise LifecycleError(
+            "WI-LEGACY-CLEANUP-REPLAY-INVALID",
+            f"unsafe owner cleanup marker for {slug}: {marker}",
+        )
+    if marker.parent == backlog:
+        transaction_id = "." + marker.name.removeprefix(".legacy-candidate-cleanup.").removesuffix(
+            ".json"
+        )
+    elif residue is not None and marker.parent == residue:
+        transaction_id = residue.name
+    else:
+        raise LifecycleError(
+            "WI-LEGACY-CLEANUP-REPLAY-INVALID",
+            f"owner cleanup marker has no transaction parent for {slug}: {marker}",
+        )
+    if not transaction_id.startswith(prefix) or (residue is not None and transaction_id != residue.name):
+        raise LifecycleError(
+            "WI-LEGACY-CLEANUP-REPLAY-INVALID",
+            f"owner cleanup marker transaction differs from residue for {slug}: {marker}",
+        )
+    try:
+        payload = json.loads(marker.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise LifecycleError(
+            "WI-LEGACY-CLEANUP-REPLAY-INVALID",
+            f"invalid owner cleanup marker for {slug}: {marker}",
+        ) from exc
+    expected = {
+        "schemaVersion": LEGACY_CLEANUP_SCHEMA_VERSION,
+        "owner": LEGACY_CLEANUP_OWNER,
+        "slug": slug,
+        "transactionId": transaction_id,
+        "canonicalTarget": f"{target.parent.name}/{target.name}",
+        "candidateSha256": hashlib.sha256(target.read_bytes()).hexdigest(),
+    }
+    if not isinstance(payload, dict) or any(payload.get(key) != value for key, value in expected.items()):
+        raise LifecycleError(
+            "WI-LEGACY-CLEANUP-REPLAY-INVALID",
+            f"owner cleanup marker differs from committed candidate for {slug}",
+        )
+    candidate_text = target.read_text(encoding="utf-8")
+    rows = payload.get("sourceFiles")
+    if not isinstance(rows, list) or not rows:
+        raise LifecycleError(
+            "WI-LEGACY-CLEANUP-REPLAY-INVALID",
+            f"owner cleanup marker has no source inventory for {slug}",
+        )
+    expected_files: dict[str, tuple[int, str]] = {}
+    for row in rows:
+        if not isinstance(row, dict) or not isinstance(row.get("path"), str):
+            raise LifecycleError(
+                "WI-LEGACY-CLEANUP-REPLAY-INVALID",
+                f"owner cleanup marker has invalid source row for {slug}",
+            )
+        relative = row["path"]
+        candidate = Path(relative)
+        byte_length = row.get("byteLength")
+        digest = row.get("sha256")
+        if (
+            candidate.is_absolute()
+            or ".." in candidate.parts
+            or not relative
+            or relative in expected_files
+            or not isinstance(byte_length, int)
+            or byte_length < 0
+            or not isinstance(digest, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", digest)
+        ):
+            raise LifecycleError(
+                "WI-LEGACY-CLEANUP-REPLAY-INVALID",
+                f"owner cleanup marker source inventory is invalid for {slug}",
+            )
+        expected_files[relative] = (byte_length, digest)
+        source_identity = (
+            f"### `{relative}`\n\n"
+            f"Source SHA-256: `{digest}`\n\n"
+            f"Source byte length: `{byte_length}`\n\n"
+        )
+        if source_identity not in candidate_text:
+            raise LifecycleError(
+                "WI-LEGACY-CLEANUP-REPLAY-INVALID",
+                f"owner cleanup marker source identity is not committed for {slug}: {relative}",
+            )
+    source_root = residue / "source" if residue is not None else None
+    actual_files: set[str] = set()
+    if residue is not None:
+        for path in residue.rglob("*"):
+            if path.is_symlink() or not (path.is_dir() or path.is_file()):
+                raise LifecycleError(
+                    "WI-LEGACY-CLEANUP-REPLAY-INVALID",
+                    f"owner cleanup residue contains unsafe path for {slug}: {path}",
+                )
+            if path == marker:
+                continue
+            try:
+                relative = path.relative_to(source_root).as_posix()
+            except ValueError as exc:
+                raise LifecycleError(
+                    "WI-LEGACY-CLEANUP-REPLAY-INVALID",
+                    f"owner cleanup residue contains unowned path for {slug}: {path}",
+                ) from exc
+            if path.is_dir():
+                continue
+            expected_file = expected_files.get(relative)
+            data = path.read_bytes()
+            if expected_file is None or expected_file != (len(data), hashlib.sha256(data).hexdigest()):
+                raise LifecycleError(
+                    "WI-LEGACY-CLEANUP-REPLAY-INVALID",
+                    f"owner cleanup residue source differs for {slug}: {relative}",
+                )
+            actual_files.add(relative)
+    if not actual_files <= expected_files.keys():
+        raise LifecycleError(
+            "WI-LEGACY-CLEANUP-REPLAY-INVALID",
+            f"owner cleanup residue has unowned files for {slug}",
+        )
+    return residue, marker, transaction_id
+
+
+def _finish_committed_legacy_cleanup(
+    backlog: Path,
+    residue: Path | None,
+    marker: Path,
+    transaction_id: str,
+) -> None:
+    if residue is not None:
+        source = residue / "source"
+        if source.exists():
+            shutil.rmtree(source)
+        sidecar = _legacy_cleanup_sidecar(backlog, transaction_id)
+        if marker.parent == residue:
+            os.replace(marker, sidecar)
+            marker = sidecar
+        residue.rmdir()
+    marker.unlink()
+
+
+def _committed_cleanup_failure(target: Path, residue: Path, cause: BaseException) -> LifecycleError:
+    return LifecycleError(
+        "WI-LEGACY-CLEANUP-AFTER-COMMIT",
+        f"state=committed target={target} residue={residue}: {cause}",
+    )
+
+
+def _replay_legacy_candidate_cleanup(root: Path, slug: str, candidate_data: bytes) -> Path | None:
+    """Remove exactly one safe residue without replaying a committed conversion."""
+
+    work_items = _work_items_root(root)
+    backlog = work_items / "backlog"
+    source = backlog / slug
+    target = backlog / f"{slug}.md"
+    if source.exists() or not target.is_file():
+        return None
+    canonical = _category_locations(root, CATEGORIES["work-item"], slug)
+    if canonical != [target]:
+        raise LifecycleError(
+            "WI-LEGACY-CLEANUP-REPLAY-INVALID",
+            f"committed cleanup has ambiguous canonical identity for {slug}",
+        )
+    candidate_prefix = candidate_data if candidate_data.endswith(b"\n") else candidate_data + b"\n"
+    if not target.read_bytes().startswith(candidate_prefix + b"\n## Preserved legacy source appendices\n"):
+        raise LifecycleError(
+            "WI-LEGACY-CLEANUP-REPLAY-INVALID",
+            f"committed cleanup target does not match requested conversion input: {target}",
+        )
+    check_readme(root)
+    residue, marker, transaction_id = _validated_legacy_cleanup_residue(backlog, slug, target)
+    target_before = target.read_bytes()
+    readme = work_items / "README.md"
+    readme_before = readme.read_bytes()
+    try:
+        _finish_committed_legacy_cleanup(backlog, residue, marker, transaction_id)
+    except OSError as exc:
+        raise _committed_cleanup_failure(target, residue, exc) from exc
+    if (residue is not None and residue.exists()) or marker.exists() or target.read_bytes() != target_before or readme.read_bytes() != readme_before:
+        raise LifecycleError(
+            "WI-LEGACY-CLEANUP-REPLAY-INVALID",
+            f"committed cleanup replay changed canonical state for {slug}",
+        )
+    return target
+
+
+def convert_legacy_candidate(
+    root: Path,
+    slug: str,
+    candidate_data: bytes,
+    *,
+    inject_readme_failure: bool = False,
+) -> Path:
+    _validate_slug(slug)
+    replay = _replay_legacy_candidate_cleanup(root, slug, candidate_data)
+    if replay is not None:
+        return replay
+    source = _legacy_backlog_source(root, slug)
+    _preflight_legacy_transition_admission(root, source, f"work-item:{slug}")
+    rows = _legacy_source_rows(source)
+    _validate_canonical_candidate_header(candidate_data)
+    converted = _candidate_with_legacy_appendices(candidate_data, rows)
+    _preflight_readme(root)
+    work_items = _work_items_root(root)
+    readme = work_items / "README.md"
+    readme_before = readme.read_bytes() if readme.is_file() else None
+    target = work_items / "backlog" / f"{slug}.md"
+    transaction = Path(tempfile.mkdtemp(prefix=f".{slug}.legacy-candidate.", dir=target.parent))
+    staged_source = transaction / "source"
+    staged_candidate = transaction / target.name
+    cleanup_marker = transaction / LEGACY_CLEANUP_FILE
+    committed = False
+    try:
+        _atomic_write(staged_candidate, converted)
+        _atomic_write(
+            cleanup_marker,
+            _legacy_cleanup_metadata(slug, target, transaction, converted, rows),
+        )
+        os.replace(source, staged_source)
+        os.replace(staged_candidate, target)
+        if inject_readme_failure:
+            raise LifecycleError("WI-README-STALE", "injected legacy conversion failure")
+        refresh_readme(root)
+        if source.exists() or target.read_bytes() != converted:
+            raise LifecycleError(
+                "WI-CATEGORY-MIGRATION-PAYLOAD", "legacy candidate byte verification failed"
+            )
+        check_readme(root)
+        # The flat candidate, regenerated read-model, and byte check form the
+        # irreversible commit point. Its appendices carry every staged legacy
+        # byte, so disposal of the no-longer-authoritative transaction copy
+        # cannot roll this committed transition back.
+        committed = True
+        try:
+            _finish_committed_legacy_cleanup(target.parent, transaction, cleanup_marker, transaction.name)
+        except OSError as exc:
+            raise _committed_cleanup_failure(target, transaction, exc) from exc
+    except BaseException:
+        if not committed:
+            if target.exists():
+                target.unlink()
+            if staged_source.exists() and not source.exists():
+                os.replace(staged_source, source)
+            _restore_readme_snapshot(readme, readme_before)
+            if staged_candidate.exists():
+                staged_candidate.unlink()
+            cleanup_marker.unlink(missing_ok=True)
+            transaction.rmdir()
+        raise
+    return target
+
+
+def retire_legacy_backlog(
+    root: Path,
+    slug: str,
+    disposition_data: bytes,
+    terminal_instant: str,
+    *,
+    inject_readme_failure: bool = False,
+) -> Path:
+    source = _legacy_backlog_source(root, slug)
+    reference = f"work-item:{slug}"
+    incoming = _preflight_legacy_transition_admission(root, source, reference)
+    rows = _legacy_source_rows(source)
+    try:
+        disposition = disposition_data.decode("utf-8").strip()
+    except UnicodeDecodeError as exc:
+        raise LifecycleError(
+            "WI-LEGACY-RETIREMENT-INVALID", "product disposition must be UTF-8 text"
+        ) from exc
+    if not disposition:
+        raise LifecycleError(
+            "WI-LEGACY-RETIREMENT-INVALID", "product disposition must not be empty"
+        )
+    month = archive_month(terminal_instant)
+    _preflight_readme(root)
+    work_items = _work_items_root(root)
+    metadata_payload = {
+        "schemaVersion": LEGACY_RETIREMENT_SCHEMA_VERSION,
+        "owner": LEGACY_RETIREMENT_OWNER,
+        "kind": "legacy-backlog-retirement",
+        "slug": slug,
+        "status": "rejected-before-admission",
+        "terminalAt": terminal_instant,
+        "productDisposition": disposition,
+        "admissionHistory": "never-admitted",
+        "syntheticTransitions": [],
+        "sourceFiles": [
+            {
+                "path": relative,
+                "byteLength": len(data),
+                "sha256": hashlib.sha256(data).hexdigest(),
+            }
+            for relative, data, _text in rows
+        ],
+        "incomingLinks": incoming,
+    }
+    metadata_data = (
+        json.dumps(metadata_payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    ).encode("utf-8")
+    readme = work_items / "README.md"
+    readme_before = readme.read_bytes() if readme.is_file() else None
+    archive = work_items / "archive"
+    month_dir = archive / month
+    target = month_dir / slug
+    if target.exists():
+        raise LifecycleError("WI-CATEGORY-DUAL-LOCATION", f"archive target exists: {target}")
+    transaction = Path(tempfile.mkdtemp(prefix=f".{slug}.legacy-retire.", dir=source.parent))
+    staged_source = transaction / "source"
+    created_archive = not archive.exists()
+    created_month = not month_dir.exists()
+    try:
+        os.replace(source, staged_source)
+        _atomic_write(staged_source / LEGACY_RETIREMENT_FILE, metadata_data)
+        month_dir.mkdir(parents=True, exist_ok=True)
+        os.replace(staged_source, target)
+        if inject_readme_failure:
+            raise LifecycleError("WI-README-STALE", "injected legacy retirement failure")
+        refresh_readme(root)
+        _legacy_retirement_entry(target, target / LEGACY_RETIREMENT_FILE)
+    except BaseException:
+        if target.exists() and not staged_source.exists():
+            os.replace(target, staged_source)
+        (staged_source / LEGACY_RETIREMENT_FILE).unlink(missing_ok=True)
+        if staged_source.exists() and not source.exists():
+            os.replace(staged_source, source)
+        _restore_readme_snapshot(readme, readme_before)
+        if created_month and month_dir.is_dir() and not any(month_dir.iterdir()):
+            month_dir.rmdir()
+        if created_archive and archive.is_dir() and not any(archive.iterdir()):
+            archive.rmdir()
+        raise
+    finally:
+        shutil.rmtree(transaction, ignore_errors=True)
+    return target
+
+
 def start_item(root: Path, slug: str, status_data: bytes, *, inject_readme_failure: bool = False) -> Path:
     _validate_slug(slug)
     _validate_active_status_bytes(status_data)
@@ -1035,8 +1800,9 @@ def reopen_item(
     return target
 
 
-def audit_categories(root: Path) -> None:
+def audit_categories(root: Path) -> tuple[str, ...]:
     work_items = _work_items_root(root)
+    legacy_read_compatible: list[str] = []
     for category in CATEGORIES.values():
         slugs: set[str] = set()
         if category.current_kind == "work-item":
@@ -1062,6 +1828,36 @@ def audit_categories(root: Path) -> None:
                     "WI-CATEGORY-DUAL-LOCATION",
                     f"{category.name}:{slug} has {len(locations)} locations",
                 )
+            if not is_valid_slug(slug):
+                if len(locations) != 1 or "archive" not in locations[0].parts:
+                    _validate_slug(slug)
+                legacy = locations[0]
+                if category.name == "work-item":
+                    entry = _archived_work_item_entry(legacy)
+                    if entry.classification == LEGACY_READ_CLASSIFICATION:
+                        fields = _parse_fields((legacy / "closure.md").read_text(encoding="utf-8"))
+                        closed = fields.get("closed", "")
+                        if not closed or not fields.get("outcome"):
+                            raise LifecycleError(
+                                "WI-CATEGORY-TERMINAL-EVIDENCE-MISSING",
+                                f"legacy archive lacks terminal evidence: {legacy}",
+                            )
+                        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", closed) or closed[:7] != legacy.parent.name:
+                            raise LifecycleError(
+                                "WI-CATEGORY-ARCHIVE-MONTH-MISMATCH",
+                                f"{category.name}:{slug} does not match archive month",
+                            )
+                else:
+                    instant = _validate_flat_terminal(category, legacy.read_bytes())
+                    if legacy.parent.name != archive_month(instant):
+                        raise LifecycleError(
+                            "WI-CATEGORY-ARCHIVE-MONTH-MISMATCH",
+                            f"{category.name}:{slug} belongs in archive/{archive_month(instant)}",
+                        )
+                legacy_read_compatible.append(
+                    legacy.relative_to(work_items).as_posix()
+                )
+                continue
             if category.current_kind == "flat" and locations:
                 path = locations[0]
                 fields = _parse_fields(path.read_text(encoding="utf-8"))
@@ -1087,9 +1883,13 @@ def audit_categories(root: Path) -> None:
                     "WI-CATEGORY-TERMINAL-IN-CURRENT",
                     f"work-item:{item.name} has terminal status in active/",
                 )
-def audit(root: Path) -> None:
-    audit_categories(root)
+    return tuple(sorted(legacy_read_compatible))
+
+
+def audit(root: Path) -> tuple[str, ...]:
+    legacy_read_compatible = audit_categories(root)
     check_readme(root)
+    return legacy_read_compatible
 
 
 def _validate_flat_terminal(category: Category, data: bytes) -> str:
@@ -1105,14 +1905,12 @@ def _validate_flat_terminal(category: Category, data: bytes) -> str:
             "WI-CATEGORY-TERMINAL-EVIDENCE-MISSING",
             f"{category.name} status {status!r} is not terminal",
         )
-    utc_field = "closed" if category.name == "epic" else "terminal-at"
-    evidence_fields = {
-        "bug": ("resolution", "evidence"),
-        "decision": ("rationale", "evidence"),
-        "lesson": ("disposition", "evidence"),
-        "roadmap": ("disposition", "evidence"),
-        "epic": ("outcome", "evidence"),
-    }[category.name]
+    admission = _admission_for(category.name)
+    utc_field = admission.utc_field.casefold()
+    evidence_fields = (
+        admission.detail_field.casefold(),
+        admission.evidence_field.casefold(),
+    )
     missing = [name for name in (utc_field, *evidence_fields) if not fields.get(name)]
     if missing:
         raise LifecycleError(
@@ -1123,6 +1921,521 @@ def _validate_flat_terminal(category: Category, data: bytes) -> str:
     return fields[utc_field]
 
 
+def _normalization_fail(failure_id: str, message: str) -> LifecycleError:
+    return LifecycleError(failure_id, message)
+
+
+def _normalization_bound_source(
+    root: Path, category: Category, relative: str, *, must_exist: bool = True
+) -> Path:
+    work_items = _work_items_root(root)
+    relative_path = Path(relative)
+    if (
+        relative_path.is_absolute()
+        or len(relative_path.parts) < 2
+        or relative_path.parts[0] != "work-items"
+    ):
+        raise _normalization_fail(
+            "WI-IDENTITY-NORMALIZE-SOURCE",
+            "normalization source must be repository-relative under work-items",
+        )
+    within_work_items = Path(*relative_path.parts[1:]).as_posix()
+    requested = work_items.resolve() / Path(within_work_items)
+    try:
+        resolved = _terminalization_bound_path(
+            work_items, within_work_items, label="normalization source"
+        )
+    except LifecycleError as exc:
+        raise _normalization_fail("WI-IDENTITY-NORMALIZE-SOURCE", str(exc)) from exc
+    source = requested
+    expected_parent = (work_items / category.current_root).resolve()
+    if (
+        category.current_kind != "flat"
+        or source.parent.resolve() != expected_parent
+        or source.resolve() != resolved
+        or source.suffix != ".md"
+        or (must_exist and not source.is_file())
+    ):
+        raise _normalization_fail(
+            "WI-IDENTITY-NORMALIZE-SOURCE",
+            "normalization source must be one mutable flat record in its category current root",
+        )
+    return source
+
+
+def _normalization_scratch_path(root: Path, path: Path, *, label: str) -> Path:
+    try:
+        return _bound_repository_scratch_path(root, path, label=label, allow_absolute=True)
+    except LifecycleError as exc:
+        raise _normalization_fail("WI-IDENTITY-NORMALIZE-INVENTORY", str(exc)) from exc
+
+
+def _normalization_exact_file(path: Path) -> bool:
+    return path.parent.is_dir() and any(
+        child.name == path.name and child.is_file() for child in path.parent.iterdir()
+    )
+
+
+def _normalization_current_files(work_items: Path) -> list[Path]:
+    files: set[Path] = set((work_items / "backlog").glob("*.md"))
+    files.update(path / "status.md" for path in (work_items / "active").glob("*") if path.is_dir())
+    for category in CATEGORIES.values():
+        if category.current_kind == "flat":
+            files.update((work_items / category.current_root).glob("*.md"))
+    return sorted(path for path in files if path.is_file())
+
+
+def _normalization_authoritative_line_numbers(text: str) -> frozenset[int]:
+    return frozenset(
+        line_number for line_number, _line in _authoritative_markdown_lines(text)
+    )
+
+
+def _normalization_replace_id(text: str, old_slug: str, new_slug: str) -> tuple[str, int]:
+    authoritative = _normalization_authoritative_line_numbers(text)
+    lines = text.splitlines(keepends=True)
+    count = 0
+    for index, line in enumerate(lines, start=1):
+        if index not in authoritative:
+            continue
+        body = line.rstrip("\r\n")
+        ending = line[len(body) :]
+        match = FIELD_RE.fullmatch(body)
+        if not (
+            match
+            and match.group(1).strip().casefold() == "id"
+            and match.group(2).strip() == old_slug
+        ):
+            continue
+        value_start, value_end = match.span(2)
+        raw_value = match.group(2)
+        leading = len(raw_value) - len(raw_value.lstrip())
+        trailing = len(raw_value) - len(raw_value.rstrip())
+        replacement = raw_value[:leading] + new_slug
+        if trailing:
+            replacement += raw_value[len(raw_value) - trailing :]
+        lines[index - 1] = body[:value_start] + replacement + body[value_end:] + ending
+        count += 1
+    return "".join(lines), count
+
+
+def _normalization_replace_live_mentions(
+    text: str, old_slug: str, new_slug: str
+) -> tuple[str, int]:
+    """Rewrite live current-record mentions but preserve fenced evidence bytes."""
+    authoritative = _normalization_authoritative_line_numbers(text)
+    lines = text.splitlines(keepends=True)
+    count = 0
+    for index, line in enumerate(lines, start=1):
+        if index not in authoritative:
+            continue
+        count += line.count(old_slug)
+        lines[index - 1] = line.replace(old_slug, new_slug)
+    return "".join(lines), count
+
+
+def _normalization_authoritative_markdown_links(
+    text: str,
+) -> Iterable[MarkdownLocalLink]:
+    """Yield normalization links only from lifecycle-authoritative Markdown lines."""
+    authoritative = _normalization_authoritative_line_numbers(text)
+    for link in _markdown_local_links(text):
+        line_number = text.count("\n", 0, link.href_start) + 1
+        if line_number in authoritative:
+            yield link
+
+
+def _normalization_snapshot(
+    root: Path,
+    category: Category,
+    source: Path,
+    target_slug: str,
+) -> tuple[dict, dict[Path, bytes]]:
+    work_items = _work_items_root(root)
+    old_slug = source.stem
+    target = work_items / category.current_root / f"{target_slug}.md"
+    planned: dict[Path, bytes] = {}
+    kinds: dict[Path, set[str]] = {}
+
+    current_files = frozenset(_normalization_current_files(work_items))
+    markdown_files = sorted(
+        path for path in work_items.rglob("*.md") if path.name != "README.md"
+    )
+    for path in markdown_files:
+        try:
+            before = path.read_bytes()
+            text = before.decode("utf-8")
+        except (OSError, UnicodeError) as exc:
+            raise _normalization_fail(
+                "WI-IDENTITY-NORMALIZE-INVENTORY",
+                f"cannot classify Markdown consumer: {path}",
+            ) from exc
+
+        physical_replacements: list[tuple[int, int, str]] = []
+        for link in _normalization_authoritative_markdown_links(text):
+            href_parts = _local_markdown_href_parts(link.href)
+            if href_parts is None:
+                continue
+            filesystem_href, suffix = href_parts
+            if (path.parent / filesystem_href).resolve() != source.resolve():
+                continue
+            if path not in current_files:
+                raise _normalization_fail(
+                    "WI-IDENTITY-NORMALIZE-INVENTORY",
+                    f"physical consumer is not mutable current state: {path}",
+                )
+            new_href = Path(os.path.relpath(target, path.parent)).as_posix() + suffix
+            physical_replacements.append((link.href_start, link.href_end, new_href))
+        if physical_replacements:
+            for start, end, value in reversed(physical_replacements):
+                text = text[:start] + value + text[end:]
+            kinds.setdefault(path, set()).add("physical-link")
+
+        if path not in current_files:
+            continue
+        after = text
+        if path == source:
+            after, count = _normalization_replace_id(after, old_slug, target_slug)
+            if count != 1:
+                raise _normalization_fail(
+                    "WI-IDENTITY-NORMALIZE-INVENTORY",
+                    "source must contain exactly one authoritative id matching its physical slug",
+                )
+            kinds.setdefault(path, set()).add("authoritative-id")
+        after, live_count = _normalization_replace_live_mentions(
+            after, old_slug, target_slug
+        )
+        if live_count:
+            kinds.setdefault(path, set()).add("live-reference")
+        if after.encode("utf-8") != before:
+            planned[path] = after.encode("utf-8")
+
+    if source not in planned:
+        raise _normalization_fail(
+            "WI-IDENTITY-NORMALIZE-INVENTORY", "normalization source produced no identity change"
+        )
+    rows = []
+    for path in sorted(planned):
+        before = path.read_bytes()
+        after = planned[path]
+        rows.append(
+            {
+                "path": path.relative_to(work_items).as_posix(),
+                "kinds": sorted(kinds[path]),
+                "beforeSha256": hashlib.sha256(before).hexdigest(),
+                "afterSha256": hashlib.sha256(after).hexdigest(),
+            }
+        )
+    inventory = {
+        "schemaVersion": CURRENT_IDENTITY_NORMALIZATION_SCHEMA_VERSION,
+        "owner": CURRENT_IDENTITY_NORMALIZATION_OWNER,
+        "workItemsRoot": str(work_items.resolve()),
+        "category": category.name,
+        "source": source.relative_to(work_items.parent).as_posix(),
+        "targetSlug": target_slug,
+        "oldIdentity": f"{category.name}:{old_slug}",
+        "newIdentity": f"{category.name}:{target_slug}",
+        "rows": rows,
+    }
+    return inventory, planned
+
+
+def write_current_identity_normalization_inventory(
+    root: Path,
+    category_name: str,
+    source_relative: str,
+    target_slug: str,
+    inventory_path: Path,
+) -> dict:
+    category = CATEGORIES.get(CATEGORY_ALIASES.get(category_name, category_name))
+    if category is None:
+        raise LifecycleError("WI-REFERENCE-INVALID", f"unknown category: {category_name!r}")
+    _validate_slug(target_slug)
+    source = _normalization_bound_source(root, category, source_relative)
+    if is_valid_slug(source.stem):
+        raise _normalization_fail(
+            "WI-IDENTITY-NORMALIZE-SOURCE", "source identity is already canonical"
+        )
+    fields = _parse_fields(source.read_text(encoding="utf-8"))
+    if fields.get("status", "") not in category.current_statuses:
+        raise _normalization_fail(
+            "WI-IDENTITY-NORMALIZE-SOURCE", "source does not carry a current admitted status"
+        )
+    inventory, _planned = _normalization_snapshot(root, category, source, target_slug)
+    destination = _normalization_scratch_path(root, inventory_path, label="normalization inventory")
+    _atomic_write(destination, (json.dumps(inventory, indent=2, sort_keys=True) + "\n").encode())
+    return inventory
+
+
+def _normalization_expected_receipt_rows(
+    root: Path,
+    category: Category,
+    inventory: object,
+    source: Path,
+    target: Path,
+) -> list[dict[str, str]]:
+    """Derive the one complete receipt row sequence from the canonical inventory."""
+    work_items = _work_items_root(root)
+    source_repo_relative = source.relative_to(work_items.parent).as_posix()
+    source_work_items_relative = source.relative_to(work_items).as_posix()
+    target_work_items_relative = target.relative_to(work_items).as_posix()
+    if (
+        not isinstance(inventory, dict)
+        or inventory.get("schemaVersion")
+        != CURRENT_IDENTITY_NORMALIZATION_SCHEMA_VERSION
+        or inventory.get("owner") != CURRENT_IDENTITY_NORMALIZATION_OWNER
+        or inventory.get("workItemsRoot") != str(work_items.resolve())
+        or inventory.get("category") != category.name
+        or inventory.get("source") != source_repo_relative
+        or inventory.get("targetSlug") != target.stem
+        or not isinstance(inventory.get("rows"), list)
+    ):
+        raise _normalization_fail(
+            "WI-IDENTITY-NORMALIZE-RECOVERY",
+            "normalization inventory binding differs during replay",
+        )
+
+    expected: list[dict[str, str]] = []
+    before_paths: set[str] = set()
+    after_paths: set[str] = set()
+    digest_re = re.compile(r"^[0-9a-f]{64}$")
+    for row in inventory["rows"]:
+        if (
+            not isinstance(row, dict)
+            or set(row) != {"path", "kinds", "beforeSha256", "afterSha256"}
+            or not isinstance(row.get("path"), str)
+            or not isinstance(row.get("kinds"), list)
+            or not all(isinstance(kind, str) for kind in row["kinds"])
+            or not isinstance(row.get("beforeSha256"), str)
+            or not digest_re.fullmatch(row["beforeSha256"])
+            or not isinstance(row.get("afterSha256"), str)
+            or not digest_re.fullmatch(row["afterSha256"])
+        ):
+            raise _normalization_fail(
+                "WI-IDENTITY-NORMALIZE-RECOVERY",
+                "normalization inventory row is invalid during replay",
+            )
+        before_path = row["path"]
+        try:
+            _terminalization_bound_path(
+                work_items, before_path, label="normalization receipt preimage"
+            )
+        except LifecycleError as exc:
+            raise _normalization_fail(
+                "WI-IDENTITY-NORMALIZE-RECOVERY", str(exc)
+            ) from exc
+        after_path = (
+            target_work_items_relative
+            if before_path == source_work_items_relative
+            else before_path
+        )
+        if before_path in before_paths or after_path in after_paths:
+            raise _normalization_fail(
+                "WI-IDENTITY-NORMALIZE-RECOVERY",
+                "normalization inventory rows are duplicated or collide",
+            )
+        before_paths.add(before_path)
+        after_paths.add(after_path)
+        expected.append(
+            {
+                "beforePath": before_path,
+                "afterPath": after_path,
+                "beforeSha256": row["beforeSha256"],
+                "afterSha256": row["afterSha256"],
+            }
+        )
+    if source_work_items_relative not in before_paths:
+        raise _normalization_fail(
+            "WI-IDENTITY-NORMALIZE-RECOVERY",
+            "normalization inventory omits the authoritative source row",
+        )
+    return expected
+
+
+def _normalization_replay(
+    root: Path,
+    category: Category,
+    inventory_bytes: bytes,
+    receipt: Path,
+    source: Path,
+    target: Path,
+) -> bool:
+    if not receipt.is_file() or _normalization_exact_file(source) or not _normalization_exact_file(target):
+        return False
+    try:
+        payload = json.loads(receipt.read_text(encoding="utf-8"))
+        inventory = json.loads(inventory_bytes.decode("utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise _normalization_fail("WI-IDENTITY-NORMALIZE-RECOVERY", "invalid normalization receipt") from exc
+    work_items = _work_items_root(root)
+    if (
+        not isinstance(payload, dict)
+        or payload.get("schemaVersion") != CURRENT_IDENTITY_NORMALIZATION_SCHEMA_VERSION
+        or payload.get("owner") != CURRENT_IDENTITY_NORMALIZATION_OWNER
+        or payload.get("inventorySha256") != hashlib.sha256(inventory_bytes).hexdigest()
+        or payload.get("source") != source.relative_to(work_items.parent).as_posix()
+        or payload.get("target") != target.relative_to(work_items).as_posix()
+        or not isinstance(payload.get("rows"), list)
+    ):
+        raise _normalization_fail("WI-IDENTITY-NORMALIZE-RECOVERY", "normalization receipt binding differs")
+    expected_rows = _normalization_expected_receipt_rows(
+        root, category, inventory, source, target
+    )
+    if payload["rows"] != expected_rows:
+        raise _normalization_fail(
+            "WI-IDENTITY-NORMALIZE-RECOVERY",
+            "normalization receipt row set is incomplete, duplicated, or tampered",
+        )
+    for row in expected_rows:
+        path = _terminalization_bound_path(work_items, row["afterPath"], label="normalization replay")
+        if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != row.get("afterSha256"):
+            raise _normalization_fail("WI-IDENTITY-NORMALIZE-RECOVERY", "normalization settled bytes differ")
+    readme = work_items / "README.md"
+    if not readme.is_file() or hashlib.sha256(readme.read_bytes()).hexdigest() != payload.get("readmeSha256"):
+        raise _normalization_fail("WI-IDENTITY-NORMALIZE-RECOVERY", "normalization README differs")
+    return True
+
+
+def normalize_current_identity(
+    root: Path,
+    category_name: str,
+    source_relative: str,
+    target_slug: str,
+    inventory_path: Path,
+    receipt_path: Path,
+    *,
+    inject_failure_at: str | None = None,
+) -> tuple[Path, bool]:
+    category = CATEGORIES.get(CATEGORY_ALIASES.get(category_name, category_name))
+    if category is None:
+        raise LifecycleError("WI-REFERENCE-INVALID", f"unknown category: {category_name!r}")
+    _validate_slug(target_slug)
+    work_items = _work_items_root(root)
+    source = _normalization_bound_source(root, category, source_relative, must_exist=False)
+    target = work_items / category.current_root / f"{target_slug}.md"
+    inventory_file = _normalization_scratch_path(root, inventory_path, label="normalization inventory")
+    receipt = _normalization_scratch_path(root, receipt_path, label="normalization receipt")
+    try:
+        inventory_bytes = inventory_file.read_bytes()
+        inventory = json.loads(inventory_bytes.decode("utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise _normalization_fail("WI-IDENTITY-NORMALIZE-INVENTORY", "invalid normalization inventory") from exc
+    if not _normalization_exact_file(source):
+        if _normalization_replay(
+            root, category, inventory_bytes, receipt, source, target
+        ):
+            return target, True
+        raise _normalization_fail(
+            "WI-IDENTITY-NORMALIZE-RECOVERY", "source is absent without a complete settled receipt"
+        )
+    if receipt.exists():
+        raise _normalization_fail(
+            "WI-IDENTITY-NORMALIZE-RECOVERY",
+            "receipt exists while legacy source is still present",
+        )
+    if is_valid_slug(source.stem):
+        raise _normalization_fail("WI-IDENTITY-NORMALIZE-SOURCE", "source identity is already canonical")
+    locations = _category_locations(root, category, source.stem)
+    if locations != [source]:
+        raise LifecycleError("WI-CATEGORY-DUAL-LOCATION", "source identity is not physically unique")
+    fields = _parse_fields(source.read_text(encoding="utf-8"))
+    if fields.get("status", "") not in category.current_statuses:
+        raise _normalization_fail(
+            "WI-IDENTITY-NORMALIZE-SOURCE", "source does not carry a current admitted status"
+        )
+    target_locations = _category_locations(root, category, target_slug)
+    if _normalization_exact_file(target) or any(
+        not (location.is_file() and os.path.samefile(location, source))
+        for location in target_locations
+    ):
+        raise LifecycleError("WI-CATEGORY-DUAL-LOCATION", "normalization target already exists")
+    expected, planned = _normalization_snapshot(root, category, source, target_slug)
+    if inventory != expected:
+        raise _normalization_fail(
+            "WI-IDENTITY-NORMALIZE-INVENTORY", "inventory is incomplete, stale, or differently classified"
+        )
+    readme = work_items / "README.md"
+    readme_before = readme.read_bytes() if readme.is_file() else None
+    preimages = {path: path.read_bytes() for path in planned}
+    inventory_sha = hashlib.sha256(inventory_bytes).hexdigest()
+    moved = False
+    move_temp: Path | None = None
+    try:
+        for path in sorted(planned):
+            _atomic_write(path, planned[path])
+        if inject_failure_at == "after-rewrites":
+            raise RuntimeError("injected normalization failure after rewrites")
+        temp_dir = Path(tempfile.mkdtemp(prefix=f".{target_slug}.normalize.", dir=source.parent))
+        move_temp = temp_dir / source.name
+        os.replace(source, move_temp)
+        os.replace(move_temp, target)
+        temp_dir.rmdir()
+        move_temp = None
+        moved = True
+        if inject_failure_at == "after-move":
+            raise RuntimeError("injected normalization failure after move")
+        readme_sha = refresh_readme(root)
+        if inject_failure_at == "after-readme":
+            raise RuntimeError("injected normalization failure after README")
+        resolved = resolve_category(root, f"{category.name}:{target_slug}")
+        if resolved != target.resolve() or _normalization_exact_file(source) or not _normalization_exact_file(target):
+            raise RuntimeError("normalization final identity check failed")
+        for path, after in planned.items():
+            final_path = target if path == source else path
+            if (
+                not final_path.is_file()
+                or hashlib.sha256(final_path.read_bytes()).hexdigest()
+                != hashlib.sha256(after).hexdigest()
+            ):
+                raise RuntimeError(
+                    f"normalization final byte check failed: {final_path}"
+                )
+        audit(root)
+        rows = _normalization_expected_receipt_rows(
+            root, category, inventory, source, target
+        )
+        payload = {
+            "schemaVersion": CURRENT_IDENTITY_NORMALIZATION_SCHEMA_VERSION,
+            "owner": CURRENT_IDENTITY_NORMALIZATION_OWNER,
+            "inventorySha256": inventory_sha,
+            "source": source_relative,
+            "target": target.relative_to(work_items).as_posix(),
+            "readmeSha256": readme_sha,
+            "rows": rows,
+        }
+        _atomic_write(receipt, (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode())
+        if not _normalization_replay(
+            root, category, inventory_bytes, receipt, source, target
+        ):
+            raise RuntimeError("normalization settled receipt verification failed")
+        return target, False
+    except BaseException as exc:
+        try:
+            if move_temp is not None and move_temp.exists():
+                os.replace(move_temp, source)
+                move_temp.parent.rmdir()
+            elif moved and _normalization_exact_file(target) and not _normalization_exact_file(source):
+                temp_dir = Path(tempfile.mkdtemp(prefix=f".{source.stem}.rollback.", dir=source.parent))
+                rollback_temp = temp_dir / target.name
+                os.replace(target, rollback_temp)
+                os.replace(rollback_temp, source)
+                temp_dir.rmdir()
+            for path, before in preimages.items():
+                _atomic_write(path, before)
+            if readme_before is None:
+                if readme.exists():
+                    readme.unlink()
+            else:
+                _atomic_write(readme, readme_before)
+            if receipt.exists():
+                receipt.unlink()
+        except BaseException as rollback_exc:
+            raise _normalization_fail(
+                "WI-IDENTITY-NORMALIZE-ROLLBACK", f"rollback failed: {rollback_exc}"
+            ) from exc
+        raise _normalization_fail("WI-IDENTITY-NORMALIZE-ROLLBACK", str(exc)) from exc
+
+
 CATEGORY_ADMISSION_TABLE = (
     CategoryAdmission(
         "work-item",
@@ -1130,6 +2443,9 @@ CATEGORY_ADMISSION_TABLE = (
         "mutate-work-item:_validate_closure",
         "closure.md:Closed",
         "work_item_terminal_evidence_missing",
+        "Closed",
+        "Outcome",
+        "Evidence",
     ),
     CategoryAdmission(
         "bug",
@@ -1137,6 +2453,9 @@ CATEGORY_ADMISSION_TABLE = (
         "mutate-work-item:_validate_flat_terminal",
         "bug:Terminal-at",
         "bug_terminal_evidence_missing",
+        "Terminal-at",
+        "Resolution",
+        "Evidence",
     ),
     CategoryAdmission(
         "decision",
@@ -1144,6 +2463,9 @@ CATEGORY_ADMISSION_TABLE = (
         "mutate-work-item:_validate_flat_terminal",
         "decision:Terminal-at",
         "decision_terminal_evidence_missing",
+        "Terminal-at",
+        "Rationale",
+        "Evidence",
     ),
     CategoryAdmission(
         "lesson",
@@ -1151,6 +2473,9 @@ CATEGORY_ADMISSION_TABLE = (
         "mutate-work-item:_validate_flat_terminal",
         "lesson:Terminal-at",
         "lesson_terminal_evidence_missing",
+        "Terminal-at",
+        "Disposition",
+        "Evidence",
     ),
     CategoryAdmission(
         "roadmap",
@@ -1158,6 +2483,9 @@ CATEGORY_ADMISSION_TABLE = (
         "mutate-work-item:_validate_flat_terminal",
         "roadmap:Terminal-at",
         "roadmap_terminal_evidence_missing",
+        "Terminal-at",
+        "Disposition",
+        "Evidence",
     ),
     CategoryAdmission(
         "epic",
@@ -1165,6 +2493,9 @@ CATEGORY_ADMISSION_TABLE = (
         "mutate-work-item:_validate_flat_terminal",
         "epic:Closed",
         "epic_terminal_evidence_missing",
+        "Closed",
+        "Outcome",
+        "Evidence",
     ),
 )
 
@@ -1184,6 +2515,9 @@ def _admission_for(category_name: str) -> CategoryAdmission:
             row.terminal_validator,
             row.utc_field_owner,
             row.negative_fixture,
+            row.utc_field,
+            row.detail_field,
+            row.evidence_field,
         )
     ):
         raise LifecycleError(
@@ -1403,7 +2737,53 @@ def _validated_migration_payload_target(
     return instant, target
 
 
-MARKDOWN_LINK_RE = re.compile(r"\]\(\s*<?([^)>#?\s]+)")
+MARKDOWN_LINK_RE = re.compile(
+    r"\[(?P<label>[^\]\r\n]+)\]\(\s*(?:<(?P<angle>[^<>()\s\r\n]+)>|(?P<bare>[^()\s\r\n]+))\s*\)"
+)
+
+
+@dataclass(frozen=True)
+class MarkdownLocalLink:
+    label: str
+    href: str
+    href_start: int
+    href_end: int
+
+
+def _markdown_local_links(text: str) -> Iterable[MarkdownLocalLink]:
+    """Yield only complete, closed, local Markdown link destinations."""
+    for match in MARKDOWN_LINK_RE.finditer(text):
+        href = match.group("angle") or match.group("bare")
+        yield MarkdownLocalLink(
+            label=match.group("label"),
+            href=href,
+            href_start=match.start("angle") if match.group("angle") is not None else match.start("bare"),
+            href_end=match.end("angle") if match.group("angle") is not None else match.end("bare"),
+        )
+
+
+URI_SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
+
+
+def _local_markdown_href_parts(href: str) -> tuple[str, str] | None:
+    """Split one local href into filesystem identity and preserved suffix."""
+    if (
+        not href
+        or href.startswith(("#", "/", "\\"))
+        or URI_SCHEME_RE.match(href)
+    ):
+        return None
+    suffix_offsets = [offset for marker in ("#", "?") if (offset := href.find(marker)) >= 0]
+    split_at = min(suffix_offsets) if suffix_offsets else len(href)
+    filesystem_identity = href[:split_at]
+    if not filesystem_identity:
+        return None
+    return filesystem_identity, href[split_at:]
+
+
+def _markdown_href_resolves(base: Path, href: str, expected: Path) -> bool:
+    parts = _local_markdown_href_parts(href)
+    return parts is not None and (base / parts[0]).resolve() == expected.resolve()
 
 
 def _incoming_link_result(
@@ -1434,7 +2814,8 @@ def _incoming_link_result(
         if belongs_to_owned(consumer_resolved):
             continue
         try:
-            text = consumer.read_text(encoding="utf-8")
+            consumer_bytes = consumer.read_bytes()
+            text = consumer_bytes.decode("utf-8")
         except (OSError, UnicodeError):
             continue
         consumer_rel = consumer.relative_to(work_items).as_posix()
@@ -1442,14 +2823,19 @@ def _incoming_link_result(
             logical.append(
                 {"consumer": consumer_rel, "kind": "logical", "value": reference}
             )
-        for match in MARKDOWN_LINK_RE.finditer(text):
-            raw = match.group(1)
-            if "://" in raw or raw.startswith("#"):
+        for link in _markdown_local_links(text):
+            raw = link.href
+            href_parts = _local_markdown_href_parts(raw)
+            if href_parts is None:
                 continue
-            candidate = (consumer.parent / raw).resolve()
+            candidate = (consumer.parent / href_parts[0]).resolve()
             if belongs_to_owned(candidate):
                 physical.append(
-                    {"consumer": consumer_rel, "kind": "physical", "value": raw}
+                    {
+                        "consumer": consumer_rel,
+                        "kind": "physical",
+                        "value": raw,
+                    }
                 )
     references = sorted(
         physical + logical,
@@ -1464,6 +2850,46 @@ def _incoming_link_result(
     return {"result": result, "references": references}
 
 
+def _validate_incoming_link_snapshot(reference: str, snapshot: dict, *, label: str) -> None:
+    if not isinstance(snapshot, dict):
+        raise LifecycleError(
+            "WI-LEGACY-LINK-UNMAPPED",
+            f"{label} incoming-link inventory is invalid for {reference}",
+        )
+    result = snapshot.get("result")
+    links = snapshot.get("references")
+    if result not in {"clear", "logical-only"} or not isinstance(links, list):
+        raise LifecycleError(
+            "WI-LEGACY-LINK-UNMAPPED",
+            f"{label} incoming links are not logical-only for {reference}",
+        )
+    expected_result = "logical-only" if links else "clear"
+    if result != expected_result:
+        raise LifecycleError(
+            "WI-LEGACY-LINK-UNMAPPED",
+            f"{label} incoming-link result differs from its rows for {reference}",
+        )
+    seen: set[tuple[str, str, str]] = set()
+    for link in links:
+        if (
+            not isinstance(link, dict)
+            or not isinstance(link.get("consumer"), str)
+            or link.get("kind") != "logical"
+            or link.get("value") != reference
+        ):
+            raise LifecycleError(
+                "WI-LEGACY-LINK-UNMAPPED",
+                f"{label} incoming link is not category-qualified logical for {reference}",
+            )
+        identity = (link["consumer"], link["kind"], link["value"])
+        if identity in seen:
+            raise LifecycleError(
+                "WI-LEGACY-LINK-UNMAPPED",
+                f"{label} incoming-link inventory repeats a row for {reference}",
+            )
+        seen.add(identity)
+
+
 def _validate_incoming_link_compatibility(
     root: Path,
     reference: str,
@@ -1473,48 +2899,7 @@ def _validate_incoming_link_compatibility(
     resolved_location: Path,
 ) -> None:
     for label, snapshot in (("planned", planned), ("current", current)):
-        if not isinstance(snapshot, dict):
-            raise LifecycleError(
-                "WI-LEGACY-LINK-UNMAPPED",
-                f"{label} incoming-link inventory is invalid for {reference}",
-            )
-        result = snapshot.get("result")
-        links = snapshot.get("references")
-        if result not in {"clear", "logical-only"} or not isinstance(links, list):
-            raise LifecycleError(
-                "WI-LEGACY-LINK-UNMAPPED",
-                f"{label} incoming links are not logical-only for {reference}",
-            )
-        expected_result = "logical-only" if links else "clear"
-        if result != expected_result:
-            raise LifecycleError(
-                "WI-LEGACY-LINK-UNMAPPED",
-                f"{label} incoming-link result differs from its rows for {reference}",
-            )
-        seen: set[tuple[str, str, str]] = set()
-        for link in links:
-            if (
-                not isinstance(link, dict)
-                or not isinstance(link.get("consumer"), str)
-                or link.get("kind") != "logical"
-                or link.get("value") != reference
-            ):
-                raise LifecycleError(
-                    "WI-LEGACY-LINK-UNMAPPED",
-                    f"{label} incoming link is not category-qualified logical "
-                    f"for {reference}",
-                )
-            identity = (
-                link["consumer"],
-                link["kind"],
-                link["value"],
-            )
-            if identity in seen:
-                raise LifecycleError(
-                    "WI-LEGACY-LINK-UNMAPPED",
-                    f"{label} incoming-link inventory repeats a row for {reference}",
-                )
-            seen.add(identity)
+        _validate_incoming_link_snapshot(reference, snapshot, label=label)
     try:
         resolved = resolve_category(root, reference)
     except LifecycleError as exc:
@@ -1636,13 +3021,367 @@ def _terminalization_fail(message: str) -> LifecycleError:
     return LifecycleError(V1_TERMINALIZATION_FAILURE, message)
 
 
-def _terminalization_receipt_path(path: Path) -> Path:
-    resolved = path.resolve()
-    if ".scratch" not in resolved.parts:
-        raise _terminalization_fail(
-            "terminalization receipt must be caller-specified under .scratch"
-        )
+def _terminalization_has_reparse(path: Path) -> bool:
+    try:
+        attributes = getattr(path.lstat(), "st_file_attributes", 0)
+    except OSError as exc:
+        raise _terminalization_fail(f"cannot inspect terminalization path: {path}") from exc
+    return path.is_symlink() or bool(
+        attributes & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    )
+
+
+def _terminalization_bound_path(
+    work_items: Path,
+    relative: str,
+    *,
+    label: str,
+) -> Path:
+    if not isinstance(relative, str) or not relative:
+        raise _terminalization_fail(f"{label} path is missing")
+    relative_path = Path(relative)
+    if relative_path.is_absolute() or ".." in relative_path.parts:
+        raise _terminalization_fail(f"{label} path escapes work-items: {relative!r}")
+    root = work_items.resolve()
+    cursor = work_items
+    if _terminalization_has_reparse(cursor):
+        raise _terminalization_fail(f"work-items root is a link or reparse point: {cursor}")
+    for part in relative_path.parts:
+        cursor = cursor / part
+        if cursor.exists() or cursor.is_symlink():
+            if _terminalization_has_reparse(cursor):
+                raise _terminalization_fail(
+                    f"{label} path contains a link or reparse point: {cursor}"
+                )
+    resolved = cursor.resolve()
+    if resolved != root and root not in resolved.parents:
+        raise _terminalization_fail(f"{label} path escapes work-items: {relative!r}")
     return resolved
+
+
+def _bound_repository_scratch_path(
+    root: Path,
+    path: str | Path,
+    *,
+    label: str,
+    allow_absolute: bool,
+) -> Path:
+    candidate = Path(path) if isinstance(path, (str, Path)) else Path()
+    if not candidate.parts or ".." in candidate.parts:
+        raise _terminalization_fail(f"{label} path is unsafe")
+    repo_root = _work_items_root(root).parent.resolve()
+    if candidate.is_absolute():
+        if not allow_absolute:
+            raise _terminalization_fail(f"{label} path must be repository-relative")
+        try:
+            relative = candidate.relative_to(repo_root)
+        except ValueError as exc:
+            raise _terminalization_fail(f"{label} path escapes the repository") from exc
+    else:
+        relative = candidate
+    if len(relative.parts) < 2 or relative.parts[0] != ".scratch":
+        raise _terminalization_fail(f"{label} must be a file under repository .scratch")
+    if _terminalization_has_reparse(repo_root):
+        raise _terminalization_fail(f"repository root is a link or reparse point: {repo_root}")
+    cursor = repo_root
+    for part in relative.parts:
+        cursor = cursor / part
+        if (cursor.exists() or cursor.is_symlink()) and _terminalization_has_reparse(cursor):
+            raise _terminalization_fail(
+                f"{label} path contains a link or reparse point: {cursor}"
+            )
+    resolved = cursor.resolve()
+    scratch = (repo_root / ".scratch").resolve()
+    if resolved == scratch or scratch not in resolved.parents:
+        raise _terminalization_fail(f"{label} escapes repository .scratch")
+    return resolved
+
+
+def _bound_physical_receipt(root: Path, relative: str) -> Path:
+    return _bound_repository_scratch_path(
+        root,
+        relative,
+        label="physical-relocation receipt",
+        allow_absolute=False,
+    )
+
+
+def _physical_relocation_admission(
+    root: Path,
+    reference: str,
+    incoming: object,
+    *,
+    receipt_path: Path | None = None,
+) -> tuple[list[dict], dict | None]:
+    if not isinstance(incoming, dict) or not isinstance(incoming.get("references"), list):
+        raise _terminalization_fail(f"incoming-link inventory is invalid for {reference}")
+    links = incoming["references"]
+    physical: list[dict] = []
+    logical: list[dict] = []
+    for link in links:
+        if (
+            not isinstance(link, dict)
+            or not isinstance(link.get("consumer"), str)
+            or not isinstance(link.get("value"), str)
+        ):
+            raise _terminalization_fail(f"incoming-link row is invalid for {reference}")
+        if link.get("kind") == "physical":
+            physical.append(link)
+        elif link.get("kind") == "logical" and link["value"] == reference:
+            logical.append(link)
+        else:
+            raise _terminalization_fail(f"incoming-link kind or identity differs for {reference}")
+    if not physical:
+        expected_result = "logical-only" if logical else "clear"
+        if incoming.get("result") != expected_result or "physicalRelocation" in incoming:
+            raise _terminalization_fail(
+                f"incoming-link result differs from its rows for {reference}"
+            )
+        return links, None
+    if len(physical) != 1 or logical or incoming.get("result") != "physical-relocation":
+        raise _terminalization_fail(
+            f"physical relocation requires one exact incoming link for {reference}"
+        )
+    admission = incoming.get("physicalRelocation")
+    required = {
+        "source",
+        "label",
+        "href",
+        "expectedIdentity",
+        "sourceSha256",
+        "targetSha256",
+        "receipt",
+    }
+    if not isinstance(admission, dict) or set(admission) != required:
+        raise _terminalization_fail(
+            f"physical-relocation admission shape differs for {reference}"
+        )
+    source_relative = admission.get("source")
+    source_parts = Path(source_relative).parts if isinstance(source_relative, str) else ()
+    if (
+        source_relative != physical[0]["consumer"]
+        or admission.get("href") != physical[0]["value"]
+        or admission.get("expectedIdentity") != reference
+        or not isinstance(admission.get("label"), str)
+        or not admission["label"]
+        or not re.fullmatch(r"[0-9a-f]{64}", str(admission.get("sourceSha256", "")))
+        or not re.fullmatch(r"[0-9a-f]{64}", str(admission.get("targetSha256", "")))
+        or len(source_parts) < 4
+        or source_parts[-3] != "archive"
+        or not re.fullmatch(r"\d{4}-\d{2}", source_parts[-2])
+    ):
+        raise _terminalization_fail(
+            f"physical-relocation tuple differs for {reference}"
+        )
+    bound_receipt = _bound_physical_receipt(root, admission["receipt"])
+    if receipt_path is not None and bound_receipt != receipt_path.resolve():
+        raise _terminalization_fail(
+            f"physical-relocation receipt binding differs for {reference}"
+        )
+    return links, admission
+
+
+def _plan_v1_link_relocations(
+    root: Path,
+    planned: list[dict],
+    terminal_at: str,
+    receipt_path: Path,
+) -> tuple[list[dict], list[dict]]:
+    work_items = _work_items_root(root)
+    admissions: list[tuple[dict, dict]] = []
+    for item in planned:
+        _links, admission = _physical_relocation_admission(
+            root,
+            item["reference"],
+            item["incomingLinks"],
+            receipt_path=receipt_path,
+        )
+        if admission is not None:
+            admissions.append((item, admission))
+    if len(admissions) > 1:
+        raise _terminalization_fail("only one exact physical relocation is admitted")
+    consumer_plans: list[dict] = []
+    receipt_links: list[dict] = []
+    for item, admission in admissions:
+        consumer_relative = admission["source"]
+        consumer = _terminalization_bound_path(
+            work_items, consumer_relative, label="physical-link consumer"
+        )
+        if consumer.suffix.casefold() != ".md" or not consumer.is_file():
+            raise _terminalization_fail(
+                f"physical-link consumer is not a Markdown file: {consumer_relative}"
+            )
+        if consumer == item["source"]:
+            raise _terminalization_fail(
+                f"physical-link consumer is also moving: {consumer_relative}"
+            )
+        before = consumer.read_bytes()
+        before_sha256 = hashlib.sha256(before).hexdigest()
+        if admission["sourceSha256"] != before_sha256:
+            raise _terminalization_fail(
+                f"physical-link consumer hash changed: {consumer_relative}"
+            )
+        if admission["targetSha256"] != item["beforeSha256"]:
+            raise _terminalization_fail(
+                f"physical-link target hash changed: {item['reference']}"
+            )
+        try:
+            text = before.decode("utf-8")
+        except UnicodeError as exc:
+            raise _terminalization_fail(
+                f"physical-link consumer is not UTF-8 Markdown: {consumer_relative}"
+            ) from exc
+
+        matches = [
+            link
+            for link in _markdown_local_links(text)
+            if link.label == admission["label"] and link.href == admission["href"]
+        ]
+        if len(matches) != 1:
+            raise _terminalization_fail(
+                f"physical Markdown tuple is missing or duplicated: {consumer_relative}"
+            )
+        href_parts = _local_markdown_href_parts(admission["href"])
+        if href_parts is None or not _markdown_href_resolves(
+            consumer.parent, admission["href"], item["source"]
+        ):
+            raise _terminalization_fail(
+                f"physical Markdown href resolves outside expected identity: {consumer_relative}"
+            )
+        new_path = Path(os.path.relpath(item["target"], consumer.parent)).as_posix()
+        new_href = new_path + href_parts[1]
+        if not _markdown_href_resolves(consumer.parent, new_href, item["target"]):
+            raise _terminalization_fail(
+                f"relocated href does not resolve to target: {consumer_relative}"
+            )
+        after_text = (
+            text[:matches[0].href_start]
+            + new_href
+            + text[matches[0].href_end:]
+        )
+        after = after_text.encode("utf-8")
+        after_sha256 = hashlib.sha256(after).hexdigest()
+        consumer_plans.append(
+            {
+                "consumer": consumer,
+                "consumerRelative": consumer_relative,
+                "before": before,
+                "beforeSha256": before_sha256,
+                "after": after,
+                "afterSha256": after_sha256,
+            }
+        )
+        receipt_links.append(
+            {
+                "source": consumer_relative,
+                "label": admission["label"],
+                "oldHref": admission["href"],
+                "newHref": new_href,
+                "expectedIdentity": item["reference"],
+                "finalTarget": item["targetRelative"],
+                "sourceBeforeSha256": before_sha256,
+                "sourceAfterSha256": None,
+                "targetBeforeSha256": item["afterSha256"],
+                "targetAfterSha256": None,
+                "terminalAt": terminal_at,
+            }
+        )
+    return consumer_plans, receipt_links
+
+
+def _expected_physical_relocation_receipt(
+    root: Path,
+    reference: str,
+    admission: dict,
+    source: Path,
+    target: Path,
+    target_before_sha256: str,
+    terminal_at: str,
+    *,
+    settled: bool,
+) -> dict:
+    """Derive the one receipt relation allowed by an admitted physical link."""
+    work_items = _work_items_root(root)
+    consumer_relative = admission["source"]
+    consumer = _terminalization_bound_path(
+        work_items, consumer_relative, label="physical-link consumer"
+    )
+    if not consumer.is_file():
+        raise _terminalization_fail(
+            f"physical-link consumer is missing: {consumer_relative}"
+        )
+    href_parts = _local_markdown_href_parts(admission["href"])
+    if href_parts is None:
+        raise _terminalization_fail(
+            f"physical Markdown href is not local: {consumer_relative}"
+        )
+    expected_href = Path(os.path.relpath(target, consumer.parent)).as_posix() + href_parts[1]
+    current_href = expected_href if settled else admission["href"]
+    resolved_target = target if settled else source
+    try:
+        current = consumer.read_bytes()
+        text = current.decode("utf-8")
+    except (OSError, UnicodeError) as exc:
+        raise _terminalization_fail(
+            f"physical-link consumer is not UTF-8 Markdown: {consumer_relative}"
+        ) from exc
+    matches = [
+        link
+        for link in _markdown_local_links(text)
+        if link.label == admission["label"]
+        and link.href == current_href
+        and _markdown_href_resolves(consumer.parent, link.href, resolved_target)
+    ]
+    if len(matches) != 1:
+        raise _terminalization_fail(
+            f"physical Markdown tuple is missing or duplicated: {consumer_relative}"
+        )
+    if settled:
+        link = matches[0]
+        source_before = hashlib.sha256(
+            (
+                text[:link.href_start]
+                + admission["href"]
+                + text[link.href_end:]
+            ).encode("utf-8")
+        ).hexdigest()
+        source_after: str | None = hashlib.sha256(current).hexdigest()
+        target_after: str | None = hashlib.sha256(target.read_bytes()).hexdigest()
+    else:
+        source_before = hashlib.sha256(current).hexdigest()
+        source_after = None
+        target_after = None
+    payload = target if settled else source
+    if (
+        source_before != admission["sourceSha256"]
+        or hashlib.sha256(payload.read_bytes()).hexdigest() != target_before_sha256
+        or (settled and target_after != target_before_sha256)
+    ):
+        raise _terminalization_fail(
+            f"physical-relocation evidence differs for {reference}"
+        )
+    return {
+        "source": consumer_relative,
+        "label": admission["label"],
+        "oldHref": admission["href"],
+        "newHref": expected_href,
+        "expectedIdentity": reference,
+        "finalTarget": target.relative_to(work_items).as_posix(),
+        "sourceBeforeSha256": source_before,
+        "sourceAfterSha256": source_after,
+        "targetBeforeSha256": target_before_sha256,
+        "targetAfterSha256": target_after,
+        "terminalAt": terminal_at,
+    }
+
+
+def _terminalization_receipt_path(root: Path, path: Path) -> Path:
+    return _bound_repository_scratch_path(
+        root,
+        path,
+        label="terminalization receipt",
+        allow_absolute=True,
+    )
 
 
 def _terminalization_replay(
@@ -1674,6 +3413,13 @@ def _terminalization_replay(
         "terminalAt": terminal_at,
         "authorizationMarker": authorization_marker,
         "rowCount": len(inventory["rows"]),
+        "linkCount": sum(
+            1
+            for inventory_row in inventory["rows"]
+            if isinstance(inventory_row, dict)
+            for link in (inventory_row.get("incomingLinks") or {}).get("references", [])
+            if isinstance(link, dict) and link.get("kind") == "physical"
+        ),
     }
     if not isinstance(receipt, dict) or any(
         receipt.get(key) != value for key, value in expected_header.items()
@@ -1698,19 +3444,166 @@ def _terminalization_replay(
         raise _terminalization_fail(
             "existing terminalization receipt references differ"
         )
+    inventory_by_reference = {
+        row.get("reference"): row for row in inventory["rows"] if isinstance(row, dict)
+    }
+    receipt_pairs: set[tuple[str, str]] = set()
     for row in receipt_rows:
         if not isinstance(row, dict):
             raise _terminalization_fail(
                 "existing terminalization receipt contains an invalid row"
             )
-        source = _bound_inventory_path(work_items, row.get("source"))
+        inventory_row = inventory_by_reference.get(row.get("reference"))
+        if not isinstance(inventory_row, dict):
+            raise _terminalization_fail(
+                f"terminalization receipt has no inventory row: {row.get('reference')}"
+            )
+        source = _terminalization_bound_path(
+            work_items, row.get("source"), label="receipt source"
+        )
+        target = _terminalization_bound_path(
+            work_items, row.get("target"), label="receipt target"
+        )
+        category, slug = _canonical_category(row["reference"])
+        expected_target = (
+            work_items
+            / category.current_root
+            / "archive"
+            / archive_month(terminal_at)
+            / f"{slug}.md"
+        ).resolve()
+        source_exists = source.is_file()
+        target_exists = target.is_file()
+        payload = source if source_exists else target
         if (
-            not source.is_file()
+            row.get("source") != inventory_row.get("source")
+            or row.get("beforeSha256") != inventory_row.get("inputSha256")
+            or source_exists == target_exists
+            or target != expected_target
             or row.get("afterSha256")
-            != hashlib.sha256(source.read_bytes()).hexdigest()
+            != hashlib.sha256(payload.read_bytes()).hexdigest()
+            or _category_locations(root, category, slug) != [payload]
         ):
             raise _terminalization_fail(
                 f"terminalized payload differs from receipt: {row.get('reference')}"
+            )
+        receipt_pairs.add((row["source"], row["target"]))
+    receipt_link_rows = [
+        (receipt_row, receipt_row["physicalRelocation"])
+        for receipt_row in receipt_rows
+        if isinstance(receipt_row, dict)
+        and isinstance(receipt_row.get("physicalRelocation"), dict)
+    ]
+    if len(receipt_link_rows) != expected_header["linkCount"]:
+        raise _terminalization_fail("existing terminalization receipt link set differs")
+    seen_link_rows: set[tuple[str, str, str, str]] = set()
+    for owner_row, link in receipt_link_rows:
+        if not isinstance(link, dict) or link.get("terminalAt") != terminal_at:
+            raise _terminalization_fail("existing terminalization receipt link row is invalid")
+        consumer = _terminalization_bound_path(
+            work_items, link.get("source"), label="receipt link consumer"
+        )
+        new_target = _terminalization_bound_path(
+            work_items, link.get("finalTarget"), label="receipt new target"
+        )
+        before_sha256 = link.get("sourceBeforeSha256")
+        after_sha256 = link.get("sourceAfterSha256")
+        target_before_sha256 = link.get("targetBeforeSha256")
+        target_after_sha256 = link.get("targetAfterSha256")
+        old_href = link.get("oldHref")
+        new_href = link.get("newHref")
+        label = link.get("label")
+        identity = link.get("expectedIdentity")
+        old_target_relative = next(
+            (
+                old
+                for old, new in receipt_pairs
+                if new == link.get("finalTarget")
+            ),
+            None,
+        )
+        old_target = (
+            _terminalization_bound_path(
+                work_items, old_target_relative, label="receipt old target"
+            )
+            if old_target_relative is not None
+            else None
+        )
+        pending = old_target is not None and old_target.is_file() and not new_target.exists()
+        settled = old_target is not None and not old_target.exists() and new_target.is_file()
+        if (
+            old_target is None
+            or not isinstance(before_sha256, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", before_sha256)
+            or not isinstance(target_before_sha256, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", target_before_sha256)
+            or (pending and (after_sha256 is not None or target_after_sha256 is not None))
+            or (
+                settled
+                and (
+                    not isinstance(after_sha256, str)
+                    or not re.fullmatch(r"[0-9a-f]{64}", after_sha256)
+                    or not isinstance(target_after_sha256, str)
+                    or not re.fullmatch(r"[0-9a-f]{64}", target_after_sha256)
+                    or hashlib.sha256(new_target.read_bytes()).hexdigest()
+                    != target_after_sha256
+                )
+            )
+            or not isinstance(old_href, str)
+            or not isinstance(new_href, str)
+            or not isinstance(label, str)
+            or not isinstance(identity, str)
+            or not (pending or settled)
+            or not consumer.is_file()
+            or hashlib.sha256(consumer.read_bytes()).hexdigest()
+            != (before_sha256 if pending else after_sha256)
+        ):
+            raise _terminalization_fail(
+                f"terminalized link differs from receipt: {link.get('source')}"
+            )
+        key = (link["source"], old_href, new_href, link["finalTarget"])
+        if key in seen_link_rows:
+            raise _terminalization_fail("terminalization receipt repeats a physical link")
+        seen_link_rows.add(key)
+        try:
+            text = consumer.read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as exc:
+            raise _terminalization_fail(
+                f"terminalized link consumer is unreadable: {link.get('source')}"
+            ) from exc
+        expected_href = old_href if pending else new_href
+        expected_target = old_target if pending else new_target
+        resolved_matches = [
+            link
+            for link in _markdown_local_links(text)
+            if link.label == label
+            and link.href == expected_href
+            and _markdown_href_resolves(consumer.parent, link.href, expected_target)
+        ]
+        if len(resolved_matches) != 1:
+            raise _terminalization_fail(
+                f"terminalized Markdown href is missing: {link.get('source')}"
+            )
+        owner_reference = owner_row["reference"]
+        owner_inventory_row = inventory_by_reference[owner_reference]
+        _links, admission = _physical_relocation_admission(
+            root,
+            owner_reference,
+            owner_inventory_row.get("incomingLinks"),
+            receipt_path=receipt_path,
+        )
+        if admission is None or link != _expected_physical_relocation_receipt(
+            root,
+            owner_reference,
+            admission,
+            old_target,
+            new_target,
+            owner_row["afterSha256"],
+            terminal_at,
+            settled=settled,
+        ):
+            raise _terminalization_fail(
+                f"terminalized physical-relocation receipt differs: {link.get('source')}"
             )
     return len(receipt_rows), True
 
@@ -1719,23 +3612,26 @@ def _preflight_v1_terminalization_rows(
     root: Path,
     inventory: dict,
     terminal_at: str,
-) -> list[dict]:
+    receipt_path: Path,
+) -> tuple[list[dict], list[dict], list[dict]]:
     _strict_utc(terminal_at)
     work_items = _work_items_root(root)
     planned: list[dict] = []
     seen_sources: set[Path] = set()
+    seen_targets: set[Path] = set()
     for row in inventory["rows"]:
         if not isinstance(row, dict):
             raise _terminalization_fail("terminalization inventory row is not an object")
         category_name = row.get("category")
-        if category_name not in {"bug", "decision"}:
-            raise _terminalization_fail(
-                f"unsupported V1 terminalization category: {category_name!r}"
-            )
         try:
             category, slug = _canonical_category(row.get("reference", ""))
         except LifecycleError as exc:
             raise _terminalization_fail(str(exc)) from exc
+        if category.current_kind != "flat":
+            raise _terminalization_fail(
+                f"unsupported V1 terminalization category: {category_name!r}"
+            )
+        admission_row = _admission_for(category.name)
         if category.name != category_name:
             raise _terminalization_fail(
                 f"category tuple differs for {row.get('reference')}"
@@ -1751,19 +3647,20 @@ def _preflight_v1_terminalization_rows(
                 f"{row.get('reference')}"
             )
         incoming = row.get("incomingLinks")
-        if not isinstance(incoming, dict) or incoming.get("result") not in {
-            "clear",
-            "logical-only",
-        }:
-            raise _terminalization_fail(
-                f"incoming links are not admitted for {row.get('reference')}"
-            )
+        _incoming_rows, physical_relocation = _physical_relocation_admission(
+            root,
+            row["reference"],
+            incoming,
+            receipt_path=receipt_path,
+        )
         if row.get("target") is not None or row.get("terminalInstant") is not None:
             raise _terminalization_fail(
                 f"denied row already has a target or terminal instant: "
                 f"{row.get('reference')}"
             )
-        source = _bound_inventory_path(work_items, row.get("source"))
+        source = _terminalization_bound_path(
+            work_items, row.get("source"), label="terminalization source"
+        )
         expected_source = (
             work_items / category.current_root / f"{slug}.md"
         ).resolve()
@@ -1782,6 +3679,20 @@ def _preflight_v1_terminalization_rows(
             raise _terminalization_fail(
                 f"current location is ambiguous for {row.get('reference')}"
             )
+        target_relative = (
+            Path(category.current_root)
+            / "archive"
+            / archive_month(terminal_at)
+            / source.name
+        ).as_posix()
+        target = _terminalization_bound_path(
+            work_items, target_relative, label="terminalization target"
+        )
+        if target in seen_targets or target.exists():
+            raise _terminalization_fail(
+                f"terminalization target is ambiguous for {row.get('reference')}"
+            )
+        seen_targets.add(target)
         if row.get("digestAlgorithm") != MIGRATION_DIGEST_ALGORITHMS["file"]:
             raise _terminalization_fail(
                 f"unsupported digest algorithm for {row.get('reference')}"
@@ -1805,9 +3716,13 @@ def _preflight_v1_terminalization_rows(
                 f"current status is not terminal for {row.get('reference')}: "
                 f"{status!r}"
             )
-        detail_field = "Resolution" if category_name == "bug" else "Rationale"
+        detail_field = admission_row.detail_field
         conflicting = tuple(
-            dict.fromkeys(_terminalization_authoritative_field_occurrences(text))
+            dict.fromkeys(
+                _terminalization_authoritative_field_occurrences(
+                    text, admission_row.utc_field
+                )
+            )
         )
         if conflicting:
             raise _terminalization_fail(
@@ -1819,7 +3734,15 @@ def _preflight_v1_terminalization_rows(
             {source},
             row["reference"],
         )
-        if current_links != incoming:
+        expected_current_links = (
+            {
+                "result": "unmapped",
+                "references": incoming["references"],
+            }
+            if physical_relocation is not None
+            else incoming
+        )
+        if current_links != expected_current_links:
             raise _terminalization_fail(
                 f"incoming-link inventory changed for {row.get('reference')}"
             )
@@ -1829,14 +3752,14 @@ def _preflight_v1_terminalization_rows(
             f"SHA-256 `{before_sha256}`; original terminal status `{status}`; "
             "explicit operator-authorized V1 migration."
         )
-        appended_lines = [f"Terminal-at: {terminal_at}"]
+        appended_lines = [f"{admission_row.utc_field}: {terminal_at}"]
         if not fields.get(detail_field.casefold()):
             appended_lines.append(
                 f"{detail_field}: Pre-V1 terminal status `{status}` is preserved "
                 "during operator-authorized V1 physical migration."
             )
-        if not fields.get("evidence"):
-            appended_lines.append(f"Evidence: {proof}")
+        if not fields.get(admission_row.evidence_field.casefold()):
+            appended_lines.append(f"{admission_row.evidence_field}: {proof}")
         appended_lines.append(f"V1-Migration-Evidence: {proof}")
         appended = ("\n".join(appended_lines) + "\n").encode("utf-8")
         after = before + separator + appended
@@ -1845,6 +3768,11 @@ def _preflight_v1_terminalization_rows(
                 "reference": row["reference"],
                 "sourceRelative": row["source"],
                 "source": source,
+                "targetRelative": target_relative,
+                "target": target,
+                "category": category,
+                "slug": slug,
+                "incomingLinks": incoming,
                 "status": status,
                 "before": before,
                 "beforeSha256": before_sha256,
@@ -1852,7 +3780,15 @@ def _preflight_v1_terminalization_rows(
                 "afterSha256": hashlib.sha256(after).hexdigest(),
             }
         )
-    return sorted(planned, key=lambda item: item["reference"])
+    planned = sorted(planned, key=lambda item: item["reference"])
+    source_set = {item["source"] for item in planned}
+    target_set = {item["target"] for item in planned}
+    if source_set & target_set:
+        raise _terminalization_fail("terminalization source and target sets overlap")
+    consumers, receipt_links = _plan_v1_link_relocations(
+        root, planned, terminal_at, receipt_path
+    )
+    return planned, consumers, receipt_links
 
 
 def terminalize_v1_inventory(
@@ -1864,13 +3800,13 @@ def terminalize_v1_inventory(
     receipt_path: Path,
     inject_failure_after: int | None = None,
 ) -> tuple[int, bool]:
-    """Add V1 terminal evidence transactionally; never move canonical records."""
+    """Add V1 evidence and preserve exact relocation admission; never move records."""
     if authorization_marker != V1_TERMINALIZATION_AUTHORIZATION:
         raise _terminalization_fail(
             "explicit operator-authorized V1 terminalization marker is required"
         )
     _strict_utc(terminal_at)
-    receipt = _terminalization_receipt_path(receipt_path)
+    receipt = _terminalization_receipt_path(root, receipt_path)
     try:
         inventory_bytes = inventory_path.read_bytes()
         inventory = _load_migration_inventory(root, inventory_path)
@@ -1891,7 +3827,12 @@ def terminalize_v1_inventory(
     )
     if replay is not None:
         return replay
-    planned = _preflight_v1_terminalization_rows(root, inventory, terminal_at)
+    planned, consumers, receipt_links = _preflight_v1_terminalization_rows(
+        root, inventory, terminal_at, receipt
+    )
+    links_by_identity = {
+        link["expectedIdentity"]: link for link in receipt_links
+    }
     receipt_payload = {
         "schemaVersion": V1_TERMINALIZATION_SCHEMA_VERSION,
         "owner": V1_TERMINALIZATION_OWNER,
@@ -1900,13 +3841,21 @@ def terminalize_v1_inventory(
         "terminalAt": terminal_at,
         "authorizationMarker": authorization_marker,
         "rowCount": len(planned),
+        "linkCount": len(receipt_links),
         "rows": [
             {
                 "reference": item["reference"],
                 "source": item["sourceRelative"],
+                "target": item["targetRelative"],
+                "terminalAt": terminal_at,
                 "originalStatus": item["status"],
                 "beforeSha256": item["beforeSha256"],
                 "afterSha256": item["afterSha256"],
+                **(
+                    {"physicalRelocation": links_by_identity[item["reference"]]}
+                    if item["reference"] in links_by_identity
+                    else {}
+                ),
             }
             for item in planned
         ],
@@ -1914,7 +3863,7 @@ def terminalize_v1_inventory(
     receipt_bytes = (
         json.dumps(receipt_payload, indent=2, sort_keys=True) + "\n"
     ).encode("utf-8")
-    written: list[dict] = []
+    mutated_items: list[dict] = []
     try:
         for index, item in enumerate(planned, start=1):
             if item["source"].read_bytes() != item["before"]:
@@ -1922,15 +3871,31 @@ def terminalize_v1_inventory(
                     f"payload changed after preflight: {item['reference']}"
                 )
             _atomic_write(item["source"], item["after"])
-            written.append(item)
+            mutated_items.append(item)
             if inject_failure_after == index:
                 raise _terminalization_fail(
                     f"injected terminalization failure after row {index}"
                 )
         _atomic_write(receipt, receipt_bytes)
+        for consumer in consumers:
+            if consumer["consumer"].read_bytes() != consumer["before"]:
+                raise _terminalization_fail(
+                    f"terminalization rewrote consumer: {consumer['consumerRelative']}"
+                )
+        for item in planned:
+            if (
+                not item["source"].is_file()
+                or item["target"].exists()
+                or item["source"].read_bytes() != item["after"]
+                or _category_locations(root, item["category"], item["slug"])
+                != [item["source"]]
+            ):
+                raise _terminalization_fail(
+                    f"terminalization identity check failed: {item['reference']}"
+                )
     except Exception as exc:
         rollback_failures: list[str] = []
-        for item in reversed(written):
+        for item in reversed(mutated_items):
             try:
                 _atomic_write(item["source"], item["before"])
             except Exception as rollback_exc:
@@ -1967,6 +3932,198 @@ def _bound_inventory_path(work_items: Path, relative: str) -> Path:
             f"inventory path escapes work-items: {relative}",
         )
     return path
+
+
+def _terminalization_receipt_for_migration(
+    root: Path,
+    inventory_path: Path,
+    inventory: dict,
+) -> tuple[Path, bytes, dict]:
+    admissions = [
+        row["incomingLinks"]["physicalRelocation"]
+        for row in inventory["rows"]
+        if isinstance(row, dict)
+        and isinstance(row.get("incomingLinks"), dict)
+        and isinstance(row["incomingLinks"].get("physicalRelocation"), dict)
+    ]
+    if len(admissions) != 1:
+        raise LifecycleError(
+            "WI-LEGACY-LINK-UNMAPPED",
+            "migration requires exactly one physical-relocation admission",
+        )
+    receipt_path = _bound_physical_receipt(root, admissions[0].get("receipt"))
+    try:
+        receipt_bytes = receipt_path.read_bytes()
+        receipt = json.loads(receipt_bytes.decode("utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise LifecycleError(
+            "WI-CATEGORY-MIGRATION-INVENTORY",
+            f"physical-relocation receipt is invalid: {receipt_path}",
+        ) from exc
+    inventory_sha256 = hashlib.sha256(inventory_path.read_bytes()).hexdigest()
+    work_items = _work_items_root(root)
+    if (
+        not isinstance(receipt, dict)
+        or receipt.get("schemaVersion") != V1_TERMINALIZATION_SCHEMA_VERSION
+        or receipt.get("owner") != V1_TERMINALIZATION_OWNER
+        or receipt.get("workItemsRoot") != str(work_items.resolve())
+        or receipt.get("inventorySha256") != inventory_sha256
+        or receipt.get("authorizationMarker") != V1_TERMINALIZATION_AUTHORIZATION
+        or receipt.get("rowCount") != len(inventory["rows"])
+        or receipt.get("linkCount") != 1
+        or not isinstance(receipt.get("rows"), list)
+        or len(receipt["rows"]) != len(inventory["rows"])
+        or not isinstance(receipt.get("terminalAt"), str)
+    ):
+        raise LifecycleError(
+            "WI-CATEGORY-MIGRATION-INVENTORY",
+            "physical-relocation receipt binding differs",
+        )
+    _strict_utc(receipt["terminalAt"])
+    return receipt_path, receipt_bytes, receipt
+
+
+def _preflight_terminalized_inventory_rows(
+    root: Path,
+    inventory_path: Path,
+    inventory: dict,
+) -> tuple[list[dict], list[dict], Path, bytes, dict]:
+    work_items = _work_items_root(root)
+    receipt_path, receipt_bytes, receipt = _terminalization_receipt_for_migration(
+        root, inventory_path, inventory
+    )
+    replay = _terminalization_replay(
+        root,
+        inventory,
+        hashlib.sha256(inventory_path.read_bytes()).hexdigest(),
+        receipt["terminalAt"],
+        V1_TERMINALIZATION_AUTHORIZATION,
+        receipt_path,
+    )
+    if replay is None:
+        raise LifecycleError(
+            "WI-CATEGORY-MIGRATION-INVENTORY", "terminalization receipt is missing"
+        )
+    receipt_rows = {row.get("reference"): row for row in receipt["rows"] if isinstance(row, dict)}
+    if len(receipt_rows) != len(inventory["rows"]):
+        raise LifecycleError(
+            "WI-CATEGORY-MIGRATION-INVENTORY", "terminalization receipt repeats a row"
+        )
+    plans: list[dict] = []
+    consumers: list[dict] = []
+    seen_sources: set[Path] = set()
+    seen_targets: set[Path] = set()
+    for row in inventory["rows"]:
+        reference = row.get("reference") if isinstance(row, dict) else None
+        receipt_row = receipt_rows.get(reference)
+        admission = row.get("admission") if isinstance(row, dict) else None
+        if (
+            not isinstance(row, dict)
+            or not isinstance(receipt_row, dict)
+            or not isinstance(admission, dict)
+            or admission.get("result") != "denied"
+            or admission.get("failureId") != V1_TERMINALIZATION_FAILURE
+        ):
+            raise LifecycleError(
+                "WI-CATEGORY-MIGRATION-INVENTORY",
+                f"terminalized inventory row is invalid: {reference}",
+            )
+        category, slug = _canonical_category(reference)
+        if row.get("category") != category.name:
+            raise LifecycleError(
+                "CATEGORY-MIGRATION-ADMISSION-GATE",
+                f"category tuple differs for {reference}",
+            )
+        source = _bound_inventory_path(work_items, row.get("source"))
+        target = _bound_inventory_path(work_items, receipt_row.get("target"))
+        if source in seen_sources or target in seen_targets:
+            raise LifecycleError(
+                "WI-CATEGORY-DUAL-LOCATION", "terminalized inventory repeats a source or target"
+            )
+        seen_sources.add(source)
+        seen_targets.add(target)
+        source_exists = source.is_file()
+        target_exists = target.is_file()
+        if source_exists == target_exists:
+            raise LifecycleError(
+                "WI-CATEGORY-DUAL-LOCATION", f"terminalized location differs for {reference}"
+            )
+        payload = source if source_exists else target
+        payload_sha256 = hashlib.sha256(payload.read_bytes()).hexdigest()
+        if (
+            receipt_row.get("source") != row.get("source")
+            or receipt_row.get("beforeSha256") != row.get("inputSha256")
+            or receipt_row.get("afterSha256") != payload_sha256
+            or receipt_row.get("terminalAt") != receipt["terminalAt"]
+        ):
+            raise LifecycleError(
+                "WI-CATEGORY-MIGRATION-PAYLOAD", f"terminalized payload changed for {reference}"
+            )
+        instant, expected_target = _validated_migration_payload_target(
+            root, category, slug, payload
+        )
+        if instant != receipt["terminalAt"] or target != expected_target.resolve():
+            raise LifecycleError(
+                "WI-CATEGORY-ARCHIVE-MONTH-MISMATCH", f"terminalized target differs for {reference}"
+            )
+        if _category_locations(root, category, slug) != [payload]:
+            raise LifecycleError(
+                "WI-CATEGORY-DUAL-LOCATION", f"terminalized identity differs for {reference}"
+            )
+        incoming = row.get("incomingLinks")
+        _links, physical = _physical_relocation_admission(
+            root, reference, incoming, receipt_path=receipt_path
+        )
+        plan = {
+            "row": row,
+            "reference": reference,
+            "category": category,
+            "slug": slug,
+            "source": source,
+            "target": target,
+            "pending": source_exists,
+            "beforeSha256": receipt_row["afterSha256"],
+            "receiptRow": receipt_row,
+        }
+        if physical is None:
+            current_links = _incoming_link_result(root, {source, target}, reference)
+            _validate_incoming_link_compatibility(
+                root,
+                reference,
+                incoming,
+                current_links,
+                resolved_location=payload,
+            )
+        elif source_exists:
+            planned_consumers, planned_links = _plan_v1_link_relocations(
+                root,
+                [
+                    {
+                        "reference": reference,
+                        "sourceRelative": row["source"],
+                        "source": source,
+                        "targetRelative": receipt_row["target"],
+                        "target": target,
+                        "incomingLinks": incoming,
+                        "beforeSha256": row["inputSha256"],
+                        "afterSha256": receipt_row["afterSha256"],
+                    }
+                ],
+                receipt["terminalAt"],
+                receipt_path,
+            )
+            if planned_links != [receipt_row.get("physicalRelocation")]:
+                raise LifecycleError(
+                    "WI-LEGACY-LINK-UNMAPPED",
+                    f"physical-relocation receipt differs for {reference}",
+                )
+            consumers.extend(planned_consumers)
+        plans.append(plan)
+    source_set = {plan["source"] for plan in plans}
+    target_set = {plan["target"] for plan in plans}
+    if source_set & target_set:
+        raise LifecycleError("WI-CATEGORY-DUAL-LOCATION", "source and target sets overlap")
+    return sorted(plans, key=lambda plan: plan["reference"]), consumers, receipt_path, receipt_bytes, receipt
 
 
 def _preflight_inventory_rows(
@@ -2077,6 +4234,157 @@ def apply_migration_inventory(
     byte_check: bool,
 ) -> tuple[int, str | None]:
     inventory = _load_migration_inventory(root, inventory_path)
+    has_physical_relocation = any(
+        isinstance(row, dict)
+        and isinstance(row.get("incomingLinks"), dict)
+        and isinstance(row["incomingLinks"].get("physicalRelocation"), dict)
+        for row in inventory["rows"]
+    )
+    if has_physical_relocation:
+        plans, consumers, receipt_path, receipt_before, receipt_payload = (
+            _preflight_terminalized_inventory_rows(root, inventory_path, inventory)
+        )
+        work_items = _work_items_root(root)
+        readme = work_items / "README.md"
+        readme_before = readme.read_bytes() if readme.is_file() else None
+        written_consumers: list[dict] = []
+        moved: list[dict] = []
+        created_directories: set[Path] = set()
+        try:
+            for consumer in consumers:
+                if consumer["consumer"].read_bytes() != consumer["before"]:
+                    raise LifecycleError(
+                        "WI-LEGACY-LINK-UNMAPPED",
+                        f"consumer changed after preflight: {consumer['consumerRelative']}",
+                    )
+                _atomic_write(consumer["consumer"], consumer["after"])
+                written_consumers.append(consumer)
+            for plan in plans:
+                if not plan["pending"]:
+                    continue
+                if (
+                    not plan["source"].is_file()
+                    or plan["target"].exists()
+                    or hashlib.sha256(plan["source"].read_bytes()).hexdigest()
+                    != plan["beforeSha256"]
+                ):
+                    raise LifecycleError(
+                        "WI-CATEGORY-MIGRATION-PAYLOAD",
+                        f"payload changed after preflight: {plan['reference']}",
+                    )
+                cursor = plan["target"].parent
+                while cursor != work_items and not cursor.exists():
+                    created_directories.add(cursor)
+                    cursor = cursor.parent
+                plan["target"].parent.mkdir(parents=True, exist_ok=True)
+                os.replace(plan["source"], plan["target"])
+                moved.append(plan)
+            readme_hash: str | None = None
+            if render_readme:
+                readme_hash = refresh_readme(root, allow_marker_bootstrap=True)
+            if byte_check and (
+                not readme.is_file() or readme.read_bytes() != render_readme_bytes(root)
+            ):
+                raise LifecycleError(
+                    "WI-README-STALE", "README differs from an immediate fresh render"
+                )
+            for plan in plans:
+                if (
+                    plan["source"].exists()
+                    or not plan["target"].is_file()
+                    or hashlib.sha256(plan["target"].read_bytes()).hexdigest()
+                    != plan["beforeSha256"]
+                    or _category_locations(root, plan["category"], plan["slug"])
+                    != [plan["target"]]
+                ):
+                    raise LifecycleError(
+                        "WI-CATEGORY-DUAL-LOCATION",
+                        f"migration identity check failed: {plan['reference']}",
+                    )
+            consumers_by_source = {
+                consumer["consumerRelative"]: consumer for consumer in consumers
+            }
+            for row in receipt_payload["rows"]:
+                evidence = row.get("physicalRelocation")
+                if not isinstance(evidence, dict):
+                    continue
+                consumer = consumers_by_source.get(evidence.get("source"))
+                if consumer is None:
+                    if not isinstance(evidence.get("sourceAfterSha256"), str):
+                        raise LifecycleError(
+                            "WI-LEGACY-LINK-UNMAPPED",
+                            "settled physical relocation lacks receipt evidence",
+                        )
+                    continue
+                if (
+                    consumer["consumer"].read_bytes() != consumer["after"]
+                    or not _markdown_href_resolves(
+                        consumer["consumer"].parent,
+                        evidence["newHref"],
+                        _bound_inventory_path(work_items, evidence["finalTarget"]),
+                    )
+                ):
+                    raise LifecycleError(
+                        "WI-LEGACY-LINK-UNMAPPED",
+                        "migrated Markdown href does not resolve to final target",
+                    )
+                evidence["sourceAfterSha256"] = consumer["afterSha256"]
+                final_target = _bound_inventory_path(work_items, evidence["finalTarget"])
+                evidence["targetAfterSha256"] = hashlib.sha256(
+                    final_target.read_bytes()
+                ).hexdigest()
+            _atomic_write(
+                receipt_path,
+                (json.dumps(receipt_payload, indent=2, sort_keys=True) + "\n").encode(
+                    "utf-8"
+                ),
+            )
+            return len(plans), readme_hash
+        except Exception as exc:
+            rollback_failures: list[str] = []
+            for plan in reversed(moved):
+                try:
+                    if plan["target"].exists() and not plan["source"].exists():
+                        plan["source"].parent.mkdir(parents=True, exist_ok=True)
+                        os.replace(plan["target"], plan["source"])
+                except Exception as rollback_exc:
+                    rollback_failures.append(
+                        f"{plan['reference']}: {rollback_exc}"
+                    )
+            for consumer in reversed(written_consumers):
+                try:
+                    _atomic_write(consumer["consumer"], consumer["before"])
+                except Exception as rollback_exc:
+                    rollback_failures.append(
+                        f"{consumer['consumerRelative']}: {rollback_exc}"
+                    )
+            try:
+                _restore_readme_snapshot(readme, readme_before)
+            except Exception as rollback_exc:
+                rollback_failures.append(f"README: {rollback_exc}")
+            try:
+                _atomic_write(receipt_path, receipt_before)
+            except Exception as rollback_exc:
+                rollback_failures.append(f"receipt: {rollback_exc}")
+            for directory in sorted(
+                created_directories, key=lambda path: len(path.parts), reverse=True
+            ):
+                try:
+                    if directory.is_dir() and not any(directory.iterdir()):
+                        directory.rmdir()
+                except OSError as rollback_exc:
+                    rollback_failures.append(f"directory {directory}: {rollback_exc}")
+            if rollback_failures:
+                raise LifecycleError(
+                    "WI-CATEGORY-MIGRATION-INVENTORY",
+                    "physical-relocation rollback failed: " + "; ".join(rollback_failures),
+                ) from exc
+            if isinstance(exc, LifecycleError):
+                raise
+            raise LifecycleError(
+                "WI-CATEGORY-MIGRATION-INVENTORY",
+                f"physical-relocation transaction failed: {exc}",
+            ) from exc
     planned = _preflight_inventory_rows(root, inventory)
     for _row, source, target, pending in planned:
         if not pending:
@@ -2104,6 +4412,31 @@ def apply_migration_inventory(
 def verify_migration_inventory(root: Path, inventory_path: Path) -> int:
     inventory = _load_migration_inventory(root, inventory_path)
     work_items = _work_items_root(root)
+    if any(
+        isinstance(row, dict)
+        and isinstance(row.get("incomingLinks"), dict)
+        and isinstance(row["incomingLinks"].get("physicalRelocation"), dict)
+        for row in inventory["rows"]
+    ):
+        plans, _consumers, _receipt_path, _receipt_bytes, _receipt = (
+            _preflight_terminalized_inventory_rows(root, inventory_path, inventory)
+        )
+        for plan in plans:
+            if (
+                plan["pending"]
+                or not plan["target"].is_file()
+                or plan["source"].exists()
+                or hashlib.sha256(plan["target"].read_bytes()).hexdigest()
+                != plan["beforeSha256"]
+                or _category_locations(root, plan["category"], plan["slug"])
+                != [plan["target"]]
+            ):
+                raise LifecycleError(
+                    "WI-CATEGORY-DUAL-LOCATION",
+                    f"settled physical relocation differs for {plan['reference']}",
+                )
+        check_readme(root)
+        return len(plans)
     for row in inventory["rows"]:
         source = _bound_inventory_path(work_items, row.get("source"))
         target = _bound_inventory_path(work_items, row.get("target"))
@@ -2221,7 +4554,6 @@ def _fixture_status(item: dict) -> str:
 def _trial_expected_files(fixture: dict) -> set[str]:
     expected = {
         "work-items/README.md",
-        "work-items/index.md",
     }
     supporting_epics = fixture.get("supportingEpics", [])
     if not isinstance(supporting_epics, list):
@@ -2435,7 +4767,6 @@ def run_trial(root: Path, fixture_path: Path) -> tuple[str, str]:
             raise LifecycleError("WI-TRIAL-FIXTURE", f"unknown trial kind: {kind}")
     first = refresh_readme(root)
     first_bytes = (work_items / "README.md").read_bytes()
-    _atomic_write(work_items / "index.md", b"# Compatibility snapshot only\n\nignored\n")
     second = refresh_readme(root)
     second_bytes = (work_items / "README.md").read_bytes()
     if first != second or first_bytes != second_bytes:
@@ -2489,6 +4820,17 @@ def build_parser() -> argparse.ArgumentParser:
         else:
             command.add_argument("--successor-slug", required=True)
             command.add_argument("--status-file", required=True)
+    convert_legacy = sub.add_parser("convert-legacy-candidate")
+    _add_root(convert_legacy)
+    _add_injection(convert_legacy)
+    convert_legacy.add_argument("--slug", required=True)
+    convert_legacy.add_argument("--file", required=True)
+    retire_legacy = sub.add_parser("retire-legacy-backlog")
+    _add_root(retire_legacy)
+    _add_injection(retire_legacy)
+    retire_legacy.add_argument("--slug", required=True)
+    retire_legacy.add_argument("--disposition-file", required=True)
+    retire_legacy.add_argument("--terminal-instant", required=True)
     refresh = sub.add_parser("refresh")
     _add_root(refresh)
     refresh.add_argument("--reset-static-guide", action="store_true")
@@ -2518,6 +4860,36 @@ def build_parser() -> argparse.ArgumentParser:
     terminalize.add_argument("--terminal-at", required=True)
     terminalize.add_argument("--authorization-marker", required=True)
     terminalize.add_argument("--receipt", required=True)
+    normalize = sub.add_parser(
+        "normalize-current-identity",
+        help="Atomically replace one noncanonical current flat-record identity",
+    )
+    _add_root(normalize)
+    normalize.add_argument("--category", required=True, help="Lifecycle category")
+    normalize.add_argument(
+        "--source",
+        required=True,
+        help="Repository-relative source path under work-items/",
+    )
+    normalize.add_argument(
+        "--target-slug", required=True, help="Canonical replacement slug"
+    )
+    normalize.add_argument(
+        "--inventory", required=True, help="Repository .scratch/ inventory path"
+    )
+    normalize.add_argument(
+        "--receipt", help="Repository .scratch/ settled receipt path"
+    )
+    normalize.add_argument(
+        "--prepare-only",
+        action="store_true",
+        help="Write the exact byte-bound inventory without mutating work-items",
+    )
+    normalize.add_argument(
+        "--inject-failure-at",
+        choices=("after-rewrites", "after-move", "after-readme"),
+        help=argparse.SUPPRESS,
+    )
     trial = sub.add_parser("trial")
     _add_root(trial)
     trial.add_argument("--fixture", required=True)
@@ -2533,6 +4905,23 @@ def main(argv: list[str]) -> int:
                 root,
                 args.slug,
                 _read_arg_file(args.file),
+                inject_readme_failure=bool(args.inject_readme_failure),
+            )
+            print(result)
+        elif args.command == "convert-legacy-candidate":
+            result = convert_legacy_candidate(
+                root,
+                args.slug,
+                _read_arg_file(args.file),
+                inject_readme_failure=bool(args.inject_readme_failure),
+            )
+            print(result)
+        elif args.command == "retire-legacy-backlog":
+            result = retire_legacy_backlog(
+                root,
+                args.slug,
+                _read_arg_file(args.disposition_file),
+                args.terminal_instant,
                 inject_readme_failure=bool(args.inject_readme_failure),
             )
             print(result)
@@ -2604,7 +4993,8 @@ def main(argv: list[str]) -> int:
                 )
                 print(f"migration_rows={rows}")
             else:
-                audit(root)
+                for legacy_path in audit(root):
+                    print(f"{LEGACY_READ_CLASSIFICATION} {legacy_path}")
             print("AUDIT: PASS")
         elif args.command == "migrate":
             if args.inventory:
@@ -2659,6 +5049,40 @@ def main(argv: list[str]) -> int:
                 print(
                     f"TERMINALIZE-V1: PASS rows={rows} "
                     f"marker={args.authorization_marker}"
+                )
+        elif args.command == "normalize-current-identity":
+            if args.prepare_only:
+                if args.receipt:
+                    raise LifecycleError(
+                        "WI-IDENTITY-NORMALIZE-INVENTORY",
+                        "--prepare-only does not accept --receipt",
+                    )
+                inventory = write_current_identity_normalization_inventory(
+                    root,
+                    args.category,
+                    args.source,
+                    args.target_slug,
+                    Path(args.inventory),
+                )
+                print(f"NORMALIZE-CURRENT-IDENTITY: INVENTORY rows={len(inventory['rows'])}")
+            else:
+                if not args.receipt:
+                    raise LifecycleError(
+                        "WI-IDENTITY-NORMALIZE-INVENTORY",
+                        "normalization apply requires --receipt",
+                    )
+                target, replay = normalize_current_identity(
+                    root,
+                    args.category,
+                    args.source,
+                    args.target_slug,
+                    Path(args.inventory),
+                    Path(args.receipt),
+                    inject_failure_at=args.inject_failure_at,
+                )
+                print(
+                    "NORMALIZE-CURRENT-IDENTITY: PASS "
+                    f"target={target} replay={'true' if replay else 'false'}"
                 )
         elif args.command == "trial":
             first, second = run_trial(root, Path(args.fixture))

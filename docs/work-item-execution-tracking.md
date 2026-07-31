@@ -130,6 +130,19 @@ derives the archive month from strict UTC closure evidence, and preserves the
 archived identity. `README.md` and `index.md` are generated compatibility
 views; do not use either to infer, backfill, or execute a state transition.
 
+Legacy directory-shaped backlog records use the same owner. Run
+`mutate-work-item.py convert-legacy-candidate` only for an admitted record and
+supply the current candidate text; the command appends every legacy source text
+with its byte digest, replaces the directory only after the README refresh
+succeeds, and rolls the whole operation back on failure. Run
+`mutate-work-item.py retire-legacy-backlog` only with an explicit product
+disposition and strict UTC instant; it preserves the original source bytes plus
+an incoming-link inventory in the existing monthly archive and deliberately
+creates no admission, active, or closure history. `terminalize-v1` applies the
+same operator-authorized missing-evidence repair to every supported flat
+category, including roadmaps, using that category's own UTC/detail/evidence
+fields.
+
 ## Operator Rules
 
 - Do not trust a subagent report without a matching ledger event and independent verification evidence.

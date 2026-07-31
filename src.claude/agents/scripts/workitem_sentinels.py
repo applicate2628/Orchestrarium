@@ -557,8 +557,8 @@ def _sen0_block_reason(item_orphans: list[tuple[str, str]], epic_orphans: list[t
             "The Recovery rule's close step is as mandatory as the create step. "
             "Close each item: write closure.md (outcome, residual risk, archive "
             "location) if it is absent, move the folder to "
-            "work-items/archive/<YYYY-MM>/<slug>/, and move its row in "
-            "work-items/index.md from Active to Archived."
+            "work-items/archive/<YYYY-MM>/<slug>/ through the lifecycle owner, "
+            "which refreshes the generated work-items/README.md read-model."
         )
     if epic_orphans:
         lines = "\n".join(f"  - {name}: {why}" for name, why in epic_orphans)

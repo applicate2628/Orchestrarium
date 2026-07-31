@@ -7,9 +7,10 @@ The immediate failure mode this policy addresses is simple: a lead can plan well
 ## Canonical location
 
 - `work-items/` is the canonical repo-local task-memory root for this repository, but it is intentionally local-only and untracked in git.
-- `work-items/index.md` is the recovery entry point.
-- Active admitted items live in `work-items/active/<date>-<slug>/`.
-- Completed, cancelled, or superseded items move to `work-items/archive/<date>-<slug>/`.
+- Generated `work-items/README.md` is the human-readable recovery start and project read-model.
+- Admitted but not started work-items live in `work-items/backlog/<slug>.md`; active items live in `work-items/active/<date>-<slug>/`.
+- Completed, cancelled, or superseded items move through the lifecycle owner to `work-items/archive/YYYY-MM/<date>-<slug>/`.
+- Physical lifecycle roots and owning artifacts are state truth. `work-items/index.md`, when retained, is a compatibility snapshot only and has no ongoing sync requirement.
 - `.reports/YYYY-MM/` stores session logs — brief summaries of what happened in a session, not copies of canonical artifacts. Named `report(<role>)-YYYY-MM-DD_HH-MM_topic.md`.
 - `.plans/YYYY-MM/` stores plan logs — plan drafts and iterations. Named `plan(<role>)-YYYY-MM-DD_HH-MM_topic.md`.
 - `.reports/` and `.plans/` are traceability logs, not canonical tracked sources. `work-items/` remains the local recovery source of truth for item-specific execution memory on the operator machine.
@@ -53,7 +54,7 @@ Additional artifacts are required when the workflow calls for them:
 - `$lead` must not move an item to archive without `closure.md`.
 - If the current stage depends on upstream artifacts such as research, design, specialist constraints, phase plan, or required review reports, those artifacts must exist and be current before work continues.
 - After every accepted artifact, interruption, or material route change, `$lead` updates `status.md`.
-- On resume after interruption or context loss, start at `work-items/index.md`, then open the item's `status.md`, then `brief.md`.
+- On resume after interruption or context loss, start at generated `work-items/README.md`, resolve the item in the physical lifecycle roots, then open its `status.md` and `brief.md`.
 - If the required task-memory artifacts are missing or stale, stop and restore them before continuing delivery.
 
 ## Task-memory linkage
@@ -61,8 +62,8 @@ Additional artifacts are required when the workflow calls for them:
 - Each work-item in `work-items/` corresponds to an entry in the team task index managed by the operating environment.
 - The work-item `status.md` SHOULD include a `Task ID` field when the environment supports cross-linking.
 - When a work-item is archived, the corresponding task is marked `completed`/`cancelled` with an archive note.
-- The `work-items/index.md` file is the portable, repo-guaranteed entry point for task recovery — it must always be current.
-- This linkage is maintained by `$lead` at each stage transition and verified by `$knowledge-archivist` during session-start audits.
+- Generated `work-items/README.md` is the portable human entry point; physical roots and owning artifacts remain authoritative even if a generated view is stale.
+- This linkage is maintained by `$lead` at each stage transition and verified by `$knowledge-archivist` against physical state during session-start audits. `work-items/index.md` is not a synchronization gate.
 
 ## Technical notes and decision history
 

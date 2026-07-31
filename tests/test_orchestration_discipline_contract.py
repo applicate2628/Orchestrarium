@@ -177,8 +177,8 @@ PINS = [
     ("A9-scope", "Dispatches and verdicts that do not rely on a C1 assessment owe no object-axis record.",
      ["src.claude/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md"]),
 
-    # A3 — index sync on every active-item state change (row + bullet; case differs, use common substring)
-    ("A3", "active-item state change (create, resume, stage transition, park, close, archive)",
+    # A3 — physical-state reconciliation on every lifecycle state change (row + bullet)
+    ("A3", "lifecycle state change (create, resume, stage transition, park, close, archive)",
      ["src.claude/agents/contracts/operating-model.md", "src.codex/skills/lead/operating-model.md"]),
 
     # A9 — GitHub thread HEAD + API rule
@@ -211,6 +211,23 @@ PINS = [
      ["src.claude/skills/architect/SKILL.md", "src.codex/skills/architect/SKILL.md"]),
     ("P8-reviewer", "Reject any pipeline touching shared mutable state unless the accepted design names exactly one writer-owner and a downstream-observable `settled/committed` event, and the implementation preserves both.",
      ["src.claude/agents/architecture-reviewer.md", "src.codex/skills/architecture-reviewer/SKILL.md"]),
+
+    # Single-writer orchestration — the root main conversation owns dispatch and lifecycle
+    # state; specialists return a bounded result and recommendation without advance authority.
+    ("single-writer-root", "Only the root main conversation holding Lead dispatches downstream roles and writes work-item lifecycle state.",
+     ["src.claude/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md"]),
+    ("single-writer-ledger", "Only the root main conversation holding Lead writes `agent-runs.jsonl`:",
+     ["src.claude/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md"]),
+    ("single-writer-specialist", "A specialist completes one profession, artifact, and gate; it returns evidence plus an optional non-binding recommended next role to the root, then stops.",
+     ["src.claude/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md"]),
+    ("single-writer-stop", "A specialist never adopts Lead, launches a peer or downstream stage, advances the pipeline, or writes `agent-runs.jsonl`.",
+     ["src.claude/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md"]),
+    ("single-writer-wrapper", "The root may directly launch a configured external wrapper; no provider or leaf may recursively launch another wrapper.",
+     ["src.claude/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md", "shared/references/subagent-operating-model.md"]),
+    ("single-writer-spine", "$lead` is the root main conversation's sole downstream dispatcher and lifecycle writer",
+     [SPINE]),
+    ("single-writer-shared", "The root main conversation holding Lead alone dispatches downstream roles and writes work-item lifecycle state.",
+     ["shared/references/subagent-operating-model.md"]),
 ]
 
 # P7 must NOT be in the spine (synthesis D-spine-P7: spine gets ONLY P4 + A5).

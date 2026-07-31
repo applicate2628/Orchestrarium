@@ -14,6 +14,8 @@ Short version:
 
 > **One subagent = one profession + one artifact + one gate.**
 
+> **The root main conversation holding Lead alone dispatches downstream roles and writes work-item lifecycle state.** A specialist returns evidence plus an optional non-binding recommended next role to the root, then stops; it never adopts Lead, launches a peer or downstream stage, advances the pipeline, or writes `agent-runs.jsonl`. The root may directly launch a configured external wrapper; no provider or leaf may recursively launch another wrapper.
+
 Shortest version:
 
 > **Manage the flow of artifacts and the owners of critical risks, not code generation.**
@@ -257,6 +259,7 @@ Do not change architecture, plans, contracts, or acceptance criteria without exp
 Do not perform side improvements unless they are in scope.
 If information is insufficient, state exactly what is missing.
 Return a concise result that is useful for the next stage.
+After your one assigned profession, artifact, and gate, return evidence and an optional non-binding recommended next role to the root, then stop. Do not adopt Lead, launch peers or downstream stages, advance the pipeline, or write `agent-runs.jsonl`.
 
 Response format:
 1. Summary
@@ -339,6 +342,7 @@ Do not design the technical solution and do not produce the delivery plan.
 You hold the `lead` role as the main conversation — lead is never dispatched as a subagent.
 
 Your task is not to write code. Your task is to route work through roles and artifacts.
+You alone dispatch downstream stages and write work-item lifecycle state, including `agent-runs.jsonl`; a main-owned helper or wrapper may write only on your behalf.
 
 First, turn the request into a canonical brief:
 - goal
@@ -699,7 +703,11 @@ At minimum, it is useful to keep these artifacts near the repository:
   is immutable and reopening creates a named successor. The active `status.md`
   and terminal `closure.md` remain the owner documents; README/index are derived
   views. Historical records with missing terminal evidence or an unmapped link
-  stay unmoved and are escalated for a human historical-data decision.
+  stay unmoved and are escalated for a human historical-data decision. A
+  product-approved legacy backlog conversion or rejection also goes through
+  this owner: conversion preserves source text and digests in one flat
+  candidate, while direct rejection preserves source bytes and link inventory
+  in the monthly archive without fabricating active or closure history.
 - `status.md` has a defined format with YAML frontmatter (template, orchestration, started, updated) and sections: Current state, Active agents, Completed agents, REVISE loop (optional), Next action. The full format is defined in `subagent-contracts.md`.
 - `agent-runs.jsonl` is the machine-readable execution ledger for the work item. It records each launched or accepted agent run, assigned role, execution path, status, gate, artifact, and evidence. The lead must use it to reconcile active, completed, blocked, and revise states before closeout. When `scripts/agent-run-ledger.*` or an installed equivalent is available, use it to initialize legacy work items and append validated events instead of hand-editing JSONL. Use `scripts/check-work-items-state.* --root <repo>` or an installed equivalent for periodic scans of all active work items before broad closeout, interruption recovery, or publication review.
 - `status.md` and `agent-runs.jsonl` must agree at stage boundaries: no closed task with running ledger entries, no accepted `PASS` without evidence, no missing artifact for a completed gate, and no dependent downstream `PASS` left untouched after a material upstream revision.

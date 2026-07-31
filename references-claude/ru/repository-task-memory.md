@@ -14,7 +14,9 @@
 
 ```
 work-items/
-  index.md              # Recovery entry point — всегда актуален
+  README.md             # Generated human-readable recovery start/read-model
+  index.md              # Необязательный compatibility snapshot
+  backlog/              # Допущенные, но ещё не начатые items
   active/
     <date>-<slug>/      # Текущая работа в delivery
       roadmap.md        # Решение по допуске (owned by product-manager или пользователь напрямую)
@@ -44,15 +46,15 @@ work-items/
 - `lead` владеет `brief.md` и `status.md`
 - `$planner` владеет `plan.md`
 - Каждый специалист владеет артефактом своей стадии
-- `$knowledge-archivist` владеет индексом, шаблонами и гигиеной архива
+- `$knowledge-archivist` владеет физической lifecycle-сверкой, generated read-model, шаблонами и гигиеной архива
 
 ## Task-memory linkage
 
 - Каждый work-item в `work-items/` соответствует записи в индексе задач команды, управляемом операционной средой.
 - `status.md` work-item ДОЛЖЕН включать поле `Task ID` когда среда поддерживает кросс-линки.
 - При архивировании work-item соответствующая задача помечается `completed`/`cancelled` с архивной заметкой.
-- `work-items/index.md` — это портируемая, repo-гарантированная entry point для восстановления задач — он всегда должен быть актуален.
-- Эта связь поддерживается `$lead` при каждом переходе стадии и проверяется `$knowledge-archivist` во время аудитов старта сессии.
+- Generated `work-items/README.md` — портируемая human-readable entry point; физические roots и owning artifacts остаются истиной даже при устаревшем generated view.
+- Эта связь поддерживается `$lead` при каждом переходе стадии и проверяется `$knowledge-archivist` по физическому состоянию во время аудитов старта сессии. `work-items/index.md` не является sync-gate.
 
 ## Технические notes и история решений
 
@@ -71,8 +73,9 @@ work-items/
 ## Восстановление после прерывания
 
 При потере контекста или прерывании сессии:
-1. Откройте `work-items/index.md` — найдите активный item
-2. Откройте `status.md` item'а — посмотрите последнюю стадию и gate
-3. Откройте `brief.md` — восстановите scope и constraints
-4. Проверьте что все требуемые для текущей стадии артефакты существуют
-5. Если артефакты устарели или отсутствуют, восстановите их до продолжения delivery
+1. Откройте generated `work-items/README.md` для human-readable обзора
+2. Найдите item в физических roots `backlog/`, `active/` или `archive/YYYY-MM/`
+3. Откройте `status.md` item'а — посмотрите последнюю стадию и gate
+4. Откройте `brief.md` — восстановите scope и constraints
+5. Проверьте что все требуемые для текущей стадии артефакты существуют
+6. Если артефакты устарели или отсутствуют, восстановите их до продолжения delivery

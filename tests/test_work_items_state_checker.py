@@ -533,6 +533,66 @@ def write_item_with_status(root: Path, name: str, status_text: str) -> Path:
     return item
 
 
+def test_relation_slug_validation_consumes_canonical_lifecycle_owner(tmp_path: Path):
+    checker = load_checker_module()
+    lifecycle = checker.load_lifecycle_owner()
+    slug_is_valid = getattr(lifecycle, "is_valid_slug", None)
+    assert callable(slug_is_valid), "lifecycle owner must publish its canonical slug predicate"
+    sentinels = checker.load_required_sentinels()
+    assert callable(sentinels.resolve_epic_locations), sentinels.diagnostic()
+
+    matrix = (
+        ("legacy-valid-slug", True),
+        ("2026-07-19-model-ranking-aa-coding-index-v1.1", True),
+        ("trailing.", False),
+        ("double..dot", False),
+        ("Uppercase", False),
+        ("under_score", False),
+        ("path/segment", False),
+        ("../traversal", False),
+    )
+    for index, (slug, expected) in enumerate(matrix):
+        try:
+            lifecycle._validate_slug(slug)
+        except lifecycle.LifecycleError as exc:
+            assert exc.failure_id == "WI-INVALID-SLUG", slug
+            mutator_accepts = False
+        else:
+            mutator_accepts = True
+        assert mutator_accepts is expected, slug
+        assert slug_is_valid(slug) is expected, slug
+
+        case_root = tmp_path / f"case-{index}"
+        status = valid_status().replace(
+            "**Primary task status**: open",
+            "**Primary task status**: open\n"
+            f"**Depends-on**: {slug}\n"
+            f"**Epic**: {slug}",
+        )
+        item = write_item_with_status(case_root, "relation-source", status)
+        active_dir = case_root / "work-items" / "active"
+        dependency_notes = checker.blocked_by_notes(
+            item,
+            active_dir,
+            case_root / "work-items" / "archive",
+            slug_is_valid,
+        )
+        epic_notes = checker.epic_link_notes(
+            item,
+            active_dir,
+            sentinels.resolve_epic_locations,
+            slug_is_valid,
+        )
+        if expected:
+            assert dependency_notes == [
+                f"dangling Depends-on: {slug} (no matching work-item)"
+            ], slug
+            assert epic_notes and epic_notes[0].startswith(f"dangling Epic: {slug} "), slug
+        else:
+            assert dependency_notes == [f"invalid Depends-on: {slug}"], slug
+            assert epic_notes == [f"invalid Epic: {slug}"], slug
+
+
 # --- aging report (B2): informational, never a failure ----------------------
 
 def test_aging_flags_old_item_as_info(tmp_path: Path):

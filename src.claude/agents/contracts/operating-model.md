@@ -129,12 +129,12 @@ Periodic controls complement stage gates. Stage gates answer "may this item adva
 | Work-items completeness | `$lead` | Session start | Create missing artifacts or park item |
 | Freshness audit | `$lead` | Resume / session start | Update `status.md` or park/archive |
 | Artifact completeness | `$knowledge-archivist` | Stage change | Restore artifact or route back upstream |
-| Index sync | `$knowledge-archivist` | Every active-item state change (create, resume, stage transition, park, close, archive) | Update the recovery index in the same transition |
+| Physical-state reconciliation | `$knowledge-archivist` | Every lifecycle state change (create, resume, stage transition, park, close, archive) | Reconcile physical roots and regenerate `work-items/README.md` in the same transition |
 | Risk-routing audit | `$lead` | Weekly or scope change | Reclassify and add missing lanes |
 | Repo consistency | `$knowledge-archivist` | Weekly | Open bounded hygiene follow-up |
 | Publication-safety spot check | `$lead` | Weekly or before publication | Redact or move to `/.scratch/` |
 | Refactor debt scan | `$architecture-reviewer` | Milestone close | Admit bounded refactor item |
-| Closure and archive hygiene | `$knowledge-archivist` | Monthly / milestone close | Archive and update index |
+| Closure and archive hygiene | `$knowledge-archivist` | Monthly / milestone close | Archive, reconcile physical roots, and regenerate `work-items/README.md` |
 | Board refresh | `$knowledge-archivist` | Every delivery wave (post-wave sync pass) | Refresh `work-items/README.md` against git and the tree |
 | Orchestrator-upgrades reconcile | `$knowledge-archivist` | Same post-wave pass as Board refresh | Reconcile `work-items/roadmaps/orchestrator-upgrades.md` rows against source lesson status |
 | Governance alignment | `$knowledge-archivist` | Governance change | Propagate to all governance files in same commit |
@@ -276,7 +276,7 @@ Completed-artifact and session-log persistence follows completed work and never 
 
 Session logs are summaries pointing to canonical artifacts, not copies. See `AGENTS.md` § "Session logging rule" for the mandatory logging contract.
 
-Epic location is part of lifecycle state. Lead owns closure/reopening decisions and content; the knowledge archivist moves the same file and reconciles the local index. A slug must resolve to exactly one active or archived file; missing and duplicate targets are invalid and callers never select one copy by traversal order or recency.
+Epic location is part of lifecycle state. Lead owns closure/reopening decisions and content; the knowledge archivist moves the same file, reconciles physical lifecycle roots, and regenerates `work-items/README.md`. A slug must resolve to exactly one active or archived file; missing and duplicate targets are invalid and callers never select one copy by traversal order or recency.
 
 **Standalone chains** (no active work-item): create a work-item folder if the result is worth preserving, or save to `.reports/` / `.plans/` only as a session log.
 
@@ -293,7 +293,7 @@ Epic location is part of lifecycle state. Lead owns closure/reopening decisions 
 
 ### Knowledge archivist
 
-Invoke `$knowledge-archivist` only for complex document operations: reorganization, migration, multi-file index sync, archive moves. Not for routine artifact saves.
+Invoke `$knowledge-archivist` only for complex document operations: reorganization, migration, multi-file physical-state reconciliation, archive moves. Not for routine artifact saves.
 
 ## Governance sources
 

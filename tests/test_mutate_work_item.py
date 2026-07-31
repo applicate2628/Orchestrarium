@@ -1582,6 +1582,54 @@ def test_incoming_link_owned_path_set_does_not_hide_third_consumers(
     }
 
 
+def test_incoming_link_inventory_normalizes_fragment_and_query_for_identity(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    work_items = root / "work-items"
+    owned = work_items / "roadmaps" / "historical.md"
+    write(owned, "status: archived\n")
+    consumer = (
+        work_items
+        / "epics"
+        / "archive"
+        / "2026-07"
+        / "closed-epic.md"
+    )
+    content = (
+        "[fragment](../../../roadmaps/historical.md#section)\n"
+        "[query](../../../roadmaps/historical.md?view=full)\n"
+        "[external](https://example.invalid/roadmaps/historical.md#section)\n"
+        "[mailto](mailto:historical@example.invalid)\n"
+        "[anchor](#section)\n"
+        "[root](/roadmaps/historical.md)\n"
+    )
+    write(consumer, content)
+
+    parsed = list(module._markdown_local_links(content))
+    assert parsed
+    assert all(content[link.href_start : link.href_end] == link.href for link in parsed)
+
+    result = module._incoming_link_result(root, {owned}, "roadmap:historical")
+
+    assert result == {
+        "result": "unmapped",
+        "references": [
+            {
+                "consumer": "epics/archive/2026-07/closed-epic.md",
+                "kind": "physical",
+                "value": "../../../roadmaps/historical.md#section",
+            },
+            {
+                "consumer": "epics/archive/2026-07/closed-epic.md",
+                "kind": "physical",
+                "value": "../../../roadmaps/historical.md?view=full",
+            },
+        ],
+    }
+
+
 def test_verify_migration_allows_logical_churn_but_rejects_physical_links(
     tmp_path: Path,
 ) -> None:
@@ -2412,6 +2460,2168 @@ def test_v1_terminalization_mid_batch_failure_rolls_back_every_byte(
         raise AssertionError("injected mid-batch failure was not surfaced")
     assert {path: path.read_bytes() for path in sources} == before
     assert not receipt.exists()
+
+
+def _seed_legacy_backlog(
+    root: Path, slug: str, files: dict[str, bytes]
+) -> tuple[Path, dict[str, bytes]]:
+    source = root / "work-items" / "backlog" / slug
+    for relative, data in files.items():
+        path = source / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+    return source, {relative: data for relative, data in files.items()}
+
+
+def test_convert_legacy_candidate_preserves_sources_hashes_and_readme(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "legacy-admitted"
+    sources = {
+        "brief.md": b"# Accepted brief\n\nEpic: none\nDepends-on: none\n",
+        "roadmap.md": b"# Accepted roadmap\n\nPriority: medium\n",
+    }
+    source, before = _seed_legacy_backlog(root, slug, sources)
+    module.refresh_readme(root, allow_marker_bootstrap=True)
+    candidate = (
+        "status: candidate\n"
+        "Task: Fix the current Python completion-oracle owner.\n"
+        "Next action: Reverify current scope before delivery.\n"
+        "Epic: none\n"
+        "Depends-on: none\n"
+    ).encode()
+
+    target = module.convert_legacy_candidate(root, slug, candidate)
+
+    assert target == root / "work-items" / "backlog" / f"{slug}.md"
+    assert target.is_file() and not source.exists()
+    converted = target.read_bytes()
+    assert converted.startswith(candidate)
+    for relative, data in before.items():
+        assert data in converted
+        assert f"### `{relative}`".encode() in converted
+        assert hashlib.sha256(data).hexdigest().encode() in converted
+        assert f"Source byte length: `{len(data)}`".encode() in converted
+    entries = [
+        entry
+        for entry in module.collect_readme_entries(root)
+        if entry.logical_reference == f"work-item:{slug}"
+    ]
+    assert len(entries) == 1 and entries[0].section == "Next actions"
+    module.audit(root)
+
+
+def test_legacy_appendix_fields_are_non_authoritative_and_byte_safe(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    exact_legacy = (
+        b"# Accepted roadmap\n\n"
+        b"- status: **ADMITTED to backlog**, not started\n"
+        b"Task: legacy wording must remain evidence only\n"
+    )
+    candidate = (
+        b"status: candidate\n"
+        b"Task: Fix the current Python completion-oracle owner.\n"
+        b"Next action: Reverify current scope before delivery.\n"
+        b"Epic: none\n"
+        b"Depends-on: none\n"
+    )
+
+    root = tmp_path / "success"
+    slug = "completion-oracle-reachability"
+    source, before = _seed_legacy_backlog(root, slug, {"roadmap.md": exact_legacy})
+    module.refresh_readme(root, allow_marker_bootstrap=True)
+    target = module.convert_legacy_candidate(root, slug, candidate)
+
+    converted = target.read_bytes()
+    assert not source.exists()
+    assert exact_legacy in converted
+    assert hashlib.sha256(exact_legacy).hexdigest().encode() in converted
+    assert module._parse_fields(converted.decode("utf-8"))["status"] == "candidate"
+    entries = [
+        entry
+        for entry in module.collect_readme_entries(root)
+        if entry.logical_reference == f"work-item:{slug}"
+    ]
+    assert len(entries) == 1 and entries[0].section == "Next actions"
+    assert (root / "work-items" / "README.md").read_bytes() == module.render_readme_bytes(root)
+
+    rollback_root = tmp_path / "rollback"
+    rollback_source, rollback_before = _seed_legacy_backlog(
+        rollback_root, slug, {"roadmap.md": exact_legacy}
+    )
+    module.refresh_readme(rollback_root, allow_marker_bootstrap=True)
+    readme_before = (rollback_root / "work-items" / "README.md").read_bytes()
+    try:
+        module.convert_legacy_candidate(
+            rollback_root,
+            slug,
+            candidate,
+            inject_readme_failure=True,
+        )
+    except module.LifecycleError as exc:
+        assert exc.failure_id == "WI-README-STALE"
+    else:
+        raise AssertionError("injected legacy conversion failure returned success")
+    assert rollback_source.is_dir()
+    assert (rollback_source / "roadmap.md").read_bytes() == rollback_before["roadmap.md"]
+    assert not (rollback_root / "work-items" / "backlog" / f"{slug}.md").exists()
+    assert (rollback_root / "work-items" / "README.md").read_bytes() == readme_before
+
+
+def test_field_parser_respects_fenced_markdown_boundary_and_fails_closed(
+    tmp_path: Path,
+) -> None:
+    del tmp_path
+    module = load_module()
+    text = (
+        "status: candidate\n"
+        "Task: authoritative task\n"
+        "```markdown\n"
+        "status: fixed\n"
+        "Task: preserved evidence\n"
+        "```\n"
+        "~~~text\n"
+        "status: dropped\n"
+        "~~~~\n"
+        "Next action: deliver\n"
+    )
+    assert module._parse_fields(text) == {
+        "status": "candidate",
+        "task": "authoritative task",
+        "next action": "deliver",
+    }
+
+    for malformed in (
+        "status: candidate\n```markdown\nstatus: fixed\n",
+        "status: candidate\n~~~text\nstatus: dropped\n````\n",
+    ):
+        try:
+            module._parse_fields(malformed)
+        except module.LifecycleError as exc:
+            assert exc.failure_id == "WI-CATEGORY-MARKDOWN-INVALID"
+        else:
+            raise AssertionError("unterminated fenced record was accepted")
+
+
+def _assert_invalid_legacy_candidate_header(
+    tmp_path: Path,
+    case: str,
+    candidate: bytes,
+) -> None:
+    module = load_module()
+    root = tmp_path / case
+    slug = f"legacy-header-{case}"
+    source, before = _seed_legacy_backlog(
+        root,
+        slug,
+        {
+            "brief.md": b"# Accepted brief\n\nPreserve exact bytes.\n",
+            "roadmap.md": (
+                b"# Accepted roadmap\n\n"
+                b"- status: **ADMITTED to backlog**, not started\n"
+            ),
+        },
+    )
+    module.refresh_readme(root, allow_marker_bootstrap=True)
+    readme = root / "work-items" / "README.md"
+    readme_before = readme.read_bytes()
+    target = root / "work-items" / "backlog" / f"{slug}.md"
+
+    try:
+        module.convert_legacy_candidate(root, slug, candidate)
+    except module.LifecycleError as exc:
+        assert exc.failure_id == "WI-CATEGORY-STATUS-INVALID", case
+    else:
+        raise AssertionError(f"{case} canonical candidate header was accepted")
+
+    assert source.is_dir() and not target.exists(), case
+    assert {
+        path.relative_to(source).as_posix(): path.read_bytes()
+        for path in source.rglob("*")
+        if path.is_file()
+    } == before, case
+    assert readme.read_bytes() == readme_before, case
+    assert not list(target.parent.glob(f".{slug}.legacy-candidate.*")), case
+
+
+def test_convert_legacy_candidate_rejects_missing_canonical_status_before_write(
+    tmp_path: Path,
+) -> None:
+    _assert_invalid_legacy_candidate_header(
+        tmp_path,
+        "missing-status",
+        b"Task: Candidate without status.\nNext action: Reject before mutation.\n",
+    )
+
+
+def test_convert_legacy_candidate_rejects_duplicate_canonical_status_before_write(
+    tmp_path: Path,
+) -> None:
+    cases = {
+        "duplicate-status": (
+            b"status: candidate\n"
+            b"status: candidate\n"
+            b"Task: Duplicate status must fail closed.\n"
+            b"Next action: Reject before mutation.\n"
+        ),
+        "conflicting-status": (
+            b"status: candidate\n"
+            b"status: fixed\n"
+            b"Task: Conflicting status must fail closed.\n"
+            b"Next action: Reject before mutation.\n"
+        ),
+        "post-fence-status": (
+            b"status: candidate\n"
+            b"Task: Lifecycle field after evidence must fail closed.\n"
+            b"```markdown\n"
+            b"status: preserved evidence\n"
+            b"```\n"
+            b"status: fixed\n"
+        ),
+    }
+    for case, candidate in cases.items():
+        _assert_invalid_legacy_candidate_header(tmp_path, case, candidate)
+
+
+def test_convert_legacy_candidate_rejects_malformed_canonical_status_before_write(
+    tmp_path: Path,
+) -> None:
+    _assert_invalid_legacy_candidate_header(
+        tmp_path,
+        "malformed-status",
+        (
+            b"status candidate\n"
+            b"Task: Malformed status must fail closed.\n"
+            b"Next action: Reject before mutation.\n"
+        ),
+    )
+    _assert_invalid_legacy_candidate_header(
+        tmp_path,
+        "valid-plus-malformed-status",
+        (
+            b"status: candidate\n"
+            b"status candidate\n"
+            b"Task: Additional malformed status must fail closed.\n"
+            b"Next action: Reject before mutation.\n"
+        ),
+    )
+
+
+def test_convert_legacy_candidate_accepts_one_real_canonical_header(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    root = tmp_path / "valid-real-header"
+    slug = "completion-oracle-reachability"
+    exact_legacy = (
+        b"# Accepted roadmap\n\n"
+        b"- status: **ADMITTED to backlog**, not started\n"
+    )
+    source, _before = _seed_legacy_backlog(
+        root,
+        slug,
+        {"roadmap.md": exact_legacy},
+    )
+    module.refresh_readme(root, allow_marker_bootstrap=True)
+    candidate = (
+        b"---\n"
+        b"status: candidate\n"
+        b"created: 2026-07-31\n"
+        b"source: legacy-backlog-conversion\n"
+        b"---\n\n"
+        b"# Completion-oracle reachability\n\n"
+        b"Task: Correct the current completion-oracle owner.\n"
+        b"Next action: Reverify admitted scope.\n"
+    )
+
+    target = module.convert_legacy_candidate(root, slug, candidate)
+
+    converted = target.read_bytes()
+    assert not source.exists() and converted.startswith(candidate)
+    assert exact_legacy in converted
+    assert hashlib.sha256(exact_legacy).hexdigest().encode() in converted
+    assert module._parse_fields(converted.decode("utf-8"))["status"] == "candidate"
+    module.audit(root)
+
+
+def test_convert_legacy_candidate_does_not_add_non_status_header_policy(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    root = tmp_path / "unrelated-body-content"
+    slug = "legacy-unrelated-body-content"
+    source, _before = _seed_legacy_backlog(
+        root,
+        slug,
+        {"brief.md": b"# Preserved evidence\n"},
+    )
+    module.refresh_readme(root, allow_marker_bootstrap=True)
+    candidate = (
+        b"status: candidate\n"
+        b"Task: First retained task value.\n"
+        b"Task: Second retained task value.\n"
+        b"Next action: Verify the admitted status contract.\n\n"
+        b"# Notes\n\n"
+        b"status candidate is ordinary body text without field syntax.\n"
+    )
+
+    target = module.convert_legacy_candidate(root, slug, candidate)
+
+    assert not source.exists() and target.read_bytes().startswith(candidate)
+    assert module._parse_fields(target.read_text(encoding="utf-8"))["status"] == "candidate"
+    module.audit(root)
+
+
+def test_convert_legacy_candidate_accepts_safe_dotted_slug_and_keeps_header_gate(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    slug = "2026-07-19-model-ranking-aa-coding-index-v1.1"
+    candidate = (
+        b"status: candidate\n"
+        b"Task: Re-rank the admitted model index.\n"
+        b"Next action: Verify the dotted canonical identity.\n"
+    )
+
+    root = tmp_path / "valid-dotted"
+    source, before = _seed_legacy_backlog(
+        root,
+        slug,
+        {"brief.md": b"- id: 2026-07-19-model-ranking-aa-coding-index-v1.1\n"},
+    )
+    module.refresh_readme(root, allow_marker_bootstrap=True)
+    target = module.convert_legacy_candidate(root, slug, candidate)
+
+    assert target.name == f"{slug}.md" and not source.exists()
+    assert before["brief.md"] in target.read_bytes()
+    assert module.resolve_category(root, f"work-item:{slug}") == target.resolve()
+    module.audit(root)
+
+    invalid_header_root = tmp_path / "dotted-invalid-header"
+    invalid_source, invalid_before = _seed_legacy_backlog(
+        invalid_header_root,
+        slug,
+        {"brief.md": before["brief.md"]},
+    )
+    module.refresh_readme(invalid_header_root, allow_marker_bootstrap=True)
+    readme_before = (invalid_header_root / "work-items" / "README.md").read_bytes()
+    try:
+        module.convert_legacy_candidate(
+            invalid_header_root,
+            slug,
+            b"Task: Missing canonical status.\nNext action: Reject before mutation.\n",
+        )
+    except module.LifecycleError as exc:
+        assert exc.failure_id == "WI-CATEGORY-STATUS-INVALID"
+    else:
+        raise AssertionError("dotted slug bypassed the canonical candidate-header gate")
+    assert invalid_source.is_dir()
+    assert (invalid_source / "brief.md").read_bytes() == invalid_before["brief.md"]
+    assert not (invalid_source.parent / f"{slug}.md").exists()
+    assert (invalid_header_root / "work-items" / "README.md").read_bytes() == readme_before
+
+
+def test_invalid_dotted_slug_grammar_fails_before_conversion_mutation(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    candidate = (
+        b"status: candidate\n"
+        b"Task: Reject unsafe identity.\n"
+        b"Next action: Preserve source and README.\n"
+    )
+    invalid_slugs = (
+        ".leading",
+        "trailing.",
+        "double..dot",
+        "../traversal",
+        "path/segment",
+        r"path\segment",
+        "Uppercase",
+        "under_score",
+        "unsafe space",
+        "unsafe@char",
+    )
+    for index, slug in enumerate(invalid_slugs):
+        root = tmp_path / f"invalid-{index}"
+        sentinel_slug = f"preserved-source-{index}"
+        source, _before = _seed_legacy_backlog(
+            root,
+            sentinel_slug,
+            {"brief.md": f"preserve {slug}\n".encode()},
+        )
+        module.refresh_readme(root, allow_marker_bootstrap=True)
+        work_items = root / "work-items"
+        state_before = {
+            path.relative_to(work_items).as_posix(): path.read_bytes()
+            for path in work_items.rglob("*")
+            if path.is_file()
+        }
+        try:
+            module.convert_legacy_candidate(root, slug, candidate)
+        except module.LifecycleError as exc:
+            assert exc.failure_id == "WI-INVALID-SLUG", slug
+        else:
+            raise AssertionError(f"unsafe dotted slug was accepted: {slug!r}")
+        assert source.is_dir(), slug
+        assert {
+            path.relative_to(work_items).as_posix(): path.read_bytes()
+            for path in work_items.rglob("*")
+            if path.is_file()
+        } == state_before, slug
+        assert not list(source.parent.glob(f".{sentinel_slug}.legacy-candidate.*")), slug
+
+
+def test_public_slug_predicate_is_the_mutation_grammar_owner(tmp_path: Path) -> None:
+    del tmp_path
+    module = load_module()
+    for slug in (
+        "a",
+        "legacy-valid-",
+        "2026-07-19-model-ranking-aa-coding-index-v1.1",
+        "safe.dot-segment",
+    ):
+        assert module.is_valid_slug(slug), slug
+        module._validate_slug(slug)
+    for slug in (
+        "",
+        ".leading",
+        "trailing.",
+        "double..dot",
+        "Uppercase",
+        "under_score",
+        "path/segment",
+        r"path\segment",
+        "../traversal",
+        "unsafe@char",
+    ):
+        assert not module.is_valid_slug(slug), slug
+        try:
+            module._validate_slug(slug)
+        except module.LifecycleError as exc:
+            assert exc.failure_id == "WI-INVALID-SLUG", slug
+        else:
+            raise AssertionError(f"mutation validator diverged from public predicate: {slug!r}")
+
+
+def test_audit_rejects_noncanonical_physical_slug(tmp_path: Path) -> None:
+    module = load_module()
+    invalid_slug = "2026-06-19-arch-layering-runtime-laws-D"
+    cases = {
+        "backlog": lambda root: write(
+            root / "work-items" / "backlog" / f"{invalid_slug}.md",
+            "Status: candidate\nTask: invalid\nNext action: reject\n",
+        ),
+        "active": lambda root: write(
+            root / "work-items" / "active" / invalid_slug / "status.md",
+            quick_status(),
+        ),
+        "work-item-archive": lambda root: write(
+            root / "work-items" / "archive" / "2026-07" / invalid_slug / "closure.md",
+            "Closed: 2026-07-31\n",
+        ),
+        "flat-current": lambda root: write(
+            root / "work-items" / "decisions" / f"{invalid_slug}.md",
+            "status: accepted\n",
+        ),
+        "flat-archive": lambda root: write(
+            root
+            / "work-items"
+            / "decisions"
+            / "archive"
+            / "2026-07"
+            / f"{invalid_slug}.md",
+            "status: dropped\nTerminal-at: 2026-07-31T00:00:00Z\nRationale: done\n",
+        ),
+    }
+    for case, seed in cases.items():
+        root = tmp_path / case
+        seed(root)
+        try:
+            module.audit_categories(root)
+        except module.LifecycleError as exc:
+            expected = (
+                "WI-INVALID-SLUG"
+                if case in {"backlog", "active", "flat-current"}
+                else "WI-CATEGORY-TERMINAL-EVIDENCE-MISSING"
+            )
+            assert exc.failure_id == expected, case
+        else:
+            raise AssertionError(f"audit accepted a noncanonical {case} slug")
+
+    valid_root = tmp_path / "valid-neighbor"
+    write(
+        valid_root / "work-items" / "decisions" / "valid-neighbor.md",
+        "status: proposed\n",
+    )
+    module.audit_categories(valid_root)
+
+
+def test_noncanonical_archive_is_physical_read_compat_only(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "2026-06-13-batchA1-decisions-deps"
+    archived = root / "work-items" / "archive" / "2026-06" / slug
+    write(archived / "closure.md", "Closed: 2026-06-13\nOutcome: delivered\n")
+    write(archived / "status.md", "status: completed\n")
+    assert module.audit_categories(root) == (
+        f"archive/2026-06/{slug}",
+    )
+    module.refresh_readme(root, allow_marker_bootstrap=True)
+    result = run_cli("audit", "--root", str(root))
+    assert result.returncode == 0, result.stdout
+    assert f"WI-LEGACY-READ-COMPAT archive/2026-06/{slug}" in result.stdout
+    try:
+        module.resolve_category(root, f"work-item:{slug}")
+    except module.LifecycleError as exc:
+        assert exc.failure_id == "WI-INVALID-SLUG"
+    else:
+        raise AssertionError("legacy archive became a logical resolver alias")
+
+
+def test_noncanonical_flat_archive_requires_unique_terminal_month(tmp_path: Path) -> None:
+    module = load_module()
+    slug = "Legacy-Decision"
+    terminal = (
+        "status: reverted\n"
+        "Terminal-at: 2026-06-13T00:00:00Z\n"
+        "Rationale: retired\n"
+        "Evidence: historical decision\n"
+    )
+    valid_root = tmp_path / "valid"
+    valid = (
+        valid_root
+        / "work-items"
+        / "decisions"
+        / "archive"
+        / "2026-06"
+        / f"{slug}.md"
+    )
+    write(valid, terminal)
+    assert module.audit_categories(valid_root) == (
+        f"decisions/archive/2026-06/{slug}.md",
+    )
+    try:
+        module.resolve_category(valid_root, f"decision:{slug}")
+    except module.LifecycleError as exc:
+        assert exc.failure_id == "WI-INVALID-SLUG"
+    else:
+        raise AssertionError("noncanonical flat archive became a logical alias")
+
+    wrong_month_root = tmp_path / "wrong-month"
+    write(
+        wrong_month_root
+        / "work-items"
+        / "decisions"
+        / "archive"
+        / "2026-07"
+        / f"{slug}.md",
+        terminal,
+    )
+    try:
+        module.audit_categories(wrong_month_root)
+    except module.LifecycleError as exc:
+        assert exc.failure_id == "WI-CATEGORY-ARCHIVE-MONTH-MISMATCH"
+    else:
+        raise AssertionError("wrong-month legacy archive was admitted")
+
+    duplicate_root = tmp_path / "duplicate"
+    for month in ("2026-06", "2026-07"):
+        write(
+            duplicate_root
+            / "work-items"
+            / "decisions"
+            / "archive"
+            / month
+            / f"{slug}.md",
+            terminal,
+        )
+    try:
+        module.audit_categories(duplicate_root)
+    except module.LifecycleError as exc:
+        assert exc.failure_id == "WI-CATEGORY-DUAL-LOCATION"
+    else:
+        raise AssertionError("duplicate legacy archive identity was admitted")
+
+
+def _identity_normalization_fixture(root: Path):
+    module = load_module()
+    work_items = root / "work-items"
+    old = "2026-06-19-arch-layering-runtime-laws-D-group-meta-C6"
+    new = old.lower()
+    source = work_items / "decisions" / f"{old}.md"
+    write(source, f"- id: {old}\n- status: accepted\n# Decision\n")
+    lineage = work_items / "decisions" / "2026-07-07-d1-amendment.md"
+    write(
+        lineage,
+        f"- id: 2026-07-07-d1-amendment\n- status: accepted\n"
+        f"Lineage: {old}; Related: decision:{old}\n"
+        f"```text\nhistorical evidence: {old}\n```\n",
+    )
+    physical = work_items / "epics" / "current-link.md"
+    write(
+        physical,
+        f"- id: current-link\n- status: active\n"
+        f"[decision](../decisions/{old}.md?view=full#d1)\n",
+    )
+    module.refresh_readme(root, allow_marker_bootstrap=True)
+    inventory = root / ".scratch" / "identity-normalization.json"
+    receipt = root / ".scratch" / "identity-normalization-receipt.json"
+    module.write_current_identity_normalization_inventory(
+        root, "decision", source.relative_to(root).as_posix(), new, inventory
+    )
+    return module, work_items, old, new, source, lineage, physical, inventory, receipt
+
+
+def test_normalize_current_identity_success_links_and_replay(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    module, work_items, old, new, source, lineage, physical, inventory, receipt = _identity_normalization_fixture(root)
+    target, replay = module.normalize_current_identity(
+        root, "decision", source.relative_to(root).as_posix(), new, inventory, receipt
+    )
+    assert replay is False and not module._normalization_exact_file(source)
+    assert module._normalization_exact_file(target)
+    target_fields = module._parse_fields(target.read_text(encoding="utf-8"))
+    assert target_fields["status"] == "accepted" and target_fields["id"] == new
+    lineage_text = lineage.read_text(encoding="utf-8")
+    assert f"Lineage: {new}; Related: decision:{new}" in lineage_text
+    assert f"historical evidence: {old}" in lineage_text
+    assert f"../decisions/{new}.md?view=full#d1" in physical.read_text(encoding="utf-8")
+    assert module.resolve_category(root, f"decision:{new}") == target.resolve()
+    module.audit(root)
+    replay_target, replay = module.normalize_current_identity(
+        root, "decision", source.relative_to(root).as_posix(), new, inventory, receipt
+    )
+    assert replay is True and replay_target == target
+
+
+def test_normalize_current_identity_rollback_matrix(tmp_path: Path) -> None:
+    for injection in ("after-rewrites", "after-move", "after-readme"):
+        root = tmp_path / injection
+        module, work_items, _old, new, source, _lineage, _physical, inventory, receipt = _identity_normalization_fixture(root)
+        before = {path.relative_to(work_items).as_posix(): path.read_bytes() for path in work_items.rglob("*") if path.is_file()}
+        try:
+            module.normalize_current_identity(
+                root, "decision", source.relative_to(root).as_posix(), new,
+                inventory, receipt, inject_failure_at=injection,
+            )
+        except module.LifecycleError as exc:
+            assert exc.failure_id == "WI-IDENTITY-NORMALIZE-ROLLBACK", injection
+        else:
+            raise AssertionError(f"injected failure settled: {injection}")
+        assert {path.relative_to(work_items).as_posix(): path.read_bytes() for path in work_items.rglob("*") if path.is_file()} == before
+        assert source.is_file() and not receipt.exists()
+
+
+def test_normalize_current_identity_inventory_collision_and_source_gates(tmp_path: Path) -> None:
+    module = load_module()
+    archive_root = tmp_path / "archive-source"
+    archived = archive_root / "work-items" / "decisions" / "archive" / "2026-06" / "Legacy.md"
+    write(archived, "status: reverted\nTerminal-at: 2026-06-01T00:00:00Z\nRationale: done\nEvidence: test\n")
+    try:
+        module.write_current_identity_normalization_inventory(
+            archive_root, "decision", "work-items/decisions/archive/2026-06/Legacy.md", "legacy",
+            archive_root / ".scratch" / "i.json",
+        )
+    except module.LifecycleError as exc:
+        assert exc.failure_id == "WI-IDENTITY-NORMALIZE-SOURCE"
+    else:
+        raise AssertionError("archive source was admitted")
+
+    for case in ("stale-inventory", "collision", "duplicate"):
+        root = tmp_path / case
+        module, work_items, _old, new, source, _lineage, _physical, inventory, receipt = _identity_normalization_fixture(root)
+        if case == "stale-inventory":
+            payload = json.loads(inventory.read_text(encoding="utf-8"))
+            payload["rows"].pop()
+            inventory.write_text(json.dumps(payload), encoding="utf-8")
+        elif case == "collision":
+            write(
+                work_items / "decisions" / "archive" / "2026-06" / f"{new}.md",
+                "status: reverted\nTerminal-at: 2026-06-01T00:00:00Z\nRationale: done\nEvidence: test\n",
+            )
+        else:
+            write(
+                work_items / "decisions" / "archive" / "2026-06" / source.name,
+                "status: reverted\nTerminal-at: 2026-06-01T00:00:00Z\nRationale: done\nEvidence: test\n",
+            )
+        before = source.read_bytes()
+        try:
+            module.normalize_current_identity(
+                root, "decision", source.relative_to(root).as_posix(), new, inventory, receipt
+            )
+        except module.LifecycleError as exc:
+            expected = "WI-IDENTITY-NORMALIZE-INVENTORY" if case == "stale-inventory" else "WI-CATEGORY-DUAL-LOCATION"
+            assert exc.failure_id == expected, case
+        else:
+            raise AssertionError(f"{case} was admitted")
+        assert source.read_bytes() == before and not receipt.exists()
+
+    non_utf = tmp_path / "non-utf8"
+    module, work_items, _old, new, source, *_rest = _identity_normalization_fixture(non_utf)
+    bad = work_items / "bugs" / "bad.md"
+    bad.parent.mkdir(parents=True, exist_ok=True)
+    bad.write_bytes(b"\xff")
+    try:
+        module.write_current_identity_normalization_inventory(
+            non_utf, "decision", source.relative_to(non_utf).as_posix(), new,
+            non_utf / ".scratch" / "identity-normalization.json",
+        )
+    except module.LifecycleError as exc:
+        assert exc.failure_id == "WI-IDENTITY-NORMALIZE-INVENTORY"
+    else:
+        raise AssertionError("non-UTF8 current record was not fail-closed")
+
+
+def test_normalize_current_identity_preserves_archive_evidence_and_rejects_mixed_replay(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    root = tmp_path / "archive-physical-consumer"
+    work_items = root / "work-items"
+    old = "Legacy-Decision"
+    new = "legacy-decision"
+    source = work_items / "decisions" / f"{old}.md"
+    write(source, f"id: {old}\nstatus: accepted\n")
+    archived_evidence = (
+        work_items / "archive" / "2026-07" / "historical-record" / "evidence.md"
+    )
+    write(
+        archived_evidence,
+        f"[historical decision](../../../decisions/{old}.md#decision)\n",
+    )
+    tree_before = {
+        path.relative_to(work_items).as_posix(): path.read_bytes()
+        for path in work_items.rglob("*")
+        if path.is_file()
+    }
+    inventory = root / ".scratch" / "identity-normalization.json"
+    try:
+        module.write_current_identity_normalization_inventory(
+            root,
+            "decision",
+            source.relative_to(root).as_posix(),
+            new,
+            inventory,
+        )
+    except module.LifecycleError as exc:
+        assert exc.failure_id == "WI-IDENTITY-NORMALIZE-INVENTORY"
+    else:
+        raise AssertionError("immutable archive physical consumer was classified mutable")
+    assert not inventory.exists()
+    assert {
+        path.relative_to(work_items).as_posix(): path.read_bytes()
+        for path in work_items.rglob("*")
+        if path.is_file()
+    } == tree_before
+
+    settled_root = tmp_path / "mixed-replay"
+    (
+        module,
+        work_items,
+        _old,
+        new,
+        source,
+        lineage,
+        _physical,
+        inventory,
+        receipt,
+    ) = _identity_normalization_fixture(settled_root)
+    target, replay = module.normalize_current_identity(
+        settled_root,
+        "decision",
+        source.relative_to(settled_root).as_posix(),
+        new,
+        inventory,
+        receipt,
+    )
+    assert replay is False and target.is_file()
+    lineage.write_text(lineage.read_text(encoding="utf-8") + "drift\n", encoding="utf-8")
+    try:
+        module.normalize_current_identity(
+            settled_root,
+            "decision",
+            source.relative_to(settled_root).as_posix(),
+            new,
+            inventory,
+            receipt,
+        )
+    except module.LifecycleError as exc:
+        assert exc.failure_id == "WI-IDENTITY-NORMALIZE-RECOVERY"
+    else:
+        raise AssertionError("mixed settled replay was accepted")
+
+    source.write_text(f"id: {_old}\nstatus: accepted\n", encoding="utf-8")
+    try:
+        module.normalize_current_identity(
+            settled_root,
+            "decision",
+            source.relative_to(settled_root).as_posix(),
+            new,
+            inventory,
+            receipt,
+        )
+    except module.LifecycleError as exc:
+        assert exc.failure_id == "WI-IDENTITY-NORMALIZE-RECOVERY"
+    else:
+        raise AssertionError("dual physical state with receipt was accepted")
+
+
+def test_normalize_current_identity_replay_requires_complete_exact_receipt_rows(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "repo"
+    (
+        module,
+        work_items,
+        _old,
+        new,
+        source,
+        _lineage,
+        _physical,
+        inventory,
+        receipt,
+    ) = _identity_normalization_fixture(root)
+    target, replay = module.normalize_current_identity(
+        root,
+        "decision",
+        source.relative_to(root).as_posix(),
+        new,
+        inventory,
+        receipt,
+    )
+    assert replay is False and target.is_file()
+    canonical_receipt = json.loads(receipt.read_text(encoding="utf-8"))
+    canonical_rows = canonical_receipt["rows"]
+    assert len(canonical_rows) == 3
+
+    variants = {
+        "zero-of-three": [],
+        "one-of-three": canonical_rows[:1],
+        "two-of-three": canonical_rows[:2],
+        "mixed": [
+            canonical_rows[0],
+            canonical_rows[1],
+            {**canonical_rows[2], "afterPath": canonical_rows[1]["afterPath"]},
+        ],
+        "duplicate": [canonical_rows[0], canonical_rows[1], canonical_rows[1]],
+        "tampered": [
+            canonical_rows[0],
+            {**canonical_rows[1], "afterSha256": "0" * 64},
+            canonical_rows[2],
+        ],
+    }
+    for name, rows in variants.items():
+        candidate = json.loads(json.dumps(canonical_receipt))
+        candidate["rows"] = rows
+        receipt.write_text(json.dumps(candidate), encoding="utf-8")
+        receipt_before = receipt.read_bytes()
+        tree_before = {
+            path.relative_to(work_items).as_posix(): path.read_bytes()
+            for path in work_items.rglob("*")
+            if path.is_file()
+        }
+        try:
+            module.normalize_current_identity(
+                root,
+                "decision",
+                source.relative_to(root).as_posix(),
+                new,
+                inventory,
+                receipt,
+            )
+        except module.LifecycleError as exc:
+            assert exc.failure_id == "WI-IDENTITY-NORMALIZE-RECOVERY", name
+        else:
+            raise AssertionError(f"incomplete/tampered receipt replayed: {name}")
+        assert receipt.read_bytes() == receipt_before, name
+        assert {
+            path.relative_to(work_items).as_posix(): path.read_bytes()
+            for path in work_items.rglob("*")
+            if path.is_file()
+        } == tree_before, name
+
+    receipt.write_text(json.dumps(canonical_receipt), encoding="utf-8")
+    replay_target, replay = module.normalize_current_identity(
+        root,
+        "decision",
+        source.relative_to(root).as_posix(),
+        new,
+        inventory,
+        receipt,
+    )
+    assert replay is True and replay_target == target
+
+
+def test_normalize_current_identity_ignores_fenced_links_but_rewrites_live_links(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    work_items = root / "work-items"
+    old = "Legacy-Decision"
+    new = "legacy-decision"
+    source = work_items / "decisions" / f"{old}.md"
+    write(source, f"id: {old}\nstatus: accepted\n")
+    current = work_items / "epics" / "current-link.md"
+    write(
+        current,
+        f"id: current-link\nstatus: active\n"
+        f"[live](../decisions/{old}.md?view=full#d1)\n"
+        f"```md\n[fenced](../decisions/{old}.md?view=old#evidence)\n```\n",
+    )
+    archived = (
+        work_items
+        / "decisions"
+        / "archive"
+        / "2026-07"
+        / "historical-evidence.md"
+    )
+    write(
+        archived,
+        "id: historical-evidence\n"
+        "status: reverted\n"
+        "Terminal-at: 2026-07-01T00:00:00Z\n"
+        "Rationale: historical evidence\n"
+        "Evidence: fenced example\n"
+        f"```md\n[historical](../../{old}.md?view=old#evidence)\n```\n",
+    )
+    archived_before = archived.read_bytes()
+    module.refresh_readme(root, allow_marker_bootstrap=True)
+    inventory = root / ".scratch" / "identity-normalization.json"
+    receipt = root / ".scratch" / "identity-normalization-receipt.json"
+    data = module.write_current_identity_normalization_inventory(
+        root,
+        "decision",
+        source.relative_to(root).as_posix(),
+        new,
+        inventory,
+    )
+    rows = {row["path"]: row for row in data["rows"]}
+    assert rows["epics/current-link.md"]["kinds"] == ["physical-link"]
+    assert "decisions/archive/2026-07/historical-evidence.md" not in rows
+
+    target, replay = module.normalize_current_identity(
+        root,
+        "decision",
+        source.relative_to(root).as_posix(),
+        new,
+        inventory,
+        receipt,
+    )
+    assert replay is False and target.is_file()
+    current_text = current.read_text(encoding="utf-8")
+    assert f"[live](../decisions/{new}.md?view=full#d1)" in current_text
+    assert f"[fenced](../decisions/{old}.md?view=old#evidence)" in current_text
+    assert archived.read_bytes() == archived_before
+
+
+def test_normalize_current_identity_rejects_invalid_paths_targets_and_reparse(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    work_items = root / "work-items"
+    source = work_items / "decisions" / "Legacy.md"
+    write(source, "id: Legacy\nstatus: accepted\n")
+    inventory = root / ".scratch" / "identity-normalization.json"
+    before = source.read_bytes()
+    cases = (
+        ("decisions/Legacy.md", "legacy", "WI-IDENTITY-NORMALIZE-SOURCE"),
+        ("work-items/../outside.md", "legacy", "WI-IDENTITY-NORMALIZE-SOURCE"),
+        (source.relative_to(root).as_posix(), "Invalid_Target", "WI-INVALID-SLUG"),
+    )
+    for source_arg, target_slug, expected in cases:
+        try:
+            module.write_current_identity_normalization_inventory(
+                root, "decision", source_arg, target_slug, inventory
+            )
+        except module.LifecycleError as exc:
+            assert exc.failure_id == expected
+        else:
+            raise AssertionError(f"invalid normalization input was admitted: {source_arg}")
+        assert source.read_bytes() == before and not inventory.exists()
+
+    link_root = tmp_path / "reparse"
+    real = link_root / "real-work-items"
+    write(real / "decisions" / "Legacy.md", "id: Legacy\nstatus: accepted\n")
+    linked = link_root / "work-items"
+    try:
+        os.symlink(real, linked, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        return
+    try:
+        module.write_current_identity_normalization_inventory(
+            link_root,
+            "decision",
+            "work-items/decisions/Legacy.md",
+            "legacy",
+            link_root / ".scratch" / "identity-normalization.json",
+        )
+    except module.LifecycleError as exc:
+        assert exc.failure_id == "WI-IDENTITY-NORMALIZE-SOURCE"
+    else:
+        raise AssertionError("reparse-backed source was admitted")
+
+
+def test_normalize_current_identity_cli_prepare_apply_and_replay(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    source = root / "work-items" / "decisions" / "Legacy.md"
+    write(source, "id: Legacy\nstatus: accepted\n")
+    module.refresh_readme(root, allow_marker_bootstrap=True)
+    inventory = root / ".scratch" / "identity-normalization.json"
+    receipt = root / ".scratch" / "identity-normalization-receipt.json"
+    common = (
+        "normalize-current-identity",
+        "--root",
+        str(root),
+        "--category",
+        "decision",
+        "--source",
+        "work-items/decisions/Legacy.md",
+        "--target-slug",
+        "legacy",
+        "--inventory",
+        str(inventory),
+    )
+    prepared = run_cli(*common, "--prepare-only")
+    assert prepared.returncode == 0, prepared.stdout
+    assert "NORMALIZE-CURRENT-IDENTITY: INVENTORY" in prepared.stdout
+    applied = run_cli(*common, "--receipt", str(receipt))
+    assert applied.returncode == 0, applied.stdout
+    assert "NORMALIZE-CURRENT-IDENTITY: PASS" in applied.stdout
+    assert "replay=false" in applied.stdout
+    replayed = run_cli(*common, "--receipt", str(receipt))
+    assert replayed.returncode == 0, replayed.stdout
+    assert "NORMALIZE-CURRENT-IDENTITY: PASS" in replayed.stdout
+    assert "replay=true" in replayed.stdout
+
+
+def test_convert_legacy_candidate_duplicate_and_failure_are_byte_rollback(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    duplicate_root = tmp_path / "duplicate"
+    slug = "legacy-duplicate"
+    source, before = _seed_legacy_backlog(
+        duplicate_root, slug, {"brief.md": b"preserve duplicate source\n"}
+    )
+    write(
+        duplicate_root / "work-items" / "backlog" / f"{slug}.md",
+        "Task: existing identity\nNext action: preserve\n",
+    )
+    module.refresh_readme(duplicate_root, allow_marker_bootstrap=True)
+    readme_before = (duplicate_root / "work-items" / "README.md").read_bytes()
+    try:
+        module.convert_legacy_candidate(duplicate_root, slug, b"Task: replacement\n")
+    except module.LifecycleError as exc:
+        assert exc.failure_id == "WI-CATEGORY-DUAL-LOCATION"
+    else:
+        raise AssertionError("duplicate legacy identity was converted")
+    assert (source / "brief.md").read_bytes() == before["brief.md"]
+    assert (duplicate_root / "work-items" / "README.md").read_bytes() == readme_before
+
+    rollback_root = tmp_path / "rollback"
+    source, before = _seed_legacy_backlog(
+        rollback_root,
+        slug,
+        {
+            "brief.md": b"preserve rollback source\n",
+            "notes/design.md": b"preserve recursive rollback source\n",
+        },
+    )
+    module.refresh_readme(rollback_root, allow_marker_bootstrap=True)
+    readme_before = (rollback_root / "work-items" / "README.md").read_bytes()
+    try:
+        module.convert_legacy_candidate(
+            rollback_root,
+            slug,
+            b"status: candidate\nTask: candidate\nNext action: verify\n",
+            inject_readme_failure=True,
+        )
+    except module.LifecycleError as exc:
+        assert exc.failure_id == "WI-README-STALE"
+    else:
+        raise AssertionError("injected conversion failure returned success")
+    assert {
+        path.relative_to(source).as_posix(): path.read_bytes()
+        for path in source.rglob("*")
+        if path.is_file()
+    } == before
+    assert not (rollback_root / "work-items" / "backlog" / f"{slug}.md").exists()
+    assert (rollback_root / "work-items" / "README.md").read_bytes() == readme_before
+    assert not list((rollback_root / "work-items" / "backlog").glob(f".{slug}.legacy-candidate.*"))
+
+
+def test_legacy_transitions_reject_physical_consumers_before_mutation(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    slug = "legacy-linked"
+    operations = (
+        (
+            "convert",
+            lambda root: module.convert_legacy_candidate(
+                root, slug, b"Task: candidate\nNext action: verify\n"
+            ),
+            lambda root: root / "work-items" / "backlog" / f"{slug}.md",
+        ),
+        (
+            "retire",
+            lambda root: module.retire_legacy_backlog(
+                root,
+                slug,
+                b"Rejected before admission.\n",
+                "2026-08-01T00:00:00Z",
+            ),
+            lambda root: root / "work-items" / "archive" / "2026-08" / slug,
+        ),
+    )
+    for name, transition, target_for in operations:
+        root = tmp_path / name
+        source, before = _seed_legacy_backlog(
+            root,
+            slug,
+            {"brief.md": b"preserve every source byte\n", "notes/design.md": b"design bytes\n"},
+        )
+        consumer = root / "work-items" / "bugs" / "consumer.md"
+        write(
+            consumer,
+            f"[legacy source](../backlog/{slug}/brief.md)\nContext: work-item:{slug}\n",
+        )
+        module.refresh_readme(root, allow_marker_bootstrap=True)
+        readme_before = (root / "work-items" / "README.md").read_bytes()
+
+        try:
+            transition(root)
+        except module.LifecycleError as exc:
+            assert exc.failure_id == "WI-LEGACY-LINK-UNMAPPED"
+        else:
+            raise AssertionError(f"{name} admitted a physical consumer")
+
+        assert {
+            path.relative_to(source).as_posix(): path.read_bytes()
+            for path in source.rglob("*")
+            if path.is_file()
+        } == before
+        assert (consumer.parent / f"../backlog/{slug}/brief.md").resolve() == source / "brief.md"
+        assert (root / "work-items" / "README.md").read_bytes() == readme_before
+        assert not target_for(root).exists()
+
+
+def test_convert_legacy_candidate_commits_before_partial_cleanup_failure(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "legacy-cleanup-commit"
+    source, before = _seed_legacy_backlog(
+        root,
+        slug,
+        {"brief.md": b"preserve brief bytes\n", "notes/design.md": b"preserve design bytes\n"},
+    )
+    module.refresh_readme(root, allow_marker_bootstrap=True)
+    original_rmtree = module.shutil.rmtree
+    injected = False
+
+    def partial_cleanup(path: Path | str, *args: object, **kwargs: object) -> None:
+        nonlocal injected
+        candidate = Path(path)
+        if candidate.name == "source" and not injected:
+            injected = True
+            (candidate / "brief.md").unlink()
+            raise OSError("injected partial cleanup failure")
+        original_rmtree(path, *args, **kwargs)
+
+    candidate_data = (
+        b"status: candidate\n"
+        b"Task: preserve complete legacy evidence\n"
+        b"Next action: verify\n"
+    )
+    module.shutil.rmtree = partial_cleanup
+    try:
+        try:
+            module.convert_legacy_candidate(root, slug, candidate_data)
+        except module.LifecycleError as exc:
+            assert exc.failure_id == "WI-LEGACY-CLEANUP-AFTER-COMMIT"
+            assert "state=committed" in str(exc)
+        else:
+            raise AssertionError("post-commit cleanup fault returned success")
+    finally:
+        module.shutil.rmtree = original_rmtree
+
+    assert injected
+    target = root / "work-items" / "backlog" / f"{slug}.md"
+    readme = root / "work-items" / "README.md"
+    converted = target.read_bytes()
+    assert converted.startswith(candidate_data) and not source.exists()
+    for relative, data in before.items():
+        assert f"### `{relative}`".encode() in converted
+        assert data in converted
+        assert hashlib.sha256(data).hexdigest().encode() in converted
+    assert readme.read_bytes() == module.render_readme_bytes(root)
+    residues = list((root / "work-items" / "backlog").glob(f".{slug}.legacy-candidate.*"))
+    assert len(residues) == 1
+    marker = residues[0] / module.LEGACY_CLEANUP_FILE
+    marker_payload = json.loads(marker.read_text(encoding="utf-8"))
+    assert marker_payload["schemaVersion"] == module.LEGACY_CLEANUP_SCHEMA_VERSION
+    assert marker_payload["owner"] == module.LEGACY_CLEANUP_OWNER
+    assert marker_payload["slug"] == slug
+    assert marker_payload["transactionId"] == residues[0].name
+    assert marker_payload["canonicalTarget"] == f"backlog/{slug}.md"
+    assert marker_payload["candidateSha256"] == hashlib.sha256(target.read_bytes()).hexdigest()
+    assert marker_payload["sourceFiles"]
+    target_before = target.read_bytes()
+    readme_before = readme.read_bytes()
+
+    replay = module.convert_legacy_candidate(root, slug, candidate_data)
+
+    assert replay == target
+    assert target.read_bytes() == target_before
+    assert readme.read_bytes() == readme_before
+    assert not residues[0].exists()
+    module.audit(root)
+
+
+def test_convert_legacy_candidate_replays_final_rmdir_failure_with_sidecar_marker(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "legacy-cleanup-final-rmdir"
+    source, _before = _seed_legacy_backlog(root, slug, {"brief.md": b"owned source\n"})
+    module.refresh_readme(root, allow_marker_bootstrap=True)
+    candidate_data = (
+        b"status: candidate\n"
+        b"Task: preserve final cleanup marker\n"
+        b"Next action: verify\n"
+    )
+    backlog = root / "work-items" / "backlog"
+    original_rmdir = module.Path.rmdir
+    injected = False
+
+    def fail_final_rmdir(path: Path, *args: object, **kwargs: object) -> None:
+        nonlocal injected
+        if (
+            path.parent == backlog
+            and path.name.startswith(f".{slug}.legacy-candidate.")
+            and not injected
+        ):
+            injected = True
+            raise OSError("injected final transaction rmdir failure")
+        original_rmdir(path, *args, **kwargs)
+
+    module.Path.rmdir = fail_final_rmdir
+    try:
+        try:
+            module.convert_legacy_candidate(root, slug, candidate_data)
+        except module.LifecycleError as exc:
+            assert exc.failure_id == "WI-LEGACY-CLEANUP-AFTER-COMMIT"
+            assert "state=committed" in str(exc)
+        else:
+            raise AssertionError("final transaction rmdir fault returned success")
+    finally:
+        module.Path.rmdir = original_rmdir
+
+    target = backlog / f"{slug}.md"
+    readme = root / "work-items" / "README.md"
+    residues = list(backlog.glob(f".{slug}.legacy-candidate.*"))
+    assert injected and not source.exists() and len(residues) == 1
+    residue = residues[0]
+    sidecar = module._legacy_cleanup_sidecar(backlog, residue.name)
+    assert not (residue / module.LEGACY_CLEANUP_FILE).exists()
+    assert list(residue.iterdir()) == []
+    sidecar_payload = json.loads(sidecar.read_text(encoding="utf-8"))
+    assert sidecar_payload["transactionId"] == residue.name
+    target_before = target.read_bytes()
+    readme_before = readme.read_bytes()
+
+    replay = module.convert_legacy_candidate(root, slug, candidate_data)
+
+    assert replay == target
+    assert target.read_bytes() == target_before
+    assert readme.read_bytes() == readme_before
+    assert not residue.exists() and not sidecar.exists()
+    module.audit(root)
+
+
+def test_convert_legacy_candidate_replays_sidecar_marker_unlink_failure(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "legacy-cleanup-sidecar-unlink"
+    source, _before = _seed_legacy_backlog(root, slug, {"brief.md": b"owned source\n"})
+    module.refresh_readme(root, allow_marker_bootstrap=True)
+    candidate_data = (
+        b"status: candidate\n"
+        b"Task: preserve sidecar cleanup marker\n"
+        b"Next action: verify\n"
+    )
+    backlog = root / "work-items" / "backlog"
+    original_unlink = module.Path.unlink
+    injected = False
+
+    def fail_sidecar_unlink(path: Path, *args: object, **kwargs: object) -> None:
+        nonlocal injected
+        if (
+            path.parent == backlog
+            and path.name.startswith(f".legacy-candidate-cleanup.{slug}.legacy-candidate.")
+            and not injected
+        ):
+            injected = True
+            raise OSError("injected sidecar marker unlink failure")
+        original_unlink(path, *args, **kwargs)
+
+    module.Path.unlink = fail_sidecar_unlink
+    try:
+        try:
+            module.convert_legacy_candidate(root, slug, candidate_data)
+        except module.LifecycleError as exc:
+            assert exc.failure_id == "WI-LEGACY-CLEANUP-AFTER-COMMIT"
+            assert "state=committed" in str(exc)
+        else:
+            raise AssertionError("sidecar marker cleanup fault returned success")
+    finally:
+        module.Path.unlink = original_unlink
+
+    target = backlog / f"{slug}.md"
+    readme = root / "work-items" / "README.md"
+    sidecars = list(backlog.glob(f".legacy-candidate-cleanup.{slug}.legacy-candidate.*.json"))
+    assert injected and not source.exists() and len(sidecars) == 1
+    sidecar = sidecars[0]
+    assert not list(backlog.glob(f".{slug}.legacy-candidate.*"))
+    assert json.loads(sidecar.read_text(encoding="utf-8"))["slug"] == slug
+    target_before = target.read_bytes()
+    readme_before = readme.read_bytes()
+
+    replay = module.convert_legacy_candidate(root, slug, candidate_data)
+
+    assert replay == target
+    assert target.read_bytes() == target_before
+    assert readme.read_bytes() == readme_before
+    assert not sidecar.exists()
+    module.audit(root)
+
+
+def test_convert_legacy_candidate_replay_rejects_unmarked_spoof_without_deletion(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "legacy-cleanup-spoof"
+    source, _before = _seed_legacy_backlog(root, slug, {"brief.md": b"owned source\n"})
+    module.refresh_readme(root, allow_marker_bootstrap=True)
+    candidate_data = (
+        b"status: candidate\n"
+        b"Task: preserve cleanup ownership\n"
+        b"Next action: verify\n"
+    )
+    target = module.convert_legacy_candidate(root, slug, candidate_data)
+    assert not source.exists()
+    readme = root / "work-items" / "README.md"
+    target_before = target.read_bytes()
+    readme_before = readme.read_bytes()
+    spoof = root / "work-items" / "backlog" / f".{slug}.legacy-candidate.user-owned"
+    valuable = spoof / "valuable.txt"
+    valuable.parent.mkdir(parents=True)
+    valuable.write_bytes(b"unowned valuable bytes\n")
+
+    try:
+        module.convert_legacy_candidate(root, slug, candidate_data)
+    except module.LifecycleError as exc:
+        assert exc.failure_id == "WI-LEGACY-CLEANUP-REPLAY-INVALID"
+    else:
+        raise AssertionError("unmarked matching residue was deleted")
+
+    assert valuable.read_bytes() == b"unowned valuable bytes\n"
+    assert target.read_bytes() == target_before
+    assert readme.read_bytes() == readme_before
+
+
+def test_convert_legacy_candidate_replay_rejects_marker_mismatch_without_deletion(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "legacy-cleanup-marker-mismatch"
+    source, _before = _seed_legacy_backlog(
+        root, slug, {"brief.md": b"owned source\n", "notes/design.md": b"owned design\n"}
+    )
+    module.refresh_readme(root, allow_marker_bootstrap=True)
+    candidate_data = (
+        b"status: candidate\n"
+        b"Task: preserve owner marker\n"
+        b"Next action: verify\n"
+    )
+    original_rmtree = module.shutil.rmtree
+    injected = False
+
+    def partial_cleanup(path: Path | str, *args: object, **kwargs: object) -> None:
+        nonlocal injected
+        candidate = Path(path)
+        if candidate.name == "source" and not injected:
+            injected = True
+            (candidate / "brief.md").unlink()
+            raise OSError("injected partial cleanup failure")
+        original_rmtree(path, *args, **kwargs)
+
+    module.shutil.rmtree = partial_cleanup
+    try:
+        try:
+            module.convert_legacy_candidate(root, slug, candidate_data)
+        except module.LifecycleError as exc:
+            assert exc.failure_id == "WI-LEGACY-CLEANUP-AFTER-COMMIT"
+        else:
+            raise AssertionError("post-commit cleanup fault returned success")
+    finally:
+        module.shutil.rmtree = original_rmtree
+
+    target = root / "work-items" / "backlog" / f"{slug}.md"
+    readme = root / "work-items" / "README.md"
+    residue = next((root / "work-items" / "backlog").glob(f".{slug}.legacy-candidate.*"))
+    marker = residue / module.LEGACY_CLEANUP_FILE
+    marker_payload = json.loads(marker.read_text(encoding="utf-8"))
+    marker_payload["candidateSha256"] = "0" * 64
+    marker.write_text(json.dumps(marker_payload, sort_keys=True) + "\n", encoding="utf-8")
+    target_before = target.read_bytes()
+    readme_before = readme.read_bytes()
+    residue_before = {
+        path.relative_to(residue).as_posix(): path.read_bytes()
+        for path in residue.rglob("*")
+        if path.is_file()
+    }
+
+    try:
+        module.convert_legacy_candidate(root, slug, candidate_data)
+    except module.LifecycleError as exc:
+        assert exc.failure_id == "WI-LEGACY-CLEANUP-REPLAY-INVALID"
+    else:
+        raise AssertionError("mismatched owner marker was accepted")
+
+    assert injected and not source.exists()
+    assert target.read_bytes() == target_before
+    assert readme.read_bytes() == readme_before
+    assert {
+        path.relative_to(residue).as_posix(): path.read_bytes()
+        for path in residue.rglob("*")
+        if path.is_file()
+    } == residue_before
+
+
+def test_retire_legacy_backlog_records_links_and_no_fake_active_history(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "legacy-rejected"
+    source, before = _seed_legacy_backlog(
+        root,
+        slug,
+        {"design.md": b"# Design only -- not admitted\n\nDecision: reject.\n"},
+    )
+    write(
+        root / "work-items" / "bugs" / "consumer.md",
+        f"status: open\nContext: work-item:{slug}\n",
+    )
+    module.refresh_readme(root, allow_marker_bootstrap=True)
+    instant = "2026-08-01T00:00:00Z"
+    disposition = b"Rejected before admission; future components require fresh intake.\n"
+
+    target = module.retire_legacy_backlog(root, slug, disposition, instant)
+
+    assert target == root / "work-items" / "archive" / "2026-08" / slug
+    assert not source.exists()
+    assert (target / "design.md").read_bytes() == before["design.md"]
+    metadata = json.loads(
+        (target / "legacy-retirement.json").read_text(encoding="utf-8")
+    )
+    assert metadata["terminalAt"] == instant
+    assert metadata["status"] == "rejected-before-admission"
+    assert metadata["admissionHistory"] == "never-admitted"
+    assert metadata["syntheticTransitions"] == []
+    assert metadata["sourceFiles"] == [
+        {
+            "path": "design.md",
+            "byteLength": len(before["design.md"]),
+            "sha256": hashlib.sha256(before["design.md"]).hexdigest(),
+        }
+    ]
+    assert metadata["incomingLinks"]["result"] == "logical-only"
+    assert {row["kind"] for row in metadata["incomingLinks"]["references"]} == {"logical"}
+    for forbidden in ("status.md", "closure.md", "admission.md", "agent-runs.jsonl"):
+        assert not (target / forbidden).exists()
+    entries = [
+        entry
+        for entry in module.collect_readme_entries(root)
+        if entry.logical_reference == f"work-item:{slug}"
+    ]
+    assert len(entries) == 1
+    assert entries[0].section == "Recently completed" and entries[0].checked
+    assert entries[0].classification == "WI-LEGACY-RETIRED-BEFORE-ADMISSION"
+    module.audit(root)
+
+
+def test_retire_legacy_backlog_strict_utc_and_failure_rollback(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "legacy-retire-rollback"
+    source, before = _seed_legacy_backlog(
+        root, slug, {"design.md": b"preserve retirement source\n"}
+    )
+    module.refresh_readme(root, allow_marker_bootstrap=True)
+    readme_before = (root / "work-items" / "README.md").read_bytes()
+    try:
+        module.retire_legacy_backlog(
+            root,
+            slug,
+            b"Rejected before admission.\n",
+            "2026-08-01T03:00:00+03:00",
+        )
+    except module.LifecycleError as exc:
+        assert exc.failure_id == "WI-CATEGORY-TERMINAL-EVIDENCE-MISSING"
+    else:
+        raise AssertionError("non-UTC retirement was admitted")
+    assert (source / "design.md").read_bytes() == before["design.md"]
+
+    try:
+        module.retire_legacy_backlog(
+            root,
+            slug,
+            b"Rejected before admission.\n",
+            "2026-08-01T00:00:00Z",
+            inject_readme_failure=True,
+        )
+    except module.LifecycleError as exc:
+        assert exc.failure_id == "WI-README-STALE"
+    else:
+        raise AssertionError("injected retirement failure returned success")
+    assert (source / "design.md").read_bytes() == before["design.md"]
+    assert not (root / "work-items" / "archive").exists()
+    assert (root / "work-items" / "README.md").read_bytes() == readme_before
+
+
+def test_terminalize_v1_supports_every_flat_category(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    work_items = root / "work-items"
+    records = {
+        "bug": ("bugs", "fixed", "Terminal-at", "Resolution"),
+        "decision": ("decisions", "dropped", "Terminal-at", "Rationale"),
+        "lesson": ("lessons", "archived", "Terminal-at", "Disposition"),
+        "roadmap": ("roadmaps", "archived", "Terminal-at", "Disposition"),
+        "epic": ("epics", "closed", "Closed", "Outcome"),
+    }
+    for category, (directory, status, _utc_field, _detail_field) in records.items():
+        write(
+            work_items / directory / f"legacy-{category}.md",
+            f"status: {status}\nTask: Preserve {category}.\n",
+        )
+    inventory = root / ".scratch" / "inventory.json"
+    receipt = root / ".scratch" / "receipt.json"
+    audited = run_cli(
+        "audit", "--root", str(work_items), "--output", str(inventory)
+    )
+    assert audited.returncode == 1, audited.stdout
+    assert "WI-CATEGORY-TERMINAL-EVIDENCE-MISSING" in audited.stdout
+    payload = json.loads(inventory.read_text(encoding="utf-8"))
+    assert {row["category"] for row in payload["rows"]} == set(records)
+    assert {row["admission"]["result"] for row in payload["rows"]} == {"denied"}
+
+    count, replay = module.terminalize_v1_inventory(
+        root,
+        inventory,
+        terminal_at="2026-08-01T00:00:00Z",
+        authorization_marker="operator-authorized-v1-terminalization",
+        receipt_path=receipt,
+    )
+
+    assert count == len(records) and replay is False
+    for category, (directory, _status, utc_field, detail_field) in records.items():
+        text = (work_items / directory / f"legacy-{category}.md").read_text(
+            encoding="utf-8"
+        )
+        assert f"{utc_field}: 2026-08-01T00:00:00Z" in text
+        assert f"{detail_field}: Pre-V1 terminal status" in text
+        assert text.count("V1-Migration-Evidence:") == 1
+        assert text.count("Evidence:") == 2
+    refreshed = root / ".scratch" / "refreshed.json"
+    checked = run_cli(
+        "audit", "--root", str(work_items), "--output", str(refreshed)
+    )
+    assert checked.returncode == 0, checked.stdout
+    assert {
+        row["admission"]["result"]
+        for row in json.loads(refreshed.read_text(encoding="utf-8"))["rows"]
+    } == {"admitted"}
+
+
+def _physical_relocation_inventory(root: Path) -> tuple[Path, Path, Path, Path, dict]:
+    work_items = root / "work-items"
+    slug = "roadmap-decision-2026-07-27"
+    target = work_items / "roadmaps" / f"{slug}.md"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(_pre_v1_terminal_record("archived", "Historical roadmap"))
+    consumer = (
+        work_items
+        / "epics"
+        / "archive"
+        / "2026-07"
+        / "2026-07-27-always-on-hook-layer-fitness.md"
+    )
+    label = f"work-items/roadmaps/{slug}.md"
+    old_href = f"../../../roadmaps/{slug}.md"
+    write(consumer, f"# Closed epic\n\n[{label}]({old_href}).\n")
+    inventory = root / ".scratch" / "terminalization-inventory.json"
+    receipt = root / ".scratch" / "terminalization-receipt.json"
+    payload = _denied_terminalization_inventory(work_items, inventory)
+    row = next(row for row in payload["rows"] if row["reference"] == f"roadmap:{slug}")
+    assert row["incomingLinks"] == {
+        "result": "unmapped",
+        "references": [
+            {
+                "consumer": consumer.relative_to(work_items).as_posix(),
+                "kind": "physical",
+                "value": old_href,
+            }
+        ],
+    }
+    row["incomingLinks"] = {
+        "result": "physical-relocation",
+        "references": row["incomingLinks"]["references"],
+        "physicalRelocation": {
+            "source": consumer.relative_to(work_items).as_posix(),
+            "label": label,
+            "href": old_href,
+            "expectedIdentity": f"roadmap:{slug}",
+            "sourceSha256": hashlib.sha256(consumer.read_bytes()).hexdigest(),
+            "targetSha256": row["inputSha256"],
+            "receipt": receipt.relative_to(root).as_posix(),
+        },
+    }
+    inventory.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return inventory, receipt, consumer, target, payload
+
+
+def test_exact_physical_relocation_is_admitted_then_moved_atomically(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    inventory, receipt, consumer, current_target, payload = _physical_relocation_inventory(root)
+    work_items = root / "work-items"
+    row = payload["rows"][0]
+    consumer_before = consumer.read_bytes()
+    target_before = current_target.read_bytes()
+
+    count, replay = module.terminalize_v1_inventory(
+        root,
+        inventory,
+        terminal_at="2026-08-01T00:00:00Z",
+        authorization_marker="operator-authorized-v1-terminalization",
+        receipt_path=receipt,
+    )
+
+    assert count == 1 and replay is False
+    assert consumer.read_bytes() == consumer_before
+    assert current_target.is_file()
+    assert current_target.read_bytes().startswith(target_before)
+    terminalized_target = current_target.read_bytes()
+
+    migrated, _readme_hash = module.apply_migration_inventory(
+        root,
+        inventory,
+        render_readme=True,
+        byte_check=True,
+    )
+
+    final_target = (
+        work_items
+        / "roadmaps"
+        / "archive"
+        / "2026-08"
+        / current_target.name
+    )
+    expected_new_href = f"../../../roadmaps/archive/2026-08/{current_target.name}"
+    consumer_after = consumer.read_bytes()
+    assert migrated == 1
+    assert not current_target.exists() and final_target.read_bytes() == terminalized_target
+    assert consumer_after == consumer_before.replace(
+        row["incomingLinks"]["physicalRelocation"]["href"].encode(),
+        expected_new_href.encode(),
+    )
+    assert (consumer.parent / expected_new_href).resolve() == final_target.resolve()
+    assert module._category_locations(
+        root, module.CATEGORIES["roadmap"], current_target.stem
+    ) == [final_target]
+    assert module.verify_migration_inventory(root, inventory) == 1
+    receipt_payload = json.loads(receipt.read_text(encoding="utf-8"))
+    evidence = receipt_payload["rows"][0]["physicalRelocation"]
+    assert evidence["oldHref"] == row["incomingLinks"]["physicalRelocation"]["href"]
+    assert evidence["newHref"] == expected_new_href
+    assert evidence["finalTarget"] == final_target.relative_to(work_items).as_posix()
+    assert evidence["sourceBeforeSha256"] == hashlib.sha256(consumer_before).hexdigest()
+    assert evidence["sourceAfterSha256"] == hashlib.sha256(consumer_after).hexdigest()
+    assert evidence["targetBeforeSha256"] == hashlib.sha256(terminalized_target).hexdigest()
+    assert evidence["targetAfterSha256"] == hashlib.sha256(final_target.read_bytes()).hexdigest()
+
+
+def test_physical_relocation_preserves_fragment_and_query_suffix_atomically(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    for case, suffix in (("fragment", "#section"), ("query", "?view=full")):
+        root = tmp_path / case
+        inventory, receipt, consumer, current_target, payload = (
+            _physical_relocation_inventory(root)
+        )
+        row = payload["rows"][0]
+        admission = row["incomingLinks"]["physicalRelocation"]
+        raw_href = admission["href"] + suffix
+        consumer.write_text(
+            f"# Closed epic\n\n[{admission['label']}]({raw_href}).\n",
+            encoding="utf-8",
+        )
+        row["incomingLinks"]["references"][0]["value"] = raw_href
+        admission["href"] = raw_href
+        admission["sourceSha256"] = hashlib.sha256(consumer.read_bytes()).hexdigest()
+        inventory.write_text(
+            json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+
+        count, replay = module.terminalize_v1_inventory(
+            root,
+            inventory,
+            terminal_at="2026-08-01T00:00:00Z",
+            authorization_marker="operator-authorized-v1-terminalization",
+            receipt_path=receipt,
+        )
+        assert count == 1 and replay is False, case
+        migrated, _readme_hash = module.apply_migration_inventory(
+            root,
+            inventory,
+            render_readme=True,
+            byte_check=True,
+        )
+
+        final_target = (
+            root
+            / "work-items"
+            / "roadmaps"
+            / "archive"
+            / "2026-08"
+            / current_target.name
+        )
+        new_path = f"../../../roadmaps/archive/2026-08/{current_target.name}"
+        new_href = new_path + suffix
+        consumer_text = consumer.read_text(encoding="utf-8")
+        receipt_payload = json.loads(receipt.read_text(encoding="utf-8"))
+        evidence = receipt_payload["rows"][0]["physicalRelocation"]
+        assert migrated == 1 and final_target.is_file(), case
+        assert f"]({new_href})" in consumer_text and raw_href not in consumer_text, case
+        assert evidence["oldHref"] == raw_href and evidence["newHref"] == new_href, case
+        assert module.verify_migration_inventory(root, inventory) == 1, case
+
+
+def test_physical_relocation_tuple_mismatches_fail_before_any_write(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    cases = {
+        "source": lambda admission: admission.__setitem__(
+            "source", "epics/archive/2026-07/other.md"
+        ),
+        "label": lambda admission: admission.__setitem__("label", admission["label"] + "-wrong"),
+        "href": lambda admission: admission.__setitem__("href", admission["href"] + "-wrong"),
+        "identity": lambda admission: admission.__setitem__(
+            "expectedIdentity", "roadmap:other"
+        ),
+        "source-hash": lambda admission: admission.__setitem__("sourceSha256", "0" * 64),
+        "target-hash": lambda admission: admission.__setitem__("targetSha256", "0" * 64),
+        "receipt-escape": lambda admission: admission.__setitem__("receipt", "../receipt.json"),
+    }
+    for case, mutate in cases.items():
+        root = tmp_path / case
+        inventory, receipt, consumer, target, payload = _physical_relocation_inventory(root)
+        admission = payload["rows"][0]["incomingLinks"]["physicalRelocation"]
+        mutate(admission)
+        inventory.write_text(
+            json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        consumer_before = consumer.read_bytes()
+        target_before = target.read_bytes()
+
+        try:
+            module.terminalize_v1_inventory(
+                root,
+                inventory,
+                terminal_at="2026-08-01T00:00:00Z",
+                authorization_marker="operator-authorized-v1-terminalization",
+                receipt_path=receipt,
+            )
+        except module.LifecycleError as exc:
+            assert exc.failure_id == "WI-CATEGORY-TERMINAL-EVIDENCE-MISSING", case
+        else:
+            raise AssertionError(f"{case} mismatch was admitted")
+
+        assert consumer.read_bytes() == consumer_before, case
+        assert target.read_bytes() == target_before, case
+        assert not receipt.exists(), case
+
+
+def test_terminalization_receipt_must_stay_under_repository_scratch(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    for case in ("outside", "traversal", "scratch-root", "reparse"):
+        root = tmp_path / f"repo-{case}"
+        work_items = root / "work-items"
+        source = work_items / "bugs" / "historic.md"
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_bytes(_pre_v1_terminal_record("fixed", "Historic"))
+        inventory = root / ".scratch" / "inventory.json"
+        payload = _denied_terminalization_inventory(work_items, inventory)
+        assert payload["rows"][0]["incomingLinks"]["result"] == "clear"
+        before = source.read_bytes()
+        if case == "outside":
+            escaped_receipt = tmp_path / "outside" / ".scratch" / "receipt.json"
+        elif case == "traversal":
+            escaped_receipt = root / ".scratch" / ".." / "outside" / "receipt.json"
+        elif case == "scratch-root":
+            escaped_receipt = root / ".scratch"
+        else:
+            redirect = root / ".scratch" / "redirect"
+            redirect.mkdir(parents=True)
+            escaped_receipt = redirect / "receipt.json"
+
+        original_reparse = module._terminalization_has_reparse
+        if case == "reparse":
+            module._terminalization_has_reparse = (
+                lambda path, redirect=redirect: path == redirect or original_reparse(path)
+            )
+        try:
+            try:
+                module.terminalize_v1_inventory(
+                    root,
+                    inventory,
+                    terminal_at="2026-08-01T00:00:00Z",
+                    authorization_marker="operator-authorized-v1-terminalization",
+                    receipt_path=escaped_receipt,
+                )
+            except module.LifecycleError as exc:
+                assert exc.failure_id == "WI-CATEGORY-TERMINAL-EVIDENCE-MISSING", case
+            else:
+                raise AssertionError(f"{case} receipt path was accepted")
+        finally:
+            module._terminalization_has_reparse = original_reparse
+
+        assert source.read_bytes() == before, case
+        assert not escaped_receipt.is_file(), case
+
+    physical_root = tmp_path / "physical-admission"
+    physical_receipt = physical_root / ".scratch" / "receipt.json"
+    for case, relative in {
+        "absolute": str(physical_receipt.resolve()),
+        "traversal": ".scratch/../outside/receipt.json",
+    }.items():
+        try:
+            module._bound_physical_receipt(physical_root, relative)
+        except module.LifecycleError as exc:
+            assert exc.failure_id == "WI-CATEGORY-TERMINAL-EVIDENCE-MISSING", case
+        else:
+            raise AssertionError(f"physical admission accepted {case} receipt path")
+
+
+def test_physical_relocation_rejects_unclosed_or_prefix_markdown_destinations(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    for case, suffix in {
+        "unterminated": "",
+        "trailing": " trailing)",
+        "fragment": "#section)",
+        "query": "?view=full)",
+        "title": ' "historic")',
+    }.items():
+        root = tmp_path / case
+        inventory, receipt, consumer, target, payload = _physical_relocation_inventory(root)
+        admission = payload["rows"][0]["incomingLinks"]["physicalRelocation"]
+        consumer.write_text(
+            f"[{admission['label']}]({admission['href']}{suffix}\n", encoding="utf-8"
+        )
+        admission["sourceSha256"] = hashlib.sha256(consumer.read_bytes()).hexdigest()
+        inventory.write_text(
+            json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+
+        try:
+            module.terminalize_v1_inventory(
+                root,
+                inventory,
+                terminal_at="2026-08-01T00:00:00Z",
+                authorization_marker="operator-authorized-v1-terminalization",
+                receipt_path=receipt,
+            )
+        except module.LifecycleError as exc:
+            assert exc.failure_id == "WI-CATEGORY-TERMINAL-EVIDENCE-MISSING", case
+        else:
+            raise AssertionError(f"{case} Markdown destination was admitted")
+
+        assert target.is_file(), case
+        assert not receipt.exists(), case
+
+
+def test_physical_relocation_duplicate_nonarchive_and_wrong_resolution_fail_closed(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    for case in ("duplicate", "nonarchive", "wrong-resolution"):
+        root = tmp_path / case
+        inventory, receipt, consumer, target, payload = _physical_relocation_inventory(root)
+        row = payload["rows"][0]
+        admission = row["incomingLinks"]["physicalRelocation"]
+        if case == "duplicate":
+            consumer.write_bytes(consumer.read_bytes() + consumer.read_bytes().split(b"\n")[-2] + b"\n")
+            row["incomingLinks"]["references"].append(
+                dict(row["incomingLinks"]["references"][0])
+            )
+            admission["sourceSha256"] = hashlib.sha256(consumer.read_bytes()).hexdigest()
+        elif case == "nonarchive":
+            live_consumer = target.parents[1] / "epics" / "live-consumer.md"
+            new_href = f"../roadmaps/{target.name}"
+            write(live_consumer, f"[{admission['label']}]({new_href})\n")
+            consumer.unlink()
+            consumer = live_consumer
+            row["incomingLinks"]["references"][0]["consumer"] = consumer.relative_to(
+                root / "work-items"
+            ).as_posix()
+            row["incomingLinks"]["references"][0]["value"] = new_href
+            admission["source"] = row["incomingLinks"]["references"][0]["consumer"]
+            admission["href"] = new_href
+            admission["sourceSha256"] = hashlib.sha256(consumer.read_bytes()).hexdigest()
+        else:
+            wrong = target.parent / "other.md"
+            wrong.write_bytes(_pre_v1_terminal_record("archived", "Other"))
+            wrong_href = f"../../../roadmaps/{wrong.name}"
+            consumer.write_text(
+                f"[{admission['label']}]({wrong_href})\n", encoding="utf-8"
+            )
+            row["incomingLinks"]["references"][0]["value"] = wrong_href
+            admission["href"] = wrong_href
+            admission["sourceSha256"] = hashlib.sha256(consumer.read_bytes()).hexdigest()
+        inventory.write_text(
+            json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        consumer_before = consumer.read_bytes()
+        target_before = target.read_bytes()
+
+        try:
+            module.terminalize_v1_inventory(
+                root,
+                inventory,
+                terminal_at="2026-08-01T00:00:00Z",
+                authorization_marker="operator-authorized-v1-terminalization",
+                receipt_path=receipt,
+            )
+        except module.LifecycleError as exc:
+            assert exc.failure_id == "WI-CATEGORY-TERMINAL-EVIDENCE-MISSING", case
+        else:
+            raise AssertionError(f"{case} physical relocation was admitted")
+
+        assert consumer.read_bytes() == consumer_before, case
+        assert target.read_bytes() == target_before, case
+        assert not receipt.exists(), case
+
+
+def test_physical_relocation_apply_drift_and_post_move_failure_roll_back(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    for case in ("consumer-drift", "target-drift", "receipt-drift", "post-move"):
+        root = tmp_path / case
+        inventory, receipt, consumer, target, _payload = _physical_relocation_inventory(root)
+        module.terminalize_v1_inventory(
+            root,
+            inventory,
+            terminal_at="2026-08-01T00:00:00Z",
+            authorization_marker="operator-authorized-v1-terminalization",
+            receipt_path=receipt,
+        )
+        consumer_before = consumer.read_bytes()
+        target_before = target.read_bytes()
+        receipt_before = receipt.read_bytes()
+        readme = root / "work-items" / "README.md"
+        readme_before = readme.read_bytes() if readme.is_file() else None
+        if case == "consumer-drift":
+            consumer.write_bytes(consumer_before + b"drift\n")
+        elif case == "target-drift":
+            target.write_bytes(target_before + b"drift\n")
+        elif case == "receipt-drift":
+            receipt_payload = json.loads(receipt.read_text(encoding="utf-8"))
+            receipt_payload["rows"][0]["physicalRelocation"]["label"] += "-wrong"
+            receipt.write_text(json.dumps(receipt_payload), encoding="utf-8")
+        original_refresh = module.refresh_readme
+        if case == "post-move":
+            def fail_after_move(*_args, **_kwargs):
+                raise module.LifecycleError("WI-README-STALE", "injected after move")
+
+            module.refresh_readme = fail_after_move
+        try:
+            try:
+                module.apply_migration_inventory(
+                    root,
+                    inventory,
+                    render_readme=True,
+                    byte_check=True,
+                )
+            except module.LifecycleError:
+                pass
+            else:
+                raise AssertionError(f"{case} returned success")
+        finally:
+            module.refresh_readme = original_refresh
+
+        final_target = (
+            root
+            / "work-items"
+            / "roadmaps"
+            / "archive"
+            / "2026-08"
+            / target.name
+        )
+        assert target.is_file() and not final_target.exists(), case
+        if case == "consumer-drift":
+            assert consumer.read_bytes() == consumer_before + b"drift\n"
+        else:
+            assert consumer.read_bytes() == consumer_before, case
+        if case == "target-drift":
+            assert target.read_bytes() == target_before + b"drift\n"
+        else:
+            assert target.read_bytes() == target_before, case
+        if case == "receipt-drift":
+            assert receipt.read_bytes() != receipt_before
+        else:
+            assert receipt.read_bytes() == receipt_before, case
+        if readme_before is None:
+            assert not readme.exists(), case
+        else:
+            assert readme.read_bytes() == readme_before, case
+
+
+def test_settled_physical_relocation_receipt_fields_are_bound_to_admission(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    for field, replacement in {
+        "expectedIdentity": "roadmap:other",
+        "oldHref": "../../../roadmaps/other.md",
+        "sourceBeforeSha256": "0" * 64,
+        "targetBeforeSha256": "f" * 64,
+    }.items():
+        root = tmp_path / field
+        inventory, receipt, consumer, target, _payload = _physical_relocation_inventory(root)
+        module.terminalize_v1_inventory(
+            root,
+            inventory,
+            terminal_at="2026-08-01T00:00:00Z",
+            authorization_marker="operator-authorized-v1-terminalization",
+            receipt_path=receipt,
+        )
+        module.apply_migration_inventory(
+            root,
+            inventory,
+            render_readme=True,
+            byte_check=True,
+        )
+        receipt_payload = json.loads(receipt.read_text(encoding="utf-8"))
+        receipt_payload["rows"][0]["physicalRelocation"][field] = replacement
+        receipt.write_text(json.dumps(receipt_payload), encoding="utf-8")
+        consumer_before = consumer.read_bytes()
+        final_target = target.parent / "archive" / "2026-08" / target.name
+        target_before = final_target.read_bytes()
+
+        try:
+            module.apply_migration_inventory(
+                root,
+                inventory,
+                render_readme=True,
+                byte_check=True,
+            )
+        except module.LifecycleError:
+            pass
+        else:
+            raise AssertionError(f"settled {field} drift was accepted")
+
+        assert consumer.read_bytes() == consumer_before, field
+        assert final_target.read_bytes() == target_before, field
+
+
+def test_settled_physical_relocation_replay_binds_its_owner_row_in_both_orders(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    for owner_position in ("first", "last"):
+        root = tmp_path / owner_position
+        inventory, receipt, consumer, target, initial_payload = (
+            _physical_relocation_inventory(root)
+        )
+        work_items = root / "work-items"
+        unrelated = work_items / "roadmaps" / "roadmap-z.md"
+        unrelated.write_bytes(_pre_v1_terminal_record("archived", "Unrelated roadmap"))
+
+        payload = _denied_terminalization_inventory(work_items, inventory)
+        owner_reference = f"roadmap:{target.stem}"
+        owner_row = next(
+            row for row in payload["rows"] if row["reference"] == owner_reference
+        )
+        owner_row["incomingLinks"] = initial_payload["rows"][0]["incomingLinks"]
+        unrelated_row = next(
+            row for row in payload["rows"] if row["reference"] != owner_reference
+        )
+        payload["rows"] = (
+            [owner_row, unrelated_row]
+            if owner_position == "first"
+            else [unrelated_row, owner_row]
+        )
+        inventory.write_text(
+            json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+
+        count, replay = module.terminalize_v1_inventory(
+            root,
+            inventory,
+            terminal_at="2026-08-01T00:00:00Z",
+            authorization_marker="operator-authorized-v1-terminalization",
+            receipt_path=receipt,
+        )
+        assert count == 2 and replay is False, owner_position
+
+        migrated, _readme_hash = module.apply_migration_inventory(
+            root,
+            inventory,
+            render_readme=True,
+            byte_check=True,
+        )
+        assert migrated == 2, owner_position
+        replayed, _readme_hash = module.apply_migration_inventory(
+            root,
+            inventory,
+            render_readme=True,
+            byte_check=True,
+        )
+        assert replayed == 2, owner_position
+
+        final_target = target.parent / "archive" / "2026-08" / target.name
+        expected_new_href = f"../../../roadmaps/archive/2026-08/{target.name}"
+        assert (consumer.parent / expected_new_href).resolve() == final_target.resolve()
+        assert module.verify_migration_inventory(root, inventory) == 2
 
 
 class _UnittestAdapter(unittest.TestCase):

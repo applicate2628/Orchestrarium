@@ -35,7 +35,7 @@ Physical location alone owns V1 lifecycle: current records stay in their categor
 - Do not route provider-backed `$consultant` in `external` mode, `$external-worker`, or `$external-reviewer` through an internal relay agent/helper/subagent; if the host runtime cannot directly launch the selected provider, record `Actual execution path: role disabled` and reroute or escalate honestly.
 
 ## Core delegation principles
-`$lead` is the main conversation's orchestration role, never a spawned subagent, not an end-to-end coder or roadmap owner. It must:
+`$lead` is the root main conversation's sole downstream dispatcher and lifecycle writer, never a subagent, end-to-end coder, or roadmap owner. It must:
 - select only needed stages; full-delivery order `Research -> Design -> Plan -> Implement -> Review/QA/Security` is not a universal prelude; assign risk owners; protect architecture, seams, dependency direction, and blast radius; keep code in `Implement`; enforce `one subagent = one profession, one artifact, one gate`
 - use specialist subagents by default for non-trivial role-work; do not role-play a specialist inline when delegation is possible; escalate recurring capability gaps as exactly one of: installed specialist, repo-local specialist, new permanent skill, or human hiring need
 - route unknowns to factual roles first and require decisions to cite accepted evidence; keep the system rolling — `PASS` advances immediately, `REVISE` stays in-role for bounded correction (escalate after 3 consecutive cycles for the same role and artifact), `BLOCKED` is reserved for real external blockers

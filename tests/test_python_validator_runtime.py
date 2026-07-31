@@ -24,8 +24,8 @@ PROVIDER_RUNTIME_MIRRORS = (
     ROOT / "src.claude/agents/scripts/skill_pack_validator_runtime.py",
 )
 EXPECTED_SUMMARIES = (
-    "PASS: 542  WARN: 0  FAIL: 0",
-    "Checks: 461  |  Passed: 461  |  Warnings: 0  |  Errors: 0",
+    "PASS: 541  WARN: 0  FAIL: 0",
+    "Checks: 460  |  Passed: 460  |  Warnings: 0  |  Errors: 0",
 )
 
 
@@ -40,6 +40,63 @@ def _load(path: Path, name: str):
     finally:
         sys.path.pop(0)
     return module
+
+
+def test_work_items_checker_consumes_canonical_slug_predicate_explicitly(
+    tmp_path: Path,
+) -> None:
+    checker = _load(ROOT / "scripts" / "check-work-items-state.py", "slug_owner_checker")
+    lifecycle = checker.load_lifecycle_owner()
+    predicate = lifecycle.is_valid_slug
+
+    for slug in ("legacy-valid", "safe.dot", "v1.1"):
+        assert predicate(slug), slug
+    for slug in (
+        "trailing.",
+        "double..dot",
+        "Uppercase",
+        "under_score",
+        "path/segment",
+        "../traversal",
+    ):
+        assert not predicate(slug), slug
+
+    work_items = tmp_path / "work-items"
+    active = work_items / "active"
+    archive = work_items / "archive"
+    target = active / "safe.dot"
+    target.mkdir(parents=True)
+    item = active / "reader"
+    item.mkdir()
+    (item / "status.md").write_text(
+        "Depends-on: safe.dot, trailing., double..dot, Uppercase, under_score\n",
+        encoding="utf-8",
+    )
+    notes = checker.blocked_by_notes(item, active, archive, predicate)
+    assert notes == [
+        "blocked-by: safe.dot (open Depends-on)",
+        "invalid Depends-on: trailing., double..dot, Uppercase, under_score",
+    ]
+
+    resolver_calls: list[str] = []
+
+    def resolve_epic_locations(_epics: Path, slug: str) -> dict[str, object]:
+        resolver_calls.append(slug)
+        return {"state": "missing", "locations": []}
+
+    (item / "status.md").write_text("Epic: safe.dot\n", encoding="utf-8")
+    assert checker.epic_link_notes(item, active, resolve_epic_locations, predicate) == [
+        "dangling Epic: safe.dot (no matching work-items/epics/safe.dot.md "
+        "or work-items/epics/archive/<YYYY-MM>/safe.dot.md)"
+    ]
+    assert resolver_calls == ["safe.dot"]
+
+    for slug in ("trailing.", "double..dot", "Uppercase", "under_score"):
+        (item / "status.md").write_text(f"Epic: {slug}\n", encoding="utf-8")
+        assert checker.epic_link_notes(item, active, resolve_epic_locations, predicate) == [
+            f"invalid Epic: {slug}"
+        ]
+    assert resolver_calls == ["safe.dot"]
 
 
 def _run_validator(

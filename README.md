@@ -75,7 +75,12 @@ strict UTC terminal evidence. `status.md` is active recovery state and
 `closure.md` is final work-item outcome. The generated `work-items/README.md`
 and compatibility `index.md` do not authorize transitions. Historical records
 without explicit terminal evidence remain unmoved for a human data decision;
-the workflow does not infer timestamps, status, or archival targets.
+the workflow does not infer timestamps, status, or archival targets. Two
+owner-managed legacy transitions handle the old directory-shaped backlog:
+`convert-legacy-candidate` creates one visible flat candidate while preserving
+every accepted source text and digest as an appendix, and
+`retire-legacy-backlog` records an explicit product rejection directly in the
+monthly archive without inventing candidate, active, or closure history.
 
 ## Installation
 

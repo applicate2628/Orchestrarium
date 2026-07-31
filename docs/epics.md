@@ -73,13 +73,14 @@ all done -> `ready-to-close (n/n)`; some -> `in-progress (k/n)`; none -> `open`.
 - When a roadmap decision package names multiple related work-items, a shared
   milestone, or one mechanism split across several items, it must either admit
   an epic or record `No-epic rationale: <why these remain standalone>`.
-- `$lead` **links** children (stamps each child `Epic: <slug>`), keeps the local
-  `work-items/index.md` `## Epics` row current, and **closes** the epic
+- `$lead` **links** children (stamps each child `Epic: <slug>`), derives the
+  roll-up from physical child locations, and **closes** the epic
   (`status: closed` + `## Closure`) ONLY when ALL children are closed AND the
   epic goal is met.
 - `$knowledge-archivist` then moves that same file to
-  `work-items/epics/archive/<YYYY-MM>/<slug>.md`, synchronizes the local index,
-  and verifies that the slug has exactly one location.
+  `work-items/epics/archive/<YYYY-MM>/<slug>.md`, reconciles physical lifecycle
+  locations, regenerates `work-items/README.md`, and verifies that the slug has
+  exactly one location.
 
 ### Edge cases
 - A 0-child epic rolls up as `open/empty`, never `ready-to-close`.

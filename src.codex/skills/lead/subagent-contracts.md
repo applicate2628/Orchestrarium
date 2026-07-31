@@ -128,7 +128,7 @@ updated: <YYYY-MM-DD HH:MM>
 - **Last accepted artifact**: <filename or "none">
 - **Open obligations before closeout**: <none | remaining required work still inside admitted scope>
 - **Epic**: <parent epic slug, or none> — present only when this work-item belongs to an epic; a single bare `Epic: <slug>` line is the join key the epic roll-up reads (see the lead skill `## Epics`)
-- **Depends-on**: <comma-separated work-item slugs, or none> — other work-items this one needs completed first; a single bare `Depends-on: <slug>, <slug>` line is what the derivation reads. A standing, planned inter-work-item dependency edge (distinct from the runtime `BLOCKED:*` gate verdicts). Targets are work-items only, resolved across `active/`, `archive/`, and the `## Backlog` section of `index.md` (a backlog match is existence, not done). A target that resolves nowhere is folded into `blocked-by`, never treated as satisfied. The lead derives `blocked-by` (open targets) and the ready-set from these lines (see the lead skill `## Dependencies`)
+- **Depends-on**: <comma-separated work-item slugs, or none> — other work-items this one needs completed first; a single bare `Depends-on: <slug>, <slug>` line is what the derivation reads. A standing, planned inter-work-item dependency edge (distinct from the runtime `BLOCKED:*` gate verdicts). Targets are work-items only, resolved across physical `active/`, `archive/YYYY-MM/`, and `backlog/` locations (a backlog match is existence, not done). A target that resolves nowhere is folded into `blocked-by`, never treated as satisfied. The lead derives `blocked-by` (open targets) and the ready-set from these lines (see the lead skill `## Dependencies`)
 - **Priority**: <high | medium | low, or none> — scheduling urgency set by `$product-manager` at admission; distinct from bug/perf SEVERITY (defect impact). A low-severity bug can still be high-priority.
 
 ## Active agents
@@ -164,7 +164,7 @@ The REVISE loop section is optional — include it only when a stage has returne
 
 ### agent-runs.jsonl format
 
-When task memory is configured, every delegated role, external adapter, consultant sweep, and main-session gate action that produces or accepts an artifact must append one JSON object to `agent-runs.jsonl` in the same work-item directory.
+Only the root main conversation holding Lead writes `agent-runs.jsonl`: it records each launch and, after receiving and accepting the assigned artifact and evidence, its terminal outcome. A main-owned validated helper or wrapper may perform that write on the root's behalf.
 
 The ledger is machine-readable execution state; `status.md` remains the human-readable recovery summary. A `PASS` in `status.md` is not accepted unless the corresponding ledger event has `gate: "PASS"`, `status: "completed"`, an artifact path, and at least one evidence entry.
 
@@ -655,6 +655,10 @@ Invocation note:
 - The orchestrating owner controls routing:
   - `$product-manager` for roadmap and intake
   - `$lead` for approved delivery work
+- Only the root main conversation holding Lead dispatches downstream roles and writes work-item lifecycle state.
+- A specialist completes one profession, artifact, and gate; it returns evidence plus an optional non-binding recommended next role to the root, then stops.
+- A specialist never adopts Lead, launches a peer or downstream stage, advances the pipeline, or writes `agent-runs.jsonl`.
+- The root may directly launch a configured external wrapper; no provider or leaf may recursively launch another wrapper.
 - Subagents communicate by producing accepted artifacts for the next role, not by assigning work directly to peers.
 - If a role is blocked by missing evidence, it should route back to the orchestrating owner for factual clarification instead of compensating with unsupported opinion.
 - A role may request clarification, but it should route the request through the orchestrating owner unless a direct collaboration edge was explicitly approved.

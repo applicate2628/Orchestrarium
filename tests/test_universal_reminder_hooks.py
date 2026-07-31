@@ -679,6 +679,10 @@ class TestTurnAnchorEmitsValidContext(unittest.TestCase):
         context = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"]
         self.assertEqual(context, policy.TURN_ANCHOR_CONTEXT)
         self.assertIn("MCP", context)
+        self.assertIn("Root main conversation / Lead", context)
+        self.assertIn("Dispatched subagent", context)
+        self.assertIn("Never adopt $lead", context)
+        self.assertIn("no provider or leaf may recursively launch another wrapper", context)
 
     @unittest.skipUnless(BASH, "no bash on PATH; the .ps1 sibling covers Windows shells")
     def test_sh_emits_wellformed_userpromptsubmit_context(self) -> None:
@@ -693,6 +697,8 @@ class TestTurnAnchorEmitsValidContext(unittest.TestCase):
         # The anchor's load-bearing sentence must actually be present.
         self.assertIn("passed slice is not completion", out["additionalContext"])
         self.assertIn("next unchecked action", out["additionalContext"])
+        self.assertIn("Root main conversation / Lead", out["additionalContext"])
+        self.assertIn("Dispatched subagent", out["additionalContext"])
 
     def test_turn_anchor_never_exits_two(self) -> None:
         for stdin_text in ("", "not json", "x" * 1_000_000):

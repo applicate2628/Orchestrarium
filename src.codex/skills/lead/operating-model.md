@@ -181,7 +181,7 @@ The roadmap loop decides what should enter discovery or delivery. The delivery l
 
 - Every admitted `quick-fix` first creates the minimal `work-items/active/<slug>/status.md` defined in `subagent-contracts.md` before its first repository mutation. It adds no heavy prelude artifact; re-classification enriches the same item, and delivery closes and archives it immediately under the normal rule.
 - The full requirements below apply only after routing admits recovery-tracked or multi-stage work, including a re-classified `quick-fix`.
-- Use `work-items/index.md` as the default recovery entry point for non-trivial lead-managed work unless an explicit repo-local policy disables task memory.
+- Use generated `work-items/README.md` as the human recovery start for non-trivial lead-managed work unless an explicit repo-local policy disables task memory; resolve state from the physical lifecycle roots and owning artifacts. Treat `work-items/index.md` as a compatibility snapshot only.
 - Keep each active lead-routed non-trivial item in its own dated directory inside `work-items/active/`.
 - Require `roadmap.md`, `brief.md`, and `status.md` before non-trivial work starts or resumes.
 - Require `plan.md` before implementation or review only when the selected route admits a Plan stage.
@@ -191,7 +191,7 @@ The roadmap loop decides what should enter discovery or delivery. The delivery l
 - If the required task-memory artifacts are missing or stale, stop and restore them before continuing delivery.
 - Use `notes.md` or `notes/` for technical notes and discoveries; keep accepted long-lived decisions in the design or ADR artifact.
 - On resume after interruption, restore only lead-owned task-memory state from persisted accepted artifacts. Do not reconstruct missing specialist artifacts or factual findings from chat memory.
-- Epics group several work-items: persist an active epic as a flat `work-items/epics/<date>-<slug>.md` and a closed epic as `work-items/epics/archive/<YYYY-MM>/<date>-<slug>.md`; each child work-item carries a single `Epic: <slug>` line in its `status.md`. Derive the epic roll-up live from the children (resolve each slug across work-item `active/` + `archive/`). Lead owns closure/reopening decisions and content; the knowledge archivist owns the same-operation location move and index reconciliation. Epic lookup must distinguish unique active, unique archived, missing, and duplicate state; duplicate state fails closed. Full rules in the lead skill `## Epics`.
+- Epics group several work-items: persist an active epic as a flat `work-items/epics/<date>-<slug>.md` and a closed epic as `work-items/epics/archive/<YYYY-MM>/<date>-<slug>.md`; each child work-item carries a single `Epic: <slug>` line in its `status.md`. Derive the epic roll-up live from the children (resolve each slug across work-item `active/` + `archive/`). Lead owns closure/reopening decisions and content; the knowledge archivist owns the same-operation location move, physical-state reconciliation, and generated `work-items/README.md` verification. Epic lookup must distinguish unique active, unique archived, missing, and duplicate state; duplicate state fails closed. Full rules in the lead skill `## Epics`.
 - Cross-cutting decisions: durable architecture decisions persist as a flat `work-items/decisions/<date>-<slug>.md` (`status: proposed|accepted|dropped|superseded|reverted`, plus `decided-by`/`context`/`supersedes`/`superseded-by`), referenced (not duplicated) from a work-item's `design.md`. Cross-work-item dependencies persist as a `Depends-on: <slug>, <slug>` line in the dependent item's `status.md`. Full rules in the architect + lead skills.
 - Delivery lessons: a keep-worthy lesson from a delivery retrospective persists as a flat `work-items/lessons/<date>-<slug>.md` entry, the same flat shape as `work-items/decisions/`. Full rules in the lead skill `## Lessons`.
 
@@ -308,7 +308,7 @@ For critical changes, run both in sequence: Claim-Verify first (fast, catches ex
 - Periodic controls complement stage gates and should catch drift between transitions, not replace phase acceptance.
 - If the target repository defines a periodic-control matrix, use it as the canonical cadence for freshness, completeness, repo consistency, publication safety, archive hygiene, and refactor-debt checks.
 - Keep the periodic layer lightweight: if a control is really about whether work may advance, it belongs in the stage-gate path instead.
-- Index sync (`$knowledge-archivist`): every active-item state change (create, resume, stage transition, park, close, archive) updates the recovery index in the same transition.
+- Physical-state reconciliation (`$knowledge-archivist`): every lifecycle state change (create, resume, stage transition, park, close, archive) reconciles physical roots and regenerates `work-items/README.md` in the same transition.
 - Board refresh (`$knowledge-archivist`): every delivery wave, in the same post-wave sync pass, refresh `work-items/README.md` against git and the tree.
 - Orchestrator-upgrades reconcile (`$knowledge-archivist`): same post-wave pass as Board refresh — reconcile `work-items/roadmaps/orchestrator-upgrades.md` rows against their source lessons' status in `work-items/lessons/`.
 

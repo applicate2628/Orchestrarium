@@ -69,7 +69,7 @@ retired archival Stop control never acts on them.
 - `$lead` / `$product-manager` **consult** open lessons when admitting or
   planning similar work, so the same mistake is not repeated.
 - `$knowledge-archivist` does ONLY the **non-semantic bookkeeping** (writing the
-  stored back-reference id, local index sync) — the same lifecycle/bookkeeping
+  stored back-reference id, physical-location reconciliation and generated read-model refresh) — the same lifecycle/bookkeeping
   split as Epics and Decisions. The archivist does NOT decide a lesson status
   transition.
 - **Stale-open accountability:** The main conversation (as Lead) is

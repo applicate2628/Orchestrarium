@@ -18,7 +18,7 @@ This file keeps only Claude-specific runtime and repository concretization for t
 ## Claude-side repository concretization
 
 - Adjacent findings and `BLOCKED:prerequisite` go to `work-items/bugs/`.
-- Recovery starts at `work-items/index.md`; active items live in `work-items/active/<date>-<slug>/`; archive target is `work-items/archive/<date>-<slug>/`.
+- Human recovery starts at generated `work-items/README.md`; state resolves from physical `work-items/backlog/`, `work-items/active/<date>-<slug>/`, and `work-items/archive/YYYY-MM/<date>-<slug>/` locations plus owning artifacts. `work-items/index.md` is compatibility-only.
 - Periodic controls stay pack-local in [periodic-control-matrix.md](periodic-control-matrix.md).
 - Claude-side examples use `Gate: PASS | REVISE | BLOCKED:<class> | RETURN(role)`.
 - Claude runtime docs also keep the explicit `Artifact invalidation protocol` and `Parallel execution protocol`; use them together with the shared core.

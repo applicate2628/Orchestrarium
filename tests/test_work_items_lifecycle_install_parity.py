@@ -300,6 +300,19 @@ class TestWorkItemsLifecycleInstallParity(unittest.TestCase):
                         hashlib.sha256((installed / "scripts" / helper).read_bytes()).hexdigest(),
                         hashlib.sha256((ROOT / "scripts" / helper).read_bytes()).hexdigest(),
                     )
+                lifecycle_help = subprocess.run(
+                    [
+                        sys.executable,
+                        str(installed / "scripts" / "mutate-work-item.py"),
+                        "--help",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(lifecycle_help.returncode, 0, lifecycle_help.stderr)
+                self.assertIn("convert-legacy-candidate", lifecycle_help.stdout)
+                self.assertIn("retire-legacy-backlog", lifecycle_help.stdout)
                 for suffix in (".py", ".sh"):
                     self.assertEqual(
                         list(installed.rglob(f"{OBSOLETE_MARKER}{suffix}")),

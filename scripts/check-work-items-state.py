@@ -174,7 +174,6 @@ def stale_running_errors(item: Path, now: datetime, stale_after: timedelta) -> l
 
 
 DIR_DATE_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})-")
-SLUG_RE = re.compile(r"^[A-Za-z0-9][\w.-]*$")
 DONE_STATE_LINE_RE = re.compile(
     r"(?im)^\s*>?\s*\*{0,3}\s*(?:current\s+)?(?:state|status|stage|outcome)"
     r"\s*\*{0,3}\s*:\s*\*{0,3}\s*(?:closed|done|complete|completed|archived)(?![\w-])"
@@ -225,7 +224,12 @@ def _slug_exists(slug: str, active_dir: Path, archive_dir: Path) -> bool:
     return _slug_archived(slug, archive_dir)
 
 
-def blocked_by_notes(item: Path, active_dir: Path, archive_dir: Path) -> list[str]:
+def blocked_by_notes(
+    item: Path,
+    active_dir: Path,
+    archive_dir: Path,
+    is_valid_slug: Any,
+) -> list[str]:
     """Informational: open Depends-on blockers + dangling targets for an active
     item. A blocked item is EXPECTED state, NOT a failure (so this never flips the
     exit code) — it mirrors the /agents-status governance derivation in a script."""
@@ -239,9 +243,13 @@ def blocked_by_notes(item: Path, active_dir: Path, archive_dir: Path) -> list[st
         return []
     open_targets: list[str] = []
     dangling: list[str] = []
+    invalid: list[str] = []
     for token in match.group(1).split(","):
         slug = token.strip().strip("`")
-        if not slug or slug.lower() == "none" or slug.startswith("<") or not SLUG_RE.match(slug):
+        if not slug or slug.lower() == "none" or slug.startswith("<"):
+            continue
+        if not is_valid_slug(slug):
+            invalid.append(slug)
             continue
         if not _slug_exists(slug, active_dir, archive_dir):
             dangling.append(slug)
@@ -252,6 +260,8 @@ def blocked_by_notes(item: Path, active_dir: Path, archive_dir: Path) -> list[st
         notes.append(f"blocked-by: {', '.join(open_targets)} (open Depends-on)")
     if dangling:
         notes.append(f"dangling Depends-on: {', '.join(dangling)} (no matching work-item)")
+    if invalid:
+        notes.append(f"invalid Depends-on: {', '.join(invalid)}")
     return notes
 
 
@@ -263,7 +273,12 @@ def _read_status_text(item: Path) -> str:
         return ""
 
 
-def epic_link_notes(item: Path, active_dir: Path, resolve_epic_locations: Any) -> list[str]:
+def epic_link_notes(
+    item: Path,
+    active_dir: Path,
+    resolve_epic_locations: Any,
+    is_valid_slug: Any,
+) -> list[str]:
     """Validate a child's Epic link through the sentinel-owned resolver.
 
     The resolver distinguishes a missing epic from a duplicate location and
@@ -277,7 +292,7 @@ def epic_link_notes(item: Path, active_dir: Path, resolve_epic_locations: Any) -
     slug = match.group(1).strip().strip("`")
     if not slug or slug.lower() == "none" or slug.startswith("<"):
         return []
-    if not SLUG_RE.match(slug):
+    if not is_valid_slug(slug):
         return [f"invalid Epic: {slug}"]
     epics_dir = active_dir.parent / "epics"
     try:
@@ -381,6 +396,7 @@ def command_check(args: argparse.Namespace) -> int:
     archive_dir = active_dir.parent / "archive"
     failed = 0
     lifecycle = load_lifecycle_owner()
+    is_valid_slug = lifecycle.is_valid_slug
     try:
         lifecycle.audit_categories(root)
     except lifecycle.LifecycleError as exc:
@@ -417,12 +433,12 @@ def command_check(args: argparse.Namespace) -> int:
         errors.extend(delivery_errors.get(item.name, []))
         resolver = sentinel_dependency.resolve_epic_locations
         if callable(resolver):
-            errors.extend(epic_link_notes(item, active_dir, resolver))
+            errors.extend(epic_link_notes(item, active_dir, resolver, is_valid_slug))
         # Informational notes (aging, blocked-by) are NOT failures: a blocked or
         # aging active item is expected state, not a defect, so they never flip
         # the exit code or the RESULT line.
         notes = item_aging_notes(item, today, args.max_age_days)
-        notes.extend(blocked_by_notes(item, active_dir, archive_dir))
+        notes.extend(blocked_by_notes(item, active_dir, archive_dir, is_valid_slug))
         label = item.name
         if errors:
             failed += 1

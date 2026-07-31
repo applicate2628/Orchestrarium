@@ -79,7 +79,7 @@ retired archival Stop control never acts on them.
   semantic status transitions** (`accepted -> superseded/reverted`, plus the `proposed -> dropped` retirement),
   including setting the two-way `superseded-by` edge.
 - `$knowledge-archivist` does ONLY the **non-semantic bookkeeping** (writing the
-  stored back-link field, local index sync) — the same lifecycle/bookkeeping
+  stored back-link field, physical-location reconciliation and generated read-model refresh) — the same lifecycle/bookkeeping
   split as Epics. It does not decide a status transition.
 
 ## Surfacing
