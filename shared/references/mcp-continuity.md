@@ -14,6 +14,20 @@ One dependency-free policy module, `scripts/universal-hooks/scripts/mcp_continui
 
 The policy admits exactly `Grep`, `Bash`, `PowerShell`, `shell_command`, and `exec_command`. Shell-shaped inputs read `tool_input.command`; `exec_command` reads `tool_input.cmd` and accepts `command` as a compatibility shape. Shell text is untrusted data: the policy tokenizes it and never executes it.
 
+## Stateful and indexed freshness
+
+The session reminder and turn anchor treat a repository, project, branch,
+worktree, or indexed-input change as invalidating an earlier result from a
+connected stateful or indexed MCP. The agent must use that server's own
+status/freshness probe; if it reports stale or pending state, run its documented
+sync, update, or reindex operation, confirm freshness again, then repeat the
+intended query. For CodeGraph this is `status -> sync -> fresh status -> repeat
+query`.
+
+This is capability-based, not a per-provider or per-server registry: a
+stateless or live MCP does not need a refresh. A failed refresh is reported
+explicitly and stale output is not presented as current.
+
 ## Navigation classification
 
 The momentum warning recognizes source-navigation patterns rather than every text search:
