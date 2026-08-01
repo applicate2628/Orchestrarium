@@ -310,7 +310,7 @@ For critical changes, run both in sequence: Claim-Verify first (fast, catches ex
 - Keep the periodic layer lightweight: if a control is really about whether work may advance, it belongs in the stage-gate path instead.
 - Physical-state reconciliation (`$knowledge-archivist`): every lifecycle state change (create, resume, stage transition, park, close, archive) reconciles physical roots and regenerates `work-items/README.md` in the same transition.
 - Board refresh (`$knowledge-archivist`): every delivery wave, in the same post-wave sync pass, refresh `work-items/README.md` against git and the tree.
-- Orchestrator-upgrades reconcile (`$knowledge-archivist`): same post-wave pass as Board refresh — reconcile `work-items/roadmaps/orchestrator-upgrades.md` rows against their source lessons' status in `work-items/lessons/`.
+- Registry governance reconciliation (`$knowledge-archivist`): after accepted task-memory governance changes, on an all-registry request, and at milestone-wide cleanup, run one complete structural plus semantic-currency matrix across every current registry; the existing orchestrator-upgrades-to-lessons check is one row of this control, not a separate owner. Non-consistent rows return to their semantic owners through `$lead`; placement-only success is not overall `PASS`.
 
 Do not let a role that defines a critical constraint act as the only approval gate for that same risk.
 
