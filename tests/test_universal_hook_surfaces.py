@@ -53,6 +53,7 @@ RUNTIME_SCRIPT_NAMES = universal_hooks_manifest.canon_names(ROOT, "scripts")
 RUNTIME_HOOK_NAMES = universal_hooks_manifest.canon_names(ROOT, "hooks")
 PACK_ONLY_SCRIPTS = universal_hooks_manifest.PACK_ONLY_SCRIPTS
 PACK_ONLY_HOOKS = universal_hooks_manifest.PACK_ONLY_HOOKS
+DEPRECATED_EXAMPLE_COMPATIBILITY_LAUNCHERS = {"mcp-usage-reminder.sh"}
 
 
 class UniversalHookSurfaceTest(unittest.TestCase):
@@ -302,6 +303,22 @@ class UniversalHookSurfaceTest(unittest.TestCase):
             with self.subTest(installer=rel):
                 for fragment in required_fragments:
                     self.assertIn(fragment, text)
+
+    def test_deprecated_examples_have_only_the_required_universal_compatibility_launcher(
+        self,
+    ) -> None:
+        universal_scripts = ROOT / "scripts" / "universal-hooks" / "scripts"
+        compatibility_launchers = {
+            path.name
+            for path in universal_scripts.glob("*.sh")
+            if path.name != "check-publication-safety.sh"
+        }
+        self.assertEqual(
+            compatibility_launchers,
+            DEPRECATED_EXAMPLE_COMPATIBILITY_LAUNCHERS,
+        )
+        for name in DEPRECATED_EXAMPLE_COMPATIBILITY_LAUNCHERS:
+            self.assertTrue((universal_scripts / name).with_suffix(".py").is_file())
 
     def test_docs_do_not_describe_gemini_qwen_hooks_as_absent(self) -> None:
         docs = [

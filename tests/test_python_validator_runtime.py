@@ -24,8 +24,8 @@ PROVIDER_RUNTIME_MIRRORS = (
     ROOT / "src.claude/agents/scripts/skill_pack_validator_runtime.py",
 )
 EXPECTED_SUMMARIES = (
-    "PASS: 541  WARN: 0  FAIL: 0",
-    "Checks: 460  |  Passed: 460  |  Warnings: 0  |  Errors: 0",
+    "PASS: 534  WARN: 0  FAIL: 0",
+    "Checks: 453  |  Passed: 453  |  Warnings: 0  |  Errors: 0",
 )
 
 
@@ -159,17 +159,6 @@ def _materialize_installed_pack(
         "validate-work-item-state.sh",
     ):
         shutil.copy2(ROOT / "scripts" / name, scripts / name)
-    for name in (
-        "agents-mode-reminder.sh",
-        "check-bugfix-discipline.sh",
-        "check-git-push-gate.sh",
-        "check-passive-polling-stop.sh",
-        "check-scratch-valuables.sh",
-        "check-work-items-archival-stop.sh",
-        "mcp-usage-reminder.sh",
-        "turn-anchor-reminder.sh",
-    ):
-        (scripts / name).unlink(missing_ok=True)
     shutil.copy2(RUNTIME, scripts / RUNTIME.name)
     return target, scripts / "validate-skill-pack.py"
 

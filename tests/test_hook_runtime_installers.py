@@ -5,7 +5,6 @@ import importlib.util
 import inspect
 import json
 import os
-import shutil
 import subprocess
 import sys
 from types import SimpleNamespace
@@ -17,32 +16,6 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 HELPER_PATH = ROOT / "scripts/install-hypothesis-hook.py"
 PRODUCTION_INSTALLER_PATH = ROOT / "scripts/production_installer.py"
-BASH_RUNTIME_PATH = ROOT / "scripts/bash_runtime.py"
-PROTECTED = (
-    "check-publication-safety.sh",
-    "agent-run-ledger.sh",
-    "check-work-items-state.sh",
-    "validate-work-item-state.sh",
-    "invoke-claude-api.sh",
-    "custom.sh",
-)
-STRUCTURED_JSON_HOOK_STEMS = frozenset(
-    {
-        "agents-mode-reminder",
-        "check-bugfix-discipline",
-        "check-git-push-gate",
-        "check-machine-local-path",
-        "check-mcp-momentum",
-        "check-no-trash-in-repo",
-        "check-passive-polling-stop",
-        "check-repository-orientation",
-        "check-scratch-valuables",
-        "check-stale-relation-residue",
-        "check-typed-routing",
-        "mcp-usage-reminder",
-        "turn-anchor-reminder",
-    }
-)
 INFORMATIONAL_REMINDER_HOOK_STEMS = frozenset(
     {"agents-mode-reminder", "mcp-usage-reminder", "turn-anchor-reminder"}
 )
@@ -73,9 +46,6 @@ HELPER = _load(HELPER_PATH, "hook_runtime_helper")
 PRODUCTION_INSTALLER = _load(
     PRODUCTION_INSTALLER_PATH, "production_installer_runtime_test"
 )
-BASH_RUNTIME = _load(BASH_RUNTIME_PATH, "bash_runtime_hook_test")
-
-
 def _provider_source_root(platform: str) -> Path:
     return ROOT / (
         "src.codex/skills/lead" if platform == "codex" else "src.claude/agents"
@@ -84,48 +54,50 @@ def _provider_source_root(platform: str) -> Path:
 
 def _owned_python_targets(platform: str) -> tuple[Path, ...]:
     return tuple(
-        sorted(
-            {path.with_suffix(".py") for path in HELPER.owned_hook_wrapper_sources(ROOT, platform)}
+        script
+        for _marker, script, _event, _matcher in PRODUCTION_INSTALLER._hook_specs(
+            platform, _provider_source_root(platform)
         )
     )
 
 
-def _seed_installed_tree(root: Path, platform: str) -> tuple[Path, ...]:
-    provider_root = _provider_source_root(platform)
-    candidates: list[Path] = []
-    for source in HELPER.owned_hook_wrapper_sources(ROOT, platform):
-        target = root / source.relative_to(provider_root)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, target)
-        shutil.copy2(source.with_suffix(".py"), target.with_suffix(".py"))
-        candidates.append(target)
-    for name in PROTECTED:
-        target = root / "scripts" / name
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text("protected\n", encoding="utf-8")
-    return tuple(candidates)
+@pytest.mark.parametrize(("platform", "expected_count"), (("codex", 12), ("claude", 13)))
+def test_hook_specs_membership_is_owned_by_universal_manifest(
+    platform: str, expected_count: int
+) -> None:
+    manifest = PRODUCTION_INSTALLER._universal_hook_manifest_module()
+    stems = tuple(
+        marker
+        for marker, _script, _event, _matcher in PRODUCTION_INSTALLER._hook_specs(
+            platform, _provider_source_root(platform)
+        )
+    )
+    assert len(stems) == expected_count
+    assert set(stems) == manifest.registered_hook_stems(platform)
 
 
-def _registration_data(
-    candidates: tuple[Path, ...], *, platform: str, wrapper: bool
-) -> dict:
-    entries: list[dict] = []
-    for sample in candidates:
-        target = sample if wrapper else sample.with_suffix(".py")
-        if platform == "claude":
-            command = {
-                "type": "command",
-                "command": "bash" if wrapper else str(Path(sys.executable).resolve()),
-                "args": [str(target.resolve())],
-            }
-        else:
-            executable = "bash" if wrapper else str(Path(sys.executable).resolve())
-            command = {
-                "type": "command",
-                "command": f"{executable} {target.resolve()}",
-            }
-        entries.append({"hooks": [command]})
-    return {"hooks": {"PreToolUse": entries}}
+def test_hook_specs_follow_manifest_membership_and_fail_closed_on_missing_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        PRODUCTION_INSTALLER,
+        "_universal_hook_manifest_module",
+        lambda: SimpleNamespace(
+            registered_hook_stems=lambda _platform: frozenset({"mcp-usage-reminder"})
+        ),
+    )
+    specs = PRODUCTION_INSTALLER._hook_specs("codex", _provider_source_root("codex"))
+    assert [marker for marker, *_rest in specs] == ["mcp-usage-reminder"]
+
+    monkeypatch.setattr(
+        PRODUCTION_INSTALLER,
+        "_universal_hook_manifest_module",
+        lambda: SimpleNamespace(
+            registered_hook_stems=lambda _platform: frozenset({"missing-owner"})
+        ),
+    )
+    with pytest.raises(RuntimeError, match="metadata is missing"):
+        PRODUCTION_INSTALLER._hook_specs("codex", _provider_source_root("codex"))
 
 
 def _parse_structured_stdout(data: bytes) -> object:
@@ -164,7 +136,7 @@ def test_python_production_installer_owns_ordered_hook_transaction() -> None:
     sync = source.index('"sync"')
     register = source.index("for marker, script, event, matcher")
     verify = source.index("check-hook-health.py")
-    reclaim = source.index("--reclaim-root")
+    reclaim = source.index('"reclaim"')
     assert preflight < sync < register < verify < reclaim
     assert '"--codex-trust-mode"' in source and '"report"' in source
     assert "owned_canonical_identities" in source
@@ -227,9 +199,6 @@ def test_installer_derives_touched_identities_from_before_after_hooks_json(
         assert touched == ["matcher-new-complete-identity"]
     assert FakeHealth.generated
 
-    run_source = inspect.getsource(PRODUCTION_INSTALLER.install)
-    assert 'args.hook_runtime != "python"' in run_source
-    assert "production hooks support only --hook-runtime python" in run_source
 
 
 @pytest.mark.parametrize(
@@ -242,7 +211,7 @@ def test_installer_derives_touched_identities_from_before_after_hooks_json(
 def test_python_target_resolution_is_absolute_and_direct(
     platform: str, source: Path
 ) -> None:
-    target = HELPER.resolve_hook_target(str(source), "windows", "python", platform)
+    target = HELPER.resolve_hook_target(str(source), "windows", platform)
     assert Path(target.executable) == Path(sys.executable).resolve()
     assert len(target.args) == 1
     assert Path(target.args[0]) == source.resolve()
@@ -250,164 +219,11 @@ def test_python_target_resolution_is_absolute_and_direct(
 
 
 @pytest.mark.parametrize("platform", ("codex", "claude"))
-def test_owned_production_wrappers_are_posix_only(platform: str) -> None:
-    wrappers = HELPER.owned_hook_wrapper_sources(ROOT, platform)
-    assert wrappers
-    assert all(path.suffix == ".sh" for path in wrappers)
-    assert all(path.with_suffix(".py").is_file() for path in wrappers)
-
-
-@pytest.mark.parametrize("platform", ("codex", "claude"))
-def test_profile_verification_exclusions_match_reclaim_inventory(
-    platform: str,
-) -> None:
-    wrappers = HELPER.owned_hook_wrapper_sources(ROOT, platform)
-    excluded = HELPER.profile_verification_exclusions(ROOT, platform, "python")
-    expected = tuple(
-        sorted(
-            path.relative_to(ROOT / ("src.codex" if platform == "codex" else "src.claude")).as_posix()
-            for path in wrappers
-        )
-    )
-    assert excluded == expected
-    assert all(path.endswith(".sh") for path in excluded)
-    assert HELPER.profile_verification_exclusions(ROOT, platform, "wrapper") == ()
-    assert HELPER.profile_verification_exclusions(ROOT, platform, "native") == ()
-
-
-@pytest.mark.parametrize("platform", ("codex", "claude"))
-def test_reclaim_is_exact_and_idempotent(tmp_path: Path, platform: str) -> None:
-    installed = tmp_path / platform
-    candidates = _seed_installed_tree(installed, platform)
-    assert candidates
-    direct = _registration_data(candidates, platform=platform, wrapper=False)
-
-    removed = HELPER.reclaim_stale_hook_wrappers(
-        repo_root=ROOT,
-        installed_root=installed,
-        platform=platform,
-        registration_data=direct,
-        dry_run=False,
-        abort_policy=HELPER.TestAbortPolicy(None, None),
-    )
-    assert removed == candidates
-    assert all(not path.exists() for path in candidates)
-    assert (
-        HELPER.reclaim_stale_hook_wrappers(
-            repo_root=ROOT,
-            installed_root=installed,
-            platform=platform,
-            registration_data=direct,
-            dry_run=False,
-            abort_policy=HELPER.TestAbortPolicy(None, None),
-        )
-        == ()
-    )
-
-
-@pytest.mark.parametrize("platform", ("codex", "claude"))
-def test_wrapper_registration_disables_reclaim(
-    tmp_path: Path, platform: str
-) -> None:
-    installed = tmp_path / platform
-    candidates = _seed_installed_tree(installed, platform)
-    wrappers = _registration_data(candidates, platform=platform, wrapper=True)
-    assert (
-        HELPER.reclaim_stale_hook_wrappers(
-            repo_root=ROOT,
-            installed_root=installed,
-            platform=platform,
-            registration_data=wrappers,
-            dry_run=False,
-            abort_policy=HELPER.TestAbortPolicy(None, None),
-        )
-        == ()
-    )
-    assert all(path.is_file() for path in candidates)
-
-
-@pytest.mark.parametrize("platform", ("codex", "claude"))
-def test_reclaim_preserves_non_hook_wrappers(
-    tmp_path: Path, platform: str
-) -> None:
-    installed = tmp_path / platform
-    candidates = _seed_installed_tree(installed, platform)
-    HELPER.reclaim_stale_hook_wrappers(
-        repo_root=ROOT,
-        installed_root=installed,
-        platform=platform,
-        registration_data=_registration_data(
-            candidates, platform=platform, wrapper=False
-        ),
-        dry_run=False,
-        abort_policy=HELPER.TestAbortPolicy(None, None),
-    )
-    assert all(
-        (installed / "scripts" / name).read_text(encoding="utf-8")
-        == "protected\n"
-        for name in PROTECTED
-    )
-
-
-@pytest.mark.parametrize("platform", ("codex", "claude"))
-def test_dry_run_reports_exact_set_without_mutation(
-    tmp_path: Path, platform: str
-) -> None:
-    installed = tmp_path / platform
-    candidates = _seed_installed_tree(installed, platform)
-    removed = HELPER.reclaim_stale_hook_wrappers(
-        repo_root=ROOT,
-        installed_root=installed,
-        platform=platform,
-        registration_data=_registration_data(
-            candidates, platform=platform, wrapper=False
-        ),
-        dry_run=True,
-        abort_policy=HELPER.TestAbortPolicy(None, None),
-    )
-    assert removed == candidates
-    assert all(path.is_file() for path in candidates)
-
-
-@pytest.mark.parametrize("platform", ("claude", "codex"))
-def test_decision_parity_between_posix_launcher_and_python_owner(
-    tmp_path: Path, platform: str
-) -> None:
-    bash = BASH_RUNTIME.resolve_bash()
-    if not bash:
-        pytest.skip("host-native retained POSIX launcher runtime is unavailable")
-
-    corpus = (b"", b"{malformed\n", b"{}\n")
-    owned_stems = {
-        wrapper.stem for wrapper in HELPER.owned_hook_wrapper_sources(ROOT, platform)
-    }
-    assert owned_stems <= STRUCTURED_JSON_HOOK_STEMS
-    for python_target in _owned_python_targets(platform):
-        wrapper = python_target.with_suffix(".sh")
-        assert wrapper.is_file()
-        for envelope in corpus:
-            wrapped = subprocess.run(
-                [str(bash), str(wrapper)],
-                cwd=tmp_path,
-                input=envelope,
-                capture_output=True,
-                timeout=60,
-            )
-            direct = subprocess.run(
-                [sys.executable, str(python_target)],
-                cwd=tmp_path,
-                input=envelope,
-                capture_output=True,
-                timeout=60,
-            )
-            assert wrapped.returncode == direct.returncode, python_target
-            assert wrapped.stderr == direct.stderr, python_target
-            if wrapped.stdout == direct.stdout:
-                continue
-            assert wrapped.stdout and direct.stdout, python_target
-            assert _parse_structured_stdout(wrapped.stdout) == _parse_structured_stdout(
-                direct.stdout
-            ), python_target
+def test_registered_hook_inventory_has_python_as_sole_owner(platform: str) -> None:
+    targets = _owned_python_targets(platform)
+    assert targets
+    assert all(target.suffix == ".py" and target.is_file() for target in targets)
+    assert all(not target.with_suffix(".sh").exists() for target in targets)
 
 
 @pytest.mark.parametrize("platform", ("claude", "codex"))

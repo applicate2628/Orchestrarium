@@ -35,16 +35,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.bash_runtime import resolve_bash
-
-BASH = resolve_bash()
-
 REPO_ROOT = Path(__file__).resolve().parent.parent
 MCP_HOOK = REPO_ROOT / "scripts" / "universal-hooks" / "hooks" / "check-mcp-momentum.py"
 MCP_POLICY = REPO_ROOT / "scripts" / "universal-hooks" / "scripts" / "mcp_continuity_policy.py"
 MCP_REMINDER_PY = REPO_ROOT / "scripts" / "universal-hooks" / "scripts" / "mcp-usage-reminder.py"
-MCP_REMINDER_SH = REPO_ROOT / "scripts" / "universal-hooks" / "scripts" / "mcp-usage-reminder.sh"
-TURN_ANCHOR_SH = REPO_ROOT / "scripts" / "universal-hooks" / "scripts" / "turn-anchor-reminder.sh"
 TURN_ANCHOR_PY = REPO_ROOT / "scripts" / "universal-hooks" / "scripts" / "turn-anchor-reminder.py"
 
 
@@ -90,8 +84,13 @@ class McpContinuityContract(unittest.TestCase):
                 for fragment in forbidden_restatements:
                     self.assertNotIn(fragment, text)
 
-    @unittest.skipUnless(BASH, "bash is required to compare the canonical shell payload")
-    def test_mcp_usage_reminder_py_matches_sh_text(self) -> None:
+    def test_mcp_usage_reminder_matches_policy_owned_text_and_shape(self) -> None:
+        spec = importlib.util.spec_from_file_location(
+            "mcp_continuity_policy_session_start_test", MCP_POLICY
+        )
+        assert spec is not None and spec.loader is not None
+        policy = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(policy)
         python_result = subprocess.run(
             [sys.executable, str(MCP_REMINDER_PY)],
             input="",
@@ -99,23 +98,17 @@ class McpContinuityContract(unittest.TestCase):
             text=True,
             encoding="utf-8",
         )
-        shell_result = subprocess.run(
-            [BASH, MCP_REMINDER_SH.as_posix()],
-            input="",
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-        )
         self.assertEqual(python_result.returncode, 0, python_result.stderr)
-        self.assertEqual(shell_result.returncode, 0, shell_result.stderr)
-        python_context = json.loads(python_result.stdout)["hookSpecificOutput"][
-            "additionalContext"
-        ]
-        shell_context = json.loads(shell_result.stdout)["hookSpecificOutput"][
-            "additionalContext"
-        ]
-        self.assertEqual(python_context.encode("utf-8"), shell_context.encode("utf-8"))
-        self.assertIn("CodeGraph `status -> sync -> fresh status -> repeat query`", shell_context)
+        payload = json.loads(python_result.stdout)
+        self.assertEqual(set(payload), {"hookSpecificOutput"})
+        output = payload["hookSpecificOutput"]
+        self.assertEqual(set(output), {"hookEventName", "additionalContext"})
+        self.assertEqual(output["hookEventName"], "SessionStart")
+        self.assertEqual(output["additionalContext"], policy.SESSION_START_CONTEXT)
+        self.assertIn(
+            "CodeGraph `status -> sync -> fresh status -> repeat query`",
+            output["additionalContext"],
+        )
 
 
 class TestMcpMomentumDiscrimination(unittest.TestCase):
@@ -712,10 +705,9 @@ class TestTurnAnchorEmitsValidContext(unittest.TestCase):
         self.assertIn("Never adopt $lead", context)
         self.assertIn("no provider or leaf may recursively launch another wrapper", context)
 
-    @unittest.skipUnless(BASH, "no bash on PATH; the .ps1 sibling covers Windows shells")
-    def test_sh_emits_wellformed_userpromptsubmit_context(self) -> None:
+    def test_python_emits_wellformed_userpromptsubmit_context(self) -> None:
         result = subprocess.run(
-            [BASH, TURN_ANCHOR_SH.as_posix()],
+            [sys.executable, str(TURN_ANCHOR_PY)],
             input="", capture_output=True, text=True, encoding="utf-8",
         )
         self.assertEqual(result.returncode, 0, "must fail open / exit 0")
@@ -747,33 +739,6 @@ class TestTurnAnchorEmitsValidContext(unittest.TestCase):
                     "UserPromptSubmit",
                 )
                 result.stdout.encode("ascii")
-
-    @unittest.skipUnless(BASH, "bash is required to compare the canonical shell payload")
-    def test_turn_anchor_py_matches_sh_text(self) -> None:
-        python_result = subprocess.run(
-            [sys.executable, str(TURN_ANCHOR_PY)],
-            input="",
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-        )
-        shell_result = subprocess.run(
-            [BASH, TURN_ANCHOR_SH.as_posix()],
-            input="",
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-        )
-        self.assertEqual(python_result.returncode, 0, python_result.stderr)
-        self.assertEqual(shell_result.returncode, 0, shell_result.stderr)
-        python_context = json.loads(python_result.stdout)["hookSpecificOutput"][
-            "additionalContext"
-        ]
-        shell_context = json.loads(shell_result.stdout)["hookSpecificOutput"][
-            "additionalContext"
-        ]
-        self.assertEqual(python_context.encode("utf-8"), shell_context.encode("utf-8"))
-
 
 if __name__ == "__main__":
     unittest.main()

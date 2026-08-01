@@ -557,36 +557,7 @@ def _manifest_stems(repo_root: Path, platform: str) -> set[str]:
     else:
         raise ValueError(f"hook manifest is unavailable: {manifest_path}")
 
-    if platform == "claude":
-        specs = (
-            ("scripts", "src.claude/agents/scripts", manifest.PACK_ONLY_SCRIPTS),
-            ("hooks", "src.claude/agents/hooks", manifest.PACK_ONLY_HOOKS),
-        )
-    elif platform == "codex":
-        specs = (
-            ("scripts", "src.codex/skills/lead/scripts", manifest.PACK_ONLY_SCRIPTS),
-            ("hooks", "src.codex/skills/lead/hooks", manifest.PACK_ONLY_HOOKS),
-        )
-    else:
-        raise ValueError(f"unsupported platform: {platform}")
-
-    stems: set[str] = set()
-    for subdir, rel_dir, pack_only in specs:
-        source_dir = repo_root / rel_dir
-        owned = set(manifest.canon_names(repo_root, subdir)) | set(pack_only[rel_dir])
-        for python_target in source_dir.glob("*.py"):
-            if python_target.name not in owned:
-                continue
-            if (
-                python_target.with_suffix(".ps1").is_file()
-                or python_target.with_suffix(".sh").is_file()
-            ):
-                if (
-                    python_target.stem
-                    not in manifest.NON_REGISTERED_ENTRYPOINT_STEMS
-                ):
-                    stems.add(python_target.stem)
-    return stems
+    return set(manifest.registered_hook_stems(platform))
 
 
 def _load(path: Path) -> dict[str, Any]:

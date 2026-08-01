@@ -112,6 +112,39 @@ _CLAUDE_RETIRED_PS1 = {
     "agents/hooks/check-machine-local-path.ps1": "0c9b3fb81fab87f773dcfc90d04bd1e6134e249e22824da3567a9d88d17ee0e5",
 }
 
+# Python is the sole hook and reminder implementation owner.  Upgrade cleanup
+# removes only the exact source-pack copies retired by that migration; a local
+# customization stays untouched for the operator to resolve deliberately.
+_CODEX_RETIRED_SH = {
+    "hooks/check-machine-local-path.sh": "7856238ed5fbadaf10b9587ce8ebbf28cd4333cde57b95edebb288a4da6a7a68",
+    "hooks/check-mcp-momentum.sh": "8f88b363f6c7f9df4c39d1d7d0c30b95d2540109323f1945af625552f0c3e5a4",
+    "hooks/check-no-trash-in-repo.sh": "a2f1182711477842d8ce76db7c19866b89bdc8669a1da01a56c7c8338460c0c7",
+    "hooks/check-repository-orientation.sh": "f3761535fe4558659a501979a62fc4a1435daa34d74fc41a0fb50b8aff0797e1",
+    "hooks/check-stale-relation-residue.sh": "c32e8e4fc87f008f205c24f71f3dbc84b2e0ee900ff64bf62427d9bb2f687158",
+    "scripts/agents-mode-reminder.sh": "e8b61f672d3b0563f913c166c8d3ed32bf19018423276dde8a600b40462e17e7",
+    "scripts/check-bugfix-discipline.sh": "9ab0c1a4fca2673f19ddf6b1877e95dc35a6beb6c469d7b205a9959c6d5265d9",
+    "scripts/check-git-push-gate.sh": "3bbe51e762508d5b2f7f40e2cee7f06e5c8f0a7bf680115fa0ff448c5d4d3938",
+    "scripts/check-passive-polling-stop.sh": "16e4a601db6ac62a2bfa38a3391ec434e632858f904be730782b6b7a3982ae06",
+    "scripts/check-scratch-valuables.sh": "3b1fca32c89cd68dfbbb6adea5d636ef49b5091220a689e593a6e7212616a065",
+    "scripts/mcp-usage-reminder.sh": "f3e56c8a05aafcd0dce9905b40ab042df4edf40968d6dfda46d70a38e5351d0d",
+    "scripts/turn-anchor-reminder.sh": "f0036ab9dd1fda1b9b7479f27f4585de9d5146bbd2a4bec10b4c4468f612c21e",
+}
+_CLAUDE_RETIRED_SH = {
+    "hooks/check-machine-local-path.sh": "7856238ed5fbadaf10b9587ce8ebbf28cd4333cde57b95edebb288a4da6a7a68",
+    "hooks/check-mcp-momentum.sh": "8f88b363f6c7f9df4c39d1d7d0c30b95d2540109323f1945af625552f0c3e5a4",
+    "hooks/check-no-trash-in-repo.sh": "a2f1182711477842d8ce76db7c19866b89bdc8669a1da01a56c7c8338460c0c7",
+    "hooks/check-repository-orientation.sh": "f3761535fe4558659a501979a62fc4a1435daa34d74fc41a0fb50b8aff0797e1",
+    "hooks/check-stale-relation-residue.sh": "c32e8e4fc87f008f205c24f71f3dbc84b2e0ee900ff64bf62427d9bb2f687158",
+    "hooks/check-typed-routing.sh": "eaa46aaf345be0bd4bcc89b1d3a3f961da3a20c9e18e19d3963fc29bc41bb10b",
+    "scripts/agents-mode-reminder.sh": "e70818e01d0ff38bae2b7e96e4ac501e13e90a762672bb812309689e6ecbe096",
+    "scripts/check-bugfix-discipline.sh": "9ab0c1a4fca2673f19ddf6b1877e95dc35a6beb6c469d7b205a9959c6d5265d9",
+    "scripts/check-git-push-gate.sh": "3bbe51e762508d5b2f7f40e2cee7f06e5c8f0a7bf680115fa0ff448c5d4d3938",
+    "scripts/check-passive-polling-stop.sh": "16e4a601db6ac62a2bfa38a3391ec434e632858f904be730782b6b7a3982ae06",
+    "scripts/check-scratch-valuables.sh": "3b1fca32c89cd68dfbbb6adea5d636ef49b5091220a689e593a6e7212616a065",
+    "scripts/mcp-usage-reminder.sh": "f3e56c8a05aafcd0dce9905b40ab042df4edf40968d6dfda46d70a38e5351d0d",
+    "scripts/turn-anchor-reminder.sh": "f0036ab9dd1fda1b9b7479f27f4585de9d5146bbd2a4bec10b4c4468f612c21e",
+}
+
 
 def _parser(provider: str) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=f"Install the production {provider} pack.")
@@ -122,7 +155,6 @@ def _parser(provider: str) -> argparse.ArgumentParser:
     parser.add_argument("--dry-run", "-DryRun", action="store_true")
     parser.add_argument("--allow-unsafe-target", "-AllowUnsafeTarget", action="store_true")
     parser.add_argument("--no-hypothesis-hook", "-NoHypothesisHook", action="store_true")
-    parser.add_argument("--hook-runtime", "-HookRuntime", default="python")
     return parser
 
 
@@ -636,28 +668,50 @@ def _run(arguments: list[str], cwd: Path, *, capture: bool = False) -> subproces
     )
 
 
+_HOOK_METADATA = (
+    ("check-bugfix-discipline", "scripts", "PreToolUse", "Edit|Write|NotebookEdit|apply_patch"),
+    ("check-git-push-gate", "scripts", "PreToolUse", "Bash|PowerShell"),
+    ("check-passive-polling-stop", "scripts", "Stop", None),
+    ("check-machine-local-path", "hooks", "PreToolUse", "Edit|Write|NotebookEdit|apply_patch"),
+    ("check-no-trash-in-repo", "hooks", "PreToolUse", "Edit|Write|NotebookEdit|apply_patch|Bash|PowerShell"),
+    ("check-stale-relation-residue", "hooks", "PreToolUse", "Edit|Write|NotebookEdit|apply_patch"),
+    ("check-repository-orientation", "hooks", "PreToolUse", "Edit|Write|NotebookEdit|apply_patch|Bash|PowerShell|shell_command|exec_command"),
+    ("check-mcp-momentum", "hooks", "PreToolUse", "Grep|Bash|PowerShell|shell_command|exec_command"),
+    ("mcp-usage-reminder", "scripts", "SessionStart", None),
+    ("check-typed-routing", "hooks", "PreToolUse", "Agent"),
+    ("agents-mode-reminder", "scripts", "SessionStart", None),
+    ("check-scratch-valuables", "scripts", "SessionStart", None),
+    ("turn-anchor-reminder", "scripts", "UserPromptSubmit", None),
+)
+
+
+def _universal_hook_manifest_module():
+    path = Path(__file__).with_name("universal_hooks_manifest.py")
+    spec = importlib.util.spec_from_file_location("orchestrarium_universal_hook_manifest", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"could not load universal hook manifest: {path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 def _hook_specs(provider: str, installed_root: Path):
     scripts = installed_root / "scripts"
     hooks = installed_root / "hooks"
+    membership = _universal_hook_manifest_module().registered_hook_stems(provider)
+    metadata = {stem: (directory, event, matcher) for stem, directory, event, matcher in _HOOK_METADATA}
+    missing = sorted(membership.difference(metadata))
+    if missing:
+        raise RuntimeError("registered hook metadata is missing for: " + ", ".join(missing))
+    roots = {"scripts": scripts, "hooks": hooks}
     specs = [
-        ("check-bugfix-discipline", scripts / "check-bugfix-discipline.py", "PreToolUse", "Edit|Write|NotebookEdit|apply_patch"),
-        ("check-git-push-gate", scripts / "check-git-push-gate.py", "PreToolUse", "Bash|PowerShell"),
-        ("check-passive-polling-stop", scripts / "check-passive-polling-stop.py", "Stop", None),
-        ("check-machine-local-path", hooks / "check-machine-local-path.py", "PreToolUse", "Edit|Write|NotebookEdit|apply_patch"),
-        ("check-no-trash-in-repo", hooks / "check-no-trash-in-repo.py", "PreToolUse", "Edit|Write|NotebookEdit|apply_patch|Bash|PowerShell"),
-        ("check-stale-relation-residue", hooks / "check-stale-relation-residue.py", "PreToolUse", "Edit|Write|NotebookEdit|apply_patch"),
-        ("check-repository-orientation", hooks / "check-repository-orientation.py", "PreToolUse", "Edit|Write|NotebookEdit|apply_patch|Bash|PowerShell|shell_command|exec_command"),
-        ("check-mcp-momentum", hooks / "check-mcp-momentum.py", "PreToolUse", "Grep|Bash|PowerShell|shell_command|exec_command"),
-        ("mcp-usage-reminder", scripts / "mcp-usage-reminder.py", "SessionStart", None),
-        ("agents-mode-reminder", scripts / "agents-mode-reminder.py", "SessionStart", None),
-        ("check-scratch-valuables", scripts / "check-scratch-valuables.py", "SessionStart", None),
-        ("turn-anchor-reminder", scripts / "turn-anchor-reminder.py", "UserPromptSubmit", None),
+        (stem, roots[directory] / f"{stem}.py", event, matcher)
+        for stem, directory, event, matcher in _HOOK_METADATA
+        if stem in membership
     ]
-    if provider == "claude":
-        specs.insert(
-            9,
-            ("check-typed-routing", hooks / "check-typed-routing.py", "PreToolUse", "Agent"),
-        )
+    if len(specs) != len(membership):
+        raise RuntimeError("registered hook membership did not resolve uniquely")
     return specs
 
 
@@ -694,8 +748,6 @@ def _install_hooks(
         provider,
         "--host-os",
         host,
-        "--hook-runtime",
-        "python",
     ]
     preflight = _run(
         [
@@ -819,26 +871,7 @@ def _install_hooks(
     if health.returncode:
         raise RuntimeError("hook target verification failed")
     _checkpoint(root, installer, registration, provider, mode, "verify")
-    reclaim = _run(
-        [
-            str(installer),
-            "--target",
-            str(registration),
-            "--platform",
-            provider,
-            "--host-os",
-            host,
-            "--reclaim-root",
-            str(installed_root),
-            "--repo-root",
-            str(root),
-            "--test-install-scope",
-            mode,
-        ],
-        root,
-    )
-    if reclaim.returncode:
-        raise RuntimeError("hook wrapper reclaim failed")
+    _checkpoint(root, installer, registration, provider, mode, "reclaim")
     if provider == "codex":
         installed_health = _run(
             [
@@ -938,9 +971,6 @@ def _verify_files(
 
 def install(provider: str, argv: list[str] | None = None) -> int:
     args = _parser(provider).parse_args(argv)
-    if args.hook_runtime != "python":
-        print("FAIL: production hooks support only --hook-runtime python.", file=sys.stderr)
-        return 2
     script = Path(__file__)
     root = _repo_root(script)
     source = root / f"src.{provider}"
@@ -1057,9 +1087,9 @@ def install(provider: str, argv: list[str] | None = None) -> int:
             _reclaim_retired(
                 target if provider == "claude" else agents_root,
                 (
-                    _CLAUDE_RETIRED_PS1
+                    {**_CLAUDE_RETIRED_PS1, **_CLAUDE_RETIRED_SH}
                     if provider == "claude"
-                    else _CODEX_RETIRED_PS1
+                    else {**_CODEX_RETIRED_PS1, **_CODEX_RETIRED_SH}
                 ),
                 args.dry_run,
             )

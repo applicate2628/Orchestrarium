@@ -33,7 +33,10 @@ import filecmp
 from pathlib import Path
 from typing import NamedTuple
 
-HOOK_EXTS = (".py", ".sh")
+# Registered hooks and the canonical/mirrored hook implementation are Python.
+# Public POSIX launchers are catalogued by the production-entrypoint contract;
+# they are deliberately not part of this mirror set.
+HOOK_EXTS = (".py",)
 
 # Python-owned production entrypoints that intentionally retain a thin POSIX
 # launcher but are not registered runtime hooks.  Hook health and wrapper
@@ -58,21 +61,21 @@ PACK_ONLY_SCRIPTS = {
         # .agents-mode.yaml read-order (./.claude/, ~/.claude/) and speaks
         # Agent-tool dispatch idiom; the codex twin walks ./.agents/ + ~/.codex/
         # and speaks role/skill-activation idiom — intentionally different.
-        "agents-mode-reminder.sh", "agents-mode-reminder.py",
+        "agents-mode-reminder.py",
         # Claude-line provider transport wrappers (no codex/canon analog).
-        "invoke-claude-api.sh", "invoke-claude-api.py",
-        "invoke-claude-prompt.sh", "invoke-claude-prompt.py",
-        "invoke-codex-prompt.sh", "invoke-codex-prompt.py",
+        "invoke-claude-api.py",
+        "invoke-claude-prompt.py",
+        "invoke-codex-prompt.py",
         "provider_prompt.py",
         # Claude-line active watcher emitted by the Codex dispatch wrappers;
         # it is provider-specific and has no Codex/canon mirror.
-        "await-codex-dispatch.sh", "await-codex-dispatch.py",
+        "await-codex-dispatch.py",
         # Per-pack validator (content differs per pack by design).
-        "validate-skill-pack.sh", "validate-skill-pack.py",
+        "validate-skill-pack.py",
     }),
     "src.codex/skills/lead/scripts": frozenset({
-        "agents-mode-reminder.sh", "agents-mode-reminder.py",  # see above
-        "validate-skill-pack.sh", "validate-skill-pack.py",
+        "agents-mode-reminder.py",  # see above
+        "validate-skill-pack.py",
     }),
 }
 
@@ -81,7 +84,7 @@ PACK_ONLY_HOOKS = {
         # Claude-only typed-routing audit: keys on the subagent-dispatch tool
         # (captured tool_name "Agent"). Codex CLI exposes no analogous
         # subagent-dispatch tool, so there is no Codex/canon mirror.
-        "check-typed-routing.py", "check-typed-routing.sh",
+        "check-typed-routing.py",
         # Dispatch-time invariant registry (round-depth observer,
         # work-items/active/2026-07-26-registry-bug-sweep/
         # design-round-cap-observer.md), imported by check-typed-routing.py
@@ -92,6 +95,42 @@ PACK_ONLY_HOOKS = {
         "dispatch_sentinels.py",
     }),
     "src.codex/skills/lead/hooks": frozenset(),
+}
+
+# Single source of truth for the Python targets that are registered as hooks.
+# Canon files such as hook_common.py and check-publication-safety.py are support
+# or manual-command surfaces, not hook registrations. Provider-only files are
+# similarly registered only when this mapping names them.
+REGISTERED_HOOK_STEMS_BY_PLATFORM = {
+    "claude": frozenset({
+        "agents-mode-reminder",
+        "check-bugfix-discipline",
+        "check-git-push-gate",
+        "check-machine-local-path",
+        "check-mcp-momentum",
+        "check-no-trash-in-repo",
+        "check-passive-polling-stop",
+        "check-repository-orientation",
+        "check-scratch-valuables",
+        "check-stale-relation-residue",
+        "check-typed-routing",
+        "mcp-usage-reminder",
+        "turn-anchor-reminder",
+    }),
+    "codex": frozenset({
+        "agents-mode-reminder",
+        "check-bugfix-discipline",
+        "check-git-push-gate",
+        "check-machine-local-path",
+        "check-mcp-momentum",
+        "check-no-trash-in-repo",
+        "check-passive-polling-stop",
+        "check-repository-orientation",
+        "check-scratch-valuables",
+        "check-stale-relation-residue",
+        "mcp-usage-reminder",
+        "turn-anchor-reminder",
+    }),
 }
 
 MIRROR_SCRIPT_DIRS = ("src.claude/agents/scripts", "src.codex/skills/lead/scripts")
@@ -111,6 +150,14 @@ def canon_names(root: Path, subdir: str) -> tuple[str, ...]:
         p.name for p in d.iterdir()
         if p.is_file() and p.suffix in HOOK_EXTS
     ))
+
+
+def registered_hook_stems(platform: str) -> frozenset[str]:
+    """Return the complete hook-registration set for one production provider."""
+    try:
+        return REGISTERED_HOOK_STEMS_BY_PLATFORM[platform]
+    except KeyError as exc:
+        raise ValueError(f"unsupported platform: {platform}") from exc
 
 
 # ---------------------------------------------------------------------------

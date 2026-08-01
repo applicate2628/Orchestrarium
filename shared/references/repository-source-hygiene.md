@@ -17,7 +17,13 @@ An entity type is the **kind of work the file does**, classified by:
 
 - **Input/output contract or side effects.** What the file consumes (stdin envelope / argv / config file / file-system state) and produces (structured-deny JSON / exit code / written file / git ref / log entry). Two files with the same contract are the same entity type; two files with different contracts are not.
 
-Platform variants (`.sh`/`.ps1`/`.py`) of the same command with the same contract count as **one entity**, not multiple.
+Language variants of the same command with the same contract count as **one entity**, not multiple. In this monorepo's Codex/Claude production surfaces, Python owns executable-script logic: a `.py` sibling holds all executable decision logic. A `.sh` sibling is permitted only as a thin unconditional launcher that locates Python and `exec`s that named `.py` owner while forwarding stdin, arguments, and exit status. It must not parse inputs, read configuration, implement decisions, or be retained as a rollback copy. `.ps1` implementations and rollback copies are not retained in those production surfaces. This is an Orchestrarium repository policy, not a rule installed into arbitrary target repositories; deprecated Gemini/Qwen example packs remain outside its scope until their separately tracked distribution decision.
+
+## Executable-script ownership (Orchestrarium only)
+
+The owner boundary is **implementation logic**, not filename extension. Python owns the logic so Windows and POSIX execute one maintained decision path. A launcher may do only the platform-neutral mechanics needed to find and `exec` its Python sibling; it cannot acquire fallback policy, duplicate validation, a configuration parser, or any separate behavior.
+
+When an admitted maintenance change finds an independent `.sh` or `.ps1` implementation in a Codex/Claude production surface, it migrates that behavior into the existing Python owner or deletes the dead file in the same change. Do not preserve the old file as a rollback profile: version control already preserves recoverable source history. This rule intentionally does not authorize a mechanical mass rewrite of unrelated files and does not apply to the deprecated Gemini/Qwen example surfaces.
 
 ## This repo's grandfathered exceptions
 

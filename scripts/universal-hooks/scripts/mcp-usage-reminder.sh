@@ -1,13 +1,13 @@
-#!/usr/bin/env bash
-# SessionStart hook -- re-injects an MCP / tools usage reminder into the model's context
-# at every session start AND after every compaction. Registered with NO matcher, so it
-# fires on every SessionStart source (startup / resume / clear / compact). Structured
-# SessionStart JSON adds the reminder as model context on both Claude Code and Codex.
-#
-# Generic ON PURPOSE: it names NO specific MCP server (a hardcoded machine-local list would
-# be wrong to ship). The agent discovers the actual connected servers via tool discovery.
-# Fail-open: never blocks; always exits 0.
-cat <<'EOF'
-{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"[MCP / tools reminder - re-shown at session start and after every compaction]\nMCP servers may be connected in this environment. For codebase, architecture, API/docs, search, browser, debugger, profiler, or repository-understanding tasks, make MCP/tool-discovery an explicit checkpoint before falling back to ad-hoc shell reads.\nMCP tools load on demand: use the platform's tool discovery (e.g. ToolSearch) to see the connected servers and load a tool's schema, then call the relevant tool. If a relevant MCP is unavailable or broken, say so briefly instead of silently substituting a weaker path.\nCONNECTED but uninitialized is not unavailable: do NOT skip a connected MCP reporting \"not initialized\", \"no index\", \"empty\", or \"no data yet\". Many servers require or build their own index/state on first use — when they report no index, INITIALIZE them per the server's own instructions (e.g. run a code-graph server's init / check its status; codegraph builds its initial index via `codegraph init`, then a file-watcher keeps it fresh) and use or await the result — never silently substitute ad-hoc shell/grep. Only a genuinely absent server (not connected, not installed, or absent from tool discovery) may be skipped with an explanation.\nWhen mcpMode: force is active, relevant MCP use is a standing instruction. Under mcpMode: auto, still consider MCP first when it fits the task and record why it was skipped if the task explicitly asked for MCP.\nFor a connected stateful or indexed MCP, repository/project/branch/worktree/indexed-input changes invalidate any earlier answer: use that MCP's own status/freshness probe; when it reports stale or pending, run its documented sync/update/reindex, confirm freshness again, then repeat the intended query. Example: CodeGraph `status -> sync -> fresh status -> repeat query`. If refresh fails, report it explicitly and do not present stale output as current. Stateless or live MCPs need no refresh.\nHigh-value categories when present: semantic code navigation and code-graph, Repomix or repository packers, language-server / LSP, current library / framework / API docs (use these instead of answering API questions from memory), debuggers and profilers, browser automation, memory, search, and fetch utilities.\nThis STILL APPLIES AFTER COMPACTION - do not forget MCP just because the context was summarized.\nSUBAGENTS: dispatched agents inherit the runtime tool surface. In the dispatch prompt, explicitly allow relevant MCP discovery/use within the assigned role, scope, and safety limits; do not accidentally hide MCP availability, but keep any deliberate tool limits honest."}}
-EOF
-exit 0
+#!/usr/bin/env sh
+set -eu
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+if command -v python3 >/dev/null 2>&1; then
+  PYTHON=python3
+elif command -v python >/dev/null 2>&1; then
+  PYTHON=python
+else
+  printf '%s\n' 'FAIL: Python is required to run mcp-usage-reminder.py.' >&2
+  exit 127
+fi
+exec "$PYTHON" "$SCRIPT_DIR/mcp-usage-reminder.py" "$@"

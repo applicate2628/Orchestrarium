@@ -171,17 +171,9 @@ HIGH-severity hardening — `work-items/bugs/2026-07-26-push-gate-new-paths-
 fail-open-because-the-wrapper-discards-the-exit-code.md`, found by
 `$security-reviewer` (fable)). Before this hardening, `main()`'s only
 `try/except` covered `parse_envelope` alone; every step from tool-input
-extraction through the scan-evidence correlation loop ran unguarded. Both
-Python owner (`check-git-push-gate.py`) and its POSIX launcher
-unconditionally exit 0 regardless of what the python helper does internally
-— that is the deliberate fail-open contract for a hook that CANNOT decide
-(missing transcript, malformed envelope, no command). It is NOT a defensible
-outcome for a hook that CRASHED WHILE DECIDING: an uncaught exception in that
-unguarded code printed nothing to stdout and exited non-zero, the wrapper
-discarded that exit code and exited 0 anyway, so the model-facing result was
-a SILENT ALLOW — indistinguishable from a legitimate pass to everything
-downstream, the identical failure-indistinguishable-from-success shape this
-same review batch kept finding elsewhere. The fix moves every step from
+extraction through the scan-evidence correlation loop ran unguarded. An
+uncaught exception printed no deny payload, making a crash indistinguishable
+from a legitimate allow to the host. The Python owner now moves every step from
 tool-input extraction through the scan-evidence loop into `evaluate_push`,
 called from `main()` inside one `try/except Exception` that treats a raised
 exception as "fall through to the deny payload", never as "return 0
@@ -1064,12 +1056,9 @@ def evaluate_push(envelope: dict) -> bool:
     bugs/2026-07-26-push-gate-new-paths-fail-open-because-the-wrapper-
     discards-the-exit-code.md`; see the module docstring's "A CRASH WHILE
     DECIDING" note for the full defect this closes). Before this split, an
-    uncaught exception ANYWHERE in this logic propagated out of `main()`
-    entirely: both wrapper scripts (`check-git-push-gate.sh`,
-    retired PowerShell launcher unconditionally discarded the Python process's
-    exit code and exit 0 regardless, so a crash meant nothing was ever
-    printed to stdout — no deny payload, nothing — and the model-facing
-    result was a SILENT ALLOW, indistinguishable from a legitimate pass.
+    uncaught exception ANYWHERE in this logic propagated out of `main()` and
+    produced no deny payload, so the host could not distinguish a crash from a
+    legitimate allow.
     Fail-open is the deliberate, documented posture for a hook that CANNOT
     decide (a missing transcript, no command, a dry run); it is not
     defensible for a hook that CRASHED WHILE DECIDING, because those two are

@@ -1,7 +1,7 @@
 """Python-owned SessionStart reminders emit the structured host context.
 
-The retained `.sh` entrypoints are POSIX launchers; the Python files own the
-payload and fail-open behavior on every host.
+Hook and reminder runtime behavior is Python-only and registered directly.
+Retained POSIX launchers are limited to non-hook public commands.
 """
 
 from __future__ import annotations

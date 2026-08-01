@@ -118,8 +118,6 @@ def _run_helper(
             provider,
             "--host-os",
             "windows" if os.name == "nt" else "posix",
-            "--hook-runtime",
-            "python",
             *arguments,
         ],
         cwd=ROOT,
@@ -194,15 +192,25 @@ class TestWorkItemsLifecycleInstallParity(unittest.TestCase):
                     provider, source_root
                 )
             }
+            self.assertTrue(
+                all(
+                    script.suffix == ".py"
+                    for _marker, script, _event, _matcher in installer._hook_specs(
+                        provider, source_root
+                    )
+                ),
+                "production hook registrations must target Python directly",
+            )
             self.assertEqual(markers, EXPECTED_MARKERS[provider])
             self.assertEqual(len(markers), total_count)
             self.assertEqual(len(markers - REMINDER_MARKERS), structural_count)
 
         install = (ROOT / "INSTALL.md").read_text(encoding="utf-8")
-        self.assertIn("26 wrappers from 13 owned stems", install)
-        self.assertIn("24 wrappers from 12 owned stems", install)
-        self.assertNotIn(
-            "Then run Codex, checking that its dry run names exactly 26 wrappers",
+        self.assertIn("direct-Python hook runtime", install)
+        self.assertNotIn("--hook-runtime wrapper", install)
+        self.assertNotIn("wrappers from", install)
+        self.assertIn(
+            "retired-file manifest removes only exact last-pack-owned hook shell or PowerShell files",
             install,
         )
 

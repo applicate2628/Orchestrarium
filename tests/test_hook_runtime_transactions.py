@@ -221,51 +221,8 @@ def _checkpoint(
     )
 
 
-def _seed_reclaim_fixture(
-    project: Path, case: Case
-) -> tuple[Path, Path, tuple[Path, ...]]:
-    installed = project / case.installed_root
-    provider_root = ROOT / (
-        "src.codex/skills/lead"
-        if case.provider == "codex"
-        else "src.claude/agents"
-    )
-    candidates: list[Path] = []
-    for source in hook_installer.owned_hook_wrapper_sources(ROOT, case.provider):
-        target = installed / source.relative_to(provider_root)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, target)
-        shutil.copy2(source.with_suffix(".py"), target.with_suffix(".py"))
-        candidates.append(target)
-
-    entries = []
-    for path in candidates:
-        if case.provider == "claude":
-            hook = {
-                "type": "command",
-                "command": str(Path(sys.executable).resolve()),
-                "args": [str(path.with_suffix(".py").resolve())],
-            }
-        else:
-            hook = {
-                "type": "command",
-                "command": (
-                    f"{Path(sys.executable).resolve()} "
-                    f"{path.with_suffix('.py').resolve()}"
-                ),
-            }
-        entries.append({"hooks": [hook]})
-    config = project / case.config
-    config.parent.mkdir(parents=True, exist_ok=True)
-    config.write_text(
-        json.dumps({"hooks": {"PreToolUse": entries}}, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    return installed, config, tuple(candidates)
-
-
 @pytest.mark.parametrize("case", CASES, ids=lambda item: item.provider)
-def test_python_install_registers_direct_python_and_reclaims_shell_wrappers(
+def test_python_install_registers_direct_python_without_shell_hook_owners(
     case: Case,
 ) -> None:
     SCRATCH.mkdir(exist_ok=True)
@@ -286,19 +243,6 @@ def test_python_install_registers_direct_python_and_reclaims_shell_wrappers(
             for command in commands
         )
         installed = project / case.installed_root
-        source_wrappers = hook_installer.owned_hook_wrapper_sources(
-            ROOT, case.provider
-        )
-        provider_root = ROOT / (
-            "src.codex/skills/lead"
-            if case.provider == "codex"
-            else "src.claude/agents"
-        )
-        hook_shells = [
-            installed / path.relative_to(provider_root) for path in source_wrappers
-        ]
-        assert all(not path.exists() for path in hook_shells)
-
         health = subprocess.run(
             [
                 sys.executable,
@@ -776,49 +720,6 @@ def test_transaction_abort_rejects_junction_escape() -> None:
     assert result.returncode not in (0, ABORT_EXIT)
     assert "repository .scratch" in output
     assert "TEST-ABORT:" not in output
-
-
-@pytest.mark.parametrize("case", CASES, ids=lambda item: item.provider)
-def test_reclaim_checkpoint_dominates_every_unlink(case: Case) -> None:
-    SCRATCH.mkdir(exist_ok=True)
-    with tempfile.TemporaryDirectory(
-        prefix=f"reclaim-checkpoint-{case.provider}-", dir=SCRATCH
-    ) as td:
-        project = Path(td)
-        installed, config, candidates = _seed_reclaim_fixture(project, case)
-        before = _tree_snapshot(installed)
-        env = os.environ.copy()
-        env[ABORT_ENV] = "reclaim"
-        env["PYTEST_CURRENT_TEST"] = "controlled-reclaim-checkpoint"
-        result = subprocess.run(
-            [
-                sys.executable,
-                str(HELPER_PATH),
-                "--target",
-                str(config),
-                "--platform",
-                case.provider,
-                "--host-os",
-                "windows" if os.name == "nt" else "posix",
-                "--repo-root",
-                str(ROOT),
-                "--reclaim-root",
-                str(installed),
-                "--test-install-scope",
-                "target",
-            ],
-            cwd=ROOT,
-            env=env,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            timeout=60,
-        )
-        output = result.stdout + result.stderr
-        assert result.returncode == ABORT_EXIT, output
-        assert "TEST-ABORT:" in output
-        assert _tree_snapshot(installed) == before
-        assert all(path.is_file() for path in candidates)
 
 
 def test_transaction_abort_policy_has_one_structural_owner() -> None:

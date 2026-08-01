@@ -12,13 +12,13 @@ Supported targets:
   --platform claude   →  Claude Code settings.json (e.g. ~/.claude/settings.json)
   --platform codex    →  Codex hooks.json (e.g. ~/.codex/hooks.json)
   --platform generic  →  Provider-neutral exec-form JSON for compatible runtimes
-                         or approved wrapper-driven hook wiring.
+                         using the provider's hook schema.
 
 Cross-platform behavior:
   Claude/generic use exec form; Codex uses shell form. The default runtime
   profile invokes the installed Python target directly through the absolute
   interpreter path reported by the installer process's sys.executable.
-  The wrapper profile preserves the prior bash/PowerShell entries for rollback.
+  Registration always invokes the selected Python hook directly.
 
 Removal:
   --remove  Removes ALL of our hook entries (handles duplicates from earlier
@@ -65,7 +65,6 @@ DEFAULT_SCRIPT_MARKER = "check-bugfix-discipline"
 TOOL_MATCHER_REGEX = "Edit|Write|NotebookEdit|apply_patch"
 
 WINDOWS_UNQUOTED_PATH_RE = re.compile(r"^[A-Za-z0-9_:\\./-]+$")
-WRAPPER_EXECUTABLES = frozenset({"bash", "powershell", "powershell.exe", "pwsh", "pwsh.exe"})
 
 
 class TestTransactionAbort(RuntimeError):
@@ -170,16 +169,6 @@ class HookTarget:
     args: tuple[str, ...] = ()
 
 
-def powershell_single_quote(value: str) -> str:
-    """Return a PowerShell single-quoted literal for a shell command string.
-
-    PowerShell single-quoted strings escape an embedded apostrophe by doubling it.
-    Codex hook entries are command strings, so the script path must be quoted in
-    the target shell's syntax instead of treated as a pre-split argv element.
-    """
-    return "'" + value.replace("'", "''") + "'"
-
-
 def _absolute_file(path_value: str, label: str) -> Path:
     path = Path(path_value).expanduser()
     if not path.is_absolute():
@@ -213,9 +202,7 @@ def _codex_windows_command_tokens(target: HookTarget) -> HookTarget:
     reinstall reproduce the stored `trusted_hash` instead of re-keying all 12
     entries and raising a blocking review modal.
 
-    Applies to the python and native profiles only. The wrapper profile must
-    keep reproducing the historical bytes so the documented rollback stays
-    modal-free too.
+    The direct-Python registration is the only supported hook command shape.
     """
     return HookTarget(
         PureWindowsPath(target.executable).as_posix(),
@@ -235,74 +222,27 @@ def _validate_windows_unquoted_tokens(target: HookTarget) -> None:
 def resolve_hook_target(
     script_path: str,
     host_os: str,
-    hook_runtime: str,
     platform: str,
     *,
     python_executable: str | None = None,
 ) -> HookTarget:
-    """Resolve and validate the one stage-dependent hook process target.
-
-    This is the only owner of wrapper/python/native selection. Serializers
-    consume HookTarget without knowing which profile produced it.
-    """
+    """Resolve and validate the direct-Python hook process target."""
     requested_script = Path(script_path).expanduser()
     if not requested_script.is_absolute():
         raise ValueError(f"hook script path must be absolute: {requested_script}")
 
-    if hook_runtime == "wrapper":
-        wrapper_path = requested_script.with_suffix(".ps1" if host_os == "windows" else ".sh")
-        _absolute_file(str(wrapper_path), "hook wrapper")
-        if host_os == "windows":
-            if platform == "codex":
-                target = HookTarget(
-                    "powershell.exe",
-                    (
-                        "-NoProfile",
-                        "-ExecutionPolicy",
-                        "Bypass",
-                        "-File",
-                        powershell_single_quote(str(wrapper_path)),
-                    ),
-                )
-            else:
-                target = HookTarget(
-                    "powershell",
-                    (
-                        "-NoProfile",
-                        "-ExecutionPolicy",
-                        "Bypass",
-                        "-File",
-                        str(wrapper_path),
-                    ),
-                )
-        else:
-            target = HookTarget("bash", (str(wrapper_path),))
-        return target
-
-    if hook_runtime == "python":
-        executable = _validate_spawnable_executable(
-            python_executable if python_executable is not None else sys.executable,
-            host_os,
-        )
-        script = _absolute_file(str(requested_script), "hook Python target")
-        if script.suffix.lower() != ".py":
-            raise ValueError(f"Python hook target must end in .py: {script}")
-        target = HookTarget(str(executable), (str(script),))
-        if platform == "codex" and host_os == "windows":
-            target = _codex_windows_command_tokens(target)
-            _validate_windows_unquoted_tokens(target)
-        return target
-
-    if hook_runtime == "native":
-        native_path = requested_script.with_suffix(".exe" if host_os == "windows" else "")
-        executable = _validate_spawnable_executable(str(native_path), host_os)
-        target = HookTarget(str(executable), ())
-        if platform == "codex" and host_os == "windows":
-            target = _codex_windows_command_tokens(target)
-            _validate_windows_unquoted_tokens(target)
-        return target
-
-    raise ValueError(f"unsupported hook runtime: {hook_runtime}")
+    executable = _validate_spawnable_executable(
+        python_executable if python_executable is not None else sys.executable,
+        host_os,
+    )
+    script = _absolute_file(str(requested_script), "hook Python target")
+    if script.suffix.lower() != ".py":
+        raise ValueError(f"Python hook target must end in .py: {script}")
+    target = HookTarget(str(executable), (str(script),))
+    if platform == "codex" and host_os == "windows":
+        target = _codex_windows_command_tokens(target)
+        _validate_windows_unquoted_tokens(target)
+    return target
 
 
 def _with_event_matcher(
@@ -425,102 +365,6 @@ def find_our_entry_indices(hook_event_list: list[Any], script_marker: str) -> li
     return indices
 
 
-def _hook_source_dirs(platform: str) -> tuple[tuple[str, str], ...]:
-    if platform == "claude":
-        return (
-            ("scripts", "src.claude/agents/scripts"),
-            ("hooks", "src.claude/agents/hooks"),
-        )
-    if platform == "codex":
-        return (
-            ("scripts", "src.codex/skills/lead/scripts"),
-            ("hooks", "src.codex/skills/lead/hooks"),
-        )
-    raise ValueError(f"reclaim is unsupported for platform: {platform}")
-
-
-def owned_hook_wrapper_sources(
-    repo_root: Path,
-    platform: str,
-) -> tuple[Path, ...]:
-    """Return source wrappers satisfying both accepted ownership conditions."""
-    scripts_dir = Path(__file__).resolve().parent
-    if str(scripts_dir) not in sys.path:
-        sys.path.insert(0, str(scripts_dir))
-    import universal_hooks_manifest as manifest
-
-    candidates: list[Path] = []
-    for subdir, source_rel in _hook_source_dirs(platform):
-        source_dir = repo_root / source_rel
-        pack_only_owner = (
-            manifest.PACK_ONLY_SCRIPTS
-            if subdir == "scripts"
-            else manifest.PACK_ONLY_HOOKS
-        )
-        owned_names = set(manifest.canon_names(repo_root, subdir))
-        owned_names.update(pack_only_owner[source_rel])
-        for extension in (".ps1", ".sh"):
-            for wrapper in sorted(source_dir.glob(f"*{extension}")):
-                if wrapper.name not in owned_names:
-                    continue
-                if wrapper.stem in manifest.NON_REGISTERED_ENTRYPOINT_STEMS:
-                    continue
-                if not wrapper.with_suffix(".py").is_file():
-                    continue
-                candidates.append(wrapper)
-    return tuple(candidates)
-
-
-def profile_verification_exclusions(
-    repo_root: Path,
-    platform: str,
-    hook_runtime: str,
-) -> tuple[str, ...]:
-    """Return provider-source-relative files intentionally absent by profile.
-
-    This is the single owner used by all four installers' post-reclaim source
-    verification. The wrapper profile requires every shipped wrapper. The
-    Python profile permits only the same two-condition wrapper inventory that
-    reclaim owns to be absent.
-    """
-    if hook_runtime != "python":
-        return ()
-    provider_root = repo_root / ("src.claude" if platform == "claude" else "src.codex")
-    return tuple(
-        sorted(
-            wrapper.relative_to(provider_root).as_posix()
-            for wrapper in owned_hook_wrapper_sources(repo_root, platform)
-        )
-    )
-
-
-def reclaimable_hook_wrappers(
-    repo_root: Path,
-    installed_root: Path,
-    platform: str,
-) -> tuple[Path, ...]:
-    """Return installed wrappers satisfying both accepted ownership conditions."""
-    provider_root = repo_root / ("src.claude" if platform == "claude" else "src.codex")
-    candidates: list[Path] = []
-    for wrapper in owned_hook_wrapper_sources(repo_root, platform):
-        source_relative = wrapper.relative_to(provider_root)
-        if platform == "claude":
-            installed_relative = source_relative.relative_to("agents")
-        else:
-            installed_relative = source_relative.relative_to("skills/lead")
-        installed = installed_root / installed_relative
-        if installed.is_file():
-            candidates.append(installed)
-    return tuple(candidates)
-
-
-def _target_uses_wrapper(target: HookTarget) -> bool:
-    executable_name = Path(target.executable).name.lower()
-    if executable_name in WRAPPER_EXECUTABLES:
-        return True
-    return any(Path(arg.strip("'\"")).suffix.lower() in {".ps1", ".sh"} for arg in target.args)
-
-
 def _iter_command_hooks(data: dict[str, Any]) -> list[dict[str, Any]]:
     hooks = data.get("hooks", {})
     if not isinstance(hooks, dict):
@@ -537,77 +381,6 @@ def _iter_command_hooks(data: dict[str, Any]) -> list[dict[str, Any]]:
                 continue
             result.extend(command for command in commands if isinstance(command, dict))
     return result
-
-
-def _registration_wrapper_state(
-    data: dict[str, Any],
-    expected_stems: set[str],
-) -> bool:
-    found: set[str] = set()
-    wrapper_found = False
-    for hook in _iter_command_hooks(data):
-        for stem in expected_stems:
-            if _hook_contains_marker(hook, stem):
-                found.add(stem)
-                command = hook.get("command", "")
-                if isinstance(command, str):
-                    if "args" in hook:
-                        args = hook["args"]
-                        if not isinstance(args, list) or not all(
-                            isinstance(arg, str) for arg in args
-                        ):
-                            raise ValueError(
-                                f"registered hook args are malformed for {stem}"
-                            )
-                        wrapper_found = wrapper_found or _target_uses_wrapper(
-                            HookTarget(command, tuple(args))
-                        )
-                    else:
-                        stripped = command.strip()
-                        first = stripped.split(maxsplit=1)[0].strip("'\"") if stripped else ""
-                        wrapper_found = wrapper_found or (
-                            Path(first).name.lower() in WRAPPER_EXECUTABLES
-                            or bool(
-                                re.search(
-                                    r"(?i)\.(?:ps1|sh)(?:['\"]?\s|$)",
-                                    stripped,
-                                )
-                            )
-                        )
-                break
-    missing = sorted(expected_stems - found)
-    if missing:
-        raise ValueError(
-            "registered hook inventory is incomplete; refusing reclaim: "
-            + ", ".join(missing)
-        )
-    return wrapper_found
-
-
-def reclaim_stale_hook_wrappers(
-    *,
-    repo_root: Path,
-    installed_root: Path,
-    platform: str,
-    registration_data: dict[str, Any],
-    dry_run: bool,
-    abort_policy: TestAbortPolicy = TestAbortPolicy(
-        requested_stage=None,
-        target_path=None,
-    ),
-) -> tuple[Path, ...]:
-    """Reclaim last, only after direct registrations are present and verified."""
-    candidates = reclaimable_hook_wrappers(repo_root, installed_root, platform)
-    expected_stems = {path.stem for path in candidates}
-    if not expected_stems:
-        return ()
-    if _registration_wrapper_state(registration_data, expected_stems):
-        return ()
-    abort_policy.checkpoint("reclaim")
-    for candidate in candidates:
-        if not dry_run:
-            candidate.unlink()
-    return candidates
 
 
 def load_existing(target: Path) -> dict[str, Any]:
@@ -740,19 +513,13 @@ def main() -> int:
     )
     parser.add_argument(
         "--script-path",
-        help="Absolute installed .py hook target; wrapper/native paths are resolved from its stem",
+        help="Absolute installed .py hook target",
     )
     parser.add_argument(
         "--host-os",
         choices=("posix", "windows"),
         default="posix",
         help="Host OS class used for target validation and Codex command serialization",
-    )
-    parser.add_argument(
-        "--hook-runtime",
-        choices=("wrapper", "python", "native"),
-        default="python",
-        help="Hook runtime profile (default: python; wrapper is rollback; native is reserved)",
     )
     parser.add_argument(
         "--hook-event",
@@ -786,22 +553,8 @@ def main() -> int:
         help="Resolve and validate the selected target without reading or writing registration",
     )
     parser.add_argument(
-        "--reclaim-root",
-        help="Installed provider root containing scripts/ and hooks/ to reclaim after verification",
-    )
-    parser.add_argument(
         "--repo-root",
-        help="Repository root used to derive manifest ownership for reclaim",
-    )
-    parser.add_argument(
-        "--preview-reclaim",
-        action="store_true",
-        help="Print the gated reclaim set without reading or mutating registration",
-    )
-    parser.add_argument(
-        "--print-verification-exclusions",
-        action="store_true",
-        help="Print provider-source-relative files intentionally absent after reclaim",
+        help="Repository root required only by transaction-test actions",
     )
     parser.add_argument(
         "--dry-run",
@@ -815,7 +568,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--test-transaction-checkpoint",
-        choices=TEST_TRANSACTION_STAGES[:-1],
+        choices=TEST_TRANSACTION_STAGES,
         help=argparse.SUPPRESS,
     )
     parser.add_argument(
@@ -856,71 +609,6 @@ def main() -> int:
                 abort_policy.checkpoint(args.test_transaction_checkpoint)
             return 0
 
-        if args.print_verification_exclusions:
-            if not args.repo_root:
-                raise ValueError(
-                    "--repo-root is required with --print-verification-exclusions"
-                )
-            for relative in profile_verification_exclusions(
-                Path(args.repo_root).expanduser().resolve(),
-                args.platform,
-                args.hook_runtime,
-            ):
-                sys.stdout.write(relative + "\n")
-            return 0
-
-        if args.reclaim_root:
-            if not args.repo_root:
-                raise ValueError("--repo-root is required with --reclaim-root")
-            if not args.test_install_scope:
-                raise ValueError("--test-install-scope is required with --reclaim-root")
-            repo_root = Path(args.repo_root).expanduser().resolve()
-            installed_root = Path(args.reclaim_root).expanduser()
-            install_scope = InstallScope(args.test_install_scope)
-            abort_policy = TestAbortPolicy.resolve_and_preflight(
-                None,
-                install_scope,
-                installed_root,
-                repo_root,
-            )
-            candidates = reclaimable_hook_wrappers(
-                repo_root,
-                installed_root,
-                args.platform,
-            )
-            if args.preview_reclaim:
-                if not args.script_path:
-                    raise ValueError("--script-path is required for --preview-reclaim")
-                planned_target = resolve_hook_target(
-                    args.script_path,
-                    args.host_os,
-                    args.hook_runtime,
-                    args.platform,
-                )
-                if _target_uses_wrapper(planned_target):
-                    sys.stdout.write("  wrapper profile: reclaim disabled\n")
-                    return 0
-                for candidate in candidates:
-                    sys.stdout.write(f"  [dry-run] would reclaim hook wrapper: {candidate}\n")
-                return 0
-
-            registration_data = load_existing(target)
-            removed = reclaim_stale_hook_wrappers(
-                repo_root=repo_root,
-                installed_root=installed_root,
-                platform=args.platform,
-                registration_data=registration_data,
-                dry_run=args.dry_run,
-                abort_policy=abort_policy,
-            )
-            if not removed:
-                sys.stdout.write("  hook wrapper reclaim disabled or already complete\n")
-            else:
-                prefix = "[dry-run] would reclaim" if args.dry_run else "reclaimed"
-                for candidate in removed:
-                    sys.stdout.write(f"  {prefix} hook wrapper: {candidate}\n")
-            return 0
-
         if args.remove:
             data = load_existing(target)
             changed = remove(data, args.hook_event, args.script_marker)
@@ -931,7 +619,6 @@ def main() -> int:
             hook_target = resolve_hook_target(
                 args.script_path,
                 args.host_os,
-                args.hook_runtime,
                 args.platform,
             )
             if args.validate_only:
