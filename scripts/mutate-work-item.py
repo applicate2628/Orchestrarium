@@ -658,6 +658,32 @@ def _legacy_retirement_entry(item: Path, metadata: Path) -> ReadmeEntry:
             "WI-LEGACY-RETIREMENT-INVALID",
             f"source inventory does not cover the retirement payload: {item}",
         )
+    # Retirement is immutable, but its former backlog paths must not remain in
+    # mutable records.  The stored inventory is evidence from the transition;
+    # this fresh owner-level scan catches a later plain-text citation that the
+    # original Markdown/link scanner could not see.  Archived consumers are
+    # historical evidence and intentionally do not participate.
+    work_items = item.parents[2]
+    current_incoming = _incoming_link_result(
+        work_items.parent,
+        sources,
+        f"work-item:{item.name}",
+        literal_path_references=(
+            f"{work_items.name}/backlog/{item.name}/{relative}"
+            for relative in seen
+        ),
+        mutable_consumers_only=True,
+        scan_markdown_links=False,
+    )
+    try:
+        _validate_incoming_link_snapshot(
+            f"work-item:{item.name}", current_incoming, label="current"
+        )
+    except LifecycleError as exc:
+        raise LifecycleError(
+            "WI-LEGACY-RETIREMENT-INVALID",
+            f"mutable record retains a retired backlog path: {item}",
+        ) from exc
     return ReadmeEntry(
         "Recently completed",
         f"work-item:{item.name}",
@@ -2790,6 +2816,10 @@ def _incoming_link_result(
     root: Path,
     owned_paths: Iterable[Path],
     reference: str,
+    *,
+    literal_path_references: Iterable[str] = (),
+    mutable_consumers_only: bool = False,
+    scan_markdown_links: bool = True,
 ) -> dict:
     work_items = _work_items_root(root)
     physical: list[dict[str, str]] = []
@@ -2800,6 +2830,21 @@ def _incoming_link_result(
             "WI-CATEGORY-MIGRATION-INVENTORY",
             f"incoming-link scan has no owned paths for {reference}",
         )
+    literal_paths = tuple(sorted(set(literal_path_references)))
+    if any(not path or path.startswith(("/", "\\")) for path in literal_paths):
+        raise LifecycleError(
+            "WI-CATEGORY-MIGRATION-INVENTORY",
+            f"incoming-link scan has invalid literal path for {reference}",
+        )
+    literal_patterns = tuple(
+        (
+            literal_path,
+            re.compile(
+                rf"(?<![A-Za-z0-9_.\\/-]){re.escape(literal_path).replace('/', r'[\\/]')}(?![A-Za-z0-9_.\\/-])"
+            ),
+        )
+        for literal_path in literal_paths
+    )
 
     def belongs_to_owned(path: Path) -> bool:
         return any(
@@ -2819,22 +2864,34 @@ def _incoming_link_result(
         except (OSError, UnicodeError):
             continue
         consumer_rel = consumer.relative_to(work_items).as_posix()
+        if mutable_consumers_only and "archive" in Path(consumer_rel).parts:
+            continue
         if reference in text:
             logical.append(
                 {"consumer": consumer_rel, "kind": "logical", "value": reference}
             )
-        for link in _markdown_local_links(text):
-            raw = link.href
-            href_parts = _local_markdown_href_parts(raw)
-            if href_parts is None:
-                continue
-            candidate = (consumer.parent / href_parts[0]).resolve()
-            if belongs_to_owned(candidate):
+        if scan_markdown_links:
+            for link in _markdown_local_links(text):
+                raw = link.href
+                href_parts = _local_markdown_href_parts(raw)
+                if href_parts is None:
+                    continue
+                candidate = (consumer.parent / href_parts[0]).resolve()
+                if belongs_to_owned(candidate):
+                    physical.append(
+                        {
+                            "consumer": consumer_rel,
+                            "kind": "physical",
+                            "value": raw,
+                        }
+                    )
+        for literal_path, literal_pattern in literal_patterns:
+            if literal_pattern.search(text):
                 physical.append(
                     {
                         "consumer": consumer_rel,
                         "kind": "physical",
-                        "value": raw,
+                        "value": literal_path,
                     }
                 )
     references = sorted(

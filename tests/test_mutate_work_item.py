@@ -3967,6 +3967,53 @@ def test_retire_legacy_backlog_records_links_and_no_fake_active_history(
     module.audit(root)
 
 
+def test_audit_rejects_live_plain_path_to_retired_backlog_but_ignores_archive_history(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "retired-path-citation"
+    _source, _before = _seed_legacy_backlog(
+        root,
+        slug,
+        {"design.md": b"# Design only\n"},
+    )
+    module.refresh_readme(root, allow_marker_bootstrap=True)
+    target = module.retire_legacy_backlog(
+        root,
+        slug,
+        b"Rejected before admission.\n",
+        "2026-08-01T00:00:00Z",
+    )
+    retired_path = f"work-items/backlog/{slug}/design.md"
+    archived_consumer = root / "work-items" / "decisions" / "archive" / "2026-08" / "history.md"
+    write(
+        archived_consumer,
+        f"Historical context: work-item:{slug}; `{retired_path}`.\n",
+    )
+    false_positive = root / "work-items" / "decisions" / "current.md"
+    write(false_positive, f"Not a path: `not-{retired_path}`.\n")
+
+    assert module._incoming_link_result(
+        root,
+        {target},
+        f"work-item:{slug}",
+        literal_path_references=(retired_path,),
+        mutable_consumers_only=True,
+        scan_markdown_links=False,
+    ) == {"result": "clear", "references": []}
+
+    live_consumer = root / "work-items" / "decisions" / "live.md"
+    write(live_consumer, f"Stale context: `{retired_path}`.\n")
+    try:
+        module.audit(root)
+    except module.LifecycleError as exc:
+        assert exc.failure_id == "WI-LEGACY-RETIREMENT-INVALID"
+        assert "mutable record retains a retired backlog path" in str(exc)
+    else:
+        raise AssertionError("live literal citation to retired backlog passed audit")
+
+
 def test_retire_legacy_backlog_strict_utc_and_failure_rollback(
     tmp_path: Path,
 ) -> None:
