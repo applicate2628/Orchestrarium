@@ -10,6 +10,12 @@ Keep the log in reverse-chronological `## YYYY-MM-DD` sections. Add new explanat
 
 Do not add entries for purely local-only hygiene edits such as formatting, link fixes, report-only churn, scratch cleanup, archive moves, or non-semantic wording cleanup.
 
+## 2026-08-01
+
+### Changed
+
+- **Codex hook installation and controlled non-interactive Codex launches now verify host-runnable trust, not only that a hook target can execute directly.** The health helper reconciles each live Orchestrarium registration with Codex `hooks/list`; installer VERIFY reports only complete registration identities changed by its own transaction as `PENDING_MANUAL_TRUST`—event, matcher, handler type, exact command, and exact registration source all participate—while pre-existing untrusted or modified registrations fail. After the interactive Trust action, and immediately before a repository-owned Codex prompt launch, `require` automatically consumes the installed helper's sibling generated inventory, accepts only host-reported `trusted` entries, and prevents launch on missing inventory, drift, or unavailable host inventory. **Why it matters:** a directly executable hook with a stale trust hash is silently omitted by Codex, so an earlier structural health check could report a disarmed installation as healthy. **Operator impact:** complete the existing interactive Trust step, then run the documented installed `check-hook-health.py --codex-trust-mode require` command before relying on automation. **Preserved:** hook registration shape and mutation ownership, Codex interactive Trust persistence, direct executable checks, Claude launch behavior, and Gemini/Qwen paths are unchanged.
+
 ## 2026-07-31
 
 ### Changed

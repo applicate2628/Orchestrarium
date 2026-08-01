@@ -14,6 +14,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 MODULE = ROOT / "src.claude/agents/scripts/provider_prompt.py"
+INSTALLER_MODULE = ROOT / "scripts/production_installer.py"
 ENTRYPOINTS = {
     "codex": ROOT / "src.claude/agents/scripts/invoke-codex-prompt.py",
     "claude": ROOT / "src.claude/agents/scripts/invoke-claude-prompt.py",
@@ -25,6 +26,13 @@ assert spec and spec.loader
 owner = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = owner
 spec.loader.exec_module(owner)
+installer_spec = importlib.util.spec_from_file_location(
+    "production_installer_oracle_test", INSTALLER_MODULE
+)
+assert installer_spec and installer_spec.loader
+installer = importlib.util.module_from_spec(installer_spec)
+sys.modules[installer_spec.name] = installer
+installer_spec.loader.exec_module(installer)
 
 
 def _make_work_item(tmp_path: Path, suffix: str) -> Path:
@@ -51,8 +59,25 @@ def _make_fake_provider(
 ) -> Path:
     fake = tmp_path / f"fake-{provider}.py"
     fake.write_text(
-        "import pathlib,sys\n"
+        "import json,os,pathlib,sys\n"
         "args=sys.argv[1:]\n"
+        "if 'app-server' in args:\n"
+        "    config_path=pathlib.Path(os.environ['CODEX_HOME'])/'hooks.json'\n"
+        "    config=json.loads(config_path.read_text(encoding='utf-8'))\n"
+        "    records=[]\n"
+        "    for event,entries in config['hooks'].items():\n"
+        "        for entry in entries:\n"
+        "            for hook in entry['hooks']:\n"
+        "                records.append({'eventName':event,'matcher':entry.get('matcher'),"
+        "'handlerType':'command','command':hook['command'],'sourcePath':str(config_path.resolve()),"
+        "'enabled':True,'trustStatus':'trusted','currentHash':'sha256:fixture'})\n"
+        "    for line in sys.stdin:\n"
+        "        message=json.loads(line)\n"
+        "        if message.get('id') == 1:\n"
+        "            print(json.dumps({'id':1,'result':{}}), flush=True)\n"
+        "        elif message.get('id') == 2:\n"
+        "            print(json.dumps({'id':2,'result':{'data':[{'hooks':records}]}}), flush=True)\n"
+        "    raise SystemExit(0)\n"
         "sys.stdin.buffer.read()\n"
         + (
             "if '--output-last-message' in args:\n"
@@ -69,6 +94,22 @@ def _make_fake_provider(
         encoding="utf-8",
     )
     return fake
+
+
+def _prepare_codex_home(tmp_path: Path) -> Path:
+    codex_home = tmp_path / "codex-home"
+    codex_home.mkdir()
+    hooks: dict[str, list[dict]] = {}
+    installed_root = ROOT / "src.codex" / "skills" / "lead"
+    for _marker, script, event, matcher in installer._hook_specs("codex", installed_root):
+        entry = {"hooks": [{"type": "command", "command": f"{sys.executable} {script}"}]}
+        if matcher is not None:
+            entry["matcher"] = matcher
+        hooks.setdefault(event, []).append(entry)
+    (codex_home / "hooks.json").write_text(
+        json.dumps({"hooks": hooks}), encoding="utf-8"
+    )
+    return codex_home
 
 
 def _run_transport(
@@ -90,6 +131,8 @@ def _run_transport(
     env = os.environ.copy()
     env[BIN_ENV[provider]] = str(fake)
     env[OUTPUT_ENV[provider]] = str(tmp_path / f"{provider}-outputs")
+    if provider == "codex":
+        env["CODEX_HOME"] = str(_prepare_codex_home(tmp_path))
     if provider == "claude":
         env["ANTHROPIC_API_KEY"] = "fake-commercial-credential"
     result = subprocess.run(
@@ -255,12 +298,9 @@ def test_terminal_oracle_records_exact_status(
     assert note in args[args.index("--notes") + 1]
 
 
-@pytest.mark.parametrize("provider", ("codex", "claude"))
-def test_installed_python_layout_uses_sibling_ledger_helper(
-    tmp_path: Path, provider: str
-) -> None:
+def test_installed_python_layout_uses_sibling_ledger_helper(tmp_path: Path) -> None:
     result, markers = _run_installed_transport(
-        tmp_path, provider, ("sibling",)
+        tmp_path, "claude", ("sibling",)
     )
     assert result.returncode == 0, result.stderr
     assert markers["sibling"].read_text(encoding="utf-8").splitlines() == [
@@ -282,7 +322,7 @@ def test_ledger_helper_resolution_prefers_sibling_and_preserves_fallbacks(
     available: tuple[str, ...],
     expected: str,
 ) -> None:
-    result, markers = _run_installed_transport(tmp_path, "codex", available)
+    result, markers = _run_installed_transport(tmp_path, "claude", available)
     assert result.returncode == 0, result.stderr
     assert markers[expected].read_text(encoding="utf-8").splitlines() == [
         expected,
@@ -339,3 +379,173 @@ def test_codex_empty_lastmsg_and_out_exit_zero_records_blocked_terminal(
     assert terminal["status"] == "blocked"
     assert terminal["gate"] == "none"
     assert "empty .out" in terminal["notes"]
+
+
+def test_provider_prompt_codex_require_preflight_blocks_popen(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    prompt = tmp_path / "prompt.md"
+    prompt.write_text("fixture prompt\n", encoding="utf-8")
+    monkeypatch.setenv("CODEX_PROMPTS_DIR", str(tmp_path / "outputs"))
+    fake_codex = tmp_path / "codex.exe"
+    fake_codex.write_bytes(b"fixture")
+    monkeypatch.setattr(owner, "resolve_provider_command", lambda _provider: [str(fake_codex)])
+    monkeypatch.setattr(owner, "require_codex_hook_trust", lambda *_args: 23)
+    monkeypatch.setattr(
+        owner,
+        "prompt_bytes",
+        lambda _control: (_ for _ in ()).throw(AssertionError("prompt must not be read")),
+    )
+    called = False
+
+    def forbidden_popen(*_args, **_kwargs):
+        nonlocal called
+        called = True
+        raise AssertionError("Codex subprocess must not start after require failure")
+
+    monkeypatch.setattr(owner.subprocess, "Popen", forbidden_popen)
+    result = owner.launch(
+        "codex",
+        [
+            "trust-gate",
+            "--prompt-file",
+            str(prompt),
+            "--ledger",
+            str(tmp_path / "work-items" / "active" / "trust-denied"),
+            "--",
+            "--model",
+            "gpt-5.6-sol",
+            "-c",
+            "model_reasoning_effort=xhigh",
+        ],
+    )
+    assert result == 23
+    assert not called
+    assert not (tmp_path / "outputs").exists()
+    assert not (tmp_path / "work-items").exists()
+
+
+def test_codex_hook_trust_uses_effective_codex_home_not_claude_adjacent_helper(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    claude_scripts = tmp_path / "claude" / "agents" / "scripts"
+    claude_scripts.mkdir(parents=True)
+    claude_adjacent = claude_scripts / "check-hook-health.py"
+    claude_adjacent.write_text("wrong inventory\n", encoding="utf-8")
+    provider_copy = claude_scripts / "provider_prompt.py"
+    provider_copy.write_text("fixture\n", encoding="utf-8")
+    codex_home = tmp_path / "codex-home"
+    codex_helper = codex_home / "skills" / "lead" / "scripts" / "check-hook-health.py"
+    codex_helper.parent.mkdir(parents=True)
+    codex_helper.write_text("right inventory\n", encoding="utf-8")
+    monkeypatch.setattr(owner, "__file__", str(provider_copy))
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+    assert owner.codex_hook_health_helper(codex_home) == codex_helper
+    invoked: list[str] = []
+
+    def trusted_require(command, **_kwargs):
+        invoked.extend(command)
+        return subprocess.CompletedProcess(command, 0, "PASS\n", "")
+
+    monkeypatch.setattr(owner.subprocess, "run", trusted_require)
+    codex_binary = tmp_path / "codex.exe"
+    codex_binary.write_bytes(b"fixture")
+    assert owner.require_codex_hook_trust(
+        [str(codex_binary)], codex_home, tmp_path
+    ) == 0
+    assert str(codex_helper) in invoked
+    assert str(claude_adjacent) not in invoked
+    assert str(codex_home / "hooks.json") in invoked
+
+
+def test_admitted_launch_settles_terminal_when_popen_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    prompt = tmp_path / "prompt.md"
+    prompt.write_text("fixture\n", encoding="utf-8")
+    fake_codex = tmp_path / "codex.exe"
+    fake_codex.write_bytes(b"fixture")
+    monkeypatch.setenv("CODEX_PROMPTS_DIR", str(tmp_path / "outputs"))
+    monkeypatch.setattr(owner, "resolve_provider_command", lambda _provider: [str(fake_codex)])
+    monkeypatch.setattr(owner, "require_codex_hook_trust", lambda *_args: 0)
+    monkeypatch.setattr(owner, "ledger_helper", lambda: tmp_path / "ledger.py")
+    ledger_calls: list[list[str]] = []
+    monkeypatch.setattr(owner, "run_ledger", lambda args: ledger_calls.append(args) or True)
+    terminal_calls: list[tuple] = []
+    monkeypatch.setattr(owner, "record_terminal", lambda *args: terminal_calls.append(args))
+    monkeypatch.setattr(
+        owner.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("fixture launch failure")),
+    )
+    result = owner.launch(
+        "codex",
+        ["popen-failure", "--prompt-file", str(prompt), "--ledger", str(tmp_path / "item")],
+    )
+    assert result == 1
+    assert len(ledger_calls) == 1
+    assert len(terminal_calls) == 1
+
+
+def test_trusted_codex_launch_preserves_exact_provider_popen_argv(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    prompt = tmp_path / "prompt.md"
+    prompt.write_text("trusted fixture\n", encoding="utf-8")
+    codex = tmp_path / "codex.exe"
+    codex.write_bytes(b"fixture")
+    command = [str(codex), "--transport-owner"]
+    codex_home = tmp_path / "codex-home"
+    output_root = tmp_path / "outputs"
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+    monkeypatch.setenv("CODEX_PROMPTS_DIR", str(output_root))
+    monkeypatch.setattr(owner, "resolve_provider_command", lambda _provider: command)
+    trust_calls: list[tuple] = []
+    monkeypatch.setattr(
+        owner,
+        "require_codex_hook_trust",
+        lambda *args: trust_calls.append(args) or 0,
+    )
+    monkeypatch.setattr(owner, "process_start_marker", lambda _pid: None)
+    captured: dict[str, object] = {}
+
+    class ProviderProcess:
+        pid = 4242
+        returncode = 0
+        def communicate(self, body: bytes) -> None:
+            captured["body"] = body
+
+    def fake_popen(arguments, **kwargs):
+        captured["arguments"] = arguments
+        captured["kwargs"] = kwargs
+        return ProviderProcess()
+
+    monkeypatch.setattr(owner.subprocess, "Popen", fake_popen)
+    result = owner.launch(
+        "codex",
+        [
+            "exact-argv",
+            "--prompt-file", str(prompt),
+            "--",
+            "--model", "gpt-5.6-sol",
+            "-c", "model_reasoning_effort=xhigh",
+        ],
+    )
+    assert result == 0
+    arguments = captured["arguments"]
+    lastmsg = Path(arguments[arguments.index("--output-last-message") + 1])
+    assert arguments == [
+        *command,
+        "exec",
+        "--skip-git-repo-check",
+        "--output-last-message",
+        str(lastmsg),
+        "--model",
+        "gpt-5.6-sol",
+        "-c",
+        "model_reasoning_effort=xhigh",
+    ]
+    assert trust_calls == [(command, codex_home.resolve(), ROOT.resolve())]
+    assert captured["kwargs"]["cwd"] == ROOT.resolve()
+    assert captured["kwargs"]["env"]["CODEX_HOME"] == str(codex_home.resolve())
+    assert captured["body"] == prompt.read_bytes()

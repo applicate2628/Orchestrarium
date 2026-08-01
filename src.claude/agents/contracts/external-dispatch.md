@@ -96,6 +96,7 @@ The prompt file is the only governance an external Command-Line Interface (CLI) 
 - Include a provenance-header echo instruction using this contract's header fields.
 - Include the evidence-citation discipline verbatim from the owning `Evidence discipline:` handoff field; this contract does not create a second copy.
 - For an adversarial review strategy, use an artifact-only prompt: include the artifact and review scope, but exclude builder claims and self-review.
+- Immediately before an approved non-interactive Codex launch, `provider_prompt.py::launch` runs the installed Codex hook-health helper in `require` mode. A nonzero trust/liveness verdict prevents `codex exec`; this gate does not apply to Claude launches.
 
 ## Run-completion oracle
 

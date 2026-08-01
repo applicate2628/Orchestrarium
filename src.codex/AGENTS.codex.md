@@ -104,7 +104,7 @@ Per the source-hygiene placement law, the five warn-only audits live in `skills/
 
 The default runtime invokes each installed `.py` target directly with the absolute `sys.executable` of the Python process running the installer. `resolve_hook_target` is the only `wrapper|python|native` selection point. Before registration mutation, the Python profile checks every owned hook: the interpreter and `.py` target must be absolute regular files; on Windows the interpreter must be a non-reparse `.exe`, and on POSIX it must have execute permission. The later health gate actually launches every registered hook. The wrapper profile remains the retained rollback path and preflights its wrapper files. The reserved native profile requires a real native executable and fails before mutation because no native hook binaries ship. On Windows, the registered command is the verified `cmd.exe`/PowerShell-compatible unquoted absolute interpreter followed by the unquoted absolute `.py` path; unsupported whitespace or metacharacters fail the install instead of creating a dead registration.
 
-Upgrade ordering is strictly **SYNC → REGISTER → VERIFY → RECLAIM**. `scripts/check-hook-health.py` verifies every registered executable and target before reclaim can run. An installed wrapper is reclaimed only if its exact name is owned by `scripts/universal_hooks_manifest.py` and an adjacent same-stem `.py` ships in the pack. Reclaim is last, idempotent, dry-run-visible, and disabled by `--hook-runtime wrapper`; source wrappers remain available for rollback.
+Upgrade ordering is strictly **SYNC → REGISTER → VERIFY → RECLAIM**. `scripts/check-hook-health.py` verifies every registered executable and target, then reconciles current owned Codex registrations one-to-one with host `hooks/list` before reclaim can run. Installer VERIFY uses `report`: only complete registration identities changed by that transaction may remain `untrusted` or `modified`, reported as `PENDING_MANUAL_TRUST`; the identity includes event, matcher, handler type, exact command, and exact registration source, while pre-existing drift fails. The installed helper's `require` mode automatically consumes its sibling generated `codex-hook-inventory.json`, fails closed when that inventory is missing, accepts only `trusted` host entries, and is the post-Trust and controlled-Codex-launch gate. An installed wrapper is reclaimed only if its exact name is owned by `scripts/universal_hooks_manifest.py` and an adjacent same-stem `.py` ships in the pack. Reclaim is last, idempotent, dry-run-visible, and disabled by `--hook-runtime wrapper`; source wrappers remain available for rollback.
 
 Unlike Claude Code, Codex marks every newly-installed or changed hook entry as untrusted.
 
@@ -114,6 +114,8 @@ After reinstall, start interactive `codex` — not `codex exec` — and choose *
 Do not press Esc and do not choose **`Continue without trusting`**, because all hooks and guards remain installed but inactive.
 `codex exec` silently skips untrusted hook entries instead of showing the trust prompt, so interactive `codex` must run first.
 The trust modal does not time out and the operator must review all 12 entries before making the explicit choice.
+
+Afterward, verify the host sees every current entry as runnable: `python ~/.codex/skills/lead/scripts/check-hook-health.py --target ~/.codex/hooks.json --platform codex --codex-trust-mode require`.
 
 #### Trust identity
 

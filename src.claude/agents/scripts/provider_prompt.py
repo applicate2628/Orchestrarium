@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import ctypes
+import json
 import os
 import re
 import secrets
@@ -318,6 +319,85 @@ def run_ledger(args: list[str]) -> bool:
     )
 
 
+def codex_hook_health_helper(codex_home: Path) -> Path | None:
+    installed_helper = codex_home / "skills" / "lead" / "scripts" / "check-hook-health.py"
+    if installed_helper.is_file():
+        return installed_helper
+
+    script_dir = Path(__file__).resolve().parent
+    repo_root = script_dir.parents[2]
+    source_helper = repo_root / "scripts" / "check-hook-health.py"
+    if (repo_root / "shared" / "AGENTS.shared.md").is_file() and source_helper.is_file():
+        return source_helper
+    return None
+
+
+def _trust_probe_env(codex_home: Path) -> dict[str, str]:
+    allowed = {
+        "COMSPEC",
+        "LANG",
+        "LC_ALL",
+        "PATH",
+        "PATHEXT",
+        "SYSTEMROOT",
+        "TEMP",
+        "TMP",
+        "TMPDIR",
+        "WINDIR",
+    }
+    child = {key: value for key, value in os.environ.items() if key.upper() in allowed}
+    child["CODEX_HOME"] = str(codex_home)
+    return child
+
+
+def require_codex_hook_trust(
+    command: list[str],
+    codex_home: Path,
+    query_cwd: Path,
+) -> int:
+    helper = codex_hook_health_helper(codex_home)
+    if helper is None:
+        return fail("Codex hook trust helper was not found")
+    host_os = "windows" if os.name == "nt" else "posix"
+    target = (codex_home / "hooks.json").resolve(strict=False)
+    inventory = helper.with_name("codex-hook-inventory.json")
+    inventory_args = ["--inventory", str(inventory)] if inventory.is_file() else []
+    try:
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(helper),
+                "--target",
+                str(target),
+                "--platform",
+                "codex",
+                "--host-os",
+                host_os,
+                "--codex-trust-mode",
+                "require",
+                *inventory_args,
+                "--codex-command-json",
+                json.dumps(command),
+                "--codex-home",
+                str(codex_home),
+                "--query-cwd",
+                str(query_cwd),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            cwd=query_cwd,
+            env=_trust_probe_env(codex_home),
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return fail("Codex hook trust inventory query failed")
+    if completed.returncode:
+        detail = " ".join((completed.stderr or completed.stdout).split())[:512]
+        return fail(detail or "Codex hook trust requirement failed")
+    return 0
+
+
 def ledger_common(
     control: Control,
     provider: str,
@@ -458,6 +538,17 @@ def launch(provider: str, argv: list[str]) -> int:
         )
         return 3
 
+    if provider == "codex":
+        if not Path(command[0]).is_absolute() or not Path(command[0]).is_file():
+            return fail("resolved Codex executable is not an absolute regular file")
+        codex_home = Path(
+            os.environ.get("CODEX_HOME") or Path.home() / ".codex"
+        ).expanduser().resolve(strict=False)
+        query_cwd = Path.cwd().resolve()
+        trust_result = require_codex_hook_trust(command, codex_home, query_cwd)
+        if trust_result:
+            return trust_result
+
     try:
         body = prompt_bytes(control)
         output_dir = secure_output_dir(provider)
@@ -515,10 +606,14 @@ def launch(provider: str, argv: list[str]) -> int:
     child_environment = os.environ.copy()
     if provider == "claude":
         child_environment["ORCHESTRARIUM_DISPATCHED_REVIEW"] = "1"
+    else:
+        child_environment["CODEX_HOME"] = str(codex_home)
 
-    out_path.touch(mode=0o600, exist_ok=False)
-    err_path.touch(mode=0o600, exist_ok=False)
+    exit_code = 1
+    launch_error: str | None = None
     try:
+        out_path.touch(mode=0o600, exist_ok=False)
+        err_path.touch(mode=0o600, exist_ok=False)
         with out_path.open("wb") as stdout_stream, err_path.open("wb") as stderr_stream:
             process = subprocess.Popen(
                 command + provider_args,
@@ -526,6 +621,7 @@ def launch(provider: str, argv: list[str]) -> int:
                 stdout=stdout_stream,
                 stderr=stderr_stream,
                 env=child_environment,
+                cwd=query_cwd if provider == "codex" else None,
             )
             marker = process_start_marker(process.pid)
             pid_text = f"pid={process.pid}\n"
@@ -563,10 +659,12 @@ def launch(provider: str, argv: list[str]) -> int:
                 except subprocess.TimeoutExpired:
                     process.kill()
                     process.wait()
-                return 130
-            exit_code = process.returncode if process.returncode is not None else 1
+                exit_code = 130
+            else:
+                exit_code = process.returncode if process.returncode is not None else 1
     except OSError as exc:
-        return fail(f"{provider} launch failed: {exc}")
+        launch_error = f"{provider} launch failed: {exc}"
+        exit_code = 1
 
     if control.ledger:
         record_terminal(
@@ -581,4 +679,6 @@ def launch(provider: str, argv: list[str]) -> int:
             err_path,
             lastmsg_path,
         )
+    if launch_error is not None:
+        return fail(launch_error)
     return exit_code

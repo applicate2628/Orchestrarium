@@ -8,6 +8,7 @@ import os
 import shutil
 import subprocess
 import sys
+from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
@@ -165,6 +166,66 @@ def test_python_production_installer_owns_ordered_hook_transaction() -> None:
     verify = source.index("check-hook-health.py")
     reclaim = source.index("--reclaim-root")
     assert preflight < sync < register < verify < reclaim
+    assert '"--codex-trust-mode"' in source and '"report"' in source
+    assert "owned_canonical_identities" in source
+    assert "write_codex_inventory" in source
+    assert "post-reclaim installed hook verification failed" in source
+
+
+def test_hook_health_runtime_and_inventory_are_codex_only() -> None:
+    assert "check-hook-health.py" not in PRODUCTION_INSTALLER.RUNTIME_HELPERS
+    assert PRODUCTION_INSTALLER.CODEX_RUNTIME_HELPERS == ("check-hook-health.py",)
+    source = inspect.getsource(PRODUCTION_INSTALLER.install)
+    assert 'if provider == "codex":' in source
+    assert "CODEX_RUNTIME_HELPERS" in source
+    assert "codex-hook-inventory.json" not in " ".join(PRODUCTION_INSTALLER.RUNTIME_HELPERS)
+
+
+def test_installer_derives_touched_identities_from_before_after_hooks_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    registration = tmp_path / ".codex" / "hooks.json"
+    registration.parent.mkdir()
+    registration.write_text('{"hooks":{}}\n', encoding="utf-8")
+    installed_root = tmp_path / ".agents" / "skills" / "lead"
+    specs = PRODUCTION_INSTALLER._hook_specs("codex", installed_root)
+    before = {"unchanged-complete-identity", "matcher-old-complete-identity"}
+    after = {"unchanged-complete-identity", "matcher-new-complete-identity"}
+
+    class FakeHealth:
+        calls = 0
+        generated = False
+        @classmethod
+        def resolve_codex_command(cls, _value):
+            return [str(Path(sys.executable).resolve())]
+        @classmethod
+        def _manifest_stems(cls, _root, _platform):
+            return {marker for marker, *_rest in specs}
+        @classmethod
+        def owned_canonical_identities(cls, **_kwargs):
+            cls.calls += 1
+            return before if cls.calls == 1 else after
+        @classmethod
+        def write_codex_inventory(cls, **_kwargs):
+            cls.generated = True
+
+    invocations: list[list[str]] = []
+    monkeypatch.setattr(PRODUCTION_INSTALLER, "_hook_health_module", lambda _root: FakeHealth)
+    monkeypatch.setattr(
+        PRODUCTION_INSTALLER,
+        "_run",
+        lambda arguments, _cwd, **_kwargs: invocations.append(arguments)
+        or SimpleNamespace(returncode=0),
+    )
+    PRODUCTION_INSTALLER._install_hooks(
+        ROOT, "codex", registration, installed_root, "target"
+    )
+    health_calls = [call for call in invocations if "--codex-trust-mode" in call]
+    assert len(health_calls) == 2
+    for call in health_calls:
+        touched = [call[index + 1] for index, token in enumerate(call) if token == "--touched-identity"]
+        assert touched == ["matcher-new-complete-identity"]
+    assert FakeHealth.generated
 
     run_source = inspect.getsource(PRODUCTION_INSTALLER.install)
     assert 'args.hook_runtime != "python"' in run_source

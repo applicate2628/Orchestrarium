@@ -81,6 +81,8 @@ def _install(case: Case, project: Path, abort_after: str | None = None):
     env = os.environ.copy()
     env.pop("ORCHESTRARIUM_NO_HYPOTHESIS_HOOK", None)
     env.pop(ABORT_ENV, None)
+    if case.provider == "codex":
+        env["CODEX_BIN"] = str(ROOT / "tests/fixtures/fake_codex_hooks_host.py")
     if abort_after:
         env[ABORT_ENV] = abort_after
     return subprocess.run(

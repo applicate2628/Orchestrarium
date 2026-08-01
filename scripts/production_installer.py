@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
+import json
 import os
 import shutil
 import stat
@@ -26,6 +28,8 @@ RUNTIME_HELPERS = (
     "validate-work-item-state.py",
     "validate-work-item-state.sh",
 )
+CODEX_RUNTIME_HELPERS = ("check-hook-health.py",)
+CODEX_HOOK_INVENTORY = "codex-hook-inventory.json"
 # SHA-256 fingerprints of every historically shipped Codex built-in agent
 # override, after the same newline normalization used by reclaim. Current
 # source files are compared directly and are deliberately not duplicated here.
@@ -439,6 +443,9 @@ def _installer_mutation_paths(
         helper_target / helper
         for helper in RUNTIME_HELPERS
     )
+    if provider == "codex":
+        paths.extend(helper_target / helper for helper in CODEX_RUNTIME_HELPERS)
+        paths.append(helper_target / CODEX_HOOK_INVENTORY)
     paths.extend(
         (
             docs_target,
@@ -633,12 +640,12 @@ def _hook_specs(provider: str, installed_root: Path):
     scripts = installed_root / "scripts"
     hooks = installed_root / "hooks"
     specs = [
-        ("check-bugfix-discipline", scripts / "check-bugfix-discipline.py", "PreToolUse", None),
+        ("check-bugfix-discipline", scripts / "check-bugfix-discipline.py", "PreToolUse", "Edit|Write|NotebookEdit|apply_patch"),
         ("check-git-push-gate", scripts / "check-git-push-gate.py", "PreToolUse", "Bash|PowerShell"),
         ("check-passive-polling-stop", scripts / "check-passive-polling-stop.py", "Stop", None),
-        ("check-machine-local-path", hooks / "check-machine-local-path.py", "PreToolUse", None),
+        ("check-machine-local-path", hooks / "check-machine-local-path.py", "PreToolUse", "Edit|Write|NotebookEdit|apply_patch"),
         ("check-no-trash-in-repo", hooks / "check-no-trash-in-repo.py", "PreToolUse", "Edit|Write|NotebookEdit|apply_patch|Bash|PowerShell"),
-        ("check-stale-relation-residue", hooks / "check-stale-relation-residue.py", "PreToolUse", None),
+        ("check-stale-relation-residue", hooks / "check-stale-relation-residue.py", "PreToolUse", "Edit|Write|NotebookEdit|apply_patch"),
         ("check-repository-orientation", hooks / "check-repository-orientation.py", "PreToolUse", "Edit|Write|NotebookEdit|apply_patch|Bash|PowerShell|shell_command|exec_command"),
         ("check-mcp-momentum", hooks / "check-mcp-momentum.py", "PreToolUse", "Grep|Bash|PowerShell|shell_command|exec_command"),
         ("mcp-usage-reminder", scripts / "mcp-usage-reminder.py", "SessionStart", None),
@@ -652,6 +659,17 @@ def _hook_specs(provider: str, installed_root: Path):
             ("check-typed-routing", hooks / "check-typed-routing.py", "PreToolUse", "Agent"),
         )
     return specs
+
+
+def _hook_health_module(root: Path):
+    path = root / "scripts" / "check-hook-health.py"
+    spec = importlib.util.spec_from_file_location("orchestrarium_hook_health", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"could not load hook health helper: {path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 RETIRED_HOOK_SPECS = (
@@ -715,6 +733,28 @@ def _install_hooks(
         )
         if proc.returncode:
             raise RuntimeError(f"obsolete hook removal failed for {marker}")
+    health_module = _hook_health_module(root) if provider == "codex" else None
+    codex_command = (
+        health_module.resolve_codex_command(os.environ.get("CODEX_BIN"))
+        if health_module is not None
+        else None
+    )
+    inventory_path = installed_root / "scripts" / CODEX_HOOK_INVENTORY
+    if health_module is not None:
+        manifest_stems = health_module._manifest_stems(root, "codex")
+        spec_stems = {marker for marker, *_rest in _hook_specs(provider, installed_root)}
+        if manifest_stems != spec_stems:
+            raise RuntimeError("Codex hook specifications drifted from universal manifest")
+    before_identities = (
+        health_module.owned_canonical_identities(
+            target=registration,
+            platform=provider,
+            host_os=host,
+            repo_root=root,
+        )
+        if health_module is not None and registration.is_file()
+        else set()
+    )
     for marker, script, event, matcher in _hook_specs(provider, installed_root):
         arguments = [*base, "--script-marker", marker, "--script-path", str(script)]
         if event != "PreToolUse":
@@ -725,18 +765,55 @@ def _install_hooks(
         if proc.returncode:
             raise RuntimeError(f"hook registration failed for {marker}")
     _checkpoint(root, installer, registration, provider, mode, "register")
+    touched_identities = (
+        health_module.owned_canonical_identities(
+            target=registration,
+            platform=provider,
+            host_os=host,
+            repo_root=root,
+        )
+        - before_identities
+        if health_module is not None
+        else set()
+    )
+    if health_module is not None:
+        health_module.write_codex_inventory(
+            target=registration,
+            specs=_hook_specs(provider, installed_root),
+            inventory_path=inventory_path,
+            host_os=host,
+        )
+    health_arguments = [
+        str(root / "scripts" / "check-hook-health.py"),
+        "--target",
+        str(registration),
+        "--platform",
+        provider,
+        "--host-os",
+        host,
+        "--repo-root",
+        str(root),
+    ]
+    if provider == "codex":
+        assert codex_command is not None
+        health_arguments.extend(
+            [
+                "--codex-trust-mode",
+                "report",
+                "--inventory",
+                str(inventory_path),
+                "--codex-command-json",
+                json.dumps(codex_command),
+                "--codex-home",
+                str(registration.parent.resolve()),
+                "--query-cwd",
+                str(root.resolve()),
+            ]
+        )
+        for identity in sorted(touched_identities):
+            health_arguments.extend(["--touched-identity", identity])
     health = _run(
-        [
-            str(root / "scripts" / "check-hook-health.py"),
-            "--target",
-            str(registration),
-            "--platform",
-            provider,
-            "--host-os",
-            host,
-            "--repo-root",
-            str(root),
-        ],
+        health_arguments,
         root,
     )
     if health.returncode:
@@ -762,6 +839,36 @@ def _install_hooks(
     )
     if reclaim.returncode:
         raise RuntimeError("hook wrapper reclaim failed")
+    if provider == "codex":
+        installed_health = _run(
+            [
+                str(installed_root / "scripts" / "check-hook-health.py"),
+                "--target",
+                str(registration),
+                "--platform",
+                "codex",
+                "--host-os",
+                host,
+                "--inventory",
+                str(inventory_path),
+                "--codex-trust-mode",
+                "report",
+                "--codex-command-json",
+                json.dumps(codex_command),
+                "--codex-home",
+                str(registration.parent.resolve()),
+                "--query-cwd",
+                str(root.resolve()),
+                *[
+                    item
+                    for identity in sorted(touched_identities)
+                    for item in ("--touched-identity", identity)
+                ],
+            ],
+            root,
+        )
+        if installed_health.returncode:
+            raise RuntimeError("post-reclaim installed hook verification failed")
 
 
 def _checkpoint(
@@ -905,6 +1012,13 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                     helper_target / helper,
                     args.dry_run,
                 )
+            if provider == "codex":
+                for helper in CODEX_RUNTIME_HELPERS:
+                    _copy_file(
+                        root / "scripts" / helper,
+                        helper_target / helper,
+                        args.dry_run,
+                    )
 
             if provider == "codex":
                 _reclaim_codex_presets(
@@ -971,6 +1085,21 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                 for item in missing:
                     print(f"  - {item}", file=sys.stderr)
                 return 1
+            if provider == "codex":
+                missing_runtime = [
+                    path
+                    for path in (
+                        helper_target / "check-hook-health.py",
+                        helper_target / CODEX_HOOK_INVENTORY,
+                    )
+                    if not path.is_file()
+                ]
+                if missing_runtime:
+                    print(
+                        "RESULT: FAIL (Codex hook health runtime incomplete)",
+                        file=sys.stderr,
+                    )
+                    return 1
             if not mode_target.is_file() or not docs_target.is_file():
                 print(
                     "RESULT: FAIL (documentation or agents-mode output missing)",
