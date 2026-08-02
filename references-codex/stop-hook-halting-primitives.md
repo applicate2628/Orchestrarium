@@ -10,12 +10,10 @@ re-check anything below.
 ## Current pack status (2026-07-29)
 
 The r8 SEN-2 cut documented below remains the historical disposition of the rejected threshold/NOTICE-only
-design; it no longer means SEN-2 is absent. Accepted decision
-`2026-07-29-host-correlated-action-evidence-for-delivery-gates` reinstates SEN-2 as the registry's third,
-stateless RESOLVE-tier sentinel for one exact opted-in Primary mutation action. Only a direct semantic
-exact-target mutation plus a same-id explicit-success result earns credit; child/re-entry skips bound it to
-one block per root user turn, and invalid input fails open. T-14/T-20 are unchanged: HALT remains absent,
-and operator-directed NOTICE remains unreliable on Codex.
+design. The later host-correlated action SEN-2 is retired and
+`2026-07-29-host-correlated-action-evidence-for-delivery-gates` is reverted; the current periodic registry
+ships SEN-0 and SEN-1 only. T-14/T-20 are unchanged: HALT remains absent, and operator-directed NOTICE
+remains unreliable on Codex.
 
 ## The fact
 

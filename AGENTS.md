@@ -56,6 +56,7 @@ This monorepo keeps `work-items/` as repo-local task memory for interruption rec
 
 - `work-items/` remains the repo-local recovery directory for admitted work and archive history on the operator machine, but it is not publication-facing tracked canon for this repository.
 - When information from local task memory needs to become tracked source of truth, promote the accepted result into the owning canonical surface such as `docs/`, `shared/references/`, pack references, `README.md`, `INSTALL.md`, or `RELEASE_NOTES.md` instead of committing `work-items/` directly.
+- A change that knowingly leaves a false or stale assertion in the live tracked tree MUST NOT land until that residual is recorded in the nearest owning tracked source; a `work-items/` record alone is insufficient.
 - New admitted work routed through `$lead` uses `work-items/` locally according to the shared recovery contract; completed, cancelled, or superseded work stays in the configured local archive location unless a human explicitly asks to publish a distilled artifact elsewhere.
 
 - For routes that select recovery-tracked or multi-stage work, `roadmap.md`, `brief.md`, and `status.md` are mandatory when the local task-memory workflow is enabled.
