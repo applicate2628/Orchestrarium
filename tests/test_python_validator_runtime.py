@@ -375,6 +375,51 @@ def test_installed_validator_uses_script_layout_and_runs_installed_actions(
 
 
 @pytest.mark.parametrize(
+    ("skill_name", "owned", "expected_warnings", "expected_errors"),
+    (
+        ("user-added-invalid", False, 1, 0),
+        ("owned-invalid", True, 0, 1),
+    ),
+)
+def test_installed_codex_layering_checks_only_orchestrarium_owned_skills(
+    tmp_path: Path,
+    skill_name: str,
+    owned: bool,
+    expected_warnings: int,
+    expected_errors: int,
+) -> None:
+    target, validator = _materialize_installed_pack(tmp_path, "codex")
+    adapter = _load(validator, f"installed_ownership_adapter_{skill_name}")
+    skill = target / ".agents" / "skills" / skill_name / "SKILL.md"
+    skill.parent.mkdir()
+    skill.write_text("B1 B2 B3\n", encoding="utf-8")
+
+    runtime = _load(RUNTIME, f"layering_ownership_{skill_name}")
+    passed, unresolved = runtime.layering_ids_resolve(skill)
+    assert not passed
+    assert unresolved == ("B1", "B2", "B3")
+    utility_skills = adapter.UTILITY_SKILLS
+    if owned:
+        utility_skills |= frozenset({skill_name})
+
+    result = runtime.validate_pack(
+        script=validator,
+        provider="codex",
+        actions=(
+            ("direct", "orphan_codex", "orphan_codex"),
+            ("direct", "layering_codex", "layering_codex"),
+        ),
+        maintainer_only_shared_reference_names=frozenset(),
+        utility_skills=utility_skills,
+        curated_role_skills=frozenset(),
+        root=target,
+    )
+
+    assert result.warnings == expected_warnings
+    assert result.errors == expected_errors
+
+
+@pytest.mark.parametrize(
     (
         "provider",
         "linked_subtree",

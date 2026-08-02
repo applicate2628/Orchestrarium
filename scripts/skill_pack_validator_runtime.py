@@ -621,6 +621,15 @@ def extract_roles(agents_text: str, heading: str) -> tuple[str, ...]:
     return tuple(sorted(set(re.findall(r"\$([a-z][a-z-]{2,})", section))))
 
 
+def codex_owned_skill_names(
+    agents_text: str,
+    utility_skills: frozenset[str],
+) -> frozenset[str]:
+    return utility_skills | frozenset(
+        extract_roles(agents_text, "## Role index")
+    )
+
+
 def layering_ids_resolve(path: Path) -> tuple[bool, tuple[str, ...]]:
     text = _read(path)
     unresolved = []
@@ -804,13 +813,13 @@ def _direct(
         )
         return
     if kind == "orphan_codex":
-        roles = set(extract_roles(layout.agents_text, "## Role index"))
+        owned = codex_owned_skill_names(layout.agents_text, utility_skills)
         common = set(extract_roles(layout.agents_text, "## Common skills"))
         for directory in sorted(
             path for path in layout.skills.iterdir() if path.is_dir()
         ):
             name = directory.name
-            if name in utility_skills or name in roles:
+            if name in owned:
                 continue
             if name in common:
                 validator.ok(
@@ -834,9 +843,10 @@ def _direct(
             )
         return
     if kind == "layering_codex":
+        owned = codex_owned_skill_names(layout.agents_text, utility_skills)
         common = set(COMMON_SKILL_BODY_PINS)
         for path in sorted(layout.skills.glob("*/SKILL.md")):
-            if path.parent.name in common:
+            if path.parent.name in common or path.parent.name not in owned:
                 continue
             passed, unresolved = layering_ids_resolve(path)
             _verdict(
