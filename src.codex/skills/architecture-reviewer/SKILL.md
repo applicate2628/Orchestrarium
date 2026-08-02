@@ -20,6 +20,7 @@ description: "Architecture/maintainability gate: coupling, cohesion, layering, d
 - Escalate ambiguous standards, design gaps, or contradictory governance intent instead of normalizing drift.
 - Require the approved change surface and must-not-break surfaces for the phase.
 - The handoff's `Diff-invisible invariants` and `Named regression guard` fields from the shared subagent contract are mandatory review inputs.
+- Evaluate authored claims and review verdicts against the producing run's declared scope and accepted baseline: later independently owned lane deltas are reviewed in their own lane and do not retroactively falsify the earlier artifact; an actual material revision of the accepted upstream artifact still invalidates dependent `PASS` states and triggers dependent re-review.
 
 ## Return exactly one artifact
 

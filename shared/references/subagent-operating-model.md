@@ -49,7 +49,7 @@ The lead assigns a task like this:
 10. **Prefer facts over opinions.** Use factual roles to reduce uncertainty before asking interpretive roles to make tradeoffs or decisions.
 11. **Use re-intake when the admitted item changes.** If scope, priority, or milestone intent drifts enough to redefine the item, send it back to `product-manager` instead of renegotiating it inside delivery.
 12. **Name integration ownership explicitly.** If multiple implementation phases or specialists must land together, one named owner assembles the integrated result before QA.
-13. **Invalidate derived `PASS` states on material upstream revision.** If an accepted upstream artifact is revised materially after downstream artifacts have already passed, the lead must mark the affected derived artifacts for re-review before delivery continues. `PASS` does not survive a material upstream change automatically.
+13. **Invalidate derived `PASS` states on material upstream revision.** If an accepted upstream artifact is revised materially after downstream artifacts have already passed, the lead must mark the affected derived artifacts for re-review before delivery continues. `PASS` does not survive a material upstream change automatically. Evaluate authored claims and review verdicts against the producing run's declared scope and accepted baseline: later independently owned lane deltas are reviewed in their own lane and do not retroactively falsify the earlier artifact; an actual material revision of the accepted upstream artifact still invalidates dependent `PASS` states and triggers dependent re-review.
 14. **Classify change impact before routing.** Use `cosmetic`, `additive`, `behavioral`, or `breaking-or-cross-cutting` to decide how strongly the lead should route and gate the work; `breaking-or-cross-cutting` must force stronger routing, re-review of affected downstream artifacts, and integration ownership when needed.
 15. **Treat the core role map as canonical, not exhaustive.** The role index names the core team only. The lead may choose a narrower installed specialist outside the core team when it is a better fit for the scoped work, and may choose a repo-local specialist only when the current repo/workspace defines or clearly implies it. Using such a specialist does not add it to the canonical team map automatically.
 16. **Preserve durable task memory for lead-routed work.** Keep roadmap, brief, status, and plan artifacts in repo-local storage so interrupted work can resume without relying on session memory.
@@ -650,10 +650,10 @@ When admitting a new candidate approach into discovery, the roadmap decision pac
 
 ## 10. Rules for parallel work
 
-1. **Read-heavy work** is the safest place to parallelize: research, triage, comparison, test-matrix analysis, summarization.
-2. **Write-heavy work** should be parallelized carefully: implementation, migrations, contract changes, build changes, or architecture-sensitive edits.
-3. **Do not run two writing subagents against the same area without explicit boundaries.**
-4. **Parallel writes are acceptable only after contracts and phase boundaries are fixed.**
+1. **Classify full resource surfaces before launch.** Parallel lanes are independent only when each lane's mutation set is disjoint from every other lane's read, write, execute, install/copy, and baseline surfaces for the full overlap interval. If a mutation can reach any such surface, serialize the lanes or use explicitly requested, validated isolation.
+2. **Preserve safe parallelism.** Read/read overlap and genuinely disjoint parallel work remain safe.
+3. **Treat consumers as observers.** Tests that execute, install, or copy current source declare those source trees and helpers as observed surfaces; disposable `.scratch/` outputs alone do not make the lane independent.
+4. **Parallel writes are acceptable only after contracts and phase boundaries are fixed and the full resource surfaces are disjoint or isolated.**
 5. **If the cost of merging or coordinating exceeds the benefit, do not parallelize.**
 6. **Independent reviewers belong after implementation, not inside the implementation lane.**
 

@@ -273,10 +273,11 @@ def _resolve_active_slug_in_archive(root: Path, candidate: Path) -> Path | None:
     the one response this bug class forbids (see
     work-items/bugs/2026-07-26-archiving-an-item-breaks-its-own-ledger-artifact-
     paths.md). The slug segment is stable across the move, so the same tail can
-    be relocated by searching the archive month directories for it -- the
-    identical lookup shape `_slug_archived` (scripts/check-work-items-state.py)
-    already uses for Depends-on / done-predicate resolution across the same
-    active/archive boundary.
+    be relocated by searching the archive month directories for it. This is an
+    append-only artifact-tail compatibility lookup across an active-to-dated-
+    archive move, not a second dependency-state resolver. Canonical work-item
+    identity and dependency state are owned by `resolve_category` and
+    `work_item_dependency_state` in `scripts/mutate-work-item.py`.
     """
     parts = candidate.parts
     if len(parts) < 3 or parts[0] != "work-items" or parts[1] != "active":

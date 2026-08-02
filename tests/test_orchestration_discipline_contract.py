@@ -73,6 +73,10 @@ PINS = [
      ["src.claude/agents/contracts/operating-model.md", "src.codex/skills/lead/operating-model.md"]),
     ("A2-marker", "# orchestrarium:requested-isolation-worktree",
      ["src.claude/agents/contracts/operating-model.md", "src.codex/skills/lead/operating-model.md"]),
+    ("A2-resource-surface", "Parallel lanes are independent only when each lane's mutation set is disjoint from every other lane's read, write, execute, install/copy, and baseline surfaces for the full overlap interval. If a mutation can reach any such surface, serialize the lanes or use explicitly requested, validated isolation.",
+     ["shared/references/subagent-operating-model.md", SPINE,
+      "src.claude/agents/contracts/operating-model.md",
+      "src.codex/skills/lead/operating-model.md"]),
     # A2 — Lead SKILL pointer
     ("A2-pointer", "Apply the installed operating-model parallel-isolation protocol before launch; mutating or Git-using parallel lanes require one requested, cleanup-owned worktree each.",
      ["src.claude/skills/lead/SKILL.md", "src.codex/skills/lead/SKILL.md"]),
@@ -228,6 +232,15 @@ PINS = [
      [SPINE]),
     ("single-writer-shared", "The root main conversation holding Lead alone dispatches downstream roles and writes work-item lifecycle state.",
      ["shared/references/subagent-operating-model.md"]),
+
+    # Review baselines belong to the producing run, not the aggregate worktree.
+    ("cross-lane-review-baseline", "Evaluate authored claims and review verdicts against the producing run's declared scope and accepted baseline: later independently owned lane deltas are reviewed in their own lane and do not retroactively falsify the earlier artifact; an actual material revision of the accepted upstream artifact still invalidates dependent `PASS` states and triggers dependent re-review.",
+     ["shared/references/subagent-operating-model.md",
+      SPINE,
+      "src.claude/agents/contracts/subagent-contracts.md",
+      "src.codex/skills/lead/subagent-contracts.md",
+      "src.claude/agents/architecture-reviewer.md",
+      "src.codex/skills/architecture-reviewer/SKILL.md"]),
 ]
 
 # P7 must NOT be in the spine (synthesis D-spine-P7: spine gets ONLY P4 + A5).

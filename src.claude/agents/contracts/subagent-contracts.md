@@ -67,6 +67,8 @@ Gate to next stage:
 
 Before dispatch, fill `Diff-invisible invariants` and `Named regression guard`; `none` is valid only with a one-line reason. An implementation or review handoff with either field omitted is incomplete.
 
+`Approved inputs` identify the producing run's declared scope and accepted artifact revision when available; no new handoff field is required. Evaluate authored claims and review verdicts against the producing run's declared scope and accepted baseline: later independently owned lane deltas are reviewed in their own lane and do not retroactively falsify the earlier artifact; an actual material revision of the accepted upstream artifact still invalidates dependent `PASS` states and triggers dependent re-review.
+
 Receiving-side echo: the returned artifact MUST (a) report the Named regression guard's actual result (expected vs observed), (b) answer each Diff-invisible invariant as verified or ASSUMPTION (UNVERIFIED), (c) when the dispatch cited a defect class, include the class audit — every enumerated participant classified fixed / not-affected. An artifact missing the echo fails the mechanical acceptance gate.
 
 **Class-completeness trigger (mandatory):** when a reviewer, bot, or test cites one instance of a defect class, the dispatch prompt MUST direct the recipient to enumerate every participant of that class, classify each one, and fix every confirmed instance. A prompt scoped only to the named line is invalid.

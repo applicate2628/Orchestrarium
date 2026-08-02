@@ -573,8 +573,8 @@ def test_relation_slug_validation_consumes_canonical_lifecycle_owner(tmp_path: P
         active_dir = case_root / "work-items" / "active"
         dependency_notes = checker.blocked_by_notes(
             item,
-            active_dir,
-            case_root / "work-items" / "archive",
+            case_root,
+            lifecycle,
             slug_is_valid,
         )
         epic_notes = checker.epic_link_notes(
@@ -585,6 +585,7 @@ def test_relation_slug_validation_consumes_canonical_lifecycle_owner(tmp_path: P
         )
         if expected:
             assert dependency_notes == [
+                f"blocked-by: {slug} (unresolved Depends-on)",
                 f"dangling Depends-on: {slug} (no matching work-item)"
             ], slug
             assert epic_notes and epic_notes[0].startswith(f"dangling Epic: {slug} "), slug
@@ -627,10 +628,22 @@ def test_blocked_by_open_target_is_info_not_failure(tmp_path: Path):
     assert "info: blocked-by: dep-target" in result.stdout
 
 
+def test_blocked_by_backlog_target_is_info_not_dangling(tmp_path: Path):
+    backlog = tmp_path / "work-items" / "backlog"
+    backlog.mkdir(parents=True)
+    (backlog / "dep-target.md").write_text("status: candidate\n", encoding="utf-8")
+    write_item_with_status(tmp_path, "blocked-item", status_with_depends("dep-target"))
+    result = run_checker(tmp_path)
+    assert result.returncode == 0, result.stdout
+    assert "info: blocked-by: dep-target (open Depends-on)" in result.stdout
+    assert "dangling Depends-on: dep-target" not in result.stdout
+
+
 def test_dangling_depends_on_reported(tmp_path: Path):
     write_item_with_status(tmp_path, "item-x", status_with_depends("ghost-item"))
     result = run_checker(tmp_path)
     assert result.returncode == 0, result.stdout
+    assert "blocked-by: ghost-item (unresolved Depends-on)" in result.stdout
     assert "dangling Depends-on: ghost-item" in result.stdout
 
 
@@ -642,6 +655,19 @@ def test_blocked_by_done_target_not_reported(tmp_path: Path):
     result = run_checker(tmp_path)
     assert result.returncode == 0, result.stdout
     assert "blocked-by" not in result.stdout
+
+
+def test_duplicate_dependency_location_fails_closed(tmp_path: Path):
+    backlog = tmp_path / "work-items" / "backlog"
+    backlog.mkdir(parents=True)
+    (backlog / "dep-target.md").write_text("status: candidate\n", encoding="utf-8")
+    write_valid_item(tmp_path, "dep-target")
+    write_item_with_status(tmp_path, "blocked-item", status_with_depends("dep-target"))
+    result = run_checker(tmp_path)
+    assert result.returncode == 1, result.stdout
+    assert "WI-CATEGORY-DUAL-LOCATION" in result.stdout
+    assert "blocked-by: dep-target (unresolved Depends-on)" in result.stdout
+    assert "duplicate Depends-on: dep-target" in result.stdout
 
 
 def test_depends_on_none_no_note(tmp_path: Path):
@@ -810,64 +836,6 @@ def test_archive_scan_propagates_security_reviewer_waiver_validity(tmp_path: Pat
         assert f"{waiver_id}: field closesRunIds requires schemaVersion 2" not in result.stdout
 
 
-# --- resolver family direct coverage: _slug_archived / _slug_exists had no unit
-# tests of their own (bug 2026-07-26-archiving-an-item-breaks-its-own-ledger-
-# artifact-paths.md names the whole family as uncovered). These exercise the
-# functions directly, including a real active/ -> archive/<YYYY-MM>/ move.
-
-def test_slug_archived_finds_slug_under_dated_month_dir(tmp_path: Path) -> None:
-    archive_dir = tmp_path / "archive"
-    (archive_dir / "2026-07" / "my-slug").mkdir(parents=True)
-    module = load_checker_module()
-    assert module._slug_archived("my-slug", archive_dir) is True
-
-
-def test_slug_archived_false_when_slug_absent(tmp_path: Path) -> None:
-    archive_dir = tmp_path / "archive"
-    archive_dir.mkdir()
-    module = load_checker_module()
-    assert module._slug_archived("nowhere", archive_dir) is False
-
-
-def test_slug_archived_false_when_archive_dir_missing(tmp_path: Path) -> None:
-    module = load_checker_module()
-    assert module._slug_archived("anything", tmp_path / "does-not-exist") is False
-
-
-def test_slug_exists_true_for_active_dir(tmp_path: Path) -> None:
-    active_dir = tmp_path / "active"
-    (active_dir / "item-a").mkdir(parents=True)
-    archive_dir = tmp_path / "archive"
-    module = load_checker_module()
-    assert module._slug_exists("item-a", active_dir, archive_dir) is True
-
-
-def test_slug_exists_true_after_real_archive_move(tmp_path: Path) -> None:
-    """A slug moved from active/ to archive/<YYYY-MM>/ (the mandatory close step)
-    must still resolve as existing -- the same slug-stability the validator's
-    archive-fallback resolver and this function's own Depends-on callers rely on.
-    Uses a real shutil.move, not a simulated path, per the entry's requirement
-    that the resolver family only gets covered by a test that performs a move."""
-    active_dir = tmp_path / "active"
-    archive_dir = tmp_path / "archive"
-    active_dir.mkdir()
-    item = active_dir / "moved-item"
-    item.mkdir()
-    archived_item = archive_dir / "2026-07" / "moved-item"
-    archived_item.parent.mkdir(parents=True)
-    shutil.move(str(item), str(archived_item))
-
-    module = load_checker_module()
-    assert module._slug_exists("moved-item", active_dir, archive_dir) is True
-    # and the slug is no longer found under active/ post-move
-    assert not (active_dir / "moved-item").exists()
-
-
-def test_slug_exists_false_when_nowhere(tmp_path: Path) -> None:
-    module = load_checker_module()
-    assert module._slug_exists("ghost", tmp_path / "active", tmp_path / "archive") is False
-
-
 def test_done_predicate_twin_not_drifted():
     # The state-checker re-implements the SEN-0 archival-orphan invariant's
     # DONE_STATE regex (no shared import across the sentinel/validator
@@ -888,11 +856,11 @@ def test_done_predicate_twin_not_drifted():
 
 class TestArchiveOnlyDependencyTerminality(unittest.TestCase):
     def test_active_semantic_done_is_not_terminal_until_archive_move(self) -> None:
-        module = load_checker_module()
+        lifecycle = load_checker_module().load_lifecycle_owner()
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            active = root / "active"
-            archive = root / "archive"
+            active = root / "work-items" / "active"
+            archive = root / "work-items" / "archive"
             item = active / "dependency"
             item.mkdir(parents=True)
             (item / "status.md").write_text("status: completed\n", encoding="utf-8")
@@ -900,8 +868,14 @@ class TestArchiveOnlyDependencyTerminality(unittest.TestCase):
                 "Closed: 2026-07-31T00:00:00Z\n",
                 encoding="utf-8",
             )
-            self.assertFalse(module._slug_done("dependency", active, archive))
+            self.assertEqual(
+                lifecycle.work_item_dependency_state(root, "dependency"),
+                "open",
+            )
             archived = archive / "2026-07" / "dependency"
             archived.parent.mkdir(parents=True)
             item.replace(archived)
-            self.assertTrue(module._slug_done("dependency", active, archive))
+            self.assertEqual(
+                lifecycle.work_item_dependency_state(root, "dependency"),
+                "done",
+            )

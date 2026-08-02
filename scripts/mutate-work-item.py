@@ -489,6 +489,18 @@ def resolve_category(root: Path, reference: str) -> Path:
     return locations[0].resolve()
 
 
+def work_item_dependency_state(root: Path, slug: str) -> str:
+    """Resolve one dependency through the lifecycle owner.
+
+    Physical location owns the state: backlog and active records are open,
+    while only a dated archive record is done. Missing and duplicate identities
+    retain ``resolve_category``'s stable fail-closed errors.
+    """
+    location = resolve_category(root, f"work-item:{slug}")
+    archive = (_work_items_root(root) / "archive").resolve()
+    return "done" if archive in location.parents else "open"
+
+
 def resolve_legacy_path(root: Path, legacy_path: str) -> Path:
     candidate = Path(legacy_path)
     if candidate.is_absolute():
@@ -1828,6 +1840,24 @@ def reopen_item(
 
 def audit_categories(root: Path) -> tuple[str, ...]:
     work_items = _work_items_root(root)
+    allowed_roots = {"backlog", "active", "archive"}
+    allowed_roots.update(
+        category.current_root
+        for category in CATEGORIES.values()
+        if category.current_kind == "flat"
+    )
+    if work_items.is_dir():
+        unknown_roots = sorted(
+            path.name
+            for path in work_items.iterdir()
+            if path.is_dir() and path.name not in allowed_roots
+        )
+        if unknown_roots:
+            noun = "directory" if len(unknown_roots) == 1 else "directories"
+            raise LifecycleError(
+                "WI-CATEGORY-UNKNOWN-ROOT",
+                f"unknown top-level work-items {noun}: " + ", ".join(unknown_roots),
+            )
     legacy_read_compatible: list[str] = []
     for category in CATEGORIES.values():
         slugs: set[str] = set()

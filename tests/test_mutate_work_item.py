@@ -2961,6 +2961,36 @@ def test_audit_rejects_noncanonical_physical_slug(tmp_path: Path) -> None:
     module.audit_categories(valid_root)
 
 
+def test_audit_accepts_only_canonical_top_level_roots_and_root_files(tmp_path: Path) -> None:
+    module = load_module()
+    work_items = tmp_path / "work-items"
+    canonical_roots = {"backlog", "active", "archive"}
+    canonical_roots.update(
+        category.current_root
+        for category in module.CATEGORIES.values()
+        if category.current_kind == "flat"
+    )
+    for name in canonical_roots:
+        (work_items / name).mkdir(parents=True)
+    write(work_items / "README.md", "# Generated view\n")
+    write(work_items / "index.md", "# Compatibility view\n")
+
+    assert module.audit_categories(tmp_path) == ()
+
+
+def test_audit_rejects_unknown_top_level_directory(tmp_path: Path) -> None:
+    module = load_module()
+    (tmp_path / "work-items" / "unknown-category").mkdir(parents=True)
+
+    try:
+        module.audit_categories(tmp_path)
+    except module.LifecycleError as exc:
+        assert exc.failure_id == "WI-CATEGORY-UNKNOWN-ROOT"
+        assert "unknown-category" in str(exc)
+    else:
+        raise AssertionError("audit accepted an unknown top-level work-items directory")
+
+
 def test_noncanonical_archive_is_physical_read_compat_only(tmp_path: Path) -> None:
     module = load_module()
     root = tmp_path / "repo"

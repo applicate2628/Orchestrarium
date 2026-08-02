@@ -201,33 +201,10 @@ def item_aging_notes(item: Path, today: date, max_age_days: float) -> list[str]:
     return []
 
 
-def _slug_archived(slug: str, archive_dir: Path) -> bool:
-    try:
-        for cand in [archive_dir / slug, *archive_dir.glob(f"*/{slug}")]:
-            if cand.is_dir():
-                return True
-    except OSError:
-        return False
-    return False
-
-
-def _slug_done(slug: str, active_dir: Path, archive_dir: Path) -> bool:
-    return _slug_archived(slug, archive_dir)
-
-
-def _slug_exists(slug: str, active_dir: Path, archive_dir: Path) -> bool:
-    try:
-        if (active_dir / slug).is_dir():
-            return True
-    except OSError:
-        return False
-    return _slug_archived(slug, archive_dir)
-
-
 def blocked_by_notes(
     item: Path,
-    active_dir: Path,
-    archive_dir: Path,
+    root: Path,
+    lifecycle: Any,
     is_valid_slug: Any,
 ) -> list[str]:
     """Informational: open Depends-on blockers + dangling targets for an active
@@ -242,7 +219,9 @@ def blocked_by_notes(
     if not match:
         return []
     open_targets: list[str] = []
+    unresolved_targets: list[str] = []
     dangling: list[str] = []
+    duplicate: list[str] = []
     invalid: list[str] = []
     for token in match.group(1).split(","):
         slug = token.strip().strip("`")
@@ -251,15 +230,33 @@ def blocked_by_notes(
         if not is_valid_slug(slug):
             invalid.append(slug)
             continue
-        if not _slug_exists(slug, active_dir, archive_dir):
-            dangling.append(slug)
-        elif not _slug_done(slug, active_dir, archive_dir):
+        try:
+            state = lifecycle.work_item_dependency_state(root, slug)
+        except lifecycle.LifecycleError as exc:
+            if exc.failure_id == "WI-REFERENCE-MISSING":
+                unresolved_targets.append(slug)
+                dangling.append(slug)
+                continue
+            if exc.failure_id == "WI-CATEGORY-DUAL-LOCATION":
+                unresolved_targets.append(slug)
+                duplicate.append(slug)
+                continue
+            raise
+        if state == "open":
             open_targets.append(slug)
     notes: list[str] = []
     if open_targets:
         notes.append(f"blocked-by: {', '.join(open_targets)} (open Depends-on)")
+    if unresolved_targets:
+        notes.append(
+            f"blocked-by: {', '.join(unresolved_targets)} (unresolved Depends-on)"
+        )
     if dangling:
         notes.append(f"dangling Depends-on: {', '.join(dangling)} (no matching work-item)")
+    if duplicate:
+        notes.append(
+            f"duplicate Depends-on: {', '.join(duplicate)} (multiple matching work-items)"
+        )
     if invalid:
         notes.append(f"invalid Depends-on: {', '.join(invalid)}")
     return notes
@@ -438,7 +435,7 @@ def command_check(args: argparse.Namespace) -> int:
         # aging active item is expected state, not a defect, so they never flip
         # the exit code or the RESULT line.
         notes = item_aging_notes(item, today, args.max_age_days)
-        notes.extend(blocked_by_notes(item, active_dir, archive_dir, is_valid_slug))
+        notes.extend(blocked_by_notes(item, root, lifecycle, is_valid_slug))
         label = item.name
         if errors:
             failed += 1

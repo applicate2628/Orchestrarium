@@ -23,6 +23,7 @@ list-item frontmatter** (`- key:` bullets, NO `---` YAML fences — bugs use
 ```
 - id: <date>-<slug>
 - status: proposed | accepted | dropped | superseded | reverted
+- date: <YYYY-MM-DD>
 - decided-by: <role or human>
 - context: <work-item slug | cross-cutting>
 - supersedes: <decision id | none>
@@ -44,6 +45,10 @@ list-item frontmatter** (`- key:` bullets, NO `---` YAML fences — bugs use
 ```
 
 ## Status lifecycle
+
+`- date:` is required. The stale-proposal accountability check considers only a
+record whose leading frontmatter has both `status: proposed` and a date before
+today; a same-day proposal has its first review window and does not flag.
 
 `proposed` -> `accepted` -> `superseded` / `reverted`, with `dropped` as the
 other terminal from `proposed`:

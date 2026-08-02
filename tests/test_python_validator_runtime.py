@@ -72,7 +72,7 @@ def test_work_items_checker_consumes_canonical_slug_predicate_explicitly(
         "Depends-on: safe.dot, trailing., double..dot, Uppercase, under_score\n",
         encoding="utf-8",
     )
-    notes = checker.blocked_by_notes(item, active, archive, predicate)
+    notes = checker.blocked_by_notes(item, tmp_path, lifecycle, predicate)
     assert notes == [
         "blocked-by: safe.dot (open Depends-on)",
         "invalid Depends-on: trailing., double..dot, Uppercase, under_score",
