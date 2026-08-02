@@ -8,10 +8,13 @@ a maintainer reference (not installed to targets); runtime surfaces (the spine c
 
 ## Principle
 
-Fixes NEVER pile up as a heap of patches. Every invariant / decision logic has ONE owner. A fix is a
-correction of the owner's logic — not a neighboring check added because the owner "wasn't trusted" or
-wasn't found. If the owner is wrong, fix the owner; if the owner is missing, name one; if you cannot
-name one, that is an `$architect` question, not a license to patch locally.
+Fixes NEVER pile up as a heap of patches. Every invariant, decision logic, or live textual artifact has
+ONE owner and one coherent current truth. A fix corrects the owner rather than adding a neighboring
+check because the owner "wasn't trusted" or wasn't found. A meaning-changing clarification supersedes
+the prior wording: rewrite or remove stale prose, with correction history kept in version control or a
+designated decision/closure record. Preserve both old and new detail only when they are genuinely
+cumulative and non-conflicting. If the owner is wrong, fix it; if missing, name it; if you cannot name
+it, that is an `$architect` question, not a license to patch locally.
 
 ## Red flags (each one is a finding)
 
@@ -23,10 +26,13 @@ name one, that is an `$architect` question, not a license to patch locally.
    READ, not redundant") is an admission of two owners, not a resolution.
 3. **A fix that papers over another fix** — a guard whose purpose is to hide the misbehavior of an
    earlier patch. The earlier patch is the defect.
-4. **An if-else pile in a validator begging for a table/loop** — each incremental special-case round
+4. **A clarification appended beside prose it invalidates** — the live document now tells two stories.
+   Replace or remove the superseded statement; do not turn ordinary current prose into correction
+   archaeology.
+5. **An if-else pile in a validator begging for a table/loop** — each incremental special-case round
    added one more branch to the same loop. After ~3 rounds of edge-mining on one surface, stop and
    route a single-owner design to `$architect`.
-5. **An interim/TODO stub without a tracked root-cause item** — a symptom-guard is allowed ONLY as an
+6. **An interim/TODO stub without a tracked root-cause item** — a symptom-guard is allowed ONLY as an
    explicitly-temporary hold with a tracked root-cause item on the single owner (spine `no kostyl` rule
    owns this: explicit `WORKAROUND`, named root cause, scope, lifetime). A guard without such an item
    is a patch forever.

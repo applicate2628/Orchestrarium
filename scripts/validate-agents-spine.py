@@ -201,6 +201,12 @@ GENERAL_CASE_TEETH = [
     "generalize later",
 ]
 
+TEXTUAL_REVISION_TEETH = [
+    "one coherent current truth",
+    "clarification that changes a live textual artifact's meaning supersedes its prior wording",
+    "genuinely cumulative and non-conflicting",
+]
+
 REUSE_BEFORE_HAND_ROLLING_TEETH = [
     "Reuse before hand-rolling",
     "from scratch",
@@ -270,6 +276,7 @@ MANIFEST: dict[str, list[str]] = {
     "safety clauses": SAFETY_CLAUSES,
     "review-restored teeth": REVIEW_RESTORED_TEETH,
     "general-case teeth": GENERAL_CASE_TEETH,
+    "textual-revision teeth": TEXTUAL_REVISION_TEETH,
     "reuse-before-hand-rolling teeth": REUSE_BEFORE_HAND_ROLLING_TEETH,
     "wire-shape teeth": WIRE_SHAPE_TEETH,
     "destructive-polarity teeth": DESTRUCTIVE_POLARITY_TEETH,

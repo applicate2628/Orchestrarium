@@ -1463,7 +1463,11 @@ _DECLARED_ACTIONS = (('direct', 'file', '@AGENTS'),
  ('direct', 'agents_heading', "Section '## Role index' present in AGENTS.md"),
  ('direct', 'agents_heading', "Section '## Engineering hygiene' present in AGENTS.md"),
  ('direct', 'agents_heading', "Section '## Publication safety' present in AGENTS.md"),
- ('direct', 'agents_heading', "Section '## Core delegation principles' present in AGENTS.md"))
+ ('direct', 'agents_heading', "Section '## Core delegation principles' present in AGENTS.md"),
+ ('check_contains',
+  '@AGENTS',
+  "clarification that changes a live textual artifact's meaning supersedes its prior wording",
+  'shared governance replaces meaning-changing textual clarifications instead of layering prose'))
 
 _INSTALLED_ACTIONS = (
     ("check_file", "@SCRIPTS/agent-run-ledger.py", "installed agent-run-ledger.py"),
@@ -1519,7 +1523,7 @@ ACTIONS = (
         _DECLARED_ACTIONS[0:35]
         + _DECLARED_ACTIONS[142:310]
         + _DECLARED_ACTIONS[328:335]
-        + _DECLARED_ACTIONS[372:377],
+        + _DECLARED_ACTIONS[372:378],
     ),
     (
         "dev_repo",

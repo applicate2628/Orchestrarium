@@ -1156,7 +1156,11 @@ _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
   'agent run ledger schema defines evidence'),
  ('check_agent_run_ledger_contract', 'agent run ledger schema and validator reject schema-invalid events'),
  ('check_arch_layering_slices',
-  'architecture-layering slices consistent across roles and claude/codex packs'))
+  'architecture-layering slices consistent across roles and claude/codex packs'),
+ ('check_contains',
+  '@AGENTS',
+  "clarification that changes a live textual artifact's meaning supersedes its prior wording",
+  'shared governance replaces meaning-changing textual clarifications instead of layering prose'))
 
 _INSTALLED_ACTIONS = (
     ("check_file", "@SCRIPTS/agent-run-ledger.py", "installed agent-run-ledger.py"),
@@ -1202,7 +1206,7 @@ _INSTALLED_ACTIONS = (
 )
 
 ACTIONS = (
-    ("all", _DECLARED_ACTIONS[0:42] + _DECLARED_ACTIONS[114:262]),
+    ("all", _DECLARED_ACTIONS[0:42] + _DECLARED_ACTIONS[114:262] + _DECLARED_ACTIONS[314:315]),
     (
         "dev_repo",
         _DECLARED_ACTIONS[42:114]

@@ -179,6 +179,32 @@ class TestMissingManifestTokenFailsClosed(unittest.TestCase):
                     self.assertIn("[performance-profile teeth]", result.stdout)
 
 
+class TestTextualRevisionTeethFailClosed(unittest.TestCase):
+    def test_deleted_supersession_tooth_fails_via_import(self) -> None:
+        mod = _load_validator()
+        token = mod.TEXTUAL_REVISION_TEETH[0]
+        with tempfile.TemporaryDirectory() as td:
+            spine = _copy_spine_tree(Path(td))
+            text = spine.read_text(encoding="utf-8")
+            self.assertIn(token, text)
+            spine.write_text(text.replace(token, "deleted-current-truth"), encoding="utf-8")
+            ok, messages = mod.validate(spine)
+            self.assertFalse(ok)
+            self.assertIn("[textual-revision teeth]", "\n".join(messages))
+
+    def test_mutated_supersession_tooth_fails_via_cli(self) -> None:
+        mod = _load_validator()
+        token = mod.TEXTUAL_REVISION_TEETH[1]
+        with tempfile.TemporaryDirectory() as td:
+            spine = _copy_spine_tree(Path(td))
+            text = spine.read_text(encoding="utf-8")
+            self.assertIn(token, text)
+            spine.write_text(text.replace("supersedes", "supplements", 1), encoding="utf-8")
+            result = _run_cli(spine)
+            self.assertEqual(result.returncode, 1, result.stdout)
+            self.assertIn("[textual-revision teeth]", result.stdout)
+
+
 class TestDeadReferencePointerFailsClosed(unittest.TestCase):
     """Branch (2): if the spine names a shared/references/...md pointer that no
     longer resolves to a file (a moved/renamed/deleted extract), the validator
