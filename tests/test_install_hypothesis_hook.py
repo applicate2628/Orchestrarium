@@ -221,6 +221,51 @@ class TestInstallHypothesisHook(unittest.TestCase):
         self.assertEqual(hook["args"], [str(REMINDER_PY_SCRIPT_PATH.resolve())])
         self.assertIn("mcp-usage-reminder", hook["args"][0])
 
+    def test_install_posttooluse_hook_uses_default_matcher_for_all_platforms(self) -> None:
+        for platform in ("claude", "codex", "generic"):
+            with self.subTest(platform=platform):
+                target = self.tmpdir / f"{platform}-default.json"
+                result = run_installer(
+                    target,
+                    "--hook-event",
+                    "PostToolUse",
+                    "--script-marker",
+                    "posttooluse-default",
+                    platform=platform,
+                    script_path=REMINDER_SCRIPT_PATH,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                entries = load_json(target)["hooks"]["PostToolUse"]
+                self.assertEqual(len(entries), 1)
+                self.assertEqual(entries[0]["matcher"], "Edit|Write|NotebookEdit|apply_patch")
+                hook = entries[0]["hooks"][0]
+                if platform == "codex":
+                    self.assertNotIn("args", hook)
+                    self.assertIn("mcp-usage-reminder", hook["command"])
+                else:
+                    self.assertEqual(Path(hook["command"]), Path(sys.executable).resolve())
+                    self.assertEqual(hook["args"], [str(REMINDER_PY_SCRIPT_PATH.resolve())])
+
+    def test_install_posttooluse_hook_uses_custom_matcher_for_all_platforms(self) -> None:
+        for platform in ("claude", "codex", "generic"):
+            with self.subTest(platform=platform):
+                target = self.tmpdir / f"{platform}-custom.json"
+                result = run_installer(
+                    target,
+                    "--hook-event",
+                    "PostToolUse",
+                    "--script-marker",
+                    "posttooluse-custom",
+                    "--tool-matcher",
+                    "Bash",
+                    platform=platform,
+                    script_path=REMINDER_SCRIPT_PATH,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                entries = load_json(target)["hooks"]["PostToolUse"]
+                self.assertEqual(len(entries), 1)
+                self.assertEqual(entries[0]["matcher"], "Bash")
+
     def test_codex_windows_remove_works(self) -> None:
         # Removal must work the same way on Codex+Windows as on POSIX.
         existing_cmd = f"bash {SCRIPT_PATH}"

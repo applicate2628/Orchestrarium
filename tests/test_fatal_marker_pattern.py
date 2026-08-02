@@ -10,6 +10,10 @@ import sys
 from pathlib import Path
 
 import pytest
+from tests.fixtures.codex_hook_fixture import (
+    FAKE_CODEX_HOOKS_HOST,
+    prepare_codex_home,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -97,8 +101,10 @@ def _make_work_item(tmp_path: Path, suffix: str) -> Path:
 def _run_transport(tmp_path: Path, err_line: str) -> dict:
     fake = tmp_path / "fake-codex.py"
     fake.write_text(
-        "import os,pathlib,sys\n"
+        "import os,pathlib,runpy,sys\n"
         "args=sys.argv[1:]\n"
+        "if 'app-server' in args:\n"
+        f"    runpy.run_path({str(FAKE_CODEX_HOOKS_HOST)!r}, run_name='__main__')\n"
         "sys.stdin.buffer.read()\n"
         "pathlib.Path(args[args.index('--output-last-message')+1]).write_text("
         "'GATE: PASS\\n', encoding='utf-8')\n"
@@ -111,6 +117,7 @@ def _run_transport(tmp_path: Path, err_line: str) -> dict:
     env = os.environ.copy()
     env["CODEX_BIN"] = str(fake)
     env["CODEX_PROMPTS_DIR"] = str(tmp_path / "outputs")
+    env["CODEX_HOME"] = str(prepare_codex_home(tmp_path))
     env["FAKE_ERR_LINE"] = err_line
     result = subprocess.run(
         [

@@ -162,6 +162,7 @@ ALLOWLIST = [
     ("refusal-negation", re.compile(r"not\s+(?:a\s+)?(?:dispatch|subagent)", re.IGNORECASE)),
     ("refusal-negation", re.compile(r"never\s+(?:be\s+)?a\s+dispatch", re.IGNORECASE)),
     ("refusal-negation", re.compile(r"not a subagent you spawn", re.IGNORECASE)),
+    ("refusal-negation", re.compile(r"never\s+(?:invoke|launch)\s+`?\$lead\b", re.IGNORECASE)),
     ("refusal-negation", re.compile(r"fail-?closed", re.IGNORECASE)),
     ("refusal-negation", re.compile(r"fails\s+closed", re.IGNORECASE)),
     ("refusal-negation", re.compile(r"stale route", re.IGNORECASE)),
@@ -298,6 +299,24 @@ _KNOWN_FINE_FORMS = [
 def test_guard_flags_known_split_forms():
     misses = [s for s in _KNOWN_SPLIT_FORMS if _line_verdict(s) is None]
     assert not misses, f"guard failed to flag reintroduced split form(s): {misses}"
+
+
+def test_guard_allows_negated_invoke_and_launch_of_lead():
+    refusals = (
+        "never invoke $lead",
+        "never launch $lead",
+    )
+    false_positives = [(line, _line_verdict(line)) for line in refusals if _line_verdict(line) is not None]
+    assert not false_positives, f"guard false-flagged lead refusal form(s): {false_positives}"
+
+
+def test_negated_invoke_launch_allowlist_keeps_positive_dispatch_forbidden():
+    positive_dispatches = (
+        "invoke $lead to coordinate the work",
+        "launch $lead to coordinate the work",
+    )
+    verdicts = [(line, _line_verdict(line)) for line in positive_dispatches]
+    assert verdicts == [(line, "dispatch:verb-lead") for line in positive_dispatches]
 
 
 def test_guard_allows_known_fine_forms():

@@ -36,7 +36,7 @@ SESSION_START_CONTEXT = "\n".join(
 TURN_ANCHOR_CONTEXT = (
     "[turn anchor - re-shown every turn because a once-per-session reminder is overwritten"
     " by whatever you did last]\n"
-    "Root main conversation / Lead: continue until blocked; a passed slice is not completion."
+    "Root main conversation (as Lead): continue until blocked; a passed slice is not completion."
     " Record it, take the next unchecked action, and dispatch the next admitted role. A final-"
     "style summary while a known next action remains IS the defect. If you genuinely need the"
     " operator, name the blocker or decision as the reason for stopping.\n"

@@ -248,13 +248,13 @@ def resolve_hook_target(
 def _with_event_matcher(
     entry: dict[str, Any], hook_event: str, tool_matcher: str | None = None
 ) -> dict[str, Any]:
-    """Attach matcher only for hook events that consume one.
+    """Attach matcher only for tool hook events that consume one.
 
     tool_matcher overrides the default TOOL_MATCHER_REGEX for a hook that must
     fire on a different tool set (e.g. "Bash" for a shell-command guard). When
     None, the shared default applies, so every existing hook entry is unchanged.
     """
-    if hook_event == "PreToolUse":
+    if hook_event in ("PreToolUse", "PostToolUse"):
         return {"matcher": tool_matcher or TOOL_MATCHER_REGEX, **entry}
     return entry
 
@@ -523,7 +523,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--hook-event",
-        choices=("PreToolUse", "Stop", "SessionStart", "UserPromptSubmit"),
+        choices=("PreToolUse", "PostToolUse", "Stop", "SessionStart", "UserPromptSubmit"),
         default="PreToolUse",
         help="Hook event to install under (default: PreToolUse)",
     )
@@ -536,7 +536,7 @@ def main() -> int:
         "--tool-matcher",
         default=None,
         help=(
-            "Override the PreToolUse matcher regex (default: "
+            "Override the tool-event matcher regex (default: "
             "Edit|Write|NotebookEdit|apply_patch). Use for a hook that must fire "
             "on a different tool set, e.g. 'Bash' for a shell-command guard. "
             "Ignored for the Stop event, which takes no matcher."

@@ -10,11 +10,11 @@ import sys
 from pathlib import Path
 
 import pytest
+from tests.fixtures.codex_hook_fixture import prepare_codex_home
 
 
 ROOT = Path(__file__).resolve().parents[1]
 MODULE = ROOT / "src.claude/agents/scripts/provider_prompt.py"
-INSTALLER_MODULE = ROOT / "scripts/production_installer.py"
 ENTRYPOINTS = {
     "codex": ROOT / "src.claude/agents/scripts/invoke-codex-prompt.py",
     "claude": ROOT / "src.claude/agents/scripts/invoke-claude-prompt.py",
@@ -26,13 +26,6 @@ assert spec and spec.loader
 owner = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = owner
 spec.loader.exec_module(owner)
-installer_spec = importlib.util.spec_from_file_location(
-    "production_installer_oracle_test", INSTALLER_MODULE
-)
-assert installer_spec and installer_spec.loader
-installer = importlib.util.module_from_spec(installer_spec)
-sys.modules[installer_spec.name] = installer
-installer_spec.loader.exec_module(installer)
 
 
 def _make_work_item(tmp_path: Path, suffix: str) -> Path:
@@ -96,22 +89,6 @@ def _make_fake_provider(
     return fake
 
 
-def _prepare_codex_home(tmp_path: Path) -> Path:
-    codex_home = tmp_path / "codex-home"
-    codex_home.mkdir()
-    hooks: dict[str, list[dict]] = {}
-    installed_root = ROOT / "src.codex" / "skills" / "lead"
-    for _marker, script, event, matcher in installer._hook_specs("codex", installed_root):
-        entry = {"hooks": [{"type": "command", "command": f"{sys.executable} {script}"}]}
-        if matcher is not None:
-            entry["matcher"] = matcher
-        hooks.setdefault(event, []).append(entry)
-    (codex_home / "hooks.json").write_text(
-        json.dumps({"hooks": hooks}), encoding="utf-8"
-    )
-    return codex_home
-
-
 def _run_transport(
     tmp_path: Path,
     provider: str,
@@ -133,7 +110,7 @@ def _run_transport(
     env[BIN_ENV[provider]] = str(fake)
     env[OUTPUT_ENV[provider]] = str(tmp_path / f"{provider}-outputs")
     if provider == "codex":
-        env["CODEX_HOME"] = str(_prepare_codex_home(tmp_path))
+        env["CODEX_HOME"] = str(prepare_codex_home(tmp_path))
     if provider == "claude":
         env["ANTHROPIC_API_KEY"] = "fake-commercial-credential"
     arguments = [

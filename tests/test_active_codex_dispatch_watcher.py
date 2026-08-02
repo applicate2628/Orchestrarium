@@ -8,6 +8,10 @@ import time
 from pathlib import Path
 
 import pytest
+from tests.fixtures.codex_hook_fixture import (
+    FAKE_CODEX_HOOKS_HOST,
+    prepare_codex_home,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -265,8 +269,10 @@ def test_python_prompt_owner_writes_pid_and_artifact_paths(
 ) -> None:
     fake = tmp_path / f"fake-{provider}.py"
     fake.write_text(
-        "import os,pathlib,sys\n"
+        "import os,pathlib,runpy,sys\n"
         "args=sys.argv[1:]\n"
+        "if 'app-server' in args:\n"
+        f"    runpy.run_path({str(FAKE_CODEX_HOOKS_HOST)!r}, run_name='__main__')\n"
         "pathlib.Path(os.environ['FAKE_ENV_CAPTURE']).write_text("
         "os.environ.get('ORCHESTRARIUM_DISPATCHED_REVIEW', ''), encoding='utf-8')\n"
         "if '--output-last-message' in args:\n"
@@ -283,6 +289,8 @@ def test_python_prompt_owner_writes_pid_and_artifact_paths(
     env[bin_env] = str(fake)
     env[output_env] = str(tmp_path / f"{provider}-artifacts")
     env["FAKE_ENV_CAPTURE"] = str(env_capture)
+    if provider == "codex":
+        env["CODEX_HOME"] = str(prepare_codex_home(tmp_path))
     if provider == "claude":
         env["ANTHROPIC_API_KEY"] = "fake-commercial-credential"
     result = subprocess.run(

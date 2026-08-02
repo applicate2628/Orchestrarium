@@ -226,6 +226,30 @@ def test_checker_accepts_minimal_staged_status_and_reports_v1_next_action(tmp_pa
     assert "status.md missing section" not in result.stdout
 
 
+def test_checker_accepts_asterisk_bullet_staged_status_fields(tmp_path: Path):
+    repo = tmp_path / "repo"
+    checker = write_checker_bundle(tmp_path / "bundle", REQUIRED_SENTINEL_STUB)
+    status = minimal_staged_status()
+    for field in (
+        "Task",
+        "Current step",
+        "Last result",
+        "Next action",
+        "Scope boundary",
+        "Owner",
+        "Integration owner",
+        "Evidence gate",
+    ):
+        status = status.replace(f"{field}: ", f"* {field}: ")
+    write_staged_item(repo, status=status)
+
+    result = run_bundled_checker(checker, repo)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "PASS staged-item" in result.stdout
+    assert "staged-item -- Next action: Run the staged checker gate." in result.stdout
+
+
 def test_checker_rejects_staged_status_missing_required_v1_field(tmp_path: Path):
     repo = tmp_path / "repo"
     checker = write_checker_bundle(tmp_path / "bundle", REQUIRED_SENTINEL_STUB)

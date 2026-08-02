@@ -60,7 +60,7 @@ UTC_INSTANT_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]*(?:\.[a-z0-9][a-z0-9-]*)*$")
 OPTIONAL_RELATION_ABSENCE_MARKERS = frozenset({"none"})
 FIELD_RE = re.compile(
-    r"^\s*(?:-\s*)?(?:\*\*)?([A-Za-z][A-Za-z0-9 -]*?)(?:\*\*)?\s*:\s*(.*?)\s*$"
+    r"^\s*(?:[-*]\s*)?(?:\*\*)?([A-Za-z][A-Za-z0-9 -]*?)(?:\*\*)?\s*:\s*(.*?)\s*$"
 )
 FENCED_CODE_OPEN_RE = re.compile(
     r"^ {0,3}(?P<fence>`{3,}|~{3,})(?P<info>[^\r\n]*)$"

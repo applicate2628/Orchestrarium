@@ -33,8 +33,8 @@ EXPECTED_PAYLOADS: dict[str, tuple[int, str]] = {
         "c0624b3c42cc0a310896b98e4cc1dfac21f68131185e21b6eb138c5f8759a272",
     ),
     "hook-behavior-contracts": (
-        21_996,
-        "81d0152163c08f7ec32e4ed5b6fcc9bf82be6eec7a6c329ba167d40a6811f726",
+        22_095,
+        "c1657fcfd1e61a3fface916886e93443db1b0f2a790006fc1da3a0cced72713d",
     ),
     # Re-pinned 2026-07-27 when the hook registration moved from `.sh`/`.ps1`
     # wrappers to direct `.py` invocation. The pin exists to force exactly this
@@ -46,12 +46,12 @@ EXPECTED_PAYLOADS: dict[str, tuple[int, str]] = {
     # SYNC -> REGISTER -> VERIFY -> RECLAIM transaction. A pin refreshed without
     # reading the diff would defeat the mechanism entirely.
     "hook-entrypoints-placement": (
-        1_216,
-        "1c679072806a87812964343a86f9cbc8cf0779e6cfc38376192b9587044c4490",
+        1_043,
+        "d03780b02444aa8890423e675f3fa476552411989f8ea0a4d2e16c9deb2971dd",
     ),
     "installer-removal-json-path": (
-        5_957,
-        "6809d9ba25ffd78f0763127879193cd6dfdc306aa09aff5c2db76682a5c57c04",
+        5_435,
+        "ec63cc633fff6a9fc40848e1f034e31599df65156e58d28a3df11015bfd91f45",
     ),
 }
 

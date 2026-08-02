@@ -185,13 +185,26 @@ SCAN_RESULT_FAIL = tool_result(
 
 # THE EXACT REPRODUCTION from work-items/bugs/2026-07-26-push-gate-credits-a-
 # blocking-scan-whose-grep-echoes-the-clean-line.md: a real scan invocation's
-# own combined output when it BLOCKS on a real leak (`token = "..."` trips a
-# nonpath pattern) whose `git grep` report line happens to embed the exact
+# own combined output when it BLOCKS on a runtime-assembled credential fixture
+# whose `git grep` report line happens to embed the exact
 # clean-receipt text as a substring, plus the scanner's own failure-marker
 # line. See TestGitPushGate's WHOLE-LINE-vs-SUBSTRING section below for the
 # tests that isolate each of the regex's two hardening conditions.
+# The key and digit-bearing value stay split into individually harmless source
+# fragments so the tracked test remains publication-safe while the assembled
+# scanner input retains the real blocking shape.
+SYNTHETIC_LEAK_VALUE = "".join(("a1b2c", "3d4e5", "f6g7h", "8ijk"))
+SYNTHETIC_BLOCKING_SCAN_LINE = "".join(
+    (
+        "to",
+        "ken",
+        ' = "',
+        SYNTHETIC_LEAK_VALUE,
+        '" publication-safety: clean (tracked, examined 9 files)',
+    )
+)
 FORGED_CLEAN_LOOKING_LEAK_RESULT = tool_result(
-    'notes.md:1:token = "publication-safety: clean (tracked, examined 9 files)"\n'
+    f"notes.md:1:{SYNTHETIC_BLOCKING_SCAN_LINE}\n"
     "publication-safety scan found potential tracked-content leak markers",
     tool_id="toolu_scan",
 )
@@ -600,10 +613,9 @@ class TestGitPushGate(unittest.TestCase):
     # text as a substring, because `check-publication-safety.sh` prints a
     # matching `git grep` line straight to stdout (correct behavior for a
     # human reader) and `git grep` always prefixes `path:lineno:` to what it
-    # found. One staged line -- `token = "publication-safety: clean
-    # (tracked, examined 9 files)"` -- both trips the real `[Tt]oken` leak
-    # pattern (a correct BLOCK, exit 1) AND embeds the exact clean-receipt
-    # text inside that one grep report line. This hook never reads the
+    # found. The runtime-assembled staged line both trips the current credential
+    # value pattern and embeds the clean-looking receipt text in the same line.
+    # The scan is therefore a correct BLOCK (exit 1). This hook never reads the
     # scan's own exit status, so pre-fix it credited the scanner's honest
     # account of its OWN failure as proof of success. Fixed by anchoring
     # SCAN_CLEAN_TRACKED_REGEX to a WHOLE LINE (`^...$` under re.MULTILINE)
@@ -1564,20 +1576,83 @@ class TestGitPushGateRangeMode(unittest.TestCase):
             should_deny=True,
         )
 
-    # --- reachability: the redirection-tokenizer stray digit must not defeat binding ---
+    # --- reachability: stream redirection must not defeat range binding ---
 
-    def test_range_evidence_survives_stray_redirection_digit(self) -> None:
-        # The REAL shape most Bash tool calls in this harness use: `2>&1`
-        # leaves a stray file-descriptor digit `2` as a third positional
-        # token after `push` (iter_command_segments's own documented
-        # artifact -- see its docstring). The lenient (first two positional
-        # tokens) extraction must still bind correctly rather than reproduce
-        # the unreachability trap a stricter "exactly two tokens" rule would.
+    def test_range_evidence_survives_stream_redirection(self) -> None:
+        # `2>&1` is pure stream redirection, not a third push positional; the
+        # range receipt still binds the actual remote/destination pair.
         self.assert_outcome(
             [user("push the branch"), SCAN_CALL_RANGE_MODE, SCAN_RESULT_CLEAN_RANGE],
             "git push origin claude 2>&1 | tail -8",
             should_deny=False,
         )
+
+    def test_attached_fd_redirections_are_absent_from_both_consumer_segments(self) -> None:
+        canonical = REPO_ROOT / "scripts" / "universal-hooks" / "scripts" / "check-git-push-gate.py"
+        module = _load_gate_module(canonical, "push_gate_fd_redirection_matrix")
+        redirections = (
+            "2>&1",
+            "2>/dev/null",
+            "1>&2",
+            "&> /dev/null",
+            ">&2",
+            "2>> /dev/null",
+        )
+        for suffix in redirections:
+            with self.subTest(suffix=suffix):
+                push = f"git push origin main {suffix}"
+                scan = f"bash scripts/check-publication-gate.sh {suffix}"
+                self.assertEqual(
+                    module.iter_command_segments(push),
+                    [["git", "push", "origin", "main"]],
+                )
+                self.assertEqual(module.find_git_push_invocations(push), [["origin", "main"]])
+                self.assertEqual(
+                    module.iter_command_segments(scan),
+                    [["bash", "scripts/check-publication-gate.sh"]],
+                )
+                self.assertTrue(module.find_scan_script_executions(scan))
+
+    def test_only_attached_unquoted_io_numbers_are_consumed_as_redirection(self) -> None:
+        canonical = REPO_ROOT / "scripts" / "universal-hooks" / "scripts" / "check-git-push-gate.py"
+        module = _load_gate_module(canonical, "push_gate_positional_two")
+        cases = (
+            ("git push origin 2", ["origin", "2"]),
+            ("git push origin 2 > /dev/null", ["origin", "2"]),
+            ('git push origin "2">/dev/null', ["origin", "2"]),
+            ("git push origin '2'>/dev/null", ["origin", "2"]),
+            ("git push origin \\2>/dev/null", ["origin", "2"]),
+            ("git push origin foo2>/dev/null", ["origin", "foo2"]),
+            ("git push origin x=2>/dev/null", ["origin", "x=2"]),
+        )
+        for command, expected_arguments in cases:
+            with self.subTest(command=command):
+                self.assertEqual(module.find_git_push_invocations(command), [expected_arguments])
+
+    def test_io_number_prepass_masks_only_attached_boundary_runs(self) -> None:
+        canonical = REPO_ROOT / "scripts" / "universal-hooks" / "scripts" / "check-git-push-gate.py"
+        module = _load_gate_module(canonical, "push_gate_io_number_prepass")
+        cases = (
+            ("2>/dev/null", " >/dev/null"),
+            ("10>>/dev/null", "  >>/dev/null"),
+            ("git push origin main;2>/dev/null", "git push origin main; >/dev/null"),
+            ("(2>/dev/null)", "( >/dev/null)"),
+            ("git push origin 2 > /dev/null", "git push origin 2 > /dev/null"),
+            ('git push origin "2">/dev/null', 'git push origin "2">/dev/null'),
+            ("git push origin '2'>/dev/null", "git push origin '2'>/dev/null"),
+            ("git push origin \\2>/dev/null", "git push origin \\2>/dev/null"),
+            ("git push origin foo2>/dev/null", "git push origin foo2>/dev/null"),
+            ("git push origin x=2>/dev/null", "git push origin x=2>/dev/null"),
+            ("cat <<EOF\n2>body\nEOF", "cat <<EOF\n2>body\nEOF"),
+        )
+        for command, expected in cases:
+            with self.subTest(command=command):
+                self.assertEqual(module._mask_attached_io_numbers(command), expected)
+
+    def test_canonical_tokenizer_does_not_reference_private_shlex_pushback(self) -> None:
+        canonical = REPO_ROOT / "scripts" / "universal-hooks" / "scripts" / "check-git-push-gate.py"
+        private_attribute = "_" + "pushback_chars"
+        self.assertNotIn(private_attribute, canonical.read_text(encoding="utf-8"))
 
     def test_narrow_scope_residual_allowances_remain_credited(self) -> None:
         # These six shapes are disclosed CURRENT residuals of the accepted

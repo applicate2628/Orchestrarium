@@ -778,6 +778,69 @@ _GIT_VALUE_OPTS = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exe
 _SHELL_KEYWORDS = {"if", "then", "elif", "else", "while", "until", "do", "!"}
 
 
+def _is_redirection_operator(token: str) -> bool:
+    return ("<" in token or ">" in token) and all(character in "<>&" for character in token)
+
+
+def _mask_attached_io_numbers(command: str) -> str:
+    """Replace only unquoted shell I/O-number prefixes with spaces.
+
+    `shlex` exposes a public token stream, but not public raw-source
+    provenance for whether a decimal token was immediately attached to a
+    redirection operator. Preserve every source offset by masking only an
+    ASCII digit run at a shell command boundary when its next character is
+    `<` or `>`. The existing public tokenizer then sees the operator and
+    consumes its target as it already does. Quotes and escaped characters are
+    left untouched, so positional or quoted ref names such as `2` stay
+    ordinary arguments.
+
+    Heredoc syntax has separate lexical rules. This narrow correction does
+    not alter any command containing a heredoc introducer, avoiding changes
+    to heredoc bodies or delimiters.
+    """
+    if "<<" in command:
+        return command
+
+    masked = list(command)
+    quote: str | None = None
+    index = 0
+    while index < len(command):
+        character = command[index]
+        if quote == "'":
+            if character == "'":
+                quote = None
+            index += 1
+            continue
+        if quote == '"':
+            if character == "\\":
+                index += 2
+                continue
+            if character == '"':
+                quote = None
+            index += 1
+            continue
+        if character == "\\":
+            index += 2
+            continue
+        if character in "'\"":
+            quote = character
+            index += 1
+            continue
+        if "0" <= character <= "9" and (
+            index == 0 or command[index - 1] in " \t\r\n;|&()"
+        ):
+            run_end = index
+            while run_end < len(command) and "0" <= command[run_end] <= "9":
+                run_end += 1
+            if run_end < len(command) and command[run_end] in "<>":
+                for digit_index in range(index, run_end):
+                    masked[digit_index] = " "
+            index = run_end
+            continue
+        index += 1
+    return "".join(masked)
+
+
 def iter_command_segments(command: str, *, reject_operators: bool = False) -> list[list[str]] | None:
     """Tokenize `command` and split it into one raw token list per shell
     command in the pipeline — the SHARED first half of the shell-aware
@@ -843,10 +906,19 @@ def iter_command_segments(command: str, *, reject_operators: bool = False) -> li
     a separator — quote-tracking runs before whitespace/punctuation
     classification either way."""
     try:
-        lexer = shlex.shlex(command, posix=True, punctuation_chars="();<>|&\n")
+        lexer = shlex.shlex(
+            _mask_attached_io_numbers(command),
+            posix=True,
+            punctuation_chars="();<>|&\n",
+        )
         lexer.whitespace_split = True
         lexer.whitespace = " \t\r"  # exclude \n so it is emitted as its own token, not swallowed
-        tokens = list(lexer)
+        tokens: list[str] = []
+        while True:
+            token = lexer.get_token()
+            if token == lexer.eof:
+                break
+            tokens.append(token)
     except ValueError:
         return None  # unbalanced quotes / unparseable -> fail open
 
@@ -857,7 +929,7 @@ def iter_command_segments(command: str, *, reject_operators: bool = False) -> li
         if not tok:
             continue
         if reject_operators and (
-            (("<" in tok or ">" in tok) and all(c in "<>&" for c in tok))
+            _is_redirection_operator(tok)
             or all(c in ";|&()\n" for c in tok)
         ):
             return None
@@ -866,7 +938,7 @@ def iter_command_segments(command: str, *, reject_operators: bool = False) -> li
             continue
         # A redirection operator (`>`, `>>`, `<`, `2>`, `&>`, ...) is not a
         # command separator; the next token is its target, not a command/arg.
-        if ("<" in tok or ">" in tok) and all(c in "<>&" for c in tok):
+        if _is_redirection_operator(tok):
             skip_redir_target = True
             continue
         # Command separators (including a bare, unquoted newline) -> the
