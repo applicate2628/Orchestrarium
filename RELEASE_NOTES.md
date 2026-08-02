@@ -10,6 +10,12 @@ Keep the log in reverse-chronological `## YYYY-MM-DD` sections. Add new explanat
 
 Do not add entries for purely local-only hygiene edits such as formatting, link fixes, report-only churn, scratch cleanup, archive moves, or non-semantic wording cleanup.
 
+## 2026-08-03
+
+### Fixed
+
+- **Provider completion truth no longer disappears when work-item bookkeeping is omitted.** The single Python owner used by the supported Codex and Claude prompt entrypoints now evaluates every admitted child run once and atomically persists a sibling one-token `.verdict`: `LAUNCHED` before process creation, then a terminal `COMPLETE:*`, `UNVERIFIED:*`, or `FAILED:*` classification after ordinary completion. Optional ledger recording consumes the same result without changing its event shape. Initial verdict failure prevents launch, terminal verdict failure cannot return false success, and an error after `Popen` now terminates and reaps the child before returning. **Why it matters:** untracked provider work has durable positive completion evidence instead of making “not evaluated” indistinguishable from absence, while interrupted or failed runs remain explicitly observable. **Preserved:** provider argv, environment, working directory, Codex trust preflight, Claude authentication, raw output evidence, ledger vocabulary, installer topology, and the deprecated Gemini/Qwen examples are unchanged.
+
 ## 2026-08-02
 
 ### Changed

@@ -118,6 +118,7 @@ def _run_transport(
     *,
     exit_code: int = 0,
     write_lastmsg: bool = True,
+    with_ledger: bool = True,
 ) -> tuple[subprocess.CompletedProcess[str], Path]:
     fake = _make_fake_provider(
         tmp_path,
@@ -135,13 +136,15 @@ def _run_transport(
         env["CODEX_HOME"] = str(_prepare_codex_home(tmp_path))
     if provider == "claude":
         env["ANTHROPIC_API_KEY"] = "fake-commercial-credential"
-    result = subprocess.run(
-        [
-            sys.executable,
-            str(ENTRYPOINTS[provider]),
-            "oracle-fixture",
-            "--prompt-file",
-            str(prompt),
+    arguments = [
+        sys.executable,
+        str(ENTRYPOINTS[provider]),
+        "oracle-fixture",
+        "--prompt-file",
+        str(prompt),
+    ]
+    if with_ledger:
+        arguments += [
             "--ledger",
             str(item),
             "--ledger-role",
@@ -150,7 +153,9 @@ def _run_transport(
             "fixture-lane",
             "--ledger-artifact",
             "design.md",
-        ],
+        ]
+    result = subprocess.run(
+        arguments,
         cwd=ROOT,
         env=env,
         capture_output=True,
@@ -248,15 +253,15 @@ def test_error_marker_is_anchored(tmp_path: Path, line: str, expected: int) -> N
 
 
 @pytest.mark.parametrize(
-    ("exit_code", "out", "err", "lastmsg", "status", "gate", "note"),
+    ("exit_code", "out", "err", "lastmsg", "status", "gate", "note", "token"),
     (
-        (1, "GATE: PASS\n", "", "", "blocked", "none", "nonzero exit"),
-        (0, "", "", "", "blocked", "none", "empty .out"),
-        (0, "GATE: PASS\n", "ERROR: failed\n", "", "blocked", "none", "err markers"),
-        (0, "GATE: PASS\n", "", "", "completed", "PASS", "final-line GATE: PASS"),
-        (0, "GATE: REVISE\n", "", "", "revise", "REVISE", "final-line GATE: REVISE"),
-        (0, "analysis only\n", "", "", "blocked", "none", "not an anchored"),
-        (0, "analysis only\n", "", "GATE: PASS\n", "completed", "PASS", "final-line GATE: PASS"),
+        (1, "GATE: PASS\n", "", "", "blocked", "none", "nonzero exit", "FAILED:nonzero-exit"),
+        (0, "", "", "", "blocked", "none", "empty .out", "UNVERIFIED:empty"),
+        (0, "GATE: PASS\n", "ERROR: failed\n", "", "blocked", "none", "err markers", "UNVERIFIED:err-markers"),
+        (0, "GATE: PASS\n", "", "", "completed", "PASS", "final-line GATE: PASS", "COMPLETE:PASS"),
+        (0, "GATE: REVISE\n", "", "", "revise", "REVISE", "final-line GATE: REVISE", "COMPLETE:REVISE"),
+        (0, "analysis only\n", "", "", "blocked", "none", "not an anchored", "UNVERIFIED:no-gate-line"),
+        (0, "analysis only\n", "", "GATE: PASS\n", "completed", "PASS", "final-line GATE: PASS", "COMPLETE:PASS"),
     ),
 )
 def test_terminal_oracle_records_exact_status(
@@ -269,6 +274,7 @@ def test_terminal_oracle_records_exact_status(
     status: str,
     gate: str,
     note: str,
+    token: str,
 ) -> None:
     out_path = tmp_path / "run.out"
     err_path = tmp_path / "run.err"
@@ -280,6 +286,7 @@ def test_terminal_oracle_records_exact_status(
     captured: list[list[str]] = []
     monkeypatch.setattr(owner, "run_ledger", lambda args: captured.append(args) or True)
     control = owner.Control(ledger="item")
+    terminal = owner.evaluate_terminal(exit_code, out_path, err_path, lastmsg_path)
     owner.record_terminal(
         control,
         "codex",
@@ -287,15 +294,51 @@ def test_terminal_oracle_records_exact_status(
         "xhigh",
         "slug",
         "launch-id",
-        exit_code,
-        out_path,
-        err_path,
-        lastmsg_path,
+        terminal,
     )
     args = captured[0]
+    assert terminal.token == token
     assert args[args.index("--status") + 1] == status
     assert args[args.index("--gate") + 1] == gate
     assert note in args[args.index("--notes") + 1]
+
+
+def test_verdict_writer_atomically_replaces_one_token(tmp_path: Path) -> None:
+    verdict = tmp_path / "run.verdict"
+    owner.write_verdict(verdict, "LAUNCHED")
+    owner.write_verdict(verdict, "COMPLETE:PASS")
+    assert verdict.read_bytes() == b"COMPLETE:PASS\n"
+    assert not list(tmp_path.glob(".run.verdict.*.tmp"))
+
+
+@pytest.mark.parametrize("provider", ("codex", "claude"))
+@pytest.mark.parametrize("provider_exit", (0, 7))
+def test_ledgered_and_unledgered_runs_share_terminal_verdict(
+    tmp_path: Path, provider: str, provider_exit: int
+) -> None:
+    observed: list[str] = []
+    for label, with_ledger in (("ledgered", True), ("unledgered", False)):
+        case = tmp_path / label
+        case.mkdir()
+        result, item = _run_transport(
+            case,
+            provider,
+            exit_code=provider_exit,
+            with_ledger=with_ledger,
+        )
+        assert result.returncode == provider_exit, result.stderr
+        verdicts = list((case / f"{provider}-outputs").glob("*.verdict"))
+        assert len(verdicts) == 1
+        observed.append(verdicts[0].read_text(encoding="ascii"))
+        assert (item / "agent-runs.jsonl").exists() is with_ledger
+    expected = (
+        "FAILED:nonzero-exit\n"
+        if provider_exit
+        else "COMPLETE:PASS\n"
+        if provider == "codex"
+        else "UNVERIFIED:empty\n"
+    )
+    assert observed == [expected, expected]
 
 
 def test_installed_python_layout_uses_sibling_ledger_helper(tmp_path: Path) -> None:
@@ -485,6 +528,222 @@ def test_admitted_launch_settles_terminal_when_popen_fails(
     assert result == 1
     assert len(ledger_calls) == 1
     assert len(terminal_calls) == 1
+    verdicts = list((tmp_path / "outputs").glob("*.verdict"))
+    assert len(verdicts) == 1
+    assert verdicts[0].read_text(encoding="ascii") == "FAILED:nonzero-exit\n"
+
+
+def test_initial_verdict_failure_prevents_provider_launch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    prompt = tmp_path / "prompt.md"
+    prompt.write_text("fixture\n", encoding="utf-8")
+    fake_codex = tmp_path / "codex.exe"
+    fake_codex.write_bytes(b"fixture")
+    monkeypatch.setenv("CODEX_PROMPTS_DIR", str(tmp_path / "outputs"))
+    monkeypatch.setattr(owner, "resolve_provider_command", lambda _provider: [str(fake_codex)])
+    monkeypatch.setattr(owner, "require_codex_hook_trust", lambda *_args: 0)
+    monkeypatch.setattr(
+        owner,
+        "write_verdict",
+        lambda *_args: (_ for _ in ()).throw(OSError("fixture verdict denial")),
+    )
+
+    def forbidden_popen(*_args, **_kwargs):
+        raise AssertionError("provider must not start without a LAUNCHED verdict")
+
+    monkeypatch.setattr(owner.subprocess, "Popen", forbidden_popen)
+    result = owner.launch("codex", ["verdict-denied", "--prompt-file", str(prompt)])
+    assert result == 1
+    assert "could not write launch verdict" in capsys.readouterr().err
+
+
+def test_ledger_launch_failure_replaces_launched_verdict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    prompt = tmp_path / "prompt.md"
+    prompt.write_text("fixture\n", encoding="utf-8")
+    fake_codex = tmp_path / "codex.exe"
+    fake_codex.write_bytes(b"fixture")
+    monkeypatch.setenv("CODEX_PROMPTS_DIR", str(tmp_path / "outputs"))
+    monkeypatch.setattr(owner, "resolve_provider_command", lambda _provider: [str(fake_codex)])
+    monkeypatch.setattr(owner, "require_codex_hook_trust", lambda *_args: 0)
+    monkeypatch.setattr(owner, "ledger_helper", lambda: tmp_path / "ledger.py")
+    monkeypatch.setattr(owner, "run_ledger", lambda _args: False)
+
+    def forbidden_popen(*_args, **_kwargs):
+        raise AssertionError("provider must not start after a ledger launch failure")
+
+    monkeypatch.setattr(owner.subprocess, "Popen", forbidden_popen)
+    result = owner.launch(
+        "codex",
+        ["ledger-denied", "--prompt-file", str(prompt), "--ledger", str(tmp_path / "item")],
+    )
+    assert result == 1
+    verdicts = list((tmp_path / "outputs").glob("*.verdict"))
+    assert len(verdicts) == 1
+    assert verdicts[0].read_text(encoding="ascii") == "FAILED:nonzero-exit\n"
+
+
+@pytest.mark.parametrize(("provider_exit", "expected_exit"), ((0, 1), (7, 7)))
+def test_terminal_verdict_failure_is_loud_and_preserves_child_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    provider_exit: int,
+    expected_exit: int,
+) -> None:
+    prompt = tmp_path / "prompt.md"
+    prompt.write_text("fixture\n", encoding="utf-8")
+    fake_codex = tmp_path / "codex.exe"
+    fake_codex.write_bytes(b"fixture")
+    monkeypatch.setenv("CODEX_PROMPTS_DIR", str(tmp_path / "outputs"))
+    monkeypatch.setattr(owner, "resolve_provider_command", lambda _provider: [str(fake_codex)])
+    monkeypatch.setattr(owner, "require_codex_hook_trust", lambda *_args: 0)
+    monkeypatch.setattr(owner, "process_start_marker", lambda _pid: None)
+
+    class ProviderProcess:
+        pid = 4242
+        returncode = provider_exit
+
+        def communicate(self, _body: bytes) -> None:
+            return None
+
+    monkeypatch.setattr(owner.subprocess, "Popen", lambda *_args, **_kwargs: ProviderProcess())
+    original_write = owner.write_verdict
+    writes = 0
+
+    def fail_terminal_write(path: Path, token: str) -> None:
+        nonlocal writes
+        writes += 1
+        if writes == 2:
+            raise OSError("fixture terminal denial")
+        original_write(path, token)
+
+    monkeypatch.setattr(owner, "write_verdict", fail_terminal_write)
+    result = owner.launch("codex", ["terminal-denied", "--prompt-file", str(prompt)])
+    assert result == expected_exit
+    assert "could not write terminal verdict" in capsys.readouterr().err
+    verdicts = list((tmp_path / "outputs").glob("*.verdict"))
+    assert len(verdicts) == 1
+    assert verdicts[0].read_text(encoding="ascii") == "LAUNCHED\n"
+
+
+def test_keyboard_interrupt_leaves_launched_and_cleans_up_child(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    prompt = tmp_path / "prompt.md"
+    prompt.write_text("fixture\n", encoding="utf-8")
+    fake_codex = tmp_path / "codex.exe"
+    fake_codex.write_bytes(b"fixture")
+    monkeypatch.setenv("CODEX_PROMPTS_DIR", str(tmp_path / "outputs"))
+    monkeypatch.setattr(owner, "resolve_provider_command", lambda _provider: [str(fake_codex)])
+    monkeypatch.setattr(owner, "require_codex_hook_trust", lambda *_args: 0)
+    monkeypatch.setattr(owner, "process_start_marker", lambda _pid: None)
+    monkeypatch.setattr(owner, "ledger_helper", lambda: tmp_path / "ledger.py")
+    ledger_calls: list[list[str]] = []
+    monkeypatch.setattr(owner, "run_ledger", lambda args: ledger_calls.append(args) or True)
+
+    class InterruptedProcess:
+        pid = 4242
+        returncode = None
+        terminated = False
+        killed = False
+
+        def communicate(self, _body: bytes) -> None:
+            raise KeyboardInterrupt
+
+        def terminate(self) -> None:
+            self.terminated = True
+
+        def kill(self) -> None:
+            self.killed = True
+
+        def wait(self, timeout=None) -> int:
+            self.returncode = 130
+            return 130
+
+    process = InterruptedProcess()
+    monkeypatch.setattr(owner.subprocess, "Popen", lambda *_args, **_kwargs: process)
+    result = owner.launch(
+        "codex",
+        ["interrupted", "--prompt-file", str(prompt), "--ledger", str(tmp_path / "item")],
+    )
+    assert result == 130
+    assert process.terminated
+    assert not process.killed
+    verdicts = list((tmp_path / "outputs").glob("*.verdict"))
+    assert len(verdicts) == 1
+    assert verdicts[0].read_text(encoding="ascii") == "LAUNCHED\n"
+    assert len(ledger_calls) == 2
+    terminal = ledger_calls[1]
+    assert terminal[terminal.index("--status") + 1] == "blocked"
+    assert terminal[terminal.index("--gate") + 1] == "none"
+    assert "nonzero exit (130)" in terminal[terminal.index("--notes") + 1]
+
+
+@pytest.mark.parametrize("failure_stage", ("pid", "communicate"))
+def test_post_popen_oserror_terminates_and_reaps_child(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_stage: str,
+) -> None:
+    prompt = tmp_path / "prompt.md"
+    prompt.write_text("fixture\n", encoding="utf-8")
+    fake_codex = tmp_path / "codex.exe"
+    fake_codex.write_bytes(b"fixture")
+    monkeypatch.setenv("CODEX_PROMPTS_DIR", str(tmp_path / "outputs"))
+    monkeypatch.setattr(owner, "resolve_provider_command", lambda _provider: [str(fake_codex)])
+    monkeypatch.setattr(owner, "require_codex_hook_trust", lambda *_args: 0)
+    monkeypatch.setattr(owner, "process_start_marker", lambda _pid: None)
+
+    class FailingProcess:
+        pid = 4242
+        returncode = None
+        communicated = False
+        terminated = False
+        killed = False
+        wait_calls = 0
+
+        def communicate(self, _body: bytes) -> None:
+            self.communicated = True
+            if failure_stage == "communicate":
+                raise OSError("fixture communicate failure")
+
+        def terminate(self) -> None:
+            self.terminated = True
+
+        def kill(self) -> None:
+            self.killed = True
+
+        def wait(self, timeout=None) -> int:
+            self.wait_calls += 1
+            if timeout is not None and not self.killed:
+                raise subprocess.TimeoutExpired("fixture", timeout)
+            self.returncode = 1
+            return 1
+
+    process = FailingProcess()
+    monkeypatch.setattr(owner.subprocess, "Popen", lambda *_args, **_kwargs: process)
+    original_write_private = owner.write_private
+
+    def fail_pid_write(path: Path, data: bytes) -> None:
+        if failure_stage == "pid" and path.suffix == ".pid":
+            raise OSError("fixture pid-sidecar failure")
+        original_write_private(path, data)
+
+    monkeypatch.setattr(owner, "write_private", fail_pid_write)
+    result = owner.launch("codex", ["post-popen-oserror", "--prompt-file", str(prompt)])
+    assert result == 1
+    assert process.communicated is (failure_stage == "communicate")
+    assert process.terminated
+    assert process.killed
+    assert process.wait_calls == 2
+    verdicts = list((tmp_path / "outputs").glob("*.verdict"))
+    assert len(verdicts) == 1
+    assert verdicts[0].read_text(encoding="ascii") == "FAILED:nonzero-exit\n"
 
 
 def test_trusted_codex_launch_preserves_exact_provider_popen_argv(

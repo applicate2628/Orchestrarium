@@ -301,17 +301,20 @@ def test_python_prompt_owner_writes_pid_and_artifact_paths(
     )
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
-    expected_path_count = 5 if provider == "codex" else 4
+    expected_path_count = 6 if provider == "codex" else 5
     paths = [Path(line) for line in lines[:expected_path_count]]
     assert [path.suffix for path in paths] == (
-        [".md", ".out", ".err", ".lastmsg", ".pid"]
+        [".md", ".out", ".err", ".lastmsg", ".pid", ".verdict"]
         if provider == "codex"
-        else [".md", ".out", ".err", ".pid"]
+        else [".md", ".out", ".err", ".pid", ".verdict"]
     )
     assert all(path.is_file() for path in paths)
-    pid_lines = paths[-1].read_text(encoding="utf-8").splitlines()
+    pid_path = next(path for path in paths if path.suffix == ".pid")
+    pid_lines = pid_path.read_text(encoding="utf-8").splitlines()
     assert pid_lines[0].startswith("pid=")
     assert pid_lines[0][4:].isdigit()
+    verdict = next(path for path in paths if path.suffix == ".verdict")
+    assert verdict.read_text(encoding="ascii") == "COMPLETE:PASS\n"
     assert lines[expected_path_count] == (
         "# actively await this dispatch (do NOT passively wait for a notification):"
     )
@@ -327,7 +330,7 @@ def test_python_prompt_owner_writes_pid_and_artifact_paths(
         expected_watch += ["--lastmsg", str(paths[3])]
     expected_watch += [
         "--pid-file",
-        str(paths[-1]),
+        str(pid_path),
         "--stall-secs",
         "2700",
     ]

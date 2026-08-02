@@ -37,6 +37,15 @@ class Control:
     provider_flags: list[str] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class TerminalResult:
+    evidence_path: Path
+    status: str
+    gate: str
+    note: str
+    token: str
+
+
 def fail(message: str, code: int = 1) -> int:
     print(f"FAIL: {message}", file=sys.stderr)
     return code
@@ -449,6 +458,72 @@ def final_nonblank_line(path: Path) -> str:
         return ""
 
 
+def nonempty_file(path: Path | None) -> bool:
+    if path is None:
+        return False
+    try:
+        return path.is_file() and path.stat().st_size > 0
+    except OSError:
+        return False
+
+
+def evaluate_terminal(
+    exit_code: int,
+    out_path: Path,
+    err_path: Path,
+    lastmsg_path: Path | None,
+) -> TerminalResult:
+    evidence_path = lastmsg_path if nonempty_file(lastmsg_path) else out_path
+    final_line = final_nonblank_line(evidence_path)
+    marker_count = has_error_markers(err_path)
+    status, gate = "blocked", "none"
+    if exit_code != 0:
+        note = f"oracle: nonzero exit ({exit_code})"
+        token = "FAILED:nonzero-exit"
+    elif not nonempty_file(evidence_path):
+        note = "oracle: empty .out"
+        token = "UNVERIFIED:empty"
+    elif marker_count:
+        note = f"oracle: err markers present ({marker_count})"
+        token = "UNVERIFIED:err-markers"
+    elif final_line == "GATE: PASS":
+        status, gate, note = "completed", "PASS", "oracle: final-line GATE: PASS"
+        token = "COMPLETE:PASS"
+    elif final_line == "GATE: REVISE":
+        status, gate, note = "revise", "REVISE", "oracle: final-line GATE: REVISE"
+        token = "COMPLETE:REVISE"
+    else:
+        note = "oracle: final line is not an anchored GATE verdict"
+        token = "UNVERIFIED:no-gate-line"
+    return TerminalResult(evidence_path, status, gate, note, token)
+
+
+def write_verdict(path: Path, token: str) -> None:
+    temporary = path.with_name(f".{path.name}.{secrets.token_hex(8)}.tmp")
+    try:
+        descriptor = os.open(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(f"{token}\n".encode("ascii"))
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    except BaseException:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+
+def terminate_and_reap(process: subprocess.Popen[bytes]) -> None:
+    process.terminate()
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait()
+
+
 def record_terminal(
     control: Control,
     provider: str,
@@ -456,56 +531,32 @@ def record_terminal(
     effort: str,
     slug: str,
     launch_run_id: str,
-    exit_code: int,
-    out_path: Path,
-    err_path: Path,
-    lastmsg_path: Path | None,
+    terminal: TerminalResult,
 ) -> None:
-    verdict_path = (
-        lastmsg_path
-        if lastmsg_path is not None and lastmsg_path.is_file() and lastmsg_path.stat().st_size
-        else out_path
-    )
-    final_line = final_nonblank_line(verdict_path)
-    marker_count = has_error_markers(err_path)
-    status, gate = "blocked", "none"
-    if exit_code != 0:
-        note = f"oracle: nonzero exit ({exit_code})"
-    elif not verdict_path.is_file() or verdict_path.stat().st_size == 0:
-        note = "oracle: empty .out"
-    elif marker_count:
-        note = f"oracle: err markers present ({marker_count})"
-    elif final_line == "GATE: PASS":
-        status, gate, note = "completed", "PASS", "oracle: final-line GATE: PASS"
-    elif final_line == "GATE: REVISE":
-        status, gate, note = "revise", "REVISE", "oracle: final-line GATE: REVISE"
-    else:
-        note = "oracle: final line is not an anchored GATE verdict"
-
     args = [
         "--work-item",
         control.ledger or "",
         "append",
         "--status",
-        status,
+        terminal.status,
         "--gate",
-        gate,
+        terminal.gate,
         "--event-kind",
         "terminal",
         "--launch-run-id",
         launch_run_id,
         "--evidence",
-        f"review:{verdict_path}",
+        f"review:{terminal.evidence_path}",
         "--notes",
-        note,
+        terminal.note,
         *ledger_common(control, provider, model, effort, slug),
     ]
-    if gate == "PASS":
+    if terminal.gate == "PASS":
         for closed in control.ledger_closes:
             args += ["--closes", closed]
     if not run_ledger(args):
         print(
-            f"FAIL: the verdict in {verdict_path} is NOT in the ledger; "
+            f"FAIL: the verdict in {terminal.evidence_path} is NOT in the ledger; "
             f"launch {launch_run_id} stays unsettled.",
             file=sys.stderr,
         )
@@ -558,14 +609,27 @@ def launch(provider: str, argv: list[str]) -> int:
         out_path = output_dir / f"{slug}.out"
         err_path = output_dir / f"{slug}.err"
         pid_path = output_dir / f"{slug}.pid"
+        verdict_path = output_dir / f"{slug}.verdict"
         lastmsg_path = output_dir / f"{slug}.lastmsg" if provider == "codex" else None
         write_private(prompt_path, body)
     except (OSError, ValueError) as exc:
         return fail(str(exc))
 
+    try:
+        write_verdict(verdict_path, "LAUNCHED")
+    except OSError as exc:
+        return fail(f"could not write launch verdict '{verdict_path}': {exc}")
+
     launch_run_id = ""
     if control.ledger:
         if ledger_helper() is None:
+            try:
+                write_verdict(verdict_path, "FAILED:nonzero-exit")
+            except OSError as exc:
+                return fail(
+                    "-Ledger given but agent-run-ledger.py was not found; "
+                    f"could not update verdict '{verdict_path}': {exc}"
+                )
             return fail("-Ledger given but agent-run-ledger.py was not found")
         launch_run_id = (
             datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -590,6 +654,13 @@ def launch(provider: str, argv: list[str]) -> int:
             *ledger_common(control, provider, model, effort, slug),
         ]
         if not run_ledger(launch_args):
+            try:
+                write_verdict(verdict_path, "FAILED:nonzero-exit")
+            except OSError as exc:
+                return fail(
+                    f"could not record launch event in {control.ledger}; "
+                    f"could not update verdict '{verdict_path}': {exc}"
+                )
             return fail(f"could not record launch event in {control.ledger}")
 
     provider_args = (
@@ -611,6 +682,8 @@ def launch(provider: str, argv: list[str]) -> int:
 
     exit_code = 1
     launch_error: str | None = None
+    interrupted = False
+    process: subprocess.Popen[bytes] | None = None
     try:
         out_path.touch(mode=0o600, exist_ok=False)
         err_path.touch(mode=0o600, exist_ok=False)
@@ -633,6 +706,7 @@ def launch(provider: str, argv: list[str]) -> int:
             if lastmsg_path is not None:
                 paths.append(lastmsg_path)
             paths.append(pid_path)
+            paths.append(verdict_path)
             for path in paths:
                 print(path)
             print("# actively await this dispatch (do NOT passively wait for a notification):")
@@ -653,19 +727,24 @@ def launch(provider: str, argv: list[str]) -> int:
             try:
                 process.communicate(body)
             except KeyboardInterrupt:
-                process.terminate()
-                try:
-                    process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait()
+                interrupted = True
+                terminate_and_reap(process)
                 exit_code = 130
             else:
                 exit_code = process.returncode if process.returncode is not None else 1
     except OSError as exc:
+        if process is not None:
+            terminate_and_reap(process)
         launch_error = f"{provider} launch failed: {exc}"
         exit_code = 1
 
+    terminal = evaluate_terminal(exit_code, out_path, err_path, lastmsg_path)
+    verdict_error: OSError | None = None
+    if not interrupted:
+        try:
+            write_verdict(verdict_path, terminal.token)
+        except OSError as exc:
+            verdict_error = exc
     if control.ledger:
         record_terminal(
             control,
@@ -674,11 +753,15 @@ def launch(provider: str, argv: list[str]) -> int:
             effort,
             slug,
             launch_run_id,
-            exit_code,
-            out_path,
-            err_path,
-            lastmsg_path,
+            terminal,
         )
+    if verdict_error is not None:
+        print(
+            f"FAIL: could not write terminal verdict '{verdict_path}': {verdict_error}",
+            file=sys.stderr,
+        )
+        if exit_code == 0:
+            return 1
     if launch_error is not None:
         return fail(launch_error)
     return exit_code
