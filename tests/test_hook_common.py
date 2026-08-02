@@ -167,6 +167,41 @@ class TestSharedProjectionsAgree(unittest.TestCase):
         self.assertIn(status2, hook_common.TURN_BOUNDARY_STATUSES)
 
 
+class TestBoundedTranscriptHistory(unittest.TestCase):
+    def test_complete_history_preserves_more_than_one_hundred_entries(self) -> None:
+        entries = [_user_entry("grant")]
+        entries.extend(_assistant_text_entry(f"step {i}") for i in range(150))
+        tp = _write_transcript(entries)
+        try:
+            observed, status = hook_common.read_transcript_history(
+                str(tp), byte_cap=1024 * 1024, record_cap=1000, line_byte_cap=4096
+            )
+            self.assertEqual(status, hook_common.HISTORY_STATUS_FOUND)
+            self.assertEqual(observed, entries)
+        finally:
+            tp.unlink()
+
+    def test_invalid_json_and_resource_limits_fail_closed_without_tail_selection(self) -> None:
+        tp = Path(tempfile.mktemp(suffix=".jsonl"))
+        try:
+            tp.write_bytes(b'{"type":"user"}\nnot-json\n')
+            self.assertEqual(
+                hook_common.read_transcript_history(
+                    str(tp), byte_cap=1024, record_cap=10, line_byte_cap=512
+                ),
+                ([], hook_common.HISTORY_STATUS_INVALID),
+            )
+            tp.write_text("\n".join(json.dumps(_assistant_text_entry(str(i))) for i in range(3)), encoding="utf-8")
+            self.assertEqual(
+                hook_common.read_transcript_history(
+                    str(tp), byte_cap=1024, record_cap=2, line_byte_cap=512
+                ),
+                ([], hook_common.HISTORY_STATUS_LIMIT),
+            )
+        finally:
+            tp.unlink(missing_ok=True)
+
+
 class TestToolResultNotMistakenForBoundary(unittest.TestCase):
     """Named regression: a tool_result is recorded as role=user in Claude
     Code. A boundary predicate that tested `is_user_message` alone would

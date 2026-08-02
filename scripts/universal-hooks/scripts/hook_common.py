@@ -145,6 +145,76 @@ def read_transcript_tail(transcript_path: str, n: int = 100) -> list[dict]:
     return entries
 
 
+HISTORY_STATUS_FOUND = "found"
+HISTORY_STATUS_ABSENT = "absent"
+HISTORY_STATUS_UNREADABLE = "unreadable"
+HISTORY_STATUS_INVALID = "invalid"
+HISTORY_STATUS_LIMIT = "limit"
+HISTORY_STATUSES = (
+    HISTORY_STATUS_FOUND,
+    HISTORY_STATUS_ABSENT,
+    HISTORY_STATUS_UNREADABLE,
+    HISTORY_STATUS_INVALID,
+    HISTORY_STATUS_LIMIT,
+)
+
+
+def read_transcript_history(
+    transcript_path: str,
+    *,
+    byte_cap: int,
+    record_cap: int,
+    line_byte_cap: int,
+) -> tuple[list[dict], str]:
+    """Read one complete JSONL transcript under explicit resource bounds.
+
+    Unlike :func:`read_transcript_tail`, this reader is strict and never
+    substitutes a tail window for complete history.  It is intended for
+    authorization state whose meaning depends on original record order.  A
+    missing/unreadable path, invalid UTF-8/JSON/non-object record, oversized
+    line, or file/record cap returns no entries plus a typed status.  Existing
+    tail and current-turn callers retain their historical fail-open behavior.
+    """
+    if not transcript_path:
+        return [], HISTORY_STATUS_ABSENT
+    if byte_cap <= 0 or record_cap <= 0 or line_byte_cap <= 0:
+        return [], HISTORY_STATUS_LIMIT
+
+    tp = Path(transcript_path)
+    try:
+        if not tp.is_file():
+            return [], HISTORY_STATUS_UNREADABLE
+        if tp.stat().st_size > byte_cap:
+            return [], HISTORY_STATUS_LIMIT
+    except Exception:
+        return [], HISTORY_STATUS_UNREADABLE
+
+    entries: list[dict] = []
+    total_bytes = 0
+    try:
+        with tp.open("rb") as stream:
+            for raw_line in stream:
+                total_bytes += len(raw_line)
+                if total_bytes > byte_cap or len(raw_line) > line_byte_cap:
+                    return [], HISTORY_STATUS_LIMIT
+                if not raw_line.strip():
+                    continue
+                if len(entries) >= record_cap:
+                    return [], HISTORY_STATUS_LIMIT
+                try:
+                    line = raw_line.decode("utf-8", errors="strict").strip()
+                    entry = json.loads(line)
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    return [], HISTORY_STATUS_INVALID
+                if not isinstance(entry, dict):
+                    return [], HISTORY_STATUS_INVALID
+                entries.append(entry)
+    except Exception:
+        return [], HISTORY_STATUS_UNREADABLE
+
+    return entries, HISTORY_STATUS_FOUND
+
+
 def last_genuine_user_text(transcript_path: str, *, byte_cap: int) -> tuple[str, str]:
     """The CURRENT TURN boundary's own typed text -- the boundary-message
     PROJECTION of `scan_current_turn_boundary` (defined further down this

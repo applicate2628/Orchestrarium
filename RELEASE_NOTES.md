@@ -10,6 +10,12 @@ Keep the log in reverse-chronological `## YYYY-MM-DD` sections. Add new explanat
 
 Do not add entries for purely local-only hygiene edits such as formatting, link fixes, report-only churn, scratch cleanup, archive moves, or non-semantic wording cleanup.
 
+## 2026-08-02
+
+### Changed
+
+- **One explicit user grant can now cover repeated safe pushes for one concrete GitHub pull request (PR), without weakening the leak-check.** The exact genuine-user message `[approve-pr-publication:v1 pr=https://github.com/<owner>/<repo>/pull/<positive-number>]` creates an ephemeral transcript-scoped grant, and exact `[revoke-pr-publication:v1]` revokes it. On every attempted push the universal Codex/Claude gate freshly verifies the open PR, current base/head repository and ref binding, direct GitHub remote, remote object, default/protection state, and one exact ordinary `HEAD` refspec. Continuing authorization is intentionally limited to provider head names of 1–255 ASCII characters in `[A-Za-z0-9._/-]` that pass direct-argument `git check-ref-format --branch`, and to the owning shell's canonical literal serialization of the absolute resolved Git executable plus the exact push arguments. It also requires a new unused non-empty range receipt bound to the decoded remote, destination, and local `HEAD` tip; any ambiguity, drift, provider failure, unsafe/out-of-language destination, non-canonical command, stale/reused receipt, or active-route command mismatch denies without falling through to generic scan credit. **Why it matters:** a user no longer repeats approval after each review-driven commit to the same PR, while every actual publication still receives a fresh leak-check and current-state validation and Windows PowerShell 5.1 cannot reinterpret an admitted branch byte. **Preserved:** all-dry-run behavior, the one-turn `[approve-publication]` exception, subagent/non-push behavior, and the generic no-grant route remain unchanged except that a detected non-dry push with no readable transcript now fails closed. No grant state, service, config, scanner format, hook registration, installer identity, or Gemini/Qwen surface was added.
+
 ## 2026-08-01
 
 ### Changed

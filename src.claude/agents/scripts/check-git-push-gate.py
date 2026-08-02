@@ -229,7 +229,7 @@ no-scan marker branch (today's actual, structural defect), but a real,
 disclosed residual, not a hidden one. Closing it further is filed as
 separate work, not silently promised here.
 
-HONESTY RULE — THIS IS A BACKSTOP, NOT A GUARANTEE. It under-detects by design
+HONESTY RULE — THIS IS A BACKSTOP, NOT A GUARANTEE. The generic route under-detects by design
 (a push wrapped in a script the hook only sees as `bash sync.sh`, `eval`,
 command substitution, or another command-wrapper is not modelled — the hook
 cannot see INSIDE a wrapper script's own contents, only the outer command
@@ -247,8 +247,8 @@ ITSELF hides `git push` from view — `bash sync.sh` where `sync.sh`'s own
 file contents run `git push`, `eval "$cmd"`, command substitution
 (`$(...)`), or piping through `xargs` — because the hook only ever sees the
 literal text of the ONE command it was invoked with, never the contents of
-a script file that command happens to run. The transcript may be
-unavailable (then the hook fails open — see step 6's exact scope below),
+a script file that command happens to run. If the transcript is unavailable,
+a detected non-dry push denies,
 and a model can still fake the scan-evidence signal — it must
 now fake a matching tool CALL and its OWN correlated tool OUTPUT (harder than
 faking invocation alone, or than faking two uncorrelated strings), but neither
@@ -264,8 +264,9 @@ publication-safety leak-check before any push. Do not represent this hook as
 enforcing that rule.
 
 Decision algorithm (fail-open on envelope-parse failure, step 1, and on the
-five deliberate no-decision returns in steps 2-6; an uncaught exception
-anywhere in steps 2-8 now falls through to the DENY payload at step 9 rather
+ordinary no-decision returns for subagents, missing commands, non-pushes, and
+all-dry-run calls; an uncaught exception in the decision path falls through
+to the DENY payload rather
 than silently allowing — 2026-07-26 hardening, see `evaluate_push`'s
 docstring and the module docstring's "A CRASH WHILE DECIDING" note above):
 
@@ -281,13 +282,8 @@ docstring and the module docstring's "A CRASH WHILE DECIDING" note above):
      the check-no-trash-in-repo.py technique). No `git push` in command
      position → exit 0. `git push` inside a quoted string is NOT a command.
   5. Every detected push carrying `--dry-run` → exit 0 (nothing is sent).
-  6. If `transcript_path` is MISSING (absent/empty) → exit 0 (cannot determine;
-     fail open). This is NARROWER than it sounds: a `transcript_path` that IS
-     present but names an unreadable, non-existent, or unparseable file does
-     NOT reach this exit — `read_transcript_tail` returns an empty entry list
-     for it, which yields no genuine user message, which fails BOTH (a) and
-     (b) below on their own merits, falling through to step 9 (DENY). Only a
-     genuinely MISSING field fails open; an unreadable-but-present one denies.
+  6. If `transcript_path` is missing, unreadable, invalid, or exceeds the
+     bounded full-history limits → deny with `PRG-TRANSCRIPT-UNAVAILABLE`.
   7. If the LAST GENUINE USER MESSAGE contains `[approve-publication]` AND
      that message is no longer than MARKER_MAX_MESSAGE_LENGTH characters →
      exit 0. The marker is honored ONLY from the user's own text — never from
@@ -295,11 +291,17 @@ docstring and the module docstring's "A CRASH WHILE DECIDING" note above):
      file content quoting the marker must not approve a publication. The
      length bound (2026-07-26 hardening; see MARKER_MAX_MESSAGE_LENGTH's own
      comment for the full contract decision and measurements) exists because
-     the deny reason at step 9 embeds this same marker verbatim, so an
+     the deny reason at step 10 embeds this same marker verbatim, so an
      operator who copies that reason back into chat reproduces the identical
      marker; a message shaped like a copied multi-paragraph deny block does
      not count as an approval here.
-  8. If the current turn (entries after the last genuine user message) shows
+  8. Derive the latest exact PR grant/revoke/malformed state from the complete
+     bounded readable transcript. A malformed reserved signal denies. An
+     active grant runs only the strict PR route: fresh GitHub/Git binding and
+     protection checks plus one fresh unused non-empty range receipt bound to
+     remote, full destination, and local HEAD tip. Every active-route failure
+     denies without generic fallback.
+  9. If no active PR grant is present and the current turn (entries after the last genuine user message) shows
      a publication-safety scan invocation among the model's own tool CALLS,
      under an id UNIQUE among this turn's calls (see COLLISION REJECTION note
      below), WHOSE OWN correlated tool OUTPUT (same call id — see the
@@ -315,13 +317,13 @@ docstring and the module docstring's "A CRASH WHILE DECIDING" note above):
      (`SCAN_FAILURE_MARKER_REGEX`), AND the last genuine user message
      contains an explicit push-instruction signal (`push`, `запушь`,
      `залей`, ...) → exit 0.
-  9. Otherwise — including when steps 2-8 raise an uncaught exception (see
+  10. Otherwise — including when the decision path raises an uncaught exception (see
      the "A CRASH WHILE DECIDING" note above and `evaluate_push`'s own
      docstring; 2026-07-26 hardening) — emit a structured `permissionDecision:
      "deny"` payload with exact compliance instructions. Always exit 0 (the
      decision is carried by the stdout payload, not the exit code).
 
-WHAT THIS STILL DOES NOT COVER (disclosed, not silently assumed away):
+WHAT THE GENERIC NON-PR ROUTE STILL DOES NOT COVER (disclosed, not silently assumed away):
   - SHORT QUOTES OF THE BARE MARKER (2026-07-26, `$security-engineer`
     contract decision on `work-items/bugs/2026-07-26-the-deny-message-
     teaches-the-marker-that-opens-the-gate.md`). The MARKER_MAX_MESSAGE_LENGTH
@@ -353,7 +355,7 @@ WHAT THIS STILL DOES NOT COVER (disclosed, not silently assumed away):
     not currently capture or compare in EITHER mode. Treat this exactly as
     the multi-commit gap below: real, not hypothetical, explicitly not
     closed by this change.
-  - `range` mode deliberately does NOT implement the cut exact-spelling push
+  - Generic `range` mode deliberately does NOT implement the strict PR route's exact-spelling push
     grammar: force flags, extra positional refspecs, empty-source deletion
     forms, config/tag expansion, repository redirects, and same-call git-state
     mutation CAN still be credited when the first extracted remote/destination
@@ -403,18 +405,29 @@ WHAT THIS STILL DOES NOT COVER (disclosed, not silently assumed away):
 from __future__ import annotations
 
 import json
+import os
 import re
 import shlex
+import shutil
+import subprocess
 import sys
+import threading
+import time
+from pathlib import Path
+from typing import NamedTuple
+from urllib.parse import quote, urlsplit
 
 from hook_common import (
     NO_OBSERVED_FAILURE,
     extract_model_shell_commands_with_ids,
     extract_model_tool_calls_with_ids,
     extract_tool_outputs_with_ids,
+    extract_user_typed_text,
+    is_user_message,
     last_genuine_user_message,
     parse_envelope,
     read_stdin_utf8,
+    read_transcript_history,
     read_transcript_tail,
 )
 
@@ -423,6 +436,59 @@ from hook_common import (
 # (see the consultant continuation-prompt untrusted-data rule), so unlike
 # [skip-bugfix-discipline] this marker never counts from the model's own reply.
 APPROVE_MARKER_REGEX = re.compile(r"\[approve-publication\]", re.IGNORECASE)
+
+PR_GRANT_REGEX = re.compile(
+    r"^\[approve-pr-publication:v1 pr=(?P<url>https://github\.com/"
+    r"(?P<owner>[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,98}[A-Za-z0-9])?)/"
+    r"(?P<repo>[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,98}[A-Za-z0-9])?)/pull/"
+    r"(?P<number>[1-9][0-9]*))\]$"
+)
+PR_REVOKE_MARKER = "[revoke-pr-publication:v1]"
+PR_RESERVED_PREFIXES = ("[approve-pr-publication:", "[revoke-pr-publication:")
+TRANSCRIPT_HISTORY_BYTE_CAP = 32 * 1024 * 1024
+TRANSCRIPT_HISTORY_RECORD_CAP = 50_000
+TRANSCRIPT_HISTORY_LINE_BYTE_CAP = 2 * 1024 * 1024
+PROCESS_OUTPUT_BYTE_CAP = 256 * 1024
+PROCESS_TIMEOUT_SECONDS = 8.0
+ORACLE_TIMEOUT_SECONDS = 45.0
+OID_REGEX = re.compile(r"^[0-9a-fA-F]{40}$")
+REMOTE_NAME_REGEX = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
+PR_HEAD_REF_REGEX = re.compile(r"^[A-Za-z0-9._/-]{1,255}$", re.ASCII)
+REPO_COMPONENT_REGEX = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$")
+NODE_ID_REGEX = re.compile(r"^[A-Za-z0-9_=-]{1,256}$")
+
+
+class ActivePrGrant(NamedTuple):
+    url: str
+    owner: str
+    repo: str
+    number: int
+
+
+class ProcessResult(NamedTuple):
+    returncode: int
+    stdout: bytes
+    stderr: bytes
+
+
+class PushTarget(NamedTuple):
+    remote: str
+    destination: str
+    head_ref: str
+
+
+class LiteralPushCommand(NamedTuple):
+    dialect: str
+    executable: str
+    remote: str
+    refspec: str
+    target: PushTarget
+
+
+class PrRouteDenied(Exception):
+    def __init__(self, failure_id: str):
+        super().__init__(failure_id)
+        self.failure_id = failure_id
 
 # MARKER-HONORING LENGTH BOUND (2026-07-26, `$security-engineer` contract
 # decision — work-items/bugs/2026-07-26-the-deny-message-teaches-the-marker-
@@ -619,9 +685,9 @@ SCAN_FAILURE_MARKER_REGEX = re.compile(
 # first two against the push's own argv (`_extract_push_remote_and_dst`,
 # below) — the receipt's binding mechanism this predicate exists to check.
 # `tip` is captured (and its shape validated as 40 hex characters) because it
-# is always part of the real receipt's own text, but this narrow-scope
-# predicate does NOT compare it against anything — see the module docstring
-# for why that binding was cut from this item's scope.
+# is always part of the real receipt's own text. The legacy generic range
+# branch does not compare it; the strict PR route does compare it to a fresh
+# `git rev-parse --verify HEAD` result.
 SCAN_CLEAN_RANGE_REGEX = re.compile(
     r"^publication-safety:\s*clean\s*\(\s*range\s*,\s*examined\s+(?P<count>[1-9]\d*)\s+files?\s*,"
     r"\s*remote\s+(?P<remote>\S+)\s*,\s*dst\s+(?P<dst>\S+)\s*,\s*tip\s+(?P<tip>[0-9a-f]{40})\s*\)\s*$",
@@ -635,8 +701,8 @@ def _extract_push_remote_and_dst(push_args: list[str]) -> tuple[str, str] | None
     i.e. everything after `push` in its command segment) — used ONLY for the
     narrow `range`-mode binding (see the module docstring's RANGE-MODE
     BRANCH (b) note and SCAN_CLEAN_RANGE_REGEX's own comment). This is
-    deliberately NOT the exact-spelling argv grammar the fuller design
-    specified (that is out of scope for this item): it takes the first TWO
+    deliberately NOT the exact-spelling argv grammar used by the separate
+    strict PR route: this generic-route helper takes the first TWO
     tokens that do not start with `-` as (remote, dst_token) and IGNORES any
     further token, rather than admitting or denying the command shape.
 
@@ -712,7 +778,7 @@ _GIT_VALUE_OPTS = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exe
 _SHELL_KEYWORDS = {"if", "then", "elif", "else", "while", "until", "do", "!"}
 
 
-def iter_command_segments(command: str) -> list[list[str]] | None:
+def iter_command_segments(command: str, *, reject_operators: bool = False) -> list[list[str]] | None:
     """Tokenize `command` and split it into one raw token list per shell
     command in the pipeline — the SHARED first half of the shell-aware
     technique this hook uses for BOTH `git push` detection
@@ -790,6 +856,11 @@ def iter_command_segments(command: str) -> list[list[str]] | None:
     for tok in tokens:
         if not tok:
             continue
+        if reject_operators and (
+            (("<" in tok or ">" in tok) and all(c in "<>&" for c in tok))
+            or all(c in ";|&()\n" for c in tok)
+        ):
+            return None
         if skip_redir_target:
             skip_redir_target = False
             continue
@@ -890,6 +961,38 @@ def find_git_push_invocations(command: str) -> list[list[str]]:
             else:
                 break  # a different git subcommand -> not our concern, rest of segment skipped
     return pushes
+
+
+def _find_embedded_git_push_invocations(command: str) -> list[list[str]]:
+    """Find literal adjacent ``git push`` tokens outside command position.
+
+    This is only a discriminator for an already-present exact PR grant.  It
+    lets that strict route reject env/wrapper prefixes instead of treating
+    them as non-push, while the generic detector and no-grant outcomes remain
+    unchanged.
+    """
+    segments = iter_command_segments(command)
+    if segments is None:
+        return []
+    found: list[list[str]] = []
+    for segment in segments:
+        for idx in range(len(segment) - 1):
+            if _normalized_command_word(segment[idx]) == "git" and segment[idx + 1] == "push":
+                found.append(segment[idx + 2:])
+        if not segment:
+            continue
+        head = _normalized_command_word(segment[0])
+        nested: str | None = None
+        if head in ("bash", "sh", "dash", "zsh"):
+            for idx, token in enumerate(segment[1:], start=1):
+                if token in ("-c", "--command") and idx + 1 < len(segment):
+                    nested = segment[idx + 1]
+                    break
+        elif head == "eval" and len(segment) > 1:
+            nested = " ".join(segment[1:])
+        if nested and nested != command:
+            found.extend(_find_embedded_git_push_invocations(nested))
+    return found
 
 
 # --- Publication-safety scan EXECUTION detection (2026-07-26 hardening) ---
@@ -1045,8 +1148,554 @@ def find_scan_script_executions(command: str) -> bool:
     return _command_is_solely_scan_execution(command)
 
 
+def _derive_pr_grant(entries: list[dict]) -> tuple[str, ActivePrGrant | None]:
+    state = "absent"
+    grant: ActivePrGrant | None = None
+    for entry in entries:
+        if not is_user_message(entry):
+            continue
+        text = extract_user_typed_text(entry)
+        if not text:
+            continue
+        if text == PR_REVOKE_MARKER:
+            state, grant = "revoked", None
+            continue
+        match = PR_GRANT_REGEX.fullmatch(text)
+        if match:
+            owner = match.group("owner")
+            repo = match.group("repo")
+            if owner in (".", "..") or repo in (".", ".."):
+                state, grant = "malformed", None
+            else:
+                state = "active"
+                grant = ActivePrGrant(
+                    match.group("url"), owner, repo, int(match.group("number"))
+                )
+            continue
+        if text.startswith(PR_RESERVED_PREFIXES):
+            state, grant = "malformed", None
+    return state, grant
+
+
+def _is_within(path: Path, parent: Path) -> bool:
+    try:
+        path.relative_to(parent)
+        return True
+    except ValueError:
+        return False
+
+
+def _resolve_executable(name: str) -> str | None:
+    candidate = shutil.which(name)
+    if not candidate:
+        return None
+    try:
+        resolved = Path(candidate).resolve(strict=True)
+        workspace = Path.cwd().resolve(strict=True)
+    except Exception:
+        return None
+    if not resolved.is_file() or _is_within(resolved, workspace):
+        return None
+    return str(resolved)
+
+
+_PR_COMMAND_DIALECT_TEST_OVERRIDE: str | None = None
+
+
+def _pr_command_dialect(tool_name: object) -> str:
+    """Select one production shell contract; never infer it from command text."""
+    if _PR_COMMAND_DIALECT_TEST_OVERRIDE in ("posix", "powershell"):
+        return _PR_COMMAND_DIALECT_TEST_OVERRIDE
+    try:
+        source = Path(__file__).resolve(strict=True).as_posix().casefold()
+    except Exception:
+        raise PrRouteDenied("PRG-COMMAND-SHAPE") from None
+    if source.endswith((
+        "/.claude/agents/scripts/check-git-push-gate.py",
+        "/src.claude/agents/scripts/check-git-push-gate.py",
+    )) and tool_name == "Bash":
+        return "posix"
+    if source.endswith((
+        "/.codex/skills/lead/scripts/check-git-push-gate.py",
+        "/src.codex/skills/lead/scripts/check-git-push-gate.py",
+    )):
+        if os.name == "posix" and tool_name in ("Bash", "shell_command", "exec_command"):
+            return "posix"
+        if os.name == "nt" and tool_name in ("PowerShell", "shell_command", "exec_command"):
+            return "powershell"
+    raise PrRouteDenied("PRG-COMMAND-SHAPE")
+
+
+def _serialize_powershell_literal(argv: tuple[str, str, str, str]) -> str:
+    return "& " + " ".join("'" + word.replace("'", "''") + "'" for word in argv)
+
+
+def _decode_powershell_literal(command: str) -> tuple[str, str, str, str]:
+    if not command.startswith("& "):
+        raise PrRouteDenied("PRG-COMMAND-SHAPE")
+    words: list[str] = []
+    offset = 2
+    for word_index in range(4):
+        if offset >= len(command) or command[offset] != "'":
+            raise PrRouteDenied("PRG-COMMAND-SHAPE")
+        offset += 1
+        decoded: list[str] = []
+        while offset < len(command):
+            char = command[offset]
+            if char != "'":
+                decoded.append(char)
+                offset += 1
+                continue
+            if offset + 1 < len(command) and command[offset + 1] == "'":
+                decoded.append("'")
+                offset += 2
+                continue
+            offset += 1
+            break
+        else:
+            raise PrRouteDenied("PRG-COMMAND-SHAPE")
+        words.append("".join(decoded))
+        if word_index < 3:
+            if offset >= len(command) or command[offset] != " ":
+                raise PrRouteDenied("PRG-COMMAND-SHAPE")
+            offset += 1
+        elif offset != len(command):
+            raise PrRouteDenied("PRG-COMMAND-SHAPE")
+    return tuple(words)  # type: ignore[return-value]
+
+
+def _portable_pr_head_ref(value: str) -> bool:
+    return PR_HEAD_REF_REGEX.fullmatch(value) is not None
+
+
+def _parse_pr_literal_command(
+    command: str,
+    resolved_git: str,
+    dialect: str,
+) -> LiteralPushCommand:
+    if dialect == "posix":
+        try:
+            decoded = shlex.split(command, posix=True)
+        except ValueError:
+            raise PrRouteDenied("PRG-COMMAND-SHAPE") from None
+        if len(decoded) != 4 or shlex.join(decoded) != command:
+            raise PrRouteDenied("PRG-COMMAND-SHAPE")
+    elif dialect == "powershell":
+        decoded = list(_decode_powershell_literal(command))
+        if _serialize_powershell_literal(tuple(decoded)) != command:  # type: ignore[arg-type]
+            raise PrRouteDenied("PRG-COMMAND-SHAPE")
+    else:
+        raise PrRouteDenied("PRG-COMMAND-SHAPE")
+
+    executable, subcommand, remote, refspec = decoded
+    if subcommand != "push" or executable != resolved_git or not Path(executable).is_absolute():
+        raise PrRouteDenied("PRG-COMMAND-SHAPE")
+    try:
+        executable_path = Path(executable).resolve(strict=True)
+        resolved_path = Path(resolved_git).resolve(strict=True)
+        same_identity = executable_path.is_file() and resolved_path.is_file() and os.path.samefile(
+            executable_path, resolved_path
+        )
+    except Exception:
+        same_identity = False
+    if not same_identity:
+        raise PrRouteDenied("PRG-COMMAND-SHAPE")
+    if not REMOTE_NAME_REGEX.fullmatch(remote):
+        raise PrRouteDenied("PRG-COMMAND-SHAPE")
+    prefix = "HEAD:refs/heads/"
+    if not refspec.startswith(prefix):
+        raise PrRouteDenied("PRG-COMMAND-SHAPE")
+    head_ref = refspec[len(prefix):]
+    if not _portable_pr_head_ref(head_ref):
+        raise PrRouteDenied("PRG-COMMAND-SHAPE")
+    target = PushTarget(remote, f"refs/heads/{head_ref}", head_ref)
+    return LiteralPushCommand(dialect, executable, remote, refspec, target)
+
+
+def _run_process(argv: list[str], timeout: float) -> ProcessResult | None:
+    env = os.environ.copy()
+    env.pop("GH_REPO", None)
+    env["GH_PROMPT_DISABLED"] = "1"
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    try:
+        process = subprocess.Popen(
+            argv,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=env,
+        )
+    except OSError:
+        return None
+
+    stdout = bytearray()
+    stderr = bytearray()
+    overflow = threading.Event()
+
+    def drain(stream, destination: bytearray) -> None:
+        try:
+            while not overflow.is_set():
+                chunk = stream.read(8192)
+                if not chunk:
+                    return
+                if len(destination) + len(chunk) > PROCESS_OUTPUT_BYTE_CAP:
+                    overflow.set()
+                    return
+                destination.extend(chunk)
+        except OSError:
+            overflow.set()
+
+    assert process.stdout is not None and process.stderr is not None
+    readers = (
+        threading.Thread(target=drain, args=(process.stdout, stdout), daemon=True),
+        threading.Thread(target=drain, args=(process.stderr, stderr), daemon=True),
+    )
+    for reader in readers:
+        reader.start()
+
+    deadline = time.monotonic() + max(0.0, timeout)
+    failed = False
+    while process.poll() is None:
+        if overflow.is_set() or time.monotonic() >= deadline:
+            failed = True
+            process.kill()
+            break
+        time.sleep(0.01)
+    try:
+        process.wait(timeout=1.0)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait()
+        failed = True
+    for reader in readers:
+        reader.join(timeout=1.0)
+    process.stdout.close()
+    process.stderr.close()
+    if failed or overflow.is_set() or any(reader.is_alive() for reader in readers):
+        return None
+    return ProcessResult(process.returncode, bytes(stdout), bytes(stderr))
+
+
+def _run_text(
+    argv: list[str],
+    deadline: float,
+    failure_id: str,
+    *,
+    accepted_codes: tuple[int, ...] = (0,),
+) -> tuple[int, str]:
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise PrRouteDenied(failure_id)
+    result = _run_process(argv, min(PROCESS_TIMEOUT_SECONDS, remaining))
+    if result is None or result.returncode not in accepted_codes:
+        raise PrRouteDenied(failure_id)
+    try:
+        return result.returncode, result.stdout.decode("utf-8", errors="strict")
+    except UnicodeDecodeError:
+        raise PrRouteDenied(failure_id) from None
+
+
+def _strict_json(text: str, expected_type: type, failure_id: str):
+    def no_duplicates(pairs):
+        value = {}
+        for key, item in pairs:
+            if key in value:
+                raise ValueError("duplicate JSON key")
+            value[key] = item
+        return value
+
+    try:
+        parsed = json.loads(text, object_pairs_hook=no_duplicates)
+    except (json.JSONDecodeError, ValueError):
+        raise PrRouteDenied(failure_id) from None
+    if not isinstance(parsed, expected_type):
+        raise PrRouteDenied(failure_id)
+    return parsed
+
+
+def _required_text(value: object, failure_id: str, *, cap: int = 512) -> str:
+    if not isinstance(value, str) or not value or len(value) > cap or "\x00" in value:
+        raise PrRouteDenied(failure_id)
+    return value
+
+
+def _required_oid(value: object, failure_id: str) -> str:
+    text = _required_text(value, failure_id, cap=40)
+    if not OID_REGEX.fullmatch(text):
+        raise PrRouteDenied(failure_id)
+    return text.lower()
+
+
+def _repo_identity_from_url(raw_url: str) -> str | None:
+    if not raw_url or len(raw_url) > 512 or any(ord(c) < 32 or ord(c) == 127 for c in raw_url):
+        return None
+    if "%" in raw_url or "?" in raw_url or "#" in raw_url:
+        return None
+    owner = repo = ""
+    scp = re.fullmatch(r"git@github\.com:([^/]+)/([^/]+)", raw_url)
+    if scp:
+        owner, repo = scp.groups()
+    else:
+        try:
+            parsed = urlsplit(raw_url)
+            if parsed.hostname != "github.com" or parsed.port is not None:
+                return None
+        except ValueError:
+            return None
+        if parsed.scheme == "https":
+            if parsed.username is not None or parsed.password is not None:
+                return None
+        elif parsed.scheme == "ssh":
+            if parsed.username != "git" or parsed.password is not None:
+                return None
+        else:
+            return None
+        parts = parsed.path.split("/")
+        if len(parts) != 3 or parts[0] != "":
+            return None
+        owner, repo = parts[1], parts[2]
+    if repo.endswith(".git"):
+        repo = repo[:-4]
+    if (
+        owner in (".", "..")
+        or repo in (".", "..")
+        or not REPO_COMPONENT_REGEX.fullmatch(owner)
+        or not REPO_COMPONENT_REGEX.fullmatch(repo)
+    ):
+        return None
+    return f"{owner}/{repo}"
+
+
+def _repo_record(value: object, expected: str, failure_id: str) -> tuple[str, str]:
+    if not isinstance(value, dict):
+        raise PrRouteDenied(failure_id)
+    repo_id = _required_text(value.get("id"), failure_id, cap=256)
+    if not NODE_ID_REGEX.fullmatch(repo_id):
+        raise PrRouteDenied(failure_id)
+    name = _required_text(value.get("nameWithOwner"), failure_id, cap=201)
+    if name.casefold() != expected.casefold():
+        raise PrRouteDenied("PRG-BINDING-DRIFT")
+    url = _required_text(value.get("url"), failure_id, cap=512)
+    if url.casefold() != f"https://github.com/{name}".casefold():
+        raise PrRouteDenied("PRG-BINDING-DRIFT")
+    default_ref = value.get("defaultBranchRef")
+    if not isinstance(default_ref, dict):
+        raise PrRouteDenied(failure_id)
+    default_name = _required_text(default_ref.get("name"), failure_id, cap=255)
+    return repo_id, default_name
+
+
+def _verify_pr_oracle(grant: ActivePrGrant, literal: LiteralPushCommand) -> tuple[PushTarget, str]:
+    deadline = time.monotonic() + ORACLE_TIMEOUT_SECONDS
+    git_exe = literal.executable
+    gh_exe = _resolve_executable("gh")
+    if gh_exe is None:
+        raise PrRouteDenied("PRG-PR-UNAVAILABLE")
+    target = literal.target
+
+    fields = (
+        "id,number,url,state,closed,mergedAt,baseRefName,baseRefOid,"
+        "headRefName,headRefOid,headRepository,headRepositoryOwner"
+    )
+    _, pr_text = _run_text(
+        [gh_exe, "pr", "view", grant.url, "--json", fields],
+        deadline,
+        "PRG-PR-UNAVAILABLE",
+    )
+    pr = _strict_json(pr_text, dict, "PRG-PR-UNAVAILABLE")
+    if pr.get("number") != grant.number or pr.get("url") != grant.url:
+        raise PrRouteDenied("PRG-BINDING-DRIFT")
+    pr_id = _required_text(pr.get("id"), "PRG-BINDING-DRIFT", cap=256)
+    if not NODE_ID_REGEX.fullmatch(pr_id):
+        raise PrRouteDenied("PRG-BINDING-DRIFT")
+    if pr.get("state") != "OPEN" or pr.get("closed") is not False or pr.get("mergedAt") is not None:
+        raise PrRouteDenied("PRG-PR-STATE")
+    base_ref = _required_text(pr.get("baseRefName"), "PRG-BINDING-DRIFT", cap=255)
+    _required_oid(pr.get("baseRefOid"), "PRG-BINDING-DRIFT")
+    head_ref = _required_text(pr.get("headRefName"), "PRG-BINDING-DRIFT", cap=255)
+    if not _portable_pr_head_ref(head_ref):
+        raise PrRouteDenied("PRG-COMMAND-SHAPE")
+    head_oid = _required_oid(pr.get("headRefOid"), "PRG-BINDING-DRIFT")
+    head_repo = pr.get("headRepository")
+    head_owner = pr.get("headRepositoryOwner")
+    if not isinstance(head_repo, dict) or not isinstance(head_owner, dict):
+        raise PrRouteDenied("PRG-BINDING-DRIFT")
+    head_repo_id = _required_text(head_repo.get("id"), "PRG-BINDING-DRIFT", cap=256)
+    head_repo_name = _required_text(head_repo.get("name"), "PRG-BINDING-DRIFT", cap=100)
+    head_owner_login = _required_text(head_owner.get("login"), "PRG-BINDING-DRIFT", cap=100)
+    head_name = f"{head_owner_login}/{head_repo_name}"
+    if not REPO_COMPONENT_REGEX.fullmatch(head_owner_login) or not REPO_COMPONENT_REGEX.fullmatch(head_repo_name):
+        raise PrRouteDenied("PRG-BINDING-DRIFT")
+    if target.head_ref != head_ref:
+        raise PrRouteDenied("PRG-COMMAND-SHAPE")
+
+    repo_fields = "id,nameWithOwner,defaultBranchRef,url"
+    _, base_repo_text = _run_text(
+        [gh_exe, "repo", "view", f"{grant.owner}/{grant.repo}", "--json", repo_fields],
+        deadline,
+        "PRG-PR-UNAVAILABLE",
+    )
+    _, head_repo_text = _run_text(
+        [gh_exe, "repo", "view", head_name, "--json", repo_fields],
+        deadline,
+        "PRG-PR-UNAVAILABLE",
+    )
+    base_record = _strict_json(base_repo_text, dict, "PRG-PR-UNAVAILABLE")
+    head_record = _strict_json(head_repo_text, dict, "PRG-PR-UNAVAILABLE")
+    _, base_default = _repo_record(base_record, f"{grant.owner}/{grant.repo}", "PRG-BINDING-DRIFT")
+    current_head_repo_id, head_default = _repo_record(head_record, head_name, "PRG-BINDING-DRIFT")
+    if current_head_repo_id != head_repo_id:
+        raise PrRouteDenied("PRG-BINDING-DRIFT")
+
+    _, ref_check = _run_text(
+        [git_exe, "check-ref-format", "--branch", head_ref], deadline, "PRG-DESTINATION-UNSAFE"
+    )
+    if ref_check.strip() != head_ref:
+        raise PrRouteDenied("PRG-DESTINATION-UNSAFE")
+    if target.destination == "refs/heads/main" or head_ref in (base_ref, base_default, head_default):
+        raise PrRouteDenied("PRG-DESTINATION-UNSAFE")
+
+    encoded_ref = quote(head_ref, safe="")
+    _, branch_text = _run_text(
+        [gh_exe, "api", "--hostname", "github.com", f"repos/{head_name}/branches/{encoded_ref}"],
+        deadline,
+        "PRG-PR-UNAVAILABLE",
+    )
+    branch = _strict_json(branch_text, dict, "PRG-PR-UNAVAILABLE")
+    if branch.get("name") != head_ref or branch.get("protected") is not False:
+        raise PrRouteDenied("PRG-DESTINATION-UNSAFE")
+    _, rules_text = _run_text(
+        [gh_exe, "api", "--hostname", "github.com", f"repos/{head_name}/rules/branches/{encoded_ref}"],
+        deadline,
+        "PRG-PR-UNAVAILABLE",
+    )
+    rules = _strict_json(rules_text, list, "PRG-PR-UNAVAILABLE")
+    if rules:
+        raise PrRouteDenied("PRG-DESTINATION-UNSAFE")
+
+    _, expanded_urls = _run_text(
+        [git_exe, "remote", "get-url", "--push", "--all", target.remote],
+        deadline,
+        "PRG-REMOTE-MISMATCH",
+    )
+    urls = expanded_urls.splitlines()
+    if len(urls) != 1 or not urls[0]:
+        raise PrRouteDenied("PRG-REMOTE-MISMATCH")
+    remote_identity = _repo_identity_from_url(urls[0])
+    if remote_identity is None or remote_identity.casefold() != head_name.casefold():
+        raise PrRouteDenied("PRG-REMOTE-MISMATCH")
+
+    config_key = f"remote.{target.remote}.pushurl"
+    code, raw_pushurl = _run_text(
+        [git_exe, "config", "--get-all", config_key],
+        deadline,
+        "PRG-REMOTE-MISMATCH",
+        accepted_codes=(0, 1),
+    )
+    if code == 1:
+        _, raw_pushurl = _run_text(
+            [git_exe, "config", "--get-all", f"remote.{target.remote}.url"],
+            deadline,
+            "PRG-REMOTE-MISMATCH",
+        )
+    raw_urls = raw_pushurl.splitlines()
+    if len(raw_urls) != 1 or raw_urls[0] != urls[0]:
+        raise PrRouteDenied("PRG-REMOTE-MISMATCH")
+
+    _, remote_head_text = _run_text(
+        [git_exe, "ls-remote", "--heads", target.remote, target.destination],
+        deadline,
+        "PRG-BRANCH-DRIFT",
+    )
+    remote_rows = remote_head_text.splitlines()
+    if len(remote_rows) != 1:
+        raise PrRouteDenied("PRG-BRANCH-DRIFT")
+    remote_parts = remote_rows[0].split("\t")
+    if len(remote_parts) != 2 or remote_parts[1] != target.destination or not OID_REGEX.fullmatch(remote_parts[0]):
+        raise PrRouteDenied("PRG-BRANCH-DRIFT")
+    if remote_parts[0].lower() != head_oid:
+        raise PrRouteDenied("PRG-BRANCH-DRIFT")
+
+    _, local_head_text = _run_text(
+        [git_exe, "rev-parse", "--verify", "HEAD"], deadline, "PRG-RECEIPT-MISMATCH"
+    )
+    local_head_rows = local_head_text.splitlines()
+    if len(local_head_rows) != 1 or not OID_REGEX.fullmatch(local_head_rows[0]):
+        raise PrRouteDenied("PRG-RECEIPT-MISMATCH")
+    return target, local_head_rows[0].lower()
+
+
+def _verify_pr_range_receipt(
+    entries: list[dict], target: PushTarget, local_head: str
+) -> None:
+    call_positions: dict[str, list[int]] = {}
+    scan_calls: list[tuple[str, int]] = []
+    for idx, entry in enumerate(entries):
+        for call_id, _text in extract_model_tool_calls_with_ids(entry):
+            call_positions.setdefault(call_id, []).append(idx)
+        for call_id, command_text in extract_model_shell_commands_with_ids(entry):
+            if find_scan_script_executions(command_text):
+                scan_calls.append((call_id, idx))
+    if len(scan_calls) != 1:
+        raise PrRouteDenied("PRG-RECEIPT-MISSING")
+    call_id, call_pos = scan_calls[0]
+    if len(call_positions.get(call_id, [])) != 1 or call_positions[call_id][0] != call_pos:
+        raise PrRouteDenied("PRG-RECEIPT-MISMATCH")
+
+    results: list[tuple[int, object]] = []
+    for idx, entry in enumerate(entries):
+        for result in extract_tool_outputs_with_ids(entry):
+            if result.call_id == call_id:
+                results.append((idx, result))
+    if len(results) != 1:
+        raise PrRouteDenied("PRG-RECEIPT-MISMATCH")
+    result_pos, result = results[0]
+    if result_pos <= call_pos or result.execution_status != NO_OBSERVED_FAILURE:
+        raise PrRouteDenied("PRG-RECEIPT-MISMATCH")
+    result_text = result.output_text
+    if SCAN_FAILURE_MARKER_REGEX.search(result_text) or SCAN_CLEAN_TRACKED_REGEX.search(result_text):
+        raise PrRouteDenied("PRG-RECEIPT-MISMATCH")
+    matches = list(SCAN_CLEAN_RANGE_REGEX.finditer(result_text))
+    if len(matches) != 1:
+        raise PrRouteDenied("PRG-RECEIPT-MISSING" if not matches else "PRG-RECEIPT-MISMATCH")
+    receipt = matches[0]
+    if (
+        receipt.group("remote") != target.remote
+        or receipt.group("dst") != target.destination
+        or receipt.group("tip").lower() != local_head
+    ):
+        raise PrRouteDenied("PRG-RECEIPT-MISMATCH")
+
+    for entry in entries[result_pos + 1:]:
+        for _prior_id, prior_command in extract_model_shell_commands_with_ids(entry):
+            prior_pushes = find_git_push_invocations(prior_command)
+            if prior_pushes and not all("--dry-run" in args for args in prior_pushes):
+                raise PrRouteDenied("PRG-RECEIPT-USED")
+
+
+def _evaluate_active_pr_route(
+    grant: ActivePrGrant,
+    command: str,
+    after_user_entries: list[dict],
+    tool_name: object,
+) -> bool:
+    try:
+        dialect = _pr_command_dialect(tool_name)
+        git_exe = _resolve_executable("git")
+        if git_exe is None:
+            raise PrRouteDenied("PRG-REMOTE-MISMATCH")
+        literal = _parse_pr_literal_command(command, git_exe, dialect)
+        target, local_head = _verify_pr_oracle(grant, literal)
+        _verify_pr_range_receipt(after_user_entries, target, local_head)
+        return True
+    except PrRouteDenied:
+        raise
+    except Exception:
+        raise PrRouteDenied("PRG-INTERNAL") from None
+
+
 def evaluate_push(envelope: dict) -> bool:
-    """Steps 2-8 of the decision algorithm (see the module docstring): return
+    """The decision algorithm after envelope parsing (see the module docstring): return
     True to ALLOW the push (`main()` then exits 0 with no payload), False to
     fall through to the deny payload. MAY RAISE — `main()` wraps the call to
     this function in one try/except and treats a raised exception exactly
@@ -1059,8 +1708,9 @@ def evaluate_push(envelope: dict) -> bool:
     uncaught exception ANYWHERE in this logic propagated out of `main()` and
     produced no deny payload, so the host could not distinguish a crash from a
     legitimate allow.
-    Fail-open is the deliberate, documented posture for a hook that CANNOT
-    decide (a missing transcript, no command, a dry run); it is not
+    Fail-open is the deliberate posture for a non-command, non-push,
+    subagent context, or dry run. A detected non-dry push with no readable
+    transcript now fails closed; it is not
     defensible for a hook that CRASHED WHILE DECIDING, because those two are
     indistinguishable to everything downstream.
 
@@ -1068,10 +1718,10 @@ def evaluate_push(envelope: dict) -> bool:
     NUMBERED steps 2-6 in the module docstring's decision algorithm (step 3
     there bundles two code-level checks — non-dict `tool_input` and a
     missing/non-string `command` — under one label, "tool_input.command is
-    absent or empty"). Concretely, SIX `return True` statements below are
-    UNCHANGED by this split: subagent context, non-dict `tool_input`, no/
-    empty `command`, no `git push` found, every push is `--dry-run`, and a
-    missing `transcript_path`. Each is an ordinary return reached without any
+    absent or empty"). The ordinary `return True` paths below remain subagent
+    context, non-dict `tool_input`, no/empty command, no detected push,
+    all-dry-run, and a suspicious wrapper/prefix with no active PR grant.
+    Each is an ordinary return reached without any
     exception being raised, so `main()`'s try/except never intercepts them —
     only a genuinely raised exception is redirected to deny."""
     # Subagent context: mirrors check-bugfix-discipline.py. The subagent's
@@ -1091,15 +1741,17 @@ def evaluate_push(envelope: dict) -> bool:
         return True
 
     pushes = find_git_push_invocations(command)
-    if not pushes:
+    embedded_pushes = [] if pushes else _find_embedded_git_push_invocations(command)
+    if not pushes and not embedded_pushes:
         return True  # no `git push` in command position
 
-    if all("--dry-run" in args for args in pushes):
+    detected_pushes = pushes or embedded_pushes
+    if all("--dry-run" in args for args in detected_pushes):
         return True  # every push is a dry run; nothing is sent
 
     transcript_path = envelope.get("transcript_path") or ""
     if not transcript_path:
-        return True  # cannot determine turn state; fail open
+        raise PrRouteDenied("PRG-TRANSCRIPT-UNAVAILABLE")
 
     entries = read_transcript_tail(transcript_path, TRANSCRIPT_TAIL_LINES)
     last_user_entry, user_text, after_user_entries = last_genuine_user_message(entries)
@@ -1116,6 +1768,25 @@ def evaluate_push(envelope: dict) -> bool:
     # through to branch (b) and then to deny, same as no marker at all.
     if APPROVE_MARKER_REGEX.search(user_text) and len(user_text) <= MARKER_MAX_MESSAGE_LENGTH:
         return True
+
+    history_entries, history_status = read_transcript_history(
+        transcript_path,
+        byte_cap=TRANSCRIPT_HISTORY_BYTE_CAP,
+        record_cap=TRANSCRIPT_HISTORY_RECORD_CAP,
+        line_byte_cap=TRANSCRIPT_HISTORY_LINE_BYTE_CAP,
+    )
+    if history_status != "found":
+        raise PrRouteDenied("PRG-TRANSCRIPT-UNAVAILABLE")
+    pr_state, pr_grant = _derive_pr_grant(history_entries)
+    if pr_state == "malformed":
+        raise PrRouteDenied("PRG-AUTH-MALFORMED")
+    if pr_state == "active" and pr_grant is not None:
+        return _evaluate_active_pr_route(
+            pr_grant, command, after_user_entries, envelope.get("tool_name")
+        )
+
+    if not pushes:
+        return True  # suspicious wrapper/prefix without an active grant: preserve generic behavior
 
     # (b) Publication-safety scan EXECUTED this turn (find_scan_script_
     # executions — real execution, never a mere MENTION of the scanner's
@@ -1253,9 +1924,12 @@ def main() -> int:
     except Exception:
         return 0  # malformed envelope -> fail open
 
+    failure_id: str | None = None
     try:
         if evaluate_push(envelope):
             return 0
+    except PrRouteDenied as exc:
+        failure_id = exc.failure_id
     except Exception:
         # A crash WHILE DECIDING is a decision not made, not a decision to
         # allow — fall through to the deny payload below rather than
@@ -1264,8 +1938,29 @@ def main() -> int:
         # note for the full defect this closes).
         pass
 
-    # Deny.
-    reason = (
+    # Deny. PR-route failures intentionally expose only a stable identifier
+    # and safe remediation; subprocess output, command text, paths, remotes,
+    # and exception details never enter this payload.
+    pr_reasons = {
+        "PRG-AUTH-MALFORMED": "Use the exact version-1 PR approval or revocation line in a genuine user message.",
+        "PRG-TRANSCRIPT-UNAVAILABLE": "Retry from a readable current session transcript; summaries cannot authorize publication.",
+        "PRG-COMMAND-SHAPE": "Use exactly one ordinary `git push <remote> HEAD:refs/heads/<current-head-ref>` command.",
+        "PRG-PR-UNAVAILABLE": "Restore authenticated GitHub state access, then retry so the pull request can be checked afresh.",
+        "PRG-PR-STATE": "The pull request is not open; obtain a new grant only for an open pull request.",
+        "PRG-BINDING-DRIFT": "Refresh the pull-request binding and retry with a current exact grant if needed.",
+        "PRG-DESTINATION-UNSAFE": "Choose the current unprotected non-default pull-request head branch.",
+        "PRG-REMOTE-MISMATCH": "Use one direct GitHub remote for the current pull-request head repository.",
+        "PRG-BRANCH-DRIFT": "Refresh remote branch state and rerun the publication-safety range scan.",
+        "PRG-RECEIPT-MISSING": "Run a fresh standalone non-empty publication-safety range scan for this push.",
+        "PRG-RECEIPT-MISMATCH": "Rerun the range scan for the exact remote, destination, and current HEAD tip.",
+        "PRG-RECEIPT-USED": "The prior receipt is consumed; run a new standalone range scan before retrying.",
+        "PRG-INTERNAL": "Retry only after the publication gate can complete its checks normally.",
+    }
+    if failure_id is not None:
+        remediation = pr_reasons.get(failure_id, pr_reasons["PRG-INTERNAL"])
+        reason = f"{failure_id}: PR-scoped publication denied. {remediation}"
+    else:
+        reason = (
         "Git-push publication gate: this Bash command runs `git push` (an "
         "irreversible publication), but this turn shows neither the per-turn "
         "user approval marker nor a publication-safety scan that reported a "
@@ -1307,7 +2002,7 @@ def main() -> int:
         "replacement for it. Do not work around it by wrapping the push in a "
         "script or delegating it to a subagent — that violates the same rule "
         "this gate protects."
-    )
+        )
 
     payload = {
         "hookSpecificOutput": {
