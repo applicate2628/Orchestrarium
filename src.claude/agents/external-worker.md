@@ -37,8 +37,8 @@ description: "External worker: run eligible worker roles externally."
 
 ## Execution recipe
 
-- On the Claude line, launch through the canonical prompt wrappers named by the shared external-dispatch contract; use its transport-neutral fallback only when the wrapper path is unavailable, preserving the prompt plus sibling `.out` / `.err` artifacts and exact launch flags.
-- Actively poll output artifacts and process status, apply the contract's effort-tiered stall policy, and never duplicate a still-running launch.
+- On the Claude line, launch through the canonical prompt wrappers named by the shared external-dispatch contract; use its transport-neutral fallback only when the wrapper path is unavailable. Preserve the caller-owned prompt and exact launch flags, then consume the wrapper's single `ORCHESTRARIUM_PROVIDER_RESULT_V1` envelope and complete `resultText`; wrapper-private capture paths are never worker artifacts.
+- Set the wrapper-owned timeout for the lane, await its terminal return, and validate the envelope's primary outcome, cleanup status, process exit, timeout/cancellation flags, and gate; for a tracked run, read the terminal ledger back separately before accepting the worker result. Never duplicate a launch; independent standalone watcher polling applies only to caller-managed background captures outside the wrapper.
 - Accept completion only when the shared run-completion oracle passes; a failed oracle is `UNVERIFIED`, not a worker artifact.
 
 ## Return exactly one artifact

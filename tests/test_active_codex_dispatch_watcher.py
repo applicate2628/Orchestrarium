@@ -1,6 +1,7 @@
 """Terminal-matrix tests for the Python dispatch watcher and prompt owners."""
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -260,7 +261,7 @@ def test_recycled_pid_with_mismatched_start_marker_is_dead(tmp_path: Path) -> No
         ("claude", CLAUDE, "CLAUDE_BIN", "CLAUDE_PROMPTS_DIR"),
     ),
 )
-def test_python_prompt_owner_writes_pid_and_artifact_paths(
+def test_python_prompt_owner_returns_complete_result_and_reclaims_artifacts(
     tmp_path: Path,
     provider: str,
     entrypoint: Path,
@@ -269,17 +270,17 @@ def test_python_prompt_owner_writes_pid_and_artifact_paths(
 ) -> None:
     fake = tmp_path / f"fake-{provider}.py"
     fake.write_text(
-        "import os,pathlib,runpy,sys\n"
+        "import json,os,pathlib,runpy,sys\n"
         "args=sys.argv[1:]\n"
         "if 'app-server' in args:\n"
         f"    runpy.run_path({str(FAKE_CODEX_HOOKS_HOST)!r}, run_name='__main__')\n"
         "pathlib.Path(os.environ['FAKE_ENV_CAPTURE']).write_text("
         "os.environ.get('ORCHESTRARIUM_DISPATCHED_REVIEW', ''), encoding='utf-8')\n"
-        "if '--output-last-message' in args:\n"
-        "    pathlib.Path(args[args.index('--output-last-message')+1]).write_text("
-        "'GATE: PASS\\n', encoding='utf-8')\n"
-        "else:\n"
-        "    print('GATE: PASS')\n",
+        + (
+            "print(json.dumps({'type':'item.completed','item':{'type':'agent_message','text':'GATE: PASS\\n'}}))\n"
+            if provider == "codex"
+            else "print('GATE: PASS')\n"
+        ),
         encoding="utf-8",
     )
     prompt = tmp_path / "prompt.md"
@@ -309,40 +310,20 @@ def test_python_prompt_owner_writes_pid_and_artifact_paths(
     )
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
-    expected_path_count = 6 if provider == "codex" else 5
-    paths = [Path(line) for line in lines[:expected_path_count]]
-    assert [path.suffix for path in paths] == (
-        [".md", ".out", ".err", ".lastmsg", ".pid", ".verdict"]
-        if provider == "codex"
-        else [".md", ".out", ".err", ".pid", ".verdict"]
-    )
-    assert all(path.is_file() for path in paths)
-    pid_path = next(path for path in paths if path.suffix == ".pid")
-    pid_lines = pid_path.read_text(encoding="utf-8").splitlines()
-    assert pid_lines[0].startswith("pid=")
-    assert pid_lines[0][4:].isdigit()
-    verdict = next(path for path in paths if path.suffix == ".verdict")
-    assert verdict.read_text(encoding="ascii") == "COMPLETE:PASS\n"
-    assert lines[expected_path_count] == (
-        "# actively await this dispatch (do NOT passively wait for a notification):"
-    )
-    expected_watch = [
-        sys.executable,
-        str(WATCH),
-        "--out",
-        str(paths[1]),
-        "--err",
-        str(paths[2]),
-    ]
-    if provider == "codex":
-        expected_watch += ["--lastmsg", str(paths[3])]
-    expected_watch += [
-        "--pid-file",
-        str(pid_path),
-        "--stall-secs",
-        "2700",
-    ]
-    assert lines[expected_path_count + 1] == subprocess.list2cmdline(expected_watch)
+    assert len(lines) == 1
+    prefix = "ORCHESTRARIUM_PROVIDER_RESULT_V1="
+    assert lines[0].startswith(prefix)
+    payload = json.loads(lines[0][len(prefix) :])
+    assert payload["schema"] == "orchestrarium.provider-result.v1"
+    assert payload["resultText"].replace("\r\n", "\n") == "GATE: PASS\n"
+    assert payload["exitCode"] == 0
+    assert payload["token"] == "COMPLETE:PASS"
+    assert payload["status"] == "completed"
+    assert payload["gate"] == "PASS"
+    assert payload["cancelled"] is False
+    assert payload["timedOut"] is False
+    assert payload["stderrMarkerCount"] == 0
+    assert list((tmp_path / f"{provider}-artifacts").iterdir()) == []
     assert env_capture.read_text(encoding="utf-8") == (
         "1" if provider == "claude" else ""
     )

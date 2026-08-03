@@ -10,6 +10,10 @@ import sys
 from pathlib import Path
 
 import pytest
+from tests.fixtures.codex_hook_fixture import (
+    FAKE_CODEX_HOOKS_HOST,
+    prepare_codex_home,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -34,14 +38,16 @@ def _make_fake_provider(tmp_path: Path, provider: str) -> tuple[Path, Path]:
     fake.write_text(
         "import json,os,pathlib,sys\n"
         "args=sys.argv[1:]\n"
+        "if 'app-server' in args:\n"
+        f"    import runpy; runpy.run_path({str(FAKE_CODEX_HOOKS_HOST)!r}, run_name='__main__')\n"
         "pathlib.Path(os.environ['FAKE_ARGV_CAPTURE']).write_text("
         "json.dumps(args), encoding='utf-8')\n"
         "sys.stdin.buffer.read()\n"
-        "if '--output-last-message' in args:\n"
-        "    pathlib.Path(args[args.index('--output-last-message')+1]).write_text("
-        "'GATE: PASS\\n', encoding='utf-8')\n"
-        "else:\n"
-        "    print('GATE: PASS')\n",
+        + (
+            "print(json.dumps({'type':'item.completed','item':{'type':'agent_message','text':'GATE: PASS\\n'}}))\n"
+            if provider == "codex"
+            else "print('GATE: PASS')\n"
+        ),
         encoding="utf-8",
     )
     return fake, capture
@@ -81,7 +87,9 @@ def _run_transport(
     env[BIN_ENV[provider]] = str(fake)
     env[OUTPUT_ENV[provider]] = str(tmp_path / f"{provider}-outputs")
     env["FAKE_ARGV_CAPTURE"] = str(capture)
-    if provider == "claude":
+    if provider == "codex":
+        env["CODEX_HOME"] = str(prepare_codex_home(tmp_path))
+    else:
         env["ANTHROPIC_API_KEY"] = "fake-commercial-credential"
     item = _make_work_item(tmp_path, provider) if ledger else None
     ledger_args = (

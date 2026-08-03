@@ -101,13 +101,13 @@ def _make_work_item(tmp_path: Path, suffix: str) -> Path:
 def _run_transport(tmp_path: Path, err_line: str) -> dict:
     fake = tmp_path / "fake-codex.py"
     fake.write_text(
-        "import os,pathlib,runpy,sys\n"
+        "import json,os,runpy,sys\n"
         "args=sys.argv[1:]\n"
         "if 'app-server' in args:\n"
         f"    runpy.run_path({str(FAKE_CODEX_HOOKS_HOST)!r}, run_name='__main__')\n"
         "sys.stdin.buffer.read()\n"
-        "pathlib.Path(args[args.index('--output-last-message')+1]).write_text("
-        "'GATE: PASS\\n', encoding='utf-8')\n"
+        "print(json.dumps({'type':'item.completed','item':"
+        "{'type':'agent_message','text':'GATE: PASS\\n'}}))\n"
         "print(os.environ['FAKE_ERR_LINE'], file=sys.stderr)\n",
         encoding="utf-8",
     )

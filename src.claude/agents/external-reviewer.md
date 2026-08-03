@@ -39,8 +39,8 @@ description: "External reviewer: run eligible review or QA externally."
 
 ## Execution recipe
 
-- On the Claude line, launch through the canonical prompt wrappers named by the shared external-dispatch contract and record the provider's read-only or sandbox flags; use its transport-neutral fallback only when needed while preserving prompt plus sibling `.out` / `.err` artifacts.
-- Actively poll output artifacts and process status, apply the contract's effort-tiered stall policy, and never duplicate a still-running launch.
+- On the Claude line, launch through the canonical prompt wrappers named by the shared external-dispatch contract and record the provider's read-only or sandbox flags; use its transport-neutral fallback only when needed. Preserve the caller-owned prompt and consume the wrapper's single `ORCHESTRARIUM_PROVIDER_RESULT_V1` envelope and complete `resultText`; wrapper-private capture paths are never review evidence.
+- Set the wrapper-owned timeout for the lane, await its terminal return, and validate the envelope's primary outcome, cleanup status, process exit, timeout/cancellation flags, and gate; for a tracked run, read the terminal ledger back separately before accepting the review. Never duplicate a launch; independent standalone watcher polling applies only to caller-managed background captures outside the wrapper.
 - Accept completion only when the shared run-completion oracle passes. A failed review run is `UNVERIFIED` under review-loop invariant 7 in `contracts/review-loop.md`; this role cites that lane-accounting owner instead of restating it.
 
 ## Return exactly one artifact
