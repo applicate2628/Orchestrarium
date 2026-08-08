@@ -29,29 +29,22 @@ BOOTSTRAP_SHA256 = "07374be13bb75fa40e827663927c619540f714b5e04f98a09ffd5b665c95
 
 EXPECTED_PAYLOADS: dict[str, tuple[int, str]] = {
     "structural-overview": (
-        4_850,
-        "c0624b3c42cc0a310896b98e4cc1dfac21f68131185e21b6eb138c5f8759a272",
+        1_265,
+        "488c41acb051ccf6100422b28b3d4ded846e8d9cdd88fb937fb9b383f8d70319",
     ),
     "hook-behavior-contracts": (
-        22_095,
-        "c1657fcfd1e61a3fface916886e93443db1b0f2a790006fc1da3a0cced72713d",
+        13_632,
+        "bc66fdc758617b33daf45a2c77f5b78740d03c2f2169ca9e1b2802544a92fac0",
     ),
-    # Re-pinned 2026-07-27 when the hook registration moved from `.sh`/`.ps1`
-    # wrappers to direct `.py` invocation. The pin exists to force exactly this
-    # review, so the change was read before the numbers were refreshed, not
-    # after: the removed text is the PowerShell entry example
-    # (`-NoProfile -ExecutionPolicy Bypass -File …ps1`) and the POSIX `bash …sh`
-    # note, both of which stopped being true; the added text describes the
-    # `sys.executable` resolution, the preflight, and the
-    # SYNC -> REGISTER -> VERIFY -> RECLAIM transaction. A pin refreshed without
-    # reading the diff would defeat the mechanism entirely.
+    # Payload pins force deliberate review of current hook behavior, placement,
+    # and installer truth before a canonical-reference edit can pass.
     "hook-entrypoints-placement": (
-        1_043,
-        "d03780b02444aa8890423e675f3fa476552411989f8ea0a4d2e16c9deb2971dd",
+        785,
+        "6bff24491968f08061763e68b24876ba95d75e8b0c79766387b97c62ac6372a0",
     ),
     "installer-removal-json-path": (
-        5_435,
-        "ec63cc633fff6a9fc40848e1f034e31599df65156e58d28a3df11015bfd91f45",
+        5_254,
+        "1810bf29901fcf68b0efabc55aacafbd9b5f49aed5da325afb8b79cd7bce27fa",
     ),
 }
 
@@ -166,9 +159,9 @@ def test_live_claude_md_passes_at_post_extraction_cap_and_reports_exact_counts()
     result = _run()
     assert result.returncode == 0, result.stdout + result.stderr
     for expected in (
-        "Code points: 36574",
-        "UTF-8 bytes: 36756",
-        "Binding size: 36756",
+            "Code points: 35778",
+            "UTF-8 bytes: 35960",
+            "Binding size: 35960",
         "Size cap: 36771",
         "Warning threshold: 36521",
         "Manifest: 47/47",
@@ -180,7 +173,7 @@ def test_live_claude_md_passes_at_post_extraction_cap_and_reports_exact_counts()
 def test_tiny_size_cap_fails_closed() -> None:
     result = _run("--size-cap", "1000")
     assert result.returncode == 1, result.stdout + result.stderr
-    assert "FAIL: Claude Markdown binding size 36756 > size cap 1000" in result.stdout
+    assert "FAIL: Claude Markdown binding size 35960 > size cap 1000" in result.stdout
     assert "RESULT: FAIL" in result.stdout
 
 

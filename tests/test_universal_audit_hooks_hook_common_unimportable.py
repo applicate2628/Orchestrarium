@@ -82,6 +82,10 @@ SHARED_TREES = (
     ("claude mirror", CLAUDE_HOOKS),
     ("codex mirror", CODEX_HOOKS),
 )
+MCP_SHARED_TREES = (
+    ("universal (canon)", UNIVERSAL_HOOKS),
+    ("codex mirror", CODEX_HOOKS),
+)
 CLAUDE_ONLY_TREES = (
     ("claude (pack-only, no mirror)", CLAUDE_HOOKS),
 )
@@ -138,13 +142,13 @@ def _repo_orientation_envelope() -> dict:
 # regression there and a regression here are testing the identical hit path.
 AUDITS = (
     ("check-machine-local-path.py", SHARED_TREES,
-     {"tool_input": {"file_path": "README.md", "content": "see C:/Users/realuser/x"}}),
+     {"tool_input": {"file_path": "README.md", "content": "see C:/" + "Users" + "/realuser/x"}}),
     ("check-no-trash-in-repo.py", SHARED_TREES,
      {"cwd": "/tmp", "tool_input": {"command": "git worktree add ../wt"}}),
     ("check-stale-relation-residue.py", SHARED_TREES,
      {"tool_input": {"file_path": "docs/live-doc.md", "content": "this is a deprecated alias for bar"}}),
     ("check-repository-orientation.py", SHARED_TREES, _repo_orientation_envelope),
-    ("check-mcp-momentum.py", SHARED_TREES,
+    ("check-mcp-momentum.py", MCP_SHARED_TREES,
      {"tool_name": "Grep", "tool_input": {"pattern": "def parse_config"}}),
     ("check-typed-routing.py", CLAUDE_ONLY_TREES,
      {

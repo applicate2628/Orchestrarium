@@ -10,7 +10,7 @@ One dependency-free policy module, `scripts/universal-hooks/scripts/mcp_continui
 | --- | --- | --- |
 | `SessionStart` | `mcp-usage-reminder.py` | Reintroduces the full MCP discovery and use guidance after a new session or compaction. |
 | `UserPromptSubmit` | `turn-anchor-reminder.py` | Adds a short checkpoint requiring relevant configured MCP discovery before ad hoc repository search. |
-| `PreToolUse` | `check-mcp-momentum.py` | Warns when a qualifying code-navigation search is about to bypass configured code-intelligence MCP tooling. |
+| `PreToolUse` | `check-mcp-momentum.py` | Classifies a qualifying code-navigation search before provider-specific advisory or force-mode enforcement. |
 
 The policy admits exactly `Grep`, `Bash`, `PowerShell`, `shell_command`, and `exec_command`. Shell-shaped inputs read `tool_input.command`; `exec_command` reads `tool_input.cmd` and accepts `command` as a compatibility shape. Shell text is untrusted data: the policy tokenizes it and never executes it.
 
@@ -44,11 +44,25 @@ The exact task-memory exemption is intentionally narrow. It does not create a ge
 
 ## Delivery and privacy boundary
 
-The momentum hook is warn-only and fail-open. A hit and a miss both exit 0; no MCP path exits 2 or mutates state. Root and dispatched-agent envelopes are evaluated the same way so subagents retain the same continuity guard.
+The shared classifier does not choose whether a provider advises or denies.
+Codex remains warn-only. Claude remains warn-only for `mcpMode: auto` and for
+dispatched-agent envelopes, but a root Claude conversation in effective
+`mcpMode: force` denies each qualifying search when a configured
+code-intelligence server is present. Exact `[approve-mcp-fallback:v1]` in the
+bounded host-projected `user`-role record grants one Claude root recovery turn;
+assistant and tool text cannot mint it. This projection is not authenticated
+authorization, and a forged host-shaped user record can satisfy it. Missing
+servers or unresolved mode allow with a stable
+diagnostic so the hook cannot create an impossible retry loop. All paths are
+process fail-open and mutate no persistent state.
 
 Configuration discovery reads only server names from the supported Claude JSON and Codex TOML MCP tables. Advisory output contains at most three matching safe names plus an omitted-count suffix. It never serializes server commands, environment values, tokens, or other configuration fields.
 
-These hooks influence the next model action; they cannot prove obedience. Registration, firing, and model-visible delivery therefore do not prove that the model used MCP. Installed-source identity and long-turn behavior require separate post-install verification.
+Advisory paths influence the next model action and cannot prove obedience. The
+Claude root-force denial is an action-level guard only for searches admitted by
+the shared classifier; it does not prove MCP success or cover tools outside its
+matcher. Installed-source identity and long-turn behavior require separate
+post-install verification.
 
 Provider-specific event envelopes, matcher registration, and installed paths live in the [Codex addendum](../../references-codex/mcp-continuity.md) and [Claude Code addendum](../../references-claude/mcp-continuity.md).
 

@@ -799,6 +799,10 @@ def verify_config(
                         ),
                         encoding="utf-8",
                     )
+                    if platform == "claude":
+                        (synthetic_home / ".agents-mode.yaml").write_text(
+                            "mcpMode: force\n", encoding="utf-8"
+                        )
                     hook_env = os.environ.copy()
                     hook_env["HOME"] = str(synthetic_home)
                     hook_env["USERPROFILE"] = str(synthetic_home)
@@ -825,18 +829,25 @@ def verify_config(
                 if stem == "check-mcp-momentum":
                     try:
                         payload = json.loads(completed.stdout)
-                        context = payload["hookSpecificOutput"]["additionalContext"]
+                        specific = payload["hookSpecificOutput"]
                     except (KeyError, TypeError, json.JSONDecodeError) as exc:
                         raise ValueError(
-                            "check-mcp-momentum fired without its expected advisory"
+                            "check-mcp-momentum fired without its expected decision"
                         ) from exc
-                    if (
-                        payload["hookSpecificOutput"].get("hookEventName")
-                        != "PreToolUse"
-                        or "mcp-momentum" not in str(context)
-                    ):
+                    event_ok = specific.get("hookEventName") == "PreToolUse"
+                    if platform == "claude":
+                        decision_ok = (
+                            specific.get("permissionDecision") == "deny"
+                            and "[MCP-FORCE-1]"
+                            in str(specific.get("permissionDecisionReason"))
+                        )
+                    else:
+                        decision_ok = "mcp-momentum" in str(
+                            specific.get("additionalContext")
+                        )
+                    if not event_ok or not decision_ok:
                         raise ValueError(
-                            "check-mcp-momentum fired without its expected advisory"
+                            "check-mcp-momentum fired without its expected decision"
                         )
             messages.append(f"PASS {platform} {event} {stem}")
     missing = sorted(stem for stem, count in counts.items() if count == 0)

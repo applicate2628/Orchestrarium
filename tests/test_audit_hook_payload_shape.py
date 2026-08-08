@@ -1,10 +1,10 @@
-"""Payload-shape regression tests for all six warn-only PreToolUse audits.
+"""Payload-shape regression tests for warn-only PreToolUse audits.
 
 THE BUG THIS FILE GUARDS AGAINST (work-items/bugs/2026-07-26-mcp-reminder-uses-
 the-once-per-session-form-its-sibling-calls-broken.md): all six warn-only
 PreToolUse audits (`check-machine-local-path`, `check-no-trash-in-repo`,
-`check-stale-relation-residue`, `check-repository-orientation`,
-`check-mcp-momentum`, `check-typed-routing`) FIRED CORRECTLY and delivered their
+`check-stale-relation-residue`, `check-repository-orientation`, the universal
+`check-mcp-momentum`, and Claude `check-typed-routing`) FIRED CORRECTLY and delivered their
 warning to NOBODY -- a stderr-plus-exit-1 PreToolUse hook was measured to reach
 neither the model nor a reliably-checked operator channel on either Claude Code
 2.1.220 or Codex CLI 0.145.0. "The audit fired" was never the defect; DELIVERY
@@ -52,6 +52,7 @@ CODEX_HOOKS = REPO_ROOT / "src.codex" / "skills" / "lead" / "hooks"
 # tool on that line; see test_typed_routing_hook.py's own module docstring).
 SHARED_AUDIT_TREES = (CLAUDE_HOOKS, UNIVERSAL_HOOKS, CODEX_HOOKS)
 CLAUDE_ONLY_TREES = (CLAUDE_HOOKS,)
+MCP_AUDIT_TREES = (UNIVERSAL_HOOKS, CODEX_HOOKS)
 
 
 def run_hook(script: Path, envelope: object, *, env: dict | None = None) -> subprocess.CompletedProcess:
@@ -130,7 +131,7 @@ def _repo_orientation_fixture() -> tuple[Path, dict]:
 # warning-marker substring). The envelope-builder takes the desired
 # hook_event_name value (or None to omit the field) and an optional env dict.
 def _machine_local_path_envelope(event: str | None) -> dict:
-    envelope = {"tool_input": {"file_path": "README.md", "content": "see C:/Users/realuser/x"}}
+    envelope = {"tool_input": {"file_path": "README.md", "content": "see C:/" + "Users" + "/realuser/x"}}
     if event is not None:
         envelope["hook_event_name"] = event
     return envelope
@@ -178,7 +179,7 @@ SIMPLE_CASES = (
      "[stray-artifact AUDIT]", None),
     ("check-stale-relation-residue.py", SHARED_AUDIT_TREES, _stale_relation_envelope,
      "[stale-relation-residue AUDIT]", None),
-    ("check-mcp-momentum.py", SHARED_AUDIT_TREES, _mcp_momentum_envelope,
+    ("check-mcp-momentum.py", MCP_AUDIT_TREES, _mcp_momentum_envelope,
      "[mcp-momentum AUDIT]", "mcp_env"),
     ("check-typed-routing.py", CLAUDE_ONLY_TREES, _typed_routing_envelope,
      "[typed-routing AUDIT]", None),

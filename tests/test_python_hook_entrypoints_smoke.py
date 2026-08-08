@@ -33,7 +33,7 @@ HOOK_PYTHON_ENTRYPOINTS = (
     CLAUDE_HOOKS / "check-no-trash-in-repo.py",
     CLAUDE_HOOKS / "check-stale-relation-residue.py",
     CLAUDE_HOOKS / "check-repository-orientation.py",
-    CLAUDE_HOOKS / "check-mcp-momentum.py",
+    CLAUDE_SCRIPTS / "check-mcp-momentum.py",
     CODEX_SCRIPTS / "check-bugfix-discipline.py",
     CODEX_SCRIPTS / "check-git-push-gate.py",
     CODEX_SCRIPTS / "check-passive-polling-stop.py",

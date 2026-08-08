@@ -80,37 +80,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
-# Import directly, with NO fallback stub -- matching every sibling universal
-# audit (check-machine-local-path.py, check-no-trash-in-repo.py, check-stale-
-# relation-residue.py, check-repository-orientation.py, check-mcp-momentum.py,
-# none of which catch the import). This file is Claude-only and has no canon
-# copy under scripts/universal-hooks/hooks/ (see PACK_ONLY_HOOKS in
-# scripts/universal_hooks_manifest.py -- Codex CLI exposes no analogous
-# subagent-dispatch tool), so it never got the same review pass that caught
-# the identical defect in check-mcp-momentum.py
-# (work-items/bugs/2026-07-26-the-mcp-momentum-audit-stubs-its-own-delivery-
-# to-a-no-op.md). On `main` this file's `try/except` stubbed only
-# `read_stdin_utf8`/`parse_envelope` (no `emit_advisory` to stub, because this
-# hook did not yet use it); the delivery-channel fix that added `emit_advisory`
-# on this branch widened the existing stub to cover it too, reintroducing the
-# exact same silent-death shape in the one copy no sync tool tracks.
-#
-# The stub was UNREACHABLE in the direction that mattered: the stubbed
-# `read_stdin_utf8()` returns "", the stubbed `parse_envelope("")` returns {},
-# so `envelope.get("tool_name")` below is never `DISPATCH_TOOL` ("Agent") and
-# `main()` returns 0 before a hit could ever be computed -- the `emit_advisory`
-# stub could never fire. Net effect: a broken install produced an exit-0 /
-# empty-stdout / empty-stderr run byte-identical to "nothing to warn about".
-#
-# Letting the ImportError propagate uncaught instead makes a broken install
-# DETECTABLE without inventing a new channel: a nonzero exit code (Python's
-# default is 1) and a traceback on stderr, instead of silent success. This
-# still honors AUDIT mode's "never block" contract -- per this pack's own
-# measured delivery-channel contract (work-items/bugs/2026-07-26-mcp-reminder-
-# uses-the-once-per-session-form-its-sibling-calls-broken.md), only an exit-2
-# PreToolUse hook blocks the tool call on Claude Code; an exit-1 (which an
-# uncaught exception produces) still ALLOWS the tool call, it just stops
-# pretending the audit ran cleanly when it did not.
+# Import directly with no fallback stub. This Claude-only audit has no universal
+# canon copy because Codex exposes no analogous dispatch tool. A missing support
+# dependency must remain distinguishable from a clean no-hit run: normal Python
+# import failure exits nonzero, while only Claude's structured deny path blocks
+# a pending tool choice.
 from hook_common import emit_advisory, parse_envelope, read_stdin_utf8
 
 

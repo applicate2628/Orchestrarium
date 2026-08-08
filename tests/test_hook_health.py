@@ -101,9 +101,9 @@ def _mcp_only_config() -> dict:
                             "args": [
                                 str(
                                     ROOT
+                                    / "src.claude"
+                                    / "agents"
                                     / "scripts"
-                                    / "universal-hooks"
-                                    / "hooks"
                                     / "check-mcp-momentum.py"
                                 )
                             ],
@@ -115,7 +115,7 @@ def _mcp_only_config() -> dict:
     }
 
 
-def test_hook_health_uses_synthetic_mcp_server_and_requires_positive_advisory(
+def test_hook_health_uses_force_mode_and_requires_claude_deny_decision(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     target = tmp_path / "mcp-health.json"
@@ -147,7 +147,7 @@ def test_hook_health_uses_synthetic_mcp_server_and_requires_positive_advisory(
         verify_fires=True,
     )
     assert messages == ["PASS claude PreToolUse check-mcp-momentum"]
-    assert "mcp-momentum" in str(observed.get("stdout", ""))
+    assert "[MCP-FORCE-1]" in str(observed.get("stdout", ""))
     assert observed.get("config") == {
         "mcpServers": {"synthetic-codegraph-health": {}}
     }
@@ -166,7 +166,7 @@ def test_hook_health_rejects_silent_mcp_positive_probe(
         "run",
         lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, "", ""),
     )
-    with pytest.raises(ValueError, match="check-mcp-momentum.*advisory"):
+    with pytest.raises(ValueError, match="check-mcp-momentum.*decision"):
         CHECKER.verify_config(
             target=target,
             platform="claude",

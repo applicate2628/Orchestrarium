@@ -53,6 +53,7 @@ RUNTIME_SCRIPT_NAMES = universal_hooks_manifest.canon_names(ROOT, "scripts")
 RUNTIME_HOOK_NAMES = universal_hooks_manifest.canon_names(ROOT, "hooks")
 PACK_ONLY_SCRIPTS = universal_hooks_manifest.PACK_ONLY_SCRIPTS
 PACK_ONLY_HOOKS = universal_hooks_manifest.PACK_ONLY_HOOKS
+MIRROR_EXCLUSIONS = universal_hooks_manifest.MIRROR_EXCLUSIONS
 DEPRECATED_EXAMPLE_COMPATIBILITY_LAUNCHERS = {"mcp-usage-reminder.sh"}
 
 
@@ -87,10 +88,10 @@ class UniversalHookSurfaceTest(unittest.TestCase):
         universal_scripts = ROOT / "scripts" / "universal-hooks" / "scripts"
         universal_hooks = ROOT / "scripts" / "universal-hooks" / "hooks"
         provider_pairs = (
-            (ROOT / "src.codex" / "skills" / "lead" / "scripts", RUNTIME_SCRIPT_NAMES),
-            (ROOT / "src.claude" / "agents" / "scripts", RUNTIME_SCRIPT_NAMES),
-            (ROOT / "src.codex" / "skills" / "lead" / "hooks", RUNTIME_HOOK_NAMES),
-            (ROOT / "src.claude" / "agents" / "hooks", RUNTIME_HOOK_NAMES),
+            ("src.codex/skills/lead/scripts", "scripts"),
+            ("src.claude/agents/scripts", "scripts"),
+            ("src.codex/skills/lead/hooks", "hooks"),
+            ("src.claude/agents/hooks", "hooks"),
         )
 
         for name in RUNTIME_SCRIPT_NAMES:
@@ -100,7 +101,9 @@ class UniversalHookSurfaceTest(unittest.TestCase):
             universal_path = universal_hooks / name
             self.assertTrue(universal_path.is_file(), f"missing universal hook {name}")
 
-        for provider_dir, names in provider_pairs:
+        for provider_rel, subdir in provider_pairs:
+            provider_dir = ROOT / Path(provider_rel)
+            names = universal_hooks_manifest.mirror_names(ROOT, subdir, provider_rel)
             universal_dir = universal_scripts if provider_dir.name == "scripts" else universal_hooks
             for name in names:
                 self.assertTrue(
@@ -121,16 +124,17 @@ class UniversalHookSurfaceTest(unittest.TestCase):
         for rel in ("src.claude/agents/hooks", "src.codex/skills/lead/hooks"):
             pack_hooks = ROOT / Path(rel)
             extra = PACK_ONLY_HOOKS.get(rel, frozenset())
+            excluded = MIRROR_EXCLUSIONS.get(rel, frozenset())
             pack = {
                 p.name for p in pack_hooks.iterdir()
                 if p.is_file() and p.suffix in universal_hooks_manifest.HOOK_EXTS
             }
             with self.subTest(pack=rel):
                 self.assertEqual(
-                    canon | set(extra), pack,
+                    (canon - set(excluded)) | set(extra), pack,
                     f"hooks/ set mismatch: undeclared pack-only="
                     f"{pack - canon - set(extra)}, missing-from-pack="
-                    f"{(canon | set(extra)) - pack}",
+                    f"{((canon - set(excluded)) | set(extra)) - pack}",
                 )
 
     def test_pack_scripts_dir_is_canon_plus_declared_pack_only(self) -> None:
@@ -168,13 +172,15 @@ class UniversalHookSurfaceTest(unittest.TestCase):
         universal_scripts = ROOT / "scripts" / "universal-hooks" / "scripts"
         universal_hooks = ROOT / "scripts" / "universal-hooks" / "hooks"
         provider_pairs = (
-            (ROOT / "src.codex" / "skills" / "lead" / "scripts", RUNTIME_SCRIPT_NAMES),
-            (ROOT / "src.claude" / "agents" / "scripts", RUNTIME_SCRIPT_NAMES),
-            (ROOT / "src.codex" / "skills" / "lead" / "hooks", RUNTIME_HOOK_NAMES),
-            (ROOT / "src.claude" / "agents" / "hooks", RUNTIME_HOOK_NAMES),
+            ("src.codex/skills/lead/scripts", "scripts"),
+            ("src.claude/agents/scripts", "scripts"),
+            ("src.codex/skills/lead/hooks", "hooks"),
+            ("src.claude/agents/hooks", "hooks"),
         )
         expected_drifted: set[str] = set()
-        for provider_dir, names in provider_pairs:
+        for provider_rel, subdir in provider_pairs:
+            provider_dir = ROOT / Path(provider_rel)
+            names = universal_hooks_manifest.mirror_names(ROOT, subdir, provider_rel)
             universal_dir = universal_scripts if provider_dir.name == "scripts" else universal_hooks
             for name in names:
                 m_path = provider_dir / name

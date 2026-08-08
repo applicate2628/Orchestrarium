@@ -62,6 +62,13 @@ PACK_ONLY_SCRIPTS = {
         # Agent-tool dispatch idiom; the codex twin walks ./.agents/ + ~/.codex/
         # and speaks role/skill-activation idiom — intentionally different.
         "agents-mode-reminder.py",
+        # Neutral Claude scalar-precedence support consumed by the delegation
+        # reminder and MCP-force adapter; it is support, not a hook entrypoint.
+        "agents_mode_runtime.py",
+        # Claude's root force-mode binding uses the universal classifier but is
+        # provider-specific because Codex intentionally retains warn-only MCP
+        # momentum.  The historical Claude hooks/ mirror is excluded below.
+        "check-mcp-momentum.py",
         # Claude-line provider transport wrappers (no codex/canon analog).
         "invoke-claude-api.py",
         "invoke-claude-prompt.py",
@@ -136,6 +143,13 @@ REGISTERED_HOOK_STEMS_BY_PLATFORM = {
 MIRROR_SCRIPT_DIRS = ("src.claude/agents/scripts", "src.codex/skills/lead/scripts")
 MIRROR_HOOK_DIRS = ("src.claude/agents/hooks", "src.codex/skills/lead/hooks")
 
+# A universal implementation may be specialized by one provider at a different
+# source-hygiene placement.  Exclusions are explicit and path-scoped so a
+# provider cannot silently drop an otherwise universal file.
+MIRROR_EXCLUSIONS = {
+    "src.claude/agents/hooks": frozenset({"check-mcp-momentum.py"}),
+}
+
 
 def canon_root(root: Path) -> Path:
     return root / "scripts" / "universal-hooks"
@@ -160,6 +174,12 @@ def registered_hook_stems(platform: str) -> frozenset[str]:
         raise ValueError(f"unsupported platform: {platform}") from exc
 
 
+def mirror_names(root: Path, subdir: str, mirror_rel_dir: str) -> tuple[str, ...]:
+    """Return the canon-derived names owned by one concrete mirror."""
+    excluded = MIRROR_EXCLUSIONS.get(mirror_rel_dir, frozenset())
+    return tuple(name for name in canon_names(root, subdir) if name not in excluded)
+
+
 # ---------------------------------------------------------------------------
 # Drift detection (shared by the --check CLI surface and the parity test).
 # ---------------------------------------------------------------------------
@@ -173,9 +193,9 @@ class DriftEntry(NamedTuple):
 def find_drift(root: Path) -> list[DriftEntry]:
     drift: list[DriftEntry] = []
     for subdir, mirror_dirs in (("scripts", MIRROR_SCRIPT_DIRS), ("hooks", MIRROR_HOOK_DIRS)):
-        names = canon_names(root, subdir)
         c_dir = canon_root(root) / subdir
         for mirror_rel_dir in mirror_dirs:
+            names = mirror_names(root, subdir, mirror_rel_dir)
             m_dir = root / Path(mirror_rel_dir)
             for name in names:
                 c_path = c_dir / name

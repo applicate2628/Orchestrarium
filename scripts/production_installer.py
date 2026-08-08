@@ -85,6 +85,7 @@ _CODEX_RETIRED_PS1 = {
     "skills/lead/hooks/check-machine-local-path.ps1": "0c9b3fb81fab87f773dcfc90d04bd1e6134e249e22824da3567a9d88d17ee0e5",
 }
 _CLAUDE_RETIRED_PS1 = {
+    "agents/hooks/check-mcp-momentum.py": "4f3fe9eabe5ea4c8654bf554a271904b9fdb16d4e9de916b7058c953e02fa430",
     "agents/scripts/validate-skill-pack.ps1": "2a7c3b096d924db39bd4685852e0748b820f4b8b8fe7a037bf18eb20a35fae8f",
     "agents/scripts/turn-anchor-reminder.ps1": "edf6aef1861337d3cda0dc142c64bb28ed797c48670a379c4ca0a51a0f8d58d0",
     "agents/scripts/mcp-usage-reminder.ps1": "62c9990f57ee7eccadcf1504a638ff6cbe4b61548405288d70ed192254b54d3d",
@@ -684,6 +685,10 @@ _HOOK_METADATA = (
     ("turn-anchor-reminder", "scripts", "UserPromptSubmit", None),
 )
 
+_HOOK_DIRECTORY_OVERRIDES = {
+    ("claude", "check-mcp-momentum"): "scripts",
+}
+
 
 def _universal_hook_manifest_module():
     path = Path(__file__).with_name("universal_hooks_manifest.py")
@@ -706,7 +711,13 @@ def _hook_specs(provider: str, installed_root: Path):
         raise RuntimeError("registered hook metadata is missing for: " + ", ".join(missing))
     roots = {"scripts": scripts, "hooks": hooks}
     specs = [
-        (stem, roots[directory] / f"{stem}.py", event, matcher)
+        (
+            stem,
+            roots[_HOOK_DIRECTORY_OVERRIDES.get((provider, stem), directory)]
+            / f"{stem}.py",
+            event,
+            matcher,
+        )
         for stem, directory, event, matcher in _HOOK_METADATA
         if stem in membership
     ]

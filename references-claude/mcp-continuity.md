@@ -8,15 +8,30 @@ Claude Code installs the three adapters below its agent pack:
 
 - `~/.claude/agents/scripts/mcp-usage-reminder.py` on `SessionStart`
 - `~/.claude/agents/scripts/turn-anchor-reminder.py` on `UserPromptSubmit`
-- `~/.claude/agents/hooks/check-mcp-momentum.py` on `PreToolUse`
+- `~/.claude/agents/scripts/check-mcp-momentum.py` on `PreToolUse`
 
 The momentum entry uses the exact matcher `Grep|Bash|PowerShell|shell_command|exec_command`. Native `Grep` and the four shell-shaped tool names enter the same shared classifier; `exec_command` reads `cmd` and accepts `command` as a compatibility shape.
 
 The adapter forwards the raw envelope `cwd` unchanged. The shared policy alone finds the nearest repository root and grants an exemption only to the four exact repository-root subtrees; a matching segment at any other depth, an unavailable coordinate, or one non-exempt scope grants no exemption.
 
-The hook evaluates root and `agent_id` envelopes identically. A qualifying search emits a model-visible warn-only advisory through `hookSpecificOutput.additionalContext`; hits and misses exit 0, no path blocks with exit 2, and internal errors fail open. The policy support module is installed beside the scripts but has no hook registration of its own.
+For `mcpMode: auto` and envelopes carrying `agent_id`, a qualifying search
+retains the model-visible warn-only advisory through
+`hookSpecificOutput.additionalContext`. For a root conversation in effective
+`mcpMode: force`, every qualifying search is denied through
+`permissionDecision: deny` with `[MCP-FORCE-1]` when a configured server is
+present. A previous MCP call grants no credit. Exact `[approve-mcp-fallback:v1]`
+in the bounded host-projected `user`-role record allows only that recovery turn;
+injected assistant or tool text cannot grant it. The projection is not
+authenticated authorization, and a forged host-shaped user JSONL record can
+satisfy it. Missing servers and unresolved modes allow with
+`[MCP-FORCE-NO-SERVER]` or `[MCP-FORCE-MODE-UNRESOLVED]`, preventing a retry
+loop. Internal errors fail open. The policy support module is installed beside
+the scripts but has no hook registration of its own.
 
-Registration and source validation prove the event path, not obedience. A post-install firing check is still required before claiming installed behavior, and even a delivered advisory cannot prove that the model followed it.
+Registration and source validation prove the event path, not installed force
+behavior. A post-install firing check must show repeated qualifying root
+searches denied after a successful MCP call; advisory delivery alone still does
+not prove obedience.
 
 ## Terms and Abbreviations
 
