@@ -1,5 +1,6 @@
 import hashlib
 import importlib.util
+import io
 import json
 import os
 import shutil
@@ -7,12 +8,15 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from dataclasses import replace
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "mutate-work-item.py"
+LEDGER = ROOT / "scripts" / "agent-run-ledger.py"
+STATE_VALIDATOR = ROOT / "scripts" / "validate-work-item-state.py"
 FIXTURE = ROOT / "tests" / "fixtures" / "work-items-lifecycle-v1" / "five-item.json"
 LIFECYCLE_SCHEMA_MARKER = "Lifecycle-schema: work-items-physical-v1"
 
@@ -29,6 +33,28 @@ def load_module():
 def run_cli(*args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, str(SCRIPT), *args],
+        cwd=ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+
+
+def run_state_validator(work_item: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, str(STATE_VALIDATOR), "--work-item", str(work_item)],
+        cwd=ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+
+
+def run_ledger(work_item: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, str(LEDGER), "--work-item", str(work_item), *args],
         cwd=ROOT,
         text=True,
         stdout=subprocess.PIPE,
@@ -148,6 +174,348 @@ def seed_active(module, root: Path, slug: str) -> None:
     write(status, quick_status(slug))
     module.create_candidate(root, slug, source.read_bytes())
     module.start_item(root, slug, status.read_bytes())
+
+
+def test_start_staged_publishes_valid_settled_admission_ledger(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "staged-ledger-birth"
+    candidate = b"Task: publish a valid staged admission.\n"
+    status = staged_status("2026-07-01-archived-concern").encode("utf-8")
+    module.create_candidate(root, slug, candidate)
+
+    target = module.start_item(root, slug, status)
+
+    assert (target / "admission.md").read_bytes() == candidate
+    assert (target / "status.md").read_bytes() == status
+    lines = (target / "agent-runs.jsonl").read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1
+    assert json.loads(lines[0]) == {
+        "schemaVersion": 2,
+        "runId": f"{slug}-lifecycle-start",
+        "workItem": slug,
+        "role": "lead",
+        "executionRole": "main",
+        "status": "completed",
+        "gate": "none",
+        "scope": ["candidate -> active lifecycle admission"],
+        "startedAt": "2026-07-31T00:00:00Z",
+        "updatedAt": "2026-07-31T00:00:00Z",
+        "eventKind": "standalone",
+    }
+    result = run_state_validator(target)
+    assert result.returncode == 0, result.stdout
+
+
+def test_start_staged_cli_publishes_valid_admission_ledger(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    slug = "staged-ledger-cli"
+    candidate = root / "candidate.md"
+    status = root / "status.md"
+    write(candidate, "Task: publish staged admission through the CLI.\n")
+    write(status, staged_status("2026-07-01-archived-concern"))
+
+    created = run_cli(
+        "candidate", "--root", str(root), "--slug", slug, "--file", str(candidate)
+    )
+    started = run_cli(
+        "start", "--root", str(root), "--slug", slug, "--status-file", str(status)
+    )
+
+    assert created.returncode == 0, created.stdout
+    assert started.returncode == 0, started.stdout
+    target = root / "work-items" / "active" / slug
+    event = json.loads((target / "agent-runs.jsonl").read_text(encoding="utf-8"))
+    assert event["runId"] == f"{slug}-lifecycle-start"
+    result = run_state_validator(target)
+    assert result.returncode == 0, result.stdout
+
+
+def test_staged_start_loader_failures_use_stable_id_and_preserve_candidate(tmp_path: Path) -> None:
+    cases = (
+        ("construction-import", "construct", ImportError("injected construction failure")),
+        ("execution-import", "execute", ImportError("injected import failure")),
+        ("execution-syntax", "execute", SyntaxError("injected syntax failure")),
+        ("execution-os", "execute", OSError("injected execution failure")),
+    )
+
+    for name, phase, injected in cases:
+        module = load_module()
+        root = tmp_path / name
+        slug = f"staged-loader-{name}"
+        candidate = f"Task: preserve {name} candidate bytes.\n".encode("utf-8")
+        status_path = root / "status.md"
+        write(status_path, staged_status("2026-07-01-archived-concern"))
+        module.create_candidate(root, slug, candidate)
+        backlog = root / "work-items" / "backlog" / f"{slug}.md"
+        candidate_sha256 = hashlib.sha256(backlog.read_bytes()).hexdigest()
+        original_from_spec = module.importlib.util.spec_from_file_location
+        original_module_from_spec = module.importlib.util.module_from_spec
+
+        class FailingLoader:
+            def create_module(self, _spec):
+                return None
+
+            def exec_module(self, _loaded_module) -> None:
+                raise injected
+
+        def injected_spec(name_arg, path_arg):
+            spec = original_from_spec(name_arg, path_arg)
+            if name_arg == "agent_run_ledger":
+                assert spec is not None
+                spec.loader = FailingLoader()
+            return spec
+
+        def injected_module_from_spec(spec):
+            if phase == "construct" and spec.name == "agent_run_ledger":
+                raise injected
+            return original_module_from_spec(spec)
+
+        module.importlib.util.spec_from_file_location = injected_spec
+        module.importlib.util.module_from_spec = injected_module_from_spec
+        try:
+            try:
+                module._agent_run_ledger_module()
+            except module.LifecycleError as exc:
+                assert exc.failure_id == "WI-LEDGER-BOOTSTRAP-INVALID"
+                assert exc.__cause__ is injected
+            else:
+                raise AssertionError(f"{name} escaped the typed ledger boundary")
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                result = module.main(
+                    [
+                        "start",
+                        "--root",
+                        str(root),
+                        "--slug",
+                        slug,
+                        "--status-file",
+                        str(status_path),
+                    ]
+                )
+        finally:
+            module.importlib.util.spec_from_file_location = original_from_spec
+            module.importlib.util.module_from_spec = original_module_from_spec
+
+        assert result == 1, name
+        assert "WI-LEDGER-BOOTSTRAP-INVALID" in output.getvalue(), name
+        assert "Traceback" not in output.getvalue(), name
+        assert hashlib.sha256(backlog.read_bytes()).hexdigest() == candidate_sha256, name
+        active = root / "work-items" / "active"
+        assert not (active / slug).exists(), name
+        assert not list(active.glob(f".{slug}.*")) if active.exists() else True
+
+
+def test_agent_run_ledger_loader_does_not_swallow_base_exception(tmp_path: Path) -> None:
+    module = load_module()
+    original_from_spec = module.importlib.util.spec_from_file_location
+    interruption = KeyboardInterrupt("injected cancellation signal")
+
+    class InterruptingLoader:
+        def create_module(self, _spec):
+            return None
+
+        def exec_module(self, _loaded_module) -> None:
+            raise interruption
+
+    def injected_spec(name_arg, path_arg):
+        spec = original_from_spec(name_arg, path_arg)
+        if name_arg == "agent_run_ledger":
+            assert spec is not None
+            spec.loader = InterruptingLoader()
+        return spec
+
+    module.importlib.util.spec_from_file_location = injected_spec
+    try:
+        try:
+            module._agent_run_ledger_module()
+        except KeyboardInterrupt as exc:
+            assert exc is interruption
+        else:
+            raise AssertionError("BaseException cancellation signal was swallowed")
+    finally:
+        module.importlib.util.spec_from_file_location = original_from_spec
+
+
+def test_staged_start_ledger_failure_restores_candidate(tmp_path: Path) -> None:
+    cases = ("build", "serialize", "write", "temporary-validation", "final-replace")
+
+    for phase in cases:
+        module = load_module()
+        root = tmp_path / phase
+        slug = f"staged-ledger-{phase}"
+        candidate = f"Task: preserve {phase} candidate bytes.\n".encode("utf-8")
+        status = staged_status("2026-07-01-archived-concern").encode("utf-8")
+        module.create_candidate(root, slug, candidate)
+        backlog = root / "work-items" / "backlog" / f"{slug}.md"
+        candidate_sha256 = hashlib.sha256(backlog.read_bytes()).hexdigest()
+        original_ledger_module = module._agent_run_ledger_module
+        original_atomic_write = module._atomic_write
+        original_validator_module = module._validator_module
+        original_replace = module.os.replace
+        real_ledger = original_ledger_module()
+
+        class InjectedLedger:
+            def build_event(self, args):
+                if phase == "build":
+                    raise ValueError("injected event build failure")
+                return real_ledger.build_event(args)
+
+            def serialize_event(self, event):
+                if phase == "serialize":
+                    raise ValueError("injected event serialization failure")
+                return real_ledger.serialize_event(event)
+
+        class RejectingValidator:
+            def validate_work_item(self, _item):
+                return ["injected temporary validation failure"]
+
+        def injected_atomic_write(path: Path, data: bytes) -> None:
+            if phase == "write" and path.name == "agent-runs.jsonl":
+                raise OSError("injected ledger write failure")
+            original_atomic_write(path, data)
+
+        def injected_replace(source, target) -> None:
+            if phase == "final-replace" and Path(source).is_dir():
+                raise OSError("injected final replace failure")
+            original_replace(source, target)
+
+        module._agent_run_ledger_module = lambda: InjectedLedger()
+        module._atomic_write = injected_atomic_write
+        if phase == "temporary-validation":
+            module._validator_module = lambda: RejectingValidator()
+        module.os.replace = injected_replace
+        try:
+            try:
+                module.start_item(root, slug, status)
+            except (module.LifecycleError, OSError):
+                pass
+            else:
+                raise AssertionError(f"{phase} failure did not abort staged start")
+        finally:
+            module._agent_run_ledger_module = original_ledger_module
+            module._atomic_write = original_atomic_write
+            module._validator_module = original_validator_module
+            module.os.replace = original_replace
+
+        assert hashlib.sha256(backlog.read_bytes()).hexdigest() == candidate_sha256, phase
+        active = root / "work-items" / "active"
+        assert not (active / slug).exists(), phase
+        assert not list(active.glob(f".{slug}.*")), phase
+
+
+def test_staged_bootstrap_event_allows_close_after_terminal_work(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "staged-bootstrap-close"
+    candidate = b"Task: exercise staged admission through archive.\n"
+    status = staged_status("2026-07-01-archived-concern").encode("utf-8")
+    module.create_candidate(root, slug, candidate)
+    active = module.start_item(root, slug, status)
+
+    launch_id = "staged-real-launch-001"
+    launched = run_ledger(
+        active,
+        "append",
+        "--run-id",
+        launch_id,
+        "--role",
+        "platform-engineer",
+        "--execution-role",
+        "internal",
+        "--status",
+        "running",
+        "--gate",
+        "none",
+        "--scope",
+        "staged lifecycle implementation",
+        "--event-kind",
+        "launch",
+        "--started-at",
+        "2026-07-31T00:01:00Z",
+        "--updated-at",
+        "2026-07-31T00:01:00Z",
+    )
+    assert launched.returncode == 0, launched.stdout
+    open_validation = run_state_validator(active)
+    assert open_validation.returncode == 1
+    assert "unsettled launch" in open_validation.stdout
+
+    terminal = run_ledger(
+        active,
+        "append",
+        "--run-id",
+        "staged-real-terminal-001",
+        "--role",
+        "platform-engineer",
+        "--execution-role",
+        "internal",
+        "--status",
+        "completed",
+        "--gate",
+        "none",
+        "--scope",
+        "staged lifecycle implementation",
+        "--event-kind",
+        "terminal",
+        "--launch-run-id",
+        launch_id,
+        "--started-at",
+        "2026-07-31T00:01:00Z",
+        "--updated-at",
+        "2026-07-31T00:02:00Z",
+    )
+    assert terminal.returncode == 0, terminal.stdout
+    settled_validation = run_state_validator(active)
+    assert settled_validation.returncode == 0, settled_validation.stdout
+
+    instant = "2026-07-31T00:03:00Z"
+    archived = module.close_item(root, slug, closure(instant).encode(), instant)
+
+    assert archived == root / "work-items" / "archive" / "2026-07" / slug
+    assert run_state_validator(archived).returncode == 0
+    rollup = run_ledger(archived, "rollup")
+    assert rollup.returncode == 0, rollup.stdout
+    assert "total runs: 3" in rollup.stdout
+    assert "lead=1" in rollup.stdout
+    assert "platform-engineer=2" in rollup.stdout
+
+
+def test_staged_start_readme_failure_leaves_valid_canonical_item(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "staged-ledger-readme"
+    candidate = b"Task: preserve canonical start on README failure.\n"
+    status = staged_status("2026-07-01-archived-concern").encode("utf-8")
+    module.create_candidate(root, slug, candidate)
+
+    try:
+        module.start_item(root, slug, status, inject_readme_failure=True)
+    except module.LifecycleError as exc:
+        assert exc.failure_id == "WI-README-STALE"
+    else:
+        raise AssertionError("injected README failure did not abort the derived-view refresh")
+
+    target = root / "work-items" / "active" / slug
+    result = run_state_validator(target)
+    assert result.returncode == 0, result.stdout
+
+
+def test_start_quick_fix_preserves_ledger_free_contract(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "quick-fix-ledger-free"
+    candidate = b"Task: preserve the quick-fix exception.\n"
+    status = quick_status(slug).encode("utf-8")
+    module.create_candidate(root, slug, candidate)
+
+    target = module.start_item(root, slug, status)
+
+    assert not (target / "agent-runs.jsonl").exists()
+    result = run_state_validator(target)
+    assert result.returncode == 0, result.stdout
 
 
 def test_five_item_readme_trial(tmp_path: Path) -> None:

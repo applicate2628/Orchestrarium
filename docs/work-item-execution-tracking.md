@@ -16,9 +16,22 @@ Each active work item should keep these files together:
 
 `status.md` remains the readable recovery surface. `agent-runs.jsonl` is the state that validators can inspect.
 
+## Canonical Staged Start
+
+`python scripts/mutate-work-item.py start` creates a staged `candidate -> active`
+item with `admission.md`, `status.md`, and one schema-version 2 settled
+`standalone` admission event in `agent-runs.jsonl` as one directory publication.
+That event records the completed lifecycle admission only: `role: lead`,
+`executionRole: main`, and `gate: none`; it does not claim a specialist launch
+or an accepted artifact. A successful canonical staged start is immediately
+valid, so do not run `init` just to create an empty ledger afterward.
+
 ## Initialize A Work Item
 
-Use the helper before the first ledger event, or when migrating a legacy work item that already has `status.md`.
+Use the helper when migrating a legacy work item that already has `status.md`,
+or when a manual recovery requires the helper before the first ledger event.
+Canonical staged starts already have their admission event; the undelegated
+quick-fix path remains ledger-free until real delegated work needs a ledger.
 
 ```bash
 python scripts/agent-run-ledger.py --work-item work-items/active/<slug> init --primary-task "Implement accepted plan" --stage "Plan"

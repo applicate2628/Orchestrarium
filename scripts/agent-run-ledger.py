@@ -165,6 +165,12 @@ def build_event(args: argparse.Namespace) -> dict[str, Any]:
     return event
 
 
+def serialize_event(event: dict[str, Any]) -> str:
+    """Render one canonical compact JSONL event without its line terminator."""
+
+    return json.dumps(event, ensure_ascii=False, separators=(",", ":"))
+
+
 def restore_ledger(path: Path, previous: str | None) -> None:
     if previous is None:
         if path.exists():
@@ -267,7 +273,7 @@ def command_append(args: argparse.Namespace) -> int:
     try:
         previous = ledger_path.read_text(encoding="utf-8") if ledger_path.exists() else ""
         prefix = "" if not previous or previous.endswith("\n") else "\n"
-        line = json.dumps(event, ensure_ascii=False, separators=(",", ":"))
+        line = serialize_event(event)
         candidate = ledger_path.with_suffix(".jsonl.tmp")
         with candidate.open("w", encoding="utf-8", newline="") as fh:
             fh.write(f"{previous}{prefix}{line}\n")

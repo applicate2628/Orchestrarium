@@ -104,6 +104,26 @@ updated: 2026-07-30 10:00
 """
 
 
+def minimal_staged_status() -> str:
+    return """---
+template: staged
+status: active
+started: 2026-07-31T00:00:00Z
+updated: 2026-07-31T00:00:00Z
+---
+
+Task: Keep the staged ledger contract strict.
+Current step: Validate the ledger.
+Last result: Candidate created.
+Next action: Run the lifecycle oracle.
+Scope boundary: State validator only.
+Owner: qa-engineer
+Integration owner: qa-engineer
+Evidence gate: focused validator test
+Reopens: 2026-07-30-predecessor
+"""
+
+
 def ledger_event(**overrides):
     event = {
         "schemaVersion": 1,
@@ -126,6 +146,22 @@ def ledger_event(**overrides):
     }
     event.update(overrides)
     return event
+
+
+def test_staged_missing_and_empty_ledgers_remain_invalid(tmp_path: Path) -> None:
+    for name, ledger_text, diagnostic in (
+        ("missing", None, "missing ledger"),
+        ("empty", "", "ledger has no events"),
+    ):
+        item = tmp_path / "work-items" / "active" / f"staged-{name}-ledger"
+        write(item / "status.md", minimal_staged_status())
+        if ledger_text is not None:
+            write(item / "agent-runs.jsonl", ledger_text)
+
+        result = run_validator(item)
+
+        assert result.returncode == 1
+        assert diagnostic in result.stdout
 
 
 def test_pass_ledger_with_artifact_and_evidence(tmp_path: Path) -> None:

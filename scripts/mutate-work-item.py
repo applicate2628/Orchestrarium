@@ -1052,6 +1052,61 @@ def _validator_module():
     return module
 
 
+def _agent_run_ledger_module():
+    path = Path(__file__).with_name("agent-run-ledger.py")
+    try:
+        spec = importlib.util.spec_from_file_location("agent_run_ledger", path)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"no import specification or loader for {path}")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    except Exception as exc:
+        raise LifecycleError(
+            "WI-LEDGER-BOOTSTRAP-INVALID",
+            f"cannot load ledger helper {path}: {exc}",
+        ) from exc
+
+
+def _staged_admission_ledger_bytes(slug: str, status_data: bytes) -> bytes:
+    """Build the settled Lead admission event from the already-validated status."""
+
+    started_at = _parse_fields(status_data.decode("utf-8"))["started"]
+    ledger = _agent_run_ledger_module()
+    args = argparse.Namespace(
+        work_item=Path(slug),
+        run_id=f"{slug}-lifecycle-start",
+        work_item_name=slug,
+        role="lead",
+        execution_role="main",
+        assigned_role=None,
+        provider=None,
+        model=None,
+        status="completed",
+        gate="none",
+        scope=["candidate -> active lifecycle admission"],
+        prompt_file=None,
+        artifact=None,
+        evidence=None,
+        evidence_json=None,
+        started_at=started_at,
+        updated_at=started_at,
+        notes=None,
+        event_kind="standalone",
+        launch_run_id=None,
+        closes=None,
+        artifact_revision=None,
+        lane=None,
+        effort=None,
+        finding_class=None,
+    )
+    try:
+        event = ledger.build_event(args)
+        return (ledger.serialize_event(event) + "\n").encode("utf-8")
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise LifecycleError("WI-LEDGER-BOOTSTRAP-INVALID", str(exc)) from exc
+
+
 def _validate_active_status_bytes(data: bytes) -> None:
     try:
         text = data.decode("utf-8")
@@ -1618,6 +1673,8 @@ def retire_legacy_backlog(
 def start_item(root: Path, slug: str, status_data: bytes, *, inject_readme_failure: bool = False) -> Path:
     _validate_slug(slug)
     _validate_active_status_bytes(status_data)
+    is_staged = _parse_fields(status_data.decode("utf-8")).get("template") == "staged"
+    admission_ledger = _staged_admission_ledger_bytes(slug, status_data) if is_staged else None
     work_items = _work_items_root(root)
     locations = _category_locations(root, CATEGORIES["work-item"], slug)
     backlog = work_items / "backlog" / f"{slug}.md"
@@ -1634,6 +1691,11 @@ def start_item(root: Path, slug: str, status_data: bytes, *, inject_readme_failu
     try:
         os.replace(backlog, moved_candidate)
         _atomic_write(temp / "status.md", status_data)
+        if admission_ledger is not None:
+            _atomic_write(temp / "agent-runs.jsonl", admission_ledger)
+            errors = _validator_module().validate_work_item(temp)
+            if errors:
+                raise LifecycleError("WI-LEDGER-BOOTSTRAP-INVALID", "; ".join(errors))
         os.replace(temp, target)
         committed = True
     finally:
