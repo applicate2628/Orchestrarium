@@ -66,8 +66,8 @@ other terminal from `proposed`:
 - **reverted** — the decision was undone (keep a one-line reason; add a
   `- reverted-by:` only if the revert is itself a registered decision).
 
-A superseded/reverted/dropped decision **stays in the registry** as history; it
-is never deleted. This status enum is **independent of** the work-item / epic
+A superseded/reverted/dropped decision is retained as history; it is never
+deleted. This status enum is **independent of** the work-item / epic
 done-predicate — decisions are never "closed" by that predicate, so the
 retired archival Stop control never acts on them.
 
