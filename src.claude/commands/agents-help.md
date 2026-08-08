@@ -14,7 +14,7 @@ Exactly five roles can be adopted inline instead of dispatched — no fresh cont
 
 | Skill | Purpose | Agent disposition |
 | --- | --- | --- |
-| `/lead` | Adopt the Lead orchestration role in-session | fail-closed stub — never spawned |
+| `/lead` | Adopt the Lead orchestration role in-session | host-selected main agent / inline role; only stale subagent dispatch is fail-closed — never spawned |
 | `/product-manager` | Quick intake/scope framing when priority is unclear | dual — also `subagent_type: product-manager`; a formal cross-initiative roadmap decision, or admitting work that will gate other work, still routes to the subagent |
 | `/analyst` | Trivial, bounded factual repository read | dual — also `subagent_type: analyst` |
 | `/architect` | Quick-fix/fast-lane seam or blast-radius decision | dual — also `subagent_type: architect` |

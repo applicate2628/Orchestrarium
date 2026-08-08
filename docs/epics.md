@@ -96,7 +96,7 @@ all done -> `ready-to-close (n/n)`; some -> `in-progress (k/n)`; none -> `open`.
 No archival Stop control scans epics. The lifecycle owner and documented state
 check reject duplicate locations and missing terminal evidence; whether the
 epic `## Goal` is met remains an explicit lead decision. Full role rules:
-`skills/lead/SKILL.md` (Claude; `agents/lead.md` is a fail-closed stub) / the
+`skills/lead/SKILL.md` (Claude; `agents/lead.md` activates the main agent and rejects stale dispatch) / the
 lead skill (Codex) `## Epics`.
 
 ## Physical lifecycle V1

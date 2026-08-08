@@ -99,7 +99,7 @@ each by id and `## Lesson` first line); on the Codex line (no commands) the lead
 derives the same open-lessons list live by scanning `work-items/lessons/` for
 `status: open`. The operating-model "where to save" surface carries the
 `Lesson -> work-items/lessons/<date>-<slug>.md` row (a table on the Claude line,
-a prose bullet on the Codex line). Full role rules: `skills/lead/SKILL.md` (Claude; `agents/lead.md` is a fail-closed stub) / the lead skill
+a prose bullet on the Codex line). Full role rules: `skills/lead/SKILL.md` (Claude; `agents/lead.md` activates the skill for the main agent and rejects stale dispatch) / the lead skill
 (Codex) `## Lessons`, `knowledge-archivist.md` / the archivist skill hygiene lane.
 
 ## Known limitation

@@ -10,6 +10,12 @@ Keep the log in reverse-chronological `## YYYY-MM-DD` sections. Add new explanat
 
 Do not add entries for purely local-only hygiene edits such as formatting, link fixes, report-only churn, scratch cleanup, archive moves, or non-semantic wording cleanup.
 
+## 2026-08-08
+
+### Fixed
+
+- **Claude force-mode installation now binds the Lead role through Claude's documented main-agent setting instead of relying only on reminder text.** When the effective `delegationMode` is `force` and the user-owned `settings.json` has no `agent` scalar, the Claude installer atomically writes `agent: "lead"`; the dual-safe Lead definition then uses its documented `initialPrompt: /lead` to load the one canonical Lead skill. **Why it matters:** new Claude sessions receive the actual main-agent role selection that the existing orchestration contract requires. **Operator impact:** an explicit non-Lead `agent`, higher-precedence managed/project selection, or `--agent` remains authoritative; `auto`, `manual`, and unresolved mode preserve the setting, and an already-running session needs a new session or explicit `--agent lead`. **Preserved:** stale `subagent_type: lead` dispatch still fails closed, unrelated settings and hooks survive reinstall, transaction rollback restores the original settings and Lead definition, and Codex, Gemini, Qwen, MCP-force, and typed-routing behavior are unchanged.
+
 ## 2026-08-03
 
 ### Fixed

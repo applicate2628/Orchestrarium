@@ -1,11 +1,12 @@
 ---
 name: lead
 description: "Lead: coordinate approved delivery, artifacts, and gates."
+initialPrompt: /lead
 ---
 
-# Lead — fail-closed dispatch stub
+# Lead — main-session activation and fail-closed stale dispatch
 
-**Lead is not a subagent.** The Lead role is held BY the main conversation: it classifies approved work, routes it to leaf specialist subagents via the Agent tool, gates their artifacts, and owns `work-items/` recovery and integration — directly, in that conversation. The live Lead contract is the `/lead` skill: `.claude/skills/lead/SKILL.md` (bootstrap, operating pipeline, delegation and gate rules, epics/dependencies/decisions/lessons registries, `/agents-external-brigade` brigade routing).
+When Claude selects this definition as the main agent, its documented main-session-only `initialPrompt` runs `/lead`. The installed `/lead` skill at `.claude/skills/lead/SKILL.md` then owns the complete Lead contract. This definition intentionally does not duplicate that contract or rely on a `skills` preload.
 
 ## If you are reading this as a dispatched subagent
 
@@ -16,4 +17,4 @@ You were dispatched through a stale route (`subagent_type: lead`). Do NOT orches
 
 ## Why this file still exists
 
-It is kept at `agents/lead.md` so pack detection and the pack validator keep passing, and so any stale `subagent_type: lead` dispatch fails CLOSED (the refusal above) instead of silently spinning up a throwaway lead. `requiresLead: true` in a team template means "the main conversation runs the full lead pipeline" — heavier orchestration, same owner, never a dispatch.
+It is the host-selected main-agent definition and also preserves the refusal above so any stale `subagent_type: lead` dispatch fails CLOSED instead of silently spinning up a throwaway lead. `requiresLead: true` in a team template means "the main conversation runs the full lead pipeline" — heavier orchestration, same owner, never a dispatch; `/agents-external-brigade` remains the bounded external-helper route.

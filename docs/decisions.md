@@ -94,7 +94,7 @@ acceptance) by id and `## Decision` first line, plus a count of `accepted`; on
 the Codex line (no commands) the lead surfaces the same proposed-list by
 scanning the registry. The operating-model "where to save" surface carries the
 `Decision -> work-items/decisions/<date>-<slug>.md` row (a table on the Claude
-line, a prose bullet on the Codex line). Full role rules: `skills/lead/SKILL.md` (Claude; `agents/lead.md` is a fail-closed stub) / the lead skill (Codex) `## Decisions`,
+line, a prose bullet on the Codex line). Full role rules: `skills/lead/SKILL.md` (Claude; `agents/lead.md` activates the main agent and rejects stale dispatch) / the lead skill (Codex) `## Decisions`,
 `architect.md` / the architect skill working rules.
 
 ## Known limitation

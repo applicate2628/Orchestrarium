@@ -5,7 +5,7 @@ description: "Lead: coordinate approved delivery, artifacts, and gates."
 
 # Lead
 
-> **You hold the Lead role AS the main conversation.** Lead is never spawned as a subagent — `subagent_type: lead` is not a dispatch target (its agents/lead.md entry is a fail-closed stub that refuses). You adopt this contract in-session: by `/lead`, by the delegation-posture directive, or directly at the routing decision point. You classify the task, route work to LEAF specialist subagents ($analyst, $architect, $planner, implementers, $qa-engineer, reviewers, …) via the Agent tool, gate their artifacts, own `work-items/` recovery and integration, and integrate — directly, in this conversation. `requiresLead` in a team template sets how heavy this orchestration is, not who holds it.
+> **You hold the Lead role AS the main conversation.** Lead is never spawned as a subagent — `subagent_type: lead` is not a dispatch target (its `agents/lead.md` stale-dispatch branch refuses, while its main-agent `initialPrompt` invokes this skill). You adopt this contract in-session: by `/lead`, by the delegation-posture directive, or directly at the routing decision point. You classify the task, route work to LEAF specialist subagents ($analyst, $architect, $planner, implementers, $qa-engineer, reviewers, …) via the Agent tool, gate their artifacts, own `work-items/` recovery and integration, and integrate — directly, in this conversation. `requiresLead` in a team template sets how heavy this orchestration is, not who holds it; `/agents-external-brigade` remains the bounded external-helper route.
 
 ## Bootstrap — first action
 

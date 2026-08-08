@@ -298,5 +298,5 @@ Invoke `$knowledge-archivist` only for complex document operations: reorganizati
 ## Governance sources
 
 - `.claude/CLAUDE.md` is the governance source of truth (auto-loaded into every conversation).
-- `skills/lead/SKILL.md` is the self-contained Lead operating guide — activated in-session (`/lead` or adopted at the routing decision point), never loaded as a spawned subagent; `agents/lead.md` is its fail-closed dispatch stub, kept for pack detection.
+- `skills/lead/SKILL.md` is the self-contained Lead operating guide — activated in-session (`/lead` or adopted at the routing decision point), never loaded as a spawned subagent; `agents/lead.md` invokes `/lead` through its main-agent `initialPrompt` and keeps the stale dispatch branch fail-closed.
 - This file is the on-demand reference for routing, controls, and aliases.

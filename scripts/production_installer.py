@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from typing import Any
 
 
 CODEX_BEGIN = "<!-- BEGIN ORCHESTRARIUM CODEX PACK -->"
@@ -655,6 +656,95 @@ def _merge_claude_docs(root: Path, source: Path, target: Path, dry_run: bool) ->
         agents_target.write_text(shared, encoding="utf-8", newline="\n")
 
 
+def _load_claude_settings(settings_path: Path) -> dict[str, Any]:
+    """Load the user-owned Claude settings object without repairing its shape."""
+    if not settings_path.exists():
+        return {}
+    try:
+        data = json.loads(settings_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Claude settings are not valid JSON: {exc}") from exc
+    except OSError as exc:
+        raise ValueError(f"cannot read Claude settings {settings_path}: {exc}") from exc
+    if not isinstance(data, dict):
+        raise ValueError("Claude settings must be a JSON object")
+    if "agent" in data and isinstance(data["agent"], (dict, list)):
+        raise ValueError("Claude settings agent must be a scalar")
+    return data
+
+
+def _merge_claude_main_agent(
+    settings: dict[str, Any], delegation_mode: str | None
+) -> tuple[str, bool]:
+    """Apply the sole persistent Lead-default policy to a decoded settings object."""
+    if "agent" in settings and isinstance(settings["agent"], (dict, list)):
+        raise ValueError("Claude settings agent must be a scalar")
+    mode = delegation_mode.casefold() if isinstance(delegation_mode, str) else ""
+    if mode == "force":
+        if "agent" not in settings:
+            settings["agent"] = "lead"
+            return "lead-default-written", True
+        if settings["agent"] == "lead":
+            return "lead-already-selected", False
+        return "preserved-nonlead-agent", False
+    if mode in {"auto", "manual"}:
+        return "mode-preserved", False
+    return "mode-unresolved", False
+
+
+def _load_module_from_path(module_name: str, path: Path):
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"could not load support module: {path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _resolve_claude_delegation_mode(
+    root: Path, project_root: Path, home: Path | None
+) -> str:
+    """Use the existing agents-mode resolver; a resolution failure is non-mutating."""
+    if home is None:
+        return "unresolved"
+    try:
+        resolver = _load_module_from_path(
+            "orchestrarium_resolve_agents_mode",
+            root / "scripts" / "resolve-agents-mode.py",
+        )
+        resolved = resolver.resolve("claude", project_root, home, root)
+        mode = resolved["values"].get("delegationMode")
+    except (KeyError, OSError, RuntimeError, ValueError):
+        return "unresolved"
+    return mode.casefold() if isinstance(mode, str) else "unresolved"
+
+
+def _merge_claude_main_agent_settings(
+    root: Path,
+    settings_path: Path,
+    delegation_mode: str,
+    dry_run: bool,
+) -> str:
+    settings = _load_claude_settings(settings_path)
+    outcome, changed = _merge_claude_main_agent(settings, delegation_mode)
+    if outcome == "preserved-nonlead-agent":
+        print("WARN: Claude main agent preserved; force lead binding not installed")
+    elif outcome == "mode-unresolved":
+        print("WARN: Claude main-agent binding skipped; delegationMode unresolved")
+    if not changed:
+        return outcome
+    if dry_run:
+        print(f"    [dry-run] would set Claude settings agent to lead ({settings_path})")
+        return outcome
+    hook_installer = _load_module_from_path(
+        "orchestrarium_install_hypothesis_hook",
+        root / "scripts" / "install-hypothesis-hook.py",
+    )
+    hook_installer.write_atomic(settings_path, settings)
+    return outcome
+
+
 def _run(arguments: list[str], cwd: Path, *, capture: bool = False) -> subprocess.CompletedProcess:
     env = os.environ.copy()
     env["PYTHONIOENCODING"] = "utf-8"
@@ -1006,11 +1096,12 @@ def install(provider: str, argv: list[str] | None = None) -> int:
             target_tree = target
             mode_target = target / ".agents-mode.yaml"
             normalize_provider = "shared"
+        home_value = os.environ.get("USERPROFILE") or os.environ.get("HOME")
+        home = Path(home_value).expanduser() if home_value else None
         shared_mode_target: Path | None = None
         if mode == "global":
-            home = Path(
-                os.environ.get("USERPROFILE") or os.environ.get("HOME") or ""
-            ).expanduser()
+            if home is None:
+                raise ValueError("cannot resolve the user home directory")
             shared_mode_target = home / ".agents-mode.yaml"
 
         print(f"=== {provider.capitalize()} Python Installer ===")
@@ -1019,6 +1110,11 @@ def install(provider: str, argv: list[str] | None = None) -> int:
         print(f"Mode: {mode}")
         if args.dry_run:
             print("Mode: dry-run")
+
+        if provider == "claude":
+            # Invalid JSON or an invalid agent shape is a user-settings error,
+            # not something a pack sync is allowed to repair after mutation.
+            _load_claude_settings(registration)
 
         transaction_paths = _installer_mutation_paths(
             provider=provider,
@@ -1082,6 +1178,18 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                     root / "shared" / "agents-mode.defaults.yaml",
                     shared_mode_target,
                     "shared",
+                    args.dry_run,
+                )
+
+            if provider == "claude":
+                mode_project = project if project is not None else target.parent / ".orchestrarium-global-install"
+                effective_delegation_mode = _resolve_claude_delegation_mode(
+                    root, mode_project, home
+                )
+                _merge_claude_main_agent_settings(
+                    root,
+                    registration,
+                    effective_delegation_mode,
                     args.dry_run,
                 )
 
