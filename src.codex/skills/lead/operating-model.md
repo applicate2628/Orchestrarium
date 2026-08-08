@@ -394,22 +394,22 @@ The cap is 3 iterations for any single role on a single artifact.
 
 ## Artifact persistence protocol
 
-Every completed chain producing an accepted artifact MUST persist it before the session ends. Three storage tiers:
+Every completed chain producing an accepted artifact MUST persist it in its owning active work-item before the session ends. Standalone persistence is conditional:
 
-Completed-artifact and session-log persistence follows completed work and never gates its first safe mutation. The minimal `quick-fix` recovery status is the explicit exception: it exists before the first repository mutation, while one post-verification `.reports/` summary may record the completed route.
+An active work-item means the current task has `work-items/active/<slug>/`, not merely that the repository contains `work-items/`. With an active item, each specialist writes only its canonical artifact and the root records its concise lane result and provenance in `agent-runs.jsonl`; do not create `.reports/` or `.plans/` duplicates. Trivial work with no preservation value writes nothing. Without an active item, one meaningful standalone result MAY use `.reports/`; an explicitly requested standalone plan MAY use `.plans/`. Work needing stages, recovery, or continuation is admitted as a work-item.
 
 | Tier | Location | When to use |
 |---|---|---|
 | Canonical | `work-items/active/<date>-<slug>/` | Lead-routed non-trivial work: brief, status, research, design, plan, review, closure |
-| Session log | `.reports/YYYY-MM/report(<role>)-YYYY-MM-DD_HH-MM_topic.md` | Brief record of what happened — summary, not a copy of the canonical artifact |
-| Plan log | `.plans/YYYY-MM/plan(<role>)-YYYY-MM-DD_HH-MM_topic.md` | Plan snapshots when a plan is created or materially revised |
+| Standalone summary | `.reports/YYYY-MM/report(<role>)-YYYY-MM-DD_HH-MM_topic.md` | Optional one-off meaningful result with no active work-item |
+| Standalone plan snapshot | `.plans/YYYY-MM/plan(<role>)-YYYY-MM-DD_HH-MM_topic.md` | Optional one-off plan explicitly requested with no active work-item |
 
-Session logging is mandatory for every participant — the orchestrator (the main conversation, as Lead) or a specialist role — when the session produced a result, made a routing decision, or completed a review. A session log summarizes what was asked, what was done, key decisions, outcome, participants, and pointers to canonical artifacts. Create `YYYY-MM/` subdirectory if it does not exist. See `AGENTS.md` § "Session logging rule" for the full contract.
+An optional standalone summary records what was asked, what was done, key decisions, outcome, participants, and follow-ups. Provider-backed or external-adapter provenance is stored in the active item's ledger/artifact or the one standalone summary. See `AGENTS.md` § "Session persistence rule" for the full contract.
 
 When NOT to save:
 - Do not persist intermediate REVISE drafts — only the final accepted version.
 - Do not persist raw session transcripts or debug logs in canonical storage.
-- Do not duplicate an artifact across tiers — the canonical artifact lives in the task-memory directory; the session log in `.reports/` is a summary, not a copy.
+- Do not duplicate an active work-item artifact or lane result across tiers.
 
 ## Governance sources
 

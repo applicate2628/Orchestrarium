@@ -257,9 +257,9 @@ If no class is specified, treat as `BLOCKED:dependency` (conservative default).
 
 If the plan specifies a different test ownership split, follow the plan. This table is the default when no plan-level override exists.
 
-## Session logging
+## Session persistence
 
-Every subagent MUST write a session log to `.reports/YYYY-MM/` before returning its final response when the session produced a result, made a routing decision, or completed a review. This rule applies equally to the main conversation (as Lead) — see `AGENTS.md` § "Session logging rule" for the full contract and log format. Create the `YYYY-MM/` subdirectory if it does not exist. Session logs are summaries, not artifact copies.
+An active work-item is the current task's `work-items/active/<slug>/` directory. With one, a specialist writes only its canonical task artifact; the root records the concise lane result and provenance in `agent-runs.jsonl`, with no `.reports/` or `.plans/` duplicate. Trivial work writes nothing. A meaningful standalone result with no active work-item MAY use one `.reports/YYYY-MM/` summary; an explicitly requested standalone plan MAY use one `.plans/YYYY-MM/` snapshot. See `AGENTS.md` § "Session persistence rule".
 
 ## Structured completion report
 

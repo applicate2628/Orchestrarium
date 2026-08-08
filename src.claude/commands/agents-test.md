@@ -32,7 +32,7 @@ The user does not need to type `/agents-test` for this flow to fire. Apply it tr
 
 4. **Save.** Persist per artifact persistence protocol (`operating-model.md`):
    - If part of an active work-item → `work-items/active/<slug>/test-report.md`
-   - Log to `.reports/YYYY-MM/report(<actual-role>)-YYYY-MM-DD_HH-MM_topic.md`
+   - With an active item, return concise result/provenance for the root ledger and do not create a `.reports/` duplicate. With no active item, a meaningful standalone test result MAY use one `.reports/` summary.
 
 5. **Report.** Present:
    - Tests written or updated (file paths)

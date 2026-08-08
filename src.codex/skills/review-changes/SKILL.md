@@ -65,8 +65,8 @@ If the user asked "did we fix everything?", answer that directly before the deta
 
 ## Persistence
 
-- If the repository uses active work-items, persist the accepted review artifact there.
-- Otherwise log the review under `.reports/YYYY-MM/` using the standard report naming convention.
+- If the current task has `work-items/active/<slug>/`, persist only the accepted review artifact there and return its concise result/provenance for the root ledger.
+- With no active work-item, a meaningful standalone review MAY use one `.reports/YYYY-MM/` summary using the standard report naming convention.
 
 ## Rules
 

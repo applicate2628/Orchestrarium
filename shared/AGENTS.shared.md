@@ -17,20 +17,19 @@ Common skills: any role or the main conversation invokes on match; they are not 
 Keep global rules short, testable, cross-repo, and costly-mistake focused: delegation/fact-first, isolation, logic, verification, security, resources, maintainability, environment, and dependency baselines. Keep compatibility, API/config/schema/migration, rollout/rollback, toolchains, canonical paths, truth sources, and portability repo-local. Keep domain heuristics specialist-owned. Do not globalize design catalogs, unenforceable reminders, tool-enforced rules, or vague slogans.
 
 ## Artifact persistence
-Storage tiers: `work-items/` is canonical task memory; `.reports/YYYY-MM/` holds session summaries; `.plans/YYYY-MM/` holds revised plan snapshots.
+Storage: `work-items/` canonical; `.reports/YYYY-MM/` optional standalone summary; `.plans/YYYY-MM/` optional explicitly requested standalone plan.
 
 ### Physical lifecycle V1
 Physical location alone owns V1 lifecycle: current records stay in their category root; terminal records live only in `archive/YYYY-MM/`, with the month from recorded strict UTC `YYYY-MM-DDTHH:MM:SSZ`, never inferred. `status.md` owns active recovery, `closure.md` final outcome, and README/index are derived views. Only the lifecycle owner moves records; it fails closed on missing admission, terminal evidence, unique location, or logical-link inventory. An archive identity is immutable: reopen via an explicit successor, never reverse move. Historical records lacking authoritative terminal fields stay unmoved; never backfill or guess.
 
-### Session logging rule (mandatory)
-- Main conversation and subagents MUST log completed results/routing decisions/reviews in `.reports/YYYY-MM/`; persistence follows completed work and never gates its first safe mutation. One summary may cover one `quick-fix`; continue if work remains.
-- Each log includes a one-paragraph summary (what was asked, what was done, key decisions, outcome `PASS`/`REVISE`/`BLOCKED`/advisory), participants, a pointer to any canonical `work-items/` artifact, and follow-ups or open items.
-- Provider-backed or external-adapter sessions add a short execution record on separate lines: `Execution role`; `Assigned / replaced internal role` or `none`; `Requested provider`; `Resolved provider` or `none`; `Actual execution path`; `Model / profile used` or `unspecified by runtime`; `Deviation reason`.
-- If the session created or revised a plan, also save a `.plans/YYYY-MM/` snapshot (with the same execution record when provider-backed).
+### Session persistence rule (mandatory)
+- An active work-item is current-task `work-items/active/<slug>/`; a repository `work-items/` directory alone is not.
+- With an active item, specialists write only canonical artifacts; root records concise lane result/provenance in `agent-runs.jsonl`. Never duplicate either in `.reports/` or `.plans/`.
+- Trivial chat/work with no recovery or preservation value writes nothing. Without an active item, a meaningful standalone result MAY use one `.reports/YYYY-MM/` summary; an explicitly requested standalone plan MAY use one `.plans/YYYY-MM/` snapshot. Work needing stages, recovery, or continuation is admitted as a work-item.
+- Provider-backed or external-adapter provenance stays in the active ledger/artifact or one standalone summary: `Execution role`; `Assigned / replaced internal role` or `none`; `Requested provider`; `Resolved provider` or `none`; `Actual execution path`; `Model / profile used` or `unspecified by runtime`; `Deviation reason`.
 
 ### Anti-patterns
 - Do not persist intermediate `REVISE` drafts, raw session transcripts, or debug logs in canonical storage.
-- Do not duplicate one artifact across tiers: the canon lives in `work-items/`, and `.reports/` is summary only.
 - Do not collapse actual execution role and provenance role into one ambiguous field.
 - Do not route provider-backed `$consultant` in `external` mode, `$external-worker`, or `$external-reviewer` through an internal relay agent/helper/subagent; if the host runtime cannot directly launch the selected provider, record `Actual execution path: role disabled` and reroute or escalate honestly.
 

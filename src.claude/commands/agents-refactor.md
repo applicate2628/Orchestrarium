@@ -45,7 +45,7 @@ The user does not need to type `/agents-refactor` for this flow to fire. Apply i
    - If architecture reviewer returns `BLOCKED` → present to user with classification
 
 7. **Save.** Persist per artifact persistence protocol (`operating-model.md`):
-   - Log to `.reports/YYYY-MM/report(<role>)-YYYY-MM-DD_HH-MM_topic.md`
+   - With an active `work-items/active/<slug>/`, write only its canonical artifact and return concise result/provenance for the root ledger. With no active item, a meaningful standalone result MAY use one `.reports/` summary.
 
 8. **Report.** Present:
    - What was refactored and why

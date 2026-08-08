@@ -174,7 +174,7 @@ Lifecycle of `constraints/claims.md` in the work-item folder:
 - Interaction types: `LEAD_MED` (default), `DIRECT` (sequential, lead-authorized), `CLAIMS`, `RETURN`, `ESCALATE`, `ADVISORY`, `NONE`. Note: `PARALLEL` is not natively supported in Codex — independent scopes are handled sequentially.
 - Reviewers tag cross-domain findings with `[CROSS-DOMAIN: <target-domain>]`; the orchestrator routes them to the appropriate specialist.
 - Any role files adjacent findings in `work-items/bugs/` without expanding scope.
-- Every completed chain persists artifacts: canonical docs in `work-items/`, session logs in `.reports/`, plan logs in `.plans/`.
+- An active task persists canonical artifacts only in `work-items/active/<slug>/` plus its root ledger; `.reports/` and `.plans/` are optional standalone surfaces when no active item exists.
 
 ## Terms and Abbreviations
 

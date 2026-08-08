@@ -2,13 +2,14 @@
 
 Этот репозиторий использует `work-items/` как канонический локальный корень памяти задач, но сам каталог намеренно остаётся local-only и не должен попадать в tracked git.
 
-### Три уровня хранения
+### Условное хранение
 
-- `work-items/` — каноническая локальная task-memory документация для recovery и handoff на машине оператора.
-- `.reports/YYYY-MM/` — логи сессий: краткие резюме того, что произошло в сессии, а не копии канонических артефактов. Формат: `report(<role>)-YYYY-MM-DD_HH-MM_topic.md`.
-- `.plans/YYYY-MM/` — логи планов: черновики и итерации. Формат: `plan(<role>)-YYYY-MM-DD_HH-MM_topic.md`.
+- `work-items/` — каноническая локальная task-memory документация для recovery и handoff на машине оператора. Активный item означает `work-items/active/<slug>/` текущей задачи, а не простое наличие каталога `work-items/`.
+- При активном item специалисты пишут только канонические артефакты item; root фиксирует краткие результаты линий и provenance в `agent-runs.jsonl`. Дубликаты в `.reports/` и `.plans/` не создаются.
+- `.reports/YYYY-MM/` — опциональное одноразовое резюме meaningful standalone результата без активного item. Формат: `report(<role>)-YYYY-MM-DD_HH-MM_topic.md`.
+- `.plans/YYYY-MM/` — опциональный одноразовый снимок только для явно запрошенного standalone-плана без активного item. Формат: `plan(<role>)-YYYY-MM-DD_HH-MM_topic.md`.
 
-`.reports/` и `.plans/` — журналы для трассировки, не tracked canonical sources. Каноническая локальная recovery-документация живёт в `work-items/`.
+Тривиальная работа без ценности для recovery или сохранения ничего не пишет. Работа, требующая stages, recovery или continuation, принимается как work-item.
 
 ## Структура
 

@@ -46,7 +46,7 @@ The user does not need to type `/agents-perf` for this flow to fire. Apply it tr
 
 7. **Save.** Persist per artifact persistence protocol (`operating-model.md`):
    - If issue from registry → update `work-items/performance/<file>` status
-   - Log to `.reports/YYYY-MM/report(<role>)-YYYY-MM-DD_HH-MM_topic.md`
+   - With an active `work-items/active/<slug>/`, write only its canonical artifact and return concise result/provenance for the root ledger. With no active item, a meaningful standalone result MAY use one `.reports/` summary.
 
 8. **Report.** Present:
    - Bottleneck identified and root cause

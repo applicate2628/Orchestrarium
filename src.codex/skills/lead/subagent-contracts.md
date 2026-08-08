@@ -668,9 +668,9 @@ Invocation note:
 - When an upstream artifact is insufficient, return `REVISE` or `BLOCKED` instead of silently redefining the stage contract.
 - External execution roles are routing adapters; they do not replace the consultant. They may replace eligible internal worker/review roles when config preference or explicit override selects them.
 
-## Session logging
+## Session persistence
 
-Every role — the orchestrator (the main conversation, as Lead) or a specialist — MUST write a session log to `.reports/YYYY-MM/` when the session produced a result, made a routing decision, or completed a review. See `AGENTS.md` § "Session logging rule" for the full contract and log format. Create the `YYYY-MM/` subdirectory if it does not exist. Session logs are summaries, not artifact copies.
+An active work-item is the current task's `work-items/active/<slug>/` directory. With one, a specialist writes only its canonical task artifact; the root records the concise lane result and provenance in `agent-runs.jsonl`, with no `.reports/` or `.plans/` duplicate. Trivial work writes nothing. A meaningful standalone result with no active work-item MAY use one `.reports/YYYY-MM/` summary; an explicitly requested standalone plan MAY use one `.plans/YYYY-MM/` snapshot. See `AGENTS.md` § "Session persistence rule".
 
 ## Structured completion report
 

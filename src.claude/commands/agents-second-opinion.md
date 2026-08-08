@@ -45,7 +45,7 @@ Do NOT auto-invoke on plain `review` / `let's review` (owned by `/agents-review`
 
 4. **Save.** Persist per artifact persistence protocol (`operating-model.md`):
    - If part of an active work-item → `work-items/active/<slug>/advisory.md`
-   - Log to `.reports/YYYY-MM/report(consultant)-YYYY-MM-DD_HH-MM_topic.md`
+   - With an active item, return concise result/provenance for the root ledger and do not create a `.reports/` duplicate. With no active item, a meaningful standalone advisory MAY use one `.reports/` summary.
 
 ## Rules
 

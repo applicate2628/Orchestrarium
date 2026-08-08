@@ -11,11 +11,12 @@ The immediate failure mode this policy addresses is simple: a lead can plan well
 - Admitted but not started work-items live in `work-items/backlog/<slug>.md`; active items live in `work-items/active/<date>-<slug>/`.
 - Completed, cancelled, or superseded items move through the lifecycle owner to `work-items/archive/YYYY-MM/<date>-<slug>/`.
 - Physical lifecycle roots and owning artifacts are state truth. `work-items/index.md`, when retained, is a compatibility snapshot only and has no ongoing sync requirement.
-- `.reports/YYYY-MM/` stores session logs — brief summaries of what happened in a session, not copies of canonical artifacts. Named `report(<role>)-YYYY-MM-DD_HH-MM_topic.md`.
-- `.plans/YYYY-MM/` stores plan logs — plan drafts and iterations. Named `plan(<role>)-YYYY-MM-DD_HH-MM_topic.md`.
-- `.reports/` and `.plans/` are traceability logs, not canonical tracked sources. `work-items/` remains the local recovery source of truth for item-specific execution memory on the operator machine.
+- An active work-item means the current task has `work-items/active/<slug>/`, not merely that this repository contains `work-items/`. Its specialists write only canonical item artifacts, while the root records concise lane results and provenance in `agent-runs.jsonl`.
+- `.reports/YYYY-MM/` is an optional one-off summary for a meaningful standalone result with no active work-item. Named `report(<role>)-YYYY-MM-DD_HH-MM_topic.md`.
+- `.plans/YYYY-MM/` is an optional one-off snapshot only for an explicitly requested standalone plan with no active work-item. Named `plan(<role>)-YYYY-MM-DD_HH-MM_topic.md`.
+- `.reports/` and `.plans/` are not a second persistence tier for active work. `work-items/` remains the local recovery source of truth for item-specific execution memory on the operator machine.
 
-`shared/references/` is the canonical home for stable repository-wide design methodology. `references-claude/` keeps Claude-specific reference material plus compatibility pointers. `work-items/` is the home for local item-specific execution memory. `.reports/` and `.plans/` are session-level audit trails.
+`shared/references/` is the canonical home for stable repository-wide design methodology. `references-claude/` keeps Claude-specific reference material plus compatibility pointers. `work-items/` is the home for local item-specific execution memory. Trivial work with no recovery or preservation value writes nothing; work needing stages, recovery, or continuation is admitted as a work-item.
 `docs/agents-mode-reference.md` is the shared operator reference when `.claude/.agents-mode.yaml` behavior matters.
 
 ## Mandatory artifact set

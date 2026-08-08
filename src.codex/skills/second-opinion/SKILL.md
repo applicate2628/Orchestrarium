@@ -40,9 +40,9 @@ Get an independent advisory memo or manage the consultant toggle.
    - Confidence level
    - Continuation prompt — a ready-to-send second prompt that begins with a direct imperative to continue and names the next concrete action
 
-5. **Save.** Persist per artifact persistence protocol:
-   - If the repository defines an active item artifact path, persist the memo there.
-   - Log to `.reports/YYYY-MM/report(consultant)-YYYY-MM-DD_HH-MM_topic.md`
+5. **Save.** Follow the session persistence rule:
+   - If the current task has `work-items/active/<slug>/`, persist only the memo there and return its concise result/provenance for the root ledger.
+   - With no active work-item, a meaningful standalone memo MAY use one `.reports/YYYY-MM/report(consultant)-YYYY-MM-DD_HH-MM_topic.md` summary.
 
 ## Rules
 

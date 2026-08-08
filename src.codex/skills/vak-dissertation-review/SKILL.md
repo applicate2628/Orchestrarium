@@ -81,8 +81,12 @@ These exist because each was learned by getting it wrong once. Full detail + the
    class-exhaustion: a class is closed when its grep count equals the expected count and stray
    classes are 0 — not after an arbitrary number of LLM passes). Confirm 0 unresolved `@@` formula
    placeholders and the expected OLE object counts.
-7. **Reconcile and report.** State what was covered, what stays out of scope (see below), and write a
-   session log. Keep the tone advisory.
+7. **Reconcile and report.** State what was covered, what stays out of scope (see below), and keep
+   the tone advisory. When the current task has `work-items/active/<slug>/`, persist only the
+   canonical VAK artifact there and return concise result/provenance for the root
+   `agent-runs.jsonl`; do not duplicate it in `.reports/` or `.plans/`. With no active work-item, a
+   meaningful standalone VAK result MAY use one `.reports/YYYY-MM/` summary; do not create a
+   `.plans/` duplicate.
 
 ## Scope honesty
 

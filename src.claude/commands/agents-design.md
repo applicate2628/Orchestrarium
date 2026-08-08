@@ -33,7 +33,7 @@ This is the standard entry point for non-trivial new work that lacks a `work-ite
 
 4. **Save.** Persist per artifact persistence protocol (`operating-model.md`):
    - Create `work-items/active/<date>-<slug>/` with `research.md`, `design.md`, `plan.md`, `status.md`
-   - Log plan to `.plans/YYYY-MM/plan(<role>)-YYYY-MM-DD_HH-MM_topic.md`
+   - Do not duplicate the active-item plan in `.plans/`; an explicitly requested standalone plan with no active item MAY use one `.plans/` snapshot.
 
 5. **Report.** Present:
    - Design summary (key decisions, tradeoffs)

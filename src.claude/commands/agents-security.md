@@ -33,7 +33,7 @@ The user does not need to type `/agents-security` for this flow to fire. Apply i
 
 4. **Save.** Persist per artifact persistence protocol (`operating-model.md`):
    - If part of an active work-item → `work-items/active/<slug>/security-review.md`
-   - Log to `.reports/YYYY-MM/report(<role>)-YYYY-MM-DD_HH-MM_topic.md`
+   - With an active item, return concise result/provenance for the root ledger and do not create a `.reports/` duplicate. With no active item, a meaningful standalone review MAY use one `.reports/` summary.
 
 5. **Report.** Present:
    - Threat model summary (trust boundaries, attack surfaces)

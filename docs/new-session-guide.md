@@ -27,7 +27,7 @@ Use this guide at the start of a new Orchestrarium maintenance session. Its purp
 5. If the symptom is visible only in an installed runtime, inspect the installed copy, then backtrack to the source owner and installer path.
 6. After source changes, sync the live installed copy only when immediate current-session behavior matters. Say explicitly that the live edit is a runtime sync, not the canonical fix.
 7. Run the narrowest relevant validators first, then broader pack validators before closeout.
-8. Record a `.reports/YYYY-MM/` session log when the session produced a result, routing decision, or review outcome. Raw logs and task memory remain local-only.
+8. Apply the shared session persistence rule: with an active work-item, write only its canonical artifact and root ledger result; trivial work writes nothing; a meaningful standalone result with no active item may use one `.reports/` summary, while an explicitly requested standalone plan may use one `.plans/` snapshot. Raw logs and task memory remain local-only.
 
 ## Source Map
 

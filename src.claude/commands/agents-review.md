@@ -35,7 +35,7 @@ This is read-only review — do not re-implement. If review uncovers required ch
 
 3. **Save.** Persist per artifact persistence protocol (`operating-model.md`):
    - If part of an active work-item → `work-items/active/<slug>/review.md`
-   - Log to `.reports/YYYY-MM/report(<role>)-YYYY-MM-DD_HH-MM_topic.md`
+   - With an active item, return concise result/provenance for the root ledger and do not create a `.reports/` duplicate. With no active item, a meaningful standalone review MAY use one `.reports/` summary.
 
 4. **Compile results.** Present a unified review with:
    - Scope reviewed

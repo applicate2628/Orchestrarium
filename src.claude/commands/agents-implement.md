@@ -42,7 +42,7 @@ The user does not need to type `/agents-implement` for this flow to fire. Apply 
 4. **Between phases.** Update `status.md` after each phase completion. Ask the user to confirm before starting the next phase.
    - **After parallel phases**: check for semantic conflicts and unintended interactions between the parallel agents' outputs (see parallel execution protocol in `operating-model.md`). Resolve conflicts before advancing.
 
-5. **Completion.** Save final report to `work-items/active/<slug>/implementation-report.md` and log to `.reports/`. When all phases are done:
+5. **Completion.** Save the final implementation report only to `work-items/active/<slug>/implementation-report.md`; the root records the concise lane result/provenance in `agent-runs.jsonl`. Do not duplicate either in `.reports/` or `.plans/`. When all phases are done:
    - Run architecture reviewer (Agent tool, `subagent_type: architecture-reviewer`) on the full changeset
    - Present summary: phases completed, tests passed, open bugs, residual risk
    - Suggest `/agents-review` for final review before commit

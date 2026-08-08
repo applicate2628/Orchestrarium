@@ -32,8 +32,8 @@ The user does not need to type `/agents-research` for this flow to fire. Apply i
 
 4. **Save.** Persist per artifact persistence protocol (`operating-model.md`):
    - If part of an active work-item → `work-items/active/<slug>/research.md`
-   - Always log to `.reports/YYYY-MM/report(<role>)-YYYY-MM-DD_HH-MM_topic.md`
-   - If no work-item exists and the result is worth preserving, create one
+   - With an active item, return concise result/provenance for the root ledger and do not create a `.reports/` duplicate.
+   - If no active item exists, admit work needing stages, recovery, or continuation; otherwise a meaningful standalone result MAY use one `.reports/` summary.
 
 5. **Report.** Present:
    - Key findings with file:line references

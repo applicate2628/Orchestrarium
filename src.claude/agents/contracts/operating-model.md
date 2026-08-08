@@ -243,42 +243,44 @@ Before launching work in parallel:
 
 ## Artifact persistence protocol
 
-Every completed chain that produces an accepted artifact MUST persist it before the session ends. The orchestrator (the main conversation, as Lead) owns persistence — do not invoke a separate agent for a single file write.
+For a completed chain with an active work-item, persist its accepted artifact there before the session ends. The orchestrator (the main conversation, as Lead) owns persistence — do not invoke a separate agent for a single file write.
 
-Completed-artifact and session-log persistence follows completed work and never gates its first safe mutation. The minimal `quick-fix` recovery status defined in `subagent-contracts.md` is the explicit exception: it exists before the first repository mutation, while one post-verification `.reports/` summary may record the completed route.
+An active work-item means the current task has `work-items/active/<slug>/`, not merely that the repository contains `work-items/`. Its specialists write only canonical artifacts; the root records concise lane result/provenance in `agent-runs.jsonl`; do not duplicate either in `.reports/` or `.plans/`. The minimal `quick-fix` recovery status defined in `subagent-contracts.md` remains the explicit pre-mutation exception.
 
-### Three-tier storage
+### Conditional storage
 
 | Tier | Location | Purpose | Content |
 | --- | --- | --- | --- |
 | **Canonical** | `work-items/active/<slug>/` | Source of truth for active work | `research.md`, `design.md`, `plan.md`, `review.md`, `report.md`, `status.md`, `brief.md` |
-| **Session log** | `.reports/YYYY-MM/` | Brief record of what happened in each session | `report(<role>)-YYYY-MM-DD_HH-MM_topic.md` — summary, not a copy of the canonical artifact |
-| **Plan log** | `.plans/YYYY-MM/` | Plan snapshots when a plan is created or materially revised | `plan(<role>)-YYYY-MM-DD_HH-MM_topic.md` |
+| **Standalone summary** | `.reports/YYYY-MM/` | Optional one-off meaningful result with no active work-item | `report(<role>)-YYYY-MM-DD_HH-MM_topic.md` |
+| **Standalone plan snapshot** | `.plans/YYYY-MM/` | Optional one-off plan explicitly requested with no active work-item | `plan(<role>)-YYYY-MM-DD_HH-MM_topic.md` |
 
 `<role>` is the `subagent_type` that produced the artifact (e.g., `analyst`, `security-reviewer`, `planner`, `qa-engineer`).
 
 ### Where to save
 
-| Artifact type | Canonical (work-items) | Session log (.reports/) |
-| --- | --- | --- |
-| Research memo | `work-items/active/<slug>/research.md` | Session log entry summarizing findings |
-| Design artifact | `work-items/active/<slug>/design.md` | Session log entry if design session was non-trivial |
-| Plan | `work-items/active/<slug>/plan.md` | Plan snapshot in `.plans/YYYY-MM/` |
-| Review report | `work-items/active/<slug>/review.md` | Session log entry summarizing review outcome |
-| Security review | `work-items/active/<slug>/security-review.md` | Session log entry summarizing review outcome |
-| Test report | `work-items/active/<slug>/test-report.md` | Session log entry summarizing QA verdict |
-| Advisory memo | `work-items/active/<slug>/advisory.md` | Session log entry summarizing advisory |
-| Bug finding | `work-items/bugs/<date>-<slug>.md` | — |
-| Performance issue | `work-items/performance/<date>-<slug>.md` | — |
-| Epic (groups work-items) | active: `work-items/epics/<date>-<slug>.md`; closed: `work-items/epics/archive/<YYYY-MM>/<date>-<slug>.md` | — |
-| Decision (cross-item ADR) | `work-items/decisions/<date>-<slug>.md` | — |
-| Lesson (delivery retrospective) | `work-items/lessons/<date>-<slug>.md` | — |
+An active work-item means the current task has `work-items/active/<slug>/`, not merely that the repository contains `work-items/`. With one, each task artifact in the active-item rows below is written only to that path and the root records the concise lane result/provenance in `agent-runs.jsonl`; no `.reports/` or `.plans/` duplicate is created. The registry rows name their own canonical cross-item registries and are not active-item artifact paths.
 
-Session logs are summaries pointing to canonical artifacts, not copies. See `AGENTS.md` § "Session logging rule" for the mandatory logging contract.
+| Artifact or registry entry | Canonical path |
+| --- | --- |
+| Research memo | `work-items/active/<slug>/research.md` |
+| Design artifact | `work-items/active/<slug>/design.md` |
+| Plan | `work-items/active/<slug>/plan.md` |
+| Review report | `work-items/active/<slug>/review.md` |
+| Security review | `work-items/active/<slug>/security-review.md` |
+| Test report | `work-items/active/<slug>/test-report.md` |
+| Advisory memo | `work-items/active/<slug>/advisory.md` |
+| Bug finding | `work-items/bugs/<date>-<slug>.md` |
+| Performance issue | `work-items/performance/<date>-<slug>.md` |
+| Epic (groups work-items) | active: `work-items/epics/<date>-<slug>.md`; closed: `work-items/epics/archive/<YYYY-MM>/<date>-<slug>.md` |
+| Decision (cross-item ADR) | `work-items/decisions/<date>-<slug>.md` |
+| Lesson (delivery retrospective) | `work-items/lessons/<date>-<slug>.md` |
+
+Trivial work with no recovery or preservation value writes nothing. With no active work-item, a meaningful standalone result MAY use one `.reports/` summary and an explicitly requested standalone plan MAY use one `.plans/` snapshot. Provider-backed or external-adapter provenance remains in the active item ledger/artifact or the one standalone summary. See `AGENTS.md` § "Session persistence rule".
 
 Epic location is part of lifecycle state. Lead owns closure/reopening decisions and content; the knowledge archivist moves the same file, reconciles physical lifecycle roots, and regenerates `work-items/README.md`. A slug must resolve to exactly one active or archived file; missing and duplicate targets are invalid and callers never select one copy by traversal order or recency.
 
-**Standalone chains** (no active work-item): create a work-item folder if the result is worth preserving, or save to `.reports/` / `.plans/` only as a session log.
+**Standalone chains** (no active work-item): admit work needing stages, recovery, or continuation as a work-item; otherwise, preserve only meaningful one-off results or explicitly requested one-off plans through the optional standalone surfaces.
 
 ### When to save
 

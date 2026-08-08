@@ -167,5 +167,5 @@ flowchart LR
 - Типы взаимодействий: `LEAD_MED` (дефолт), `DIRECT`, `PARALLEL`, `CLAIMS`, `RETURN`, `ESCALATE`, `ADVISORY`, `NONE`.
 - Reviewer'ы тегируют cross-domain находки как `[CROSS-DOMAIN: <target-domain>]`; оркестратор маршрутизирует их соответствующему специалисту.
 - Любая роль фиксирует смежные находки в `work-items/bugs/`, используя bug registry format, с `context: adjacent-finding` и `status: open`, без расширения scope.
-- Каждая завершённая цепочка сохраняет артефакты: каноническая документация в `work-items/`, логи сессий в `.reports/`, логи планов в `.plans/`.
+- Активная задача сохраняет канонические артефакты только в `work-items/active/<slug>/` и в корневом ledger; `.reports/` и `.plans/` — опциональные standalone-поверхности, когда активного item нет.
 - Параллельные агенты должны иметь непересекающиеся change surfaces; после завершения всех параллельных агентов проводится интеграционная проверка.
