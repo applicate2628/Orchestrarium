@@ -1,4 +1,5 @@
 import json
+import importlib.util
 import shutil
 import subprocess
 import sys
@@ -24,6 +25,14 @@ def run_validator(work_item: Path) -> subprocess.CompletedProcess:
         text=True,
         capture_output=True,
     )
+
+
+def load_ledger_module():
+    spec = importlib.util.spec_from_file_location("agent_run_ledger", LEDGER)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def valid_status() -> str:
@@ -146,6 +155,10 @@ def test_append_records_event_and_validator_passes(tmp_path: Path):
     )
 
     assert result.returncode == 0, result.stderr
+    marker = load_ledger_module().APPEND_SUCCESS_MARKER
+    assert marker == "RESULT: PASS append"
+    assert result.stdout == f"{marker} ({item / 'agent-runs.jsonl'})\n"
+    assert result.stderr == ""
     validator = run_validator(item)
     assert validator.returncode == 0, validator.stderr
     lines = (item / "agent-runs.jsonl").read_text(encoding="utf-8").splitlines()
@@ -344,6 +357,29 @@ def append_valid(item: Path, run_id: str) -> subprocess.CompletedProcess:
         "--evidence", "command:pytest",
         "--started-at", "2026-05-03T10:00:00Z", "--updated-at", "2026-05-03T10:05:00Z",
     )
+
+
+def test_init_and_append_reject_non_active_lifecycle_paths_without_mutation(tmp_path: Path):
+    archived = tmp_path / "work-items" / "archive" / "2026-08" / "archived-ledger"
+    nested = tmp_path / "work-items" / "active" / "active-ledger" / "nested"
+    for item in (archived, nested):
+        (item / "reviews").mkdir(parents=True)
+        status_path = item / "status.md"
+        original_status = valid_status().encode("utf-8")
+        status_path.write_bytes(original_status)
+        (item / "reviews" / "qa.md").write_text("PASS\n", encoding="utf-8")
+
+        initialized = run_ledger(item, "init")
+        assert initialized.returncode == 1, (item, initialized.stdout, initialized.stderr)
+        assert "current work-items/active/<item> directory" in initialized.stderr
+        assert status_path.read_bytes() == original_status
+        assert not (item / "agent-runs.jsonl").exists()
+
+        appended = append_valid(item, f"reject-{item.name}")
+        assert appended.returncode == 1, (item, appended.stdout, appended.stderr)
+        assert "current work-items/active/<item> directory" in appended.stderr
+        assert status_path.read_bytes() == original_status
+        assert not (item / "agent-runs.jsonl").exists()
 
 
 def make_second_item(tmp_path: Path, name: str) -> Path:

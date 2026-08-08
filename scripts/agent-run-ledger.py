@@ -25,6 +25,11 @@ STATUS_SECTIONS = {
 }
 
 
+# Post-commit stdout contract for consumers that need to distinguish a durable
+# append from a rejected or rolled-back attempt. Keep the text in this writer.
+APPEND_SUCCESS_MARKER = "RESULT: PASS append"
+
+
 def load_validator():
     validator_path = Path(__file__).with_name("validate-work-item-state.py")
     spec = importlib.util.spec_from_file_location("validate_work_item_state", validator_path)
@@ -209,11 +214,30 @@ def _iter_active_items(active_dir: Path) -> list[Path]:
     return sorted(path for path in active_dir.iterdir() if path.is_dir())
 
 
-def command_init(args: argparse.Namespace) -> int:
+def active_work_item(args: argparse.Namespace, command: str) -> Path | None:
+    """Return one resolved current item, rejecting every non-active lifecycle path."""
+
     if args.work_item is None:
-        print("FAIL: init requires --work-item", file=sys.stderr)
-        return 1
+        print(f"FAIL: {command} requires --work-item", file=sys.stderr)
+        return None
+
     item = args.work_item.resolve()
+    work_items = next((parent for parent in item.parents if parent.name == "work-items"), None)
+    active_root = work_items / "active" if work_items is not None else None
+    if active_root is None or item.parent != active_root:
+        print(
+            f"FAIL: {command} requires a current work-items/active/<item> directory; "
+            f"refusing non-active lifecycle path: {item}",
+            file=sys.stderr,
+        )
+        return None
+    return item
+
+
+def command_init(args: argparse.Namespace) -> int:
+    item = active_work_item(args, "init")
+    if item is None:
+        return 1
     item.mkdir(parents=True, exist_ok=True)
     validator = load_validator()
     errors = ensure_status_sections(item, args, validator)
@@ -228,10 +252,9 @@ def command_init(args: argparse.Namespace) -> int:
 
 
 def command_append(args: argparse.Namespace) -> int:
-    if args.work_item is None:
-        print("FAIL: append requires --work-item", file=sys.stderr)
+    item = active_work_item(args, "append")
+    if item is None:
         return 1
-    item = args.work_item.resolve()
     if not item.exists():
         print(f"FAIL: missing work item: {item}", file=sys.stderr)
         return 1
@@ -294,7 +317,7 @@ def command_append(args: argparse.Namespace) -> int:
         os.close(lock_fd)
         lock_path.unlink(missing_ok=True)
 
-    print(f"RESULT: PASS append ({ledger_path})")
+    print(f"{APPEND_SUCCESS_MARKER} ({ledger_path})")
     return 0
 
 
