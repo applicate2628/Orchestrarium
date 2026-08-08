@@ -36,40 +36,17 @@ import re
 import sys
 from pathlib import Path
 
-# Disciplines whose standalone bold card was intentionally folded into another
-# spine card during the Task-6 cut (so the discipline-parity check below does
-# not false-positive on a deliberate merge). "Results-table provenance
-# discipline" is folded into the "Formula scope and assumptions discipline"
-# card, which carries its teeth (the `provenance triad`, pinned in the manifest).
-MERGED_INTO_SPINE = {"Results-table provenance discipline"}
+# The extract lists only current spine cards, so parity needs no compatibility
+# exception for retired or folded names.
+MERGED_INTO_SPINE: frozenset[str] = frozenset()
 
 # Claude Code warns when an always-loaded context file exceeds 40,000 chars.
 # SIZE_CAP is the spine ceiling the validator enforces: 39,900 keeps a 100-unit
 # guard band below the warning; measured as max(code points, UTF-8 bytes)
 # because Claude's own counting unit is unverified and the spine's non-ASCII
-# content makes bytes the binding measure. The guard band is thin
-# because lose-nothing restores (the review loop required several enforceable
-# specifics to stay in the spine, not just in extracts) raised the floor to
-# ~39,800; the dense operational content cannot drop further without removing
-# rules. Real headroom is architectural (new DETAIL -> extracts); a genuinely
-# new always-on RULE is the trigger to recompress a card or escalate structure.
-#
-# Why not lower: the spine is dense operational governance. The Task-6 cut moved
-# all genuine ELABORATION (rationale, examples, recovery procedures, the
-# glossary, common-skill layout, delegation prose) to on-demand
-# shared/references/spine/*.md extracts, taking AGENTS.shared.md from
-# 61,905 -> ~39,815 chars while keeping all manifest protection tokens in the
-# spine. The floor near 39,815 is also set by the pack validators
-# (validate-skill-pack.sh), which require specific formula/terminology/
-# verification phrases to be present in the installed AGENTS.md itself, not only
-# in a reference. What remains is irreducible enforcement teeth (banned-phrase
-# lists, gate triggers, kostyl tests, probe commands, the required formula
-# rules); compressing further would drop actual rules, which the "lose no
-# protection" constraint forbids. Real headroom is architectural, not numeric:
-# new governance DETAIL now lands in references, so the spine stops growing. If a
-# genuinely new always-on RULE must enter the spine and would trip this cap, that
-# is the signal to move its elaboration to a reference (keeping only the
-# operational card in the spine) rather than to raise the cap.
+# content makes bytes the binding measure. Headroom comes from assigning each
+# invariant one current owner and keeping provider/domain detail in its existing
+# local owner; do not raise the cap to preserve duplicate cards.
 SIZE_CAP = 39_900
 
 # --- lose-nothing manifest -------------------------------------------------
@@ -132,8 +109,6 @@ GATE_AND_DISCIPLINE_NAMES = [
     "Hypothesis disclosure discipline",
     "Evidence-citation discipline",
     "Active-availability probe discipline",
-    "Provider-contract evidence discipline",
-    "Canonical-source maintenance discipline",
     "Ambiguity resolution discipline",
     "Visual artifact verification discipline",
     "Completion reconciliation discipline",
@@ -182,7 +157,6 @@ REVIEW_RESTORED_TEETH = [
     "external-brigade",                                               # bounded parallel helper fan-out permission
     "AskUserQuestion",                                               # pre-fix gate verification mechanism
     "no other work depends on them",                                 # git reset --hard recovery guard (destructive)
-    "provenance triad",                                              # results-table provenance requirement
     "do not let UI animation or reconciliation depend on mutations", # state-sync observability teeth
     "they are not roles and do not own delivery",                    # common-skills scope clause
     "any role or the main conversation",                             # common-skills caller scope

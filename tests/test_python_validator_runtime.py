@@ -24,8 +24,8 @@ PROVIDER_RUNTIME_MIRRORS = (
     ROOT / "src.claude/agents/scripts/skill_pack_validator_runtime.py",
 )
 EXPECTED_SUMMARIES = (
-    "PASS: 534  WARN: 0  FAIL: 0",
-    "Checks: 453  |  Passed: 453  |  Warnings: 0  |  Errors: 0",
+    "PASS: 529  WARN: 0  FAIL: 0",
+    "Checks: 448  |  Passed: 448  |  Warnings: 0  |  Errors: 0",
 )
 
 
@@ -334,12 +334,12 @@ def test_scoped_action_registry_preserves_source_inventory(
     (
         (
             "codex",
-            "PASS: 346  WARN: 0  FAIL: 0",
+            "PASS: 341  WARN: 0  FAIL: 0",
             "installed work-item state validator enforces evidence for PASS",
         ),
         (
             "claude",
-            "Checks: 341  |  Passed: 341  |  Warnings: 0  |  Errors: 0",
+            "Checks: 336  |  Passed: 336  |  Warnings: 0  |  Errors: 0",
             "installed work-item state validator enforces evidence for PASS",
         ),
     ),
@@ -436,7 +436,7 @@ def test_installed_codex_layering_checks_only_orchestrarium_owned_skills(
             "AGENTS.md",
             "## Role index",
             "## Stale role index",
-            "PASS: 346  WARN: 0  FAIL: 0",
+            "PASS: 341  WARN: 0  FAIL: 0",
             "Section '## Role index' present in AGENTS.md",
         ),
         (
@@ -445,7 +445,7 @@ def test_installed_codex_layering_checks_only_orchestrarium_owned_skills(
             ".claude/CLAUDE.md",
             "agents-design-panel.md",
             "agents-stale-panel.md",
-            "Checks: 341  |  Passed: 341  |  Warnings: 0  |  Errors: 0",
+            "Checks: 336  |  Passed: 336  |  Warnings: 0  |  Errors: 0",
             "CLAUDE.md dispatch index exposes the design-panel command",
         ),
     ),

@@ -66,6 +66,30 @@ def test_manifest_pins_repository_orientation_teeth() -> None:
         assert token in validator_source, f"validator manifest does not pin {token!r}"
 
 
+def test_spine_uses_single_current_owners_for_consolidated_rules() -> None:
+    """The whole-spine consolidation must not regrow retired duplicate cards."""
+    spine = (REPO_ROOT / "shared" / "AGENTS.shared.md").read_text(encoding="utf-8")
+    validator_source = VALIDATOR.read_text(encoding="utf-8")
+
+    for card in (
+        "Verification-and-evidence core",
+        "No logic duplication / no fix layering",
+        "General-case over local symptoms",
+        "Resource lifecycle hygiene",
+    ):
+        assert f"**{card}" in spine, f"missing consolidated owner {card!r}"
+
+    for retired_card in (
+        "Provider-contract evidence discipline",
+        "Canonical-source maintenance discipline",
+        "Markdown formula rendering format",
+        "Formula scope and assumptions discipline",
+        "Results-table provenance discipline",
+    ):
+        assert f"**{retired_card}" not in spine
+        assert retired_card not in validator_source
+
+
 if __name__ == "__main__":
     import unittest
     # allow `python tests/test_agents_spine_validator.py` as a quick manual run

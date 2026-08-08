@@ -442,7 +442,7 @@ _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
   'src.claude/skills/explain-simply/SKILL.md'),
  ('check_common_skill_body_pin',
   'mathtype-book-page',
-  'e0d3fa5233eaa5d59ba0c8b90b45ffb0aa2dd51e6a8a8a00659dd8bddd626323',
+  '615499de68dc03fccb23954e8ed94662076a9a744a493b71232ebdcce55357be',
   'src.claude/skills/mathtype-book-page/SKILL.md'),
  ('check_common_skill_body_pin',
   'vak-dissertation-review',
@@ -661,30 +661,6 @@ _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
   'shared/AGENTS.shared.md',
   'Plain-language and terminology discipline',
   'shared governance requires terminology and abbreviation explanations in documents'),
- ('check_contains',
-  'shared/AGENTS.shared.md',
-  'Markdown formula rendering format',
-  'shared governance requires previewer-safe Markdown formula formatting'),
- ('check_contains',
-  'shared/AGENTS.shared.md',
-  'split long derivations into several short one-line',
-  'shared governance prefers one-line formulas for fragile previewers'),
- ('check_contains',
-  'shared/AGENTS.shared.md',
-  'Do not use multi-line `$$...$$` display blocks',
-  'shared governance rejects unverified multi-line display math'),
- ('check_contains',
-  'shared/AGENTS.shared.md',
-  'compatibility hacks such as `\\sb` or `\\sp`',
-  'shared governance forbids formula compatibility hacks'),
- ('check_contains',
-  'shared/AGENTS.shared.md',
-  'broken Markdown table pipe counts',
-  'shared governance scans formula edits for delimiter and table breakage'),
- ('check_contains',
-  'shared/AGENTS.shared.md',
-  'Formula scope and assumptions discipline',
-  'shared governance requires formula scope and assumption disclosure'),
  ('check_contains',
   'shared/AGENTS.shared.md',
   'concrete observable data',
@@ -1206,21 +1182,21 @@ _INSTALLED_ACTIONS = (
 )
 
 ACTIONS = (
-    ("all", _DECLARED_ACTIONS[0:42] + _DECLARED_ACTIONS[114:262] + _DECLARED_ACTIONS[314:315]),
+    ("all", _DECLARED_ACTIONS[0:42] + _DECLARED_ACTIONS[114:256] + _DECLARED_ACTIONS[308:309]),
     (
         "dev_repo",
         _DECLARED_ACTIONS[42:114]
-        + _DECLARED_ACTIONS[275:279]
-        + _DECLARED_ACTIONS[280:285]
-        + _DECLARED_ACTIONS[286:290]
-        + _DECLARED_ACTIONS[299:314],
+        + _DECLARED_ACTIONS[269:273]
+        + _DECLARED_ACTIONS[274:279]
+        + _DECLARED_ACTIONS[280:284]
+        + _DECLARED_ACTIONS[293:308],
     ),
     (
         "dev_repo_nonstandalone",
-        _DECLARED_ACTIONS[262:275]
+        _DECLARED_ACTIONS[256:269]
+        + _DECLARED_ACTIONS[273:274]
         + _DECLARED_ACTIONS[279:280]
-        + _DECLARED_ACTIONS[285:286]
-        + _DECLARED_ACTIONS[290:299],
+        + _DECLARED_ACTIONS[284:293],
     ),
     ("installed", _INSTALLED_ACTIONS),
 )

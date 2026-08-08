@@ -773,7 +773,7 @@ _DECLARED_ACTIONS = (('direct', 'file', '@AGENTS'),
   '@ROOT/src.codex/skills/explain-simply/SKILL.md'),
  ('check_common_skill_body_pin',
   'mathtype-book-page',
-  'e0d3fa5233eaa5d59ba0c8b90b45ffb0aa2dd51e6a8a8a00659dd8bddd626323',
+  '615499de68dc03fccb23954e8ed94662076a9a744a493b71232ebdcce55357be',
   '@ROOT/src.codex/skills/mathtype-book-page/SKILL.md'),
  ('check_common_skill_body_pin',
   'vak-dissertation-review',
@@ -923,30 +923,6 @@ _DECLARED_ACTIONS = (('direct', 'file', '@AGENTS'),
   '@AGENTS',
   'Plain-language and terminology discipline',
   'shared governance requires terminology and abbreviation explanations in documents'),
- ('check_contains',
-  '@AGENTS',
-  'Markdown formula rendering format',
-  'shared governance requires previewer-safe Markdown formula formatting'),
- ('check_contains',
-  '@AGENTS',
-  'split long derivations into several short one-line',
-  'shared governance prefers one-line formulas for fragile previewers'),
- ('check_contains',
-  '@AGENTS',
-  'Do not use multi-line `$$...$$` display blocks',
-  'shared governance rejects unverified multi-line display math'),
- ('check_contains',
-  '@AGENTS',
-  'compatibility hacks such as `\\sb` or `\\sp`',
-  'shared governance forbids formula compatibility hacks'),
- ('check_contains',
-  '@AGENTS',
-  'broken Markdown table pipe counts',
-  'shared governance scans formula edits for delimiter and table breakage'),
- ('check_contains',
-  '@AGENTS',
-  'Formula scope and assumptions discipline',
-  'shared governance requires formula scope and assumption disclosure'),
  ('check_contains',
   '@AGENTS',
   'concrete observable data',
@@ -1521,9 +1497,9 @@ ACTIONS = (
     (
         "all",
         _DECLARED_ACTIONS[0:35]
-        + _DECLARED_ACTIONS[142:310]
-        + _DECLARED_ACTIONS[328:335]
-        + _DECLARED_ACTIONS[372:378],
+        + _DECLARED_ACTIONS[142:304]
+        + _DECLARED_ACTIONS[322:329]
+        + _DECLARED_ACTIONS[366:372],
     ),
     (
         "dev_repo",
@@ -1531,20 +1507,20 @@ ACTIONS = (
         + _DECLARED_ACTIONS[58:76]
         + _DECLARED_ACTIONS[86:122]
         + _DECLARED_ACTIONS[129:142]
-        + _DECLARED_ACTIONS[324:327]
-        + _DECLARED_ACTIONS[335:340]
-        + _DECLARED_ACTIONS[341:348]
-        + _DECLARED_ACTIONS[357:372],
+        + _DECLARED_ACTIONS[318:321]
+        + _DECLARED_ACTIONS[329:334]
+        + _DECLARED_ACTIONS[335:342]
+        + _DECLARED_ACTIONS[351:366],
     ),
     (
         "dev_repo_nonstandalone",
         _DECLARED_ACTIONS[51:58]
         + _DECLARED_ACTIONS[76:86]
         + _DECLARED_ACTIONS[122:129]
-        + _DECLARED_ACTIONS[310:324]
-        + _DECLARED_ACTIONS[327:328]
-        + _DECLARED_ACTIONS[340:341]
-        + _DECLARED_ACTIONS[348:357],
+        + _DECLARED_ACTIONS[304:318]
+        + _DECLARED_ACTIONS[321:322]
+        + _DECLARED_ACTIONS[334:335]
+        + _DECLARED_ACTIONS[342:351],
     ),
     ("installed", _INSTALLED_ACTIONS),
 )
