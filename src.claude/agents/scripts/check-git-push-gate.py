@@ -385,22 +385,9 @@ WHAT THE GENERIC NON-PR ROUTE STILL DOES NOT COVER (disclosed, not silently assu
     scanner it keys on (`2026-07-26-commit-messages-are-never-scanned-under-
     any-posture`, filed, not fixed here — sequenced after this item as
     `2026-07-26-publication-scanner-attestation-object`).
-  - TRANSCRIPT_TAIL_LINES REACHABILITY (2026-07-26, adversarial-gate
-    finding, pre-existing but now load-bearing since branch (b) is a real
-    correlation check rather than a haystack join). Only the last
-    TRANSCRIPT_TAIL_LINES entries of the transcript are read; a scan-and-
-    result pair further back than that is invisible, so branch (b) is
-    UNREACHABLE for that turn no matter how correctly the scan ran. Measured
-    on this machine's own real transcripts, under the turn-boundary
-    definition that mirrors this hook's own `last_genuine_user_message` (see
-    TRANSCRIPT_TAIL_LINES' comment for the exact method and sample): ~38% of
-    real turns exceed the window. This fails CLOSED (an unreachable
-    branch (b) denies, it does not allow), which is the safe direction, but
-    it is silent about WHY — an operator sees a bare deny and does not know
-    whether their scan evidence was rejected or never seen at all. The deny
-    message below now names this possibility explicitly rather than leaving
-    it silent. Widening the window is a deliberate future decision (it costs
-    read time on every push) and is intentionally NOT made here.
+  - Current-turn evidence is read through the shared byte-bounded owner. A
+    non-success snapshot cannot credit the marker or correlated scan route;
+    strict complete history remains the separate source for PR grant state.
 """
 from __future__ import annotations
 
@@ -418,17 +405,18 @@ from typing import NamedTuple
 from urllib.parse import quote, urlsplit
 
 from hook_common import (
+    CURRENT_TURN_BYTE_CAP,
     NO_OBSERVED_FAILURE,
+    STATUS_FOUND,
     extract_model_shell_commands_with_ids,
     extract_model_tool_calls_with_ids,
     extract_tool_outputs_with_ids,
     extract_user_typed_text,
     is_user_message,
-    last_genuine_user_message,
     parse_envelope,
     read_stdin_utf8,
     read_transcript_history,
-    read_transcript_tail,
+    scan_current_turn_boundary,
 )
 
 # Per-turn override marker — honored ONLY from the last genuine user message.
@@ -738,35 +726,6 @@ def _extract_push_remote_and_dst(push_args: list[str]) -> tuple[str, str] | None
         return None
     return remote, dst
 
-
-# How many transcript JSONL lines to read (same tail budget as the sibling
-# bugfix-discipline hook). DISCLOSED REACHABILITY GAP (2026-07-26, adversarial-
-# gate finding, pre-existing, amplified by this hardening making branch (b)
-# real correlation work at all): a scan-and-result pair more than this many
-# entries before the push is invisible to `read_transcript_tail`, so branch
-# (b) becomes UNREACHABLE for that turn regardless of how correctly the scan
-# ran, silently pushing the operator toward the `[approve-publication]`
-# marker (the branch that needs no scan at all). Measured directly against
-# this machine's own real session transcripts (477 main-session `.jsonl`
-# files under `~/.claude/projects`, subagent sidechains excluded since a
-# subagent context already exits at step 2 above; 2026-07-26). An initial
-# pass used a partially-permissive turn-boundary definition and read ~14% of
-# turns exceeding 100; re-measured under the boundary that actually MIRRORS
-# this hook's own `last_genuine_user_message` (non-empty typed text, skipping
-# meta/compact-summary entries — the same rule this hook itself uses to find
-# where a turn starts): median turn length 66 entries, p90 385, ~38% of turns
-# exceed 100. That figure is the one that describes this hook's real
-# exposure, because it is measured the same way the hook itself measures a
-# turn; the ~14% figure came from a looser boundary than what the hook
-# actually applies and understates the gap — both figures are recorded here
-# rather than silently discarding the superseded one. This fails closed here
-# (the current, safe behavior), which is not the same as this branch being
-# reliably reachable. Widening the window trades read-time cost on EVERY
-# push (not measured here) against that reachability gap; this hardening
-# deliberately does NOT pick a new number unilaterally — see the deny
-# message's reachability note, WHAT THIS STILL DOES NOT COVER below, and
-# work-items/bugs/2026-07-26-transcript-tail-lines-reachability-gap-needs-a-decision.md.
-TRANSCRIPT_TAIL_LINES = 100
 
 # `git` global options that consume a SEPARATE following token as their value;
 # skipped together with their value when scanning for the subcommand (so
@@ -1825,11 +1784,16 @@ def evaluate_push(envelope: dict) -> bool:
     if not transcript_path:
         raise PrRouteDenied("PRG-TRANSCRIPT-UNAVAILABLE")
 
-    entries = read_transcript_tail(transcript_path, TRANSCRIPT_TAIL_LINES)
-    last_user_entry, user_text, after_user_entries = last_genuine_user_message(entries)
-
-    if last_user_entry is None:
-        user_text = ""
+    last_user_entry, after_user_entries, current_turn_status = scan_current_turn_boundary(
+        transcript_path, byte_cap=CURRENT_TURN_BYTE_CAP
+    )
+    user_text = (
+        extract_user_typed_text(last_user_entry)
+        if current_turn_status == STATUS_FOUND and last_user_entry is not None
+        else ""
+    )
+    if current_turn_status != STATUS_FOUND:
+        after_user_entries = []
 
     # (a) Per-turn user-side override — the marker counts ONLY from the last
     # genuine user message, never from assistant prose / tool calls / output.

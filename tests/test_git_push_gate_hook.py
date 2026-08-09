@@ -2371,6 +2371,16 @@ class TestGitPushGateResultStatus(unittest.TestCase):
         )
 
 
+class TestBoundedCurrentTurnPushGate(unittest.TestCase):
+    def test_current_turn_131_record_reachability_allows_marker(self) -> None:
+        entries = [user("[approve-publication] push")]
+        entries.extend(assistant(f"step {index}") for index in range(130))
+        for script in HOOKS:
+            with self.subTest(script=script):
+                result = run_hook(script, entries, "git push origin main")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertFalse(denies(result), result.stdout)
+
 class TestCrashWhileDecidingFallsThroughToDeny(unittest.TestCase):
     """2026-07-26, HIGH-severity finding, `$security-reviewer` (fable) --
     `work-items/bugs/2026-07-26-push-gate-new-paths-fail-open-because-the-
@@ -2410,7 +2420,7 @@ class TestCrashWhileDecidingFallsThroughToDeny(unittest.TestCase):
         return rc, buf.getvalue()
 
     def test_exception_reading_the_transcript_still_prints_deny_payload(self) -> None:
-        # THE BUG REPORT'S OWN INJECTION POINT: read_transcript_tail raises
+        # THE BUG REPORT'S OWN INJECTION POINT: current-turn scanning raises
         # (e.g. a git/helper failure surfacing as an unexpected exception).
         # Pre-fix this propagated out of main() with no payload printed;
         # post-fix, main() must still return 0 AND print the deny payload.
@@ -2423,7 +2433,7 @@ class TestCrashWhileDecidingFallsThroughToDeny(unittest.TestCase):
             with self.subTest(script=script.parent.parent.name):
                 rc, stdout = self._run_with_patch(
                     script, f"push_gate_crash_read_{idx}", envelope,
-                    read_transcript_tail={"side_effect": RuntimeError("injected: git/helper failure")},
+                    scan_current_turn_boundary={"side_effect": RuntimeError("injected: git/helper failure")},
                 )
                 self.assertEqual(rc, 0, f"stdout={stdout!r}")
                 self.assertTrue(denies_text(stdout), f"stdout={stdout!r}")

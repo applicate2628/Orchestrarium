@@ -119,32 +119,6 @@ def parse_envelope(stdin_text: str) -> dict:
     return data
 
 
-def read_transcript_tail(transcript_path: str, n: int = 100) -> list[dict]:
-    """Read up to n JSONL transcript entries with per-line fail-open parsing."""
-    if not transcript_path:
-        return []
-    tp = Path(transcript_path)
-    if not tp.is_file():
-        return []
-    try:
-        raw = tp.read_text(encoding="utf-8", errors="replace")
-    except Exception:
-        return []
-
-    entries: list[dict] = []
-    for line in raw.splitlines()[-n:]:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            entry = json.loads(line)
-        except Exception:
-            continue
-        if isinstance(entry, dict):
-            entries.append(entry)
-    return entries
-
-
 HISTORY_STATUS_FOUND = "found"
 HISTORY_STATUS_ABSENT = "absent"
 HISTORY_STATUS_UNREADABLE = "unreadable"
@@ -168,12 +142,12 @@ def read_transcript_history(
 ) -> tuple[list[dict], str]:
     """Read one complete JSONL transcript under explicit resource bounds.
 
-    Unlike :func:`read_transcript_tail`, this reader is strict and never
-    substitutes a tail window for complete history.  It is intended for
+    This strict-history reader never substitutes a current-turn snapshot for
+    complete history. It is intended for
     authorization state whose meaning depends on original record order.  A
     missing/unreadable path, invalid UTF-8/JSON/non-object record, oversized
     line, or file/record cap returns no entries plus a typed status.  Existing
-    tail and current-turn callers retain their historical fail-open behavior.
+    current-turn callers retain their typed non-success behavior.
     """
     if not transcript_path:
         return [], HISTORY_STATUS_ABSENT
@@ -231,8 +205,7 @@ def last_genuine_user_text(transcript_path: str, *, byte_cap: int) -> tuple[str,
                 `status == STATUS_FOUND` (possibly "" if the message itself
                 was empty, which cannot happen for a real typed message but
                 is defensive); "" for every other status
-      status -- one of `TURN_BOUNDARY_STATUSES` (STATUS_FOUND, STATUS_ABSENT,
-                STATUS_UNREADABLE, STATUS_NOT_IN_WINDOW)
+      status -- one of `TURN_BOUNDARY_STATUSES`
 
     THIS USED TO BE its OWN independent bounded-reverse-scan loop, byte for
     byte identical to `current_turn_entries`'s except for which half of the
@@ -914,19 +887,27 @@ def extract_model_shell_commands_with_ids(entry: object) -> list[tuple[str, str]
 STATUS_FOUND = "found"
 STATUS_ABSENT = "absent"
 STATUS_UNREADABLE = "unreadable"
+STATUS_INVALID = "invalid"
+STATUS_LIMIT = "limit"
 STATUS_NOT_IN_WINDOW = "not-in-window"
-TURN_BOUNDARY_STATUSES = (STATUS_FOUND, STATUS_ABSENT, STATUS_UNREADABLE, STATUS_NOT_IN_WINDOW)
+TURN_BOUNDARY_STATUSES = (
+    STATUS_FOUND,
+    STATUS_ABSENT,
+    STATUS_UNREADABLE,
+    STATUS_INVALID,
+    STATUS_LIMIT,
+    STATUS_NOT_IN_WINDOW,
+)
+CURRENT_TURN_BYTE_CAP = 8 * 1024 * 1024
 
 
 def scan_current_turn_boundary(transcript_path: str, *, byte_cap: int) -> tuple[dict | None, list[dict], str]:
-    """THE single bounded REVERSE scan to the CURRENT TURN's boundary -- the
-    most recent genuine user-typed message -- without ever reading the whole
-    transcript file. `current_turn_entries` and `last_genuine_user_text` are
-    both thin projections of this function's return value; neither
-    re-implements the scan loop or the boundary predicate (see
-    work-items/bugs/2026-07-26-two-owners-of-the-current-turn-boundary-in-
-    one-module.md -- they used to each run this loop independently, which is
-    exactly the defect this function removes).
+    """Return one bounded snapshot of the current turn.
+
+    This is the only production I/O owner for current-turn evidence.
+    `current_turn_entries` and `last_genuine_user_text` are thin projections;
+    semantic boundary detection remains delegated to `slice_current_turn` and
+    therefore to `last_genuine_user_message`.
 
     Returns `(boundary_entry, after_entries, status)`:
 
@@ -937,119 +918,70 @@ def scan_current_turn_boundary(transcript_path: str, *, byte_cap: int) -> tuple[
                          when the boundary is the very last record in the
                          window
       status         -- one of TURN_BOUNDARY_STATUSES:
-          STATUS_FOUND          -- boundary_entry located within byte_cap
+          STATUS_FOUND          -- a valid boundary is inside the snapshot
           STATUS_ABSENT         -- transcript_path is empty/None
-          STATUS_UNREADABLE     -- the path does not resolve to a readable
-                                    file
-          STATUS_NOT_IN_WINDOW  -- no genuine user message within byte_cap
-                                    bytes of end-of-file
+          STATUS_UNREADABLE     -- path/open/seek/read failed
+          STATUS_INVALID        -- retained complete data is invalid
+          STATUS_LIMIT          -- one record spans the bounded snapshot
+          STATUS_NOT_IN_WINDOW  -- valid snapshot has no genuine boundary
 
-    BOUNDARY DETECTION IS DELEGATED, NEVER REIMPLEMENTED. Each candidate
-    window's parsed entries are handed to `slice_current_turn`, which itself
-    delegates to `last_genuine_user_message` -- the SAME function every
-    other transcript-slicing caller in this module uses. This function owns
-    ONLY the I/O half of the scan (chunked reads, the doubling retry,
-    byte_cap, decode, per-line parse); it must never re-test
-    `is_user_message` or "typed text" itself. That split is load-bearing:
-    `slice_current_turn`'s own docstring records a real, previously-shipped
-    defect where a prior version used `is_user_message` ALONE as the
-    boundary predicate -- a tool_result is ALSO recorded as
-    `{"type":"user",...}` in Claude Code, so in any tool-using turn the
-    boundary landed on the trailing tool_result instead of the human's real
-    last message, silently discarding every actual tool call the turn made
-    before it. Routing through `slice_current_turn` here means this
-    function cannot independently reopen that defect by re-deriving the
-    predicate itself.
-
-    WHY A SEPARATE SCAN FROM `read_transcript_tail` (design.md,
-    review-round-cap-enforcement, S4.5 / F2). The turn boundary (where the
-    CURRENT turn started) is a SEMANTIC position; a fixed record window
-    (`read_transcript_tail`'s `n`) is a COST CAP. Conflating them under one
-    constant loses the boundary whenever a turn produces more records than
-    the window -- measured at 36.8% of real turns for n=100 and still 19.5%
-    for n=200 (a bigger constant does not fix the defect class, it only
-    moves the failure rate). This function anchors on the boundary itself:
-    start with a small trailing read (1 MiB) and only read MORE when that
-    chunk does not contain the boundary, doubling up to `byte_cap`. Measured
-    cheaper on both axes than the fixed-window approach: 8 records / 0.6 ms
-    to find the boundary on the largest transcript measured here, versus
-    `read_transcript_tail`'s whole-file `read_text()` at 1,482 ms for the
-    same file. This refactor's own regression measurement (this session, a
-    different machine and fixture than the figures above, so not a literal
-    reproduction of them): a 100 MiB synthetic transcript, 8 MiB byte_cap,
-    20 reps of the bounded scan versus 5 reps of `read_transcript_tail` as a
-    whole-file-read control -- bounded scan p95 9.03 ms against a 239.96 ms
-    control mean (see tests/test_hook_common.py's opt-in `TestScanCost`,
-    `ORCHESTRARIUM_RUN_SCAN_COST_BENCHMARK=1`). The bounded scan stays
-    roughly two orders of magnitude cheaper than the whole-file control,
-    which is the property this refactor is required to preserve; the
-    absolute numbers differ from the design-time citation because they were
-    captured on a different machine under different load, not because the
-    scan's cost characteristics changed.
-
-    `read_transcript_tail` and every other export in this module besides
-    `current_turn_entries` / `last_genuine_user_text` are BYTE-UNCHANGED by
-    this function -- a caller that needs a whole-turn-agnostic tail keeps
-    using `read_transcript_tail` exactly as before. `read_transcript_tail`'s
-    own whole-file-read cost on a blocking path is a SEPARATE, still-open
-    defect (work-items/bugs/2026-07-26-transcript-tail-reads-the-whole-
-    file-on-a-blocking-path.md), not fixed here -- this function makes that
-    fix EASIER, not harder, if it later routes callers through a shared
-    chunked-read primitive of its own, because the doubling-read mechanics
-    now have exactly one home to extend rather than two to keep in sync."""
+    At most ``byte_cap`` transcript bytes are read in aggregate. For a file
+    larger than the cap, one byte of that budget is a leading-boundary
+    sentinel and the remainder is the retained suffix. Any non-found result
+    returns no partial boundary or later-entry data."""
     if not transcript_path:
         return None, [], STATUS_ABSENT
+    if byte_cap <= 0:
+        return None, [], STATUS_LIMIT
     tp = Path(transcript_path)
     try:
         if not tp.is_file():
             return None, [], STATUS_UNREADABLE
-        file_size = tp.stat().st_size
+        with tp.open("rb") as stream:
+            stream.seek(0, 2)
+            file_size = stream.tell()
+            if file_size <= byte_cap:
+                stream.seek(0)
+                raw = stream.read(file_size)
+                payload = raw
+                begins_at_record_boundary = True
+            else:
+                stream.seek(file_size - byte_cap)
+                raw = stream.read(byte_cap)
+                if len(raw) != byte_cap:
+                    return None, [], STATUS_UNREADABLE
+                sentinel, payload = raw[:1], raw[1:]
+                begins_at_record_boundary = sentinel == b"\n"
     except Exception:
         return None, [], STATUS_UNREADABLE
 
-    chunk = min(1024 * 1024, byte_cap)  # start at 1 MiB, never exceeding byte_cap
-    while True:
-        read_size = min(chunk, file_size)
-        start_offset = file_size - read_size
+    if not begins_at_record_boundary:
+        first_newline = payload.find(b"\n")
+        if first_newline < 0:
+            return None, [], STATUS_LIMIT
+        payload = payload[first_newline + 1 :]
+
+    lines = payload.split(b"\n")
+    if payload.endswith(b"\n"):
+        lines.pop()
+
+    entries: list[dict] = []
+    for raw_line in lines:
+        if not raw_line.strip():
+            continue
         try:
-            with tp.open("rb") as f:
-                f.seek(start_offset)
-                raw = f.read(read_size)
-        except Exception:
-            return None, [], STATUS_UNREADABLE
+            line = raw_line.decode("utf-8", errors="strict")
+            entry = json.loads(line)
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return None, [], STATUS_INVALID
+        if not isinstance(entry, dict):
+            return None, [], STATUS_INVALID
+        entries.append(entry)
 
-        text_blob = raw.decode("utf-8", errors="replace")
-        lines = text_blob.split("\n")
-        # Discard the leading partial line UNLESS the read started at true
-        # file offset 0 (in which case there is no partial line -- the read
-        # begins at a real record boundary). A doubling retry re-includes
-        # the discarded partial line whole, so this is safe rather than lossy.
-        if start_offset > 0 and lines:
-            lines = lines[1:]
-
-        entries: list[dict] = []
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                entry = json.loads(line)
-            except Exception:
-                continue
-            if isinstance(entry, dict):
-                entries.append(entry)
-
-        boundary_entry, after_entries = slice_current_turn(entries)
-        if boundary_entry is not None:
-            return boundary_entry, after_entries, STATUS_FOUND
-
-        if start_offset == 0:
-            # Read the whole file and still found no boundary -- there is
-            # nothing more to read.
-            return None, [], STATUS_NOT_IN_WINDOW
-        if chunk >= byte_cap:
-            return None, [], STATUS_NOT_IN_WINDOW
-        chunk = min(chunk * 2, byte_cap)
+    boundary_entry, after_entries = slice_current_turn(entries)
+    if boundary_entry is None:
+        return None, [], STATUS_NOT_IN_WINDOW
+    return boundary_entry, after_entries, STATUS_FOUND
 
 
 def current_turn_entries(transcript_path: str, *, byte_cap: int) -> tuple[list[dict], str]:
@@ -1065,8 +997,7 @@ def current_turn_entries(transcript_path: str, *, byte_cap: int) -> tuple[list[d
                  original (forward) order, when `status == STATUS_FOUND`
                  (possibly [] if the boundary is the very last record in the
                  window); [] for every other status
-      status  -- one of `TURN_BOUNDARY_STATUSES` (STATUS_FOUND,
-                 STATUS_ABSENT, STATUS_UNREADABLE, STATUS_NOT_IN_WINDOW)
+      status  -- one of `TURN_BOUNDARY_STATUSES`
 
     Existing callers relying on this exact signature and status vocabulary:
     `dispatch_sentinels.py` (the round-depth observer) and this module's own

@@ -41,10 +41,8 @@ from __future__ import annotations
 
 import json
 import os
-import statistics
 import sys
 import tempfile
-import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -159,12 +157,169 @@ class TestSharedProjectionsAgree(unittest.TestCase):
         # second hand-typed literal set.
         self.assertEqual(
             set(hook_common.TURN_BOUNDARY_STATUSES),
-            {"found", "absent", "unreadable", "not-in-window"},
+            {"found", "absent", "unreadable", "invalid", "limit", "not-in-window"},
         )
         _after, status = hook_common.current_turn_entries("", byte_cap=1024)
         self.assertIn(status, hook_common.TURN_BOUNDARY_STATUSES)
         _text, status2 = hook_common.last_genuine_user_text("", byte_cap=1024)
         self.assertIn(status2, hook_common.TURN_BOUNDARY_STATUSES)
+
+
+class TestBoundedCurrentTurnContract(unittest.TestCase):
+    def test_current_turn_131_record_reachability(self) -> None:
+        entries = [_user_entry("[approve-publication] push")]
+        entries.extend(_assistant_text_entry(f"step {i}") for i in range(130))
+        tp = _write_transcript(entries)
+        try:
+            boundary, after, status = hook_common.scan_current_turn_boundary(
+                str(tp), byte_cap=hook_common.CURRENT_TURN_BYTE_CAP
+            )
+            self.assertEqual(status, "found")
+            self.assertEqual(hook_common.extract_user_typed_text(boundary), "[approve-publication] push")
+            self.assertEqual(after, entries[1:])
+            self.assertEqual(len(after), 130)
+        finally:
+            tp.unlink()
+
+    def test_trailing_claude_tool_result_is_not_the_boundary(self) -> None:
+        entries = [_user_entry("do work"), _tool_use_entry("c1"), _tool_result_entry("c1")]
+        tp = _write_transcript(entries)
+        try:
+            boundary, after, status = hook_common.scan_current_turn_boundary(
+                str(tp), byte_cap=hook_common.CURRENT_TURN_BYTE_CAP
+            )
+            self.assertEqual(status, "found")
+            self.assertEqual(hook_common.extract_user_typed_text(boundary), "do work")
+            self.assertEqual(after, entries[1:])
+        finally:
+            tp.unlink()
+
+    def test_oversized_final_record_is_limit_not_partial_success(self) -> None:
+        tp = Path(tempfile.mktemp(suffix=".jsonl"))
+        try:
+            tp.write_bytes(
+                (json.dumps(_user_entry("boundary")) + "\n").encode("utf-8")
+                + (b"x" * (hook_common.CURRENT_TURN_BYTE_CAP + 1024))
+            )
+            self.assertEqual(
+                hook_common.scan_current_turn_boundary(
+                    str(tp), byte_cap=hook_common.CURRENT_TURN_BYTE_CAP
+                ),
+                (None, [], "limit"),
+            )
+        finally:
+            tp.unlink(missing_ok=True)
+
+    def test_final_partial_record_is_invalid_not_partial_success(self) -> None:
+        tp = Path(tempfile.mktemp(suffix=".jsonl"))
+        try:
+            tp.write_bytes(
+                (json.dumps(_user_entry("boundary")) + "\n").encode("utf-8")
+                + b'{"type":"assistant","message":'
+            )
+            self.assertEqual(
+                hook_common.scan_current_turn_boundary(
+                    str(tp), byte_cap=hook_common.CURRENT_TURN_BYTE_CAP
+                ),
+                (None, [], "invalid"),
+            )
+        finally:
+            tp.unlink(missing_ok=True)
+
+    def test_invalid_complete_record_is_invalid_not_partial_success(self) -> None:
+        tp = Path(tempfile.mktemp(suffix=".jsonl"))
+        try:
+            tp.write_bytes(
+                (json.dumps(_user_entry("boundary")) + "\n").encode("utf-8")
+                + b"not-json\n"
+            )
+            self.assertEqual(
+                hook_common.scan_current_turn_boundary(
+                    str(tp), byte_cap=hook_common.CURRENT_TURN_BYTE_CAP
+                ),
+                (None, [], "invalid"),
+            )
+        finally:
+            tp.unlink(missing_ok=True)
+
+    def test_six_statuses_have_empty_data_on_every_non_found_path(self) -> None:
+        cases: list[tuple[str, str]] = []
+        cases.append(("", "absent"))
+        cases.append((str(Path(tempfile.mktemp(suffix=".jsonl"))), "unreadable"))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            invalid = root / "invalid.jsonl"
+            invalid.write_bytes(b"not-json\n")
+            cases.append((str(invalid), "invalid"))
+            no_user = root / "no-user.jsonl"
+            no_user.write_text(json.dumps(_assistant_text_entry("only assistant")) + "\n", encoding="utf-8")
+            cases.append((str(no_user), "not-in-window"))
+            over = root / "over.jsonl"
+            over.write_bytes(b"x" * 2048)
+            cases.append((str(over), "limit"))
+
+            for transcript_path, expected_status in cases:
+                with self.subTest(status=expected_status):
+                    self.assertEqual(
+                        hook_common.scan_current_turn_boundary(transcript_path, byte_cap=1024),
+                        (None, [], expected_status),
+                    )
+
+    @unittest.skipUnless(
+        os.environ.get("ORCHESTRARIUM_RUN_TRANSCRIPT_P95_BENCHMARK") == "1",
+        "opt-in >=100 MiB read-budget guard",
+    )
+    def test_tail_reader_byte_cap_8mib(self) -> None:
+        filler = (json.dumps(_assistant_text_entry("x" * 400)) + "\n").encode("utf-8")
+        target_size = 100 * 1024 * 1024
+        tp = Path(tempfile.mktemp(suffix=".jsonl"))
+        try:
+            with tp.open("wb") as stream:
+                while stream.tell() < target_size:
+                    stream.write(filler)
+                stream.write((json.dumps(_user_entry("boundary")) + "\n").encode("utf-8"))
+                stream.write((json.dumps(_assistant_text_entry("after")) + "\n").encode("utf-8"))
+
+            original_open = Path.open
+            observed = {"bytes": 0}
+
+            class CountingReader:
+                def __init__(self, wrapped):
+                    self.wrapped = wrapped
+
+                def __enter__(self):
+                    self.wrapped.__enter__()
+                    return self
+
+                def __exit__(self, *args):
+                    return self.wrapped.__exit__(*args)
+
+                def seek(self, *args):
+                    return self.wrapped.seek(*args)
+
+                def tell(self):
+                    return self.wrapped.tell()
+
+                def read(self, *args):
+                    data = self.wrapped.read(*args)
+                    observed["bytes"] += len(data)
+                    return data
+
+            def counting_open(path_self, *args, **kwargs):
+                return CountingReader(original_open(path_self, *args, **kwargs))
+
+            with mock.patch.object(hook_common.Path, "open", counting_open):
+                boundary, after, status = hook_common.scan_current_turn_boundary(
+                    str(tp), byte_cap=hook_common.CURRENT_TURN_BYTE_CAP
+                )
+
+            self.assertEqual(status, "found")
+            self.assertEqual(hook_common.extract_user_typed_text(boundary), "boundary")
+            self.assertEqual(after, [_assistant_text_entry("after")])
+            self.assertLessEqual(observed["bytes"], hook_common.CURRENT_TURN_BYTE_CAP)
+        finally:
+            tp.unlink(missing_ok=True)
 
 
 class TestBoundedTranscriptHistory(unittest.TestCase):
@@ -346,66 +501,6 @@ class TestCorrelatedToolResultStatus(unittest.TestCase):
                 self.assertIsInstance(result, tuple)
                 with self.assertRaises(AttributeError):
                     result.execution_status = "NO_OBSERVED_FAILURE"
-
-
-class TestScanCost(unittest.TestCase):
-    """Measured-cost gate (bug Constraints): the refactor must preserve the
-    bounded scan's cheapness against a whole-file-read control. Opt-in via
-    ORCHESTRARIUM_RUN_SCAN_COST_BENCHMARK=1 -- writes a ~100 MiB fixture, so
-    it is skipped by default to keep the routine suite fast."""
-
-    @unittest.skipUnless(
-        os.environ.get("ORCHESTRARIUM_RUN_SCAN_COST_BENCHMARK") == "1",
-        "opt-in benchmark; set ORCHESTRARIUM_RUN_SCAN_COST_BENCHMARK=1 to run",
-    )
-    def test_bounded_scan_p95_beats_whole_file_control_at_100mib(self) -> None:
-        filler_line = json.dumps(_assistant_text_entry("x" * 400)) + "\n"
-        target_size = 100 * 1024 * 1024
-        tp = Path(tempfile.mktemp(suffix=".jsonl"))
-        try:
-            with tp.open("w", encoding="utf-8") as f:
-                written = 0
-                while written < target_size:
-                    f.write(filler_line)
-                    written += len(filler_line)
-                f.write(json.dumps(_user_entry("the boundary message")) + "\n")
-                f.write(json.dumps(_assistant_text_entry("after")) + "\n")
-
-            byte_cap = 8 * 1024 * 1024
-
-            # Warm the OS file cache identically before either measured path.
-            hook_common.current_turn_entries(str(tp), byte_cap=byte_cap)
-            hook_common.read_transcript_tail(str(tp), 100)
-
-            bounded_samples = []
-            status = None
-            for _ in range(20):
-                t0 = time.perf_counter()
-                _entries, status = hook_common.current_turn_entries(str(tp), byte_cap=byte_cap)
-                bounded_samples.append((time.perf_counter() - t0) * 1000)
-            self.assertEqual(status, "found")
-
-            control_samples = []
-            for _ in range(5):
-                t0 = time.perf_counter()
-                hook_common.read_transcript_tail(str(tp), 100)
-                control_samples.append((time.perf_counter() - t0) * 1000)
-
-            bounded_samples.sort()
-            p95_index = max(0, int(len(bounded_samples) * 0.95) - 1)
-            bounded_p95 = bounded_samples[p95_index]
-            control_mean = statistics.mean(control_samples)
-
-            print(f"\n[TestScanCost] bounded scan p95 over {len(bounded_samples)} reps: {bounded_p95:.2f} ms")
-            print(f"[TestScanCost] whole-file control mean over {len(control_samples)} reps: {control_mean:.2f} ms")
-
-            self.assertLess(
-                bounded_p95, control_mean,
-                "bounded reverse scan regressed past the whole-file control -- "
-                "the measured cost this refactor must preserve is broken",
-            )
-        finally:
-            tp.unlink()
 
 
 if __name__ == "__main__":

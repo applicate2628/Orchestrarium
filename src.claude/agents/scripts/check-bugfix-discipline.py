@@ -49,12 +49,14 @@ import re
 import sys
 
 from hook_common import (
+    CURRENT_TURN_BYTE_CAP,
+    STATUS_FOUND,
     extract_assistant_prose,
     extract_model_tool_calls,
-    last_genuine_user_message,
+    extract_user_typed_text,
     parse_envelope,
     read_stdin_utf8,
-    read_transcript_tail,
+    scan_current_turn_boundary,
 )
 
 # Bug-trigger and change-request phrases — English + Russian + universal markers.
@@ -164,10 +166,6 @@ BUGFIX_SIGNAL_REGEX = re.compile(BUGFIX_SIGNAL_PATTERN)
 # (e.g. a file the model is editing that happens to contain them).
 BUGFIX_INVOCATION_REGEX = re.compile(r"agents-bugfix", re.IGNORECASE)
 
-# How many lines of transcript JSONL to read. The current turn is usually
-# within the last ~50 entries; reading more wastes I/O.
-TRANSCRIPT_TAIL_LINES = 100
-
 # Path SEGMENTS whose Writes/Edits are never the CODE fix this guard targets:
 # report logs, scratch, plan snapshots, task memory, and docs. A Write to one of
 # these under a bug-vocabulary prompt (reviewing a bug-fix plan, or a headless
@@ -234,20 +232,12 @@ def main() -> int:
     if not transcript_path:
         return 0
 
-    entries = read_transcript_tail(transcript_path, TRANSCRIPT_TAIL_LINES)
-
-    # Find the last GENUINE user-typed message (skipping tool_result and
-    # harness-injected entries like system-reminder / task-notification);
-    # everything after it is the true current turn we examine for discipline
-    # signals. Matching triggers against the genuine message — not the most
-    # recent tool_result, which is what the naive "last user-role entry" used
-    # to return — is what stops the long-session false positives (and also
-    # fixes the false negative where a real bug report sits behind many
-    # tool_result entries).
-    last_user_entry, user_text, after_user_entries = last_genuine_user_message(entries)
-
-    if last_user_entry is None:
-        return 0  # no genuine user message in scope; allow
+    last_user_entry, after_user_entries, current_turn_status = scan_current_turn_boundary(
+        transcript_path, byte_cap=CURRENT_TURN_BYTE_CAP
+    )
+    if current_turn_status != STATUS_FOUND or last_user_entry is None:
+        return 0
+    user_text = extract_user_typed_text(last_user_entry)
 
     # The override marker AND the broad discipline signals (a stated hypothesis,
     # "diagnostic", "VERIFIED:", ...) come ONLY from the model's own PROSE reply

@@ -28,12 +28,13 @@ from pathlib import Path, PurePosixPath
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "scripts"))
 
 from hook_common import (  # noqa: E402
+    CURRENT_TURN_BYTE_CAP,
+    STATUS_FOUND,
     emit_advisory,
     extract_assistant_prose,
-    last_genuine_user_message,
     parse_envelope,
     read_stdin_utf8,
-    read_transcript_tail,
+    scan_current_turn_boundary,
 )
 
 
@@ -302,9 +303,10 @@ def main() -> int:
         transcript_path = envelope.get("transcript_path")
         if not isinstance(transcript_path, str) or not Path(transcript_path).is_file():
             return 0
-        entries = read_transcript_tail(transcript_path, 200)
-        _user, _typed, current_turn = last_genuine_user_message(entries)
-        if _user is None:
+        _user, current_turn, current_turn_status = scan_current_turn_boundary(
+            transcript_path, byte_cap=CURRENT_TURN_BYTE_CAP
+        )
+        if current_turn_status != STATUS_FOUND:
             return 0
         prose = "\n".join(filter(None, (extract_assistant_prose(entry) for entry in current_turn)))
         record = _parse_record(prose)

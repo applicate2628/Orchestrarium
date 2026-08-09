@@ -1400,30 +1400,32 @@ class TestG14T16BoundedReverseScan(unittest.TestCase):
 # name in any adapter payload).
 
 
-class TestG16T18HookCommonAdditivity(unittest.TestCase):
-    """G-16 / T-18 (design.md DI-13): adding `last_genuine_user_text` to
-    `hook_common.py` must move NOTHING existing. `read_transcript_tail` stays
-    byte-identical to what it has always been, and the four other callers'
-    own suites pass unchanged."""
+class TestG16T18HookCommonCurrentTurnOwnership(unittest.TestCase):
+    """The current state has one bounded current-turn owner and no fixed-record
+    tail relationship. Strict complete history remains a separate contract."""
 
-    def test_read_transcript_tail_source_unchanged(self) -> None:
-        import inspect
+    def test_obsolete_tail_reader_is_absent_and_one_owner_remains(self) -> None:
+        owner = REPO_ROOT / "scripts" / "universal-hooks" / "scripts" / "hook_common.py"
+        owner_text = owner.read_text(encoding="utf-8")
+        self.assertNotIn("def read_transcript_tail", owner_text)
+        self.assertNotIn("TRANSCRIPT_TAIL_LINES", owner_text)
+        self.assertEqual(owner_text.count("def scan_current_turn_boundary"), 1)
+        self.assertIn("def read_transcript_history", owner_text)
 
-        hook_common_path = (
-            REPO_ROOT / "scripts" / "universal-hooks" / "scripts" / "hook_common.py"
+        consumers = (
+            REPO_ROOT / "scripts" / "universal-hooks" / "scripts" / "check-git-push-gate.py",
+            REPO_ROOT / "scripts" / "universal-hooks" / "scripts" / "check-bugfix-discipline.py",
+            REPO_ROOT / "scripts" / "universal-hooks" / "scripts" / "check-passive-polling-stop.py",
+            REPO_ROOT / "scripts" / "universal-hooks" / "hooks" / "check-repository-orientation.py",
         )
-        spec = importlib.util.spec_from_file_location(
-            "hook_common_sentinel_additivity", hook_common_path
-        )
-        assert spec is not None and spec.loader is not None
-        hook_common = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(hook_common)
+        for consumer in consumers:
+            with self.subTest(consumer=consumer.name):
+                text = consumer.read_text(encoding="utf-8")
+                self.assertNotIn("read_transcript_tail", text)
+                self.assertNotIn("TRANSCRIPT_TAIL_LINES", text)
+                self.assertIn("scan_current_turn_boundary", text)
 
-        source = inspect.getsource(hook_common.read_transcript_tail)
-        self.assertIn("def read_transcript_tail(transcript_path: str, n: int = 100) -> list[dict]:", source)
-        self.assertIn("raw.splitlines()[-n:]", source)
-
-    def test_other_four_callers_suites_pass_unchanged(self) -> None:
+    def test_four_migrated_callers_suites_pass(self) -> None:
         other_suites = (
             "test_bugfix_discipline_hook.py",
             "test_git_push_gate_hook.py",

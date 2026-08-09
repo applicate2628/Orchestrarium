@@ -10,6 +10,12 @@ Keep the log in reverse-chronological `## YYYY-MM-DD` sections. Add new explanat
 
 Do not add entries for purely local-only hygiene edits such as formatting, link fixes, report-only churn, scratch cleanup, archive moves, or non-semantic wording cleanup.
 
+## 2026-08-09
+
+### Fixed
+
+- **Blocking and audit hooks now inspect one byte-bounded current-turn snapshot instead of reading an entire transcript and then keeping only 100 records.** The shared owner reads at most 8 MiB, applies the existing genuine-user boundary predicate, and returns typed non-success states without partial evidence; the publication gate, bug-fix discipline, passive-polling guard, and repository-orientation audit all use that owner. **Why it matters:** long sessions no longer make valid current-turn evidence unreachable merely because more than 100 records followed the user message, and large transcripts no longer impose whole-file reads on these paths. **Preserved:** publication authorization and strict pull-request history semantics, each hook's existing fail-open or fail-closed polarity, Codex/Claude mirror parity, and Gemini/Qwen behavior are unchanged. Dense full-process latency remains separately tracked and is not claimed to meet 150 ms.
+
 ## 2026-08-08
 
 ### Fixed

@@ -26,14 +26,13 @@ import os
 import re
 import sys
 from hook_common import (
+    CURRENT_TURN_BYTE_CAP,
+    STATUS_FOUND,
     extract_text,
     parse_envelope,
     read_stdin_utf8,
-    read_transcript_tail,
-    slice_current_turn,
+    scan_current_turn_boundary,
 )
-
-TRANSCRIPT_TAIL_LINES = 100
 
 OVERRIDE_MARKER_REGEX = re.compile(r"\[acknowledge-passive-stop\]", re.IGNORECASE)
 
@@ -129,10 +128,11 @@ def main() -> int:
         transcript_path = envelope.get("transcript_path") or ""
         if not transcript_path:
             return 0
-        entries = read_transcript_tail(str(transcript_path), TRANSCRIPT_TAIL_LINES)
-        if not entries:
+        _last_user, current_turn_entries, current_turn_status = scan_current_turn_boundary(
+            str(transcript_path), byte_cap=CURRENT_TURN_BYTE_CAP
+        )
+        if current_turn_status != STATUS_FOUND:
             return 0
-        _last_user, current_turn_entries = slice_current_turn(entries)
 
         if _has_relevant_probe(current_turn_entries):
             return 0
