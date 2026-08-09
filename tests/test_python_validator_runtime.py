@@ -153,6 +153,7 @@ def _materialize_installed_pack(
     for name in (
         "agent-run-ledger.py",
         "agent-run-ledger.sh",
+        "review_loop_state.py",
         "check-work-items-state.py",
         "check-work-items-state.sh",
         "validate-work-item-state.py",
@@ -334,12 +335,12 @@ def test_scoped_action_registry_preserves_source_inventory(
     (
         (
             "codex",
-            "PASS: 341  WARN: 0  FAIL: 0",
+            "PASS: 342  WARN: 0  FAIL: 0",
             "installed work-item state validator enforces evidence for PASS",
         ),
         (
             "claude",
-            "Checks: 336  |  Passed: 336  |  Warnings: 0  |  Errors: 0",
+            "Checks: 337  |  Passed: 337  |  Warnings: 0  |  Errors: 0",
             "installed work-item state validator enforces evidence for PASS",
         ),
     ),
@@ -436,7 +437,7 @@ def test_installed_codex_layering_checks_only_orchestrarium_owned_skills(
             "AGENTS.md",
             "## Role index",
             "## Stale role index",
-            "PASS: 341  WARN: 0  FAIL: 0",
+            "PASS: 342  WARN: 0  FAIL: 0",
             "Section '## Role index' present in AGENTS.md",
         ),
         (
@@ -445,7 +446,7 @@ def test_installed_codex_layering_checks_only_orchestrarium_owned_skills(
             ".claude/CLAUDE.md",
             "agents-design-panel.md",
             "agents-stale-panel.md",
-            "Checks: 336  |  Passed: 336  |  Warnings: 0  |  Errors: 0",
+            "Checks: 337  |  Passed: 337  |  Warnings: 0  |  Errors: 0",
             "CLAUDE.md dispatch index exposes the design-panel command",
         ),
     ),

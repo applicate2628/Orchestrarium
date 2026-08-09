@@ -1141,6 +1141,7 @@ _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
 _INSTALLED_ACTIONS = (
     ("check_file", "@SCRIPTS/agent-run-ledger.py", "installed agent-run-ledger.py"),
     ("check_file", "@SCRIPTS/agent-run-ledger.sh", "installed agent-run-ledger.sh"),
+    ("check_file", "@SCRIPTS/review_loop_state.py", "installed review-loop state engine"),
     (
         "check_file",
         "@SCRIPTS/check-work-items-state.py",

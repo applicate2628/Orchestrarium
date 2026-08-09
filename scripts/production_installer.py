@@ -25,6 +25,7 @@ RUNTIME_HELPERS = (
     "check-work-items-state.py",
     "check-work-items-state.sh",
     "mutate-work-item.py",
+    "review_loop_state.py",
     "skill_pack_validator_runtime.py",
     "validate-work-item-state.py",
     "validate-work-item-state.sh",
