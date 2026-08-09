@@ -5,6 +5,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[1]
 LEDGER = ROOT / "scripts" / "agent-run-ledger.py"
@@ -242,6 +244,116 @@ def test_append_rolls_back_invalid_pass_without_evidence(tmp_path: Path):
     assert not (item / "agent-runs.jsonl").exists()
 
 
+def test_append_writes_valid_terminal_scratch_evidence(tmp_path: Path):
+    item = prepare_valid_work_item(tmp_path)
+    launch = run_ledger(
+        item,
+        "append",
+        "--run-id", "scratch-launch-001",
+        "--role", "platform-engineer",
+        "--execution-role", "internal",
+        "--status", "running",
+        "--gate", "none",
+        "--scope", "scratch lifecycle",
+        "--event-kind", "launch",
+        "--started-at", "2026-08-09T00:00:00Z",
+        "--updated-at", "2026-08-09T00:00:00Z",
+    )
+    assert launch.returncode == 0, launch.stderr
+    entry = {
+        "entryId": "capture",
+        "path": ".scratch/work-items/ledger-helper/scratch-terminal-001/capture",
+        "disposition": "retain",
+        "reason": "Explicitly retained test evidence.",
+        "canonicalPointer": "reviews/qa.md",
+    }
+    terminal = run_ledger(
+        item,
+        "append",
+        "--run-id", "scratch-terminal-001",
+        "--role", "platform-engineer",
+        "--execution-role", "internal",
+        "--status", "completed",
+        "--gate", "PASS",
+        "--scope", "scratch lifecycle",
+        "--artifact", "reviews/qa.md",
+        "--evidence", "command:focused scratch test",
+        "--event-kind", "terminal",
+        "--launch-run-id", "scratch-launch-001",
+        "--scratch-evidence-json", json.dumps(entry),
+        "--started-at", "2026-08-09T00:01:00Z",
+        "--updated-at", "2026-08-09T00:01:00Z",
+    )
+    assert terminal.returncode == 0, terminal.stderr
+    events = [json.loads(line) for line in (item / "agent-runs.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert events[-1]["schemaVersion"] == 2
+    assert events[-1]["scratchEvidence"] == [entry]
+
+
+def test_append_rejects_duplicate_keys_in_scratch_evidence_json(tmp_path: Path):
+    item = prepare_valid_work_item(tmp_path)
+    result = run_ledger(
+        item,
+        "append",
+        "--run-id", "scratch-terminal-duplicate",
+        "--role", "platform-engineer",
+        "--execution-role", "internal",
+        "--status", "completed",
+        "--gate", "PASS",
+        "--scope", "scratch lifecycle",
+        "--artifact", "reviews/qa.md",
+        "--evidence", "command:focused scratch test",
+        "--event-kind", "terminal",
+        "--launch-run-id", "scratch-launch-001",
+        "--scratch-evidence-json",
+        '{"entryId":"capture","entryId":"shadow","path":"x","disposition":"retain","reason":"r","canonicalPointer":"reviews/qa.md"}',
+        "--started-at", "2026-08-09T00:01:00Z",
+        "--updated-at", "2026-08-09T00:01:00Z",
+    )
+
+    assert result.returncode == 1
+    assert "duplicate JSON key" in result.stderr
+    assert not (item / "agent-runs.jsonl").exists()
+
+
+def test_append_rejects_nested_duplicate_keys_in_scratch_evidence_json(tmp_path: Path):
+    item = prepare_valid_work_item(tmp_path)
+    result = run_ledger(
+        item,
+        "append",
+        "--run-id", "scratch-terminal-nested-duplicate",
+        "--role", "platform-engineer",
+        "--execution-role", "internal",
+        "--status", "completed",
+        "--gate", "PASS",
+        "--scope", "scratch lifecycle",
+        "--artifact", "reviews/qa.md",
+        "--evidence", "command:focused scratch test",
+        "--event-kind", "terminal",
+        "--launch-run-id", "scratch-launch-001",
+        "--scratch-evidence-json",
+        '{"entryId":"capture","path":"x","disposition":"delete","reason":"r","canonicalPointer":"reviews/qa.md","proof":{"kind":"git-object-set","kind":"accepted-artifact"}}',
+        "--started-at", "2026-08-09T00:01:00Z",
+        "--updated-at", "2026-08-09T00:01:00Z",
+    )
+
+    assert result.returncode == 1
+    assert "duplicate JSON key: kind" in result.stderr
+    assert not (item / "agent-runs.jsonl").exists()
+
+
+def test_scratch_evidence_raw_utf8_bytes_are_bounded_before_json_parse():
+    ledger = load_ledger_module()
+    validator = ledger.load_validator()
+    maximum = validator.MAX_SCRATCH_EVIDENCE_JSON_BYTES
+    raw = '{"entryId":"' + ("é" * ((maximum // 2) + 1))
+
+    assert len(raw) < maximum
+    assert len(raw.encode("utf-8")) > maximum
+    with pytest.raises(ValueError, match=r"maximum raw UTF-8 length"):
+        ledger.parse_scratch_evidence_json(raw, validator)
+
+
 def test_append_accepts_security_reviewer_waiver_and_discharges_revise(tmp_path: Path):
     item = prepare_valid_work_item(tmp_path)
     revise = append_unclassified_revise(item)
@@ -443,6 +555,20 @@ def test_rollup_surfaces_malformed_ledger_lines(tmp_path: Path):
     assert result.returncode == 0, result.stderr
     assert "malformed lines: 1" in result.stdout
     assert "total runs: 1" in result.stdout  # the one valid event is still counted
+
+
+def test_rollup_counts_duplicate_key_ledger_line_as_malformed(tmp_path: Path):
+    item = prepare_valid_work_item(tmp_path)
+    (item / "agent-runs.jsonl").write_text(
+        '{"runId":"first","runId":"second"}\n',
+        encoding="utf-8",
+    )
+
+    result = run_ledger(item, "rollup")
+
+    assert result.returncode == 0, result.stderr
+    assert "malformed lines: 1" in result.stdout
+    assert "total runs: 0" in result.stdout
 
 
 # --- F25: one main-conversation identity on the wire --------------------------

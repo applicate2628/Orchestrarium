@@ -56,11 +56,16 @@ def parse_evidence(value: str) -> dict[str, str]:
     return {"kind": kind.strip(), "ref": ref.strip()}
 
 
-def parse_evidence_json(value: str) -> dict[str, Any]:
-    parsed = json.loads(value)
-    if not isinstance(parsed, dict):
-        raise ValueError("--evidence-json must be a JSON object")
-    return parsed
+def parse_evidence_json(value: str, validator: Any) -> dict[str, Any]:
+    return validator.decode_json_object(value, source="--evidence-json")
+
+
+def parse_scratch_evidence_json(value: str, validator: Any) -> dict[str, Any]:
+    return validator.decode_json_object(
+        value.encode("utf-8"),
+        source="--scratch-evidence-json",
+        maximum_bytes=validator.MAX_SCRATCH_EVIDENCE_JSON_BYTES,
+    )
 
 
 def ensure_status_sections(item: Path, args: argparse.Namespace, validator: Any) -> list[str]:
@@ -101,7 +106,9 @@ def ensure_status_sections(item: Path, args: argparse.Namespace, validator: Any)
 LEGACY_EXECUTION_ROLES = {"lead": "main"}
 
 
-def build_event(args: argparse.Namespace) -> dict[str, Any]:
+def build_event(args: argparse.Namespace, validator: Any | None = None) -> dict[str, Any]:
+    if validator is None:
+        validator = load_validator()
     if args.execution_role in LEGACY_EXECUTION_ROLES:
         canonical = LEGACY_EXECUTION_ROLES[args.execution_role]
         raise ValueError(
@@ -124,6 +131,7 @@ def build_event(args: argparse.Namespace) -> dict[str, Any]:
             getattr(args, "lane", None),
             getattr(args, "effort", None),
             getattr(args, "finding_class", None),
+            getattr(args, "scratch_evidence_json", None),
         )
     )
     event: dict[str, Any] = {
@@ -163,9 +171,16 @@ def build_event(args: argparse.Namespace) -> dict[str, Any]:
     for value in args.evidence or []:
         evidence.append(parse_evidence(value))
     for value in args.evidence_json or []:
-        evidence.append(parse_evidence_json(value))
+        evidence.append(parse_evidence_json(value, validator))
     if evidence:
         event["evidence"] = evidence
+
+    scratch_evidence = [
+        parse_scratch_evidence_json(value, validator)
+        for value in (getattr(args, "scratch_evidence_json", None) or [])
+    ]
+    if scratch_evidence:
+        event["scratchEvidence"] = scratch_evidence
 
     return event
 
@@ -184,7 +199,7 @@ def restore_ledger(path: Path, previous: str | None) -> None:
         path.write_text(previous, encoding="utf-8")
 
 
-def _read_ledger(item: Path) -> tuple[list[dict[str, Any]], int]:
+def _read_ledger(item: Path, validator: Any | None = None) -> tuple[list[dict[str, Any]], int]:
     """Return (events, malformed_line_count). A corrupt or non-object JSONL line
     is skipped but COUNTED so the rollup can surface it — an audit surface
     (evidence coverage) must not silently under-count corrupt input."""
@@ -193,18 +208,37 @@ def _read_ledger(item: Path) -> tuple[list[dict[str, Any]], int]:
     malformed = 0
     if not ledger.exists():
         return events, malformed
-    for line in ledger.read_text(encoding="utf-8").splitlines():
-        if not line.strip():
-            continue
-        try:
-            parsed = json.loads(line)
-        except json.JSONDecodeError:
-            malformed += 1
-            continue
-        if isinstance(parsed, dict):
-            events.append(parsed)
-        else:
-            malformed += 1
+    validator = validator or load_validator()
+    with ledger.open("r", encoding="utf-8", newline="") as stream:
+        line_no = 0
+        while True:
+            raw = stream.readline(validator.MAX_LEDGER_LINE_CHARS + 2)
+            if raw == "":
+                break
+            line_no += 1
+            complete_line = raw.endswith("\n")
+            line = raw.rstrip("\r\n")
+            if len(line) > validator.MAX_LEDGER_LINE_CHARS or (
+                not complete_line and len(raw) > validator.MAX_LEDGER_LINE_CHARS
+            ):
+                while raw and not raw.endswith("\n"):
+                    raw = stream.readline(validator.MAX_LEDGER_LINE_CHARS + 2)
+                malformed += 1
+                continue
+            if not line.strip():
+                continue
+            if len(events) >= validator.MAX_LEDGER_EVENTS:
+                malformed += 1
+                break
+            try:
+                events.append(
+                    validator.decode_json_object(
+                        line,
+                        source=f"{ledger}:{line_no}",
+                    )
+                )
+            except ValueError:
+                malformed += 1
     return events, malformed
 
 
@@ -259,9 +293,10 @@ def command_append(args: argparse.Namespace) -> int:
         print(f"FAIL: missing work item: {item}", file=sys.stderr)
         return 1
 
+    validator = load_validator()
     try:
-        event = build_event(args)
-    except (ValueError, json.JSONDecodeError) as exc:
+        event = build_event(args, validator)
+    except ValueError as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
         return 1
 
@@ -302,7 +337,6 @@ def command_append(args: argparse.Namespace) -> int:
             fh.write(f"{previous}{prefix}{line}\n")
             fh.flush()
 
-        validator = load_validator()
         # strict_revise=False: the helper RECORDS events (including REVISE verdicts
         # themselves); closure strictness is the checker's and the gates' job.
         errors = validator.validate_work_item(item, ledger_path=candidate, strict_revise=False)
@@ -343,8 +377,9 @@ def command_rollup(args: argparse.Namespace) -> int:
     with_evidence = 0
     per_item: list[tuple[str, int]] = []
 
+    validator = load_validator()
     for item in items:
-        events, malformed = _read_ledger(item)
+        events, malformed = _read_ledger(item, validator)
         malformed_total += malformed
         per_item.append((item.name, len(events)))
         for event in events:
@@ -425,6 +460,11 @@ def build_parser() -> argparse.ArgumentParser:
     append.add_argument("--artifact", help="Artifact path relative to the work item.")
     append.add_argument("--evidence", action="append", help="Evidence in KIND:REF form. Repeatable.")
     append.add_argument("--evidence-json", action="append", help="Evidence as a JSON object. Repeatable.")
+    append.add_argument(
+        "--scratch-evidence-json",
+        action="append",
+        help="Terminal scratch-evidence ownership entry as a JSON object. Repeatable.",
+    )
     append.add_argument("--started-at", help="ISO-like start timestamp. Defaults to current UTC.")
     append.add_argument("--updated-at", help="ISO-like update timestamp. Defaults to started-at.")
     append.add_argument("--notes", help="Short operational note.")

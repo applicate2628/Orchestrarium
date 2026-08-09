@@ -330,6 +330,7 @@ class SessionStartPythonSmokeTests(unittest.TestCase):
             for create_scratch in (True, False):
                 with tempfile.TemporaryDirectory() as td:
                     root = Path(td)
+                    (root / ".git").mkdir()
                     if create_scratch:
                         (root / ".scratch").mkdir()
                     with self.subTest(

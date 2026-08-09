@@ -295,7 +295,7 @@ def test_failed_git_cat_file_call_falls_back_to_age_gate(tmp_path: Path, monkeyp
     _init_repo(tmp_path)
     write_file(tmp_path, ".scratch/old.md", age_days=30, text="anything")
 
-    monkeypatch.setattr(cleanup, "_blobs_missing_from_store", lambda git_root, shas: None)
+    monkeypatch.setattr(cleanup, "inspect_git_object_set", lambda git_root, shas: None)
 
     result = cleanup.scan_valuables(tmp_path / ".scratch", now=NOW)
 

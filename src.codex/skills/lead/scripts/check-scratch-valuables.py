@@ -187,6 +187,7 @@ import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import NamedTuple
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -677,6 +678,7 @@ def _scan_valuables(
     *,
     fallback_age_days: float = FALLBACK_AGE_THRESHOLD_DAYS,
     time_budget_seconds: float = HOOK_TIME_BUDGET_SECONDS,
+    deadline: float | None = None,
     report: "ScanReport | None" = None,
 ) -> list[dict]:
     """Read-only scan: PRIMARY predicate is git-content-uniqueness (see the
@@ -695,7 +697,8 @@ def _scan_valuables(
     if not scratch_root.is_dir():
         return []
     now = datetime.now(timezone.utc).timestamp()
-    deadline = time.monotonic() + time_budget_seconds
+    if deadline is None:
+        deadline = time.monotonic() + time_budget_seconds
     budget = _WalkBudget(deadline)
 
     candidates: list[tuple[Path, Path, "os.stat_result"]] = []
@@ -768,13 +771,156 @@ def _scan_valuables(
     return found
 
 
-def _resolve_root(envelope: dict) -> Path:
+class RepositoryRootResolution(NamedTuple):
+    status: str
+    root: Path | None
+    candidate_count: int = 0
+
+
+def _path_is_link_or_reparse(path: Path) -> bool:
+    """Inspect one path component without following it; uncertainty is unsafe."""
+
+    try:
+        info = os.lstat(path)
+    except OSError:
+        return True
+    import stat as stat_module
+
+    if stat_module.S_ISLNK(info.st_mode):
+        return True
+    if _HAS_ISJUNCTION:
+        try:
+            if os.path.isjunction(path):
+                return True
+        except OSError:
+            return True
+    reparse_attr = getattr(stat_module, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+    return bool(getattr(info, "st_file_attributes", 0) & reparse_attr)
+
+
+def _path_chain_is_safe(path: Path, deadline: float) -> bool | None:
+    """Return True/False, or None when the shared deadline expires."""
+
+    current = path.absolute()
+    while True:
+        if time.monotonic() >= deadline:
+            return None
+        if _path_is_link_or_reparse(current):
+            return False
+        if current.parent == current:
+            return True
+        current = current.parent
+
+
+def _git_root_state(path: Path) -> str:
+    """Return repo, none, or unsafe for one direct repository marker."""
+
+    marker = path / ".git"
+    try:
+        info = os.lstat(marker)
+    except FileNotFoundError:
+        return "none"
+    except OSError:
+        return "unsafe"
+    if _path_is_link_or_reparse(marker):
+        return "unsafe"
+    import stat as stat_module
+
+    return "repo" if (stat_module.S_ISDIR(info.st_mode) or stat_module.S_ISREG(info.st_mode)) else "unsafe"
+
+
+def resolve_repository_root(envelope: dict, deadline: float) -> RepositoryRootResolution:
+    """Resolve exactly one containing or direct-child Git repository, read-only.
+
+    A containing repository always wins. Outside a repository, only immediate
+    children are considered and the enumeration must finish within the SAME
+    deadline later consumed by the valuables scan. Links, junctions, and other
+    reparse points are never followed.
+    """
+
     cwd_value = envelope.get("cwd") if isinstance(envelope, dict) else None
+    candidate: Path | None = None
     if isinstance(cwd_value, str) and cwd_value:
-        candidate = Path(cwd_value)
-        if candidate.is_dir():
-            return candidate
-    return Path.cwd()
+        supplied = Path(cwd_value)
+        try:
+            if supplied.is_dir():
+                candidate = supplied
+        except OSError:
+            candidate = None
+    if candidate is None:
+        candidate = Path.cwd()
+
+    safe = _path_chain_is_safe(candidate, deadline)
+    if safe is None:
+        return RepositoryRootResolution("budget-limited", None)
+    if not safe:
+        return RepositoryRootResolution("unsafe", None)
+
+    current = candidate.absolute()
+    while True:
+        if time.monotonic() >= deadline:
+            return RepositoryRootResolution("budget-limited", None)
+        marker_state = _git_root_state(current)
+        if marker_state == "repo":
+            return RepositoryRootResolution("selected", current, 1)
+        if marker_state == "unsafe":
+            return RepositoryRootResolution("unsafe", None)
+        if current.parent == current:
+            break
+        current = current.parent
+
+    candidates: list[Path] = []
+    unsafe_child = False
+    try:
+        with os.scandir(candidate) as entries:
+            for entry in entries:
+                if time.monotonic() >= deadline:
+                    return RepositoryRootResolution(
+                        "budget-limited", None, len(candidates)
+                    )
+                try:
+                    if _is_link_or_reparse(entry):
+                        continue
+                    if not entry.is_dir(follow_symlinks=False):
+                        continue
+                except OSError:
+                    continue
+                child = Path(entry.path).absolute()
+                state = _git_root_state(child)
+                if state == "unsafe":
+                    unsafe_child = True
+                    continue
+                if state == "repo":
+                    candidates.append(child)
+                    if len(candidates) == 2:
+                        return RepositoryRootResolution("ambiguous", None, 2)
+    except OSError:
+        return RepositoryRootResolution("unsafe", None)
+
+    if unsafe_child:
+        return RepositoryRootResolution("unsafe", None, len(candidates))
+    if len(candidates) == 1:
+        return RepositoryRootResolution("selected", candidates[0], 1)
+    return RepositoryRootResolution("none", None)
+
+
+def _root_resolution_message(result: RepositoryRootResolution) -> str:
+    identifiers = {
+        "none": "SCRATCH-ROOT-NOT-FOUND",
+        "ambiguous": "SCRATCH-ROOT-AMBIGUOUS",
+        "unsafe": "SCRATCH-ROOT-UNSAFE",
+        "budget-limited": "SCRATCH-ROOT-BUDGET-LIMITED",
+    }
+    identifier = identifiers.get(result.status, "SCRATCH-ROOT-UNSAFE")
+    suffix = (
+        f" candidates={result.candidate_count}"
+        if result.status == "ambiguous"
+        else ""
+    )
+    return (
+        f"[scratch watchdog] {identifier}{suffix}: no scratch tree was scanned; "
+        "start inside one repository or its unambiguous direct parent."
+    )
 
 
 def _top_level_dir(relative_posix: str) -> str:
@@ -897,15 +1043,36 @@ def _build_message(valuables: list[dict], report: "ScanReport | None" = None) ->
 
 def main() -> int:
     try:
-        envelope = parse_envelope(read_stdin_utf8())
+        raw_envelope = read_stdin_utf8()
+        try:
+            json.loads(raw_envelope) if raw_envelope.strip() else {}
+        except (TypeError, ValueError):
+            return 0
+        envelope = parse_envelope(raw_envelope)
         if not isinstance(envelope, dict):
             envelope = {}
         if envelope.get("agent_id"):
             return 0  # this reminder belongs to the top-level session, not a dispatched subagent
 
-        root = _resolve_root(envelope)
+        deadline = time.monotonic() + HOOK_TIME_BUDGET_SECONDS
+        resolution = resolve_repository_root(envelope, deadline)
+        if resolution.status != "selected" or resolution.root is None:
+            payload = {
+                "hookSpecificOutput": {
+                    "hookEventName": "SessionStart",
+                    "additionalContext": _root_resolution_message(resolution),
+                }
+            }
+            print(json.dumps(payload, ensure_ascii=True))
+            return 0
+
+        root = resolution.root
         report = ScanReport()
-        valuables = _scan_valuables(root / SCRATCH_DIRNAME, report=report)
+        valuables = _scan_valuables(
+            root / SCRATCH_DIRNAME,
+            deadline=deadline,
+            report=report,
+        )
         if not valuables and not report.budget_limited:
             return 0  # byte-silent: nothing lingering, and this run covered the whole tree
 

@@ -37,7 +37,7 @@ a git repository, git is unavailable, or any git call fails, this fails OPEN
 to the original age-gated behavior (see `scan_valuables`'s docstring) rather
 than silently returning nothing.
 
-The whole module is two functions:
+The module exposes three read-only owners:
 
   * `scan_valuables()` -- pure, read-only. Walks a `.scratch/` tree and
     returns every candidate valuable file (git-unique when git is available,
@@ -47,6 +47,10 @@ The whole module is two functions:
     `is_dir` / `is_file` / `.stat`, `os.path.isjunction`, `Path.stat`, and two
     READ-ONLY git subprocesses (`git hash-object` WITHOUT `-w`, and
     `git cat-file --batch-check`) -- neither writes to the object database.
+  * `classify_owned_tree()` -- pure, bounded, link-safe classification of one
+    producer-owned evidence root. It opens regular files read-only, verifies
+    stable identities while hashing, and reuses the same two read-only Git
+    probes. It returns proof data but never applies a disposition.
   * `main()` -- a thin CLI that prints the scan as a human report (or JSON),
     for a developer to run by hand from this repository, purely for
     debugging. It performs no mutation either.
@@ -67,8 +71,10 @@ changes here, update both -- each file's docstring points at the other.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
+import re
 import shutil
 import stat as stat_module
 import subprocess
@@ -95,6 +101,45 @@ _HAS_ISJUNCTION = hasattr(os.path, "isjunction")
 _REPARSE_POINT_ATTR = getattr(stat_module, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
 
 _GIT_TIMEOUT_SECONDS = 60
+MAX_OWNED_TREE_FILES = 4096
+MAX_OWNED_TREE_ENTRIES = 8192
+MAX_OWNED_TREE_BYTES = 256 * 1024 * 1024
+
+
+class OwnedTreeClassificationError(Exception):
+    def __init__(self, failure_id: str, detail: str):
+        super().__init__(detail)
+        self.failure_id = failure_id
+
+
+@dataclass(frozen=True)
+class OwnedTreeSnapshot:
+    """Complete, read-only identity and Git-recoverability result for one root."""
+
+    identity_digest: str
+    file_count: int
+    directory_count: int
+    total_bytes: int
+    all_git_recoverable: bool
+    git_check_complete: bool
+
+
+@dataclass(frozen=True)
+class RootInspection:
+    """One non-following metadata observation of an owned root."""
+
+    exists: bool
+    is_directory: bool
+    is_link_or_reparse: bool
+    identity: tuple[int, int, int, int, int] | None
+
+
+@dataclass(frozen=True)
+class OwnedNamespaceInspection:
+    """Direct run/entry roots under one canonical scratch owner namespace."""
+
+    originals: frozenset[Path]
+    tombstones: frozenset[Path]
 
 
 @dataclass(frozen=True)
@@ -297,6 +342,288 @@ def _is_link_or_reparse(entry: os.DirEntry) -> bool:
     return bool(getattr(info, "st_file_attributes", 0) & _REPARSE_POINT_ATTR)
 
 
+def _stat_is_link_or_reparse(info: os.stat_result) -> bool:
+    return stat_module.S_ISLNK(info.st_mode) or bool(
+        getattr(info, "st_file_attributes", 0) & _REPARSE_POINT_ATTR
+    )
+
+
+def _path_lstat(path: Path) -> os.stat_result:
+    try:
+        info = path.lstat()
+    except OSError as exc:
+        raise OwnedTreeClassificationError(
+            "SCRATCH-INVENTORY-UNREADABLE", f"cannot inspect {path.name}"
+        ) from exc
+    if _stat_is_link_or_reparse(info):
+        raise OwnedTreeClassificationError(
+            "SCRATCH-INVENTORY-UNSAFE", f"link or reparse entry: {path.name}"
+        )
+    if _HAS_ISJUNCTION:
+        try:
+            if os.path.isjunction(path):
+                raise OwnedTreeClassificationError(
+                    "SCRATCH-INVENTORY-UNSAFE", f"junction entry: {path.name}"
+                )
+        except OSError as exc:
+            raise OwnedTreeClassificationError(
+                "SCRATCH-INVENTORY-UNSAFE", f"cannot classify {path.name}"
+            ) from exc
+    return info
+
+
+def inspect_root_no_follow(path: Path) -> RootInspection:
+    """Inspect one path without following it or enumerating its contents."""
+
+    try:
+        info = Path(path).lstat()
+    except FileNotFoundError:
+        return RootInspection(False, False, False, None)
+    except OSError as exc:
+        raise OwnedTreeClassificationError(
+            "SCRATCH-INVENTORY-UNREADABLE", f"cannot inspect {Path(path).name}"
+        ) from exc
+    linked = _stat_is_link_or_reparse(info)
+    if not linked and _HAS_ISJUNCTION:
+        try:
+            linked = os.path.isjunction(path)
+        except OSError as exc:
+            raise OwnedTreeClassificationError(
+                "SCRATCH-INVENTORY-UNREADABLE", f"cannot inspect {Path(path).name}"
+            ) from exc
+    return RootInspection(
+        True,
+        stat_module.S_ISDIR(info.st_mode),
+        linked,
+        _identity_parts(info),
+    )
+
+
+def inspect_owned_namespace(owner_root: Path) -> OwnedNamespaceInspection:
+    """Inspect only canonical run and evidence roots, never their contents."""
+
+    root = inspect_root_no_follow(owner_root)
+    if not root.exists:
+        return OwnedNamespaceInspection(frozenset(), frozenset())
+    if root.is_link_or_reparse or not root.is_directory:
+        raise OwnedTreeClassificationError(
+            "SCRATCH-INVENTORY-UNSAFE", "owned scratch namespace is not a plain directory"
+        )
+    originals: set[Path] = set()
+    tombstones: set[Path] = set()
+    try:
+        with os.scandir(owner_root) as runs:
+            run_entries = list(runs)
+        for run in run_entries:
+            run_root = inspect_root_no_follow(Path(run.path))
+            if run_root.is_link_or_reparse or not run_root.is_directory:
+                raise OwnedTreeClassificationError(
+                    "SCRATCH-INVENTORY-UNSAFE", f"unsafe scratch run namespace: {run.name}"
+                )
+            with os.scandir(run.path) as entries:
+                leaves = list(entries)
+            for entry in leaves:
+                leaf = inspect_root_no_follow(Path(entry.path))
+                if leaf.is_link_or_reparse or not leaf.is_directory:
+                    raise OwnedTreeClassificationError(
+                        "SCRATCH-INVENTORY-UNSAFE",
+                        f"unsafe scratch evidence namespace entry: {run.name}/{entry.name}",
+                    )
+                path = Path(entry.path)
+                if re.fullmatch(r"\..+\.orchestrarium-delete-[0-9a-f]{16}", entry.name):
+                    tombstones.add(path)
+                else:
+                    originals.add(path)
+    except OwnedTreeClassificationError:
+        raise
+    except OSError as exc:
+        raise OwnedTreeClassificationError(
+            "SCRATCH-INVENTORY-UNREADABLE", "cannot enumerate owned scratch namespace"
+        ) from exc
+    return OwnedNamespaceInspection(frozenset(originals), frozenset(tombstones))
+
+
+def identity_matches(left: object, right: object) -> bool:
+    """Compare public classifier snapshots without exposing their internals."""
+
+    left_digest = getattr(left, "identity_digest", None)
+    right_digest = getattr(right, "identity_digest", None)
+    if isinstance(left_digest, str) and isinstance(right_digest, str):
+        return left_digest == right_digest
+    left_identity = getattr(left, "identity", None)
+    right_identity = getattr(right, "identity", None)
+    if left_identity is not None and right_identity is not None:
+        return left_identity == right_identity and getattr(left, "exists", None) == getattr(
+            right, "exists", None
+        )
+    return False
+
+
+def _identity_parts(info: os.stat_result) -> tuple[int, int, int, int, int]:
+    return (
+        int(getattr(info, "st_dev", 0)),
+        int(getattr(info, "st_ino", 0)),
+        int(info.st_mode),
+        int(info.st_size),
+        int(getattr(info, "st_mtime_ns", int(info.st_mtime * 1_000_000_000))),
+    )
+
+
+def _same_open_identity(left: os.stat_result, right: os.stat_result) -> bool:
+    """Compare pathname and handle stats using fields stable on this host.
+
+    Windows may report a zero inode from ``DirEntry.stat`` and the real file
+    index from ``fstat`` for the same file.  Size, write time, and file type are
+    the stable cross-view fields there; POSIX additionally has stable device and
+    inode values and uses the complete identity tuple.
+    """
+
+    if os.name == "nt":
+        return (
+            stat_module.S_IFMT(left.st_mode) == stat_module.S_IFMT(right.st_mode)
+            and int(left.st_size) == int(right.st_size)
+            and int(getattr(left, "st_mtime_ns", int(left.st_mtime * 1_000_000_000)))
+            == int(getattr(right, "st_mtime_ns", int(right.st_mtime * 1_000_000_000)))
+        )
+    return _identity_parts(left) == _identity_parts(right)
+
+
+def _read_regular_file_identity(path: Path, expected: os.stat_result) -> tuple[str, os.stat_result]:
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise OwnedTreeClassificationError(
+            "SCRATCH-INVENTORY-UNREADABLE", f"cannot open {path.name}"
+        ) from exc
+    try:
+        opened = os.fstat(descriptor)
+        if not _same_open_identity(opened, expected) or not stat_module.S_ISREG(
+            opened.st_mode
+        ):
+            raise OwnedTreeClassificationError(
+                "SCRATCH-INVENTORY-DRIFT", f"identity changed while opening {path.name}"
+            )
+        digest = hashlib.sha256()
+        while True:
+            block = os.read(descriptor, 1024 * 1024)
+            if not block:
+                break
+            digest.update(block)
+        final = os.fstat(descriptor)
+        if not _same_open_identity(final, opened):
+            raise OwnedTreeClassificationError(
+                "SCRATCH-INVENTORY-DRIFT", f"identity changed while reading {path.name}"
+            )
+        return digest.hexdigest(), final
+    finally:
+        os.close(descriptor)
+
+
+def classify_owned_tree(tree_root: Path, repository_root: Path) -> OwnedTreeSnapshot:
+    """Completely classify one exact owned tree without mutating it.
+
+    The walk refuses every link/junction/reparse point and is bounded by explicit
+    file, entry, and byte ceilings. The returned digest covers directory and file
+    identities, relative paths, and regular-file SHA-256 values. Git checks use
+    the module's existing read-only `hash-object`/`cat-file` owner.
+    """
+
+    tree_root = Path(tree_root)
+    repository_root = Path(repository_root)
+    root_info = _path_lstat(tree_root)
+    if not stat_module.S_ISDIR(root_info.st_mode):
+        raise OwnedTreeClassificationError(
+            "SCRATCH-INVENTORY-UNSAFE", "owned scratch root is not a directory"
+        )
+
+    digest = hashlib.sha256()
+    digest.update(repr(("root", _identity_parts(root_info))).encode("utf-8"))
+    stack: list[tuple[Path, Path]] = [(tree_root, Path("."))]
+    files: list[Path] = []
+    file_count = 0
+    directory_count = 0
+    entry_count = 0
+    total_bytes = 0
+
+    while stack:
+        directory, relative_directory = stack.pop()
+        directory_count += 1
+        if directory_count + file_count > MAX_OWNED_TREE_ENTRIES:
+            raise OwnedTreeClassificationError(
+                "SCRATCH-INVENTORY-LIMIT", "owned scratch tree exceeds entry limit"
+            )
+        try:
+            with os.scandir(directory) as entries:
+                ordered = sorted(entries, key=lambda entry: entry.name.casefold())
+        except OSError as exc:
+            raise OwnedTreeClassificationError(
+                "SCRATCH-INVENTORY-UNREADABLE", f"cannot enumerate {relative_directory.as_posix()}"
+            ) from exc
+        child_directories: list[tuple[Path, Path]] = []
+        for entry in ordered:
+            entry_count += 1
+            if entry_count > MAX_OWNED_TREE_ENTRIES:
+                raise OwnedTreeClassificationError(
+                    "SCRATCH-INVENTORY-LIMIT", "owned scratch tree exceeds entry limit"
+                )
+            relative = relative_directory / entry.name
+            if _is_link_or_reparse(entry):
+                raise OwnedTreeClassificationError(
+                    "SCRATCH-INVENTORY-UNSAFE",
+                    f"link or reparse entry: {relative.as_posix()}",
+                )
+            try:
+                info = entry.stat(follow_symlinks=False)
+            except OSError as exc:
+                raise OwnedTreeClassificationError(
+                    "SCRATCH-INVENTORY-UNREADABLE",
+                    f"cannot inspect {relative.as_posix()}",
+                ) from exc
+            if entry.is_dir(follow_symlinks=False):
+                digest.update(
+                    repr(("dir", relative.as_posix(), _identity_parts(info))).encode("utf-8")
+                )
+                child_directories.append((Path(entry.path), relative))
+                continue
+            if not entry.is_file(follow_symlinks=False):
+                raise OwnedTreeClassificationError(
+                    "SCRATCH-INVENTORY-UNSAFE",
+                    f"non-regular entry: {relative.as_posix()}",
+                )
+            file_count += 1
+            total_bytes += int(info.st_size)
+            if file_count > MAX_OWNED_TREE_FILES or total_bytes > MAX_OWNED_TREE_BYTES:
+                raise OwnedTreeClassificationError(
+                    "SCRATCH-INVENTORY-LIMIT", "owned scratch tree exceeds file or byte limit"
+                )
+            path = Path(entry.path)
+            content_sha256, stable_info = _read_regular_file_identity(path, info)
+            digest.update(
+                repr(
+                    (
+                        "file",
+                        relative.as_posix(),
+                        _identity_parts(stable_info),
+                        content_sha256,
+                    )
+                ).encode("utf-8")
+            )
+            files.append(path)
+        stack.extend(reversed(child_directories))
+
+    git_root = _find_git_root(repository_root) if shutil.which("git") else None
+    unique_paths = _git_unique_paths(git_root, files) if git_root is not None else None
+    return OwnedTreeSnapshot(
+        identity_digest=digest.hexdigest(),
+        file_count=file_count,
+        directory_count=directory_count,
+        total_bytes=total_bytes,
+        all_git_recoverable=unique_paths == set() if unique_paths is not None else False,
+        git_check_complete=unique_paths is not None,
+    )
+
+
 def _iter_candidate_files(scratch_root: Path, denylist: JunkDenylist) -> Iterator[Path]:
     """Walk `scratch_root`, read-only. Symlinks and reparse points (including
     NTFS junctions -- see `_is_link_or_reparse`) are never followed (a link
@@ -421,7 +748,7 @@ def _hash_object_batch(git_root: Path, paths: list[Path]) -> dict[Path, str] | N
     return result
 
 
-def _blobs_missing_from_store(git_root: Path, shas: set[str]) -> set[str] | None:
+def inspect_git_object_set(git_root: Path, shas: set[str]) -> set[str] | None:
     """Read-only: `git cat-file --batch-check` reports which of `shas` exist
     in the object database (loose or packed, from ANY commit/branch reachable
     in this repository's history -- not only the current working tree).
@@ -443,11 +770,33 @@ def _blobs_missing_from_store(git_root: Path, shas: set[str]) -> set[str] | None
         return None
     if proc.returncode != 0:
         return None
+    ordered = sorted(shas)
+    lengths = {len(sha) for sha in ordered}
+    if lengths not in ({40}, {64}) or any(
+        re.fullmatch(r"[0-9a-f]+", sha, re.ASCII) is None for sha in ordered
+    ):
+        return None
+    lines = proc.stdout.splitlines()
+    if len(lines) != len(ordered):
+        return None
     missing: set[str] = set()
-    for line in proc.stdout.splitlines():
+    seen: set[str] = set()
+    for line in lines:
         parts = line.split()
-        if len(parts) >= 2 and parts[1] == "missing":
-            missing.add(parts[0])
+        if len(parts) not in (2, 3):
+            return None
+        oid = parts[0]
+        if oid not in shas or oid in seen or len(oid) not in lengths:
+            return None
+        seen.add(oid)
+        if len(parts) == 2:
+            if parts[1] != "missing":
+                return None
+            missing.add(oid)
+        elif parts[1] != "blob" or not parts[2].isdigit():
+            return None
+    if seen != shas:
+        return None
     return missing
 
 
@@ -460,7 +809,7 @@ def _git_unique_paths(git_root: Path, paths: list[Path]) -> set[Path] | None:
     shas = _hash_object_batch(git_root, paths)
     if shas is None:
         return None
-    missing = _blobs_missing_from_store(git_root, set(shas.values()))
+    missing = inspect_git_object_set(git_root, set(shas.values()))
     if missing is None:
         return None
     return {path for path, sha in shas.items() if sha in missing}

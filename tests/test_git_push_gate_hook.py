@@ -60,6 +60,22 @@ HOOKS = (
 _MISSING = object()
 
 
+@contextlib.contextmanager
+def pr_literal_command_workspace():
+    scratch_parent = REPO_ROOT / ".scratch"
+    scratch_parent.mkdir(parents=True, exist_ok=True)
+    owned_path: Path | None = None
+    try:
+        with tempfile.TemporaryDirectory(
+            prefix="pr-push-literal-command-", dir=scratch_parent
+        ) as temp_dir:
+            owned_path = Path(temp_dir)
+            yield owned_path
+    finally:
+        if owned_path is not None:
+            assert not owned_path.exists()
+
+
 def user(text: str) -> dict:
     return {"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": text}]}}
 
@@ -2079,8 +2095,6 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
         capture_executable = str(Path(sys.executable).resolve(strict=True))
         remote = "origin"
         positive_heads = ("a", "Az09._/hy-phen", "a" * 255)
-        scratch = REPO_ROOT / ".scratch" / "pr-push-literal-command"
-        scratch.mkdir(parents=True, exist_ok=True)
         evidence: list[dict] = []
 
         for head_ref in positive_heads:
@@ -2093,8 +2107,7 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
             )
             self.assertEqual(checked.returncode, 0, (head_ref, checked.stderr))
 
-        with tempfile.TemporaryDirectory(dir=scratch) as temp_dir:
-            temp = Path(temp_dir)
+        with pr_literal_command_workspace() as temp:
             capture_path = temp / "captured.json"
             (temp / "sitecustomize.py").write_text(
                 "import json, os, sys\n"
@@ -2160,9 +2173,20 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
                         "real_push_performed": False,
                     })
 
-        (scratch / "cross-shell-argv.json").write_text(
-            json.dumps(evidence, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
-        )
+            (temp / "cross-shell-argv.json").write_text(
+                json.dumps(evidence, indent=2, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+
+    def test_pr_literal_command_fixture_cleans_after_failure(self) -> None:
+        owned_path: Path | None = None
+        with self.assertRaisesRegex(RuntimeError, "injected producer failure"):
+            with pr_literal_command_workspace() as temp:
+                owned_path = temp
+                (temp / "partial.json").write_text("partial", encoding="utf-8")
+                raise RuntimeError("injected producer failure")
+        self.assertIsNotNone(owned_path)
+        self.assertFalse(owned_path.exists())
 
     def test_malformed_and_revoked_authorization_states(self) -> None:
         for script in HOOKS:

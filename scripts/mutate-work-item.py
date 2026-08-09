@@ -165,6 +165,16 @@ class CategoryAdmission:
     evidence_field: str
 
 
+@dataclass(frozen=True)
+class ScratchDisposition:
+    original: Path
+    tombstone: Path
+    disposition: str
+    proof: dict | None
+    canonical_pointer: Path
+    snapshot: object | None
+
+
 def _work_items_root(root: Path) -> Path:
     root = root.resolve()
     return root if root.name == "work-items" else root / "work-items"
@@ -1052,6 +1062,17 @@ def _validator_module():
     return module
 
 
+def _scratch_classifier_module():
+    path = Path(__file__).with_name("maintenance") / "cleanup.py"
+    spec = importlib.util.spec_from_file_location("scratch_evidence_classifier", path)
+    if spec is None or spec.loader is None:
+        raise LifecycleError("WI-SCRATCH-CLASSIFIER-LOAD", f"cannot load classifier: {path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 def _agent_run_ledger_module():
     path = Path(__file__).with_name("agent-run-ledger.py")
     try:
@@ -1771,6 +1792,285 @@ def _terminalize_status(data: bytes) -> bytes:
     return _stamp_schema_marker(replaced.encode("utf-8"), "status.md")
 
 
+SCRATCH_REGENERATION_MARKER = (
+    "Scratch evidence: regeneration-only; all load-bearing observations retained."
+)
+
+
+def _scratch_tombstone(original: Path, slug: str, run_id: str, entry_id: str) -> Path:
+    name = _validator_module().scratch_tombstone_name(slug, run_id, entry_id)
+    return original.with_name(name)
+
+
+def _classify_scratch_entry(classifier, path: Path, root: Path):
+    try:
+        return classifier.classify_owned_tree(path, root)
+    except classifier.OwnedTreeClassificationError as exc:
+        failure = {
+            "SCRATCH-INVENTORY-UNSAFE": "WI-SCRATCH-UNSAFE-ENTRY",
+            "SCRATCH-INVENTORY-DRIFT": "WI-SCRATCH-IDENTITY-DRIFT",
+        }.get(exc.failure_id, "WI-SCRATCH-PROOF-FAILED")
+        raise LifecycleError(failure, str(exc)) from exc
+
+
+def _verify_scratch_proof(
+    snapshot,
+    proof: dict,
+    canonical_pointer: Path,
+) -> None:
+    kind = proof["kind"]
+    if kind == "git-object-set":
+        if not snapshot.git_check_complete or not snapshot.all_git_recoverable:
+            raise LifecycleError(
+                "WI-SCRATCH-PROOF-FAILED",
+                "scratch bytes are not completely recoverable from the repository object store",
+            )
+        return
+    if kind != "accepted-artifact":
+        raise LifecycleError("WI-SCRATCH-PROOF-FAILED", f"unsupported proof kind: {kind!r}")
+    try:
+        artifact = canonical_pointer.read_bytes()
+    except OSError as exc:
+        raise LifecycleError(
+            "WI-SCRATCH-PROOF-FAILED", "accepted artifact is unreadable"
+        ) from exc
+    if hashlib.sha256(artifact).hexdigest() != proof["artifactSha256"]:
+        raise LifecycleError("WI-SCRATCH-PROOF-FAILED", "accepted artifact digest differs")
+    try:
+        text = artifact.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise LifecycleError(
+            "WI-SCRATCH-PROOF-FAILED", "accepted artifact is not UTF-8"
+        ) from exc
+    if SCRATCH_REGENERATION_MARKER not in text:
+        raise LifecycleError(
+            "WI-SCRATCH-PROOF-FAILED", "accepted artifact lacks the regeneration marker"
+        )
+
+
+def _relocate_scratch_pointer(root: Path, pointer: Path) -> Path:
+    if pointer.is_file():
+        return pointer
+    try:
+        relative = pointer.relative_to(root)
+    except ValueError:
+        return pointer
+    parts = relative.parts
+    if len(parts) < 4 or parts[:2] != ("work-items", "active"):
+        return pointer
+    locations = _category_locations(root, CATEGORIES["work-item"], parts[2])
+    archived = [path for path in locations if "archive" in path.parts]
+    return archived[0].joinpath(*parts[3:]) if len(archived) == 1 else pointer
+
+
+def _scratch_namespace_entries(owner_root: Path) -> tuple[set[Path], set[Path]]:
+    """Return present original/tombstone leaf roots without following links."""
+
+    classifier = _scratch_classifier_module()
+    try:
+        inspection = classifier.inspect_owned_namespace(owner_root)
+    except LifecycleError:
+        raise
+    except (OSError, classifier.OwnedTreeClassificationError) as exc:
+        raise LifecycleError("WI-SCRATCH-UNSAFE-ENTRY", str(exc)) from exc
+    return set(inspection.originals), set(inspection.tombstones)
+
+
+def _scratch_disposition_plan(
+    root: Path,
+    item: Path,
+    *,
+    archived: bool,
+) -> tuple[ScratchDisposition, ...]:
+    ledger = item / "agent-runs.jsonl"
+    owner_root = root / ".scratch" / "work-items" / item.name
+    classifier = _scratch_classifier_module()
+    try:
+        owner_inspection = classifier.inspect_root_no_follow(owner_root)
+    except classifier.OwnedTreeClassificationError as exc:
+        raise LifecycleError("WI-SCRATCH-UNSAFE-ENTRY", str(exc)) from exc
+    if not ledger.exists():
+        if owner_inspection.exists:
+            raise LifecycleError(
+                "WI-SCRATCH-OWNERSHIP-INCOMPLETE",
+                "canonical scratch namespace exists without a terminal owner declaration",
+            )
+        return ()
+
+    validator = _validator_module()
+    errors: list[str] = []
+    events = validator.load_jsonl(ledger, errors)
+    validator.validate_scratch_ownership(events, item, errors)
+    if errors:
+        raise LifecycleError("WI-LEDGER-UNSETTLED", "; ".join(errors))
+    recorded: list[tuple[str, dict]] = []
+    for event in events:
+        for entry in event.get("scratchEvidence", []):
+            recorded.append((event["runId"], entry))
+    if not recorded:
+        if owner_inspection.exists:
+            raise LifecycleError(
+                "WI-SCRATCH-OWNERSHIP-INCOMPLETE",
+                "canonical scratch namespace exists without a terminal owner declaration",
+            )
+        return ()
+
+    originals_present, tombstones_present = _scratch_namespace_entries(owner_root)
+    expected_originals: set[Path] = set()
+    expected_tombstones: set[Path] = set()
+    plans: list[ScratchDisposition] = []
+    for run_id, entry in recorded:
+        original = root / Path(entry["path"])
+        tombstone = _scratch_tombstone(original, item.name, run_id, entry["entryId"])
+        expected_originals.add(original)
+        expected_tombstones.add(tombstone)
+        original_exists = original in originals_present
+        tombstone_exists = tombstone in tombstones_present
+        if original_exists and tombstone_exists:
+            raise LifecycleError(
+                "WI-SCRATCH-DISPOSITION-CONFLICT",
+                f"both original and tombstone exist for {entry['path']}",
+            )
+        if entry["disposition"] == "retain" and (tombstone_exists or not original_exists):
+            raise LifecycleError(
+                "WI-SCRATCH-RETAINED-EVIDENCE-MISSING",
+                f"retained scratch evidence is missing or tombstoned: {entry['path']}",
+            )
+        if not original_exists and not tombstone_exists:
+            if not archived:
+                raise LifecycleError(
+                    "WI-SCRATCH-OWNERSHIP-INCOMPLETE",
+                    f"declared scratch evidence is missing: {entry['path']}",
+                )
+            if entry["disposition"] == "delete":
+                continue
+        pointer_errors: list[str] = []
+        pointer = validator.resolve_scratch_pointer(
+            item,
+            entry["canonicalPointer"],
+            "scratchEvidence.canonicalPointer",
+            run_id,
+            pointer_errors,
+        )
+        if pointer is None or pointer_errors:
+            raise LifecycleError(
+                "WI-SCRATCH-POINTER-OUTSIDE-ITEM",
+                "; ".join(pointer_errors) or "missing canonical pointer",
+            )
+        if entry["disposition"] == "retain":
+            try:
+                retained = classifier.inspect_root_no_follow(original)
+            except classifier.OwnedTreeClassificationError as exc:
+                raise LifecycleError("WI-SCRATCH-RETAINED-EVIDENCE-MISSING", str(exc)) from exc
+            if not retained.exists or retained.is_link_or_reparse or not retained.is_directory:
+                raise LifecycleError(
+                    "WI-SCRATCH-RETAINED-EVIDENCE-MISSING",
+                    f"retained scratch root is unavailable: {entry['path']}",
+                )
+            snapshot = None
+            proof = None
+        else:
+            source = tombstone if tombstone_exists else original
+            snapshot = _classify_scratch_entry(classifier, source, root)
+            proof = entry["proof"]
+            _verify_scratch_proof(snapshot, proof, pointer)
+        plans.append(
+            ScratchDisposition(
+                original=original,
+                tombstone=tombstone,
+                disposition=entry["disposition"],
+                proof=proof,
+                canonical_pointer=pointer,
+                snapshot=snapshot,
+            )
+        )
+
+    if originals_present - expected_originals or tombstones_present - expected_tombstones:
+        raise LifecycleError(
+            "WI-SCRATCH-OWNERSHIP-INCOMPLETE",
+            "scratch namespace contains an undeclared evidence root",
+        )
+    return tuple(plans)
+
+
+def _remove_scratch_tree(tree_root: Path) -> None:
+    """Remove one already-proven tree without following links or reparses."""
+
+    classifier = _scratch_classifier_module()
+    directories: list[Path] = []
+    stack = [tree_root]
+    while stack:
+        directory = stack.pop()
+        inspection = classifier.inspect_root_no_follow(directory)
+        if not inspection.exists or inspection.is_link_or_reparse or not inspection.is_directory:
+            raise OSError(f"unsafe directory during removal: {directory.name}")
+        directories.append(directory)
+        with os.scandir(directory) as entries:
+            children = list(entries)
+        for entry in children:
+            child = classifier.inspect_root_no_follow(Path(entry.path))
+            if child.is_link_or_reparse:
+                raise OSError(f"unsafe link or reparse during removal: {entry.name}")
+            if child.is_directory:
+                stack.append(Path(entry.path))
+            elif child.exists and stat.S_ISREG(os.lstat(entry.path).st_mode):
+                Path(entry.path).unlink()
+            else:
+                raise OSError(f"unsafe non-regular entry during removal: {entry.name}")
+    for directory in reversed(directories):
+        directory.rmdir()
+
+
+def _settle_scratch_dispositions(root: Path, plans: tuple[ScratchDisposition, ...]) -> None:
+    classifier = _scratch_classifier_module()
+    for plan in plans:
+        if plan.disposition == "retain":
+            continue
+        try:
+            original_state = classifier.inspect_root_no_follow(plan.original)
+            tombstone_state = classifier.inspect_root_no_follow(plan.tombstone)
+        except classifier.OwnedTreeClassificationError as exc:
+            raise LifecycleError("WI-SCRATCH-DISPOSITION-PENDING", str(exc)) from exc
+        if original_state.exists and tombstone_state.exists:
+            raise LifecycleError(
+                "WI-SCRATCH-DISPOSITION-CONFLICT", "both original and tombstone exist"
+            )
+        source = plan.tombstone if tombstone_state.exists else plan.original
+        source_state = tombstone_state if tombstone_state.exists else original_state
+        if not source_state.exists:
+            continue
+        if source_state.is_link_or_reparse or not source_state.is_directory:
+            raise LifecycleError(
+                "WI-SCRATCH-DISPOSITION-PENDING",
+                "scratch root changed to an unsafe identity after preflight",
+            )
+        try:
+            snapshot = classifier.classify_owned_tree(source, root)
+            if plan.snapshot is None or not classifier.identity_matches(snapshot, plan.snapshot):
+                raise LifecycleError(
+                    "WI-SCRATCH-DISPOSITION-PENDING", "scratch identity drifted after preflight"
+                )
+            canonical_pointer = _relocate_scratch_pointer(root, plan.canonical_pointer)
+            assert plan.proof is not None
+            _verify_scratch_proof(snapshot, plan.proof, canonical_pointer)
+            if source == plan.original:
+                os.replace(plan.original, plan.tombstone)
+            tombstone_snapshot = classifier.classify_owned_tree(plan.tombstone, root)
+            if not classifier.identity_matches(tombstone_snapshot, plan.snapshot):
+                raise LifecycleError(
+                    "WI-SCRATCH-DISPOSITION-PENDING", "scratch identity drifted after tombstone"
+                )
+            _verify_scratch_proof(tombstone_snapshot, plan.proof, canonical_pointer)
+            _remove_scratch_tree(plan.tombstone)
+        except LifecycleError:
+            raise
+        except (OSError, classifier.OwnedTreeClassificationError) as exc:
+            raise LifecycleError(
+                "WI-SCRATCH-DISPOSITION-PENDING",
+                f"archived item retains retryable scratch disposition: {exc}",
+            ) from exc
+
+
 def _validate_item_before_close(item: Path) -> None:
     validator = _validator_module()
     ledger = item / "agent-runs.jsonl"
@@ -1819,14 +2119,17 @@ def close_item(
             or archived.parent.name != month
         ):
             raise LifecycleError("WI-IMMUTABLE-ARCHIVE", f"archived identity differs: {slug}")
+        scratch_plan = _scratch_disposition_plan(root, archived, archived=True)
         if inject_readme_failure:
             raise LifecycleError("WI-README-STALE", "injected failure after canonical success")
         refresh_readme(root)
+        _settle_scratch_dispositions(root, scratch_plan)
         return archived
     active = work_items / "active" / slug
     if locations != [active]:
         raise LifecycleError("WI-INVALID-TARGET", f"close requires one active item: {slug}")
     _validate_item_before_close(active)
+    scratch_plan = _scratch_disposition_plan(root, active, archived=False)
     _preflight_readme(root)
     closure_path = active / "closure.md"
     prior_closure = closure_path.read_bytes() if closure_path.exists() else None
@@ -1854,6 +2157,7 @@ def close_item(
         refresh_readme(root)
     except LifecycleError as exc:
         raise LifecycleError("WI-README-STALE", str(exc)) from exc
+    _settle_scratch_dispositions(root, scratch_plan)
     return target
 
 

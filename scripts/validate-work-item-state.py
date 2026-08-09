@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 import argparse
+import hashlib
 import importlib.util
 import json
+import os
 import re
+import stat as stat_module
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 
 STATUS_VALUES = {"planned", "running", "completed", "revise", "blocked", "cancelled"}
@@ -26,7 +29,16 @@ EVENT_KINDS = {"launch", "terminal", "standalone"}
 EFFORT_ORDER = ["low", "medium", "high", "xhigh", "max"]  # ordered, ascending strength
 FINDING_CLASSES = {"publication-safety", "security", "correctness", "performance", "other"}
 PROTECTED_CLASSES = {"publication-safety", "security"}  # non-user-waivable (spine: $security-reviewer only)
-V2_ONLY_FIELDS = {"eventKind", "launchRunId", "closesRunIds", "artifactRevision", "lane", "effort", "findingClass"}
+V2_ONLY_FIELDS = {
+    "eventKind",
+    "launchRunId",
+    "closesRunIds",
+    "artifactRevision",
+    "lane",
+    "effort",
+    "findingClass",
+    "scratchEvidence",
+}
 # Canonical executionRole values (mirrors shared/schemas/agent-runs.schema.json).
 # There is exactly ONE main-conversation identity: "main". The main conversation
 # also holds the Lead role — orchestration weight is the status.md
@@ -71,8 +83,39 @@ ALLOWED_FIELDS = {
     "lane",
     "effort",
     "findingClass",
+    "scratchEvidence",
 }
 EVIDENCE_ALLOWED_FIELDS = {"kind", "ref", "result"}
+AGENT_RUN_SCHEMA_PATH = Path(__file__).resolve().parents[1] / "shared" / "schemas" / "agent-runs.schema.json"
+AGENT_RUN_SCHEMA = json.loads(AGENT_RUN_SCHEMA_PATH.read_text(encoding="utf-8"))
+_SCRATCH_SCHEMA = AGENT_RUN_SCHEMA["properties"]["scratchEvidence"]
+_SCRATCH_ITEM_SCHEMA = _SCRATCH_SCHEMA["items"]
+_SCRATCH_PROPERTIES = _SCRATCH_ITEM_SCHEMA["properties"]
+_JSONL_SCHEMA = AGENT_RUN_SCHEMA["x-orchestrarium-jsonl"]
+SCRATCH_EVIDENCE_ALLOWED_FIELDS = set(_SCRATCH_PROPERTIES)
+SCRATCH_EVIDENCE_REQUIRED_FIELDS = set(_SCRATCH_ITEM_SCHEMA["required"])
+SCRATCH_PROOF_FIELDS = {
+    alternative["properties"]["kind"]["const"]: set(alternative["required"])
+    for alternative in _SCRATCH_PROPERTIES["proof"]["oneOf"]
+}
+MAX_SCRATCH_EVIDENCE_ENTRIES = _SCRATCH_SCHEMA["maxItems"]
+MAX_SCRATCH_EVIDENCE_JSON_BYTES = _SCRATCH_SCHEMA["x-orchestrarium-maxRawUtf8Bytes"]
+MAX_SCRATCH_ENTRY_ID_LENGTH = _SCRATCH_PROPERTIES["entryId"]["maxLength"]
+MAX_SCRATCH_PATH_LENGTH = _SCRATCH_PROPERTIES["path"]["maxLength"]
+MAX_SCRATCH_REASON_LENGTH = _SCRATCH_PROPERTIES["reason"]["maxLength"]
+MAX_SCRATCH_POINTER_LENGTH = _SCRATCH_PROPERTIES["canonicalPointer"]["maxLength"]
+_ACCEPTED_ARTIFACT_SCHEMA = next(
+    alternative
+    for alternative in _SCRATCH_PROPERTIES["proof"]["oneOf"]
+    if alternative["properties"]["kind"]["const"] == "accepted-artifact"
+)
+MAX_SCRATCH_PRODUCER_LENGTH = _ACCEPTED_ARTIFACT_SCHEMA["properties"]["producer"]["maxLength"]
+MAX_SCRATCH_REPRODUCE_LENGTH = _ACCEPTED_ARTIFACT_SCHEMA["properties"]["reproduce"]["maxLength"]
+MAX_LEDGER_LINE_CHARS = _JSONL_SCHEMA["maxLineChars"]
+MAX_LEDGER_EVENTS = _JSONL_SCHEMA["maxEvents"]
+MAX_JSON_NESTING_DEPTH = _JSONL_SCHEMA["maxNestingDepth"]
+SCRATCH_IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$", re.ASCII)
+SHA256_RE = re.compile(r"^[0-9a-f]{64}$", re.ASCII)
 QUICK_FIX_TEMPLATE = "quick-fix"
 STAGED_TEMPLATE = "staged"
 QUICK_FIX_LIFECYCLE_FIELDS = ("template", "status", "started", "updated")
@@ -225,23 +268,106 @@ def validate_quick_fix_status(text: str, errors: list[str]) -> None:
             fail(errors, f"quick-fix status.md duplicate recovery field: {field}")
 
 
+class DuplicateJsonKeyError(ValueError):
+    pass
+
+
+def _reject_duplicate_keys(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise DuplicateJsonKeyError(f"duplicate JSON key: {key}")
+        result[key] = value
+    return result
+
+
+def _json_depth(value: object) -> int:
+    maximum = 0
+    stack: list[tuple[object, int]] = [(value, 0)]
+    while stack:
+        current, depth = stack.pop()
+        maximum = max(maximum, depth)
+        if maximum > MAX_JSON_NESTING_DEPTH:
+            return maximum
+        if isinstance(current, dict):
+            stack.extend((item, depth + 1) for item in current.values())
+        elif isinstance(current, list):
+            stack.extend((item, depth + 1) for item in current)
+    return maximum
+
+
+def decode_json_object(
+    raw: str | bytes,
+    *,
+    source: str,
+    maximum_chars: int | None = None,
+    maximum_bytes: int | None = None,
+) -> dict:
+    """Canonical bounded strict decoder for ledger and CLI JSON objects."""
+
+    if maximum_chars is not None and len(raw) > maximum_chars:
+        raise ValueError(f"{source}: JSON exceeds maximum length {maximum_chars}")
+    if maximum_bytes is not None:
+        raw_bytes = raw if isinstance(raw, bytes) else raw.encode("utf-8")
+        if len(raw_bytes) > maximum_bytes:
+            raise ValueError(
+                f"{source}: JSON exceeds maximum raw UTF-8 length {maximum_bytes} bytes"
+            )
+        raw = raw_bytes
+    try:
+        value = json.loads(raw, object_pairs_hook=_reject_duplicate_keys)
+    except DuplicateJsonKeyError as exc:
+        raise ValueError(f"{source}: {exc}") from exc
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{source}: invalid JSON: {exc.msg}") from exc
+    except UnicodeDecodeError as exc:
+        raise ValueError(f"{source}: invalid UTF-8 JSON") from exc
+    except RecursionError as exc:
+        raise ValueError(f"{source}: JSON nesting exceeds parser limit") from exc
+    if _json_depth(value) > MAX_JSON_NESTING_DEPTH:
+        raise ValueError(f"{source}: JSON nesting exceeds parser limit")
+    if not isinstance(value, dict):
+        raise ValueError(f"{source}: JSON value must be an object")
+    return value
+
+
 def load_jsonl(path: Path, errors: list[str]) -> list[dict]:
     if not path.exists():
         fail(errors, f"missing ledger: {path}")
         return []
-    events = []
-    for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-        if not line.strip():
-            continue
-        try:
-            event = json.loads(line)
-        except json.JSONDecodeError as exc:
-            fail(errors, f"{path}:{line_no}: invalid JSON: {exc.msg}")
-            continue
-        if not isinstance(event, dict):
-            fail(errors, f"{path}:{line_no}: event must be an object")
-            continue
-        events.append(event)
+    events: list[dict] = []
+    try:
+        stream = path.open("r", encoding="utf-8", newline="")
+    except OSError as exc:
+        fail(errors, f"cannot read ledger: {path}: {exc}")
+        return []
+    with stream:
+        line_no = 0
+        while True:
+            raw = stream.readline(MAX_LEDGER_LINE_CHARS + 2)
+            if raw == "":
+                break
+            line_no += 1
+            complete_line = raw.endswith("\n")
+            line = raw.rstrip("\r\n")
+            if len(line) > MAX_LEDGER_LINE_CHARS or (
+                not complete_line and len(raw) > MAX_LEDGER_LINE_CHARS
+            ):
+                while raw and not raw.endswith("\n"):
+                    raw = stream.readline(MAX_LEDGER_LINE_CHARS + 2)
+                fail(errors, f"{path}:{line_no}: event exceeds bounded line length")
+                continue
+            if not line.strip():
+                continue
+            if len(events) >= MAX_LEDGER_EVENTS:
+                fail(errors, f"ledger exceeds bounded event count: {path}")
+                break
+            try:
+                event = decode_json_object(line, source=f"{path}:{line_no}")
+            except ValueError as exc:
+                fail(errors, str(exc))
+                continue
+            events.append(event)
     if not events:
         fail(errors, f"ledger has no events: {path}")
     return events
@@ -355,6 +481,38 @@ def resolve_work_item_path(item: Path, value: object, label: str, run_id: object
     return resolved
 
 
+def resolve_scratch_pointer(
+    item: Path, value: object, label: str, run_id: object, errors: list[str]
+) -> Path | None:
+    """Resolve scratch evidence only inside this exact work-item identity."""
+
+    failure = "WI-SCRATCH-POINTER-OUTSIDE-ITEM"
+    if not isinstance(value, str) or not value.strip() or not _safe_repo_relative(value):
+        fail(errors, f"{failure}: {run_id}: {label} must be item-relative")
+        return None
+    item_root = item.resolve()
+    candidate = item_root.joinpath(*PurePosixPath(value).parts)
+    current = item_root
+    try:
+        for part in PurePosixPath(value).parts:
+            current = current / part
+            info = os.lstat(current)
+            if stat_module.S_ISLNK(info.st_mode) or (
+                getattr(info, "st_file_attributes", 0)
+                & getattr(stat_module, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+            ):
+                fail(errors, f"{failure}: {run_id}: {label} crosses a link or reparse point")
+                return None
+    except OSError:
+        fail(errors, f"{failure}: {run_id}: {label} does not exist inside this item")
+        return None
+    resolved = candidate.resolve()
+    if item_root not in resolved.parents or not resolved.is_file():
+        fail(errors, f"{failure}: {run_id}: {label} must name a file inside this item")
+        return None
+    return resolved
+
+
 def validate_evidence(evidence: object, run_id: object, errors: list[str], require_non_empty: bool) -> None:
     if not isinstance(evidence, list):
         fail(errors, f"{run_id}: evidence must be a list")
@@ -376,6 +534,218 @@ def validate_evidence(evidence: object, run_id: object, errors: list[str], requi
             fail(errors, f"{run_id}: evidence[{index}] requires ref")
         if "result" in entry and not isinstance(entry.get("result"), str):
             fail(errors, f"{run_id}: evidence[{index}].result must be a string")
+
+
+def _bounded_nonempty_string(
+    value: object,
+    *,
+    maximum: int,
+    label: str,
+    run_id: object,
+    errors: list[str],
+) -> bool:
+    if not isinstance(value, str) or not value.strip():
+        fail(errors, f"{run_id}: {label} must be a non-empty string")
+        return False
+    if len(value) > maximum:
+        fail(errors, f"{run_id}: {label} exceeds maximum length {maximum}")
+        return False
+    return True
+
+
+def _safe_repo_relative(value: str) -> bool:
+    if "\\" in value:
+        return False
+    candidate = PurePosixPath(value)
+    return not candidate.is_absolute() and value == candidate.as_posix() and ".." not in candidate.parts
+
+
+def validate_scratch_evidence(
+    event: dict,
+    item: Path,
+    artifact_path: Path | None,
+    run_id: object,
+    errors: list[str],
+) -> None:
+    entries = event.get("scratchEvidence")
+    if not isinstance(entries, list) or not entries or len(entries) > MAX_SCRATCH_EVIDENCE_ENTRIES:
+        fail(errors, f"{run_id}: scratchEvidence must be a non-empty bounded list")
+        return
+    if event.get("schemaVersion") != 2:
+        fail(errors, f"{run_id}: scratchEvidence requires schemaVersion 2")
+    if event.get("eventKind") != "terminal":
+        fail(errors, f"{run_id}: scratchEvidence requires eventKind terminal")
+    if event.get("status") != "completed" or event.get("gate") != "PASS":
+        fail(errors, f"{run_id}: scratchEvidence requires completed PASS owner")
+    if not isinstance(run_id, str) or not SCRATCH_IDENTIFIER_RE.fullmatch(run_id):
+        fail(errors, f"{run_id}: scratchEvidence owner runId is not namespace-safe")
+        return
+
+    seen_ids: set[str] = set()
+    seen_paths: set[str] = set()
+    normalized_paths: list[str] = []
+    for index, entry in enumerate(entries, start=1):
+        label = f"scratchEvidence[{index}]"
+        if not isinstance(entry, dict):
+            fail(errors, f"{run_id}: {label} must be an object")
+            continue
+        unexpected = sorted(set(entry) - SCRATCH_EVIDENCE_ALLOWED_FIELDS)
+        missing = sorted(SCRATCH_EVIDENCE_REQUIRED_FIELDS - set(entry))
+        for key in unexpected:
+            fail(errors, f"{run_id}: {label} has unexpected field: {key}")
+        for key in missing:
+            fail(errors, f"{run_id}: {label} missing required field: {key}")
+
+        entry_id = entry.get("entryId")
+        if not _bounded_nonempty_string(
+            entry_id,
+            maximum=MAX_SCRATCH_ENTRY_ID_LENGTH,
+            label=f"{label}.entryId",
+            run_id=run_id,
+            errors=errors,
+        ):
+            continue
+        assert isinstance(entry_id, str)
+        if not SCRATCH_IDENTIFIER_RE.fullmatch(entry_id):
+            fail(errors, f"{run_id}: {label}.entryId is not namespace-safe")
+        folded_id = entry_id.casefold()
+        if folded_id in seen_ids:
+            fail(errors, f"{run_id}: scratchEvidence entryId collision: {entry_id}")
+        seen_ids.add(folded_id)
+
+        path_value = entry.get("path")
+        if _bounded_nonempty_string(
+            path_value,
+            maximum=MAX_SCRATCH_PATH_LENGTH,
+            label=f"{label}.path",
+            run_id=run_id,
+            errors=errors,
+        ):
+            assert isinstance(path_value, str)
+            expected = f".scratch/work-items/{item.name}/{run_id}/{entry_id}"
+            if not _safe_repo_relative(path_value) or path_value != expected:
+                fail(errors, f"{run_id}: {label}.path must equal its exact owner namespace")
+            folded_path = path_value.casefold()
+            if folded_path in seen_paths:
+                fail(errors, f"{run_id}: scratchEvidence path collision: {path_value}")
+            seen_paths.add(folded_path)
+            normalized_paths.append(folded_path)
+
+        disposition = entry.get("disposition")
+        if disposition not in {"retain", "delete"}:
+            fail(errors, f"{run_id}: {label}.disposition must be retain or delete")
+        _bounded_nonempty_string(
+            entry.get("reason"),
+            maximum=MAX_SCRATCH_REASON_LENGTH,
+            label=f"{label}.reason",
+            run_id=run_id,
+            errors=errors,
+        )
+
+        pointer = entry.get("canonicalPointer")
+        pointer_path = None
+        if _bounded_nonempty_string(
+            pointer,
+            maximum=MAX_SCRATCH_POINTER_LENGTH,
+            label=f"{label}.canonicalPointer",
+            run_id=run_id,
+            errors=errors,
+        ):
+            assert isinstance(pointer, str)
+            pointer_path = resolve_scratch_pointer(
+                item, pointer, f"{label}.canonicalPointer", run_id, errors
+            )
+            if pointer_path is not None and not pointer_path.is_file():
+                fail(errors, f"{run_id}: {label}.canonicalPointer must name a file")
+
+        proof = entry.get("proof")
+        if disposition == "retain":
+            if "proof" in entry:
+                fail(errors, f"{run_id}: {label}.proof is forbidden for retain")
+            continue
+        if not isinstance(proof, dict):
+            fail(errors, f"{run_id}: {label}.proof is required for delete")
+            continue
+        kind = proof.get("kind")
+        expected_fields = SCRATCH_PROOF_FIELDS.get(kind)
+        if expected_fields is None:
+            fail(errors, f"{run_id}: {label}.proof has invalid kind {kind!r}")
+            continue
+        for key in sorted(set(proof) - expected_fields):
+            fail(errors, f"{run_id}: {label}.proof has unexpected field: {key}")
+        for key in sorted(expected_fields - set(proof)):
+            fail(errors, f"{run_id}: {label}.proof missing required field: {key}")
+        if kind == "accepted-artifact":
+            artifact_sha = proof.get("artifactSha256")
+            if not isinstance(artifact_sha, str) or not SHA256_RE.fullmatch(artifact_sha):
+                fail(errors, f"{run_id}: {label}.proof artifactSha256 must be lowercase SHA-256")
+            if pointer != event.get("artifact") or pointer_path != artifact_path:
+                fail(errors, f"{run_id}: {label}.proof must bind the accepted event artifact")
+            producer = proof.get("producer")
+            if not _bounded_nonempty_string(
+                producer,
+                maximum=MAX_SCRATCH_PRODUCER_LENGTH,
+                label=f"{label}.proof.producer",
+                run_id=run_id,
+                errors=errors,
+            ):
+                pass
+            elif not _safe_repo_relative(producer):
+                fail(errors, f"{run_id}: {label}.proof producer must be repository-relative")
+            else:
+                repo_root = repo_root_for(item)
+                if repo_root is None or not (repo_root / producer).is_file():
+                    fail(errors, f"{run_id}: {label}.proof producer does not exist")
+            _bounded_nonempty_string(
+                proof.get("reproduce"),
+                maximum=MAX_SCRATCH_REPRODUCE_LENGTH,
+                label=f"{label}.proof.reproduce",
+                run_id=run_id,
+                errors=errors,
+            )
+
+    for index, path in enumerate(normalized_paths):
+        for other in normalized_paths[index + 1 :]:
+            if path.startswith(other + "/") or other.startswith(path + "/"):
+                fail(errors, f"{run_id}: scratchEvidence paths must not overlap")
+
+
+def scratch_tombstone_name(slug: str, run_id: str, entry_id: str) -> str:
+    token = hashlib.sha256(f"{slug}/{run_id}/{entry_id}".encode("utf-8")).hexdigest()[:16]
+    return f".{entry_id}.orchestrarium-delete-{token}"
+
+
+def validate_scratch_ownership(events: list[dict], item: Path, errors: list[str]) -> None:
+    """Enforce ledger-wide, case-insensitive scratch and tombstone ownership."""
+
+    owners: dict[str, str] = {}
+    for event in events:
+        run_id = event.get("runId")
+        if not isinstance(run_id, str):
+            continue
+        for entry in event.get("scratchEvidence", []):
+            if not isinstance(entry, dict):
+                continue
+            path = entry.get("path")
+            entry_id = entry.get("entryId")
+            if not isinstance(path, str) or not isinstance(entry_id, str):
+                continue
+            identity = f"{run_id}/{entry_id}/{entry.get('disposition')}"
+            original_key = path.casefold()
+            candidate = PurePosixPath(path)
+            tombstone = candidate.with_name(
+                scratch_tombstone_name(item.name, run_id, entry_id)
+            ).as_posix()
+            for key in (original_key, tombstone.casefold()):
+                previous = owners.get(key)
+                if previous is not None:
+                    fail(
+                        errors,
+                        "WI-SCRATCH-OWNERSHIP-CONFLICT: "
+                        f"{identity} collides with {previous}",
+                    )
+                else:
+                    owners[key] = identity
 
 
 def has_security_reviewer_authority(event: dict) -> bool:
@@ -484,9 +854,10 @@ def validate_event(event: dict, item: Path, seen: set[str], errors: list[str]) -
 
     run_id = event.get("runId")
     if isinstance(run_id, str):
-        if run_id in seen:
+        folded_run_id = run_id.casefold()
+        if folded_run_id in seen:
             fail(errors, f"duplicate runId: {run_id}")
-        seen.add(run_id)
+        seen.add(folded_run_id)
     else:
         fail(errors, f"{run_id}: runId must be a string")
 
@@ -532,6 +903,9 @@ def validate_event(event: dict, item: Path, seen: set[str], errors: list[str]) -
 
     if evidence is not None:
         validate_evidence(evidence, run_id, errors, gate == "PASS")
+
+    if "scratchEvidence" in event:
+        validate_scratch_evidence(event, item, artifact_path, run_id, errors)
 
     if gate == "PASS":
         if status != "completed":
@@ -932,6 +1306,7 @@ def validate_work_item(
     )
     events = [] if ledger_free_quick_fix else load_jsonl(selected_ledger, errors)
     event_validity = derive_event_validity(events, item, errors)
+    validate_scratch_ownership(events, item, errors)
     open_revise, open_launches = validate_closure(
         events,
         errors,

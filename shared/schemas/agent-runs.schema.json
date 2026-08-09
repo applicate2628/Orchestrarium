@@ -2,6 +2,11 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://orchestrarium.local/schemas/agent-runs.schema.json",
   "title": "Orchestrarium agent run ledger event",
+  "x-orchestrarium-jsonl": {
+    "maxLineChars": 131072,
+    "maxEvents": 4096,
+    "maxNestingDepth": 8
+  },
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -91,8 +96,72 @@
         }
       }
     },
+    "scratchEvidence": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "x-orchestrarium-maxRawUtf8Bytes": 131072,
+      "$comment": "Optional terminal PASS ownership contract for bounded scratch evidence under .scratch/work-items/<workItem>/<runId>/<entryId>. Legacy events remain valid when absent.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+          "required": ["entryId", "path", "disposition", "reason", "canonicalPointer"],
+        "properties": {
+          "entryId": { "type": "string", "minLength": 1, "maxLength": 96, "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+          "path": { "type": "string", "minLength": 1, "maxLength": 512 },
+          "disposition": { "enum": ["retain", "delete"] },
+          "reason": { "type": "string", "minLength": 1, "maxLength": 1024 },
+          "canonicalPointer": { "type": "string", "minLength": 1, "maxLength": 512 },
+          "proof": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["kind"],
+                "properties": { "kind": { "const": "git-object-set" } }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["kind", "artifactSha256", "producer", "reproduce"],
+                "properties": {
+                  "kind": { "const": "accepted-artifact" },
+                  "artifactSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+                  "producer": { "type": "string", "minLength": 1, "maxLength": 512 },
+                  "reproduce": { "type": "string", "minLength": 1, "maxLength": 1024 }
+                }
+              }
+            ]
+          },
+          "allOf": [
+            {
+              "if": { "properties": { "disposition": { "const": "delete" } }, "required": ["disposition"] },
+              "then": { "required": ["proof"] }
+            },
+            {
+              "if": { "properties": { "disposition": { "const": "retain" } }, "required": ["disposition"] },
+              "then": { "not": { "required": ["proof"] } }
+            }
+          ]
+        }
+      }
+    },
     "startedAt": { "type": "string", "minLength": 10 },
     "updatedAt": { "type": "string", "minLength": 10 },
     "notes": { "type": "string" }
-  }
+  },
+  "allOf": [
+    {
+      "if": { "required": ["scratchEvidence"] },
+      "then": {
+        "required": ["eventKind"],
+        "properties": {
+          "schemaVersion": { "const": 2 },
+          "eventKind": { "const": "terminal" },
+          "status": { "const": "completed" },
+          "gate": { "const": "PASS" }
+        }
+      }
+    }
+  ]
 }
