@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -161,23 +162,216 @@ def _make_file_symlink(link: Path, target: Path) -> None:
     assert link.is_symlink()
 
 
-def _policy_owner_count(source: str) -> int:
-    tree = ast.parse(source)
-    return sum(
-        isinstance(node, ast.ClassDef) and node.name == "TestAbortPolicy"
-        for node in ast.walk(tree)
+ABORT_POLICY_PATHS = (
+    HELPER_PATH,
+    ROOT / "scripts/production_installer.py",
+    ROOT / "scripts/install-codex.py",
+    ROOT / "scripts/install-claude.py",
+)
+ABORT_STAGES = ("sync", "register", "verify", "reclaim")
+
+
+def _abort_policy_sources() -> dict[Path, str]:
+    return {path: path.read_text(encoding="utf-8") for path in ABORT_POLICY_PATHS}
+
+
+def _fold_static_string(node: ast.AST | None) -> str | None:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left = _fold_static_string(node.left)
+        right = _fold_static_string(node.right)
+        return left + right if left is not None and right is not None else None
+    if isinstance(node, ast.JoinedStr):
+        parts = [_fold_static_string(value) for value in node.values]
+        return "".join(parts) if all(part is not None for part in parts) else None
+    return None
+
+
+def _fold_stage_container(node: ast.AST | None) -> tuple[str, ...] | None:
+    if isinstance(node, (ast.Tuple, ast.List, ast.Set)):
+        values = tuple(_fold_static_string(item) for item in node.elts)
+    elif (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id in {"tuple", "list", "set"}
+        and len(node.args) == 1
+        and not node.keywords
+    ):
+        return _fold_stage_container(node.args[0])
+    else:
+        return None
+    if any(value is None for value in values):
+        return None
+    return tuple(value for value in values if value is not None)
+
+
+def _assigned_name(node: ast.Assign | ast.AnnAssign) -> str:
+    targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+    if len(targets) != 1 or not isinstance(targets[0], ast.Name):
+        return "<complex-target>"
+    return targets[0].id
+
+
+class AbortPolicyOwnershipContract:
+    """Bounded AST owner proof for the test-only installer interruption policy."""
+
+    _ENV_ALLOWLIST = frozenset(
+        {
+            ("scripts/install-hypothesis-hook.py", "TestAbortPolicy.resolve_and_preflight", "mapping", None),
+            ("scripts/install-hypothesis-hook.py", "main", "get", "ORCHESTRARIUM_NO_HYPOTHESIS_HOOK"),
+            ("scripts/production_installer.py", "_run", "copy", None),
+            ("scripts/production_installer.py", "_install_hooks", "get", "CODEX_BIN"),
+            ("scripts/production_installer.py", "_target", "get", "USERPROFILE"),
+            ("scripts/production_installer.py", "_target", "get", "HOME"),
+            ("scripts/production_installer.py", "install", "get", "USERPROFILE"),
+            ("scripts/production_installer.py", "install", "get", "HOME"),
+            ("scripts/production_installer.py", "install", "get", "ORCHESTRARIUM_NO_HYPOTHESIS_HOOK"),
+        }
     )
 
+    def __init__(self, sources: dict[Path, str]) -> None:
+        self._sources = sources
 
-def _assert_no_abort_env_reads(sources: dict[Path, str]) -> None:
-    offenders = [path for path, text in sources.items() if ABORT_ENV in text]
-    assert offenders == []
+    @staticmethod
+    def _owner(node: ast.AST, parents: dict[ast.AST, ast.AST]) -> str:
+        names: list[str] = []
+        current = node
+        while current in parents:
+            current = parents[current]
+            if isinstance(current, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                names.append(current.name)
+        return ".".join(reversed(names)) or "<module>"
+
+    @staticmethod
+    def _relative(path: Path) -> str:
+        return path.resolve().relative_to(ROOT.resolve()).as_posix()
+
+    def errors(self) -> tuple[str, ...]:
+        errors: list[str] = []
+        class_owners: list[tuple[str, str]] = []
+        key_owners: list[tuple[str, str, str]] = []
+        stage_owners: list[tuple[str, str, str]] = []
+        environment_uses: list[tuple[str, str, str, str | None]] = []
+
+        for path, source in self._sources.items():
+            relative = self._relative(path)
+            try:
+                tree = ast.parse(source)
+            except SyntaxError as exc:
+                errors.append(f"ABORT-OWNER-PARSE:{relative}:{exc.lineno}")
+                continue
+            parents = {
+                child: parent
+                for parent in ast.walk(tree)
+                for child in ast.iter_child_nodes(parent)
+            }
+            for node in ast.walk(tree):
+                owner = self._owner(node, parents)
+                if isinstance(node, ast.ClassDef) and node.name == "TestAbortPolicy":
+                    class_owners.append((relative, node.name))
+                if isinstance(node, (ast.Assign, ast.AnnAssign)):
+                    value = node.value
+                    name = _assigned_name(node)
+                    if _fold_static_string(value) == ABORT_ENV:
+                        key_owners.append((relative, owner, name))
+                    stages = _fold_stage_container(value)
+                    if stages is not None and len(stages) == 4 and set(stages) == set(ABORT_STAGES):
+                        stage_owners.append((relative, owner, name))
+                if (
+                    isinstance(node, ast.ImportFrom)
+                    and node.module == "os"
+                    and any(alias.name in {"environ", "getenv"} for alias in node.names)
+                ):
+                    environment_uses.append((relative, owner, "import", None))
+                if not (
+                    isinstance(node, ast.Attribute)
+                    and isinstance(node.value, ast.Name)
+                    and node.value.id == "os"
+                    and node.attr in {"environ", "getenv"}
+                ):
+                    continue
+                if node.attr == "getenv":
+                    call = parents.get(node)
+                    key = (
+                        _fold_static_string(call.args[0])
+                        if isinstance(call, ast.Call) and call.args
+                        else None
+                    )
+                    environment_uses.append((relative, owner, "getenv", key))
+                    continue
+                parent = parents.get(node)
+                call = parents.get(parent) if parent is not None else None
+                if (
+                    isinstance(parent, ast.Attribute)
+                    and parent.value is node
+                    and parent.attr in {"get", "copy"}
+                    and isinstance(call, ast.Call)
+                ):
+                    key = _fold_static_string(call.args[0]) if parent.attr == "get" and call.args else None
+                    environment_uses.append((relative, owner, parent.attr, key))
+                else:
+                    environment_uses.append((relative, owner, "mapping", None))
+
+        expected_class = [("scripts/install-hypothesis-hook.py", "TestAbortPolicy")]
+        if class_owners != expected_class:
+            errors.append(f"ABORT-OWNER-CLASS:{class_owners!r}")
+        expected_key = [("scripts/install-hypothesis-hook.py", "TestAbortPolicy", "ABORT_ENV")]
+        if key_owners != expected_key:
+            errors.append(f"ABORT-OWNER-KEY:{key_owners!r}")
+        expected_stages = [("scripts/install-hypothesis-hook.py", "TestAbortPolicy", "STAGES")]
+        if stage_owners != expected_stages:
+            errors.append(f"ABORT-OWNER-STAGES:{stage_owners!r}")
+        for observation in environment_uses:
+            if observation not in self._ENV_ALLOWLIST:
+                errors.append(f"ABORT-OWNER-ENV:{observation!r}")
+        actual_environment = Counter(environment_uses)
+        expected_environment = Counter(self._ENV_ALLOWLIST)
+        if actual_environment != expected_environment:
+            errors.append(
+                "ABORT-OWNER-ENV-CARDINALITY:"
+                f"actual={sorted(actual_environment.items())!r}:"
+                f"expected={sorted(expected_environment.items())!r}"
+            )
+        return tuple(sorted(set(errors)))
+
+    def assert_valid(self) -> None:
+        errors = self.errors()
+        assert errors == (), "\n".join(errors)
 
 
-def _assert_no_second_stage_owner(sources: dict[Path, str]) -> None:
-    stage_tuple = '("sync", "register", "verify", "reclaim")'
-    offenders = [path for path, text in sources.items() if stage_tuple in text]
-    assert offenders == []
+def _run_fake_global_abort_case(case: Case, stage: str, tmp_path: Path) -> bool:
+    fake_home = tmp_path / case.provider / stage / "home"
+    config = fake_home / Path(case.config)
+    installed = fake_home / Path(case.installed_root)
+    config.parent.mkdir(parents=True, exist_ok=True)
+    installed.mkdir(parents=True, exist_ok=True)
+    config.write_text('{"hooks": {}, "sentinel": "preserve"}\n', encoding="utf-8")
+    (installed / "owned-sentinel.bin").write_bytes(b"owned-before")
+    (fake_home / "unrelated-sentinel.bin").write_bytes(b"unrelated-before")
+    before = _tree_snapshot(fake_home)
+    env = os.environ.copy()
+    env["HOME"] = str(fake_home)
+    env["USERPROFILE"] = str(fake_home)
+    env[ABORT_ENV] = stage
+    env.setdefault("PYTEST_CURRENT_TEST", f"fake-global-{case.provider}-{stage}")
+    if case.provider == "codex":
+        env["CODEX_BIN"] = str(ROOT / "tests/fixtures/fake_codex_hooks_host.py")
+    result = subprocess.run(
+        [sys.executable, str(case.script), "--global", "--force"],
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=240,
+    )
+    output = result.stdout + result.stderr
+    assert result.returncode not in (0, ABORT_EXIT), (case.provider, stage, output)
+    assert "forbidden for global install scope" in output, (case.provider, stage, output)
+    assert "TEST-ABORT:" not in output, (case.provider, stage, output)
+    assert _tree_snapshot(fake_home) == before, (case.provider, stage)
+    return True
 
 
 def _checkpoint(
@@ -722,55 +916,104 @@ def test_transaction_abort_rejects_junction_escape() -> None:
     assert "TEST-ABORT:" not in output
 
 
-def test_transaction_abort_policy_has_one_structural_owner() -> None:
+def test_transaction_abort_policy_contract_accepts_current_source() -> None:
+    AbortPolicyOwnershipContract(_abort_policy_sources()).assert_valid()
+
+
+def test_transaction_abort_policy_contract_rejects_archived_constructed_owner() -> None:
+    assert "AbortPolicyOwnershipContract" in globals(), "ABORT-PROOF-MISSING"
     helper_source = HELPER_PATH.read_text(encoding="utf-8")
-    assert _policy_owner_count(helper_source) == 1
-    for path in (
-        ROOT / "scripts/production_installer.py",
-        ROOT / "scripts/install-codex.py",
-        ROOT / "scripts/install-claude.py",
-    ):
-        assert _policy_owner_count(path.read_text(encoding="utf-8")) == 0
+    mutant = helper_source + """
+
+def duplicate_abort_owner():
+    ambient = os.environ
+    key = "ORCHESTRARIUM_TEST_" + "ABORT_HOOK_TRANSACTION_AFTER"
+    stages = tuple(("sync", "register", "verify", "reclaim"))
+    return ambient.get(key), stages
+"""
+    sources = _abort_policy_sources()
+    sources[HELPER_PATH] = mutant
+    errors = AbortPolicyOwnershipContract(sources).errors()
+    assert any(error.startswith("ABORT-OWNER-ENV:") for error in errors), errors
+    assert any(error.startswith("ABORT-OWNER-KEY:") for error in errors), errors
+    assert any(error.startswith("ABORT-OWNER-STAGES:") for error in errors), errors
+
+
+def test_transaction_abort_all_global_stages_preserve_state(tmp_path: Path) -> None:
+    assert "_run_fake_global_abort_case" in globals(), "ABORT-GLOBAL-MATRIX-MISSING"
+    observed = {
+        (case.provider, stage)
+        for case in CASES
+        for stage in hook_installer.TEST_TRANSACTION_STAGES
+        if _run_fake_global_abort_case(case, stage, tmp_path)
+    }
+    assert observed == {
+        (provider, stage)
+        for provider in ("codex", "claude")
+        for stage in ("sync", "register", "verify", "reclaim")
+    }
 
 
 def test_transaction_abort_semantic_oracle_rejects_constructed_policy_owners() -> None:
-    helper_source = HELPER_PATH.read_text(encoding="utf-8")
-    planted = helper_source + "\nclass TestAbortPolicy:\n    pass\n"
-    assert _policy_owner_count(planted) == 2
+    sources = _abort_policy_sources()
+    sources[HELPER_PATH] += "\nclass TestAbortPolicy:\n    pass\n"
+    errors = AbortPolicyOwnershipContract(sources).errors()
+    assert any(error.startswith("ABORT-OWNER-CLASS:") for error in errors), errors
 
 
-def test_transaction_abort_policy_owner_guard_rejects_installer_environment_reads() -> None:
-    sources = {
-        path: path.read_text(encoding="utf-8")
-        for path in (
-            ROOT / "scripts/production_installer.py",
-            ROOT / "scripts/install-codex.py",
-            ROOT / "scripts/install-claude.py",
-        )
-    }
-    _assert_no_abort_env_reads(sources)
+@pytest.mark.parametrize(
+    "suffix",
+    (
+        f'\nos.environ.get("{ABORT_ENV}")\n',
+        '\nos.getenv("ORCHESTRARIUM_TEST_" + "ABORT_HOOK_TRANSACTION_AFTER")\n',
+        '\nfrom os import environ\n',
+    ),
+    ids=("direct-get", "split-getenv", "import-environ"),
+)
+def test_transaction_abort_policy_contract_rejects_installer_environment_reads(
+    suffix: str,
+) -> None:
+    sources = _abort_policy_sources()
     planted_path = ROOT / "scripts/production_installer.py"
-    planted = dict(sources)
-    planted[planted_path] += f'\nos.environ.get("{ABORT_ENV}")\n'
-    with pytest.raises(AssertionError):
-        _assert_no_abort_env_reads(planted)
+    sources[planted_path] += suffix
+    errors = AbortPolicyOwnershipContract(sources).errors()
+    assert any(error.startswith("ABORT-OWNER-ENV:") for error in errors), errors
 
 
-def test_transaction_abort_policy_owner_guard_rejects_second_stage_enumeration() -> None:
-    sources = {
-        path: path.read_text(encoding="utf-8")
-        for path in (
-            ROOT / "scripts/production_installer.py",
-            ROOT / "scripts/install-codex.py",
-            ROOT / "scripts/install-claude.py",
-        )
-    }
-    _assert_no_second_stage_owner(sources)
+def test_transaction_abort_policy_contract_rejects_duplicate_allowed_environment_read() -> None:
+    sources = _abort_policy_sources()
+    source = sources[HELPER_PATH]
+    needle = "        source = os.environ if environ is None else environ\n"
+    assert source.count(needle) == 1
+    sources[HELPER_PATH] = source.replace(
+        needle,
+        needle + "        duplicate_ambient = os.environ\n",
+        1,
+    )
+    errors = AbortPolicyOwnershipContract(sources).errors()
+    assert any(
+        error.startswith("ABORT-OWNER-ENV-CARDINALITY:") for error in errors
+    ), errors
+
+
+@pytest.mark.parametrize(
+    "expression",
+    (
+        '("sync", "register", "verify", "reclaim")',
+        '["sync", "register", "verify", "reclaim"]',
+        '{"sync", "register", "verify", "reclaim"}',
+        'tuple(("sync", "register", "verify", "reclaim"))',
+    ),
+    ids=("tuple", "list", "set", "constructed-tuple"),
+)
+def test_transaction_abort_policy_contract_rejects_second_stage_enumeration(
+    expression: str,
+) -> None:
+    sources = _abort_policy_sources()
     planted_path = ROOT / "scripts/install-codex.py"
-    planted = dict(sources)
-    planted[planted_path] += '\nSTAGES = ("sync", "register", "verify", "reclaim")\n'
-    with pytest.raises(AssertionError):
-        _assert_no_second_stage_owner(planted)
+    sources[planted_path] += f"\nSTAGES = {expression}\n"
+    errors = AbortPolicyOwnershipContract(sources).errors()
+    assert any(error.startswith("ABORT-OWNER-STAGES:") for error in errors), errors
 
 
 def test_transaction_abort_surface_is_hidden_from_operator_and_publication_paths() -> None:
