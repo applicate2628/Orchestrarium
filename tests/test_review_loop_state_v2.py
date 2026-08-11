@@ -1047,19 +1047,29 @@ def test_nonconverged_close_requires_a_complete_revise_round(
     assert state.read_bytes() == before
 
 
-def test_runtime_engine_is_projected_and_bindings_keep_observability_bug_open() -> None:
+def test_runtime_engine_is_projected_and_observability_record_is_current() -> None:
     installer = (ROOT / "scripts" / "production_installer.py").read_text(encoding="utf-8")
-    codex = (ROOT / "src.codex" / "skills" / "review-loop" / "SKILL.md").read_text(encoding="utf-8")
-    claude = (ROOT / "src.claude" / "commands" / "agents-review-loop.md").read_text(encoding="utf-8")
-    open_bug = "work-items/bugs/2026-07-26-nothing-observes-a-review-loop-that-ran-without-a-ledger.md"
+    live_surfaces = (
+        ROOT / "shared" / "references" / "review-loop-methodology.md",
+        ROOT / "shared" / "references" / "ru" / "review-loop-methodology.md",
+        ROOT / "src.claude" / "agents" / "contracts" / "review-loop.md",
+        ROOT / "src.claude" / "commands" / "agents-review-loop.md",
+        ROOT / "src.codex" / "skills" / "review-loop" / "SKILL.md",
+    )
+    old_bug = "work-items/bugs/2026-07-26-nothing-observes-a-review-loop-that-ran-without-a-ledger.md"
+    archived_bug = "work-items/bugs/archive/2026-08/2026-07-26-nothing-observes-a-review-loop-that-ran-without-a-ledger.md"
     assert '"review_loop_state.py"' in installer
+    assert (ROOT / archived_bug).is_file()
+    for surface in live_surfaces:
+        text = surface.read_text(encoding="utf-8")
+        assert old_bug not in text
+        assert archived_bug in text
+    codex = live_surfaces[-1].read_text(encoding="utf-8")
+    claude = live_surfaces[-2].read_text(encoding="utf-8")
     assert "ORCHESTRARIUM_REVIEW_LOOP_STATE_V2" in codex
     assert "ORCHESTRARIUM_REVIEW_LOOP_STATE_V2" in claude
-    assert open_bug in codex
-    assert open_bug in claude
     assert "absence observer" not in codex
     assert "only launchable attempt IDs" not in claude
-    assert (ROOT / open_bug).is_file()
 
 
 @pytest.mark.parametrize(
