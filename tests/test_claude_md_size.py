@@ -33,8 +33,8 @@ EXPECTED_PAYLOADS: dict[str, tuple[int, str]] = {
         "488c41acb051ccf6100422b28b3d4ded846e8d9cdd88fb937fb9b383f8d70319",
     ),
     "hook-behavior-contracts": (
-        13_632,
-        "bc66fdc758617b33daf45a2c77f5b78740d03c2f2169ca9e1b2802544a92fac0",
+        16_115,
+        "4bacc7ef7c89ed3330f824a394e3e1a4672ee05809a5cd0b71e537a8cc58e1be",
     ),
     # Payload pins force deliberate review of current hook behavior, placement,
     # and installer truth before a canonical-reference edit can pass.
@@ -73,10 +73,10 @@ EXPECTED_MANIFEST: dict[str, tuple[str, ...]] = {
     "structural-enforcement teeth": (
         "They are backstops; they do not replace the text rules above.",
         "prompts should allow relevant MCP use",
-        "the binding rule remains the governance text (human review + leak-check before any push)",
+        "gate captures and directly executes the verified",
         "a subagent must never be blocked",
         "This exemption never transfers ownership: the dispatching main conversation still owns diagnostic discipline and publication authorization",
-        "requires the publication-safety scan in the current turn",
+        "Transcript/manual results cannot authorize",
         "Stop hooks do not replace the main conversation's current-turn status checks or work-item close/archive ownership",
         "Reminder hooks re-anchor Model Context Protocol (MCP) discovery/use after compaction, active delegation/recovery, scratch preservation, and every-turn continuity",
         "AUDIT mode",
@@ -159,9 +159,9 @@ def test_live_claude_md_passes_at_post_extraction_cap_and_reports_exact_counts()
     result = _run()
     assert result.returncode == 0, result.stdout + result.stderr
     for expected in (
-            "Code points: 35951",
-            "UTF-8 bytes: 36133",
-            "Binding size: 36133",
+            "Code points: 36525",
+            "UTF-8 bytes: 36705",
+            "Binding size: 36705",
         "Size cap: 36771",
         "Warning threshold: 36521",
         "Manifest: 47/47",
@@ -173,7 +173,7 @@ def test_live_claude_md_passes_at_post_extraction_cap_and_reports_exact_counts()
 def test_tiny_size_cap_fails_closed() -> None:
     result = _run("--size-cap", "1000")
     assert result.returncode == 1, result.stdout + result.stderr
-    assert "FAIL: Claude Markdown binding size 36133 > size cap 1000" in result.stdout
+    assert "FAIL: Claude Markdown binding size 36705 > size cap 1000" in result.stdout
     assert "RESULT: FAIL" in result.stdout
 
 

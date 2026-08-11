@@ -1535,6 +1535,7 @@ def validate(root: Path | None = None):
         utility_skills=UTILITY_SKILLS,
         curated_role_skills=CURATED_ROLE_SKILLS,
         root=root,
+        enforce_reusable_instruction_boundaries=True,
     )
 
 
@@ -1546,6 +1547,7 @@ def main(argv: list[str] | None = None) -> int:
         maintainer_only_shared_reference_names=MAINTAINER_ONLY_SHARED_REFERENCE_NAMES,
         utility_skills=UTILITY_SKILLS,
         curated_role_skills=CURATED_ROLE_SKILLS,
+        enforce_reusable_instruction_boundaries=True,
         argv=argv,
         description=__doc__,
     )

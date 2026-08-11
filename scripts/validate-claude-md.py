@@ -45,10 +45,10 @@ BOOTSTRAP_TEETH = (
 STRUCTURAL_ENFORCEMENT_TEETH = (
     "They are backstops; they do not replace the text rules above.",
     "prompts should allow relevant MCP use",
-    "the binding rule remains the governance text (human review + leak-check before any push)",
+    "gate captures and directly executes the verified",
     "a subagent must never be blocked",
     "This exemption never transfers ownership: the dispatching main conversation still owns diagnostic discipline and publication authorization",
-    "requires the publication-safety scan in the current turn",
+    "Transcript/manual results cannot authorize",
     "Stop hooks do not replace the main conversation's current-turn status checks or work-item close/archive ownership",
     "Reminder hooks re-anchor Model Context Protocol (MCP) discovery/use after compaction, active delegation/recovery, scratch preservation, and every-turn continuity",
     "AUDIT mode",

@@ -24,8 +24,8 @@ PROVIDER_RUNTIME_MIRRORS = (
     ROOT / "src.claude/agents/scripts/skill_pack_validator_runtime.py",
 )
 EXPECTED_SUMMARIES = (
-    "PASS: 529  WARN: 0  FAIL: 0",
-    "Checks: 448  |  Passed: 448  |  Warnings: 0  |  Errors: 0",
+    "PASS: 530  WARN: 0  FAIL: 0",
+    "Checks: 449  |  Passed: 449  |  Warnings: 0  |  Errors: 0",
 )
 
 
@@ -174,6 +174,68 @@ def _replace_directory_with_symlink(link: Path, target: Path) -> None:
     assert link.is_dir()
 
 
+@pytest.mark.parametrize(
+    ("provider", "relative_instruction", "leak_text"),
+    (
+        (
+            "codex",
+            Path(".agents/skills/qa-engineer/SKILL.md"),
+            "## Orchestrator upgrades "
+            "(work-items/roadmaps/orchestrator-upgrades.md)",
+        ),
+        (
+            "codex",
+            Path(".agents/skills/qa-engineer/SKILL.md"),
+            "## Orchestrarium-upgrade ledger",
+        ),
+        (
+            "claude",
+            Path(".claude/agents/qa-engineer.md"),
+            "## Orchestrator upgrades "
+            "(work-items/roadmaps/orchestrator-upgrades.md)",
+        ),
+        (
+            "claude",
+            Path(".claude/agents/qa-engineer.md"),
+            "## Orchestrarium-upgrade ledger",
+        ),
+    ),
+)
+def test_reusable_instruction_guard_rejects_project_specific_upgrade_ledger(
+    tmp_path: Path,
+    provider: str,
+    relative_instruction: Path,
+    leak_text: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    target, validator = _materialize_installed_pack(tmp_path, provider)
+    instruction = target / relative_instruction
+    instruction.write_text(
+        instruction.read_text(encoding="utf-8")
+        + f"\n{leak_text}\n",
+        encoding="utf-8",
+    )
+    runtime = _load(RUNTIME, f"project_specific_ledger_guard_{provider}")
+
+    result = runtime.validate_pack(
+        script=validator,
+        provider=provider,
+        actions=(),
+        maintainer_only_shared_reference_names=frozenset(),
+        utility_skills=frozenset(),
+        curated_role_skills=frozenset(),
+        root=target,
+        enforce_reusable_instruction_boundaries=True,
+    )
+
+    assert result.checks == 1
+    assert result.passed == 0
+    assert result.errors == 1
+    output = capsys.readouterr().out
+    assert "project-specific Orchestrarium upgrade-ledger obligation" in output
+    assert instruction.name in output
+
+
 def test_canonical_runtime_is_the_only_engine_and_exports_public_entrypoints() -> None:
     assert RUNTIME.is_file()
     assert all(not path.exists() for path in PROVIDER_RUNTIME_MIRRORS)
@@ -305,8 +367,8 @@ def test_mutable_action_seam_detects_missing_required_content(
         result = module.validate(ROOT)
     finally:
         module.ACTIONS = original_actions
-    assert result.checks == 1
-    assert result.passed == 0
+    assert result.checks == 2
+    assert result.passed == 1
     assert result.errors == 1
 
 
@@ -335,12 +397,12 @@ def test_scoped_action_registry_preserves_source_inventory(
     (
         (
             "codex",
-            "PASS: 342  WARN: 0  FAIL: 0",
+            "PASS: 343  WARN: 0  FAIL: 0",
             "installed work-item state validator enforces evidence for PASS",
         ),
         (
             "claude",
-            "Checks: 337  |  Passed: 337  |  Warnings: 0  |  Errors: 0",
+            "Checks: 338  |  Passed: 338  |  Warnings: 0  |  Errors: 0",
             "installed work-item state validator enforces evidence for PASS",
         ),
     ),
@@ -437,7 +499,7 @@ def test_installed_codex_layering_checks_only_orchestrarium_owned_skills(
             "AGENTS.md",
             "## Role index",
             "## Stale role index",
-            "PASS: 342  WARN: 0  FAIL: 0",
+            "PASS: 343  WARN: 0  FAIL: 0",
             "Section '## Role index' present in AGENTS.md",
         ),
         (
@@ -446,7 +508,7 @@ def test_installed_codex_layering_checks_only_orchestrarium_owned_skills(
             ".claude/CLAUDE.md",
             "agents-design-panel.md",
             "agents-stale-panel.md",
-            "Checks: 337  |  Passed: 337  |  Warnings: 0  |  Errors: 0",
+            "Checks: 338  |  Passed: 338  |  Warnings: 0  |  Errors: 0",
             "CLAUDE.md dispatch index exposes the design-panel command",
         ),
     ),

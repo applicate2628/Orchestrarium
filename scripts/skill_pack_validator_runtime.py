@@ -26,6 +26,13 @@ LAW_ID_RE = re.compile(r"\b(A[1-9]|B[1-3]|C[1-6]|D[1-5])\b")
 ACTION_SCOPES = frozenset(
     {"all", "dev_repo", "dev_repo_nonstandalone", "installed"}
 )
+PROJECT_SPECIFIC_UPGRADE_LEDGER_MARKERS = (
+    "work-items/roadmaps/orchestrator-upgrades.md",
+    "orchestrator upgrades",
+    "orchestrarium upgrades",
+    "orchestrator upgrade ledger",
+    "orchestrarium upgrade ledger",
+)
 
 
 @dataclass(frozen=True)
@@ -236,6 +243,37 @@ class Validator:
         text = self._read_or_fail(file, label)
         if text is not None:
             (self.fail if pattern in text else self.ok)(label)
+
+    def check_reusable_instruction_boundaries(self) -> None:
+        roots = [self.layout.skills]
+        if self.layout.provider == "claude":
+            roots.append(self.layout.pack / "agents")
+        hits: list[str] = []
+        for root in roots:
+            if not root.is_dir():
+                continue
+            for path in sorted(root.rglob("*.md")):
+                text = _read(path).casefold()
+                normalized = re.sub(r"[-_]+", " ", text)
+                matched = tuple(
+                    marker
+                    for marker in PROJECT_SPECIFIC_UPGRADE_LEDGER_MARKERS
+                    if marker in text or marker in normalized
+                )
+                if matched:
+                    try:
+                        display = path.relative_to(self.layout.pack).as_posix()
+                    except ValueError:
+                        display = str(path)
+                    hits.append(f"{display} ({', '.join(matched)})")
+        label = (
+            "installable skill/agent instructions contain no project-specific "
+            "Orchestrarium upgrade-ledger obligation"
+        )
+        if hits:
+            self.fail(f"{label}: {'; '.join(hits)}")
+        else:
+            self.ok(label)
 
     def check_file(self, file: str, label: str) -> None:
         (self.ok if self.is_file(file) else self.fail)(label)
@@ -1093,9 +1131,12 @@ def validate_pack(
     utility_skills: frozenset[str],
     curated_role_skills: frozenset[str],
     root: Path | None = None,
+    enforce_reusable_instruction_boundaries: bool = False,
 ) -> Validator:
     layout = detect_layout(script, provider, root)
     validator = Validator(layout)
+    if enforce_reusable_instruction_boundaries:
+        validator.check_reusable_instruction_boundaries()
     for action in _applicable_actions(actions, layout):
         operation, *args = action
         if operation == "direct":
@@ -1121,6 +1162,7 @@ def run_validator_cli(
     maintainer_only_shared_reference_names: frozenset[str],
     utility_skills: frozenset[str],
     curated_role_skills: frozenset[str],
+    enforce_reusable_instruction_boundaries: bool = False,
     argv: list[str] | None = None,
     description: str | None = None,
 ) -> int:
@@ -1146,6 +1188,9 @@ def run_validator_cli(
             utility_skills=utility_skills,
             curated_role_skills=curated_role_skills,
             root=args.root,
+            enforce_reusable_instruction_boundaries=(
+                enforce_reusable_instruction_boundaries
+            ),
         )
     except Exception as exc:
         print(f"  FAIL  validator runtime error: {exc}")

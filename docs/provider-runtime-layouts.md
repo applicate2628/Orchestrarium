@@ -35,7 +35,7 @@ Do not collapse those layers into one claim. When a row is Orchestrarium-owned r
 | Design-panel binding | `~/.codex/skills/design-panel/SKILL.md` + `agents/openai.yaml` | Independent multi-lane design generation on one pinned problem, converged through one mandatory synthesis; no panel-state validator is installed |
 | Optional native subagent overrides | `~/.codex/agents/default.toml`, `worker.toml`, `explorer.toml` | Runtime/operator-owned; Orchestrarium does not install defaults. Reinstall removes recognizable retired pack-owned copies and preserves customized user files |
 | Validation script | `~/.codex/skills/lead/scripts/validate-skill-pack.sh` | Same lead script tree as the repo source |
-| Publication-safety scan | `~/.codex/skills/lead/scripts/check-publication-safety.sh` | PowerShell wrapper exists alongside the shell script |
+| Publication-safety scan | `~/.codex/skills/lead/scripts/check-publication-safety.sh` | PowerShell runs the sibling `.py` entrypoint with Python |
 | Global operator overlay | `~/.codex/.agents-mode.yaml` | Orchestrarium-owned default operator file seeded on first global install and preserved on reinstall; legacy sibling `~/.codex/.agents-mode` is compatibility input only |
 
 ### Local
@@ -49,7 +49,7 @@ Do not collapse those layers into one claim. When a row is Orchestrarium-owned r
 | Optional native subagent overrides | `<project>/.codex/agents/default.toml`, `worker.toml`, `explorer.toml` | Runtime/operator-owned; Orchestrarium does not install defaults. Reinstall removes recognizable retired pack-owned copies and preserves customized user files |
 | Local config | `<project>/.agents/.agents-mode.yaml` | Canonical Orchestrarium local state file; local install seeds the default and `$init-project` reviews or updates it, while legacy sibling `<project>/.agents/.agents-mode` remains compatibility input only. Decision-driving reads use this local scope first, then fall back to the global Codex overlay when the local scope is absent. |
 | Validation script | `<project>/.agents/skills/lead/scripts/validate-skill-pack.sh` | Run from the target project root after install |
-| Publication-safety scan | `<project>/.agents/skills/lead/scripts/check-publication-safety.sh` | PowerShell wrapper exists alongside the shell script |
+| Publication-safety scan | `<project>/.agents/skills/lead/scripts/check-publication-safety.sh` | PowerShell runs the sibling `.py` entrypoint with Python |
 
 ## Claude Code
 

@@ -36,15 +36,24 @@ reference `find_machine_paths` and asserts this file has zero flaggable lines.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import dataclasses
 import importlib.util
+import hashlib
+import inspect
+import io
 import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+CANONICAL_SCANNER = REPO_ROOT / "scripts" / "universal-hooks" / "scripts" / "check-publication-safety.py"
 CODEX_SCANNER = REPO_ROOT / "src.codex" / "skills" / "lead" / "scripts" / "check-publication-safety.py"
 CLAUDE_SCANNER = REPO_ROOT / "src.claude" / "agents" / "scripts" / "check-publication-safety.py"
 CODEX_REF = REPO_ROOT / "src.codex" / "skills" / "lead" / "hooks" / "check-machine-local-path.py"
@@ -69,6 +78,17 @@ def _load_find_machine_paths():
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod.find_machine_paths
+
+
+def _load_canonical_scanner(name: str):
+    spec = importlib.util.spec_from_file_location(name, str(CANONICAL_SCANNER))
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[name] = mod
+    try:
+        spec.loader.exec_module(mod)
+    finally:
+        sys.modules.pop(name, None)
+    return mod
 
 
 # --- Row builders (assembled at runtime; no flaggable literal in source) ------
@@ -644,25 +664,25 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
                     ).stdout.strip()
                     rc, out, err = self._run_range(scanner, repo, "origin", "claude")
                     self.assertEqual(rc, 0, err)
-                    self.assertIn(
-                        f"publication-safety: clean (range, examined 1 file, remote origin, dst claude, tip {tip})",
+                    self.assertRegex(
                         out,
+                        rf"^publication-safety: clean \(range, receipt=v2, files=1, commits=1, "
+                        rf"commit-set=[0-9a-f]{{64}}, messages=complete, remote=origin, "
+                        rf"dst=claude, tip={tip}\)\n?$",
                     )
 
     def test_range_mode_empty_range_reports_zero_and_is_not_creditable(self) -> None:
-        # THE OPERATOR'S SCENARIO, scanner half: the tip is ALREADY published
-        # (nothing to publish). Must exit 0 (nothing to block on) but the
-        # "examined 0" line must never satisfy the gate's non-empty regex --
-        # mirrors tracked mode's own zero-examined armor (G1).
+        # An empty outgoing selection is uncertainty at the publication gate:
+        # it refuses and can never mint a zero-commit clean receipt.
         for scanner in SCANNERS:
             with self.subTest(scanner=scanner.parent.parent.name):
                 with tempfile.TemporaryDirectory() as td:
                     repo = self._init_range_repo(Path(td))
                     rc, out, err = self._run_range(scanner, repo, "origin", "main")
-                    self.assertEqual(rc, 0, err)
-                    self.assertIn("publication-safety: clean (range, examined 0 files -- nothing to publish)", out)
-                    self.assertNotRegex(out, r"examined [1-9]\d* files?")
-                    self.assertNotIn("remote origin", out)
+                    self.assertEqual(rc, 2, err)
+                    self.assertEqual(out, "")
+                    self.assertIn("PS-MSG-COVERAGE", err)
+                    self.assertNotIn("publication-safety: clean", err)
 
     def test_range_mode_reads_content_at_tip_not_working_tree(self) -> None:
         # O16, the single most important range-mode content-source property:
@@ -707,7 +727,12 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
                     self._rm_file(repo, "gone.txt")
                     rc, out, err = self._run_range(scanner, repo, "origin", "claude")
                     self.assertEqual(rc, 0, err)
-                    self.assertIn("publication-safety: clean (range, examined 0 files -- nothing to publish)", out)
+                    self.assertRegex(
+                        out,
+                        r"^publication-safety: clean \(range, receipt=v2, files=0, commits=2, "
+                        r"commit-set=[0-9a-f]{64}, messages=complete, remote=origin, "
+                        r"dst=claude, tip=[0-9a-f]{40,64}\)\n?$",
+                    )
 
     def test_range_mode_self_exemption_for_scanner_copy_inside_range(self) -> None:
         # Guard G3: the scanner's own copy, committed inside a scanned range,
@@ -735,7 +760,7 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
                     self.assertEqual(rc, 2)
                     self.assertNotIn(secret_url, err)
                     self.assertNotIn("token123", err)
-                    self.assertIn("not a configured remote name", err)
+                    self.assertIn("id=PS-MSG-RANGE reason=remote", err)
 
     def test_range_mode_rejects_glob_remote_value(self) -> None:
         # F7: `--remotes=` is glob-matched by git; a glob value must be
@@ -747,7 +772,7 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
                     repo = self._init_range_repo(Path(td))
                     rc, out, err = self._run_range(scanner, repo, "*", "claude")
                     self.assertEqual(rc, 2)
-                    self.assertIn("not a configured remote name", err)
+                    self.assertIn("id=PS-MSG-RANGE reason=remote", err)
 
     def test_range_mode_missing_arguments_errors(self) -> None:
         for scanner in SCANNERS:
@@ -760,6 +785,1268 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
                         capture_output=True, text=True, encoding="utf-8",
                     )
                     self.assertEqual(proc.returncode, 2)
+
+
+@unittest.skipIf(_git() is None, "needs git on PATH")
+class TestPublicationSafetyScannerV2(unittest.TestCase):
+    """Item-6 contract guards target the universal owner directly."""
+
+    def _git_run(
+        self, repo: Path, *args: str, input_text: str | None = None, check: bool = True
+    ) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [_git(), "-C", str(repo), *args],
+            input=input_text,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=check,
+        )
+
+    def _init_range_repo(self, root: Path, *, publish_seed: bool = True) -> Path:
+        origin = root / "origin.git"
+        repo = root / "repo"
+        subprocess.run([_git(), "init", "-q", "--bare", str(origin)], check=True)
+        subprocess.run([_git(), "init", "-q", str(repo)], check=True)
+        self._git_run(repo, "config", "user.email", "t@t")
+        self._git_run(repo, "config", "user.name", "t")
+        self._git_run(repo, "remote", "add", "origin", str(origin))
+        self._commit(repo, "seed.txt", "clean seed", "seed")
+        if publish_seed:
+            self._git_run(repo, "push", "-q", "origin", "HEAD:refs/heads/main")
+        return repo
+
+    def _commit(self, repo: Path, name: str, content: str, message: str) -> str:
+        path = repo / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content + "\n", encoding="utf-8")
+        self._git_run(repo, "add", name)
+        self._git_run(repo, "commit", "-q", "-F", "-", input_text=message)
+        return self._git_run(repo, "rev-parse", "HEAD").stdout.strip()
+
+    def _run_range(self, repo: Path, remote: str = "origin", dst: str = "main") -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [sys.executable, str(CANONICAL_SCANNER), "--range", remote, dst],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+
+    def _run_path(self, content: str) -> subprocess.CompletedProcess:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            subprocess.run([_git(), "init", "-q", str(repo)], check=True)
+            fixture = repo / "fixture.txt"
+            fixture.write_text(content + "\n", encoding="utf-8")
+            return subprocess.run(
+                [sys.executable, str(CANONICAL_SCANNER), "--path", str(fixture)],
+                cwd=repo,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+            )
+
+    def _expected_digest(self, rows: list[str]) -> str:
+        ordered = [value.lower() for value in rows]
+        framed = b"publication-safety-range-receipt-v2\0" + b"\0".join(
+            value.encode("ascii") for value in ordered
+        )
+        return hashlib.sha256(framed).hexdigest()
+
+    def _leak_message(self, label: str) -> str:
+        return _join(label, "\n\n", "to", "ken", " = ", "A1B2C3D4E5F6G7H8IJK")
+
+    def test_uppercase_identifier_polarity_matrix(self) -> None:
+        families = {
+            "password": ("password", "service_password", "servicePassword", "DBPassword", "DBPASSWORD"),
+            "secret": ("secret", "service_secret", "serviceSecret", "AWSSecret", "AWSSECRET"),
+            "token": ("token", "service_token", "serviceToken", "APIToken", "APITOKEN"),
+            "api-key": ("api_key", "service_api_key", "serviceApiKey", "XApiKey", "MYAPIKEY"),
+        }
+        values = ("A1B2C3D4E5F6G7H8IJK", '"A1B2C3D4E5F6G7H8IJK"')
+        executed = 0
+        for family, identifiers in families.items():
+            for identifier in identifiers:
+                for value in values:
+                    executed += 1
+                    with self.subTest(family=family, identifier=identifier, quoted=value.startswith('"')):
+                        proc = self._run_path(f"{identifier} = {value}")
+                        self.assertEqual(proc.returncode, 1, f"row={family}:{identifier}:{proc.stderr!r}")
+        self.assertEqual(executed, 40)
+        for name, content in block_rows().items():
+            with self.subTest(existing_block=name):
+                self.assertEqual(self._run_path(content).returncode, 1)
+        for name, content in pass_rows().items():
+            with self.subTest(existing_pass=name):
+                self.assertEqual(self._run_path(content).returncode, 0)
+        self.assertEqual(self._run_path("myatoken = A1B2C3D4E5F6G7H8IJK").returncode, 0)
+        self.assertEqual(self._run_path("CancellationToken cancellationToken = default").returncode, 0)
+
+    def test_range_message_exactly_once(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = self._init_range_repo(Path(td))
+            self._commit(repo, "one.txt", "clean one", "first clean message")
+            self._commit(repo, "two.txt", "clean two", "second clean message")
+            selected = self._git_run(
+                repo, "rev-list", "--topo-order", "HEAD", "--not", "--remotes=origin"
+            ).stdout.splitlines()
+            proc = self._run_range(repo)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn(f"commits={len(selected)}", proc.stdout)
+            self.assertIn(f"commit-set={self._expected_digest(selected)}", proc.stdout)
+            self.assertIn("messages=complete", proc.stdout)
+
+    def test_range_message_row_mutation(self) -> None:
+        module = _load_canonical_scanner("_scanner_v2_mutation")
+        self.assertTrue(hasattr(module, "_canonical_commit_ids"))
+        rows = ["1" * 40, "2" * 40, "3" * 40]
+        self.assertEqual(module._canonical_commit_ids(rows), tuple(rows))
+        for mutation in (rows[:-1], rows + [rows[-1]], [rows[0], rows[1], "4" * 40]):
+            with self.subTest(mutation=tuple(mutation)):
+                if len(mutation) != len(set(mutation)):
+                    with self.assertRaises(ValueError):
+                        module._canonical_commit_ids(mutation)
+                else:
+                    self.assertNotEqual(self._expected_digest(rows), self._expected_digest(mutation))
+
+    def test_range_commit_graph_matrix(self) -> None:
+        cases = ("non-tip-body", "trailer", "rename", "delete", "binary", "add-delete", "initial", "other-remote", "merge")
+        for case in cases:
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as td:
+                root = Path(td)
+                repo = self._init_range_repo(root, publish_seed=case in {"non-tip-body", "trailer", "rename", "delete", "binary", "add-delete", "merge"})
+                message = self._leak_message(case)
+                if case == "non-tip-body":
+                    self._commit(repo, "a.txt", "clean a", message)
+                    self._commit(repo, "b.txt", "clean b", "clean tip")
+                elif case == "trailer":
+                    self._commit(repo, "a.txt", "clean a", "clean subject\n\nSigned-off-by: t\n" + message)
+                elif case == "rename":
+                    self._git_run(repo, "mv", "seed.txt", "renamed.txt")
+                    self._git_run(repo, "commit", "-q", "-F", "-", input_text=message)
+                elif case == "delete":
+                    self._git_run(repo, "rm", "seed.txt")
+                    self._git_run(repo, "commit", "-q", "-F", "-", input_text=message)
+                elif case == "binary":
+                    (repo / "binary.bin").write_bytes(b"\0\1\2")
+                    self._git_run(repo, "add", "binary.bin")
+                    self._git_run(repo, "commit", "-q", "-F", "-", input_text=message)
+                elif case == "add-delete":
+                    self._commit(repo, "gone.txt", "clean transient", message)
+                    self._git_run(repo, "rm", "gone.txt")
+                    self._git_run(repo, "commit", "-q", "-m", "clean delete")
+                elif case == "initial":
+                    self._commit(repo, "initial.txt", "clean initial", message)
+                elif case == "other-remote":
+                    backup = root / "backup.git"
+                    subprocess.run([_git(), "init", "-q", "--bare", str(backup)], check=True)
+                    self._git_run(repo, "remote", "add", "backup", str(backup))
+                    self._commit(repo, "other.txt", "clean other", message)
+                    self._git_run(repo, "push", "-q", "backup", "HEAD:refs/heads/main")
+                else:
+                    base = self._git_run(repo, "branch", "--show-current").stdout.strip()
+                    self._git_run(repo, "checkout", "-q", "-b", "side")
+                    self._commit(repo, "side.txt", "clean side", "clean side")
+                    self._git_run(repo, "checkout", "-q", base)
+                    self._commit(repo, "base.txt", "clean base", "clean base")
+                    self._git_run(repo, "merge", "--no-ff", "side", "-q", "-m", message)
+                proc = self._run_range(repo)
+                self.assertEqual(proc.returncode, 1, f"case={case} out={proc.stdout!r} err={proc.stderr!r}")
+                self.assertNotIn("A1B2C3D4E5F6G7H8IJK", proc.stdout + proc.stderr)
+
+    def test_range_message_zero_file_nonzero_commit(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = self._init_range_repo(Path(td))
+            self._git_run(repo, "rm", "seed.txt")
+            self._git_run(repo, "commit", "-q", "-m", "clean delete")
+            proc = self._run_range(repo)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("files=0, commits=1", proc.stdout)
+            self.assertIn("messages=complete", proc.stdout)
+
+    def test_range_fail_closed_matrix(self) -> None:
+        module = _load_canonical_scanner("_scanner_v2_failures")
+        for name in ("Refusal", "_canonical_commit_ids", "_decode_commit_message", "_parse_batch_header"):
+            self.assertTrue(hasattr(module, name), name)
+        with self.assertRaises(ValueError):
+            module._canonical_commit_ids(["x" * 40])
+        with self.assertRaises(ValueError):
+            module._canonical_commit_ids(["1" * 40, "1" * 40])
+        failures = (
+            (b"tree " + b"1" * 40 + b"\nencoding latin1\n\nclean", "PS-MSG-DECODE"),
+            (b"tree " + b"1" * 40 + b"\n\n\xff", "PS-MSG-DECODE"),
+            (b"tree " + b"1" * 40 + b"\n\n" + b"a" * (1_048_576 + 1), "PS-MSG-LIMIT"),
+        )
+        for raw, failure_id in failures:
+            with self.subTest(failure_id=failure_id):
+                outcome = module._decode_commit_message(raw)
+                self.assertEqual(outcome.failure_id, failure_id)
+        for header in (b"missing", b"1" * 40 + b" blob 2", b"2" * 40 + b" commit 2", b"1" * 40 + b" commit nope"):
+            with self.subTest(header=header[:8]):
+                outcome = module._parse_batch_header(header, "1" * 40, "commit")
+                self.assertEqual(outcome.failure_id, "PS-MSG-FRAME")
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            subprocess.run([_git(), "init", "-q", str(repo)], check=True)
+            proc = self._run_range(repo, "missing")
+            self.assertEqual(proc.returncode, 2)
+            self.assertIn("PS-MSG-RANGE", proc.stderr)
+            self.assertNotIn("publication-safety: clean", proc.stdout + proc.stderr)
+
+    def test_range_tip_changed(self) -> None:
+        module = _load_canonical_scanner("_scanner_v2_tip")
+        self.assertTrue(hasattr(module, "_confirm_tip"))
+        refusal = module._confirm_tip("1" * 40, lambda: "2" * 40)
+        self.assertEqual(refusal.failure_id, "PS-MSG-TIP-CHANGED")
+
+    def test_receipt_v2_canonicalization(self) -> None:
+        module = _load_canonical_scanner("_scanner_v2_receipt")
+        self.assertTrue(hasattr(module, "_serialize_range_receipt_v2"))
+        rows = ["2" * 40, "1" * 40]
+        line = module._serialize_range_receipt_v2(0, rows, "origin one", "refs/heads/topic", "2" * 40)
+        self.assertEqual(
+            line,
+            "publication-safety: clean (range, receipt=v2, files=0, commits=2, "
+            f"commit-set={self._expected_digest(rows)}, messages=complete, "
+            "remote=origin%20one, dst=refs%2Fheads%2Ftopic, tip=" + "2" * 40 + ")",
+        )
+        self.assertFalse(hasattr(module, "_serialize_empty_range_v2"))
+
+    def test_redacted_finding_output(self) -> None:
+        sentinel = "A1B2C3D4E5F6G7H8IJK"
+        proc = self._run_path(_join("to", "ken", " = ", sentinel))
+        self.assertEqual(proc.returncode, 1)
+        self.assertNotIn(sentinel, proc.stdout + proc.stderr)
+        self.assertIn("PS-FINDING-CONTENT", proc.stderr)
+        self.assertIn("line=1", proc.stderr)
+        self.assertIn("class=", proc.stderr)
+
+    def test_tracked_and_path_no_message_fields(self) -> None:
+        path_proc = self._run_path("clean content")
+        self.assertEqual(path_proc.returncode, 0, path_proc.stderr)
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            subprocess.run([_git(), "init", "-q", str(repo)], check=True)
+            self._git_run(repo, "config", "user.email", "t@t")
+            self._git_run(repo, "config", "user.name", "t")
+            (repo / "clean.txt").write_text("clean content\n", encoding="utf-8")
+            self._git_run(repo, "add", "clean.txt")
+            tracked_proc = subprocess.run(
+                [sys.executable, str(CANONICAL_SCANNER)], cwd=repo,
+                capture_output=True, text=True, encoding="utf-8",
+            )
+        self.assertEqual(tracked_proc.returncode, 0, tracked_proc.stderr)
+        for output in (path_proc.stdout, tracked_proc.stdout):
+            self.assertNotIn("commits=", output)
+            self.assertNotIn("commit-set=", output)
+            self.assertNotIn("messages=", output)
+
+
+class TestPublicationSafetyScannerR2Contract(unittest.TestCase):
+    """Durable R2 guards for lifecycle, multiplicity, and typed redaction."""
+
+    def _module(self, suffix: str):
+        return _load_canonical_scanner("_scanner_r2_" + suffix)
+
+    def test_r2_async_reader_and_coverage_contract_exist(self) -> None:
+        module = self._module("owners")
+        required = (
+            "ObjectReadSuccess",
+            "CoverageProof",
+            "_AsyncGitObjectReader",
+            "ObjectReaderSession",
+            "_build_coverage_proof",
+        )
+        missing = tuple(name for name in required if not hasattr(module, name))
+        self.assertEqual(missing, (), "R2-OWNER-CONTRACT")
+
+    def test_r2_coverage_proof_rejects_every_multiset_mutation(self) -> None:
+        module = self._module("coverage")
+        self.assertTrue(hasattr(module, "_build_coverage_proof"), "R2-COVERAGE-OWNER")
+        if not hasattr(module, "_build_coverage_proof"):
+            return
+        expected = ("1" * 40, "2" * 40, "3" * 40)
+        clean = module._build_coverage_proof(expected, expected, expected, expected)
+        self.assertEqual(type(clean).__name__, "CoverageProof", "R2-COVERAGE-CLEAN")
+        mutations = {
+            "omission": expected[:-1],
+            "duplicate": expected + (expected[-1],),
+            "substitution": expected[:-1] + ("4" * 40,),
+            "extra": expected + ("4" * 40,),
+        }
+        for axis in (1, 2, 3):
+            for mutation, rows in mutations.items():
+                values = [expected, expected, expected, expected]
+                values[axis] = rows
+                with self.subTest(axis=axis, mutation=mutation):
+                    refusal = module._build_coverage_proof(*values)
+                    self.assertEqual(refusal.failure_id, "PS-MSG-COVERAGE")
+                    self.assertEqual(refusal.phase, "coverage")
+                    self.assertEqual(refusal.reason, "multiplicity")
+
+    def test_r2_refusal_schema_and_failure_registry_are_complete(self) -> None:
+        module = self._module("failures")
+        expected = {
+            "PS-MSG-RANGE",
+            "PS-MSG-READ",
+            "PS-MSG-SPAWN",
+            "PS-MSG-READ-TIMEOUT",
+            "PS-MSG-REAP",
+            "PS-MSG-FRAME",
+            "PS-MSG-DECODE",
+            "PS-MSG-LIMIT",
+            "PS-MSG-COVERAGE",
+            "PS-MSG-TIP-CHANGED",
+        }
+        self.assertTrue(hasattr(module, "_SCANNER_REFUSAL_IDS"), "R2-REFUSAL-REGISTRY")
+        if not hasattr(module, "_SCANNER_REFUSAL_IDS"):
+            return
+        self.assertEqual(set(module._SCANNER_REFUSAL_IDS), expected)
+        fields = tuple(module.Refusal.__dataclass_fields__)
+        self.assertEqual(fields, ("failure_id", "phase", "reason"))
+        self.assertNotIn("detail", fields)
+
+    def test_r2_range_composition_root_is_async_and_finalization_aware(self) -> None:
+        module = self._module("composition")
+        self.assertTrue(hasattr(module, "_scan_range_async"), "R2-ASYNC-COMPOSITION")
+        self.assertTrue(hasattr(module, "_finalize_range_outcome"), "R2-FINALIZER-PRECEDENCE")
+        if not hasattr(module, "_scan_range_async"):
+            return
+        import inspect
+        self.assertTrue(inspect.iscoroutinefunction(module._scan_range_async))
+        outcome_fields = tuple(module.ScanOutcome.__dataclass_fields__)
+        self.assertIn("reap_certificate", outcome_fields)
+        self.assertIn("coverage", outcome_fields)
+
+    def test_r2_reader_deadline_cancellation_and_reap_are_behavioral(self) -> None:
+        module = self._module("reader_lifecycle")
+        self.assertTrue(hasattr(module, "_AsyncGitObjectReader"), "R2-READER-LIFECYCLE")
+        if not hasattr(module, "_AsyncGitObjectReader"):
+            return
+
+        oid = "1" * 40
+        raw = b"tree " + b"2" * 40 + b"\n\nclean"
+        helpers = {
+            "header": "import sys,time; sys.stdin.buffer.readline(); time.sleep(60)",
+            "body": (
+                "import sys,time; o=sys.stdin.buffer.readline().strip(); "
+                "sys.stdout.buffer.write(o+b' commit 10\\n'); sys.stdout.buffer.flush(); time.sleep(60)"
+            ),
+            "delimiter": (
+                "import sys,time; o=sys.stdin.buffer.readline().strip(); "
+                "sys.stdout.buffer.write(o+b' commit 10\\n'+b'x'*10); "
+                "sys.stdout.buffer.flush(); time.sleep(60)"
+            ),
+        }
+
+        async def finalize_until_terminal(reader, label: str) -> None:
+            result = await reader.finalize()
+            if result is not None:
+                self.assertEqual(result.failure_id, "PS-MSG-REAP", label)
+                self.assertEqual(reader.state, module.ReaderState.REAP_PENDING, label)
+                result = await reader.finalize()
+            self.assertIsNone(result, label)
+            self.assertTrue(reader.reap_certificate.complete, label)
+
+        async def timeout_row(label: str, body: str) -> None:
+            reader = module._AsyncGitObjectReader(
+                argv=(sys.executable, "-u", "-c", body),
+                request_timeout=0.15,
+                settle_timeout=0.25,
+            )
+            self.assertIsNone(await reader.start(), label)
+            started = time.monotonic()
+            refusal = await reader.read(oid, "commit")
+            self.assertLess(time.monotonic() - started, 1.0, label)
+            self.assertEqual(refusal.failure_id, "PS-MSG-READ-TIMEOUT", label)
+            await finalize_until_terminal(reader, label)
+            self.assertIsNotNone(reader.process.returncode, label)
+
+        async def cancellation_row() -> None:
+            reader = module._AsyncGitObjectReader(
+                argv=(sys.executable, "-u", "-c", helpers["header"]),
+                request_timeout=5.0,
+                settle_timeout=0.25,
+            )
+            self.assertIsNone(await reader.start())
+            task = asyncio.create_task(reader.read(oid, "commit"))
+            await asyncio.sleep(0.05)
+            task.cancel()
+            refusal = await task
+            self.assertEqual(refusal.failure_id, "PS-MSG-READ")
+            self.assertEqual(refusal.reason, "cancelled")
+            await finalize_until_terminal(reader, "cancelled")
+            self.assertTrue(task.done())
+            self.assertIsNotNone(reader.process.returncode)
+
+        async def success_row() -> None:
+            encoded = repr(raw)
+            body = (
+                "import sys; o=sys.stdin.buffer.readline().strip(); r=" + encoded + "; "
+                "sys.stdout.buffer.write(o+b' commit '+str(len(r)).encode()+b'\\n'+r+b'\\n'); "
+                "sys.stdout.buffer.flush()"
+            )
+            reader = module._AsyncGitObjectReader(
+                argv=(sys.executable, "-u", "-c", body),
+                request_timeout=1.0,
+                settle_timeout=0.25,
+            )
+            self.assertIsNone(await reader.start())
+            result = await reader.read(oid, "commit")
+            self.assertEqual(type(result).__name__, "ObjectReadSuccess")
+            self.assertEqual(result.raw, raw)
+            await finalize_until_terminal(reader, "success")
+            self.assertIsNotNone(reader.process.returncode)
+
+        async def exercise() -> None:
+            for label, body in helpers.items():
+                with self.subTest(phase=label):
+                    await timeout_row(label, body)
+            await cancellation_row()
+            await success_row()
+
+        asyncio.run(exercise())
+
+    def test_r2_composition_all_returns_finalize_once_and_cleanup_wins(self) -> None:
+        module = self._module("all_returns")
+        oid = "1" * 40
+        other = "2" * 40
+        clean_raw = b"tree " + other.encode("ascii") + b"\n\nclean"
+        selection = module.RangeSelection(
+            "origin", "refs/heads/main", oid, (oid,), ()
+        )
+        originals = (
+            module._range_selection,
+            module._tip_blob_ids,
+            module._build_coverage_proof,
+        )
+
+        def complete_certificate(identity: str = "fixture"):
+            tick = asyncio.get_running_loop().time()
+            child = module.ChildObservation(identity, 0, True, tick)
+            stdin = module.TransportObservation("owned", "input-closed", True, None, tick)
+            stdout = module.TransportObservation("owned", "output-eof", True, None, tick)
+            finalizer = module.FinalizerObservation("fixture-task", True, False, False, tick)
+            return module.ReaderReapCertificate(
+                "fixture-session", 1, identity, "fixture-task", child, stdin, stdout,
+                finalizer, (), tick + 1e-6, module.ReaderState.REAPED,
+            )
+
+        class FakeReader:
+            def __init__(self, row: str) -> None:
+                self.row = row
+                self.finalize_calls = 0
+                self.reap_certificate = None
+                self.state = module.ReaderState.ACTIVE
+
+            async def start(self):
+                if self.row == "start-exception":
+                    raise RuntimeError("synthetic")
+                if self.row == "start-refusal":
+                    return module._refusal("PS-MSG-READ", "spawn")
+                return None
+
+            async def read(self, requested: str, object_type: str):
+                if self.row == "read-exception":
+                    raise RuntimeError("synthetic")
+                if self.row == "read-refusal":
+                    return module._refusal("PS-MSG-READ", "short-read")
+                raw = b"invalid" if self.row == "decode-refusal" else clean_raw
+                returned = other if self.row == "coverage-refusal" else requested
+                return module.ObjectReadSuccess(requested, returned, object_type, raw)
+
+            async def finalize(self):
+                self.finalize_calls += 1
+                if self.row == "cleanup-refusal":
+                    self.state = module.ReaderState.REAP_PENDING
+                    return module._refusal("PS-MSG-REAP", "unreaped")
+                self.reap_certificate = complete_certificate()
+                self.state = module.ReaderState.REAPED
+                return None
+
+        async def exercise() -> None:
+            module._range_selection = lambda _remote, _destination: selection
+            module._tip_blob_ids = lambda _selection: {}
+            rows = {
+                "start-exception": "PS-MSG-READ",
+                "start-refusal": "PS-MSG-READ",
+                "read-exception": "PS-MSG-READ",
+                "read-refusal": "PS-MSG-READ",
+                "decode-refusal": "PS-MSG-FRAME",
+                "coverage-refusal": "PS-MSG-COVERAGE",
+                "tip-drift": "PS-MSG-TIP-CHANGED",
+            }
+            for row, expected_failure in rows.items():
+                with self.subTest(row=row):
+                    reader = FakeReader(row)
+                    resolver = (lambda: other) if row == "tip-drift" else (lambda: oid)
+                    outcome = await module._scan_range_async(
+                        "origin", "refs/heads/main", lambda _line: [],
+                        head_resolver=resolver,
+                        reader_factory=lambda: reader,
+                    )
+                    self.assertEqual(outcome.kind, "refusal")
+                    self.assertEqual(outcome.refusal.failure_id, expected_failure)
+                    self.assertTrue(outcome.reap_certificate.complete)
+                    self.assertEqual(reader.finalize_calls, 1)
+
+            for row, finder, expected_kind in (
+                ("clean", lambda _line: [], "clean"),
+                ("finding", lambda _line: ["synthetic"], "findings"),
+            ):
+                with self.subTest(row=row):
+                    reader = FakeReader(row)
+                    outcome = await module._scan_range_async(
+                        "origin", "refs/heads/main", finder,
+                        head_resolver=lambda: oid,
+                        reader_factory=lambda: reader,
+                    )
+                    self.assertEqual(outcome.kind, expected_kind)
+                    self.assertTrue(outcome.reap_certificate.complete)
+                    self.assertEqual(reader.finalize_calls, 1)
+
+            reader = FakeReader("cleanup-refusal")
+            outcome = await module._scan_range_async(
+                "origin", "refs/heads/main", lambda _line: [],
+                head_resolver=lambda: oid,
+                reader_factory=lambda: reader,
+            )
+            self.assertEqual(outcome.kind, "refusal")
+            self.assertEqual(outcome.refusal.failure_id, "PS-MSG-REAP")
+            self.assertIsNone(outcome.reap_certificate)
+            self.assertEqual(reader.finalize_calls, 2)
+
+        try:
+            asyncio.run(exercise())
+        finally:
+            (
+                module._range_selection,
+                module._tip_blob_ids,
+                module._build_coverage_proof,
+            ) = originals
+
+
+class TestPublicationSafetyScannerR3Contract(unittest.TestCase):
+    """R3 RED/GREEN guards for cancellation, live coverage, and redaction."""
+
+    def _module(self, suffix: str):
+        return _load_canonical_scanner("_scanner_r3_" + suffix)
+
+    def test_r3_cancel_during_finalize_retries_until_reaped(self) -> None:
+        module = self._module("cancel_finalize")
+
+        async def exercise() -> None:
+            reader = module._AsyncGitObjectReader(
+                argv=(sys.executable, "-u", "-c", "import time; time.sleep(60)"),
+                request_timeout=1.0,
+                settle_timeout=0.2,
+            )
+            self.assertIsNone(await reader.start())
+            process = reader.process
+            self.assertIsNotNone(process)
+            try:
+                task = asyncio.create_task(module._finalize_reader(reader))
+                await asyncio.sleep(0.05)
+                task.cancel()
+                first = await task
+                self.assertIsNotNone(first)
+                self.assertEqual(first.failure_id, "PS-MSG-READ")
+                self.assertEqual(first.reason, "cancelled")
+                retry = await reader.finalize()
+                if retry is not None and retry.failure_id == "PS-MSG-REAP":
+                    retry = await reader.finalize()
+                self.assertIsNone(retry, "R3-CANCEL-RETRY-FAILED")
+                self.assertIsNotNone(process.returncode, "R3-CANCEL-LEFT-CHILD-LIVE")
+                self.assertTrue(reader.is_finalized)
+                self.assertEqual(reader.state.name, "REAPED")
+                certificate = reader.reap_certificate
+                self.assertIsNotNone(certificate)
+                self.assertTrue(certificate.complete)
+            finally:
+                if process.returncode is None:
+                    process.kill()
+                    await process.wait()
+
+        asyncio.run(exercise())
+
+    def test_r3_live_reader_detector_oid_multiplicity(self) -> None:
+        module = self._module("live_coverage")
+        self.assertTrue(hasattr(module, "CoverageRecorder"), "R3-LIVE-COVERAGE-OWNER")
+        self.assertTrue(hasattr(module, "CoverageEvent"), "R3-LIVE-COVERAGE-EVENT")
+        signature = inspect.signature(module._scan_range_async)
+        self.assertIn("coverage_observer", signature.parameters, "R3-LIVE-COVERAGE-SEAM")
+
+        oid = "1" * 40
+        selection = module.RangeSelection(
+            "origin", "refs/heads/main", "2" * 40, (oid,), ()
+        )
+
+        class Reader:
+            def __init__(self, returned_oid=oid):
+                self.returned_oid = returned_oid
+                self.reap_certificate = None
+                self.state = module.ReaderState.ACTIVE
+
+            async def start(self):
+                return None
+
+            async def read(self, requested_oid, expected_type):
+                raw = b"tree " + b"3" * 40 + b"\n\nclean message"
+                return module.ObjectReadSuccess(
+                    requested_oid, self.returned_oid, expected_type, raw
+                )
+
+            async def finalize(self):
+                tick = asyncio.get_running_loop().time()
+                child = module.ChildObservation("fixture", 0, True, tick)
+                stdin = module.TransportObservation("owned", "input-closed", True, None, tick)
+                stdout = module.TransportObservation("owned", "output-eof", True, None, tick)
+                finalizer = module.FinalizerObservation("fixture-task", True, False, False, tick)
+                self.reap_certificate = module.ReaderReapCertificate(
+                    "fixture-session", 1, "fixture", "fixture-task", child,
+                    stdin, stdout, finalizer, (), tick + 1e-6,
+                    module.ReaderState.REAPED,
+                )
+                self.state = module.ReaderState.REAPED
+                return None
+
+        originals = (
+            module._range_selection,
+            module._tip_blob_ids,
+            module._confirm_tip,
+            module._content_hits,
+        )
+
+        async def run_case(*, returned_oid=oid, expected=(oid,), detector_fault=False):
+            module._range_selection = lambda *_args: module.RangeSelection(
+                selection.remote,
+                selection.destination,
+                selection.tip,
+                expected,
+                selection.changed_paths,
+            )
+            module._tip_blob_ids = lambda _selection: {}
+            module._confirm_tip = lambda *_args: None
+            if detector_fault:
+                module._content_hits = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                    RuntimeError("synthetic-detector-fault")
+                )
+            else:
+                module._content_hits = lambda *_args, **_kwargs: []
+            events = []
+            return await module._scan_range_async(
+                "origin", "refs/heads/main", lambda _line: [],
+                reader_factory=lambda: Reader(returned_oid),
+                coverage_observer=lambda event, value: events.append((event, value)),
+            ), events
+
+        try:
+            clean, events = asyncio.run(run_case())
+            self.assertEqual(clean.kind, "clean")
+            self.assertEqual(clean.coverage.expected_count, 1)
+            self.assertEqual(clean.coverage.requested_count, 1)
+            self.assertEqual(clean.coverage.acquired_count, 1)
+            self.assertEqual(clean.coverage.scanned_count, 1)
+            self.assertEqual(
+                [event for event, _value in events],
+                [
+                    module.CoverageEvent.REQUESTED,
+                    module.CoverageEvent.ACQUIRED,
+                    module.CoverageEvent.SCANNED,
+                ],
+            )
+            wrong, _ = asyncio.run(run_case(returned_oid="4" * 40))
+            self.assertEqual(wrong.refusal.failure_id, "PS-MSG-COVERAGE")
+            duplicate, _ = asyncio.run(run_case(expected=(oid, oid)))
+            self.assertEqual(duplicate.refusal.failure_id, "PS-MSG-COVERAGE")
+            detector, _ = asyncio.run(run_case(detector_fault=True))
+            self.assertEqual(detector.kind, "refusal")
+            self.assertNotEqual(detector.kind, "clean")
+            self.assertNotEqual(
+                module._commit_set_digest((oid, "4" * 40)),
+                module._commit_set_digest(("4" * 40, oid)),
+            )
+        finally:
+            (
+                module._range_selection,
+                module._tip_blob_ids,
+                module._confirm_tip,
+                module._content_hits,
+            ) = originals
+
+    def test_r3_scanner_formatter_redacts_every_sensitive_subject(self) -> None:
+        module = self._module("redaction")
+        self.assertTrue(hasattr(module, "_format_outcome"), "R3-SCANNER-FORMATTER")
+        if not hasattr(module, "_format_outcome"):
+            return
+        sentinels = {
+            "staged": "SENTINEL_STAGE_VALUE",
+            "path": "SENTINEL_PATH_VALUE",
+            "tip": "SENTINEL_TIP_VALUE",
+            "subject": "SENTINEL_MESSAGE_SUBJECT",
+            "body": "SENTINEL_MESSAGE_BODY",
+            "trailer": "SENTINEL_MESSAGE_TRAILER",
+            "machine": _join(WIN, BS, USERS, BS, "sentinel-user"),
+            "exception": "SENTINEL_EXCEPTION_TEXT",
+        }
+        for label, sentinel in sentinels.items():
+            finding = module.Finding(
+                "PS-FINDING-CONTENT", "path-blob", sentinel, 7, "value-token"
+            )
+            outcome = module.ScanOutcome("findings", "path", findings=(finding,))
+            rendered = module._format_outcome(outcome)
+            self.assertIsInstance(rendered, tuple)
+            combined = "\n".join(str(value) for value in rendered)
+            with self.subTest(subject=label, channel="formatter"):
+                self.assertNotIn(sentinel, combined, "R3-REDACTION-SENTINEL")
+
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                module._emit_outcome(outcome)
+            channels = stdout.getvalue() + stderr.getvalue()
+            with self.subTest(subject=label, channel="runtime"):
+                self.assertNotIn(sentinel, channels, "R3-REDACTION-RUNTIME")
+
+
+class TestPublicationSafetyScannerR4Contract(unittest.TestCase):
+    """R4 guards for observed settlement and live proof boundaries."""
+
+    def _module(self, suffix: str):
+        return _load_canonical_scanner("_scanner_r4_" + suffix)
+
+    def test_r4_certificate_contains_only_observed_owned_participants(self) -> None:
+        module = self._module("certificate")
+        self.assertTrue(hasattr(module, "ReaderReapCertificate"), "R4-READER-CERTIFICATE")
+        certificate_type = module.ReaderReapCertificate
+        self.assertFalse(
+            {"writer_task_joined", "reader_task_joined", "child_reaped"}
+            & {field.name for field in dataclasses.fields(certificate_type)},
+            "R4-FABRICATED-CERTIFICATE-FIELDS",
+        )
+        child = module.ChildObservation("child-1", 0, True, 2.0)
+        stdin = module.TransportObservation("owned", "input-closed", True, None, 2.1)
+        stdout = module.TransportObservation("owned", "output-eof", True, None, 2.2)
+        finalizer = module.FinalizerObservation("task-1", True, False, False, 2.3)
+        certificate = certificate_type(
+            "session-1", 1, "child-1", "task-1", child, stdin, stdout,
+            finalizer, (), 2.4, module.ReaderState.REAPED,
+        )
+        self.assertTrue(certificate.complete)
+        mutations = (
+            dataclasses.replace(certificate, attempts_used=3),
+            dataclasses.replace(certificate, owned_child_identity="child-2"),
+            dataclasses.replace(certificate, child=dataclasses.replace(child, terminal_observed=False)),
+            dataclasses.replace(certificate, stdin=dataclasses.replace(stdin, observed=False)),
+            dataclasses.replace(certificate, stdout=dataclasses.replace(stdout, terminal_fact="unobserved")),
+            dataclasses.replace(certificate, finalizer=dataclasses.replace(finalizer, completion_observed=False)),
+            dataclasses.replace(certificate, verified_at_monotonic_tick=2.0),
+            dataclasses.replace(certificate, terminal_state=module.ReaderState.REAP_PENDING),
+        )
+        for index, mutated in enumerate(mutations):
+            with self.subTest(index=index):
+                self.assertFalse(mutated.complete, "R4-CERTIFICATE-MUTATION-ACCEPTED")
+
+    def test_r4_reader_uses_one_three_second_budget_and_two_entries(self) -> None:
+        module = self._module("deadline")
+        self.assertEqual(module.OBJECT_REAP_ATTEMPT_SECONDS, 3.0)
+        self.assertEqual(module.OBJECT_REAP_MAX_ATTEMPTS, 2)
+
+        async def exercise() -> None:
+            reader = module.ObjectReaderSession(
+                argv=(sys.executable, "-u", "-c", "import time; time.sleep(60)"),
+                request_timeout=1.0,
+                settle_timeout=0.2,
+            )
+            self.assertIsNone(await reader.start())
+            process = reader.process
+            self.assertIsNotNone(process)
+            try:
+                finalization = await reader.finalize()
+                if finalization is not None and finalization.failure_id == "PS-MSG-REAP":
+                    finalization = await reader.finalize()
+                self.assertIsNone(finalization)
+                certificate = reader.reap_certificate
+                self.assertIsNotNone(certificate)
+                self.assertTrue(certificate.complete)
+                self.assertLessEqual(certificate.attempts_used, 2)
+                self.assertIsNotNone(process.returncode)
+            finally:
+                if process.returncode is None:
+                    process.kill()
+                    await process.wait()
+
+        asyncio.run(exercise())
+
+    def test_r4_live_coverage_fault_port_drives_emitter(self) -> None:
+        module = self._module("coverage")
+        signature = inspect.signature(module._scan_range_async)
+        self.assertIn("coverage_fault", signature.parameters, "R4-COVERAGE-FAULT-SEAM")
+        self.assertTrue(hasattr(module, "CoverageFaultPort"), "R4-COVERAGE-FAULT-PORT")
+
+        first, second = "1" * 40, "2" * 40
+        expected = (first, second)
+
+        class Reader:
+            def __init__(self):
+                self.reap_certificate = None
+                self.state = module.ReaderState.ACTIVE
+
+            async def start(self):
+                return None
+
+            async def read(self, requested_oid, expected_type):
+                raw = b"tree " + b"3" * 40 + b"\n\nclean message"
+                return module.ObjectReadSuccess(
+                    requested_oid, requested_oid, expected_type, raw
+                )
+
+            async def finalize(self):
+                tick = asyncio.get_running_loop().time()
+                child = module.ChildObservation("fixture", 0, True, tick)
+                stdin = module.TransportObservation("owned", "input-closed", True, None, tick)
+                stdout = module.TransportObservation("owned", "output-eof", True, None, tick)
+                finalizer = module.FinalizerObservation("fixture-task", True, False, False, tick)
+                self.reap_certificate = module.ReaderReapCertificate(
+                    "fixture-session", 1, "fixture", "fixture-task", child,
+                    stdin, stdout, finalizer, (), tick + 1e-6,
+                    module.ReaderState.REAPED,
+                )
+                self.state = module.ReaderState.REAPED
+                return None
+
+        originals = (
+            module._range_selection, module._tip_blob_ids,
+            module._confirm_tip, module._content_hits,
+        )
+        module._range_selection = lambda *_args: module.RangeSelection(
+            "origin", "refs/heads/main", "4" * 40, expected, ()
+        )
+        module._tip_blob_ids = lambda _selection: {}
+        module._confirm_tip = lambda *_args: None
+        module._content_hits = lambda *_args, **_kwargs: []
+
+        def run(transform, selection_oids=expected):
+            module._range_selection = lambda *_args: module.RangeSelection(
+                "origin", "refs/heads/main", "4" * 40, selection_oids, ()
+            )
+            outcome = asyncio.run(module._scan_range_async(
+                "origin", "refs/heads/main", lambda _line: [],
+                reader_factory=Reader,
+                coverage_fault=module.CoverageFaultPort(transform),
+            ))
+            stdout, stderr = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                code = module._emit_outcome(outcome)
+            return outcome, code, stdout.getvalue(), stderr.getvalue()
+
+        mutations = {
+            "omit-requested": lambda event, oid: () if (
+                event is module.CoverageEvent.REQUESTED and oid == first
+            ) else ((event, oid),),
+            "omit-acquired": lambda event, oid: () if (
+                event is module.CoverageEvent.ACQUIRED and oid == first
+            ) else ((event, oid),),
+            "omit-scanned": lambda event, oid: () if (
+                event is module.CoverageEvent.SCANNED and oid == first
+            ) else ((event, oid),),
+            "duplicate": lambda event, oid: ((event, oid), (event, oid)) if (
+                event is module.CoverageEvent.ACQUIRED and oid == first
+            ) else ((event, oid),),
+            "substitute": lambda event, oid: ((event, "5" * 40),) if (
+                event is module.CoverageEvent.SCANNED and oid == first
+            ) else ((event, oid),),
+            "extra": lambda event, oid: ((event, oid), (event, "6" * 40)) if (
+                event is module.CoverageEvent.REQUESTED and oid == first
+            ) else ((event, oid),),
+        }
+        try:
+            for row, transform in mutations.items():
+                outcome, code, stdout, stderr = run(transform)
+                with self.subTest(row=row):
+                    self.assertEqual(outcome.refusal.failure_id, "PS-MSG-COVERAGE")
+                    self.assertEqual(code, 2)
+                    self.assertNotIn("receipt=v2", stdout + stderr)
+
+            duplicate_input, code, stdout, stderr = run(
+                lambda event, oid: ((event, oid),), (first, first)
+            )
+            self.assertEqual(duplicate_input.refusal.failure_id, "PS-MSG-COVERAGE")
+            self.assertEqual(code, 2)
+            self.assertNotIn("receipt=v2", stdout + stderr)
+
+            deferred = []
+            def reorder(event, oid):
+                if event is not module.CoverageEvent.SCANNED:
+                    return ((event, oid),)
+                deferred.append(oid)
+                if len(deferred) == 1:
+                    return ()
+                return ((event, deferred[1]), (event, deferred[0]))
+
+            reordered, code, stdout, stderr = run(reorder)
+            independently_observed = (second, first)
+            independent_digest = hashlib.sha256(
+                b"publication-safety-range-receipt-v2"
+                + b"\0" + b"\0".join(oid.encode("ascii") for oid in independently_observed)
+            ).hexdigest()
+            self.assertEqual(reordered.coverage.scanned_message_oids, independently_observed)
+            self.assertEqual(code, 0)
+            self.assertIn("commit-set=" + independent_digest, stdout)
+            self.assertEqual(stderr, "")
+
+            clean, code, stdout, stderr = run(lambda event, oid: ((event, oid),))
+            self.assertEqual(clean.kind, "clean")
+            self.assertEqual(clean.coverage.scanned_message_oids, expected)
+            self.assertEqual(code, 0)
+            self.assertIn("receipt=v2", stdout)
+            self.assertEqual(stderr, "")
+        finally:
+            (
+                module._range_selection, module._tip_blob_ids,
+                module._confirm_tip, module._content_hits,
+            ) = originals
+
+    def test_r4_actual_boundary_redaction_matrix(self) -> None:
+        module = self._module("redaction")
+        sentinels = {
+            "staged": "R4_STAGE_SENTINEL",
+            "path": "R4_PATH_SENTINEL",
+            "tip": "R4_TIP_SENTINEL",
+            "subject": "R4_SUBJECT_SENTINEL",
+            "body": "R4_BODY_SENTINEL",
+            "trailer": "R4_TRAILER_SENTINEL",
+            "machine": _join(WIN, BS, USERS, BS, "r4-sentinel-user"),
+        }
+        subjects = {
+            "staged": "tracked-blob", "path": "path-blob", "tip": "tip-blob",
+            "subject": "commit-message", "body": "commit-message",
+            "trailer": "commit-message", "machine": "path-blob",
+        }
+        for row, sentinel in sentinels.items():
+            outcome = module.ScanOutcome(
+                "findings", "range" if subjects[row] == "commit-message" else "path",
+                findings=(module.Finding(
+                    "PS-FINDING-COMMIT-MESSAGE" if subjects[row] == "commit-message" else "PS-FINDING-CONTENT",
+                    subjects[row], sentinel, 1, "value-token",
+                ),),
+            )
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                module._emit_outcome(outcome)
+            with self.subTest(row=row):
+                self.assertNotIn(sentinel, stdout.getvalue() + stderr.getvalue(), f"R4-REDACTION:{row}")
+
+
+class TestPublicationSafetyScannerR5Proof(unittest.TestCase):
+    """Proof-only inventory for the four architecture R4 enforcement gaps."""
+
+    def test_r5_proof_inventory(self) -> None:
+        required = {
+            "test_r5_reader_retry_and_certificate_mutation_matrix",
+            "test_r5_live_counter_detector_skip_and_producer_redaction_matrix",
+        }
+        self.assertEqual(required - set(dir(self.__class__)), set(), "R5-MISSING-PROBE")
+
+    def _module(self, suffix: str):
+        return _load_canonical_scanner("_scanner_r5_" + suffix)
+
+    def test_r5_reader_retry_and_certificate_mutation_matrix(self) -> None:
+        module = self._module("reader_retry")
+
+        async def exercise() -> None:
+            reader = module.ObjectReaderSession(settle_timeout=0.01)
+            reader._state = module.ReaderState.ACTIVE
+            tick = asyncio.get_running_loop().time()
+            first = module._ReaderFinalizerResult(
+                module._refusal("PS-MSG-REAP", "unreaped"),
+                module.ChildObservation("owned-child", None, False, tick),
+                module.TransportObservation(
+                    "owned", "input-closed", True, None, tick + 0.01
+                ),
+                module.TransportObservation(
+                    "owned", "unobserved", False, "stdout-drain", tick + 0.02
+                ),
+                ("stdout-drain",),
+            )
+            second = module._ReaderFinalizerResult(
+                None,
+                module.ChildObservation("owned-child", 0, True, tick + 0.03),
+                module.TransportObservation(
+                    "owned", "input-closed", True, None, tick + 0.04
+                ),
+                module.TransportObservation(
+                    "owned", "output-eof", True, None, tick + 0.05
+                ),
+                (),
+            )
+            rows = iter((first, second))
+
+            async def drive():
+                reader._attempts_used += 1
+                reader._state = module.ReaderState.FINALIZING
+                return next(rows)
+
+            with mock.patch.object(
+                reader, "_drive_finalizer", side_effect=drive
+            ) as finalizer:
+                refusal = await reader.finalize()
+                self.assertEqual(refusal.failure_id, "PS-MSG-REAP")
+                self.assertEqual(reader.state, module.ReaderState.REAP_PENDING)
+                self.assertIsNone(reader.reap_certificate)
+
+                self.assertIsNone(await reader.finalize())
+                self.assertEqual(reader.state, module.ReaderState.REAPED)
+                certificate = reader.reap_certificate
+                self.assertIsNotNone(certificate)
+                self.assertTrue(certificate.complete)
+                self.assertEqual(certificate.attempts_used, 2)
+                self.assertEqual(finalizer.call_count, 2)
+
+                stable = reader.reap_certificate
+                self.assertIsNone(await reader.finalize())
+                self.assertIs(reader.reap_certificate, stable)
+                self.assertEqual(finalizer.call_count, 2, "R5-REAPED-REENTERED")
+
+            certificate = reader.reap_certificate
+            mutations = {
+                "attempt-zero": dataclasses.replace(certificate, attempts_used=0),
+                "attempt-overflow": dataclasses.replace(certificate, attempts_used=3),
+                "owned-child": dataclasses.replace(
+                    certificate, owned_child_identity="other-child"
+                ),
+                "child-return": dataclasses.replace(
+                    certificate,
+                    child=dataclasses.replace(certificate.child, return_code=None),
+                ),
+                "child-terminal": dataclasses.replace(
+                    certificate,
+                    child=dataclasses.replace(
+                        certificate.child, terminal_observed=False
+                    ),
+                ),
+                "stdin-owner": dataclasses.replace(
+                    certificate,
+                    stdin=dataclasses.replace(certificate.stdin, ownership="not-owned"),
+                ),
+                "stdin-fact": dataclasses.replace(
+                    certificate,
+                    stdin=dataclasses.replace(certificate.stdin, terminal_fact="unobserved"),
+                ),
+                "stdin-observed": dataclasses.replace(
+                    certificate,
+                    stdin=dataclasses.replace(certificate.stdin, observed=False),
+                ),
+                "stdout-owner": dataclasses.replace(
+                    certificate,
+                    stdout=dataclasses.replace(certificate.stdout, ownership="not-owned"),
+                ),
+                "stdout-fact": dataclasses.replace(
+                    certificate,
+                    stdout=dataclasses.replace(certificate.stdout, terminal_fact="unobserved"),
+                ),
+                "stdout-observed": dataclasses.replace(
+                    certificate,
+                    stdout=dataclasses.replace(certificate.stdout, observed=False),
+                ),
+                "owned-finalizer": dataclasses.replace(
+                    certificate, owned_finalizer_identity="other-task"
+                ),
+                "finalizer-complete": dataclasses.replace(
+                    certificate,
+                    finalizer=dataclasses.replace(
+                        certificate.finalizer, completion_observed=False
+                    ),
+                ),
+                "finalizer-cancel": dataclasses.replace(
+                    certificate,
+                    finalizer=dataclasses.replace(certificate.finalizer, cancelled=True),
+                ),
+                "finalizer-error": dataclasses.replace(
+                    certificate,
+                    finalizer=dataclasses.replace(
+                        certificate.finalizer, exception_observed=True
+                    ),
+                ),
+                "verification-order": dataclasses.replace(
+                    certificate,
+                    verified_at_monotonic_tick=max(
+                        certificate.child.observed_at_monotonic_tick,
+                        certificate.stdin.observed_at_monotonic_tick,
+                        certificate.stdout.observed_at_monotonic_tick,
+                        certificate.finalizer.observed_at_monotonic_tick,
+                    ),
+                ),
+                "terminal-state": dataclasses.replace(
+                    certificate, terminal_state=module.ReaderState.REAP_PENDING
+                ),
+            }
+            for name, mutated in mutations.items():
+                with self.subTest(participant=name):
+                    self.assertFalse(mutated.complete, "R5-READER-CERTIFICATE-ACCEPTED")
+
+        asyncio.run(exercise())
+
+    def test_r5_live_counter_detector_skip_and_producer_redaction_matrix(self) -> None:
+        module = self._module("coverage_redaction")
+        oid = "1" * 40
+        selection = module.RangeSelection(
+            "origin", "refs/heads/main", "2" * 40, (oid,), ()
+        )
+
+        class Reader:
+            def __init__(self):
+                self.reap_certificate = None
+                self.state = module.ReaderState.ACTIVE
+
+            async def start(self):
+                return None
+
+            async def read(self, requested_oid, expected_type):
+                raw = b"tree " + b"3" * 40 + b"\n\nclean message"
+                return module.ObjectReadSuccess(
+                    requested_oid, requested_oid, expected_type, raw
+                )
+
+            async def finalize(self):
+                tick = asyncio.get_running_loop().time()
+                child = module.ChildObservation("fixture", 0, True, tick)
+                stdin = module.TransportObservation(
+                    "owned", "input-closed", True, None, tick
+                )
+                stdout = module.TransportObservation(
+                    "owned", "output-eof", True, None, tick
+                )
+                finalizer = module.FinalizerObservation(
+                    "fixture-task", True, False, False, tick
+                )
+                self.reap_certificate = module.ReaderReapCertificate(
+                    "fixture-session", 1, "fixture", "fixture-task", child,
+                    stdin, stdout, finalizer, (), tick + 1e-6,
+                    module.ReaderState.REAPED,
+                )
+                self.state = module.ReaderState.REAPED
+                return None
+
+        originals = (
+            module._range_selection,
+            module._tip_blob_ids,
+            module._confirm_tip,
+            module._content_hits,
+        )
+        module._range_selection = lambda *_args: selection
+        module._tip_blob_ids = lambda _selection: {}
+        module._confirm_tip = lambda *_args: None
+
+        async def run(*, detector_completes: bool):
+            state = {"complete": False}
+            events = []
+
+            def detector(*_args, **_kwargs):
+                state["complete"] = detector_completes
+                return []
+
+            def observer(event, value):
+                if event is module.CoverageEvent.SCANNED and not state["complete"]:
+                    raise RuntimeError("R5-DETECTOR-SKIPPED")
+                events.append((event, value))
+
+            module._content_hits = detector
+            outcome = await module._scan_range_async(
+                "origin", "refs/heads/main", lambda _line: [],
+                reader_factory=Reader,
+                coverage_observer=observer,
+            )
+            stdout, stderr = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                code = module._emit_outcome(outcome)
+            return outcome, events, code, stdout.getvalue() + stderr.getvalue()
+
+        try:
+            with mock.patch.object(module, "Counter", wraps=module.Counter) as counter:
+                clean, events, code, output = asyncio.run(
+                    run(detector_completes=True)
+                )
+            self.assertEqual(clean.kind, "clean")
+            self.assertEqual(code, 0)
+            self.assertIn("receipt=v2", output)
+            self.assertGreaterEqual(counter.call_count, 5, "R5-LIVE-COUNTER-BYPASSED")
+            self.assertEqual(
+                [event for event, _value in events],
+                [
+                    module.CoverageEvent.REQUESTED,
+                    module.CoverageEvent.ACQUIRED,
+                    module.CoverageEvent.SCANNED,
+                ],
+            )
+
+            skipped, _events, code, output = asyncio.run(
+                run(detector_completes=False)
+            )
+            self.assertEqual(skipped.kind, "refusal")
+            self.assertEqual(code, 2)
+            self.assertNotIn("receipt=v2", output)
+
+            module._content_hits = originals[3]
+
+            body_sentinel = _join("R5_BODY_", "123456789")
+            path_sentinel = _join("R5_PATH_", "123456789", ".txt")
+            machine_sentinel = _join("R5_MACHINE_", "123456789")
+            secret_line = _join(
+                "to", "ken", " = ", '"', body_sentinel, '"'
+            )
+            producer_rows = {
+                "message-body": module._content_hits(
+                    secret_line, oid, lambda _line: [],
+                    subject_kind="commit-message",
+                ),
+                "path-locator": module._content_hits(
+                    secret_line, path_sentinel, lambda _line: [],
+                    subject_kind="path-blob",
+                ),
+                "machine-classifier": module._content_hits(
+                    "ordinary line", path_sentinel,
+                    lambda _line: [machine_sentinel],
+                    subject_kind="tip-blob",
+                ),
+            }
+            scratch = REPO_ROOT / ".scratch"
+            scratch.mkdir(exist_ok=True)
+            for label, findings in producer_rows.items():
+                self.assertTrue(findings, "R5-PRODUCER-DID-NOT-FIRE")
+                outcome = module.ScanOutcome(
+                    "findings", "range", findings=tuple(findings)
+                )
+                stdout, stderr = io.StringIO(), io.StringIO()
+                with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                    self.assertEqual(module._emit_outcome(outcome), 1)
+                combined = stdout.getvalue() + stderr.getvalue()
+                with tempfile.TemporaryDirectory(
+                    prefix="r5-redaction-", dir=scratch
+                ) as temp_dir:
+                    persisted = Path(temp_dir) / "evidence.txt"
+                    persisted.write_text(combined, encoding="utf-8")
+                    channels = {
+                        "stdout": stdout.getvalue(),
+                        "stderr": stderr.getvalue(),
+                        "assertion": f"row={label};output={combined}",
+                        "persisted": persisted.read_text(encoding="utf-8"),
+                    }
+                for sentinel in (
+                    body_sentinel, path_sentinel, machine_sentinel
+                ):
+                    for channel, rendered in channels.items():
+                        with self.subTest(row=label, channel=channel):
+                            self.assertNotIn(sentinel, rendered)
+        finally:
+            (
+                module._range_selection,
+                module._tip_blob_ids,
+                module._confirm_tip,
+                module._content_hits,
+            ) = originals
 
 
 class TestThisTestFileIsGateSafe(unittest.TestCase):

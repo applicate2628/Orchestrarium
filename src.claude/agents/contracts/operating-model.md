@@ -136,7 +136,7 @@ Periodic controls complement stage gates. Stage gates answer "may this item adva
 | Refactor debt scan | `$architecture-reviewer` | Milestone close | Admit bounded refactor item |
 | Closure and archive hygiene | `$knowledge-archivist` | Monthly / milestone close | Archive, reconcile physical roots, and regenerate `work-items/README.md` |
 | Board refresh | `$knowledge-archivist` | Every delivery wave (post-wave sync pass) | Refresh `work-items/README.md` against git and the tree |
-| Registry governance reconciliation | `$knowledge-archivist` | Accepted task-memory governance change, all-registry request, or milestone-wide cleanup | Run one complete structural plus semantic-currency matrix across every current registry; the orchestrator-upgrades-to-lessons check is one row, and placement-only success is not overall `PASS`; route non-consistent rows to semantic owners through `$lead` |
+| Registry governance reconciliation | `$knowledge-archivist` | Accepted task-memory governance change, all-registry request, or milestone-wide cleanup | Run one complete structural plus semantic-currency matrix across every current registry; placement-only success is not overall `PASS`; route non-consistent rows to semantic owners through `$lead` |
 | Governance alignment | `$knowledge-archivist` | Governance change | Propagate to all governance files in same commit |
 | Documentation sync | `$knowledge-archivist` | Skill, role, or template added/removed/renamed | Update README, INSTALL, install scripts per root CLAUDE.md checklists |
 | Batch-close consultant-check | `$lead` | Only when explicitly requested by lead or repo-local lane policy and `consultantMode` is enabled | Satisfy the requested consultant sweep or keep the batch open and escalate honestly |

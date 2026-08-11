@@ -136,17 +136,6 @@ Lessons learned during delivery (a recurring miss, a wrong assumption, a process
 - **Surfacing.** The lead derives the open-lessons count live by scanning `work-items/lessons/` for `status: open` (count + id + `## Lesson` first line). `$product-manager` consults open lessons when admitting similar work so the same mistake is not repeated.
 - **Residual (honest).** Registry hygiene is governance-enforced only — no hook scans `work-items/lessons/`, so an `open` lesson nobody applies is not structurally caught.
 
-## Orchestrator upgrades (work-items/roadmaps/orchestrator-upgrades.md)
-
-The standing precedent-driven improvement plan `work-items/roadmaps/orchestrator-upgrades.md` is a thin PROMOTION LEDGER — the join view tracking which lessons/decisions have earned a concrete orchestrator (control-plane) change, and which are still knowledge-only. It is NOT a second status board: it does not restate board state, it points into it.
-
-- **Shape.** A flat single file: a table `Precedent (lesson) | Orchestrator change | Status | Evidence` plus a `## Knowledge-only precedents` bucket for lessons that don't (yet) call for a mechanism. Status vocabulary: ✅ shipped · 🔄 in-progress (design/audit/impl) · ⬜ planned (owed, not started) · ⏸ parked.
-- **Ownership.** `$lead` decides WHICH precedent earns an orchestrator change — a semantic act, the same authority level as a decision or lesson lifecycle transition; `$knowledge-archivist` owns refresh mechanics and reconciles rows against the source lessons' status, in the same Board-refresh post-wave pass.
-- **Anti-duplication.** For any row NOT `✅ shipped`, point at the owning board milestone (`work-items/README.md`) or the owning `work-items/active/<slug>` instead of restating status here — this ledger derives its in-progress truth from the board/work-item rather than tracking it a second time, which is the exact dual-canon defect class this ledger exists to avoid repeating.
-- **No self-cert on `✅ shipped`.** A row may be marked `✅ shipped` only when (a) the source lesson in `work-items/lessons/` is `applied` in the same change, AND (b) an independent review gate — not the role that authored the change — has passed. A same-session or self-authored orchestrator change enters as `🔄` and stays there until that independent gate closes.
-- **Recurrence-triggered promotion.** A knowledge-only lesson that later RECURS (the discipline it names fails to hold a second time) is promoted from the knowledge-only bucket to the main table with status `⬜ planned` — recurrence is itself the signal that a reminder is no longer enough and a mechanism is now owed.
-- **Residual (honest).** Registry hygiene here is governance-enforced only — no hook scans `work-items/roadmaps/orchestrator-upgrades.md` for stale rows or self-certified `✅` marks.
-
 ## Backlog (physical-root spec)
 
 `work-items/backlog/` is the physical root for items admitted by `$product-manager` but not yet started: a holding area between roadmap admission and active delivery, distinct from Active (in-flight) and Archived (done). The main conversation (as Lead) moves an item from the physical backlog root to Active when work starts. The lifecycle owner regenerates `work-items/README.md` from that root; `work-items/index.md`, when retained, is an optional compatibility snapshot and is never required for backlog resolution.

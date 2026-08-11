@@ -45,7 +45,7 @@ Exactly five roles can be adopted inline instead of dispatched — no fresh cont
 | `/agents-check-policies` | Audit codebase compliance with configured policies |
 | `/agents-validate` | Structural integrity check of the skill-pack |
 | `/agents-status` | Project dashboard: active chains, policies, pack summary; flags reserved `$product-manager` admissions |
-| `/agents-check-safety` | Scan staged files for secrets before commit |
+| `/agents-check-safety` | Run a manual staged or range diagnostic; push authorization uses the gate's own fresh canonical sibling scan |
 
 ### Decision tree
 

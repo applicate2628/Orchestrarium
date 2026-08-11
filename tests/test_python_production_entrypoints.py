@@ -245,6 +245,29 @@ def test_publication_scanner_python_mirrors_match_canon() -> None:
 
 
 @pytest.mark.parametrize(
+    "manifest,source,relative",
+    (
+        (
+            INSTALLER._CODEX_RETIRED_PS1,
+            ROOT / "src.codex/skills/lead/scripts/check-publication-safety.ps1",
+            "skills/lead/scripts/check-publication-safety.ps1",
+        ),
+        (
+            INSTALLER._CLAUDE_RETIRED_PS1,
+            ROOT / "src.claude/agents/scripts/check-publication-safety.ps1",
+            "agents/scripts/check-publication-safety.ps1",
+        ),
+    ),
+)
+def test_publication_scanner_powershell_wrapper_is_retired_not_shipped(
+    manifest: dict[str, str], source: Path, relative: str
+) -> None:
+    assert relative in manifest
+    assert not source.exists()
+    assert source.with_suffix(".py").is_file()
+
+
+@pytest.mark.parametrize(
     "manifest,relative",
     (
         (
