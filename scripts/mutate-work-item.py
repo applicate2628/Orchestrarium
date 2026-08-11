@@ -62,6 +62,17 @@ OPTIONAL_RELATION_ABSENCE_MARKERS = frozenset({"none"})
 FIELD_RE = re.compile(
     r"^\s*(?:[-*]\s*)?(?:\*\*)?([A-Za-z][A-Za-z0-9 -]*?)(?:\*\*)?\s*:\s*(.*?)\s*$"
 )
+DECISION_REQUIRED_FIELDS = (
+    "id",
+    "status",
+    "date",
+    "decided-by",
+    "context",
+    "supersedes",
+    "superseded-by",
+)
+DECISION_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+DECISION_LIST_FIELD_RE = re.compile(r"^- ([a-z][a-z0-9-]*):\s*(.*?)\s*$")
 FENCED_CODE_OPEN_RE = re.compile(
     r"^ {0,3}(?P<fence>`{3,}|~{3,})(?P<info>[^\r\n]*)$"
 )
@@ -272,6 +283,102 @@ def _parse_fields(text: str) -> dict[str, str]:
     fields: dict[str, str] = {}
     for _line_number, name, value, _line in _authoritative_field_occurrences(text):
         fields[name] = value
+    return fields
+
+
+def _validate_current_decision_record(path: Path, slug: str) -> dict[str, str]:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        raise LifecycleError(
+            "WI-DECISION-SCHEMA-INVALID",
+            f"decision:{slug} must be UTF-8",
+        ) from exc
+
+    lines = text.splitlines()
+    heading_index = next(
+        (index for index, line in enumerate(lines) if re.match(r"^#\s+\S", line)),
+        None,
+    )
+    if not lines or not lines[0].startswith("- ") or heading_index is None:
+        raise LifecycleError(
+            "WI-DECISION-SCHEMA-INVALID",
+            f"decision:{slug} requires leading list metadata before its first H1 heading",
+        )
+
+    leading_occurrences: dict[str, tuple[int, str]] = {}
+    previous_field = False
+    for line_number, line in enumerate(lines[:heading_index], start=1):
+        if not line.strip():
+            previous_field = False
+            continue
+        match = DECISION_LIST_FIELD_RE.fullmatch(line)
+        if match:
+            name = match.group(1).strip().casefold()
+            if name in leading_occurrences:
+                raise LifecycleError(
+                    "WI-DECISION-FIELD-DUPLICATE",
+                    f"decision:{slug} duplicates leading field '{name}'",
+                )
+            leading_occurrences[name] = (line_number, match.group(2).strip())
+            previous_field = True
+            continue
+        if FIELD_RE.fullmatch(line):
+            raise LifecycleError(
+                "WI-DECISION-SCHEMA-INVALID",
+                f"decision:{slug} has a non-list metadata field at line {line_number}",
+            )
+        if line[:1].isspace() and previous_field:
+            continue
+        previous_field = False
+
+    occurrences = _authoritative_field_occurrences(text)
+    for required in DECISION_REQUIRED_FIELDS:
+        matches = [
+            (line_number, value)
+            for line_number, name, value, _line in occurrences
+            if name == required
+        ]
+        if len(matches) > 1:
+            raise LifecycleError(
+                "WI-DECISION-FIELD-DUPLICATE",
+                f"decision:{slug} duplicates required field '{required}'",
+            )
+        leading = leading_occurrences.get(required)
+        if len(matches) != 1 or leading is None or matches[0][0] != leading[0] or not leading[1]:
+            raise LifecycleError(
+                "WI-DECISION-SCHEMA-INVALID",
+                f"decision:{slug} requires one non-empty leading '{required}' field",
+            )
+
+    fields = {name: value for name, (_line_number, value) in leading_occurrences.items()}
+    if fields["id"] != slug:
+        raise LifecycleError(
+            "WI-DECISION-IDENTITY-MISMATCH",
+            f"decision:{slug} id does not match its filename",
+        )
+    date_value = fields["date"]
+    try:
+        parsed_date = datetime.strptime(date_value, "%Y-%m-%d")
+    except ValueError as exc:
+        raise LifecycleError(
+            "WI-DECISION-IDENTITY-MISMATCH",
+            f"decision:{slug} date must be a real YYYY-MM-DD value",
+        ) from exc
+    if (
+        not DECISION_DATE_RE.fullmatch(date_value)
+        or parsed_date.strftime("%Y-%m-%d") != date_value
+        or not slug.startswith(f"{date_value}-")
+    ):
+        raise LifecycleError(
+            "WI-DECISION-IDENTITY-MISMATCH",
+            f"decision:{slug} date does not match its filename prefix",
+        )
+    if fields["status"] not in CATEGORIES["decision"].current_statuses:
+        raise LifecycleError(
+            "WI-DECISION-SCHEMA-INVALID",
+            f"decision:{slug} has unsupported current status '{fields['status']}'",
+        )
     return fields
 
 
@@ -2836,9 +2943,9 @@ def audit_categories(root: Path) -> tuple[str, ...]:
                 continue
             if category.current_kind == "flat" and locations:
                 path = locations[0]
+                archived = "archive" in path.parts
                 fields = _parse_fields(path.read_text(encoding="utf-8"))
                 status = fields.get("status", "")
-                archived = "archive" in path.parts
                 if archived and status in category.current_statuses:
                     raise LifecycleError(
                         "WI-CATEGORY-CURRENT-IN-ARCHIVE",
@@ -2849,6 +2956,12 @@ def audit_categories(root: Path) -> tuple[str, ...]:
                         "WI-CATEGORY-TERMINAL-IN-CURRENT",
                         f"{category.name}:{slug} has terminal status in current root",
                     )
+                if (
+                    category.name == "decision"
+                    and not archived
+                    and status in category.current_statuses
+                ):
+                    _validate_current_decision_record(path, slug)
 
     active = work_items / "active"
     if active.is_dir():

@@ -1913,6 +1913,27 @@ def _terminal_record(
     )
 
 
+def _current_decision_record(
+    slug: str,
+    *,
+    status: str = "proposed",
+    body: str = "Synthetic decision.\n",
+) -> str:
+    date = slug[:10]
+    return (
+        f"- id: {slug}\n"
+        f"- status: {status}\n"
+        f"- date: {date}\n"
+        "- decided-by: lifecycle test\n"
+        "- context: lifecycle-test\n"
+        "- supersedes: none\n"
+        "- superseded-by: none\n"
+        "\n"
+        f"# Decision: {slug}\n\n"
+        f"{body}"
+    )
+
+
 def test_category_migration_admission_table_has_six_complete_rows(tmp_path: Path) -> None:
     module = load_module()
     rows = module.CATEGORY_ADMISSION_TABLE
@@ -1997,11 +2018,23 @@ def test_flat_categories_archive_replay_and_reopen_successor(tmp_path: Path) -> 
         assert archived.parent.name == "2026-08"
         assert hashlib.sha256(archived.read_bytes()).hexdigest() == archived_hash
 
-        successor_slug = f"{category_name}-successor"
+        successor_slug = (
+            "2026-08-01-decision-successor"
+            if category_name == "decision"
+            else f"{category_name}-successor"
+        )
         successor_data = (
-            f"status: {current_status[category_name]}\n"
-            f"Reopens: {slug}\n"
-        ).encode()
+            _current_decision_record(
+                successor_slug,
+                status=current_status[category_name],
+                body=f"Reopens: {slug}\n",
+            ).encode()
+            if category_name == "decision"
+            else (
+                f"status: {current_status[category_name]}\n"
+                f"Reopens: {slug}\n"
+            ).encode()
+        )
         successor = module.reopen_category_record(
             root, reference, successor_slug, successor_data
         )
@@ -3906,9 +3939,10 @@ def test_audit_rejects_noncanonical_physical_slug(tmp_path: Path) -> None:
             raise AssertionError(f"audit accepted a noncanonical {case} slug")
 
     valid_root = tmp_path / "valid-neighbor"
+    valid_slug = "2026-08-11-valid-neighbor"
     write(
-        valid_root / "work-items" / "decisions" / "valid-neighbor.md",
-        "status: proposed\n",
+        valid_root / "work-items" / "decisions" / f"{valid_slug}.md",
+        _current_decision_record(valid_slug),
     )
     module.audit_categories(valid_root)
 
@@ -4036,13 +4070,18 @@ def _identity_normalization_fixture(root: Path):
     old = "2026-06-19-arch-layering-runtime-laws-D-group-meta-C6"
     new = old.lower()
     source = work_items / "decisions" / f"{old}.md"
-    write(source, f"- id: {old}\n- status: accepted\n# Decision\n")
+    write(source, _current_decision_record(old, status="accepted"))
     lineage = work_items / "decisions" / "2026-07-07-d1-amendment.md"
     write(
         lineage,
-        f"- id: 2026-07-07-d1-amendment\n- status: accepted\n"
-        f"Lineage: {old}; Related: decision:{old}\n"
-        f"```text\nhistorical evidence: {old}\n```\n",
+        _current_decision_record(
+            "2026-07-07-d1-amendment",
+            status="accepted",
+            body=(
+                f"Lineage: {old}; Related: decision:{old}\n"
+                f"```text\nhistorical evidence: {old}\n```\n"
+            ),
+        ),
     )
     physical = work_items / "epics" / "current-link.md"
     write(
@@ -4165,10 +4204,10 @@ def test_normalize_current_identity_preserves_archive_evidence_and_rejects_mixed
     module = load_module()
     root = tmp_path / "archive-physical-consumer"
     work_items = root / "work-items"
-    old = "Legacy-Decision"
-    new = "legacy-decision"
+    old = "2026-08-01-Legacy-Decision"
+    new = "2026-08-01-legacy-decision"
     source = work_items / "decisions" / f"{old}.md"
-    write(source, f"id: {old}\nstatus: accepted\n")
+    write(source, _current_decision_record(old, status="accepted"))
     archived_evidence = (
         work_items / "archive" / "2026-07" / "historical-record" / "evidence.md"
     )
@@ -4345,10 +4384,10 @@ def test_normalize_current_identity_ignores_fenced_links_but_rewrites_live_links
     module = load_module()
     root = tmp_path / "repo"
     work_items = root / "work-items"
-    old = "Legacy-Decision"
-    new = "legacy-decision"
+    old = "2026-08-01-Legacy-Decision"
+    new = "2026-08-01-legacy-decision"
     source = work_items / "decisions" / f"{old}.md"
-    write(source, f"id: {old}\nstatus: accepted\n")
+    write(source, _current_decision_record(old, status="accepted"))
     current = work_items / "epics" / "current-link.md"
     write(
         current,
@@ -4453,8 +4492,11 @@ def test_normalize_current_identity_rejects_invalid_paths_targets_and_reparse(
 def test_normalize_current_identity_cli_prepare_apply_and_replay(tmp_path: Path) -> None:
     module = load_module()
     root = tmp_path / "repo"
-    source = root / "work-items" / "decisions" / "Legacy.md"
-    write(source, "id: Legacy\nstatus: accepted\n")
+    source = root / "work-items" / "decisions" / "2026-08-01-Legacy.md"
+    write(
+        source,
+        _current_decision_record("2026-08-01-Legacy", status="accepted"),
+    )
     module.refresh_readme(root, allow_marker_bootstrap=True)
     inventory = root / ".scratch" / "identity-normalization.json"
     receipt = root / ".scratch" / "identity-normalization-receipt.json"
@@ -4465,9 +4507,9 @@ def test_normalize_current_identity_cli_prepare_apply_and_replay(tmp_path: Path)
         "--category",
         "decision",
         "--source",
-        "work-items/decisions/Legacy.md",
+        "work-items/decisions/2026-08-01-Legacy.md",
         "--target-slug",
-        "legacy",
+        "2026-08-01-legacy",
         "--inventory",
         str(inventory),
     )
@@ -4973,8 +5015,15 @@ def test_audit_rejects_live_plain_path_to_retired_backlog_but_ignores_archive_hi
         archived_consumer,
         f"Historical context: work-item:{slug}; `{retired_path}`.\n",
     )
-    false_positive = root / "work-items" / "decisions" / "current.md"
-    write(false_positive, f"Not a path: `not-{retired_path}`.\n")
+    false_positive_slug = "2026-08-01-current"
+    false_positive = root / "work-items" / "decisions" / f"{false_positive_slug}.md"
+    write(
+        false_positive,
+        _current_decision_record(
+            false_positive_slug,
+            body=f"Not a path: `not-{retired_path}`.\n",
+        ),
+    )
 
     assert module._incoming_link_result(
         root,
@@ -4985,8 +5034,15 @@ def test_audit_rejects_live_plain_path_to_retired_backlog_but_ignores_archive_hi
         scan_markdown_links=False,
     ) == {"result": "clear", "references": []}
 
-    live_consumer = root / "work-items" / "decisions" / "live.md"
-    write(live_consumer, f"Stale context: `{retired_path}`.\n")
+    live_slug = "2026-08-01-live"
+    live_consumer = root / "work-items" / "decisions" / f"{live_slug}.md"
+    write(
+        live_consumer,
+        _current_decision_record(
+            live_slug,
+            body=f"Stale context: `{retired_path}`.\n",
+        ),
+    )
     try:
         module.audit(root)
     except module.LifecycleError as exc:
@@ -5651,6 +5707,115 @@ def test_settled_physical_relocation_replay_binds_its_owner_row_in_both_orders(
         expected_new_href = f"../../../roadmaps/archive/2026-08/{target.name}"
         assert (consumer.parent / expected_new_href).resolve() == final_target.resolve()
         assert module.verify_migration_inventory(root, inventory) == 2
+
+
+def _canonical_decision_record(slug: str) -> str:
+    return (
+        f"- id: {slug}\n"
+        "- status: proposed\n"
+        "- date: 2026-08-11\n"
+        "- decided-by: $architect\n"
+        "- context: schema-test\n"
+        "- supersedes: none\n"
+        "- superseded-by: none\n"
+        "- accepted-evidence: first line\n"
+        "  continuation line\n"
+        "\n"
+        f"# Decision: {slug}\n"
+        "\n"
+        "## Decision\n"
+        "Synthetic decision.\n"
+    )
+
+
+def test_decision_schema_rejects_noncanonical_current_records(tmp_path: Path) -> None:
+    module = load_module()
+    slug = "2026-08-11-schema-test"
+    canonical = _canonical_decision_record(slug)
+    cases = {
+        "fenced": (
+            "---\nstatus: proposed\ndate: 2026-08-11\n---\n"
+            f"# Decision: {slug}\n\n- id: {slug}\n"
+            "- decided-by: $architect\n- context: schema-test\n"
+            "- supersedes: none\n- superseded-by: none\n",
+            "WI-DECISION-SCHEMA-INVALID",
+        ),
+        "body-only-id": (
+            canonical.replace(f"- id: {slug}\n", "").replace(
+                "## Decision\n", f"## Decision\n- id: {slug}\n"
+            ),
+            "WI-DECISION-SCHEMA-INVALID",
+        ),
+        "proposer-is-not-decider": (
+            canonical.replace("- decided-by: $architect\n", "- proposed-by: $architect\n"),
+            "WI-DECISION-SCHEMA-INVALID",
+        ),
+        "duplicate-body-id": (
+            canonical.replace("## Decision\n", f"## Decision\n- id: {slug}\n"),
+            "WI-DECISION-FIELD-DUPLICATE",
+        ),
+        "wrong-id": (
+            canonical.replace(f"- id: {slug}\n", "- id: 2026-08-11-other\n"),
+            "WI-DECISION-IDENTITY-MISMATCH",
+        ),
+        "wrong-date": (
+            canonical.replace("- date: 2026-08-11\n", "- date: 2026-08-10\n"),
+            "WI-DECISION-IDENTITY-MISMATCH",
+        ),
+        "bare-leading-field": (
+            canonical.replace("- context: schema-test\n", "context: schema-test\n"),
+            "WI-DECISION-SCHEMA-INVALID",
+        ),
+        "decorated-leading-field": (
+            canonical.replace(f"- id: {slug}\n", f"- **id**: {slug}\n"),
+            "WI-DECISION-SCHEMA-INVALID",
+        ),
+        "uppercase-leading-field": (
+            canonical.replace(f"- id: {slug}\n", f"- ID: {slug}\n"),
+            "WI-DECISION-SCHEMA-INVALID",
+        ),
+        "empty-context": (
+            canonical.replace("- context: schema-test\n", "- context:\n"),
+            "WI-DECISION-SCHEMA-INVALID",
+        ),
+    }
+    for name, (payload, failure_id) in cases.items():
+        root = tmp_path / name
+        write(root / "work-items" / "decisions" / f"{slug}.md", payload)
+        try:
+            module.audit_categories(root)
+        except module.LifecycleError as exc:
+            assert exc.failure_id == failure_id, (name, exc.failure_id, str(exc))
+        else:
+            raise AssertionError(f"noncanonical current decision passed: {name}")
+
+
+def test_decision_schema_accepts_optional_multiline_and_legacy_archive(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    slug = "2026-08-11-schema-test"
+    write(
+        tmp_path / "work-items" / "decisions" / f"{slug}.md",
+        _canonical_decision_record(slug),
+    )
+    archived = (
+        tmp_path
+        / "work-items"
+        / "decisions"
+        / "archive"
+        / "2026-08"
+        / "legacy.md"
+    )
+    write(
+        archived,
+        "---\nstatus: dropped\n---\n\n# Decision: legacy\n\n"
+        "Terminal-at: 2026-08-11T00:00:00Z\n"
+        "Rationale: Historical bytes remain readable.\n"
+        "Evidence: Synthetic archive fixture.\n",
+    )
+
+    assert module.audit_categories(tmp_path) == ()
 
 
 class _UnittestAdapter(unittest.TestCase):

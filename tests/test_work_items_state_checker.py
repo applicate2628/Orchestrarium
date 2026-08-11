@@ -858,3 +858,23 @@ class TestArchiveOnlyDependencyTerminality(unittest.TestCase):
                 lifecycle.work_item_dependency_state(root, "dependency"),
                 "done",
             )
+
+
+def test_decision_schema_failure_reaches_repository_state_checker(tmp_path: Path) -> None:
+    decision = (
+        tmp_path
+        / "work-items"
+        / "decisions"
+        / "2026-08-11-schema-test.md"
+    )
+    decision.parent.mkdir(parents=True)
+    decision.write_text(
+        "---\nstatus: proposed\ndate: 2026-08-11\n---\n"
+        "\n# Decision: malformed\n",
+        encoding="utf-8",
+    )
+
+    result = run_checker(tmp_path)
+
+    assert result.returncode == 1
+    assert "WI-DECISION-SCHEMA-INVALID" in result.stdout

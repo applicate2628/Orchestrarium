@@ -99,18 +99,14 @@ line, a prose bullet on the Codex line). Full role rules: `skills/lead/SKILL.md`
 
 ## Known limitation
 
-The decision registry is **governance-enforced only**. No hook scans
-`work-items/decisions/`, so a stale `proposed` decision that was never accepted
-or dropped, or an `accepted` decision that should have been superseded, is not
-structurally caught — no archival Stop control sees the
-registry. This is weaker than the work-item close path, which the hook
-backstops. Surfacing the proposed-list in `/agents-status` is the only standing
-prompt to resolve a dangling proposal — and it runs ONLY when you invoke the
-command (on the Codex line, when the lead scans the registry); nothing runs in
-the background and nothing VALIDATES the registry (no check that a `superseded-by`
-back-link is consistent, no check that a `supersedes:` target exists), so a stale
-`proposed`, a half-set supersede edge, or a wrong reference is caught only if and
-when you look.
+The lifecycle audit validates every mutable current decision's leading schema:
+the seven required list fields must be unique, non-empty, and consistent with
+the filename identity and date. Historical monthly archives retain their legacy
+reader and immutable bytes. Semantic drift remains governance-enforced: no hook
+decides when a proposal should be accepted or dropped, and the lifecycle audit
+does not yet prove that `supersedes:` / `superseded-by:` targets exist or form a
+consistent two-way edge. Surfacing the proposed-list remains the standing prompt
+to resolve a dangling proposal.
 
 ## Physical lifecycle V1
 
