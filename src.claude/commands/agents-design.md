@@ -27,8 +27,8 @@ This is the standard entry point for non-trivial new work that lacks a `work-ite
    - **Planner** (`subagent_type: planner`): break the accepted design into small independent delivery phases with file scope, dependencies, acceptance criteria, and quality gates.
 
 3. **Handle REVISE at each stage:**
-   - If **architect** returns `REVISE` on the research → route gaps back to analyst → re-run architect. Max 3 iterations.
-   - If **planner** returns `REVISE` on the design → route gaps back to architect → re-run planner. Max 3 iterations.
+   - If **architect** returns `REVISE` on the research → route gaps back to analyst → re-run architect under the shared spine's consecutive same-role/same-artifact `REVISE`-cycle cap.
+   - If **planner** returns `REVISE` on the design → route gaps back to architect → re-run planner under that same shared cap.
    - If any stage exceeds the iteration cap, present findings and remaining gaps to the user.
 
 4. **Save.** Persist per artifact persistence protocol (`operating-model.md`):

@@ -236,7 +236,7 @@ Require every pipeline subagent to end with exactly one gate status:
 - `REVISE`: the artifact stays in the same role and needs a bounded correction.
 - `BLOCKED`: the role cannot proceed without new context, a decision, or a different role.
 - `RETURN(role)`: an independent reviewer sends the artifact back to a specific upstream role because the upstream artifact has a structural gap requiring that role's expertise — not a bounded correction. Example: `RETURN(security-engineer)` — threat model missing server-side validation surface entirely. Route the finding to the named role; do not treat it as REVISE or BLOCKED. Lead receives notification but does not re-interpret; reviewer must justify RETURN over standard findings. Format details in [subagent-contracts.md](../../agents/contracts/subagent-contracts.md).
-- Default `REVISE` cap: no more than 3 consecutive `REVISE` iterations for the same role and artifact before the lead must escalate to the user with a summary of all iterations, remaining findings, and a recommendation (see REVISE iteration cap in `operating-model.md`). The counter does not reset on a brief re-route; only a full re-classification resets it.
+- Apply the shared spine's consecutive same-role/same-artifact `REVISE`-cycle cap before escalating to the user with a summary of all attempts, remaining findings, and a recommendation (see the procedure in `operating-model.md`). The counter does not reset on a brief re-route; only a full re-classification resets it.
 
 Do not advance work on optimism or partial acceptance.
 

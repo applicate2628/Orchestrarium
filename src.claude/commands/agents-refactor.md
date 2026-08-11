@@ -41,7 +41,7 @@ The user does not need to type `/agents-refactor` for this flow to fire. Apply i
 
 6. **Handle reviewer verdict:**
    - If architecture reviewer returns `PASS` → proceed to report
-   - If architecture reviewer returns `REVISE` → route to the correct target (see architecture-reviewer REVISE routing: code issues → implementer, design issues → architect, plan issues → planner) → re-run QA → re-run architecture reviewer. Max 3 iterations, then escalate to user.
+   - If architecture reviewer returns `REVISE` → route to the correct target (see architecture-reviewer REVISE routing: code issues → implementer, design issues → architect, plan issues → planner) → re-run QA → re-run architecture reviewer under the shared spine's consecutive same-role/same-artifact `REVISE`-cycle cap, then escalate to the user when exhausted.
    - If architecture reviewer returns `BLOCKED` → present to user with classification
 
 7. **Save.** Persist per artifact persistence protocol (`operating-model.md`):

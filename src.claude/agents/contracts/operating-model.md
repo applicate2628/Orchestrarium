@@ -218,15 +218,15 @@ When an upstream artifact is revised after downstream artifacts have already bee
 
 ## REVISE iteration cap
 
-Any REVISE loop (QA, reviewer, or other gate returning REVISE) is capped at **3 iterations** per stage:
+Use the shared spine's consecutive same-role/same-artifact `REVISE`-cycle cap. This binding does not own or restate its numeric value:
 
-1. **Iteration 1-3**: The implementer (or responsible role) addresses findings and re-submits. The gate re-evaluates.
-2. **After iteration 3**: If the gate still returns REVISE, escalate to the user with:
-   - Summary of all 3 iterations and what was attempted
+1. While the cap is not exhausted, the responsible role addresses findings and re-submits the same artifact. The gate re-evaluates.
+2. When the cap is exhausted without `PASS`, escalate to the user with:
+   - Summary of all attempts and what was tried
    - Remaining unresolved findings
    - Recommendation: fix approach, redesign, or defer
 3. The user decides: continue fixing, re-plan, or accept with known issues.
-4. The iteration count is tracked in `status.md` under the REVISE loop section.
+4. Track consecutive cycles by role and artifact in `status.md` under the REVISE loop section.
 
 ## Parallel execution protocol
 

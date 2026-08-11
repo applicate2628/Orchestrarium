@@ -175,7 +175,7 @@ A subagent `PASS` still requires verification by the orchestrating owner or the 
 - The system operates as a rolling loop, not a stop-and-wait chain.
 - `PASS` immediately advances to the next approved role.
 - `REVISE` stays within the same role for a bounded correction.
-- Default `REVISE` cap: no more than 3 consecutive `REVISE` cycles for the same role and artifact before the lead re-routes, escalates, or blocks the work.
+- Apply the shared spine's consecutive same-role/same-artifact `REVISE`-cycle cap before the lead re-routes, escalates, or blocks the work; this reference does not own the numeric limit.
 - `BLOCKED` is reserved for real external blockers, missing decisions, or unavailable prerequisites.
   - `BLOCKED` has two typed classes:
     - `BLOCKED:dependency` — cannot proceed, missing tool, environment, access, or information that no current agent can provide. Orchestrator presents to user for resolution.

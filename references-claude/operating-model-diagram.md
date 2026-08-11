@@ -161,7 +161,7 @@ Lifecycle of `constraints/claims.md` in the work-item folder:
 - `product-manager` owns what enters delivery. `lead` owns execution of approved work.
 - `analyst` and `product-analyst` reduce uncertainty before interpretive roles make tradeoff decisions.
 - Delegation passes accepted artifacts, not raw transcripts.
-- `REVISE` returns work to the responsible role for up to 3 iterations; after 3, escalate to the user. `BLOCKED` stops progression — classified as `BLOCKED:dependency` (external blocker) or `BLOCKED:prerequisite` (adjacent work needed first).
+- `REVISE` returns work to the responsible role under the shared spine's consecutive same-role/same-artifact cycle cap; escalate to the user when it is exhausted. `BLOCKED` stops progression — classified as `BLOCKED:dependency` (external blocker) or `BLOCKED:prerequisite` (adjacent work needed first).
 - Multi-phase implementation requires one explicit integration owner before QA.
 - Reviewers stay independent and report to the orchestrating owner.
 - Interaction types: `LEAD_MED` (default), `DIRECT`, `PARALLEL`, `CLAIMS`, `RETURN`, `ESCALATE`, `ADVISORY`, `NONE`.

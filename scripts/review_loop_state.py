@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 
-DEFAULT_CAP = 3
+REVIEW_LOOP_ROUND_CAP = 3
 JSON_NESTING_LIMIT = 128
 LANES = ("surgical", "deep", "scout")
 VERDICT_LANES = ("surgical", "deep")
@@ -121,7 +121,7 @@ def load_ledger(path: str | Path) -> tuple[Any | None, str | None]:
     return (data, None) if error is None else _load_yaml(text)
 
 
-def validate_v1(data: Any, cap: int = DEFAULT_CAP) -> list[str]:
+def validate_v1(data: Any, cap: int = REVIEW_LOOP_ROUND_CAP) -> list[str]:
     """Preserve the former development validator's V1 structural contract."""
     if not isinstance(data, dict):
         return ["ledger root must be a mapping/object"]
@@ -204,7 +204,7 @@ def _fields(value: dict[str, Any], allowed: set[str], label: str, errors: list[s
         errors.append(f"{label}.{key}: unexpected field")
 
 
-def validate_v2(data: Any, cap: int = DEFAULT_CAP, require_terminal: bool = False) -> list[str]:
+def validate_v2(data: Any, cap: int = REVIEW_LOOP_ROUND_CAP, require_terminal: bool = False) -> list[str]:
     errors: list[str] = []
     if not isinstance(data, dict):
         return ["root: expected object"]
@@ -346,7 +346,7 @@ def validate_v2(data: Any, cap: int = DEFAULT_CAP, require_terminal: bool = Fals
     return errors
 
 
-def validate_record(data: Any, cap: int = DEFAULT_CAP, require_v2: bool = False, require_terminal: bool = False) -> tuple[list[str], bool]:
+def validate_record(data: Any, cap: int = REVIEW_LOOP_ROUND_CAP, require_v2: bool = False, require_terminal: bool = False) -> tuple[list[str], bool]:
     is_v2 = isinstance(data, dict) and data.get("schema_version") == 2
     if require_v2 and not is_v2:
         return ["RLSTATE_MIGRATION_REQUIRED"], False
@@ -1076,7 +1076,7 @@ def command_next_round(args: argparse.Namespace) -> dict[str, Any]:
         if prior["phase"] != "complete" or not any(prior[lane].get("verdict") == "REVISE" for lane in VERDICT_LANES):
             raise StateError("RLSTATE_INVALID", "next round requires a complete REVISE round")
         number = len(data["rounds"]) + 1
-        if number > DEFAULT_CAP:
+        if number > REVIEW_LOOP_ROUND_CAP:
             raise StateError("RLSTATE_INVALID", "round cap exceeded")
         if args.artifact_file:
             artifact, created = _freeze_snapshot(args.artifact_file, root, reviews, data["loop_id"], number)
@@ -1331,12 +1331,12 @@ def build_parser() -> argparse.ArgumentParser:
     close.add_argument("--outcome", choices=OUTCOMES, required=True)
 
     validate = state_parser("validate")
-    validate.add_argument("--cap", type=int, default=DEFAULT_CAP)
+    validate.add_argument("--cap", type=int, default=REVIEW_LOOP_ROUND_CAP)
     validate.add_argument("--require-v2", action="store_true")
     validate.add_argument("--require-terminal", action="store_true")
 
     migrate = state_parser("migrate-v1", operation=True)
-    migrate.add_argument("--cap", type=int, default=DEFAULT_CAP)
+    migrate.add_argument("--cap", type=int, default=REVIEW_LOOP_ROUND_CAP)
     migrate.add_argument("--round-revision", action="append", default=[], required=True)
 
     rollback = state_parser("rollback-migration")
@@ -1379,7 +1379,7 @@ def main(argv: list[str] | None = None) -> int:
 def validator_main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Structural validator for review-loop-state V1/V2 records")
     parser.add_argument("ledger", nargs="?")
-    parser.add_argument("--cap", type=int, default=DEFAULT_CAP)
+    parser.add_argument("--cap", type=int, default=REVIEW_LOOP_ROUND_CAP)
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args(argv)
     if args.self_test:

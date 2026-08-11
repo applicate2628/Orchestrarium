@@ -271,7 +271,7 @@ Require every pipeline subagent to end with exactly one gate status:
 - `REVISE`: the artifact stays in the same role and needs a bounded correction.
 - `BLOCKED`: the role cannot proceed without new context, a decision, or a different role.
 - `RETURN(role)`: an independent reviewer sends the artifact back to a specific upstream role because the upstream artifact has a structural gap requiring that role's expertise — not a bounded correction. Example: `RETURN(security-engineer)` — threat model missing server-side validation surface entirely. Route the finding to the named role; do not treat it as REVISE or BLOCKED.
-- Default `REVISE` cap: no more than 3 consecutive `REVISE` cycles for the same role and artifact before the lead escalates to the user with a summary of all iterations, remaining findings, and a recommendation.
+- Apply the shared spine's consecutive same-role/same-artifact `REVISE`-cycle cap before the lead escalates to the user with a summary of all attempts, remaining findings, and a recommendation.
 
 Do not advance work on optimism or partial acceptance.
 
@@ -285,7 +285,7 @@ When an accepted artifact asserts a root cause, a fix verification, or `diagnosi
 
 - The system operates as a rolling loop, not a stop-and-wait chain.
 - `PASS` should immediately advance to the next approved role.
-- `REVISE` should stay within the same role for a bounded correction instead of reopening the whole pipeline, but only for up to 3 consecutive cycles on the same role and artifact.
+- `REVISE` should stay within the same role for a bounded correction instead of reopening the whole pipeline, subject to the shared spine's consecutive same-role/same-artifact cycle cap.
 - `BLOCKED` is reserved for real external blockers, missing decisions, or unavailable prerequisites that cannot be fixed inside the current role.
 
 ## Flow-continuity rule

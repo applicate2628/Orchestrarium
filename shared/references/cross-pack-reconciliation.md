@@ -23,7 +23,7 @@ Codex loads skills statically → contract docs must be self-contained lead guid
 | Cross-domain escalation | §"Cross-domain escalation protocol" | §"Cross-domain escalation protocol" | Identical 4-step protocol; Claude adds target-domain mapping table |
 | Adjacent-issue protocol | §"Adjacent-issue protocol" | §"Adjacent-issue protocol" | Identical semantics; Codex says "configured bug registry path" vs Claude's `work-items/bugs/` |
 | Artifact invalidation | §"Artifact invalidation protocol" | §"Artifact invalidation protocol" | Claude has 3 detailed steps; Codex condensed to 3 points. Same dependency chain. |
-| REVISE iteration cap | §"REVISE iteration cap" | §"REVISE iteration cap procedure" | Identical cap (3), identical escalation procedure |
+| REVISE correction cap | §"REVISE iteration cap" | §"REVISE iteration cap procedure" | Both bindings cite the shared spine's consecutive same-role/same-artifact cap and escalation procedure; neither binding owns its numeric value |
 | Periodic controls | §"Periodic controls" table | §"Periodic controls" | Claude has full 11-row control matrix; Codex defers to repo-defined matrix |
 | How to instruct reviewers | §"How to instruct reviewers" | §"Review strategy selection" | Claude: 2 compact paragraphs. Codex: full strategy A/B with decision table. Semantics identical. |
 | Common alias map | §"Common alias map" | §"Common alias map" | Identical mappings, different formatting |

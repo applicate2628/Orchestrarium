@@ -20,7 +20,7 @@ The roadmap loop decides what should enter discovery or delivery. The delivery l
 - The system operates as a rolling loop, not a stop-and-wait chain.
 - `PASS` immediately advances to the next approved role.
 - `REVISE` stays inside the same role for a bounded correction.
-- Default `REVISE` cap: no more than 3 consecutive `REVISE` cycles for the same role and artifact before the lead must escalate to the user with a summary of all iterations, remaining findings, and a recommendation.
+- Apply the shared spine's consecutive same-role/same-artifact `REVISE`-cycle cap before the lead must escalate to the user with a summary of all attempts, remaining findings, and a recommendation.
 - A handoff interrupt or worker stall without an artifact is not a completed `REVISE` artifact. Keep the stage open, record the interruption in `status.md`, then either re-dispatch the same role with a narrower slice or route to the proper factual role.
 - `BLOCKED` is reserved for real external blockers, missing decisions, or unavailable prerequisites.
 - A consultant sweep is advisory-only. Run it only when the lead explicitly wants a second opinion or a repo-local lane policy explicitly asks for one and `consultantMode` is not `disabled`.
@@ -386,11 +386,11 @@ When an upstream artifact is revised after downstream artifacts have been accept
 
 ## REVISE iteration cap procedure
 
-The cap is 3 iterations for any single role on a single artifact.
+Use the shared spine's consecutive same-role/same-artifact `REVISE`-cycle cap; this binding does not own or restate its numeric value.
 
-- Iteration 1–3: the role attempts to address findings within its bounded correction scope.
-- After iteration 3 without PASS: the orchestrator escalates to the user with a summary of all 3 iterations, remaining unresolved findings, and a recommendation (continue fixing, re-plan, or accept with known issues).
-- Track the current iteration count in `status.md` under the REVISE loop section.
+- While the cap is not exhausted, the role addresses findings within its bounded correction scope.
+- When the cap is exhausted without `PASS`, the orchestrator escalates to the user with a summary of all attempts, remaining unresolved findings, and a recommendation (continue fixing, re-plan, or accept with known issues).
+- Track consecutive cycles by role and artifact in `status.md` under the REVISE loop section.
 
 ## Artifact persistence protocol
 

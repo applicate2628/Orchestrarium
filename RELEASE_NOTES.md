@@ -14,6 +14,8 @@ Do not add entries for purely local-only hygiene edits such as formatting, link 
 
 - Claude and Codex design-panel bindings now use one fail-closed candidate-isolation rule: native Agent/subagent lanes are ineligible while sealing is unverified, and candidates run only through the existing direct external-worker boundary. External failure remains visible and may not fall back to an internal candidate.
 
+- Lead correction retries and autonomous review-loop rounds now have separate owners: the shared spine alone owns the generic consecutive same-role/same-artifact `REVISE` limit, while `review_loop_state.py` exposes the explicit `REVIEW_LOOP_ROUND_CAP` for the independently bounded multi-angle loop. Existing numeric limits and explicit `--cap` overrides are unchanged.
+
 - The passive-polling Stop guard now resolves the dispatched-review environment policy once at its process entrypoint and injects an immutable typed configuration into decision logic. The existing non-empty-value suppression behavior is unchanged, while lower hook logic no longer reads ambient process policy.
 
 ### Fixed

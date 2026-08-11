@@ -8,11 +8,11 @@ from __future__ import annotations
 
 import sys
 
-from review_loop_state import load_ledger, validate_record, validate_v1, validate_v2, validator_main
+from review_loop_state import REVIEW_LOOP_ROUND_CAP, load_ledger, validate_record, validate_v1, validate_v2, validator_main
 
 
 # Compatibility names for repository callers that imported the old module.
-def validate(data, cap=3):
+def validate(data, cap=REVIEW_LOOP_ROUND_CAP):
     return validate_record(data, cap=cap)[0]
 
 

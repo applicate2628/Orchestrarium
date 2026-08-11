@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "workItem": "2026-08-11-separate-revise-cap-contracts",
+  "closedAt": "2026-08-11T20:08:17Z",
+  "bugs": [
+    {
+      "id": "2026-07-25-cap-three-no-single-owner",
+      "action": "terminalize",
+      "inputSha256": "416439e42dd7d4dac6a815f8fe623976d8b71c87b5463af8711993804d53b81c",
+      "status": "fixed",
+      "resolution": "The shared spine now solely owns the generic same-role/same-artifact correction-cycle number, while review_loop_state.py::REVIEW_LOOP_ROUND_CAP separately owns autonomous review rounds; every allowed hard-boundary duplicate is drift-gated.",
+      "evidence": "implementation.md, qa.md, and architecture-review.md are PASS; dedicated RED-to-GREEN contract, full review-loop/dispatch suites, both pack validators, spine, CodeGraph, staged-boundary, and diff checks are green."
+    }
+  ]
+}
