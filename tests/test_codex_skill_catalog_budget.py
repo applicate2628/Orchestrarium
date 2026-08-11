@@ -20,6 +20,7 @@ from __future__ import annotations
 import runpy
 import subprocess
 import sys
+import json
 from pathlib import Path
 
 import pytest
@@ -55,8 +56,262 @@ def _write_skill(root: Path, name: str, description: str) -> Path:
     return skill_md
 
 
+def _prompt_input(skills_text: str) -> str:
+    return json.dumps(
+        [
+            {
+                "role": "developer",
+                "content": [{"type": "input_text", "text": skills_text}],
+            }
+        ]
+    )
+
+
+def _skills_text(root: Path, rows: list[tuple[str, str]]) -> str:
+    rendered = [
+        "<skills_instructions>",
+        "## Skills",
+        "### Skill roots",
+        f"- `r0` = `{root.as_posix()}`",
+        "### Available skills",
+    ]
+    rendered.extend(
+        f"- {name}: {description} (file: r0/{name}/SKILL.md)"
+        for name, description in rows
+    )
+    rendered.append("</skills_instructions>")
+    return "\n".join(rendered)
+
+
 def test_validator_script_exists() -> None:
     assert VALIDATOR.is_file(), f"validator missing: {VALIDATOR}"
+
+
+def test_runtime_observation_distinguishes_shortening_from_identity_omission(
+    tmp_path: Path,
+) -> None:
+    repo_skills = tmp_path / "repo-skills"
+    installed = tmp_path / "installed"
+    _write_skill(repo_skills, "alpha", "full alpha description")
+    _write_skill(repo_skills, "beta", "full beta description")
+    _write_skill(installed, "alpha", "full alpha description")
+    _write_skill(installed, "beta", "full beta description")
+    module = _module()
+
+    observed = module["parse_runtime_prompt_input"](
+        _prompt_input(
+            _skills_text(
+                installed,
+                [("alpha", "short alpha"), ("beta", "full beta description")],
+            )
+        ),
+        repo_skills,
+        installed,
+    )
+
+    assert observed.status == "shortened"
+    assert observed.total_entries == 2
+    assert observed.pack_expected == 2
+    assert observed.pack_rendered == 2
+    assert observed.shortened_count == 1
+    assert observed.omitted_pack == ()
+
+
+def test_runtime_observation_fails_when_pack_identity_is_omitted(tmp_path: Path) -> None:
+    repo_skills = tmp_path / "repo-skills"
+    installed = tmp_path / "installed"
+    _write_skill(repo_skills, "alpha", "alpha description")
+    _write_skill(repo_skills, "beta", "beta description")
+    _write_skill(installed, "alpha", "alpha description")
+    module = _module()
+
+    observed = module["parse_runtime_prompt_input"](
+        _prompt_input(_skills_text(installed, [("alpha", "alpha description")])),
+        repo_skills,
+        installed,
+    )
+
+    assert observed.status == "omitted-pack"
+    assert observed.omitted_pack == ("beta",)
+
+
+def test_runtime_observation_does_not_credit_plugin_or_renamed_identity_collision(
+    tmp_path: Path,
+) -> None:
+    repo_skills = tmp_path / "repo-skills"
+    plugin = tmp_path / "plugin"
+    pack_runtime = tmp_path / "pack-runtime"
+    pack_runtime.mkdir()
+    renamed = tmp_path / "renamed"
+    _write_skill(repo_skills, "alpha", "pack alpha")
+    _write_skill(plugin, "alpha", "plugin alpha")
+    _write_skill(renamed, "alpha", "renamed alpha")
+    (renamed / "alpha" / "SKILL.md").write_text(
+        '---\nname: substitute\ndescription: "renamed alpha"\n---\n',
+        encoding="utf-8",
+    )
+    module = _module()
+
+    plugin_text = _skills_text(plugin, [("plugin:alpha", "plugin alpha")]).replace(
+        "plugin:alpha/SKILL.md", "alpha/SKILL.md"
+    )
+    plugin_collision = module["parse_runtime_prompt_input"](
+        _prompt_input(plugin_text),
+        repo_skills,
+        pack_runtime,
+    )
+    assert plugin_collision.status == "omitted-pack"
+    assert plugin_collision.omitted_pack == ("alpha",)
+
+    renamed_collision = module["parse_runtime_prompt_input"](
+        _prompt_input(_skills_text(renamed, [("substitute", "renamed alpha")])),
+        repo_skills,
+        renamed,
+    )
+    assert renamed_collision.status == "binding-failure"
+    assert renamed_collision.diagnostic == "CATALOG-RUNTIME-BINDING"
+
+
+def test_runtime_observer_uses_exact_direct_argv_and_typed_execution_failure(
+    tmp_path: Path,
+) -> None:
+    repo_skills = tmp_path / "repo-skills"
+    repo_skills.mkdir()
+    calls: list[tuple[list[str], dict]] = []
+
+    def runner(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return subprocess.CompletedProcess(argv, 7, "", "injected failure")
+
+    observed = _module()["observe_runtime_catalog"](
+        "codex", repo_skills, repo_skills, runner=runner
+    )
+
+    assert calls[0][0] == ["codex", "debug", "prompt-input"]
+    assert calls[0][1]["shell"] is False
+    assert observed.status == "execution-failure"
+    assert observed.diagnostic == "CATALOG-RUNTIME-EXECUTION"
+
+
+def test_runtime_observation_rejects_ambiguous_or_duplicate_catalogs(tmp_path: Path) -> None:
+    repo_skills = tmp_path / "repo-skills"
+    installed = tmp_path / "installed"
+    _write_skill(repo_skills, "alpha", "alpha description")
+    _write_skill(installed, "alpha", "alpha description")
+    module = _module()
+    block = _skills_text(installed, [("alpha", "alpha description")])
+
+    ambiguous_payload = json.dumps(
+        [
+            {
+                "role": "developer",
+                "content": [
+                    {"type": "input_text", "text": block},
+                    {"type": "input_text", "text": block},
+                ],
+            }
+        ]
+    )
+    ambiguous = module["parse_runtime_prompt_input"](
+        ambiguous_payload, repo_skills, installed
+    )
+    assert ambiguous.status == "malformed"
+    assert ambiguous.diagnostic == "CATALOG-RUNTIME-MALFORMED"
+
+    duplicate = module["parse_runtime_prompt_input"](
+        _prompt_input(
+            _skills_text(
+                installed,
+                [("alpha", "alpha description"), ("alpha", "alpha description")],
+            )
+        ),
+        repo_skills,
+        installed,
+    )
+    assert duplicate.status == "binding-failure"
+    assert duplicate.diagnostic == "CATALOG-RUNTIME-BINDING"
+
+    traversal = block.replace("r0/alpha/SKILL.md", "r0/../alpha/SKILL.md")
+    escaped = module["parse_runtime_prompt_input"](
+        _prompt_input(traversal), repo_skills, installed
+    )
+    assert escaped.status == "binding-failure"
+    assert escaped.diagnostic == "CATALOG-RUNTIME-BINDING"
+
+
+def test_runtime_observer_timeout_is_typed_and_fail_closed(tmp_path: Path) -> None:
+    repo_skills = tmp_path / "repo-skills"
+    repo_skills.mkdir()
+
+    def runner(argv, **_kwargs):
+        raise subprocess.TimeoutExpired(argv, 20)
+
+    observed = _module()["observe_runtime_catalog"](
+        "codex", repo_skills, repo_skills, runner=runner
+    )
+    assert observed.status == "execution-failure"
+    assert observed.diagnostic == "CATALOG-RUNTIME-EXECUTION"
+
+
+@pytest.mark.parametrize(
+    ("observation", "expected_code", "expected_marker"),
+    (
+        (
+            ("shortened", "CATALOG-DESCRIPTION-SHORTENED"),
+            0,
+            "WARNING: CATALOG-DESCRIPTION-SHORTENED",
+        ),
+        (
+            ("omitted-pack", "CATALOG-PACK-IDENTITY-OMITTED"),
+            1,
+            "FAIL: CATALOG-PACK-IDENTITY-OMITTED",
+        ),
+        (
+            ("unavailable", "CATALOG-RUNTIME-UNAVAILABLE"),
+            1,
+            "FAIL: CATALOG-RUNTIME-UNAVAILABLE",
+        ),
+    ),
+)
+def test_main_runtime_policy_warns_on_shortening_and_fails_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    observation: tuple[str, str],
+    expected_code: int,
+    expected_marker: str,
+) -> None:
+    codex_home = tmp_path / "codex-home"
+    (codex_home / "skills").mkdir(parents=True)
+    repo_skills = tmp_path / "repo-skills"
+    _write_skill(repo_skills, "alpha", "alpha description")
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+    module = _module()
+    runtime_globals = module["main"].__globals__
+    runtime_globals["DEFAULT_REPO_SKILLS"] = repo_skills
+    runtime_globals["shutil"].which = lambda _name: "codex"
+    runtime_globals["discover_entries"] = lambda *_args: []
+    runtime_globals["validate"] = lambda *_args, **_kwargs: (True, ["STATIC"])
+    status, diagnostic = observation
+    runtime_globals["observe_runtime_catalog"] = lambda *_args: module[
+        "RuntimeCatalogObservation"
+    ](
+        status=status,
+        diagnostic=diagnostic,
+        total_entries=1,
+        pack_expected=1,
+        pack_rendered=0 if status == "omitted-pack" else 1,
+        shortened_count=1 if status == "shortened" else 0,
+        shortened_chars=5 if status == "shortened" else 0,
+        omitted_pack=("alpha",) if status == "omitted-pack" else (),
+    )
+
+    code = module["main"]([])
+    output = capsys.readouterr().out
+
+    assert code == expected_code
+    assert expected_marker in output
+    assert f"RESULT: {'PASS' if expected_code == 0 else 'FAIL'}" in output
 
 
 # --- Fail-first verification: prove the gate can actually fire -------------
