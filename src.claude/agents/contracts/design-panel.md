@@ -23,14 +23,25 @@ Every installed binding carries these stable IDs; the operative text below is wh
 
 ## Claude dispatch mapping
 
+`DP3-NATIVE-ROUTE-UNVERIFIED`: native Agent sealing is not an installed or
+runtime-verified authorization guarantee, so a native Agent is not an eligible
+candidate lane. Every candidate uses the existing direct `$external-worker`
+boundary with file-based prompt delivery. No internal fallback may replace an
+unavailable external candidate.
+Candidate launch arguments MUST NOT select or resume an existing provider
+session: Claude `--continue`/`-c`, `--resume`/`-r`, `--session-id`,
+`--fork-session`, `--from-pr`, and `--teleport`, plus the Codex `exec resume`
+route, are forbidden. Inspect the resolved provider argv before launch; a
+session-reuse route makes that candidate `UNVERIFIED` and it is never counted
+toward quorum.
+
 | Lane | `subagent_type` | Model / tier | Why this role |
 | --- | --- | --- | --- |
-| Design lane (internal) | `architect` | strongest internal design tier, explicit `model:` override | the design-generation profession; the lane framing travels in the dispatch prompt (`Scope`/`Constraints` fields of the handoff template, `subagent-contracts.md`) — `architect.md` is NOT edited to carry panel-specific text |
-| Design lane (external) | `$external-worker` inheriting `architect` | resolved external provider per the active `externalPriorityProfile` | worker-side generation adapter; direct provider launch, file-based prompt per `agents/contracts/external-dispatch.md`; provenance keeps the replaced-role label |
+| Candidate design lane | `$external-worker` inheriting `architect` | resolved external provider per the active `externalPriorityProfile` | worker-side generation adapter; direct provider launch, file-based prompt per `agents/contracts/external-dispatch.md`; provenance keeps the replaced-role label |
 | Comparison scout (optional) | `analyst` | `model: sonnet` | factual `file:line` set-diff across candidate artifacts; FEEDS the synthesis, casts NO verdict; never `qa-engineer` |
 | Synthesis | the main conversation, as Lead, inline | — | **anti-shadow-lead (REQUIRED):** synthesis is NEVER a spawned "synthesizer" subagent acting as a stand-in lead; the Lead owns the design-stage gate directly. A candidate author (an `architect`/`$external-worker` lane) may never synthesize. A pre-declared, non-candidate synthesis architect dispatch is an explicit alternative to Lead-inline, but Lead always owns the `PASS`. |
 
-**Collection rule** (mirrors `review-loop.md`): independent lanes launch in parallel (`run_in_background: true`). Same-vendor Agent subagents return their normal result; each external-provider shell lane returns one terminal `ORCHESTRARIUM_PROVIDER_RESULT_V1` envelope. Await the wrapper process, then read its complete `resultText` and validate the primary outcome, combined status, cleanup status, process exit, timeout/cancellation flags, and gate; for tracked runs, also read back the path-free terminal ledger before counting the lane. Notifications are collection hints only; independence remains scope/framing, never vendor (per `DP3`). A died, timed-out, cleanup-failed, ledger-unsettled, or empty lane is `UNVERIFIED` — re-run it with the same framing; never silently reduce quorum.
+**Collection rule** (mirrors `review-loop.md`): independent direct external lanes launch in parallel when the selected runtimes support concurrent non-interactive execution. When they do not, run the lanes sequentially in separate fresh external contexts that have not seen sibling output. Before launch, inspect the resolved provider argv and fail closed on every session-reuse route listed by `DP3-NATIVE-ROUTE-UNVERIFIED`. Each lane returns one terminal `ORCHESTRARIUM_PROVIDER_RESULT_V1` envelope. Await the wrapper process, then read its complete `resultText` and validate the primary outcome, combined status, cleanup status, process exit, timeout/cancellation flags, and gate; for tracked runs, also read back the path-free terminal ledger before counting the lane. Notifications are collection hints only; independence remains scope/framing, never vendor (per `DP3`). A died, timed-out, cleanup-failed, ledger-unsettled, or empty lane is `UNVERIFIED` — re-run it with the same framing; never silently reduce quorum. No internal fallback is permitted.
 
 ## Skip-guards (defense in depth — both apply)
 
