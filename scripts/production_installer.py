@@ -30,6 +30,10 @@ RUNTIME_HELPERS = (
     "validate-work-item-state.py",
     "validate-work-item-state.sh",
 )
+RUNTIME_RESOURCES = (
+    ("shared/schemas/agent-runs.schema.json", "shared/schemas/agent-runs.schema.json"),
+    ("scripts/maintenance/cleanup.py", "scripts/maintenance/cleanup.py"),
+)
 CODEX_RUNTIME_HELPERS = ("check-hook-health.py",)
 CODEX_HOOK_INVENTORY = "codex-hook-inventory.json"
 # SHA-256 fingerprints of every historically shipped Codex built-in agent
@@ -410,6 +414,25 @@ def _copy_file(source: Path, target: Path, dry_run: bool) -> None:
     shutil.copy2(source, target)
 
 
+def _runtime_file_destinations(
+    root: Path, helper_target: Path
+) -> tuple[tuple[Path, Path], ...]:
+    helper_files = tuple(
+        (root / "scripts" / helper, helper_target / helper)
+        for helper in RUNTIME_HELPERS
+    )
+    resource_files = tuple(
+        (root / source, helper_target.parent / destination)
+        for source, destination in RUNTIME_RESOURCES
+    )
+    return helper_files + resource_files
+
+
+def _install_runtime_files(root: Path, helper_target: Path, dry_run: bool) -> None:
+    for source, target in _runtime_file_destinations(root, helper_target):
+        _copy_file(source, target, dry_run)
+
+
 def _sync_tree(source: Path, target: Path, dry_run: bool) -> None:
     for item in sorted(source.rglob("*")):
         relative = item.relative_to(source)
@@ -477,6 +500,10 @@ def _installer_mutation_paths(
     paths.extend(
         helper_target / helper
         for helper in RUNTIME_HELPERS
+    )
+    paths.extend(
+        helper_target.parent / destination
+        for _source, destination in RUNTIME_RESOURCES
     )
     if provider == "codex":
         paths.extend(helper_target / helper for helper in CODEX_RUNTIME_HELPERS)
@@ -1144,12 +1171,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                 if provider == "codex"
                 else target / "agents" / "scripts"
             )
-            for helper in RUNTIME_HELPERS:
-                _copy_file(
-                    root / "scripts" / helper,
-                    helper_target / helper,
-                    args.dry_run,
-                )
+            _install_runtime_files(root, helper_target, args.dry_run)
             if provider == "codex":
                 for helper in CODEX_RUNTIME_HELPERS:
                     _copy_file(
@@ -1233,6 +1255,19 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                     file=sys.stderr,
                 )
                 for item in missing:
+                    print(f"  - {item}", file=sys.stderr)
+                return 1
+            missing_common_runtime = [
+                target
+                for _source, target in _runtime_file_destinations(root, helper_target)
+                if not target.is_file()
+            ]
+            if missing_common_runtime:
+                print(
+                    "RESULT: FAIL (shared runtime incomplete)",
+                    file=sys.stderr,
+                )
+                for item in missing_common_runtime:
                     print(f"  - {item}", file=sys.stderr)
                 return 1
             if provider == "codex":

@@ -176,6 +176,593 @@ def seed_active(module, root: Path, slug: str) -> None:
     module.start_item(root, slug, status.read_bytes())
 
 
+def seed_context_bug(root: Path, item_slug: str, bug_slug: str) -> Path:
+    target = root / "work-items" / "bugs" / f"{bug_slug}.md"
+    write(
+        target,
+        (
+            f"# Bug: {bug_slug}\n\n"
+            f"- id: {bug_slug}\n"
+            f"- context: {item_slug}\n"
+            "- status: open\n"
+            "- severity: medium\n"
+        ),
+    )
+    return target
+
+
+def write_bug_dispositions(
+    root: Path,
+    item_slug: str,
+    instant: str,
+    rows: list[dict],
+) -> Path:
+    target = root / "work-items" / "active" / item_slug / "bug-dispositions.json"
+    write(
+        target,
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "workItem": item_slug,
+                "closedAt": instant,
+                "bugs": rows,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+    )
+    return target
+
+
+def write_empty_bug_dispositions(root: Path, item_slug: str, instant: str) -> Path:
+    return write_bug_dispositions(root, item_slug, instant, [])
+
+
+def test_close_requires_exact_bug_disposition_manifest(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "missing-closeout-manifest"
+    seed_active(module, root, slug)
+    instant = "2026-08-11T10:00:00Z"
+
+    try:
+        module.close_item(root, slug, closure(instant).encode(), instant)
+    except module.LifecycleError as exc:
+        assert exc.failure_id == "WI-BUG-DISPOSITIONS-MISSING"
+    else:
+        raise AssertionError("work-item closed without bug-dispositions.json")
+
+    assert (root / "work-items" / "active" / slug).is_dir()
+    assert not (root / "work-items" / "archive" / "2026-08" / slug).exists()
+
+
+def test_close_rejects_complete_invalid_bug_disposition_schema_matrix(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    instant = "2026-08-11T10:00:30Z"
+
+    def mutate_header(payload: dict, key: str, value) -> None:
+        payload[key] = value
+
+    def mutate_row(payload: dict, key: str, value) -> None:
+        payload["bugs"][0][key] = value
+
+    cases = (
+        ("unknown-header", lambda payload: mutate_header(payload, "unexpected", True)),
+        ("schema-version", lambda payload: mutate_header(payload, "schemaVersion", 2)),
+        ("work-item", lambda payload: mutate_header(payload, "workItem", "another-item")),
+        ("closed-at", lambda payload: mutate_header(payload, "closedAt", "2026-08-11T10:00:31Z")),
+        ("bugs-type", lambda payload: mutate_header(payload, "bugs", {})),
+        ("duplicate-id", lambda payload: payload["bugs"].append(dict(payload["bugs"][0]))),
+        ("unsafe-id", lambda payload: mutate_row(payload, "id", "../unsafe")),
+        ("unknown-row", lambda payload: mutate_row(payload, "unexpected", True)),
+        ("action", lambda payload: mutate_row(payload, "action", "close-it")),
+        ("digest", lambda payload: mutate_row(payload, "inputSha256", "not-a-digest")),
+        ("terminal-status", lambda payload: mutate_row(payload, "status", "open")),
+        ("multiline-resolution", lambda payload: mutate_row(payload, "resolution", "line one\nline two")),
+        ("multiline-evidence", lambda payload: mutate_row(payload, "evidence", "line one\r\nline two")),
+    )
+
+    for suffix, mutate in cases:
+        root = tmp_path / suffix
+        slug = f"invalid-schema-{suffix}"
+        seed_active(module, root, slug)
+        bug = seed_context_bug(root, slug, f"2026-08-11-{suffix}-bug")
+        before = bug.read_bytes()
+        payload = {
+            "schemaVersion": 1,
+            "workItem": slug,
+            "closedAt": instant,
+            "bugs": [
+                {
+                    "id": bug.stem,
+                    "action": "terminalize",
+                    "inputSha256": hashlib.sha256(before).hexdigest(),
+                    "status": "fixed",
+                    "resolution": "The accepted implementation fixes this defect.",
+                    "evidence": "The final regression suite passed.",
+                }
+            ],
+        }
+        mutate(payload)
+        write(
+            root / "work-items" / "active" / slug / "bug-dispositions.json",
+            json.dumps(payload, indent=2, sort_keys=True) + "\n",
+        )
+
+        try:
+            module.close_item(root, slug, closure(instant).encode(), instant)
+        except module.LifecycleError as exc:
+            assert exc.failure_id == "WI-BUG-DISPOSITIONS-INVALID", suffix
+        else:
+            raise AssertionError(f"invalid bug disposition schema passed: {suffix}")
+
+        assert bug.read_bytes() == before, suffix
+        assert (root / "work-items" / "active" / slug).is_dir(), suffix
+        assert not (root / "work-items" / "archive" / "2026-08" / slug).exists(), suffix
+
+
+def test_close_terminalizes_exact_context_bug_in_same_owner_transaction(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "closeout-with-bug"
+    bug_slug = "2026-08-11-closeout-with-bug"
+    seed_active(module, root, slug)
+    bug = seed_context_bug(root, slug, bug_slug)
+    instant = "2026-08-11T10:01:00Z"
+    write_bug_dispositions(
+        root,
+        slug,
+        instant,
+        [
+            {
+                "id": bug_slug,
+                "action": "terminalize",
+                "inputSha256": hashlib.sha256(bug.read_bytes()).hexdigest(),
+                "status": "fixed",
+                "resolution": "Accepted regression suite proves the defect is fixed.",
+                "evidence": "Final QA and architecture gates PASS.",
+            }
+        ],
+    )
+
+    archived = module.close_item(root, slug, closure(instant).encode(), instant)
+
+    archived_bug = (
+        root / "work-items" / "bugs" / "archive" / "2026-08" / f"{bug_slug}.md"
+    )
+    assert archived.is_dir()
+    assert archived_bug.is_file()
+    fields = module._parse_fields(archived_bug.read_text(encoding="utf-8"))
+    assert fields["status"] == "fixed"
+    assert fields["terminal-at"] == instant
+    assert (archived / "bug-dispositions-receipt.json").is_file()
+    assert not bug.exists()
+
+
+def test_close_rejects_missing_and_extra_context_bug_dispositions(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    instant = "2026-08-11T10:02:00Z"
+    for suffix, rows in (("missing", []), ("extra", None)):
+        root = tmp_path / suffix
+        slug = f"exact-set-{suffix}"
+        seed_active(module, root, slug)
+        linked = seed_context_bug(root, slug, f"2026-08-11-{suffix}-linked")
+        if rows is None:
+            rows = [
+                {
+                    "id": f"2026-08-11-{suffix}-linked",
+                    "action": "preserve-current",
+                    "inputSha256": hashlib.sha256(linked.read_bytes()).hexdigest(),
+                    "status": "open",
+                    "reason": "The defect remains independently actionable.",
+                    "evidence": "The close review explicitly preserved this bug.",
+                },
+                {
+                    "id": f"2026-08-11-{suffix}-not-linked",
+                    "action": "preserve-current",
+                    "inputSha256": "0" * 64,
+                    "status": "open",
+                    "reason": "This row must be rejected as unrelated.",
+                    "evidence": "The exact context set excludes this identity.",
+                },
+            ]
+        write_bug_dispositions(root, slug, instant, rows)
+
+        try:
+            module.close_item(root, slug, closure(instant).encode(), instant)
+        except module.LifecycleError as exc:
+            assert exc.failure_id == "WI-BUG-DISPOSITIONS-INCOMPLETE", suffix
+        else:
+            raise AssertionError(f"{suffix} bug disposition set was accepted")
+
+        assert (root / "work-items" / "active" / slug).is_dir()
+        assert linked.is_file()
+
+
+def test_close_uses_exact_parsed_context_not_substring_or_prose(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "exact-context-owner"
+    seed_active(module, root, slug)
+    near = seed_context_bug(root, f"{slug}-suffix", "2026-08-11-near-context")
+    near.write_bytes(
+        near.read_bytes()
+        + f"\nThis prose mentions {slug} but does not change context ownership.\n".encode()
+    )
+    before = near.read_bytes()
+    instant = "2026-08-11T10:02:30Z"
+    write_empty_bug_dispositions(root, slug, instant)
+
+    module.close_item(root, slug, closure(instant).encode(), instant)
+
+    assert near.read_bytes() == before
+    assert not (root / "work-items" / "bugs" / "archive").exists()
+
+
+def test_close_preserves_declared_current_bug_and_unrelated_bug_bytes(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "preserve-current-bug"
+    seed_active(module, root, slug)
+    linked = seed_context_bug(root, slug, "2026-08-11-preserved-linked")
+    unrelated = seed_context_bug(root, "another-item", "2026-08-11-unrelated")
+    linked_before = linked.read_bytes()
+    unrelated_before = unrelated.read_bytes()
+    instant = "2026-08-11T10:03:00Z"
+    write_bug_dispositions(
+        root,
+        slug,
+        instant,
+        [
+            {
+                "id": linked.stem,
+                "action": "preserve-current",
+                "inputSha256": hashlib.sha256(linked_before).hexdigest(),
+                "status": "open",
+                "reason": "The remaining defect has a separate accepted owner.",
+                "evidence": "The close review recorded the residual explicitly.",
+            }
+        ],
+    )
+
+    archived = module.close_item(root, slug, closure(instant).encode(), instant)
+
+    assert linked.read_bytes() == linked_before
+    assert unrelated.read_bytes() == unrelated_before
+    receipt = json.loads(
+        (archived / "bug-dispositions-receipt.json").read_text(encoding="utf-8")
+    )
+    assert receipt["bugs"][0]["action"] == "preserve-current"
+    assert receipt["bugs"][0]["target"] is None
+    module.audit_categories(root)
+
+
+def test_close_rejects_context_bug_hash_drift_without_mutation(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "bug-hash-drift"
+    seed_active(module, root, slug)
+    bug = seed_context_bug(root, slug, "2026-08-11-hash-drift")
+    before = bug.read_bytes()
+    instant = "2026-08-11T10:04:00Z"
+    write_bug_dispositions(
+        root,
+        slug,
+        instant,
+        [
+            {
+                "id": bug.stem,
+                "action": "terminalize",
+                "inputSha256": "0" * 64,
+                "status": "fixed",
+                "resolution": "This stale declaration must not be applied.",
+                "evidence": "The input digest deliberately differs.",
+            }
+        ],
+    )
+
+    try:
+        module.close_item(root, slug, closure(instant).encode(), instant)
+    except module.LifecycleError as exc:
+        assert exc.failure_id == "WI-BUG-DISPOSITIONS-DRIFT"
+    else:
+        raise AssertionError("stale bug digest was accepted")
+
+    assert bug.read_bytes() == before
+    assert (root / "work-items" / "active" / slug).is_dir()
+
+
+def test_close_rejects_non_utf8_current_bug_with_typed_failure(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "invalid-current-bug"
+    seed_active(module, root, slug)
+    invalid = root / "work-items" / "bugs" / "2026-08-11-invalid-utf8.md"
+    invalid.parent.mkdir(parents=True, exist_ok=True)
+    invalid.write_bytes(b"context: " + slug.encode() + b"\nstatus: open\n\xff")
+    instant = "2026-08-11T10:04:30Z"
+    write_empty_bug_dispositions(root, slug, instant)
+
+    try:
+        module.close_item(root, slug, closure(instant).encode(), instant)
+    except module.LifecycleError as exc:
+        assert exc.failure_id == "WI-BUG-DISPOSITIONS-INVALID"
+    else:
+        raise AssertionError("non-UTF-8 current bug escaped typed close refusal")
+
+    assert invalid.read_bytes().endswith(b"\xff")
+    assert (root / "work-items" / "active" / slug).is_dir()
+
+
+def test_terminalized_bug_preserves_crlf_line_endings(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "crlf-terminal-bug"
+    seed_active(module, root, slug)
+    bug = seed_context_bug(root, slug, "2026-08-11-crlf-terminal-bug")
+    bug.write_bytes(bug.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n"))
+    instant = "2026-08-11T10:04:45Z"
+    write_bug_dispositions(
+        root,
+        slug,
+        instant,
+        [
+            {
+                "id": bug.stem,
+                "action": "terminalize",
+                "inputSha256": hashlib.sha256(bug.read_bytes()).hexdigest(),
+                "status": "fixed",
+                "resolution": "The defect is fixed by the accepted implementation.",
+                "evidence": "The final regression suite passed.",
+            }
+        ],
+    )
+
+    module.close_item(root, slug, closure(instant).encode(), instant)
+
+    archived_bug = (
+        root / "work-items" / "bugs" / "archive" / "2026-08" / f"{bug.stem}.md"
+    ).read_bytes()
+    assert b"\r\n" in archived_bug
+    assert b"\n" not in archived_bug.replace(b"\r\n", b"")
+
+
+def test_close_rolls_back_bug_bytes_when_bug_archive_move_fails(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "bug-move-rollback"
+    seed_active(module, root, slug)
+    bug = seed_context_bug(root, slug, "2026-08-11-bug-move-rollback")
+    before = bug.read_bytes()
+    instant = "2026-08-11T10:05:00Z"
+    write_bug_dispositions(
+        root,
+        slug,
+        instant,
+        [
+            {
+                "id": bug.stem,
+                "action": "terminalize",
+                "inputSha256": hashlib.sha256(before).hexdigest(),
+                "status": "fixed",
+                "resolution": "The defect is fixed by the accepted implementation.",
+                "evidence": "The final regression suite passed.",
+            }
+        ],
+    )
+    original_replace = module.os.replace
+
+    def fail_bug_move(source, target):
+        if Path(source) == bug:
+            raise OSError("injected bug archive move failure")
+        return original_replace(source, target)
+
+    module.os.replace = fail_bug_move
+    try:
+        try:
+            module.close_item(root, slug, closure(instant).encode(), instant)
+        except OSError as exc:
+            assert "injected bug archive move failure" in str(exc)
+        else:
+            raise AssertionError("bug archive move failure returned success")
+    finally:
+        module.os.replace = original_replace
+
+    assert bug.read_bytes() == before
+    assert (root / "work-items" / "active" / slug).is_dir()
+    assert not (root / "work-items" / "archive" / "2026-08" / slug).exists()
+
+
+def test_close_rolls_back_all_context_bugs_after_partial_disposition(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    for fail_after in (1, 2):
+        root = tmp_path / f"repo-{fail_after}"
+        slug = f"partial-bug-rollback-{fail_after}"
+        seed_active(module, root, slug)
+        bugs = [
+            seed_context_bug(
+                root, slug, f"2026-08-11-partial-{fail_after}-bug-{index}"
+            )
+            for index in (1, 2)
+        ]
+        before = {bug: bug.read_bytes() for bug in bugs}
+        readme_before = (root / "work-items" / "README.md").read_bytes()
+        instant = f"2026-08-11T10:06:0{fail_after}Z"
+        write_bug_dispositions(
+            root,
+            slug,
+            instant,
+            [
+                {
+                    "id": bug.stem,
+                    "action": "terminalize",
+                    "inputSha256": hashlib.sha256(before[bug]).hexdigest(),
+                    "status": "fixed",
+                    "resolution": "The defect is fixed by the accepted implementation.",
+                    "evidence": "The final regression suite passed.",
+                }
+                for bug in bugs
+            ],
+        )
+
+        try:
+            module.close_item(
+                root,
+                slug,
+                closure(instant).encode(),
+                instant,
+                inject_bug_failure_after=fail_after,
+            )
+        except module.LifecycleError as exc:
+            assert exc.failure_id == "WI-BUG-DISPOSITIONS-DRIFT", fail_after
+        else:
+            raise AssertionError(
+                f"partial bug disposition failure {fail_after} returned success"
+            )
+
+        assert (root / "work-items" / "active" / slug).is_dir()
+        assert all(bug.read_bytes() == before[bug] for bug in bugs)
+        assert (root / "work-items" / "README.md").read_bytes() == readme_before
+        assert not (root / "work-items" / "bugs" / "archive").exists()
+
+
+def test_close_replay_verifies_bug_receipt_and_archived_bug_bytes(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "verified-close-replay"
+    seed_active(module, root, slug)
+    bug = seed_context_bug(root, slug, "2026-08-11-verified-replay")
+    instant = "2026-08-11T10:07:00Z"
+    write_bug_dispositions(
+        root,
+        slug,
+        instant,
+        [
+            {
+                "id": bug.stem,
+                "action": "terminalize",
+                "inputSha256": hashlib.sha256(bug.read_bytes()).hexdigest(),
+                "status": "fixed",
+                "resolution": "The defect is fixed by the accepted implementation.",
+                "evidence": "The final regression suite passed.",
+            }
+        ],
+    )
+    closure_bytes = closure(instant).encode()
+    archived = module.close_item(root, slug, closure_bytes, instant)
+    assert module.close_item(root, slug, closure_bytes, instant) == archived
+    archived_bug = (
+        root / "work-items" / "bugs" / "archive" / "2026-08" / f"{bug.stem}.md"
+    )
+    archived_bug.write_bytes(archived_bug.read_bytes() + b"tampered\n")
+
+    try:
+        module.close_item(root, slug, closure_bytes, instant)
+    except module.LifecycleError as exc:
+        assert exc.failure_id == "WI-IMMUTABLE-ARCHIVE"
+    else:
+        raise AssertionError("tampered archived bug passed replay verification")
+
+
+def test_close_replay_rejects_deterministic_receipt_binding_drift(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    mutations = {
+        "source": "bugs/2026-08-11-wrong-source.md",
+        "target": "bugs/archive/2026-08/2026-08-11-wrong-target.md",
+        "statusBefore": "fixed",
+    }
+    for field, replacement in mutations.items():
+        root = tmp_path / field
+        slug = f"receipt-binding-{field.casefold()}"
+        seed_active(module, root, slug)
+        bug = seed_context_bug(root, slug, f"2026-08-11-receipt-{field.casefold()}")
+        instant = "2026-08-11T10:07:30Z"
+        write_bug_dispositions(
+            root,
+            slug,
+            instant,
+            [
+                {
+                    "id": bug.stem,
+                    "action": "terminalize",
+                    "inputSha256": hashlib.sha256(bug.read_bytes()).hexdigest(),
+                    "status": "fixed",
+                    "resolution": "The defect is fixed by the accepted implementation.",
+                    "evidence": "The final regression suite passed.",
+                }
+            ],
+        )
+        closure_bytes = closure(instant).encode()
+        archived = module.close_item(root, slug, closure_bytes, instant)
+        receipt_path = archived / "bug-dispositions-receipt.json"
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        receipt["bugs"][0][field] = replacement
+        receipt_path.write_text(
+            json.dumps(receipt, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+
+        try:
+            module.close_item(root, slug, closure_bytes, instant)
+        except module.LifecycleError as exc:
+            assert exc.failure_id == "WI-IMMUTABLE-ARCHIVE", field
+        else:
+            raise AssertionError(f"tampered receipt {field} passed replay")
+
+
+def test_close_replay_accepts_historical_archive_without_bug_manifest(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "historical-close-replay"
+    instant = "2026-08-11T10:08:00Z"
+    archived = root / "work-items" / "archive" / "2026-08" / slug
+    write(archived / "status.md", marked_status())
+    (archived / "closure.md").write_bytes(
+        module._stamp_schema_marker(closure(instant).encode(), "closure.md")
+    )
+    module.refresh_readme(root)
+
+    assert module.close_item(root, slug, closure(instant).encode(), instant) == archived
+    assert not (archived / "bug-dispositions.json").exists()
+    assert not (archived / "bug-dispositions-receipt.json").exists()
+
+
+def test_category_audit_rejects_unapplied_active_bug_dispositions(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "pending-close-reconciliation"
+    seed_active(module, root, slug)
+    write_empty_bug_dispositions(root, slug, "2026-08-11T10:09:00Z")
+
+    try:
+        module.audit_categories(root)
+    except module.LifecycleError as exc:
+        assert exc.failure_id == "WI-BUG-DISPOSITIONS-PENDING"
+    else:
+        raise AssertionError("unapplied active bug disposition passed category audit")
+
+
 def test_start_staged_publishes_valid_settled_admission_ledger(tmp_path: Path) -> None:
     module = load_module()
     root = tmp_path / "repo"
@@ -472,6 +1059,7 @@ def test_staged_bootstrap_event_allows_close_after_terminal_work(tmp_path: Path)
     assert settled_validation.returncode == 0, settled_validation.stdout
 
     instant = "2026-07-31T00:03:00Z"
+    write_empty_bug_dispositions(root, slug, instant)
     archived = module.close_item(root, slug, closure(instant).encode(), instant)
 
     assert archived == root / "work-items" / "archive" / "2026-07" / slug
@@ -599,6 +1187,7 @@ def test_utc_same_instant_boundary_replay(tmp_path: Path) -> None:
     instant = "2026-08-01T00:00:00Z"
     closure_bytes = closure(instant).encode()
 
+    write_empty_bug_dispositions(root, slug, instant)
     first = module.close_item(root, slug, closure_bytes, instant)
     first_hash = hashlib.sha256((first / "closure.md").read_bytes()).hexdigest()
     original_tz = os.environ.get("TZ")
@@ -636,6 +1225,7 @@ def test_terminalization_stamps_schema_pair_once_and_replay_is_idempotent(
     instant = "2026-08-01T00:00:00Z"
     closure_input = closure(instant).encode()
 
+    write_empty_bug_dispositions(root, slug, instant)
     archived = module.close_item(root, slug, closure_input, instant)
     status_after = (archived / "status.md").read_bytes()
     closure_after = (archived / "closure.md").read_bytes()
@@ -806,13 +1396,14 @@ def test_v1_archive_pair_preserves_strict_evidence_status_and_month(
             raise AssertionError(f"invalid V1 archive pair passed: {slug}")
 
 
-def test_readme_stale_recovery_guard(tmp_path: Path) -> None:
+def test_close_readme_failure_rolls_back_canonical_and_readme(tmp_path: Path) -> None:
     module = load_module()
     root = tmp_path / "repo"
     slug = "stale-readme"
     seed_active(module, root, slug)
     old_readme = (root / "work-items" / "README.md").read_bytes()
     instant = "2026-07-31T10:00:00Z"
+    write_empty_bug_dispositions(root, slug, instant)
 
     try:
         module.close_item(
@@ -828,22 +1419,12 @@ def test_readme_stale_recovery_guard(tmp_path: Path) -> None:
         raise AssertionError("injected README failure returned success")
 
     archived = root / "work-items" / "archive" / "2026-07" / slug
-    assert archived.is_dir()
-    assert not (root / "work-items" / "active" / slug).exists()
+    active = root / "work-items" / "active" / slug
+    assert active.is_dir()
+    assert not archived.exists()
     validator = module._validator_module()
-    assert validator.validate_work_item(archived) == []
+    assert validator.validate_work_item(active) == []
     assert (root / "work-items" / "README.md").read_bytes() == old_readme
-    try:
-        module.check_readme(root)
-    except module.LifecycleError as exc:
-        assert exc.failure_id == "WI-README-STALE"
-    else:
-        raise AssertionError("stale README was accepted")
-    repaired = module.refresh_readme(root)
-    assert len(repaired) == 64
-    assert repaired == hashlib.sha256(
-        (root / "work-items" / "README.md").read_bytes()
-    ).hexdigest()
     module.check_readme(root)
 
 
@@ -873,6 +1454,7 @@ def test_logical_link_relocation_and_legacy_inventory_guard(tmp_path: Path) -> N
     seed_active(module, root, slug)
     assert module.resolve_category(root, f"work-item:{slug}").parent.name == "active"
     instant = "2026-07-31T11:00:00Z"
+    write_empty_bug_dispositions(root, slug, instant)
     archived = module.close_item(root, slug, closure(instant).encode(), instant)
     assert module.resolve_category(root, f"work-item:{slug}") == archived.resolve()
     try:
@@ -1253,6 +1835,7 @@ def test_reopen_creates_new_successor_and_preserves_archive(tmp_path: Path) -> N
     slug = "original-concern"
     seed_active(module, root, slug)
     instant = "2026-07-31T13:00:00Z"
+    write_empty_bug_dispositions(root, slug, instant)
     archived = module.close_item(root, slug, closure(instant).encode(), instant)
     archive_hash = hashlib.sha256((archived / "closure.md").read_bytes()).hexdigest()
     successor = module.reopen_item(
@@ -1652,6 +2235,7 @@ def test_work_item_archive_status_is_terminal_and_active_terminal_fails(
     slug = "terminalized-work-item"
     seed_active(module, root, slug)
     instant = "2026-07-31T20:00:00Z"
+    write_empty_bug_dispositions(root, slug, instant)
     archived = module.close_item(root, slug, closure(instant).encode(), instant)
     status = module._parse_fields((archived / "status.md").read_text(encoding="utf-8"))
     assert status["status"] == "completed"

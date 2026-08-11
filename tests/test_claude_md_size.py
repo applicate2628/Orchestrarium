@@ -159,9 +159,9 @@ def test_live_claude_md_passes_at_post_extraction_cap_and_reports_exact_counts()
     result = _run()
     assert result.returncode == 0, result.stdout + result.stderr
     for expected in (
-            "Code points: 36525",
-            "UTF-8 bytes: 36705",
-            "Binding size: 36705",
+            "Code points: 36477",
+            "UTF-8 bytes: 36657",
+            "Binding size: 36657",
         "Size cap: 36771",
         "Warning threshold: 36521",
         "Manifest: 47/47",
@@ -173,7 +173,7 @@ def test_live_claude_md_passes_at_post_extraction_cap_and_reports_exact_counts()
 def test_tiny_size_cap_fails_closed() -> None:
     result = _run("--size-cap", "1000")
     assert result.returncode == 1, result.stdout + result.stderr
-    assert "FAIL: Claude Markdown binding size 36705 > size cap 1000" in result.stdout
+    assert "FAIL: Claude Markdown binding size 36657 > size cap 1000" in result.stdout
     assert "RESULT: FAIL" in result.stdout
 
 

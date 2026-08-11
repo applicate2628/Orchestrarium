@@ -26,6 +26,12 @@ def run_checker(root: Path, *args: str) -> subprocess.CompletedProcess:
 def write_checker_bundle(bundle_dir: Path, sentinel_source: str | None = None) -> Path:
     """Copy the checker into an isolated installed-layout fixture."""
     bundle_dir.mkdir(parents=True)
+    schema_dir = bundle_dir.parent / "shared" / "schemas"
+    schema_dir.mkdir(parents=True)
+    shutil.copy2(
+        ROOT / "shared" / "schemas" / "agent-runs.schema.json",
+        schema_dir / "agent-runs.schema.json",
+    )
     checker = bundle_dir / CHECKER.name
     shutil.copy2(CHECKER, checker)
     shutil.copy2(VALIDATOR, bundle_dir / VALIDATOR.name)
@@ -471,6 +477,29 @@ def test_checker_validates_all_active_items(tmp_path: Path):
     assert "PASS valid-item" in result.stdout
     assert "FAIL bad-item" in result.stdout
     assert "missing ledger" in result.stdout
+
+
+def test_checker_rejects_unapplied_active_bug_disposition_manifest(
+    tmp_path: Path,
+) -> None:
+    item = write_valid_item(tmp_path)
+    (item / "bug-dispositions.json").write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "workItem": item.name,
+                "closedAt": "2026-08-11T10:09:00Z",
+                "bugs": [],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = run_checker(tmp_path)
+
+    assert result.returncode == 1
+    assert "WI-BUG-DISPOSITIONS-PENDING" in result.stdout
 
 
 def test_pass_surfaces_active_items_and_denies_completion(tmp_path: Path):

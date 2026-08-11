@@ -175,6 +175,27 @@ class ScratchDisposition:
     snapshot: object | None
 
 
+BUG_DISPOSITIONS_MANIFEST = "bug-dispositions.json"
+BUG_DISPOSITIONS_RECEIPT = "bug-dispositions-receipt.json"
+BUG_DISPOSITIONS_SCHEMA_VERSION = 1
+BUG_DISPOSITIONS_OWNER = "mutate-work-item:close-item-bug-dispositions-v1"
+SHA256_RE = re.compile(r"[0-9a-f]{64}")
+BUG_DISPOSITION_ACTIONS = {"terminalize", "preserve-current"}
+BUG_DISPOSITION_TEXT_LIMIT = 2048
+
+
+@dataclass(frozen=True)
+class BugDispositionPlan:
+    bug_id: str
+    action: str
+    source: Path
+    target: Path | None
+    before: bytes
+    after: bytes
+    status_before: str
+    status_after: str
+
+
 def _work_items_root(root: Path) -> Path:
     root = root.resolve()
     return root if root.name == "work-items" else root / "work-items"
@@ -2093,6 +2114,446 @@ def _validate_item_before_close(item: Path) -> None:
         raise LifecycleError("WI-LEDGER-UNSETTLED", "; ".join(errors))
 
 
+def _bug_disposition_fail(failure_id: str, message: str) -> LifecycleError:
+    return LifecycleError(failure_id, message)
+
+
+def _single_line_manifest_text(row: dict, key: str) -> str:
+    value = row.get(key)
+    if (
+        not isinstance(value, str)
+        or not value.strip()
+        or len(value) > BUG_DISPOSITION_TEXT_LIMIT
+        or "\n" in value
+        or "\r" in value
+    ):
+        raise _bug_disposition_fail(
+            "WI-BUG-DISPOSITIONS-INVALID",
+            f"bug disposition {key} must be one non-empty bounded line",
+        )
+    return value.strip()
+
+
+def _load_bug_disposition_manifest(
+    item: Path,
+    slug: str,
+    terminal_instant: str,
+) -> tuple[Path, bytes, dict]:
+    manifest = item / BUG_DISPOSITIONS_MANIFEST
+    if manifest.is_symlink() or not manifest.is_file():
+        raise _bug_disposition_fail(
+            "WI-BUG-DISPOSITIONS-MISSING",
+            f"active work-item requires {BUG_DISPOSITIONS_MANIFEST}: {slug}",
+        )
+    try:
+        data = manifest.read_bytes()
+        payload = json.loads(data.decode("utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise _bug_disposition_fail(
+            "WI-BUG-DISPOSITIONS-INVALID",
+            f"invalid {BUG_DISPOSITIONS_MANIFEST}: {slug}",
+        ) from exc
+    if (
+        not isinstance(payload, dict)
+        or set(payload) != {"schemaVersion", "workItem", "closedAt", "bugs"}
+        or payload.get("schemaVersion") != BUG_DISPOSITIONS_SCHEMA_VERSION
+        or payload.get("workItem") != slug
+        or payload.get("closedAt") != terminal_instant
+        or not isinstance(payload.get("bugs"), list)
+    ):
+        raise _bug_disposition_fail(
+            "WI-BUG-DISPOSITIONS-INVALID",
+            f"bug disposition manifest header differs: {slug}",
+        )
+    return manifest, data, payload
+
+
+def _context_bug_files(root: Path, slug: str) -> dict[str, Path]:
+    bug_root = _work_items_root(root) / CATEGORIES["bug"].current_root
+    result: dict[str, Path] = {}
+    if not bug_root.is_dir():
+        return result
+    for path in sorted(bug_root.glob("*.md")):
+        if path.is_symlink() or not path.is_file():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as exc:
+            raise _bug_disposition_fail(
+                "WI-BUG-DISPOSITIONS-INVALID",
+                f"current bug record is not readable UTF-8: {path.name}",
+            ) from exc
+        fields = _parse_fields(text)
+        if fields.get("context") != slug:
+            continue
+        _validate_slug(path.stem)
+        if path.stem in result:
+            raise _bug_disposition_fail(
+                "WI-BUG-DISPOSITIONS-INCOMPLETE",
+                f"duplicate context-linked bug identity: {path.stem}",
+            )
+        result[path.stem] = path
+    return result
+
+
+def _terminal_bug_bytes(
+    before: bytes,
+    *,
+    current_status: str,
+    terminal_status: str,
+    terminal_instant: str,
+    resolution: str,
+    evidence: str,
+) -> bytes:
+    try:
+        text = before.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise _bug_disposition_fail(
+            "WI-BUG-DISPOSITIONS-INVALID", "bug record is not UTF-8"
+        ) from exc
+    fields = _parse_fields(text)
+    if fields.get("status") != current_status:
+        raise _bug_disposition_fail(
+            "WI-BUG-DISPOSITIONS-DRIFT", "bug status changed after preflight"
+        )
+    if any(fields.get(key) for key in ("terminal-at", "resolution", "evidence")):
+        raise _bug_disposition_fail(
+            "WI-BUG-DISPOSITIONS-INVALID",
+            "current bug already carries terminal evidence",
+        )
+    replaced, count = re.subn(
+        r"(?im)^(\s*(?:-\s*)?status\s*:\s*)[^\r\n]+(?=\r?$)",
+        rf"\g<1>{terminal_status}",
+        text,
+        count=1,
+    )
+    if count != 1:
+        raise _bug_disposition_fail(
+            "WI-BUG-DISPOSITIONS-INVALID", "bug requires one status field"
+        )
+    newline = "\r\n" if "\r\n" in text and text.count("\n") == text.count("\r\n") else "\n"
+    separator = "" if replaced.endswith("\n") else newline
+    return (
+        replaced
+        + separator
+        + newline
+        + f"Terminal-at: {terminal_instant}{newline}"
+        + f"Resolution: {resolution}{newline}"
+        + f"Evidence: {evidence}{newline}"
+    ).encode("utf-8")
+
+
+def _prepare_bug_dispositions(
+    root: Path,
+    item: Path,
+    slug: str,
+    terminal_instant: str,
+) -> tuple[Path, bytes, tuple[BugDispositionPlan, ...]]:
+    manifest, manifest_data, payload = _load_bug_disposition_manifest(
+        item, slug, terminal_instant
+    )
+    linked = _context_bug_files(root, slug)
+    rows = payload["bugs"]
+    ids = [row.get("id") for row in rows if isinstance(row, dict)]
+    if (
+        len(ids) != len(rows)
+        or any(not isinstance(value, str) or not is_valid_slug(value) for value in ids)
+        or len(set(ids)) != len(ids)
+    ):
+        raise _bug_disposition_fail(
+            "WI-BUG-DISPOSITIONS-INVALID",
+            "bug disposition ids must be unique canonical slugs",
+        )
+    if set(ids) != set(linked):
+        missing = sorted(set(linked) - set(ids))
+        extra = sorted(set(ids) - set(linked))
+        raise _bug_disposition_fail(
+            "WI-BUG-DISPOSITIONS-INCOMPLETE",
+            f"bug disposition set differs (missing={missing}, extra={extra})",
+        )
+    plans: list[BugDispositionPlan] = []
+    bug_category = CATEGORIES["bug"]
+    for row in rows:
+        assert isinstance(row, dict)
+        bug_id = row["id"]
+        action = row.get("action")
+        if action not in BUG_DISPOSITION_ACTIONS:
+            raise _bug_disposition_fail(
+                "WI-BUG-DISPOSITIONS-INVALID", f"invalid bug action: {action!r}"
+            )
+        expected_fields = (
+            {"id", "action", "inputSha256", "status", "resolution", "evidence"}
+            if action == "terminalize"
+            else {"id", "action", "inputSha256", "status", "reason", "evidence"}
+        )
+        if set(row) != expected_fields:
+            raise _bug_disposition_fail(
+                "WI-BUG-DISPOSITIONS-INVALID",
+                f"bug disposition fields differ: {bug_id}",
+            )
+        source = linked[bug_id]
+        before = source.read_bytes()
+        digest = row.get("inputSha256")
+        if not isinstance(digest, str) or not SHA256_RE.fullmatch(digest):
+            raise _bug_disposition_fail(
+                "WI-BUG-DISPOSITIONS-INVALID", f"invalid inputSha256: {bug_id}"
+            )
+        if hashlib.sha256(before).hexdigest() != digest:
+            raise _bug_disposition_fail(
+                "WI-BUG-DISPOSITIONS-DRIFT", f"bug bytes changed: {bug_id}"
+            )
+        try:
+            fields = _parse_fields(before.decode("utf-8"))
+        except UnicodeDecodeError as exc:
+            raise _bug_disposition_fail(
+                "WI-BUG-DISPOSITIONS-INVALID",
+                f"current bug record is not UTF-8: {bug_id}",
+            ) from exc
+        current_status = fields.get("status", "")
+        if current_status not in bug_category.current_statuses:
+            raise _bug_disposition_fail(
+                "WI-BUG-DISPOSITIONS-DRIFT",
+                f"bug is not current: {bug_id} ({current_status!r})",
+            )
+        desired_status = row.get("status")
+        _single_line_manifest_text(row, "evidence")
+        if action == "preserve-current":
+            if desired_status != current_status:
+                raise _bug_disposition_fail(
+                    "WI-BUG-DISPOSITIONS-INVALID",
+                    f"preserve-current status differs: {bug_id}",
+                )
+            _single_line_manifest_text(row, "reason")
+            target = None
+            after = before
+        else:
+            if desired_status not in bug_category.terminal_statuses:
+                raise _bug_disposition_fail(
+                    "WI-BUG-DISPOSITIONS-INVALID",
+                    f"terminal bug status is invalid: {bug_id}",
+                )
+            resolution = _single_line_manifest_text(row, "resolution")
+            evidence = _single_line_manifest_text(row, "evidence")
+            after = _terminal_bug_bytes(
+                before,
+                current_status=current_status,
+                terminal_status=desired_status,
+                terminal_instant=terminal_instant,
+                resolution=resolution,
+                evidence=evidence,
+            )
+            _validate_flat_terminal(bug_category, after)
+            target = (
+                _work_items_root(root)
+                / bug_category.current_root
+                / "archive"
+                / archive_month(terminal_instant)
+                / source.name
+            )
+            if target.exists():
+                raise _bug_disposition_fail(
+                    "WI-BUG-DISPOSITIONS-DRIFT",
+                    f"bug archive target already exists: {bug_id}",
+                )
+        plans.append(
+            BugDispositionPlan(
+                bug_id=bug_id,
+                action=action,
+                source=source,
+                target=target,
+                before=before,
+                after=after,
+                status_before=current_status,
+                status_after=desired_status,
+            )
+        )
+    return manifest, manifest_data, tuple(sorted(plans, key=lambda plan: plan.bug_id))
+
+
+def _bug_disposition_receipt_bytes(
+    root: Path,
+    slug: str,
+    terminal_instant: str,
+    manifest_data: bytes,
+    closure_data: bytes,
+    plans: tuple[BugDispositionPlan, ...],
+    readme_sha256: str,
+) -> bytes:
+    payload = {
+        "schemaVersion": BUG_DISPOSITIONS_SCHEMA_VERSION,
+        "owner": BUG_DISPOSITIONS_OWNER,
+        "workItem": slug,
+        "closedAt": terminal_instant,
+        "manifestSha256": hashlib.sha256(manifest_data).hexdigest(),
+        "closureSha256": hashlib.sha256(closure_data).hexdigest(),
+        "readmeSha256": readme_sha256,
+        "bugs": [
+            {
+                "id": plan.bug_id,
+                "action": plan.action,
+                "statusBefore": plan.status_before,
+                "statusAfter": plan.status_after,
+                "beforeSha256": hashlib.sha256(plan.before).hexdigest(),
+                "afterSha256": hashlib.sha256(plan.after).hexdigest(),
+                "source": plan.source.relative_to(_work_items_root(root)).as_posix(),
+                "target": (
+                    plan.target.relative_to(_work_items_root(root)).as_posix()
+                    if plan.target is not None
+                    else None
+                ),
+            }
+            for plan in plans
+        ],
+    }
+    return (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
+
+
+def _verify_archived_bug_dispositions(
+    root: Path,
+    archived: Path,
+    closure_data: bytes,
+    terminal_instant: str,
+) -> None:
+    slug = archived.name
+    try:
+        _manifest, manifest_data, manifest = _load_bug_disposition_manifest(
+            archived, slug, terminal_instant
+        )
+    except LifecycleError as exc:
+        raise _bug_disposition_fail(
+            "WI-IMMUTABLE-ARCHIVE",
+            f"archived bug disposition manifest differs: {slug}",
+        ) from exc
+    receipt_path = archived / BUG_DISPOSITIONS_RECEIPT
+    if receipt_path.is_symlink() or not receipt_path.is_file():
+        raise _bug_disposition_fail(
+            "WI-IMMUTABLE-ARCHIVE",
+            f"archived work-item lacks {BUG_DISPOSITIONS_RECEIPT}: {slug}",
+        )
+    try:
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise _bug_disposition_fail(
+            "WI-IMMUTABLE-ARCHIVE", f"invalid bug disposition receipt: {slug}"
+        ) from exc
+    expected_keys = {
+        "schemaVersion",
+        "owner",
+        "workItem",
+        "closedAt",
+        "manifestSha256",
+        "closureSha256",
+        "readmeSha256",
+        "bugs",
+    }
+    if (
+        not isinstance(receipt, dict)
+        or set(receipt) != expected_keys
+        or receipt.get("schemaVersion") != BUG_DISPOSITIONS_SCHEMA_VERSION
+        or receipt.get("owner") != BUG_DISPOSITIONS_OWNER
+        or receipt.get("workItem") != slug
+        or receipt.get("closedAt") != terminal_instant
+        or receipt.get("manifestSha256") != hashlib.sha256(manifest_data).hexdigest()
+        or receipt.get("closureSha256") != hashlib.sha256(closure_data).hexdigest()
+        or not isinstance(receipt.get("readmeSha256"), str)
+        or not SHA256_RE.fullmatch(receipt["readmeSha256"])
+        or not isinstance(receipt.get("bugs"), list)
+    ):
+        raise _bug_disposition_fail(
+            "WI-IMMUTABLE-ARCHIVE", f"bug disposition receipt binding differs: {slug}"
+        )
+    rows = manifest["bugs"]
+    if len(receipt["bugs"]) != len(rows):
+        raise _bug_disposition_fail(
+            "WI-IMMUTABLE-ARCHIVE", f"bug disposition receipt count differs: {slug}"
+        )
+    by_id = {
+        row.get("id"): row for row in receipt["bugs"] if isinstance(row, dict)
+    }
+    if set(by_id) != {row.get("id") for row in rows if isinstance(row, dict)}:
+        raise _bug_disposition_fail(
+            "WI-IMMUTABLE-ARCHIVE", f"bug disposition receipt ids differ: {slug}"
+        )
+    work_items = _work_items_root(root)
+    for decision in rows:
+        if not isinstance(decision, dict):
+            raise _bug_disposition_fail(
+                "WI-IMMUTABLE-ARCHIVE", f"invalid archived decision row: {slug}"
+            )
+        result = by_id[decision["id"]]
+        required_result_keys = {
+            "id",
+            "action",
+            "statusBefore",
+            "statusAfter",
+            "beforeSha256",
+            "afterSha256",
+            "source",
+            "target",
+        }
+        if (
+            set(result) != required_result_keys
+            or result.get("id") != decision["id"]
+            or result.get("action") != decision["action"]
+            or result.get("beforeSha256") != decision["inputSha256"]
+            or result.get("statusAfter") != decision["status"]
+            or result.get("statusBefore") not in CATEGORIES["bug"].current_statuses
+            or result.get("source") != f"bugs/{decision['id']}.md"
+            or not isinstance(result.get("afterSha256"), str)
+            or not SHA256_RE.fullmatch(result["afterSha256"])
+        ):
+            raise _bug_disposition_fail(
+                "WI-IMMUTABLE-ARCHIVE",
+                f"archived bug disposition row differs: {decision['id']}",
+            )
+        if decision["action"] == "terminalize":
+            target_relative = result.get("target")
+            expected_target = (
+                f"bugs/archive/{archive_month(terminal_instant)}/{decision['id']}.md"
+            )
+            if target_relative != expected_target:
+                raise _bug_disposition_fail(
+                    "WI-IMMUTABLE-ARCHIVE",
+                    f"terminal bug target differs: {decision['id']}",
+                )
+            assert isinstance(target_relative, str)
+            target = _terminalization_bound_path(
+                work_items, target_relative, label="archived bug disposition target"
+            )
+            current = work_items / CATEGORIES["bug"].current_root / f"{decision['id']}.md"
+            if (
+                not target.is_file()
+                or current.exists()
+                or hashlib.sha256(target.read_bytes()).hexdigest()
+                != result["afterSha256"]
+            ):
+                raise _bug_disposition_fail(
+                    "WI-IMMUTABLE-ARCHIVE",
+                    f"terminal bug archive differs: {decision['id']}",
+                )
+            _validate_flat_terminal(CATEGORIES["bug"], target.read_bytes())
+        elif (
+            result.get("target") is not None
+            or result.get("statusBefore") != decision["status"]
+            or result.get("afterSha256") != decision["inputSha256"]
+        ):
+            raise _bug_disposition_fail(
+                "WI-IMMUTABLE-ARCHIVE",
+                f"preserved bug receipt differs: {decision['id']}",
+            )
+
+
+def _mkdir_parents_tracked(path: Path, created: list[Path]) -> None:
+    missing: list[Path] = []
+    cursor = path
+    while not cursor.exists():
+        missing.append(cursor)
+        cursor = cursor.parent
+    for directory in reversed(missing):
+        directory.mkdir()
+        created.append(directory)
+
+
 def close_item(
     root: Path,
     slug: str,
@@ -2100,6 +2561,7 @@ def close_item(
     terminal_instant: str,
     *,
     inject_readme_failure: bool = False,
+    inject_bug_failure_after: int | None = None,
 ) -> Path:
     _validate_slug(slug)
     month = archive_month(terminal_instant)
@@ -2119,6 +2581,12 @@ def close_item(
             or archived.parent.name != month
         ):
             raise LifecycleError("WI-IMMUTABLE-ARCHIVE", f"archived identity differs: {slug}")
+        manifest_present = (archived / BUG_DISPOSITIONS_MANIFEST).exists()
+        receipt_present = (archived / BUG_DISPOSITIONS_RECEIPT).exists()
+        if manifest_present or receipt_present:
+            _verify_archived_bug_dispositions(
+                root, archived, archived_closure_data, terminal_instant
+            )
         scratch_plan = _scratch_disposition_plan(root, archived, archived=True)
         if inject_readme_failure:
             raise LifecycleError("WI-README-STALE", "injected failure after canonical success")
@@ -2130,33 +2598,119 @@ def close_item(
         raise LifecycleError("WI-INVALID-TARGET", f"close requires one active item: {slug}")
     _validate_item_before_close(active)
     scratch_plan = _scratch_disposition_plan(root, active, archived=False)
+    _manifest, manifest_data, bug_plans = _prepare_bug_dispositions(
+        root, active, slug, terminal_instant
+    )
     _preflight_readme(root)
     closure_path = active / "closure.md"
     prior_closure = closure_path.read_bytes() if closure_path.exists() else None
     status_path = active / "status.md"
     prior_status = status_path.read_bytes()
-    _atomic_write(closure_path, archived_closure_data)
-    _atomic_write(status_path, _terminalize_status(prior_status))
     target = work_items / "archive" / month / slug
-    target.parent.mkdir(parents=True, exist_ok=True)
+    readme = work_items / "README.md"
+    readme_existed = readme.is_file()
+    readme_before = readme.read_bytes() if readme_existed else b""
+    created_dirs: list[Path] = []
+    touched_bugs: list[BugDispositionPlan] = []
+    item_moved = False
+    receipt_path = target / BUG_DISPOSITIONS_RECEIPT
     try:
+        for index, plan in enumerate(bug_plans, start=1):
+            if plan.action != "terminalize":
+                continue
+            if plan.source.read_bytes() != plan.before or plan.target is None:
+                raise _bug_disposition_fail(
+                    "WI-BUG-DISPOSITIONS-DRIFT",
+                    f"bug changed after preflight: {plan.bug_id}",
+                )
+            touched_bugs.append(plan)
+            _atomic_write(plan.source, plan.after)
+            _mkdir_parents_tracked(plan.target.parent, created_dirs)
+            os.replace(plan.source, plan.target)
+            if inject_bug_failure_after == index:
+                raise _bug_disposition_fail(
+                    "WI-BUG-DISPOSITIONS-DRIFT",
+                    f"injected bug disposition failure after row {index}",
+                )
+        _atomic_write(closure_path, archived_closure_data)
+        _atomic_write(status_path, _terminalize_status(prior_status))
+        _mkdir_parents_tracked(target.parent, created_dirs)
         os.replace(active, target)
-    except BaseException:
-        if prior_closure is None:
+        item_moved = True
+        if inject_readme_failure:
+            raise LifecycleError("WI-README-STALE", "injected failure after canonical success")
+        readme_sha256 = refresh_readme(root)
+        receipt_data = _bug_disposition_receipt_bytes(
+            root,
+            slug,
+            terminal_instant,
+            manifest_data,
+            archived_closure_data,
+            bug_plans,
+            readme_sha256,
+        )
+        _atomic_write(receipt_path, receipt_data)
+        _verify_archived_bug_dispositions(
+            root, target, archived_closure_data, terminal_instant
+        )
+    except BaseException as exc:
+        rollback_failures: list[str] = []
+
+        def attempt(label: str, action) -> None:
             try:
-                closure_path.unlink()
-            except FileNotFoundError:
-                pass
+                action()
+            except BaseException as rollback_exc:
+                rollback_failures.append(f"{label}: {rollback_exc}")
+
+        if receipt_path.exists():
+            attempt("remove receipt", receipt_path.unlink)
+        if item_moved and target.exists() and not active.exists():
+            attempt("restore active item", lambda: os.replace(target, active))
+        if active.is_dir():
+            restored_closure = active / "closure.md"
+            restored_status = active / "status.md"
+            if prior_closure is None:
+                if restored_closure.exists():
+                    attempt("remove closure", restored_closure.unlink)
+            else:
+                attempt(
+                    "restore closure",
+                    lambda: _atomic_write(restored_closure, prior_closure),
+                )
+            attempt("restore status", lambda: _atomic_write(restored_status, prior_status))
         else:
-            _atomic_write(closure_path, prior_closure)
-        _atomic_write(status_path, prior_status)
+            rollback_failures.append("restore active item: active directory is unavailable")
+        for plan in reversed(touched_bugs):
+            assert plan.target is not None
+            if plan.target.exists() and not plan.source.exists():
+                attempt(
+                    f"restore bug location {plan.bug_id}",
+                    lambda plan=plan: os.replace(plan.target, plan.source),
+                )
+            if plan.source.exists():
+                attempt(
+                    f"restore bug bytes {plan.bug_id}",
+                    lambda plan=plan: _atomic_write(plan.source, plan.before),
+                )
+            else:
+                rollback_failures.append(
+                    f"restore bug bytes {plan.bug_id}: current source is unavailable"
+                )
+        if readme_existed:
+            attempt("restore README", lambda: _atomic_write(readme, readme_before))
+        elif readme.exists():
+            attempt("remove generated README", readme.unlink)
+        for directory in reversed(created_dirs):
+            try:
+                directory.rmdir()
+            except OSError:
+                pass
+        if rollback_failures:
+            raise _bug_disposition_fail(
+                "WI-BUG-DISPOSITIONS-ROLLBACK",
+                "bug disposition rollback failed: " + "; ".join(rollback_failures),
+            ) from exc
         raise
-    if inject_readme_failure:
-        raise LifecycleError("WI-README-STALE", "injected failure after canonical success")
-    try:
-        refresh_readme(root)
-    except LifecycleError as exc:
-        raise LifecycleError("WI-README-STALE", str(exc)) from exc
     _settle_scratch_dispositions(root, scratch_plan)
     return target
 
@@ -2299,11 +2853,35 @@ def audit_categories(root: Path) -> tuple[str, ...]:
     active = work_items / "active"
     if active.is_dir():
         for item in sorted(path for path in active.iterdir() if path.is_dir()):
+            if (item / BUG_DISPOSITIONS_MANIFEST).exists():
+                raise LifecycleError(
+                    "WI-BUG-DISPOSITIONS-PENDING",
+                    f"work-item:{item.name} has an unapplied bug disposition manifest",
+                )
             fields = _parse_fields((item / "status.md").read_text(encoding="utf-8"))
             if fields.get("status") in CATEGORIES["work-item"].terminal_statuses:
                 raise LifecycleError(
                     "WI-CATEGORY-TERMINAL-IN-CURRENT",
                     f"work-item:{item.name} has terminal status in active/",
+                )
+    archive_root = work_items / "archive"
+    if archive_root.is_dir():
+        for month in sorted(path for path in archive_root.iterdir() if path.is_dir()):
+            for item in sorted(path for path in month.iterdir() if path.is_dir()):
+                manifest = item / BUG_DISPOSITIONS_MANIFEST
+                receipt = item / BUG_DISPOSITIONS_RECEIPT
+                if not manifest.exists() and not receipt.exists():
+                    continue
+                closure = item / "closure.md"
+                if not closure.is_file():
+                    raise LifecycleError(
+                        "WI-IMMUTABLE-ARCHIVE",
+                        f"archived disposition owner lacks closure: {item.name}",
+                    )
+                closure_data = closure.read_bytes()
+                fields = _parse_fields(closure_data.decode("utf-8"))
+                _verify_archived_bug_dispositions(
+                    root, item, closure_data, fields.get("closed", "")
                 )
     return tuple(sorted(legacy_read_compatible))
 

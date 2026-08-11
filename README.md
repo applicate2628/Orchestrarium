@@ -75,7 +75,11 @@ strict UTC terminal evidence. `status.md` is active recovery state and
 `closure.md` is final work-item outcome. The generated `work-items/README.md`
 and compatibility `index.md` do not authorize transitions. Historical records
 without explicit terminal evidence remain unmoved for a human data decision;
-the workflow does not infer timestamps, status, or archival targets. Two
+the workflow does not infer timestamps, status, or archival targets. Before
+closing a work-item, `bug-dispositions.json` must cover exactly all current
+bugs whose parsed `context` equals its slug. The lifecycle owner applies each
+`terminalize` or `preserve-current` row, archives the item, writes a bound
+receipt, and refreshes the derived README as one rollback-safe operation. Two
 owner-managed legacy transitions handle the old directory-shaped backlog:
 `convert-legacy-candidate` creates one visible flat candidate while preserving
 every accepted source text and digest as an appendix, and
