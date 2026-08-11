@@ -17,7 +17,12 @@ ROOT = Path(__file__).resolve().parents[1]
 HELPER_PATH = ROOT / "scripts/install-hypothesis-hook.py"
 PRODUCTION_INSTALLER_PATH = ROOT / "scripts/production_installer.py"
 INFORMATIONAL_REMINDER_HOOK_STEMS = frozenset(
-    {"agents-mode-reminder", "mcp-usage-reminder", "turn-anchor-reminder"}
+    {
+        "agents-mode-reminder",
+        "check-scratch-valuables",
+        "mcp-usage-reminder",
+        "turn-anchor-reminder",
+    }
 )
 CWD_SCANNING_HOOK_STEMS = frozenset({"check-scratch-valuables"})
 CANONICAL_TRUST_GUIDANCE = (
