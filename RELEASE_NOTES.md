@@ -14,6 +14,8 @@ Do not add entries for purely local-only hygiene edits such as formatting, link 
 
 - Claude and Codex design-panel bindings now use one fail-closed candidate-isolation rule: native Agent/subagent lanes are ineligible while sealing is unverified, and candidates run only through the existing direct external-worker boundary. External failure remains visible and may not fall back to an internal candidate.
 
+- The passive-polling Stop guard now resolves the dispatched-review environment policy once at its process entrypoint and injects an immutable typed configuration into decision logic. The existing non-empty-value suppression behavior is unchanged, while lower hook logic no longer reads ambient process policy.
+
 ### Fixed
 
 - **Retired SEN-2 delivery credit no longer leaves a live `Delivery action` schema in the periodic work-item checker.** The checker now requires only the current epic-location capability from the sentinel owner; the unused delivery parser, validator, failure ID, skipped behavior suite, and generated-copy residue are removed together. Existing `## Delivery action` headings are ordinary inert Markdown rather than an undocumented validation contract. **Why it matters:** work-item validation no longer rejects or coordinates against a field that no shipped registry entry consumes. **Preserved:** SEN-0, SEN-1, epic and lifecycle validation, fail-closed sentinel dependency loading, canonical/Claude/Codex mirror parity, historical release chronology, hook registration, installers, and publication gates are unchanged.

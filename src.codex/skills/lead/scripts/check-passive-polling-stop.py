@@ -25,6 +25,8 @@ import json
 import os
 import re
 import sys
+from collections.abc import Mapping
+from dataclasses import dataclass
 from hook_common import (
     CURRENT_TURN_BYTE_CAP,
     STATUS_FOUND,
@@ -33,6 +35,19 @@ from hook_common import (
     read_stdin_utf8,
     scan_current_turn_boundary,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class StopRuntimeConfig:
+    """Process policy resolved once by the composition root."""
+
+    dispatched_review: bool
+
+
+def resolve_runtime_config(environ: Mapping[str, str]) -> StopRuntimeConfig:
+    return StopRuntimeConfig(
+        dispatched_review=bool(environ.get("ORCHESTRARIUM_DISPATCHED_REVIEW")),
+    )
 
 OVERRIDE_MARKER_REGEX = re.compile(r"\[acknowledge-passive-stop\]", re.IGNORECASE)
 
@@ -95,7 +110,7 @@ READ_PROBE_PATH_REGEX = re.compile(
 )
 
 
-def main() -> int:
+def main(config: StopRuntimeConfig) -> int:
     try:
         envelope = parse_envelope(read_stdin_utf8())
         if not envelope:
@@ -111,7 +126,7 @@ def main() -> int:
             return 0
         # Dispatched-review safety: an external review is not the main
         # conversation and must never be blocked by main-conversation Stop guards.
-        if os.environ.get("ORCHESTRARIUM_DISPATCHED_REVIEW"):
+        if config.dispatched_review:
             return 0
 
         last_message = envelope.get("last_assistant_message")
@@ -236,4 +251,4 @@ def _deny_reason() -> str:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(resolve_runtime_config(os.environ)))
