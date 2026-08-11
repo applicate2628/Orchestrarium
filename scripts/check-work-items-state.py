@@ -33,16 +33,12 @@ def load_lifecycle_owner():
 
 REQUIRED_SENTINEL_DEPENDENCY_ID = "required-sentinel-dependency-unavailable"
 REQUIRED_SENTINEL_CONTRACT_ID = "required-sentinel-contract-mismatch"
-REQUIRED_SENTINEL_CALL_ID = "required-sentinel-call-failed"
-
-
 @dataclass(frozen=True)
 class RequiredSentinelDependency:
     """One composition-root result for every verdict-bearing sentinel use."""
 
     module: Any | None
     resolve_epic_locations: Any | None
-    delivery_action_validation_errors: Any | None
     failure_id: str | None
     candidate_labels: tuple[str, ...]
     candidate_failures: tuple[str, ...]
@@ -89,9 +85,6 @@ def load_required_sentinels() -> RequiredSentinelDependency:
 
         required = {
             "resolve_epic_locations": getattr(module, "resolve_epic_locations", None),
-            "delivery_action_validation_errors": getattr(
-                module, "delivery_action_validation_errors", None
-            ),
         }
         missing = sorted(name for name, capability in required.items() if not callable(capability))
         if missing:
@@ -101,7 +94,6 @@ def load_required_sentinels() -> RequiredSentinelDependency:
         return RequiredSentinelDependency(
             module=module,
             resolve_epic_locations=required["resolve_epic_locations"],
-            delivery_action_validation_errors=required["delivery_action_validation_errors"],
             failure_id=None,
             candidate_labels=tuple(label for label, _path in candidates),
             candidate_failures=(),
@@ -115,7 +107,6 @@ def load_required_sentinels() -> RequiredSentinelDependency:
     return RequiredSentinelDependency(
         module=None,
         resolve_epic_locations=None,
-        delivery_action_validation_errors=None,
         failure_id=failure_id,
         candidate_labels=tuple(label for label, _path in candidates),
         candidate_failures=tuple(failures),
@@ -401,23 +392,10 @@ def command_check(args: argparse.Namespace) -> int:
         print(f"FAIL category lifecycle: {exc.failure_id}: {exc}")
     global_notes = epic_adoption_notes(items, active_dir)
     sentinel_dependency = load_required_sentinels()
-    delivery_errors: dict[str, list[str]] = {}
     if not sentinel_dependency.available:
         failed += 1
         print("FAIL checker dependency:")
         print(f"  - {sentinel_dependency.diagnostic()}")
-    else:
-        delivery_validator = sentinel_dependency.delivery_action_validation_errors
-        assert callable(delivery_validator)
-        try:
-            delivery_errors = delivery_validator(active_dir)
-        except Exception as exc:
-            failed += 1
-            print("FAIL checker dependency:")
-            print(
-                f"  - {REQUIRED_SENTINEL_CALL_ID}: "
-                f"delivery_action_validation_errors failed: {type(exc).__name__}: {exc}"
-            )
 
     telemetry: dict[str, int] = {}
     for item in items:
@@ -427,7 +405,6 @@ def command_check(args: argparse.Namespace) -> int:
             telemetry=telemetry,
         )
         errors.extend(stale_running_errors(item, now, stale_after))
-        errors.extend(delivery_errors.get(item.name, []))
         resolver = sentinel_dependency.resolve_epic_locations
         if callable(resolver):
             errors.extend(epic_link_notes(item, active_dir, resolver, is_valid_slug))

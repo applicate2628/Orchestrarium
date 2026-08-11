@@ -154,9 +154,6 @@ def write_staged_item(
 REQUIRED_SENTINEL_STUB = """\
 def resolve_epic_locations(epics_dir, slug):
     return {"state": "missing", "locations": []}
-
-def delivery_action_validation_errors(active_dir):
-    return {}
 """
 
 
@@ -193,7 +190,7 @@ def test_checker_rejects_incomplete_required_sentinel_contract(tmp_path: Path):
     repo = tmp_path / "repo"
     checker = write_checker_bundle(
         tmp_path / "bundle",
-        "def resolve_epic_locations(epics_dir, slug):\n    return {'state': 'missing', 'locations': []}\n",
+        "def unrelated_capability():\n    return None\n",
     )
     write_valid_item(repo)
 
@@ -201,7 +198,7 @@ def test_checker_rejects_incomplete_required_sentinel_contract(tmp_path: Path):
 
     assert result.returncode == 1, result.stdout + result.stderr
     assert result.stdout.count("required-sentinel-contract-mismatch") == 1
-    assert "missing callable(s): delivery_action_validation_errors" in result.stdout
+    assert "missing callable(s): resolve_epic_locations" in result.stdout
 
 
 def test_checker_keeps_absent_optional_sentinel_reporting_verdict_neutral(tmp_path: Path):
@@ -346,23 +343,6 @@ def evaluate_all(context):
     )
 
 
-def test_checker_fails_causally_when_required_delivery_validation_raises(tmp_path: Path):
-    repo = tmp_path / "repo"
-    checker = write_checker_bundle(
-        tmp_path / "bundle",
-        REQUIRED_SENTINEL_STUB.replace(
-            "return {}", 'raise RuntimeError("delivery validation failed")'
-        ),
-    )
-    write_valid_item(repo)
-
-    result = run_bundled_checker(checker, repo)
-
-    assert result.returncode == 1, result.stdout + result.stderr
-    assert result.stdout.count("required-sentinel-call-failed") == 1
-    assert "RuntimeError: delivery validation failed" in result.stdout
-
-
 def test_checker_preserves_required_epic_resolver_call_failure_cause(tmp_path: Path):
     repo = tmp_path / "repo"
     checker = write_checker_bundle(
@@ -387,75 +367,21 @@ def test_checker_preserves_required_epic_resolver_call_failure_cause(tmp_path: P
     assert "epic location resolver failed: RuntimeError: epic resolution failed" in result.stdout
 
 
-def delivery_action_contract(*, include_oracle: bool = True, action_class: str = "mutation") -> str:
-    lines = [
-        "## Delivery action",
-        "",
-        "- **Primary**: true",
-        "- **Fingerprint**: delivery-core-v1",
-        f"- **Class**: {action_class}",
-        "- **Target**: scripts/universal-hooks/scripts/workitem_sentinels.py",
-    ]
-    if include_oracle:
-        lines.append("- **Oracle**: correlated-success")
-    return "\n".join(lines) + "\n"
-
-
-def test_checker_accepts_one_explicit_primary_delivery_action(tmp_path: Path):
+def test_checker_treats_unowned_markdown_sections_as_inert(tmp_path: Path):
     item = write_valid_item(tmp_path)
+    baseline = run_checker(tmp_path)
     with (item / "status.md").open("a", encoding="utf-8") as handle:
-        handle.write("\n" + delivery_action_contract())
-    result = run_checker(tmp_path)
-    assert result.returncode == 0, result.stdout + result.stderr
+        handle.write(
+            "\n## Delivery action\n\n"
+            "This retired heading is ordinary Markdown and carries no control meaning.\n"
+        )
 
+    with_unowned_section = run_checker(tmp_path)
 
-def test_checker_rejects_incomplete_delivery_action(tmp_path: Path):
-    item = write_valid_item(tmp_path)
-    with (item / "status.md").open("a", encoding="utf-8") as handle:
-        handle.write("\n" + delivery_action_contract(include_oracle=False))
-    result = run_checker(tmp_path)
-    assert result.returncode == 1
-    assert "invalid ## Delivery action contract" in result.stdout
-
-
-def test_checker_rejects_unsupported_verification_delivery_action(tmp_path: Path):
-    item = write_valid_item(tmp_path)
-    with (item / "status.md").open("a", encoding="utf-8") as handle:
-        handle.write("\n" + delivery_action_contract(action_class="verification"))
-
-    result = run_checker(tmp_path)
-
-    assert result.returncode == 1
-    assert "invalid ## Delivery action contract" in result.stdout
-
-
-def test_checker_rejects_multiple_primary_delivery_actions(tmp_path: Path):
-    for name in ("first-item", "second-item"):
-        item = write_valid_item(tmp_path, name)
-        with (item / "status.md").open("a", encoding="utf-8") as handle:
-            handle.write("\n" + delivery_action_contract())
-    result = run_checker(tmp_path)
-    assert result.returncode == 1
-    assert result.stdout.count("multiple primary ## Delivery action contracts") == 2
-
-
-def test_checker_accepts_one_declared_and_one_absent_active_item(tmp_path: Path):
-    declared = write_valid_item(tmp_path, "declared-item")
-    with (declared / "status.md").open("a", encoding="utf-8") as handle:
-        handle.write("\n" + delivery_action_contract())
-    write_valid_item(tmp_path, "absent-item")
-
-    result = run_checker(tmp_path)
-
-    assert result.returncode == 0, result.stdout + result.stderr
-
-
-def test_checker_keeps_parked_item_compatible(tmp_path: Path):
-    item = write_valid_item(tmp_path)
-    status = valid_status().replace("**Primary task status**: open", "**Primary task status**: parked")
-    (item / "status.md").write_text(status + "\n" + delivery_action_contract(), encoding="utf-8")
-    result = run_checker(tmp_path)
-    assert result.returncode == 0, result.stdout + result.stderr
+    assert baseline.returncode == 0, baseline.stdout + baseline.stderr
+    assert with_unowned_section.returncode == baseline.returncode
+    assert with_unowned_section.stdout == baseline.stdout
+    assert with_unowned_section.stderr == baseline.stderr
 
 
 def test_checker_passes_when_no_active_directory_exists(tmp_path: Path):

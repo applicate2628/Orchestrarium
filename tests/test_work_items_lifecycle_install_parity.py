@@ -49,6 +49,7 @@ EXPECTED_COUNTS = {
 }
 CURRENT_LIFECYCLE_SURFACES = (
     ROOT / "INSTALL.md",
+    ROOT / "scripts" / "check-work-items-state.py",
     ROOT / "src.codex" / "AGENTS.codex.md",
     ROOT / "src.codex" / "skills" / "lead" / "SKILL.md",
     ROOT / "src.claude" / "CLAUDE.md",
@@ -87,6 +88,11 @@ RETIRED_CONTROL_CLAIMS = (
     "archival Stop-hook",
     "archival Stop hook flags",
     "SEN-2",
+    "## Delivery action",
+    "DELIVERY_ACTION_HEADING",
+    "_parse_delivery_action",
+    "delivery_action_validation_errors",
+    "REQUIRED_SENTINEL_CALL_ID",
     "Registered ONLY on `Stop`",
     "neither blocking Stop guard",
     "28 wrappers from 14 owned stems",
