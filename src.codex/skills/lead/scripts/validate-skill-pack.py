@@ -476,7 +476,7 @@ _DECLARED_ACTIONS = (('direct', 'file', '@AGENTS'),
   'Codex addendum stays bounded instead of regrowing into a full blueprint copy'),
  ('check_normalized_sha256',
   '@ROOT/shared/references/subagent-operating-model.md',
-  '74b579fbb45cae49b72f3e69b93e3cba886a946d60872389386a76d0baf2b786',
+  'fa464ae90e0c66a22fdf6dfbe875ab3db7815b4aa9db2d0b75df0dc92318f864',
   'shared subagent-operating-model matches the current canonical normalized fingerprint'),
  ('check_normalized_sha256',
   '@ROOT/references-codex/subagent-operating-model.md',
@@ -1446,6 +1446,12 @@ _DECLARED_ACTIONS = (('direct', 'file', '@AGENTS'),
   'shared governance replaces meaning-changing textual clarifications instead of layering prose'))
 
 _INSTALLED_ACTIONS = (
+    (
+        "check_normalized_sha256",
+        "@PACK/contracts/ui-transition-continuity.md",
+        "92af857398c6c56ff681fa91360673d7a9c2365f48734f6d83fa74d98e12cf62",
+        "UI-CONTINUITY-CONTRACT-DRIFT: installed neutral contract leaf matches the canonical English fingerprint",
+    ),
     ("check_file", "@SCRIPTS/agent-run-ledger.py", "installed agent-run-ledger.py"),
     ("check_file", "@SCRIPTS/agent-run-ledger.sh", "installed agent-run-ledger.sh"),
     ("check_file", "@SCRIPTS/review_loop_state.py", "installed review-loop state engine"),
@@ -1492,6 +1498,54 @@ _INSTALLED_ACTIONS = (
     ("direct", "codex_native_override", "explorer.toml"),
 )
 
+_APAT_ACTIONS = (
+    ("check_file", "@SKILLS/lead/SKILL.md", "APAT-E006-INSTALLED-MISSING: codex lead APAT projection file"),
+    ("check_file", "@SKILLS/architect/SKILL.md", "APAT-E006-INSTALLED-MISSING: codex architect AP0-AP5 projection file"),
+    ("check_file", "@SKILLS/architecture-reviewer/SKILL.md", "APAT-E006-INSTALLED-MISSING: codex architecture-reviewer APAT projection file"),
+    ("check_contains", "@SKILLS/lead/SKILL.md", "<!-- APAT-BLOCK:LEAD-ROUTING:BEGIN -->", "APAT-E006-INSTALLED-MISSING: codex lead APAT-G04-PROVIDER-PARITY projection marker"),
+    ("check_contains", "@SKILLS/lead/SKILL.md", "is not a universal Architect prelude", "APAT-E006-INSTALLED-MISSING: codex lead APAT-G05-INSTALLED-PARITY negative-selection wording"),
+    *(("check_contains", "@SKILLS/architect/SKILL.md", f'<!-- APAT-SEMANTIC id="AP{number}.', f"APAT-E006-INSTALLED-MISSING: codex architect AP{number} marker") for number in range(6)),
+    ("check_contains", "@SKILLS/architect/SKILL.md", "<!-- APAT-BLOCK:ARCHITECT-DISPOSITION:BEGIN -->", "APAT-E006-INSTALLED-MISSING: codex architect AP0-AP5 projection section marker"),
+    ("check_contains", "@SKILLS/architecture-reviewer/SKILL.md", "<!-- APAT-BLOCK:ARCHITECTURE-REVIEW:BEGIN -->", "APAT-E006-INSTALLED-MISSING: codex architecture-reviewer APAT projection section marker"),
+    ("check_contains", "@SKILLS/architecture-reviewer/SKILL.md", "each tempting but unsuitable pattern has explicit negative evidence", "APAT-E006-INSTALLED-MISSING: codex architecture-reviewer APAT negative-selection wording"),
+)
+
+_APAT_DEV_ACTIONS = (
+    ("check_file", "@ROOT/shared/references/architecture-pattern-applicability.md", "APAT-G04-PROVIDER-PARITY canonical applicability reference"),
+    ("check_file", "@ROOT/shared/references/ru/architecture-pattern-applicability.md", "APAT-G04-PROVIDER-PARITY Russian applicability reference"),
+)
+
+_UI_CONTINUITY_DEV_ACTIONS = (
+    (
+        "check_normalized_sha256",
+        "@ROOT/shared/references/ui-transition-continuity.md",
+        "92af857398c6c56ff681fa91360673d7a9c2365f48734f6d83fa74d98e12cf62",
+        "UI-CONTINUITY-CONTRACT-DRIFT: canonical English contract matches its declared fingerprint",
+    ),
+    (
+        "check_contains",
+        "@ROOT/scripts/production_installer.py",
+        "UI_CONTINUITY_CONTRACT_SOURCE",
+        "UI-CONTINUITY-CONTRACT-DRIFT: production installer declares the canonical contract source",
+    ),
+    (
+        "check_contains",
+        "@ROOT/scripts/production_installer.py",
+        "UI_CONTINUITY_CONTRACT_TARGET",
+        "UI-CONTINUITY-CONTRACT-DRIFT: production installer declares the neutral contract target",
+    ),
+    (
+        "check_not_exists",
+        "@ROOT/src.codex/contracts",
+        "UI-CONTINUITY-CONTRACT-DRIFT: Codex has no provider-local contract copy",
+    ),
+    (
+        "check_not_exists",
+        "@ROOT/src.claude/contracts",
+        "UI-CONTINUITY-CONTRACT-DRIFT: Claude has no provider-local contract copy",
+    ),
+)
+
 # The slices are historical validator sections, not inferred path heuristics.
 # Their union preserves the source validator's exact action inventory and counts.
 ACTIONS = (
@@ -1500,7 +1554,8 @@ ACTIONS = (
         _DECLARED_ACTIONS[0:35]
         + _DECLARED_ACTIONS[142:304]
         + _DECLARED_ACTIONS[322:329]
-        + _DECLARED_ACTIONS[366:372],
+        + _DECLARED_ACTIONS[366:372]
+        + _APAT_ACTIONS,
     ),
     (
         "dev_repo",
@@ -1511,7 +1566,9 @@ ACTIONS = (
         + _DECLARED_ACTIONS[318:321]
         + _DECLARED_ACTIONS[329:334]
         + _DECLARED_ACTIONS[335:342]
-        + _DECLARED_ACTIONS[351:366],
+        + _DECLARED_ACTIONS[351:366]
+        + _APAT_DEV_ACTIONS
+        + _UI_CONTINUITY_DEV_ACTIONS,
     ),
     (
         "dev_repo_nonstandalone",

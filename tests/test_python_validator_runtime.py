@@ -1,8 +1,11 @@
 """Single-owner Python runtime tests for the production pack validators."""
 from __future__ import annotations
 
+import ast
+import hashlib
 import importlib.util
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -24,8 +27,8 @@ PROVIDER_RUNTIME_MIRRORS = (
     ROOT / "src.claude/agents/scripts/skill_pack_validator_runtime.py",
 )
 EXPECTED_SUMMARIES = (
-    "PASS: 530  WARN: 0  FAIL: 0",
-    "Checks: 449  |  Passed: 449  |  Warnings: 0  |  Errors: 0",
+    "PASS: 553  WARN: 0  FAIL: 0",
+    "Checks: 470  |  Passed: 470  |  Warnings: 0  |  Errors: 0",
 )
 
 
@@ -161,6 +164,9 @@ def _materialize_installed_pack(
     ):
         shutil.copy2(ROOT / "scripts" / name, scripts / name)
     shutil.copy2(RUNTIME, scripts / RUNTIME.name)
+    contract = pack / "contracts" / "ui-transition-continuity.md"
+    contract.parent.mkdir()
+    shutil.copy2(ROOT / "shared/references/ui-transition-continuity.md", contract)
     return target, scripts / "validate-skill-pack.py"
 
 
@@ -242,6 +248,156 @@ def test_canonical_runtime_is_the_only_engine_and_exports_public_entrypoints() -
     runtime = _load(RUNTIME, "canonical_skill_pack_validator_runtime")
     assert callable(runtime.validate_pack)
     assert callable(runtime.run_validator_cli)
+
+
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    (
+        (b"plain\nbody\n", "366c65d58ad0d90fdd93095d1c9ae82a13afbce33e4ca9e6e384d3c1e4b4f01f"),
+        (b"plain\r\nbody\r\n", "366c65d58ad0d90fdd93095d1c9ae82a13afbce33e4ca9e6e384d3c1e4b4f01f"),
+        (b"plain\rbody\r", "366c65d58ad0d90fdd93095d1c9ae82a13afbce33e4ca9e6e384d3c1e4b4f01f"),
+        (b"---\r\nname: demo\r\n---\r\nbody\r\n", "9e2ec912af5dff2a72300863864fc4da04e81999339d9fac5c7590ba8a3f4e11"),
+        (b"name: demo\r\nbody\r\n", "68d93eb64d12ffced451f894a644945b015e2de1df72c4a3faa6956e33b29850"),
+        (b"---\r\nname: demo\r\nbody\r\n", "b4e972b2a859ff21d1694808d4698be7f8d445c8f3493f544996463ee288a003"),
+    ),
+)
+def test_common_skill_body_digest_normalizes_newlines_and_frontmatter(
+    content: bytes,
+    expected: str,
+) -> None:
+    """Catches newline/frontmatter divergence in the one public digest owner."""
+    runtime = _load(RUNTIME, f"common_skill_digest_{hashlib.sha256(content).hexdigest()[:8]}")
+    operation = getattr(runtime, "common_skill_body_sha256", None)
+    assert callable(operation), "canonical public common-skill body digest is missing"
+    assert operation(content) == expected
+
+
+def test_runtime_has_no_common_skill_policy_map_and_pin_check_uses_digest_owner() -> None:
+    """Catches a surviving semantic map or a second normalization implementation."""
+    tree = ast.parse(RUNTIME.read_text(encoding="utf-8"))
+    assignments = {
+        target.id
+        for node in tree.body
+        if isinstance(node, (ast.Assign, ast.AnnAssign))
+        for target in (
+            node.targets if isinstance(node, ast.Assign) else (node.target,)
+        )
+        if isinstance(target, ast.Name)
+    }
+    obsolete_policy_name = "COMMON_SKILL_BODY_" + "PINS"
+    assert obsolete_policy_name not in assignments
+
+    validator = next(
+        node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "Validator"
+    )
+    pin_check = next(
+        node
+        for node in validator.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name == "check_common_skill_body_pin"
+    )
+    calls = {
+        child.func.id
+        for child in ast.walk(pin_check)
+        if isinstance(child, ast.Call) and isinstance(child.func, ast.Name)
+    }
+    assert "common_skill_body_sha256" in calls
+    assert "hashlib" not in ast.unparse(pin_check)
+
+
+def _common_pin_actions(names: tuple[str, ...], candidate: Path) -> tuple[tuple[str, ...], ...]:
+    expected = hashlib.sha256(b"body\n").hexdigest()
+    return tuple(
+        ("check_common_skill_body_pin", name, expected, str(candidate))
+        for name in names
+    )
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected_errors", "expected_fragment"),
+    (
+        ("matching", 0, None),
+        ("missing", 1, "missing: windows-gui-manual-testing"),
+        ("extra", 1, "extra: synthetic-common"),
+        ("non-applicable-extra", 0, None),
+    ),
+)
+def test_common_pin_completeness_uses_exact_applicable_action_names(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    mutation: str,
+    expected_errors: int,
+    expected_fragment: str | None,
+) -> None:
+    """Catches missing/extra pins and accidental inclusion of an inactive scope."""
+    runtime = _load(RUNTIME, f"common_pin_completeness_{mutation}")
+    agents_text = (ROOT / "shared/AGENTS.shared.md").read_text(encoding="utf-8")
+    names = runtime.extract_roles(agents_text, "## Common skills")
+    candidate = tmp_path / "SKILL.md"
+    candidate.write_bytes(b"---\nname: fixture\ndescription: fixture\n---\nbody\n")
+    applicable_names = names
+    scoped_actions: tuple[tuple[str, object], ...] = ()
+    if mutation == "missing":
+        applicable_names = tuple(name for name in names if name != "windows-gui-manual-testing")
+    elif mutation == "extra":
+        applicable_names = (*names, "synthetic-common")
+    elif mutation == "non-applicable-extra":
+        scoped_actions = (
+            (
+                "installed",
+                _common_pin_actions(("synthetic-common",), candidate),
+            ),
+        )
+
+    result = runtime.validate_pack(
+        script=VALIDATORS[0],
+        provider="codex",
+        actions=(
+            ("direct", "common_pin_completeness", "common pin completeness"),
+            *_common_pin_actions(applicable_names, candidate),
+            *scoped_actions,
+        ),
+        maintainer_only_shared_reference_names=frozenset(),
+        utility_skills=frozenset(),
+        curated_role_skills=frozenset(),
+        root=ROOT,
+    )
+
+    assert result.errors == expected_errors
+    output = capsys.readouterr().out
+    if expected_fragment is not None:
+        assert expected_fragment in output
+
+
+def test_layering_codex_derives_common_names_from_the_spine(tmp_path: Path) -> None:
+    """Catches a layering exclusion still coupled to a stale runtime name map."""
+    target, validator = _materialize_installed_pack(tmp_path, "codex")
+    agents = target / "AGENTS.md"
+    text = agents.read_text(encoding="utf-8")
+    text, replacements = re.subn(
+        r"(## Common skills.*?\bSet:\s*)",
+        r"\1`$synthetic-common`, ",
+        text,
+        count=1,
+        flags=re.DOTALL,
+    )
+    assert replacements == 1
+    agents.write_text(text, encoding="utf-8")
+    skill = target / ".agents/skills/synthetic-common/SKILL.md"
+    skill.parent.mkdir()
+    skill.write_text("B1 B2 B3\n", encoding="utf-8")
+
+    runtime = _load(RUNTIME, "layering_codex_spine_common")
+    result = runtime.validate_pack(
+        script=validator,
+        provider="codex",
+        actions=(("direct", "layering_codex", "layering codex"),),
+        maintainer_only_shared_reference_names=frozenset(),
+        utility_skills=frozenset({"synthetic-common"}),
+        curated_role_skills=frozenset(),
+        root=target,
+    )
+    assert result.errors == 0
 
 
 @pytest.mark.parametrize("validator", VALIDATORS)
@@ -389,7 +545,12 @@ def test_scoped_action_registry_preserves_source_inventory(
         if scope != "installed"
         for action in actions
     )
-    assert Counter(source_actions) == Counter(module._DECLARED_ACTIONS)
+    assert Counter(source_actions) == Counter(
+        module._DECLARED_ACTIONS
+        + module._APAT_ACTIONS
+        + module._APAT_DEV_ACTIONS
+        + module._UI_CONTINUITY_DEV_ACTIONS
+    )
 
 
 @pytest.mark.parametrize(
@@ -397,12 +558,12 @@ def test_scoped_action_registry_preserves_source_inventory(
     (
         (
             "codex",
-            "PASS: 343  WARN: 0  FAIL: 0",
+            "PASS: 358  WARN: 0  FAIL: 0",
             "installed work-item state validator enforces evidence for PASS",
         ),
         (
             "claude",
-            "Checks: 338  |  Passed: 338  |  Warnings: 0  |  Errors: 0",
+            "Checks: 353  |  Passed: 353  |  Warnings: 0  |  Errors: 0",
             "installed work-item state validator enforces evidence for PASS",
         ),
     ),
@@ -499,7 +660,7 @@ def test_installed_codex_layering_checks_only_orchestrarium_owned_skills(
             "AGENTS.md",
             "## Role index",
             "## Stale role index",
-            "PASS: 343  WARN: 0  FAIL: 0",
+            "PASS: 358  WARN: 0  FAIL: 0",
             "Section '## Role index' present in AGENTS.md",
         ),
         (
@@ -508,7 +669,7 @@ def test_installed_codex_layering_checks_only_orchestrarium_owned_skills(
             ".claude/CLAUDE.md",
             "agents-design-panel.md",
             "agents-stale-panel.md",
-            "Checks: 338  |  Passed: 338  |  Warnings: 0  |  Errors: 0",
+            "Checks: 353  |  Passed: 353  |  Warnings: 0  |  Errors: 0",
             "CLAUDE.md dispatch index exposes the design-panel command",
         ),
     ),

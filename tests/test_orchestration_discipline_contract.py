@@ -311,10 +311,6 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
             spine,
         )
         self.assertIn(
-            "no roadmap/brief/Research/Design/Plan/consultant/pre-review/report",
-            spine,
-        )
-        self.assertIn(
             "Failed/unclear => re-classify/enrich same item",
             spine,
         )

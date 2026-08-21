@@ -1,4 +1,5 @@
 import json
+import hashlib
 import importlib.util
 import shutil
 import subprocess
@@ -860,3 +861,79 @@ def test_minimal_quick_fix_status_operates_through_ledger_qa_and_archive(tmp_pat
     assert archived_validation.returncode == 0, archived_validation.stdout
     assert "RESULT: PASS" in archived_validation.stdout
     assert len((archived_item / "agent-runs.jsonl").read_text(encoding="utf-8").splitlines()) == 2
+
+
+def _prepare_recovery_writer_item(tmp_path: Path) -> tuple[Path, bytes, str]:
+    item = prepare_valid_work_item(tmp_path)
+    revise = {
+        "schemaVersion": 2, "runId": "run-writer-revise", "workItem": item.name,
+        "role": "architecture-reviewer", "executionRole": "external-reviewer",
+        "status": "revise", "gate": "REVISE", "scope": ["fixture"],
+        "artifact": "reviews/qa.md", "lane": "architecture", "effort": "high",
+        "provider": "codex", "findingClass": "correctness",
+        "startedAt": "2026-08-17T00:00:00Z", "updatedAt": "2026-08-17T00:00:00Z",
+    }
+    bad = {
+        "schemaVersion": 2, "runId": "run-writer-invalid-closer", "workItem": item.name,
+        "role": "architecture-reviewer", "executionRole": "main",
+        "status": "completed", "gate": "PASS", "scope": ["fixture"],
+        "artifact": "reviews/qa.md", "lane": "architecture", "effort": "high",
+        "provider": "codex", "closesRunIds": [revise["runId"]],
+        "evidence": [{"kind": "review", "ref": "author self-close"}],
+        "startedAt": "2026-08-17T00:01:00Z", "updatedAt": "2026-08-17T00:01:00Z",
+    }
+    revise_line = json.dumps(revise, ensure_ascii=False, separators=(",", ":")).encode()
+    bad_line = json.dumps(bad, ensure_ascii=False, separators=(",", ":")).encode()
+    old = revise_line + b"\n" + bad_line + b"\n"
+    (item / "agent-runs.jsonl").write_bytes(old)
+    return item, old, hashlib.sha256(bad_line).hexdigest()
+
+
+def _run_recovery(item: Path, digest: str, *extra: str) -> subprocess.CompletedProcess:
+    return run_ledger(
+        item,
+        "recover-invalid-closure",
+        "--run-id", "run-writer-recovery-control",
+        "--target-run-id", "run-writer-invalid-closer",
+        "--target-event-sha256", digest,
+        "--evidence", f"manual-check:run-writer-invalid-closer {digest}",
+        "--started-at", "2026-08-17T00:02:00Z",
+        "--updated-at", "2026-08-17T00:02:00Z",
+        *extra,
+    )
+
+
+def test_recover_invalid_closure_preserves_exact_prefix_and_phase_failures(tmp_path: Path):
+    item, old, digest = _prepare_recovery_writer_item(tmp_path)
+    wrong = _run_recovery(item, "0" * 64)
+    assert wrong.returncode != 0
+    assert (item / "agent-runs.jsonl").read_bytes() == old
+    assert "ledger-recovery:target-digest-mismatch" in wrong.stdout
+    result = _run_recovery(item, digest)
+    current = (item / "agent-runs.jsonl").read_bytes()
+    assert result.returncode == 0, result.stdout
+    assert current.startswith(old) and len(current) > len(old)
+    assert result.stdout.count("RESULT: PASS recover-invalid-closure (") == 1
+    assert not (item / "agent-runs.jsonl.lock").exists()
+    assert not (item / "agent-runs.jsonl.tmp").exists()
+
+
+def test_closure_recovery_v3_coexistence_and_writer_refusal(tmp_path: Path):
+    item, old, digest = _prepare_recovery_writer_item(tmp_path)
+    v3 = {"schemaVersion": 3, "eventId": "v3-event", "operationId": "v3-operation", "fingerprint": "1" * 64, "priorHead": "GENESIS", "recordedAt": "2026-08-17T00:00:00Z", "eventType": "solution-bootstrap", "payload": {}}
+    before = old + json.dumps(v3, separators=(",", ":")).encode() + b"\n"
+    (item / "agent-runs.jsonl").write_bytes(before)
+    result = _run_recovery(item, digest)
+    assert result.returncode != 0
+    assert "legacy V1/V2 writer refuses a ledger containing schemaVersion 3" in result.stdout
+    assert (item / "agent-runs.jsonl").read_bytes() == before
+
+
+def test_recover_invalid_closure_marker_requires_exact_readback(tmp_path: Path):
+    item, old, digest = _prepare_recovery_writer_item(tmp_path)
+    result = _run_recovery(item, digest, "--inject-failure", "post-replace-readback")
+    assert result.returncode != 0
+    assert "ledger-recovery:post-commit-readback-indeterminate" in result.stdout
+    assert "RESULT: PASS recover-invalid-closure (" not in result.stdout
+    committed = (item / "agent-runs.jsonl").read_bytes()
+    assert committed.startswith(old) and len(committed) > len(old)

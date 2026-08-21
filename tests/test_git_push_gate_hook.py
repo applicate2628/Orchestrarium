@@ -60,11 +60,21 @@ from typing import NamedTuple
 from unittest import mock
 from urllib.parse import quote
 
+from git_push_gate_target import GateTarget, target_for
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CANONICAL_HOOK = REPO_ROOT / "scripts" / "universal-hooks" / "scripts" / "check-git-push-gate.py"
 HOOKS = (
     REPO_ROOT / "src.claude" / "agents" / "scripts" / "check-git-push-gate.py",
     REPO_ROOT / "src.codex" / "skills" / "lead" / "scripts" / "check-git-push-gate.py",
+)
+TARGETS = tuple(
+    target_for(label, directory)
+    for label, directory in (
+        ("canonical", CANONICAL_HOOK.parent),
+        ("codex", HOOKS[1].parent),
+        ("claude", HOOKS[0].parent),
+    )
 )
 
 _MISSING = object()
@@ -1514,7 +1524,7 @@ def run_hook(
             return _fixture_authoritative_observation(module, entries, binding)
 
         stdout = io.StringIO()
-        with mock.patch.object(module, "read_stdin_utf8", return_value=json.dumps(envelope)), \
+        with mock.patch.object(module._a3_preflight, "read_stdin_utf8", return_value=json.dumps(envelope)), \
              mock.patch.object(module, "_run_authoritative_scan", side_effect=authoritative), \
              contextlib.redirect_stdout(stdout):
             returncode = module.main()
@@ -1623,7 +1633,22 @@ class TestRunHookTranscriptCleanup(unittest.TestCase):
                             run_hook(CANONICAL_HOOK, [user("inspect only")], "echo clean")
 
 
-def _load_gate_module(script: Path, mod_name: str):
+def _target_for_policy(script: Path) -> GateTarget:
+    matches = tuple(target for target in TARGETS if target.policy_path == script)
+    assert len(matches) == 1, f"unknown complete gate layout: {script}"
+    return matches[0]
+
+
+def _load_exact_module(path: Path, module_name: str):
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_gate_module(script: Path | GateTarget, mod_name: str):
     """Import a HOOKS entry directly (not via subprocess) so a test can
     monkeypatch one of its module-level functions to raise -- used only by
     TestCrashWhileDecidingFallsThroughToDeny below, which needs to inject a
@@ -1634,20 +1659,36 @@ def _load_gate_module(script: Path, mod_name: str):
     directory must be on sys.path for its bare `import hook_common` to
     resolve, since importlib.util.spec_from_file_location does not add it
     automatically the way running the script directly would)."""
-    script_dir = str(script.parent)
+    target = script if isinstance(script, GateTarget) else _target_for_policy(script)
+    script_dir = str(target.policy_path.parent)
     added = script_dir not in sys.path
     if added:
         sys.path.insert(0, script_dir)
     try:
-        spec = importlib.util.spec_from_file_location(mod_name, script)
-        assert spec is not None and spec.loader is not None
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[mod_name] = module
-        spec.loader.exec_module(module)
+        # Load the real complete target in the same dependency order as the
+        # registered runner. Tests patch the owning module directly.
+        sys.modules.pop("hook_common", None)
+        sys.modules.pop("git_push_gate_preflight", None)
+        _load_exact_module(target.common_path, "hook_common")
+        preflight = _load_exact_module(
+            target.preflight_path, "git_push_gate_preflight"
+        )
+        module = _load_exact_module(target.policy_path, mod_name)
+        module._a3_preflight = preflight
         return module
     finally:
         if added:
             sys.path.remove(script_dir)
+
+
+def _heavy_preflight(module):
+    owner = module._a3_preflight
+    parsed = owner.parse_shell_command("git push origin main", "posix")
+    return owner.validate_preflight_result(owner.PreflightResult(
+        "DEFER", "PFP-HEAVY", "EVALUATE_HEAVY",
+        "git push origin main", "posix", "fixture-transcript.jsonl",
+        parsed, "found", owner.classify_generic_push(parsed), False, None,
+    ))
 
 
 SCAN_CALL = assistant_tool_use(
@@ -3165,8 +3206,8 @@ class TestGitPushGateRangeMode(unittest.TestCase):
             with self.subTest(suffix=suffix):
                 push = f"git push origin main {suffix}"
                 scan = f"bash scripts/check-publication-gate.sh {suffix}"
-                push_result = module.parse_shell_command(push)
-                scan_result = module.parse_shell_command(scan)
+                push_result = module._a3_preflight.parse_shell_command(push)
+                scan_result = module._a3_preflight.parse_shell_command(scan)
                 self.assertEqual(
                     [list(record.tokens) for record in push_result.commands],
                     [["git", "push", "origin", "main"]],
@@ -3179,7 +3220,7 @@ class TestGitPushGateRangeMode(unittest.TestCase):
                     [list(record.tokens) for record in scan_result.commands],
                     [["bash", "scripts/check-publication-gate.sh"]],
                 )
-                self.assertTrue(module.project_scan_execution(scan_result))
+                self.assertTrue(scan_result.scan_execution)
 
     def test_only_attached_unquoted_io_numbers_are_consumed_as_redirection(self) -> None:
         canonical = REPO_ROOT / "scripts" / "universal-hooks" / "scripts" / "check-git-push-gate.py"
@@ -3195,7 +3236,7 @@ class TestGitPushGateRangeMode(unittest.TestCase):
         )
         for command, expected_arguments in cases:
             with self.subTest(command=command):
-                parsed = module.parse_shell_command(command)
+                parsed = module._a3_preflight.parse_shell_command(command)
                 self.assertEqual(
                     [list(record.post_subcommand_tokens) for record in parsed.pushes],
                     [expected_arguments],
@@ -3220,7 +3261,7 @@ class TestGitPushGateRangeMode(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertEqual(module._mask_attached_io_numbers(command), expected)
         heredoc = "cat <<EOF\n2>body\nEOF"
-        masked, regions, status = module._mask_shell_data_regions(heredoc, "posix")
+        masked, regions, status = module._a3_preflight._mask_shell_data_regions(heredoc, "posix")
         self.assertEqual(status, "SCG-PARSED")
         self.assertTrue(regions)
         self.assertEqual(module._mask_attached_io_numbers(masked), masked)
@@ -3291,7 +3332,7 @@ class TestR10WrapperGrammarInProcess(unittest.TestCase):
         cls.module = _load_gate_module(CANONICAL_HOOK, "publication_grammar_r10_red")
 
     def test_wrapper_grammar_registry_is_complete_and_single_owner(self) -> None:
-        rows = self.module.WrapperGrammarRegistry.rows()
+        rows = self.module._a3_preflight.WrapperGrammarRegistry.rows()
         self.assertEqual(
             {row.wrapper_id for row in rows},
             {
@@ -3349,12 +3390,12 @@ class TestR10WrapperGrammarInProcess(unittest.TestCase):
         )
         for command, dialect, terminal, publication in cases:
             with self.subTest(command=command):
-                parsed = self.module.parse_shell_command(command, dialect)
+                parsed = self.module._a3_preflight.parse_shell_command(command, dialect)
                 self.assertEqual(parsed.wrapper_projections[0].terminal_state, terminal)
                 self.assertEqual(bool(parsed.effective_publications.records), publication)
 
     def test_noncanonical_active_pr_denies_before_oracle(self) -> None:
-        parsed = self.module.parse_shell_command(
+        parsed = self.module._a3_preflight.parse_shell_command(
             "eval git push origin main", "posix"
         )
         grant = self.module.ActivePrGrant(
@@ -3374,11 +3415,11 @@ class TestR10WrapperGrammarInProcess(unittest.TestCase):
         scan.assert_not_called()
 
     def test_direct_argv_child_preserves_parent_tokens(self) -> None:
-        original = self.module._build_shell_lexical_state
+        original = self.module._a3_preflight._build_shell_lexical_state
         with mock.patch.object(
-            self.module, "_build_shell_lexical_state", wraps=original
+            self.module._a3_preflight, "_build_shell_lexical_state", wraps=original
         ) as lexical_build:
-            parsed = self.module.parse_shell_command(
+            parsed = self.module._a3_preflight.parse_shell_command(
                 "env command -- exec git push origin main", "posix"
             )
         self.assertEqual(lexical_build.call_count, 1)
@@ -3392,7 +3433,7 @@ class TestR10WrapperGrammarInProcess(unittest.TestCase):
         )
 
     def test_composed_payload_records_every_contributing_token(self) -> None:
-        parsed = self.module.parse_shell_command("eval git push origin main", "posix")
+        parsed = self.module._a3_preflight.parse_shell_command("eval git push origin main", "posix")
         projection = parsed.wrapper_projections[0]
         self.assertEqual(projection.payload_composition, "SPACE_JOIN_LOGICAL_ARGV")
         self.assertEqual(
@@ -3445,19 +3486,19 @@ class TestR10WrapperGrammarInProcess(unittest.TestCase):
         )
         for command, dialect, kinds, generic_status in cases:
             with self.subTest(command=command):
-                parsed = self.module.parse_shell_command(command, dialect)
+                parsed = self.module._a3_preflight.parse_shell_command(command, dialect)
                 self.assertEqual(
                     [record.kind for record in parsed.effective_publications.records],
                     kinds,
                 )
                 self.assertEqual(
                     [record.push for record in parsed.effective_publications.records],
-                    self.module.find_git_push_records(parsed),
+                    self.module._a3_preflight.find_git_push_records(parsed),
                 )
                 self.assertEqual(
-                    self.module.classify_generic_push(parsed).status, generic_status
+                    self.module._a3_preflight.classify_generic_push(parsed).status, generic_status
                 )
-                self.assertFalse(self.module.project_scan_execution(parsed))
+                self.assertFalse(parsed.scan_execution)
 
     def test_receipt_reuse_consumes_every_effective_publication(self) -> None:
         later = assistant_tool_use(
@@ -3636,18 +3677,18 @@ class TestCanonicalPublicationCommandGrammar(unittest.TestCase):
         for script, module in self._modules("single_parse_projection"):
             with self.subTest(script=script):
                 with mock.patch.object(
-                    module,
+                    module._a3_preflight,
                     "_build_shell_lexical_state",
-                    wraps=module._build_shell_lexical_state,
+                    wraps=module._a3_preflight._build_shell_lexical_state,
                 ) as lexical_build, mock.patch.object(
-                    module,
+                    module._a3_preflight,
                     "_tokenize_shell_lexical_state",
-                    wraps=module._tokenize_shell_lexical_state,
+                    wraps=module._a3_preflight._tokenize_shell_lexical_state,
                 ) as tokenize:
-                    parsed = module.parse_shell_command(command, "posix")
-                    pushes = module.find_git_push_records(parsed)
-                    module.classify_generic_push(parsed)
-                    module.project_scan_execution(parsed)
+                    parsed = module._a3_preflight.parse_shell_command(command, "posix")
+                    pushes = module._a3_preflight.find_git_push_records(parsed)
+                    module._a3_preflight.classify_generic_push(parsed)
+                    parsed.scan_execution
                 self.assertEqual(lexical_build.call_count, 1)
                 self.assertEqual(tokenize.call_count, 1)
                 self.assertIs(parsed.lexical.segments, parsed.segments)
@@ -3661,10 +3702,10 @@ class TestCanonicalPublicationCommandGrammar(unittest.TestCase):
             argv = (str(Path(sys.executable).resolve()), "push", "origin", "main")
             for dialect, command in (
                 ("posix", shlex.join(argv)),
-                ("powershell", module._serialize_powershell_literal(argv)),
+                ("powershell", module._a3_preflight._serialize_powershell_literal(argv)),
             ):
                 with self.subTest(script=script, dialect=dialect):
-                    parsed = module.parse_shell_command(command, dialect)
+                    parsed = module._a3_preflight.parse_shell_command(command, dialect)
                     self.assertEqual(parsed.strict_projection.status, "canonical")
                     self.assertEqual(parsed.strict_projection.argv, argv)
 
@@ -3682,28 +3723,30 @@ class TestCanonicalPublicationCommandGrammar(unittest.TestCase):
         for script, module in self._modules("transcript_parse_map"):
             with self.subTest(script=script):
                 with mock.patch.object(
-                    module,
+                    module._a3_preflight,
                     "_parse_shell_command_identity",
-                    wraps=module._parse_shell_command_identity,
+                    wraps=module._a3_preflight._parse_shell_command_identity,
                 ) as parser:
                     parsed_entries = module._build_parsed_transcript_commands(entries)
                 self.assertEqual(parser.call_count, 2)
                 self.assertEqual(len(parsed_entries), 2)
                 self.assertTrue(
-                    module.project_scan_execution(parsed_entries[0].parsed)
+                    parsed_entries[0].parsed.scan_execution
                 )
-                later_pushes = module.find_git_push_records(parsed_entries[1].parsed)
+                later_pushes = module._a3_preflight.find_git_push_records(parsed_entries[1].parsed)
                 self.assertIs(later_pushes[0], parsed_entries[1].parsed.pushes[0])
 
-                tree = ast.parse(Path(script).read_text(encoding="utf-8"))
+                tree = ast.parse(
+                    Path(module._a3_preflight.__file__).read_text(encoding="utf-8")
+                )
                 owners = {
                     node.name: node
                     for node in tree.body
                     if isinstance(node, ast.FunctionDef)
-                    and node.name == "evaluate_push"
+                    and node.name == "build_preflight"
                 }
                 evaluate_calls = [
-                    call for call in ast.walk(owners["evaluate_push"])
+                    call for call in ast.walk(owners["build_preflight"])
                     if isinstance(call, ast.Call)
                     and isinstance(call.func, ast.Name)
                     and call.func.id == "parse_shell_command"
@@ -3716,15 +3759,15 @@ class TestCanonicalPublicationCommandGrammar(unittest.TestCase):
         for script, module in self._modules("nested_child_identity"):
             with self.subTest(script=script):
                 with mock.patch.object(
-                    module,
+                    module._a3_preflight,
                     "_build_shell_lexical_state",
-                    wraps=module._build_shell_lexical_state,
+                    wraps=module._a3_preflight._build_shell_lexical_state,
                 ) as lexical_build, mock.patch.object(
-                    module,
+                    module._a3_preflight,
                     "_tokenize_shell_lexical_state",
-                    wraps=module._tokenize_shell_lexical_state,
+                    wraps=module._a3_preflight._tokenize_shell_lexical_state,
                 ) as tokenize:
-                    parsed = module.parse_shell_command(command, "posix")
+                    parsed = module._a3_preflight.parse_shell_command(command, "posix")
                 self.assertEqual(lexical_build.call_count, 2)
                 self.assertEqual(tokenize.call_count, 2)
                 self.assertEqual(len(parsed.children), 1)
@@ -3732,13 +3775,17 @@ class TestCanonicalPublicationCommandGrammar(unittest.TestCase):
                 self.assertEqual(child.raw_command, "git push origin main")
                 self.assertEqual(child.identity.parent, parsed.identity)
                 self.assertEqual(child.identity.depth, 1)
-                self.assertTrue(module.find_git_push_records(child))
+                self.assertTrue(module._a3_preflight.find_git_push_records(child))
                 self.assertEqual(
                     [record.kind for record in parsed.effective_publications.records],
                     ["WRAPPER_CHILD"],
                 )
 
-        tree = ast.parse(CANONICAL_HOOK.read_text(encoding="utf-8"))
+        tree = ast.parse(
+            (
+                CANONICAL_HOOK.parent / "git_push_gate_preflight.py"
+            ).read_text(encoding="utf-8")
+        )
         names = {
             node.name for node in tree.body
             if isinstance(node, (ast.FunctionDef, ast.ClassDef))
@@ -3767,10 +3814,10 @@ class TestCanonicalPublicationCommandGrammar(unittest.TestCase):
         for script, module in self._modules("unsupported_escape"):
             for dialect, fixture_name, command, expected_status in cases:
                 with self.subTest(script=script, dialect=dialect, fixture=fixture_name):
-                    parsed = module.parse_shell_command(command, dialect)
+                    parsed = module._a3_preflight.parse_shell_command(command, dialect)
                     self.assertEqual(parsed.status, expected_status)
                     self.assertTrue(parsed.candidates)
-                    self.assertTrue(module.find_git_push_records(parsed))
+                    self.assertTrue(module._a3_preflight.find_git_push_records(parsed))
 
     def test_quote_and_data_states_do_not_normalize_executable_text(self) -> None:
         cases = (
@@ -3783,9 +3830,9 @@ class TestCanonicalPublicationCommandGrammar(unittest.TestCase):
         for script, module in self._modules("normalization_data_state"):
             for dialect, fixture_name, command in cases:
                 with self.subTest(script=script, dialect=dialect, fixture=fixture_name):
-                    parsed = module.parse_shell_command(command, dialect)
+                    parsed = module._a3_preflight.parse_shell_command(command, dialect)
                     self.assertEqual(parsed.status, "SCG-PARSED")
-                    self.assertFalse(module.find_git_push_records(parsed))
+                    self.assertFalse(module._a3_preflight.find_git_push_records(parsed))
                     self.assertFalse(parsed.normalizations)
 
     def test_escaped_syntax_does_not_create_shell_boundary(self) -> None:
@@ -3796,7 +3843,7 @@ class TestCanonicalPublicationCommandGrammar(unittest.TestCase):
         for script, module in self._modules("literalized_syntax"):
             for dialect, command, *literal_values in cases:
                 with self.subTest(script=script, dialect=dialect):
-                    parsed = module.parse_shell_command(command, dialect)
+                    parsed = module._a3_preflight.parse_shell_command(command, dialect)
                     for value in literal_values:
                         atoms = [atom for atom in parsed.lexical.atoms if atom.value == value]
                         self.assertEqual(len(atoms), 1)
@@ -3805,7 +3852,7 @@ class TestCanonicalPublicationCommandGrammar(unittest.TestCase):
                     self.assertEqual(len(parsed.commands), 1)
                     self.assertEqual(parsed.commands[0].boundary_before, "start")
                     self.assertEqual(parsed.commands[0].boundary_after, "end")
-                    self.assertEqual(len(module.find_git_push_records(parsed)), 1)
+                    self.assertEqual(len(module._a3_preflight.find_git_push_records(parsed)), 1)
 
     def test_normalized_push_is_detected_but_not_creditable(self) -> None:
         cases = (
@@ -3815,10 +3862,10 @@ class TestCanonicalPublicationCommandGrammar(unittest.TestCase):
         for script, module in self._modules("normalized_noncreditable"):
             for dialect, command in cases:
                 with self.subTest(script=script, dialect=dialect):
-                    parsed = module.parse_shell_command(command, dialect)
-                    self.assertEqual(len(module.find_git_push_records(parsed)), 1)
+                    parsed = module._a3_preflight.parse_shell_command(command, dialect)
+                    self.assertEqual(len(module._a3_preflight.find_git_push_records(parsed)), 1)
                     self.assertEqual(
-                        module.classify_generic_push(parsed).status,
+                        module._a3_preflight.classify_generic_push(parsed).status,
                         "PGG-LEXICAL-NORMALIZATION",
                     )
 
@@ -3859,10 +3906,10 @@ class TestCanonicalPublicationCommandGrammar(unittest.TestCase):
         for script, module in self._modules("posix_data"):
             for command in fixtures:
                 with self.subTest(script=script, command=command):
-                    parsed = module.parse_shell_command(command, "posix")
+                    parsed = module._a3_preflight.parse_shell_command(command, "posix")
                     self.assertEqual(parsed.status, "SCG-PARSED")
-                    self.assertEqual(module.find_git_push_records(parsed), [])
-                    self.assertFalse(module.project_scan_execution(parsed))
+                    self.assertEqual(module._a3_preflight.find_git_push_records(parsed), [])
+                    self.assertFalse(parsed.scan_execution)
                     self.assertTrue(parsed.data_regions)
         for command in fixtures:
             self.assert_gate([], command, should_deny=False, transcript=False)
@@ -3871,8 +3918,8 @@ class TestCanonicalPublicationCommandGrammar(unittest.TestCase):
         command = "cat <<EOF\ngit push origin hidden\nEOF\ngit push origin main"
         for script, module in self._modules("post_heredoc"):
             with self.subTest(script=script):
-                parsed = module.parse_shell_command(command, "posix")
-                pushes = module.find_git_push_records(parsed)
+                parsed = module._a3_preflight.parse_shell_command(command, "posix")
+                pushes = module._a3_preflight.find_git_push_records(parsed)
                 self.assertEqual(len(pushes), 1)
                 self.assertEqual(pushes[0].positionals, ("origin", "main"))
         self.assert_gate([user("finish")], command, should_deny=True)
@@ -3886,10 +3933,10 @@ class TestCanonicalPublicationCommandGrammar(unittest.TestCase):
         for script, module in self._modules("uncertain_data"):
             for command, expected_status in commands:
                 with self.subTest(script=script, command=command):
-                    parsed = module.parse_shell_command(command, "posix")
+                    parsed = module._a3_preflight.parse_shell_command(command, "posix")
                     self.assertEqual(parsed.status, expected_status)
                     self.assertTrue(parsed.commands or parsed.candidates)
-                    self.assertTrue(module.find_git_push_records(parsed))
+                    self.assertTrue(module._a3_preflight.find_git_push_records(parsed))
         for command, _expected_status in commands:
             self.assert_gate(
                 [], command, should_deny=True,
@@ -3909,9 +3956,9 @@ class TestCanonicalPublicationCommandGrammar(unittest.TestCase):
         command = "# <<EOF\ngit push origin main"
         for script, module in self._modules("comment_heredoc"):
             with self.subTest(script=script):
-                parsed = module.parse_shell_command(command, "posix")
+                parsed = module._a3_preflight.parse_shell_command(command, "posix")
                 self.assertEqual(parsed.status, "SCG-PARSED")
-                self.assertEqual(len(module.find_git_push_records(parsed)), 1)
+                self.assertEqual(len(module._a3_preflight.find_git_push_records(parsed)), 1)
                 self.assertEqual(parsed.data_regions, ())
         self.assert_gate([user("finish")], command, should_deny=True)
 
@@ -3924,10 +3971,10 @@ class TestCanonicalPublicationCommandGrammar(unittest.TestCase):
         for script, module in self._modules("powershell_data"):
             for command in fixtures:
                 with self.subTest(script=script, command=command):
-                    parsed = module.parse_shell_command(command, "powershell")
+                    parsed = module._a3_preflight.parse_shell_command(command, "powershell")
                     self.assertEqual(parsed.status, "SCG-PARSED")
-                    self.assertEqual(module.find_git_push_records(parsed), [])
-                    self.assertFalse(module.project_scan_execution(parsed))
+                    self.assertEqual(module._a3_preflight.find_git_push_records(parsed), [])
+                    self.assertFalse(parsed.scan_execution)
                     self.assertTrue(parsed.data_regions)
         for command in fixtures:
             self.assert_gate([], command, should_deny=False, transcript=False, tool_name="PowerShell")
@@ -3940,8 +3987,8 @@ class TestCanonicalPublicationCommandGrammar(unittest.TestCase):
         for command in commands:
             for script, module in self._modules("post_here_string"):
                 with self.subTest(script=script, command=command):
-                    parsed = module.parse_shell_command(command, "powershell")
-                    pushes = module.find_git_push_records(parsed)
+                    parsed = module._a3_preflight.parse_shell_command(command, "powershell")
+                    pushes = module._a3_preflight.find_git_push_records(parsed)
                     self.assertEqual(len(pushes), 1)
                     self.assertEqual(pushes[0].positionals, ("origin", "main"))
             self.assert_gate([user("finish")], command, should_deny=True, tool_name="PowerShell")
@@ -3950,10 +3997,10 @@ class TestCanonicalPublicationCommandGrammar(unittest.TestCase):
         command = "$x = @'\ngit push origin hidden"
         for script, module in self._modules("unterminated_here_string"):
             with self.subTest(script=script):
-                parsed = module.parse_shell_command(command, "powershell")
+                parsed = module._a3_preflight.parse_shell_command(command, "powershell")
                 self.assertEqual(parsed.status, "SCG-UNTERMINATED-DATA")
                 self.assertTrue(parsed.commands or parsed.candidates)
-                self.assertTrue(module.find_git_push_records(parsed))
+                self.assertTrue(module._a3_preflight.find_git_push_records(parsed))
         self.assert_gate(
             [], command, should_deny=True, failure_id="PRG-TRANSCRIPT-UNAVAILABLE",
             transcript=False, tool_name="PowerShell",
@@ -3963,9 +4010,9 @@ class TestCanonicalPublicationCommandGrammar(unittest.TestCase):
         command = "# @'\ngit push origin main"
         for script, module in self._modules("comment_here_string"):
             with self.subTest(script=script):
-                parsed = module.parse_shell_command(command, "powershell")
+                parsed = module._a3_preflight.parse_shell_command(command, "powershell")
                 self.assertEqual(parsed.status, "SCG-PARSED")
-                self.assertEqual(len(module.find_git_push_records(parsed)), 1)
+                self.assertEqual(len(module._a3_preflight.find_git_push_records(parsed)), 1)
                 self.assertEqual(parsed.data_regions, ())
         self.assert_gate([user("finish")], command, should_deny=True, tool_name="PowerShell")
 
@@ -3973,8 +4020,8 @@ class TestCanonicalPublicationCommandGrammar(unittest.TestCase):
         command = "<#\n@'\n#>\ngit push origin main\n$x = @'\nbody\n'@"
         for script, module in self._modules("block_comment_here_string"):
             with self.subTest(script=script):
-                parsed = module.parse_shell_command(command, "powershell")
-                self.assertTrue(module.find_git_push_records(parsed))
+                parsed = module._a3_preflight.parse_shell_command(command, "powershell")
+                self.assertTrue(module._a3_preflight.find_git_push_records(parsed))
                 self.assertFalse(any(region.start <= command.index("git push") < region.end for region in parsed.data_regions))
         self.assert_gate(
             [user("finish")], command, should_deny=True, tool_name="PowerShell"
@@ -4004,8 +4051,8 @@ class TestCanonicalPublicationCommandGrammar(unittest.TestCase):
         for script, module in self._modules("provenance"):
             for command, env_prefix, global_options, repository_context in cases:
                 with self.subTest(script=script, command=command):
-                    parsed = module.parse_shell_command(command, "posix")
-                    pushes = module.find_git_push_records(parsed)
+                    parsed = module._a3_preflight.parse_shell_command(command, "posix")
+                    pushes = module._a3_preflight.find_git_push_records(parsed)
                     self.assertEqual(len(pushes), 1)
                     self.assertEqual(pushes[0].environment_assignments, env_prefix)
                     self.assertEqual(pushes[0].git_global_options, global_options)
@@ -4015,7 +4062,7 @@ class TestCanonicalPublicationCommandGrammar(unittest.TestCase):
         command = "cd .. && ! git push origin main"
         for script, module in self._modules("record_spans"):
             with self.subTest(script=script):
-                parsed = module.parse_shell_command(command, "posix")
+                parsed = module._a3_preflight.parse_shell_command(command, "posix")
                 self.assertEqual(parsed.status, "SCG-PARSED")
                 self.assertEqual(len(parsed.commands), 2)
                 self.assertEqual(
@@ -4025,7 +4072,7 @@ class TestCanonicalPublicationCommandGrammar(unittest.TestCase):
                 self.assertEqual(parsed.commands[0].boundary_after, "&&")
                 self.assertEqual(parsed.commands[1].boundary_before, "&&")
                 self.assertEqual(parsed.commands[1].control_keywords, ("!",))
-                self.assertEqual(module.classify_generic_push(parsed).status, "PGG-COMPOUND-CONTEXT")
+                self.assertEqual(module._a3_preflight.classify_generic_push(parsed).status, "PGG-COMPOUND-CONTEXT")
                 self.assertEqual(
                     module.resolve_command_dialect("shell_command").dialect,
                     "powershell" if module.os.name == "nt" else "posix",
@@ -4161,7 +4208,7 @@ class TestCanonicalPublicationCommandGrammar(unittest.TestCase):
             ("git push --repo elsewhere origin claude", "PGG-REPOSITORY-REDIRECT"),
             ("git push --force origin claude", "PGG-PUSH-OPTION"),
             ("cd .. && git push origin claude", "PGG-COMPOUND-CONTEXT"),
-            ("git push origin main", "PGG-RANGE-BINDING"),
+            ("git push origin HEAD:main", "PGG-RANGE-BINDING"),
         )
         for command, failure_id in cases:
             self.assert_gate(entries, command, should_deny=True, failure_id=failure_id)
@@ -4227,8 +4274,8 @@ class TestCanonicalPublicationCommandGrammar(unittest.TestCase):
         for script, module in self._modules("option_arity"):
             for command, option_status, dry_state, operands in cases:
                 with self.subTest(script=script, command=command):
-                    parsed = module.parse_shell_command(command, "posix")
-                    pushes = module.find_git_push_records(parsed)
+                    parsed = module._a3_preflight.parse_shell_command(command, "posix")
+                    pushes = module._a3_preflight.find_git_push_records(parsed)
                     self.assertEqual(len(pushes), 1)
                     self.assertEqual(pushes[0].option_status, option_status)
                     self.assertEqual(pushes[0].dry_run_state, dry_state)
@@ -4248,7 +4295,7 @@ class TestCanonicalPublicationCommandGrammar(unittest.TestCase):
                 with mock.patch.object(module, "_run_process") as run_process:
                     with self.assertRaises(module.PrRouteDenied) as caught:
                         module._parse_pr_literal_command(
-                            module.parse_shell_command(command, "posix"), executable, "posix"
+                            module._a3_preflight.parse_shell_command(command, "posix"), executable, "posix"
                         )
                 self.assertEqual(caught.exception.failure_id, "PRG-COMMAND-SHAPE")
                 run_process.assert_not_called()
@@ -4421,7 +4468,7 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
                 "tool_input": {"command": command},
                 "transcript_path": str(transcript_path),
             }
-            with mock.patch.object(module, "read_stdin_utf8", return_value=json.dumps(envelope)), \
+            with mock.patch.object(module._a3_preflight, "read_stdin_utf8", return_value=json.dumps(envelope)), \
                  mock.patch.object(module, "_resolve_executable", side_effect=resolver), \
                  mock.patch.object(module, "_run_process", side_effect=self._oracle(module, observed, **oracle_changes)), \
                  mock.patch.object(module, "_run_authoritative_scan", side_effect=authoritative), \
@@ -4685,14 +4732,14 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
             own_command = self._literal_command(script)
             own_dialect = "powershell" if self._tool_name(script) == "PowerShell" else "posix"
             literal = module._parse_pr_literal_command(
-                module.parse_shell_command(own_command, own_dialect), self.OWNED_GIT_IDENTITY, own_dialect
+                module._a3_preflight.parse_shell_command(own_command, own_dialect), self.OWNED_GIT_IDENTITY, own_dialect
             )
             self.assertEqual((literal.remote, literal.target.head_ref), ("origin", "feature"))
 
             other_command = (
                 shlex.join((self.OWNED_GIT_IDENTITY, "push", "origin", "HEAD:refs/heads/feature"))
                 if own_dialect == "powershell"
-                else module._serialize_powershell_literal(
+                else module._a3_preflight._serialize_powershell_literal(
                     (self.OWNED_GIT_IDENTITY, "push", "origin", "HEAD:refs/heads/feature")
                 )
             )
@@ -4703,7 +4750,7 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
             for noncanonical in (" " + own_command, own_command + " ", own_command + "\n"):
                 with self.assertRaises(module.PrRouteDenied):
                     module._parse_pr_literal_command(
-                        module.parse_shell_command(noncanonical, own_dialect), self.OWNED_GIT_IDENTITY, own_dialect
+                        module._a3_preflight.parse_shell_command(noncanonical, own_dialect), self.OWNED_GIT_IDENTITY, own_dialect
                     )
 
             denied, observed = self._run_module(
@@ -4978,20 +5025,31 @@ class TestCrashWhileDecidingFallsThroughToDeny(unittest.TestCase):
     subprocess.run) specifically because the fault must be injected INSIDE
     the running decision code -- a subprocess-driven test has no seam to
     monkeypatch a function living in a separate process. Each test injects
-    the fault at a DIFFERENT point in evaluate_push (transcript reading vs.
-    command parsing) to prove the try/except wraps the WHOLE decision block
+    the fault at a DIFFERENT real owner (transcript reading vs. command
+    parsing) to prove the fail-closed path wraps the WHOLE decision block
     end to end, not merely the specific line the bug report's own
     reproduction happened to use.
     """
 
     def _run_with_patch(self, script: Path, mod_name: str, envelope: dict, **patches) -> tuple[int, str]:
         module = _load_gate_module(script, mod_name)
-        patchers = [mock.patch.object(module, name, **kwargs) for name, kwargs in patches.items()]
+        patchers = [
+            mock.patch.object(
+                module if hasattr(module, name) else module._a3_preflight,
+                name,
+                **kwargs,
+            )
+            for name, kwargs in patches.items()
+        ]
         buf = io.StringIO()
         for p in patchers:
             p.start()
         try:
-            with mock.patch.object(module, "read_stdin_utf8", return_value=json.dumps(envelope)):
+            with mock.patch.object(
+                module._a3_preflight,
+                "read_stdin_utf8",
+                return_value=json.dumps(envelope),
+            ):
                 with contextlib.redirect_stdout(buf):
                     rc = module.main()
         finally:
@@ -5041,7 +5099,7 @@ class TestCrashWhileDecidingFallsThroughToDeny(unittest.TestCase):
         # Sanity/regression guard for the refactor itself: driving main()
         # through the SAME direct-import seam as the tests above, but with NO
         # injected fault, must reproduce the ordinary bare-push deny (proving
-        # the split into evaluate_push() did not change behavior on the
+        # the staged preflight split did not change behavior on the
         # non-crashing path). A real transcript_path is required here (unlike
         # the two injection tests above, where the injected exception fires
         # before the transcript is ever read). A real path keeps this control
@@ -5081,9 +5139,9 @@ class TestR11PublicationGateContracts(unittest.TestCase):
 
     def test_r11_wrapper_owner_and_effective_projection_are_single(self) -> None:
         module = self._module("r11_single_owner")
-        self.assertTrue(hasattr(module, "WrapperExecutableIdentity"))
-        self.assertTrue(hasattr(module, "TerminalParticipant"))
-        parsed = module.parse_shell_command(
+        self.assertTrue(hasattr(module._a3_preflight, "WrapperExecutableIdentity"))
+        self.assertTrue(hasattr(module._a3_preflight, "TerminalParticipant"))
+        parsed = module._a3_preflight.parse_shell_command(
             "env A=x command -- git push origin main", "posix"
         )
         self.assertEqual(len(parsed.wrapper_projections), 1)
@@ -5099,7 +5157,7 @@ class TestR11PublicationGateContracts(unittest.TestCase):
         for wrapper in ("env", "sudo"):
             for assignment in ("1=x", "A-B=x", "=x", "É=x", "A==x"):
                 with self.subTest(wrapper=wrapper, assignment=assignment):
-                    parsed = module.parse_shell_command(
+                    parsed = module._a3_preflight.parse_shell_command(
                         f"{wrapper} {assignment} git push origin main", "posix"
                     )
                     self.assertFalse(parsed.effective_publications.exact_complete)
@@ -5122,7 +5180,7 @@ class TestR11PublicationGateContracts(unittest.TestCase):
         )
         for command, dialect in commands:
             with self.subTest(command=command):
-                parsed = module.parse_shell_command(command, dialect)
+                parsed = module._a3_preflight.parse_shell_command(command, dialect)
                 projection = parsed.wrapper_projections[0]
                 self.assertEqual(projection.terminal_state, "CANDIDATE")
                 self.assertTrue(projection.terminal_participants)
@@ -5130,7 +5188,7 @@ class TestR11PublicationGateContracts(unittest.TestCase):
 
     def test_r11_wrapper_terminal_and_permissive_return_matrix_is_complete(self) -> None:
         module = self._module("r11_registry_complete")
-        rows = module.WrapperGrammarRegistry.rows()
+        rows = module._a3_preflight.WrapperGrammarRegistry.rows()
         self.assertEqual(
             tuple(row.wrapper_id for row in rows),
             (
@@ -5147,7 +5205,7 @@ class TestR11PublicationGateContracts(unittest.TestCase):
 
     def test_r11_candidate_has_zero_authorization_credit(self) -> None:
         module = self._module("r11_zero_credit")
-        parsed = module.parse_shell_command(
+        parsed = module._a3_preflight.parse_shell_command(
             "env 1=x git push --dry-run origin main", "posix"
         )
         effective = parsed.effective_publications
@@ -5424,7 +5482,7 @@ class TestR12ProductionOwners(unittest.TestCase):
         module = self._module("r12_registry_red")
         self.assertFalse(hasattr(module, "AssignmentNameRule"))
         self.assertEqual(
-            module.WrapperGrammar._fields,
+            module._a3_preflight.WrapperGrammar._fields,
             (
                 "wrapper_id", "executable_names", "parent_dialects", "option_specs",
                 "option_terminator", "assignment_rule_id", "operand_rule",
@@ -5433,30 +5491,30 @@ class TestR12ProductionOwners(unittest.TestCase):
             ),
         )
         self.assertEqual(
-            module.WrapperOptionSpec._fields,
+            module._a3_preflight.WrapperOptionSpec._fields,
             ("spelling", "accepted_forms", "arity", "mode", "requires_mode"),
         )
-        original_rows = module.WrapperGrammarRegistry._ROWS
+        original_rows = module._a3_preflight.WrapperGrammarRegistry._ROWS
         row_template = original_rows[0]
-        for field in module.WrapperGrammar._fields:
+        for field in module._a3_preflight.WrapperGrammar._fields:
             with self.subTest(schema_field=f"WrapperGrammar.{field}"):
-                module.WrapperGrammarRegistry._ROWS = (
+                module._a3_preflight.WrapperGrammarRegistry._ROWS = (
                     row_template._replace(**{field: object()}),
                     *original_rows[1:],
                 )
                 try:
                     with self.assertRaises(module.PrRouteDenied) as denied:
-                        module.WrapperGrammarRegistry.rows()
+                        module._a3_preflight.WrapperGrammarRegistry.rows()
                     self.assertEqual(denied.exception.failure_id, "WPG-REGISTRY-SCHEMA")
                 finally:
-                    module.WrapperGrammarRegistry._ROWS = original_rows
+                    module._a3_preflight.WrapperGrammarRegistry._ROWS = original_rows
 
         option_row_index = next(
             index for index, row in enumerate(original_rows) if row.option_specs
         )
         option_row = original_rows[option_row_index]
         option_template = option_row.option_specs[0]
-        for field in module.WrapperOptionSpec._fields:
+        for field in module._a3_preflight.WrapperOptionSpec._fields:
             with self.subTest(schema_field=f"WrapperOptionSpec.{field}"):
                 mutated_options = (
                     option_template._replace(**{field: object()}),
@@ -5466,50 +5524,54 @@ class TestR12ProductionOwners(unittest.TestCase):
                 mutated_rows[option_row_index] = option_row._replace(
                     option_specs=mutated_options
                 )
-                module.WrapperGrammarRegistry._ROWS = tuple(mutated_rows)
+                module._a3_preflight.WrapperGrammarRegistry._ROWS = tuple(mutated_rows)
                 try:
                     with self.assertRaises(module.PrRouteDenied) as denied:
-                        module.WrapperGrammarRegistry.rows()
+                        module._a3_preflight.WrapperGrammarRegistry.rows()
                     self.assertEqual(denied.exception.failure_id, "WPG-REGISTRY-SCHEMA")
                 finally:
-                    module.WrapperGrammarRegistry._ROWS = original_rows
+                    module._a3_preflight.WrapperGrammarRegistry._ROWS = original_rows
 
-        module.WrapperGrammarRegistry._ROWS = (
+        module._a3_preflight.WrapperGrammarRegistry._ROWS = (
             row_template._replace(wrapper_id=object()),
             *original_rows[1:],
         )
         try:
             with self.assertRaises(module.PrRouteDenied) as denied:
-                module.parse_shell_command("git push --dry-run")
+                module._a3_preflight.parse_shell_command("git push --dry-run")
             self.assertEqual(denied.exception.failure_id, "WPG-REGISTRY-SCHEMA")
         finally:
-            module.WrapperGrammarRegistry._ROWS = original_rows
+            module._a3_preflight.WrapperGrammarRegistry._ROWS = original_rows
 
-        for row in module.WrapperGrammarRegistry.rows():
+        for row in module._a3_preflight.WrapperGrammarRegistry.rows():
             self.assertNotIn("unsupported_polarity", row._fields)
             for option in row.option_specs:
                 self.assertNotIn("kind", option._fields)
                 self.assertNotIn("payload_role", option._fields)
             try:
-                module.WrapperGrammarRegistry._ROWS = tuple(
+                module._a3_preflight.WrapperGrammarRegistry._ROWS = tuple(
                     current._replace(executable_names=("never-a-wrapper",))
                     if current is row else current
                     for current in original_rows
                 )
                 for executable in row.executable_names:
                     self.assertIsNone(
-                        module.WrapperGrammarRegistry.resolve(
+                        module._a3_preflight.WrapperGrammarRegistry.resolve(
                             executable, row.parent_dialects[0]
                         )
                     )
             finally:
-                module.WrapperGrammarRegistry._ROWS = original_rows
-        self.assertTrue(all(isinstance(value, str) for value in module.ASSIGNMENT_NAME_RULES.values()))
-        source_tree = ast.parse(CANONICAL_HOOK.read_text(encoding="utf-8"))
+                module._a3_preflight.WrapperGrammarRegistry._ROWS = original_rows
+        self.assertTrue(all(isinstance(value, str) for value in module._a3_preflight.ASSIGNMENT_NAME_RULES.values()))
+        source_tree = ast.parse(
+            (
+                CANONICAL_HOOK.parent / "git_push_gate_preflight.py"
+            ).read_text(encoding="utf-8")
+        )
         consumed_attributes = {
             node.attr for node in ast.walk(source_tree) if isinstance(node, ast.Attribute)
         }
-        for field in (*module.WrapperGrammar._fields, *module.WrapperOptionSpec._fields):
+        for field in (*module._a3_preflight.WrapperGrammar._fields, *module._a3_preflight.WrapperOptionSpec._fields):
             self.assertIn(field, consumed_attributes, field)
 
     def test_r14_oracle_identity_stable_adapter_contract(self) -> None:
@@ -6353,8 +6415,9 @@ class TestPublicationSafetyTrustedScanR2(unittest.TestCase):
                 "tool_input": {"command": "git push origin HEAD:refs/heads/main"},
                 "transcript_path": str(transcript_path),
             }
+            decision = module._a3_preflight.build_preflight(envelope)
             with self.assertRaises(module.PrRouteDenied) as caught:
-                module.evaluate_push(envelope)
+                module.evaluate_heavy(decision)
         self.assertEqual(caught.exception.failure_id, "PGG-SCAN-PROVENANCE")
 
     def test_snapshot_boundary_rejects_alternate_hard_link(self) -> None:
@@ -6433,7 +6496,6 @@ class TestPublicationSafetyTrustedScanR2(unittest.TestCase):
             REPO_ROOT / "src.claude" / "commands" / "agents-help.md",
             REPO_ROOT / "INSTALL.md",
             REPO_ROOT / "docs" / "provider-runtime-layouts.md",
-            REPO_ROOT / "work-items" / "decisions" / "2026-07-26-publication-scanner-subject-is-the-published-range.md",
         )
         stale = (
             "any installed or repo-local copy counts",
@@ -6746,12 +6808,14 @@ class TestPublicationSafetyTrustedScanR3(unittest.TestCase):
                     self.assertNotIn(sentinel, rendered, "R3-REDACTION-CHANNEL")
 
                 stdout = io.StringIO()
-                with mock.patch.object(module, "read_stdin_utf8", return_value="{}"), \
-                     mock.patch.object(module, "parse_envelope", return_value={}), \
-                     mock.patch.object(
-                         module, "evaluate_push",
-                         side_effect=module.PrRouteDenied(sentinel),
-                     ), contextlib.redirect_stdout(stdout):
+                with mock.patch.object(
+                    module._a3_preflight,
+                    "build_preflight_from_stdin",
+                    return_value=_heavy_preflight(module),
+                ), mock.patch.object(
+                    module, "evaluate_heavy",
+                    side_effect=module.PrRouteDenied(sentinel),
+                ), contextlib.redirect_stdout(stdout):
                     self.assertEqual(module.main(), 0)
                 with self.subTest(route=route, channel=channel, boundary="runtime"):
                     self.assertNotIn(sentinel, stdout.getvalue(), "R3-REDACTION-RUNTIME")
@@ -7626,9 +7690,11 @@ class TestPublicationSafetyTrustedScanR5Proof(unittest.TestCase):
 
         def capture_main(error: BaseException) -> tuple[int, str, str]:
             stdout, stderr = io.StringIO(), io.StringIO()
-            with mock.patch.object(module, "read_stdin_utf8", return_value="{}"), \
-                 mock.patch.object(module, "parse_envelope", return_value={}), \
-                 mock.patch.object(module, "evaluate_push", side_effect=error), \
+            with mock.patch.object(
+                module._a3_preflight,
+                "build_preflight_from_stdin",
+                return_value=_heavy_preflight(module),
+            ), mock.patch.object(module, "evaluate_heavy", side_effect=error), \
                  contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
                 code = module.main()
             return code, stdout.getvalue(), stderr.getvalue()
@@ -7670,7 +7736,8 @@ class TestPublicationSafetyTrustedScanR5Proof(unittest.TestCase):
             ):
                 stdout, stderr = io.StringIO(), io.StringIO()
                 with mock.patch.object(
-                    module, "read_stdin_utf8", return_value=json.dumps(envelope)
+                    module._a3_preflight,
+                    "read_stdin_utf8", return_value=json.dumps(envelope)
                 ), mock.patch.object(
                     module, "_run_authoritative_scan", side_effect=error
                 ), contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):

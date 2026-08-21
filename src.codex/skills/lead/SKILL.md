@@ -388,6 +388,64 @@ Lead rules for `$consultant`:
 - When mode is `external`, keep the consultant lane external-only. Internal fallback is not part of the consultant contract anymore.
 - Require the consultant-check memo set to end with a ready-to-send second prompt that begins with a direct imperative to continue and names the next concrete action.
 
+<!-- APAT-BLOCK:LEAD-ROUTING:BEGIN -->
+## Architecture-pattern routing recognition (APAT)
+
+Inside already-admitted non-trivial work, route to `$architect` before Plan or Implement when accepted evidence shows at least one of these problem shapes. Lead recognises the shape and does not select a pattern:
+
+- conflicting business meanings, invariants, owners, or change cadence across a proposed semantic boundary;
+- a long-lived or branch-heavy lifecycle with legal and illegal transitions, retry, timeout, cancellation, restart, manual intervention, or audit requirements;
+- materially asymmetric command/query models, scaling, authorization, or consistency needs;
+- one local database mutation plus message publication that cannot currently be one atomic operation;
+- one business transaction crossing autonomous services or data owners.
+
+This route does not change template admission and is not a universal Architect prelude. Simple Create, Read, Update, Delete (CRUD), a coherent small domain, local linear control flow, one local transaction, and a flow with no dual write do not force Architect. An irreversible cross-owner invariant still routes Architect so saga can be rejected or deferred rather than assumed.
+
+<a id="apat-en-apat-p01-semantic-boundary-outcome"></a>
+<!-- APAT-SEMANTIC id="APAT-P01-SEMANTIC-BOUNDARY.outcome" value="route-architect:consider-AP1:no-deployment-inference" -->
+- `APAT-P01-SEMANTIC-BOUNDARY` -> `route-architect:consider-AP1:no-deployment-inference`.
+
+<a id="apat-en-apat-p02-long-lived-lifecycle-outcome"></a>
+<!-- APAT-SEMANTIC id="APAT-P02-LONG-LIVED-LIFECYCLE.outcome" value="route-architect:consider-AP2:require-transition-evidence" -->
+- `APAT-P02-LONG-LIVED-LIFECYCLE` -> `route-architect:consider-AP2:require-transition-evidence`.
+
+<a id="apat-en-apat-p03-read-write-asymmetry-outcome"></a>
+<!-- APAT-SEMANTIC id="APAT-P03-READ-WRITE-ASYMMETRY.outcome" value="route-architect:consider-AP3:no-event-sourcing-inference" -->
+- `APAT-P03-READ-WRITE-ASYMMETRY` -> `route-architect:consider-AP3:no-event-sourcing-inference`.
+
+<a id="apat-en-apat-p04-dual-write-outcome"></a>
+<!-- APAT-SEMANTIC id="APAT-P04-DUAL-WRITE.outcome" value="route-architect:consider-AP4:require-relay-evidence" -->
+- `APAT-P04-DUAL-WRITE` -> `route-architect:consider-AP4:require-relay-evidence`.
+
+<a id="apat-en-apat-p05-cross-owner-transaction-outcome"></a>
+<!-- APAT-SEMANTIC id="APAT-P05-CROSS-OWNER-TRANSACTION.outcome" value="route-architect:consider-AP5:require-compensation-evidence" -->
+- `APAT-P05-CROSS-OWNER-TRANSACTION` -> `route-architect:consider-AP5:require-compensation-evidence`.
+
+<a id="apat-en-apat-n01-coherent-domain-outcome"></a>
+<!-- APAT-SEMANTIC id="APAT-N01-COHERENT-DOMAIN.outcome" value="no-force-architect:reject-AP1" -->
+- `APAT-N01-COHERENT-DOMAIN` -> `no-force-architect:reject-AP1` when alternatives are otherwise requested.
+
+<a id="apat-en-apat-n02-linear-flow-outcome"></a>
+<!-- APAT-SEMANTIC id="APAT-N02-LINEAR-FLOW.outcome" value="no-force-architect:reject-AP2" -->
+- `APAT-N02-LINEAR-FLOW` -> `no-force-architect:reject-AP2` when alternatives are otherwise requested.
+
+<a id="apat-en-apat-n03-simple-crud-outcome"></a>
+<!-- APAT-SEMANTIC id="APAT-N03-SIMPLE-CRUD.outcome" value="no-force-architect:reject-AP3" -->
+- `APAT-N03-SIMPLE-CRUD` -> `no-force-architect:reject-AP3` when alternatives are otherwise requested.
+
+<a id="apat-en-apat-n04-no-dual-write-outcome"></a>
+<!-- APAT-SEMANTIC id="APAT-N04-NO-DUAL-WRITE.outcome" value="no-force-architect:reject-AP4" -->
+- `APAT-N04-NO-DUAL-WRITE` -> `no-force-architect:reject-AP4` when alternatives are otherwise requested.
+
+<a id="apat-en-apat-n05-local-atomic-outcome"></a>
+<!-- APAT-SEMANTIC id="APAT-N05-LOCAL-ATOMIC.outcome" value="no-force-architect:reject-AP5" -->
+- `APAT-N05-LOCAL-ATOMIC` -> `no-force-architect:reject-AP5` when alternatives are otherwise requested.
+
+<a id="apat-en-apat-n06-irreversible-invariant-outcome"></a>
+<!-- APAT-SEMANTIC id="APAT-N06-IRREVERSIBLE-INVARIANT.outcome" value="route-architect:reject-or-defer-AP5" -->
+- `APAT-N06-IRREVERSIBLE-INVARIANT` -> `route-architect:reject-or-defer-AP5` and require a changed boundary, requirement, or actually supported transaction mechanism.
+<!-- APAT-BLOCK:LEAD-ROUTING:END -->
+
 ## Non-goals
 
 - Do not turn the lead into a universal coder.

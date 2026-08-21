@@ -1,20 +1,25 @@
+import asyncio
 import hashlib
 import importlib.util
 import io
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import replace
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPT = ROOT / "scripts" / "mutate-work-item.py"
+SCRIPT = Path(
+    os.environ.get("MUTATE_WORK_ITEM_SCRIPT", ROOT / "scripts" / "mutate-work-item.py")
+)
 LEDGER = ROOT / "scripts" / "agent-run-ledger.py"
 STATE_VALIDATOR = ROOT / "scripts" / "validate-work-item-state.py"
 FIXTURE = ROOT / "tests" / "fixtures" / "work-items-lifecycle-v1" / "five-item.json"
@@ -1176,7 +1181,13 @@ def test_trial_foreign_root_is_preserved_and_fails_closed(tmp_path: Path) -> Non
     assert result.returncode == 1
     assert "WI-TRIAL-NOT-OWNED" in result.stdout
     assert foreign.read_bytes() == before
-    assert sorted(path.name for path in trial_root.iterdir()) == ["user-content.txt"]
+    assert sorted(path.name for path in trial_root.iterdir()) == [
+        ".scratch",
+        "user-content.txt",
+    ]
+    assert (
+        trial_root / ".scratch" / "work-items-lifecycle-owner.lock"
+    ).read_bytes() == b"work-items-lifecycle-owner-v1\n"
 
 
 def test_utc_same_instant_boundary_replay(tmp_path: Path) -> None:
@@ -5728,18 +5739,172 @@ def _canonical_decision_record(slug: str) -> str:
     )
 
 
+def _accepted_v0_policy_record(
+    slug: str,
+    baseline_sha256: str,
+    *,
+    manifest_path: str = "work-items/decision-v0-compatibility.json",
+    cutover_date: str = "2026-08-18",
+) -> str:
+    return _canonical_decision_record(slug).replace(
+        "- status: proposed\n",
+        "- status: accepted\n",
+    ).replace(
+        "- date: 2026-08-11\n",
+        f"- date: {slug[:10]}\n",
+    ).replace(
+        "\n# Decision:",
+        (
+            f"- v0-manifest: {manifest_path}\n"
+            f"- v0-baseline-sha256: {baseline_sha256}\n"
+            f"- v0-cutover-date: {cutover_date}\n"
+            "\n# Decision:"
+        ),
+    )
+
+
+def _legacy_v0_decision_record(
+    *,
+    status: str = "accepted",
+    identity_line: str | None = None,
+    extra_header: str = "",
+    body: str = "Legacy decision body.\n",
+) -> str:
+    identity = f"{identity_line}\n" if identity_line else ""
+    return f"---\nstatus: {status}\n{identity}{extra_header}---\n{body}"
+
+
+def _decision_v0_baseline(entries: list[dict[str, str]]) -> str:
+    payload = b"".join(
+        entry["path"].encode("utf-8")
+        + b"\0"
+        + entry["sha256"].encode("ascii")
+        + b"\n"
+        for entry in sorted(entries, key=lambda row: row["path"])
+    )
+    return hashlib.sha256(payload).hexdigest().upper()
+
+
+def _write_decision_v0_manifest(
+    root: Path,
+    entries: list[dict[str, str]],
+    *,
+    policy_slug: str = "2026-08-18-current-decision-schema-versioned-read-compatibility",
+    cutover_date: str = "2026-08-18",
+) -> Path:
+    ordered = sorted(entries, key=lambda row: row["path"])
+    baseline = _decision_v0_baseline(ordered)
+    write(
+        root / "work-items" / "decisions" / f"{policy_slug}.md",
+        _accepted_v0_policy_record(
+            policy_slug,
+            baseline,
+            cutover_date=cutover_date,
+        ),
+    )
+    target = root / "work-items" / "decision-v0-compatibility.json"
+    write(
+        target,
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "policyDecision": policy_slug,
+                "cutoverDate": cutover_date,
+                "baselineSha256": baseline,
+                "entries": ordered,
+            },
+            indent=2,
+        )
+        + "\n",
+    )
+    return target
+
+
+def _legacy_h1_decision_record(
+    *,
+    mode: str = "plain",
+    status: str = "accepted",
+    status_key: str = "status",
+    extra_fields: tuple[tuple[str, str], ...] = (("owner", "architect"),),
+    body: str = "Legacy H1 decision body.\n",
+) -> str:
+    fields = ((status_key, status), *extra_fields)
+    if mode == "plain":
+        prefix = "\n".join(f"{key}: {value}" for key, value in fields)
+    elif mode == "bold":
+        prefix = "\n".join(f"- **{key}:** {value}" for key, value in fields)
+    else:
+        raise AssertionError(f"unsupported test H1 mode: {mode}")
+    return f"# Legacy H1 decision\n\n{prefix}\n\n{body}"
+
+
+def _accepted_h1_policy_record(
+    slug: str,
+    baseline_sha256: str,
+    *,
+    manifest_path: str = "work-items/decision-h1-compatibility.json",
+    cutover_date: str = "2026-08-18",
+) -> str:
+    return _canonical_decision_record(slug).replace(
+        "- status: proposed\n",
+        "- status: accepted\n",
+    ).replace(
+        "- date: 2026-08-11\n",
+        f"- date: {slug[:10]}\n",
+    ).replace(
+        "- supersedes: none\n",
+        "- supersedes: 2026-08-18-current-decision-schema-versioned-read-compatibility\n",
+    ).replace(
+        "\n# Decision:",
+        (
+            f"- h1-manifest: {manifest_path}\n"
+            f"- h1-baseline-sha256: {baseline_sha256}\n"
+            f"- h1-cutover-date: {cutover_date}\n"
+            "\n# Decision:"
+        ),
+    )
+
+
+def _write_decision_h1_manifest(
+    root: Path,
+    entries: list[dict[str, str]],
+    *,
+    policy_slug: str = "2026-08-18-current-decision-schema-h1-read-compatibility",
+    cutover_date: str = "2026-08-18",
+) -> Path:
+    ordered = sorted(entries, key=lambda row: row["path"])
+    baseline = _decision_v0_baseline(ordered)
+    write(
+        root / "work-items" / "decisions" / f"{policy_slug}.md",
+        _accepted_h1_policy_record(
+            policy_slug,
+            baseline,
+            cutover_date=cutover_date,
+        ),
+    )
+    target = root / "work-items" / "decision-h1-compatibility.json"
+    write(
+        target,
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "policyDecision": policy_slug,
+                "cutoverDate": cutover_date,
+                "baselineSha256": baseline,
+                "entries": ordered,
+            },
+            indent=2,
+        )
+        + "\n",
+    )
+    return target
+
+
 def test_decision_schema_rejects_noncanonical_current_records(tmp_path: Path) -> None:
     module = load_module()
     slug = "2026-08-11-schema-test"
     canonical = _canonical_decision_record(slug)
     cases = {
-        "fenced": (
-            "---\nstatus: proposed\ndate: 2026-08-11\n---\n"
-            f"# Decision: {slug}\n\n- id: {slug}\n"
-            "- decided-by: $architect\n- context: schema-test\n"
-            "- supersedes: none\n- superseded-by: none\n",
-            "WI-DECISION-SCHEMA-INVALID",
-        ),
         "body-only-id": (
             canonical.replace(f"- id: {slug}\n", "").replace(
                 "## Decision\n", f"## Decision\n- id: {slug}\n"
@@ -5816,6 +5981,1845 @@ def test_decision_schema_accepts_optional_multiline_and_legacy_archive(
     )
 
     assert module.audit_categories(tmp_path) == ()
+
+
+def test_decision_v0_parser_accepts_closed_identity_matrix_and_preserves_v1(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    cases = (
+        (
+            "2026-08-01-full-id",
+            "id: 2026-08-01-full-id",
+            {"id": "2026-08-01-full-id"},
+        ),
+        (
+            "2026-08-02-undated-slug",
+            "slug: undated-slug",
+            {"slug": "undated-slug"},
+        ),
+        ("2026-08-03-no-identity", None, {}),
+    )
+    for slug, identity, expected_identity in cases:
+        path = tmp_path / f"{slug}.md"
+        write(
+            path,
+            _legacy_v0_decision_record(
+                identity_line=identity,
+                extra_header="owners:\n  - one\n  - two\n",
+            ),
+        )
+        result = module._validate_current_decision_record(path, slug)
+        assert result.format == "legacy-yaml-v0"
+        assert result.raw_status == "accepted"
+        assert result.admitted_current_status == "accepted"
+        assert result.legacy_read_only is True
+        assert result.fields["owners"] == ("one", "two")
+        assert {key: result.fields[key] for key in expected_identity} == expected_identity
+        assert "id" in result.fields if "id" in expected_identity else "id" not in result.fields
+        assert "slug" in result.fields if "slug" in expected_identity else "slug" not in result.fields
+        with unittest.TestCase().assertRaises(TypeError):
+            result.fields["invented"] = "value"
+
+    v1_slug = "2026-08-11-schema-test"
+    v1_path = tmp_path / f"{v1_slug}.md"
+    write(v1_path, _canonical_decision_record(v1_slug))
+    v1 = module._validate_current_decision_record(v1_path, v1_slug)
+    assert v1.format == "canonical-list-v1"
+    assert v1.fields["id"] == v1_slug
+    assert v1.raw_status == "proposed"
+    assert v1.admitted_current_status == "proposed"
+    assert v1.legacy_read_only is False
+
+
+def test_decision_v0_parser_rejects_malformed_unknown_duplicate_and_identity(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    slug = "2026-08-01-legacy"
+    cases = {
+        "unknown": ("## Decision\nstatus: accepted\n", "WI-DECISION-FORMAT-UNSUPPORTED"),
+        "bom": ("\ufeff---\nstatus: accepted\n---\nbody\n", "WI-DECISION-FORMAT-UNSUPPORTED"),
+        "missing-close": ("---\nstatus: accepted\nbody\n", "WI-DECISION-V0-SCHEMA-INVALID"),
+        "blank-header": ("---\nstatus: accepted\n\n---\nbody\n", "WI-DECISION-V0-SCHEMA-INVALID"),
+        "tab": ("---\nstatus:\taccepted\n---\nbody\n", "WI-DECISION-V0-SCHEMA-INVALID"),
+        "nested": ("---\nstatus: accepted\n  child: value\n---\nbody\n", "WI-DECISION-V0-UNSUPPORTED-NESTING"),
+        "empty-sequence": ("---\nstatus: accepted\nowners:\n  - \n---\nbody\n", "WI-DECISION-V0-UNSUPPORTED-NESTING"),
+        "active-yaml": ("---\nstatus: &value accepted\n---\nbody\n", "WI-DECISION-V0-UNSUPPORTED-NESTING"),
+        "duplicate": ("---\nstatus: accepted\nStatus: accepted\n---\nbody\n", "WI-DECISION-V0-FIELD-DUPLICATE"),
+        "normalized-duplicate": ("---\nstatus: accepted\nowner name: one\nowner_name: two\n---\nbody\n", "WI-DECISION-V0-FIELD-DUPLICATE"),
+        "wrong-id": ("---\nstatus: accepted\nid: 2026-08-01-other\n---\nbody\n", "WI-DECISION-IDENTITY-MISMATCH"),
+        "dated-slug": (f"---\nstatus: accepted\nslug: {slug}\n---\nbody\n", "WI-DECISION-IDENTITY-MISMATCH"),
+        "wrong-date": ("---\nstatus: accepted\ndate: 2026-08-02\n---\nbody\n", "WI-DECISION-DATE-MISMATCH"),
+        "empty-body": ("---\nstatus: accepted\n---\n \n", "WI-DECISION-V0-SCHEMA-INVALID"),
+    }
+    for name, (payload, failure_id) in cases.items():
+        path = tmp_path / name / f"{slug}.md"
+        write(path, payload)
+        with unittest.TestCase().assertRaises(module.LifecycleError) as caught:
+            module._validate_current_decision_record(path, slug)
+        assert caught.exception.failure_id == failure_id, (name, caught.exception.failure_id)
+
+    cutover_slug = "2026-08-18-new-v0"
+    cutover = tmp_path / f"{cutover_slug}.md"
+    write(cutover, _legacy_v0_decision_record())
+    with unittest.TestCase().assertRaises(module.LifecycleError) as caught:
+        module._validate_current_decision_record(
+            cutover,
+            cutover_slug,
+            v0_cutover_date="2026-08-18",
+        )
+    assert caught.exception.failure_id == "WI-DECISION-V0-CUTOVER-VIOLATION"
+
+
+def test_decision_v0_manifest_admits_frozen_53_row_inventory_without_writes(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    entries: list[dict[str, str]] = []
+    identity_counts = {"id": 0, "slug": 0, "neither": 0}
+    for index in range(53):
+        day = 1 + index // 28
+        slug = f"2026-07-{day:02d}-legacy-{index:02d}"
+        if index < 2:
+            identity = f"id: {slug}"
+            identity_counts["id"] += 1
+        elif index < 27:
+            identity = f"slug: {slug[11:]}"
+            identity_counts["slug"] += 1
+        else:
+            identity = None
+            identity_counts["neither"] += 1
+        path = root / "work-items" / "decisions" / f"{slug}.md"
+        write(path, _legacy_v0_decision_record(identity_line=identity))
+        entries.append(
+            {
+                "path": path.name,
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest().upper(),
+                "state": "admitted",
+            }
+        )
+    manifest = _write_decision_v0_manifest(root, entries)
+    before = {
+        path: path.read_bytes()
+        for path in (root / "work-items" / "decisions").glob("*.md")
+    }
+    manifest_before = manifest.read_bytes()
+    with patch.object(module, "_atomic_write") as atomic_write, patch.object(
+        module.os,
+        "replace",
+    ) as replace_file:
+        admitted = module.audit_categories(root)
+    assert len(admitted) == 53
+    assert identity_counts == {"id": 2, "slug": 25, "neither": 26}
+    assert atomic_write.call_count == 0
+    assert replace_file.call_count == 0
+    assert manifest.read_bytes() == manifest_before
+    assert all(path.read_bytes() == data for path, data in before.items())
+
+
+def test_decision_v0_manifest_fail_closed_state_matrix(tmp_path: Path) -> None:
+    module = load_module()
+
+    def seeded(name: str, *, state: str = "admitted") -> tuple[Path, Path, Path]:
+        root = tmp_path / name
+        slug = "2026-08-01-legacy"
+        decision = root / "work-items" / "decisions" / f"{slug}.md"
+        write(decision, _legacy_v0_decision_record(identity_line=f"id: {slug}"))
+        entry = {
+            "path": decision.name,
+            "sha256": hashlib.sha256(decision.read_bytes()).hexdigest().upper(),
+            "state": state,
+        }
+        manifest = _write_decision_v0_manifest(root, [entry])
+        return root, decision, manifest
+
+    absent_root = tmp_path / "absent"
+    write(
+        absent_root / "work-items" / "decisions" / "2026-08-01-legacy.md",
+        _legacy_v0_decision_record(),
+    )
+    with unittest.TestCase().assertRaises(module.LifecycleError) as caught:
+        module.audit_categories(absent_root)
+    assert caught.exception.failure_id == "WI-DECISION-V0-MANIFEST-MISSING"
+
+    cases = [
+        ("hash", "WI-DECISION-V0-HASH-MISMATCH", lambda _r, d, _m: d.write_text(d.read_text(encoding="utf-8") + "drift\n", encoding="utf-8")),
+        ("delete", "WI-DECISION-V0-MANIFEST-STALE", lambda _r, d, _m: d.unlink()),
+        ("convert", "WI-DECISION-V0-MANIFEST-STALE", lambda _r, d, _m: d.write_text(_canonical_decision_record(d.stem), encoding="utf-8")),
+        ("retired-reappear", "WI-DECISION-V0-RETIRED-REAPPEARED", lambda _r, _d, _m: None),
+    ]
+    for name, failure_id, mutate in cases:
+        root, decision, manifest = seeded(
+            name,
+            state="retired" if name == "retired-reappear" else "admitted",
+        )
+        before_manifest = manifest.read_bytes()
+        mutate(root, decision, manifest)
+        with unittest.TestCase().assertRaises(module.LifecycleError) as caught:
+            module.audit_categories(root)
+        assert caught.exception.failure_id == failure_id, (name, caught.exception.failure_id)
+        assert manifest.read_bytes() == before_manifest
+
+    retired_root, retired_decision, retired_manifest = seeded("retired", state="retired")
+    retired_decision.unlink()
+    retired_before = retired_manifest.read_bytes()
+    assert module.audit_categories(retired_root) == ()
+    assert retired_manifest.read_bytes() == retired_before
+
+    for name in ("new", "copy", "backdated"):
+        root, decision, manifest = seeded(name)
+        new_name = "2026-07-01-copy.md" if name == "backdated" else f"2026-08-02-{name}.md"
+        shutil.copy2(decision, decision.parent / new_name)
+        with unittest.TestCase().assertRaises(module.LifecycleError) as caught:
+            module.audit_categories(root)
+        assert caught.exception.failure_id == "WI-DECISION-V0-UNADMITTED", name
+
+
+def test_decision_v0_manifest_rejects_invalid_shape_anchor_and_duplicate_json(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+
+    def seeded(name: str) -> tuple[Path, Path]:
+        root = tmp_path / name
+        decision = root / "work-items" / "decisions" / "2026-08-01-legacy.md"
+        write(decision, _legacy_v0_decision_record())
+        manifest = _write_decision_v0_manifest(
+            root,
+            [
+                {
+                    "path": decision.name,
+                    "sha256": hashlib.sha256(decision.read_bytes()).hexdigest().upper(),
+                    "state": "admitted",
+                }
+            ],
+        )
+        return root, manifest
+
+    mutations = {
+        "unknown-field": lambda payload: payload.update({"extra": True}),
+        "schema": lambda payload: payload.update({"schemaVersion": 2}),
+        "traversal": lambda payload: payload["entries"][0].update({"path": "../legacy.md"}),
+        "lower-hash": lambda payload: payload["entries"][0].update({"sha256": payload["entries"][0]["sha256"].lower()}),
+        "state": lambda payload: payload["entries"][0].update({"state": "pending"}),
+        "duplicate-entry": lambda payload: payload["entries"].append(dict(payload["entries"][0])),
+        "unsorted-entries": lambda payload: payload["entries"].append(
+            {
+                "path": "2026-07-01-earlier.md",
+                "sha256": "A" * 64,
+                "state": "retired",
+            }
+        ),
+    }
+    for name, mutate in mutations.items():
+        root, manifest = seeded(name)
+        payload = json.loads(manifest.read_text(encoding="utf-8"))
+        mutate(payload)
+        manifest.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        with unittest.TestCase().assertRaises(module.LifecycleError) as caught:
+            module.audit_categories(root)
+        assert caught.exception.failure_id == "WI-DECISION-V0-MANIFEST-INVALID", (name, caught.exception.failure_id)
+
+    root, manifest = seeded("duplicate-json")
+    manifest.write_text(manifest.read_text(encoding="utf-8").replace('"schemaVersion": 1,', '"schemaVersion": 1,\n  "schemaVersion": 1,'), encoding="utf-8")
+    with unittest.TestCase().assertRaises(module.LifecycleError) as caught:
+        module.audit_categories(root)
+    assert caught.exception.failure_id == "WI-DECISION-V0-MANIFEST-INVALID"
+
+    root, manifest = seeded("unaccepted-anchor")
+    policy = root / "work-items" / "decisions" / "2026-08-18-current-decision-schema-versioned-read-compatibility.md"
+    policy.write_text(policy.read_text(encoding="utf-8").replace("- status: accepted\n", "- status: proposed\n"), encoding="utf-8")
+    with unittest.TestCase().assertRaises(module.LifecycleError) as caught:
+        module.audit_categories(root)
+    assert caught.exception.failure_id == "WI-DECISION-V0-MANIFEST-INVALID"
+
+
+def test_decision_v0_manifest_is_repo_local_and_has_no_retirement_writer(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    for repo_name, slug in (("one", "2026-08-01-one"), ("two", "2026-08-02-two")):
+        root = tmp_path / repo_name
+        decision = root / "work-items" / "decisions" / f"{slug}.md"
+        write(decision, _legacy_v0_decision_record(identity_line=f"id: {slug}"))
+        _write_decision_v0_manifest(
+            root,
+            [
+                {
+                    "path": decision.name,
+                    "sha256": hashlib.sha256(decision.read_bytes()).hexdigest().upper(),
+                    "state": "admitted",
+                }
+            ],
+        )
+        assert module.audit_categories(root) == (f"decisions/{slug}.md",)
+    assert not hasattr(module, "retire_decision_v0")
+    source = Path(module.__file__).read_text(encoding="utf-8")
+    assert "mcp-local-hub" not in source
+    assert "F4AF62741FD4BEFC59AA3FEC95EDC88E995CD477B4551F53A2AFB403234A3A6F" not in source
+    preflight_source = source.split("def _preflight_current_decision_v0", 1)[1].split("\ndef ", 1)[0]
+    for mutation_token in ("write_text(", "write_bytes(", "os.replace(", ".unlink(", ".rename("):
+        assert mutation_token not in preflight_source
+    repository = Path(__file__).resolve().parents[1]
+    for contract_path, no_fence_marker in (
+        (repository / "docs" / "decisions.md", "NO `---` YAML fences"),
+        (repository / "src.codex" / "skills" / "lead" / "SKILL.md", "no `---` fences"),
+        (repository / "src.claude" / "skills" / "lead" / "SKILL.md", "no `---` fences"),
+    ):
+        contract = contract_path.read_text(encoding="utf-8")
+        assert "list-item" in contract
+        assert no_fence_marker in contract
+
+
+def test_decision_h1_parser_accepts_closed_modes_and_opaque_body(tmp_path: Path) -> None:
+    module = load_module()
+    cases = (
+        ("plain", "accepted (prefix authority)", "status", "accepted"),
+        ("bold", "ACCEPTED 2026-07-01 — annotated", "status", "accepted"),
+        ("bold", "proposed (deferred)", "Status", "proposed"),
+    )
+    for index, (mode, raw_status, status_key, admitted) in enumerate(cases):
+        slug = f"2026-07-{index + 1:02d}-h1-{mode}"
+        path = tmp_path / f"{slug}.md"
+        body = "status: dropped\n\nBody metadata is opaque.\n"
+        write(
+            path,
+            _legacy_h1_decision_record(
+                mode=mode,
+                status=raw_status,
+                status_key=status_key,
+                body=body,
+            ),
+        )
+        result = module._validate_current_decision_record(path, slug)
+        assert result.format == "legacy-markdown-h1-v0"
+        assert result.raw_status == raw_status
+        assert result.admitted_current_status == admitted
+        assert result.legacy_read_only is True
+        assert result.fields[status_key] == raw_status
+        assert "id" not in result.fields and "slug" not in result.fields
+        normalized = path.read_text(encoding="utf-8").encode("utf-8")
+        assert normalized[result.body_offset :].decode("utf-8") == body
+        with unittest.TestCase().assertRaises(TypeError):
+            result.fields["invented"] = "value"
+
+    cutover_slug = "2026-08-18-new-h1"
+    cutover = tmp_path / f"{cutover_slug}.md"
+    write(cutover, _legacy_h1_decision_record())
+    with unittest.TestCase().assertRaises(module.LifecycleError) as caught:
+        module._validate_current_decision_record(
+            cutover,
+            cutover_slug,
+            h1_cutover_date="2026-08-18",
+        )
+    assert caught.exception.failure_id == "WI-DECISION-H1-CUTOVER-VIOLATION"
+
+
+def test_decision_h1_parser_rejects_malformed_prefix_without_fallback(tmp_path: Path) -> None:
+    module = load_module()
+    slug = "2026-07-01-h1-invalid"
+    cases = {
+        "empty-title": ("# \n\nstatus: accepted\n\nbody\n", "WI-DECISION-FORMAT-UNSUPPORTED"),
+        "missing-line-two": ("# Title\nstatus: accepted\n\nbody\n", "WI-DECISION-H1-SCHEMA-INVALID"),
+        "empty-body": ("# Title\n\nstatus: accepted\n\n \n", "WI-DECISION-H1-SCHEMA-INVALID"),
+        "mixed-mode": ("# Title\n\nstatus: accepted\n- **owner:** one\n\nbody\n", "WI-DECISION-H1-SCHEMA-INVALID"),
+        "tab": ("# Title\n\nstatus:\taccepted\n\nbody\n", "WI-DECISION-H1-SCHEMA-INVALID"),
+        "indented": ("# Title\n\n status: accepted\n\nbody\n", "WI-DECISION-H1-SCHEMA-INVALID"),
+        "malformed-bold": ("# Title\n\n- **status**: accepted\n\nbody\n", "WI-DECISION-H1-SCHEMA-INVALID"),
+        "normalized-duplicate": ("# Title\n\nstatus: accepted\nowner name: one\nOwner_name: two\n\nbody\n", "WI-DECISION-H1-FIELD-DUPLICATE"),
+        "duplicate-status": ("# Title\n\nstatus: accepted\nStatus: accepted\n\nbody\n", "WI-DECISION-H1-STATUS-UNSUPPORTED"),
+        "non-first-status": ("# Title\n\nowner: one\nstatus: accepted\n\nbody\n", "WI-DECISION-H1-STATUS-UNSUPPORTED"),
+        "unsupported-status": ("# Title\n\nstatus: dropped\n\nbody\n", "WI-DECISION-H1-STATUS-UNSUPPORTED"),
+        "punctuated-token": ("# Title\n\nstatus: accepted, maybe\n\nbody\n", "WI-DECISION-H1-STATUS-UNSUPPORTED"),
+        "body-only-status": ("# Title\n\nowner: one\n\nstatus: accepted\n", "WI-DECISION-H1-STATUS-UNSUPPORTED"),
+        "bom": ("\ufeff# Title\n\nstatus: accepted\n\nbody\n", "WI-DECISION-FORMAT-UNSUPPORTED"),
+    }
+    for name, (payload, failure_id) in cases.items():
+        path = tmp_path / name / f"{slug}.md"
+        write(path, payload)
+        with unittest.TestCase().assertRaises(module.LifecycleError) as caught:
+            module._validate_current_decision_record(path, slug)
+        assert caught.exception.failure_id == failure_id, (name, caught.exception.failure_id)
+
+    invalid_utf8 = tmp_path / "invalid-utf8" / f"{slug}.md"
+    invalid_utf8.parent.mkdir(parents=True)
+    invalid_utf8.write_bytes(b"# Title\n\nstatus: accepted\n\nbody\xff\n")
+    with unittest.TestCase().assertRaises(module.LifecycleError) as caught:
+        module._validate_current_decision_record(invalid_utf8, slug)
+    assert caught.exception.failure_id == "WI-DECISION-SCHEMA-INVALID"
+
+
+def test_decision_h1_manifest_admits_13_rows_deterministically_without_writes(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    entries: list[dict[str, str]] = []
+    expected_statuses: dict[str, str] = {}
+    decision_bytes: dict[Path, bytes] = {}
+    for index in range(13):
+        slug = f"2026-07-{index + 1:02d}-h1-{index:02d}"
+        mode = "plain" if index < 7 else "bold"
+        status = "proposed (deferred)" if index in {7, 8} else "accepted (frozen)"
+        path = root / "work-items" / "decisions" / f"{slug}.md"
+        write(
+            path,
+            _legacy_h1_decision_record(
+                mode=mode,
+                status=status,
+                status_key="Status" if index == 12 else "status",
+                body="status: dropped\n\nOpaque body.\n" if index == 6 else "Opaque body.\n",
+            ),
+        )
+        entries.append(
+            {
+                "path": path.name,
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest().upper(),
+                "state": "admitted",
+            }
+        )
+        expected_statuses[path.name] = "proposed" if index in {7, 8} else "accepted"
+        decision_bytes[path] = path.read_bytes()
+    manifest = _write_decision_h1_manifest(root, entries)
+    manifest_before = manifest.read_bytes()
+    original_parse_fields = module._parse_fields
+
+    def reject_h1_loose_scan(text: str) -> dict[str, str]:
+        if text.startswith("# "):
+            raise AssertionError("admitted H1 reached loose whole-document field scan")
+        return original_parse_fields(text)
+
+    with patch.object(module, "_parse_fields", side_effect=reject_h1_loose_scan), patch.object(
+        module,
+        "_atomic_write",
+    ) as atomic_write, patch.object(module.os, "replace") as replace_file:
+        observed = tuple(module.audit_categories(root) for _ in range(3))
+    expected = tuple(f"decisions/{name}" for name in sorted(expected_statuses))
+    assert observed == (expected, expected, expected)
+    admitted = module._preflight_current_decision_h1(root)
+    assert {name: row.admitted_current_status for name, row in admitted.items()} == expected_statuses
+    assert atomic_write.call_count == 0 and replace_file.call_count == 0
+    assert manifest.read_bytes() == manifest_before
+    assert all(path.read_bytes() == payload for path, payload in decision_bytes.items())
+
+
+def test_decision_h1_manifest_fail_closed_state_matrix(tmp_path: Path) -> None:
+    module = load_module()
+
+    def assert_read_only_failure(root: Path, failure_id: str) -> None:
+        with patch.object(module, "_atomic_write") as atomic_write, patch.object(
+            module.os,
+            "replace",
+        ) as replace_file, unittest.TestCase().assertRaises(module.LifecycleError) as caught:
+            module.audit_categories(root)
+        assert caught.exception.failure_id == failure_id, caught.exception.failure_id
+        assert atomic_write.call_count == 0 and replace_file.call_count == 0
+
+    def seeded(name: str, *, state: str = "admitted", slug: str = "2026-07-01-h1") -> tuple[Path, Path, Path]:
+        root = tmp_path / name
+        decision = root / "work-items" / "decisions" / f"{slug}.md"
+        write(decision, _legacy_h1_decision_record())
+        manifest = _write_decision_h1_manifest(
+            root,
+            [
+                {
+                    "path": decision.name,
+                    "sha256": hashlib.sha256(decision.read_bytes()).hexdigest().upper(),
+                    "state": state,
+                }
+            ],
+        )
+        return root, decision, manifest
+
+    missing_root = tmp_path / "missing"
+    write(
+        missing_root / "work-items" / "decisions" / "2026-07-01-h1.md",
+        _legacy_h1_decision_record(),
+    )
+    assert_read_only_failure(missing_root, "WI-DECISION-H1-MANIFEST-MISSING")
+
+    cases = (
+        ("hash", "admitted", "WI-DECISION-H1-HASH-MISMATCH", lambda decision: decision.write_text(decision.read_text(encoding="utf-8") + "drift\n", encoding="utf-8")),
+        ("delete", "admitted", "WI-DECISION-H1-MANIFEST-STALE", lambda decision: decision.unlink()),
+        ("convert", "admitted", "WI-DECISION-H1-MANIFEST-STALE", lambda decision: decision.write_text(_canonical_decision_record(decision.stem), encoding="utf-8")),
+        ("retired-reappear", "retired", "WI-DECISION-H1-RETIRED-REAPPEARED", lambda _decision: None),
+    )
+    for name, state, failure_id, mutate in cases:
+        root, decision, manifest = seeded(name, state=state)
+        manifest_before = manifest.read_bytes()
+        mutate(decision)
+        assert_read_only_failure(root, failure_id)
+        assert manifest.read_bytes() == manifest_before
+
+    retired_root, retired_decision, retired_manifest = seeded("retired", state="retired")
+    retired_decision.unlink()
+    retired_before = retired_manifest.read_bytes()
+    assert module.audit_categories(retired_root) == ()
+    assert retired_manifest.read_bytes() == retired_before
+
+    for name, new_slug in (
+        ("new", "2026-07-02-new"),
+        ("copy", "2026-07-03-copy"),
+        ("backdated", "2026-06-01-backdated"),
+    ):
+        root, decision, _manifest = seeded(name)
+        shutil.copy2(decision, decision.parent / f"{new_slug}.md")
+        assert_read_only_failure(root, "WI-DECISION-H1-UNADMITTED")
+
+    cutover_root, _decision, _manifest = seeded(
+        "cutover",
+        slug="2026-08-18-cutover-h1",
+    )
+    assert_read_only_failure(cutover_root, "WI-DECISION-H1-CUTOVER-VIOLATION")
+
+
+def test_decision_h1_manifest_rejects_invalid_shape_and_anchor(tmp_path: Path) -> None:
+    module = load_module()
+
+    def seeded(name: str) -> tuple[Path, Path]:
+        root = tmp_path / name
+        decision = root / "work-items" / "decisions" / "2026-07-01-h1.md"
+        write(decision, _legacy_h1_decision_record())
+        manifest = _write_decision_h1_manifest(
+            root,
+            [{"path": decision.name, "sha256": hashlib.sha256(decision.read_bytes()).hexdigest().upper(), "state": "admitted"}],
+        )
+        return root, manifest
+
+    mutations = {
+        "unknown-field": lambda payload: payload.update({"extra": True}),
+        "schema": lambda payload: payload.update({"schemaVersion": 2}),
+        "traversal": lambda payload: payload["entries"][0].update({"path": "../h1.md"}),
+        "lower-hash": lambda payload: payload["entries"][0].update({"sha256": payload["entries"][0]["sha256"].lower()}),
+        "state": lambda payload: payload["entries"][0].update({"state": "pending"}),
+        "duplicate-entry": lambda payload: payload["entries"].append(dict(payload["entries"][0])),
+        "unsorted-entries": lambda payload: payload["entries"].append(
+            {"path": "2026-06-01-earlier.md", "sha256": "A" * 64, "state": "retired"}
+        ),
+    }
+    for name, mutate in mutations.items():
+        root, manifest = seeded(name)
+        payload = json.loads(manifest.read_text(encoding="utf-8"))
+        mutate(payload)
+        manifest.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        with unittest.TestCase().assertRaises(module.LifecycleError) as caught:
+            module.audit_categories(root)
+        assert caught.exception.failure_id == "WI-DECISION-H1-MANIFEST-INVALID", name
+
+    root, manifest = seeded("duplicate-json")
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8").replace(
+            '"schemaVersion": 1,',
+            '"schemaVersion": 1,\n  "schemaVersion": 1,',
+        ),
+        encoding="utf-8",
+    )
+    with unittest.TestCase().assertRaises(module.LifecycleError) as caught:
+        module.audit_categories(root)
+    assert caught.exception.failure_id == "WI-DECISION-H1-MANIFEST-INVALID"
+
+    root, _manifest = seeded("unaccepted-anchor")
+    policy = root / "work-items" / "decisions" / "2026-08-18-current-decision-schema-h1-read-compatibility.md"
+    policy.write_text(
+        policy.read_text(encoding="utf-8").replace("- status: accepted\n", "- status: proposed\n"),
+        encoding="utf-8",
+    )
+    with unittest.TestCase().assertRaises(module.LifecycleError) as caught:
+        module.audit_categories(root)
+    assert caught.exception.failure_id == "WI-DECISION-H1-MANIFEST-INVALID"
+
+
+def test_decision_h1_manifest_is_separate_generic_and_fail_closed(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "combined"
+    v0_path = root / "work-items" / "decisions" / "2026-07-01-v0.md"
+    h1_path = root / "work-items" / "decisions" / "2026-07-02-h1.md"
+    write(v0_path, _legacy_v0_decision_record(identity_line=f"id: {v0_path.stem}"))
+    write(h1_path, _legacy_h1_decision_record(mode="bold", status="PROPOSED later"))
+    v0_manifest = _write_decision_v0_manifest(
+        root,
+        [{"path": v0_path.name, "sha256": hashlib.sha256(v0_path.read_bytes()).hexdigest().upper(), "state": "admitted"}],
+    )
+    h1_manifest = _write_decision_h1_manifest(
+        root,
+        [{"path": h1_path.name, "sha256": hashlib.sha256(h1_path.read_bytes()).hexdigest().upper(), "state": "admitted"}],
+    )
+    v0_before = v0_manifest.read_bytes()
+    h1_before = h1_manifest.read_bytes()
+    assert module.audit_categories(root) == (
+        "decisions/2026-07-01-v0.md",
+        "decisions/2026-07-02-h1.md",
+    )
+    assert v0_manifest.read_bytes() == v0_before
+    assert h1_manifest.read_bytes() == h1_before
+
+    payload = json.loads(h1_manifest.read_text(encoding="utf-8"))
+    payload["entries"].append(dict(payload["entries"][0]))
+    h1_manifest.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    with unittest.TestCase().assertRaises(module.LifecycleError) as caught:
+        module.audit_categories(root)
+    assert caught.exception.failure_id == "WI-DECISION-H1-MANIFEST-INVALID"
+    assert v0_manifest.read_bytes() == v0_before
+
+    source = Path(module.__file__).read_text(encoding="utf-8")
+    assert source.count("def _verify_current_decision_compatibility_manifest") == 1
+    assert "2D873AB6EE1D6B026EEFD59879F538BA6DE8DBAB23C66646DD05FD7065D4137E" not in source
+    assert "2026-06-16-hot-swap-zero-downtime-config" not in source
+    assert not hasattr(module, "retire_decision_h1")
+    h1_preflight = source.split("def _preflight_current_decision_h1", 1)[1].split("\ndef ", 1)[0]
+    for mutation_token in ("write_text(", "write_bytes(", "os.replace(", ".unlink(", ".rename("):
+        assert mutation_token not in h1_preflight
+
+
+def test_decision_h1_failure_order_is_lexical_across_processes(tmp_path: Path) -> None:
+    root = tmp_path / "ordered"
+    entries: list[dict[str, str]] = []
+    for slug, status in (
+        ("2026-07-01-a-invalid", "dropped"),
+        ("2026-07-02-z-invalid", "reverted"),
+    ):
+        path = root / "work-items" / "decisions" / f"{slug}.md"
+        write(path, _legacy_h1_decision_record(status=status))
+        entries.append(
+            {
+                "path": path.name,
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest().upper(),
+                "state": "admitted",
+            }
+        )
+    _write_decision_h1_manifest(root, entries)
+    observed: list[str] = []
+    for seed in ("1", "7", "41", "99"):
+        env = os.environ.copy()
+        env["PYTHONHASHSEED"] = seed
+        process = subprocess.run(
+            [sys.executable, str(SCRIPT), "audit", "--root", str(root)],
+            cwd=ROOT,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        assert process.returncode != 0
+        assert "WI-DECISION-H1-STATUS-UNSUPPORTED" in process.stdout
+        observed.append(process.stdout)
+    assert all("2026-07-01-a-invalid" in output for output in observed)
+    assert all("2026-07-02-z-invalid" not in output for output in observed)
+
+
+class PartialMigrationRecoveryParserTests(unittest.TestCase):
+    def _inventory_bytes(self, root: Path, *, suffix: str = "") -> bytes:
+        work_items = (root / "work-items").resolve()
+        return (
+            "{"
+            f'"digestAlgorithms":{{"directory":"sha256-tree-entries-v1","file":"sha256-file-bytes-v1"}},'
+            f'"owner":"work-items-lifecycle-v1-migration",{suffix}'
+            '"rows":[],"schemaVersion":1,'
+            f'"workItemsRoot":{json.dumps(str(work_items))}'
+            "}\n"
+        ).encode("utf-8")
+
+    def test_byte_parser_rejects_duplicate_json_keys(self):
+        module = load_module()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            snapshot = self._inventory_bytes(
+                root,
+                suffix='"owner":"work-items-lifecycle-v1-migration",',
+            )
+            with self.assertRaises(module.LifecycleError) as caught:
+                module._parse_migration_inventory_bytes(root, snapshot, strict_shape=True)
+            self.assertEqual(
+                caught.exception.failure_id,
+                "WI-CATEGORY-MIGRATION-INVENTORY",
+            )
+
+    def test_path_loader_delegates_exact_bytes_to_strict_parser(self):
+        module = load_module()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            inventory_path = root / "inventory.json"
+            snapshot = self._inventory_bytes(root)
+            inventory_path.write_bytes(snapshot)
+            sentinel = {"parsed": True}
+            with patch.object(
+                module,
+                "_parse_migration_inventory_bytes",
+                return_value=sentinel,
+            ) as parser:
+                self.assertIs(
+                    module._load_migration_inventory(root, inventory_path),
+                    sentinel,
+                )
+            parser.assert_called_once_with(root, snapshot)
+
+    def test_byte_parser_rejects_unknown_top_level_fields(self):
+        module = load_module()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            snapshot = self._inventory_bytes(root).replace(
+                b'"rows":[]',
+                b'"unexpected":true,"rows":[]',
+            )
+            with self.assertRaises(module.LifecycleError) as caught:
+                module._parse_migration_inventory_bytes(root, snapshot, strict_shape=True)
+            self.assertEqual(
+                caught.exception.failure_id,
+                "WI-CATEGORY-MIGRATION-INVENTORY",
+            )
+
+
+class LifecycleTransactionTests(unittest.TestCase):
+    def _holder(self, root: Path, *, crash: bool = False) -> subprocess.Popen[str]:
+        body = (
+            "import importlib.util,os,sys;"
+            "from pathlib import Path;"
+            f"p=Path({str(SCRIPT)!r});"
+            "s=importlib.util.spec_from_file_location('transaction_holder',p);"
+            "m=importlib.util.module_from_spec(s);sys.modules[s.name]=m;"
+            "s.loader.exec_module(m);"
+            "t=m.LifecycleTransaction(Path(sys.argv[1]));t.__enter__();"
+            "print('LOCKED',flush=True);"
+            + ("os._exit(23)" if crash else "sys.stdin.readline();t.__exit__(None,None,None)")
+        )
+        return subprocess.Popen(
+            [sys.executable, "-c", body, str(root)],
+            cwd=ROOT,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+    def test_live_owner_contention_fails_closed_and_releases_after_exit(self):
+        module = load_module()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            holder = self._holder(root)
+            locked = holder.stdout.readline().strip()
+            try:
+                if locked == "LOCKED":
+                    with self.assertRaises(module.LifecycleError) as caught:
+                        with module.LifecycleTransaction(root):
+                            self.fail("contending owner entered the transaction")
+                    self.assertEqual(
+                        caught.exception.failure_id,
+                        "WI-LIFECYCLE-LOCK-HELD",
+                    )
+            finally:
+                if holder.stdin and locked == "LOCKED":
+                    holder.stdin.write("release\n")
+                    holder.stdin.flush()
+                stdout, stderr = holder.communicate(timeout=10)
+                if holder.returncode == 0:
+                    self.assertEqual(stderr, "")
+            self.assertEqual(locked, "LOCKED", stderr)
+            with module.LifecycleTransaction(root):
+                pass
+
+    def test_every_public_lifecycle_api_uses_the_common_transaction(self):
+        module = load_module()
+        expected = {
+            "resolve_category",
+            "work_item_dependency_state",
+            "resolve_legacy_path",
+            "collect_readme_entries",
+            "render_readme_bytes",
+            "refresh_readme",
+            "reset_readme_static_guide",
+            "check_readme",
+            "create_candidate",
+            "convert_legacy_candidate",
+            "retire_legacy_backlog",
+            "start_item",
+            "update_status",
+            "close_item",
+            "reopen_item",
+            "audit_categories",
+            "audit",
+            "write_current_identity_normalization_inventory",
+            "normalize_current_identity",
+            "migrate_legacy_ledger_obligation",
+            "revoke_legacy_ledger_obligation",
+            "archive_with_successor",
+            "build_migration_inventory",
+            "write_migration_inventory",
+            "migrate_legacy",
+            "terminalize_v1_inventory",
+            "apply_migration_inventory",
+            "recover_partial_migration_v1",
+            "verify_migration_inventory",
+            "reopen_category_record",
+            "run_trial",
+        }
+        self.assertEqual(set(module.LIFECYCLE_PUBLIC_APIS), expected)
+        for name in sorted(expected):
+            with self.subTest(name=name):
+                self.assertTrue(
+                    getattr(
+                        getattr(module, name),
+                        "__lifecycle_transaction_participant__",
+                        False,
+                    ),
+                    name,
+                )
+
+    def test_process_crash_releases_native_lock(self):
+        module = load_module()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            holder = self._holder(root, crash=True)
+            self.assertEqual(holder.stdout.readline().strip(), "LOCKED")
+            stdout, stderr = holder.communicate(timeout=10)
+            self.assertEqual(holder.returncode, 23, stdout + stderr)
+            with module.LifecycleTransaction(root):
+                pass
+
+
+class PartialMigrationRecoveryBehaviorTests(unittest.TestCase):
+    WORK_ITEM_ROWS = (
+        (
+            "work-item:2026-08-11-pr598-review-fix",
+            "2026-08-11-pr598-review-fix",
+            "2026-08-11T10:50:44Z",
+        ),
+        (
+            "work-item:2026-08-11-pr600-review-fix",
+            "2026-08-11-pr600-review-fix",
+            "2026-08-11T10:53:49Z",
+        ),
+    )
+    BUG_ROWS = (
+        (
+            "bug:2026-07-25-cleanup-aggressive-exe-extension-index-out-of-range-panic",
+            "2026-07-25-cleanup-aggressive-exe-extension-index-out-of-range-panic",
+        ),
+        (
+            "bug:2026-07-26-route-daemon-state-read-unhardened-parent-fallback-writes-hub-mcp-log",
+            "2026-07-26-route-daemon-state-read-unhardened-parent-fallback-writes-hub-mcp-log",
+        ),
+    )
+
+    def test_recovery_scratch_paths_reject_unreduced_reparse_participants(self):
+        module = load_module()
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            root = base / "repository"
+            scratch = root / ".scratch"
+            scratch.mkdir(parents=True)
+            inventory = scratch / "inventory.json"
+            inventory.write_bytes(b"{}\n")
+            receipt_parent = scratch / "receipt-target"
+            receipt_parent.mkdir()
+            cases = []
+            try:
+                inventory_link = scratch / "inventory-link.json"
+                os.symlink(inventory, inventory_link)
+                cases.append((root, Path(".scratch/inventory-link.json"), "inventory"))
+
+                receipt_parent_link = scratch / "receipt-parent-link"
+                os.symlink(
+                    receipt_parent,
+                    receipt_parent_link,
+                    target_is_directory=True,
+                )
+                cases.append(
+                    (
+                        root,
+                        Path(".scratch/receipt-parent-link/receipt.json"),
+                        "receipt",
+                    )
+                )
+
+                root_link = base / "repository-link"
+                os.symlink(root, root_link, target_is_directory=True)
+                cases.append((root_link, Path(".scratch/inventory.json"), "inventory"))
+            except OSError as exc:
+                self.skipTest(f"target environment cannot create symlinks: {exc}")
+
+            for recovery_root, candidate, label in cases:
+                with self.subTest(candidate=candidate, label=label):
+                    with self.assertRaises(module.LifecycleError) as caught:
+                        module._partial_recovery_bound_scratch_file(
+                            recovery_root,
+                            candidate,
+                            label=label,
+                        )
+                    self.assertEqual(
+                        caught.exception.failure_id,
+                        "WI-PARTIAL-MIGRATION-RECOVERY-INVENTORY",
+                    )
+
+    def test_inventory_paths_reject_unreduced_root_and_target_parent_reparse(self):
+        module = load_module()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            real_work_items = root / "real-work-items"
+            real_work_items.mkdir()
+            work_items_link = root / "work-items-link"
+            real_parent = real_work_items / "real-archive-parent"
+            real_parent.mkdir()
+            target_parent_link = real_work_items / "target-parent-link"
+            try:
+                os.symlink(real_work_items, work_items_link, target_is_directory=True)
+                os.symlink(real_parent, target_parent_link, target_is_directory=True)
+            except OSError as exc:
+                self.skipTest(f"target environment cannot create symlinks: {exc}")
+
+            cases = (
+                (work_items_link, "incident-target"),
+                (real_work_items, "target-parent-link/incident-target"),
+            )
+            for work_items, relative in cases:
+                with self.subTest(work_items=work_items, relative=relative):
+                    with self.assertRaises(module.LifecycleError) as caught:
+                        module._bound_inventory_path(work_items, relative)
+                    self.assertEqual(
+                        caught.exception.failure_id,
+                        "WI-CATEGORY-MIGRATION-INVENTORY",
+                    )
+
+    def test_status_parent_reparse_swap_after_preflight_refuses_before_any_write(self):
+        module = load_module()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fixture = self._fixture(module, root)
+            real_preflight = module._partial_recovery_preflight
+            real_atomic_write = module._atomic_write
+            attempted_writes = []
+
+            def swap_after_preflight(recovery_root, inventory):
+                plans = real_preflight(recovery_root, inventory)
+                month = root / "work-items" / "archive" / "2026-08"
+                moved = month.with_name("2026-08-real")
+                month.rename(moved)
+                try:
+                    os.symlink(moved, month, target_is_directory=True)
+                except OSError as exc:
+                    moved.rename(month)
+                    self.skipTest(
+                        f"target environment cannot create a directory symlink: {exc}"
+                    )
+                return plans
+
+            def recording_atomic_write(path, data):
+                attempted_writes.append(Path(path))
+                return real_atomic_write(path, data)
+
+            try:
+                with patch.object(
+                    module,
+                    "_partial_recovery_preflight",
+                    side_effect=swap_after_preflight,
+                ), patch.object(
+                    module,
+                    "_atomic_write",
+                    side_effect=recording_atomic_write,
+                ):
+                    with self.assertRaises(module.LifecycleError):
+                        self._run(module, root, fixture)
+            finally:
+                month = root / "work-items" / "archive" / "2026-08"
+                if month.is_symlink():
+                    month.unlink()
+            self.assertEqual(attempted_writes, [])
+
+    def _fixture(self, module, root: Path):
+        work_items = root / "work-items"
+        work_items.mkdir(parents=True)
+        module.refresh_readme(root, allow_marker_bootstrap=True)
+        readme = work_items / "README.md"
+        expected_readme_sha256 = hashlib.sha256(readme.read_bytes()).hexdigest()
+        rows = []
+        unchanged = {}
+        closures = {}
+        targets = {}
+        for index, (reference, slug) in enumerate(self.BUG_ROWS, start=1):
+            target = work_items / "bugs" / "archive" / "2026-08" / f"{slug}.md"
+            write(
+                target,
+                "status: fixed\n"
+                "Terminal-at: 2026-08-17T18:25:44Z\n"
+                f"Resolution: synthetic recovery fixture {index}\n"
+                "Evidence: focused recovery test\n",
+            )
+            algorithm, digest = module._payload_digest(target)
+            unchanged[reference] = digest
+            rows.append(
+                {
+                    "admission": {
+                        "negativeFixture": "bug_terminal_evidence_missing",
+                        "reader": "mutate-work-item:_category_locations",
+                        "result": "admitted",
+                        "utcOwner": "bug:Terminal-at",
+                        "validator": "mutate-work-item:_validate_flat_terminal",
+                    },
+                    "category": "bug",
+                    "digestAlgorithm": algorithm,
+                    "incomingLinks": {"references": [], "result": "clear"},
+                    "inputSha256": digest,
+                    "reference": reference,
+                    "source": f"bugs/{slug}.md",
+                    "target": f"bugs/archive/2026-08/{slug}.md",
+                    "terminalInstant": "2026-08-17T18:25:44Z",
+                }
+            )
+        for reference, slug, instant in self.WORK_ITEM_ROWS:
+            target = work_items / "archive" / "2026-08" / slug
+            status = quick_status().encode("utf-8")
+            closure_bytes = marked_closure(instant).encode("utf-8")
+            (target / "status.md").parent.mkdir(parents=True, exist_ok=True)
+            (target / "status.md").write_bytes(status)
+            (target / "closure.md").write_bytes(closure_bytes)
+            algorithm, before_tree = module._payload_digest(target)
+            after_status = module._terminalize_status(status)
+            (target / "status.md").write_bytes(after_status)
+            _after_algorithm, after_tree = module._payload_digest(target)
+            (target / "status.md").write_bytes(status)
+            targets[reference] = module.PartialRecoveryTarget(
+                reference=reference,
+                inventory_tree_preimage=before_tree,
+                status_preimage=hashlib.sha256(status).hexdigest(),
+                status_afterimage=hashlib.sha256(after_status).hexdigest(),
+                projected_tree_afterimage=after_tree,
+                closure_sha256=hashlib.sha256(closure_bytes).hexdigest(),
+            )
+            closures[reference] = closure_bytes
+            rows.append(
+                {
+                    "admission": {
+                        "negativeFixture": "work_item_terminal_evidence_missing",
+                        "reader": "mutate-work-item:_category_locations",
+                        "result": "admitted",
+                        "utcOwner": "closure.md:Closed",
+                        "validator": "mutate-work-item:_validate_closure",
+                    },
+                    "category": "work-item",
+                    "digestAlgorithm": algorithm,
+                    "incomingLinks": {"references": [], "result": "clear"},
+                    "inputSha256": before_tree,
+                    "reference": reference,
+                    "source": f"active/{slug}",
+                    "target": f"archive/2026-08/{slug}",
+                    "terminalInstant": instant,
+                }
+            )
+        inventory = {
+            "digestAlgorithms": module.MIGRATION_DIGEST_ALGORITHMS,
+            "owner": module.MIGRATION_OWNER,
+            "rows": sorted(rows, key=lambda row: row["reference"]),
+            "schemaVersion": module.MIGRATION_SCHEMA_VERSION,
+            "workItemsRoot": str(work_items.resolve()),
+        }
+        inventory_bytes = (
+            json.dumps(inventory, indent=2, sort_keys=True) + "\n"
+        ).encode("utf-8")
+        inventory_path = root / ".scratch" / "recovery-inventory.json"
+        inventory_path.parent.mkdir(exist_ok=True)
+        inventory_path.write_bytes(inventory_bytes)
+        return {
+            "inventory": inventory_path,
+            "inventory_sha256": hashlib.sha256(inventory_bytes).hexdigest(),
+            "expected_readme_sha256": expected_readme_sha256,
+            "receipt": root / ".scratch" / "recovery-receipt.json",
+            "targets": targets,
+            "unchanged": unchanged,
+            "closures": closures,
+            "status_preimages": {
+                reference: target.status_preimage
+                for reference, target in targets.items()
+            },
+        }
+
+    def _run(self, module, root: Path, fixture: dict, **kwargs):
+        with patch.multiple(
+            module,
+            PARTIAL_MIGRATION_RECOVERY_INVENTORY_SHA256=fixture[
+                "inventory_sha256"
+            ],
+            PARTIAL_MIGRATION_RECOVERY_README_PREIMAGE_SHA256=fixture[
+                "expected_readme_sha256"
+            ],
+            PARTIAL_MIGRATION_RECOVERY_TARGETS=fixture["targets"],
+            PARTIAL_MIGRATION_RECOVERY_UNCHANGED_ROWS=fixture["unchanged"],
+        ):
+            return module.recover_partial_migration_v1(
+                root,
+                fixture["inventory"],
+                expected_inventory_sha256=fixture["inventory_sha256"],
+                expected_readme_sha256=fixture["expected_readme_sha256"],
+                target_status_preimages=fixture["status_preimages"],
+                receipt_path=fixture["receipt"],
+                apply_admitted=True,
+                render_readme=True,
+                byte_check=True,
+                **kwargs,
+            )
+
+    def test_exact_recovery_is_receipt_bound_and_idempotent(self):
+        module = load_module()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fixture = self._fixture(module, root)
+            result = self._run(module, root, fixture)
+            self.assertFalse(result.replay)
+            self.assertEqual(result.audit, "PASS")
+            self.assertEqual(
+                hashlib.sha256(fixture["receipt"].read_bytes()).hexdigest().upper(),
+                result.receipt_sha256,
+            )
+            receipt_payload = json.loads(fixture["receipt"].read_bytes())
+            changed_rows = {
+                row["reference"]: row
+                for row in receipt_payload["rows"]
+                if row["action"] == "terminalize-status"
+            }
+            self.assertEqual(set(changed_rows), set(fixture["targets"]))
+            for reference, contract in fixture["targets"].items():
+                self.assertEqual(
+                    changed_rows[reference]["closureSha256"],
+                    contract.closure_sha256.upper(),
+                )
+            self.assertEqual(
+                {
+                    row["action"]
+                    for row in receipt_payload["rows"]
+                    if row["reference"] in fixture["unchanged"]
+                },
+                {"none"},
+            )
+            for reference, contract in fixture["targets"].items():
+                slug = reference.split(":", 1)[1]
+                target = root / "work-items" / "archive" / "2026-08" / slug
+                self.assertEqual(
+                    hashlib.sha256((target / "status.md").read_bytes()).hexdigest(),
+                    contract.status_afterimage,
+                )
+                self.assertEqual(
+                    (target / "closure.md").read_bytes(),
+                    fixture["closures"][reference],
+                )
+                self.assertFalse((root / "work-items" / "active" / slug).exists())
+            self.assertEqual(
+                (root / "work-items" / "README.md").read_bytes(),
+                module.render_readme_bytes(root),
+            )
+            receipt_before = fixture["receipt"].read_bytes()
+            with patch.object(
+                module,
+                "_atomic_write",
+                wraps=module._atomic_write,
+            ) as atomic_write:
+                result = self._run(module, root, fixture)
+            self.assertTrue(result.replay)
+            atomic_write.assert_not_called()
+            self.assertEqual(fixture["receipt"].read_bytes(), receipt_before)
+
+    def test_failure_after_first_status_rolls_back_then_retry_succeeds(self):
+        module = load_module()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fixture = self._fixture(module, root)
+            before = {
+                reference: (
+                    root
+                    / "work-items"
+                    / "archive"
+                    / "2026-08"
+                    / reference.split(":", 1)[1]
+                    / "status.md"
+                ).read_bytes()
+                for reference in fixture["targets"]
+            }
+            with self.assertRaises(module.LifecycleError) as caught:
+                self._run(
+                    module,
+                    root,
+                    fixture,
+                    inject_failure_at="after-status-1",
+                )
+            self.assertEqual(
+                caught.exception.failure_id,
+                "WI-PARTIAL-MIGRATION-RECOVERY-TEST-FAILPOINT",
+            )
+            self.assertFalse(fixture["receipt"].exists())
+            for reference, expected in before.items():
+                status = (
+                    root
+                    / "work-items"
+                    / "archive"
+                    / "2026-08"
+                    / reference.split(":", 1)[1]
+                    / "status.md"
+                )
+                self.assertEqual(status.read_bytes(), expected)
+            self.assertEqual(self._run(module, root, fixture).audit, "PASS")
+
+    def test_crash_afterimage_is_reentered_without_rewriting_completed_target(self):
+        module = load_module()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fixture = self._fixture(module, root)
+            reference = sorted(fixture["targets"])[0]
+            contract = fixture["targets"][reference]
+            status = (
+                root
+                / "work-items"
+                / "archive"
+                / "2026-08"
+                / reference.split(":", 1)[1]
+                / "status.md"
+            )
+            crash_afterimage = module._terminalize_status(status.read_bytes())
+            self.assertEqual(
+                hashlib.sha256(crash_afterimage).hexdigest(),
+                contract.status_afterimage,
+            )
+            status.write_bytes(crash_afterimage)
+            completed_before = status.read_bytes()
+            result = self._run(module, root, fixture)
+            self.assertFalse(result.replay)
+            self.assertEqual(status.read_bytes(), completed_before)
+            self.assertEqual(self._run(module, root, fixture).replay, True)
+
+    def test_pending_recovery_refuses_preexisting_receipt(self):
+        module = load_module()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fixture = self._fixture(module, root)
+            fixture["receipt"].write_bytes(b"not-an-authorized-receipt\n")
+            with self.assertRaises(module.LifecycleError) as caught:
+                self._run(module, root, fixture)
+            self.assertEqual(
+                caught.exception.failure_id,
+                "WI-PARTIAL-MIGRATION-RECOVERY-RECEIPT-CONFLICT",
+            )
+
+    def test_incomplete_exact_prefix_pending_receipt_is_recreated_after_crash(self):
+        module = load_module()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fixture = self._fixture(module, root)
+            self.assertEqual(self._run(module, root, fixture).audit, "PASS")
+            exact_receipt = fixture["receipt"].read_bytes()
+            fixture["receipt"].unlink()
+            pending = fixture["receipt"].with_name(
+                f".{fixture['receipt'].name}.pending-v1"
+            )
+            pending.write_bytes(exact_receipt[: len(exact_receipt) // 2])
+            recovered = self._run(module, root, fixture)
+            self.assertFalse(recovered.replay)
+            self.assertEqual(fixture["receipt"].read_bytes(), exact_receipt)
+            self.assertFalse(pending.exists())
+
+    def test_receipt_settlement_fsyncs_parent_directory_before_success(self):
+        module = load_module()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "receipt.json"
+            fsync_modes = []
+            real_fsync = module.os.fsync
+
+            def recording_fsync(descriptor):
+                fsync_modes.append(module.os.fstat(descriptor).st_mode)
+                return real_fsync(descriptor)
+
+            with patch.object(module.os, "fsync", side_effect=recording_fsync):
+                self.assertTrue(
+                    module._partial_recovery_settle_receipt(path, b"authorized\n")
+                )
+            self.assertTrue(
+                any(stat.S_ISDIR(mode) for mode in fsync_modes),
+                f"receipt parent directory was not fsynced: {fsync_modes!r}",
+            )
+
+    def test_receipt_directory_fsync_failure_cleans_own_link_and_retries(self):
+        module = load_module()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "receipt.json"
+            data = b"authorized\n"
+            with patch.object(
+                module,
+                "_partial_recovery_fsync_directory",
+                side_effect=module.LifecycleError(
+                    "WI-PARTIAL-MIGRATION-RECOVERY-RECEIPT-CREATE-UNSUPPORTED",
+                    "injected directory durability failure",
+                ),
+            ), self.assertRaises(module.LifecycleError):
+                module._partial_recovery_settle_receipt(path, data)
+            self.assertEqual(path.read_bytes(), data)
+            self.assertFalse(path.with_name(f".{path.name}.pending-v1").exists())
+            self.assertFalse(module._partial_recovery_settle_receipt(path, data))
+
+    def test_late_receipt_conflict_cleanup_does_not_mask_primary(self):
+        module = load_module()
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            path = parent / "receipt.json"
+            winner = parent / "winner.json"
+            wanted = b"authorized\n"
+            winner.write_bytes(wanted)
+            real_directory_fsync = module._partial_recovery_fsync_directory
+
+            def replace_after_fsync(directory_path):
+                real_directory_fsync(directory_path)
+                path.unlink()
+                try:
+                    os.symlink(winner, path)
+                except OSError as exc:
+                    self.skipTest(
+                        f"target environment cannot create a symlink: {exc}"
+                    )
+
+            with patch.object(
+                module,
+                "_partial_recovery_fsync_directory",
+                side_effect=replace_after_fsync,
+            ), self.assertRaises(module.LifecycleError) as caught:
+                module._partial_recovery_settle_receipt(path, wanted)
+
+            self.assertEqual(
+                caught.exception.failure_id,
+                "WI-PARTIAL-MIGRATION-RECOVERY-RECEIPT-CONFLICT",
+            )
+            self.assertTrue(path.is_symlink())
+            self.assertEqual(winner.read_bytes(), wanted)
+
+    def test_exact_receipt_symlink_race_is_conflict_not_success(self):
+        module = load_module()
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            path = parent / "receipt.json"
+            winner = parent / "winner.json"
+            wanted = b"authorized\n"
+            winner.write_bytes(wanted)
+
+            def racing_link(_source, destination):
+                try:
+                    os.symlink(winner, destination)
+                except OSError as exc:
+                    self.skipTest(f"target environment cannot create a symlink: {exc}")
+                raise FileExistsError(destination)
+
+            with patch.object(module.os, "link", side_effect=racing_link):
+                with self.assertRaises(module.LifecycleError) as caught:
+                    module._partial_recovery_settle_receipt(path, wanted)
+            self.assertEqual(
+                caught.exception.failure_id,
+                "WI-PARTIAL-MIGRATION-RECOVERY-RECEIPT-CONFLICT",
+            )
+            self.assertTrue(path.is_symlink())
+            self.assertEqual(winner.read_bytes(), wanted)
+
+    def test_closure_drift_refuses_before_status_write(self):
+        module = load_module()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fixture = self._fixture(module, root)
+            reference = sorted(fixture["targets"])[0]
+            slug = reference.split(":", 1)[1]
+            status = root / "work-items" / "archive" / "2026-08" / slug / "status.md"
+            closure_path = status.with_name("closure.md")
+            before = status.read_bytes()
+            closure_path.write_bytes(closure_path.read_bytes() + b"drift\n")
+            with self.assertRaises(module.LifecycleError) as caught:
+                self._run(module, root, fixture)
+            self.assertEqual(
+                caught.exception.failure_id,
+                "WI-PARTIAL-MIGRATION-RECOVERY-CLOSURE",
+            )
+            self.assertEqual(status.read_bytes(), before)
+            self.assertFalse(fixture["receipt"].exists())
+
+    def test_same_bytes_closure_replacement_identity_refuses_before_status_write(self):
+        module = load_module()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fixture = self._fixture(module, root)
+            before = {
+                reference: (
+                    root
+                    / "work-items"
+                    / "archive"
+                    / "2026-08"
+                    / reference.split(":", 1)[1]
+                    / "status.md"
+                ).read_bytes()
+                for reference in fixture["targets"]
+            }
+            real_preflight = module._partial_recovery_preflight
+
+            def replace_closure_identity(recovery_root, inventory):
+                plans = real_preflight(recovery_root, inventory)
+                closure = plans[0][0]["closure"]
+                replacement = closure.with_name(".closure.identity-replacement")
+                replacement.write_bytes(closure.read_bytes())
+                os.replace(replacement, closure)
+                return plans
+
+            with patch.object(
+                module,
+                "_partial_recovery_preflight",
+                side_effect=replace_closure_identity,
+            ), self.assertRaises(module.LifecycleError) as caught:
+                self._run(module, root, fixture)
+            self.assertEqual(
+                caught.exception.failure_id,
+                "WI-PARTIAL-MIGRATION-RECOVERY-CLOSURE",
+            )
+            for reference, expected in before.items():
+                status = (
+                    root
+                    / "work-items"
+                    / "archive"
+                    / "2026-08"
+                    / reference.split(":", 1)[1]
+                    / "status.md"
+                )
+                self.assertEqual(status.read_bytes(), expected)
+            self.assertFalse(fixture["receipt"].exists())
+
+
+class PartialMigrationRecoveryCliTests(unittest.TestCase):
+    def _argv(self, root: Path) -> list[str]:
+        return [
+            "recover-partial-migration-v1",
+            "--root",
+            str(root),
+            "--inventory",
+            ".scratch/inventory.json",
+            "--expected-inventory-sha256",
+            "A" * 64,
+            "--expected-readme-sha256",
+            "B" * 64,
+            "--target-status-preimage",
+            "work-item:2026-08-11-pr598-review-fix=" + "C" * 64,
+            "--target-status-preimage",
+            "work-item:2026-08-11-pr600-review-fix=" + "D" * 64,
+            "--receipt",
+            ".scratch/recovery-receipt.json",
+            "--apply-admitted",
+            "--render-readme",
+            "--byte-check",
+        ]
+
+    def test_parser_exposes_only_explicit_recovery_bindings(self):
+        module = load_module()
+        with tempfile.TemporaryDirectory() as directory:
+            args = module.build_parser().parse_args(self._argv(Path(directory)))
+        self.assertEqual(args.command, "recover-partial-migration-v1")
+        self.assertEqual(len(args.target_status_preimage), 2)
+        self.assertTrue(args.apply_admitted)
+        self.assertTrue(args.render_readme)
+        self.assertTrue(args.byte_check)
+
+    def test_main_routes_exact_bindings_and_rejects_duplicate_target(self):
+        module = load_module()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            argv = self._argv(root)
+            expected = module.PartialRecoveryResult("E" * 64, "PASS", False)
+            with patch.object(
+                module,
+                "recover_partial_migration_v1",
+                return_value=expected,
+            ) as recovery, redirect_stdout(io.StringIO()) as output:
+                self.assertEqual(module.main(argv), 0)
+            call_args, call_kwargs = recovery.call_args
+            observer = call_kwargs.pop("diagnostic_observer")
+            self.assertIs(type(observer), module.LifecycleDiagnosticObserver)
+            self.assertEqual(call_args, (root, Path(".scratch/inventory.json")))
+            self.assertEqual(
+                call_kwargs,
+                {
+                    "expected_inventory_sha256": "A" * 64,
+                    "expected_readme_sha256": "B" * 64,
+                    "target_status_preimages": {
+                        "work-item:2026-08-11-pr598-review-fix": "C" * 64,
+                        "work-item:2026-08-11-pr600-review-fix": "D" * 64,
+                    },
+                    "receipt_path": Path(".scratch/recovery-receipt.json"),
+                    "apply_admitted": True,
+                    "render_readme": True,
+                    "byte_check": True,
+                },
+            )
+            self.assertEqual(
+                output.getvalue(),
+                "PARTIAL-MIGRATION-RECOVERY: PASS "
+                + "receipt_sha256="
+                + "E" * 64
+                + " audit=PASS\n",
+            )
+            duplicate = argv + [
+                "--target-status-preimage",
+                "work-item:2026-08-11-pr598-review-fix=" + "F" * 64,
+            ]
+            with redirect_stdout(io.StringIO()) as error_output:
+                self.assertEqual(module.main(duplicate), 1)
+            self.assertIn(
+                "WI-PARTIAL-MIGRATION-RECOVERY-COVERAGE",
+                error_output.getvalue(),
+            )
+
+    def test_main_emits_exactly_one_committed_success_event(self):
+        module = load_module()
+        with tempfile.TemporaryDirectory() as directory:
+            result = module.PartialRecoveryResult("E" * 64, "PASS", False)
+            with patch.object(
+                module,
+                "recover_partial_migration_v1",
+                return_value=result,
+            ), redirect_stdout(io.StringIO()) as output:
+                self.assertEqual(module.main(self._argv(Path(directory))), 0)
+            self.assertEqual(
+                output.getvalue().splitlines(),
+                [
+                    "PARTIAL-MIGRATION-RECOVERY: PASS "
+                    + "receipt_sha256="
+                    + "E" * 64
+                    + " audit=PASS"
+                ],
+            )
+
+    def test_outcome_composer_preserves_primary_and_exact_eight_cleanup_slots(self):
+        module = load_module()
+        primary = module.LifecycleError(
+            "WI-PARTIAL-MIGRATION-RECOVERY-RECEIPT-CONFLICT",
+            "primary receipt conflict",
+        )
+        composer = module.LifecycleOutcomeComposer()
+        composer.capture_primary(primary)
+        for index, phase in enumerate(module.LIFECYCLE_CLEANUP_PHASES, start=1):
+            composer.record_cleanup(
+                phase=phase,
+                failure_id="WI-PARTIAL-MIGRATION-RECOVERY-CLEANUP-FAILED",
+                resource=f"resource-{index}",
+                diagnostic=f"cleanup-{index}",
+            )
+        composer.set_rollback("incomplete")
+
+        bundle = composer.finalize()
+
+        self.assertIs(bundle.primary, primary)
+        self.assertEqual(
+            tuple(record.phase for record in bundle.cleanup_failures),
+            module.LIFECYCLE_CLEANUP_PHASES,
+        )
+        self.assertEqual(len(bundle.cleanup_failures), 8)
+        self.assertEqual(bundle.rollback, "incomplete")
+        with self.assertRaises(Exception):
+            bundle.cleanup_failures += ()
+
+    def test_reusable_api_observer_preserves_control_flow_identity_and_zero_streams(self):
+        module = load_module()
+        primary = KeyboardInterrupt("operator cancellation")
+        observer = module.LifecycleDiagnosticObserver()
+
+        @module._lifecycle_participant
+        def failing_api(root):
+            composer = module._CURRENT_LIFECYCLE_OUTCOME_COMPOSER.get()
+            composer.record_cleanup(
+                phase="receipt-pending",
+                failure_id="WI-PARTIAL-MIGRATION-RECOVERY-CLEANUP-FAILED",
+                resource=".scratch/.receipt.pending-v1",
+                diagnostic="pending unlink failed",
+            )
+            raise primary
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = io.StringIO()
+            error = io.StringIO()
+            with redirect_stdout(output), redirect_stderr(error):
+                with self.assertRaises(KeyboardInterrupt) as caught:
+                    failing_api(
+                        Path(directory),
+                        diagnostic_observer=observer,
+                    )
+
+        self.assertIs(caught.exception, primary)
+        self.assertEqual(output.getvalue(), "")
+        self.assertEqual(error.getvalue(), "")
+        self.assertEqual(observer.state, "delivered")
+        self.assertEqual(observer.snapshot.primaryKind, "control-flow")
+        self.assertEqual(observer.snapshot.primaryType, "KeyboardInterrupt")
+        self.assertEqual(observer.snapshot.topLevelKind, "control-flow-primary")
+        self.assertEqual(
+            tuple(record.phase for record in observer.snapshot.cleanupFailures),
+            ("receipt-pending",),
+        )
+
+    def test_reusable_api_asyncio_cancelled_error_is_control_flow_and_same_object(self):
+        module = load_module()
+        primary = asyncio.CancelledError("cancelled")
+        observer = module.LifecycleDiagnosticObserver()
+
+        @module._lifecycle_participant
+        def cancelled_api(root):
+            composer = module._CURRENT_LIFECYCLE_OUTCOME_COMPOSER.get()
+            composer.record_cleanup(
+                phase="receipt-pending",
+                failure_id="WI-PARTIAL-MIGRATION-RECOVERY-CLEANUP-FAILED",
+                resource=".scratch/.receipt.pending-v1",
+                diagnostic="pending unlink failed",
+            )
+            raise primary
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = io.StringIO()
+            error = io.StringIO()
+            with redirect_stdout(output), redirect_stderr(error):
+                with self.assertRaises(asyncio.CancelledError) as caught:
+                    cancelled_api(
+                        Path(directory),
+                        diagnostic_observer=observer,
+                    )
+
+        self.assertIs(caught.exception, primary)
+        self.assertEqual(output.getvalue(), "")
+        self.assertEqual(error.getvalue(), "")
+        self.assertEqual(observer.state, "delivered")
+        self.assertEqual(observer.delivery_attempts, 1)
+        self.assertEqual(observer.snapshot.primaryKind, "control-flow")
+        self.assertEqual(observer.snapshot.primaryType, "CancelledError")
+        self.assertEqual(observer.snapshot.topLevelKind, "control-flow-primary")
+        self.assertEqual(
+            tuple(record.phase for record in observer.snapshot.cleanupFailures),
+            ("receipt-pending",),
+        )
+
+    def test_reusable_api_observer_rejection_is_one_shot_and_non_masking(self):
+        module = load_module()
+        primary = module.LifecycleError("WI-TEST-PRIMARY", "primary")
+        observer = module.LifecycleDiagnosticObserver(_reject_delivery=True)
+
+        @module._lifecycle_participant
+        def failing_api(root):
+            raise primary
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = io.StringIO()
+            error = io.StringIO()
+            with redirect_stdout(output), redirect_stderr(error):
+                with self.assertRaises(module.LifecycleError) as caught:
+                    failing_api(
+                        Path(directory),
+                        diagnostic_observer=observer,
+                    )
+
+        self.assertIs(caught.exception, primary)
+        self.assertEqual(output.getvalue(), "")
+        self.assertEqual(error.getvalue(), "")
+        self.assertEqual(observer.state, "delivery-failed")
+        self.assertIsNone(observer.snapshot)
+        self.assertEqual(
+            observer.delivery_failure.failure_id,
+            "WI-LIFECYCLE-DIAGNOSTIC-DELIVERY",
+        )
+        self.assertEqual(observer.delivery_attempts, 1)
+
+    def test_reusable_api_clean_candidate_returns_silently_after_release(self):
+        module = load_module()
+        observer = module.LifecycleDiagnosticObserver()
+        result = module.PartialRecoveryResult("E" * 64, "PASS", False)
+
+        @module._lifecycle_participant
+        def successful_api(root):
+            return module.PartialRecoveryCommittedCandidate(result)
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = io.StringIO()
+            error = io.StringIO()
+            with redirect_stdout(output), redirect_stderr(error):
+                actual = successful_api(
+                    Path(directory),
+                    diagnostic_observer=observer,
+                )
+
+        self.assertIs(actual, result)
+        self.assertEqual(output.getvalue(), "")
+        self.assertEqual(error.getvalue(), "")
+        self.assertEqual(observer.state, "not-needed")
+        self.assertIsNone(observer.snapshot)
+
+    def test_reusable_api_cleanup_only_promotes_earliest_slot_after_release(self):
+        module = load_module()
+        observer = module.LifecycleDiagnosticObserver()
+
+        @module._lifecycle_participant
+        def cleanup_only_api(root):
+            composer = module._CURRENT_LIFECYCLE_OUTCOME_COMPOSER.get()
+            composer.record_cleanup(
+                phase="receipt-pending",
+                failure_id="WI-PARTIAL-MIGRATION-RECOVERY-CLEANUP-FAILED",
+                resource=".scratch/.receipt.pending-v1",
+                diagnostic="pending unlink failed",
+            )
+            return "proposed-success"
+
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaises(module.LifecycleError) as caught:
+                cleanup_only_api(
+                    Path(directory),
+                    diagnostic_observer=observer,
+                )
+
+        self.assertEqual(
+            caught.exception.failure_id,
+            "WI-PARTIAL-MIGRATION-RECOVERY-CLEANUP-FAILED",
+        )
+        self.assertEqual(observer.snapshot.primaryKind, "none")
+        self.assertEqual(observer.snapshot.topLevelKind, "cleanup-only")
+        self.assertEqual(
+            observer.snapshot.topLevelFailureId,
+            "WI-PARTIAL-MIGRATION-RECOVERY-CLEANUP-FAILED",
+        )
+
+    def test_reusable_api_release_failure_preserves_existing_primary_identity(self):
+        module = load_module()
+        primary = module.LifecycleError("WI-TEST-PRIMARY", "primary")
+        observer = module.LifecycleDiagnosticObserver()
+        real_unlock = module.LifecycleTransaction._native_unlock
+
+        def fail_after_unlock(transaction):
+            real_unlock(transaction)
+            raise OSError("injected release failure")
+
+        @module._lifecycle_participant
+        def failing_api(root):
+            raise primary
+
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.object(
+                module.LifecycleTransaction,
+                "_native_unlock",
+                fail_after_unlock,
+            ), self.assertRaises(module.LifecycleError) as caught:
+                failing_api(
+                    Path(directory),
+                    diagnostic_observer=observer,
+                )
+
+        self.assertIs(caught.exception, primary)
+        self.assertEqual(
+            tuple(record.phase for record in observer.snapshot.cleanupFailures),
+            ("transaction-release",),
+        )
+        self.assertEqual(
+            observer.snapshot.cleanupFailures[0].failureId,
+            "WI-LIFECYCLE-LOCK-IDENTITY",
+        )
+
+    def test_reusable_api_rejects_subclassed_observer_before_lock_acquisition(self):
+        module = load_module()
+
+        class SubclassedObserver(module.LifecycleDiagnosticObserver):
+            pass
+
+        @module._lifecycle_participant
+        def successful_api(root):
+            return "unreachable"
+
+        observer = SubclassedObserver()
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.object(module, "LifecycleTransaction") as transaction:
+                with self.assertRaises(TypeError):
+                    successful_api(
+                        Path(directory),
+                        diagnostic_observer=observer,
+                    )
+            transaction.assert_not_called()
+        self.assertEqual(observer.state, "empty")
+
+    def test_cli_root_serializes_primary_cleanup_and_summary_exactly_once(self):
+        module = load_module()
+
+        @module._lifecycle_participant
+        def failing_recovery(root, *args, **kwargs):
+            composer = module._CURRENT_LIFECYCLE_OUTCOME_COMPOSER.get()
+            composer.record_cleanup(
+                phase="receipt-pending",
+                failure_id="WI-PARTIAL-MIGRATION-RECOVERY-CLEANUP-FAILED",
+                resource=".scratch/.recovery-receipt.json.pending-v1",
+                diagnostic="pending unlink failed",
+            )
+            raise module.LifecycleError(
+                "WI-PARTIAL-MIGRATION-RECOVERY-RECEIPT-CONFLICT",
+                "primary receipt conflict",
+            )
+
+        expected_record = json.dumps(
+            {
+                "causeType": None,
+                "diagnostic": "pending unlink failed",
+                "failureId": "WI-PARTIAL-MIGRATION-RECOVERY-CLEANUP-FAILED",
+                "index": 1,
+                "phase": "receipt-pending",
+                "resource": ".scratch/.recovery-receipt.json.pending-v1",
+                "total": 1,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.object(
+                module,
+                "recover_partial_migration_v1",
+                failing_recovery,
+            ), redirect_stdout(io.StringIO()) as output:
+                self.assertEqual(module.main(self._argv(Path(directory))), 1)
+
+        self.assertEqual(
+            output.getvalue().splitlines(),
+            [
+                "WI-PARTIAL-MIGRATION-RECOVERY-RECEIPT-CONFLICT: "
+                "primary receipt conflict",
+                f"CLEANUP-FAILURE: {expected_record}",
+                'CLEANUP-SUMMARY: {"count":1,"rollback":"not-needed"}',
+            ],
+        )
+
+    def test_cli_root_preserves_control_flow_and_unexpected_identity_without_typed_line(self):
+        module = load_module()
+        for primary in (
+            KeyboardInterrupt("operator cancellation"),
+            RuntimeError("unexpected failure"),
+        ):
+            with self.subTest(primary=type(primary).__name__):
+
+                @module._lifecycle_participant
+                def failing_recovery(root, *args, **kwargs):
+                    composer = module._CURRENT_LIFECYCLE_OUTCOME_COMPOSER.get()
+                    composer.record_cleanup(
+                        phase="receipt-pending",
+                        failure_id=(
+                            "WI-PARTIAL-MIGRATION-RECOVERY-CLEANUP-FAILED"
+                        ),
+                        resource=".scratch/.recovery-receipt.json.pending-v1",
+                        diagnostic="pending unlink failed",
+                    )
+                    raise primary
+
+                with tempfile.TemporaryDirectory() as directory:
+                    with patch.object(
+                        module,
+                        "recover_partial_migration_v1",
+                        failing_recovery,
+                    ), redirect_stdout(io.StringIO()) as output:
+                        with self.assertRaises(BaseException) as caught:
+                            module.main(self._argv(Path(directory)))
+
+                self.assertIs(caught.exception, primary)
+                lines = output.getvalue().splitlines()
+                self.assertEqual(len(lines), 2)
+                self.assertTrue(lines[0].startswith("CLEANUP-FAILURE: "))
+                self.assertEqual(
+                    lines[1],
+                    'CLEANUP-SUMMARY: {"count":1,"rollback":"not-needed"}',
+                )
+                self.assertNotIn("WI-TEST-PRIMARY", output.getvalue())
 
 
 class _UnittestAdapter(unittest.TestCase):

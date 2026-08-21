@@ -135,6 +135,118 @@ Project installs copy to the matching project-local runtime:
 
 Use the installed equivalent when the source checkout is not available in the target repository.
 
+## Recover one invalid closure attempt
+
+Use this recovery only when an earlier schema-version-2 closure event is valid as an individual event but invalid under the closure relation rules. The Lead-owned main conversation is the sole authority: the recovery record is fixed to `role=lead`, `executionRole=main`, and `scope=["ledger-recovery:closure-invalidation"]`. It invalidates the whole target event for derived closure and launch reduction; it never edits or removes the historical line.
+
+Derive the target digest from the exact stored JSONL line bytes after removing only the terminal line ending: remove one `LF`, or one terminal `CRLF` pair, and hash every remaining byte with SHA-256. Do not parse and reserialize the event. Supply the exact earlier `runId` as `invalidatesRunId` and the lowercase digest as `invalidatesEventSha256`; the manual-check evidence must name both exact tokens.
+
+```powershell
+python scripts/agent-run-ledger.py --work-item work-items/active/<slug> recover-invalid-closure --run-id <new-recovery-run-id> --target-run-id <invalid-closer-run-id> --target-event-sha256 <64-lowercase-hex> --evidence "manual-check:<invalid-closer-run-id> <64-lowercase-hex>"
+```
+
+The target must be one unique earlier V2 non-launch, non-recovery closer, must remain valid under every per-event rule, and must fail the shared closure relation evaluation. A valid closer is authoritative and cannot be invalidated. V3 events, malformed or otherwise per-event-invalid records, duplicate or future targets, recovery chains, and a second invalidation of the same target are refused. In particular, `ledger-recovery:target-per-event-invalid` means this mechanism is not applicable; repair requires a separately designed typed migration, not a broader recovery event.
+
+The writer holds the existing ledger lock, builds and validates a temporary candidate, replaces the ledger, then reads back and verifies the exact prefix, appended record, length, and digest. `RESULT: PASS recover-invalid-closure` means only **store-commit/readback** succeeded. It makes no `fsync`, power-loss, or crash-durability claim. A failure before replacement preserves the old bytes. A readback failure after replacement is indeterminate: inspect the ledger directly and do not rerun blindly or rewrite it back.
+
+Invalidation removes every closure edge contributed by the target event. It can therefore reopen a `REVISE` obligation or a launch. Append an ordinary independently authorized replacement terminal or closure event through the normal writer; the invalidation itself never satisfies the reopened obligation.
+
+## Migrate one legacy obligation
+
+This is the sole operator procedure for exactly two closed normalizations of a
+legacy V2 terminal event. The original raw events stay byte-for-byte present.
+`invalid-finding-class` changes only an unknown historical `findingClass` to
+`legacy-unclassified`; `remove-string-scratch-evidence` removes only a present
+string `scratchEvidence`. The caller selects neither a field nor a replacement:
+the lifecycle owner derives the one allowed projection from
+`--normalization-kind`.
+
+### Eligibility and exclusions
+
+| Input | Eligible? | Handling |
+| --- | --- | --- |
+| One unique earlier V2 `REVISE`, exact raw-line digest, complete diagnostic set `{LEDGER-EVENT-FINDING-CLASS-INVALID}` | Yes | The lifecycle owner generates the replacement; callers cannot provide it or select the class. |
+| p95 V2 terminal with a present string `scratchEvidence`, valid earlier launch relation, and a valid remove-only replacement | Yes, only with `--normalization-kind remove-string-scratch-evidence` | The lifecycle owner removes exactly that key in the effective projection; the raw line, original status, gate, and every other field remain unchanged. |
+| Relation-invalid C2/C1-C5 closer | No | Use `recover-invalid-closure` only when that separate contract admits it. |
+| Malformed, duplicate-key, ambiguous identity, missing field, unsafe artifact/evidence, or any non-class defect | No | Stop without writing. No value is inferred or repaired. |
+| V1, V3, or a ledger containing V3 | No | V1 has no V2 finding class; V3 keeps its separate reducer and writer. |
+| Apply/revoke/closure-invalidation control event | No | Cross-mechanism targeting, chains, duplicate recovery, and cycles are forbidden. |
+| architecture-pattern sibling | Type-eligible, not admitted by another item's operation | Require a separate explicit digest-bound invocation and its own gates. |
+
+### Apply
+
+Capture the current full-ledger SHA-256 and the exact target raw-line SHA-256
+after removing only its terminal line ending. Then run the one lifecycle-owned
+apply command:
+
+```powershell
+python scripts/mutate-work-item.py --root . migrate-legacy-ledger-obligation --slug <active-slug> --target-run-id <target-run-id> --target-event-sha256 <target-raw-sha256> --expected-ledger-sha256 <current-ledger-sha256> --operation-id <bounded-operation-id> --recorded-at <strict-UTC> --normalization-kind <invalid-finding-class|remove-string-scratch-evidence>
+```
+
+`WI-LEDGER-MIGRATION-COMMITTED` is authoritative only after exact anchor
+readback and receipt reconciliation. The anchor is the commit marker; the
+receipt is a derived read model. Its exact fields are `operationId`,
+`targetRunId`, `targetEventSha256`, `anchorRunId`, `anchorEventSha256`,
+`beforeLedgerBytes`, `beforeLedgerSha256`, `afterLedgerBytes`,
+`afterLedgerSha256`, `replacementEventSha256`, `normalizationKind`, `diagnosticId`,
+`sourcePath`, `receiptPath`, and `recordedAt`. `findingClass` is present only
+when the normalized target had one. Missing or conflicting derived
+receipt bytes are reconstructed only from the valid anchor and exact ledger.
+
+### Revoke before physical transition
+
+Revocation is append-only and allowed only while the item is still active and
+no transition intent or receipt exists:
+
+```powershell
+python scripts/mutate-work-item.py --root . revoke-legacy-ledger-obligation --slug <active-slug> --apply-run-id <apply-run-id> --apply-event-sha256 <apply-raw-sha256> --expected-ledger-sha256 <current-ledger-sha256> --operation-id <bounded-revoke-id> --recorded-at <strict-UTC>
+```
+
+`WI-LEDGER-MIGRATION-REVOKED` restores the original invalid diagnostic in the
+effective view; it never deletes the apply anchor or the source line.
+
+### Archive with a backlog successor
+
+Use this only after strict ledger closure, accepted terminal evidence, exact
+`bug-dispositions.json`, and the first-use gates below:
+
+```powershell
+python scripts/mutate-work-item.py --root . archive-with-successor --slug <active-slug> --closure-file <closure.md-input> --terminal-instant <strict-UTC> --successor-slug <new-backlog-slug> --successor-file <successor.md-input> --operation-id <bounded-transition-id> --expected-ledger-sha256 <current-ledger-sha256> --expected-readme-sha256 <current-readme-sha256>
+```
+
+The owner fsyncs transition intent, applies the bound bug dispositions, moves
+the item to its final archive, writes the flat successor only after that
+archive exists, refreshes README, and writes
+`lifecycle-transition-receipt.json`. Its `status: settled` record binds
+`archivePath`, `successorPath`, `successorSha256`, `ledgerSha256`,
+`statusSha256`, `closureSha256`, `bugDispositionReceiptSha256`,
+`migrationReceiptSha256`, and `readmeSha256`.
+
+### Failures, recovery, and telemetry
+
+| Failure class | Exact discriminator |
+| --- | --- |
+| Missing/non-unique target; target digest; ledger drift; ineligible target | `WI-LEDGER-MIGRATION-TARGET-IDENTITY`; `WI-LEDGER-MIGRATION-TARGET-DIGEST`; `WI-LEDGER-MIGRATION-LEDGER-DRIFT`; `WI-LEDGER-MIGRATION-TARGET-INELIGIBLE` |
+| Wrong defect class; replacement mismatch; V3; chain/cycle | `WI-LEDGER-MIGRATION-DEFECT-CLASS`; `WI-LEDGER-MIGRATION-REPLACEMENT-MISMATCH`; `WI-LEDGER-MIGRATION-V3-UNSUPPORTED`; `WI-LEDGER-MIGRATION-TOPOLOGY` |
+| Unknown normalization kind, kind/scope/evidence drift, or cross-kind revoke | `WI-LEDGER-MIGRATION-NORMALIZATION-KIND` |
+| Lock; invalid candidate; uncertain commit; receipt mismatch | `WI-LIFECYCLE-LOCK-HELD`; `WI-LEDGER-MIGRATION-CANDIDATE-INVALID`; `WI-LEDGER-MIGRATION-COMMIT-INDETERMINATE`; `WI-LEDGER-MIGRATION-RECEIPT-MISMATCH` |
+| Corrupt intent; rollback failure; roll-forward failure; settlement mismatch; late revoke | `WI-LIFECYCLE-TRANSITION-INTENT-INVALID`; `WI-LIFECYCLE-TRANSITION-ROLLBACK-INDETERMINATE`; `WI-LIFECYCLE-TRANSITION-ROLLFORWARD-INDETERMINATE`; `WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH`; `WI-LEDGER-MIGRATION-REVOCATION-FROZEN` |
+
+Telemetry always reports raw events separately from apply, revoke, and
+projected counts. Raw count never decreases; one active apply adds one raw
+control and one projected event, while revocation adds another raw control and
+returns projected count to zero. `legacy-unclassified` never enters a security
+count.
+
+Before first use, require focused migration tests, the contract checker, strict
+item validation, lifecycle audit, deterministic crash recovery, independent
+Architecture Review, Security Review, and Quality Assurance to pass on one
+frozen byte set. Before the first valid anchor, the implementation can revert
+as one atomic group. After a valid anchor, reader/projection support and the
+operator contract are forward-only. Before archive movement, operational
+rollback is the exact revoke command; after archive movement, recovery is
+forward-only to one exact successor, README, bug receipt, and settled receipt.
+
 ## Physical lifecycle V1
 
 For a tracked work-item, `status.md` is active recovery state and `closure.md`

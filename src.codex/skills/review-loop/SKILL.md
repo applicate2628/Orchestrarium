@@ -50,6 +50,8 @@ The **scout does not co-judge**: it executes spelled-out mechanical scans and su
 
 ## Hardening invariants (every round)
 
+The runtime gate explicitly enforces hardening invariants 7-8 (failed-lane-is-unverified, fail-closed aggregation); neither silence nor a null lane result can converge.
+
 1. Runtime-evidence is a hard gate, not a section (root captured this session; never pinned `CONFIRMED`).
 2. Every angle answers "root proven (runtime)?", "scope unchanged?", "verification adequate?" — not only its scope.
 3. Reject bare `PASS` — cite specific blockers (`file:line` / evidence) or a specific no-blocker rationale.

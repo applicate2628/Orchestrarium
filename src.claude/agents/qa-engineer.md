@@ -37,6 +37,7 @@ description: "QA engineer: verify phases and issue test verdicts."
 
 ## Working rules
 
+- Execute the portable schema in the [Causal UI Continuity contract](../contracts/ui-transition-continuity.md) for web/React through the repository browser, component, or end-to-end harness and for native mobile through the repository platform instrumentation/UI harness; a missing required harness is `BLOCKED`/`UNVERIFIED`, never permission to broaden the Qt-only role.
 - Prefer reproducible findings over vague quality feedback.
 - Add or update tests when the phase lacks the planned coverage.
 - Every QA-authored test for a defect or criterion cites a run that fails against pre-fix behavior through a revert, stub, or preserved pre-fix run. A test born green is not regression coverage.

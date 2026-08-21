@@ -1,0 +1,82 @@
+{
+  "capsulePathBounds": [
+    {"case":"minimal-clean","paths":["scripts/example.py"],"expected":"ADMITTED"},
+    {"case":"undeclared-object","paths":["scripts/example.py"],"mutationObject":"object-new","expected":"SOL-E005-DECLARATION-DRIFT"},
+    {"case":"undeclared-surface","paths":["docs/outside.md"],"expected":"SOL-E005-DECLARATION-DRIFT"},
+    {"case":"overlapping-roots","paths":["scripts","scripts/example.py"],"expected":"SOL-E001-CAPSULE-INVALID"},
+    {"case":"parent-traversal","paths":["../outside"],"expected":"SOL-E001-CAPSULE-INVALID"},
+    {"case":"absolute-path","paths":["C:/outside"],"expected":"SOL-E001-CAPSULE-INVALID"},
+    {"case":"empty-guard-set","paths":["scripts/example.py"],"guards":[],"expected":"SOL-E001-CAPSULE-INVALID"}
+  ],
+  "attemptReviewCardinality": [
+    {"case":"clean-first-attempt","rejectedAttempts":0,"reviewers":0,"expected":"ADMITTED"},
+    {"case":"one-rejected-attempt-one-reviewer","rejectedAttempts":1,"reviewers":1,"expected":"BOUNDED_CORRECTION"},
+    {"case":"one-rejected-attempt-many-reviewers","rejectedAttempts":1,"reviewers":3,"expected":"BOUNDED_CORRECTION"},
+    {"case":"two-distinct-rejected-attempts","rejectedAttempts":2,"reviewers":2,"expected":"SOL-E004-REASSESSMENT-REQUIRED"},
+    {"case":"class-rejected-first-attempt","rejectedAttempts":0,"reviewers":1,"expected":"SOL-E003-CLASS-REJECTED"},
+    {"case":"guard-fired-first-attempt","rejectedAttempts":0,"reviewers":0,"expected":"SOL-E003-CLASS-REJECTED"},
+    {"case":"unresolved-revise-class-switch","rejectedAttempts":1,"reviewers":1,"expected":"SOL-E004-REASSESSMENT-REQUIRED"}
+  ],
+  "launchStates": ["CLAIMED_NO_SPAWN","SPAWNED_UNCONFIRMED","STARTED","TERMINAL","REAPED"],
+  "legalLaunchTransitions": [
+    {"source":"CLAIMED_NO_SPAWN","target":"SPAWNED_UNCONFIRMED","outcome":"spawn-boundary"},
+    {"source":"CLAIMED_NO_SPAWN","target":"TERMINAL","outcome":"abandoned-before-spawn"},
+    {"source":"CLAIMED_NO_SPAWN","target":"TERMINAL","outcome":"cancelled-before-spawn"},
+    {"source":"CLAIMED_NO_SPAWN","target":"TERMINAL","outcome":"failed-before-spawn"},
+    {"source":"SPAWNED_UNCONFIRMED","target":"STARTED","outcome":"authenticated-start"},
+    {"source":"SPAWNED_UNCONFIRMED","target":"TERMINAL","outcome":"spawn-failed"},
+    {"source":"SPAWNED_UNCONFIRMED","target":"TERMINAL","outcome":"spawn-outcome-unknown"},
+    {"source":"SPAWNED_UNCONFIRMED","target":"TERMINAL","outcome":"cancelled-before-authentication"},
+    {"source":"SPAWNED_UNCONFIRMED","target":"TERMINAL","outcome":"timed-out-before-authentication"},
+    {"source":"SPAWNED_UNCONFIRMED","target":"TERMINAL","outcome":"unadoptable-child-terminated"},
+    {"source":"STARTED","target":"TERMINAL","outcome":"pass"},
+    {"source":"STARTED","target":"TERMINAL","outcome":"revise"},
+    {"source":"STARTED","target":"TERMINAL","outcome":"failed"},
+    {"source":"STARTED","target":"TERMINAL","outcome":"cancelled"},
+    {"source":"STARTED","target":"TERMINAL","outcome":"timed-out"},
+    {"source":"STARTED","target":"TERMINAL","outcome":"orphaned-after-start"},
+    {"source":"TERMINAL","target":"REAPED","outcome":"resources-absent"}
+  ],
+  "persistenceKillPoints": [
+    "candidate-validated","candidate-file-flushed","candidate-replaced","directory-flushed","live-path-readback","full-reduction-complete","result-returned"
+  ],
+  "operationRecoveryCases": [
+    {"case":"exact-replay","expected":"EXACT_REPLAY"},
+    {"case":"same-operation-different-payload","expected":"SOL-E010-OPERATION-CONFLICT"},
+    {"case":"replacement-outcome-unknown","expected":"SOL-E013-COMMIT-UNCERTAIN"},
+    {"case":"spawn-outcome-unknown","expected":"NO_AUTO_RELAUNCH"},
+    {"case":"pid-reuse","expected":"LOCK_TAKEOVER_DENIED"},
+    {"case":"wrong-fence-token","expected":"LOCK_TAKEOVER_DENIED"},
+    {"case":"aba-file-identity","expected":"LOCK_TAKEOVER_DENIED"}
+  ],
+  "routeCatalog": [
+    "claude.native-agent","claude.external.codex","claude.external.claude","codex.native-subagent","codex.root","codex.external.codex","codex.external.claude"
+  ],
+  "routeBindingFields": [
+    "routeId","originRuntime","provider","commandPath","commandVersion","commandIdentity","hookEvent","hookMatcher","hookHandler","hookCommand","hookSource","trustDigest","adapterSha256","reducerSha256","storeSha256","registrySha256","launcherSha256","sandboxDigest","installationId","generation","probeVersion","challengeDigest","fileOwner","fileMode","reparseIdentity"
+  ],
+  "routeProjectionFields": ["routeId","installationId","generation","bindingDigest","probeId"],
+  "byteWindowCases": [
+    {"case":"before-claim","expected":"SOL-E006-UNAUTHORIZED-DELTA"},
+    {"case":"inside-surface-window","expected":"INCLUDED_IN_FINAL_DIFF"},
+    {"case":"outside-all-open-surfaces","expected":"SOL-E006-UNAUTHORIZED-DELTA"},
+    {"case":"after-reaped","expected":"SOL-E011-POST-REAP-DRIFT"},
+    {"case":"baseline-drift","expected":"SOL-E006-UNAUTHORIZED-DELTA"}
+  ],
+  "resourceCleanup": [
+    "ledger-lock","candidate-file","directory-handle","registry-lock","capability-token","containment","provider-process-tree","stdin-pipe","stdout-pipe","stderr-pipe","reader-thread","cancellation-token"
+  ],
+  "versionInstallRollback": [
+    {"case":"v1-read","expected":"READABLE"},
+    {"case":"v2-read","expected":"READABLE"},
+    {"case":"v3-read","expected":"READABLE"},
+    {"case":"old-writer-v3","expected":"REFUSED"},
+    {"case":"v3-down-conversion","expected":"REFUSED"},
+    {"case":"reinstall-generation","expected":"ROTATED_ALL_DISABLED"},
+    {"case":"failed-install","expected":"OLD_OR_NEW_VALID_DISABLED"},
+    {"case":"post-v3-rollback","expected":"READERS_AND_OBLIGATIONS_RETAINED"}
+  ],
+  "launcherKillPoints": [
+    "before-manifest","after-manifest","before-spawn-boundary","after-spawn-boundary","after-os-spawn","before-authentication","after-authentication","before-go","after-go","before-terminal","after-terminal","before-reap","after-reap"
+  ]
+}

@@ -33,6 +33,7 @@ description: "Qt UI engineer: implement approved Widgets UI phases."
 
 ## Working rules
 
+- For a dynamic UI transition, follow the [Causal UI Continuity contract](../contracts/ui-transition-continuity.md): map the accepted transition instance to existing Qt owners, own the canonical update path and one authoritative settled adapter, and preserve semantic identity and valid interaction state.
 - Prefer Qt Widgets implementation details over broad frontend abstractions when the task is desktop UI work.
 - Keep state changes, event handling, and visual updates easy to review.
 - If the specification is ambiguous or the plan conflicts with reality, stop and return `BLOCKED` with the exact gap.

@@ -33,14 +33,14 @@ EXPECTED_PAYLOADS: dict[str, tuple[int, str]] = {
         "488c41acb051ccf6100422b28b3d4ded846e8d9cdd88fb937fb9b383f8d70319",
     ),
     "hook-behavior-contracts": (
-        16_115,
-        "4bacc7ef7c89ed3330f824a394e3e1a4672ee05809a5cd0b71e537a8cc58e1be",
+        17_038,
+        "5419e8b9c76f10964a3410a1a287b7b3638d07d1ccf727ce5f9e1f7c895923a9",
     ),
     # Payload pins force deliberate review of current hook behavior, placement,
     # and installer truth before a canonical-reference edit can pass.
     "hook-entrypoints-placement": (
-        785,
-        "6bff24491968f08061763e68b24876ba95d75e8b0c79766387b97c62ac6372a0",
+        924,
+        "98017e791601949a09f1d0ba4e32c7a429195dcdff99cca1b7f0df52a66d45ee",
     ),
     "installer-removal-json-path": (
         5_254,

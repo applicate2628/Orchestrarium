@@ -33,6 +33,16 @@ Shared-core documents may still keep provider-local addenda when the shared blue
 
 Russian translations live under `shared/references/ru/` for shared documents that are mirrored for Russian-language operators.
 
+Architecture-pattern selection uses one applicability-first semantic owner and one operator translation:
+
+- [`architecture-pattern-applicability.md`](architecture-pattern-applicability.md) — normative AP0-AP5 routing, disposition, verification, scenarios, diagnostics, and bilingual correspondence matrix.
+- [`ru/architecture-pattern-applicability.md`](ru/architecture-pattern-applicability.md) — Russian operator mirror; semantic acceptance remains owned by independent bilingual Architecture Review.
+
+Dynamic user-interface transitions use one causal-continuity semantic owner and one operator translation:
+
+- [`ui-transition-continuity.md`](ui-transition-continuity.md) — sole normative platform-neutral transition classes, continuity dimensions, failure identifiers, settled semantics, portable schema, and metamorphic oracle.
+- [`ru/ui-transition-continuity.md`](ru/ui-transition-continuity.md) — required non-authoritative Russian operator mirror; independent bilingual Architecture Review owns semantic-parity acceptance.
+
 Two design-only trunks own independence techniques at different stages: `review-loop-methodology.md` (independence at verification — multiple angles converge on one already-written artifact) and `design-panel-methodology.md` (independence at generation — N independently-framed candidate designs on one pinned problem, converged through one mandatory synthesis, before a single design exists). Installed operative bindings currently exist for the Claude and Codex PRODUCTION packs; `design-panel-methodology.md`'s Gemini/Qwen demo-pack mirror is an explicit, tracked DEFERRED follow-on, not yet shipped (see `work-items/bugs/2026-07-10-review-loop-pack-integration-gaps.md` for the related pre-existing review-loop demo-pack gap). Neither trunk carries exact provider paths or CLI syntax; those live in the corresponding pack binding.
 
 Intentional pack-local exceptions:

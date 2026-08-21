@@ -9,6 +9,8 @@ re-verification closer is appended.
 from __future__ import annotations
 
 import importlib.util
+import hashlib
+import json
 import sys
 import tempfile
 import unittest
@@ -958,3 +960,171 @@ class ArtifactResolutionFixture(unittest.TestCase):
         errors = vws.validate_work_item(item)
 
         self.assertTrue(errors, "an artifact escaping the repository must fail")
+
+
+# Recovery guards. Each expectation is literal and kills a distinct mutation in
+# the typed recovery reducer: target selection, digest binding, whole-event
+# invalidation, raw identity, lifecycle reopening, or per-event fatality.
+def _recovery(run_id: str, target: dict, target_line: bytes, **over: object) -> dict:
+    event = _event(
+        run_id,
+        role="lead",
+        executionRole="main",
+        status="completed",
+        gate="none",
+        scope=["ledger-recovery:closure-invalidation"],
+        eventKind="closure-invalidation",
+        invalidatesRunId=target["runId"],
+        invalidatesEventSha256=hashlib.sha256(target_line).hexdigest(),
+        evidence=[{"kind": "manual-check", "ref": f"{target['runId']} {hashlib.sha256(target_line).hexdigest()}"}],
+    )
+    event.update(over)
+    return event
+
+
+def _recovery_errors(events: list[dict]) -> tuple[list[str], dict[str, int]]:
+    item = Path(tempfile.mkdtemp())
+    (item / "status.md").write_text(STATUS_MD, encoding="utf-8")
+    (item / "design.md").write_text("fixture artifact\n", encoding="utf-8")
+    lines = [json.dumps(event, ensure_ascii=False, separators=(",", ":")).encode("utf-8") for event in events]
+    (item / "agent-runs.jsonl").write_bytes(b"\n".join(lines) + b"\n")
+    telemetry: dict[str, int] = {}
+    return vws.validate_work_item(item, telemetry=telemetry), telemetry
+
+
+def _invalid_author_closer(target_id: str, run_id: str = "run-invalid-author-closer") -> dict:
+    return _event(
+        run_id,
+        gate="PASS",
+        role="architecture-reviewer",
+        executionRole="main",
+        artifact="design.md",
+        lane="architecture",
+        effort="high",
+        provider="codex",
+        closesRunIds=[target_id],
+        evidence=[{"kind": "review", "ref": "author self-close"}],
+    )
+
+
+def _revise(run_id: str = "run-recovery-revise") -> dict:
+    return _event(run_id, gate="REVISE", status="revise", artifact="design.md", lane="architecture", effort="high", provider="codex", findingClass="correctness")
+
+
+def test_closure_recovery_preserves_existing_c1_c5_matrix() -> None:
+    target = _revise()
+    bad = _invalid_author_closer(target["runId"])
+    bad_line = json.dumps(bad, ensure_ascii=False, separators=(",", ":")).encode()
+    recovery = _recovery("run-recovery-control-01", bad, bad_line)
+    independent = _event("run-independent-c1", gate="PASS", artifact="design.md", closesRunIds=["run-missing-target"], evidence=[{"kind": "review", "ref": "x"}])
+    errors, _ = _recovery_errors([target, bad, recovery, independent])
+    assert any("run-missing-target" in error and "(C1)" in error for error in errors), errors
+    assert not any(bad["runId"] in error and "(C3)" in error for error in errors), errors
+
+
+def test_closure_recovery_does_not_reuse_run_id() -> None:
+    target = _revise()
+    bad = _invalid_author_closer(target["runId"])
+    line = json.dumps(bad, ensure_ascii=False, separators=(",", ":")).encode()
+    recovery = _recovery("run-recovery-control-02", bad, line)
+    duplicate = dict(_event(bad["runId"].upper()), gate="none")
+    errors, telemetry = _recovery_errors([target, bad, recovery, duplicate])
+    assert any("duplicate runId" in error for error in errors), errors
+    assert telemetry.get("recovery-accepted") == 1, telemetry
+
+
+def test_closure_recovery_preserves_scratch_ownership_checks() -> None:
+    target = _revise()
+    bad = _invalid_author_closer(target["runId"])
+    line = json.dumps(bad, ensure_ascii=False, separators=(",", ":")).encode()
+    recovery = _recovery("run-recovery-control-03", bad, line)
+    malformed = _event("run-scratch-bad", eventKind="terminal", launchRunId="run-missing-launch", gate="PASS", artifact="design.md", evidence=[{"kind": "review", "ref": "x"}], scratchEvidence="not-a-list")
+    errors, telemetry = _recovery_errors([target, bad, recovery, malformed])
+    assert any("scratchEvidence" in error for error in errors), errors
+    assert telemetry.get("recovery-accepted") == 1, telemetry
+
+
+def test_closure_recovery_reopens_launch_until_replacement_terminal() -> None:
+    launch = _event("run-recovery-launch", eventKind="launch", status="running")
+    ordinary = _event("run-non-revise-target")
+    terminal = _event("run-invalid-terminal", eventKind="terminal", launchRunId=launch["runId"], gate="PASS", artifact="design.md", closesRunIds=[ordinary["runId"]], evidence=[{"kind": "review", "ref": "x"}])
+    line = json.dumps(terminal, ensure_ascii=False, separators=(",", ":")).encode()
+    recovery = _recovery("run-recovery-control-04", terminal, line)
+    errors, telemetry = _recovery_errors([launch, ordinary, terminal, recovery])
+    assert any("unsettled launch" in error for error in errors), errors
+    assert telemetry.get("recovery-reopened-launch") == 1, telemetry
+
+
+def test_closure_recovery_invalidates_complete_mixed_target_attempt() -> None:
+    first, second = _revise("run-mixed-revise-one"), _revise("run-mixed-revise-two")
+    ordinary = _event("run-mixed-ordinary")
+    closer = _event("run-mixed-closer", gate="PASS", artifact="design.md", lane="architecture", effort="high", provider="codex", closesRunIds=[first["runId"], ordinary["runId"]], evidence=[{"kind": "review", "ref": "x"}])
+    line = json.dumps(closer, ensure_ascii=False, separators=(",", ":")).encode()
+    recovery = _recovery("run-recovery-control-05", closer, line)
+    errors, _ = _recovery_errors([first, second, ordinary, closer, recovery])
+    assert sum("open REVISE obligation" in error for error in errors) == 2, errors
+
+
+def test_closure_recovery_rejects_inline_sufficient_model_ranking_shape() -> None:
+    target = _invalid_author_closer(_revise()["runId"])
+    target["findingClass"] = "inline-sufficient"
+    line = json.dumps(target, ensure_ascii=False, separators=(",", ":")).encode()
+    recovery = _recovery("run-recovery-control-06", target, line)
+    errors, _ = _recovery_errors([_revise(), target, recovery])
+    assert any("ledger-recovery:target-per-event-invalid" in error for error in errors), errors
+
+
+def test_closure_recovery_rejects_target_identity_digest_and_topology_attacks() -> None:
+    target = _revise()
+    bad = _invalid_author_closer(target["runId"])
+    line = json.dumps(bad, ensure_ascii=False, separators=(",", ":")).encode()
+    recovery = _recovery(
+        "run-recovery-control-07",
+        bad,
+        line,
+        invalidatesEventSha256="0" * 64,
+        evidence=[{"kind": "manual-check", "ref": f"{bad['runId']} {'0' * 64}"}],
+    )
+    errors, _ = _recovery_errors([target, bad, recovery])
+    assert any("ledger-recovery:target-digest-mismatch" in error for error in errors), errors
+
+
+def test_closure_recovery_rejects_valid_closure_target() -> None:
+    target = _revise()
+    closer = _event("run-valid-review-closer", gate="PASS", artifact="design.md", lane="architecture", effort="high", provider="codex", closesRunIds=[target["runId"]], evidence=[{"kind": "review", "ref": "x"}])
+    line = json.dumps(closer, ensure_ascii=False, separators=(",", ":")).encode()
+    recovery = _recovery("run-recovery-control-08", closer, line)
+    errors, _ = _recovery_errors([target, closer, recovery])
+    assert any("ledger-recovery:target-authoritative" in error for error in errors), errors
+
+
+def test_closure_recovery_recovers_synthetic_c3_only_via_authorized_replacement() -> None:
+    target = _revise()
+    bad = _invalid_author_closer(target["runId"])
+    line = json.dumps(bad, ensure_ascii=False, separators=(",", ":")).encode()
+    recovery = _recovery("run-recovery-control-09", bad, line)
+    replacement = _event("run-authorized-replacement", gate="PASS", artifact="design.md", lane="architecture", effort="high", provider="codex", closesRunIds=[target["runId"]], evidence=[{"kind": "review", "ref": "independent re-review"}])
+    errors, telemetry = _recovery_errors([target, bad, recovery, replacement])
+    assert errors == [], errors
+    assert telemetry.get("recovery-accepted") == 1, telemetry
+
+
+def test_closure_recovery_preserves_c5() -> None:
+    protected = _event("run-protected-revise", gate="REVISE", status="revise", artifact="design.md", findingClass="security")
+    waiver = _event("run-invalid-user-waiver", role="lead", executionRole="main", gate="WAIVED:user", status="completed", closesRunIds=[protected["runId"]], evidence=[{"kind": "manual-check", "ref": f"user authorizes {protected['runId']}"}])
+    line = json.dumps(waiver, ensure_ascii=False, separators=(",", ":")).encode()
+    recovery = _recovery("run-recovery-control-10", waiver, line)
+    second_waiver = dict(waiver, runId="run-invalid-user-waiver-two")
+    errors, telemetry = _recovery_errors([protected, waiver, recovery, second_waiver])
+    assert any("(C5)" in error for error in errors), errors
+    assert telemetry.get("recovery-accepted") == 1, telemetry
+
+
+def test_closure_recovery_rejects_per_event_invalid_targets() -> None:
+    target = _revise()
+    bad = _invalid_author_closer(target["runId"])
+    del bad["evidence"]
+    line = json.dumps(bad, ensure_ascii=False, separators=(",", ":")).encode()
+    recovery = _recovery("run-recovery-control-11", bad, line)
+    errors, _ = _recovery_errors([target, bad, recovery])
+    assert any("ledger-recovery:target-per-event-invalid" in error for error in errors), errors

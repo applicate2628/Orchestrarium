@@ -288,8 +288,8 @@ def test_main_runtime_policy_warns_on_shortening_and_fails_closed(
     monkeypatch.setenv("CODEX_HOME", str(codex_home))
     module = _module()
     runtime_globals = module["main"].__globals__
+    original_which = runtime_globals["shutil"].which
     runtime_globals["DEFAULT_REPO_SKILLS"] = repo_skills
-    runtime_globals["shutil"].which = lambda _name: "codex"
     runtime_globals["discover_entries"] = lambda *_args: []
     runtime_globals["validate"] = lambda *_args, **_kwargs: (True, ["STATIC"])
     status, diagnostic = observation
@@ -306,12 +306,15 @@ def test_main_runtime_policy_warns_on_shortening_and_fails_closed(
         omitted_pack=("alpha",) if status == "omitted-pack" else (),
     )
 
-    code = module["main"]([])
-    output = capsys.readouterr().out
+    with monkeypatch.context() as runtime_patch:
+        runtime_patch.setattr(runtime_globals["shutil"], "which", lambda _name: "codex")
+        code = module["main"]([])
+        output = capsys.readouterr().out
 
     assert code == expected_code
     assert expected_marker in output
     assert f"RESULT: {'PASS' if expected_code == 0 else 'FAIL'}" in output
+    assert runtime_globals["shutil"].which is original_which
 
 
 # --- Fail-first verification: prove the gate can actually fire -------------

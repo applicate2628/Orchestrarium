@@ -10,9 +10,33 @@ Keep the log in reverse-chronological `## YYYY-MM-DD` sections. Add new explanat
 
 Do not add entries for purely local-only hygiene edits such as formatting, link fixes, report-only churn, scratch cleanup, archive moves, or non-semantic wording cleanup.
 
+## 2026-08-18
+
+- Current decision reads now accept only the frozen, manifest-admitted legacy YAML-frontmatter V0 records alongside the canonical leading-list V1 format. A strict repository-local manifest binds every admitted legacy path to its SHA-256 bytes and accepted policy decision before status reads, so copied, backdated, missing, changed, stale, or reappearing legacy records fail closed; decision bodies stay opaque and all authoring remains V1-only. The lifecycle owner remains generic, retirement mutation is explicitly outside this read-compatibility slice, and existing archives and unrelated lifecycle behavior are unchanged.
+
+- Current decision audits now recognize a separate read-only H1 profile for exactly 13 frozen leading-list records admitted by a repository-local path-and-SHA-256 manifest. This lets repository operators audit those historical decisions truthfully while any new, copied, backdated, missing, changed, stale, or retired-then-reappearing record fails closed before lifecycle evaluation. The canonical V1 format remains the sole write format, the existing 53-record YAML-frontmatter V0 profile and grammar are unchanged, no H1 retirement writer is introduced, and PR598/PR600 recovery and registry-data rewrites remain outside this compatibility slice.
+
+- The warn-only stray-artifact guard now covers four command-derived mistakes: unrequested `git worktree add`, mangled Windows redirect targets, build/log redirects into a repository root, and compiler invocations that would emit artifacts into that root. Root-sensitive checks require a confirmed repository-root working directory and stay silent after an explicit directory change; directed compiler output, scratch-subdirectory output, non-artifact redirects, and well-formed external Windows paths remain allowed. Warnings continue through the model-visible `hookSpecificOutput.additionalContext` channel with exit code 0 and never block. This closes the operator-documentation gap for the behavior introduced by `950a799` without changing its production logic.
+
+## 2026-08-17
+
+- The V2 agent-run ledger can now recover from one otherwise valid closure event whose closure relationship is invalid by appending a Lead-authorized, digest-bound invalidation record. The original bytes remain auditable, valid closures and malformed events remain untargetable, reopened obligations still require an ordinary authorized replacement, V3 state stays independent, and the dedicated writer reports success only after atomic replacement plus exact readback. The sole operational procedure lives in the execution-tracking runbook; installation and overview documents remain pointers.
+
+## 2026-08-13
+
+- Added one specialist-owned Causal UI Continuity contract for dynamic user-interface transitions, together with its required non-authoritative Russian operator mirror. The contract replaces coordinate-freeze and API-ban heuristics with a causal, eight-dimension rule; it preserves identity and task state on equivalent refreshes while explicitly permitting bounded accessibility, localization, responsive, structural, lifecycle, corrective, and user-intended changes. Live Codex and Claude roles will consume one English-only neutral installed contract leaf through the existing installer workflow, without installing the maintainer reference tree or creating provider-specific semantic copies.
+
+## 2026-08-12
+
+- Common-skill validation now treats Codex and Claude Code as the live parity pair while independently pinning the deprecated Gemini and Qwen examples as frozen per-pack snapshots. The generic runtime policy map was removed; standalone production validators retain their provider-local pins, and this change introduces no npm dependency or frozen-source edit.
+
+- Architecture-pattern guidance is now applicability-first: Lead routes only evidence-shaped cases, Architect records `selected | rejected | deferred` dispositions, and Architecture Reviewer independently verifies both positive and negative selection. This prevents cargo-cult pattern adoption while keeping zero selected patterns valid. Static source/install parity does not prove provider/model obedience; runtime fidelity remains `ASSUMPTION (UNVERIFIED)` until a separately pinned fresh-context report exists.
+
 ## 2026-08-11
 
 - Claude and Codex design-panel bindings now use one fail-closed candidate-isolation rule: native Agent/subagent lanes are ineligible while sealing is unverified, and candidates run only through the existing direct external-worker boundary. External failure remains visible and may not fall back to an internal candidate.
+
+- The git-push publication gate now registers a minimal fixed-sibling import runner for `hook_common.py` and the unchanged policy module. Warm launches can use Python's standard bytecode cache; load or delegation failures deny without raw detail. The changed Codex command identity requires interactive trust review after the next install.
 
 - Lead correction retries and autonomous review-loop rounds now have separate owners: the shared spine alone owns the generic consecutive same-role/same-artifact `REVISE` limit, while `review_loop_state.py` exposes the explicit `REVIEW_LOOP_ROUND_CAP` for the independently bounded multi-angle loop. Existing numeric limits and explicit `--cap` overrides are unchanged.
 

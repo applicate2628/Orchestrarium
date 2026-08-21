@@ -1,4 +1,5 @@
 import importlib.util
+import hashlib
 import json
 import os
 import shutil
@@ -869,12 +870,58 @@ def test_decision_schema_failure_reaches_repository_state_checker(tmp_path: Path
     )
     decision.parent.mkdir(parents=True)
     decision.write_text(
-        "---\nstatus: proposed\ndate: 2026-08-11\n---\n"
+        "---\nstatus: proposed\nnot-a-field\ndate: 2026-08-11\n---\n"
         "\n# Decision: malformed\n",
+        encoding="utf-8",
+    )
+    entry = {
+        "path": decision.name,
+        "sha256": hashlib.sha256(decision.read_bytes()).hexdigest().upper(),
+        "state": "admitted",
+    }
+    baseline = hashlib.sha256(
+        f"{entry['path']}\0{entry['sha256']}\n".encode("utf-8")
+    ).hexdigest().upper()
+    policy_slug = "2026-08-18-current-decision-schema-versioned-read-compatibility"
+    (decision.parent / f"{policy_slug}.md").write_text(
+        "\n".join(
+            [
+                f"- id: {policy_slug}",
+                "- status: accepted",
+                "- date: 2026-08-18",
+                "- decided-by: $architect",
+                "- context: schema-test",
+                "- supersedes: none",
+                "- superseded-by: none",
+                "- accepted-evidence: fixture",
+                "- v0-manifest: work-items/decision-v0-compatibility.json",
+                f"- v0-baseline-sha256: {baseline}",
+                "- v0-cutover-date: 2026-08-18",
+                "",
+                f"# Decision: {policy_slug}",
+                "",
+                "## Decision",
+                "Fixture policy anchor.",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "work-items" / "decision-v0-compatibility.json").write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "policyDecision": policy_slug,
+                "cutoverDate": "2026-08-18",
+                "baselineSha256": baseline,
+                "entries": [entry],
+            }
+        )
+        + "\n",
         encoding="utf-8",
     )
 
     result = run_checker(tmp_path)
 
     assert result.returncode == 1
-    assert "WI-DECISION-SCHEMA-INVALID" in result.stdout
+    assert "WI-DECISION-V0-SCHEMA-INVALID" in result.stdout

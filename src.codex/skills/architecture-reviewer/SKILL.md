@@ -32,13 +32,15 @@ description: "Architecture/maintainability gate: coupling, cohesion, layering, d
 
 ## Gate
 
+- Reject any pipeline touching shared mutable state unless the accepted design names exactly one writer-owner and a downstream-observable `settled/committed` event, and the implementation preserves both.
+
 - The implementation or control-plane change remains aligned with the accepted design or governance intent.
 - Readability, complexity, contract boundaries, dependency direction, and cognitive load stay within team standards.
 - Approved extension seams or governance boundaries are used correctly, or new ones are justified explicitly.
 - A local feature or governance patch does not drag unrelated modules or policies into the diff without a design-backed reason.
 - A cross-cutting / long-lived decision asserted in the design without a `work-items/decisions/` registry id is a blocking `REVISE`.
 - The change does not pass with unexplained architectural drift, contradictory control-plane behavior, or avoidable debt growth.
-- Reject any pipeline touching shared mutable state unless the accepted design names exactly one writer-owner and a downstream-observable `settled/committed` event, and the implementation preserves both.
+- Against the [Causal UI Continuity contract](../../contracts/ui-transition-continuity.md), verify one semantic owner, row/section-level English/Russian meaning parity, one writer per mutable dimension, one settled evidence seam, no duplicate rule catalog, and no unexplained dimension delta; this role reviews bilingual meaning and topology, not platform execution.
 - Verify every declared diff-invisible invariant by running its named regression guard or recording why that guard failed; the returned implementation artifact must satisfy the shared receiving-side echo contract, and a missing echo blocks `PASS`.
 - If the diff materially exceeds the approved change surface, return `REVISE` for a split instead of issuing a low-confidence `PASS`.
 
@@ -111,6 +113,23 @@ When a significant issue is found outside the architecture domain:
 2. State the observation factually — do not evaluate severity outside your expertise.
 3. The orchestrator routes the tagged finding to the appropriate specialist.
 4. This finding does not block the current gate unless the review cannot be completed without it.
+
+<!-- APAT-BLOCK:ARCHITECTURE-REVIEW:BEGIN -->
+## Architecture-pattern verification (APAT)
+
+Architecture Reviewer verifies and does not redesign:
+
+- every evidence-triggered candidate has a complete Pattern Disposition Record with `selected | rejected | deferred` and all AP0 fields;
+- each selection has accepted positive evidence, and each tempting but unsuitable pattern has explicit negative evidence;
+- zero selected patterns remains valid and no pattern name, popularity, or model familiarity is treated as evidence;
+- dispositions preserve the smallest-durable-design, one-owner, stable-seam, failure-transparency, migration, and reliability contracts;
+- composition does not conflate bounded context with deployment, CQRS with event sourcing, outbox with distributed atomicity or exactly-once delivery, saga with a local transaction, or workflow with saga;
+- selection logic exists only in Architect; Lead only routes, while Backend, Data, and Reliability remain downstream consequence owners;
+- a cross-cutting selection cites an accepted decision record and implementation consumes the accepted Change-Surface Contract;
+- the Russian mirror receives a row-by-row bilingual semantic verdict; identifier, word, byte, or hash equality alone is insufficient.
+
+Static source/install parity does not prove provider or model obedience. Without a separately admitted pinned fresh-context report, runtime fidelity remains `ASSUMPTION (UNVERIFIED)`.
+<!-- APAT-BLOCK:ARCHITECTURE-REVIEW:END -->
 
 ## Non-goals
 

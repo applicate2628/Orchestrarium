@@ -13,11 +13,29 @@ empirically pinned in this repository.
 from __future__ import annotations
 
 import argparse
+import hashlib
+import re
 from pathlib import Path
 
 
 SIZE_CAP = 36_771
 WARNING_BAND = 250
+
+REFERENCE_PAYLOAD_BEGIN = re.compile(
+    rb"<!-- BEGIN ORCHESTRARIUM PAYLOAD: ([a-z0-9-]+) -->\r?\n"
+)
+REFERENCE_PAYLOAD_END = re.compile(
+    rb"<!-- END ORCHESTRARIUM PAYLOAD: ([a-z0-9-]+) -->"
+)
+HOOK_SCRIPT_NAME = re.compile(r"\bcheck-[A-Za-z0-9_-]+\.py\b")
+STATUS_ID = re.compile(r"\b[A-Z][A-Z0-9]*(?:-[A-Z0-9]+){2,}\b")
+USER_CONTROL_MARKER = re.compile(
+    r"\[(?:approve|skip|acknowledge|revoke)[^\]\r\n]*\]"
+)
+RU_HOOK_BEHAVIOR_PAYLOAD_PIN = (
+    22_849,
+    "37bcf9b3f9d904eb0f1d3235b515e2c1dfa29508883002b9b9c55bf3ebc97aea",
+)
 
 INSTALL_ANCHORS = (
     "@AGENTS.md",
@@ -150,6 +168,120 @@ def validate(claude_md: Path, size_cap: int = SIZE_CAP) -> tuple[bool, list[str]
     return ok, messages
 
 
+def _read_reference(path: Path, label: str) -> tuple[bytes | None, str | None, list[str]]:
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        return None, None, [f"FAIL CRM-REFERENCE-READ: {label}: {exc}"]
+    try:
+        text = raw.decode("utf-8", errors="strict")
+    except UnicodeDecodeError as exc:
+        return None, None, [f"FAIL CRM-REFERENCE-UTF8: {label}: {exc}"]
+    return raw, text, []
+
+
+def _payload_inventory(raw: bytes) -> tuple[tuple[str, ...], dict[str, bytes] | None]:
+    begins = tuple(
+        match.group(1).decode("ascii") for match in REFERENCE_PAYLOAD_BEGIN.finditer(raw)
+    )
+    ends = tuple(
+        match.group(1).decode("ascii") for match in REFERENCE_PAYLOAD_END.finditer(raw)
+    )
+    if begins != ends or len(begins) != len(set(begins)):
+        return begins, None
+
+    payloads: dict[str, bytes] = {}
+    for payload_id in begins:
+        begin = re.compile(
+            rb"<!-- BEGIN ORCHESTRARIUM PAYLOAD: "
+            + re.escape(payload_id.encode("ascii"))
+            + rb" -->\r?\n"
+        ).search(raw)
+        end_marker = (
+            f"<!-- END ORCHESTRARIUM PAYLOAD: {payload_id} -->".encode("ascii")
+        )
+        if begin is None:
+            return begins, None
+        finish = raw.find(end_marker, begin.end())
+        if finish < 0:
+            return begins, None
+        payloads[payload_id] = raw[begin.end() : finish]
+    return begins, payloads
+
+
+def validate_reference_mirror(
+    english_reference: Path,
+    russian_reference: Path,
+) -> tuple[bool, list[str]]:
+    """Validate the mechanical contract shared by the English and Russian references."""
+    en_raw, en_text, messages = _read_reference(english_reference, "English reference")
+    ru_raw, ru_text, ru_messages = _read_reference(russian_reference, "Russian reference")
+    messages.extend(ru_messages)
+    if en_raw is None or en_text is None or ru_raw is None or ru_text is None:
+        return False, messages
+
+    en_ids, en_payloads = _payload_inventory(en_raw)
+    ru_ids, ru_payloads = _payload_inventory(ru_raw)
+    ok = True
+    if en_payloads is None or ru_payloads is None:
+        ok = False
+        messages.append("FAIL CRM-PAYLOAD-BOUNDARY: malformed or duplicate payload boundary")
+    if en_ids != ru_ids:
+        ok = False
+        messages.append(
+            "FAIL CRM-PAYLOAD-ID-SET: English/Russian payload order or identity differs"
+        )
+    else:
+        messages.append(f"PASS: Claude reference mirror payloads {len(en_ids)}/{len(en_ids)}")
+
+    en_hooks = set(HOOK_SCRIPT_NAME.findall(en_text))
+    ru_hooks = set(HOOK_SCRIPT_NAME.findall(ru_text))
+    if en_hooks != ru_hooks:
+        ok = False
+        messages.append("FAIL CRM-HOOK-NAME-SET: English/Russian hook names differ")
+    else:
+        messages.append(f"PASS: Claude reference mirror hooks {len(en_hooks)}/{len(en_hooks)}")
+
+    en_statuses = set(STATUS_ID.findall(en_text))
+    ru_statuses = set(STATUS_ID.findall(ru_text))
+    if en_statuses != ru_statuses:
+        ok = False
+        messages.append("FAIL CRM-STATUS-ID-SET: English/Russian status IDs differ")
+    else:
+        messages.append(
+            f"PASS: Claude reference mirror status IDs {len(en_statuses)}/{len(en_statuses)}"
+        )
+
+    en_markers = set(USER_CONTROL_MARKER.findall(en_text))
+    ru_markers = set(USER_CONTROL_MARKER.findall(ru_text))
+    if en_markers != ru_markers:
+        ok = False
+        messages.append("FAIL CRM-USER-MARKER-SET: English/Russian user markers differ")
+    else:
+        messages.append(
+            f"PASS: Claude reference mirror user markers {len(en_markers)}/{len(en_markers)}"
+        )
+
+    ru_hook_payload = (
+        None if ru_payloads is None else ru_payloads.get("hook-behavior-contracts")
+    )
+    expected_size, expected_sha256 = RU_HOOK_BEHAVIOR_PAYLOAD_PIN
+    if (
+        ru_hook_payload is None
+        or len(ru_hook_payload) != expected_size
+        or hashlib.sha256(ru_hook_payload).hexdigest() != expected_sha256
+    ):
+        ok = False
+        messages.append(
+            "FAIL CRM-RU-HOOK-PAYLOAD-PIN: Russian hook-behavior-contracts "
+            "payload changed without a reviewed pin update"
+        )
+    else:
+        messages.append("PASS: Russian hook-behavior-contracts payload pin")
+
+    return ok, messages
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     repo_root = Path(__file__).resolve().parent.parent
@@ -168,9 +300,31 @@ def main(argv: list[str] | None = None) -> int:
             f"(post-extraction default: {SIZE_CAP})."
         ),
     )
+    parser.add_argument(
+        "--reference",
+        type=Path,
+        default=repo_root / "references-claude" / "claude-md-structural-enforcement.md",
+        help="English structural-enforcement maintainer reference.",
+    )
+    parser.add_argument(
+        "--ru-reference",
+        type=Path,
+        default=(
+            repo_root
+            / "references-claude"
+            / "ru"
+            / "claude-md-structural-enforcement.md"
+        ),
+        help="Russian structural-enforcement maintainer reference.",
+    )
     args = parser.parse_args(argv)
 
     ok, messages = validate(args.claude_md, args.size_cap)
+    mirror_ok, mirror_messages = validate_reference_mirror(
+        args.reference, args.ru_reference
+    )
+    ok = ok and mirror_ok
+    messages.extend(mirror_messages)
     print(f"=== Claude Markdown validation ({args.claude_md}) ===")
     for message in messages:
         print(message)

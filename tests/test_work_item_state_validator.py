@@ -1,4 +1,5 @@
 import importlib.util
+import hashlib
 import json
 import shutil
 import subprocess
@@ -6,6 +7,9 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+
+import pytest
+from jsonschema import Draft202012Validator
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -15,6 +19,13 @@ CONTRACT_CHECK = ROOT / "scripts" / "check-agent-run-ledger-contract.py"
 
 def load_validator_module():
     spec = importlib.util.spec_from_file_location("validate_work_item_state_direct", VALIDATOR)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_contract_check_module():
+    spec = importlib.util.spec_from_file_location("agent_run_ledger_contract_direct", CONTRACT_CHECK)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -143,6 +154,47 @@ def ledger_event(**overrides):
         "startedAt": "2026-05-03T14:20:00Z",
         "updatedAt": "2026-05-03T14:24:00Z",
         "notes": "happy path",
+    }
+    event.update(overrides)
+    return event
+
+
+def solution_capsule() -> dict:
+    return {
+        "version": 1,
+        "declarationSetId": "declaration-one",
+        "objects": [
+            {
+                "decisionObjectId": "object-one",
+                "mutationSurfaces": ["scripts/example.py"],
+                "solutionClasses": ["class-one"],
+                "initialClassId": "class-one",
+                "initialAttemptId": "attempt-one",
+                "guardIds": [
+                    "mutation-surface-subset",
+                    "no-new-dependency",
+                    "no-new-contract-risk-owner",
+                    "forbidden-mechanism-tag",
+                    "required-oracle",
+                    "item-specific-stop",
+                ],
+            }
+        ],
+        "baseline": "b" * 64,
+        "author": "accepted-admission-run",
+    }
+
+
+def v3_event(**overrides) -> dict:
+    event = {
+        "schemaVersion": 3,
+        "eventId": "solution-event-0001",
+        "operationId": "solution-operation-0001",
+        "fingerprint": "1" * 64,
+        "priorHead": "GENESIS",
+        "recordedAt": "2026-08-13T07:30:00Z",
+        "eventType": "solution-bootstrap",
+        "payload": {"capsule": solution_capsule()},
     }
     event.update(overrides)
     return event
@@ -360,6 +412,56 @@ def test_schema_contract_check_exercises_validator_negative_cases() -> None:
     assert "RESULT: PASS" in result.stdout
 
 
+def test_agent_run_schema_is_valid_draft_2020_12() -> None:
+    schema = json.loads(
+        (ROOT / "shared" / "schemas" / "agent-runs.schema.json").read_text(encoding="utf-8")
+    )
+    Draft202012Validator.check_schema(schema)
+
+
+def test_scratch_evidence_schema_activates_declared_proof_polarity() -> None:
+    schema = json.loads(
+        (ROOT / "shared" / "schemas" / "agent-runs.schema.json").read_text(encoding="utf-8")
+    )
+    validator = Draft202012Validator(schema["properties"]["scratchEvidence"]["items"])
+    base = {
+        "entryId": "entry-one",
+        "path": ".scratch/work-items/item/run/entry-one",
+        "reason": "bounded evidence",
+        "canonicalPointer": "implementation.md",
+    }
+    retain = {**base, "disposition": "retain"}
+    delete = {
+        **base,
+        "disposition": "delete",
+        "proof": {"kind": "git-object-set"},
+    }
+    assert list(validator.iter_errors(retain)) == []
+    assert list(validator.iter_errors(delete)) == []
+    assert list(validator.iter_errors({**retain, "proof": {"kind": "git-object-set"}}))
+    missing_proof = dict(delete)
+    missing_proof.pop("proof")
+    assert list(validator.iter_errors(missing_proof))
+
+
+def test_agent_run_schema_discriminates_legacy_and_v3_shapes() -> None:
+    schema = json.loads(
+        (ROOT / "shared" / "schemas" / "agent-runs.schema.json").read_text(encoding="utf-8")
+    )
+    validator = Draft202012Validator(schema)
+    legacy_v1 = ledger_event()
+    legacy_v2 = ledger_event(schemaVersion=2, eventKind="standalone")
+    control_v3 = v3_event()
+    assert list(validator.iter_errors(legacy_v1)) == []
+    assert list(validator.iter_errors(legacy_v2)) == []
+    assert list(validator.iter_errors(control_v3)) == []
+    assert list(validator.iter_errors({**legacy_v1, "eventId": "mixed-shape"}))
+    assert list(validator.iter_errors({**control_v3, "runId": "mixed-shape-run"}))
+    assert "legacy-obligation-migration" in schema["properties"]["eventKind"]["enum"]
+    assert "legacy-unclassified" in schema["properties"]["findingClass"]["enum"]
+    assert "replacementEvent" in schema["properties"]
+
+
 def test_schema_contract_includes_security_reviewer_waiver_gate() -> None:
     schema = json.loads(
         (ROOT / "shared" / "schemas" / "agent-runs.schema.json").read_text(encoding="utf-8")
@@ -371,6 +473,164 @@ def test_schema_contract_includes_security_reviewer_waiver_gate() -> None:
     }
 
     assert "WAIVED:security-reviewer" in gate_values
+
+
+def test_expand_contract_and_reader_floor(tmp_path: Path) -> None:
+    validator = load_validator_module()
+    item = tmp_path / "work-items" / "active" / "reader-floor"
+    write(item / "status.md", valid_status())
+    write(item / "reviews" / "qa.md", "# QA\n\nGate: PASS\n")
+
+    v1 = ledger_event(runId="reader-floor-v1-0001")
+    v2_revise = ledger_event(
+        schemaVersion=2,
+        runId="reader-floor-v2-revise-0001",
+        status="revise",
+        gate="REVISE",
+        eventKind="standalone",
+        lane="correctness",
+        effort="high",
+        findingClass="correctness",
+    )
+    v2_closer = ledger_event(
+        schemaVersion=2,
+        runId="reader-floor-v2-closer-0001",
+        eventKind="standalone",
+        closesRunIds=["reader-floor-v2-revise-0001"],
+        lane="correctness",
+        effort="high",
+    )
+    v3 = v3_event()
+    lines = [v1, v2_revise, v2_closer, v3]
+    write(item / "agent-runs.jsonl", "".join(json.dumps(row) + "\n" for row in lines))
+
+    result = run_validator(item)
+    assert result.returncode == 0, result.stdout
+    assert "RESULT: PASS" in result.stdout
+
+    events = validator.load_jsonl(item / "agent-runs.jsonl", [])
+    state, errors = validator.reduce_v3_events(events)
+    assert errors == []
+    assert state is not None
+    assert state["declarationSetId"] == "declaration-one"
+    assert state["head"] == "1" * 64
+
+    closure_errors: list[str] = []
+    validity = validator.derive_event_validity(events, item, closure_errors)
+    open_revise, _ = validator.validate_closure(
+        events,
+        closure_errors,
+        event_validity=validity,
+    )
+    assert closure_errors == []
+    assert open_revise == []
+
+
+def test_v3_duplicate_unknown_and_malformed_fields_fail_closed(tmp_path: Path) -> None:
+    item = tmp_path / "work-items" / "active" / "v3-negative"
+    write(item / "status.md", valid_status())
+    cases = {
+        "duplicate": json.dumps(v3_event()).replace(
+            '"schemaVersion": 3,',
+            '"schemaVersion": 3, "schemaVersion": 3,',
+            1,
+        ),
+        "unknown": json.dumps(v3_event(unexpected="field")),
+        "bad-fingerprint": json.dumps(v3_event(fingerprint="not-a-digest")),
+        "bad-prior-head": json.dumps(v3_event(priorHead="guess-the-head")),
+        "bad-event-type": json.dumps(v3_event(eventType="heuristic-retry")),
+    }
+    expected = {
+        "duplicate": "duplicate JSON key",
+        "unknown": "unexpected V3 field",
+        "bad-fingerprint": "fingerprint must be 64 lowercase hex characters",
+        "bad-prior-head": "priorHead must be GENESIS or 64 lowercase hex characters",
+        "bad-event-type": "invalid eventType",
+    }
+    for name, raw in cases.items():
+        write(item / "agent-runs.jsonl", raw + "\n")
+        result = run_validator(item)
+        assert result.returncode == 1, (name, result.stdout)
+        assert expected[name] in result.stdout, (name, result.stdout)
+
+
+def test_v3_decoder_enforces_utf8_depth_and_event_count_bounds(tmp_path: Path) -> None:
+    validator = load_validator_module()
+    with pytest.raises(ValueError, match="maximum raw UTF-8 length"):
+        validator.decode_json_object(
+            json.dumps({"value": "\u00e9" * 20}),
+            source="v3-byte-bound",
+            maximum_bytes=20,
+        )
+    deep: object = "leaf"
+    for _ in range(validator.MAX_JSON_NESTING_DEPTH + 1):
+        deep = {"nested": deep}
+    with pytest.raises(ValueError, match="nesting exceeds"):
+        validator.decode_json_object(json.dumps(deep), source="v3-depth-bound")
+
+    item = tmp_path / "work-items" / "active" / "v3-count-bound"
+    write(item / "status.md", valid_status())
+    repeated = json.dumps(v3_event()) + "\n"
+    write(
+        item / "agent-runs.jsonl",
+        repeated * (validator.MAX_LEDGER_EVENTS + 1),
+    )
+    result = run_validator(item)
+    assert result.returncode == 1
+    assert "ledger exceeds bounded event count" in result.stdout
+
+
+def test_raw_v1_v2_are_readable_but_do_not_create_v3_authorization() -> None:
+    validator = load_validator_module()
+    events = [
+        ledger_event(runId="legacy-readable-v1-0001"),
+        ledger_event(
+            schemaVersion=2,
+            runId="legacy-readable-v2-0001",
+            eventKind="standalone",
+        ),
+    ]
+    state, errors = validator.reduce_v3_events(events)
+    assert errors == []
+    assert state is None
+
+
+def test_old_writer_refuses_v3_without_down_conversion_or_byte_change(tmp_path: Path) -> None:
+    item = tmp_path / "work-items" / "active" / "old-writer-v3-refusal"
+    write(item / "status.md", valid_status())
+    original = json.dumps(v3_event(), sort_keys=True, separators=(",", ":")) + "\n"
+    write(item / "agent-runs.jsonl", original)
+    command = [
+        sys.executable,
+        str(ROOT / "scripts" / "agent-run-ledger.py"),
+        "--work-item",
+        str(item),
+        "append",
+        "--run-id",
+        "legacy-writer-attempt-0001",
+        "--role",
+        "qa-engineer",
+        "--execution-role",
+        "internal",
+        "--status",
+        "blocked",
+        "--gate",
+        "BLOCKED:dependency",
+        "--scope",
+        "reader-floor",
+    ]
+    result = subprocess.run(
+        command,
+        cwd=ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+    assert result.returncode == 1, result.stdout
+    assert "legacy V1/V2 writer refuses a ledger containing schemaVersion 3" in result.stdout
+    assert (item / "agent-runs.jsonl").read_text(encoding="utf-8") == original
+    assert not (item / "agent-runs.jsonl.tmp").exists()
 
 
 def test_legacy_execution_role_lead_still_reads(tmp_path: Path) -> None:
@@ -668,6 +928,107 @@ def test_archive_fallback_does_not_match_wrong_slug(tmp_path: Path) -> None:
     assert resolved is None or not resolved.exists()
 
 
+def test_closure_recovery_post_first_use_reader_floor(tmp_path: Path) -> None:
+    fixture = ROOT / "tests" / "fixtures" / "agent-run-ledger" / "closure-invalidation-v2"
+    item = tmp_path / "work-items" / "active" / "closure-invalidation-v2"
+    shutil.copytree(fixture, item)
+    result = run_validator(item)
+    expected = json.loads((fixture / "expected.json").read_text(encoding="utf-8"))
+    assert result.returncode == 0, result.stdout
+    assert expected["openRevise"] == 0 and expected["openLaunches"] == 0
+
+
+def test_model_ranking_migration_boundary_and_sibling_inventory(tmp_path: Path) -> None:
+    fixture = ROOT / "tests" / "fixtures" / "agent-run-ledger" / "closure-invalidation-v2"
+    item = tmp_path / "work-items" / "active" / "closure-invalidation-v2"
+    shutil.copytree(fixture, item)
+    lines = (item / "agent-runs.jsonl").read_text(encoding="utf-8").splitlines()
+    events = [json.loads(line) for line in lines]
+    events[1]["findingClass"] = "inline-sufficient"
+    target_line = json.dumps(events[1], ensure_ascii=False, separators=(",", ":"))
+    target_digest = hashlib.sha256(target_line.encode()).hexdigest()
+    events[2]["invalidatesEventSha256"] = target_digest
+    events[2]["evidence"] = [{"kind": "manual-check", "ref": f"fixture-invalid-closer {target_digest}"}]
+    (item / "agent-runs.jsonl").write_text("\n".join(json.dumps(event, ensure_ascii=False, separators=(",", ":")) for event in events) + "\n", encoding="utf-8", newline="")
+    result = run_validator(item)
+    assert result.returncode != 0
+    assert "ledger-recovery:target-per-event-invalid" in result.stdout
+    assert "inline-sufficient" in result.stdout
+
+
+def test_closure_recovery_schema_contract_runbook_and_rollup_parity(tmp_path: Path) -> None:
+    schema = json.loads((ROOT / "shared" / "schemas" / "agent-runs.schema.json").read_text(encoding="utf-8"))
+    assert "closure-invalidation" in schema["properties"]["eventKind"]["enum"]
+    assert "invalidatesRunId" in schema["properties"]
+    assert "invalidatesEventSha256" in schema["properties"]
+    result = run_contract_check()
+    assert result.returncode == 0, result.stdout
+    assert result.stdout.rstrip().endswith("RESULT: PASS")
+
+    checker = load_contract_check_module()
+    relative_paths = [
+        "docs/work-item-execution-tracking.md",
+        *checker.RECOVERY_POINTERS,
+    ]
+
+    def copy_documentation(destination: Path) -> None:
+        for relative in relative_paths:
+            target = destination / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(ROOT / relative, target)
+
+    for index, token in enumerate(checker.RECOVERY_RUNBOOK_TOKENS):
+        case = tmp_path / f"missing-token-{index}"
+        copy_documentation(case)
+        runbook = case / "docs" / "work-item-execution-tracking.md"
+        runbook.write_text(runbook.read_text(encoding="utf-8").replace(token, ""), encoding="utf-8")
+        with pytest.raises(AssertionError, match="recovery runbook"):
+            checker.check_recovery_documentation(case)
+
+    for index, (relative, pointer) in enumerate(checker.RECOVERY_POINTERS.items()):
+        missing_link = tmp_path / f"missing-link-{index}"
+        copy_documentation(missing_link)
+        pointer_path = missing_link / relative
+        pointer_path.write_text(pointer_path.read_text(encoding="utf-8").replace(pointer, ""), encoding="utf-8")
+        with pytest.raises(AssertionError, match="must point"):
+            checker.check_recovery_documentation(missing_link)
+
+        duplicate_procedure = tmp_path / f"duplicate-procedure-{index}"
+        copy_documentation(duplicate_procedure)
+        duplicate_path = duplicate_procedure / relative
+        duplicate_path.write_text(
+            duplicate_path.read_text(encoding="utf-8") + "\n```text\nrecover-invalid-closure\n```\n",
+            encoding="utf-8",
+        )
+        with pytest.raises(AssertionError, match="must not duplicate"):
+            checker.check_recovery_documentation(duplicate_procedure)
+
+
+def test_implementation_lane_replays_dirty_declared_producer_delta() -> None:
+    root = ROOT / ".scratch" / "work-items" / "2026-08-17-fix-append-only-invalid-ledger-event-recovery" / "lead-append-only-scratch-retain-20260821-r1-terminal" / "implementation-lane-baseline"
+    manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["schemaVersion"] == 2
+    assert len(manifest["entries"]) == 77
+    assert len(manifest["declaredPaths"]["paths"]) == 13
+    assert manifest["exclusiveLane"]["producerWriteObserved"] is False
+    probes = json.loads((root / "negative-probes.json").read_text(encoding="utf-8"))
+    assert len(probes["results"]) == 7
+    assert {row["failureId"] for row in probes["results"]} == {"lane-evidence:path", "lane-evidence:cap", "lane-evidence:identity", "lane-evidence:corrupt", "lane-evidence:baseline-drift"}
+    assert probes["producerWrites"] == 0
+
+
+def test_implementation_lane_forbids_external_side_effects() -> None:
+    root = ROOT / ".scratch" / "work-items" / "2026-08-17-fix-append-only-invalid-ledger-event-recovery" / "lead-append-only-scratch-retain-20260821-r1-terminal" / "implementation-lane-baseline"
+    commands = json.loads((root / "commands.jsonl").read_text(encoding="utf-8"))
+    processes = json.loads((root / "process-network-attempts.jsonl").read_text(encoding="utf-8"))
+    call_path = json.loads((root / "call-path-observation.json").read_text(encoding="utf-8"))
+    assert len(commands["deniedClasses"]) == 12
+    assert commands["forbiddenAttempts"] == []
+    assert processes["networkAttempts"] == processes["forbiddenAttempts"] == processes["activePids"] == []
+    assert call_path["forbiddenEdges"] == []
+    assert call_path["claimBoundary"] == "no claim about arbitrary unobserved installed/runtime state"
+
+
 class _UnittestAdapter(unittest.TestCase):
     """Run existing pytest-style functions under the plan's unittest CLI."""
 
@@ -684,6 +1045,14 @@ def _adapt_test(function):
     return method
 
 
+_PYTEST_ONLY_RECOVERY_TESTS = {
+    "test_closure_recovery_post_first_use_reader_floor",
+    "test_model_ranking_migration_boundary_and_sibling_inventory",
+    "test_closure_recovery_schema_contract_runbook_and_rollup_parity",
+    "test_implementation_lane_replays_dirty_declared_producer_delta",
+    "test_implementation_lane_forbids_external_side_effects",
+}
+
 for _name, _function in tuple(globals().items()):
-    if _name.startswith("test_") and callable(_function):
+    if _name.startswith("test_") and _name not in _PYTEST_ONLY_RECOVERY_TESTS and callable(_function):
         setattr(_UnittestAdapter, _name, _adapt_test(_function))

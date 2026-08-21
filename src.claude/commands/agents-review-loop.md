@@ -17,7 +17,7 @@ Do NOT auto-invoke for trivial changes (one-line typo, doc edit, single-file ref
 
 ## Steps
 
-1. **Read the installed contract.** Read `.claude/agents/contracts/review-loop.md`. It owns the operative loop rules (the angles, the Claude dispatch mapping, autonomous-to-convergence, anti-drift, the cap, the hardening invariants, the convergence rule, and the `review-loop-state` ledger — its force, schema, and enforcement envelope). Do not re-derive any of that here — follow the contract.
+1. **Read the installed contract.** Read `.claude/agents/contracts/review-loop.md`. It owns the operative loop rules (the angles, the Claude dispatch mapping, autonomous-to-convergence, anti-drift, the cap, the hardening invariants, the convergence rule, and the `review-loop-state` ledger — its force, schema, and enforcement envelope), including hardening invariants 7-8 (failed-lane-is-unverified, fail-closed aggregation); do not re-derive any of that here — follow the contract.
 
 2. **Confirm the runtime-verified root (hard gate).** Per invariant 1, the artifact's root must be runtime-captured THIS session. If the root is second-hand (commit message, prior plan, agent report), runtime-verify it yourself before writing the artifact. Never pin the root as `CONFIRMED — do not re-litigate`.
 

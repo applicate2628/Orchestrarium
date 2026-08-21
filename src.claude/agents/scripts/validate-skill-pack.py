@@ -421,7 +421,7 @@ _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
   'Claude addendum stays bounded instead of regrowing into a full blueprint copy'),
  ('check_normalized_sha256',
   '@ROOT/shared/references/subagent-operating-model.md',
-  '74b579fbb45cae49b72f3e69b93e3cba886a946d60872389386a76d0baf2b786',
+  'fa464ae90e0c66a22fdf6dfbe875ab3db7815b4aa9db2d0b75df0dc92318f864',
   'shared subagent-operating-model matches the current canonical normalized fingerprint'),
  ('check_normalized_sha256',
   '@ROOT/references-claude/subagent-operating-model.md',
@@ -1139,6 +1139,12 @@ _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
   'shared governance replaces meaning-changing textual clarifications instead of layering prose'))
 
 _INSTALLED_ACTIONS = (
+    (
+        "check_normalized_sha256",
+        "@PACK/contracts/ui-transition-continuity.md",
+        "92af857398c6c56ff681fa91360673d7a9c2365f48734f6d83fa74d98e12cf62",
+        "UI-CONTINUITY-CONTRACT-DRIFT: installed neutral contract leaf matches the canonical English fingerprint",
+    ),
     ("check_file", "@SCRIPTS/agent-run-ledger.py", "installed agent-run-ledger.py"),
     ("check_file", "@SCRIPTS/agent-run-ledger.sh", "installed agent-run-ledger.sh"),
     ("check_file", "@SCRIPTS/review_loop_state.py", "installed review-loop state engine"),
@@ -1182,15 +1188,65 @@ _INSTALLED_ACTIONS = (
     ),
 )
 
+_APAT_ACTIONS = (
+    ("check_file", "@PACK/skills/lead/SKILL.md", "APAT-E006-INSTALLED-MISSING: claude lead APAT projection file"),
+    ("check_file", "@PACK/skills/architect/SKILL.md", "APAT-E006-INSTALLED-MISSING: claude architect AP0-AP5 projection file"),
+    ("check_file", "@PACK/agents/architecture-reviewer.md", "APAT-E006-INSTALLED-MISSING: claude architecture-reviewer APAT projection file"),
+    ("check_contains", "@PACK/skills/lead/SKILL.md", "<!-- APAT-BLOCK:LEAD-ROUTING:BEGIN -->", "APAT-E006-INSTALLED-MISSING: claude lead APAT-G04-PROVIDER-PARITY projection marker"),
+    ("check_contains", "@PACK/skills/lead/SKILL.md", "is not a universal Architect prelude", "APAT-E006-INSTALLED-MISSING: claude lead APAT-G05-INSTALLED-PARITY negative-selection wording"),
+    *(("check_contains", "@PACK/skills/architect/SKILL.md", f'<!-- APAT-SEMANTIC id="AP{number}.', f"APAT-E006-INSTALLED-MISSING: claude architect AP{number} marker") for number in range(6)),
+    ("check_contains", "@PACK/skills/architect/SKILL.md", "<!-- APAT-BLOCK:ARCHITECT-DISPOSITION:BEGIN -->", "APAT-E006-INSTALLED-MISSING: claude architect AP0-AP5 projection section marker"),
+    ("check_contains", "@PACK/agents/architecture-reviewer.md", "<!-- APAT-BLOCK:ARCHITECTURE-REVIEW:BEGIN -->", "APAT-E006-INSTALLED-MISSING: claude architecture-reviewer APAT projection section marker"),
+    ("check_contains", "@PACK/agents/architecture-reviewer.md", "each tempting but unsuitable pattern has explicit negative evidence", "APAT-E006-INSTALLED-MISSING: claude architecture-reviewer APAT negative-selection wording"),
+)
+
+_APAT_DEV_ACTIONS = (
+    ("check_file", "@ROOT/shared/references/architecture-pattern-applicability.md", "APAT-G04-PROVIDER-PARITY canonical applicability reference"),
+    ("check_file", "@ROOT/shared/references/ru/architecture-pattern-applicability.md", "APAT-G04-PROVIDER-PARITY Russian applicability reference"),
+)
+
+_UI_CONTINUITY_DEV_ACTIONS = (
+    (
+        "check_normalized_sha256",
+        "@ROOT/shared/references/ui-transition-continuity.md",
+        "92af857398c6c56ff681fa91360673d7a9c2365f48734f6d83fa74d98e12cf62",
+        "UI-CONTINUITY-CONTRACT-DRIFT: canonical English contract matches its declared fingerprint",
+    ),
+    (
+        "check_contains",
+        "@ROOT/scripts/production_installer.py",
+        "UI_CONTINUITY_CONTRACT_SOURCE",
+        "UI-CONTINUITY-CONTRACT-DRIFT: production installer declares the canonical contract source",
+    ),
+    (
+        "check_contains",
+        "@ROOT/scripts/production_installer.py",
+        "UI_CONTINUITY_CONTRACT_TARGET",
+        "UI-CONTINUITY-CONTRACT-DRIFT: production installer declares the neutral contract target",
+    ),
+    (
+        "check_not_exists",
+        "@ROOT/src.codex/contracts",
+        "UI-CONTINUITY-CONTRACT-DRIFT: Codex has no provider-local contract copy",
+    ),
+    (
+        "check_not_exists",
+        "@ROOT/src.claude/contracts",
+        "UI-CONTINUITY-CONTRACT-DRIFT: Claude has no provider-local contract copy",
+    ),
+)
+
 ACTIONS = (
-    ("all", _DECLARED_ACTIONS[0:42] + _DECLARED_ACTIONS[114:256] + _DECLARED_ACTIONS[308:309]),
+    ("all", _DECLARED_ACTIONS[0:42] + _DECLARED_ACTIONS[114:256] + _DECLARED_ACTIONS[308:309] + _APAT_ACTIONS),
     (
         "dev_repo",
         _DECLARED_ACTIONS[42:114]
         + _DECLARED_ACTIONS[269:273]
         + _DECLARED_ACTIONS[274:279]
         + _DECLARED_ACTIONS[280:284]
-        + _DECLARED_ACTIONS[293:308],
+        + _DECLARED_ACTIONS[293:308]
+        + _APAT_DEV_ACTIONS
+        + _UI_CONTINUITY_DEV_ACTIONS,
     ),
     (
         "dev_repo_nonstandalone",

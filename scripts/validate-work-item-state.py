@@ -25,10 +25,25 @@ GATE_VALUES = {
 }
 CLOSURE_GATES = {"PASS", USER_WAIVER_GATE, SECURITY_REVIEWER_WAIVER_GATE}
 # --- v2 REVISE-closure vocabulary (decision 2026-07-16-review-verdict-closure, minimal slice) ---
-EVENT_KINDS = {"launch", "terminal", "standalone"}
+EVENT_KINDS = {"launch", "terminal", "standalone", "closure-invalidation", "legacy-obligation-migration"}
 EFFORT_ORDER = ["low", "medium", "high", "xhigh", "max"]  # ordered, ascending strength
-FINDING_CLASSES = {"publication-safety", "security", "correctness", "performance", "other"}
-PROTECTED_CLASSES = {"publication-safety", "security"}  # non-user-waivable (spine: $security-reviewer only)
+FINDING_CLASSES = {"publication-safety", "security", "correctness", "performance", "other", "legacy-unclassified"}
+PROTECTED_CLASSES = {"publication-safety", "security", "legacy-unclassified"}  # non-user-waivable (spine: $security-reviewer only)
+LEGACY_MIGRATION_KIND = "legacy-obligation-migration"
+LEGACY_MIGRATION_SCOPE = ["ledger-migration:invalid-finding-class"]
+LEGACY_MIGRATION_NORMALIZATIONS = {
+    "invalid-finding-class": {
+        "scope": ["ledger-migration:invalid-finding-class"],
+        "evidence": "invalid-finding-class {target} {digest} -> legacy-unclassified",
+    },
+    "remove-string-scratch-evidence": {
+        "scope": ["ledger-migration:remove-string-scratch-evidence"],
+        "evidence": "remove-string-scratch-evidence {target} {digest} -> scratchEvidence absent",
+    },
+}
+LEDGER_EVENT_FINDING_CLASS_INVALID = "LEDGER-EVENT-FINDING-CLASS-INVALID"
+LEDGER_EVENT_SCRATCH_EVIDENCE_INVALID = "LEDGER-EVENT-SCRATCH-EVIDENCE-INVALID"
+LEGACY_MIGRATION_V3_UNSUPPORTED = "WI-LEDGER-MIGRATION-V3-UNSUPPORTED"
 V2_ONLY_FIELDS = {
     "eventKind",
     "launchRunId",
@@ -38,7 +53,27 @@ V2_ONLY_FIELDS = {
     "effort",
     "findingClass",
     "scratchEvidence",
+    "invalidatesRunId",
+    "invalidatesEventSha256",
+    "migrationAction",
+    "normalizationKind",
+    "migratesRunId",
+    "migratesEventSha256",
+    "revokesMigrationRunId",
+    "revokesMigrationEventSha256",
+    "replacementEvent",
 }
+V3_ALLOWED_FIELDS = {
+    "schemaVersion",
+    "eventId",
+    "operationId",
+    "fingerprint",
+    "priorHead",
+    "recordedAt",
+    "eventType",
+    "payload",
+}
+V3_REQUIRED_FIELDS = V3_ALLOWED_FIELDS
 # Canonical executionRole values (mirrors shared/schemas/agent-runs.schema.json).
 # There is exactly ONE main-conversation identity: "main". The main conversation
 # also holds the Lead role — orchestration weight is the status.md
@@ -84,10 +119,20 @@ ALLOWED_FIELDS = {
     "effort",
     "findingClass",
     "scratchEvidence",
+    "invalidatesRunId",
+    "invalidatesEventSha256",
+    "migrationAction",
+    "normalizationKind",
+    "migratesRunId",
+    "migratesEventSha256",
+    "revokesMigrationRunId",
+    "revokesMigrationEventSha256",
+    "replacementEvent",
 }
 EVIDENCE_ALLOWED_FIELDS = {"kind", "ref", "result"}
 AGENT_RUN_SCHEMA_PATH = Path(__file__).resolve().parents[1] / "shared" / "schemas" / "agent-runs.schema.json"
 AGENT_RUN_SCHEMA = json.loads(AGENT_RUN_SCHEMA_PATH.read_text(encoding="utf-8"))
+V3_EVENT_TYPES = set(AGENT_RUN_SCHEMA["properties"]["eventType"]["enum"])
 _SCRATCH_SCHEMA = AGENT_RUN_SCHEMA["properties"]["scratchEvidence"]
 _SCRATCH_ITEM_SCHEMA = _SCRATCH_SCHEMA["items"]
 _SCRATCH_PROPERTIES = _SCRATCH_ITEM_SCHEMA["properties"]
@@ -112,6 +157,7 @@ _ACCEPTED_ARTIFACT_SCHEMA = next(
 MAX_SCRATCH_PRODUCER_LENGTH = _ACCEPTED_ARTIFACT_SCHEMA["properties"]["producer"]["maxLength"]
 MAX_SCRATCH_REPRODUCE_LENGTH = _ACCEPTED_ARTIFACT_SCHEMA["properties"]["reproduce"]["maxLength"]
 MAX_LEDGER_LINE_CHARS = _JSONL_SCHEMA["maxLineChars"]
+MAX_LEDGER_LINE_BYTES = _JSONL_SCHEMA["maxLineBytes"]
 MAX_LEDGER_EVENTS = _JSONL_SCHEMA["maxEvents"]
 MAX_JSON_NESTING_DEPTH = _JSONL_SCHEMA["maxNestingDepth"]
 SCRATCH_IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$", re.ASCII)
@@ -129,6 +175,7 @@ QUICK_FIX_RECOVERY_FIELD_BY_CASEFOLD = {
     field.casefold(): field for field in QUICK_FIX_RECOVERY_FIELDS
 }
 _LIFECYCLE_OWNER = None
+_SOLUTION_ATTEMPT_OWNER = None
 
 
 def fail(errors: list[str], message: str) -> None:
@@ -150,6 +197,23 @@ def load_lifecycle_owner():
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     _LIFECYCLE_OWNER = module
+    return module
+
+
+def load_solution_attempt_owner():
+    global _SOLUTION_ATTEMPT_OWNER
+    if _SOLUTION_ATTEMPT_OWNER is not None:
+        return _SOLUTION_ATTEMPT_OWNER
+    owner_path = Path(__file__).with_name("solution_attempt_state.py")
+    spec = importlib.util.spec_from_file_location(
+        "solution_attempt_state_for_validation",
+        owner_path,
+    )
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Unable to load solution-attempt owner from {owner_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    _SOLUTION_ATTEMPT_OWNER = module
     return module
 
 
@@ -331,7 +395,11 @@ def decode_json_object(
     return value
 
 
-def load_jsonl(path: Path, errors: list[str]) -> list[dict]:
+def load_jsonl(
+    path: Path,
+    errors: list[str],
+    raw_metadata: list[dict[str, object]] | None = None,
+) -> list[dict]:
     if not path.exists():
         fail(errors, f"missing ledger: {path}")
         return []
@@ -363,11 +431,29 @@ def load_jsonl(path: Path, errors: list[str]) -> list[dict]:
                 fail(errors, f"ledger exceeds bounded event count: {path}")
                 break
             try:
-                event = decode_json_object(line, source=f"{path}:{line_no}")
+                event = decode_json_object(
+                    line,
+                    source=f"{path}:{line_no}",
+                    maximum_bytes=MAX_LEDGER_LINE_BYTES,
+                )
             except ValueError as exc:
                 fail(errors, str(exc))
                 continue
             events.append(event)
+            if raw_metadata is not None:
+                if raw.endswith("\r\n"):
+                    digest_text = raw[:-2]
+                elif raw.endswith("\n"):
+                    digest_text = raw[:-1]
+                else:
+                    digest_text = raw
+                raw_metadata.append(
+                    {
+                        "line": line_no,
+                        "sha256": hashlib.sha256(digest_text.encode("utf-8")).hexdigest(),
+                        "bytes": len(digest_text.encode("utf-8")),
+                    }
+                )
     if not events:
         fail(errors, f"ledger has no events: {path}")
     return events
@@ -842,7 +928,52 @@ def validate_waiver_fields(
             )
 
 
+def validate_v3_event(event: dict, seen: set[str], errors: list[str]) -> bool:
+    error_count_on_entry = len(errors)
+    event_id = event.get("eventId")
+    for key in sorted(V3_REQUIRED_FIELDS - set(event)):
+        fail(errors, f"V3 event missing required field: {key}")
+    for key in sorted(set(event) - V3_ALLOWED_FIELDS):
+        fail(errors, f"unexpected V3 field: {key}")
+
+    if not isinstance(event_id, str) or not SCRATCH_IDENTIFIER_RE.fullmatch(event_id) or len(event_id) > 128:
+        fail(errors, f"{event_id}: eventId must be a bounded namespace-safe string")
+    else:
+        identity = f"v3:{event_id.casefold()}"
+        if identity in seen:
+            fail(errors, f"duplicate eventId: {event_id}")
+        seen.add(identity)
+    operation_id = event.get("operationId")
+    if (
+        not isinstance(operation_id, str)
+        or not SCRATCH_IDENTIFIER_RE.fullmatch(operation_id)
+        or len(operation_id) > 128
+    ):
+        fail(errors, f"{event_id}: operationId must be a bounded namespace-safe string")
+    if not isinstance(event.get("fingerprint"), str) or not SHA256_RE.fullmatch(event["fingerprint"]):
+        fail(errors, f"{event_id}: fingerprint must be 64 lowercase hex characters")
+    prior_head = event.get("priorHead")
+    if prior_head != "GENESIS" and (
+        not isinstance(prior_head, str) or not SHA256_RE.fullmatch(prior_head)
+    ):
+        fail(errors, f"{event_id}: priorHead must be GENESIS or 64 lowercase hex characters")
+    recorded_at = event.get("recordedAt")
+    if not isinstance(recorded_at, str) or re.fullmatch(
+        r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z",
+        recorded_at,
+        re.ASCII,
+    ) is None:
+        fail(errors, f"{event_id}: recordedAt must be a strict UTC timestamp")
+    if event.get("eventType") not in V3_EVENT_TYPES:
+        fail(errors, f"{event_id}: invalid eventType {event.get('eventType')!r}")
+    if not isinstance(event.get("payload"), dict):
+        fail(errors, f"{event_id}: payload must be an object")
+    return len(errors) == error_count_on_entry
+
+
 def validate_event(event: dict, item: Path, seen: set[str], errors: list[str]) -> bool:
+    if event.get("schemaVersion") == 3:
+        return validate_v3_event(event, seen, errors)
     error_count_on_entry = len(errors)
     required = ["schemaVersion", "runId", "workItem", "role", "executionRole", "status", "gate", "scope", "startedAt", "updatedAt"]
     for key in required:
@@ -904,8 +1035,116 @@ def validate_event(event: dict, item: Path, seen: set[str], errors: list[str]) -
     if evidence is not None:
         validate_evidence(evidence, run_id, errors, gate == "PASS")
 
+    event_kind = event.get("eventKind")
     if "scratchEvidence" in event:
         validate_scratch_evidence(event, item, artifact_path, run_id, errors)
+
+    recovery_fields = {"invalidatesRunId", "invalidatesEventSha256"}
+    if event_kind == "closure-invalidation":
+        if schema_version != 2:
+            fail(errors, f"{run_id}: closure-invalidation requires schemaVersion 2")
+        fixed = {
+            "role": "lead",
+            "executionRole": "main",
+            "status": "completed",
+            "gate": "none",
+            "scope": ["ledger-recovery:closure-invalidation"],
+        }
+        for key, wanted in fixed.items():
+            if event.get(key) != wanted:
+                fail(errors, f"{run_id}: closure-invalidation requires {key}={wanted!r}")
+        target_id = event.get("invalidatesRunId")
+        digest = event.get("invalidatesEventSha256")
+        if not isinstance(target_id, str) or len(target_id) < 8:
+            fail(errors, f"{run_id}: invalidatesRunId must be a runId string")
+        if not isinstance(digest, str) or not SHA256_RE.fullmatch(digest):
+            fail(errors, f"{run_id}: invalidatesEventSha256 must be lowercase SHA-256")
+        for forbidden in ("launchRunId", "closesRunIds", "artifact", "scratchEvidence"):
+            if forbidden in event:
+                fail(errors, f"{run_id}: closure-invalidation forbids {forbidden}")
+        refs = [entry.get("ref", "") for entry in event.get("evidence", []) if isinstance(entry, dict) and entry.get("kind") == "manual-check"]
+        tokens = " ".join(refs).split()
+        if target_id not in tokens or digest not in tokens:
+            fail(errors, f"{run_id}: closure-invalidation manual-check must name exact target and digest tokens")
+    elif recovery_fields & set(event):
+        for key in sorted(recovery_fields & set(event)):
+            fail(errors, f"{run_id}: {key} requires eventKind closure-invalidation")
+
+    migration_fields = {
+        "migrationAction", "normalizationKind", "migratesRunId", "migratesEventSha256",
+        "revokesMigrationRunId", "revokesMigrationEventSha256", "replacementEvent",
+    }
+    if event_kind == LEGACY_MIGRATION_KIND:
+        fixed = {
+            "schemaVersion": 2, "role": "lead", "executionRole": "main",
+            "status": "completed", "gate": "none",
+        }
+        for key, wanted in fixed.items():
+            if event.get(key) != wanted:
+                fail(errors, f"{run_id}: migration control requires {key}={wanted!r}")
+        action = event.get("migrationAction")
+        if action == "apply":
+            required_fields = {"migratesRunId", "migratesEventSha256", "replacementEvent", "evidence"}
+            forbidden_fields = {"revokesMigrationRunId", "revokesMigrationEventSha256", "invalidatesRunId", "invalidatesEventSha256"}
+            for key in sorted(required_fields - set(event)):
+                fail(errors, f"{run_id}: migration apply requires {key}")
+            for key in sorted(forbidden_fields & set(event)):
+                fail(errors, f"{run_id}: migration apply forbids {key}")
+            target_id = event.get("migratesRunId")
+            digest = event.get("migratesEventSha256")
+            replacement = event.get("replacementEvent")
+            normalization_kind = event.get("normalizationKind", "invalid-finding-class")
+            row = LEGACY_MIGRATION_NORMALIZATIONS.get(normalization_kind)
+            if row is None or event.get("scope") != row["scope"]:
+                fail(errors, f"{run_id}: migration normalizationKind requires exact closed mapping")
+            if not isinstance(target_id, str) or len(target_id) < 8:
+                fail(errors, f"{run_id}: migratesRunId must be a runId string")
+            if not isinstance(digest, str) or not SHA256_RE.fullmatch(digest):
+                fail(errors, f"{run_id}: migratesEventSha256 must be lowercase SHA-256")
+            if not isinstance(replacement, dict):
+                fail(errors, f"{run_id}: replacementEvent must be an object")
+            else:
+                if migration_fields & set(replacement) or recovery_fields & set(replacement):
+                    fail(errors, f"{run_id}: replacementEvent cannot be a control event")
+                replacement_errors: list[str] = []
+                validate_event(replacement, item, set(), replacement_errors)
+                for message in replacement_errors:
+                    fail(errors, f"{run_id}: replacementEvent invalid: {message}")
+            tokens = " ".join(
+                entry.get("ref", "") for entry in event.get("evidence", [])
+                if isinstance(entry, dict) and entry.get("kind") == "manual-check"
+            ).split()
+            if target_id not in tokens or digest not in tokens:
+                fail(errors, f"{run_id}: migration apply evidence must bind target and digest")
+        elif action == "revoke":
+            required_fields = {"revokesMigrationRunId", "revokesMigrationEventSha256", "evidence"}
+            forbidden_fields = {"migratesRunId", "migratesEventSha256", "replacementEvent", "invalidatesRunId", "invalidatesEventSha256"}
+            for key in sorted(required_fields - set(event)):
+                fail(errors, f"{run_id}: migration revoke requires {key}")
+            for key in sorted(forbidden_fields & set(event)):
+                fail(errors, f"{run_id}: migration revoke forbids {key}")
+            target_id = event.get("revokesMigrationRunId")
+            digest = event.get("revokesMigrationEventSha256")
+            if "normalizationKind" in event:
+                fail(errors, f"{run_id}: migration revoke forbids normalizationKind")
+            if not isinstance(target_id, str) or len(target_id) < 8:
+                fail(errors, f"{run_id}: revokesMigrationRunId must be a runId string")
+            if not isinstance(digest, str) or not SHA256_RE.fullmatch(digest):
+                fail(errors, f"{run_id}: revokesMigrationEventSha256 must be lowercase SHA-256")
+            tokens = " ".join(
+                entry.get("ref", "") for entry in event.get("evidence", [])
+                if isinstance(entry, dict) and entry.get("kind") == "manual-check"
+            ).split()
+            if target_id not in tokens or digest not in tokens:
+                fail(errors, f"{run_id}: migration revoke evidence must bind apply and digest")
+        else:
+            fail(errors, f"{run_id}: migrationAction must be apply or revoke")
+        for forbidden in ("launchRunId", "closesRunIds", "artifact", "scratchEvidence"):
+            if forbidden in event:
+                fail(errors, f"{run_id}: migration control forbids {forbidden}")
+    elif migration_fields & set(event):
+        for key in sorted(migration_fields & set(event)):
+            fail(errors, f"{run_id}: {key} requires eventKind {LEGACY_MIGRATION_KIND}")
 
     if gate == "PASS":
         if status != "completed":
@@ -1260,6 +1499,31 @@ def validate_closure(
     return open_revise, open_launches
 
 
+def migration_terminal_launch_relation_error(events: list[dict], target_pos: int, item: Path) -> str | None:
+    """Return the exact terminal/launch relation failure for a migration target."""
+    target = events[target_pos]
+    launch_id = target.get("launchRunId")
+    if not isinstance(launch_id, str):
+        return "migration target has no launchRunId"
+    launches = [
+        (pos, event) for pos, event in enumerate(events[:target_pos])
+        if event.get("runId") == launch_id
+    ]
+    if len(launches) != 1 or launches[0][1].get("eventKind") != "launch":
+        return "migration target does not reference one earlier launch"
+    launch_errors: list[str] = []
+    validate_event(launches[0][1], item, set(), launch_errors)
+    if launch_errors:
+        return "migration target launch is not individually valid"
+    terminals = [
+        pos for pos, event in enumerate(events)
+        if event.get("eventKind") == "terminal" and event.get("launchRunId") == launch_id
+    ]
+    if terminals != [target_pos]:
+        return "migration target launch has duplicate or mismatched terminal"
+    return None
+
+
 def validate_status(item: Path, events: list[dict], errors: list[str]) -> None:
     status_path = item / "status.md"
     if not status_path.exists():
@@ -1279,6 +1543,290 @@ def validate_status(item: Path, events: list[dict], errors: list[str]) -> None:
     running_events = [event for event in events if event.get("status") == "running"]
     if running_events and "Primary task status**: closed" in text:
         fail(errors, "status.md cannot be closed while ledger has running agents")
+
+
+def project_legacy_obligation_migrations(
+    events: list[dict], raw_metadata: list[dict[str, object]], item: Path
+) -> tuple[list[dict], dict[str, int], list[str]]:
+    """Project valid V2 legacy-class anchors without mutating raw ledger history."""
+    counters = {"raw": len(events), "apply": 0, "revoke": 0, "projected": 0}
+    if any(event.get("schemaVersion") == 3 for event in events) and any(
+        event.get("eventKind") == LEGACY_MIGRATION_KIND for event in events
+    ):
+        return events, counters, [LEGACY_MIGRATION_V3_UNSUPPORTED]
+
+    errors: list[str] = []
+    positions: dict[str, list[int]] = {}
+    for pos, event in enumerate(events):
+        run_id = event.get("runId")
+        if isinstance(run_id, str):
+            positions.setdefault(run_id, []).append(pos)
+
+    active: dict[int, dict] = {}
+    applies: dict[str, tuple[int, dict]] = {}
+    revoked: set[str] = set()
+    fatal_control_identity = False
+    control_seen = {
+        str(event["runId"]).casefold()
+        for event in events
+        if event.get("eventKind") != LEGACY_MIGRATION_KIND
+        and isinstance(event.get("runId"), str)
+    }
+    migration_fields = {
+        "migrationAction", "normalizationKind", "migratesRunId", "migratesEventSha256",
+        "revokesMigrationRunId", "revokesMigrationEventSha256", "replacementEvent",
+    }
+    for pos, anchor in enumerate(events):
+        kind = anchor.get("eventKind")
+        if kind != LEGACY_MIGRATION_KIND:
+            if migration_fields & set(anchor):
+                errors.append(f"{anchor.get('runId')}: migration control fields require {LEGACY_MIGRATION_KIND}")
+            continue
+        control_errors: list[str] = []
+        run_id = anchor.get("runId")
+        identity_collision = isinstance(run_id, str) and run_id.casefold() in control_seen
+        validate_event(anchor, item, control_seen, control_errors)
+        if control_errors:
+            errors.extend(control_errors)
+            fatal_control_identity = fatal_control_identity or identity_collision
+            continue
+        action = anchor.get("migrationAction")
+        if action not in {"apply", "revoke"}:
+            errors.append(f"{anchor.get('runId')}: migrationAction must be apply or revoke")
+            continue
+        counters[action] += 1
+        fixed = {
+            "schemaVersion": 2, "role": "lead", "executionRole": "main",
+            "status": "completed", "gate": "none",
+        }
+        if any(anchor.get(key) != wanted for key, wanted in fixed.items()):
+            errors.append(f"{anchor.get('runId')}: migration control requires fixed Lead/main authority")
+            continue
+        if action == "apply":
+            normalization_kind = anchor.get("normalizationKind", "invalid-finding-class")
+            row = LEGACY_MIGRATION_NORMALIZATIONS.get(normalization_kind)
+            if row is None or anchor.get("scope") != row["scope"]:
+                errors.append(f"{anchor.get('runId')}: migration normalization kind/scope is invalid")
+                continue
+            target_id = anchor.get("migratesRunId")
+            target_digest = anchor.get("migratesEventSha256")
+            candidates = positions.get(target_id, []) if isinstance(target_id, str) else []
+            if len(candidates) != 1 or candidates[0] >= pos:
+                errors.append(f"{anchor.get('runId')}: migration target must be one unique earlier event")
+                continue
+            target_pos = candidates[0]
+            target = events[target_pos]
+            if target.get("schemaVersion") != 2 or target.get("eventKind") != "terminal" or target.get("eventKind") in {LEGACY_MIGRATION_KIND, "closure-invalidation"}:
+                errors.append(f"{anchor.get('runId')}: migration target is not an eligible V2 terminal")
+                continue
+            recorded = raw_metadata[target_pos].get("sha256") if target_pos < len(raw_metadata) else None
+            if target_digest != recorded:
+                errors.append(f"{anchor.get('runId')}: migration target digest mismatch")
+                continue
+            if normalization_kind == "invalid-finding-class":
+                if target.get("gate") != "REVISE":
+                    errors.append(f"{anchor.get('runId')}: finding-class target is not REVISE")
+                    continue
+                if "findingClass" not in target or target.get("findingClass") in FINDING_CLASSES:
+                    errors.append(f"{anchor.get('runId')}: migration target diagnostic set is not {{{LEDGER_EVENT_FINDING_CLASS_INVALID}}}")
+                    continue
+                normalized = {**target, "findingClass": "legacy-unclassified"}
+            else:
+                if not isinstance(target.get("scratchEvidence"), str):
+                    errors.append(f"{anchor.get('runId')}: migration target does not carry string scratchEvidence")
+                    continue
+                normalized = {key: value for key, value in target.items() if key != "scratchEvidence"}
+            candidate_errors: list[str] = []
+            validate_event(normalized, item, set(), candidate_errors)
+            if candidate_errors:
+                errors.append(f"{anchor.get('runId')}: migration target retains another invalid diagnostic")
+                continue
+            relation_events = list(events)
+            relation_events[target_pos] = normalized
+            relation_error = migration_terminal_launch_relation_error(relation_events, target_pos, item)
+            if relation_error is not None:
+                errors.append(f"{anchor.get('runId')}: {relation_error}")
+                continue
+            replacement = anchor.get("replacementEvent")
+            if replacement != normalized:
+                errors.append(f"{anchor.get('runId')}: replacementEvent does not match closed normalization")
+                continue
+            if anchor.get("evidence") != [{"kind": "manual-check", "ref": row["evidence"].format(target=target_id, digest=target_digest)}]:
+                errors.append(f"{anchor.get('runId')}: migration evidence does not match closed normalization")
+                continue
+            if target_pos in active:
+                errors.append(f"{anchor.get('runId')}: migration topology permits one apply per target")
+                active.pop(target_pos, None)
+                continue
+            active[target_pos] = replacement
+            applies[str(anchor.get("runId"))] = (target_pos, replacement, normalization_kind)
+        else:
+            apply_id = anchor.get("revokesMigrationRunId")
+            apply_digest = anchor.get("revokesMigrationEventSha256")
+            candidates = positions.get(apply_id, []) if isinstance(apply_id, str) else []
+            if len(candidates) != 1 or candidates[0] >= pos or apply_id in revoked:
+                errors.append(f"{anchor.get('runId')}: revoke must target one unique earlier active apply")
+                continue
+            apply_pos = candidates[0]
+            apply_event = events[apply_pos]
+            recorded = raw_metadata[apply_pos].get("sha256") if apply_pos < len(raw_metadata) else None
+            if apply_event.get("eventKind") != LEGACY_MIGRATION_KIND or apply_event.get("migrationAction") != "apply" or apply_digest != recorded:
+                errors.append(f"{anchor.get('runId')}: revoke must bind an earlier apply digest")
+                continue
+            applied = applies.get(str(apply_id))
+            if applied is None:
+                errors.append(f"{anchor.get('runId')}: revoke target apply is not active")
+                continue
+            row = LEGACY_MIGRATION_NORMALIZATIONS[applied[2]]
+            if anchor.get("scope") != row["scope"] or anchor.get("evidence") != [{"kind": "manual-check", "ref": f"revoke {apply_id} {apply_digest}"}]:
+                errors.append(f"{anchor.get('runId')}: revoke does not match referenced normalization")
+                continue
+            active.pop(applied[0], None)
+            revoked.add(str(apply_id))
+
+    if fatal_control_identity:
+        counters["projected"] = 0
+        return events, counters, errors
+    effective = [
+        active.get(pos, event)
+        for pos, event in enumerate(events)
+        if event.get("eventKind") != LEGACY_MIGRATION_KIND
+    ]
+    counters["projected"] = len(active)
+    return effective, counters, errors
+
+
+def reduce_v3_events(events: list[dict]) -> tuple[dict | None, list[str]]:
+    """Reduce only V3 control events; legacy events remain readable, non-authorizing input."""
+
+    v3_events = [event for event in events if event.get("schemaVersion") == 3]
+    if not v3_events:
+        return None, []
+    owner = load_solution_attempt_owner()
+    state: dict | None = None
+    errors: list[str] = []
+    for event in v3_events:
+        result = owner.reduce_solution_attempt(state, event)
+        if result.get("changed") is True and result.get("result") in {
+            owner.OK,
+            owner.CLASS_REJECTED,
+        }:
+            state = result.get("state")
+            continue
+        fail(
+            errors,
+            f"V3 event {event.get('eventId')}: reducer denied event with "
+            f"{result.get('result')}",
+        )
+    return state, errors
+
+
+def validate_solution_attempt_gate_binding(binding: object) -> dict[str, object]:
+    """Validate an exact settled snapshot without granting lifecycle authority."""
+
+    denied = {"result": "SOL-E001-STATE-INVALID", "eligible": False}
+    required = {
+        "owner",
+        "routeEnabled",
+        "routeBinding",
+        "expectedRouteBinding",
+        "launchState",
+        "finalSnapshot",
+        "expectedFinalSnapshot",
+    }
+    if not isinstance(binding, dict) or set(binding) != required:
+        return denied
+    if binding.get("owner") != "agent_run_store.commit_operation":
+        return denied
+
+    digest = re.compile(r"^[0-9a-f]{64}$", re.ASCII)
+    route_binding = binding.get("routeBinding")
+    expected_route_binding = binding.get("expectedRouteBinding")
+    if binding.get("routeEnabled") is not True:
+        return {"result": "SOL-E007-ENFORCEMENT-UNAVAILABLE", "eligible": False}
+    if not all(
+        isinstance(value, str) and digest.fullmatch(value) is not None
+        for value in (route_binding, expected_route_binding)
+    ) or route_binding != expected_route_binding:
+        return {"result": "SOL-E007-ENFORCEMENT-UNAVAILABLE", "eligible": False}
+    if binding.get("launchState") != "REAPED":
+        return denied
+
+    final_snapshot = binding.get("finalSnapshot")
+    expected_snapshot = binding.get("expectedFinalSnapshot")
+    if not all(
+        isinstance(value, str) and digest.fullmatch(value) is not None
+        for value in (final_snapshot, expected_snapshot)
+    ):
+        return denied
+    if final_snapshot != expected_snapshot:
+        return {"result": "SOL-E006-RECEIPT-STALE", "eligible": False}
+    return {"result": "SOL-OK", "eligible": True}
+
+
+def resolve_closure_invalidations(
+    events: list[dict],
+    event_validity: list[bool],
+    raw_metadata: list[dict[str, object]],
+    errors: list[str],
+    telemetry: dict[str, int] | None = None,
+) -> set[int]:
+    """Return whole-event positions excluded only from V1/V2 relation reduction."""
+    tel = telemetry if telemetry is not None else {}
+    inactive: set[int] = set()
+    positions: dict[str, list[int]] = {}
+    for pos, event in enumerate(events):
+        run_id = event.get("runId")
+        if isinstance(run_id, str):
+            positions.setdefault(run_id, []).append(pos)
+
+    for pos, recovery in enumerate(events):
+        if recovery.get("eventKind") != "closure-invalidation":
+            continue
+        if pos >= len(event_validity) or not event_validity[pos]:
+            continue
+        recovery_id = recovery.get("runId")
+        target_id = recovery.get("invalidatesRunId")
+        candidates = positions.get(target_id, []) if isinstance(target_id, str) else []
+        if len(candidates) != 1 or candidates[0] >= pos:
+            fail(errors, f"{recovery_id}: ledger-recovery:target-identity requires exactly one earlier event for {target_id!r}")
+            continue
+        target_pos = candidates[0]
+        target = events[target_pos]
+        if target_pos in inactive or target.get("eventKind") == "closure-invalidation":
+            fail(errors, f"{recovery_id}: ledger-recovery:topology forbids duplicate, chain, cycle, or correction target {target_id}")
+            continue
+        if target.get("schemaVersion") != 2 or target.get("eventKind") == "launch" or not isinstance(target.get("closesRunIds"), list):
+            fail(errors, f"{recovery_id}: ledger-recovery:target-ineligible {target_id}")
+            continue
+        if target_pos >= len(event_validity) or not event_validity[target_pos]:
+            fail(errors, f"{recovery_id}: ledger-recovery:target-per-event-invalid {target_id}")
+            continue
+        recorded_digest = raw_metadata[target_pos].get("sha256") if target_pos < len(raw_metadata) else None
+        if recovery.get("invalidatesEventSha256") != recorded_digest:
+            fail(errors, f"{recovery_id}: ledger-recovery:target-digest-mismatch {target_id}")
+            continue
+
+        # Reuse the one C1-C5 evaluator: adding the candidate target to its
+        # already-active prefix must introduce a relation diagnostic. No copied
+        # C-rule logic is maintained in this recovery owner.
+        before_positions = [index for index in range(target_pos) if index not in inactive]
+        with_positions = before_positions + [target_pos]
+        before_events = [events[index] for index in before_positions]
+        with_events = [events[index] for index in with_positions]
+        before_validity = [event_validity[index] for index in before_positions]
+        with_validity = [event_validity[index] for index in with_positions]
+        before_errors: list[str] = []
+        with_errors: list[str] = []
+        validate_closure(before_events, before_errors, event_validity=before_validity)
+        validate_closure(with_events, with_errors, event_validity=with_validity)
+        introduced = with_errors[len(before_errors):] if with_errors[: len(before_errors)] == before_errors else with_errors
+        if not introduced:
+            fail(errors, f"{recovery_id}: ledger-recovery:target-authoritative {target_id}")
+            continue
+        inactive.add(target_pos)
+        tel["recovery-accepted"] = tel.get("recovery-accepted", 0) + 1
+    return inactive
 
 
 def validate_work_item(
@@ -1304,15 +1852,43 @@ def validate_work_item(
         and not selected_ledger.exists()
         and is_quick_fix_status(status_text)
     )
-    events = [] if ledger_free_quick_fix else load_jsonl(selected_ledger, errors)
-    event_validity = derive_event_validity(events, item, errors)
-    validate_scratch_ownership(events, item, errors)
+    raw_metadata: list[dict[str, object]] = []
+    events = [] if ledger_free_quick_fix else load_jsonl(selected_ledger, errors, raw_metadata)
+    effective_events, migration_counters, migration_errors = project_legacy_obligation_migrations(
+        events, raw_metadata, item
+    )
+    errors.extend(migration_errors)
+    if ledger_path is not None and any(event.get("schemaVersion") == 3 for event in events):
+        fail(errors, "legacy V1/V2 writer refuses a ledger containing schemaVersion 3")
+    event_validity = derive_event_validity(effective_events, item, errors)
+    _, v3_errors = reduce_v3_events(events)
+    errors.extend(v3_errors)
+    validate_scratch_ownership(effective_events, item, errors)
+    effective_metadata = [
+        metadata for event, metadata in zip(events, raw_metadata)
+        if event.get("eventKind") != LEGACY_MIGRATION_KIND
+    ]
+    inactive = resolve_closure_invalidations(effective_events, event_validity, effective_metadata, errors, telemetry)
+    active_positions = [pos for pos in range(len(effective_events)) if pos not in inactive]
+    active_events = [effective_events[pos] for pos in active_positions]
+    active_validity = [event_validity[pos] for pos in active_positions]
+    raw_errors: list[str] = []
+    raw_open_revise, raw_open_launches = validate_closure(effective_events, raw_errors, event_validity=event_validity)
     open_revise, open_launches = validate_closure(
-        events,
+        active_events,
         errors,
         telemetry,
-        event_validity=event_validity,
+        event_validity=active_validity,
     )
+    if telemetry is not None:
+        for name, value in migration_counters.items():
+            telemetry[f"ledger-migration-{name}"] = value
+        reopened_revise = max(0, len(open_revise) - len(raw_open_revise))
+        reopened_launch = max(0, len(open_launches) - len(raw_open_launches))
+        if reopened_revise:
+            telemetry["recovery-reopened-revise"] = telemetry.get("recovery-reopened-revise", 0) + reopened_revise
+        if reopened_launch:
+            telemetry["recovery-reopened-launch"] = telemetry.get("recovery-reopened-launch", 0) + reopened_launch
     if strict_revise:
         for event in open_launches:
             fail(

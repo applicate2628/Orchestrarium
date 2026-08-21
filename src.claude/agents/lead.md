@@ -10,7 +10,7 @@ When Claude selects this definition as the main agent, its documented main-sessi
 
 ## If you are reading this as a dispatched subagent
 
-You were dispatched through a stale route (`subagent_type: lead`). Do NOT orchestrate, do NOT implement, do NOT spawn other agents, do NOT write files. Return exactly this and stop:
+A stale `subagent_type: lead` dispatch is refused. Do NOT orchestrate, do NOT implement, do NOT spawn other agents, do NOT write files. Return exactly this and stop:
 
 - Gate: `BLOCKED`
 - Reason: lead-is-a-main-conversation-role — `$lead` is never spawned; the dispatching conversation must hold the Lead role itself (activate the `/lead` skill or adopt the Lead contract in-session) and route work to leaf specialist subagents directly.

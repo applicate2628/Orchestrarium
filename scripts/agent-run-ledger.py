@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
 import re
 import sys
+import tempfile
 import time
+from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -28,6 +32,7 @@ STATUS_SECTIONS = {
 # Post-commit stdout contract for consumers that need to distinguish a durable
 # append from a rejected or rolled-back attempt. Keep the text in this writer.
 APPEND_SUCCESS_MARKER = "RESULT: PASS append"
+RECOVERY_SUCCESS_MARKER = "RESULT: PASS recover-invalid-closure"
 
 
 def load_validator():
@@ -191,6 +196,213 @@ def serialize_event(event: dict[str, Any]) -> str:
     return json.dumps(event, ensure_ascii=False, separators=(",", ":"))
 
 
+class LedgerMigrationError(RuntimeError):
+    def __init__(self, failure_id: str, message: str):
+        super().__init__(message)
+        self.failure_id = failure_id
+
+
+@dataclass(frozen=True)
+class StagedLegacyMigration:
+    staged_bytes: bytes
+    receipt_facts: dict[str, Any]
+
+
+def _migration_fail(failure_id: str, message: str) -> None:
+    raise LedgerMigrationError(failure_id, message)
+
+
+def _strict_migration_inputs(operation_id: str, recorded_at: str) -> None:
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", operation_id, re.ASCII) is None:
+        _migration_fail("WI-LEDGER-MIGRATION-TARGET-IDENTITY", "operation id is not bounded")
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z", recorded_at, re.ASCII) is None:
+        _migration_fail("WI-LEDGER-MIGRATION-TARGET-IDENTITY", "recorded-at is not strict UTC")
+
+
+def stage_invalid_finding_class_migration(
+    item: Path,
+    target_run_id: str,
+    target_event_sha256: str,
+    expected_ledger_sha256: str,
+    operation_id: str,
+    recorded_at: str,
+) -> StagedLegacyMigration:
+    """Build and validate one append-only migration anchor without replacing the ledger."""
+
+    return stage_legacy_obligation_migration(
+        item, target_run_id, target_event_sha256, expected_ledger_sha256,
+        operation_id, recorded_at, "invalid-finding-class",
+    )
+
+
+def stage_legacy_scratch_evidence_migration(
+    item: Path,
+    target_run_id: str,
+    target_event_sha256: str,
+    expected_ledger_sha256: str,
+    operation_id: str,
+    recorded_at: str,
+) -> StagedLegacyMigration:
+    return stage_legacy_obligation_migration(
+        item, target_run_id, target_event_sha256, expected_ledger_sha256,
+        operation_id, recorded_at, "remove-string-scratch-evidence",
+    )
+
+
+def stage_legacy_obligation_migration(
+    item: Path,
+    target_run_id: str,
+    target_event_sha256: str,
+    expected_ledger_sha256: str,
+    operation_id: str,
+    recorded_at: str,
+    normalization_kind: str,
+) -> StagedLegacyMigration:
+    _strict_migration_inputs(operation_id, recorded_at)
+    for value, failure_id in (
+        (target_event_sha256, "WI-LEDGER-MIGRATION-TARGET-DIGEST"),
+        (expected_ledger_sha256, "WI-LEDGER-MIGRATION-LEDGER-DRIFT"),
+    ):
+        if re.fullmatch(r"[0-9a-f]{64}", value, re.ASCII) is None:
+            _migration_fail(failure_id, "digest must be lowercase SHA-256")
+    item = Path(item)
+    ledger_path = item / "agent-runs.jsonl"
+    try:
+        before = ledger_path.read_bytes()
+    except OSError as exc:
+        _migration_fail("WI-LEDGER-MIGRATION-LEDGER-DRIFT", str(exc))
+    before_sha = hashlib.sha256(before).hexdigest()
+    if before_sha != expected_ledger_sha256:
+        _migration_fail("WI-LEDGER-MIGRATION-LEDGER-DRIFT", "ledger digest changed")
+
+    validator = load_validator()
+    row = validator.LEGACY_MIGRATION_NORMALIZATIONS.get(normalization_kind)
+    if row is None:
+        _migration_fail("WI-LEDGER-MIGRATION-NORMALIZATION-KIND", "normalization kind is not closed")
+    metadata: list[dict[str, Any]] = []
+    parse_errors: list[str] = []
+    events = validator.load_jsonl(ledger_path, parse_errors, metadata)
+    if any(event.get("schemaVersion") == 3 for event in events):
+        _migration_fail("WI-LEDGER-MIGRATION-V3-UNSUPPORTED", "V3 ledger is not writable by this migration")
+    if parse_errors:
+        _migration_fail("WI-LEDGER-MIGRATION-DEFECT-CLASS", "; ".join(parse_errors))
+    positions = [index for index, event in enumerate(events) if event.get("runId") == target_run_id]
+    if len(positions) != 1:
+        _migration_fail("WI-LEDGER-MIGRATION-TARGET-IDENTITY", "target is missing or non-unique")
+    target_pos = positions[0]
+    target = events[target_pos]
+    raw_digest = metadata[target_pos].get("sha256") if target_pos < len(metadata) else None
+    if raw_digest != target_event_sha256:
+        _migration_fail("WI-LEDGER-MIGRATION-TARGET-DIGEST", "target digest changed")
+    if (
+        target.get("schemaVersion") != 2
+        or target.get("eventKind") != "terminal"
+        or target.get("eventKind") in {validator.LEGACY_MIGRATION_KIND, "closure-invalidation"}
+    ):
+        _migration_fail("WI-LEDGER-MIGRATION-TARGET-INELIGIBLE", "target is not an eligible V2 terminal")
+    if normalization_kind == "invalid-finding-class":
+        if target.get("gate") != "REVISE":
+            _migration_fail("WI-LEDGER-MIGRATION-TARGET-INELIGIBLE", "finding-class target is not REVISE")
+        if "findingClass" not in target or target.get("findingClass") in validator.FINDING_CLASSES:
+            _migration_fail("WI-LEDGER-MIGRATION-DEFECT-CLASS", "target finding class is already valid")
+        replacement = {**target, "findingClass": "legacy-unclassified"}
+        diagnostic_id = validator.LEDGER_EVENT_FINDING_CLASS_INVALID
+        receipt_finding_class = "legacy-unclassified"
+    else:
+        if not isinstance(target.get("scratchEvidence"), str):
+            _migration_fail("WI-LEDGER-MIGRATION-DEFECT-CLASS", "target scratchEvidence is not a string")
+        replacement = {key: value for key, value in target.items() if key != "scratchEvidence"}
+        diagnostic_id = validator.LEDGER_EVENT_SCRATCH_EVIDENCE_INVALID
+        receipt_finding_class = target.get("findingClass")
+    replacement_errors: list[str] = []
+    validator.validate_event(replacement, item, set(), replacement_errors)
+    if replacement_errors:
+        _migration_fail(
+            "WI-LEDGER-MIGRATION-DEFECT-CLASS",
+            "target has diagnostics besides the selected normalization: " + "; ".join(replacement_errors),
+        )
+    relation_events = list(events)
+    relation_events[target_pos] = replacement
+    relation_error = validator.migration_terminal_launch_relation_error(relation_events, target_pos, item)
+    if relation_error is not None:
+        _migration_fail("WI-LEDGER-MIGRATION-TARGET-INELIGIBLE", relation_error)
+    for event in events:
+        if event.get("eventKind") == validator.LEGACY_MIGRATION_KIND and event.get("migrationAction") == "apply" and event.get("migratesRunId") == target_run_id:
+            _migration_fail("WI-LEDGER-MIGRATION-TOPOLOGY", "target already has a migration apply")
+
+    anchor_run_id = f"ledger-migration-{operation_id}"
+    if any(event.get("runId") == anchor_run_id for event in events):
+        _migration_fail("WI-LEDGER-MIGRATION-TOPOLOGY", "anchor run id already exists")
+    anchor = {
+        "schemaVersion": 2,
+        "runId": anchor_run_id,
+        "workItem": target["workItem"],
+        "role": "lead",
+        "executionRole": "main",
+        "status": "completed",
+        "gate": "none",
+        "scope": row["scope"],
+        "eventKind": "legacy-obligation-migration",
+        "migrationAction": "apply",
+        "normalizationKind": normalization_kind,
+        "migratesRunId": target_run_id,
+        "migratesEventSha256": target_event_sha256,
+        "replacementEvent": replacement,
+        "evidence": [{"kind": "manual-check", "ref": row["evidence"].format(target=target_run_id, digest=target_event_sha256)}],
+        "startedAt": recorded_at,
+        "updatedAt": recorded_at,
+    }
+    anchor_bytes = serialize_event(anchor).encode("utf-8")
+    prefix = b"" if not before or before.endswith(b"\n") else b"\n"
+    staged = before + prefix + anchor_bytes + b"\n"
+    if not staged.startswith(before) or staged[: len(before)] != before:
+        _migration_fail("WI-LEDGER-MIGRATION-CANDIDATE-INVALID", "candidate does not preserve prefix")
+    candidate_path: Path | None = None
+    try:
+        descriptor, candidate_name = tempfile.mkstemp(prefix=".ledger-migration-", suffix=".jsonl", dir=item)
+        candidate_path = Path(candidate_name)
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(staged)
+            stream.flush()
+        parse_errors: list[str] = []
+        candidate_metadata: list[dict[str, Any]] = []
+        candidate_events = validator.load_jsonl(candidate_path, parse_errors, candidate_metadata)
+        _effective, _counters, projection_errors = validator.project_legacy_obligation_migrations(
+            candidate_events, candidate_metadata, item
+        )
+        if parse_errors or projection_errors:
+            _migration_fail("WI-LEDGER-MIGRATION-CANDIDATE-INVALID", "; ".join(parse_errors + projection_errors))
+    finally:
+        if candidate_path is not None:
+            candidate_path.unlink(missing_ok=True)
+
+    after_sha = hashlib.sha256(staged).hexdigest()
+    anchor_sha = hashlib.sha256(anchor_bytes).hexdigest()
+    replacement_sha = hashlib.sha256(serialize_event(replacement).encode("utf-8")).hexdigest()
+    facts = {
+        "schemaVersion": 1,
+        "status": "committed",
+        "operationId": operation_id,
+        "targetRunId": target_run_id,
+        "targetEventSha256": target_event_sha256,
+        "anchorRunId": anchor_run_id,
+        "anchorEventSha256": anchor_sha,
+        "beforeLedgerBytes": len(before),
+        "beforeLedgerSha256": before_sha,
+        "afterLedgerBytes": len(staged),
+        "afterLedgerSha256": after_sha,
+        "replacementEventSha256": replacement_sha,
+        "normalizationKind": normalization_kind,
+        "diagnosticId": diagnostic_id,
+        "sourcePath": f"work-items/active/{item.name}/agent-runs.jsonl",
+        "receiptPath": f"work-items/active/{item.name}/ledger-migration-receipts/{operation_id}.json",
+        "recordedAt": recorded_at,
+    }
+    if receipt_finding_class is not None:
+        facts["findingClass"] = receipt_finding_class
+    return StagedLegacyMigration(staged, facts)
+
+
 def restore_ledger(path: Path, previous: str | None) -> None:
     if previous is None:
         if path.exists():
@@ -240,6 +452,39 @@ def _read_ledger(item: Path, validator: Any | None = None) -> tuple[list[dict[st
             except ValueError:
                 malformed += 1
     return events, malformed
+
+
+class LedgerWriteLockError(RuntimeError):
+    pass
+
+
+@contextmanager
+def ledger_write_lock(item: Path):
+    """The existing per-item writer lock, reusable by the lifecycle owner."""
+
+    lock_path = Path(item) / "agent-runs.jsonl.lock"
+    lock_fd = None
+    for _attempt in range(50):
+        try:
+            lock_fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.write(lock_fd, f"pid={os.getpid()} at={utc_timestamp()}\n".encode())
+            break
+        except FileExistsError:
+            time.sleep(0.1)
+    if lock_fd is None:
+        holder = ""
+        try:
+            holder = lock_path.read_text(encoding="utf-8").strip()
+        except OSError:
+            pass
+        raise LedgerWriteLockError(
+            f"ledger locked ({lock_path}; holder: {holder or 'unknown'}); no automatic takeover"
+        )
+    try:
+        yield
+    finally:
+        os.close(lock_fd)
+        lock_path.unlink(missing_ok=True)
 
 
 def _iter_active_items(active_dir: Path) -> list[Path]:
@@ -352,6 +597,95 @@ def command_append(args: argparse.Namespace) -> int:
         lock_path.unlink(missing_ok=True)
 
     print(f"{APPEND_SUCCESS_MARKER} ({ledger_path})")
+    return 0
+
+
+def command_recover_invalid_closure(args: argparse.Namespace) -> int:
+    item = active_work_item(args, "recover-invalid-closure")
+    if item is None or not item.exists():
+        print(f"FAIL: missing work item: {item}")
+        return 1
+    validator = load_validator()
+    started_at = args.started_at or utc_timestamp()
+    event = {
+        "schemaVersion": 2,
+        "runId": args.run_id,
+        "workItem": item.name,
+        "role": "lead",
+        "executionRole": "main",
+        "status": "completed",
+        "gate": "none",
+        "scope": ["ledger-recovery:closure-invalidation"],
+        "eventKind": "closure-invalidation",
+        "invalidatesRunId": args.target_run_id,
+        "invalidatesEventSha256": args.target_event_sha256,
+        "evidence": [parse_evidence(value) for value in args.evidence],
+        "startedAt": started_at,
+        "updatedAt": args.updated_at or started_at,
+    }
+    ledger_path = item / "agent-runs.jsonl"
+    lock_path = item / "agent-runs.jsonl.lock"
+    lock_fd = None
+    for _attempt in range(50):
+        try:
+            lock_fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.write(lock_fd, f"pid={os.getpid()} at={utc_timestamp()}\n".encode())
+            break
+        except FileExistsError:
+            time.sleep(0.1)
+    if lock_fd is None:
+        print(f"FAIL: ledger locked ({lock_path}); no automatic takeover")
+        return 1
+    candidate = ledger_path.with_suffix(".jsonl.tmp")
+    replaced = False
+    try:
+        previous = ledger_path.read_bytes() if ledger_path.exists() else b""
+        decoded, _ = _read_ledger(item, validator)
+        if any(event.get("schemaVersion") == 3 for event in decoded):
+            print("FAIL: legacy V1/V2 writer refuses a ledger containing schemaVersion 3")
+            return 1
+        line = (serialize_event(event) + "\n").encode("utf-8")
+        prefix = b"" if not previous or previous.endswith(b"\n") else b"\n"
+        expected = previous + prefix + line
+        with candidate.open("xb") as stream:
+            stream.write(expected)
+            stream.flush()
+        errors = validator.validate_work_item(item, ledger_path=candidate, strict_revise=False)
+        if errors:
+            for error in errors:
+                print(f"FAIL: {error}")
+            print(f"RESULT: FAIL ({len(errors)} errors)")
+            return 1
+        if args.inject_failure == "pre-replace":
+            print("FAIL: ledger-recovery:pre-replace-injected")
+            return 1
+        os.replace(candidate, ledger_path)
+        replaced = True
+        if args.inject_failure == "post-replace-readback":
+            print("FAIL: ledger-recovery:post-commit-readback-indeterminate")
+            return 1
+        try:
+            actual = ledger_path.read_bytes()
+        except OSError:
+            print("FAIL: ledger-recovery:post-commit-readback-indeterminate")
+            return 1
+        if (
+            len(actual) != len(expected)
+            or hashlib.sha256(actual).digest() != hashlib.sha256(expected).digest()
+            or not actual.startswith(previous)
+            or not actual.endswith(line)
+        ):
+            print("FAIL: ledger-recovery:post-commit-readback-indeterminate")
+            return 1
+    except (OSError, ValueError) as exc:
+        print(f"FAIL: ledger-recovery:store-error: {exc}")
+        return 1
+    finally:
+        if not replaced:
+            candidate.unlink(missing_ok=True)
+        os.close(lock_fd)
+        lock_path.unlink(missing_ok=True)
+    print(f"{RECOVERY_SUCCESS_MARKER} ({ledger_path})")
     return 0
 
 
@@ -484,6 +818,16 @@ def build_parser() -> argparse.ArgumentParser:
     append.add_argument("--effort", choices=["low", "medium", "high", "xhigh", "max"], help="Typed declared reasoning-effort tier.")
     append.add_argument("--finding-class", choices=["publication-safety", "security", "correctness", "performance", "other"], help="REVISE finding classification (publication-safety/security are non-user-waivable).")
     append.set_defaults(func=command_append)
+
+    recovery = subparsers.add_parser("recover-invalid-closure", help="Append one digest-bound V2 closure invalidation")
+    recovery.add_argument("--run-id", required=True)
+    recovery.add_argument("--target-run-id", required=True)
+    recovery.add_argument("--target-event-sha256", required=True)
+    recovery.add_argument("--evidence", action="append", required=True)
+    recovery.add_argument("--started-at")
+    recovery.add_argument("--updated-at")
+    recovery.add_argument("--inject-failure", choices=["pre-replace", "post-replace-readback"], help=argparse.SUPPRESS)
+    recovery.set_defaults(func=command_recover_invalid_closure)
 
     rollup = subparsers.add_parser("rollup", help="Aggregate ledger events (one work-item via --work-item, or all active via --root)")
     rollup.add_argument("--root", type=Path, default=Path("."), help="Repository root for an all-active rollup (when --work-item is omitted).")

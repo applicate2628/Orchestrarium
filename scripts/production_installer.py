@@ -34,6 +34,10 @@ RUNTIME_RESOURCES = (
     ("shared/schemas/agent-runs.schema.json", "shared/schemas/agent-runs.schema.json"),
     ("scripts/maintenance/cleanup.py", "scripts/maintenance/cleanup.py"),
 )
+UI_CONTINUITY_CONTRACT_SOURCE = (
+    Path("shared") / "references" / "ui-transition-continuity.md"
+)
+UI_CONTINUITY_CONTRACT_TARGET = Path("contracts") / "ui-transition-continuity.md"
 CODEX_RUNTIME_HELPERS = ("check-hook-health.py",)
 CODEX_HOOK_INVENTORY = "codex-hook-inventory.json"
 # SHA-256 fingerprints of every historically shipped Codex built-in agent
@@ -414,6 +418,28 @@ def _copy_file(source: Path, target: Path, dry_run: bool) -> None:
     shutil.copy2(source, target)
 
 
+def _verify_ui_continuity_contract(source: Path, target: Path) -> None:
+    if (
+        not source.is_file()
+        or not target.is_file()
+        or target.read_bytes() != source.read_bytes()
+    ):
+        raise RuntimeError(
+            "UI-CONTINUITY-CONTRACT-DRIFT: installed neutral contract leaf "
+            "differs from the canonical English source"
+        )
+
+
+def _install_ui_continuity_contract(
+    root: Path, pack_root: Path, dry_run: bool
+) -> None:
+    source = root / UI_CONTINUITY_CONTRACT_SOURCE
+    target = pack_root / UI_CONTINUITY_CONTRACT_TARGET
+    _copy_file(source, target, dry_run)
+    if not dry_run:
+        _verify_ui_continuity_contract(source, target)
+
+
 def _runtime_file_destinations(
     root: Path, helper_target: Path
 ) -> tuple[tuple[Path, Path], ...]:
@@ -501,6 +527,7 @@ def _installer_mutation_paths(
         helper_target / helper
         for helper in RUNTIME_HELPERS
     )
+    paths.append(agents_root / UI_CONTINUITY_CONTRACT_TARGET)
     paths.extend(
         helper_target.parent / destination
         for _source, destination in RUNTIME_RESOURCES
@@ -807,6 +834,10 @@ _HOOK_DIRECTORY_OVERRIDES = {
     ("claude", "check-mcp-momentum"): "scripts",
 }
 
+_HOOK_SCRIPT_OVERRIDES = {
+    "check-git-push-gate": "check-git-push-gate-runner.py",
+}
+
 
 def _universal_hook_manifest_module():
     path = Path(__file__).with_name("universal_hooks_manifest.py")
@@ -832,7 +863,7 @@ def _hook_specs(provider: str, installed_root: Path):
         (
             stem,
             roots[_HOOK_DIRECTORY_OVERRIDES.get((provider, stem), directory)]
-            / f"{stem}.py",
+            / _HOOK_SCRIPT_OVERRIDES.get(stem, f"{stem}.py"),
             event,
             matcher,
         )
@@ -1166,6 +1197,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
             else:
                 for directory in ("agents", "commands", "skills"):
                     _sync_tree(source / directory, target / directory, args.dry_run)
+            _install_ui_continuity_contract(root, agents_root, args.dry_run)
             helper_target = (
                 skills_target / "lead" / "scripts"
                 if provider == "codex"

@@ -39,6 +39,7 @@ description: "UX reviewer: gate usability and interaction clarity."
 
 ## Working rules
 
+- As an independent outcome gate, apply the [Causal UI Continuity contract](../contracts/ui-transition-continuity.md) to verify task continuity, preserved valid interaction state, and declared transition outcomes without imposing a geometry freeze.
 - Judge against user outcomes, accessibility expectations, and interaction clarity.
 - Each usability finding cites a named heuristic from Nielsen's ten—such as visibility of system status, match with the real world, user control and undo, consistency, error prevention, or recognition over recall—or the exact design-package requirement it contradicts. “Confusing” without a named heuristic or contradicted requirement is not a finding.
 - Walk every scoped flow end to end, including empty, loading, error, success, back, cancel, and interruption paths. Each finding carries reproduction steps and a captured screenshot or recording directly inspected under the shared visual-artifact-verification rule; for desktop surfaces route capture through `$windows-gui-manual-testing` or `$analyzing-video-bugs`.

@@ -14,14 +14,6 @@ from pathlib import Path
 from typing import Iterable, Iterator, Sequence
 
 
-COMMON_SKILL_BODY_PINS = {
-    "analyzing-video-bugs": "cf78ec0176f1726891045a2c2626363377994f34f081f9a9ad0ffbdb60740e91",
-    "bug-hunting": "56c6ed8a5a590559bdf29409102b2b8b654bf73c7be2b4ef23c4d2c74e019232",
-    "explain-simply": "f0f0e4dd1bed68aa8114adf6059fea32fedbee8fd06bf8bb12042dcd07ebb408",
-    "mathtype-book-page": "e0d3fa5233eaa5d59ba0c8b90b45ffb0aa2dd51e6a8a8a00659dd8bddd626323",
-    "vak-dissertation-review": "e259d114a1ea2372d9152a07445aeba82c51493b9caf7b39f3b6b96678e9b261",
-    "windows-gui-manual-testing": "b3a029e6784d1d9e37f789b8b512f31f5e5c2161ca6807dc8a140854042ae6c8",
-}
 LAW_ID_RE = re.compile(r"\b(A[1-9]|B[1-3]|C[1-6]|D[1-5])\b")
 ACTION_SCOPES = frozenset(
     {"all", "dev_repo", "dev_repo_nonstandalone", "installed"}
@@ -49,6 +41,19 @@ class Layout:
 
 def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace")
+
+
+def common_skill_body_sha256(content: bytes) -> str:
+    """Hash a common-skill body after canonical newline/frontmatter handling."""
+    normalized = content.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    lines = normalized.splitlines(keepends=True)
+    body_start = 0
+    if lines and lines[0].strip() == b"---":
+        for index in range(1, len(lines)):
+            if lines[index].strip() == b"---":
+                body_start = index + 1
+                break
+    return hashlib.sha256(b"".join(lines[body_start:])).hexdigest()
 
 
 def _assembled_codex_agents(root: Path) -> str:
@@ -346,22 +351,13 @@ class Validator:
         if not self.is_file(file):
             self.fail(f"common-skill {name} body-parity pin (file missing: {file})")
             return
-        text = self.text(file).replace("\r\n", "\n").replace("\r", "\n")
-        lines = text.splitlines(keepends=True)
-        body_start = 0
-        if lines and lines[0].strip() == "---":
-            for index in range(1, len(lines)):
-                if lines[index].strip() == "---":
-                    body_start = index + 1
-                    break
-        actual = hashlib.sha256("".join(lines[body_start:]).encode("utf-8")).hexdigest()
+        actual = common_skill_body_sha256(self.path(file).read_bytes())
         if actual == expected:
-            self.ok(f"common-skill {name} body matches the pinned canonical cross-pack body")
+            self.ok(f"common-skill {name} body matches its provider-local body pin")
         else:
             self.fail(
-                f"common-skill {name} body drifted from the pinned canonical cross-pack body "
-                f"(expected {expected}, actual {actual} — a deliberate body change must land "
-                "in ALL FOUR packs plus both validators' COMMON_SKILL_BODY_PINS)"
+                f"common-skill {name} body drifted from its provider-local body pin "
+                f"(expected {expected}, actual {actual})"
             )
 
     def _run_python(self, script: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -787,6 +783,7 @@ def _direct(
     maintainer_only_shared_reference_names: frozenset[str],
     utility_skills: frozenset[str],
     curated_role_skills: frozenset[str],
+    common_skill_pin_names: frozenset[str],
 ) -> None:
     layout = validator.layout
     if kind == "file":
@@ -871,18 +868,20 @@ def _direct(
                 )
         return
     if kind == "common_pin_completeness":
-        for name in extract_roles(layout.agents_text, "## Common skills"):
+        live_names = frozenset(extract_roles(layout.agents_text, "## Common skills"))
+        for name in sorted(live_names):
             _verdict(
                 validator,
-                name in COMMON_SKILL_BODY_PINS,
-                f"common-skill {name} has a body-parity pin",
-                f"common-skill {name} has no body-parity pin "
-                "(add it to COMMON_SKILL_BODY_PINS in the canonical validator engine)",
+                name in common_skill_pin_names,
+                f"common-skill {name} has an applicable provider-local body pin",
+                f"common-skill body pins missing: {name}",
             )
+        for name in sorted(common_skill_pin_names - live_names):
+            validator.fail(f"common-skill body pins extra: {name}")
         return
     if kind == "layering_codex":
         owned = codex_owned_skill_names(layout.agents_text, utility_skills)
-        common = set(COMMON_SKILL_BODY_PINS)
+        common = set(extract_roles(layout.agents_text, "## Common skills"))
         for path in sorted(layout.skills.glob("*/SKILL.md")):
             if path.parent.name in common or path.parent.name not in owned:
                 continue
@@ -1137,7 +1136,13 @@ def validate_pack(
     validator = Validator(layout)
     if enforce_reusable_instruction_boundaries:
         validator.check_reusable_instruction_boundaries()
-    for action in _applicable_actions(actions, layout):
+    applicable_actions = tuple(_applicable_actions(actions, layout))
+    common_skill_pin_names = frozenset(
+        action[1]
+        for action in applicable_actions
+        if len(action) >= 2 and action[0] == "check_common_skill_body_pin"
+    )
+    for action in applicable_actions:
         operation, *args = action
         if operation == "direct":
             _direct(
@@ -1148,6 +1153,7 @@ def validate_pack(
                 ),
                 utility_skills=utility_skills,
                 curated_role_skills=curated_role_skills,
+                common_skill_pin_names=common_skill_pin_names,
             )
         else:
             validator.dispatch(operation, args)
