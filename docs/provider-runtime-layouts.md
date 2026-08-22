@@ -2,11 +2,17 @@
 
 This document records the installed runtime layout for the provider lines used by Orchestrarium today, including provider source trees that already exist in the monorepo. It is an install/runtime reference, not a source-layout reference.
 
+## Codex native mechanical roles
+
+Codex installs `mechanical-scout.toml` and `mechanical-worker.toml` as create-only native role payloads under the target `.codex/agents/` directory. Both require exact `gpt-5.6-luna` with high reasoning effort; their shared eligibility is native policy rather than an agents-mode model option. `RoleDispatchPolicyV1` is resolved immediately before native dispatch and accepts no host/provider result or result file. Disabled native roles are explicitly unavailable; no external, Terra, or Sol substitution is permitted.
+
+Repository policy tests use inline requests and consume no tracked provider-result or runtime-result fixture. `scripts/validate-slice-a-detached.py` applies only the explicitly admitted overlay to one real detached candidate worktree, supervises every focused child, settles worktree cleanup, and only then publishes an always-nonauthorizing bounded manifest. Attempt logs and receipts are local evidence only.
+
 Production auto-routing in the root integration contract is limited to Codex plus Claude Code. Gemini CLI and Qwen are documented here as explicit example integrations only; both are classified in this repository as `WEAK MODEL / NOT RECOMMENDED`.
 
 Do not confuse these runtime surfaces with the monorepo authoring trees such as `src.codex/`, `src.claude/`, `src.gemini/`, or `src.qwen/`.
 
-Architecture note: on the Codex line, the installed `AGENTS.md` is intentionally the compact universal minimum. Detailed installed role contracts and runtime guidance belong in the installed `skills/<role>/SKILL.md` files; native subagent model selection remains runtime- or operator-owned rather than pack-pinned through default overrides. Shared/provider reference trees are source-maintainer canon, not target-project install payload. Claude already follows the analogous pattern through a short `CLAUDE.md` entrypoint plus `.claude/agents/*.md` role files, with the five curated role-skills as the deliberate exception: `lead`, `product-manager`, `analyst`, `architect`, and `planner` keep their canonical contracts under `.claude/skills/<role>/SKILL.md`. Claude main-agent `lead` activation uses the documented `initialPrompt: /lead`; the same definition retains a fail-closed stale-dispatch branch, while the other four keep thin `.claude/agents/<role>.md` delegate wrappers that load the same-named skill.
+Architecture note: on the Codex line, the installed `AGENTS.md` is intentionally the compact universal minimum. Detailed installed role contracts and runtime guidance belong in the installed `skills/<role>/SKILL.md` files; the Native role manifest is source-only current-payload validation, while role TOMLs are create-only targets with no installed receipt, adoption, update, or reclaim authority in 1.x. Only an absent `.codex/config.toml` receives `multi_agent_v2 = true`; an existing ordinary file stays byte-exact when its TOML feature shape is valid, and stays byte-exact while the install fails when that shape is malformed or wrongly typed. Codex and Claude compose one identical complete canonical `.agents/skills/lead` tree before its single create-only publication, in either installation order, and Claude receives only create-only discovery projections. Codex hook inventory is mutable evidence outside that tree and is authoritative only as the exact ordinary sibling of the selected `hooks.json`. Shared/provider reference trees are source-maintainer canon, not target-project install payload. Claude already follows the analogous pattern through a short `CLAUDE.md` entrypoint plus `.claude/agents/*.md` role files, with the five curated role-skills as the deliberate exception: `lead`, `product-manager`, `analyst`, `architect`, and `planner` keep their canonical contracts under `.claude/skills/<role>/SKILL.md`. Claude main-agent `lead` activation uses the documented `initialPrompt: /lead`; the same definition retains a fail-closed stale-dispatch branch, while the other four keep thin `.claude/agents/<role>.md` delegate wrappers that load the same-named skill.
 
 Read the tables with three layers in mind:
 
@@ -31,11 +37,11 @@ Do not collapse those layers into one claim. When a row is Orchestrarium-owned r
 | --- | --- | --- |
 | Installed pack root | `~/.codex/` | Global Codex pack install target |
 | Governance entrypoint | `~/.codex/AGENTS.md` | Installed Codex runtime entrypoint; intentionally the compact universal minimum rather than the full role/runtime manual |
-| Skill tree | `~/.codex/skills/<role>/SKILL.md` | Orchestrarium Codex runtime organizes each role as a skill directory |
-| Design-panel binding | `~/.codex/skills/design-panel/SKILL.md` + `agents/openai.yaml` | Independent multi-lane design generation on one pinned problem, converged through one mandatory synthesis; no panel-state validator is installed |
-| Optional native subagent overrides | `~/.codex/agents/default.toml`, `worker.toml`, `explorer.toml` | Runtime/operator-owned; Orchestrarium does not install defaults. Reinstall removes recognizable retired pack-owned copies and preserves customized user files |
-| Validation script | `~/.codex/skills/lead/scripts/validate-skill-pack.sh` | Same lead script tree as the repo source |
-| Publication-safety scan | `~/.codex/skills/lead/scripts/check-publication-safety.sh` | PowerShell runs the sibling `.py` entrypoint with Python |
+| Skill tree | `$HOME/.agents/skills/<role>/SKILL.md` | Orchestrarium Codex runtime organizes each role as a skill directory |
+| Design-panel binding | `$HOME/.agents/skills/design-panel/SKILL.md` + `agents/openai.yaml` | Independent multi-lane design generation on one pinned problem, converged through one mandatory synthesis; no panel-state validator is installed |
+| Native roles | `~/.codex/agents/<role>.toml` | Create-only: absent roles are created, identical files are no-ops, and differing files are preserved while installation fails. The source manifest validates current payloads and is never installed as a receipt; 1.x has no adoption, update, deletion, or reclaim authority. |
+| Validation script | `$HOME/.agents/skills/lead/scripts/validate-skill-pack.sh` | Same lead script tree as the repo source |
+| Publication-safety scan | `$HOME/.agents/skills/lead/scripts/check-publication-safety.sh` | PowerShell runs the sibling `.py` entrypoint with Python |
 | Global operator overlay | `~/.codex/.agents-mode.yaml` | Orchestrarium-owned default operator file seeded on first global install and preserved on reinstall; legacy sibling `~/.codex/.agents-mode` is compatibility input only |
 
 ### Local
@@ -46,7 +52,7 @@ Do not collapse those layers into one claim. When a row is Orchestrarium-owned r
 | Governance entrypoint | `<project>/AGENTS.md` | Codex pack section is merged into the project-root `AGENTS.md`; the installed Codex section stays intentionally compact and defers detailed installed role/runtime guidance to the skill tree |
 | Skill tree | `<project>/.agents/skills/<role>/SKILL.md` | Mirrors the global `skills/` structure |
 | Design-panel binding | `<project>/.agents/skills/design-panel/SKILL.md` + `agents/openai.yaml` | Project-level mirror of the global design-panel binding; no panel-state validator is installed |
-| Optional native subagent overrides | `<project>/.codex/agents/default.toml`, `worker.toml`, `explorer.toml` | Runtime/operator-owned; Orchestrarium does not install defaults. Reinstall removes recognizable retired pack-owned copies and preserves customized user files |
+| Native roles | `<project>/.codex/agents/<role>.toml` | Create-only: absent roles are created, identical files are no-ops, and differing files are preserved while installation fails. The source manifest validates current payloads and is never installed as a receipt; 1.x has no adoption, update, deletion, or reclaim authority. |
 | Local config | `<project>/.agents/.agents-mode.yaml` | Canonical Orchestrarium local state file; local install seeds the default and `$init-project` reviews or updates it, while legacy sibling `<project>/.agents/.agents-mode` remains compatibility input only. Decision-driving reads use this local scope first, then fall back to the global Codex overlay when the local scope is absent. |
 | Validation script | `<project>/.agents/skills/lead/scripts/validate-skill-pack.sh` | Run from the target project root after install |
 | Publication-safety scan | `<project>/.agents/skills/lead/scripts/check-publication-safety.sh` | PowerShell runs the sibling `.py` entrypoint with Python |

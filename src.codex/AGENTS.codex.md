@@ -97,10 +97,10 @@ The no-trash guard has four closed, command-derived triggers: (1) the unrequeste
 
 **MCP-momentum audit.** `check-mcp-momentum.py` is one consumer of the shared three-event MCP continuity policy documented in [`references-codex/mcp-continuity.md`](../references-codex/mcp-continuity.md). It admits exactly `Grep|Bash|PowerShell|shell_command|exec_command`; treats `rg`, `ag`, and `ack` as recursive by default and `grep` as recursive only with an explicit recursive option; stays silent only when every explicit scope resolves from the raw envelope `cwd` to `work-items/`, `.reports/`, `.plans/`, or `.scratch/` at the nearest repository root; a matching segment at any other depth is not exempt; and fires for a mixed source/exempt search. Root and `agent_id` envelopes are evaluated identically. It emits only safe matched server names (at most three plus a count), always allows, exits 0 on hit and miss, never exits 2, and fails open. The advisory re-anchors tool choice; it cannot prove model obedience.
 
-Hook entry points: `~/.codex/skills/lead/scripts/check-{bugfix-discipline,passive-polling-stop}.py`, the registered `~/.codex/skills/lead/scripts/check-git-push-gate-runner.py`, and its fixed policy sibling `check-git-push-gate.py`;
-`~/.codex/skills/lead/hooks/check-{machine-local-path,no-trash-in-repo,stale-relation-residue,repository-orientation,mcp-momentum}.py`.
+Hook entry points: `$HOME/.agents/skills/lead/scripts/check-{bugfix-discipline,passive-polling-stop}.py`, the registered `$HOME/.agents/skills/lead/scripts/check-git-push-gate-runner.py`, and its fixed policy sibling `check-git-push-gate.py`;
+`$HOME/.agents/skills/lead/hooks/check-{machine-local-path,no-trash-in-repo,stale-relation-residue,repository-orientation,mcp-momentum}.py`.
 
-This list covers the eight structural hooks (blocking + audit); the four reminder/context hooks are registered through `~/.codex/skills/lead/scripts/<name>.py`. Hook implementations have no shell or PowerShell rollback copies.
+This list covers the eight structural hooks (blocking + audit); the four reminder/context hooks are registered through `$HOME/.agents/skills/lead/scripts/<name>.py`. Hook implementations have no shell or PowerShell rollback copies.
 
 Per the source-hygiene placement law, the five warn-only audits live in `skills/lead/hooks/`, while blocking and reminder/context hooks live in `skills/lead/scripts/` beside `hook_common.py`. Python is the sole registered and implementation runtime for hooks.
 
@@ -108,7 +108,7 @@ Per the source-hygiene placement law, the five warn-only audits live in `skills/
 
 The installer invokes each installed `.py` target directly with the absolute `sys.executable` of the Python process running the installer. Before registration mutation, the interpreter and `.py` target must be absolute regular files; on Windows the interpreter must be a non-reparse `.exe`, and on POSIX it must have execute permission. The later health gate actually launches every registered hook. The reserved native profile requires a real native executable and fails before mutation because no native hook binaries ship. On Windows, the registered command is the verified `cmd.exe`/PowerShell-compatible unquoted absolute interpreter followed by the unquoted absolute `.py` path; unsupported whitespace or metacharacters fail the install instead of creating a dead registration.
 
-Upgrade ordering is strictly **SYNC → REGISTER → VERIFY → RECLAIM**. `scripts/check-hook-health.py` verifies every registered executable and target, then reconciles current owned Codex registrations one-to-one with host `hooks/list` before reclaim can run. Installer VERIFY uses `report`: only complete registration identities changed by that transaction may remain `untrusted` or `modified`, reported as `PENDING_MANUAL_TRUST`; the identity includes event, matcher, handler type, exact command, and exact registration source, while pre-existing drift fails. The installed helper's `require` mode automatically consumes its sibling generated `codex-hook-inventory.json`, fails closed when that inventory is missing, accepts only `trusted` host entries, and is the post-Trust and controlled-Codex-launch gate. Reclaim is last, idempotent, and dry-run-visible; it removes only byte-identical retired shell copies and preserves customized files.
+Upgrade ordering is strictly **SYNC → REGISTER → VERIFY → RECLAIM**. `scripts/check-hook-health.py` verifies every registered executable and target, then reconciles current owned Codex registrations one-to-one with host `hooks/list` before reclaim can run. Installer VERIFY uses `report`: only complete registration identities changed by that transaction may remain `untrusted` or `modified`, reported as `PENDING_MANUAL_TRUST`; the identity includes event, matcher, handler type, exact command, and exact registration source, while pre-existing drift fails. The installed helper's `require` mode derives the generated `codex-hook-inventory.json` from the selected `hooks.json` parent, fails closed when that target-derived sidecar is missing, accepts only `trusted` host entries, and is the post-Trust and controlled-Codex-launch gate. Reclaim is last, idempotent, and dry-run-visible; it removes only byte-identical retired shell copies and preserves customized files.
 
 Unlike Claude Code, Codex marks every newly-installed or changed hook entry as untrusted.
 
@@ -119,7 +119,7 @@ Do not press Esc and do not choose **`Continue without trusting`**, because all 
 `codex exec` silently skips untrusted hook entries instead of showing the trust prompt, so interactive `codex` must run first.
 The trust modal does not time out and the operator must review all 12 entries before making the explicit choice.
 
-Afterward, verify the host sees every current entry as runnable: `python ~/.codex/skills/lead/scripts/check-hook-health.py --target ~/.codex/hooks.json --platform codex --codex-trust-mode require`.
+Afterward, verify the host sees every current entry as runnable: `python "$HOME/.agents/skills/lead/scripts/check-hook-health.py" --target "$HOME/.codex/hooks.json" --platform codex --codex-trust-mode require`.
 
 #### Trust identity
 
@@ -182,7 +182,19 @@ Codex's `matcher` field is regex on tool name only (no `if`-style argument filte
 
 ## Default delegation entry point
 
-If approved delivery work needs delegation and no narrower delegated role is already named, use `$lead` from `$CODEX_HOME/skills/lead` as the default coordinator. If the task is about roadmap ownership, prioritization, milestone shaping, or admission into discovery or delivery, use `$product-manager` instead.
+## Native Luna mechanical corridor
+
+`mechanical-scout` and `mechanical-worker` are standalone named native roles only for the shared `micro`, `mechanical-read`, and `mechanical` task classes. Every Lead, direct-root, and nested/non-Lead caller invokes `scripts/resolve-agents-mode.py --resolve-role-dispatch` (or its `resolve_role_dispatch` application-programming interface) and consumes `RoleDispatchPolicyV1` immediately before native dispatch. Callers do not reimplement task, role, profile, floor, corridor, or fallback logic.
+
+In the source monorepo, the resolver is the exact repository `scripts/resolve-agents-mode.py`. In an installed layout, callers check only the exact project candidate `<project>/.agents/skills/lead/scripts/resolve-agents-mode.py`, then the exact global candidate `$HOME/.agents/skills/lead/scripts/resolve-agents-mode.py`; matching role TOMLs come only from the corresponding `<project>/.codex/agents/` or `$HOME/.codex/agents/`. Missing or ambiguous layout/input state returns `E_ROLE_POLICY_INVALID`; no current-working-directory or parent-directory search is allowed. Installed generic agents-mode resolution is unsupported. The installed policy and manifest remain ordinary create-only leaves under `lead/shared/`; the manifest is never copied into `.codex/agents/` and never proves installer ownership.
+
+The policy result is `denied`, `unavailable`, or `native-required`, always with `fallback:"none"`. Denied/unavailable permits no launch. Native-required permits exactly the named native attempt. A host rejection or unobserved exact model/effort becomes a nonauthorizing caller handoff with `E_LUNA_UNAVAILABLE`; it is never replayed into the resolver and never authorizes publication. External realization, Terra, Sol, runtime-default, unnamed/default-role, recursive, cross-home, automatic-provider, and other-provider substitution are prohibited for this corridor.
+
+Before every native subagent spawn, the caller discovers the tools available at that moment and selects the exact task-scoped MCP/tool identifiers, or `none`. It records only that selection under `Allowed tools`; tracked rules never hardcode concrete MCP identifiers, and `runtime default surface` is invalid for native dispatch. The subagent must not use an unlisted tool even when the host inherits it. This is behavioral isolation enforced by caller and subagent instructions until the native runtime provides per-spawn tool filtering; it is not a claim of host-level capability restriction.
+
+The policy accepts only `{task_class, role, effective_feature_state}` and returns only `denied`, `unavailable`, or `native-required`, always with `fallback:"none"`; repository policy launches nothing. A native host outcome is caller-owned and recorded only as a nonauthorizing caller handoff; it is never fed back into policy and cannot authorize publication. Slice A has no external realization. Independent QA owns fresh runtime and test evidence, while human publication review plus the existing leak gate alone owns commit, push, and release decisions.
+
+If approved delivery work needs delegation and no narrower delegated role is already named, use `$lead` from `$HOME/.agents/skills/lead` as the default coordinator. If the task is about roadmap ownership, prioritization, milestone shaping, or admission into discovery or delivery, use `$product-manager` instead.
 
 ## Template routing
 
@@ -227,7 +239,7 @@ For a direct full repository impact review of recent changes, use `$review-chang
 
 ## Role resolution paths
 
-Role definitions live in the installed skills tree: `.agents/skills/<role>/SKILL.md` for repo-local installs, or `$CODEX_HOME/skills/<role>/SKILL.md` / `~/.codex/skills/<role>/SKILL.md` for global installs.
+Role definitions live in the installed skills tree: `.agents/skills/<role>/SKILL.md` for repo-local installs or `$HOME/.agents/skills/<role>/SKILL.md` for global installs.
 
 Use the skill or custom-agent overlay that matches the assigned role. Utility skills live in the same installed skills tree and may be invoked directly when their workflow fits. In particular, use `$init-project` to initialize project policies in the root `AGENTS.md` and bootstrap `.agents/.agents-mode.yaml` for a new Codex project, and use `$external-brigade` when a bounded set of independent external helpers should launch together instead of being orchestrated ad hoc.
 
@@ -235,7 +247,7 @@ Use these global anchor roles:
 
 - `$lead`: default delivery coordination, routing, artifact acceptance, and gate decisions for approved work
 - `$product-manager`: roadmap ownership, initiative prioritization, and admission into discovery or delivery
-- `$consultant`: optional non-blocking independent advisor; usage rules, toggle check, and execution paths are in `$CODEX_HOME/skills/consultant/SKILL.md`
+- `$consultant`: optional non-blocking independent advisor; usage rules, toggle check, and execution paths are in `$HOME/.agents/skills/consultant/SKILL.md`
 
 External dispatch roles also exist in the installed skills tree as bidirectional adapters:
 
@@ -254,6 +266,6 @@ If the project root `AGENTS.md` lacks `## Project policies`, or if no `.agents-m
 
 ## Publication safety scan
 
-For repo-local installs, run `bash .agents/skills/lead/scripts/check-publication-safety.sh` from Git Bash / macOS / Linux, or `python .agents/skills/lead/scripts/check-publication-safety.py` from Windows PowerShell. For global installs, use the same sibling entrypoints under `~/.codex/skills/lead/scripts/` (`python "$HOME/.codex/skills/lead/scripts/check-publication-safety.py"` in PowerShell).
+For repo-local installs, run `bash .agents/skills/lead/scripts/check-publication-safety.sh` from Git Bash / macOS / Linux, or `python .agents/skills/lead/scripts/check-publication-safety.py` from Windows PowerShell. For global installs, use the same sibling entrypoints under `$HOME/.agents/skills/lead/scripts/` (`python "$HOME/.agents/skills/lead/scripts/check-publication-safety.py"` in PowerShell).
 
 The default command is the pre-commit staged-blob check only. A manual range invocation is diagnostic; at push evaluation the gate runs its own fresh canonical sibling range scan. Human review and explicit user publication approval remain separate requirements.

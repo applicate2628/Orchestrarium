@@ -4,10 +4,14 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
+import re
+import stat
 import sys
+import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +33,36 @@ PROJECT_RANKS = frozenset({"local", "local-legacy"})
 USER_GLOBAL_RANKS = frozenset({"global", "global-legacy", "shared-global"})
 
 
+def _is_reparse_metadata(metadata: os.stat_result) -> bool:
+    return bool(
+        getattr(metadata, "st_file_attributes", 0)
+        & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    )
+
+
+def _ordinary_file(path: Path) -> bool:
+    try:
+        metadata = path.lstat()
+    except OSError:
+        return False
+    return (
+        stat.S_ISREG(metadata.st_mode)
+        and not stat.S_ISLNK(metadata.st_mode)
+        and not _is_reparse_metadata(metadata)
+    )
+
+
+def _ordinary_directory(path: Path) -> bool:
+    try:
+        metadata = path.lstat()
+    except OSError:
+        return False
+    return (
+        stat.S_ISDIR(metadata.st_mode)
+        and not stat.S_ISLNK(metadata.st_mode)
+        and not _is_reparse_metadata(metadata)
+        and not getattr(os.path, "isjunction", lambda _path: False)(path)
+    )
 def is_executable_bearing(key: str, value: Any) -> bool:
     """True when a resolved key/value names an arbitrary executable a repo could supply."""
     return key == "reserveResolver" and isinstance(value, str) and value.startswith("wrapper:")
@@ -131,6 +165,386 @@ def canonical_defaults(repo_root: Path, provider: str) -> dict[str, Any]:
     return parse_agents_mode_text(content)
 
 
+def load_role_policy(repo_root: Path) -> tuple[dict[str, Any], Path]:
+    path = repo_root / "shared" / "role-routing-policy.v1.json"
+    if not _ordinary_file(path):
+        raise ValueError(f"E_ROLE_POLICY_INVALID: policy input is not ordinary: {path}")
+    try:
+        policy = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"E_ROLE_POLICY_INVALID: cannot load {path}: {exc}") from exc
+    if not isinstance(policy, dict) or policy.get("schemaVersion") != 1:
+        raise ValueError("E_ROLE_POLICY_INVALID: schemaVersion must be 1")
+
+    model_tiers = policy.get("modelTierOrder")
+    efforts = policy.get("effortOrder")
+    profiles = policy.get("profiles")
+    task_classes = policy.get("taskClasses")
+    roles = policy.get("roles")
+    eligibility = policy.get("taskRoleEligibility")
+    if not all(
+        isinstance(value, dict)
+        for value in (profiles, task_classes, roles, eligibility)
+    ):
+        raise ValueError("E_ROLE_POLICY_INVALID: policy maps are required")
+    if not isinstance(model_tiers, list) or len(model_tiers) != len(set(model_tiers)):
+        raise ValueError("E_ROLE_POLICY_INVALID: modelTierOrder must be unique")
+    if not isinstance(efforts, list) or len(efforts) != len(set(efforts)):
+        raise ValueError("E_ROLE_POLICY_INVALID: effortOrder must be unique")
+
+    model_index = {value: index for index, value in enumerate(model_tiers)}
+    effort_index = {value: index for index, value in enumerate(efforts)}
+    for name, profile in profiles.items():
+        if not isinstance(profile, dict):
+            raise ValueError(f"E_ROLE_POLICY_INVALID: profile {name} is not an object")
+        if profile.get("modelTier") not in model_index:
+            raise ValueError(f"E_ROLE_POLICY_INVALID: profile {name} model tier")
+        if profile.get("effort") not in effort_index:
+            raise ValueError(f"E_ROLE_POLICY_INVALID: profile {name} effort")
+        if not isinstance(profile.get("codexModel"), str):
+            raise ValueError(f"E_ROLE_POLICY_INVALID: profile {name} Codex model")
+
+    for role_name, role in roles.items():
+        if not isinstance(role, dict):
+            raise ValueError(f"E_ROLE_POLICY_INVALID: role {role_name} is not an object")
+        allowed = role.get("allowedProfiles")
+        default = role.get("defaultProfile")
+        if not isinstance(allowed, list) or not allowed or default not in allowed:
+            raise ValueError(f"E_ROLE_POLICY_INVALID: role {role_name} corridor")
+        if any(profile not in profiles for profile in allowed):
+            raise ValueError(f"E_ROLE_POLICY_INVALID: role {role_name} profile")
+
+    for task_name, task in task_classes.items():
+        if not isinstance(task, dict):
+            raise ValueError(f"E_ROLE_POLICY_INVALID: task {task_name} is not an object")
+        required_model = task.get("requiredModelTier")
+        required_effort = task.get("requiredEffort")
+        if required_model not in model_index or required_effort not in effort_index:
+            raise ValueError(f"E_ROLE_POLICY_INVALID: task {task_name} floor")
+        eligible_roles = eligibility.get(task_name)
+        if not isinstance(eligible_roles, list) or not eligible_roles:
+            raise ValueError(f"E_ROLE_POLICY_INVALID: task {task_name} eligibility")
+        for role_name in eligible_roles:
+            if role_name not in roles:
+                raise ValueError(
+                    f"E_ROLE_POLICY_INVALID: task {task_name} unknown role {role_name}"
+                )
+            corridor = roles[role_name]["allowedProfiles"]
+            if not any(
+                model_index[profiles[profile]["modelTier"]]
+                >= model_index[required_model]
+                and effort_index[profiles[profile]["effort"]]
+                >= effort_index[required_effort]
+                for profile in corridor
+            ):
+                raise ValueError(
+                    f"E_ROLE_POLICY_INVALID: task {task_name} role {role_name} corridor"
+                )
+
+    if set(eligibility) != set(task_classes):
+        raise ValueError("E_ROLE_POLICY_INVALID: task eligibility keys drifted")
+    return policy, path
+
+
+def _file_sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _role_dispatch_decision(
+    *,
+    status: str,
+    stable_id: str | None,
+    task_class: str,
+    role: str,
+    requested_profile: str | None,
+    requested_model: str | None,
+    requested_effort: str | None,
+    sandbox: str | None,
+) -> dict[str, Any]:
+    return {
+        "schemaVersion": 1,
+        "status": status,
+        "stableId": stable_id,
+        "taskClass": task_class,
+        "role": role,
+        "requestedProfile": requested_profile,
+        "requestedModel": requested_model,
+        "requestedEffort": requested_effort,
+        "sandbox": sandbox,
+        "fallback": "none",
+    }
+
+
+def _role_dispatch_invalid(
+    task_class: Any, role: Any, _cause: str
+) -> dict[str, Any]:
+    safe_task = task_class if isinstance(task_class, str) else ""
+    safe_role = role if isinstance(role, str) else ""
+    return _role_dispatch_decision(
+        status="denied",
+        stable_id="E_ROLE_POLICY_INVALID",
+        task_class=safe_task[:128],
+        role=safe_role[:128],
+        requested_profile=None,
+        requested_model=None,
+        requested_effort=None,
+        sandbox=None,
+    )
+
+
+def _load_role_dispatch_contract(
+    repo_root: Path,
+    task_class: Any,
+    role_name: Any,
+    *,
+    manifest_path: Path | None = None,
+    role_root: Path | None = None,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    if (
+        not isinstance(task_class, str)
+        or not task_class
+        or len(task_class) > 128
+        or not isinstance(role_name, str)
+        or not role_name
+        or len(role_name) > 128
+    ):
+        return None, _role_dispatch_invalid(task_class, role_name, "request")
+    try:
+        policy, policy_path = load_role_policy(repo_root)
+        tasks = policy["taskClasses"]
+        roles = policy["roles"]
+        eligibility = policy["taskRoleEligibility"]
+        if (
+            task_class not in tasks
+            or role_name not in roles
+            or role_name not in eligibility.get(task_class, ())
+        ):
+            return None, _role_dispatch_decision(
+                status="denied",
+                stable_id="E_ROLE_CORRIDOR_DENIED",
+                task_class=task_class,
+                role=role_name,
+                requested_profile=None,
+                requested_model=None,
+                requested_effort=None,
+                sandbox=None,
+            )
+        profile_name = roles[role_name]["defaultProfile"]
+        profile = policy["profiles"][profile_name]
+        model_index = {
+            value: index for index, value in enumerate(policy["modelTierOrder"])
+        }
+        effort_index = {
+            value: index for index, value in enumerate(policy["effortOrder"])
+        }
+        task = tasks[task_class]
+        if (
+            model_index[profile["modelTier"]]
+            < model_index[task["requiredModelTier"]]
+            or effort_index[profile["effort"]]
+            < effort_index[task["requiredEffort"]]
+            or profile["codexModel"] != "gpt-5.6-luna"
+            or role_name not in {"mechanical-scout", "mechanical-worker"}
+        ):
+            return None, _role_dispatch_decision(
+                status="denied",
+                stable_id="E_ROLE_CORRIDOR_DENIED",
+                task_class=task_class,
+                role=role_name,
+                requested_profile=profile_name,
+                requested_model=profile["codexModel"],
+                requested_effort=profile["effort"],
+                sandbox=None,
+            )
+
+        manifest_path = manifest_path or (
+            repo_root / "src.codex" / "agents" / "orchestrarium-role-manifest.json"
+        )
+        role_root = role_root or manifest_path.parent
+        if (
+            not _ordinary_directory(role_root)
+            or not _ordinary_file(manifest_path)
+        ):
+            raise ValueError("manifest or role root type")
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if (
+            not isinstance(manifest, dict)
+            or manifest.get("schemaVersion") != 1
+            or set(manifest) != {
+                "schemaVersion",
+                "packRevision",
+                "policySha256",
+                "roles",
+            }
+            or manifest.get("policySha256") != _file_sha256(policy_path)
+            or not isinstance(manifest.get("roles"), dict)
+        ):
+            raise ValueError("manifest")
+        record = manifest["roles"].get(role_name)
+        if not isinstance(record, dict) or set(record) != {"relativePath", "sha256"}:
+            raise ValueError("role record")
+        if record["relativePath"] != f"{role_name}.toml":
+            raise ValueError("role path")
+        role_path = role_root / record["relativePath"]
+        if not _ordinary_file(role_path):
+            raise ValueError("role type")
+        role_bytes = role_path.read_bytes()
+        if record["sha256"] != hashlib.sha256(role_bytes).hexdigest():
+            raise ValueError("role digest")
+        role_toml = tomllib.loads(role_bytes.decode("utf-8"))
+        sandbox = role_toml.get("sandbox_mode")
+        expected_sandbox = (
+            "read-only"
+            if task["mutationClass"] == "read-only"
+            else "workspace-write"
+        )
+        if (
+            role_toml.get("name") != role_name
+            or role_toml.get("model") != profile["codexModel"]
+            or role_toml.get("model_reasoning_effort") != profile["effort"]
+            or sandbox != expected_sandbox
+        ):
+            raise ValueError("role TOML contract")
+        return {
+            "taskClass": task_class,
+            "role": role_name,
+            "profile": profile_name,
+            "model": profile["codexModel"],
+            "effort": profile["effort"],
+            "sandbox": sandbox,
+            "roleSha256": record["sha256"],
+            "policySha256": manifest["policySha256"],
+        }, None
+    except (KeyError, OSError, UnicodeDecodeError, ValueError, json.JSONDecodeError, tomllib.TOMLDecodeError) as exc:
+        return None, _role_dispatch_invalid(task_class, role_name, str(exc))
+
+
+def _resolve_role_dispatch_in_layout(
+    task_class: Any,
+    role: Any,
+    effective_feature_state: Any,
+    *,
+    repo_root: Path,
+    manifest_path: Path | None = None,
+    role_root: Path | None = None,
+) -> dict[str, Any]:
+    contract, early = _load_role_dispatch_contract(
+        repo_root,
+        task_class,
+        role,
+        manifest_path=manifest_path,
+        role_root=role_root,
+    )
+    if early is not None:
+        return early
+    assert contract is not None
+    if effective_feature_state not in {"enabled", "disabled"}:
+        return _role_dispatch_invalid(task_class, role, "feature-state")
+    if effective_feature_state == "disabled":
+        return _role_dispatch_decision(
+            status="unavailable",
+            stable_id="E_NATIVE_V2_DISABLED",
+            task_class=contract["taskClass"],
+            role=contract["role"],
+            requested_profile=contract["profile"],
+            requested_model=contract["model"],
+            requested_effort=contract["effort"],
+            sandbox=contract["sandbox"],
+        )
+    return _role_dispatch_decision(
+        status="native-required",
+        stable_id=None,
+        task_class=contract["taskClass"],
+        role=contract["role"],
+        requested_profile=contract["profile"],
+        requested_model=contract["model"],
+        requested_effort=contract["effort"],
+        sandbox=contract["sandbox"],
+    )
+
+
+def resolve_role_dispatch(
+    task_class: Any,
+    role: Any,
+    effective_feature_state: Any,
+    *,
+    repo_root: Path | None = None,
+) -> dict[str, Any]:
+    """Resolve one caller-neutral native policy without launching a provider."""
+
+    source_root = (
+        Path(repo_root).resolve()
+        if repo_root is not None
+        else Path(__file__).resolve().parents[1]
+    )
+    return _resolve_role_dispatch_in_layout(
+        task_class,
+        role,
+        effective_feature_state,
+        repo_root=source_root,
+    )
+
+
+def _same_path(left: Path, right: Path) -> bool:
+    return os.path.normcase(os.path.abspath(left)) == os.path.normcase(
+        os.path.abspath(right)
+    )
+
+
+def _source_layout_root(resolver: Path, repo_root: Path) -> Path | None:
+    expected = repo_root / "scripts" / "resolve-agents-mode.py"
+    source_agents = repo_root / "src.codex" / "agents"
+    return (
+        repo_root
+        if _same_path(resolver, expected) and _ordinary_directory(source_agents)
+        else None
+    )
+
+
+def _installed_role_dispatch_layout(
+    resolver: Path,
+    project_root: Path,
+    home: Path,
+) -> tuple[Path, Path, Path]:
+    project_resolver = (
+        project_root
+        / ".agents"
+        / "skills"
+        / "lead"
+        / "scripts"
+        / "resolve-agents-mode.py"
+    )
+    global_resolver = (
+        home
+        / ".agents"
+        / "skills"
+        / "lead"
+        / "scripts"
+        / "resolve-agents-mode.py"
+    )
+    matches = [
+        (project_resolver, project_root / ".codex" / "agents"),
+        (global_resolver, home / ".codex" / "agents"),
+    ]
+    selected = [role_root for candidate, role_root in matches if _same_path(resolver, candidate)]
+    if len(selected) != 1:
+        raise ValueError("installed resolver layout is missing or ambiguous")
+    lead_root = resolver.parent.parent
+    shared_root = lead_root / "shared"
+    if (
+        not _ordinary_file(resolver)
+        or not _ordinary_directory(lead_root)
+        or not _ordinary_directory(shared_root)
+        or not _ordinary_directory(selected[0])
+    ):
+        raise ValueError("installed resolver layout contains a reparse or missing root")
+    return (
+        lead_root,
+        shared_root / "orchestrarium-role-manifest.json",
+        selected[0],
+    )
+
+
 def layer_paths(provider: str, project_root: Path, home: Path) -> list[tuple[str, Path]]:
     provider_dir = PROVIDER_DIRS[provider]
     return [
@@ -171,6 +585,7 @@ def resolve(provider: str, project_root: Path, home: Path, repo_root: Path) -> d
         reserve_resolver_layers,
     )
 
+    role_policy, role_policy_path = load_role_policy(repo_root)
     return {
         "provider": provider,
         "projectRoot": str(project_root),
@@ -178,6 +593,8 @@ def resolve(provider: str, project_root: Path, home: Path, repo_root: Path) -> d
         "values": values,
         "sources": sources,
         "reserveResolverTrust": trust,
+        "rolePolicy": role_policy,
+        "rolePolicySource": str(role_policy_path),
     }
 
 
@@ -187,14 +604,71 @@ def main() -> int:
     parser.add_argument("--project-root", default=".")
     parser.add_argument("--home", default=str(Path.home()))
     parser.add_argument("--repo-root", default=str(Path(__file__).resolve().parents[1]))
+    parser.add_argument("--resolve-role-dispatch", action="store_true")
+    parser.add_argument("--task-class")
+    parser.add_argument("--role")
+    parser.add_argument("--feature-state", choices=("enabled", "disabled"))
     parser.add_argument("--json", action="store_true", help="emit JSON output")
     args = parser.parse_args()
 
+    resolver_path = Path(os.path.abspath(__file__))
+    repo_root = Path(args.repo_root).resolve()
+    project_root = Path(args.project_root).resolve()
+    home = Path(os.path.expanduser(args.home)).resolve()
+    source_root = _source_layout_root(resolver_path, repo_root)
+    if args.resolve_role_dispatch:
+        if (
+            args.provider != "codex"
+            or not args.json
+            or args.task_class is None
+            or args.role is None
+            or args.feature_state is None
+        ):
+            parser.error(
+                "--resolve-role-dispatch requires provider codex, task class, role, "
+                "feature state, and --json"
+            )
+
+        if source_root is not None:
+            decision = resolve_role_dispatch(
+                args.task_class,
+                args.role,
+                args.feature_state,
+                repo_root=source_root,
+            )
+        else:
+            try:
+                installed_root, manifest_path, role_root = (
+                    _installed_role_dispatch_layout(
+                        resolver_path,
+                        project_root,
+                        home,
+                    )
+                )
+            except (OSError, ValueError) as exc:
+                decision = _role_dispatch_invalid(
+                    args.task_class, args.role, str(exc)
+                )
+            else:
+                decision = _resolve_role_dispatch_in_layout(
+                    args.task_class,
+                    args.role,
+                    args.feature_state,
+                    repo_root=installed_root,
+                    manifest_path=manifest_path,
+                    role_root=role_root,
+                )
+        json.dump(decision, sys.stdout, sort_keys=True, separators=(",", ":"))
+        sys.stdout.write("\n")
+        return 0
+
+    if source_root is None:
+        parser.error("installed layout supports --resolve-role-dispatch only")
     resolved = resolve(
         args.provider,
-        Path(args.project_root).resolve(),
-        Path(os.path.expanduser(args.home)).resolve(),
-        Path(args.repo_root).resolve(),
+        project_root,
+        home,
+        source_root,
     )
     if args.json:
         json.dump(resolved, sys.stdout, indent=2, sort_keys=True)

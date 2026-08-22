@@ -243,35 +243,24 @@ def seed_codex_agent_overrides(
     (agents_dir / "worker.toml").write_bytes(CUSTOM_CODEX_WORKER_AGENT.encode("utf-8"))
 
 
-def validate_codex_agent_override_reclaim(
-    project_root: Path, expected_custom: dict[str, str]
-) -> None:
+def validate_codex_native_role_install(project_root: Path, root: Path) -> None:
     agents_dir = project_root / ".codex" / "agents"
-
-    for name in ["default.toml", "explorer.toml", "worker.toml"]:
+    source_roles = {
+        path.name: path for path in (root / "src.codex" / "agents").glob("*.toml")
+    }
+    if (agents_dir / "orchestrarium-role-manifest.json").exists():
+        raise InstallerRegressionError("Codex installed a native-role ownership receipt")
+    for name, source_path in source_roles.items():
         path = agents_dir / name
-        expected = expected_custom.get(name)
-        if expected is None and path.exists():
+        if path.read_bytes() != source_path.read_bytes():
             raise InstallerRegressionError(
-                f"codex did not reclaim retired pack-owned agent override {name}"
+                f"codex native role bytes drifted for {name}"
             )
-        if expected is not None and path.read_bytes() != expected.encode("utf-8"):
-            raise InstallerRegressionError(
-                f"codex changed customized built-in agent override {name}"
-            )
-
-
-def validate_no_codex_agent_overrides(project_root: Path) -> None:
-    agents_dir = project_root / ".codex" / "agents"
-    if agents_dir.exists():
-        raise InstallerRegressionError(
-            "fresh codex install created the retired .codex/agents directory"
-        )
-    for name in ["default.toml", "explorer.toml", "worker.toml"]:
-        if (agents_dir / name).exists():
-            raise InstallerRegressionError(
-                f"fresh codex install created retired built-in agent override {name}"
-            )
+    config = (project_root / ".codex" / "config.toml").read_text(encoding="utf-8")
+    if "multi_agent_v2 = true" not in config:
+        raise InstallerRegressionError("codex fresh role surface did not enable multi_agent_v2")
+    if not (project_root / ".agents" / "skills" / "lead" / "SKILL.md").is_file():
+        raise InstallerRegressionError("codex canonical .agents skills body missing")
 
 
 def validate_overlay(
@@ -358,10 +347,6 @@ def run_regression(root: Path) -> None:
             project_root = scratch / f"{case.name}-project"
             project_root.mkdir(parents=True, exist_ok=True)
             overlay = seed_stale_overlay(project_root, case)
-            if case.codex_line:
-                seed_codex_agent_overrides(
-                    project_root, root, historical_explorer=False
-                )
             run_installer(
                 root,
                 case,
@@ -372,13 +357,7 @@ def run_regression(root: Path) -> None:
             )
             validate_overlay(case, overlay, schema_data)
             if case.codex_line:
-                validate_codex_agent_override_reclaim(
-                    project_root,
-                    {
-                        "explorer.toml": CUSTOM_CODEX_EXPLORER_AGENT,
-                        "worker.toml": CUSTOM_CODEX_WORKER_AGENT,
-                    },
-                )
+                validate_codex_native_role_install(project_root, root)
 
         codex_fresh_project = scratch / "codex-fresh-project"
         codex_fresh_project.mkdir(parents=True, exist_ok=True)
@@ -391,7 +370,7 @@ def run_regression(root: Path) -> None:
             / scratch.name
             / "codex-fresh-project",
         )
-        validate_no_codex_agent_overrides(codex_fresh_project)
+        validate_codex_native_role_install(codex_fresh_project, root)
 
         codex_global_home = scratch / "codex-python-global-home"
         codex_global_home.mkdir(parents=True, exist_ok=True)
@@ -402,20 +381,14 @@ def run_regression(root: Path) -> None:
             codex_line=True,
         )
         overlay = seed_stale_overlay(codex_global_home, codex_global_case)
-        seed_codex_agent_overrides(
-            codex_global_home, root, historical_explorer=True
-        )
         run_python_codex_global_installer(root, codex_global_home)
         validate_overlay(codex_global_case, overlay, schema_data)
-        validate_codex_agent_override_reclaim(
-            codex_global_home,
-            {"worker.toml": CUSTOM_CODEX_WORKER_AGENT},
-        )
+        validate_codex_native_role_install(codex_global_home, root)
 
         codex_global_fresh_home = scratch / "codex-python-global-fresh-home"
         codex_global_fresh_home.mkdir(parents=True, exist_ok=True)
         run_python_codex_global_installer(root, codex_global_fresh_home)
-        validate_no_codex_agent_overrides(codex_global_fresh_home)
+        validate_codex_native_role_install(codex_global_fresh_home, root)
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
 

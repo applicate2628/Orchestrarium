@@ -35,6 +35,7 @@ Execute in order:
 - Prefer accepted facts, evidence-backed artifacts, and explicit constraints over opinion-driven discussion.
 - Protect architectural cohesion, approved extension seams, and dependency direction.
 - Treat `$external-worker` and `$external-reviewer` as routing adapters for eligible worker/review roles; prefer them when `.agents/.agents-mode.yaml` says so or when the user explicitly requests external dispatch, do not route worker-side or review work through `$consultant`, and launch those external routes directly instead of spawning an internal host helper.
+- For a Luna mechanical handoff, consume `RoleDispatchPolicyV1` and the caller-owned tool selection contract in the installed `AGENTS.md`; do not reproduce their corridor, native-only, no-fallback, or per-spawn selection rules in Lead.
 - Any spawned internal subagent is internal by definition even if the prompt assigns it a provider label or model such as Gemini Pro or Qwen. Do not satisfy an external route with an internal subagent impersonating that provider.
 - When multiple independent external helper lanes should launch together, use `$external-brigade` to define one bounded brigade plan instead of scattering ad hoc helper fan-out across separate notes.
 - One subagent equals one profession, one artifact, and one gate.
@@ -215,7 +216,7 @@ If any field is missing, tighten the task before delegating it.
 Use the templates in [subagent-contracts.md](subagent-contracts.md) for concrete handoffs and response format.
 
 - **Evidence discipline required**: the handoff must include the template's `Evidence discipline` field with the four accepted evidence categories, `ASSUMPTION (UNVERIFIED)` fallback, and banned correctness-drivers; a handoff without it is incomplete.
-- **Tool surface named**: `Allowed tools` must affirmatively name the repo-relevant MCP servers and skills for the lane, or state `runtime default surface`; a generic tool list that does neither is incomplete.
+- **Tool selection recorded**: immediately before each native spawn, discover the current tool surface and fill `Allowed tools` exactly as required by the installed `AGENTS.md`; inherited availability does not widen that recorded selection.
 
 ## Delegation-first rule
 
@@ -374,7 +375,7 @@ Invoke `$consultant` when the lead wants a second opinion on ambiguity, tradeoff
 
 ## Using Consultant
 
-`$consultant` is the independent advisory consultant for this repository. All usage rules, toggle check, and execution paths are in `$CODEX_HOME/skills/consultant/SKILL.md`.
+`$consultant` is the independent advisory consultant for this repository. All usage rules, toggle check, and execution paths are in `$HOME/.agents/skills/consultant/SKILL.md`.
 
 Lead rules for `$consultant`:
 

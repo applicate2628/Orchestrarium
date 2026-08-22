@@ -613,8 +613,6 @@ def require_codex_hook_trust(
         return fail("Codex hook trust helper was not found")
     host_os = "windows" if os.name == "nt" else "posix"
     target = (codex_home / "hooks.json").resolve(strict=False)
-    inventory = helper.with_name("codex-hook-inventory.json")
-    inventory_args = ["--inventory", str(inventory)] if inventory.is_file() else []
     try:
         completed = subprocess.run(
             [
@@ -628,7 +626,6 @@ def require_codex_hook_trust(
                 host_os,
                 "--codex-trust-mode",
                 "require",
-                *inventory_args,
                 "--codex-command-json",
                 json.dumps(command),
                 "--codex-home",

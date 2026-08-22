@@ -10,9 +10,8 @@ Goal:
 Approved inputs:
 - <accepted artifact or fact>
 - <accepted artifact or fact>
-Allowed tools (affirmatively name repo-relevant MCP servers/skills, or state "runtime default surface"):
-- <allowed tool, MCP server, skill, or "runtime default surface">
-- <allowed tool, MCP server, or skill>
+Allowed tools:
+- <exact task-scoped identifier discovered immediately before this spawn, or none>
 Scope:
 - <allowed area>
 Out of scope:
@@ -42,6 +41,8 @@ Gate to next stage:
 ```
 
 Before dispatch, fill `Diff-invisible invariants` and `Named regression guard`; `none` is valid only with a one-line reason. An implementation or review handoff with either field omitted is incomplete.
+
+Populate `Allowed tools` under the caller-owned tool selection contract in installed `AGENTS.md`. The caller performs fresh discovery before each native spawn and records the exact selection or `none`; an inherited but unlisted tool remains behaviorally forbidden.
 
 `Approved inputs` identify the producing run's declared scope and accepted artifact revision when available; no new handoff field is required. Evaluate authored claims and review verdicts against the producing run's declared scope and accepted baseline: later independently owned lane deltas are reviewed in their own lane and do not retroactively falsify the earlier artifact; an actual material revision of the accepted upstream artifact still invalidates dependent `PASS` states and triggers dependent re-review.
 
@@ -640,7 +641,7 @@ Acceptance criteria:
 - if it finds a real blocker, it points back to the proper specialist role
 
 Invocation note:
-- `$consultant` usage rules, toggle check, and execution paths are in `$CODEX_HOME/skills/consultant/SKILL.md`
+- `$consultant` usage rules, toggle check, and execution paths are in `$HOME/.agents/skills/consultant/SKILL.md`
 - if the selected external consultant path fails or is unavailable, report that honestly and reroute; use an internal consultant only when `consultantMode: internal` was selected explicitly before dispatch
 - `external-dispatch.md` is the shared contract for the new external adapters and the consultant config fields they share
 

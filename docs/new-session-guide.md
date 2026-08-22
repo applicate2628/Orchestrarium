@@ -62,7 +62,7 @@ Inside this monorepo, a missing local `.agents/` tree is not a misconfiguration.
 
 | Symptom | Correct first move |
 |---|---|
-| Codex skill label, trigger, or default prompt is wrong | Edit `src.codex/skills/<skill>/SKILL.md` and/or `agents/openai.yaml`; then sync `~/.codex/skills/<skill>/` only if immediate behavior is needed. |
+| Codex skill label, trigger, or default prompt is wrong | Edit `src.codex/skills/<skill>/SKILL.md` and/or `agents/openai.yaml`; then sync `$HOME/.agents/skills/<skill>/` only if immediate behavior is needed. |
 | Common skill behavior is wrong across providers | Update the common skill source in each affected provider tree; update shared docs/indexes when the public contract changes. Do not mechanically copy without validating provider semantics. |
 | Claude behavior relies on `Agent` or slash-command mechanics | Keep that change in `src.claude/`; do not rewrite it for Codex unless there is a Codex-native owner. |
 | Codex behavior lacks a direct Agent tool | Check available Codex subagent or MCP tooling in the current runtime; if unavailable, record the gap honestly instead of pretending the Claude mechanism exists. |

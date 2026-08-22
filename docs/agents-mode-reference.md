@@ -2,6 +2,10 @@
 
 Canonical value-by-value operator reference for pack-local `agents-mode` files. Keep full `value | meaning` semantics here and let root manuals or provider contracts link here instead of duplicating the same tables in multiple places.
 
+## Native Luna mechanical policy
+
+Luna is not an agents-mode key, external-provider enum value, preset value, or automatic-provider choice. The native `mechanical-scout` and `mechanical-worker` roles consume the caller-neutral shared role policy for the bounded `micro`, `mechanical-read`, and `mechanical` classes; callers obtain denied, unavailable, or native-required from `scripts/resolve-agents-mode.py --resolve-role-dispatch`. The resolver accepts no host result or result file, and the corridor has no external or Terra/Sol fallback. Existing external Terra profile semantics remain unchanged outside this corridor.
+
 ## Provider surfaces
 
 | Provider | Canonical file | Provider-specific note |

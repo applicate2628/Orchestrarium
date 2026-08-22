@@ -6,9 +6,9 @@ Canonical shared semantics: [shared/references/mcp-continuity.md](../shared/refe
 
 Codex installs the three adapters below the Lead skill:
 
-- `~/.codex/skills/lead/scripts/mcp-usage-reminder.py` on `SessionStart`
-- `~/.codex/skills/lead/scripts/turn-anchor-reminder.py` on `UserPromptSubmit`
-- `~/.codex/skills/lead/hooks/check-mcp-momentum.py` on `PreToolUse`
+- `$HOME/.agents/skills/lead/scripts/mcp-usage-reminder.py` on `SessionStart`
+- `$HOME/.agents/skills/lead/scripts/turn-anchor-reminder.py` on `UserPromptSubmit`
+- `$HOME/.agents/skills/lead/hooks/check-mcp-momentum.py` on `PreToolUse`
 
 The momentum entry uses the exact matcher `Grep|Bash|PowerShell|shell_command|exec_command`. The broad matcher is defensive because the tool name exposed by Codex has varied by runtime version; the adapter still admits only those five names and applies the shared classifier to the actual envelope. For `exec_command`, the canonical command field is `cmd`, with `command` accepted as a compatibility input.
 

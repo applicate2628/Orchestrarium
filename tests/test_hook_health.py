@@ -621,9 +621,130 @@ def test_generated_inventory_is_read_only_and_detects_registration_drift(
     config["hooks"]["PreToolUse"][0]["matcher"] = "drift"
     target.write_text(json.dumps(config), encoding="utf-8")
     with pytest.raises(ValueError, match="drifted from generated inventory"):
-        CHECKER.verify_config(
+        failure = CHECKER.verify_config(
             target=target, platform="codex", host_os="posix", repo_root=ROOT,
             verify_fires=False, inventory_path=inventory,
+        )
+
+
+def test_codex_hook_inventory_exact_parent_negative(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """F4: only the exact ordinary sibling of hooks.json can carry authority."""
+
+    config_root = tmp_path / "codex-home"
+    config_root.mkdir()
+    target = config_root / "hooks.json"
+    rows, records = _host_trust_fixture(target)
+    specs = [
+        (stem, Path(argv[-1]), event, matcher)
+        for event, stem, argv, matcher in rows
+    ]
+    exact = target.parent / CHECKER.INVENTORY_NAME
+    CHECKER.write_codex_inventory(
+        target=target,
+        specs=specs,
+        inventory_path=exact,
+        host_os="posix",
+    )
+    monkeypatch.setattr(CHECKER, "_codex_hooks_list", lambda **_kwargs: records)
+    before_target = target.read_bytes()
+    before_inventory = exact.read_bytes()
+
+    CHECKER.verify_config(
+        target=target,
+        platform="codex",
+        host_os="posix",
+        repo_root=ROOT,
+        verify_fires=False,
+        inventory_path=exact,
+        codex_trust_mode="require",
+        codex_command=[str(Path(sys.executable).resolve())],
+        codex_home=config_root,
+        query_cwd=tmp_path,
+    )
+
+    outside = tmp_path / "outside" / CHECKER.INVENTORY_NAME
+    outside.parent.mkdir()
+    outside.write_bytes(before_inventory)
+    alternate = target.parent / "alternate-inventory.json"
+    alternate.write_bytes(before_inventory)
+    for candidate in (outside, alternate):
+        with pytest.raises(ValueError, match="^E_HOOK_INVENTORY_TARGET_INVALID"):
+            CHECKER.verify_config(
+                target=target,
+                platform="codex",
+                host_os="posix",
+                repo_root=ROOT,
+                verify_fires=False,
+                inventory_path=candidate,
+            )
+
+    exact.unlink()
+    try:
+        exact.symlink_to(outside)
+    except OSError as exc:
+        pytest.skip(f"file symlink unavailable: {exc}")
+    with pytest.raises(ValueError, match="^E_HOOK_INVENTORY_TARGET_INVALID"):
+        CHECKER.verify_config(
+            target=target,
+            platform="codex",
+            host_os="posix",
+            repo_root=ROOT,
+            verify_fires=False,
+            inventory_path=exact,
+        )
+    assert target.read_bytes() == before_target
+    assert outside.read_bytes() == before_inventory
+
+
+def test_codex_inventory_writer_rejects_outside_parent_without_mutation(
+    tmp_path: Path,
+) -> None:
+    """F4: the write branch applies the same exact-parent no-reparse authority."""
+
+    target = tmp_path / "codex-home" / "hooks.json"
+    target.parent.mkdir()
+    rows, _records = _host_trust_fixture(target)
+    outside = tmp_path / "outside" / CHECKER.INVENTORY_NAME
+    outside.parent.mkdir()
+    with pytest.raises(ValueError, match="^E_HOOK_INVENTORY_TARGET_INVALID"):
+        CHECKER.write_codex_inventory(
+            target=target,
+            specs=[
+                (stem, Path(argv[-1]), event, matcher)
+                for event, stem, argv, matcher in rows
+            ],
+            inventory_path=outside,
+            host_os="posix",
+        )
+    assert not outside.exists()
+
+
+def test_codex_inventory_rejects_reparse_target_parent(
+    tmp_path: Path,
+) -> None:
+    """F4: lexical target-parent identity cannot be supplied through a reparse."""
+
+    actual = tmp_path / "actual-home"
+    alias = tmp_path / "alias-home"
+    actual.mkdir()
+    try:
+        alias.symlink_to(actual, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"directory symlink unavailable: {exc}")
+    target = alias / "hooks.json"
+    rows, _records = _host_trust_fixture(target)
+    inventory = alias / CHECKER.INVENTORY_NAME
+    with pytest.raises(ValueError, match="^E_HOOK_INVENTORY_TARGET_INVALID"):
+        CHECKER.write_codex_inventory(
+            target=target,
+            specs=[
+                (stem, Path(argv[-1]), event, matcher)
+                for event, stem, argv, matcher in rows
+            ],
+            inventory_path=inventory,
+            host_os="posix",
         )
 
 
@@ -637,7 +758,7 @@ def test_post_reclaim_installed_helper_trusted_and_modified_smoke(
     installed_scripts.mkdir(parents=True)
     installed_helper = installed_scripts / "check-hook-health.py"
     shutil.copy2(CHECKER_PATH, installed_helper)
-    inventory = installed_scripts / "codex-hook-inventory.json"
+    inventory = target.parent / "codex-hook-inventory.json"
     CHECKER.write_codex_inventory(
         target=target,
         specs=[(stem, Path(argv[-1]), event, matcher) for event, stem, argv, matcher in rows],
@@ -758,7 +879,7 @@ def test_hook_health_read_only_trust_probe(
     assert json.dumps(records, sort_keys=True).encode("utf-8") == host_before
 
 
-def test_installed_require_automatically_uses_sibling_inventory(
+def test_installed_require_derives_target_sidecar_and_ignores_helper_sibling(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     target = tmp_path / "codex-home" / "hooks.json"
@@ -768,13 +889,15 @@ def test_installed_require_automatically_uses_sibling_inventory(
     scripts.mkdir(parents=True)
     helper = scripts / "check-hook-health.py"
     shutil.copy2(CHECKER_PATH, helper)
-    inventory = scripts / CHECKER.INVENTORY_NAME
+    inventory = target.parent / CHECKER.INVENTORY_NAME
     CHECKER.write_codex_inventory(
         target=target,
         specs=[(stem, Path(argv[-1]), event, matcher) for event, stem, argv, matcher in rows],
         inventory_path=inventory,
         host_os="posix",
     )
+    stale_inventory = scripts / CHECKER.INVENTORY_NAME
+    stale_inventory.write_text("stale", encoding="utf-8")
     spec = importlib.util.spec_from_file_location("installed_inventory_default", helper)
     assert spec and spec.loader
     installed = importlib.util.module_from_spec(spec)

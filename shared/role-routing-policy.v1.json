@@ -1,0 +1,206 @@
+{
+  "schemaVersion": 1,
+  "modelTierOrder": [
+    "fast",
+    "balanced",
+    "frontier",
+    "apex"
+  ],
+  "effortOrder": [
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "profiles": {
+    "micro-low": {
+      "modelTier": "fast",
+      "effort": "low",
+      "codexModel": "gpt-5.6-luna"
+    },
+    "fast-medium": {
+      "modelTier": "fast",
+      "effort": "medium",
+      "codexModel": "gpt-5.6-luna"
+    },
+    "fast-high": {
+      "modelTier": "fast",
+      "effort": "high",
+      "codexModel": "gpt-5.6-luna"
+    },
+    "balanced-medium": {
+      "modelTier": "balanced",
+      "effort": "medium",
+      "codexModel": "gpt-5.6-terra"
+    },
+    "balanced-high": {
+      "modelTier": "balanced",
+      "effort": "high",
+      "codexModel": "gpt-5.6-terra"
+    },
+    "frontier-high": {
+      "modelTier": "frontier",
+      "effort": "high",
+      "codexModel": "gpt-5.6-sol"
+    },
+    "frontier-xhigh": {
+      "modelTier": "frontier",
+      "effort": "xhigh",
+      "codexModel": "gpt-5.6-sol"
+    },
+    "apex-max": {
+      "modelTier": "apex",
+      "effort": "max",
+      "codexModel": "gpt-5.6-sol"
+    }
+  },
+  "taskClasses": {
+    "micro": {
+      "requiredModelTier": "fast",
+      "requiredEffort": "low",
+      "mutationClass": "read-only"
+    },
+    "mechanical-read": {
+      "requiredModelTier": "fast",
+      "requiredEffort": "medium",
+      "mutationClass": "read-only"
+    },
+    "mechanical": {
+      "requiredModelTier": "fast",
+      "requiredEffort": "medium",
+      "mutationClass": "bounded-write"
+    },
+    "exploration": {
+      "requiredModelTier": "balanced",
+      "requiredEffort": "high",
+      "mutationClass": "read-only"
+    },
+    "engineering": {
+      "requiredModelTier": "balanced",
+      "requiredEffort": "high",
+      "mutationClass": "bounded-write"
+    },
+    "planning": {
+      "requiredModelTier": "balanced",
+      "requiredEffort": "high",
+      "mutationClass": "read-only"
+    },
+    "review": {
+      "requiredModelTier": "balanced",
+      "requiredEffort": "high",
+      "mutationClass": "read-only"
+    },
+    "critical-design": {
+      "requiredModelTier": "frontier",
+      "requiredEffort": "xhigh",
+      "mutationClass": "read-only"
+    },
+    "critical-security": {
+      "requiredModelTier": "frontier",
+      "requiredEffort": "xhigh",
+      "mutationClass": "read-only"
+    },
+    "recovery": {
+      "requiredModelTier": "frontier",
+      "requiredEffort": "high",
+      "mutationClass": "bounded-write"
+    }
+  },
+  "roles": {
+    "mechanical-scout": {
+      "defaultProfile": "fast-high",
+      "allowedProfiles": ["fast-high"]
+    },
+    "mechanical-worker": {
+      "defaultProfile": "fast-high",
+      "allowedProfiles": ["fast-high"]
+    },
+    "default": {
+      "defaultProfile": "frontier-xhigh",
+      "allowedProfiles": ["balanced-high", "frontier-high", "frontier-xhigh", "apex-max"]
+    },
+    "explorer": {
+      "defaultProfile": "balanced-high",
+      "allowedProfiles": ["balanced-medium", "balanced-high", "frontier-high"]
+    },
+    "worker": {
+      "defaultProfile": "balanced-high",
+      "allowedProfiles": ["balanced-medium", "balanced-high", "frontier-high", "frontier-xhigh"]
+    },
+    "analyst": {
+      "defaultProfile": "balanced-high",
+      "allowedProfiles": ["balanced-high", "frontier-high", "frontier-xhigh"]
+    },
+    "planner": {
+      "defaultProfile": "balanced-high",
+      "allowedProfiles": ["balanced-high", "frontier-high", "frontier-xhigh"]
+    },
+    "architect": {
+      "defaultProfile": "frontier-xhigh",
+      "allowedProfiles": ["frontier-high", "frontier-xhigh", "apex-max"]
+    },
+    "architecture-reviewer": {
+      "defaultProfile": "frontier-xhigh",
+      "allowedProfiles": ["frontier-xhigh", "apex-max"]
+    },
+    "algorithm-scientist": {
+      "defaultProfile": "frontier-xhigh",
+      "allowedProfiles": ["frontier-xhigh", "apex-max"]
+    },
+    "computational-scientist": {
+      "defaultProfile": "frontier-xhigh",
+      "allowedProfiles": ["frontier-xhigh", "apex-max"]
+    },
+    "security-engineer": {
+      "defaultProfile": "frontier-high",
+      "allowedProfiles": ["frontier-high", "frontier-xhigh"]
+    },
+    "security-reviewer": {
+      "defaultProfile": "frontier-xhigh",
+      "allowedProfiles": ["frontier-xhigh", "apex-max"]
+    },
+    "backend-engineer": {
+      "defaultProfile": "balanced-high",
+      "allowedProfiles": ["balanced-medium", "balanced-high", "frontier-high", "frontier-xhigh"]
+    },
+    "platform-engineer": {
+      "defaultProfile": "balanced-high",
+      "allowedProfiles": ["balanced-medium", "balanced-high", "frontier-high", "frontier-xhigh"]
+    },
+    "qa-engineer": {
+      "defaultProfile": "balanced-high",
+      "allowedProfiles": ["balanced-high", "frontier-high", "frontier-xhigh"]
+    },
+    "knowledge-archivist": {
+      "defaultProfile": "balanced-medium",
+      "allowedProfiles": ["balanced-medium", "balanced-high"]
+    }
+  },
+  "taskRoleEligibility": {
+    "micro": ["mechanical-scout"],
+    "mechanical-read": ["mechanical-scout"],
+    "mechanical": ["mechanical-worker"],
+    "exploration": ["explorer", "analyst"],
+    "engineering": ["worker", "backend-engineer", "platform-engineer"],
+    "planning": ["analyst", "planner", "architect"],
+    "review": ["qa-engineer", "architecture-reviewer", "security-reviewer"],
+    "critical-design": ["architect", "architecture-reviewer", "algorithm-scientist", "computational-scientist"],
+    "critical-security": ["security-engineer", "security-reviewer"],
+    "recovery": ["default", "worker", "platform-engineer"]
+  },
+  "providerRealizations": {
+    "codex": {
+      "modelTier": "native",
+      "effort": "native"
+    },
+    "kimi": {
+      "modelTier": "model-only",
+      "effort": "unsupported"
+    },
+    "grok": {
+      "modelTier": "model-only",
+      "effort": "runtime-default"
+    }
+  }
+}

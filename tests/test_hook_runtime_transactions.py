@@ -144,7 +144,7 @@ def _seed_unrelated_provider_state(project: Path, case: Case) -> tuple[Path, ...
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(f"unrelated-{index}".encode("ascii"))
     custom = (
-        project / ".agents" / "skills" / "lead" / "user-custom.txt"
+        project / ".agents" / "user-custom.txt"
         if case.provider == "codex"
         else provider_root / "agents" / "user-custom.txt"
     )
@@ -221,9 +221,10 @@ class AbortPolicyOwnershipContract:
             ("scripts/install-hypothesis-hook.py", "TestAbortPolicy.resolve_and_preflight", "mapping", None),
             ("scripts/install-hypothesis-hook.py", "main", "get", "ORCHESTRARIUM_NO_HYPOTHESIS_HOOK"),
             ("scripts/production_installer.py", "_run", "copy", None),
+            ("scripts/production_installer.py", "_run_hook_health_bounded", "copy", None),
             ("scripts/production_installer.py", "_install_hooks", "get", "CODEX_BIN"),
-            ("scripts/production_installer.py", "_target", "get", "USERPROFILE"),
-            ("scripts/production_installer.py", "_target", "get", "HOME"),
+            ("scripts/production_installer.py", "_resolve_global_home", "get", "USERPROFILE"),
+            ("scripts/production_installer.py", "_resolve_global_home", "get", "HOME"),
             ("scripts/production_installer.py", "install", "get", "USERPROFILE"),
             ("scripts/production_installer.py", "install", "get", "HOME"),
             ("scripts/production_installer.py", "install", "get", "ORCHESTRARIUM_NO_HYPOTHESIS_HOOK"),
@@ -343,11 +344,12 @@ class AbortPolicyOwnershipContract:
 def _run_fake_global_abort_case(case: Case, stage: str, tmp_path: Path) -> bool:
     fake_home = tmp_path / case.provider / stage / "home"
     config = fake_home / Path(case.config)
-    installed = fake_home / Path(case.installed_root)
     config.parent.mkdir(parents=True, exist_ok=True)
-    installed.mkdir(parents=True, exist_ok=True)
     config.write_text('{"hooks": {}, "sentinel": "preserve"}\n', encoding="utf-8")
-    (installed / "owned-sentinel.bin").write_bytes(b"owned-before")
+    if case.provider != "codex":
+        installed = fake_home / Path(case.installed_root)
+        installed.mkdir(parents=True, exist_ok=True)
+        (installed / "owned-sentinel.bin").write_bytes(b"owned-before")
     (fake_home / "unrelated-sentinel.bin").write_bytes(b"unrelated-before")
     before = _tree_snapshot(fake_home)
     env = os.environ.copy()
@@ -664,8 +666,11 @@ def test_registration_symlink_referent_restored_after_reclaim_failure(
         output = result.stdout + result.stderr
 
         assert result.returncode != 0, output
-        assert "abort" in output.casefold(), output
-        assert "reclaim" in output.casefold(), output
+        if case.provider == "codex":
+            assert "E_HOOK_INVENTORY_TARGET_INVALID" in output, output
+        else:
+            assert "abort" in output.casefold(), output
+            assert "reclaim" in output.casefold(), output
         assert registration.is_symlink()
         assert os.readlink(registration) == link_target
         assert external.read_bytes() == b'{"hooks": {}}\n'
@@ -1039,3 +1044,237 @@ def test_transaction_abort_surface_is_hidden_from_operator_and_publication_paths
         assert completed.returncode == 0, completed.stdout + completed.stderr
         assert ABORT_ENV not in completed.stdout
         assert "--test-transaction-" not in completed.stdout
+
+
+_VERIFY_FAILURE_IDS = (
+    "E_INSTALL_VERIFY_FILES_MISSING",
+    "E_INSTALL_VERIFY_RUNTIME_MISSING",
+    "E_INSTALL_VERIFY_HOOK_RUNTIME_MISSING",
+    "E_INSTALL_VERIFY_CONTROL_FILES_MISSING",
+)
+
+
+@pytest.mark.parametrize("stable_id", _VERIFY_FAILURE_IDS)
+def test_rollback_identity_failure_settles_independent_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    stable_id: str,
+) -> None:
+    """F6: one identity refusal cannot suppress disjoint cleanup or the cause."""
+
+    project = tmp_path / stable_id.lower()
+    project.mkdir()
+    hooks = project / ".codex" / "hooks.json"
+    inventory = project / ".codex" / "codex-hook-inventory.json"
+    hooks.parent.mkdir()
+    hooks_before = b'{"hooks": "before"}\n'
+    inventory_before = b'{"inventory": "before"}\n'
+    hooks.write_bytes(hooks_before)
+    inventory.write_bytes(inventory_before)
+    backup_paths: list[Path] = []
+    real_mkdtemp = tempfile.mkdtemp
+
+    def record_mkdtemp(suffix=None, prefix=None, dir=None):
+        path = Path(real_mkdtemp(suffix=suffix, prefix=prefix, dir=tmp_path))
+        backup_paths.append(path)
+        return str(path)
+
+    monkeypatch.setattr(production_installer.tempfile, "mkdtemp", record_mkdtemp)
+    failure_type = getattr(production_installer, "_InstallFailure", None)
+    original = (
+        failure_type(stable_id, "verify", "forced")
+        if isinstance(failure_type, type)
+        else RuntimeError(stable_id)
+    )
+    bad = project / ".agents" / "bad.txt"
+    good = project / ".agents" / "good.txt"
+
+    with pytest.raises(BaseException) as caught:
+        transaction = production_installer._InstallTransaction(
+            [hooks, inventory], enabled=True
+        )
+        with transaction:
+            owner = production_installer._CreateOnlyMutablePath(
+                project, transaction, dry_run=False
+            )
+            owner.create_file(Path(".agents/bad.txt"), b"created bad\n")
+            owner.create_file(Path(".agents/good.txt"), b"created good\n")
+            bad.unlink()
+            bad.write_bytes(b"replacement preserved\n")
+            hooks.write_bytes(b"mutated hooks\n")
+            inventory.write_bytes(b"mutated inventory\n")
+            raise original
+
+    aggregate = caught.value
+    assert getattr(aggregate, "stable_id", None) == "E_ROLLBACK_SETTLEMENT_FAILED"
+    assert getattr(aggregate, "cause", None) is original
+    assert hooks.read_bytes() == hooks_before
+    assert inventory.read_bytes() == inventory_before
+    assert bad.read_bytes() == b"replacement preserved\n"
+    assert not good.exists()
+    member_ids = [member.stable_id for member in aggregate.members]
+    assert member_ids
+    assert set(member_ids) == {"E_ROLLBACK_CREATED_IDENTITY_CHANGED"}
+    assert aggregate.recovery_path is None
+    assert backup_paths and all(not path.exists() for path in backup_paths)
+
+
+def test_rollback_restore_failure_retains_complete_backup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """F6: a failed snapshot restore retains one reported recovery set."""
+
+    target = tmp_path / "hooks.json"
+    target.write_bytes(b"before\n")
+    backup_paths: list[Path] = []
+    real_mkdtemp = tempfile.mkdtemp
+
+    def record_mkdtemp(suffix=None, prefix=None, dir=None):
+        path = Path(real_mkdtemp(suffix=suffix, prefix=prefix, dir=tmp_path))
+        backup_paths.append(path)
+        return str(path)
+
+    monkeypatch.setattr(production_installer.tempfile, "mkdtemp", record_mkdtemp)
+    failure_type = getattr(production_installer, "_InstallFailure", None)
+    original = (
+        failure_type("E_INSTALL_VERIFY_FILES_MISSING", "verify", "forced")
+        if isinstance(failure_type, type)
+        else RuntimeError("E_INSTALL_VERIFY_FILES_MISSING")
+    )
+    if hasattr(production_installer._InstallTransaction, "_restore_entry"):
+        monkeypatch.setattr(
+            production_installer._InstallTransaction,
+            "_restore_entry",
+            lambda _self, _entry: (_ for _ in ()).throw(OSError("restore denied")),
+        )
+    else:
+        monkeypatch.setattr(
+            production_installer._InstallTransaction,
+            "_restore",
+            lambda _self: (_ for _ in ()).throw(OSError("restore denied")),
+        )
+
+    recovery_path: Path | None = None
+    try:
+        with pytest.raises(BaseException) as caught:
+            transaction = production_installer._InstallTransaction(
+                [target], enabled=True
+            )
+            with transaction:
+                target.write_bytes(b"mutated\n")
+                raise original
+        aggregate = caught.value
+        assert getattr(aggregate, "stable_id", None) == "E_ROLLBACK_SETTLEMENT_FAILED"
+        assert getattr(aggregate, "cause", None) is original
+        assert [member.stable_id for member in aggregate.members] == [
+            "E_ROLLBACK_RESTORE_FAILED"
+        ]
+        recovery_path = aggregate.recovery_path
+        assert recovery_path is not None and recovery_path.is_dir()
+        assert recovery_path in backup_paths
+    finally:
+        if recovery_path is not None:
+            shutil.rmtree(recovery_path, ignore_errors=True)
+
+
+def test_install_transaction_excludes_dry_run_and_committed_success_from_rollback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """F6: disabled dry-run and committed success never enter rollback settlement."""
+
+    dry_target = tmp_path / "dry.txt"
+    dry_target.write_bytes(b"before\n")
+    with production_installer._InstallTransaction([dry_target], enabled=False):
+        dry_target.write_bytes(b"dry-run owner did not mutate this path\n")
+    assert dry_target.read_bytes() == b"dry-run owner did not mutate this path\n"
+
+    backup_paths: list[Path] = []
+    real_mkdtemp = tempfile.mkdtemp
+
+    def record_mkdtemp(suffix=None, prefix=None, dir=None):
+        path = Path(real_mkdtemp(suffix=suffix, prefix=prefix, dir=tmp_path))
+        backup_paths.append(path)
+        return str(path)
+
+    monkeypatch.setattr(production_installer.tempfile, "mkdtemp", record_mkdtemp)
+    committed = tmp_path / "committed.txt"
+    committed.write_bytes(b"before\n")
+    transaction = production_installer._InstallTransaction(
+        [committed], enabled=True
+    )
+    with transaction:
+        committed.write_bytes(b"committed\n")
+        transaction.commit()
+    assert committed.read_bytes() == b"committed\n"
+    assert backup_paths and all(not path.exists() for path in backup_paths)
+
+
+@pytest.mark.parametrize("stable_id", _VERIFY_FAILURE_IDS)
+def test_every_precommit_verification_path_enters_rollback_with_typed_cause(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    stable_id: str,
+) -> None:
+    """F5/F6: no pre-commit validation branch returns from inside the transaction."""
+
+    project = tmp_path / stable_id.lower()
+    project.mkdir()
+    observed: list[BaseException | None] = []
+    original_exit = production_installer._InstallTransaction.__exit__
+
+    def observe_exit(self, exc_type, exc, traceback):
+        observed.append(exc)
+        return original_exit(self, exc_type, exc, traceback)
+
+    monkeypatch.setattr(
+        production_installer._InstallTransaction, "__exit__", observe_exit
+    )
+    if stable_id == "E_INSTALL_VERIFY_FILES_MISSING":
+        monkeypatch.setattr(
+            production_installer, "_verify_files", lambda *_args, **_kwargs: ["missing"]
+        )
+        monkeypatch.setattr(
+            production_installer, "_reclaim_retired", lambda *_args, **_kwargs: None
+        )
+    else:
+        def remove_validation_target(*_args, **_kwargs):
+            if stable_id == "E_INSTALL_VERIFY_RUNTIME_MISSING":
+                path = (
+                    project
+                    / ".agents"
+                    / "skills"
+                    / "lead"
+                    / "scripts"
+                    / "agent-run-ledger.py"
+                )
+            elif stable_id == "E_INSTALL_VERIFY_HOOK_RUNTIME_MISSING":
+                path = (
+                    project
+                    / ".agents"
+                    / "skills"
+                    / "lead"
+                    / "scripts"
+                    / "check-hook-health.py"
+                )
+            else:
+                path = project / "AGENTS.md"
+            path.unlink()
+
+        monkeypatch.setattr(
+            production_installer, "_reclaim_retired", remove_validation_target
+        )
+
+    result = production_installer.install(
+        "codex",
+        [
+            "--target",
+            str(project),
+            "--force",
+            "--allow-unsafe-target",
+            "--no-hypothesis-hook",
+        ],
+    )
+
+    assert result == 1
+    assert len(observed) == 1
+    assert getattr(observed[0], "stable_id", None) == stable_id

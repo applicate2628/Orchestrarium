@@ -123,7 +123,7 @@ Global installs copy the helper surface into the production provider runtime.
 
 | Provider | Installed helper directory |
 | --- | --- |
-| Codex | `~/.codex/skills/lead/scripts/` |
+| Codex | `$HOME/.agents/skills/lead/scripts/` |
 | Claude Code | `~/.claude/agents/scripts/` |
 
 Project installs copy to the matching project-local runtime:

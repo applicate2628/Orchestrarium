@@ -191,6 +191,36 @@ def _outcome() -> owner.FinalOutcome:
     )
 
 
+def test_codex_hook_trust_uses_target_sidecar_and_ignores_helper_sibling(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    codex_home = tmp_path / "external-codex-home"
+    codex_home.mkdir()
+    target = codex_home / "hooks.json"
+    target.write_text("{}", encoding="utf-8")
+    target_inventory = codex_home / "codex-hook-inventory.json"
+    target_inventory.write_text("authoritative", encoding="utf-8")
+    helper = tmp_path / "lead" / "scripts" / "check-hook-health.py"
+    helper.parent.mkdir(parents=True)
+    helper.write_text("fixture helper", encoding="utf-8")
+    stale_inventory = helper.with_name("codex-hook-inventory.json")
+    stale_inventory.write_text("stale", encoding="utf-8")
+    observed: list[str] = []
+
+    def probe(arguments, **_kwargs):
+        observed.extend(arguments)
+        return subprocess.CompletedProcess(arguments, 0, "", "")
+
+    monkeypatch.setattr(owner, "codex_hook_health_helper", lambda _home: helper)
+    monkeypatch.setattr(owner.subprocess, "run", probe)
+
+    assert owner.require_codex_hook_trust(["codex", "exec"], codex_home, tmp_path) == 0
+    assert observed[observed.index("--target") + 1] == str(target.resolve())
+    assert target_inventory.is_file()
+    assert "--inventory" not in observed
+    assert str(stale_inventory) not in observed
+
+
 def test_result_limit_control_has_safe_default_and_positive_override() -> None:
     assert owner.parse_control(["topic"]).result_max_bytes == 1024 * 1024
     assert owner.parse_control(["topic", "--result-max-bytes", "17"]).result_max_bytes == 17
