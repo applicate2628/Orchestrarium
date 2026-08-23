@@ -72,6 +72,24 @@ Stay within the requested scope and return a concise, usable result.
 """
 '''
 
+LEGACY_LUNA_ROLE_BYTES = b'''name = "luna_mechanical"
+description = "Exact inventories, hashes, formatting, and mechanical checks"
+model = "gpt-5.6-luna"
+model_reasoning_effort = "high"
+
+developer_instructions = """
+Handle only narrow mechanical work: exact lists, counts, hashes,
+formatting, schema checks, link checks, and deterministic comparisons.
+Do not own semantic decisions, architecture, root-cause conclusions,
+security or publication gates, or destructive lifecycle transitions.
+"""
+'''
+LEGACY_LUNA_CONFIG_BLOCK = b'''[agents.luna_mechanical]
+description = "Exact inventories, hashes, formatting, and mechanical checks"
+config_file = "agents/luna-mechanical.toml"
+'''
+LEGACY_LUNA_SHA256 = "fe2fed7ae3ee36dd454c884c4daeb0bb0a21e1cbdb406fb7a844f40b1675cacb"
+
 
 def _resolve(tmp_path: Path, provider: str = "codex") -> dict:
     project = tmp_path / "project"
@@ -220,6 +238,61 @@ def _run_claude_installer(project: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _run_codex_global_installer(
+    home: Path, *, install_hooks: bool = False
+) -> subprocess.CompletedProcess[str]:
+    env = os.environ.copy()
+    env["USERPROFILE"] = str(home)
+    env["HOME"] = str(home)
+    if not install_hooks:
+        env["ORCHESTRARIUM_NO_HYPOTHESIS_HOOK"] = "1"
+    return subprocess.run(
+        [sys.executable, str(INSTALL_CODEX), "--global", "--force"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env=env,
+    )
+
+
+def _expected_native_role_mappings() -> dict[str, dict[str, str]]:
+    source_agents = ROOT / "src.codex" / "agents"
+    manifest = json.loads(
+        (source_agents / "orchestrarium-role-manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    expected: dict[str, dict[str, str]] = {}
+    for manifest_name, record in sorted(manifest["roles"].items()):
+        relative = record["relativePath"]
+        role = tomllib.loads((source_agents / relative).read_text(encoding="utf-8"))
+        assert role["name"] == manifest_name
+        expected[manifest_name] = {
+            "description": role["description"],
+            "config_file": f"agents/{relative}",
+        }
+    return expected
+
+
+def _assert_callable_native_role_mappings(config_path: Path) -> None:
+    expected = _expected_native_role_mappings()
+    parsed = tomllib.loads(config_path.read_text(encoding="utf-8"))
+    agents = parsed["agents"]
+    actual_role_names = {
+        name for name, value in agents.items() if isinstance(value, dict)
+    }
+    assert actual_role_names == set(expected)
+    assert len(actual_role_names) == 17
+    for name, mapping in expected.items():
+        assert agents[name] == mapping
+        installed = config_path.parent / mapping["config_file"]
+        assert installed.is_file(), f"malformed runtime mapping for {name}: {installed}"
+        assert installed.read_bytes() == (
+            ROOT / "src.codex" / "agents" / f"{name}.toml"
+        ).read_bytes()
+
+
 def _same_root_install(
     provider: str,
     mode: str,
@@ -293,7 +366,176 @@ def test_fresh_codex_install_materializes_native_roles_v2_and_canonical_skills(
 
     config = tomllib.loads((project / ".codex" / "config.toml").read_text("utf-8"))
     assert config["features"]["multi_agent_v2"] is True
+    _assert_callable_native_role_mappings(project / ".codex" / "config.toml")
     assert (project / ".agents" / "skills" / "lead" / "SKILL.md").is_file()
+
+
+def test_native_role_config_registration_is_idempotent_and_byte_exact(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    first = _run_codex_installer(project, install_hooks=False)
+    assert first.returncode == 0, first.stdout + first.stderr
+    config = project / ".codex" / "config.toml"
+    before = config.read_bytes()
+
+    second = _run_codex_installer(project, install_hooks=False)
+
+    assert second.returncode == 0, second.stdout + second.stderr
+    assert config.read_bytes() == before
+    _assert_callable_native_role_mappings(config)
+
+
+@pytest.mark.parametrize(
+    "mapping",
+    (
+        '''[agents.analyst]\ndescription = "wrong"\nconfig_file = "agents/analyst.toml"\n''',
+        '''[agents.analyst]\ndescription = "Evidence-first repository and system analyst."\nconfig_file = "agents/wrong.toml"\n''',
+        '''[agents.analyst]\ndescription = "Evidence-first repository and system analyst."\nconfig_file = "agents/analyst.toml"\nextra = true\n''',
+        '''analyst = "wrong-shape"\n''',
+    ),
+    ids=("description", "config-file", "extra-field", "wrong-shape"),
+)
+def test_native_role_config_mapping_collision_is_preserved_without_mutation(
+    tmp_path: Path, mapping: str
+) -> None:
+    project = tmp_path / "project"
+    config = project / ".codex" / "config.toml"
+    config.parent.mkdir(parents=True)
+    payload = ("# preserve\n[agents]\nmax_concurrent_threads_per_session = 16\n\n" + mapping).encode()
+    config.write_bytes(payload)
+
+    result = _run_codex_installer(project, install_hooks=False)
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "E_CREATE_ONLY_COLLISION" in result.stderr
+    assert config.read_bytes() == payload
+    assert not (project / ".codex" / "agents" / "analyst.toml").exists()
+
+
+@pytest.mark.parametrize("legacy_file", ("exact", "missing"))
+def test_exact_legacy_luna_registration_migrates_to_manifest_roles(
+    tmp_path: Path, legacy_file: str
+) -> None:
+    assert hashlib.sha256(LEGACY_LUNA_ROLE_BYTES).hexdigest() == LEGACY_LUNA_SHA256
+    project = tmp_path / "project"
+    config = project / ".codex" / "config.toml"
+    config.parent.mkdir(parents=True)
+    prefix = b'''# unrelated operator comment
+[unrelated]
+value = "preserve-byte-exact"
+
+[agents]
+max_concurrent_threads_per_session = 16
+
+'''
+    config.write_bytes(prefix + LEGACY_LUNA_CONFIG_BLOCK)
+    legacy = project / ".codex" / "agents" / "luna-mechanical.toml"
+    if legacy_file == "exact":
+        legacy.parent.mkdir()
+        legacy.write_bytes(LEGACY_LUNA_ROLE_BYTES)
+
+    result = _run_codex_installer(project, install_hooks=False)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    updated = config.read_bytes()
+    assert updated.startswith(prefix)
+    assert LEGACY_LUNA_CONFIG_BLOCK not in updated
+    parsed = tomllib.loads(updated.decode())
+    assert parsed["unrelated"]["value"] == "preserve-byte-exact"
+    assert parsed["agents"]["max_concurrent_threads_per_session"] == 16
+    assert "luna_mechanical" not in parsed["agents"]
+    assert not legacy.exists()
+    _assert_callable_native_role_mappings(config)
+
+
+@pytest.mark.parametrize("mismatch", ("mapping", "file"))
+def test_mismatched_legacy_luna_state_fails_closed_and_is_preserved(
+    tmp_path: Path, mismatch: str
+) -> None:
+    project = tmp_path / "project"
+    config = project / ".codex" / "config.toml"
+    config.parent.mkdir(parents=True)
+    block = (
+        LEGACY_LUNA_CONFIG_BLOCK.replace(
+            b"Exact inventories, hashes, formatting, and mechanical checks",
+            b"operator-owned different mapping",
+        )
+        if mismatch == "mapping"
+        else LEGACY_LUNA_CONFIG_BLOCK
+    )
+    config_payload = b"# keep\n" + block
+    config.write_bytes(config_payload)
+    legacy = project / ".codex" / "agents" / "luna-mechanical.toml"
+    legacy.parent.mkdir()
+    legacy_payload = (
+        LEGACY_LUNA_ROLE_BYTES + b"# operator change\n"
+        if mismatch == "file"
+        else LEGACY_LUNA_ROLE_BYTES
+    )
+    legacy.write_bytes(legacy_payload)
+
+    result = _run_codex_installer(project, install_hooks=False)
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "E_CREATE_ONLY_COLLISION" in result.stderr
+    assert config.read_bytes() == config_payload
+    assert legacy.read_bytes() == legacy_payload
+    assert not (project / ".codex" / "agents" / "analyst.toml").exists()
+
+
+def test_legacy_config_and_role_migration_roll_back_together(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    config = project / ".codex" / "config.toml"
+    config.parent.mkdir()
+    config_payload = b"# rollback sentinel\n" + LEGACY_LUNA_CONFIG_BLOCK
+    config.write_bytes(config_payload)
+    legacy = project / ".codex" / "agents" / "luna-mechanical.toml"
+    legacy.parent.mkdir()
+    legacy.write_bytes(LEGACY_LUNA_ROLE_BYTES)
+    observed: list[tuple[bool, bool]] = []
+
+    def fail_after_config_registration(*_args, **_kwargs):
+        current = tomllib.loads(config.read_text(encoding="utf-8"))
+        observed.append(("luna_mechanical" not in current["agents"], not legacy.exists()))
+        raise RuntimeError("forced post-config failure")
+
+    monkeypatch.setattr(installer, "_install_codex_native_roles", fail_after_config_registration)
+    result = installer.install(
+        "codex",
+        [
+            "--target",
+            str(project),
+            "--force",
+            "--allow-unsafe-target",
+            "--no-hypothesis-hook",
+        ],
+    )
+
+    assert result == 1
+    assert observed == [(True, True)]
+    assert config.read_bytes() == config_payload
+    assert legacy.read_bytes() == LEGACY_LUNA_ROLE_BYTES
+
+
+def test_global_codex_and_claude_provider_paths_keep_role_registration_owned(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    global_result = _run_codex_global_installer(home)
+    assert global_result.returncode == 0, global_result.stdout + global_result.stderr
+    _assert_callable_native_role_mappings(home / ".codex" / "config.toml")
+
+    project = tmp_path / "claude-project"
+    project.mkdir()
+    claude_result = _run_claude_installer(project)
+    assert claude_result.returncode == 0, claude_result.stdout + claude_result.stderr
+    assert not (project / ".codex" / "config.toml").exists()
 
 
 def test_codex_canonical_lead_tree_is_source_exact_after_reinstall(tmp_path: Path) -> None:
@@ -596,21 +838,46 @@ def test_post_materialization_runtime_census_matches_declared_destinations(
 
     original_hooks = installer._install_hooks
 
-    def hooks(root, provider, registration, installed_hook_root, mode):
-        original_hooks(root, provider, registration, installed_hook_root, mode)
+    def hooks(
+        root,
+        provider,
+        registration,
+        installed_hook_root,
+        mode,
+        inventory_path=None,
+    ):
+        original_hooks(
+            root,
+            provider,
+            registration,
+            installed_hook_root,
+            mode,
+            inventory_path,
+        )
         emit("hook-registration", registration)
         if provider == "codex":
-            emit("hook-inventory", registration.parent / installer.CODEX_HOOK_INVENTORY)
+            emit(
+                "hook-inventory",
+                inventory_path
+                if inventory_path is not None
+                else registration.parent / installer.CODEX_HOOK_INVENTORY,
+            )
 
     monkeypatch.setattr(installer, "_install_hooks", hooks)
 
-    original_config = installer._enable_codex_multi_agent_v2
+    original_config = installer._reconcile_codex_native_config
 
-    def config(config_path, owner):
-        original_config(config_path, owner)
+    def config(config_path, owner, **kwargs):
+        original_config(config_path, owner, **kwargs)
         emit("native-config", config_path)
+        target_agents = kwargs.get("target_agents")
+        if target_agents is not None:
+            emit(
+                "native-config",
+                target_agents / installer.CODEX_LEGACY_LUNA_ROLE.name,
+            )
 
-    monkeypatch.setattr(installer, "_enable_codex_multi_agent_v2", config)
+    monkeypatch.setattr(installer, "_reconcile_codex_native_config", config)
 
     original_roles = installer._install_codex_native_roles
 
@@ -1019,7 +1286,7 @@ def test_native_role_slice_a_config_create_only_matrix(
     owner = installer._CreateOnlyMutablePath(anchor, transaction, dry_run=False)
 
     if expected_id is None:
-        installer._enable_codex_multi_agent_v2(config, owner)
+        installer._reconcile_codex_native_config(config, owner)
         if payload is None:
             assert config.read_bytes() == b"[features]\nmulti_agent_v2 = true\n"
         else:
@@ -1028,7 +1295,7 @@ def test_native_role_slice_a_config_create_only_matrix(
         return
 
     with pytest.raises(ValueError, match=f"^{expected_id}"):
-        installer._enable_codex_multi_agent_v2(config, owner)
+        installer._reconcile_codex_native_config(config, owner)
     assert config.read_bytes() == payload
     assert installer._CreateOnlyMutablePath._identity(config) == before_identity
     assert transaction._slice_a_created == []
@@ -1046,7 +1313,7 @@ def test_config_wrong_type_and_reparse_keep_distinct_failure_ids(
         type_anchor, installer._InstallTransaction([], enabled=False), dry_run=False
     )
     with pytest.raises(ValueError, match="^E_CREATE_ONLY_TYPE_COLLISION"):
-        installer._enable_codex_multi_agent_v2(type_config, owner)
+        installer._reconcile_codex_native_config(type_config, owner)
 
     reparse_anchor = tmp_path / "reparse-anchor"
     reparse_anchor.mkdir()
@@ -1063,7 +1330,7 @@ def test_config_wrong_type_and_reparse_keep_distinct_failure_ids(
         dry_run=False,
     )
     with pytest.raises(ValueError, match="^E_MUTABLE_PATH_REPARSE"):
-        installer._enable_codex_multi_agent_v2(reparse_config, reparse_owner)
+        installer._reconcile_codex_native_config(reparse_config, reparse_owner)
 
 
 def test_interrupted_role_creation_rolls_back_only_created_roles(tmp_path: Path) -> None:

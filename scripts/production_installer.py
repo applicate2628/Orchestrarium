@@ -57,6 +57,14 @@ UI_CONTINUITY_CONTRACT_SOURCE = (
 UI_CONTINUITY_CONTRACT_TARGET = Path("contracts") / "ui-transition-continuity.md"
 CODEX_HOOK_INVENTORY = "codex-hook-inventory.json"
 CODEX_ROLE_MANIFEST = "orchestrarium-role-manifest.json"
+CODEX_LEGACY_LUNA_CONFIG_NAME = "luna_mechanical"
+CODEX_LEGACY_LUNA_ROLE = Path("agents") / "luna-mechanical.toml"
+CODEX_LEGACY_LUNA_SHA256 = (
+    "fe2fed7ae3ee36dd454c884c4daeb0bb0a21e1cbdb406fb7a844f40b1675cacb"
+)
+CODEX_LEGACY_LUNA_DESCRIPTION = (
+    "Exact inventories, hashes, formatting, and mechanical checks"
+)
 
 # SHA-256 fingerprints of the last production PowerShell files. Upgrade cleanup
 # removes only an exact byte-for-byte pack copy; any edited file is preserved.
@@ -1179,7 +1187,7 @@ _POST_MATERIALIZATION_WRITER_CALLS = {
     "_install_runtime_files": ("runtime-outside",),
     "_install_ui_continuity_contract": ("ui-continuity",),
     "_install_hooks": ("hook-registration", "hook-inventory"),
-    "_enable_codex_multi_agent_v2": ("native-config",),
+    "_reconcile_codex_native_config": ("native-config",),
     "_install_codex_native_roles": ("native-role",),
     "_merge_codex_agents": ("provider-doc",),
     "_merge_claude_docs": ("provider-doc",),
@@ -1283,6 +1291,7 @@ def _post_materialization_writer_destinations(
     shared_mode_target: Path | None,
     hooks_enabled: bool,
     codex_post_tree_runtime: tuple[tuple[Path, Path], ...],
+    codex_hook_inventory: Path | None = None,
     codex_role_manifest: dict[str, Any] | None = None,
 ) -> tuple[_PostMaterializationWriterDestination, ...]:
     """Enumerate every durable destination written after canonical lead publication."""
@@ -1317,10 +1326,16 @@ def _post_materialization_writer_destinations(
     if hooks_enabled:
         add("hook-registration", registration)
         if provider == "codex":
-            add("hook-inventory", registration.parent / CODEX_HOOK_INVENTORY)
+            add(
+                "hook-inventory",
+                codex_hook_inventory
+                if codex_hook_inventory is not None
+                else registration.parent / CODEX_HOOK_INVENTORY,
+            )
 
     if provider == "codex":
         add("native-config", target / "config.toml")
+        add("native-config", target / CODEX_LEGACY_LUNA_ROLE)
         manifest = (
             codex_role_manifest
             if codex_role_manifest is not None
@@ -1417,6 +1432,7 @@ def _installer_mutation_paths(
     mode_target: Path,
     registration: Path,
     shared_mode_target: Path | None,
+    codex_hook_inventory: Path | None = None,
 ) -> list[Path]:
     """Return only paths whose contents this installer can mutate."""
     if provider not in {"codex", "claude"}:
@@ -1454,7 +1470,11 @@ def _installer_mutation_paths(
         paths.extend(
             (
                 helper_target / "check-hook-health.py",
-                registration.parent / CODEX_HOOK_INVENTORY,
+                codex_hook_inventory
+                if codex_hook_inventory is not None
+                else registration.parent / CODEX_HOOK_INVENTORY,
+                target / "config.toml",
+                target / CODEX_LEGACY_LUNA_ROLE,
             )
         )
     paths.extend(
@@ -1602,6 +1622,10 @@ def _source_codex_role_manifest_unchecked(
         if record.get("sha256") != _file_sha256(source):
             raise ValueError(f"E_NATIVE_ROLE_MANIFEST_INVALID: role digest {name}")
         parsed = tomllib.loads(source.read_text(encoding="utf-8"))
+        if parsed.get("name") != name or not isinstance(
+            parsed.get("description"), str
+        ) or not parsed["description"].strip():
+            raise ValueError(f"E_NATIVE_ROLE_MANIFEST_INVALID: config mapping {name}")
         expected_sandbox = "read-only" if name in _READ_ONLY_ROLES else "workspace-write"
         if name not in _READ_ONLY_ROLES | _BOUNDED_WRITE_ROLES or parsed.get("sandbox_mode") != expected_sandbox:
             raise ValueError(f"E_NATIVE_ROLE_MANIFEST_INVALID: sandbox {name}")
@@ -1619,6 +1643,40 @@ def _source_codex_role_manifest(root: Path, source_agents: Path) -> dict[str, An
         if str(exc).startswith("E_NATIVE_ROLE_MANIFEST_INVALID"):
             raise
         raise ValueError(f"E_NATIVE_ROLE_MANIFEST_INVALID: {exc}") from exc
+
+
+@dataclass(frozen=True)
+class _NativeRoleRegistration:
+    name: str
+    description: str
+    relative_path: Path
+
+    @property
+    def config_file(self) -> str:
+        return f"agents/{self.relative_path.as_posix()}"
+
+
+def _native_role_registrations(
+    source_agents: Path, manifest: dict[str, Any]
+) -> tuple[_NativeRoleRegistration, ...]:
+    registrations: list[_NativeRoleRegistration] = []
+    for manifest_name, record in sorted(manifest["roles"].items()):
+        relative = Path(record["relativePath"])
+        parsed = tomllib.loads((source_agents / relative).read_text(encoding="utf-8"))
+        name = parsed.get("name")
+        description = parsed.get("description")
+        if (
+            name != manifest_name
+            or not isinstance(description, str)
+            or not description.strip()
+        ):
+            raise ValueError(
+                f"E_NATIVE_ROLE_MANIFEST_INVALID: config mapping {manifest_name}"
+            )
+        registrations.append(
+            _NativeRoleRegistration(name, description, relative)
+        )
+    return tuple(registrations)
 
 
 def _install_codex_native_roles(
@@ -1690,29 +1748,177 @@ def _install_claude_skill_projections(
             owner.create_projection(projection_relative / skill.name, canonical_target / skill.name)
 
 
-def _enable_codex_multi_agent_v2(
-    config_path: Path, owner: _CreateOnlyMutablePath
+def _toml_string(value: str) -> str:
+    return json.dumps(value, ensure_ascii=False)
+
+
+def _remove_frozen_legacy_luna_block(payload: bytes) -> bytes:
+    text = payload.decode("utf-8")
+    lines = text.splitlines(keepends=True)
+    headers = [
+        index
+        for index, line in enumerate(lines)
+        if line.strip() == "[agents.luna_mechanical]"
+    ]
+    if len(headers) != 1:
+        raise ValueError("E_CREATE_ONLY_COLLISION: agents.luna_mechanical")
+    start = headers[0]
+    end = len(lines)
+    for index in range(start + 1, len(lines)):
+        stripped = lines[index].strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            end = index
+            break
+    actual = tuple(line.strip() for line in lines[start:end] if line.strip())
+    expected = (
+        "[agents.luna_mechanical]",
+        f"description = {_toml_string(CODEX_LEGACY_LUNA_DESCRIPTION)}",
+        'config_file = "agents/luna-mechanical.toml"',
+    )
+    if actual != expected:
+        raise ValueError("E_CREATE_ONLY_COLLISION: agents.luna_mechanical")
+    return ("".join(lines[:start]) + "".join(lines[end:])).encode("utf-8")
+
+
+def _append_native_role_blocks(
+    payload: bytes, registrations: tuple[_NativeRoleRegistration, ...]
+) -> bytes:
+    if not registrations:
+        return payload
+    newline = b"\r\n" if b"\r\n" in payload else b"\n"
+    result = payload
+    if result and not result.endswith((b"\n", b"\r")):
+        result += newline
+    if result and not result.endswith(newline + newline):
+        result += newline
+    blocks = []
+    for registration in registrations:
+        blocks.append(
+            newline.join(
+                (
+                    f"[agents.{registration.name}]".encode("utf-8"),
+                    f"description = {_toml_string(registration.description)}".encode(
+                        "utf-8"
+                    ),
+                    f'config_file = "{registration.config_file}"'.encode("utf-8"),
+                )
+            )
+            + newline
+        )
+    return result + newline.join(blocks)
+
+
+def _reconcile_codex_native_config(
+    config_path: Path,
+    owner: _CreateOnlyMutablePath,
+    *,
+    source_agents: Path | None = None,
+    target_agents: Path | None = None,
+    manifest: dict[str, Any] | None = None,
 ) -> None:
     relative = config_path.relative_to(owner.anchor)
-    if config_path.exists() or config_path.is_symlink():
+    config_exists = config_path.exists() or config_path.is_symlink()
+    if config_exists:
         owner.destination(relative)
         owner._assert_regular(config_path, existing=True)
         payload = config_path.read_bytes()
-        try:
-            parsed = tomllib.loads(payload.decode("utf-8"))
-        except (UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
-            raise ValueError("E_CREATE_ONLY_CONFIG_INVALID") from exc
-        features = parsed.get("features")
-        if features is not None and not isinstance(features, dict):
+    else:
+        payload = b""
+    try:
+        parsed = tomllib.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
+        raise ValueError("E_CREATE_ONLY_CONFIG_INVALID") from exc
+    features = parsed.get("features")
+    if features is not None and not isinstance(features, dict):
+        raise ValueError("E_CREATE_ONLY_CONFIG_INVALID")
+    if isinstance(features, dict):
+        value = features.get("multi_agent_v2")
+        if value is not None and type(value) is not bool:
             raise ValueError("E_CREATE_ONLY_CONFIG_INVALID")
-        if isinstance(features, dict):
-            value = features.get("multi_agent_v2")
-            if value is not None and type(value) is not bool:
-                raise ValueError("E_CREATE_ONLY_CONFIG_INVALID")
-        print("  Codex config is operator-owned and left byte-exact")
-        return
-    owner.create_file(relative, b"[features]\nmulti_agent_v2 = true\n")
-    print(f"  Created Codex multi_agent_v2 config: {config_path}")
+
+    registrations: tuple[_NativeRoleRegistration, ...] = ()
+    legacy_path: Path | None = None
+    legacy_exists = False
+    if source_agents is not None or target_agents is not None or manifest is not None:
+        if source_agents is None or target_agents is None or manifest is None:
+            raise ValueError("E_NATIVE_ROLE_MANIFEST_INVALID: config registration inputs")
+        registrations = _native_role_registrations(source_agents, manifest)
+        agents = parsed.get("agents")
+        if agents is None:
+            agents = {}
+        if not isinstance(agents, dict):
+            raise ValueError("E_CREATE_ONLY_CONFIG_INVALID")
+        expected_by_name = {
+            registration.name: {
+                "description": registration.description,
+                "config_file": registration.config_file,
+            }
+            for registration in registrations
+        }
+        for name, expected in expected_by_name.items():
+            if name in agents and agents[name] != expected:
+                raise ValueError(f"E_CREATE_ONLY_COLLISION: agents.{name}")
+
+        legacy_path = target_agents / CODEX_LEGACY_LUNA_ROLE.name
+        legacy_relative = legacy_path.relative_to(owner.anchor)
+        legacy_exists = legacy_path.exists() or legacy_path.is_symlink()
+        if legacy_exists:
+            owner.destination(legacy_relative)
+            try:
+                owner._assert_regular(legacy_path, existing=True)
+            except ValueError as exc:
+                raise ValueError(
+                    f"E_CREATE_ONLY_COLLISION: {legacy_relative}"
+                ) from exc
+
+        legacy = agents.get(CODEX_LEGACY_LUNA_CONFIG_NAME)
+        if legacy is None:
+            if legacy_exists:
+                raise ValueError(f"E_CREATE_ONLY_COLLISION: {legacy_relative}")
+        else:
+            expected_legacy = {
+                "description": CODEX_LEGACY_LUNA_DESCRIPTION,
+                "config_file": CODEX_LEGACY_LUNA_ROLE.as_posix(),
+            }
+            if legacy != expected_legacy:
+                raise ValueError(
+                    "E_CREATE_ONLY_COLLISION: agents.luna_mechanical"
+                )
+            if legacy_exists and _file_sha256(legacy_path) != CODEX_LEGACY_LUNA_SHA256:
+                raise ValueError(f"E_CREATE_ONLY_COLLISION: {legacy_relative}")
+            payload = _remove_frozen_legacy_luna_block(payload)
+            parsed = tomllib.loads(payload.decode("utf-8"))
+
+        missing = tuple(
+            registration
+            for registration in registrations
+            if registration.name
+            not in (parsed.get("agents") if isinstance(parsed.get("agents"), dict) else {})
+        )
+        payload = _append_native_role_blocks(payload, missing)
+
+    if not config_exists:
+        initial = b"[features]\nmulti_agent_v2 = true\n"
+        if registrations:
+            initial = _append_native_role_blocks(initial, registrations)
+        owner.create_file(relative, initial)
+        print(f"  Created Codex multi_agent_v2 and native-role config: {config_path}")
+    elif config_path.read_bytes() != payload:
+        if not owner.dry_run:
+            config_path.write_bytes(payload)
+            if config_path.read_bytes() != payload:
+                raise ValueError("E_MUTABLE_PATH_POSTCONDITION")
+        print("  Updated Codex native-role config without rewriting unrelated bytes")
+    else:
+        print("  Codex config registration is exact and left byte-exact")
+
+    if legacy_exists:
+        assert legacy_path is not None
+        if not owner.dry_run:
+            legacy_path.unlink()
+            if legacy_path.exists() or legacy_path.is_symlink():
+                raise ValueError("E_MUTABLE_PATH_POSTCONDITION")
+        print(f"  Removed frozen legacy native role: {legacy_path}")
 
 
 def _claude_stale_namespace_paths(source: Path, target: Path) -> tuple[Path, ...]:
@@ -2240,6 +2446,7 @@ def _install_hooks(
     registration: Path,
     installed_root: Path,
     mode: str,
+    inventory_path: Path | None = None,
 ) -> None:
     installer = root / "scripts" / "install-hypothesis-hook.py"
     host = "windows" if os.name == "nt" else "posix"
@@ -2294,7 +2501,12 @@ def _install_hooks(
         if health_module is not None
         else None
     )
-    inventory_path = registration.parent / CODEX_HOOK_INVENTORY
+    if inventory_path is None:
+        inventory_path = (
+            health_module._codex_inventory_sidecar(registration)
+            if health_module is not None
+            else registration.parent / CODEX_HOOK_INVENTORY
+        )
     if health_module is not None:
         manifest_stems = health_module._manifest_stems(root, "codex")
         spec_stems = {marker for marker, *_rest in _hook_specs(provider, installed_root)}
@@ -2530,6 +2742,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
         canonical_lead = canonical_skills_target / "lead"
         codex_post_tree_runtime: tuple[tuple[Path, Path], ...] = ()
         codex_role_manifest: dict[str, Any] | None = None
+        codex_hook_inventory = registration.parent / CODEX_HOOK_INVENTORY
         if provider == "codex":
             codex_role_manifest = _source_codex_role_manifest(
                 root, source / "agents"
@@ -2544,6 +2757,10 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                 for source, destination in runtime_destinations
                 if not _is_lexically_under(destination, canonical_lead)
             )
+            if hooks_enabled:
+                codex_hook_inventory = _hook_health_module(
+                    root
+                )._codex_inventory_sidecar(registration)
         post_materialization_writers = _post_materialization_writer_destinations(
             provider=provider,
             root=root,
@@ -2557,6 +2774,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
             shared_mode_target=shared_mode_target,
             hooks_enabled=hooks_enabled,
             codex_post_tree_runtime=codex_post_tree_runtime,
+            codex_hook_inventory=codex_hook_inventory,
             codex_role_manifest=codex_role_manifest,
         )
         _assert_canonical_lead_postwrite_free(
@@ -2574,6 +2792,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
             mode_target=mode_target,
             registration=registration,
             shared_mode_target=shared_mode_target,
+            codex_hook_inventory=codex_hook_inventory,
         )
         transaction = _InstallTransaction(
             transaction_paths,
@@ -2645,9 +2864,20 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                 # under the same .codex containment root.
                 if hooks_enabled:
                     _install_hooks(
-                        root, provider, registration, installed_hook_root, mode
+                        root,
+                        provider,
+                        registration,
+                        installed_hook_root,
+                        mode,
+                        codex_hook_inventory,
                     )
-                _enable_codex_multi_agent_v2(target / "config.toml", create_only)
+                _reconcile_codex_native_config(
+                    target / "config.toml",
+                    create_only,
+                    source_agents=source / "agents",
+                    target_agents=target / "agents",
+                    manifest=codex_role_manifest,
+                )
                 _install_codex_native_roles(
                     root,
                     source / "agents",
@@ -2737,7 +2967,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                 missing_runtime = [
                     path
                     for path in ((helper_target / "check-hook-health.py",)
-                                 + ((registration.parent / CODEX_HOOK_INVENTORY,)
+                                 + ((codex_hook_inventory,)
                                     if hooks_enabled else ()))
                     if not path.is_file()
                 ]

@@ -2,7 +2,7 @@
 
 This directory contains the Codex-provider source tree inside the Orchestrarium monorepo.
 
-It includes two standalone native Luna mechanical roles: read-only `mechanical-scout` and bounded-write `mechanical-worker`. They are create-only install payloads and admit only the shared fast-high mechanical corridor. `scripts/resolve-agents-mode.py::resolve_role_dispatch` is the policy-only caller-neutral owner; disabled native roles return typed unavailability, admitted calls require the exact native attempt, and no host result, external route, Terra, or Sol fallback enters policy.
+It includes 17 manifest-driven native roles; read-only `mechanical-scout` and bounded-write `mechanical-worker` are the two standalone Luna mechanical members. Role TOMLs are create-only install payloads and every role is registered in `.codex/config.toml` from its validated name, description, and relative file. The Luna roles admit only the shared fast-high mechanical corridor. `scripts/resolve-agents-mode.py::resolve_role_dispatch` is the policy-only caller-neutral owner; disabled native roles return typed unavailability, admitted calls require the exact native attempt, and no host result, external route, Terra, or Sol fallback enters policy.
 
 Use it together with:
 
@@ -13,14 +13,14 @@ Use it together with:
 Source surface:
 
 - `../shared/AGENTS.shared.md` + `AGENTS.codex.md` assemble the installed Codex `AGENTS.md`
-- `agents/*.toml` are create-only native role payloads and `agents/orchestrarium-role-manifest.json` is source-only current-inventory validation; no installed receipt, historical digest, adoption, update, reclaim, or delete authority exists in 1.x
+- `agents/*.toml` are create-only native role payloads and `agents/orchestrarium-role-manifest.json` is source-only current-inventory and config-registration validation; no installed receipt or general historical adoption, update, reclaim, or delete authority exists in 1.x, apart from the exact frozen `luna_mechanical` migration
 - `skills/<role>/SKILL.md` and `skills/<role>/agents/openai.yaml` define the role catalog
 - `skills/lead/` carries operating-model notes, handoff contracts, and validation/publication-safety scripts
 - `skills/consultant/` and `skills/second-opinion/` carry the advisory and explicit consultant routing surfaces
 - `skills/external-brigade/` carries the bounded parallel external-helper orchestration surface
 - `skills/design-panel/` carries the design-panel technique — independent multi-lane design generation on one pinned problem, converged through one mandatory synthesis; the generation-side analog of `skills/review-loop/`
 
-Architecture decision: the installed Codex `AGENTS.md` is intentionally the compact universal minimum, not the place for the full role catalog or long runtime manuals. Keep the universal entrypoint thin and put detailed role contracts in `skills/<role>/SKILL.md`, shared methodology in `../shared/references/`, and Codex-specific addenda in `../references-codex/`. The source `agents/*.toml` files are policy-resolved native role payloads created only when their targets are absent; any existing operator role collision fails closed. An absent config receives `multi_agent_v2 = true`; an existing ordinary config is preserved byte-exact and accepted only when TOML is valid and the feature is absent or Boolean. Codex and Claude compose the same complete canonical `lead` payload before either host publishes it. This mirrors the Claude-side pattern where `CLAUDE.md` stays short and `.claude/agents/*.md` carries the detailed role files.
+Architecture decision: the installed Codex `AGENTS.md` is intentionally the compact universal minimum, not the place for the full role catalog or long runtime manuals. Keep the universal entrypoint thin and put detailed role contracts in `skills/<role>/SKILL.md`, shared methodology in `../shared/references/`, and Codex-specific addenda in `../references-codex/`. The source `agents/*.toml` files are policy-resolved native role payloads created only when their targets are absent; any existing operator role collision fails closed. Manifest mappings are appended to valid config text without reserializing unrelated bytes; exact mappings no-op and collisions fail. An absent config receives `multi_agent_v2 = true` plus all mappings, and only the exact frozen `luna_mechanical` state may be migrated away. Codex and Claude compose the same complete canonical `lead` payload before either host publishes it. This mirrors the Claude-side pattern where `CLAUDE.md` stays short and `.claude/agents/*.md` carries the detailed role files.
 
 Keep `SKILL.md` frontmatter `description:` values compact because Codex loads them as startup metadata before any one skill body is selected. Put detailed trigger logic, scope, and gate rules in the body of the skill instead; `skills/lead/scripts/validate-skill-pack.*` enforces the Codex metadata budget.
 

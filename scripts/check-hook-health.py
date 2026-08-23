@@ -30,6 +30,7 @@ HEALTH_FAILURE_IDS = frozenset(
 MAX_STDOUT_BYTES = 2 * 1024 * 1024
 MAX_STDOUT_LINE_BYTES = 256 * 1024
 MAX_STDOUT_MESSAGES = 256
+MAX_HOOK_PATH_LINKS = 64
 _CHILD_ENV_KEYS = frozenset(
     {
         "COMSPEC",
@@ -62,12 +63,22 @@ class _InventoryAuthority:
         self,
         *,
         target: Path,
+        resolved_target: Path,
         inventory: Path,
+        logical_parent_identity: tuple[int, int, int, int],
+        link_chain: tuple[
+            tuple[str, tuple[int, int, int, int], str, str], ...
+        ],
+        target_identity: tuple[int, int, int, int],
         parent_identity: tuple[int, int, int, int],
         inventory_identity: tuple[int, int, int, int] | None,
     ) -> None:
         self.target = target
+        self.resolved_target = resolved_target
         self.inventory = inventory
+        self.logical_parent_identity = logical_parent_identity
+        self.link_chain = link_chain
+        self.target_identity = target_identity
         self.parent_identity = parent_identity
         self.inventory_identity = inventory_identity
 
@@ -119,7 +130,13 @@ def _write_failure_envelope(failure: _HookHealthFailure) -> None:
 
 
 def _lexical_absolute(path: Path) -> Path:
-    return Path(os.path.abspath(os.path.expanduser(str(path))))
+    value = os.path.abspath(os.path.expanduser(str(path)))
+    if os.name == "nt":
+        if value.startswith("\\\\?\\UNC\\"):
+            value = "\\\\" + value[8:]
+        elif value.startswith("\\\\?\\"):
+            value = value[4:]
+    return Path(value)
 
 
 def _path_identity(path: Path) -> tuple[int, int, int, int]:
@@ -142,18 +159,83 @@ def _is_link_or_reparse(metadata: os.stat_result) -> bool:
     )
 
 
-def _require_no_reparse_chain(path: Path) -> None:
-    chain: list[Path] = []
-    current = path
-    while True:
-        chain.append(current)
-        if current.parent == current:
-            break
-        current = current.parent
-    for component in reversed(chain):
-        metadata = component.lstat()
-        if _is_link_or_reparse(metadata):
-            raise ValueError(f"reparse component: {component}")
+def _same_path(first: Path, second: Path) -> bool:
+    return os.path.normcase(str(first)) == os.path.normcase(str(second))
+
+
+def _path_walk(path: Path) -> tuple[Path, list[str]]:
+    if not path.is_absolute() or not path.anchor:
+        raise ValueError(f"hooks target path is not absolute: {path}")
+    return Path(path.anchor), list(path.parts[1:])
+
+
+def _link_kind(path: Path, metadata: os.stat_result) -> str | None:
+    if stat.S_ISLNK(metadata.st_mode):
+        return "symlink"
+    is_junction = getattr(os.path, "isjunction", lambda _path: False)
+    if is_junction(path):
+        return "junction"
+    if _is_link_or_reparse(metadata):
+        raise ValueError(f"hooks target contains unsupported reparse component: {path}")
+    return None
+
+
+def _resolve_hooks_target(
+    target: Path, *, allow_missing_ordinary: bool
+) -> tuple[
+    Path,
+    tuple[tuple[str, tuple[int, int, int, int], str, str], ...],
+    tuple[int, int, int, int] | None,
+]:
+    selected_target = _lexical_absolute(target)
+    current, pending = _path_walk(selected_target)
+    seen: set[str] = set()
+    links: list[tuple[str, tuple[int, int, int, int], str, str]] = []
+    while pending:
+        candidate = current / pending.pop(0)
+        try:
+            metadata = candidate.lstat()
+        except FileNotFoundError:
+            if allow_missing_ordinary and not links:
+                return selected_target, (), None
+            raise ValueError(f"hooks target link chain is dangling: {selected_target}")
+
+        kind = _link_kind(candidate, metadata)
+        if kind is not None:
+            if len(links) >= MAX_HOOK_PATH_LINKS:
+                raise ValueError("hooks target link chain exceeds bounded depth")
+            key = os.path.normcase(str(candidate))
+            if key in seen:
+                raise ValueError(f"hooks target link cycle detected at {candidate}")
+            seen.add(key)
+            try:
+                raw_target = os.readlink(candidate)
+            except OSError as exc:
+                raise ValueError(f"cannot read hooks target link {candidate}: {exc}") from exc
+            links.append(
+                (str(candidate), _path_identity(candidate), raw_target, kind)
+            )
+            next_target = Path(raw_target)
+            resolved_component = _lexical_absolute(
+                next_target
+                if next_target.is_absolute()
+                else candidate.parent / next_target
+            )
+            combined = resolved_component.joinpath(*pending)
+            current, pending = _path_walk(combined)
+            continue
+        if pending:
+            if not stat.S_ISDIR(metadata.st_mode):
+                raise ValueError(f"hooks target parent is not a directory: {candidate}")
+            current = candidate
+            continue
+        if not stat.S_ISREG(metadata.st_mode):
+            raise ValueError("hooks target link chain does not resolve to an ordinary file")
+        return candidate, tuple(links), _path_identity(candidate)
+
+    if allow_missing_ordinary and not links:
+        return selected_target, (), None
+    raise ValueError(f"hooks target path is incomplete: {selected_target}")
 
 
 def _inventory_authority(
@@ -164,7 +246,12 @@ def _inventory_authority(
 ) -> _InventoryAuthority:
     try:
         selected_target = _lexical_absolute(target)
-        parent = selected_target.parent
+        resolved_target, link_chain, target_identity = _resolve_hooks_target(
+            selected_target, allow_missing_ordinary=False
+        )
+        assert target_identity is not None
+        logical_parent = selected_target.parent
+        parent = resolved_target.parent
         exact_inventory = parent / INVENTORY_NAME
         selected_inventory = _lexical_absolute(
             inventory_path if inventory_path is not None else exact_inventory
@@ -173,15 +260,6 @@ def _inventory_authority(
             str(exact_inventory)
         ):
             raise ValueError("inventory must be the exact hooks-target sibling")
-        _require_no_reparse_chain(parent)
-        parent_metadata = parent.lstat()
-        if not stat.S_ISDIR(parent_metadata.st_mode):
-            raise ValueError("hooks target parent is not a directory")
-        target_metadata = selected_target.lstat()
-        if _is_link_or_reparse(target_metadata) or not stat.S_ISREG(
-            target_metadata.st_mode
-        ):
-            raise ValueError("hooks target is not an ordinary file")
         inventory_identity = None
         try:
             inventory_metadata = selected_inventory.lstat()
@@ -196,7 +274,11 @@ def _inventory_authority(
             inventory_identity = _path_identity(selected_inventory)
         return _InventoryAuthority(
             target=selected_target,
+            resolved_target=resolved_target,
             inventory=selected_inventory,
+            logical_parent_identity=_path_identity(logical_parent),
+            link_chain=link_chain,
+            target_identity=target_identity,
             parent_identity=_path_identity(parent),
             inventory_identity=inventory_identity,
         )
@@ -208,18 +290,48 @@ def _inventory_authority(
         ) from exc
 
 
-def _recheck_inventory_authority(
-    authority: _InventoryAuthority, *, for_write: bool
-) -> _InventoryAuthority:
-    current = _inventory_authority(
-        authority.target, authority.inventory, for_write=for_write
-    )
+def _require_same_hook_target_authority(
+    authority: _InventoryAuthority, current: _InventoryAuthority
+) -> None:
+    if current.logical_parent_identity != authority.logical_parent_identity:
+        raise _HookHealthFailure(
+            "E_HOOK_INVENTORY_TARGET_INVALID",
+            "inventory",
+            "hooks target logical parent identity changed",
+        )
+    if current.link_chain != authority.link_chain:
+        raise _HookHealthFailure(
+            "E_HOOK_INVENTORY_TARGET_INVALID",
+            "inventory",
+            "hooks target symlink identity or target changed",
+        )
+    if not _same_path(current.resolved_target, authority.resolved_target):
+        raise _HookHealthFailure(
+            "E_HOOK_INVENTORY_TARGET_INVALID",
+            "inventory",
+            "resolved hooks target changed",
+        )
+    if current.target_identity != authority.target_identity:
+        raise _HookHealthFailure(
+            "E_HOOK_INVENTORY_TARGET_INVALID",
+            "inventory",
+            "resolved hooks target identity changed",
+        )
     if current.parent_identity != authority.parent_identity:
         raise _HookHealthFailure(
             "E_HOOK_INVENTORY_TARGET_INVALID",
             "inventory",
             "hooks target parent identity changed",
         )
+
+
+def _recheck_inventory_authority(
+    authority: _InventoryAuthority, *, for_write: bool
+) -> _InventoryAuthority:
+    current = _inventory_authority(
+        authority.target, authority.inventory, for_write=for_write
+    )
+    _require_same_hook_target_authority(authority, current)
     if (
         authority.inventory_identity is not None
         and current.inventory_identity != authority.inventory_identity
@@ -706,8 +818,7 @@ def write_codex_inventory(
         written = _inventory_authority(
             authority.target, authority.inventory, for_write=False
         )
-        if written.parent_identity != authority.parent_identity:
-            raise ValueError("hooks target parent identity changed after inventory write")
+        _require_same_hook_target_authority(authority, written)
     except _HookHealthFailure:
         raise
     except (OSError, ValueError, json.JSONDecodeError) as exc:
@@ -1112,9 +1223,19 @@ def _default_checks(repo_root: Path) -> list[tuple[Path, str, Path]]:
 
 
 def _codex_inventory_sidecar(target: Path) -> Path:
-    """Locate the generated inventory beside the selected Codex hooks file."""
+    """Locate the inventory beside the final ordinary Codex hooks target."""
 
-    return target.parent / INVENTORY_NAME
+    try:
+        resolved_target, _link_chain, _target_identity = _resolve_hooks_target(
+            target, allow_missing_ordinary=True
+        )
+        return resolved_target.parent / INVENTORY_NAME
+    except _HookHealthFailure:
+        raise
+    except (OSError, ValueError) as exc:
+        raise _HookHealthFailure(
+            "E_HOOK_INVENTORY_TARGET_INVALID", "inventory", str(exc)
+        ) from exc
 
 
 def _leftover_wrappers(

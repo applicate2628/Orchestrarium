@@ -176,16 +176,24 @@ def test_installer_derives_touched_identities_from_before_after_hooks_json(
     class FakeHealth:
         calls = 0
         generated = False
+
         @classmethod
         def resolve_codex_command(cls, _value):
             return [str(Path(sys.executable).resolve())]
+
         @classmethod
         def _manifest_stems(cls, _root, _platform):
             return {marker for marker, *_rest in specs}
+
+        @classmethod
+        def _codex_inventory_sidecar(cls, target):
+            return target.parent / "codex-hook-inventory.json"
+
         @classmethod
         def owned_canonical_identities(cls, **_kwargs):
             cls.calls += 1
             return before if cls.calls == 1 else after
+
         @classmethod
         def write_codex_inventory(cls, **_kwargs):
             cls.generated = True

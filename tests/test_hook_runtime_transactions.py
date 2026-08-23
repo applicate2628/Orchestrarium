@@ -162,6 +162,32 @@ def _make_file_symlink(link: Path, target: Path) -> None:
     assert link.is_symlink()
 
 
+def _make_directory_junction(link: Path, target: Path) -> None:
+    if os.name != "nt":
+        pytest.skip("Windows junction coverage")
+    link.parent.mkdir(parents=True, exist_ok=True)
+    result = subprocess.run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "New-Item",
+            "-ItemType",
+            "Junction",
+            "-Path",
+            str(link),
+            "-Target",
+            str(target),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if result.returncode != 0 or not os.path.isjunction(link):
+        pytest.skip(f"junction creation is unavailable: {result.stdout}{result.stderr}")
+
+
 ABORT_POLICY_PATHS = (
     HELPER_PATH,
     ROOT / "scripts/production_installer.py",
@@ -601,6 +627,94 @@ def test_transaction_commit_keeps_write_through_symlink_referent_change(
     assert external.read_bytes() == b'{"after": true}\n'
 
 
+def test_global_codex_install_preserves_hooks_symlink_and_uses_real_sidecar(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    logical = home / ".codex" / "hooks.json"
+    resolved = tmp_path / "shared" / "hooks.json"
+    resolved.parent.mkdir()
+    resolved.write_bytes(b'{"hooks": {}}\n')
+    _make_file_symlink(logical, resolved)
+    link_target = os.readlink(logical)
+    env = os.environ.copy()
+    env.pop("ORCHESTRARIUM_NO_HYPOTHESIS_HOOK", None)
+    env["USERPROFILE"] = str(home)
+    env["HOME"] = str(home)
+    env["CODEX_BIN"] = str(ROOT / "tests/fixtures/fake_codex_hooks_host.py")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts/install-codex.py"),
+            "--global",
+            "--force",
+        ],
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=240,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert logical.is_symlink()
+    assert os.readlink(logical) == link_target
+    assert json.loads(resolved.read_text(encoding="utf-8"))["hooks"]
+    inventory = resolved.parent / "codex-hook-inventory.json"
+    assert inventory.is_file()
+    assert not (logical.parent / inventory.name).exists()
+
+
+def test_global_codex_install_resolves_hooks_referent_through_junction(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    logical = home / ".codex" / "hooks.json"
+    real_root = tmp_path / "real-env"
+    resolved = real_root / "Agents" / ".codex" / "hooks.json"
+    resolved.parent.mkdir(parents=True)
+    resolved.write_bytes(b'{"hooks": {}}\n')
+    junction = tmp_path / "env"
+    _make_directory_junction(junction, real_root)
+    _make_file_symlink(
+        logical,
+        junction / "Agents" / ".codex" / "hooks.json",
+    )
+    file_link_target = os.readlink(logical)
+    env = os.environ.copy()
+    env.pop("ORCHESTRARIUM_NO_HYPOTHESIS_HOOK", None)
+    env["USERPROFILE"] = str(home)
+    env["HOME"] = str(home)
+    env["CODEX_BIN"] = str(ROOT / "tests/fixtures/fake_codex_hooks_host.py")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts/install-codex.py"),
+            "--global",
+            "--force",
+        ],
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=240,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert logical.is_symlink()
+    assert os.readlink(logical) == file_link_target
+    assert os.path.isjunction(junction)
+    inventory = resolved.parent / "codex-hook-inventory.json"
+    assert inventory.is_file()
+    assert not (logical.parent / inventory.name).exists()
+
+
 def test_transaction_rejects_symlink_cycle_before_mutation(tmp_path: Path) -> None:
     first = tmp_path / "first.json"
     second = tmp_path / "second.json"
@@ -667,7 +781,7 @@ def test_registration_symlink_referent_restored_after_reclaim_failure(
 
         assert result.returncode != 0, output
         if case.provider == "codex":
-            assert "E_HOOK_INVENTORY_TARGET_INVALID" in output, output
+            assert "hook transaction checkpoint failed at reclaim" in output, output
         else:
             assert "abort" in output.casefold(), output
             assert "reclaim" in output.casefold(), output
