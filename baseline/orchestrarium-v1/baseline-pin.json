@@ -1,0 +1,34 @@
+{
+  "baseline": {
+    "commitSha": "ce2052fb773576fd6e3206c2a7e21e01852d556b",
+    "repository": "applicate2628/Orchestrarium",
+    "requestedRef": "ce2052fb773576fd6e3206c2a7e21e01852d556b",
+    "sourceBranch": "main",
+    "sourceBranchHeadAtCapture": "ce2052fb773576fd6e3206c2a7e21e01852d556b",
+    "treeSha": "04dccf4575f17c9c5533474d2e0fd1503bfeceb7"
+  },
+  "evidence": {
+    "commitGeneratedOutputs": false,
+    "generatedOutputDirectory": ".scratch/orche-stage0/orchestrarium-v1",
+    "requiredGeneratedOutputs": [
+      "baseline-manifest.json",
+      "capability-inventory.json",
+      "summary.md",
+      "target-effect-baseline.json",
+      "test-inventory.json"
+    ],
+    "verificationMode": "local-only"
+  },
+  "generator": {
+    "command": "python scripts/baseline/build_inventory.py",
+    "deterministic": true,
+    "runtimeMutation": false
+  },
+  "schemaVersion": 2,
+  "signedTag": {
+    "name": "orchestrarium-v1-parity-baseline",
+    "required": true,
+    "status": "human-gate-pending"
+  },
+  "status": "baseline-identity-pinned"
+}
