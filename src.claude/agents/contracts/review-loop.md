@@ -2,6 +2,10 @@
 
 This contract is the INSTALLED Claude-line runtime binding for the autonomous parallel-review-loop. It is what `/agents-review-loop` reads at runtime and what ships with the pack, because the provider-neutral design trunk (`shared/references/review-loop-methodology.md`) is NOT installed into any runtime. The trunk owns the conceptual design; this contract carries the operative loop rules plus the concrete Claude dispatch mapping. Do not duplicate the trunk's prose into the command or the skill — they point at this contract.
 
+## Workflow economy projection
+
+Apply the binding shared **Workflow economy (binding)** rule: this loop starts only from its documented evidence trigger, never as default pre-implementation review. After a finding, re-dispatch only the exact open finding and its changed delta; start a full-artifact round only for a new defect class or material upstream revision.
+
 ## What the loop is
 
 Get **independent multi-angle convergence** on one written fix-design artifact BEFORE the change lands. It is an autonomous, multi-round, same-artifact loop with anti-drift, gating the human only at convergence. It is NOT a single advisory opinion (`/agents-second-opinion`), NOT disjoint parallel helper lanes (`/agents-external-brigade`), and NOT a post-implementation specialist chain (`/agents-review`).
@@ -20,7 +24,7 @@ The **scout does not co-judge**: it executes spelled-out mechanical scans and su
 
 ## Claude dispatch mapping
 
-Each angle is dispatched DIRECTLY by the orchestrator and returns its own result — no angle re-dispatches to another provider or spawns its own waiter. Independent angles launch in parallel (`run_in_background: true`). Same-vendor Agent subagents return their normal result. Each external-provider shell lane returns one terminal `ORCHESTRARIUM_PROVIDER_RESULT_V1` envelope; await the wrapper process and parse its complete `resultText` plus terminal metadata. Notifications are collection hints only and independence remains scope/framing, never vendor (see the angle table above).
+Each angle is dispatched DIRECTLY by the orchestrator and returns its own result — no angle re-dispatches to another provider or spawns its own waiter. Independent angles launch in parallel (`run_in_background: true`). Same-vendor Agent subagents return their normal result. Each external-provider lane uses the approved thin wrapper owned by `external-dispatch.md`; that owner supplies the strict V2 parser, full external-nonauthorizing tuple, and untrusted/potentially-sensitive resultText contract. Notifications are collection hints only and independence remains scope/framing, never vendor (see the angle table above).
 
 | Angle | `subagent_type` | Model / tier | Why this role |
 | --- | --- | --- | --- |
@@ -131,12 +135,11 @@ See also `/agents-design-panel` (`agents/contracts/design-panel.md`) — the gen
 
 ## Verdict closure (binding form of decision 2026-07-16-review-verdict-closure)
 
-- Every dispatched angle on a TRACKED work-item records its ledger events: pass `--ledger <work-item>`
-  (plus `--ledger-role/--ledger-lane/--ledger-artifact`) to `invoke-codex-prompt.sh/.ps1` /
-  `invoke-claude-prompt.sh/.ps1` — the wrapper records the launch, materializes the complete provider
-  result, disposes of its one private run directory, emits and flushes one result envelope, records one path-free terminal event, and returns
-  one result envelope. Count the lane only when `resultText` has the required final `GATE: PASS|REVISE`
-  shape and the combined envelope status, cleanup status, and wrapper exit are acceptable; for a tracked run, read the terminal ledger back separately.
+- Every dispatched external angle on a TRACKED work-item passes `--ledger <work-item>` (plus
+  `--ledger-role/--ledger-lane/--ledger-artifact`) to the approved thin wrapper owner in
+  `external-dispatch.md`. That owner records the terminal event and owns the strict V2 parser, full
+  external-nonauthorizing tuple, and untrusted/potentially-sensitive resultText contract. Count the
+  lane only after the owner accepts the terminal result and the tracked ledger is read back separately.
 - **Loop-to-PASS is the gate, not a preference:** a lane's `REVISE` closes only when THAT lane (or a
   recorded equivalent, structured fields) re-verifies `PASS` naming the exact `closesRunIds`. Author
   belief, applied fixes, or a green mechanical validator never close it; `check-work-items-state`

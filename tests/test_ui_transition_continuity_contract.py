@@ -304,7 +304,7 @@ def _documentation_verdict(readme: str, install: str) -> str:
         "no provider-specific semantic copy",
     )
     install_only = (
-        "~/.codex/contracts/",
+        "$HOME/.agents/contracts/",
         "<repo>/.agents/contracts/",
         "~/.claude/contracts/",
         "<repo>/.claude/contracts/",
@@ -624,7 +624,7 @@ def test_claim_13_allowed_surface_and_documentation_projection_reject_drift() ->
     _assert_tokens(contract, ("no new workflow stage", "no new hook", "no new operator command", "no new dependency", "no documentation semantic owner"), "UI-CONTINUITY-CONTRACT-DRIFT")
     doc_mutations = [
         (readme.replace("contracts/ui-transition-continuity.md", "contracts/wrong.md"), install),
-        (readme, install.replace("~/.codex/contracts/", "~/.codex/provider-contracts/")),
+        (readme, install.replace("$HOME/.agents/contracts/", "$HOME/.agents/provider-contracts/")),
         (readme, install.replace("<repo>/.agents/contracts/", "<repo>/.agents/provider-contracts/")),
         (readme, install.replace("~/.claude/contracts/", "~/.claude/provider-contracts/")),
         (readme, install.replace("<repo>/.claude/contracts/", "<repo>/.claude/provider-contracts/")),

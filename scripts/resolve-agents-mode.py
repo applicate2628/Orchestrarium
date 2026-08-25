@@ -22,6 +22,8 @@ PROVIDER_DIRS = {
     "gemini": ".gemini",
     "qwen": ".qwen",
 }
+EXTERNAL_DISPATCH_PROVIDERS = ("kimi", "grok")
+PROVIDER_CHOICES = tuple(sorted((*PROVIDER_DIRS, *EXTERNAL_DISPATCH_PROVIDERS)))
 
 # Layer-provenance trust boundary (F9): ranks supplied by the user's own machine-global
 # configuration vs. ranks a cloned repository can supply. Executable-bearing values
@@ -182,15 +184,23 @@ def load_role_policy(repo_root: Path) -> tuple[dict[str, Any], Path]:
     task_classes = policy.get("taskClasses")
     roles = policy.get("roles")
     eligibility = policy.get("taskRoleEligibility")
+    realizations = policy.get("providerRealizations")
+    final_authorizing_roles = policy.get("finalAuthorizingRoles")
     if not all(
         isinstance(value, dict)
-        for value in (profiles, task_classes, roles, eligibility)
+        for value in (profiles, task_classes, roles, eligibility, realizations)
     ):
         raise ValueError("E_ROLE_POLICY_INVALID: policy maps are required")
     if not isinstance(model_tiers, list) or len(model_tiers) != len(set(model_tiers)):
         raise ValueError("E_ROLE_POLICY_INVALID: modelTierOrder must be unique")
     if not isinstance(efforts, list) or len(efforts) != len(set(efforts)):
         raise ValueError("E_ROLE_POLICY_INVALID: effortOrder must be unique")
+    if (
+        not isinstance(final_authorizing_roles, list)
+        or not final_authorizing_roles
+        or len(final_authorizing_roles) != len(set(final_authorizing_roles))
+    ):
+        raise ValueError("E_ROLE_POLICY_INVALID: finalAuthorizingRoles must be unique")
 
     model_index = {value: index for index, value in enumerate(model_tiers)}
     effort_index = {value: index for index, value in enumerate(efforts)}
@@ -213,6 +223,8 @@ def load_role_policy(repo_root: Path) -> tuple[dict[str, Any], Path]:
             raise ValueError(f"E_ROLE_POLICY_INVALID: role {role_name} corridor")
         if any(profile not in profiles for profile in allowed):
             raise ValueError(f"E_ROLE_POLICY_INVALID: role {role_name} profile")
+    if any(role_name not in roles for role_name in final_authorizing_roles):
+        raise ValueError("E_ROLE_POLICY_INVALID: finalAuthorizingRoles role")
 
     for task_name, task in task_classes.items():
         if not isinstance(task, dict):
@@ -243,6 +255,21 @@ def load_role_policy(repo_root: Path) -> tuple[dict[str, Any], Path]:
 
     if set(eligibility) != set(task_classes):
         raise ValueError("E_ROLE_POLICY_INVALID: task eligibility keys drifted")
+    for provider in EXTERNAL_DISPATCH_PROVIDERS:
+        realization = realizations.get(provider)
+        if not isinstance(realization, dict):
+            raise ValueError(f"E_ROLE_POLICY_INVALID: {provider} realization")
+        allowed = realization.get("allowedTaskClasses")
+        if (
+            not isinstance(allowed, list)
+            or len(allowed) != len(set(allowed))
+            or any(task not in task_classes for task in allowed)
+            or realization.get("requiredMutationClass") != "read-only"
+            or realization.get("independentVerification") is not True
+            or not isinstance(realization.get("effortMappingLoss"), str)
+            or not realization["effortMappingLoss"]
+        ):
+            raise ValueError(f"E_ROLE_POLICY_INVALID: {provider} realization shape")
     return policy, path
 
 
@@ -299,6 +326,7 @@ def _load_role_dispatch_contract(
     *,
     manifest_path: Path | None = None,
     role_root: Path | None = None,
+    linked_authority: Any | None = None,
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     if (
         not isinstance(task_class, str)
@@ -361,6 +389,8 @@ def _load_role_dispatch_contract(
             repo_root / "src.codex" / "agents" / "orchestrarium-role-manifest.json"
         )
         role_root = role_root or manifest_path.parent
+        if linked_authority is not None:
+            linked_authority.assert_current()
         if (
             not _ordinary_directory(role_root)
             or not _ordinary_file(manifest_path)
@@ -385,10 +415,16 @@ def _load_role_dispatch_contract(
             raise ValueError("role record")
         if record["relativePath"] != f"{role_name}.toml":
             raise ValueError("role path")
-        role_path = role_root / record["relativePath"]
+        role_path = (
+            linked_authority.ordinary_file(Path(record["relativePath"]))
+            if linked_authority is not None
+            else role_root / record["relativePath"]
+        )
         if not _ordinary_file(role_path):
             raise ValueError("role type")
         role_bytes = role_path.read_bytes()
+        if linked_authority is not None:
+            linked_authority.assert_current()
         if record["sha256"] != hashlib.sha256(role_bytes).hexdigest():
             raise ValueError("role digest")
         role_toml = tomllib.loads(role_bytes.decode("utf-8"))
@@ -427,6 +463,7 @@ def _resolve_role_dispatch_in_layout(
     repo_root: Path,
     manifest_path: Path | None = None,
     role_root: Path | None = None,
+    linked_authority: Any | None = None,
 ) -> dict[str, Any]:
     contract, early = _load_role_dispatch_contract(
         repo_root,
@@ -434,6 +471,7 @@ def _resolve_role_dispatch_in_layout(
         role,
         manifest_path=manifest_path,
         role_root=role_root,
+        linked_authority=linked_authority,
     )
     if early is not None:
         return early
@@ -485,10 +523,139 @@ def resolve_role_dispatch(
     )
 
 
+def _external_dispatch_decision(
+    *,
+    status: str,
+    stable_id: str | None,
+    provider: str,
+    task_class: str,
+    role: str,
+    required_model_tier: str | None,
+    required_effort: str | None,
+    mutation_class: str | None,
+    native_effort: str | None,
+    effort_mapping_loss: str | None,
+    final_authorizing_role: bool,
+) -> dict[str, Any]:
+    return {
+        "schemaVersion": 1,
+        "status": status,
+        "stableId": stable_id,
+        "provider": provider,
+        "taskClass": task_class,
+        "role": role,
+        "requiredModelTier": required_model_tier,
+        "requiredEffort": required_effort,
+        "mutationClass": mutation_class,
+        "nativeEffort": native_effort,
+        "effortMappingLoss": effort_mapping_loss,
+        "finalAuthorizingRole": final_authorizing_role,
+        "independentVerification": True,
+        "fallback": "none",
+    }
+
+
+def resolve_external_dispatch(
+    provider: Any,
+    task_class: Any,
+    role: Any,
+    *,
+    repo_root: Path | None = None,
+) -> dict[str, Any]:
+    """Resolve one explicit external-provider policy without probing or launching."""
+
+    provider_name = provider if isinstance(provider, str) else ""
+    task_name = task_class if isinstance(task_class, str) else ""
+    role_name = role if isinstance(role, str) else ""
+    if provider_name not in EXTERNAL_DISPATCH_PROVIDERS:
+        return _external_dispatch_decision(
+            status="denied",
+            stable_id="E_EXTERNAL_DISPATCH_DENIED",
+            provider=provider_name,
+            task_class=task_name,
+            role=role_name,
+            required_model_tier=None,
+            required_effort=None,
+            mutation_class=None,
+            native_effort=None,
+            effort_mapping_loss=None,
+            final_authorizing_role=False,
+        )
+
+    stable_id = f"E_{provider_name.upper()}_DISPATCH_DENIED"
+    source_root = (
+        Path(repo_root).resolve()
+        if repo_root is not None
+        else Path(__file__).resolve().parents[1]
+    )
+    try:
+        policy, _policy_path = load_role_policy(source_root)
+        realization = policy["providerRealizations"][provider_name]
+        task = policy["taskClasses"].get(task_name)
+        eligible = policy["taskRoleEligibility"].get(task_name)
+        final_authorizing_role = role_name in policy["finalAuthorizingRoles"]
+        base_admitted = (
+            isinstance(task, dict)
+            and isinstance(eligible, list)
+            and task_name in realization["allowedTaskClasses"]
+            and role_name in eligible
+            and task.get("mutationClass")
+            == realization["requiredMutationClass"]
+            == "read-only"
+            and realization["independentVerification"] is True
+        )
+        admitted = base_admitted and not final_authorizing_role
+    except (KeyError, OSError, TypeError, ValueError):
+        realization = {}
+        task = None
+        admitted = False
+        base_admitted = False
+        final_authorizing_role = False
+
+    return _external_dispatch_decision(
+        status="external-required" if admitted else "denied",
+        stable_id=(
+            None
+            if admitted
+            else (
+                f"E_{provider_name.upper()}_FINAL_OWNER_DENIED"
+                if base_admitted and final_authorizing_role
+                else stable_id
+            )
+        ),
+        provider=provider_name,
+        task_class=task_name,
+        role=role_name,
+        required_model_tier=(task.get("requiredModelTier") if isinstance(task, dict) else None),
+        required_effort=(task.get("requiredEffort") if isinstance(task, dict) else None),
+        mutation_class=(task.get("mutationClass") if isinstance(task, dict) else None),
+        native_effort=(realization.get("effort") if isinstance(realization, dict) else None),
+        effort_mapping_loss=(
+            realization.get("effortMappingLoss")
+            if isinstance(realization, dict)
+            else None
+        ),
+        final_authorizing_role=final_authorizing_role,
+    )
+
+
 def _same_path(left: Path, right: Path) -> bool:
     return os.path.normcase(os.path.abspath(left)) == os.path.normcase(
         os.path.abspath(right)
     )
+
+
+def _linked_runtime_subroots_module(resolver: Path):
+    path = resolver.parent / "linked_runtime_subroots.py"
+    spec = importlib.util.spec_from_file_location(
+        "orchestrarium_linked_runtime_subroots", path
+    )
+    if spec is None or spec.loader is None:
+        raise ValueError("installed linked runtime authority is unavailable")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def _source_layout_root(resolver: Path, repo_root: Path) -> Path | None:
@@ -505,7 +672,7 @@ def _installed_role_dispatch_layout(
     resolver: Path,
     project_root: Path,
     home: Path,
-) -> tuple[Path, Path, Path]:
+) -> tuple[Path, Path, Path, Any | None]:
     project_resolver = (
         project_root
         / ".agents"
@@ -526,22 +693,34 @@ def _installed_role_dispatch_layout(
         (project_resolver, project_root / ".codex" / "agents"),
         (global_resolver, home / ".codex" / "agents"),
     ]
-    selected = [role_root for candidate, role_root in matches if _same_path(resolver, candidate)]
+    selected = [
+        ("project" if candidate == project_resolver else "global", role_root)
+        for candidate, role_root in matches
+        if _same_path(resolver, candidate)
+    ]
     if len(selected) != 1:
         raise ValueError("installed resolver layout is missing or ambiguous")
+    scope, selected_root = selected[0]
+    authority = _linked_runtime_subroots_module(resolver).LinkedRuntimeSubrootAuthority.bind(
+        selected_root,
+        scope=scope,
+        trusted_global_roots=(home / ".codex" / "agents",),
+    )
+    role_root = authority.resolved_root if authority is not None else selected_root
     lead_root = resolver.parent.parent
     shared_root = lead_root / "shared"
     if (
         not _ordinary_file(resolver)
         or not _ordinary_directory(lead_root)
         or not _ordinary_directory(shared_root)
-        or not _ordinary_directory(selected[0])
+        or not _ordinary_directory(role_root)
     ):
         raise ValueError("installed resolver layout contains a reparse or missing root")
     return (
         lead_root,
         shared_root / "orchestrarium-role-manifest.json",
-        selected[0],
+        role_root,
+        authority,
     )
 
 
@@ -600,11 +779,12 @@ def resolve(provider: str, project_root: Path, home: Path, repo_root: Path) -> d
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--provider", choices=sorted(PROVIDER_DIRS), required=True)
+    parser.add_argument("--provider", choices=PROVIDER_CHOICES, required=True)
     parser.add_argument("--project-root", default=".")
     parser.add_argument("--home", default=str(Path.home()))
     parser.add_argument("--repo-root", default=str(Path(__file__).resolve().parents[1]))
     parser.add_argument("--resolve-role-dispatch", action="store_true")
+    parser.add_argument("--resolve-external-dispatch", action="store_true")
     parser.add_argument("--task-class")
     parser.add_argument("--role")
     parser.add_argument("--feature-state", choices=("enabled", "disabled"))
@@ -616,6 +796,8 @@ def main() -> int:
     project_root = Path(args.project_root).resolve()
     home = Path(os.path.expanduser(args.home)).resolve()
     source_root = _source_layout_root(resolver_path, repo_root)
+    if args.resolve_role_dispatch and args.resolve_external_dispatch:
+        parser.error("choose exactly one dispatch resolver")
     if args.resolve_role_dispatch:
         if (
             args.provider != "codex"
@@ -638,7 +820,7 @@ def main() -> int:
             )
         else:
             try:
-                installed_root, manifest_path, role_root = (
+                installed_root, manifest_path, role_root, authority = (
                     _installed_role_dispatch_layout(
                         resolver_path,
                         project_root,
@@ -657,13 +839,51 @@ def main() -> int:
                     repo_root=installed_root,
                     manifest_path=manifest_path,
                     role_root=role_root,
+                    linked_authority=authority,
                 )
         json.dump(decision, sys.stdout, sort_keys=True, separators=(",", ":"))
         sys.stdout.write("\n")
         return 0
 
+    if args.resolve_external_dispatch:
+        if (
+            args.provider not in EXTERNAL_DISPATCH_PROVIDERS
+            or not args.json
+            or args.task_class is None
+            or args.role is None
+            or args.feature_state is not None
+        ):
+            parser.error(
+                "--resolve-external-dispatch requires provider kimi or grok, "
+                "task class, role, no feature state, and --json"
+            )
+        if source_root is not None:
+            external_root = source_root
+        else:
+            try:
+                external_root, _manifest_path, _role_root, _authority = (
+                    _installed_role_dispatch_layout(
+                        resolver_path,
+                        project_root,
+                        home,
+                    )
+                )
+            except (OSError, ValueError):
+                external_root = repo_root / "__invalid_external_layout__"
+        decision = resolve_external_dispatch(
+            args.provider,
+            args.task_class,
+            args.role,
+            repo_root=external_root,
+        )
+        json.dump(decision, sys.stdout, sort_keys=True, separators=(",", ":"))
+        sys.stdout.write("\n")
+        return 0
+
     if source_root is None:
-        parser.error("installed layout supports --resolve-role-dispatch only")
+        parser.error("installed layout supports dispatch resolution only")
+    if args.provider not in PROVIDER_DIRS:
+        parser.error("explicit-only providers support external dispatch resolution only")
     resolved = resolve(
         args.provider,
         project_root,

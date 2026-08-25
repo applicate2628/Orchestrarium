@@ -28,7 +28,7 @@ description: "External worker: run eligible worker roles externally."
 - Explicit Gemini and Qwen routes remain manual `WEAK MODEL / NOT RECOMMENDED` example-only paths.
 - If a repository wants an example-only provider demonstration, use a scalar explicit provider override instead of broadening shipped or repo-local `auto` profiles.
 - Never select `gpt-5.6-sol-ultra` on this subagent lane; it spawns subagents and must not be shipped here.
-- Use file-based prompt delivery for substantive task prompts: write the prompt to a temporary prompt file and feed it through stdin or the provider's supported file-input mechanism; direct prompt argv is only for tiny smoke checks or documented provider limitations.
+- Use file-based prompt delivery for substantive task prompts through the approved thin wrapper: write the prompt to a temporary prompt file and feed it through stdin or the provider's supported file-input mechanism; direct prompt argv is only for a fixed synthetic non-substantive smoke token. If the wrapper is unavailable, fail or reroute honestly.
 - If the selected primary Claude path fails for worker-side work, report Claude unavailable or reroute honestly instead of converting the same run to the secret-backed wrapper.
 - This adapter is a direct external launch contract. Do not spawn it as an internal Claude agent/helper host for another provider.
 - A spawned internal subagent is still internal even if its prompt labels it Gemini Pro, Claude, or Codex; that is a routing violation, not external-worker execution.
@@ -37,8 +37,8 @@ description: "External worker: run eligible worker roles externally."
 
 ## Execution recipe
 
-- On the Claude line, launch through the canonical prompt wrappers named by the shared external-dispatch contract; use its transport-neutral fallback only when the wrapper path is unavailable. Preserve the caller-owned prompt and exact launch flags, then consume the wrapper's single `ORCHESTRARIUM_PROVIDER_RESULT_V1` envelope and complete `resultText`; wrapper-private capture paths are never worker artifacts.
-- Set the wrapper-owned timeout for the lane, await its terminal return, and validate the envelope's primary outcome, cleanup status, process exit, timeout/cancellation flags, and gate; for a tracked run, read the terminal ledger back separately before accepting the worker result. Never duplicate a launch; independent standalone watcher polling applies only to caller-managed background captures outside the wrapper.
+- Use the approved thin wrapper owned by `contracts/external-dispatch.md`; that owner supplies the strict V2 parser, full external-nonauthorizing tuple, and untrusted/potentially-sensitive resultText contract. Do not retype the schema, consume wrapper-private captures, or substitute a direct closure/manual sidecar path.
+- Set the wrapper-owned timeout, await its terminal return, and apply the owner's tracked-ledger rules before accepting the worker result. Never duplicate a launch; independent standalone watcher polling applies only to caller-managed background captures outside the wrapper.
 - Accept completion only when the shared run-completion oracle passes; a failed oracle is `UNVERIFIED`, not a worker artifact.
 
 ## Return exactly one artifact

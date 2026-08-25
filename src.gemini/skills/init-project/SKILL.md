@@ -146,7 +146,7 @@ Routing conventions (not persisted as keys):
    mcpMode: {value}  # allowed: auto | force; default: auto
    preferExternalWorker: {value}  # allowed: false | true; default: false
    preferExternalReviewer: {value}  # allowed: false | true; default: false
-   externalProvider: {value}  # allowed here: auto | codex | claude | gemini | qwen; default: auto; gemini/qwen are explicit example-only and not recommended
+   externalProvider: {value}  # allowed here: auto | codex | claude | gemini | qwen | kimi | grok; default: auto; kimi/grok are explicit-only; gemini/qwen are example-only and not recommended
    externalPriorityProfile: {value}  # allowed: balanced | quality-first | <repo-local production profile>; default: balanced
    reserveResolver: {value}  # allowed: disabled | claude-sonnet | claude-wrapper | wrapper:<command>; default: claude-sonnet
    externalPriorityProfiles:

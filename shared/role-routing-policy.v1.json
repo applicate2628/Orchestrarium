@@ -13,6 +13,10 @@
     "xhigh",
     "max"
   ],
+  "finalAuthorizingRoles": [
+    "architecture-reviewer",
+    "security-reviewer"
+  ],
   "profiles": {
     "micro-low": {
       "modelTier": "fast",
@@ -196,11 +200,19 @@
     },
     "kimi": {
       "modelTier": "model-only",
-      "effort": "unsupported"
+      "effort": "unsupported",
+      "allowedTaskClasses": ["exploration", "planning", "review"],
+      "requiredMutationClass": "read-only",
+      "independentVerification": true,
+      "effortMappingLoss": "no-native-effort-control"
     },
     "grok": {
       "modelTier": "model-only",
-      "effort": "runtime-default"
+      "effort": "high",
+      "allowedTaskClasses": ["exploration", "planning", "review"],
+      "requiredMutationClass": "read-only",
+      "independentVerification": true,
+      "effortMappingLoss": "none"
     }
   }
 }

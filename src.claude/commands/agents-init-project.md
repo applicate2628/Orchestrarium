@@ -111,7 +111,7 @@ Routing conventions (not persisted as keys):
       - `externalClaudeWorkdirMode: neutral`
       - `externalModelMode: runtime-default`
       - `externalCodexProfile: gpt-5.6-sol-xhigh`
-    - `externalProvider: auto` resolves by lane type through the active named production priority profile rather than a Claude-line default provider. Shipped `auto` stays on `codex | claude`; explicit `codex`, `claude`, `gemini`, or `qwen` may still be selected when the route is eligible, but Gemini and Qwen stay explicit `WEAK MODEL / NOT RECOMMENDED` example-only paths.
+    - `externalProvider: auto` resolves by lane type through the active named production priority profile rather than a Claude-line default provider. Shipped `auto` stays on the Codex/Claude pair. Gemini/Qwen are explicit `WEAK MODEL / NOT RECOMMENDED` example-only paths; Kimi/Grok are explicit-only read-only routes admitted only by the pre-dispatch policy and requiring independent verification.
     - Accept shorthand answers such as `force`, `external reviewer only`, or `defaults for the rest`.
 
 6. **Confirm choices.**
@@ -137,7 +137,7 @@ Routing conventions (not persisted as keys):
    mcpMode: {value}  # allowed: auto | force; default: auto
    preferExternalWorker: {value}  # allowed: false | true; default: false
    preferExternalReviewer: {value}  # allowed: false | true; default: false
-   externalProvider: {value}  # allowed here: auto | codex | claude | gemini | qwen; default: auto; gemini/qwen are explicit example-only and not recommended
+   externalProvider: {value}  # allowed here: auto | codex | claude | gemini | qwen | kimi | grok; default: auto; kimi/grok are explicit-only; gemini/qwen are example-only and not recommended
    externalPriorityProfile: {value}  # allowed: balanced | quality-first | <repo-local production profile>; default: balanced
    reserveResolver: {value}  # allowed: disabled | claude-sonnet | claude-wrapper | wrapper:<command>; default: claude-sonnet
    externalPriorityProfiles: {value}  # allowed: structured profile map

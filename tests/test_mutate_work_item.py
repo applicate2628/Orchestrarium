@@ -5955,6 +5955,46 @@ def test_decision_schema_rejects_noncanonical_current_records(tmp_path: Path) ->
             raise AssertionError(f"noncanonical current decision passed: {name}")
 
 
+def test_decision_v1_list_metadata_accepts_exact_h2_decision_body_heading(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    slug = "2026-08-11-h2-body-heading"
+    payload = _canonical_decision_record(slug).replace(
+        f"# Decision: {slug}\n\n", ""
+    )
+    path = tmp_path / f"{slug}.md"
+    write(path, payload)
+
+    record = module._validate_current_decision_record(path, slug)
+
+    assert record.format == "canonical-list-v1"
+    assert record.body_offset == len(payload.split("## Decision\n", 1)[0].encode("utf-8"))
+
+
+def test_decision_v1_list_metadata_rejects_malformed_h2_body_headings(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    slug = "2026-08-11-h2-body-heading"
+    canonical = _canonical_decision_record(slug)
+    cases = {
+        "wrong-title": canonical.replace(f"# Decision: {slug}", "## Notes"),
+        "nested-decision": canonical.replace(f"# Decision: {slug}", "### Decision"),
+        "empty-heading": canonical.replace(f"# Decision: {slug}", "## "),
+        "heading-before-required-metadata": canonical.replace(
+            "- context: schema-test\n", "## Decision\n\n- context: schema-test\n"
+        ),
+    }
+
+    for name, payload in cases.items():
+        path = tmp_path / name / f"{slug}.md"
+        write(path, payload)
+        with unittest.TestCase().assertRaises(module.LifecycleError) as caught:
+            module._validate_current_decision_record(path, slug)
+        assert caught.exception.failure_id == "WI-DECISION-SCHEMA-INVALID", name
+
+
 def test_decision_schema_accepts_optional_multiline_and_legacy_archive(
     tmp_path: Path,
 ) -> None:

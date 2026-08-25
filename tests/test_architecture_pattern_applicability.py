@@ -7,6 +7,7 @@ classes, and failure oracles.
 
 from __future__ import annotations
 
+import importlib.util
 import re
 import shutil
 import subprocess
@@ -19,6 +20,10 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 CANONICAL = ROOT / "shared/references/architecture-pattern-applicability.md"
 RUSSIAN = ROOT / "shared/references/ru/architecture-pattern-applicability.md"
+VALIDATOR_DECLARATIONS = (
+    ROOT / "src.codex/skills/lead/scripts/validate-skill-pack.py",
+    ROOT / "src.claude/agents/scripts/validate-skill-pack.py",
+)
 
 APPLICABILITY_IDS = ("AP0", "AP1", "AP2", "AP3", "AP4", "AP5")
 GUARD_IDS = (
@@ -41,6 +46,42 @@ FAILURE_IDS = (
     "APAT-E007-MODEL-FIDELITY",
     "APAT-E008-RU-SEMANTIC-DRIFT",
 )
+
+
+def _load_validator_declaration(path: Path):
+    spec = importlib.util.spec_from_file_location(
+        f"architecture_pattern_validator_{path.parents[3].name}", path
+    )
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_installed_validator_scope_excludes_source_only_maintainer_checks() -> None:
+    source_only_prefixes = (
+        "@ROOT/shared/references/",
+        "@ROOT/references-",
+        "@ROOT/src.gemini/",
+        "@ROOT/src.qwen/",
+        "@ROOT/install.",
+        "@ROOT/INSTALL.md",
+        "@ROOT/RELEASE_NOTES.md",
+        "@ROOT/scripts/agent-run-ledger",
+    )
+    for declaration in VALIDATOR_DECLARATIONS:
+        module = _load_validator_declaration(declaration)
+        all_actions = next(actions for scope, actions in module.ACTIONS if scope == "all")
+        for action in all_actions:
+            assert not any(
+                str(value).startswith(source_only_prefixes) for value in action
+            ), declaration
+            assert action[:2] != ("direct", "curated_registry"), declaration
+            assert not any(
+                str(value).startswith("src.claude/skills/lead/")
+                for value in action
+            ), declaration
 
 POSITIVE_SCENARIOS = {
     "APAT-P01-SEMANTIC-BOUNDARY": "route-architect:consider-AP1:no-deployment-inference",
@@ -425,10 +466,14 @@ def test_canonical_runtime_claim_does_not_overstate_static_delivery() -> None:
             ),
             Path(".agents/skills/lead/scripts/validate-skill-pack.py"),
         ),
-        (
-            "claude",
-            ROOT / "scripts/install-claude.py",
-            tuple(paths[1] for paths in BLOCKS.values()),
+            (
+                "claude",
+                ROOT / "scripts/install-claude.py",
+                (
+                    ROOT / "src.codex/skills/lead/SKILL.md",
+                    ROOT / "src.codex/skills/architect/SKILL.md",
+                    BLOCKS["ARCHITECTURE-REVIEW"][1],
+                ),
             (
                 Path(".claude/skills/lead/SKILL.md"),
                 Path(".claude/skills/architect/SKILL.md"),

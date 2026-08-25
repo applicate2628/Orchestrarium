@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 from collections import Counter
 from dataclasses import replace
+import importlib.util
 import json
 import hashlib
 import os
@@ -11,6 +12,7 @@ import subprocess
 import sys
 import tomllib
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -32,6 +34,8 @@ SUPPORTED_NATIVE_FIELDS = {
 }
 sys.path.insert(0, str(ROOT / "scripts"))
 import production_installer as installer  # noqa: E402
+from linked_runtime_subroots import LinkedRuntimeSubrootAuthority  # noqa: E402
+import linked_runtime_subroots as runtime_subroots  # noqa: E402
 
 
 POST_MATERIALIZATION_WRITER_IDS = {
@@ -239,15 +243,18 @@ def _run_claude_installer(project: Path) -> subprocess.CompletedProcess[str]:
 
 
 def _run_codex_global_installer(
-    home: Path, *, install_hooks: bool = False
+    home: Path, *, install_hooks: bool = False, dry_run: bool = False
 ) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     env["USERPROFILE"] = str(home)
     env["HOME"] = str(home)
     if not install_hooks:
         env["ORCHESTRARIUM_NO_HYPOTHESIS_HOOK"] = "1"
+    arguments = [sys.executable, str(INSTALL_CODEX), "--global", "--force"]
+    if dry_run:
+        arguments.append("--dry-run")
     return subprocess.run(
-        [sys.executable, str(INSTALL_CODEX), "--global", "--force"],
+        arguments,
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -340,6 +347,21 @@ def _no_follow_inventory(root: Path) -> dict[str, tuple[object, ...]]:
                 else:
                     inventory[relative] = ("other", metadata.st_mode)
     return inventory
+
+
+def _make_runtime_directory_link(logical: Path, backing: Path, kind: str) -> None:
+    logical.parent.mkdir(parents=True, exist_ok=True)
+    if kind == "symlink":
+        logical.symlink_to(backing, target_is_directory=True)
+        return
+    result = subprocess.run(
+        ["cmd.exe", "/d", "/c", "mklink", "/J", str(logical), str(backing)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    if result.returncode != 0:
+        pytest.skip(f"directory junction unavailable: {result.stdout}{result.stderr}")
 
 
 def test_fresh_codex_install_materializes_native_roles_v2_and_canonical_skills(
@@ -536,6 +558,474 @@ def test_global_codex_and_claude_provider_paths_keep_role_registration_owned(
     claude_result = _run_claude_installer(project)
     assert claude_result.returncode == 0, claude_result.stdout + claude_result.stderr
     assert not (project / ".codex" / "config.toml").exists()
+
+
+@pytest.mark.parametrize("kind", ("symlink", "junction"))
+def test_global_codex_linked_agents_preserves_link_and_resolves_native_dispatch(
+    tmp_path: Path, kind: str
+) -> None:
+    """An explicit user-global agents link is an identity-bound runtime root."""
+
+    home = tmp_path / "home"
+    home.mkdir()
+    backing = tmp_path / "backing-agents"
+    backing.mkdir()
+    logical = home / ".codex" / "agents"
+    try:
+        _make_runtime_directory_link(logical, backing, kind)
+        raw_target = os.readlink(logical)
+    except OSError as exc:
+        pytest.skip(f"directory {kind} unavailable: {exc}")
+
+    link_identity = installer._CreateOnlyMutablePath._identity(logical)
+    before = _no_follow_inventory(backing)
+
+    dry_run = _run_codex_global_installer(home, dry_run=True)
+
+    assert dry_run.returncode == 0, dry_run.stdout + dry_run.stderr
+    assert installer._CreateOnlyMutablePath._identity(logical) == link_identity
+    assert os.readlink(logical) == raw_target
+    assert _no_follow_inventory(backing) == before
+
+    installed = _run_codex_global_installer(home)
+
+    assert installed.returncode == 0, installed.stdout + installed.stderr
+    assert installer._CreateOnlyMutablePath._identity(logical) == link_identity
+    assert os.readlink(logical) == raw_target
+    _assert_callable_native_role_mappings(home / ".codex" / "config.toml")
+
+    resolver = home / ".agents" / "skills" / "lead" / "scripts" / "resolve-agents-mode.py"
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(resolver),
+            "--provider",
+            "codex",
+            "--project-root",
+            str(tmp_path / "project"),
+            "--home",
+            str(home),
+            "--repo-root",
+            str(ROOT),
+            "--resolve-role-dispatch",
+            "--task-class",
+            "mechanical-read",
+            "--role",
+            "mechanical-scout",
+            "--feature-state",
+            "enabled",
+            "--json",
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    decision = json.loads(result.stdout)
+    assert decision["status"] == "native-required"
+    assert decision["stableId"] is None
+
+
+def test_global_codex_linked_agents_multihop_windows_reparse_chain_is_identity_bound(
+    tmp_path: Path,
+) -> None:
+    """A raw-target symlink through two junctions stays trusted only unchanged."""
+
+    home = tmp_path / "home"
+    home.mkdir()
+    logical = home / ".codex" / "agents"
+    one_drive_redirect = tmp_path / "OneDrive - operator" / "agents-redirect"
+    drive_redirect = tmp_path / "drive-redirect" / "agents-redirect"
+    backing = tmp_path / "backing-agents"
+    replacement = tmp_path / "replacement-agents"
+    backing.mkdir()
+    replacement.mkdir()
+    try:
+        if os.name == "nt":
+            _make_runtime_directory_link(drive_redirect, backing, "junction")
+            _make_runtime_directory_link(one_drive_redirect, drive_redirect, "junction")
+            logical.parent.mkdir(parents=True, exist_ok=True)
+            raw_target = "\\\\?\\" + str(one_drive_redirect)
+            logical.symlink_to(raw_target, target_is_directory=True)
+            expected_kinds = ["symlink", "junction", "junction"]
+        else:
+            _make_runtime_directory_link(drive_redirect, backing, "symlink")
+            _make_runtime_directory_link(one_drive_redirect, drive_redirect, "symlink")
+            _make_runtime_directory_link(logical, one_drive_redirect, "symlink")
+            raw_target = os.readlink(logical)
+            expected_kinds = ["symlink", "symlink", "symlink"]
+    except OSError as exc:
+        pytest.skip(f"multihop runtime directory link unavailable: {exc}")
+
+    assert os.readlink(logical) == raw_target
+    if os.name == "nt":
+        assert raw_target.startswith("\\\\?\\")
+    authority = LinkedRuntimeSubrootAuthority.bind(
+        logical,
+        scope="global",
+        trusted_global_roots=(logical,),
+    )
+    assert authority is not None
+    assert [Path(witness[0]) for witness in authority.link_chain] == [
+        logical,
+        one_drive_redirect,
+        drive_redirect,
+    ]
+    assert [witness[3] for witness in authority.link_chain] == expected_kinds
+    authority.assert_current()
+
+    installed = _run_codex_global_installer(home)
+    assert installed.returncode == 0, installed.stdout + installed.stderr
+    authority.assert_current()
+    resolver = home / ".agents" / "skills" / "lead" / "scripts" / "resolve-agents-mode.py"
+
+    def resolve_installed_role() -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [
+                sys.executable,
+                str(resolver),
+                "--provider",
+                "codex",
+                "--project-root",
+                str(tmp_path / "project"),
+                "--home",
+                str(home),
+                "--repo-root",
+                str(ROOT),
+                "--resolve-role-dispatch",
+                "--task-class",
+                "mechanical-read",
+                "--role",
+                "mechanical-scout",
+                "--feature-state",
+                "enabled",
+                "--json",
+            ],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+
+    before_retarget = resolve_installed_role()
+    assert before_retarget.returncode == 0, (
+        before_retarget.stdout + before_retarget.stderr
+    )
+    assert json.loads(before_retarget.stdout) == {
+        "schemaVersion": 1,
+        "status": "native-required",
+        "stableId": None,
+        "taskClass": "mechanical-read",
+        "role": "mechanical-scout",
+        "requestedProfile": "fast-high",
+        "requestedModel": "gpt-5.6-luna",
+        "requestedEffort": "high",
+        "sandbox": "read-only",
+        "fallback": "none",
+    }
+
+    if os.name == "nt":
+        one_drive_redirect.rmdir()
+        _make_runtime_directory_link(one_drive_redirect, replacement, "junction")
+    else:
+        one_drive_redirect.unlink()
+        _make_runtime_directory_link(one_drive_redirect, replacement, "symlink")
+
+    with pytest.raises(ValueError, match="^E_RUNTIME_SUBROOT_IDENTITY_CHANGED"):
+        authority.assert_current()
+    after_retarget = resolve_installed_role()
+    assert after_retarget.returncode == 0, after_retarget.stdout + after_retarget.stderr
+    failed_closed = json.loads(after_retarget.stdout)
+    assert failed_closed["status"] == "denied"
+    assert failed_closed["stableId"] == "E_ROLE_POLICY_INVALID"
+    assert failed_closed["fallback"] == "none"
+
+
+def test_project_local_codex_agents_link_remains_denied(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    backing = tmp_path / "backing-agents"
+    backing.mkdir()
+    logical = project / ".codex" / "agents"
+    try:
+        _make_runtime_directory_link(logical, backing, "symlink")
+    except OSError as exc:
+        pytest.skip(f"directory symlink unavailable: {exc}")
+
+    result = _run_codex_installer(project, install_hooks=False)
+
+    assert result.returncode == 1
+    assert "E_RUNTIME_SUBROOT_SCOPE_DENIED" in result.stderr
+    assert not (project / ".codex" / "config.toml").exists()
+    assert _no_follow_inventory(backing) == {}
+
+
+def test_linked_runtime_authority_retarget_fails_before_referent_use(
+    tmp_path: Path,
+) -> None:
+    logical = tmp_path / "home" / ".codex" / "agents"
+    backing = tmp_path / "backing-a"
+    replacement = tmp_path / "backing-b"
+    backing.mkdir(parents=True)
+    replacement.mkdir()
+    try:
+        _make_runtime_directory_link(logical, backing, "symlink")
+    except OSError as exc:
+        pytest.skip(f"directory symlink unavailable: {exc}")
+    authority = LinkedRuntimeSubrootAuthority.bind(
+        logical,
+        scope="global",
+        trusted_global_roots=(logical,),
+    )
+    assert authority is not None
+    logical.unlink()
+    _make_runtime_directory_link(logical, replacement, "symlink")
+
+    with pytest.raises(ValueError, match="^E_RUNTIME_SUBROOT_IDENTITY_CHANGED"):
+        authority.assert_current()
+
+
+def test_linked_runtime_authority_binds_intermediate_target_link(
+    tmp_path: Path,
+) -> None:
+    logical = tmp_path / "home" / ".codex" / "agents"
+    container = tmp_path / "container"
+    backing = tmp_path / "backing-agents"
+    container.mkdir()
+    backing.mkdir()
+    intermediate = container / "linked-target"
+    try:
+        _make_runtime_directory_link(intermediate, backing, "symlink")
+        _make_runtime_directory_link(logical, intermediate, "symlink")
+    except OSError as exc:
+        pytest.skip(f"directory symlink unavailable: {exc}")
+
+    authority = LinkedRuntimeSubrootAuthority.bind(
+        logical,
+        scope="global",
+        trusted_global_roots=(logical,),
+    )
+
+    assert authority is not None
+    assert [Path(witness[0]) for witness in authority.link_chain] == [
+        logical,
+        intermediate,
+    ]
+    assert [witness[3] for witness in authority.link_chain] == ["symlink", "symlink"]
+
+
+@pytest.mark.parametrize("scope", ("project", "global"))
+def test_runtime_authority_rejects_linked_logical_ancestor_with_ordinary_agents(
+    tmp_path: Path, scope: str
+) -> None:
+    logical_parent = tmp_path / "logical" / ".codex"
+    backing_parent = tmp_path / "backing" / ".codex"
+    (backing_parent / "agents").mkdir(parents=True)
+    try:
+        _make_runtime_directory_link(logical_parent, backing_parent, "symlink")
+    except OSError as exc:
+        pytest.skip(f"directory symlink unavailable: {exc}")
+    logical_agents = logical_parent / "agents"
+
+    with pytest.raises(ValueError, match="^E_RUNTIME_SUBROOT_SCOPE_DENIED"):
+        LinkedRuntimeSubrootAuthority.bind(
+            logical_agents,
+            scope=scope,
+            trusted_global_roots=(logical_agents,),
+        )
+
+
+def test_runtime_authority_leaves_ordinary_logical_root_unclaimed(tmp_path: Path) -> None:
+    logical_agents = tmp_path / "home" / ".codex" / "agents"
+    logical_agents.mkdir(parents=True)
+
+    assert (
+        LinkedRuntimeSubrootAuthority.bind(
+            logical_agents,
+            scope="global",
+            trusted_global_roots=(logical_agents,),
+        )
+        is None
+    )
+
+
+def test_runtime_authority_rejects_dangling_and_looped_root_links(
+    tmp_path: Path,
+) -> None:
+    dangling = tmp_path / "home" / ".codex" / "agents"
+    dangling.parent.mkdir(parents=True)
+    try:
+        dangling.symlink_to(tmp_path / "missing-agents", target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"directory symlink unavailable: {exc}")
+    with pytest.raises(ValueError, match="^E_RUNTIME_SUBROOT_TARGET_INVALID"):
+        LinkedRuntimeSubrootAuthority.bind(
+            dangling, scope="global", trusted_global_roots=(dangling,)
+        )
+
+    first = tmp_path / "loop" / "first"
+    second = tmp_path / "loop" / "second"
+    first.parent.mkdir(parents=True)
+    try:
+        first.symlink_to(second, target_is_directory=True)
+        second.symlink_to(first, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"directory symlink unavailable: {exc}")
+    with pytest.raises(ValueError, match="^E_RUNTIME_SUBROOT_TARGET_INVALID"):
+        LinkedRuntimeSubrootAuthority.bind(
+            first, scope="global", trusted_global_roots=(first,)
+        )
+
+
+def test_runtime_authority_rejects_opaque_reparse_metadata(tmp_path: Path) -> None:
+    metadata = SimpleNamespace(st_mode=stat.S_IFDIR, st_file_attributes=0x400)
+
+    with pytest.raises(ValueError, match="^E_RUNTIME_SUBROOT_REPARSE_UNSUPPORTED"):
+        runtime_subroots._link_kind(tmp_path / "opaque", metadata)
+
+
+def test_installer_and_resolver_deny_linked_codex_ancestor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    home = tmp_path / "home"
+    backing = tmp_path / "backing" / ".codex"
+    (backing / "agents").mkdir(parents=True)
+    try:
+        _make_runtime_directory_link(home / ".codex", backing, "symlink")
+    except OSError as exc:
+        pytest.skip(f"directory symlink unavailable: {exc}")
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setenv("HOME", str(home))
+
+    assert installer.install("codex", ["--global", "--force", "--no-hypothesis-hook"]) == 1
+    assert "E_RUNTIME_SUBROOT_SCOPE_DENIED" in capsys.readouterr().err
+
+    scripts = home / ".agents" / "skills" / "lead" / "scripts"
+    shared = scripts.parent / "shared"
+    scripts.mkdir(parents=True)
+    shared.mkdir()
+    resolver_path = scripts / "resolve-agents-mode.py"
+    resolver_path.write_bytes(RESOLVER.read_bytes())
+    (scripts / "linked_runtime_subroots.py").write_bytes(
+        (ROOT / "scripts" / "linked_runtime_subroots.py").read_bytes()
+    )
+    (shared / "orchestrarium-role-manifest.json").write_bytes(
+        (ROOT / "src.codex" / "agents" / "orchestrarium-role-manifest.json").read_bytes()
+    )
+    (shared / "role-routing-policy.v1.json").write_bytes(
+        (ROOT / "shared" / "role-routing-policy.v1.json").read_bytes()
+    )
+    spec = importlib.util.spec_from_file_location("linked_ancestor_resolver", resolver_path)
+    assert spec and spec.loader
+    resolver_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(resolver_module)
+
+    with pytest.raises(ValueError, match="^E_RUNTIME_SUBROOT_SCOPE_DENIED"):
+        resolver_module._installed_role_dispatch_layout(
+            resolver_path,
+            tmp_path / "project",
+            home,
+        )
+
+
+def test_global_codex_linked_role_leaf_is_not_overwritten(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    backing = tmp_path / "backing-agents"
+    backing.mkdir()
+    logical = home / ".codex" / "agents"
+    try:
+        _make_runtime_directory_link(logical, backing, "symlink")
+        (backing / "analyst.toml").symlink_to(
+            ROOT / "src.codex" / "agents" / "analyst.toml"
+        )
+    except OSError as exc:
+        pytest.skip(f"file or directory symlink unavailable: {exc}")
+
+    result = _run_codex_global_installer(home)
+
+    assert result.returncode == 1
+    assert "E_MUTABLE_PATH_REPARSE" in result.stderr
+    assert (backing / "analyst.toml").is_symlink()
+
+
+def test_global_codex_linked_agents_rollback_removes_only_transaction_roles(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A post-role failure rolls back through the bound referent, never its link."""
+
+    home = tmp_path / "home"
+    home.mkdir()
+    backing = tmp_path / "backing-agents"
+    backing.mkdir()
+    logical = home / ".codex" / "agents"
+    try:
+        _make_runtime_directory_link(logical, backing, "symlink")
+    except OSError as exc:
+        pytest.skip(f"directory symlink unavailable: {exc}")
+    preexisting_role = ROOT / "src.codex" / "agents" / "analyst.toml"
+    (backing / "analyst.toml").write_bytes(preexisting_role.read_bytes())
+    config = home / ".codex" / "config.toml"
+    config_bytes = b"# operator-owned bytes\n[unrelated]\nvalue = 1\n"
+    config.write_bytes(config_bytes)
+    link_identity = installer._CreateOnlyMutablePath._identity(logical)
+    raw_target = os.readlink(logical)
+    before_referent = _no_follow_inventory(backing)
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setenv("HOME", str(home))
+
+    def fail_after_role_create(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("forced post-role failure")
+
+    monkeypatch.setattr(installer, "_merge_codex_agents", fail_after_role_create)
+
+    result = installer.install("codex", ["--global", "--force", "--no-hypothesis-hook"])
+
+    assert result == 1
+    assert installer._CreateOnlyMutablePath._identity(logical) == link_identity
+    assert os.readlink(logical) == raw_target
+    assert _no_follow_inventory(backing) == before_referent
+    assert config.read_bytes() == config_bytes
+
+
+def test_global_codex_linked_agents_retarget_before_rollback_is_unsafe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Rollback keeps both referents intact when its bound link is retargeted."""
+
+    home = tmp_path / "home"
+    home.mkdir()
+    original = tmp_path / "original-agents"
+    replacement = tmp_path / "replacement-agents"
+    original.mkdir()
+    replacement.mkdir()
+    replacement_sentinel = replacement / "sentinel.txt"
+    replacement_sentinel.write_bytes(b"replacement remains untouched\n")
+    logical = home / ".codex" / "agents"
+    try:
+        _make_runtime_directory_link(logical, original, "symlink")
+    except OSError as exc:
+        pytest.skip(f"directory symlink unavailable: {exc}")
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setenv("HOME", str(home))
+
+    def retarget_then_fail(*_args: object, **_kwargs: object) -> None:
+        logical.unlink()
+        _make_runtime_directory_link(logical, replacement, "symlink")
+        raise RuntimeError("forced retarget before rollback")
+
+    monkeypatch.setattr(installer, "_merge_codex_agents", retarget_then_fail)
+
+    result = installer.install("codex", ["--global", "--force", "--no-hypothesis-hook"])
+    captured = capsys.readouterr()
+
+    assert result == 1
+    assert "E_RUNTIME_SUBROOT_ROLLBACK_UNSAFE" in captured.err
+    assert os.path.samefile(logical, replacement)
+    assert replacement_sentinel.read_bytes() == b"replacement remains untouched\n"
+    assert any(original.glob("*.toml"))
 
 
 def test_codex_canonical_lead_tree_is_source_exact_after_reinstall(tmp_path: Path) -> None:
@@ -791,26 +1281,27 @@ def test_post_materialization_runtime_census_matches_declared_destinations(
         installer, "_assert_canonical_lead_postwrite_free", capture_inventory
     )
 
-    original_canonical = installer._install_canonical_skills
+    original_canonical = installer._apply_canonical_skills_plan
 
     def canonical(*args, **kwargs):
         nonlocal published
         original_canonical(*args, **kwargs)
         published = True
 
-    monkeypatch.setattr(installer, "_install_canonical_skills", canonical)
+    monkeypatch.setattr(installer, "_apply_canonical_skills_plan", canonical)
 
-    original_projection = installer._install_claude_skill_projections
+    original_projection = installer._apply_claude_skill_projection_plan
 
-    def projections(canonical_source, historical, canonical_target, projection_root, owner):
+    def projections(plan, canonical_source, projection_root, owner):
         original_projection(
-            canonical_source, historical, canonical_target, projection_root, owner
+            plan, canonical_source, projection_root, owner
         )
-        for skill in sorted(canonical_source.iterdir()):
-            if skill.is_dir() and not skill.is_symlink():
-                emit("claude-skill-projection", projection_root / skill.name)
+        for item in plan:
+            emit("claude-skill-projection", projection_root / item.name)
 
-    monkeypatch.setattr(installer, "_install_claude_skill_projections", projections)
+    monkeypatch.setattr(
+        installer, "_apply_claude_skill_projection_plan", projections
+    )
 
     original_runtime = installer._install_runtime_files
 
@@ -824,7 +1315,14 @@ def test_post_materialization_runtime_census_matches_declared_destinations(
             root, helper_target, dry_run, destinations=destinations
         )
         for _source, destination in selected:
-            emit("runtime-outside", destination)
+            if published or helper_target.parent.parent.name == ".claude":
+                run_observed[-1].append(
+                    installer._PostMaterializationWriterDestination(
+                        "runtime-outside",
+                        artifact_class["runtime-outside"],
+                        Path(os.path.abspath(destination)),
+                    )
+                )
 
     monkeypatch.setattr(installer, "_install_runtime_files", runtime)
 
@@ -957,6 +1455,7 @@ def test_post_materialization_runtime_census_matches_declared_destinations(
         )
 
     for declared, observed in zip(inventories, run_observed, strict=True):
+        assert set(census(observed)) == set(census(declared))
         assert census(observed) == census(declared)
 
 
@@ -1299,6 +1798,333 @@ def test_native_role_slice_a_config_create_only_matrix(
     assert config.read_bytes() == payload
     assert installer._CreateOnlyMutablePath._identity(config) == before_identity
     assert transaction._slice_a_created == []
+
+
+def test_top_level_projection_record_and_rollback_only_delete_exact_identity(
+    tmp_path: Path,
+) -> None:
+    """A top-level Claude skill projection is both the root and rollback leaf."""
+
+    anchor = tmp_path / "global-home"
+    source = tmp_path / "canonical-skills" / "algorithm-scientist"
+    replacement = tmp_path / "replacement-skills" / "algorithm-scientist"
+    anchor.mkdir()
+    source.mkdir(parents=True)
+    replacement.mkdir(parents=True)
+
+    transaction = installer._InstallTransaction([], enabled=False)
+    owner = installer._CreateOnlyMutablePath(anchor, transaction, dry_run=False)
+    target = owner.create_projection(Path("algorithm-scientist"), source)
+    record = transaction._slice_a_created[-1]
+
+    assert record.root_path == target == record.leaf_path
+    assert installer._projection_resolves_to(target, source)
+    owner.rollback_created(record)
+    assert not target.exists()
+    assert not target.is_symlink()
+
+    target = owner.create_projection(Path("algorithm-scientist"), source)
+    record = transaction._slice_a_created[-1]
+    target.unlink()
+    target.symlink_to(replacement, target_is_directory=True)
+
+    with pytest.raises(RuntimeError, match="^E_ROLLBACK_CREATED_IDENTITY_CHANGED$"):
+        owner.rollback_created(record)
+    assert installer._projection_resolves_to(target, replacement)
+
+
+def test_readonly_historical_projection_migration_uses_transaction_safe_rename(
+    tmp_path: Path,
+) -> None:
+    anchor = tmp_path / "global-home"
+    source = tmp_path / "canonical-skills" / "analyst"
+    target = anchor / "skills" / "analyst"
+    anchor.mkdir()
+    source.mkdir(parents=True)
+    target.mkdir(parents=True)
+    (source / "SKILL.md").write_text("canonical", encoding="utf-8")
+    (target / "SKILL.md").write_text("historical", encoding="utf-8")
+    expected = installer._tree_sha256(target)
+    assert expected is not None
+    target.chmod(0o555)
+
+    owner = installer._CreateOnlyMutablePath(
+        anchor, installer._InstallTransaction([], enabled=False), dry_run=False
+    )
+    owner.replace_exact_tree_with_projection(Path("skills") / "analyst", expected, source)
+
+    assert installer._projection_resolves_to(target, source)
+    assert not (target.parent / ".analyst.projection.tmp").exists()
+    assert not (target.parent / ".analyst.projection.tombstone").exists()
+
+
+def test_projection_migration_rollback_restores_readonly_historical_tree(
+    tmp_path: Path,
+) -> None:
+    anchor = tmp_path / "global-home"
+    source = tmp_path / "canonical-skills" / "analyst"
+    target = anchor / "skills" / "analyst"
+    anchor.mkdir()
+    source.mkdir(parents=True)
+    target.mkdir(parents=True)
+    (source / "SKILL.md").write_text("canonical", encoding="utf-8")
+    historical = b"historical"
+    (target / "SKILL.md").write_bytes(historical)
+    expected = installer._tree_sha256(target)
+    assert expected is not None
+    target.chmod(0o555)
+    original_mode = stat.S_IMODE(target.lstat().st_mode)
+
+    with pytest.raises(RuntimeError, match="^forced post-migration failure$"):
+        tombstone = target.parent / ".analyst.projection.tombstone"
+        transaction = installer._InstallTransaction([target, tombstone], enabled=True)
+        with transaction:
+            owner = installer._CreateOnlyMutablePath(anchor, transaction, dry_run=False)
+            owner.replace_exact_tree_with_projection(
+                Path("skills") / "analyst", expected, source
+            )
+            raise RuntimeError("forced post-migration failure")
+
+    assert not target.is_symlink()
+    assert (target / "SKILL.md").read_bytes() == historical
+    assert stat.S_IMODE(target.lstat().st_mode) == original_mode
+    assert not (target.parent / ".analyst.projection.tmp").exists()
+    assert not (target.parent / ".analyst.projection.tombstone").exists()
+    target.chmod(0o755)
+
+
+def test_projection_migration_post_promotion_failure_restores_snapshot_members(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    anchor = tmp_path / "global-home"
+    source = tmp_path / "canonical-skills" / "analyst"
+    target = anchor / "skills" / "analyst"
+    tombstone = target.parent / ".analyst.projection.tombstone"
+    anchor.mkdir()
+    source.mkdir(parents=True)
+    target.mkdir(parents=True)
+    (source / "SKILL.md").write_text("canonical", encoding="utf-8")
+    historical = b"historical"
+    (target / "SKILL.md").write_bytes(historical)
+    expected = installer._tree_sha256(target)
+    assert expected is not None
+
+    original_resolves = installer._projection_resolves_to
+
+    def fail_after_promotion(path: Path, expected_source: Path) -> bool:
+        if path == target:
+            return False
+        return original_resolves(path, expected_source)
+
+    monkeypatch.setattr(installer, "_projection_resolves_to", fail_after_promotion)
+    with pytest.raises(ValueError, match="^E_MUTABLE_PATH_POSTCONDITION$"):
+        transaction = installer._InstallTransaction([target, tombstone], enabled=True)
+        with transaction:
+            owner = installer._CreateOnlyMutablePath(anchor, transaction, dry_run=False)
+            owner.replace_exact_tree_with_projection(
+                Path("skills") / "analyst", expected, source
+            )
+
+    assert not target.is_symlink()
+    assert (target / "SKILL.md").read_bytes() == historical
+    assert not (target.parent / ".analyst.projection.tmp").exists()
+    assert not tombstone.exists()
+    assert not tombstone.is_symlink()
+
+
+def test_projection_migration_cleanup_failure_restores_snapshot_members(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    anchor = tmp_path / "global-home"
+    source = tmp_path / "canonical-skills" / "analyst"
+    target = anchor / "skills" / "analyst"
+    tombstone = target.parent / ".analyst.projection.tombstone"
+    anchor.mkdir()
+    source.mkdir(parents=True)
+    target.mkdir(parents=True)
+    (source / "SKILL.md").write_text("canonical", encoding="utf-8")
+    historical = b"historical"
+    (target / "SKILL.md").write_bytes(historical)
+    expected = installer._tree_sha256(target)
+    assert expected is not None
+
+    original_cleanup = installer._remove_readonly_tree
+
+    def fail_cleanup(path: Path) -> None:
+        if path == tombstone:
+            raise OSError("forced cleanup failure")
+        original_cleanup(path)
+
+    monkeypatch.setattr(installer, "_remove_readonly_tree", fail_cleanup)
+    with pytest.raises(OSError, match="^forced cleanup failure$"):
+        transaction = installer._InstallTransaction([target, tombstone], enabled=True)
+        with transaction:
+            owner = installer._CreateOnlyMutablePath(anchor, transaction, dry_run=False)
+            owner.replace_exact_tree_with_projection(
+                Path("skills") / "analyst", expected, source
+            )
+
+    assert not target.is_symlink()
+    assert (target / "SKILL.md").read_bytes() == historical
+    assert not (target.parent / ".analyst.projection.tmp").exists()
+    assert not tombstone.exists()
+    assert not tombstone.is_symlink()
+
+
+def test_tree_sha256_ignores_only_regular_pyc_under_ordinary_runtime_cache(
+    tmp_path: Path,
+) -> None:
+    tree = tmp_path / "lead"
+    tree.mkdir()
+    (tree / "SKILL.md").write_text("lead", encoding="utf-8")
+    baseline = installer._tree_sha256(tree, ignore_runtime_cache=True)
+    assert baseline is not None
+
+    cache = tree / "__pycache__"
+    cache.mkdir()
+    (cache / "validator.pyc").write_bytes(b"bytecode")
+    assert installer._tree_sha256(tree, ignore_runtime_cache=True) == baseline
+
+    (tree / "standalone.pyc").write_bytes(b"standalone")
+    assert installer._tree_sha256(tree, ignore_runtime_cache=True) != baseline
+    (tree / "standalone.pyc").unlink()
+    (cache / "note.txt").write_text("not bytecode", encoding="utf-8")
+    assert installer._tree_sha256(tree, ignore_runtime_cache=True) != baseline
+
+
+def test_tree_sha256_rejects_cache_symlink_before_ignoring_bytecode(
+    tmp_path: Path,
+) -> None:
+    tree = tmp_path / "lead"
+    target = tmp_path / "external.pyc"
+    tree.mkdir()
+    target.write_bytes(b"bytecode")
+    cache = tree / "__pycache__"
+    cache.mkdir()
+    try:
+        (cache / "validator.pyc").symlink_to(target)
+    except OSError as exc:
+        pytest.skip(f"symlink unavailable: {exc}")
+
+    assert installer._tree_sha256(tree, ignore_runtime_cache=True) is None
+
+
+def test_current_claude_projection_plan_is_identity_noop(tmp_path: Path) -> None:
+    anchor = tmp_path / "global-home"
+    canonical_root = tmp_path / "canonical-skills"
+    source = canonical_root / "analyst"
+    projection_root = anchor / "skills"
+    target = projection_root / "analyst"
+    anchor.mkdir()
+    source.mkdir(parents=True)
+    projection_root.mkdir()
+    (source / "SKILL.md").write_text("canonical", encoding="utf-8")
+
+    owner = installer._CreateOnlyMutablePath(
+        anchor, installer._InstallTransaction([], enabled=False), dry_run=False
+    )
+    owner.create_projection(Path("skills") / "analyst", source)
+    before_identity = installer._CreateOnlyMutablePath._identity(target)
+    digest = installer._tree_sha256(source)
+    assert digest is not None
+    plan = (
+        installer._ClaudeSkillProjectionPlan(
+            "analyst", source, digest, "current", None
+        ),
+    )
+
+    installer._apply_claude_skill_projection_plan(
+        plan, canonical_root, projection_root, owner
+    )
+
+    assert installer._CreateOnlyMutablePath._identity(target) == before_identity
+    assert installer._projection_resolves_to(target, source)
+
+
+def test_canonical_lead_create_ignores_runtime_cache_but_nonlead_stays_strict(
+    tmp_path: Path,
+) -> None:
+    anchor = tmp_path / "global-home"
+    source_root = tmp_path / "source-skills"
+    target_root = anchor / ".agents" / "skills"
+    lead_source = source_root / "lead"
+    lead_target = target_root / "lead"
+    nonlead_source = source_root / "analyst"
+    nonlead_target = target_root / "analyst"
+    anchor.mkdir()
+    for path in (lead_source, lead_target, nonlead_source, nonlead_target):
+        path.mkdir(parents=True)
+    (lead_source / "SKILL.md").write_text("lead", encoding="utf-8")
+    (lead_target / "SKILL.md").write_text("lead", encoding="utf-8")
+    (lead_target / "__pycache__").mkdir()
+    (lead_target / "__pycache__" / "validator.pyc").write_bytes(b"cache")
+    (nonlead_source / "SKILL.md").write_text("analyst", encoding="utf-8")
+    (nonlead_target / "SKILL.md").write_text("analyst", encoding="utf-8")
+    (nonlead_target / "__pycache__").mkdir()
+    (nonlead_target / "__pycache__" / "validator.pyc").write_bytes(b"cache")
+
+    lead_digest = installer._tree_sha256(lead_source, ignore_runtime_cache=True)
+    assert lead_digest is not None
+    plan = installer._CanonicalSkillsPlan(
+        installer._CanonicalLeadStage(source_root, (), "stage"),
+        (
+            installer._CanonicalSkillPlan(
+                "lead", lead_source, lead_digest, lead_digest, None, True
+            ),
+        ),
+        None,
+    )
+    owner = installer._CreateOnlyMutablePath(
+        anchor, installer._InstallTransaction([], enabled=False), dry_run=False
+    )
+    lead_identity = installer._CreateOnlyMutablePath._identity(lead_target)
+
+    installer._apply_canonical_skills_plan(plan, target_root, owner, root=ROOT)
+
+    assert installer._CreateOnlyMutablePath._identity(lead_target) == lead_identity
+    assert (lead_target / "SKILL.md").read_text(encoding="utf-8") == "lead"
+    assert (lead_target / "__pycache__" / "validator.pyc").read_bytes() == b"cache"
+    with pytest.raises(ValueError, match="^E_CREATE_ONLY_COLLISION"):
+        owner.create_tree(Path(".agents") / "skills" / "analyst", nonlead_source)
+
+
+def test_lead_tree_rollback_ignores_cache_but_rejects_noncache_drift(
+    tmp_path: Path,
+) -> None:
+    anchor = tmp_path / "global-home"
+    source = tmp_path / "source-skills" / "lead"
+    anchor.mkdir()
+    source.mkdir(parents=True)
+    (source / "SKILL.md").write_text("lead", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="^forced post-lead failure$"):
+        transaction = installer._InstallTransaction([], enabled=True)
+        with transaction:
+            owner = installer._CreateOnlyMutablePath(anchor, transaction, dry_run=False)
+            lead = owner.create_tree(
+                Path(".agents") / "skills" / "lead",
+                source,
+                ignore_runtime_cache=True,
+            )
+            (lead / "__pycache__").mkdir()
+            (lead / "__pycache__" / "validator.pyc").write_bytes(b"cache")
+            raise RuntimeError("forced post-lead failure")
+
+    assert not (anchor / ".agents").exists()
+
+    transaction = installer._InstallTransaction([], enabled=False)
+    owner = installer._CreateOnlyMutablePath(anchor, transaction, dry_run=False)
+    lead = owner.create_tree(
+        Path(".agents") / "skills" / "lead",
+        source,
+        ignore_runtime_cache=True,
+    )
+    record = transaction._slice_a_created[-1]
+    (lead / "changed.txt").write_text("drift", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="^E_ROLLBACK_CREATED_IDENTITY_CHANGED$"):
+        owner.rollback_created(record)
+    assert (lead / "changed.txt").read_text(encoding="utf-8") == "drift"
 
 
 def test_config_wrong_type_and_reparse_keep_distinct_failure_ids(

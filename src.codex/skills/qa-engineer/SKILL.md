@@ -33,6 +33,7 @@ description: "Tests, coverage, regressions, bugs, phase verdicts."
 - Agreed basic performance checks or performance smoke evidence are included when the phase can affect user-visible or system-visible performance.
 - Deeper bottleneck analysis is escalated to `performance-engineer`, not invented inside QA.
 - Apply the canonical S1 `Receiving-side echo` owned by `subagent-contracts.md`; when the dispatch cited a defect class, the verification report classifies every enumerated participant as `fixed` or `not-affected`.
+- A QA report cannot return `PASS` until it verifies the disposition field against the diff, an old-name/path search, language/repository reachability or static check where available, and focused tests. When the change supersedes a mechanism, a `none` disposition is `REVISE`.
 - Each executed check has command, result counts, wall time, and preserved raw output; prose that coverage ran without counts does not satisfy the gate.
 
 ## Working rules

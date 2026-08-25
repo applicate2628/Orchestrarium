@@ -88,7 +88,7 @@ EXPECTED_MANIFEST: dict[str, tuple[str, ...]] = {
     ),
     "delegation and recovery teeth": (
         "/agents-init-project",
-        "externalProvider: auto | codex | claude | gemini | qwen",
+        "externalProvider: auto | codex | claude | gemini | qwen | kimi | grok",
         "Gemini and Qwen are `WEAK MODEL / NOT RECOMMENDED`",
         "never a provider entry inside `externalPriorityProfiles`",
         "Every specialist invocation MUST use the Agent tool",
@@ -159,9 +159,9 @@ def test_live_claude_md_passes_at_post_extraction_cap_and_reports_exact_counts()
     result = _run()
     assert result.returncode == 0, result.stdout + result.stderr
     for expected in (
-            "Code points: 36477",
-            "UTF-8 bytes: 36657",
-            "Binding size: 36657",
+            "Code points: 36498",
+            "UTF-8 bytes: 36678",
+            "Binding size: 36678",
         "Size cap: 36771",
         "Warning threshold: 36521",
         "Manifest: 47/47",
@@ -173,7 +173,7 @@ def test_live_claude_md_passes_at_post_extraction_cap_and_reports_exact_counts()
 def test_tiny_size_cap_fails_closed() -> None:
     result = _run("--size-cap", "1000")
     assert result.returncode == 1, result.stdout + result.stderr
-    assert "FAIL: Claude Markdown binding size 36657 > size cap 1000" in result.stdout
+    assert "FAIL: Claude Markdown binding size 36678 > size cap 1000" in result.stdout
     assert "RESULT: FAIL" in result.stdout
 
 

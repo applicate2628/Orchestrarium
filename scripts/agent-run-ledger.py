@@ -137,6 +137,14 @@ def build_event(args: argparse.Namespace, validator: Any | None = None) -> dict[
             getattr(args, "effort", None),
             getattr(args, "finding_class", None),
             getattr(args, "scratch_evidence_json", None),
+            getattr(args, "terminal_class", None),
+            getattr(args, "authorizing", None),
+            getattr(args, "actual_execution_path", None),
+            getattr(args, "artifact_identity", None),
+            getattr(args, "external_dispatch_id", None),
+            getattr(args, "external_evidence_run_id", None),
+            getattr(args, "closer_run_id", None),
+            getattr(args, "target_tuple_json", None),
         )
     )
     event: dict[str, Any] = {
@@ -167,10 +175,25 @@ def build_event(args: argparse.Namespace, validator: Any | None = None) -> dict[
         "lane": getattr(args, "lane", None),
         "effort": getattr(args, "effort", None),
         "findingClass": getattr(args, "finding_class", None),
+        "terminalClass": getattr(args, "terminal_class", None),
+        "actualExecutionPath": getattr(args, "actual_execution_path", None),
+        "artifactIdentity": getattr(args, "artifact_identity", None),
+        "externalDispatchId": getattr(args, "external_dispatch_id", None),
+        "externalEvidenceRunId": getattr(args, "external_evidence_run_id", None),
+        "closerRunId": getattr(args, "closer_run_id", None),
     }
     for key, value in optional_fields.items():
         if value is not None:
             event[key] = value
+    if getattr(args, "authorizing", None) is not None:
+        event["authorizing"] = args.authorizing == "true"
+    if getattr(args, "target_tuple_json", None) is not None:
+        event["targetTuple"] = validator.decode_json_object(
+            args.target_tuple_json,
+            source="--target-tuple-json",
+        )
+    if event.get("terminalClass") == "external-nonauthorizing":
+        event["closesRunIds"] = []
 
     evidence: list[dict[str, Any]] = []
     for value in args.evidence or []:
@@ -817,6 +840,14 @@ def build_parser() -> argparse.ArgumentParser:
     append.add_argument("--lane", help="Review angle label (e.g. architecture-adversarial).")
     append.add_argument("--effort", choices=["low", "medium", "high", "xhigh", "max"], help="Typed declared reasoning-effort tier.")
     append.add_argument("--finding-class", choices=["publication-safety", "security", "correctness", "performance", "other"], help="REVISE finding classification (publication-safety/security are non-user-waivable).")
+    append.add_argument("--terminal-class", choices=["external-nonauthorizing", "internal-authorizing"], help="Typed durable terminal authority class.")
+    append.add_argument("--authorizing", choices=["true", "false"], help="Whether this terminal may authorize lifecycle closure.")
+    append.add_argument("--actual-execution-path", choices=["direct-external-cli", "internal"], help="Actual terminal execution path.")
+    append.add_argument("--artifact-identity", help="Frozen identity of the reviewed artifact.")
+    append.add_argument("--external-dispatch-id", help="Frozen external dispatch identity.")
+    append.add_argument("--external-evidence-run-id", help="External evidence run consumed by an internal closer.")
+    append.add_argument("--closer-run-id", help="Distinct internal closer run identity.")
+    append.add_argument("--target-tuple-json", help="Exact external target tuple as a JSON object.")
     append.set_defaults(func=command_append)
 
     recovery = subparsers.add_parser("recover-invalid-closure", help="Append one digest-bound V2 closure invalidation")

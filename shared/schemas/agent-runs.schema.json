@@ -50,7 +50,7 @@
     "workItem": { "type": "string", "minLength": 1 },
     "role": { "type": "string", "minLength": 1 },
     "executionRole": {
-      "enum": ["main", "internal", "consultant", "external-worker", "external-reviewer", "external-brigade"],
+      "enum": ["main", "internal", "consultant", "external-worker", "external-reviewer", "external-brigade", "none"],
       "$comment": "Exactly ONE main-conversation identity: 'main' (the main conversation, which also holds the Lead role — orchestration weight lives in status.md 'orchestration: light|full-lead', never here). Ledgers written before 2026-07-11 may carry the legacy value 'lead'; readers map it to 'main' (see scripts/validate-work-item-state.py LEGACY_EXECUTION_ROLES). New writes must use 'main'."
     },
     "assignedRole": { "type": "string" },
@@ -75,9 +75,26 @@
     },
     "closesRunIds": {
       "type": "array",
-      "minItems": 1,
       "items": { "type": "string", "minLength": 8 },
-      "$comment": "The normalized REVISE-closure relation (decision item 2): the exact runIds of earlier gate:REVISE events this PASS/WAIVED:user/WAIVED:security-reviewer event discharges. Closure is NEVER derived from role/scope/artifact string matching."
+      "$comment": "The normalized REVISE-closure relation. Non-empty only for authorizing PASS/waiver closers; typed external-nonauthorizing terminals require exactly an empty array. Closure is NEVER derived from role/scope/artifact string matching."
+    },
+    "terminalClass": { "enum": ["external-nonauthorizing", "internal-authorizing"] },
+    "authorizing": { "type": "boolean" },
+    "actualExecutionPath": { "enum": ["direct-external-cli", "internal"] },
+    "artifactIdentity": { "type": "string", "minLength": 1 },
+    "externalDispatchId": { "type": "string", "minLength": 1 },
+    "externalEvidenceRunId": { "type": "string", "minLength": 1 },
+    "closerRunId": { "type": "string", "minLength": 1 },
+    "targetTuple": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["workItem", "assignedInternalRole", "artifactIdentity"],
+      "properties": {
+        "workItem": { "type": "string", "minLength": 1 },
+        "assignedInternalRole": { "type": "string", "minLength": 1 },
+        "artifactIdentity": { "type": "string", "minLength": 1 },
+        "externalDispatchId": { "type": "string", "minLength": 1 }
+      }
     },
     "invalidatesRunId": { "type": "string", "minLength": 8 },
     "invalidatesEventSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },

@@ -15,9 +15,9 @@ description: "Consultant: advise on tradeoffs without approving gates."
 >    - `internal`: proceed to formulate an internal advisory memo directly (skip steps 3-5). Steps 3-5 and the end-of-response violation clause do **not** apply in this mode; the memo is authored from your own reasoning by design. Continue to step 6 with "internal advisory" as the source.
 >    - `external`: continue to steps 3-6 below; the violation clause at the end of this block applies.
 > 3. (external mode) Identify the selected external provider for the current lane. **Verification is a real shell call, not a text claim.** Run `command -v <provider>` (POSIX) or `Get-Command <provider>` (PowerShell) in the current session and record the output. Treat any reasoning that does not include such a shell call as unverified — the provider's unavailability is then a claim with no evidence, not a fact. **The absence of a repo-specific wrapper script is never sufficient to conclude the provider is unavailable**: wrappers are convenience surfaces, not authentication gates; the canonical availability check is whether the binary resolves on PATH. See the shared `Active-availability probe discipline` for the binding form of this rule. If the binary is genuinely not callable, return an unavailable memo and surface the gap; do not silently switch providers and do not author the opinion yourself.
-> 4. (external mode) Write the full advisory prompt body to `.scratch/<provider>-prompts/<topic>.md`. Argv to the provider stays for launcher flags only. When the question is "which option", present the options symmetrically and omit the orchestrator's current preference or draft conclusion unless the request is explicitly to critique a chosen option; record the prompt form as `blind-options` or `critique-of-choice`. Require one single-turn, self-contained response between `BEGIN_REVIEW` / `END_REVIEW` markers, with all required sections and no deferred handoff, plan, or "what next?" ending. This rule is binding for every consultant invocation — see the shared `External CLI prompt delivery` governance.
-> 5. (external mode) Shell out to the selected provider with the prompt redirected from the file and stdout/stderr captured to sibling files. Apply the stall and timeout policy in the shared external-dispatch contract (`../lead/external-dispatch.md`); do not abandon the run on the first short timeout, and check stdout/stderr files plus process status first.
-> 6. Only after the provider returns (in external mode) or after you have completed your internal reasoning (in internal mode) may you formulate the consultant memo. In external mode, first verify that captured stdout contains the `BEGIN_REVIEW` / `END_REVIEW` markers and every required section; a stub, handoff-only capture, or bare verdict is `REVISE`, not a memo. Return an unavailable memo only when the provider is genuinely unavailable and no provider result was captured. The memo summarizes the external response and applies your own framing; it does not substitute your own opinion for the external one. In internal mode the memo is authored from your own reasoning and is explicitly labeled as `internal advisory` at the top.
+> 4. (external mode) Build the full advisory handoff for the approved installed `invoke-<provider>-prompt` wrapper. When the question is "which option", present the options symmetrically and omit the orchestrator's current preference or draft conclusion unless the request is explicitly to critique a chosen option; record the prompt form as `blind-options` or `critique-of-choice`. Require one single-turn, self-contained response between `BEGIN_REVIEW` / `END_REVIEW` markers, with all required sections and no deferred handoff, plan, or "what next?" ending.
+> 5. (external mode) Invoke the selected approved thin wrapper synchronously. The owner in `../lead/external-dispatch.md` supplies the strict V2 parser, full external-nonauthorizing tuple, and untrusted/potentially-sensitive resultText contract; consume its single `ORCHESTRARIUM_PROVIDER_RESULT_V2` envelope and wrapper exit, requiring empty `closesRunIds`. No raw provider process, wrapper-private capture, or caller-owned sidecar is an approved route. Apply the owner's timeout/oracle policy.
+> 6. Only after the wrapper returns (in external mode) or after you have completed your internal reasoning (in internal mode) may you formulate the consultant memo. In external mode, verify the envelope's complete `resultText`, terminal metadata, and requested review markers/sections; a stub, handoff-only response, or bare verdict is `REVISE`, not a memo. Return an unavailable memo only when the provider is genuinely unavailable and no wrapper result was delivered. The memo summarizes the external response and applies your own framing; it does not substitute your own opinion for the external one. In internal mode the memo is authored from your own reasoning and is explicitly labeled as `internal advisory` at the top.
 >
 > **Violation clause (external mode only):** if `consultantMode == external` and you reach the end of your response while step 5 was never actually executed via a tool call (shell-out), you have violated the role. Abort the response, return an unavailable memo with the explicit reason "external provider call was not actually executed", and surface the gap to the user. This clause does NOT fire for `internal` mode — internal advisory by design has no external shell-out — nor for `disabled` mode where the response stopped at step 2.
 >
@@ -128,10 +128,10 @@ Do not invoke for:
 - Every consultant memo must include a provenance header:
   - **Execution role:** `consultant`
   - **Assigned / replaced internal role:** `none`
-  - **Requested provider:** <internal | codex | claude | gemini | qwen>
-  - **Resolved provider:** <Codex CLI | Claude CLI | Gemini CLI | Qwen Code | none>
+  - **Requested provider:** <internal | codex | claude | gemini | qwen | kimi | grok>
+  - **Resolved provider:** <Codex CLI | Claude CLI | Gemini CLI | Qwen Code | Kimi CLI | Grok CLI | none>
   - **Requested consultant mode:** <external | internal | disabled>
-  - **Actual execution path:** <internal consultant | external CLI (provider name) | role-play (violation)>
+  - **Actual execution path:** <internal consultant | external CLI (Codex CLI) | external CLI (Claude CLI) | external CLI (Gemini CLI) | external CLI (Qwen Code) | external CLI (Kimi CLI) | external CLI (Grok CLI) | role-play (violation)>
   - **Model / profile used:** <actual profile or model when known | runtime default | unspecified by runtime>
   - **Prompt form:** <blind-options | critique-of-choice | not-applicable: reason>
   - **Inputs consumed:** <artifacts/files used, such as canonical brief, design decision id, or diff range>
@@ -182,20 +182,7 @@ Honor `externalCodexProfile` and `externalModelMode` before provider-specific tr
 - `externalCodexProfile: gpt-5.6-sol-xhigh` → shipped as the default and used unconditionally by the consultant lane; explicitly request model `gpt-5.6-sol` with `model_reasoning_effort = "xhigh"` via `-c model_reasoning_effort=xhigh` regardless of `externalModelMode`, symmetric to `externalClaudeProfile: opus-xhigh`.
 - Gemini and Qwen routes stay manual demonstration or compatibility paths only. Both are `WEAK MODEL / NOT RECOMMENDED` example-only routes, and this pack does not add shared production fallback keys for them.
 
-Examples:
-
-**macOS / Linux:**
-```bash
-claude -p --model sonnet --effort high --permission-mode bypassPermissions < "$PROMPT_FILE"
-claude -p --model opus --effort xhigh --permission-mode bypassPermissions < "$PROMPT_FILE"
-```
-
-**Windows (Git Bash inside Codex):**
-```bash
-cmd.exe /c claude.exe -p --model sonnet --effort high --permission-mode bypassPermissions < "$PROMPT_FILE"
-cmd.exe /c claude.exe -p --model opus --effort xhigh --permission-mode bypassPermissions < "$PROMPT_FILE"
-```
-Fallback if `claude.exe` is not on PATH: use `claude.cmd` instead.
+Use the approved `invoke-claude-prompt` wrapper for substantive Claude consultation; do not substitute raw `claude -p` recipes.
 
 Reserve advisory candidate:
 - If an advisory profile order reaches `reserve`, bind it through `reserveResolver` after primary `claude`/`codex` candidates have been considered.
@@ -210,7 +197,7 @@ Reserve advisory candidate:
 - If the requested primary Claude profile fails on the plain Claude CLI path, do not silently convert that same run to the wrapper. Advisory lanes may later collect `reserve` as a separate profile candidate when enabled; otherwise return an unavailable memo.
 - If an advisory route resolves to `reserve` and that wrapper is unavailable, disclose a dependency/config failure instead of pretending the advisory path was complete.
 - If an example-only Gemini or Qwen route fails, disclose provider failure explicitly instead of inventing a hidden production fallback or silently switching providers.
-- Use file-based prompt delivery for substantive task prompts: write the prompt to a temporary prompt file and feed it through stdin or the provider's supported file-input mechanism; direct prompt argv is only for tiny smoke checks or documented provider limitations.
+- Route every substantive task through the approved thin `invoke-<provider>-prompt` wrapper, which owns file/stdin prompt delivery and the governance capsule; raw provider CLI prompt routes are unsupported. Inline argv is only for a fixed synthetic non-substantive smoke token, never a provider limitation or real task.
 - **Never invoke a non-interactive Claude review with `--permission-mode plan`.** Plan mode makes Claude research and then present a plan for approval (ExitPlanMode) instead of emitting the verdict; under `claude -p` there is no approver, so the captured stdout is only the final handoff / "waiting for your direction" turn and the actual review never lands in the file. Use `--permission-mode bypassPermissions` exactly as the examples above show; if you want a read-only reviewer, constrain it with `--tools "Read,Grep,Glob"`, not with plan mode. The mode is not a safety lever here — the tool set and the prompt are.
 - Do not use TTY when a non-interactive invocation is available.
 - On Windows, keep command-line prompts short enough to avoid `cmd.exe` truncation.

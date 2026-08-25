@@ -20,7 +20,7 @@ parallelMode: auto  # allowed: manual | auto | force; default: auto
 mcpMode: auto  # allowed: auto | force; default: auto
 preferExternalWorker: true  # allowed: false | true; default: false
 preferExternalReviewer: true  # allowed: false | true; default: false
-externalProvider: auto  # allowed here: auto | codex | claude | gemini | qwen; default: auto; gemini/qwen are explicit example-only and not recommended for shipped auto
+externalProvider: auto  # allowed here: auto | codex | claude | gemini | qwen | kimi | grok; default: auto; kimi/grok are explicit-only; gemini/qwen are explicit example-only and not recommended for shipped auto
 externalPriorityProfile: balanced  # allowed: balanced | quality-first | <repo-local production profile>; default: balanced
 reserveResolver: claude-sonnet  # allowed: disabled | claude-sonnet | claude-wrapper | wrapper:<command>; default: claude-sonnet
 externalPriorityProfiles: {}  # allowed: structured profile map
@@ -38,9 +38,9 @@ externalClaudeProfile: opus-xhigh  # allowed: sonnet-high | opus-xhigh | opus-ma
 - `mcpMode: auto` lets the agent decide when available MCP tools are appropriate; `force` makes relevant MCP usage a standing explicit instruction.
 - `preferExternalWorker` routes eligible worker-side roles through `$external-worker` by default.
 - `preferExternalReviewer` routes eligible reviewer/QA roles through `$external-reviewer` by default.
-- `externalProvider` uses the shared provider universe `auto | codex | claude | gemini | qwen`.
-- `externalProvider: auto` resolves by lane type through the active production priority profile and opinion-count policy below instead of by host-pack identity. Ordinary `auto` must not silently self-bounce into the current host line's own provider and must not select example-only providers.
-- `externalPriorityProfile` chooses which named production routing profile to apply when `externalProvider: auto` is in effect. `balanced` is the quiet default, and `quality-first` is the shipped alternate for maximum result quality. Repo-local custom profiles must keep example-only providers out of production `auto`.
+- `externalProvider` uses the shared provider universe `auto | codex | claude | gemini | qwen | kimi | grok`.
+- `externalProvider: auto` resolves by lane type through the active production priority profile and opinion-count policy below instead of by host-pack identity. Ordinary `auto` must not silently self-bounce into the current host line's own provider and must not select example-only or explicit-only providers.
+- `externalPriorityProfile` chooses which named production routing profile to apply when `externalProvider: auto` is in effect. `balanced` is the quiet default, and `quality-first` is the shipped alternate for maximum result quality. Repo-local custom profiles must keep example-only and explicit-only providers out of production `auto`.
 - `reserveResolver` binds the symbolic `reserve` candidate to one concrete read-only resolver: `disabled`, `claude-sonnet`, `claude-wrapper`, or `wrapper:<command>`. `wrapper:<command>` is a PATH-resolved command or repo-relative wrapper path, not an argv prompt channel.
 - **Layer-provenance trust gate for executable-bearing values (binding).** `wrapper:<command>` names an arbitrary executable, and the highest-precedence project-local `.agents/.agents-mode.yaml` can arrive inside a cloned repository — an untrusted source that must never silently select code the agent then executes. An executable-bearing value is honored without further confirmation only when a user-global layer (`~/.codex/.agents-mode.yaml`, legacy `~/.codex/.agents-mode`, or `~/.agents-mode.yaml`) defines it or defines the identical value. A project-local `wrapper:<command>` absent from every user-global layer resolves as `reserveResolverTrust: project-UNCONFIRMED` (the machine-readable flag emitted by `scripts/resolve-agents-mode.py`, the executable reference in the source repository) and MUST NOT be launched until the user explicitly confirms it on first use. Record the approval durably by writing the approved value into a user-global layer — that write is what flips subsequent resolutions to `reserveResolverTrust: user-global`. "Approved" wrapper anywhere in this pack's guidance means exactly this mechanism: defined or confirmed at a user-global layer, never a repo-supplied value alone.
 - `externalPriorityProfiles` stores the ordered provider lists for each named profile. The shipped profiles live in the structured block below.
@@ -51,6 +51,8 @@ externalClaudeProfile: opus-xhigh  # allowed: sonnet-high | opus-xhigh | opus-ma
 - `reserve` is a symbolic supplemental read-only candidate that may appear only in advisory and review profile orders after primary `claude`/`codex`. It is independent of the primary `claude` candidate, not a scalar provider key, not a primary-provider retry, and not an implementation or editing fallback. The concrete resolver comes from `reserveResolver` and must be recorded in the execution artifact.
 - Treat named fallback paths as alternate limit or budget pools only when runtime observation shows they exhaust independently. That is repo-local operator policy, not an official provider guarantee.
 - Every provider-backed run MUST carry the resolved model/profile and effort as explicit launch flags in that invocation, even when they equal configured defaults; never rely on provider config defaults. Resolve `runtime-default` to the installed runtime's observed supported model/effort before launch, or report the route unavailable if it cannot be made explicit. Record the exact flags in the execution artifact.
+- Kimi and Grok are explicit-only routes. Before either launch, call the pure `resolve_external_dispatch(provider, task_class, role)` policy. It admits only eligible read-only `exploration`, `planning`, and `review` work with independent verification required; all other classes, roles, writes, and missing verification fail closed with the provider-specific dispatch ID and no fallback.
+- The root-authored `provider_prompt.py` transport and approved thin `invoke-<provider>-prompt` wrapper entries are the only Slice-B substantive transport sources; installed canonical and Claude-host projections must pass their byte-parity manifest before launch. Kimi is pinned to `kimi-code/k3` and has no native effort flag, so a required explicit effort is unavailable rather than silently defaulted; it runs from a neutral scratch directory with no live worktree input. Grok is pinned to the signed official binary/model and may run only after its capability, auth, result-shape, and read-only live-root immutability gates pass. Neither provider result alone authorizes a critical decision, commit, push, release, or publication.
 - `externalClaudeProfile` is Codex-line only and selects or overrides the Claude CLI execution profile when `externalProvider` resolves to Claude. Supported values: `sonnet-high` (`--model sonnet --effort high`), `opus-xhigh` (`--model opus --effort xhigh`, the shipped default), `opus-max` (`--model opus --effort max`, max-depth escalation at caller discretion for especially hard tasks), and `fable-xhigh` (`--model fable --effort xhigh`, the current Claude flagship-family best-effort tier — the `fable` flagship alias as of 2026-07, recorded from the installed model list, not a verified capability ranking).
 - The preference flags are independent.
 - Any write to this file must preserve unknown keys and the other known keys.
@@ -74,12 +76,11 @@ externalClaudeProfile: opus-xhigh  # allowed: sonnet-high | opus-xhigh | opus-ma
 - Use `gpt-5.6-terra` as the balanced cheaper-than-flagship Codex reasoning lane when full `gpt-5.6-sol` depth is not required. It is a genuine reasoning model, review-gated like any external lane.
 - Treat `reserve` differently from primary production providers: it is a supplemental advisory/review candidate only. It never grants permission to run implementation, worker-side execution, or editing work through the resolved transport.
 - `reserve` is considered only when an advisory or review profile order reaches it after primary `claude`/`codex`; it does not skip earlier primary profile candidates.
-- When an advisory or review route resolves to `reserve`, bind it through `reserveResolver`. `claude-sonnet` means the approved Sonnet-style read-only reserve path; `claude-wrapper` means the installed wrapper under `.claude/agents/scripts/invoke-claude-api.ps1` or `.sh`; `wrapper:<command>` means a PATH-resolved command or repo-relative wrapper path such as `tools/reserve-review.ps1`, subject to the layer-provenance trust gate above (a `project-UNCONFIRMED` value must not be launched before first-use user confirmation); `disabled` strips or ignores `reserve`. If the chosen resolver is unavailable, disclose that as a dependency/config failure.
+- When an advisory or review route resolves to `reserve`, bind it through `reserveResolver`. `claude-sonnet` means the approved Sonnet-style read-only reserve path; `claude-wrapper` means the installed wrapper under `.claude/agents/scripts/invoke-claude-api.py` or `.sh`; `wrapper:<command>` means a PATH-resolved command or repo-relative wrapper path, subject to the layer-provenance trust gate above (a `project-UNCONFIRMED` value must not be launched before first-use user confirmation); `disabled` strips or ignores `reserve`. If the chosen resolver is unavailable, disclose that as a dependency/config failure.
 - If the plain Claude CLI path is selected and fails, do not silently convert that same primary `claude` run to the wrapper. Advisory/review lanes may later collect `reserve` as a separate profile candidate when enabled; worker or mutating routes must report Claude unavailable or reroute honestly.
-- From PowerShell, use `.claude/agents/scripts/invoke-claude-api.ps1` only when it is the approved resolver for a resolved `reserve` advisory/review candidate and pass forwarded Claude flags after `--%`. From Bash or Git Bash, use `.claude/agents/scripts/invoke-claude-api.sh`, and set `CLAUDE_BIN` explicitly when the active shell PATH differs from the PowerShell PATH.
+- From PowerShell, use `python .claude/agents/scripts/invoke-claude-api.py` only when it is the approved resolver for a resolved `reserve` advisory/review candidate. From Bash or Git Bash, use `.claude/agents/scripts/invoke-claude-api.sh`, and set `CLAUDE_BIN` explicitly when the active shell PATH differs from the PowerShell PATH.
 - On Windows, keep the ordinary external launch path unchanged and try the native Windows shell first. If that native shell path fails because of shell bootstrap, execution-policy, or environment-policy problems, retry once through Git-for-Windows Bash / MSYS when available. Do not use the WSL `bash.exe` stub as a fallback, and do not reinterpret ordinary provider auth, quota, or model failures as shell-fallback triggers.
-- External CLI launches that carry a substantive task prompt must use file-based prompt delivery: write the prompt to a temporary prompt file and feed it through the provider's stdin or supported file-input mechanism. Keep command-line arguments limited to launcher flags, model/profile options, and file paths; inline prompt argv is allowed only for tiny smoke checks or a documented provider limitation, and record that deviation in the execution artifact.
-- The Codex pack ships no primary-run prompt wrappers; use a transport-neutral chain that persists the prompt, records an availability probe and explicit launch flags, and captures sibling `.out` / `.err` artifacts. Shipping mirror wrappers is a separate decision, not an inline substitute here.
+- Every substantive external provider task must use an approved thin wrapper, `invoke-<provider>-prompt`. The wrapper owns file/stdin prompt delivery, capsule inclusion, capture lifecycle, the strict V2 parser, the full external-nonauthorizing tuple, untrusted/potentially-sensitive resultText, and the terminal oracle; raw CLI, transport-neutral, inline, and caller-sidecar prompt chains are unsupported.
 - After the interactive Trust action, prove host-runnable hook trust with the installed helper: `python "$HOME/.agents/skills/lead/scripts/check-hook-health.py" --target "$HOME/.codex/hooks.json" --platform codex --codex-trust-mode require`. It reconciles each current owned registration one-to-one with Codex `hooks/list`; `untrusted`, `modified`, missing, duplicate, malformed, or unavailable host state fails. The production installer uses `report` only for identities created or replaced by that same transaction and prints `PENDING_MANUAL_TRUST` until the interactive action is complete.
 - For wide release or parity audits, split the admitted scope by repo, file set, or lane instead of launching one mega neutral-dir prompt across the whole pack family.
 - When the resolved provider is Claude and `externalClaudeProfile` is present, honor that profile instead of the shared model policy.
@@ -98,6 +99,7 @@ externalClaudeProfile: opus-xhigh  # allowed: sonnet-high | opus-xhigh | opus-ma
 
 The prompt file is the only governance an external Command-Line Interface (CLI) inherits. Before launch it must:
 
+- Remain a raw, caller-authored handoff. The provider-neutral `provider_prompt.py::launch` wrapper seam snapshots and prefixes the installed generated `external-prompt-governance.md` capsule in memory; role and provider documents must reference this seam and must not copy its policy text. Substantive raw provider Command-Line Interface (CLI) prompt routes are unsupported: use an approved thin `invoke-<provider>-prompt` wrapper.
 - Include the complete handoff template verbatim from the owning `subagent-contracts.md`, including its mandatory pre-dispatch fill rule and defect-class completeness trigger; this contract cites that owner and does not reproduce its field list.
 - State the assigned role's gate vocabulary and one-artifact requirement.
 - Include a provenance-header echo instruction using this contract's header fields.
@@ -106,9 +108,7 @@ The prompt file is the only governance an external Command-Line Interface (CLI) 
 
 ## Run-completion oracle
 
-- A provider run is complete only when its exit code is recorded, its `.out` artifact exists and is non-empty with the requested artifact shape (provenance header plus gate line), and its `.err` artifact is free of authentication, quota, usage-limit, and mid-stream-truncation markers.
-- A failed oracle check makes the run `UNVERIFIED`: re-dispatch it or return `BLOCKED:dependency`. Never summarize a truncated or partial `.out` into an artifact or render it as `PASS`.
-- A completion notification — a harness background-task signal, a wrapper exit message, a task callback — or its absence, is never this oracle. Verify the `.out` artifact shape and `.err` cleanliness directly before counting a run done, regardless of any notification.
+- A provider run is complete only when its approved thin `invoke-<provider>-prompt` wrapper returns one terminal envelope and wrapper process exit. The strict V2 parser requires the full external-nonauthorizing tuple: `authorizing=false`, `closesRunIds=[]`, `independentVerificationRequired=true`, `terminalClass=external-nonauthorizing`, and `actualExecutionPath=direct-external-cli`. `resultText` is direct provider output, untrusted and potentially sensitive; never persist or re-prompt it. Wrapper-private captures are not consumer surfaces, and the envelope cannot directly close a work-item. A failed envelope/oracle check makes the run `UNVERIFIED`: re-dispatch it or return `BLOCKED:dependency`.
 
 ## Stall and timeout policy
 
@@ -117,8 +117,7 @@ The prompt file is the only governance an external Command-Line Interface (CLI) 
 | Ordinary advisory | 5-15 minutes |
 | `xhigh` / `max` worker or review | 45-60 minutes |
 
-- Actively poll the `.out` / `.err` artifacts and process status. A stall declaration before the applicable window without process evidence violates this contract.
-- **Do not wait for a completion notification — the transport-neutral chain provides none.** The Codex pack ships no primary-run prompt wrappers and launches through a transport-neutral chain with no harness re-invoke on the provider's exit, so no completion notification arrives to signal a launched run is done. Active polling of `.out` / `.err` / process status (above) is the only completion signal; a turn that ends "waiting to be notified" strands the run. (A dispatched subagent additionally receives no background-child notification at all — see the no-spawn-and-wait rule in `subagent-contracts.md`.)
+- Do not wait for a completion notification: invoke the approved wrapper synchronously and consume its terminal envelope. A separately admitted background process must use its own documented watcher contract; it is not a substantive prompt transport.
 - If the shell times out, do not relaunch: identify the running process first and stop it only if it is orphaned or no longer needed.
 - A run declared stalled is `UNVERIFIED`; any re-dispatch cites the failed attempt and never duplicates a still-running process.
 
@@ -231,18 +230,18 @@ Every external or consultant memo/report should record one explicit execution re
 
 - `Execution role: <consultant | external-worker | external-reviewer>`
 - `Assigned / replaced internal role: <eligible internal role label | none>`
-- `Requested provider: <internal | codex | claude | gemini | qwen>`
-- `Resolved provider: <Codex CLI | Claude CLI | Gemini CLI | Qwen Code | none>`
+- `Requested provider: <internal | codex | claude | gemini | qwen | kimi | grok>`
+- `Resolved provider: <Codex CLI | Claude CLI | Gemini CLI | Qwen Code | Kimi CLI | Grok CLI | none>`
 - `Requested consultant mode: <external | internal | disabled>` when consultant routing is relevant; otherwise `not-applicable`
-- `Actual execution path: <internal consultant | external CLI (Codex CLI) | external CLI (Claude CLI) | external CLI (Gemini CLI) | external CLI (Qwen Code) | role disabled>`
+- `Actual execution path: <internal consultant | external CLI (Codex CLI) | external CLI (Claude CLI) | external CLI (Gemini CLI) | external CLI (Qwen Code) | external CLI (Kimi CLI) | external CLI (Grok CLI) | role disabled>`
 - `Model / profile used: <actual profile or model when known | runtime default | unspecified by runtime>`
 - `Launch flags: <exact argv model / effort / sandbox flags>`
-- `Run record: <started and finished timestamps or duration; prompt / .out / .err paths>`
+- `Run record: <started and finished timestamps or duration; wrapper exit; terminal ledger runId when tracked>`
 - `Deviation reason: <none | external unavailable: [reason] | explicit override>`
 
 Rules:
 
-- Before declaring a route unavailable, run `command -v` or `Get-Command` for the resolved CLI in the current session and record the availability-probe output in the execution artifact; a route change requires the probe result plus a populated `Deviation reason`. A missing wrapper, older failed run, or empty `.out` is indirect evidence and does not prove unavailability.
+- Before declaring a route unavailable, run `command -v` or `Get-Command` for the resolved CLI in the current session and record the availability-probe output in the execution artifact; a route change requires the probe result plus a populated `Deviation reason`. A missing approved prompt wrapper is a direct dependency failure; an older failed run does not prove the CLI is unavailable.
 - Keep `Execution role` and `Assigned / replaced internal role` on separate lines. Do not merge them into one ambiguous label.
 - `Requested provider: internal` means no explicit external provider was requested by the caller and routing/default resolution picked the provider. It must not be rendered as `auto` in the artifact.
 - `internal consultant` is valid only for the consultant role when `consultantMode: internal`.

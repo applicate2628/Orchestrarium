@@ -17,7 +17,7 @@ from tests.fixtures.codex_hook_fixture import (
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE = ROOT / "src.claude/agents/scripts/provider_prompt.py"
+SOURCE = ROOT / "scripts/provider_prompt.py"
 CODEX = ROOT / "src.claude/agents/scripts/invoke-codex-prompt.py"
 spec = importlib.util.spec_from_file_location("provider_prompt_marker_test", SOURCE)
 assert spec and spec.loader
@@ -30,6 +30,27 @@ SHIPPED_PATTERN = (
     r"(\.[0-9]+)?Z? )?(ERROR|FATAL|API Error)"
     r"(: | [A-Za-z0-9_]+(::[A-Za-z0-9_]+)*: )"
 )
+
+
+def _projected_codex_entrypoint(tmp_path: Path) -> Path:
+    scripts = tmp_path / "claude-projection" / "agents" / "scripts"
+    scripts.mkdir(parents=True, exist_ok=True)
+    (scripts / "provider_prompt.py").write_bytes(SOURCE.read_bytes())
+    entrypoint = scripts / CODEX.name
+    entrypoint.write_bytes(CODEX.read_bytes())
+    (scripts / "external-prompt-governance.md").write_bytes(
+        (ROOT / "scripts" / "external-prompt-governance.md").read_bytes()
+    )
+    support = tmp_path / "scripts"
+    support.mkdir(exist_ok=True)
+    for name in ("check-hook-health.py", "universal_hooks_manifest.py", "agent-run-ledger.py"):
+        (support / name).write_bytes((ROOT / "scripts" / name).read_bytes())
+    shared = tmp_path / "shared"
+    shared.mkdir(exist_ok=True)
+    (shared / "AGENTS.shared.md").write_bytes(
+        (ROOT / "shared" / "AGENTS.shared.md").read_bytes()
+    )
+    return entrypoint
 ORIGINAL_PATTERN = r"^(ERROR|FATAL|API Error): "
 REAL_INCIDENT_LINE = (
     "2026-07-25T23:20:34.729085Z ERROR rmcp::transport::worker: worker quit "
@@ -108,7 +129,7 @@ def _run_transport(tmp_path: Path, err_line: str) -> dict:
         "sys.stdin.buffer.read()\n"
         "print(json.dumps({'type':'item.completed','item':"
         "{'type':'agent_message','text':'GATE: PASS\\n'}}))\n"
-        "print(os.environ['FAKE_ERR_LINE'], file=sys.stderr)\n",
+        f"print({err_line!r}, file=sys.stderr)\n",
         encoding="utf-8",
     )
     item = _make_work_item(tmp_path, "fatal-marker-fixture")
@@ -118,11 +139,10 @@ def _run_transport(tmp_path: Path, err_line: str) -> dict:
     env["CODEX_BIN"] = str(fake)
     env["CODEX_PROMPTS_DIR"] = str(tmp_path / "outputs")
     env["CODEX_HOME"] = str(prepare_codex_home(tmp_path))
-    env["FAKE_ERR_LINE"] = err_line
     result = subprocess.run(
         [
             sys.executable,
-            str(CODEX),
+            str(_projected_codex_entrypoint(tmp_path)),
             "fatal-marker-fixture",
             "--prompt-file",
             str(prompt),

@@ -68,7 +68,7 @@ Return one advisory memo with:
 ## Working rules
 
 - Distinguish confirmed facts, assumptions, and judgment.
-- Use file-based prompt delivery for substantive external CLI prompts: write the prompt to a temporary prompt file and feed it through stdin or the provider's supported file-input mechanism; direct prompt argv is only for tiny smoke checks or documented provider limitations.
+- Use file-based prompt delivery for substantive external CLI prompts through the approved thin wrapper: write the prompt to a temporary prompt file and feed it through stdin or the provider's supported file-input mechanism; direct prompt argv is only for a fixed synthetic non-substantive smoke token. If the wrapper is unavailable, fail or reroute honestly.
 - If the lead or repo-local lane policy explicitly requests a closeout consultant sweep, follow the configured consultant mode honestly and do not silently downgrade to a different path.
 - If the selected consultant path is unavailable for that requested closeout sweep, say so explicitly and keep the batch open for escalation.
 - If the active lane policy requests more than one consultant-check, each invocation still returns one memo; the lead aggregates the memos and fails closed when the requested count cannot be satisfied.

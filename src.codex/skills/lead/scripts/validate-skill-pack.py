@@ -492,7 +492,7 @@ _DECLARED_ACTIONS = (('direct', 'file', '@AGENTS'),
   'Codex addendum stays bounded instead of regrowing into a full blueprint copy'),
  ('check_normalized_sha256',
   '@ROOT/shared/references/subagent-operating-model.md',
-  'fa464ae90e0c66a22fdf6dfbe875ab3db7815b4aa9db2d0b75df0dc92318f864',
+  'b4d4b87fa3b87ed77c4cc3b2c313a5141eb38d07d5176e6dbce297e4fa3b2d01',
   'shared subagent-operating-model matches the current canonical normalized fingerprint'),
  ('check_normalized_sha256',
   '@ROOT/references-codex/subagent-operating-model.md',
@@ -855,6 +855,18 @@ _DECLARED_ACTIONS = (('direct', 'file', '@AGENTS'),
   'scripts/check-work-items-state.* --root',
   'subagent-contracts point to the periodic work-item state checker'),
  ('check_contains',
+  '@ROOT/src.codex/skills/lead/subagent-contracts.md',
+  'Dead/superseded code disposition:',
+  'subagent-contracts require a dead/superseded code disposition'),
+ ('check_contains',
+  '@ROOT/src.codex/skills/lead/subagent-contracts.md',
+  'When a change supersedes a mechanism, `none` is invalid.',
+  'subagent-contracts reject none for superseded mechanisms'),
+ ('check_contains',
+  '@ROOT/src.codex/skills/qa-engineer/SKILL.md',
+  'cannot return `PASS` until it verifies the disposition field against the diff',
+  'QA gate verifies dead/superseded code disposition before PASS'),
+ ('check_contains',
   '@ROOT/src.codex/AGENTS.codex.md',
   'Before every native subagent spawn, the caller discovers the tools available at that moment and selects the exact task-scoped MCP/tool identifiers, or `none`.',
   'Codex AGENTS owns per-spawn exact tool discovery and selection'),
@@ -973,8 +985,16 @@ _DECLARED_ACTIONS = (('direct', 'file', '@AGENTS'),
   'external-dispatch requires direct external launch'),
  ('check_contains',
   '@ROOT/src.codex/skills/lead/external-dispatch.md',
-  'substantive task prompt must use file-based prompt delivery',
-  'external-dispatch requires file-based external CLI prompts'),
+  'approved thin wrapper',
+  'external-dispatch requires approved wrapper prompts'),
+ ('check_contains',
+  '@ROOT/src.codex/skills/lead/external-dispatch.md',
+  'file/stdin prompt delivery',
+  'external-dispatch requires file/stdin prompt delivery'),
+ ('check_contains',
+  '@ROOT/src.codex/skills/lead/external-dispatch.md',
+  'raw CLI, transport-neutral, inline, and caller-sidecar prompt chains are unsupported',
+  'external-dispatch rejects raw and inline substantive prompts'),
  ('check_absent',
   '@ROOT/src.codex/skills/consultant/SKILL.md',
   'Adapter host runtime:',
@@ -1007,6 +1027,46 @@ _DECLARED_ACTIONS = (('direct', 'file', '@AGENTS'),
   '@ROOT/src.codex/skills/external-reviewer/SKILL.md',
   'file-based prompt delivery',
   'external-reviewer requires file-based external CLI prompts'),
+ ('check_contains',
+  '@ROOT/src.codex/skills/lead/external-dispatch.md',
+  'approved thin wrapper',
+  'external prompt consumer inventory: Codex dispatch owner cites the wrapper boundary'),
+ ('check_contains',
+  '@ROOT/src.codex/skills/consultant/SKILL.md',
+  'approved thin wrapper',
+  'external prompt consumer inventory: Codex consultant cites the wrapper boundary'),
+ ('check_contains',
+  '@ROOT/src.codex/skills/external-worker/SKILL.md',
+  'approved thin wrapper',
+  'external prompt consumer inventory: Codex worker cites the wrapper boundary'),
+ ('check_contains',
+  '@ROOT/src.codex/skills/external-reviewer/SKILL.md',
+  'approved thin wrapper',
+  'external prompt consumer inventory: Codex reviewer cites the wrapper boundary'),
+ ('check_contains',
+  '@ROOT/src.codex/skills/review-loop/SKILL.md',
+  'approved thin wrapper',
+  'external prompt consumer inventory: Codex review loop cites the wrapper boundary'),
+ ('check_contains',
+  '@ROOT/src.codex/skills/design-panel/SKILL.md',
+  'approved thin wrapper',
+  'external prompt consumer inventory: Codex design panel cites the wrapper boundary'),
+ ('check_contains',
+  '@ROOT/docs/external-worker-design.md',
+  'approved thin wrapper',
+  'external prompt consumer inventory: worker design cites the wrapper boundary'),
+ ('check_contains',
+  '@ROOT/docs/agents-mode-reference.md',
+  'approved thin wrapper',
+  'external prompt consumer inventory: agents-mode reference cites the wrapper boundary'),
+ ('check_contains',
+  '@ROOT/shared/references/spine/verification-and-decision-discipline.md',
+  'approved thin wrapper',
+  'external prompt consumer inventory: verification discipline cites the wrapper boundary'),
+ ('check_contains',
+  '@ROOT/shared/references/review-loop-methodology.md',
+  'approved thin wrapper',
+  'external prompt consumer inventory: review-loop methodology cites the wrapper boundary'),
  ('check_absent',
   '@ROOT/src.codex/skills/consultant/SKILL.md',
   'Actual execution path:** <external CLI (provider name) | internal subagent',
@@ -1237,7 +1297,7 @@ _DECLARED_ACTIONS = (('direct', 'file', '@AGENTS'),
   'Codex platform rules mention the external-brigade utility skill'),
  ('check_contains',
   '@ROOT/src.codex/AGENTS.codex.md',
-  'auto | codex | claude | gemini | qwen',
+  'auto | codex | claude | gemini | qwen | kimi | grok',
   'Codex platform rules document the example-only Gemini/Qwen provider universe'),
  ('check_contains',
   '@ROOT/shared/references/README.md',
@@ -1587,16 +1647,52 @@ _CODEX_HOOK_HEALTH_DEV_ACTIONS = (
     ),
 )
 
-# The slices are historical validator sections, not inferred path heuristics.
-# Their union preserves the source validator's exact action inventory and counts.
+_SOURCE_ONLY_MAINTAINER_PREFIXES = (
+    "@ROOT/shared/references/",
+    "@ROOT/shared/agents-mode.defaults.yaml",
+    "@ROOT/docs/",
+    "@ROOT/references-",
+    "@ROOT/src.gemini/",
+    "@ROOT/src.qwen/",
+    "@ROOT/install.",
+    "@ROOT/INSTALL.md",
+    "@ROOT/RELEASE_NOTES.md",
+    "@ROOT/scripts/agent-run-ledger",
+)
+
+_SOURCE_ONLY_MAINTAINER_OPERATIONS = (
+    "check_normalizer_strips_example_auto_providers",
+    "check_shared_defaults_reserve_policy",
+)
+
+
+def _is_source_only_maintainer_action(action: tuple[str, ...]) -> bool:
+    return (
+        action[0] in _SOURCE_ONLY_MAINTAINER_OPERATIONS
+        or any(
+            str(value).startswith(_SOURCE_ONLY_MAINTAINER_PREFIXES)
+            for value in action
+        )
+    )
+
+
+# Historical sections retain their existing source coverage, but a source-only
+# assertion may never leak into the installed-pack action set as an index moves.
+_ALL_ACTIONS = (
+    _DECLARED_ACTIONS[0:35]
+    + _DECLARED_ACTIONS[142:304]
+    + _DECLARED_ACTIONS[322:329]
+    + _DECLARED_ACTIONS[366:372]
+    + _APAT_ACTIONS
+)
+
 ACTIONS = (
     (
         "all",
-        _DECLARED_ACTIONS[0:35]
-        + _DECLARED_ACTIONS[142:304]
-        + _DECLARED_ACTIONS[322:329]
-        + _DECLARED_ACTIONS[366:372]
-        + _APAT_ACTIONS,
+        tuple(
+            action for action in _ALL_ACTIONS
+            if not _is_source_only_maintainer_action(action)
+        ),
     ),
     (
         "dev_repo",
@@ -1608,6 +1704,10 @@ ACTIONS = (
         + _DECLARED_ACTIONS[329:334]
         + _DECLARED_ACTIONS[335:342]
         + _DECLARED_ACTIONS[351:366]
+        + tuple(
+            action for action in _ALL_ACTIONS
+            if _is_source_only_maintainer_action(action)
+        )
         + _APAT_DEV_ACTIONS
         + _UI_CONTINUITY_DEV_ACTIONS
         + _CODEX_HOOK_HEALTH_DEV_ACTIONS,

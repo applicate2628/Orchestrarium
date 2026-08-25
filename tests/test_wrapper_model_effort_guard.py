@@ -17,7 +17,7 @@ from tests.fixtures.codex_hook_fixture import (
 
 
 ROOT = Path(__file__).resolve().parents[1]
-MODULE = ROOT / "src.claude/agents/scripts/provider_prompt.py"
+MODULE = ROOT / "scripts/provider_prompt.py"
 ENTRYPOINTS = {
     "codex": ROOT / "src.claude/agents/scripts/invoke-codex-prompt.py",
     "claude": ROOT / "src.claude/agents/scripts/invoke-claude-prompt.py",
@@ -32,7 +32,30 @@ sys.modules[spec.name] = provider_prompt
 spec.loader.exec_module(provider_prompt)
 
 
-def _make_fake_provider(tmp_path: Path, provider: str) -> tuple[Path, Path]:
+def _projected_entrypoint(tmp_path: Path, provider: str) -> Path:
+    scripts = tmp_path / "claude-projection" / "agents" / "scripts"
+    scripts.mkdir(parents=True, exist_ok=True)
+    (scripts / "provider_prompt.py").write_bytes(MODULE.read_bytes())
+    (scripts / "external-prompt-governance.md").write_bytes(
+        (ROOT / "scripts" / "external-prompt-governance.md").read_bytes()
+    )
+    entrypoint = scripts / ENTRYPOINTS[provider].name
+    entrypoint.write_bytes(ENTRYPOINTS[provider].read_bytes())
+    support = tmp_path / "scripts"
+    support.mkdir(exist_ok=True)
+    for name in ("check-hook-health.py", "universal_hooks_manifest.py", "agent-run-ledger.py"):
+        (support / name).write_bytes((ROOT / "scripts" / name).read_bytes())
+    shared = tmp_path / "shared"
+    shared.mkdir(exist_ok=True)
+    (shared / "AGENTS.shared.md").write_bytes(
+        (ROOT / "shared" / "AGENTS.shared.md").read_bytes()
+    )
+    return entrypoint
+
+
+def _make_fake_provider(
+    tmp_path: Path, provider: str, *, stdin_capture: Path | None = None
+) -> tuple[Path, Path]:
     capture = tmp_path / f"{provider}-argv.json"
     fake = tmp_path / f"fake-{provider}.py"
     fake.write_text(
@@ -40,9 +63,13 @@ def _make_fake_provider(tmp_path: Path, provider: str) -> tuple[Path, Path]:
         "args=sys.argv[1:]\n"
         "if 'app-server' in args:\n"
         f"    import runpy; runpy.run_path({str(FAKE_CODEX_HOOKS_HOST)!r}, run_name='__main__')\n"
-        "pathlib.Path(os.environ['FAKE_ARGV_CAPTURE']).write_text("
-        "json.dumps(args), encoding='utf-8')\n"
-        "sys.stdin.buffer.read()\n"
+        f"pathlib.Path({str(capture)!r}).write_text(json.dumps(args), encoding='utf-8')\n"
+        "payload=sys.stdin.buffer.read()\n"
+        + (
+            f"pathlib.Path({str(stdin_capture)!r}).write_bytes(payload)\n"
+            if stdin_capture is not None
+            else ""
+        )
         + (
             "print(json.dumps({'type':'item.completed','item':{'type':'agent_message','text':'GATE: PASS\\n'}}))\n"
             if provider == "codex"
@@ -109,7 +136,7 @@ def _run_transport(
     result = subprocess.run(
         [
             sys.executable,
-            str(ENTRYPOINTS[provider]),
+            str(_projected_entrypoint(tmp_path, provider)),
             "model-effort-fixture",
             "--prompt-file",
             str(prompt),
@@ -124,6 +151,55 @@ def _run_transport(
         timeout=30,
     )
     return result, capture, item
+
+
+@pytest.mark.parametrize("provider", ("codex", "claude"))
+def test_root_thin_wrapper_delivers_one_governance_frame_then_exact_task_bytes(
+    tmp_path: Path, provider: str
+) -> None:
+    """Catches a root wrapper that bypasses the shared in-memory transport seam."""
+
+    prompt = tmp_path / "task.md"
+    task = b"root-wrapper task\n"
+    prompt.write_bytes(task)
+    stdin_capture = tmp_path / "provider-stdin.bin"
+    fake, _argv = _make_fake_provider(tmp_path, provider, stdin_capture=stdin_capture)
+    env = os.environ.copy()
+    env[BIN_ENV[provider]] = str(fake)
+    env[OUTPUT_ENV[provider]] = str(tmp_path / "outputs")
+    if provider == "codex":
+        env["CODEX_HOME"] = str(prepare_codex_home(tmp_path))
+    else:
+        env["ANTHROPIC_API_KEY"] = "fake-commercial-credential"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts" / f"invoke-{provider}-prompt.py"),
+            "root-wrapper-fixture",
+            "--prompt-file",
+            str(prompt),
+        ],
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=30,
+    )
+
+    assert result.returncode == 0, result.stderr
+    delivered = stdin_capture.read_bytes()
+    capsule = (ROOT / "scripts" / "external-prompt-governance.md").read_bytes()
+    expected = (
+        b"ORCHESTRARIUM_EXTERNAL_GOVERNANCE_V1\n"
+        + capsule
+        + b"END_ORCHESTRARIUM_EXTERNAL_GOVERNANCE_V1\n\n"
+        + task
+    )
+    assert delivered == expected
+    assert delivered.splitlines().count(b"ORCHESTRARIUM_EXTERNAL_GOVERNANCE_V1") == 1
+    assert result.stdout.count("ORCHESTRARIUM_PROVIDER_RESULT_V2=") == 1
 
 
 @pytest.mark.parametrize(

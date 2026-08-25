@@ -10,7 +10,6 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -27,7 +26,7 @@ PROVIDER_RUNTIME_MIRRORS = (
     ROOT / "src.claude/agents/scripts/skill_pack_validator_runtime.py",
 )
 EXPECTED_SUMMARIES = (
-    "PASS: 553  WARN: 0  FAIL: 0",
+    "PASS: 554  WARN: 0  FAIL: 0",
     "Checks: 470  |  Passed: 470  |  Warnings: 0  |  Errors: 0",
 )
 
@@ -529,7 +528,7 @@ def test_mutable_action_seam_detects_missing_required_content(
 
 
 @pytest.mark.parametrize("validator", VALIDATORS)
-def test_scoped_action_registry_preserves_source_inventory(
+def test_scoped_action_registry_keeps_source_only_maintainer_checks_out_of_installed_layout(
     validator: Path,
 ) -> None:
     module = _load(validator, f"validator_scope_inventory_{validator.parent.parent.name}")
@@ -539,31 +538,47 @@ def test_scoped_action_registry_preserves_source_inventory(
         "dev_repo_nonstandalone",
         "installed",
     )
-    source_actions = tuple(
+    source_only_actions = tuple(
+        action
+        for action in dict(module.ACTIONS)["dev_repo"]
+        if module._is_source_only_maintainer_action(action)
+    )
+    assert source_only_actions
+    assert any(
+        any(str(value).startswith("@ROOT/docs/") for value in action)
+        for action in source_only_actions
+    )
+    assert any(
+        action[0] == "check_normalizer_strips_example_auto_providers"
+        for action in source_only_actions
+    )
+    assert any(
+        "@ROOT/shared/agents-mode.defaults.yaml" in action
+        for action in source_only_actions
+    )
+    installed_actions = tuple(
         action
         for scope, actions in module.ACTIONS
-        if scope != "installed"
+        if scope in ("all", "installed")
         for action in actions
     )
-    assert Counter(source_actions) == Counter(
-        module._DECLARED_ACTIONS
-        + module._APAT_ACTIONS
-        + module._APAT_DEV_ACTIONS
-        + module._UI_CONTINUITY_DEV_ACTIONS
+    assert not any(
+        module._is_source_only_maintainer_action(action)
+        for action in installed_actions
     )
 
 
 @pytest.mark.parametrize(
-    ("provider", "expected_summary", "installed_label"),
+    ("provider", "expected_clean_result", "installed_label"),
     (
         (
             "codex",
-            "PASS: 358  WARN: 0  FAIL: 0",
+            "VALIDATION PASSED\n",
             "installed work-item state validator enforces evidence for PASS",
         ),
         (
             "claude",
-            "Checks: 353  |  Passed: 353  |  Warnings: 0  |  Errors: 0",
+            "  RESULT: PASS\n",
             "installed work-item state validator enforces evidence for PASS",
         ),
     ),
@@ -572,7 +587,7 @@ def test_scoped_action_registry_preserves_source_inventory(
 def test_installed_validator_uses_script_layout_and_runs_installed_actions(
     tmp_path: Path,
     provider: str,
-    expected_summary: str,
+    expected_clean_result: str,
     installed_label: str,
     cwd_mode: str,
 ) -> None:
@@ -591,7 +606,7 @@ def test_installed_validator_uses_script_layout_and_runs_installed_actions(
         check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert expected_summary in result.stdout
+    assert expected_clean_result in result.stdout
     assert installed_label in result.stdout
     assert "dev repo validator unavailable in installed layout" not in result.stdout
     assert "agents-mode reference defines canonical maintenance" not in result.stdout
@@ -650,7 +665,7 @@ def test_installed_codex_layering_checks_only_orchestrarium_owned_skills(
         "root_document",
         "required_marker",
         "stale_marker",
-        "expected_summary",
+        "expected_clean_result",
         "expected_label",
     ),
     (
@@ -660,8 +675,8 @@ def test_installed_codex_layering_checks_only_orchestrarium_owned_skills(
             "AGENTS.md",
             "## Role index",
             "## Stale role index",
-            "PASS: 358  WARN: 0  FAIL: 0",
-            "Section '## Role index' present in AGENTS.md",
+            "VALIDATION PASSED\n",
+                "installable skill/agent instructions contain no project-specific Orchestrarium upgrade-ledger obligation",
         ),
         (
             "claude",
@@ -669,7 +684,7 @@ def test_installed_codex_layering_checks_only_orchestrarium_owned_skills(
             ".claude/CLAUDE.md",
             "agents-design-panel.md",
             "agents-stale-panel.md",
-            "Checks: 353  |  Passed: 353  |  Warnings: 0  |  Errors: 0",
+            "  RESULT: PASS\n",
             "CLAUDE.md dispatch index exposes the design-panel command",
         ),
     ),
@@ -681,7 +696,7 @@ def test_installed_validator_prefers_logical_root_across_provider_subtree_symlin
     root_document: str,
     required_marker: str,
     stale_marker: str,
-    expected_summary: str,
+    expected_clean_result: str,
     expected_label: str,
 ) -> None:
     logical_home = tmp_path / "logical"
@@ -721,7 +736,7 @@ def test_installed_validator_prefers_logical_root_across_provider_subtree_symlin
 
         result = _run_validator(
             logical_validator,
-            expected_summary,
+            expected_clean_result,
             cwd=ROOT,
             root=None,
         )

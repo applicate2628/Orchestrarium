@@ -8,7 +8,7 @@ Codex installs all 17 manifest role TOMLs as create-only payloads under the targ
 
 Repository policy tests use inline requests and consume no tracked provider-result or runtime-result fixture. `scripts/validate-slice-a-detached.py` applies only the explicitly admitted overlay to one real detached candidate worktree, supervises every focused child, settles worktree cleanup, and only then publishes an always-nonauthorizing bounded manifest. Attempt logs and receipts are local evidence only.
 
-Production auto-routing in the root integration contract is limited to Codex plus Claude Code. Gemini CLI and Qwen are documented here as explicit example integrations only; both are classified in this repository as `WEAK MODEL / NOT RECOMMENDED`.
+Production auto-routing in the root integration contract is limited to Codex plus Claude Code. Gemini CLI and Qwen are explicit example integrations only and are classified in this repository as `WEAK MODEL / NOT RECOMMENDED`. Kimi Code and official Grok are explicit-only external routes: they never join `auto` or profile orders, may admit only eligible read-only exploration/planning/review through `resolve_external_dispatch`, and require independent verification.
 
 Do not confuse these runtime surfaces with the monorepo authoring trees such as `src.codex/`, `src.claude/`, `src.gemini/`, or `src.qwen/`.
 

@@ -13,7 +13,7 @@ Use the shared Qwen dispatch contract in [../lead/external-dispatch.md](../lead/
 - No silent internal fallback.
 - Respect the approved role contract and change surface.
 - Preserve the replaced internal worker role as provenance.
-- Use file-based prompt delivery for substantive task prompts: write the prompt to a temporary prompt file and feed it through stdin or the provider's supported file-input mechanism; direct prompt argv is only for tiny smoke checks or documented provider limitations.
+- Use file-based prompt delivery for substantive task prompts through the approved thin wrapper: write the prompt to a temporary prompt file and feed it through stdin or the provider's supported file-input mechanism; direct prompt argv is only for a fixed synthetic non-substantive smoke token. If the wrapper is unavailable, fail or reroute honestly.
 
 ## Qwen-line provider rules
 

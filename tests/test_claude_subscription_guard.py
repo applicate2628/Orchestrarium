@@ -11,13 +11,38 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 WRAPPER = ROOT / "src.claude/agents/scripts/invoke-claude-prompt.py"
+OWNER = ROOT / "scripts/provider_prompt.py"
 
 
-def _run(tmp_path: Path, extra_env: dict[str, str] | None = None):
+def _projected_wrapper(tmp_path: Path) -> Path:
+    scripts = tmp_path / "claude-projection" / "agents" / "scripts"
+    scripts.mkdir(parents=True, exist_ok=True)
+    (scripts / "provider_prompt.py").write_bytes(OWNER.read_bytes())
+    (scripts / "external-prompt-governance.md").write_bytes(
+        (ROOT / "scripts" / "external-prompt-governance.md").read_bytes()
+    )
+    wrapper = scripts / WRAPPER.name
+    wrapper.write_bytes(WRAPPER.read_bytes())
+    support = tmp_path / "scripts"
+    support.mkdir(exist_ok=True)
+    (support / "agent-run-ledger.py").write_bytes(
+        (ROOT / "scripts" / "agent-run-ledger.py").read_bytes()
+    )
+    return wrapper
+
+
+def _run(
+    tmp_path: Path,
+    extra_env: dict[str, str] | None = None,
+    *,
+    child_source: str | None = None,
+    prompt_bytes: bytes | None = None,
+):
+    tmp_path.mkdir(parents=True, exist_ok=True)
     fake = tmp_path / "fake-claude.py"
-    fake.write_text("print('GATE: PASS')\n", encoding="utf-8")
+    fake.write_text(child_source or "print('GATE: PASS')\n", encoding="utf-8")
     prompt = tmp_path / "prompt.md"
-    prompt.write_text("review\n", encoding="utf-8")
+    prompt.write_bytes(prompt_bytes if prompt_bytes is not None else b"review\n")
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
     env = {
@@ -43,7 +68,13 @@ def _run(tmp_path: Path, extra_env: dict[str, str] | None = None):
     if extra_env:
         env.update(extra_env)
     return subprocess.run(
-        [sys.executable, str(WRAPPER), "auth-test", "--prompt-file", str(prompt)],
+        [
+            sys.executable,
+            str(_projected_wrapper(tmp_path)),
+            "auth-test",
+            "--prompt-file",
+            str(prompt),
+        ],
         cwd=tmp_path,
         env=env,
         capture_output=True,
@@ -85,3 +116,20 @@ def test_api_key_helper_settings_launch(tmp_path: Path) -> None:
     )
     result = _run(tmp_path)
     assert result.returncode == 0, result.stderr
+
+
+def test_vertex_closed_stdin_after_terminal_is_deterministically_benign(tmp_path: Path) -> None:
+    child = (
+        "import os,sys,time\n"
+        "sys.stdout.write('GATE: PASS\\n');sys.stdout.flush()\n"
+        "os.close(0)\n"
+        "time.sleep(0.2)\n"
+    )
+    for index in range(3):
+        result = _run(
+            tmp_path / str(index),
+            {"CLAUDE_CODE_USE_VERTEX": "true"},
+            child_source=child,
+                prompt_bytes=b"x" * (15 * 1024 * 1024),
+        )
+        assert result.returncode == 0, result.stderr

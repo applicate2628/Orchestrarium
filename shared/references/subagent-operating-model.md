@@ -76,6 +76,10 @@ Delivery loop:
 lead -> research -> design -> plan -> implement -> QA/review -> lead
 ```
 
+### 3.1a Workflow economy
+
+Workflow economy is owned by `shared/AGENTS.shared.md` under **Workflow economy (binding)**. This methodology does not create a second review, fan-out, or artifact policy; provider contracts project that shared rule for their native runtime.
+
 Re-intake loop for an in-flight item whose admitted shape has changed:
 
 ```text

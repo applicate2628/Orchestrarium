@@ -17,7 +17,7 @@ Candidate launch arguments MUST NOT select or resume an existing provider sessio
 
 - Each candidate lane is dispatched as a design-capable worker run (per `$external-worker` and `external-dispatch.md`), carrying the identical pinned input; only the framing overlay differs.
 - Where the host runtime cannot launch a lane concurrently, run the lanes **sequentially** in fresh external contexts and synthesize their outputs afterward; sequential execution does not change the panel's logic, only its concurrency — each lane still needs a fresh context that has not seen a sibling lane's output.
-- Read each lane's captured output file before counting it; a launch is not a candidate.
+- Count an external lane only after the approved thin wrapper owner in `lead/external-dispatch.md` accepts its terminal result through the strict V2 parser, full external-nonauthorizing tuple, and untrusted/potentially-sensitive resultText contract; a launch is not a candidate.
 
 ## The design-panel invariants (DP1–DP8)
 
@@ -34,11 +34,11 @@ Candidate launch arguments MUST NOT select or resume an existing provider sessio
 
 ## Steps
 
-1. **Read the routing surface.** Read and normalize `.agents/.agents-mode.yaml` first; honor `parallelMode`, `externalProvider`, `externalPriorityProfile`, and the other structured routing keys. Shipped `auto` stays on `codex | claude`.
+1. **Read the routing surface.** Read and normalize `.agents/.agents-mode.yaml` first; honor `parallelMode`, `externalProvider`, `externalPriorityProfile`, and the other structured routing keys. Shipped `auto` stays on the Codex/Claude pair; Kimi/Grok remain explicit-only read-only routes.
 2. **Pinned-input gate.** Confirm one admitted objective, scope, and evidence/constraint package exist. A panel multiplies an unverified premise across every lane — verify it first.
 3. **Choose N and framings.** Default `N=2`. Pick a distinct, bounded framing per lane and pre-register them (lane id, framing, resolved role) before dispatch.
 4. **Dispatch the candidate lanes** through the external surface, each carrying the identical pinned input and its own framing, with file-based prompt delivery (write the prompt body to a temporary file; argv stays for launcher flags and file paths). Inspect the resolved provider argv and fail closed on every session-reuse route listed by `DP3-NATIVE-ROUTE-UNVERIFIED`. Run concurrently when the runtime supports it, else sequentially in fresh contexts. Each lane writes its candidate to `design-<lane>.md`, never `design.md`.
-5. **Collect.** Read each lane's captured output before counting it. A died, timed-out, or empty lane is `UNVERIFIED` — re-run it with the same framing; never silently reduce quorum below `N=2`.
+5. **Collect.** Count each lane only after the approved thin wrapper owner returns its terminal result through the strict V2 parser, full external-nonauthorizing tuple, and untrusted/potentially-sensitive resultText contract. A died, timed-out, or empty lane is `UNVERIFIED` — re-run it with the same framing; never silently reduce quorum below `N=2`.
 6. **Synthesize.** The orchestrating session performs the synthesis directly (never a spawned "synthesizer" run acting as a stand-in lead, and never a candidate author). Produce the comparison/disposition matrix and write the sole canonical `design.md`, citing every candidate as evidence.
 7. **Return exactly one public result:** the synthesized design and its gate (`PASS | REVISE | BLOCKED:dependency | BLOCKED:prerequisite`). Never present one candidate as "the design." Candidate artifacts stay as work-item inputs and are never handed to the planner.
 

@@ -2,6 +2,10 @@
 
 Plan or launch a bounded parallel set of external helpers for independent admitted lanes or disjoint slices.
 
+## Workflow economy projection
+
+Apply the binding shared **Workflow economy (binding)** rule. An external brigade is off by default and may launch only for an explicit user request, enabled configuration, or a documented risk trigger; it does not manufacture optional review or progress artifacts.
+
 ## Steps
 
 1. **Read the current contract.**

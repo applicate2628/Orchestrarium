@@ -100,6 +100,7 @@ INSTALLER_CASES = [
 
 PRODUCTION_PROVIDER_NAMES = frozenset({"codex", "claude"})
 EXAMPLE_PROVIDER_NAMES = frozenset({"gemini", "qwen"})
+EXPLICIT_ONLY_PROVIDER_NAMES = frozenset({"kimi", "grok"})
 
 
 def validate_production_provider_partition() -> None:
@@ -312,9 +313,12 @@ def validate_overlay(
 
     for profile_name, lanes in profiles.items():
         for lane_name, providers in lanes.items():
-            if any(provider in {"gemini", "qwen"} for provider in providers):
+            if any(
+                provider in EXAMPLE_PROVIDER_NAMES | EXPLICIT_ONLY_PROVIDER_NAMES
+                for provider in providers
+            ):
                 raise InstallerRegressionError(
-                    f"{case.name} profile {profile_name}/{lane_name} kept example provider"
+                    f"{case.name} profile {profile_name}/{lane_name} kept non-auto provider"
                 )
             if "reserve" in providers:
                 if not (lane_name.startswith("advisory.") or lane_name.startswith("review.")):

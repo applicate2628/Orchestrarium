@@ -24,6 +24,8 @@ Diff-invisible invariants:
 - <behavior or contract that must remain true although the diff may not expose it>
 Named regression guard:
 - <test/probe plus expected result that falsifies preservation>
+Dead/superseded code disposition:
+- deleted <files/symbols/paths> | none (probe: <named search/reachability/test>)
 Evidence discipline:
 - <cite each decision-driving claim with an in-repo file:line, installed-dependency surface check, versioned official docs/upstream source URL, or target-environment smoke test preserved under .scratch/; otherwise label it ASSUMPTION (UNVERIFIED) with the resolving step; never use "should work", "should be fine", "probably", "likely", "I think", "based on training data", "in general", or "this pattern usually works" as a correctness-driver>
 Defect-class inventory:
@@ -40,13 +42,13 @@ Gate to next stage:
 - <what must be proven>
 ```
 
-Before dispatch, fill `Diff-invisible invariants` and `Named regression guard`; `none` is valid only with a one-line reason. An implementation or review handoff with either field omitted is incomplete.
+Before dispatch, fill `Diff-invisible invariants`, `Named regression guard`, and `Dead/superseded code disposition`; `none` is valid only with a one-line reason. When a change supersedes a mechanism, `none` is invalid. An implementation or review handoff with any field omitted is incomplete.
 
 Populate `Allowed tools` under the caller-owned tool selection contract in installed `AGENTS.md`. The caller performs fresh discovery before each native spawn and records the exact selection or `none`; an inherited but unlisted tool remains behaviorally forbidden.
 
 `Approved inputs` identify the producing run's declared scope and accepted artifact revision when available; no new handoff field is required. Evaluate authored claims and review verdicts against the producing run's declared scope and accepted baseline: later independently owned lane deltas are reviewed in their own lane and do not retroactively falsify the earlier artifact; an actual material revision of the accepted upstream artifact still invalidates dependent `PASS` states and triggers dependent re-review.
 
-Receiving-side echo: the returned artifact MUST (a) report the Named regression guard's actual result (expected vs observed), (b) answer each Diff-invisible invariant as verified or ASSUMPTION (UNVERIFIED), (c) when the dispatch cited a defect class, include the class audit — every enumerated participant classified fixed / not-affected. An artifact missing the echo fails the mechanical acceptance gate.
+Receiving-side echo: the returned artifact MUST (a) report the Named regression guard's actual result (expected vs observed), (b) answer each Diff-invisible invariant as verified or ASSUMPTION (UNVERIFIED), (c) report the Dead/superseded code disposition result and its named probe, and (d) when the dispatch cited a defect class, include the class audit — every enumerated participant classified fixed / not-affected. An artifact missing the echo fails the mechanical acceptance gate.
 
 **Class-completeness trigger (mandatory):** when a reviewer, bot, or test cites one instance of a defect class, the dispatch prompt MUST direct the recipient to enumerate every participant of that class, classify each one, and fix every confirmed instance. A prompt scoped only to the named line is invalid.
 
@@ -85,6 +87,10 @@ plain hardcoding, which is a different rule and a different fix.
 ## Artifact gate — no delegation without brief
 
 A lead MUST NOT delegate recovery-tracked or multi-stage work until the configured task-memory item folder, if the repository uses one, contains a verified `brief.md` and full `status.md`.
+
+### Workflow economy projection
+
+Apply the binding shared **Workflow economy (binding)** rule. This contract projects the one-canonical-artifact/concise-root-ledger boundary and forbids progress-only artifacts or progress-only `REVISE`; it does not add a second provider-specific review policy.
 
 - `brief.md` must have explicit scope, out-of-scope, acceptance criteria, required roles, and critical risks with owners.
 - `status.md` must have a current snapshot with stage, last accepted artifact, next concrete action, and any open obligations that still block closeout.

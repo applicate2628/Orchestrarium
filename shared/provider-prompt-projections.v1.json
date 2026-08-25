@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "packRevision": "1.x-slice-b",
+  "files": {
+    "provider_prompt.py": {
+      "source": "scripts/provider_prompt.py",
+      "sha256": "4bfb92cb92039f73ce5eca397f22a5df7b9ef9203486cbd81c654e485315edf1",
+      "destination": "scripts/provider_prompt.py"
+    },
+    "invoke-codex-prompt.py": {
+      "source": "scripts/invoke-codex-prompt.py",
+      "sha256": "0b085a6fd0e28a5a486c8ef25bf52d4c69123d94cc8712d63dd30deadcc5f665",
+      "destination": "scripts/invoke-codex-prompt.py"
+    },
+    "invoke-claude-prompt.py": {
+      "source": "scripts/invoke-claude-prompt.py",
+      "sha256": "3250c9a85e36ab2e57a218688c5d7d3cfed59552c1f2bad7eb52f45370df80f3",
+      "destination": "scripts/invoke-claude-prompt.py"
+    },
+    "invoke-kimi-prompt.py": {
+      "source": "scripts/invoke-kimi-prompt.py",
+      "sha256": "05679dac1daded511debf617e8f1189dd941d21a5d1c7f6e3dd3ec21d4c0bc75",
+      "destination": "scripts/invoke-kimi-prompt.py"
+    },
+    "invoke-grok-prompt.py": {
+      "source": "scripts/invoke-grok-prompt.py",
+      "sha256": "1f0f4f6bb03d816b3f40ff56ebe71973301d2d7104ef1d7f335b1ffa0b248559",
+      "destination": "scripts/invoke-grok-prompt.py"
+    },
+    "external-prompt-governance.md": {
+      "source": "scripts/external-prompt-governance.md",
+      "sha256": "c7a59ccec7d6e46be76584a107b0a5b30b249368b4f0958cb78177962dc34b00",
+      "destination": "scripts/external-prompt-governance.md"
+    }
+  }
+}

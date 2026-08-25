@@ -1058,13 +1058,16 @@ def _immutable_decision_fields(
 def _validate_current_decision_v1(text: str, slug: str) -> CurrentDecisionRecord:
     lines = text.splitlines()
     heading_index = next(
-        (index for index, line in enumerate(lines) if re.match(r"^#\s+\S", line)),
+        (index for index, line in enumerate(lines) if line.startswith("#")),
         None,
     )
-    if heading_index is None:
+    if heading_index is None or not (
+        re.match(r"^#\s+\S", lines[heading_index])
+        or lines[heading_index] == "## Decision"
+    ):
         raise LifecycleError(
             "WI-DECISION-SCHEMA-INVALID",
-            f"decision:{slug} requires leading list metadata before its first H1 heading",
+            f"decision:{slug} requires leading list metadata before its first body heading",
         )
 
     leading_occurrences: dict[str, tuple[int, str]] = {}

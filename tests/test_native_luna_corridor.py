@@ -356,7 +356,7 @@ def test_installed_role_dispatch_matches_source_from_foreign_cwd(
         encoding="utf-8",
     )
     assert generic.returncode == 2
-    assert "installed layout supports --resolve-role-dispatch only" in generic.stderr
+    assert "installed layout supports dispatch resolution only" in generic.stderr
 
 
 @pytest.mark.parametrize(

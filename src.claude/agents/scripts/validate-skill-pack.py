@@ -421,7 +421,7 @@ _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
   'Claude addendum stays bounded instead of regrowing into a full blueprint copy'),
  ('check_normalized_sha256',
   '@ROOT/shared/references/subagent-operating-model.md',
-  'fa464ae90e0c66a22fdf6dfbe875ab3db7815b4aa9db2d0b75df0dc92318f864',
+  'b4d4b87fa3b87ed77c4cc3b2c313a5141eb38d07d5176e6dbce297e4fa3b2d01',
   'shared subagent-operating-model matches the current canonical normalized fingerprint'),
  ('check_normalized_sha256',
   '@ROOT/references-claude/subagent-operating-model.md',
@@ -557,6 +557,18 @@ _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
   'scripts/check-work-items-state.* --root',
   'subagent-contracts point to the periodic work-item state checker'),
  ('check_contains',
+  'src.claude/agents/contracts/subagent-contracts.md',
+  'Dead/superseded code disposition:',
+  'subagent-contracts require a dead/superseded code disposition'),
+ ('check_contains',
+  'src.claude/agents/contracts/subagent-contracts.md',
+  'When a change supersedes a mechanism, `none` is invalid.',
+  'subagent-contracts reject none for superseded mechanisms'),
+ ('check_contains',
+  'src.claude/agents/qa-engineer.md',
+  'cannot return `PASS` until it verifies the disposition field against the diff',
+  'QA gate verifies dead/superseded code disposition before PASS'),
+ ('check_contains',
   'src.claude/commands/agents-bugfix.md',
   '**Second-cross-break stop:** If a second fix in the same session breaks a previously working neighbor, '
   'STOP all edits.',
@@ -647,8 +659,16 @@ _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
   'external-dispatch requires direct external launch'),
  ('check_contains',
   'src.claude/agents/contracts/external-dispatch.md',
-  'substantive task prompt must use file-based prompt delivery',
-  'external-dispatch requires file-based external CLI prompts'),
+  'approved thin wrapper',
+  'external-dispatch requires approved wrapper prompts'),
+ ('check_contains',
+  'src.claude/agents/contracts/external-dispatch.md',
+  'file/stdin delivery',
+  'external-dispatch requires file/stdin prompt delivery'),
+ ('check_contains',
+  'src.claude/agents/contracts/external-dispatch.md',
+  'fixed synthetic non-substantive smoke token',
+  'external-dispatch limits inline argv to synthetic smoke'),
  ('check_contains',
   'shared/AGENTS.shared.md',
   'verify every subagent result before accepting it',
@@ -713,6 +733,58 @@ _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
   'src.claude/agents/external-reviewer.md',
   'file-based prompt delivery',
   'external-reviewer requires file-based external CLI prompts'),
+ ('check_contains',
+  'src.claude/CLAUDE.md',
+  'approved thin wrapper',
+  'external prompt consumer inventory: Claude entrypoint cites the wrapper boundary'),
+ ('check_contains',
+  'src.claude/agents/contracts/external-dispatch.md',
+  'approved thin wrapper',
+  'external prompt consumer inventory: Claude dispatch owner cites the wrapper boundary'),
+ ('check_contains',
+  'src.claude/agents/consultant.md',
+  'approved thin wrapper',
+  'external prompt consumer inventory: Claude consultant cites the wrapper boundary'),
+ ('check_contains',
+  'src.claude/agents/external-worker.md',
+  'approved thin wrapper',
+  'external prompt consumer inventory: Claude worker cites the wrapper boundary'),
+ ('check_contains',
+  'src.claude/agents/external-reviewer.md',
+  'approved thin wrapper',
+  'external prompt consumer inventory: Claude reviewer cites the wrapper boundary'),
+ ('check_contains',
+  'src.claude/agents/contracts/review-loop.md',
+  'approved thin wrapper',
+  'external prompt consumer inventory: Claude review loop cites the wrapper boundary'),
+ ('check_contains',
+  'src.claude/agents/contracts/design-panel.md',
+  'approved thin wrapper',
+  'external prompt consumer inventory: Claude design panel cites the wrapper boundary'),
+ ('check_contains',
+  'src.claude/commands/agents-review-loop.md',
+  'approved thin wrapper',
+  'external prompt consumer inventory: Claude review-loop command cites the wrapper boundary'),
+ ('check_contains',
+  'src.claude/commands/agents-design-panel.md',
+  'approved thin wrapper',
+  'external prompt consumer inventory: Claude design-panel command cites the wrapper boundary'),
+ ('check_contains',
+  '@ROOT/docs/external-worker-design.md',
+  'approved thin wrapper',
+  'external prompt consumer inventory: worker design cites the wrapper boundary'),
+ ('check_contains',
+  '@ROOT/docs/agents-mode-reference.md',
+  'approved thin wrapper',
+  'external prompt consumer inventory: agents-mode reference cites the wrapper boundary'),
+ ('check_contains',
+  '@ROOT/shared/references/spine/verification-and-decision-discipline.md',
+  'approved thin wrapper',
+  'external prompt consumer inventory: verification discipline cites the wrapper boundary'),
+ ('check_contains',
+  '@ROOT/shared/references/review-loop-methodology.md',
+  'approved thin wrapper',
+  'external prompt consumer inventory: review-loop methodology cites the wrapper boundary'),
  ('check_contains',
   'src.claude/agents/scripts/invoke-claude-api.sh',
   'invoke-claude-api.py',
@@ -911,7 +983,7 @@ _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
   'src.claude/commands/agents-external-brigade.md removes retired externalGeminiWorkdirMode'),
  ('check_contains',
   'src.claude/CLAUDE.md',
-  'auto | codex | claude | gemini | qwen',
+  'auto | codex | claude | gemini | qwen | kimi | grok',
   'Claude pack docs document the example-only Gemini/Qwen provider universe'),
  ('check_contains',
   'src.claude/CLAUDE.md',
@@ -923,7 +995,7 @@ _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
   'Claude entrypoint forbids Gemini/Qwen profile entries'),
  ('check_contains',
   'src.claude/agents/consultant.md',
-  'Gemini and Qwen stay explicit `WEAK MODEL / NOT RECOMMENDED` example-only paths',
+  'Explicit `gemini`/`qwen` remain `WEAK MODEL / NOT RECOMMENDED` example-only paths',
   'Claude consultant marks Gemini/Qwen as not recommended example routes'),
  ('check_contains',
   'src.claude/agents/external-worker.md',
@@ -943,7 +1015,7 @@ _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
   'Claude external-reviewer forbids example-provider profile broadening'),
  ('check_contains',
   'src.claude/agents/contracts/operating-model.md',
-  'Gemini and Qwen stay explicit `WEAK MODEL / NOT RECOMMENDED` example-only paths',
+  'Gemini/Qwen stay explicit `WEAK MODEL / NOT RECOMMENDED` example-only paths',
   'Claude operating-model marks Gemini/Qwen as not recommended example routes'),
  ('check_contains',
   '@ROOT/shared/references/README.md',
@@ -1236,8 +1308,53 @@ _UI_CONTINUITY_DEV_ACTIONS = (
     ),
 )
 
+_SOURCE_ONLY_MAINTAINER_PREFIXES = (
+    "@ROOT/shared/references/",
+    "@ROOT/shared/agents-mode.defaults.yaml",
+    "@ROOT/docs/",
+    "@ROOT/references-",
+    "@ROOT/src.gemini/",
+    "@ROOT/src.qwen/",
+    "@ROOT/install.",
+    "@ROOT/INSTALL.md",
+    "@ROOT/RELEASE_NOTES.md",
+    "@ROOT/scripts/agent-run-ledger",
+)
+
+_SOURCE_ONLY_MAINTAINER_OPERATIONS = (
+    "check_normalizer_strips_example_auto_providers",
+    "check_shared_defaults_reserve_policy",
+)
+
+
+def _is_source_only_maintainer_action(action: tuple[str, ...]) -> bool:
+    return (
+        action[:2] == ("direct", "curated_registry")
+        or any(str(value).startswith("src.claude/skills/lead/") for value in action)
+        or action[0] in _SOURCE_ONLY_MAINTAINER_OPERATIONS
+        or any(
+            str(value).startswith(_SOURCE_ONLY_MAINTAINER_PREFIXES)
+            for value in action
+        )
+    )
+
+
+_ALL_ACTIONS = (
+    _DECLARED_ACTIONS[0:42]
+    + _DECLARED_ACTIONS[114:256]
+    + _DECLARED_ACTIONS[308:309]
+    + _APAT_ACTIONS
+)
+
+
 ACTIONS = (
-    ("all", _DECLARED_ACTIONS[0:42] + _DECLARED_ACTIONS[114:256] + _DECLARED_ACTIONS[308:309] + _APAT_ACTIONS),
+    (
+        "all",
+        tuple(
+            action for action in _ALL_ACTIONS
+            if not _is_source_only_maintainer_action(action)
+        ),
+    ),
     (
         "dev_repo",
         _DECLARED_ACTIONS[42:114]
@@ -1245,6 +1362,10 @@ ACTIONS = (
         + _DECLARED_ACTIONS[274:279]
         + _DECLARED_ACTIONS[280:284]
         + _DECLARED_ACTIONS[293:308]
+        + tuple(
+            action for action in _ALL_ACTIONS
+            if _is_source_only_maintainer_action(action)
+        )
         + _APAT_DEV_ACTIONS
         + _UI_CONTINUITY_DEV_ACTIONS,
     ),

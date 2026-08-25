@@ -62,6 +62,14 @@ V2_ONLY_FIELDS = {
     "revokesMigrationRunId",
     "revokesMigrationEventSha256",
     "replacementEvent",
+    "terminalClass",
+    "authorizing",
+    "actualExecutionPath",
+    "artifactIdentity",
+    "externalDispatchId",
+    "externalEvidenceRunId",
+    "closerRunId",
+    "targetTuple",
 }
 V3_ALLOWED_FIELDS = {
     "schemaVersion",
@@ -78,7 +86,7 @@ V3_REQUIRED_FIELDS = V3_ALLOWED_FIELDS
 # There is exactly ONE main-conversation identity: "main". The main conversation
 # also holds the Lead role — orchestration weight is the status.md
 # `orchestration: light | full-lead` field, never a second executionRole value.
-EXECUTION_ROLES = {"main", "internal", "consultant", "external-worker", "external-reviewer", "external-brigade"}
+EXECUTION_ROLES = {"main", "internal", "consultant", "external-worker", "external-reviewer", "external-brigade", "none"}
 # Legacy READ-mapping: ledgers written before 2026-07-11 may carry "lead" as the
 # executionRole; it reads as "main" (same owner). Read-side acceptance only —
 # NEW writes must use "main" (scripts/agent-run-ledger.py rejects legacy values).
@@ -128,6 +136,14 @@ ALLOWED_FIELDS = {
     "revokesMigrationRunId",
     "revokesMigrationEventSha256",
     "replacementEvent",
+    "terminalClass",
+    "authorizing",
+    "actualExecutionPath",
+    "artifactIdentity",
+    "externalDispatchId",
+    "externalEvidenceRunId",
+    "closerRunId",
+    "targetTuple",
 }
 EVIDENCE_ALLOWED_FIELDS = {"kind", "ref", "result"}
 AGENT_RUN_SCHEMA_PATH = Path(__file__).resolve().parents[1] / "shared" / "schemas" / "agent-runs.schema.json"
@@ -1172,15 +1188,124 @@ def validate_event(event: dict, item: Path, seen: set[str], errors: list[str]) -
             fail(errors, f"{run_id}: launchRunId is only legal on eventKind terminal")
     if event_kind == "terminal" and "launchRunId" not in event:
         fail(errors, f"{run_id}: eventKind terminal requires launchRunId")
+    terminal_class = event.get("terminalClass")
+    typed_terminal_fields = {
+        "terminalClass", "authorizing", "actualExecutionPath", "artifactIdentity",
+        "externalDispatchId", "externalEvidenceRunId", "closerRunId", "targetTuple",
+    }
+    if terminal_class is not None and terminal_class not in {
+        "external-nonauthorizing", "internal-authorizing",
+    }:
+        fail(errors, f"{run_id}: invalid terminalClass {terminal_class!r}")
+    if terminal_class is not None:
+        for key in ("authorizing", "actualExecutionPath"):
+            if key not in event:
+                fail(errors, f"{run_id}: typed terminal requires {key}")
+        if not isinstance(event.get("authorizing"), bool):
+            fail(errors, f"{run_id}: authorizing must be a boolean")
+        if terminal_class == "external-nonauthorizing":
+            required = {"assignedRole", "closesRunIds"}
+            for key in sorted(required - set(event)):
+                fail(errors, f"{run_id}: external terminal requires {key}")
+            if event.get("authorizing") is not False:
+                fail(errors, f"{run_id}: external terminal requires authorizing=false")
+            if event.get("actualExecutionPath") != "direct-external-cli":
+                fail(errors, f"{run_id}: external terminal requires direct-external-cli")
+            if event.get("executionRole") not in {
+                "external-worker", "external-reviewer", "consultant", "none",
+            }:
+                fail(errors, f"{run_id}: external terminal has invalid executionRole")
+            if event.get("closesRunIds") != []:
+                fail(errors, f"{run_id}: external terminal requires empty closesRunIds")
+            provider = event.get("provider")
+            extended = {"externalDispatchId", "externalEvidenceRunId"}
+            if provider in {"codex", "claude"}:
+                for key in sorted(extended & set(event)):
+                    fail(errors, f"{run_id}: {provider} external terminal forbids {key}")
+            elif provider in {"kimi", "grok"}:
+                for key in sorted(extended - set(event)):
+                    fail(errors, f"{run_id}: {provider} external terminal requires {key}")
+                if event.get("externalEvidenceRunId") != run_id:
+                    fail(errors, f"{run_id}: external terminal evidence run must equal its runId")
+            else:
+                fail(errors, f"{run_id}: external terminal provider must be codex, claude, kimi, or grok")
+        elif terminal_class == "internal-authorizing":
+            required = {
+                "assignedRole", "artifactIdentity", "externalEvidenceRunId",
+                "closerRunId", "targetTuple", "closesRunIds",
+            }
+            for key in sorted(required - set(event)):
+                fail(errors, f"{run_id}: internal terminal requires {key}")
+            if event.get("authorizing") is not True:
+                fail(errors, f"{run_id}: internal terminal requires authorizing=true")
+            if event.get("actualExecutionPath") != "internal":
+                fail(errors, f"{run_id}: internal terminal requires internal execution path")
+            if event.get("executionRole") != "internal":
+                fail(errors, f"{run_id}: internal terminal requires executionRole=internal")
+            if event.get("role") != event.get("assignedRole"):
+                fail(errors, f"{run_id}: internal terminal role must equal assignedRole")
+            try:
+                resolver_path = Path(__file__).with_name("resolve-agents-mode.py")
+                spec = importlib.util.spec_from_file_location(
+                    "_ledger_role_policy_resolver", resolver_path
+                )
+                if spec is None or spec.loader is None:
+                    raise ValueError("resolver unavailable")
+                resolver = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(resolver)
+                policy, _ = resolver.load_role_policy(Path(__file__).resolve().parents[1])
+                final_roles = policy["finalAuthorizingRoles"]
+            except (ImportError, OSError, TypeError, ValueError):
+                final_roles = []
+            if event.get("assignedRole") not in final_roles:
+                fail(errors, f"{run_id}: internal terminal requires a canonical final-authorizing role")
+            if event.get("closerRunId") != run_id:
+                fail(errors, f"{run_id}: closerRunId must equal this internal terminal runId")
+            if len(event.get("closesRunIds", [])) != 1:
+                fail(errors, f"{run_id}: internal terminal closes exactly one gate")
+            target_tuple = event.get("targetTuple")
+            if isinstance(target_tuple, dict):
+                for field, expected in (
+                    ("workItem", event.get("workItem")),
+                    ("artifactIdentity", event.get("artifactIdentity")),
+                ):
+                    if target_tuple.get(field) != expected:
+                        fail(errors, f"{run_id}: targetTuple {field} must bind this closer")
+                if "externalDispatchId" in event and target_tuple.get("externalDispatchId") != event.get("externalDispatchId"):
+                    fail(errors, f"{run_id}: targetTuple externalDispatchId must bind this closer")
+            if event.get("closerRunId") in {
+                event.get("externalEvidenceRunId"), event.get("externalDispatchId")
+            } or event.get("closerRunId") in (event.get("closesRunIds") or []):
+                fail(errors, f"{run_id}: closerRunId must be distinct from target and evidence identities")
+            if "externalDispatchId" in event and event.get("externalDispatchId") == event.get("externalEvidenceRunId"):
+                fail(errors, f"{run_id}: externalDispatchId and externalEvidenceRunId must be distinct")
+    elif typed_terminal_fields & set(event):
+        for key in sorted(typed_terminal_fields & set(event)):
+            fail(errors, f"{run_id}: {key} requires terminalClass")
+
+    for key in ("artifactIdentity", "externalDispatchId", "externalEvidenceRunId", "closerRunId"):
+        if key in event and (not isinstance(event.get(key), str) or not event[key].strip()):
+            fail(errors, f"{run_id}: {key} must be a non-empty string")
+    if "targetTuple" in event:
+        target_tuple = event.get("targetTuple")
+        wanted = {"workItem", "assignedInternalRole", "artifactIdentity"}
+        allowed = wanted | {"externalDispatchId"}
+        if not isinstance(target_tuple, dict) or set(target_tuple) not in (wanted, allowed) or any(
+            not isinstance(target_tuple.get(key), str) or not target_tuple[key].strip()
+            for key in wanted
+        ):
+            fail(errors, f"{run_id}: targetTuple must contain exactly the frozen target fields")
+
     if "closesRunIds" in event:
         closes = event.get("closesRunIds")
-        if not isinstance(closes, list) or not closes or any(
+        external_empty_closes = terminal_class == "external-nonauthorizing" and closes == []
+        if not isinstance(closes, list) or (not closes and not external_empty_closes) or any(
             not isinstance(x, str) or len(x) < 8 for x in closes
         ):
             fail(errors, f"{run_id}: closesRunIds must be a non-empty list of runId strings")
         elif len(set(closes)) != len(closes):
             fail(errors, f"{run_id}: closesRunIds must not contain duplicates")
-        if gate not in CLOSURE_GATES:
+        if not external_empty_closes and gate not in CLOSURE_GATES:
             fail(
                 errors,
                 f"{run_id}: closesRunIds is only legal on PASS, {USER_WAIVER_GATE}, "
@@ -1426,6 +1551,84 @@ def validate_closure(
                 continue
             # C3 (PASS closers): identity + authority + strength against the target.
             if gate == "PASS":
+                if event.get("terminalClass") == "internal-authorizing":
+                    target_tuple = event.get("targetTuple")
+                    evidence_id = event.get("externalEvidenceRunId")
+                    evidence_positions = (
+                        positions_by_run_id.get(evidence_id, [])
+                        if isinstance(evidence_id, str)
+                        else []
+                    )
+                    target_role = target.get("assignedRole") or target.get("role")
+                    typed_close_ok = (
+                        isinstance(target_tuple, dict)
+                        and target_tuple.get("assignedInternalRole") == target_role
+                        and target.get("executionRole") == "internal"
+                        and target.get("terminalClass") != "external-nonauthorizing"
+                        and target.get("workItem") == target_tuple.get("workItem")
+                        and len(evidence_positions) == 1
+                    )
+                    if typed_close_ok:
+                        evidence_pos, evidence_event = evidence_positions[0]
+                        typed_close_ok = (
+                            evidence_pos < pos
+                            and evidence_event.get("terminalClass")
+                            == "external-nonauthorizing"
+                            and evidence_event.get("authorizing") is False
+                            and evidence_event.get("closesRunIds") == []
+                            and evidence_event.get("workItem")
+                            == target_tuple.get("workItem")
+                            and evidence_event.get("assignedRole")
+                            == target_tuple.get("assignedInternalRole")
+                            and evidence_event.get("artifactIdentity")
+                            == target_tuple.get("artifactIdentity")
+                            and event.get("artifactIdentity")
+                            == evidence_event.get("artifactIdentity")
+                        )
+                        if evidence_event.get("provider") in {"codex", "claude"}:
+                            launch_id = evidence_event.get("launchRunId")
+                            launch_positions = (
+                                positions_by_run_id.get(launch_id, [])
+                                if isinstance(launch_id, str) else []
+                            )
+                            typed_close_ok = typed_close_ok and (
+                                evidence_event.get("eventKind") == "terminal"
+                                and evidence_event.get("status") == "completed"
+                                and evidence_event.get("gate") == "PASS"
+                                and "externalDispatchId" not in evidence_event
+                                and "externalEvidenceRunId" not in evidence_event
+                                and "externalDispatchId" not in event
+                                and set(target_tuple) == {
+                                    "workItem", "assignedInternalRole", "artifactIdentity"
+                                }
+                                and len(launch_positions) == 1
+                                and launch_positions[0][0] < evidence_pos
+                                and launch_positions[0][1].get("eventKind") == "launch"
+                                and launch_positions[0][1].get("workItem")
+                                == evidence_event.get("workItem")
+                                and launch_positions[0][1].get("provider")
+                                == evidence_event.get("provider")
+                                and launch_positions[0][1].get("assignedRole")
+                                == evidence_event.get("assignedRole")
+                                and launch_positions[0][1].get("executionRole")
+                                == evidence_event.get("executionRole")
+                            )
+                        else:
+                            typed_close_ok = typed_close_ok and (
+                                evidence_event.get("externalDispatchId")
+                                == target_tuple.get("externalDispatchId")
+                                and event.get("externalDispatchId")
+                                == evidence_event.get("externalDispatchId")
+                            )
+                        if event_validity is not None:
+                            typed_close_ok = typed_close_ok and event_validity[evidence_pos]
+                    if not typed_close_ok:
+                        fail(errors, f"{rid}: internal closer does not bind one valid frozen external evidence tuple (C3)")
+                        bump("C3-external-tuple-fail")
+                        continue
+                    discharged[target_id] = rid if isinstance(rid, str) else "<invalid>"
+                    bump("closure-accepted")
+                    continue
                 closer_exec = event.get("executionRole")
                 if closer_exec in LEGACY_EXECUTION_ROLES:
                     closer_exec = LEGACY_EXECUTION_ROLES[closer_exec]

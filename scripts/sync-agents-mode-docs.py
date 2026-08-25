@@ -220,11 +220,12 @@ def scalar_comment(scalar: dict[str, Any], provider: str) -> str:
         if provider == "qwen":
             return (
                 f"# allowed here: {allowed}; default: {default}; "
-                "gemini/qwen are WEAK MODEL / NOT RECOMMENDED example-only routes"
+                "kimi/grok are explicit-only; gemini/qwen are WEAK MODEL / "
+                "NOT RECOMMENDED example-only routes"
             )
         return (
             f"# allowed here: {allowed}; default: {default}; "
-            "gemini/qwen are explicit example-only and not recommended"
+            "kimi/grok are explicit-only; gemini/qwen are example-only and not recommended"
         )
     return f"# allowed: {allowed}; default: {default}"
 

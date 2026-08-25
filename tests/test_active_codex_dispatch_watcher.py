@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -268,13 +269,23 @@ def test_python_prompt_owner_returns_complete_result_and_reclaims_artifacts(
     bin_env: str,
     output_env: str,
 ) -> None:
+    projection = tmp_path / f"{provider}-projection" / "agents" / "scripts"
+    projection.mkdir(parents=True)
+    projected_entrypoint = projection / entrypoint.name
+    shutil.copyfile(entrypoint, projected_entrypoint)
+    shutil.copyfile(ROOT / "scripts" / "provider_prompt.py", projection / "provider_prompt.py")
+    shutil.copyfile(
+        ROOT / "scripts" / "external-prompt-governance.md",
+        projection / "external-prompt-governance.md",
+    )
+    env_capture = tmp_path / f"{provider}.env"
     fake = tmp_path / f"fake-{provider}.py"
     fake.write_text(
         "import json,os,pathlib,runpy,sys\n"
         "args=sys.argv[1:]\n"
         "if 'app-server' in args:\n"
         f"    runpy.run_path({str(FAKE_CODEX_HOOKS_HOST)!r}, run_name='__main__')\n"
-        "pathlib.Path(os.environ['FAKE_ENV_CAPTURE']).write_text("
+        f"pathlib.Path({str(env_capture)!r}).write_text("
         "os.environ.get('ORCHESTRARIUM_DISPATCHED_REVIEW', ''), encoding='utf-8')\n"
         + (
             "print(json.dumps({'type':'item.completed','item':{'type':'agent_message','text':'GATE: PASS\\n'}}))\n"
@@ -286,18 +297,19 @@ def test_python_prompt_owner_returns_complete_result_and_reclaims_artifacts(
     prompt = tmp_path / "prompt.md"
     prompt.write_text("review this\n", encoding="utf-8")
     env = os.environ.copy()
-    env_capture = tmp_path / f"{provider}.env"
     env[bin_env] = str(fake)
     env[output_env] = str(tmp_path / f"{provider}-artifacts")
-    env["FAKE_ENV_CAPTURE"] = str(env_capture)
     if provider == "codex":
         env["CODEX_HOME"] = str(prepare_codex_home(tmp_path))
+        helper = Path(env["CODEX_HOME"]) / "skills" / "lead" / "scripts" / "check-hook-health.py"
+        helper.parent.mkdir(parents=True)
+        shutil.copyfile(ROOT / "scripts" / helper.name, helper)
     if provider == "claude":
         env["ANTHROPIC_API_KEY"] = "fake-commercial-credential"
     result = subprocess.run(
         [
             sys.executable,
-            str(entrypoint),
+            str(projected_entrypoint),
             "watch-test",
             "--prompt-file",
             str(prompt),
@@ -311,13 +323,16 @@ def test_python_prompt_owner_returns_complete_result_and_reclaims_artifacts(
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
     assert len(lines) == 1
-    prefix = "ORCHESTRARIUM_PROVIDER_RESULT_V1="
+    prefix = "ORCHESTRARIUM_PROVIDER_RESULT_V2="
     assert lines[0].startswith(prefix)
     payload = json.loads(lines[0][len(prefix) :])
-    assert payload["schema"] == "orchestrarium.provider-result.v1"
+    assert payload["schema"] == "orchestrarium.provider-result.v2"
     assert payload["resultText"].replace("\r\n", "\n") == "GATE: PASS\n"
     assert payload["exitCode"] == 0
-    assert payload["token"] == "COMPLETE:PASS"
+    assert payload["token"] == "COMPLETE:EXTERNAL_NONAUTHORIZING"
+    assert payload["primaryOutcome"]["token"] == "COMPLETE:PASS"
+    assert payload["authorizing"] is False
+    assert payload["closesRunIds"] == []
     assert payload["status"] == "completed"
     assert payload["gate"] == "PASS"
     assert payload["cancelled"] is False

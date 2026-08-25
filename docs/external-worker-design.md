@@ -4,7 +4,7 @@
 **Status:** Approved
 **Scope:** Orchestrarium skill-pack routing canon across the production Codex/Claude core plus explicit example integrations
 
-**2026-04-28 production note:** Shipped production `externalProvider: auto` routing is now limited to `codex | claude`. Gemini CLI and Qwen remain explicit example integrations, both classified here as `WEAK MODEL / NOT RECOMMENDED`, and they do not participate in the shipped production profiles or production-only provider fallback/workdir schema.
+**2026-04-28 production note:** Shipped production `externalProvider: auto` routing is now limited to the Codex/Claude pair. Gemini CLI and Qwen remain explicit example integrations, both classified here as `WEAK MODEL / NOT RECOMMENDED`, while Kimi Code and official Grok are explicit-only read-only routes; none of them participates in shipped production profiles or the production-only provider fallback/workdir schema.
 
 ## Problem
 
@@ -169,14 +169,14 @@ Full value-by-value operator semantics now live in [`agents-mode-reference.md`](
    - Execution record mandatory for all three roles:
      - **Execution role:** `<consultant | external-worker | external-reviewer>`
      - **Assigned / replaced internal role:** `<eligible internal role label | none>`
-     - **Requested provider:** `<internal | claude | codex>`
+     - **Requested provider:** `<internal | codex | claude | gemini | qwen | kimi | grok>`
      - **Resolved provider:** `<provider selected after routing/default resolution | none>`
      - **Actual execution path:** `<internal consultant | external CLI (provider name) | role disabled | role-play (violation)>`
      - **Model / profile used:** `<actual profile or model when known | runtime default | unspecified by runtime>`
      - **Deviation reason:** `<none | external unavailable: [reason]>`
    - Provider-backed consultant execution in `external` mode and both external adapter roles must use direct external launch from the orchestrating runtime or an approved transport wrapper script. If the host runtime cannot launch the selected provider directly, the route is `role disabled`.
    - Reporting rule: if the operator or caller left provider selection at runtime default behavior, artifacts must record `Requested provider: internal` and put the real provider choice in `Resolved provider`; do not emit `auto` in the execution record.
-   - Work-item ledger rule: when task memory is enabled, the execution record maps directly to `agent-runs.jsonl`: `Execution role` becomes `executionRole`; `Assigned / replaced internal role` becomes `assignedRole`; `Resolved provider` becomes `provider`; `Model / profile used` becomes `model`; and publication-safe execution-path detail belongs in `notes` until the schema grows a dedicated path field. Adapter closeout is incomplete until the ledger has the event, artifact, gate, and evidence.
+   - Work-item ledger rule: when task memory is enabled, the execution record maps directly to `agent-runs.jsonl`: `Execution role` becomes `executionRole`; `Assigned / replaced internal role` becomes `assignedRole`; `Resolved provider` becomes `provider`; `Model / profile used` becomes `model`; and the publication-safe execution path becomes `actualExecutionPath`. The V2 external-nonauthorizing mapping is owned by the approved wrapper contract, not by this design note. Adapter closeout is incomplete until the ledger has the event, artifact, gate, and evidence.
 
 ### Practical launch rules
 
@@ -186,7 +186,7 @@ Full value-by-value operator semantics now live in [`agents-mode-reference.md`](
 | Claude CLI is unauthenticated, or the repository intentionally carries auth in `.claude/SECRET.md` | Do not convert a primary `claude` route into a wrapper-backed run. Advisory/review lanes may still reach the independent `reserve` candidate later in the profile order when enabled. |
 | Python Claude API transport | Use `python .claude/agents/scripts/invoke-claude-api.py`. It accepts `--print-secret-path`, forwards remaining Claude flags unchanged, and preserves the provider exit code. |
 | Bash / Git Bash Claude API launcher | Use `.claude/agents/scripts/invoke-claude-api.sh`; it delegates to the same Python transport. If the active environment cannot see the provider binary, set `CLAUDE_BIN` explicitly. |
-| External provider CLI prompt payload | Write the substantive task prompt to a temporary prompt file and feed it through stdin or the provider's supported file-input mechanism. Keep argv for launcher flags, model/profile options, and file paths; inline prompt strings are only for tiny smoke checks or a documented provider limitation, and the deviation must be recorded. |
+| External provider CLI prompt payload | Use the approved thin wrapper owner in `agents/contracts/external-dispatch.md`; it owns file/stdin prompt delivery, the strict V2 parser, full external-nonauthorizing tuple, and untrusted/potentially-sensitive resultText contract. No raw, transport-neutral, or inline substantive prompt chain is an alternative. |
 | Codex commit review transport | Use `codex review --commit <sha>` without a free-form prompt. If custom review instructions are needed, prefer a narrower `codex exec` run on the admitted scope instead of mixing text with `review --commit`. |
 | Wide release or parity audits | Split by admitted repo, file set, or lane. Do not default to one mega neutral-dir prompt over the whole pack family because Codex and Gemini are more likely to stall on ultra-wide review scopes. |
 | Neutral workdir default | Keep `external<Provider>WorkdirMode: neutral` unless the external run truly needs in-place filesystem execution or repo-local instruction surfaces, and always pass the exact repo, commit, file, or artifact scope explicitly. |
@@ -203,7 +203,7 @@ The orchestrator (the main conversation, as Lead) **prefers** external roles by 
 - `mcpMode: auto | force` — `auto` uses MCP by judgment; `force` treats relevant MCP use as an explicit standing instruction
 - `preferExternalWorker: true` — `$external-worker` on eligible worker-side lanes
 - `preferExternalReviewer: true` — `$external-reviewer` on eligible `review` + `QA` stages
-- `externalProvider: auto | claude | codex` — use the shipped production provider universe; `auto` resolves through the active named profile, while example-provider routing stays explicit-only and outside the production profile set
+- `externalProvider: auto | codex | claude | gemini | qwen | kimi | grok` — `auto` resolves through the shipped Codex/Claude profile, while Gemini/Qwen example routes and Kimi/Grok read-only routes stay explicit-only and outside the production profile set
 - `externalPriorityProfile: balanced | quality-first | <custom>` — select which ordered provider map `auto` uses
 - `reserveResolver: disabled | claude-sonnet | claude-wrapper | wrapper:<command>` — choose the concrete read-only resolver for symbolic `reserve`; `wrapper:<command>` is a PATH-resolved command or repo-relative wrapper path
 - `externalPriorityProfiles` — maintain the per-profile lane matrix; the shipped production profiles stay on the Codex/Claude pair plus advisory/review-only `reserve`

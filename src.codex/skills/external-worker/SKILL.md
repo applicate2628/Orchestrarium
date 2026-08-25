@@ -32,7 +32,7 @@ description: "External worker: run eligible worker roles externally."
 - Explicit Gemini and Qwen routes remain manual `WEAK MODEL / NOT RECOMMENDED` example-only paths.
 - If a repository wants an example-only provider demonstration, use a scalar explicit provider override instead of broadening shipped or repo-local `auto` profiles.
 - Never select `gpt-5.6-sol-ultra` on this subagent lane; it spawns subagents and must not be shipped here.
-- Use file-based prompt delivery for substantive task prompts: write the prompt to a temporary prompt file and feed it through stdin or the provider's supported file-input mechanism; direct prompt argv is only for tiny smoke checks or documented provider limitations.
+- Use file-based prompt delivery for substantive task prompts through the approved thin wrapper: write the prompt to a temporary prompt file and feed it through stdin or the provider's supported file-input mechanism; direct prompt argv is only for a fixed synthetic non-substantive smoke token. If the wrapper is unavailable, fail or reroute honestly.
 - If the selected Claude CLI path fails for a worker artifact, do not convert that same primary `claude` run to the secret-backed wrapper. Treat Claude as unavailable or reroute honestly.
 - This adapter is a direct external launch contract. Do not spawn it as an internal specialist or helper; the orchestrator must launch the selected external provider directly or fail closed.
 - A spawned internal subagent is still internal even if the prompt tells it to use Gemini Pro, Claude, or Codex. That is a routing violation, not a valid external-worker execution path.
@@ -42,8 +42,8 @@ description: "External worker: run eligible worker roles externally."
 
 ## Execution recipe
 
-- The Codex pack ships no primary-run prompt wrappers; use the transport-neutral probe, persisted prompt, sibling `.out` / `.err` capture, and explicit-flag chain owned by the shared external-dispatch contract.
-- Actively poll output artifacts and process status, apply the contract's effort-tiered stall policy, and never duplicate a still-running launch.
+- Use the approved thin wrapper owned by `../lead/external-dispatch.md`; that owner supplies the strict V2 parser, full external-nonauthorizing tuple, and untrusted/potentially-sensitive resultText contract. Do not retype the schema, consume wrapper-private captures, or substitute a direct closure/manual sidecar path.
+- Await the wrapper's terminal return, then apply the owner's stall/timeout and tracked-ledger rules; never duplicate a still-running launch.
 - Accept completion only when the shared run-completion oracle passes; a failed oracle is `UNVERIFIED`, not a worker artifact.
 
 ## Return exactly one artifact

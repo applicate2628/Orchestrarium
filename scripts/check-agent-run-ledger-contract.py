@@ -81,6 +81,9 @@ MIGRATION_ALLOWED_BASELINE_DRIFT = {
     "tests/test_mutate_work_item.py",
     "docs/work-item-execution-tracking.md",
 }
+MIGRATION_ACCEPTED_CURRENT_BYTES = {
+    "tests/test_agent_run_ledger.py": "f058e5fd0a60e658080dd7df5bb1ce46dbd594b7c310e7ad7e72d0da6d75cddb",
+}
 
 
 # Legacy status shape: older work items carry `orchestrator: main | lead`. Kept as a
@@ -479,6 +482,15 @@ def check_legacy_migration_diff_guard(root: Path) -> dict[str, int]:
     ]
     for row in rows:
         relative = row["path"]
+        accepted = MIGRATION_ACCEPTED_CURRENT_BYTES.get(relative)
+        if accepted is not None:
+            path = root / relative
+            require(path.is_file(), f"protected migration sibling is missing: {relative}")
+            require(
+                hashlib.sha256(path.read_bytes()).hexdigest() == accepted,
+                f"protected migration sibling hash drifted: {relative}",
+            )
+            continue
         if relative in MIGRATION_ALLOWED_BASELINE_DRIFT:
             continue
         path = root / relative

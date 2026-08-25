@@ -937,3 +937,196 @@ def test_recover_invalid_closure_marker_requires_exact_readback(tmp_path: Path):
     assert "RESULT: PASS recover-invalid-closure (" not in result.stdout
     committed = (item / "agent-runs.jsonl").read_bytes()
     assert committed.startswith(old) and len(committed) > len(old)
+
+
+def test_append_persists_typed_external_nonauthorizing_terminal(tmp_path: Path):
+    """Provider evidence cannot be mistaken for an authorizing lifecycle close."""
+
+    item = prepare_valid_work_item(tmp_path)
+    result = run_ledger(
+        item,
+        "append",
+        "--run-id", "run-external-evidence-001",
+        "--role", "external-reviewer",
+        "--execution-role", "external-reviewer",
+        "--assigned-role", "qa-engineer",
+        "--provider", "kimi",
+        "--status", "completed",
+        "--gate", "PASS",
+        "--scope", "provider evidence",
+        "--artifact", "reviews/qa.md",
+        "--evidence", "artifact:reviews/qa.md",
+        "--terminal-class", "external-nonauthorizing",
+        "--authorizing", "false",
+        "--actual-execution-path", "direct-external-cli",
+        "--artifact-identity", "sha256:" + "a" * 64,
+        "--external-dispatch-id", "dispatch-external-001",
+        "--external-evidence-run-id", "run-external-evidence-001",
+        "--started-at", "2026-08-24T10:00:00Z",
+        "--updated-at", "2026-08-24T10:00:00Z",
+    )
+
+    assert result.returncode == 0, result.stderr
+    event = json.loads((item / "agent-runs.jsonl").read_text(encoding="utf-8"))
+    assert event["terminalClass"] == "external-nonauthorizing"
+    assert event["authorizing"] is False
+    assert event["closesRunIds"] == []
+    assert event["assignedRole"] == "qa-engineer"
+    assert event["artifactIdentity"] == "sha256:" + "a" * 64
+    assert event["externalDispatchId"] == "dispatch-external-001"
+    assert event["externalEvidenceRunId"] == "run-external-evidence-001"
+    validated = run_validator(item)
+    assert validated.returncode == 0, validated.stdout
+
+
+def test_append_accepts_codex_external_terminal_without_extended_provenance_ids(tmp_path: Path):
+    """Codex evidence is the actual terminal/launch pair, not a fabricated dispatch id."""
+
+    item = prepare_valid_work_item(tmp_path)
+    common = [
+        "--work-item", str(item), "append", "--role", "external-reviewer",
+        "--execution-role", "external-reviewer", "--assigned-role", "qa-engineer",
+        "--provider", "codex", "--model", "gpt-5.6-sol", "--effort", "high",
+        "--scope", "provider evidence", "--artifact", "reviews/qa.md",
+    ]
+    launch = run_ledger(
+        item,
+        *common,
+        "--run-id", "run-codex-launch-001", "--status", "running", "--gate", "none",
+        "--event-kind", "launch",
+    )
+    terminal = run_ledger(
+        item,
+        *common,
+        "--run-id", "run-codex-terminal-001", "--status", "completed", "--gate", "PASS",
+        "--event-kind", "terminal", "--launch-run-id", "run-codex-launch-001",
+        "--terminal-class", "external-nonauthorizing", "--authorizing", "false",
+        "--actual-execution-path", "direct-external-cli", "--artifact-identity", "sha256:" + "c" * 64,
+        "--evidence", "artifact:reviews/qa.md",
+    )
+
+    assert launch.returncode == 0, launch.stderr
+    assert terminal.returncode == 0, terminal.stderr
+    events = [json.loads(line) for line in (item / "agent-runs.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert "externalDispatchId" not in events[-1]
+    assert "externalEvidenceRunId" not in events[-1]
+    assert events[-1]["runId"] == "run-codex-terminal-001"
+    assert events[-1]["launchRunId"] == "run-codex-launch-001"
+    validated = run_validator(item)
+    assert validated.returncode == 0, validated.stdout
+
+
+def test_internal_final_closer_binds_one_external_evidence_tuple(tmp_path: Path):
+    """Only a distinct internal final reviewer can discharge the matching gate."""
+
+    item = prepare_valid_work_item(tmp_path)
+    work_item = item.name
+    events = [
+        {
+            "schemaVersion": 2, "runId": "run-open-internal-gate-001",
+            "workItem": work_item, "role": "qa-engineer", "executionRole": "internal",
+            "status": "revise", "gate": "REVISE", "scope": ["provider evidence review"],
+            "artifact": "reviews/qa.md", "lane": "provider-evidence", "effort": "high",
+            "startedAt": "2026-08-24T10:00:00Z", "updatedAt": "2026-08-24T10:00:00Z",
+        },
+        {
+            "schemaVersion": 2, "runId": "run-external-evidence-002",
+            "workItem": work_item, "role": "external-reviewer", "executionRole": "external-reviewer",
+            "assignedRole": "qa-engineer", "provider": "kimi", "status": "completed", "gate": "PASS",
+            "scope": ["provider evidence"], "artifact": "reviews/qa.md",
+            "terminalClass": "external-nonauthorizing", "authorizing": False,
+            "actualExecutionPath": "direct-external-cli", "artifactIdentity": "sha256:" + "b" * 64,
+            "externalDispatchId": "dispatch-external-002",
+            "externalEvidenceRunId": "run-external-evidence-002", "closesRunIds": [],
+            "evidence": [{"kind": "artifact", "ref": "reviews/qa.md"}],
+            "startedAt": "2026-08-24T10:01:00Z", "updatedAt": "2026-08-24T10:01:00Z",
+        },
+        {
+            "schemaVersion": 2, "runId": "run-internal-closer-001",
+            "workItem": work_item, "role": "architecture-reviewer", "executionRole": "internal",
+            "assignedRole": "architecture-reviewer", "status": "completed", "gate": "PASS",
+            "scope": ["provider evidence review"], "artifact": "reviews/qa.md",
+            "lane": "provider-evidence", "effort": "high",
+            "terminalClass": "internal-authorizing", "authorizing": True,
+            "actualExecutionPath": "internal", "artifactIdentity": "sha256:" + "b" * 64,
+            "externalDispatchId": "dispatch-external-002",
+            "externalEvidenceRunId": "run-external-evidence-002",
+            "closerRunId": "run-internal-closer-001",
+            "targetTuple": {
+                "workItem": work_item, "assignedInternalRole": "qa-engineer",
+                "artifactIdentity": "sha256:" + "b" * 64,
+                "externalDispatchId": "dispatch-external-002",
+            },
+            "closesRunIds": ["run-open-internal-gate-001"],
+            "evidence": [{"kind": "review", "ref": "reviews/qa.md"}],
+            "startedAt": "2026-08-24T10:02:00Z", "updatedAt": "2026-08-24T10:02:00Z",
+        },
+    ]
+    (item / "agent-runs.jsonl").write_text(
+        "".join(json.dumps(event, separators=(",", ":")) + "\n" for event in events),
+        encoding="utf-8",
+    )
+
+    validated = run_validator(item)
+    assert validated.returncode == 0, validated.stdout
+
+
+def test_internal_closer_binds_actual_codex_terminal_and_launch_without_extended_ids(tmp_path: Path):
+    """A Codex closer uses the terminal ledger identity, never a dispatch-shaped alias."""
+
+    item = prepare_valid_work_item(tmp_path)
+    work_item = item.name
+    artifact = "sha256:" + "d" * 64
+    events = [
+        {
+            "schemaVersion": 2, "runId": "run-codex-open-gate-001", "workItem": work_item,
+            "role": "qa-engineer", "executionRole": "internal", "status": "revise",
+            "gate": "REVISE", "scope": ["provider evidence review"], "artifact": "reviews/qa.md",
+            "lane": "provider-evidence", "effort": "high",
+            "startedAt": "2026-08-25T10:00:00Z", "updatedAt": "2026-08-25T10:00:00Z",
+        },
+        {
+            "schemaVersion": 2, "runId": "run-codex-launch-002", "workItem": work_item,
+            "role": "external-reviewer", "executionRole": "external-reviewer", "assignedRole": "qa-engineer",
+            "provider": "codex", "status": "running", "gate": "none", "eventKind": "launch",
+            "scope": ["provider evidence"], "artifact": "reviews/qa.md", "effort": "high",
+            "startedAt": "2026-08-25T10:01:00Z", "updatedAt": "2026-08-25T10:01:00Z",
+        },
+        {
+            "schemaVersion": 2, "runId": "run-codex-terminal-002", "workItem": work_item,
+            "role": "external-reviewer", "executionRole": "external-reviewer", "assignedRole": "qa-engineer",
+            "provider": "codex", "status": "completed", "gate": "PASS", "eventKind": "terminal",
+            "launchRunId": "run-codex-launch-002", "scope": ["provider evidence"], "artifact": "reviews/qa.md",
+            "effort": "high", "terminalClass": "external-nonauthorizing", "authorizing": False,
+            "actualExecutionPath": "direct-external-cli", "artifactIdentity": artifact, "closesRunIds": [],
+            "evidence": [{"kind": "artifact", "ref": "reviews/qa.md"}],
+            "startedAt": "2026-08-25T10:02:00Z", "updatedAt": "2026-08-25T10:02:00Z",
+        },
+        {
+            "schemaVersion": 2, "runId": "run-codex-closer-002", "workItem": work_item,
+            "role": "architecture-reviewer", "executionRole": "internal", "assignedRole": "architecture-reviewer",
+            "status": "completed", "gate": "PASS", "scope": ["provider evidence review"],
+            "artifact": "reviews/qa.md", "lane": "provider-evidence", "effort": "high",
+            "terminalClass": "internal-authorizing", "authorizing": True, "actualExecutionPath": "internal",
+            "artifactIdentity": artifact, "externalEvidenceRunId": "run-codex-terminal-002",
+            "closerRunId": "run-codex-closer-002",
+            "targetTuple": {"workItem": work_item, "assignedInternalRole": "qa-engineer", "artifactIdentity": artifact},
+            "closesRunIds": ["run-codex-open-gate-001"], "evidence": [{"kind": "review", "ref": "reviews/qa.md"}],
+            "startedAt": "2026-08-25T10:03:00Z", "updatedAt": "2026-08-25T10:03:00Z",
+        },
+    ]
+    (item / "agent-runs.jsonl").write_text(
+        "".join(json.dumps(event, separators=(",", ":")) + "\n" for event in events), encoding="utf-8"
+    )
+
+    validated = run_validator(item)
+
+    assert validated.returncode == 0, validated.stdout
+    events[2]["status"] = "revise"
+    events[2]["gate"] = "REVISE"
+    (item / "agent-runs.jsonl").write_text(
+        "".join(json.dumps(event, separators=(",", ":")) + "\n" for event in events), encoding="utf-8"
+    )
+    revised = run_validator(item)
+    assert revised.returncode != 0
+    assert "internal closer does not bind" in revised.stdout

@@ -17,18 +17,44 @@ from tests.fixtures.codex_hook_fixture import prepare_codex_home
 
 
 ROOT = Path(__file__).resolve().parents[1]
-MODULE = ROOT / "src.claude/agents/scripts/provider_prompt.py"
+MODULE = ROOT / "scripts/provider_prompt.py"
 ENTRYPOINTS = {
     "codex": ROOT / "src.claude/agents/scripts/invoke-codex-prompt.py",
     "claude": ROOT / "src.claude/agents/scripts/invoke-claude-prompt.py",
 }
 BIN_ENV = {"codex": "CODEX_BIN", "claude": "CLAUDE_BIN"}
-OUTPUT_ENV = {"codex": "CODEX_PROMPTS_DIR", "claude": "CLAUDE_PROMPTS_DIR"}
+OUTPUT_ENV = {
+    "codex": "CODEX_PROMPTS_DIR",
+    "claude": "CLAUDE_PROMPTS_DIR",
+    "kimi": "KIMI_PROMPTS_DIR",
+    "grok": "GROK_PROMPTS_DIR",
+}
 spec = importlib.util.spec_from_file_location("provider_prompt_oracle_test", MODULE)
 assert spec and spec.loader
 owner = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = owner
 spec.loader.exec_module(owner)
+
+
+def _projected_entrypoint(tmp_path: Path, provider: str) -> Path:
+    scripts = tmp_path / "claude-projection" / "agents" / "scripts"
+    scripts.mkdir(parents=True, exist_ok=True)
+    (scripts / "provider_prompt.py").write_bytes(MODULE.read_bytes())
+    (scripts / "external-prompt-governance.md").write_bytes(
+        (ROOT / "scripts" / "external-prompt-governance.md").read_bytes()
+    )
+    entrypoint = scripts / ENTRYPOINTS[provider].name
+    entrypoint.write_bytes(ENTRYPOINTS[provider].read_bytes())
+    support = tmp_path / "scripts"
+    support.mkdir(exist_ok=True)
+    for name in ("check-hook-health.py", "universal_hooks_manifest.py", "agent-run-ledger.py"):
+        (support / name).write_bytes((ROOT / "scripts" / name).read_bytes())
+    shared = tmp_path / "shared"
+    shared.mkdir(exist_ok=True)
+    (shared / "AGENTS.shared.md").write_bytes(
+        (ROOT / "shared" / "AGENTS.shared.md").read_bytes()
+    )
+    return entrypoint
 
 
 def _make_work_item(tmp_path: Path, suffix: str) -> Path:
@@ -52,9 +78,31 @@ def _make_fake_provider(
     *,
     exit_code: int = 0,
     write_result: bool = True,
+    raw_stdout: bytes | None = None,
+    raw_stderr: bytes = b"",
+    launch_marker: Path | None = None,
 ) -> Path:
     fake = tmp_path / f"fake-{provider}.py"
-    fake.write_text(
+    result_write = (
+        f"sys.stdout.buffer.write({raw_stdout!r}); sys.stdout.buffer.flush()\n"
+        if raw_stdout is not None
+        else (
+            "print(json.dumps({'type':'item.completed','item':{'type':'agent_message','text':'GATE: PASS\\n'}}))\n"
+            if provider == "codex" and write_result
+            else ("print('GATE: PASS')\n" if provider == "claude" and write_result else "")
+        )
+    )
+    marker_write = (
+        f"pathlib.Path({str(launch_marker)!r}).write_text('launched', encoding='utf-8')\n"
+        if launch_marker is not None
+        else ""
+    )
+    stderr_write = (
+        f"sys.stderr.buffer.write({raw_stderr!r}); sys.stderr.buffer.flush()\n"
+        if raw_stderr
+        else ""
+    )
+    source = (
         "import json,os,pathlib,sys\n"
         "args=sys.argv[1:]\n"
         "if 'app-server' in args:\n"
@@ -75,14 +123,12 @@ def _make_fake_provider(
         "            print(json.dumps({'id':2,'result':{'data':[{'hooks':records}]}}), flush=True)\n"
         "    raise SystemExit(0)\n"
         "sys.stdin.buffer.read()\n"
-        + (
-            "print(json.dumps({'type':'item.completed','item':{'type':'agent_message','text':'GATE: PASS\\n'}}))\n"
-            if provider == "codex" and write_result
-            else ("print('GATE: PASS')\n" if provider == "claude" and write_result else "")
-        )
-        + f"raise SystemExit({exit_code})\n",
-        encoding="utf-8",
+        + marker_write
+        + result_write
+        + stderr_write
+        + f"raise SystemExit({exit_code})\n"
     )
+    fake.write_text(source, encoding="utf-8")
     return fake
 
 
@@ -93,9 +139,21 @@ def _run_transport(
     exit_code: int = 0,
     write_result: bool = True,
     with_ledger: bool = True,
+    ledger_role: str | None = "architecture-reviewer",
+    extra_args: list[str] | None = None,
+    raw_stdout: bytes | None = None,
+    raw_stderr: bytes = b"",
+    launch_marker: Path | None = None,
+    environment: dict[str, str] | None = None,
 ) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
     fake = _make_fake_provider(
-        tmp_path, provider, exit_code=exit_code, write_result=write_result
+        tmp_path,
+        provider,
+        exit_code=exit_code,
+        write_result=write_result,
+        raw_stdout=raw_stdout,
+        raw_stderr=raw_stderr,
+        launch_marker=launch_marker,
     )
     item = _make_work_item(tmp_path, f"oracle-{provider}-{exit_code}-{write_result}")
     prompt = tmp_path / f"{provider}.md"
@@ -106,26 +164,32 @@ def _run_transport(
     env[OUTPUT_ENV[provider]] = str(output_root)
     if provider == "codex":
         env["CODEX_HOME"] = str(prepare_codex_home(tmp_path))
-    else:
+    elif not environment or not (
+        environment.get("CLAUDE_CODE_USE_BEDROCK")
+        or environment.get("CLAUDE_CODE_USE_VERTEX")
+    ):
         env["ANTHROPIC_API_KEY"] = "fake-commercial-credential"
+    if environment:
+        env.update(environment)
     arguments = [
         sys.executable,
-        str(ENTRYPOINTS[provider]),
+        str(_projected_entrypoint(tmp_path, provider)),
         "oracle-fixture",
         "--prompt-file",
         str(prompt),
+        *(extra_args or []),
     ]
     if with_ledger:
         arguments += [
             "--ledger",
             str(item),
-            "--ledger-role",
-            "architecture-reviewer",
             "--ledger-lane",
             "fixture-lane",
             "--ledger-artifact",
             "design.md",
         ]
+        if ledger_role is not None:
+            arguments += ["--ledger-role", ledger_role]
     result = subprocess.run(
         arguments,
         cwd=ROOT,
@@ -674,11 +738,11 @@ def test_result_read_denial_is_nonpass_and_preserves_secure_recovery(
     )
     payload = owner.parse_provider_result(stream.getvalue())
     assert code != 0
-    assert payload["token"] == "FAILED:result-materialization"
+    assert payload["token"] == "UNVERIFIED:result-materialization"
     assert payload["gate"] == "none"
-    assert payload["captureRecoveryRetained"] is True
+    assert payload["captureRecoveryRetained"] is False
     assert str(lifecycle.run_dir) not in json.dumps(payload)
-    assert lifecycle.run_dir.is_dir()
+    assert not lifecycle.run_dir.exists()
 
 
 def test_oversize_finalize_is_nonpass_and_preserves_secure_recovery(
@@ -700,9 +764,271 @@ def test_oversize_finalize_is_nonpass_and_preserves_secure_recovery(
     )
     payload = owner.parse_provider_result(stream.getvalue())
     assert code != 0
-    assert payload["token"] == "FAILED:result-materialization"
-    assert payload["captureRecoveryRetained"] is True
-    assert lifecycle.run_dir.is_dir()
+    assert payload["token"] == "UNVERIFIED:result-materialization"
+    assert payload["captureRecoveryRetained"] is False
+    assert not lifecycle.run_dir.exists()
+
+
+def test_external_initialized_setup_failure_settles_before_one_envelope_without_raw_capture(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lifecycle = _lifecycle(tmp_path, monkeypatch, provider="kimi")
+    stream = io.StringIO()
+    monkeypatch.setattr(owner.sys, "stdout", stream)
+    code = owner.settle_initialized_setup_failure(
+        owner.Control(task_class="review", role="qa-engineer"),
+        "kimi",
+        "kimi-code/k3",
+        "unsupported",
+        "setup-failure-fixture",
+        lifecycle,
+        ValueError("agent setup failed"),
+        None,
+    )
+    payload = owner.parse_provider_result(stream.getvalue())
+    assert code != 0
+    assert payload["token"] == "UNVERIFIED:external-result"
+    assert payload["captureRecoveryRetained"] is False
+    assert not lifecycle.run_dir.exists()
+    assert "fixture prompt" not in stream.getvalue()
+
+
+@pytest.mark.parametrize("provider", ("codex", "claude", "kimi", "grok"))
+@pytest.mark.parametrize("failure_name", ("ledger helper unavailable", "launch ledger append failed"))
+def test_unlaunched_ledger_failure_uses_one_v2_envelope_without_durable_ledger_claim(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    provider: str,
+    failure_name: str,
+) -> None:
+    lifecycle = _lifecycle(tmp_path, monkeypatch, provider=provider)
+    stream = io.StringIO()
+    ledger_calls: list[list[str]] = []
+    popen_calls: list[object] = []
+    monkeypatch.setattr(owner.sys, "stdout", stream)
+    monkeypatch.setattr(
+        owner, "run_ledger", lambda args: ledger_calls.append(args) or True
+    )
+    monkeypatch.setattr(
+        owner.subprocess, "Popen", lambda *_args, **_kwargs: popen_calls.append(True)
+    )
+
+    code = owner.settle_initialized_setup_failure(
+        owner.Control(ledger="work-item", ledger_role="qa-engineer"),
+        provider,
+        "fixture-model",
+        "high",
+        f"{provider}-unlaunched",
+        lifecycle,
+        RuntimeError(failure_name),
+        None,
+    )
+
+    payload = owner.parse_provider_result(stream.getvalue())
+    assert code != 0
+    assert payload["schema"] == "orchestrarium.provider-result.v2"
+    assert payload["authorizing"] is False
+    assert payload["closesRunIds"] == []
+    assert payload["assignedRole"] == "none"
+    assert payload["executionRole"] == "none"
+    assert ledger_calls == []
+    assert popen_calls == []
+    assert not lifecycle.run_dir.exists()
+
+
+def test_external_terminal_producer_persists_exact_nonauthorizing_tuple(tmp_path: Path) -> None:
+    item = _make_work_item(tmp_path, "external-terminal")
+    control = owner.Control(
+        ledger=str(item),
+        task_class="review",
+        role="qa-engineer",
+        ledger_artifact="design.md",
+    )
+    provenance = owner.external_execution_provenance(
+        control,
+        "kimi",
+        "dispatch-external-fixture",
+        "kimi-code/k3",
+        "unsupported",
+        "no-native-effort-control",
+    )
+    outcome = owner.FinalOutcome(
+        1, "UNVERIFIED:external-result", "blocked", "none", "fixture",
+        1, "UNVERIFIED:external-result", "blocked", "none", "fixture",
+        "complete", 0, "", False, 0,
+    )
+    assert owner.run_ledger([
+        "--work-item", str(item), "append", "--run-id", "launch-external-fixture",
+        "--role", "external-reviewer", "--execution-role", "external-reviewer",
+        "--assigned-role", "qa-engineer", "--provider", "kimi", "--model", "kimi-code/k3",
+        "--effort", "high", "--status", "running", "--gate", "none",
+        "--event-kind", "launch", "--scope", "external run: dispatch-external-fixture",
+        "--artifact", "design.md", "--notes", "fixture launch",
+    ])
+    assert owner.record_terminal(
+        control,
+        "kimi",
+        "kimi-code/k3",
+        "unsupported",
+        "dispatch-external-fixture",
+        "launch-external-fixture",
+        outcome,
+        cancelled=False,
+        timed_out=False,
+        result_delivered=True,
+        realization={"executionProvenance": provenance.payload()},
+    )
+    terminal = _ledger_events(item)[-1]
+    assert terminal["terminalClass"] == "external-nonauthorizing"
+    assert terminal["authorizing"] is False
+    assert terminal["actualExecutionPath"] == "direct-external-cli"
+    assert terminal["assignedRole"] == "qa-engineer"
+    assert terminal["artifactIdentity"] == "design.md"
+    assert terminal["externalDispatchId"] == "dispatch-external-fixture"
+    assert terminal["externalEvidenceRunId"] == terminal["runId"]
+    assert terminal["closesRunIds"] == []
+
+
+@pytest.mark.parametrize("provider", ("kimi", "grok"))
+@pytest.mark.parametrize(
+    "realization",
+    (None, {"executionProvenance": {"externalDispatchId": "incomplete"}}),
+)
+def test_kimi_and_grok_terminal_reject_missing_or_incomplete_frozen_realization(
+    provider: str, realization: dict[str, object] | None
+) -> None:
+    control = owner.Control(
+        ledger="work-item", task_class="review", role="qa-engineer", ledger_artifact="design.md"
+    )
+
+    with pytest.raises(ValueError, match="E_EXTERNAL_LEDGER_UNVERIFIED"):
+        owner.external_terminal_ledger_args(
+            control, provider, "fixture-model", "high", "fixture-dispatch", realization
+        )
+
+
+@pytest.mark.parametrize("provider", ("kimi", "grok"))
+def test_kimi_and_grok_terminal_retains_exact_frozen_realization(provider: str) -> None:
+    control = owner.Control(
+        ledger="work-item", task_class="review", role="qa-engineer", ledger_artifact="design.md"
+    )
+    provenance = owner.external_execution_provenance(
+        control,
+        provider,
+        "fixture-dispatch",
+        "fixture-model",
+        "high",
+        "no-native-effort-control" if provider == "kimi" else "none",
+    ).payload()
+
+    args = owner.external_terminal_ledger_args(
+        control, provider, "fixture-model", "high", "fixture-dispatch",
+        {"executionProvenance": provenance},
+    )
+
+    assert args[args.index("--external-dispatch-id") + 1] == "fixture-dispatch"
+    assert args[args.index("--external-evidence-run-id") + 1] == "external-evidence-fixture-dispatch"
+
+
+@pytest.mark.parametrize(
+    ("ledger_role", "expected_execution_role"),
+    (
+        ("qa-engineer", "external-reviewer"),
+        ("backend-engineer", "external-worker"),
+        ("consultant", "consultant"),
+        ("lead", "none"),
+    ),
+)
+def test_codex_and_claude_external_role_provenance_uses_only_explicit_ledger_role(
+    ledger_role: str, expected_execution_role: str
+) -> None:
+    control = owner.parse_control(["fixture", "--ledger-role", ledger_role])
+
+    provenance = owner.external_role_provenance(control, "codex")
+
+    assert provenance.assigned_role == ledger_role
+    assert provenance.execution_role == expected_execution_role
+    assert control.ledger_role_explicit is True
+
+
+def test_codex_and_claude_external_role_provenance_uses_none_without_ledger_role() -> None:
+    control = owner.parse_control(["fixture"])
+
+    provenance = owner.external_role_provenance(control, "claude")
+
+    assert provenance.assigned_role == "none"
+    assert provenance.execution_role == "none"
+    assert control.ledger_role_explicit is False
+
+
+def test_external_role_provenance_rejects_unknown_explicit_ledger_role() -> None:
+    control = owner.parse_control(["fixture", "--ledger-role", "invented-owner"])
+
+    with pytest.raises(ValueError, match="E_EXTERNAL_PROVENANCE_ROLE_INVALID"):
+        owner.external_role_provenance(control, "codex")
+
+
+@pytest.mark.parametrize("provider", ("codex", "claude"))
+def test_codex_and_claude_terminal_ledger_args_do_not_synthesize_extended_provenance(
+    provider: str,
+) -> None:
+    control = owner.parse_control(["fixture", "--ledger-role", "qa-engineer"])
+
+    args = owner.external_terminal_ledger_args(
+        control, provider, "fixture-model", "high", "fixture-dispatch", None
+    )
+
+    assert "--external-dispatch-id" not in args
+    assert "--external-evidence-run-id" not in args
+    assert "--run-id" not in args
+    assert args[args.index("--terminal-class") + 1] == "external-nonauthorizing"
+
+
+def test_codex_terminal_record_requires_actual_terminal_readback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    item = _make_work_item(tmp_path, "codex-terminal-readback")
+    control = owner.Control(ledger=str(item))
+    outcome = owner.FinalOutcome(
+        0, "COMPLETE:EXTERNAL_NONAUTHORIZING", "completed", "PASS", "fixture",
+        0, "COMPLETE:PASS", "completed", "PASS", "fixture",
+        "complete", 0, "", False, 0,
+    )
+    monkeypatch.setattr(owner, "run_ledger", lambda _args: True)
+
+    recorded = owner.record_terminal(
+        control, "codex", "fixture-model", "high", "fixture-slug", "launch-codex-001",
+        outcome, cancelled=False, timed_out=False, result_delivered=True,
+    )
+
+    assert recorded is False
+
+
+@pytest.mark.parametrize("provider", ("codex", "claude"))
+@pytest.mark.parametrize(
+    ("ledger_role", "execution_role"),
+    (
+        ("qa-engineer", "external-reviewer"),
+        ("backend-engineer", "external-worker"),
+        ("consultant", "consultant"),
+        (None, "none"),
+    ),
+)
+def test_codex_and_claude_success_ledger_roles_are_truthful(
+    tmp_path: Path, provider: str, ledger_role: str | None, execution_role: str
+) -> None:
+    result, item, _output_root = _run_transport(
+        tmp_path, provider, ledger_role=ledger_role
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = owner.parse_provider_result(result.stdout)
+    terminal = _ledger_events(item)[-1]
+    expected_assigned = ledger_role or "none"
+    assert payload["assignedRole"] == expected_assigned
+    assert payload["executionRole"] == execution_role
+    assert terminal["assignedRole"] == expected_assigned
+    assert terminal["executionRole"] == execution_role
 
 
 def test_terminate_kill_and_wait_exceptions_are_all_contained() -> None:
@@ -745,7 +1071,29 @@ def test_tombstone_delete_failure_is_visible_and_preserves_recovery(
     assert not cleanup.clean
     assert cleanup.recovery_retained
     assert not lifecycle.run_dir.exists()
-    assert len(list(lifecycle.root.glob(".capture-tombstone-*"))) == 1
+    recovery = list(lifecycle.root.glob(".capture-recovery-*"))
+    assert len(recovery) == 1
+    assert json.loads((recovery[0] / "recovery.json").read_text(encoding="utf-8"))["state"] == "cleanup-incomplete"
+    assert not any(path.name in {"prompt.md", "provider.out", "provider.err"} for path in recovery[0].rglob("*"))
+
+
+def test_primary_purge_failure_scrubs_prompt_and_provider_canaries_before_retention(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lifecycle = _lifecycle(tmp_path, monkeypatch)
+    _write_result(lifecycle, b"RAW_PROVIDER_CANARY")
+    lifecycle.prompt_path.write_bytes(b"RAW_PROMPT_CANARY")
+    monkeypatch.setattr(
+        owner.shutil, "rmtree", lambda _path: (_ for _ in ()).throw(PermissionError("primary"))
+    )
+    cleanup = lifecycle.cleanup()
+    retained = list(lifecycle.root.rglob("*"))
+    assert not cleanup.clean and cleanup.recovery_retained
+    assert all(
+        b"RAW_PROMPT_CANARY" not in path.read_bytes()
+        and b"RAW_PROVIDER_CANARY" not in path.read_bytes()
+        for path in retained if path.is_file()
+    )
 
 
 def test_tombstone_scan_rejects_link_content(
@@ -763,7 +1111,106 @@ def test_tombstone_scan_rejects_link_content(
     assert not cleanup.clean
     assert cleanup.recovery_retained
     assert target.read_text(encoding="utf-8") == "outside"
-    assert len(list(lifecycle.root.glob(".capture-tombstone-*"))) == 1
+    assert len(list(lifecycle.root.glob(".capture-recovery-*"))) == 1
+
+
+def test_secondary_purge_failure_is_never_reported_clean(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    lifecycle = _lifecycle(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        owner.shutil, "rmtree", lambda _path: (_ for _ in ()).throw(PermissionError("primary"))
+    )
+    monkeypatch.setattr(
+        lifecycle, "_purge_tombstone", lambda _path: (_ for _ in ()).throw(PermissionError("purge"))
+    )
+    cleanup = lifecycle.cleanup()
+    assert not cleanup.clean
+    assert cleanup.recovery_retained
+    assert not lifecycle.run_dir.exists()
+
+
+def test_per_file_scrub_failure_still_attempts_all_and_purges_canaries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lifecycle = _lifecycle(tmp_path, monkeypatch)
+    _write_result(lifecycle, b"RAW_PROVIDER_CANARY")
+    lifecycle.prompt_path.write_bytes(b"RAW_PROMPT_CANARY")
+    monkeypatch.setattr(
+        owner.shutil, "rmtree", lambda _path: (_ for _ in ()).throw(PermissionError("primary"))
+    )
+    original = lifecycle._scrub_regular_payload
+    calls: list[str] = []
+
+    def fail_one(path: Path, metadata) -> None:
+        calls.append(path.name)
+        if path.name == "prompt.md":
+            raise PermissionError("scrub")
+        original(path, metadata)
+
+    monkeypatch.setattr(owner.RunCaptureLifecycle, "_scrub_regular_payload", staticmethod(fail_one))
+    cleanup = lifecycle.cleanup()
+    assert not cleanup.clean and cleanup.recovery_retained
+    assert {"prompt.md", "provider.out", "provider.err", "provider.pid"} <= set(calls)
+    assert not any(
+        b"RAW_PROMPT_CANARY" in path.read_bytes() or b"RAW_PROVIDER_CANARY" in path.read_bytes()
+        for path in lifecycle.root.rglob("*") if path.is_file()
+    )
+
+
+def test_scrub_failure_falls_back_to_individual_unlink_before_retention(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lifecycle = _lifecycle(tmp_path, monkeypatch)
+    _write_result(lifecycle, b"RAW_PROVIDER_CANARY")
+    lifecycle.prompt_path.write_bytes(b"RAW_PROMPT_CANARY")
+    monkeypatch.setattr(
+        owner.shutil, "rmtree", lambda _path: (_ for _ in ()).throw(PermissionError("primary"))
+    )
+    original_purge = lifecycle._purge_tombstone
+    purge_calls = 0
+
+    def fail_primary_purge(path: Path) -> None:
+        nonlocal purge_calls
+        purge_calls += 1
+        if purge_calls == 1:
+            raise PermissionError("purge")
+        original_purge(path)
+
+    monkeypatch.setattr(lifecycle, "_purge_tombstone", fail_primary_purge)
+    monkeypatch.setattr(
+        owner.RunCaptureLifecycle,
+        "_scrub_regular_payload",
+        staticmethod(lambda _path, _metadata: (_ for _ in ()).throw(PermissionError("scrub"))),
+    )
+    cleanup = lifecycle.cleanup()
+    assert not cleanup.clean and cleanup.recovery_retained and purge_calls == 2
+    assert not any(
+        b"RAW_PROMPT_CANARY" in path.read_bytes() or b"RAW_PROVIDER_CANARY" in path.read_bytes()
+        for path in lifecycle.root.rglob("*") if path.is_file()
+    )
+
+
+def test_triple_cleanup_denial_is_nonclean_and_retained(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    lifecycle = _lifecycle(tmp_path, monkeypatch)
+    lifecycle.prompt_path.write_bytes(b"RAW_PROMPT_CANARY")
+    monkeypatch.setattr(
+        owner.shutil, "rmtree", lambda _path: (_ for _ in ()).throw(PermissionError("primary"))
+    )
+    monkeypatch.setattr(
+        lifecycle, "_purge_tombstone", lambda _path: (_ for _ in ()).throw(PermissionError("purge"))
+    )
+    monkeypatch.setattr(
+        owner.RunCaptureLifecycle,
+        "_scrub_regular_payload",
+        staticmethod(lambda _path, _metadata: (_ for _ in ()).throw(PermissionError("scrub"))),
+    )
+    monkeypatch.setattr(
+        owner.RunCaptureLifecycle,
+        "_unlink_regular_payload",
+        staticmethod(lambda _path, _metadata: (_ for _ in ()).throw(PermissionError("unlink"))),
+    )
+    cleanup = lifecycle.cleanup()
+    assert not cleanup.clean and cleanup.recovery_retained
+    assert "scrub-unlink-failed" in cleanup.issues
 
 
 @pytest.mark.parametrize("failure_stage", ("write", "flush"))
@@ -974,9 +1421,13 @@ def test_real_transport_emits_one_envelope_then_path_free_terminal_ledger(
     result, item, output_root = _run_transport(tmp_path, provider)
     payload = owner.parse_provider_result(result.stdout)
     assert result.returncode == 0, result.stderr
-    assert payload["schema"] == "orchestrarium.provider-result.v1"
+    assert payload["schema"] == "orchestrarium.provider-result.v2"
     assert payload["resultText"].replace("\r\n", "\n") == "GATE: PASS\n"
     assert payload["gate"] == "PASS"
+    assert payload["token"] == "COMPLETE:EXTERNAL_NONAUTHORIZING"
+    assert payload["primaryOutcome"]["token"] == "COMPLETE:PASS"
+    assert payload["authorizing"] is False
+    assert payload["closesRunIds"] == []
     assert payload["cleanupStatus"] == "complete"
     assert payload["captureRecoveryRetained"] is False
     assert "ledgerStatus" not in payload
@@ -984,6 +1435,11 @@ def test_real_transport_emits_one_envelope_then_path_free_terminal_ledger(
     assert [event["eventKind"] for event in events] == ["launch", "terminal"]
     terminal = events[-1]
     assert terminal["gate"] == "PASS"
+    assert terminal["assignedRole"] == "architecture-reviewer"
+    assert terminal["executionRole"] == "external-reviewer"
+    assert "externalDispatchId" not in terminal
+    assert "externalEvidenceRunId" not in terminal
+    assert terminal["launchRunId"] == events[0]["runId"]
     assert "resultDelivered=true" in terminal["notes"]
     assert terminal["evidence"] == [
         {"kind": "command", "ref": "provider-result-envelope-flushed"}
@@ -991,6 +1447,161 @@ def test_real_transport_emits_one_envelope_then_path_free_terminal_ledger(
     serialized = json.dumps(terminal)
     assert str(output_root) not in serialized
     assert list(output_root.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    ("provider", "auth_environment", "credential_key"),
+    (
+        ("codex", {"OPENAI_API_KEY": "codex-secret-001"}, "OPENAI_API_KEY"),
+        ("claude", {"ANTHROPIC_" "API_KEY": "claude-secret-001"}, "ANTHROPIC_API_KEY"),
+        (
+            "claude",
+            {
+                "CLAUDE_CODE_USE_BEDROCK": "true",
+                "AWS_SESSION_TOKEN": "bedrock-secret-001",
+            },
+            "AWS_SESSION_TOKEN",
+        ),
+        (
+            "claude",
+            {
+                "CLAUDE_CODE_USE_VERTEX": "true",
+                "GOOGLE_OAUTH_ACCESS_TOKEN": "vertex-secret-001",
+            },
+            "GOOGLE_OAUTH_ACCESS_TOKEN",
+        ),
+    ),
+)
+@pytest.mark.parametrize("stream_name", ("stdout", "stderr"))
+def test_exact_child_credential_echo_is_blocked_before_v2_result_materialization(
+    tmp_path: Path,
+    provider: str,
+    auth_environment: dict[str, str],
+    credential_key: str,
+    stream_name: str,
+) -> None:
+    """Every direct provider credential becomes an exact raw-byte scan needle."""
+
+    secret = auth_environment[credential_key].encode("ascii")
+    if provider == "codex":
+        stdout = json.dumps(
+            {
+                "type": "item.completed",
+                "item": {"type": "agent_message", "text": "GATE: PASS\\n"},
+            }
+        ).encode("utf-8") + b"\n"
+    else:
+        stdout = b"GATE: PASS\n"
+    if stream_name == "stdout":
+        stdout = secret + b"\n" + stdout
+        stderr = b""
+    else:
+        stderr = secret + b"\n"
+    result, _item, _output_root = _run_transport(
+        tmp_path,
+        provider,
+        raw_stdout=stdout,
+        raw_stderr=stderr,
+        environment=auth_environment,
+        with_ledger=False,
+    )
+
+    assert result.returncode != 0
+    payload = owner.parse_provider_result(result.stdout)
+    assert payload["schema"] == "orchestrarium.provider-result.v2"
+    assert payload["token"] == "UNVERIFIED:E_EXTERNAL_PROVIDER_CREDENTIAL_ECHO"
+    assert payload["resultText"] == ""
+    assert secret.decode("ascii") not in result.stdout
+    assert secret.decode("ascii") not in result.stderr
+
+
+@pytest.mark.parametrize("invalid_secret", ("not-ascii-\u0436", "nul\x00credential"))
+def test_invalid_credential_needle_fails_before_prompt_consumption(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], invalid_secret: str
+) -> None:
+    prompt_reads: list[bool] = []
+    monkeypatch.setattr(owner.os, "environ", {"ANTHROPIC_" "API_KEY": invalid_secret})
+    monkeypatch.setattr(owner, "resolve_provider_command", lambda _provider: None)
+    monkeypatch.setattr(
+        owner,
+        "prompt_bytes",
+        lambda *_args, **_kwargs: prompt_reads.append(True) or b"task",
+    )
+
+    code = owner.launch("claude", ["credential-scan-fixture"])
+
+    assert code != 0
+    assert "E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE" in capsys.readouterr().err
+    assert prompt_reads == []
+
+
+def test_subscription_only_claude_refusal_precedes_s1_inventory_and_all_launch_side_effects(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr(owner.os, "environ", {"HOME": ""})
+    monkeypatch.setattr(
+        owner,
+        "resolve_provider_auth_configuration",
+        lambda *_args, **_kwargs: calls.append("credential-registry"),
+    )
+    monkeypatch.setattr(
+        owner,
+        "prompt_bytes",
+        lambda *_args, **_kwargs: calls.append("prompt") or b"task",
+    )
+    monkeypatch.setattr(
+        owner.RunCaptureLifecycle,
+        "create",
+        lambda *_args, **_kwargs: calls.append("capture"),
+    )
+    monkeypatch.setattr(
+        owner.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: calls.append("popen"),
+    )
+
+    code = owner.launch("claude", ["subscription-only-fixture"])
+
+    assert code == 3
+    assert "commercial authentication" in capsys.readouterr().err
+    assert calls == []
+
+
+@pytest.mark.parametrize("provider", ("codex", "claude"))
+def test_ledger_closes_are_rejected_before_prompt_or_provider_launch(
+    tmp_path: Path, provider: str
+) -> None:
+    marker = tmp_path / "provider-launched"
+    result, _item, _output_root = _run_transport(
+        tmp_path,
+        provider,
+        extra_args=["--ledger-closes", "run-critical-gate-001"],
+        launch_marker=marker,
+        with_ledger=False,
+    )
+
+    assert result.returncode != 0
+    assert "E_EXTERNAL_CLOSES_FORBIDDEN" in result.stderr
+    assert not marker.exists()
+
+
+@pytest.mark.parametrize("provider", ("kimi", "grok"))
+def test_unavailable_external_provider_rejects_ledger_closes_before_prompt_consumption(
+    provider: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    prompt_reads: list[bool] = []
+    monkeypatch.setattr(
+        owner,
+        "prompt_bytes",
+        lambda *_args, **_kwargs: prompt_reads.append(True) or b"task",
+    )
+
+    code = owner.launch(provider, ["closure-fixture", "--ledger-closes", "run-critical-gate-001"])
+
+    assert code != 0
+    assert "E_EXTERNAL_CLOSES_FORBIDDEN" in capsys.readouterr().err
+    assert prompt_reads == []
 
 
 def test_launch_fails_closed_when_private_run_directory_cannot_be_created(

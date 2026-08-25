@@ -44,7 +44,7 @@ Against false convergence (angles agreeing on a wrong-but-plausible result) and 
 2. **Every angle answers** "root proven?", "scope unchanged?", "verification adequate?" — not only its scope.
 3. **Reject bare PASS** — cite specific blockers (evidence/`file:line`) or a specific no-blocker rationale.
 4. **Per-round diff** — record what changed and why (which blocker it answers).
-5. **Verify OUTPUTS, not notifications** — read the captured angle output and confirm a real verdict/findings before counting it. A completion signal from a *sidecar* (watcher / notifier / background-task callback / "task done" notification) is NOT a liveness verdict on the process it watches: liveness of a launched run is proven only by a DIRECT probe of the run itself — its PID/exit status, or its own `.out`/`.err` carrying a normal-completion marker — never by a neighboring task's completion.
+5. **Verify wrapper results, not notifications** — count a prompt-wrapper lane only after its approved thin wrapper accepts the terminal result through the strict V2 parser, full external-nonauthorizing tuple, and untrusted/potentially-sensitive resultText contract. A completion signal from a sidecar (watcher / notifier / background-task callback / "task done" notification) is never a substitute for that return. A standalone watcher may observe only caller-managed background captures outside the prompt-wrapper path.
 6. **Escalate early on a stuck blocker.**
 7. **Failed lane is unverified.** Any expected lane that errors, dies, or hits a time/token/usage limit is UNVERIFIED. Record the failed attempt, re-dispatch that lane, and never infer a clean result from silence. Before convergence, reconcile expected lanes against substantive outputs and recorded failures; every failure must name the successful re-dispatch that supersedes it.
 8. **Fail-closed aggregation.** A missing/null sub-verdict or findings payload is NOT-clean. An aggregation or gate remains `REVISE` and exits non-zero until every expected lane has substantive output and every recorded failure is reconciled.
@@ -72,8 +72,8 @@ green mechanical validator never closes it** (the always-on spine carries this c
 dispositions are the only alternatives: `WAIVED:user` (user-authorized, evidence-carried; never legal
 against protected or unclassified findings) and `WAIVED:security-reviewer` (completed, exact
 target-bound `manual-check` evidence, with `role` or `assignedRole` equal to `security-reviewer`). For
-TRACKED work-items the relation is mechanical: the dispatch records launch+terminal events (wrapper
-`--ledger`), the closer names the exact `closesRunIds`, and `check-work-items-state` fails on open
+TRACKED work-items the relation is mechanical: the wrapper-owner terminal-ledger protocol records
+launch+terminal events, the closer names the exact `closesRunIds`, and `check-work-items-state` fails on open
 obligations. Replacement-reviewer equivalence must preserve: the review scope, independence from the
 author, the same evidence target/version, and an equal-or-stronger declared tier — recorded in
 structured fields, not prose. Reviews outside any work-item remain governed by the spine clause alone
@@ -92,7 +92,7 @@ Full lesson: `work-items/lessons/2026-07-17-review-a-frozen-snapshot-not-a-live-
 
 **Ledger read-back before reporting a verdict (2026-07-17, live incident).** On a tracked item, a
 lane's verdict may be reported or acted on ONLY after reading the ledger back and confirming the
-terminal event exists for that launch `runId`. The reviewer's `.out` prose is evidence of what the
+terminal event exists for that launch `runId`. The wrapper result's `resultText` is evidence of what the
 reviewer said, never evidence that the obligation moved. This is the polling-anchor discipline
 applied to closure: anchor on the authoritative store, not on a self-derived signal. The incident
 that forced the rule: a validator defect rejected terminal events whose artifact was a repository

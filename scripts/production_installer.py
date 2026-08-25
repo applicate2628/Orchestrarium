@@ -32,14 +32,62 @@ RUNTIME_HELPERS = (
     "check-work-items-state.py",
     "check-work-items-state.sh",
     "mutate-work-item.py",
+    "provider_prompt.py",
+    "invoke-codex-prompt.py",
+    "invoke-claude-prompt.py",
+    "invoke-kimi-prompt.py",
+    "invoke-grok-prompt.py",
+    "external-prompt-governance.md",
+    "linked_runtime_subroots.py",
     "resolve-agents-mode.py",
     "review_loop_state.py",
     "skill_pack_validator_runtime.py",
     "validate-work-item-state.py",
     "validate-work-item-state.sh",
+    "validate-provider-prompt-projections.py",
 )
 CODEX_RUNTIME_HELPERS = ("check-hook-health.py",)
+TRANSPORT_PROJECTION_FILES = (
+    "provider_prompt.py",
+    "invoke-codex-prompt.py",
+    "invoke-claude-prompt.py",
+    "invoke-kimi-prompt.py",
+    "invoke-grok-prompt.py",
+    "external-prompt-governance.md",
+)
+TRANSPORT_PROJECTION_MANIFEST = "provider-prompt-projections.v1.json"
+E7_LEGACY_PROVIDER_PROMPT_SHA256 = (
+    "825bc6db49408c5975627fba95c95ca479fe45c508e5be71d06c5e6f6c4b8121"
+)
+PRE_E7_LEGACY_PROVIDER_PROMPT_SHA256 = (
+    "a051c5fd916b9995d3c97995b926052acf15796887988e56dbb25d127e4749b0"
+)
+ACCEPTED_LEGACY_PROVIDER_PROMPT_SHA256 = frozenset(
+    (E7_LEGACY_PROVIDER_PROMPT_SHA256, PRE_E7_LEGACY_PROVIDER_PROMPT_SHA256)
+)
+E7_CANONICAL_SKILL_TREE_SHA256 = {
+    "consultant": "2b8294473d5402361082876b569f38b6307f56aa8170e92539bd95bb3c26a6b6",
+    "design-panel": "fb9d97b09517ec38e4560e1b597794024e2e2d27184c25cfa79af0de8616973f",
+    "external-brigade": "abe6def46092b9caf7e081829b0832960831d940d8b062757cc020f4842bec8c",
+    "external-reviewer": "9153bde23c68612926c560a1d43673ed51923d017e31618a02363ddbe6faf750",
+    "external-worker": "3a457ffd5b9f55b786c3f18b6003073f64dda089f9c00e35302f6b6140e7c512",
+    "init-project": "378850fefc2c8b9b352988a34290e515f958b8ea2622c183a5ca5d9b636562fe",
+    "lead": "9bebb43f56bcb0ecb8b8ff8219d227a66b50af026a8c1b900374498c9c494117",
+    "qa-engineer": "c32b6e90e9ba229d13df62f3d3fd0d049ff503773d42c0a04f96ff1d574d7289",
+    "review-loop": "d5a5190926d170a6498399e221028e11087974aef7fb7e49abb1d2052acac089",
+    "second-opinion": "d3f1e93ddb6641b21e05c13e28e1f291137e608922c00c00a59fa28ccad54741",
+}
+GLOBAL_LEAD_ACCEPTED_PRIOR_TREE_SHA256 = frozenset(
+    {
+        "e09377e4cf15c446e2ff19ab160a09835ac6683d51e54a89585625dc1de935ca",
+        "fd28049deb001bf088b0033e2dcc82ffc372e8257dd8aaf1bc6384d49be328b3",
+    }
+)
 RUNTIME_RESOURCES = (
+    (
+        f"shared/{TRANSPORT_PROJECTION_MANIFEST}",
+        f"shared/{TRANSPORT_PROJECTION_MANIFEST}",
+    ),
     ("shared/schemas/agent-runs.schema.json", "shared/schemas/agent-runs.schema.json"),
     (
         "shared/role-routing-policy.v1.json",
@@ -272,6 +320,7 @@ class _SliceACreatedRecord:
     kind: str
     digest: str | None
     projection_target: Path | None
+    ignore_runtime_cache: bool = False
 
 
 @dataclass(frozen=True)
@@ -329,6 +378,7 @@ SLICE_A_FAILURE_IDS = frozenset(
         "E_MUTABLE_PATH_ESCAPE",
         "E_MUTABLE_PATH_IDENTITY_CHANGED",
         "E_MUTABLE_PATH_POSTCONDITION",
+        "E_RUNTIME_SUBROOT_ROLLBACK_UNSAFE",
         "E_CANONICAL_LEAD_STAGE_INVALID",
         "E_CANONICAL_LEAD_POSTWRITE",
         "E_HOOK_INVENTORY_TARGET_INVALID",
@@ -365,7 +415,11 @@ class _InstallTransaction:
         self._entries: list[dict[str, object]] = []
         self._absent_parents: set[Path] = set()
         self._slice_a_created: list[_SliceACreatedRecord] = []
-        self._slice_a_owner: _CreateOnlyMutablePath | None = None
+        # A single transaction may span the ordinary global home plus one or
+        # more explicitly bound Claude subroots.  Each record carries its own
+        # anchor identity, so rollback selects the matching owner rather than
+        # pretending all approved roots share one filesystem ancestor.
+        self._slice_a_owners: dict[str, _CreateOnlyMutablePath] = {}
 
     def __enter__(self) -> "_InstallTransaction":
         if not self.enabled:
@@ -477,9 +531,9 @@ class _InstallTransaction:
     ) -> None:
         """Keep immutable creation proof; only its mutable-path owner removes it."""
 
-        if self._slice_a_owner is None:
-            self._slice_a_owner = owner
-        elif self._slice_a_owner is not owner:
+        key = os.path.normcase(str(owner.anchor))
+        prior = self._slice_a_owners.setdefault(key, owner)
+        if prior is not owner:
             raise RuntimeError("E_ROLLBACK_CREATED_IDENTITY_CHANGED")
         self._slice_a_created.append(record)
 
@@ -492,7 +546,7 @@ class _InstallTransaction:
     ) -> tuple[list[Path], list[_RollbackFailureMember]]:
         unresolved: list[Path] = []
         failures: list[_RollbackFailureMember] = []
-        if self._slice_a_created and self._slice_a_owner is None:
+        if self._slice_a_created and not self._slice_a_owners:
             failures.append(
                 _RollbackFailureMember(
                     "created",
@@ -522,15 +576,24 @@ class _InstallTransaction:
                 unresolved.append(record.leaf_path)
                 continue
             try:
-                assert self._slice_a_owner is not None
-                self._slice_a_owner.rollback_created(record)
+                owner = self._slice_a_owners.get(
+                    os.path.normcase(str(record.anchor_path))
+                )
+                if owner is None:
+                    raise RuntimeError("E_ROLLBACK_CREATED_IDENTITY_CHANGED")
+                owner.rollback_created(record)
             except BaseException as exc:
+                stable_id = (
+                    "E_RUNTIME_SUBROOT_ROLLBACK_UNSAFE"
+                    if str(exc).startswith("E_RUNTIME_SUBROOT_ROLLBACK_UNSAFE")
+                    else "E_ROLLBACK_CREATED_IDENTITY_CHANGED"
+                )
                 failures.append(
                     _RollbackFailureMember(
                         "created",
                         ordinal,
                         str(record.leaf_path),
-                        "E_ROLLBACK_CREATED_IDENTITY_CHANGED",
+                        stable_id,
                         str(exc),
                     )
                 )
@@ -577,7 +640,7 @@ class _InstallTransaction:
         assert self._temporary is not None
         backup = self._temporary
         try:
-            shutil.rmtree(backup)
+            _remove_readonly_tree(backup)
             if backup.exists() or backup.is_symlink():
                 raise OSError("backup path still exists")
         except BaseException as exc:
@@ -638,7 +701,14 @@ class _InstallTransaction:
                 )
             )
             raise _InstallFailure(
-                "E_ROLLBACK_SETTLEMENT_FAILED",
+                (
+                    "E_RUNTIME_SUBROOT_ROLLBACK_UNSAFE"
+                    if any(
+                        member.stable_id == "E_RUNTIME_SUBROOT_ROLLBACK_UNSAFE"
+                        for member in ordered
+                    )
+                    else "E_ROLLBACK_SETTLEMENT_FAILED"
+                ),
                 "rollback",
                 original,
                 members=ordered,
@@ -656,13 +726,27 @@ def _is_reparse_metadata(metadata: os.stat_result) -> bool:
     )
 
 
+def _remove_readonly_tree(path: Path) -> None:
+    """Remove a transaction-owned tree after making only failed entries writable."""
+
+    def retry_writable(function: Callable[..., Any], value: str, _exc: Any) -> None:
+        candidate = Path(value)
+        os.chmod(candidate, candidate.lstat().st_mode | stat.S_IWRITE)
+        function(value)
+
+    shutil.rmtree(path, onexc=retry_writable)
+
+
 class _CreateOnlyMutablePath:
     """The sole Slice-A writer: create absent, exact no-op, collision fail."""
 
-    def __init__(self, anchor: Path, transaction: _InstallTransaction, *, dry_run: bool) -> None:
+    def __init__(self, anchor: Path, transaction: _InstallTransaction, *, dry_run: bool, linked_authority: Any | None = None) -> None:
         self.anchor = Path(os.path.abspath(anchor))
         self.transaction = transaction
         self.dry_run = dry_run
+        self.linked_authority = linked_authority
+        if self.linked_authority is not None:
+            self.linked_authority.assert_current()
         self._walk_existing(self.anchor)
         if not self.anchor.is_dir():
             raise ValueError("E_MUTABLE_PATH_ESCAPE: anchor is not a directory")
@@ -691,12 +775,23 @@ class _CreateOnlyMutablePath:
 
     def _walk_existing(self, path: Path, *, allow_leaf_reparse: bool = False) -> None:
         candidate = Path(os.path.abspath(path))
+        linked_authority = getattr(self, "linked_authority", None)
         chain: list[Path] = []
         while True:
             chain.append(candidate)
+            if linked_authority is not None and candidate == self.anchor:
+                break
             if candidate.parent == candidate:
                 break
             candidate = candidate.parent
+        if linked_authority is not None:
+            try:
+                if os.path.normcase(
+                    os.path.commonpath((str(self.anchor), str(path)))
+                ) != os.path.normcase(str(self.anchor)):
+                    raise ValueError("E_MUTABLE_PATH_ESCAPE")
+            except ValueError:
+                raise ValueError("E_MUTABLE_PATH_ESCAPE") from None
         for component in reversed(chain):
             try:
                 metadata = component.lstat()
@@ -708,6 +803,8 @@ class _CreateOnlyMutablePath:
                 raise ValueError(f"E_MUTABLE_PATH_REPARSE: {component}")
 
     def destination(self, relative: Path, *, allow_leaf_reparse: bool = False) -> Path:
+        if self.linked_authority is not None:
+            self.linked_authority.assert_current()
         if relative.is_absolute() or ".." in relative.parts:
             raise ValueError("E_MUTABLE_PATH_ESCAPE")
         candidate = Path(os.path.abspath(self.anchor / relative))
@@ -742,6 +839,7 @@ class _CreateOnlyMutablePath:
         digest: str | None,
         *,
         projection_target: Path | None = None,
+        ignore_runtime_cache: bool = False,
     ) -> None:
         """Capture the complete no-follow identity proof required for rollback."""
 
@@ -752,10 +850,16 @@ class _CreateOnlyMutablePath:
             raise ValueError("E_MUTABLE_PATH_ESCAPE") from exc
         if not relative.parts:
             raise ValueError("E_MUTABLE_PATH_ESCAPE")
+        if (
+            not isinstance(ignore_runtime_cache, bool)
+            or (ignore_runtime_cache and kind != "tree")
+        ):
+            raise ValueError("E_MUTABLE_PATH_POSTCONDITION")
         root = self.anchor / relative.parts[0]
         allow_leaf_reparse = kind == "projection"
+        allow_root_reparse = allow_leaf_reparse and root == path
         self._walk_existing(self.anchor)
-        self._walk_existing(root)
+        self._walk_existing(root, allow_leaf_reparse=allow_root_reparse)
         self._walk_existing(path.parent)
         self._walk_existing(path, allow_leaf_reparse=allow_leaf_reparse)
         if kind == "projection":
@@ -780,6 +884,7 @@ class _CreateOnlyMutablePath:
                 kind=kind,
                 digest=digest,
                 projection_target=projection_target,
+                ignore_runtime_cache=ignore_runtime_cache,
             ),
             self,
         )
@@ -791,6 +896,11 @@ class _CreateOnlyMutablePath:
         """Delete one created object only after its complete identity proof holds."""
 
         try:
+            if self.linked_authority is not None:
+                try:
+                    self.linked_authority.assert_current()
+                except ValueError as exc:
+                    raise RuntimeError("E_RUNTIME_SUBROOT_ROLLBACK_UNSAFE") from exc
             if (
                 os.path.normcase(str(record.anchor_path))
                 != os.path.normcase(str(self.anchor))
@@ -802,8 +912,13 @@ class _CreateOnlyMutablePath:
                 ) != os.path.normcase(str(record.anchor_path)):
                     self._rollback_identity_changed()
             allow_leaf_reparse = record.kind == "projection"
+            allow_root_reparse = (
+                allow_leaf_reparse and record.root_path == record.leaf_path
+            )
             self._walk_existing(record.anchor_path)
-            self._walk_existing(record.root_path)
+            self._walk_existing(
+                record.root_path, allow_leaf_reparse=allow_root_reparse
+            )
             self._walk_existing(record.parent_path)
             self._walk_existing(
                 record.leaf_path, allow_leaf_reparse=allow_leaf_reparse
@@ -849,7 +964,11 @@ class _CreateOnlyMutablePath:
                     not stat.S_ISDIR(metadata.st_mode)
                     or stat.S_ISLNK(metadata.st_mode)
                     or _is_reparse_metadata(metadata)
-                    or _tree_sha256(record.leaf_path) != record.digest
+                    or _tree_sha256(
+                        record.leaf_path,
+                        ignore_runtime_cache=record.ignore_runtime_cache,
+                    )
+                    != record.digest
                 ):
                     self._rollback_identity_changed()
                 shutil.rmtree(record.leaf_path)
@@ -886,9 +1005,72 @@ class _CreateOnlyMutablePath:
         self._record_created(path, "file", digest)
         return path
 
-    def create_tree(self, relative: Path, source: Path) -> Path:
+    def replace_exact_file(self, relative: Path, expected_digest: str, payload: bytes) -> Path:
+        """Replace one preflighted accepted-prior file inside the outer transaction."""
+        path = self.destination(relative)
+        if self.dry_run:
+            return path
+        self._assert_regular(path, existing=True)
+        if _file_sha256(path) != expected_digest:
+            raise ValueError(f"E_ACCEPTED_PRIOR_COLLISION: {relative}")
+        descriptor, name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+        temporary = Path(name)
+        try:
+            with os.fdopen(descriptor, "wb") as stream:
+                stream.write(payload)
+                stream.flush()
+                os.fsync(stream.fileno())
+            self._walk_existing(path.parent)
+            self._assert_regular(path, existing=True)
+            if _file_sha256(path) != expected_digest:
+                raise ValueError(f"E_ACCEPTED_PRIOR_COLLISION: {relative}")
+            os.replace(temporary, path)
+        finally:
+            temporary.unlink(missing_ok=True)
+        self._assert_regular(path, existing=True)
+        if _file_sha256(path) != hashlib.sha256(payload).hexdigest():
+            raise ValueError("E_MUTABLE_PATH_POSTCONDITION")
+        return path
+
+    def replace_exact_tree(
+        self,
+        relative: Path,
+        expected_digest: str,
+        source: Path,
+        *,
+        ignore_runtime_cache: bool = False,
+    ) -> Path:
+        """Transaction-owned upgrade for one hash-pinned accepted-prior skill tree."""
         target = self.destination(relative)
-        expected = _tree_sha256(source)
+        if self.dry_run:
+            return target
+        self._walk_existing(target)
+        digest = lambda path: _tree_sha256(path, ignore_runtime_cache=ignore_runtime_cache)
+        if digest(target) != expected_digest:
+            raise ValueError(f"E_ACCEPTED_PRIOR_COLLISION: {relative}")
+        current_digest = digest(source)
+        if current_digest is None:
+            raise ValueError("E_MUTABLE_PATH_POSTCONDITION: invalid source tree")
+        staged = Path(tempfile.mkdtemp(prefix=f".{target.name}.upgrade.", dir=target.parent))
+        try:
+            shutil.rmtree(staged)
+            shutil.copytree(source, staged, symlinks=True)
+            if digest(staged) != current_digest:
+                raise ValueError("E_MUTABLE_PATH_POSTCONDITION")
+            shutil.rmtree(target)
+            os.replace(staged, target)
+        finally:
+            if staged.exists():
+                shutil.rmtree(staged, ignore_errors=True)
+        if digest(target) != current_digest:
+            raise ValueError("E_MUTABLE_PATH_POSTCONDITION")
+        return target
+
+    def create_tree(
+        self, relative: Path, source: Path, *, ignore_runtime_cache: bool = False
+    ) -> Path:
+        target = self.destination(relative)
+        expected = _tree_sha256(source, ignore_runtime_cache=ignore_runtime_cache)
         if expected is None:
             raise ValueError("E_MUTABLE_PATH_POSTCONDITION: invalid source tree")
         if target.exists() or target.is_symlink():
@@ -899,7 +1081,7 @@ class _CreateOnlyMutablePath:
                 or _is_reparse_metadata(metadata)
             ):
                 raise ValueError(f"E_CREATE_ONLY_TYPE_COLLISION: {relative}")
-            if _tree_sha256(target) == expected:
+            if _tree_sha256(target, ignore_runtime_cache=ignore_runtime_cache) == expected:
                 return target
             raise ValueError(f"E_CREATE_ONLY_COLLISION: {relative}")
         if self.dry_run:
@@ -909,16 +1091,21 @@ class _CreateOnlyMutablePath:
         try:
             shutil.rmtree(staged)
             shutil.copytree(source, staged, symlinks=True)
-            if _tree_sha256(staged) != expected:
+            if _tree_sha256(staged, ignore_runtime_cache=ignore_runtime_cache) != expected:
                 raise ValueError("E_MUTABLE_PATH_POSTCONDITION")
             self._final_absence(target)
             os.replace(staged, target)
         finally:
             if staged.exists():
                 shutil.rmtree(staged)
-        if _tree_sha256(target) != expected:
+        if _tree_sha256(target, ignore_runtime_cache=ignore_runtime_cache) != expected:
             raise ValueError("E_MUTABLE_PATH_POSTCONDITION")
-        self._record_created(target, "tree", expected)
+        self._record_created(
+            target,
+            "tree",
+            expected,
+            ignore_runtime_cache=ignore_runtime_cache,
+        )
         return target
 
     def create_projection(self, relative: Path, source: Path) -> Path:
@@ -945,6 +1132,67 @@ class _CreateOnlyMutablePath:
             None,
             projection_target=source.resolve(strict=True),
         )
+        return target
+
+    def replace_exact_tree_with_projection(
+        self, relative: Path, expected_digest: str, source: Path
+    ) -> Path:
+        """Migrate one hash-pinned historical tree to its canonical projection."""
+
+        target = self.destination(relative, allow_leaf_reparse=True)
+        metadata = target.lstat()
+        if (
+            not stat.S_ISDIR(metadata.st_mode)
+            or stat.S_ISLNK(metadata.st_mode)
+            or _is_reparse_metadata(metadata)
+            or _tree_sha256(target) != expected_digest
+        ):
+            raise ValueError(f"E_CREATE_ONLY_PROJECTION_COLLISION: {relative}")
+        if self.dry_run:
+            return target
+        target_identity = self._identity(target)
+        self._walk_existing(target.parent)
+        staged = target.parent / f".{target.name}.projection.tmp"
+        tombstone = target.parent / f".{target.name}.projection.tombstone"
+        if (
+            staged.exists()
+            or staged.is_symlink()
+            or tombstone.exists()
+            or tombstone.is_symlink()
+        ):
+            raise ValueError("E_MUTABLE_PATH_IDENTITY_CHANGED")
+        staged.symlink_to(source, target_is_directory=True)
+        try:
+            if not _projection_resolves_to(staged, source):
+                raise ValueError("E_MUTABLE_PATH_POSTCONDITION")
+            self._walk_existing(target.parent)
+            if (
+                self._identity(target) != target_identity
+                or _tree_sha256(target) != expected_digest
+            ):
+                raise ValueError(f"E_CREATE_ONLY_PROJECTION_COLLISION: {relative}")
+            os.replace(target, tombstone)
+            if (
+                self._identity(tombstone) != target_identity
+                or _tree_sha256(tombstone) != expected_digest
+            ):
+                raise ValueError("E_MUTABLE_PATH_POSTCONDITION")
+            try:
+                os.replace(staged, target)
+            except BaseException:
+                if tombstone.exists() and not (target.exists() or target.is_symlink()):
+                    os.replace(tombstone, target)
+                raise
+            if not _projection_resolves_to(target, source):
+                raise ValueError("E_MUTABLE_PATH_POSTCONDITION")
+            if (
+                self._identity(tombstone) != target_identity
+                or _tree_sha256(tombstone) != expected_digest
+            ):
+                raise ValueError("E_MUTABLE_PATH_POSTCONDITION")
+            _remove_readonly_tree(tombstone)
+        finally:
+            staged.unlink(missing_ok=True)
         return target
 
 
@@ -999,7 +1247,7 @@ def _target(provider: str, args: argparse.Namespace) -> tuple[str, Path, Path | 
     target = Path(os.path.abspath(target))
     if mode != "global":
         project = target.parent
-    if _contains_reparse(target):
+    if mode != "global" and _contains_reparse(target):
         raise ValueError(f"refusing reparse-point target path: {target}")
     if target.name.casefold() != suffix:
         raise ValueError(f"target must resolve to a {suffix} directory")
@@ -1078,6 +1326,211 @@ class _CanonicalLeadStage:
     digest: str
 
 
+@dataclass(frozen=True)
+class _ClaudeTransportProjectionStage:
+    """One preflighted Claude transport set derived from canonical-stage bytes."""
+
+    files: tuple[tuple[str, bytes], ...]
+    manifest_payload: bytes
+    pending_files: tuple[tuple[str, bytes], ...]
+    manifest_pending: bool
+    replace_legacy_singleton: bool = False
+    replacement_digest: str | None = None
+
+
+def _projection_validator(root: Path):
+    """Load the one parity-schema owner from the source tree."""
+
+    path = root / "scripts" / "validate-provider-prompt-projections.py"
+    spec = importlib.util.spec_from_file_location(
+        "_orchestrarium_transport_projection_validator", path
+    )
+    if spec is None or spec.loader is None:
+        raise ValueError("E_TRANSPORT_PROJECTION_PARITY: validator cannot load")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    try:
+        spec.loader.exec_module(module)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise ValueError(
+            "E_TRANSPORT_PROJECTION_PARITY: validator cannot load"
+        ) from exc
+    return module
+
+
+def _projection_file_state(
+    path: Path,
+    expected: bytes,
+    *,
+    accepted_prior_sha256: frozenset[str] = frozenset(),
+) -> str:
+    """Classify one no-follow destination against its staged bytes."""
+
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError:
+        return "absent"
+    except OSError as exc:
+        raise ValueError(
+            "E_TRANSPORT_PROJECTION_PARITY: destination inspection"
+        ) from exc
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or stat.S_ISLNK(metadata.st_mode)
+        or _is_reparse_metadata(metadata)
+    ):
+        return "invalid"
+    try:
+        content = path.read_bytes()
+        if content == expected:
+            return "current"
+        if hashlib.sha256(content).hexdigest() in accepted_prior_sha256:
+            return "accepted-prior"
+        return "drift"
+    except OSError as exc:
+        raise ValueError(
+            "E_TRANSPORT_PROJECTION_PARITY: destination read"
+        ) from exc
+
+
+def _stage_claude_transport_projection(
+    root: Path,
+    canonical_transport_root: Path,
+    projection_root: Path,
+) -> _ClaudeTransportProjectionStage:
+    """Admit exactly one atomic Claude transport transition before mutation."""
+
+    root = Path(root)
+    canonical_transport_root = Path(canonical_transport_root)
+    projection_root = Path(projection_root)
+    validator = _projection_validator(root)
+    manifest_path = root / "shared" / TRANSPORT_PROJECTION_MANIFEST
+    try:
+        validator.validate_projection_manifest(
+            manifest_path,
+            root,
+            (("canonical-stage", canonical_transport_root),),
+        )
+        files = tuple(
+            (name, (canonical_transport_root / name).read_bytes())
+            for name in TRANSPORT_PROJECTION_FILES
+        )
+        manifest_payload = manifest_path.read_bytes()
+    except (OSError, ValueError) as exc:
+        detail = str(exc)
+        if not detail.startswith("E_TRANSPORT_PROJECTION_PARITY:"):
+            detail = f"E_TRANSPORT_PROJECTION_PARITY: {detail}"
+        raise ValueError(detail) from exc
+
+    states = tuple(
+        _projection_file_state(
+            projection_root / name,
+            payload,
+            accepted_prior_sha256=(
+                ACCEPTED_LEGACY_PROVIDER_PROMPT_SHA256
+                if name == "provider_prompt.py"
+                else frozenset()
+            ),
+        )
+        for name, payload in files
+    )
+    manifest_target = projection_root.parent / "shared" / TRANSPORT_PROJECTION_MANIFEST
+    manifest_state = _projection_file_state(manifest_target, manifest_payload)
+    replace_legacy_singleton = False
+    replacement_digest: str | None = None
+    if states == ("absent",) * len(TRANSPORT_PROJECTION_FILES) and manifest_state == "absent":
+        pending_files = files
+        manifest_pending = True
+    elif states == ("absent", "current", "current", "absent", "absent", "absent") and manifest_state == "absent":
+        pending_files = tuple(
+            (name, payload)
+            for (name, payload), state in zip(files, states)
+            if state == "absent"
+        )
+        manifest_pending = True
+    elif states == ("current",) * len(TRANSPORT_PROJECTION_FILES) and manifest_state == "current":
+        pending_files = ()
+        manifest_pending = False
+    elif states == ("accepted-prior", "current", "current", "absent", "absent", "absent") and manifest_state == "absent":
+        pending_files = files
+        manifest_pending = True
+        replace_legacy_singleton = True
+        replacement_digest = _file_sha256(projection_root / "provider_prompt.py")
+    else:
+        raise ValueError("E_TRANSPORT_PROJECTION_PARITY: atomic projection state")
+    return _ClaudeTransportProjectionStage(
+        files,
+        manifest_payload,
+        pending_files,
+        manifest_pending,
+        replace_legacy_singleton,
+        replacement_digest,
+    )
+
+
+def _apply_claude_transport_projection(
+    stage: _ClaudeTransportProjectionStage,
+    projection_root: Path,
+    owner: "_CreateOnlyMutablePath",
+) -> None:
+    """Materialize only the preflighted missing members through the sole owner."""
+
+    try:
+        projection_relative = projection_root.relative_to(owner.anchor)
+    except ValueError as exc:
+        raise ValueError("E_TRANSPORT_PROJECTION_PARITY: destination escape") from exc
+    for name, payload in stage.pending_files:
+        if stage.replace_legacy_singleton and name == "provider_prompt.py":
+            if stage.replacement_digest not in ACCEPTED_LEGACY_PROVIDER_PROMPT_SHA256:
+                raise ValueError("E_TRANSPORT_PROJECTION_PARITY: legacy replacement digest")
+            owner.replace_exact_file(
+                projection_relative / name,
+                stage.replacement_digest,
+                payload,
+            )
+        else:
+            owner.create_file(projection_relative / name, payload)
+    if stage.manifest_pending:
+        owner.create_file(
+            projection_relative.parent / "shared" / TRANSPORT_PROJECTION_MANIFEST,
+            stage.manifest_payload,
+        )
+
+
+def _validate_committed_transport_projection(
+    root: Path,
+    stage: _ClaudeTransportProjectionStage,
+    canonical_transport_root: Path,
+    projection_root: Path,
+) -> None:
+    """Accept skill projection only after the committed bytes match this stage."""
+
+    for name, payload in stage.files:
+        if _projection_file_state(canonical_transport_root / name, payload) != "current":
+            raise ValueError("E_TRANSPORT_PROJECTION_PARITY: canonical commit drift")
+        if _projection_file_state(projection_root / name, payload) != "current":
+            raise ValueError("E_TRANSPORT_PROJECTION_PARITY: Claude commit drift")
+    manifest_path = Path(root) / "shared" / TRANSPORT_PROJECTION_MANIFEST
+    if _projection_file_state(manifest_path, stage.manifest_payload) != "current":
+        raise ValueError("E_TRANSPORT_PROJECTION_PARITY: manifest commit drift")
+    if _projection_file_state(
+        projection_root.parent / "shared" / TRANSPORT_PROJECTION_MANIFEST,
+        stage.manifest_payload,
+    ) != "current":
+        raise ValueError("E_TRANSPORT_PROJECTION_PARITY: Claude manifest commit drift")
+    try:
+        _projection_validator(Path(root)).validate_projection_manifest(
+            manifest_path,
+            Path(root),
+            (("canonical", canonical_transport_root), ("claude-host", projection_root)),
+        )
+    except (OSError, ValueError) as exc:
+        detail = str(exc)
+        if not detail.startswith("E_TRANSPORT_PROJECTION_PARITY:"):
+            detail = f"E_TRANSPORT_PROJECTION_PARITY: {detail}"
+        raise ValueError(detail) from exc
+
+
 def _stage_tree_manifest(path: Path) -> tuple[tuple[str, str], ...]:
     """Return a deterministic, no-follow manifest for one staged skill tree."""
 
@@ -1094,7 +1547,7 @@ def _stage_tree_manifest(path: Path) -> tuple[tuple[str, str], ...]:
         current = pending.pop()
         for entry in sorted(os.scandir(current), key=lambda candidate: candidate.name):
             candidate = Path(entry.path)
-            relative = candidate.relative_to(path).as_posix()
+            relative = _relative_posix(candidate, path)
             metadata = candidate.stat(follow_symlinks=False)
             if stat.S_ISLNK(metadata.st_mode) or _is_reparse_metadata(metadata):
                 raise ValueError(
@@ -1183,7 +1636,7 @@ class _PostMaterializationWriterDestination:
 
 
 _POST_MATERIALIZATION_WRITER_CALLS = {
-    "_install_claude_skill_projections": ("claude-skill-projection",),
+    "_apply_claude_skill_projection_plan": ("claude-skill-projection",),
     "_install_runtime_files": ("runtime-outside",),
     "_install_ui_continuity_contract": ("ui-continuity",),
     "_install_hooks": ("hook-registration", "hook-inventory"),
@@ -1196,7 +1649,11 @@ _POST_MATERIALIZATION_WRITER_CALLS = {
     "_reclaim_retired": ("retired-reclaim",),
 }
 _POST_MATERIALIZATION_NONWRITER_CALLS = frozenset(
-    {"_resolve_claude_delegation_mode"}
+    {
+        "_resolve_claude_delegation_mode",
+        "_discard_canonical_skills_plan",
+        "_assert_global_claude_linked_subroot_authority",
+    }
 )
 _POST_MATERIALIZATION_ARTIFACT_CLASS = {
     "claude-skill-projection": "claude-skill-projection",
@@ -1227,10 +1684,16 @@ def _post_materialization_writer_source_census() -> tuple[str, ...]:
     try:
         tree = ast.parse(inspect.getsource(install))
         calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)]
+        parents = {
+            id(child): parent
+            for parent in ast.walk(tree)
+            for child in ast.iter_child_nodes(parent)
+        }
         publication_calls = [
             call
             for call in calls
-            if _post_materialization_call_name(call) == "_install_canonical_skills"
+            if _post_materialization_call_name(call)
+            in {"_install_canonical_skills", "_apply_canonical_skills_plan"}
         ]
         if len(publication_calls) != 2:
             raise ValueError("canonical publication call census")
@@ -1252,6 +1715,7 @@ def _post_materialization_writer_source_census() -> tuple[str, ...]:
             name
             for call in calls
             if start < call.lineno < end
+            if isinstance(parents.get(id(call)), ast.Expr)
             if (name := _post_materialization_call_name(call)) is not None
         }
         observed_writers = observed_calls - _POST_MATERIALIZATION_NONWRITER_CALLS
@@ -1293,6 +1757,7 @@ def _post_materialization_writer_destinations(
     codex_post_tree_runtime: tuple[tuple[Path, Path], ...],
     codex_hook_inventory: Path | None = None,
     codex_role_manifest: dict[str, Any] | None = None,
+    claude_skills_target: Path | None = None,
 ) -> tuple[_PostMaterializationWriterDestination, ...]:
     """Enumerate every durable destination written after canonical lead publication."""
 
@@ -1311,13 +1776,18 @@ def _post_materialization_writer_destinations(
         )
 
     if provider == "claude":
+        projection_root = claude_skills_target or target / "skills"
         for skill in sorted((root / "src.codex" / "skills").iterdir()):
             if skill.is_dir() and not skill.is_symlink():
-                add("claude-skill-projection", target / "skills" / skill.name)
-        for _runtime_source, destination in _runtime_file_destinations(
+                add("claude-skill-projection", projection_root / skill.name)
+        for runtime_source, destination in _runtime_file_destinations(
             root, target / "agents" / "scripts"
         ):
-            add("runtime-outside", destination)
+            if (
+                runtime_source.name not in TRANSPORT_PROJECTION_FILES
+                and runtime_source.name != TRANSPORT_PROJECTION_MANIFEST
+            ):
+                add("runtime-outside", destination)
     else:
         for _runtime_source, destination in codex_post_tree_runtime:
             add("runtime-outside", destination)
@@ -1397,10 +1867,18 @@ def _assert_canonical_lead_postwrite_free(
             raise ValueError("E_CANONICAL_LEAD_POSTWRITE: runtime census mismatch")
 
 
-def _sync_tree(source: Path, target: Path, dry_run: bool) -> None:
+def _sync_tree(
+    source: Path,
+    target: Path,
+    dry_run: bool,
+    *,
+    excluded_files: frozenset[Path] = frozenset(),
+) -> None:
     for item in sorted(source.rglob("*")):
         relative = item.relative_to(source)
         if "__pycache__" in relative.parts or item.suffix.casefold() == ".ps1":
+            continue
+        if relative in excluded_files:
             continue
         destination = target / relative
         if item.is_file():
@@ -1433,12 +1911,21 @@ def _installer_mutation_paths(
     registration: Path,
     shared_mode_target: Path | None,
     codex_hook_inventory: Path | None = None,
+    claude_commands_target: Path | None = None,
+    claude_skills_target: Path | None = None,
+    claude_projection_snapshot_paths: tuple[Path, ...] = (),
 ) -> list[Path]:
     """Return only paths whose contents this installer can mutate."""
     if provider not in {"codex", "claude"}:
         raise ValueError(f"unsupported provider: {provider}")
 
     paths: list[Path] = []
+    # Accepted-prior e7 canonical skill trees are transaction-restored if upgraded.
+    paths.append(
+        target_tree
+        if provider == "codex"
+        else target.parent / ".agents" / "skills"
+    )
     if provider == "codex":
         # Slice-A skills, native roles, and config use the created-only ledger,
         # never the snapshot-and-restore transaction surface.
@@ -1446,25 +1933,43 @@ def _installer_mutation_paths(
         retired_root = agents_root
         retired_manifest = _CODEX_RETIRED_PS1
     else:
+        commands_target = claude_commands_target or target / "commands"
+        skills_target = claude_skills_target or target / "skills"
         for directory in ("agents", "commands"):
             paths.extend(
                 _sync_file_destinations(
                     source / directory,
-                    target / directory,
+                    target_tree if directory == "agents" else commands_target,
                 )
             )
         # Canonical skills and projections are Slice-A create-only objects.
-        paths.extend(_claude_stale_namespace_paths(source, target))
+        paths.extend(
+            _claude_stale_namespace_paths(source, commands_target, skills_target)
+        )
+        paths.extend(claude_projection_snapshot_paths)
         paths.append(target / "AGENTS.md")
-        helper_target = target / "agents" / "scripts"
+        helper_target = target_tree / "scripts"
         retired_root = target
         retired_manifest = _CLAUDE_RETIRED_PS1
 
-    paths.extend(helper_target / helper for helper in RUNTIME_HELPERS)
+    mutable_runtime_helpers = (
+        RUNTIME_HELPERS
+        if provider == "codex"
+        else tuple(
+            helper
+            for helper in RUNTIME_HELPERS
+            if helper not in TRANSPORT_PROJECTION_FILES
+        )
+    )
+    paths.extend(helper_target / helper for helper in mutable_runtime_helpers)
+    if provider == "claude":
+        paths.extend(helper_target / name for name in TRANSPORT_PROJECTION_FILES)
+        paths.append(helper_target.parent / "shared" / TRANSPORT_PROJECTION_MANIFEST)
     paths.append(agents_root / UI_CONTINUITY_CONTRACT_TARGET)
     paths.extend(
         helper_target.parent / destination
         for _source, destination in RUNTIME_RESOURCES
+        if provider == "codex" or Path(destination).name != TRANSPORT_PROJECTION_MANIFEST
     )
     if provider == "codex":
         paths.extend(
@@ -1492,7 +1997,13 @@ def _installer_mutation_paths(
                 shared_mode_target.with_suffix(""),
             )
         )
-    paths.extend(retired_root / Path(relative) for relative in retired_manifest)
+    for relative in retired_manifest:
+        relative_path = Path(relative)
+        paths.append(
+            target_tree / relative_path.relative_to("agents")
+            if provider == "claude" and relative_path.parts[0] == "agents"
+            else retired_root / relative_path
+        )
     return paths
 
 
@@ -1529,6 +2040,16 @@ def _file_sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _relative_posix(path: Path, root: Path) -> str:
+    """Return a containment-checked relative name across native/MSYS paths."""
+
+    relative = os.path.relpath(str(path), str(root))
+    normalized = relative.replace("\\", "/")
+    if normalized == ".." or normalized.startswith("../") or Path(relative).is_absolute():
+        raise ValueError("E_MUTABLE_PATH_ESCAPE: relative path")
+    return normalized
+
+
 def _load_json_object(path: Path, failure_id: str) -> dict[str, Any]:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
@@ -1539,21 +2060,49 @@ def _load_json_object(path: Path, failure_id: str) -> dict[str, Any]:
     return value
 
 
-def _tree_sha256(path: Path) -> str | None:
-    if not path.is_dir() or path.is_symlink() or getattr(
-        os.path, "isjunction", lambda _path: False
-    )(path):
+def _tree_sha256(path: Path, *, ignore_runtime_cache: bool = False) -> str | None:
+    path = Path(os.path.abspath(path))
+    try:
+        root_metadata = path.lstat()
+    except OSError:
+        return None
+    if (
+        not stat.S_ISDIR(root_metadata.st_mode)
+        or stat.S_ISLNK(root_metadata.st_mode)
+        or _is_reparse_metadata(root_metadata)
+        or getattr(os.path, "isjunction", lambda _path: False)(path)
+    ):
         return None
     digest = hashlib.sha256()
     for item in sorted(path.rglob("*"), key=lambda value: value.as_posix()):
-        relative = item.relative_to(path).as_posix().encode("utf-8")
-        if item.is_symlink() or getattr(os.path, "isjunction", lambda _path: False)(item):
+        try:
+            metadata = item.lstat()
+        except OSError:
             return None
-        if item.is_file():
+        if (
+            stat.S_ISLNK(metadata.st_mode)
+            or _is_reparse_metadata(metadata)
+            or getattr(os.path, "isjunction", lambda _path: False)(item)
+        ):
+            return None
+        relative_path = item.relative_to(path)
+        if ignore_runtime_cache and stat.S_ISDIR(metadata.st_mode) and item.name == "__pycache__":
+            continue
+        if (
+            ignore_runtime_cache
+            and stat.S_ISREG(metadata.st_mode)
+            and item.suffix.casefold() == ".pyc"
+            and "__pycache__" in relative_path.parts[:-1]
+        ):
+            continue
+        relative = _relative_posix(item, path).encode("utf-8")
+        if stat.S_ISREG(metadata.st_mode):
             digest.update(b"F\0" + relative + b"\0")
             digest.update(item.read_bytes())
-        elif item.is_dir():
+        elif stat.S_ISDIR(metadata.st_mode):
             digest.update(b"D\0" + relative + b"\0")
+        else:
+            return None
     return digest.hexdigest()
 
 
@@ -1561,7 +2110,7 @@ def _projection_resolves_to(path: Path, expected: Path) -> bool:
     if not (path.is_symlink() or getattr(os.path, "isjunction", lambda _path: False)(path)):
         return False
     try:
-        return path.resolve(strict=True) == expected.resolve(strict=True)
+        return os.path.samefile(path.resolve(strict=True), expected.resolve(strict=True))
     except OSError:
         return False
 
@@ -1707,45 +2256,342 @@ def _install_codex_native_roles(
         print(f"  Native role create-only verified: {relative}")
 
 
+@dataclass(frozen=True)
+class _CanonicalSkillPlan:
+    name: str
+    source: Path
+    source_digest: str
+    installed_digest: str | None
+    accepted_prior: str | None
+    ignore_runtime_cache: bool
+
+
+@dataclass(frozen=True)
+class _CanonicalSkillsPlan:
+    stage: _CanonicalLeadStage
+    skills: tuple[_CanonicalSkillPlan, ...]
+    transport_stage: _ClaudeTransportProjectionStage | None
+
+
+def _preflight_canonical_skills(
+    source: Path,
+    target: Path,
+    *,
+    root: Path,
+    claude_transport_root: Path | None = None,
+) -> _CanonicalSkillsPlan:
+    """Bind the complete affected set before the transaction applies any member."""
+
+    skills = tuple(
+        skill
+        for skill in sorted(source.iterdir())
+        if skill.is_dir() and not skill.is_symlink()
+    )
+    lead_source = next((skill for skill in skills if skill.name == "lead"), None)
+    if lead_source is None:
+        raise ValueError("E_CANONICAL_LEAD_STAGE_INVALID: source lead missing")
+    stage = _stage_canonical_lead_tree(root, lead_source, target / "lead" / "scripts")
+    try:
+        if (
+            _stage_tree_manifest(stage.path) != stage.manifest
+            or _tree_sha256(stage.path) != stage.digest
+        ):
+            raise ValueError("E_CANONICAL_LEAD_STAGE_INVALID: staged evidence drift")
+
+        planned: list[_CanonicalSkillPlan] = []
+        for skill in skills:
+            materialized = stage.path if skill.name == "lead" else skill
+            ignore_runtime_cache = skill.name == "lead"
+            current = _tree_sha256(
+                materialized, ignore_runtime_cache=ignore_runtime_cache
+            )
+            if current is None:
+                raise ValueError(f"E_ACCEPTED_PRIOR_COLLISION: invalid source {skill.name}")
+            installed = target / skill.name
+            exists = installed.exists() or installed.is_symlink()
+            observed = (
+                _tree_sha256(installed, ignore_runtime_cache=ignore_runtime_cache)
+                if exists
+                else None
+            )
+            prior = E7_CANONICAL_SKILL_TREE_SHA256.get(skill.name)
+            accepted_priors = frozenset(
+                value
+                for value in (
+                    prior,
+                    *(
+                        GLOBAL_LEAD_ACCEPTED_PRIOR_TREE_SHA256
+                        if skill.name == "lead"
+                        else ()
+                    ),
+                )
+                if value is not None
+            )
+            if observed is None and exists:
+                raise ValueError(f"E_ACCEPTED_PRIOR_COLLISION: {skill.name}")
+            if (
+                observed is not None
+                and observed != current
+                and observed not in accepted_priors
+            ):
+                raise ValueError(f"E_ACCEPTED_PRIOR_COLLISION: {skill.name}")
+            planned.append(
+                _CanonicalSkillPlan(
+                    skill.name,
+                    materialized,
+                    current,
+                    observed,
+                    observed if observed in accepted_priors else None,
+                    ignore_runtime_cache,
+                )
+            )
+
+        transport_stage: _ClaudeTransportProjectionStage | None = None
+        if claude_transport_root is not None:
+            transport_stage = _stage_claude_transport_projection(
+                root,
+                stage.path / "scripts",
+                claude_transport_root,
+            )
+
+        return _CanonicalSkillsPlan(stage, tuple(planned), transport_stage)
+    except BaseException:
+        shutil.rmtree(stage.path, ignore_errors=True)
+        raise
+
+
+def _discard_canonical_skills_plan(plan: _CanonicalSkillsPlan) -> None:
+    shutil.rmtree(plan.stage.path, ignore_errors=True)
+
+
+def _assert_canonical_skills_plan_current(
+    plan: _CanonicalSkillsPlan,
+    target: Path,
+    *,
+    root: Path,
+    claude_transport_root: Path | None,
+) -> None:
+    """Reject any post-preflight drift before the transaction writes its first path."""
+
+    for skill in plan.skills:
+        current = _tree_sha256(
+            skill.source, ignore_runtime_cache=skill.ignore_runtime_cache
+        )
+        installed = target / skill.name
+        exists = installed.exists() or installed.is_symlink()
+        observed = (
+            _tree_sha256(installed, ignore_runtime_cache=skill.ignore_runtime_cache)
+            if exists
+            else None
+        )
+        if current != skill.source_digest or observed != skill.installed_digest:
+            raise ValueError(f"E_ACCEPTED_PRIOR_COLLISION: preflight drift {skill.name}")
+    if plan.transport_stage is not None:
+        assert claude_transport_root is not None
+        current_transport = _stage_claude_transport_projection(
+            root, plan.stage.path / "scripts", claude_transport_root
+        )
+        if current_transport != plan.transport_stage:
+            raise ValueError("E_TRANSPORT_PROJECTION_PARITY: preflight drift")
+
+
+def _apply_canonical_skills_plan(
+    plan: _CanonicalSkillsPlan,
+    target: Path,
+    owner: _CreateOnlyMutablePath,
+    *,
+    root: Path,
+    claude_transport_root: Path | None = None,
+    claude_transport_owner: _CreateOnlyMutablePath | None = None,
+) -> None:
+    """Apply one immutable preflight plan through the sole transaction owner."""
+
+    target_relative = target.relative_to(owner.anchor)
+    _assert_canonical_skills_plan_current(
+        plan,
+        target,
+        root=root,
+        claude_transport_root=claude_transport_root,
+    )
+    for skill in plan.skills:
+        if skill.name == "lead":
+            continue
+        if skill.accepted_prior is not None:
+            owner.replace_exact_tree(
+                target_relative / skill.name, skill.accepted_prior, skill.source
+            )
+        else:
+            owner.create_tree(
+                target_relative / skill.name,
+                skill.source,
+                ignore_runtime_cache=skill.ignore_runtime_cache,
+            )
+
+    if plan.transport_stage is not None:
+        assert claude_transport_root is not None
+        _apply_claude_transport_projection(
+            plan.transport_stage,
+            claude_transport_root,
+            claude_transport_owner or owner,
+        )
+
+    lead = next(skill for skill in plan.skills if skill.name == "lead")
+    if lead.accepted_prior is not None:
+        owner.replace_exact_tree(
+            target_relative / "lead",
+            lead.accepted_prior,
+            lead.source,
+            ignore_runtime_cache=lead.ignore_runtime_cache,
+        )
+    else:
+        owner.create_tree(
+            target_relative / "lead",
+            lead.source,
+            ignore_runtime_cache=lead.ignore_runtime_cache,
+        )
+
+    if plan.transport_stage is not None and not owner.dry_run:
+        _validate_committed_transport_projection(
+            root,
+            plan.transport_stage,
+            target / "lead" / "scripts",
+            claude_transport_root,
+        )
+
+
 def _install_canonical_skills(
     source: Path,
     target: Path,
     owner: _CreateOnlyMutablePath,
     *,
     root: Path,
+    claude_transport_root: Path | None = None,
+    claude_transport_owner: _CreateOnlyMutablePath | None = None,
 ) -> None:
-    target_relative = target.relative_to(owner.anchor)
-    for skill in sorted(source.iterdir()):
-        if skill.is_dir() and not skill.is_symlink():
-            if skill.name != "lead":
-                owner.create_tree(target_relative / skill.name, skill)
-                continue
-            helper_target = target / "lead" / "scripts"
-            stage = _stage_canonical_lead_tree(root, skill, helper_target)
-            try:
-                if (
-                    _stage_tree_manifest(stage.path) != stage.manifest
-                    or _tree_sha256(stage.path) != stage.digest
-                ):
-                    raise ValueError(
-                        "E_CANONICAL_LEAD_STAGE_INVALID: staged evidence drift"
-                    )
-                owner.create_tree(target_relative / "lead", stage.path)
-            finally:
-                shutil.rmtree(stage.path, ignore_errors=True)
+    plan = _preflight_canonical_skills(
+        source,
+        target,
+        root=root,
+        claude_transport_root=claude_transport_root,
+    )
+    try:
+        _apply_canonical_skills_plan(
+            plan,
+            target,
+            owner,
+            root=root,
+            claude_transport_root=claude_transport_root,
+            claude_transport_owner=claude_transport_owner,
+        )
+    finally:
+        _discard_canonical_skills_plan(plan)
+
+
+@dataclass(frozen=True)
+class _ClaudeSkillProjectionPlan:
+    name: str
+    canonical_target: Path
+    canonical_digest: str
+    action: str
+    historical_digest: str | None
+
+
+def _preflight_claude_skill_projections(
+    canonical_source: Path,
+    historical_claude_source: Path,
+    canonical_target: Path,
+    projection_root: Path,
+) -> tuple[_ClaudeSkillProjectionPlan, ...]:
+    """Freeze each Claude skill projection state before any install write."""
+
+    plans: list[_ClaudeSkillProjectionPlan] = []
+    for skill in sorted(canonical_source.iterdir()):
+        if not skill.is_dir() or skill.is_symlink():
+            continue
+        canonical = canonical_target / skill.name
+        digest = _tree_sha256(skill, ignore_runtime_cache=skill.name == "lead")
+        if digest is None:
+            raise ValueError(f"E_CREATE_ONLY_PROJECTION_COLLISION: {skill.name}")
+        installed = projection_root / skill.name
+        if not (installed.exists() or installed.is_symlink()):
+            action, historical_digest = "create", None
+        elif _projection_resolves_to(installed, canonical):
+            action, historical_digest = "current", None
+        else:
+            historical = historical_claude_source / skill.name
+            historical_digest = _tree_sha256(
+                historical, ignore_runtime_cache=skill.name == "lead"
+            )
+            installed_digest = _tree_sha256(
+                installed, ignore_runtime_cache=skill.name == "lead"
+            )
+            if historical_digest is None or installed_digest != historical_digest:
+                raise ValueError(f"E_CREATE_ONLY_PROJECTION_COLLISION: {skill.name}")
+            action = "migrate"
+        plans.append(
+            _ClaudeSkillProjectionPlan(
+                skill.name, canonical, digest, action, historical_digest
+            )
+        )
+    return tuple(plans)
+
+
+def _assert_claude_skill_projection_plan_current(
+    plan: tuple[_ClaudeSkillProjectionPlan, ...],
+    canonical_source: Path,
+    projection_root: Path,
+) -> None:
+    for item in plan:
+        source = canonical_source / item.name
+        if _tree_sha256(source, ignore_runtime_cache=item.name == "lead") != item.canonical_digest:
+            raise ValueError(f"E_CREATE_ONLY_PROJECTION_COLLISION: preflight drift {item.name}")
+        installed = projection_root / item.name
+        if item.action == "create":
+            current = not (installed.exists() or installed.is_symlink())
+        elif item.action == "current":
+            current = _projection_resolves_to(installed, item.canonical_target)
+        else:
+            current = _tree_sha256(
+                installed, ignore_runtime_cache=item.name == "lead"
+            ) == item.historical_digest
+        if not current:
+            raise ValueError(f"E_CREATE_ONLY_PROJECTION_COLLISION: preflight drift {item.name}")
+
+
+def _apply_claude_skill_projection_plan(
+    plan: tuple[_ClaudeSkillProjectionPlan, ...],
+    canonical_source: Path,
+    projection_root: Path,
+    owner: _CreateOnlyMutablePath,
+) -> None:
+    _assert_claude_skill_projection_plan_current(
+        plan, canonical_source, projection_root
+    )
+    projection_relative = projection_root.relative_to(owner.anchor)
+    for item in plan:
+        relative = projection_relative / item.name
+        if item.action == "create":
+            owner.create_projection(relative, item.canonical_target)
+        elif item.action == "migrate":
+            assert item.historical_digest is not None
+            owner.replace_exact_tree_with_projection(
+                relative, item.historical_digest, item.canonical_target
+            )
 
 
 def _install_claude_skill_projections(
     canonical_source: Path,
-    _historical_claude_source: Path,
+    historical_claude_source: Path,
     canonical_target: Path,
     projection_root: Path,
     owner: _CreateOnlyMutablePath,
 ) -> None:
-    projection_relative = projection_root.relative_to(owner.anchor)
-    for skill in sorted(canonical_source.iterdir()):
-        if skill.is_dir() and not skill.is_symlink():
-            owner.create_projection(projection_relative / skill.name, canonical_target / skill.name)
+    plan = _preflight_claude_skill_projections(
+        canonical_source, historical_claude_source, canonical_target, projection_root
+    )
+    _apply_claude_skill_projection_plan(
+        plan, canonical_source, projection_root, owner
+    )
 
 
 def _toml_string(value: str) -> str:
@@ -1815,6 +2661,7 @@ def _reconcile_codex_native_config(
     source_agents: Path | None = None,
     target_agents: Path | None = None,
     manifest: dict[str, Any] | None = None,
+    role_owner: _CreateOnlyMutablePath | None = None,
 ) -> None:
     relative = config_path.relative_to(owner.anchor)
     config_exists = config_path.exists() or config_path.is_symlink()
@@ -1860,12 +2707,13 @@ def _reconcile_codex_native_config(
                 raise ValueError(f"E_CREATE_ONLY_COLLISION: agents.{name}")
 
         legacy_path = target_agents / CODEX_LEGACY_LUNA_ROLE.name
-        legacy_relative = legacy_path.relative_to(owner.anchor)
+        legacy_owner = role_owner or owner
+        legacy_relative = legacy_path.relative_to(legacy_owner.anchor)
         legacy_exists = legacy_path.exists() or legacy_path.is_symlink()
         if legacy_exists:
-            owner.destination(legacy_relative)
+            legacy_owner.destination(legacy_relative)
             try:
-                owner._assert_regular(legacy_path, existing=True)
+                legacy_owner._assert_regular(legacy_path, existing=True)
             except ValueError as exc:
                 raise ValueError(
                     f"E_CREATE_ONLY_COLLISION: {legacy_relative}"
@@ -1915,20 +2763,24 @@ def _reconcile_codex_native_config(
     if legacy_exists:
         assert legacy_path is not None
         if not owner.dry_run:
+            if role_owner is not None and role_owner.linked_authority is not None:
+                role_owner.linked_authority.assert_current()
             legacy_path.unlink()
             if legacy_path.exists() or legacy_path.is_symlink():
                 raise ValueError("E_MUTABLE_PATH_POSTCONDITION")
         print(f"  Removed frozen legacy native role: {legacy_path}")
 
 
-def _claude_stale_namespace_paths(source: Path, target: Path) -> tuple[Path, ...]:
+def _claude_stale_namespace_paths(
+    source: Path, commands_target: Path, skills_target: Path
+) -> tuple[Path, ...]:
     candidates: list[Path] = []
     for directory, pattern, expected_kind in (
         ("commands", "agents-*.md", "file"),
         ("skills", "agents-*", "directory"),
     ):
         source_dir = source / directory
-        target_dir = target / directory
+        target_dir = commands_target if directory == "commands" else skills_target
         if not target_dir.is_dir():
             continue
         for installed in sorted(target_dir.glob(pattern)):
@@ -1943,17 +2795,26 @@ def _claude_stale_namespace_paths(source: Path, target: Path) -> tuple[Path, ...
     return tuple(candidates)
 
 
-def _reclaim_claude_namespace(source: Path, target: Path, dry_run: bool) -> None:
-    for installed in _claude_stale_namespace_paths(source, target):
-        relative = installed.relative_to(target).as_posix()
+def _reclaim_claude_namespace(
+    source: Path, commands_target: Path, skills_target: Path, dry_run: bool
+) -> None:
+    for installed in _claude_stale_namespace_paths(
+        source, commands_target, skills_target
+    ):
+        root = commands_target if installed.is_relative_to(commands_target) else skills_target
+        relative = installed.relative_to(root).as_posix()
+        namespace = "commands" if root == commands_target else "skills"
         if dry_run:
-            print(f"    [dry-run] would reclaim stale pack namespace: {relative}")
+            print(
+                "    [dry-run] would reclaim stale pack namespace: "
+                f"{namespace}/{relative}"
+            )
             continue
         if installed.is_symlink() or installed.is_file():
             installed.unlink()
         else:
             shutil.rmtree(installed)
-        print(f"  Reclaimed stale pack item: {relative}")
+        print(f"  Reclaimed stale pack item: {namespace}/{relative}")
 
 
 def _merge_codex_agents(root: Path, source: Path, target: Path, dry_run: bool) -> None:
@@ -2435,6 +3296,48 @@ def _hook_health_module(root: Path):
     return module
 
 
+_CLAUDE_LINKED_SUBROOT_NAMES = frozenset({"agents", "skills", "commands"})
+
+
+def _linked_runtime_subroots_module(root: Path):
+    return _load_module_from_path(
+        "orchestrarium_linked_runtime_subroots",
+        root / "scripts" / "linked_runtime_subroots.py",
+    )
+
+
+def _resolve_global_claude_linked_subroot(
+    root: Path, target: Path, mode: str, name: str
+) -> tuple[Path, Any | None]:
+    """Bind one declared Claude subroot through the linked-runtime authority."""
+
+    if name not in _CLAUDE_LINKED_SUBROOT_NAMES:
+        raise ValueError(f"E_MUTABLE_PATH_REPARSE: unsupported Claude subroot {name}")
+    logical_root = target / name
+    try:
+        authority = _linked_runtime_subroots_module(root).LinkedRuntimeSubrootAuthority.bind(
+            logical_root,
+            scope=mode,
+            trusted_global_roots=tuple(
+                target / known for known in sorted(_CLAUDE_LINKED_SUBROOT_NAMES)
+            ),
+        )
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"E_MUTABLE_PATH_REPARSE: {logical_root}") from exc
+    return (authority.resolved_root, authority) if authority is not None else (logical_root, None)
+
+
+def _assert_global_claude_linked_subroot_authority(
+    root: Path, authority: Any | None
+) -> None:
+    if authority is None:
+        return
+    try:
+        authority.assert_current()
+    except ValueError as exc:
+        raise ValueError("E_MUTABLE_PATH_IDENTITY_CHANGED") from exc
+
+
 RETIRED_HOOK_SPECS = (
     ("check-work-items-archival-stop", "Stop"),
 )
@@ -2695,6 +3598,11 @@ def install(provider: str, argv: list[str] | None = None) -> int:
             target.parent / ".agents" if mode == "global" else project / ".agents"
         )
         canonical_skills_target = canonical_agents_root / "skills"
+        claude_link_authorities: tuple[Any, ...] = ()
+        codex_agents_authority: Any | None = None
+        codex_agents_target: Path | None = None
+        claude_commands_target: Path | None = None
+        claude_skills_projection_target: Path | None = None
         if provider == "codex":
             agents_root = target if mode == "global" else project / ".agents"
             skills_target = canonical_skills_target
@@ -2705,13 +3613,37 @@ def install(provider: str, argv: list[str] | None = None) -> int:
             target_tree = skills_target
             mode_target = agents_root / ".agents-mode.yaml"
             normalize_provider = "codex"
+            codex_agents_authority = _linked_runtime_subroots_module(root).LinkedRuntimeSubrootAuthority.bind(
+                target / "agents",
+                scope=mode,
+                trusted_global_roots=(target / "agents",),
+            )
+            codex_agents_target = (
+                codex_agents_authority.resolved_root
+                if codex_agents_authority is not None
+                else target / "agents"
+            )
         else:
             agents_root = target
             docs_target = target / "CLAUDE.md"
-            installed_hook_root = target / "agents"
+            claude_agents_root, agents_authority = _resolve_global_claude_linked_subroot(
+                root, target, mode, "agents"
+            )
+            claude_skills_projection_target, skills_authority = (
+                _resolve_global_claude_linked_subroot(root, target, mode, "skills")
+            )
+            claude_commands_target, commands_authority = (
+                _resolve_global_claude_linked_subroot(root, target, mode, "commands")
+            )
+            claude_link_authorities = tuple(
+                authority
+                for authority in (agents_authority, skills_authority, commands_authority)
+                if authority is not None
+            )
+            installed_hook_root = claude_agents_root
             registration = target / "settings.json"
             source_tree = source
-            target_tree = target
+            target_tree = claude_agents_root
             mode_target = target / ".agents-mode.yaml"
             normalize_provider = "shared"
         home_value = os.environ.get("USERPROFILE") or os.environ.get("HOME")
@@ -2776,11 +3708,21 @@ def install(provider: str, argv: list[str] | None = None) -> int:
             codex_post_tree_runtime=codex_post_tree_runtime,
             codex_hook_inventory=codex_hook_inventory,
             codex_role_manifest=codex_role_manifest,
+            claude_skills_target=claude_skills_projection_target,
         )
         _assert_canonical_lead_postwrite_free(
             canonical_lead, post_materialization_writers
         )
 
+        claude_skill_projection_plan: tuple[_ClaudeSkillProjectionPlan, ...] = ()
+        if provider == "claude":
+            assert claude_skills_projection_target is not None
+            claude_skill_projection_plan = _preflight_claude_skill_projections(
+                root / "src.codex" / "skills",
+                source / "skills",
+                canonical_skills_target,
+                claude_skills_projection_target,
+            )
         transaction_paths = _installer_mutation_paths(
             provider=provider,
             source=source,
@@ -2793,16 +3735,80 @@ def install(provider: str, argv: list[str] | None = None) -> int:
             registration=registration,
             shared_mode_target=shared_mode_target,
             codex_hook_inventory=codex_hook_inventory,
+            claude_commands_target=claude_commands_target,
+            claude_skills_target=claude_skills_projection_target,
+            claude_projection_snapshot_paths=tuple(
+                path
+                for item in claude_skill_projection_plan
+                if item.action == "migrate"
+                for path in (
+                    claude_skills_projection_target / item.name,
+                    claude_skills_projection_target
+                    / f".{item.name}.projection.tombstone",
+                )
+            ),
         )
         transaction = _InstallTransaction(
             transaction_paths,
             enabled=not args.dry_run,
         )
+        for authority in claude_link_authorities:
+            _assert_global_claude_linked_subroot_authority(root, authority)
+        if codex_agents_authority is not None:
+            codex_agents_authority.assert_current()
         with transaction:
             mutable_anchor = project if project is not None else _resolve_global_home()
+            if not mutable_anchor.is_dir():
+                if args.dry_run:
+                    while not mutable_anchor.is_dir():
+                        parent = mutable_anchor.parent
+                        if parent == mutable_anchor:
+                            raise ValueError("E_MUTABLE_PATH_ESCAPE: anchor is not a directory")
+                        mutable_anchor = parent
+                else:
+                    mutable_anchor.mkdir(parents=True, exist_ok=False)
             create_only = _CreateOnlyMutablePath(
                 mutable_anchor, transaction, dry_run=args.dry_run
             )
+            claude_agents_owner: _CreateOnlyMutablePath | None = None
+            claude_skills_owner: _CreateOnlyMutablePath | None = None
+            codex_agents_owner: _CreateOnlyMutablePath | None = None
+            if provider == "claude":
+                assert claude_commands_target is not None
+                assert claude_skills_projection_target is not None
+                claude_authorities_by_name = {
+                    authority.name: authority for authority in claude_link_authorities
+                }
+                claude_agents_authority = claude_authorities_by_name.get("agents")
+                claude_skills_authority = claude_authorities_by_name.get("skills")
+                claude_agents_owner = (
+                    _CreateOnlyMutablePath(
+                        target_tree,
+                        transaction,
+                        dry_run=args.dry_run,
+                        linked_authority=claude_agents_authority,
+                    )
+                    if claude_agents_authority is not None
+                    else create_only
+                )
+                claude_skills_owner = (
+                    _CreateOnlyMutablePath(
+                        claude_skills_projection_target,
+                        transaction,
+                        dry_run=args.dry_run,
+                        linked_authority=claude_skills_authority,
+                    )
+                    if claude_skills_authority is not None
+                    else create_only
+                )
+            elif codex_agents_authority is not None:
+                assert codex_agents_target is not None
+                codex_agents_owner = _CreateOnlyMutablePath(
+                    codex_agents_target,
+                    transaction,
+                    dry_run=args.dry_run,
+                    linked_authority=codex_agents_authority,
+                )
             if provider == "codex":
                 # The create-only lead tree records .agents as its containment
                 # root.  All independent .agents writers run before that tree
@@ -2827,25 +3833,89 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                     source_tree, target_tree, create_only, root=root
                 )
             else:
-                for directory in ("agents", "commands"):
-                    _sync_tree(source / directory, target / directory, args.dry_run)
-                _install_canonical_skills(
+                # The canonical skill trees plus the paired Claude transport
+                # projection are the accepted-prior affected set.  Classify
+                # them before any Claude sync operation; the later call is the
+                # single transaction-owned apply path for that accepted plan.
+                canonical_plan = _preflight_canonical_skills(
                     root / "src.codex" / "skills",
                     canonical_skills_target,
-                    create_only,
                     root=root,
+                    claude_transport_root=target_tree / "scripts",
                 )
-                _install_claude_skill_projections(
-                    root / "src.codex" / "skills",
-                    source / "skills",
-                    canonical_skills_target,
-                    target / "skills",
-                    create_only,
-                )
+                try:
+                    for authority in claude_link_authorities:
+                        _assert_global_claude_linked_subroot_authority(root, authority)
+                    _sync_tree(
+                        source / "agents",
+                        target_tree,
+                        args.dry_run,
+                        excluded_files=frozenset(
+                            Path("scripts") / name
+                            for name in TRANSPORT_PROJECTION_FILES
+                        ),
+                    )
+                    for authority in claude_link_authorities:
+                        _assert_global_claude_linked_subroot_authority(root, authority)
+                    _sync_tree(source / "commands", claude_commands_target, args.dry_run)
+                    for authority in claude_link_authorities:
+                        _assert_global_claude_linked_subroot_authority(root, authority)
+                    _reclaim_claude_namespace(
+                        source,
+                        claude_commands_target,
+                        claude_skills_projection_target,
+                        args.dry_run,
+                    )
+                    for authority in claude_link_authorities:
+                        _assert_global_claude_linked_subroot_authority(root, authority)
+                    # The non-transport Claude runtime set must exist before the
+                    # create-only six-member transport set claims its shared/scripts parents.
+                    # Transaction snapshots therefore retain ownership of every
+                    # mutable runtime leaf through any later failure.
+                    claude_runtime_destinations = tuple(
+                        (source_path, destination)
+                        for source_path, destination in _runtime_file_destinations(
+                            root, target_tree / "scripts"
+                        )
+                        if source_path.name not in TRANSPORT_PROJECTION_FILES
+                        and source_path.name != TRANSPORT_PROJECTION_MANIFEST
+                    )
+                    _install_runtime_files(
+                        root,
+                        target_tree / "scripts",
+                        args.dry_run,
+                        destinations=claude_runtime_destinations,
+                    )
+                    for authority in claude_link_authorities:
+                        _assert_global_claude_linked_subroot_authority(root, authority)
+                    _apply_canonical_skills_plan(
+                        canonical_plan,
+                        canonical_skills_target,
+                        create_only,
+                        root=root,
+                        claude_transport_root=target_tree / "scripts",
+                        claude_transport_owner=claude_agents_owner,
+                    )
+                    for authority in claude_link_authorities:
+                        _assert_global_claude_linked_subroot_authority(root, authority)
+                    _apply_claude_skill_projection_plan(
+                        claude_skill_projection_plan,
+                        root / "src.codex" / "skills",
+                        claude_skills_projection_target,
+                        claude_skills_owner,
+                    )
+                    _assert_global_claude_linked_subroot_authority(
+                        root, claude_agents_authority
+                    )
+                    _assert_global_claude_linked_subroot_authority(
+                        root, claude_skills_authority
+                    )
+                finally:
+                    _discard_canonical_skills_plan(canonical_plan)
             helper_target = (
                 skills_target / "lead" / "scripts"
                 if provider == "codex"
-                else target / "agents" / "scripts"
+                else target_tree / "scripts"
             )
             if provider == "codex":
                 _install_runtime_files(
@@ -2854,8 +3924,6 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                     args.dry_run,
                     destinations=codex_post_tree_runtime,
                 )
-            else:
-                _install_runtime_files(root, helper_target, args.dry_run)
             _install_ui_continuity_contract(root, agents_root, args.dry_run)
 
             if provider == "codex":
@@ -2875,14 +3943,15 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                     target / "config.toml",
                     create_only,
                     source_agents=source / "agents",
-                    target_agents=target / "agents",
+                    target_agents=codex_agents_target,
                     manifest=codex_role_manifest,
+                    role_owner=codex_agents_owner,
                 )
                 _install_codex_native_roles(
                     root,
                     source / "agents",
-                    target / "agents",
-                    create_only,
+                    codex_agents_target,
+                    codex_agents_owner or create_only,
                     manifest=codex_role_manifest,
                 )
                 _merge_codex_agents(root, source, docs_target, args.dry_run)

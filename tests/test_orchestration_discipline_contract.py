@@ -169,7 +169,7 @@ PINS = [
      ["src.claude/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md"]),
     ("A7-guard", "Named regression guard:",
      ["src.claude/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md"]),
-    ("A7-rule", "Before dispatch, fill `Diff-invisible invariants` and `Named regression guard`; `none` is valid only with a one-line reason.",
+    ("A7-rule", "Before dispatch, fill `Diff-invisible invariants`, `Named regression guard`, and `Dead/superseded code disposition`; `none` is valid only with a one-line reason. When a change supersedes a mechanism, `none` is invalid. An implementation or review handoff with any field omitted is incomplete.",
      ["src.claude/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md"]),
 
     # A9 — object-axis re-aim trigger (both subagent-contracts); the 2448-char block was a

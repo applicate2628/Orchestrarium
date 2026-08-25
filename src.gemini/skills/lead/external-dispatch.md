@@ -17,7 +17,7 @@ parallelMode: auto  # allowed: manual | auto | force; default: auto
 mcpMode: auto  # allowed: auto | force; default: auto
 preferExternalWorker: true  # allowed: false | true; default: false
 preferExternalReviewer: true  # allowed: false | true; default: false
-externalProvider: auto  # allowed here: auto | codex | claude | gemini | qwen; default: auto; gemini/qwen are explicit example-only and not recommended
+externalProvider: auto  # allowed here: auto | codex | claude | gemini | qwen | kimi | grok; default: auto; kimi/grok are explicit-only; gemini/qwen are explicit example-only and not recommended
 externalPriorityProfile: balanced  # allowed: balanced | quality-first | <repo-local production profile>; default: balanced
 reserveResolver: claude-sonnet  # allowed: disabled | claude-sonnet | claude-wrapper | wrapper:<command>; default: claude-sonnet
 externalPriorityProfiles: {}  # profile -> lane -> ordered provider list used when externalProvider=auto
@@ -113,9 +113,9 @@ Rules:
 - `reserve` is considered only when an advisory or review profile order reaches it after primary `claude`/`codex`; it does not skip earlier primary profile candidates.
 - When advisory or review routing reaches `reserve`, bind it through `reserveResolver`: `claude-sonnet`, `claude-wrapper`, `wrapper:<command>`, or `disabled`. `wrapper:<command>` is a PATH-resolved command or repo-relative wrapper path.
 - If the plain Claude CLI path is selected and fails, do not silently convert that same primary `claude` run to the wrapper. Advisory/review lanes may later collect `reserve` as a separate profile candidate when enabled; worker or mutating routes must report Claude unavailable or reroute honestly.
-- From PowerShell, use `.claude/agents/scripts/invoke-claude-api.ps1` only for a resolved `reserve` advisory/review candidate and pass forwarded Claude flags after `--%`. From Bash or Git Bash, use `.claude/agents/scripts/invoke-claude-api.sh`, and set `CLAUDE_BIN` explicitly when the active shell PATH differs from the PowerShell PATH.
+- From PowerShell, use `python .claude/agents/scripts/invoke-claude-api.py` only for a resolved `reserve` advisory/review candidate. From Bash or Git Bash, use `.claude/agents/scripts/invoke-claude-api.sh`, and set `CLAUDE_BIN` explicitly when the active shell PATH differs from the PowerShell PATH.
 - On Windows, keep the ordinary external launch path unchanged and try the native Windows shell first. If that native shell path fails because of shell bootstrap, execution-policy, or environment-policy problems, retry once through Git-for-Windows Bash / MSYS when available. Do not use the WSL `bash.exe` stub as a fallback, and do not reinterpret ordinary provider auth, quota, or model failures as shell-fallback triggers.
-- External CLI launches that carry a substantive task prompt must use file-based prompt delivery: write the prompt to a temporary prompt file and feed it through the provider's stdin or supported file-input mechanism. Keep command-line arguments limited to launcher flags, model/profile options, and file paths; inline prompt argv is allowed only for tiny smoke checks or a documented provider limitation, and record that deviation in the execution artifact.
+- External CLI launches that carry a substantive task prompt must use the approved prompt wrapper and file-based delivery: write the prompt to a temporary prompt file and feed it through the provider's stdin or supported file-input mechanism. Keep command-line arguments limited to launcher flags, model/profile options, and file paths; inline prompt argv is allowed only for a fixed synthetic non-substantive smoke token. If the approved wrapper is unavailable, fail or reroute honestly.
 - For wide release or parity audits, split the admitted scope by repo, file set, or lane instead of launching one mega neutral-dir prompt across the whole pack family.
 
 ## Eligibility gate
@@ -142,10 +142,10 @@ Every external or consultant artifact should record:
 
 - `Execution role: <consultant | external-worker | external-reviewer>`
 - `Assigned / replaced internal role: <role | none>`
-- `Requested provider: <internal | codex | claude | gemini | qwen>`
-- `Resolved provider: <Codex CLI | Claude CLI | Gemini CLI | Qwen Code | none>`
+- `Requested provider: <internal | codex | claude | gemini | qwen | kimi | grok>`
+- `Resolved provider: <Codex CLI | Claude CLI | Gemini CLI | Qwen Code | Kimi CLI | Grok CLI | none>`
 - `Requested consultant mode: <external | internal | disabled>` or `not-applicable`
-- `Actual execution path: <internal consultant | external CLI (Codex CLI) | external CLI (Claude CLI) | external CLI (Gemini CLI) | external CLI (Qwen Code) | role disabled>`
+- `Actual execution path: <internal consultant | external CLI (Codex CLI) | external CLI (Claude CLI) | external CLI (Gemini CLI) | external CLI (Qwen Code) | external CLI (Kimi CLI) | external CLI (Grok CLI) | role disabled>`
 - `Model / profile used: <actual model/profile | runtime default | unspecified by runtime>`
 - `Deviation reason: <none | external unavailable: [reason]>`
 - `internal consultant` is valid only for the consultant role when `consultantMode: internal`

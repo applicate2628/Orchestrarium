@@ -73,6 +73,17 @@ def _git() -> str | None:
     return which("git")
 
 
+def _assert_batch_finding_lines(
+    test: unittest.TestCase,
+    output: str,
+    rows: dict[str, str],
+) -> None:
+    """Every named blocking fixture must produce a finding on its fixture line."""
+    for line, name in enumerate(rows, start=1):
+        with test.subTest(row=name, line=line):
+            test.assertRegex(output, rf"\bline={line}\b class=", f"{name!r} must report its fixture line")
+
+
 def _load_find_machine_paths():
     spec = importlib.util.spec_from_file_location("_mlp_ref_test", str(CODEX_REF))
     mod = importlib.util.module_from_spec(spec)
@@ -336,6 +347,17 @@ class TestPublicationSafetyScanner(unittest.TestCase):
         inspect the scanner's own self-reported RESULT text (2026-07-26
         hardening: check-git-push-gate.py step 8 branch (b) now keys on this
         text, not just the exit code)."""
+        proc = self._run_cached_process(scanner, content, env_overrides=env_overrides, filename=filename)
+        return proc.returncode, proc.stdout
+
+    def _run_cached_process(
+        self,
+        scanner: Path,
+        content: str,
+        env_overrides: dict | None = None,
+        filename: str = "fixture.txt",
+    ) -> subprocess.CompletedProcess[str]:
+        """Run one real cached scan and retain both output channels for callers."""
         git = _git()
         with tempfile.TemporaryDirectory() as td:
             subprocess.run([git, "init", "-q", td], check=True, capture_output=True)
@@ -356,7 +378,34 @@ class TestPublicationSafetyScanner(unittest.TestCase):
                 encoding="utf-8",
                 env=env,
             )
-            return proc.returncode, proc.stdout
+            return proc
+
+    def _run_cached_batch_full(
+        self,
+        scanner: Path,
+        rows: dict[str, str],
+    ) -> tuple[int, str]:
+        """Stage one named fixture row per line and retain scanner findings."""
+        proc = self._run_cached_process(scanner, "\n".join(rows.values()))
+        return proc.returncode, proc.stdout + proc.stderr
+
+    def test_cached_batch_reports_each_fixture_line(self) -> None:
+        rows = {
+            "first": block_rows()["b01_win_home"],
+            "second": block_rows()["b14_aws"],
+        }
+        rc, out = self._run_cached_batch_full(CODEX_SCANNER, rows)
+        self.assertEqual(rc, 1)
+        _assert_batch_finding_lines(self, out, rows)
+
+    def _assert_cached_block_batch(self, scanner: Path, rows: dict[str, str]) -> None:
+        rc, out = self._run_cached_batch_full(scanner, rows)
+        self.assertEqual(rc, 1, f"{scanner.name} must BLOCK the fixture batch")
+        _assert_batch_finding_lines(self, out, rows)
+
+    def _assert_cached_pass_batch(self, scanner: Path, rows: dict[str, str]) -> None:
+        rc, out = self._run_cached_batch_full(scanner, rows)
+        self.assertEqual(rc, 0, f"{scanner.name} must PASS the fixture batch: {out!r}")
 
     def _run_cached_nothing_staged(self, scanner: Path) -> tuple[int, str]:
         """Run the scanner in a real repo with NOTHING staged at all -- the
@@ -379,17 +428,13 @@ class TestPublicationSafetyScanner(unittest.TestCase):
 
     def test_block_rows_exit_1(self) -> None:
         for scanner in SCANNERS:
-            for name, content in block_rows().items():
-                with self.subTest(scanner=scanner.parent.parent.name, row=name):
-                    self.assertEqual(self._run_cached(scanner, content), 1,
-                                     f"{name!r} must BLOCK (exit 1)")
+            with self.subTest(scanner=scanner.parent.parent.name):
+                self._assert_cached_block_batch(scanner, block_rows())
 
     def test_pass_rows_exit_0(self) -> None:
         for scanner in SCANNERS:
-            for name, content in pass_rows().items():
-                with self.subTest(scanner=scanner.parent.parent.name, row=name):
-                    self.assertEqual(self._run_cached(scanner, content), 0,
-                                     f"{name!r} must PASS (exit 0)")
+            with self.subTest(scanner=scanner.parent.parent.name):
+                self._assert_cached_pass_batch(scanner, pass_rows())
 
     def test_clean_repo_exits_0(self) -> None:
         for scanner in SCANNERS:
@@ -834,6 +879,9 @@ class TestPublicationSafetyScannerV2(unittest.TestCase):
         )
 
     def _run_path(self, content: str) -> subprocess.CompletedProcess:
+        return self._run_path_process(content)
+
+    def _run_path_process(self, content: str) -> subprocess.CompletedProcess[str]:
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)
             subprocess.run([_git(), "init", "-q", str(repo)], check=True)
@@ -846,6 +894,11 @@ class TestPublicationSafetyScannerV2(unittest.TestCase):
                 text=True,
                 encoding="utf-8",
             )
+
+    def _run_path_batch_full(self, rows: dict[str, str]) -> tuple[int, str]:
+        """Run one real path-mode scan over one named fixture row per line."""
+        proc = self._run_path_process("\n".join(rows.values()))
+        return proc.returncode, proc.stdout + proc.stderr
 
     def _expected_digest(self, rows: list[str]) -> str:
         ordered = [value.lower() for value in rows]
@@ -865,23 +918,27 @@ class TestPublicationSafetyScannerV2(unittest.TestCase):
             "api-key": ("api_key", "service_api_key", "serviceApiKey", "XApiKey", "MYAPIKEY"),
         }
         values = ("A1B2C3D4E5F6G7H8IJK", '"A1B2C3D4E5F6G7H8IJK"')
-        executed = 0
+        blocked_rows: dict[str, str] = {}
         for family, identifiers in families.items():
             for identifier in identifiers:
                 for value in values:
-                    executed += 1
-                    with self.subTest(family=family, identifier=identifier, quoted=value.startswith('"')):
-                        proc = self._run_path(f"{identifier} = {value}")
-                        self.assertEqual(proc.returncode, 1, f"row={family}:{identifier}:{proc.stderr!r}")
-        self.assertEqual(executed, 40)
-        for name, content in block_rows().items():
-            with self.subTest(existing_block=name):
-                self.assertEqual(self._run_path(content).returncode, 1)
-        for name, content in pass_rows().items():
-            with self.subTest(existing_pass=name):
-                self.assertEqual(self._run_path(content).returncode, 0)
-        self.assertEqual(self._run_path("myatoken = A1B2C3D4E5F6G7H8IJK").returncode, 0)
-        self.assertEqual(self._run_path("CancellationToken cancellationToken = default").returncode, 0)
+                    quoted = "quoted" if value.startswith('"') else "bare"
+                    blocked_rows[f"{family}:{identifier}:{quoted}"] = f"{identifier} = {value}"
+        self.assertEqual(len(blocked_rows), 40)
+        rc, out = self._run_path_batch_full(blocked_rows)
+        self.assertEqual(rc, 1, out)
+        _assert_batch_finding_lines(self, out, blocked_rows)
+        rc, out = self._run_path_batch_full(block_rows())
+        self.assertEqual(rc, 1, out)
+        _assert_batch_finding_lines(self, out, block_rows())
+        rc, out = self._run_path_batch_full(pass_rows())
+        self.assertEqual(rc, 0, out)
+        pass_rows_for_matrix = {
+            "incidental-myatoken": "myatoken = A1B2C3D4E5F6G7H8IJK",
+            "declaration-cancellation-token": "CancellationToken cancellationToken = default",
+        }
+        rc, out = self._run_path_batch_full(pass_rows_for_matrix)
+        self.assertEqual(rc, 0, out)
 
     def test_range_message_exactly_once(self) -> None:
         with tempfile.TemporaryDirectory() as td:
