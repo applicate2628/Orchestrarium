@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "packRevision": "1.x-native-role-policy-v1",
-  "policySha256": "eb28e17382a537e8a99b999184e8e6bfc40e0293e336d0e74d5ea71a1968f1f7",
+  "policySha256": "451eaa39720883a1e70c47254fd0d9548d141517d265718100a1454b65ae37ab",
   "roles": {
     "algorithm-scientist": {
       "relativePath": "algorithm-scientist.toml",
@@ -53,7 +53,7 @@
     },
     "platform-engineer": {
       "relativePath": "platform-engineer.toml",
-      "sha256": "2f62aaf20edd4b30838db3e728d6a907e8f6826620d2eede78c02a1cd0b7a214"
+      "sha256": "e5d44b7fafc7ec8ab3c69b4086bdda5e5430974334f90fc407b5bb78ace8a4cf"
     },
     "qa-engineer": {
       "relativePath": "qa-engineer.toml",
@@ -61,7 +61,7 @@
     },
     "security-engineer": {
       "relativePath": "security-engineer.toml",
-      "sha256": "aeb2800e4e498ad7d3a63951608e780eb730ef2bd744ff679fee5c697f5d837a"
+      "sha256": "ceb53c8db3d77f75beea76a9cc27120d7623a60661cca3dac92b01a35ce06a0c"
     },
     "security-reviewer": {
       "relativePath": "security-reviewer.toml",
@@ -69,7 +69,7 @@
     },
     "worker": {
       "relativePath": "worker.toml",
-      "sha256": "2d950ebfa4e9cc7293ee32cbc71ad3910fa6938a80a339bbbc3434ecc6c4d860"
+      "sha256": "1b311bd1a413c660382c57df74bdccc016f9b8a919e039efe21f703f0b09e475"
     }
   }
 }
