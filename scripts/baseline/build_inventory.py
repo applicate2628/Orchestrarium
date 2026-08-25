@@ -190,10 +190,10 @@ def _primary_surface(surfaces: Sequence[str]) -> str:
         "governance",
         "configuration",
         "script",
+        "release-log",
         "documentation",
         "provider-pack",
         "shared-source",
-        "release-log",
         "repository-metadata",
         "repository-content",
     )
@@ -405,7 +405,7 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=Path("baseline") / "orchestrarium-v1",
+        default=Path(".scratch") / "orche-stage0" / "orchestrarium-v1",
     )
     parser.add_argument("--check", action="store_true")
     return parser.parse_args(argv)

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import sys
@@ -12,6 +13,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "baseline" / "build_target_effect_baseline.py"
+
+
+def canonical_json(value: object) -> str:
+    return json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
 
 
 def inventory_payload() -> dict[str, object]:
@@ -58,8 +63,14 @@ def inventory_payload() -> dict[str, object]:
             "contentSha256": "e" * 64,
             "surfaces": ["script", "test"],
         },
+        {
+            "path": "tests/test_registry_governance_reconciliation_contract.py",
+            "sizeBytes": 60,
+            "contentSha256": "9" * 64,
+            "surfaces": ["script", "test"],
+        },
     ]
-    return {
+    payload: dict[str, object] = {
         "schemaVersion": 1,
         "baseline": {
             "commitSha": "1" * 40,
@@ -68,9 +79,12 @@ def inventory_payload() -> dict[str, object]:
             "treeSha": "2" * 40,
         },
         "entries": entries,
-        "inventorySha256": "3" * 64,
         "summary": {"trackedLeafEntries": len(entries), "surfaceCounts": {}},
     }
+    payload["inventorySha256"] = hashlib.sha256(
+        canonical_json(payload).encode("utf-8")
+    ).hexdigest()
+    return payload
 
 
 class TargetEffectBaselineTests(unittest.TestCase):
@@ -98,16 +112,13 @@ class TargetEffectBaselineTests(unittest.TestCase):
             root = Path(directory)
             inventory = root / "capability.json"
             output = root / "target.json"
-            inventory.write_text(
-                json.dumps(inventory_payload(), sort_keys=True) + "\n",
-                encoding="utf-8",
-            )
+            inventory.write_text(canonical_json(inventory_payload()), encoding="utf-8")
             result = self.run_script(inventory, output)
             self.assertEqual(result.returncode, 0, result.stderr)
             payload = json.loads(output.read_text(encoding="utf-8"))
 
-            self.assertEqual(payload["repositoryShape"]["trackedLeafEntries"], 7)
-            self.assertEqual(payload["repositoryShape"]["trackedBytes"], 205)
+            self.assertEqual(payload["repositoryShape"]["trackedLeafEntries"], 8)
+            self.assertEqual(payload["repositoryShape"]["trackedBytes"], 265)
             self.assertEqual(payload["repositoryShape"]["providerPackCount"], 2)
             self.assertEqual(
                 payload["repositoryShape"]["skillBodies"],
@@ -141,15 +152,30 @@ class TargetEffectBaselineTests(unittest.TestCase):
                 "MEASUREMENT_PENDING_RUNTIME_INSTRUMENTATION",
             )
 
+    def test_rejects_valid_json_when_declared_semantic_digest_no_longer_matches(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            inventory = root / "capability.json"
+            output = root / "target.json"
+            payload = inventory_payload()
+            entries = payload["entries"]
+            assert isinstance(entries, list)
+            assert isinstance(entries[0], dict)
+            entries[0]["sizeBytes"] = 11
+            inventory.write_text(canonical_json(payload), encoding="utf-8")
+
+            result = self.run_script(inventory, output)
+
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("inventorySha256 mismatch", result.stderr)
+            self.assertFalse(output.exists())
+
     def test_output_is_deterministic_and_check_detects_drift(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             inventory = root / "capability.json"
             output = root / "target.json"
-            inventory.write_text(
-                json.dumps(inventory_payload(), sort_keys=True) + "\n",
-                encoding="utf-8",
-            )
+            inventory.write_text(canonical_json(inventory_payload()), encoding="utf-8")
             first = self.run_script(inventory, output)
             self.assertEqual(first.returncode, 0, first.stderr)
             first_bytes = output.read_bytes()

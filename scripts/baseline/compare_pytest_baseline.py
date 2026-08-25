@@ -114,9 +114,13 @@ def compare(
     baseline: dict[str, TestCaseResult],
     candidate: dict[str, TestCaseResult],
     *,
+    baseline_exit: int,
+    candidate_exit: int,
     baseline_ref: str,
     candidate_ref: str,
 ) -> dict[str, object]:
+    if baseline_exit < 0 or candidate_exit < 0:
+        raise ComparisonError("pytest exit codes must be non-negative")
     baseline_ids = set(baseline)
     candidate_ids = set(candidate)
     baseline_failures = {
@@ -151,17 +155,29 @@ def compare(
         if baseline[test_id].status != candidate[test_id].status
     )
 
+    pytest_exit_code_regression = (
+        []
+        if candidate_exit == 0 or candidate_exit == baseline_exit
+        else [
+            {
+                "baselineExitCode": baseline_exit,
+                "candidateExitCode": candidate_exit,
+            }
+        ]
+    )
     blockers = {
         "newFailures": new_failures,
         "missingBaselineTests": missing_baseline_tests,
         "maskedBaselineFailures": masked_failures,
         "passingTestRegressions": regressions,
+        "pytestExitCodeRegression": pytest_exit_code_regression,
     }
     verdict = "PASS" if all(not values for values in blockers.values()) else "BLOCKED"
 
     return {
         "schemaVersion": SCHEMA_VERSION,
         "baseline": {
+            "exitCode": baseline_exit,
             "ref": baseline_ref,
             "total": len(baseline),
             "passed": sum(result.status == "passed" for result in baseline.values()),
@@ -169,6 +185,7 @@ def compare(
             "failures": len(baseline_failures),
         },
         "candidate": {
+            "exitCode": candidate_exit,
             "ref": candidate_ref,
             "total": len(candidate),
             "passed": sum(result.status == "passed" for result in candidate.values()),
@@ -181,6 +198,7 @@ def compare(
             "resolvedBaselineFailures": resolved_failures,
             "unchangedBaselineFailures": sorted(baseline_failures & candidate_failures),
             "changedKnownFailureKind": changed_known_failure_kind,
+            "resolvedPytestExitCode": baseline_exit != 0 and candidate_exit == 0,
         },
         "baselineFailureDetails": [
             _record(baseline[test_id]) for test_id in sorted(baseline_failures)
@@ -200,6 +218,8 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--baseline-junit", type=Path, required=True)
     parser.add_argument("--candidate-junit", type=Path, required=True)
+    parser.add_argument("--baseline-exit", type=int, required=True)
+    parser.add_argument("--candidate-exit", type=int, required=True)
     parser.add_argument("--baseline-ref", required=True)
     parser.add_argument("--candidate-ref", required=True)
     parser.add_argument("--output", type=Path, required=True)
@@ -212,6 +232,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         report = compare(
             parse_junit(args.baseline_junit),
             parse_junit(args.candidate_junit),
+            baseline_exit=args.baseline_exit,
+            candidate_exit=args.candidate_exit,
             baseline_ref=args.baseline_ref,
             candidate_ref=args.candidate_ref,
         )

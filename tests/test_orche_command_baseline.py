@@ -20,8 +20,8 @@ class CommandBaselineTests(unittest.TestCase):
         *,
         baseline_exit: int,
         candidate_exit: int,
-        baseline_log: str,
-        candidate_log: str,
+        baseline_log: str | bytes,
+        candidate_log: str | bytes,
         baseline_root: str = "/tmp/baseline",
         candidate_root: str = "/tmp/candidate",
     ) -> tuple[subprocess.CompletedProcess[str], dict[str, object]]:
@@ -30,8 +30,14 @@ class CommandBaselineTests(unittest.TestCase):
             baseline_path = root / "baseline.log"
             candidate_path = root / "candidate.log"
             report_path = root / "report.json"
-            baseline_path.write_text(baseline_log, encoding="utf-8")
-            candidate_path.write_text(candidate_log, encoding="utf-8")
+            if isinstance(baseline_log, bytes):
+                baseline_path.write_bytes(baseline_log)
+            else:
+                baseline_path.write_text(baseline_log, encoding="utf-8")
+            if isinstance(candidate_log, bytes):
+                candidate_path.write_bytes(candidate_log)
+            else:
+                candidate_path.write_text(candidate_log, encoding="utf-8")
             result = subprocess.run(
                 [
                     sys.executable,
@@ -146,6 +152,20 @@ class CommandBaselineTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 1)
         self.assertEqual(report["classification"], "drifted-failure")
+
+    def test_distinct_invalid_utf8_diagnostics_are_not_collapsed(self) -> None:
+        result, report = self.invoke(
+            baseline_exit=1,
+            candidate_exit=1,
+            baseline_log=b"ERROR: invalid byte " + bytes([0xFF]) + b"\n",
+            candidate_log=b"ERROR: invalid byte " + bytes([0xFE]) + b"\n",
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(report["classification"], "drifted-failure")
+        self.assertNotEqual(
+            report["baseline"]["normalizedSha256"],
+            report["candidate"]["normalizedSha256"],
+        )
 
 
 if __name__ == "__main__":

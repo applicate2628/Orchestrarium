@@ -43,7 +43,7 @@ def _read_log(path: Path) -> bytes:
 
 
 def _normalized_text(data: bytes, *, root: str, ref: str) -> bytes:
-    text = data.decode("utf-8", errors="replace")
+    text = data.decode("utf-8", errors="surrogateescape")
     text = text.replace("\r\n", "\n").replace("\r", "\n")
 
     root_variants = {
@@ -66,7 +66,7 @@ def _normalized_text(data: bytes, *, root: str, ref: str) -> bytes:
     normalized = "\n".join(lines)
     if normalized:
         normalized += "\n"
-    return normalized.encode("utf-8")
+    return normalized.encode("utf-8", errors="surrogateescape")
 
 
 def _atomic_write(path: Path, content: bytes) -> None:

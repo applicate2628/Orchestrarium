@@ -36,6 +36,9 @@ class PytestBaselineComparatorTests(unittest.TestCase):
         self,
         baseline_cases: list[tuple[str, str, str]],
         candidate_cases: list[tuple[str, str, str]],
+        *,
+        baseline_exit: int = 0,
+        candidate_exit: int = 0,
     ) -> tuple[subprocess.CompletedProcess[str], dict[str, object]]:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -52,6 +55,10 @@ class PytestBaselineComparatorTests(unittest.TestCase):
                     str(baseline),
                     "--candidate-junit",
                     str(candidate),
+                    "--baseline-exit",
+                    str(baseline_exit),
+                    "--candidate-exit",
+                    str(candidate_exit),
                     "--baseline-ref",
                     "baseline",
                     "--candidate-ref",
@@ -80,6 +87,8 @@ class PytestBaselineComparatorTests(unittest.TestCase):
                 ("suite.Test", "test_resolved", "passed"),
                 ("suite.Test", "test_new", "passed"),
             ],
+            baseline_exit=1,
+            candidate_exit=1,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(report["verdict"], "PASS")
@@ -96,6 +105,7 @@ class PytestBaselineComparatorTests(unittest.TestCase):
         result, report = self.run_compare(
             [("suite.Test", "test_pass", "passed")],
             [("suite.Test", "test_pass", "failure")],
+            candidate_exit=1,
         )
         self.assertEqual(result.returncode, 1)
         self.assertEqual(report["verdict"], "BLOCKED")
@@ -111,6 +121,8 @@ class PytestBaselineComparatorTests(unittest.TestCase):
                 ("suite.Test", "test_known", "failure"),
             ],
             [("suite.Test", "test_known", "skipped")],
+            baseline_exit=1,
+            candidate_exit=0,
         )
         self.assertEqual(result.returncode, 1)
         self.assertEqual(
@@ -120,6 +132,20 @@ class PytestBaselineComparatorTests(unittest.TestCase):
         self.assertEqual(
             report["blockers"]["maskedBaselineFailures"],
             ["suite.Test::test_known"],
+        )
+
+    def test_blocks_new_nonzero_pytest_exit_even_when_junit_is_all_passing(self) -> None:
+        result, report = self.run_compare(
+            [("suite.Test", "test_pass", "passed")],
+            [("suite.Test", "test_pass", "passed")],
+            baseline_exit=0,
+            candidate_exit=3,
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(report["verdict"], "BLOCKED")
+        self.assertEqual(
+            report["blockers"]["pytestExitCodeRegression"],
+            [{"baselineExitCode": 0, "candidateExitCode": 3}],
         )
 
 

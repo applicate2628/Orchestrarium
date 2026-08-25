@@ -46,6 +46,20 @@ def _load_inventory(path: Path) -> dict[str, object]:
     baseline = payload.get("baseline")
     if not isinstance(entries, list) or not isinstance(baseline, dict):
         raise TargetEffectError("capability inventory lacks entries or baseline")
+
+    declared_digest = payload.get("inventorySha256")
+    if not isinstance(declared_digest, str):
+        raise TargetEffectError("capability inventory lacks inventorySha256")
+    semantic_payload = dict(payload)
+    semantic_payload.pop("inventorySha256", None)
+    computed_digest = _sha256_bytes(
+        _canonical_json(semantic_payload).encode("utf-8")
+    )
+    if computed_digest != declared_digest:
+        raise TargetEffectError(
+            "capability inventory inventorySha256 mismatch: "
+            f"declared={declared_digest}, computed={computed_digest}"
+        )
     return payload
 
 
@@ -88,6 +102,16 @@ def _is_instruction_entrypoint(path_text: str) -> bool:
         len(path.parts) == 1
         or path.parts[0] == "shared"
         or path.parts[0].startswith("src.")
+    )
+
+
+def _is_manual_reconciliation_artifact(
+    path_text: str, surfaces: Sequence[str]
+) -> bool:
+    return (
+        "reconciliation" in path_text.lower()
+        and "documentation" in surfaces
+        and "test" not in surfaces
     )
 
 
@@ -154,7 +178,7 @@ def build_payload(inventory_path: Path) -> dict[str, object]:
             legacy_settings.append(
                 {"contentSha256": digest, "path": path, "sizeBytes": size}
             )
-        if "reconciliation" in path.lower():
+        if _is_manual_reconciliation_artifact(path, surfaces):
             reconciliation_artifacts.append(
                 {"contentSha256": digest, "path": path, "sizeBytes": size}
             )

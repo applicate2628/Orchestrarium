@@ -48,6 +48,7 @@ class BaselineInventoryTests(unittest.TestCase):
         run("git", "config", "user.email", "orche-test@example.invalid", cwd=self.repo)
 
         write(self.repo / "AGENTS.md", "# Governance\n")
+        write(self.repo / "RELEASE_NOTES.md", "# Release Notes\n")
         write(self.repo / "docs" / "guide.md", "# Guide\n")
         write(
             self.repo / "src.codex" / "skills" / "architect" / "SKILL.md",
@@ -98,13 +99,14 @@ class BaselineInventoryTests(unittest.TestCase):
 
         paths = [entry["path"] for entry in capability["entries"]]
         self.assertEqual(paths, sorted(paths))
-        self.assertEqual(len(paths), 7)
+        self.assertEqual(len(paths), 8)
         self.assertNotIn("later.txt", paths)
         self.assertEqual(capability["baseline"]["commitSha"], self.baseline)
         self.assertEqual(manifest["baseline"]["commitSha"], self.baseline)
 
         by_path = {entry["path"]: entry for entry in capability["entries"]}
         self.assertIn("governance", by_path["AGENTS.md"]["surfaces"])
+        self.assertEqual(by_path["RELEASE_NOTES.md"]["primarySurface"], "release-log")
         self.assertIn("skill", by_path["src.codex/skills/architect/SKILL.md"]["surfaces"])
         self.assertIn("command", by_path["src.claude/commands/agents-test.md"]["surfaces"])
         self.assertIn("script", by_path["scripts/check.py"]["surfaces"])
@@ -115,6 +117,25 @@ class BaselineInventoryTests(unittest.TestCase):
         self.assertEqual(
             {entry["disposition"] for entry in test_inventory["entries"]},
             {"retainedAs"},
+        )
+
+    def test_default_output_stays_under_repo_scratch(self) -> None:
+        result = run(
+            sys.executable,
+            os.fspath(SCRIPT),
+            "--repo-root",
+            os.fspath(self.repo),
+            "--repository",
+            "example/orche",
+            "--ref",
+            self.baseline,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        expected = self.repo / ".scratch" / "orche-stage0" / "orchestrarium-v1"
+        self.assertTrue((expected / "capability-inventory.json").is_file())
+        self.assertFalse(
+            (self.repo / "baseline" / "orchestrarium-v1" / "capability-inventory.json").exists()
         )
 
     def test_output_is_deterministic_and_check_mode_detects_drift(self) -> None:
