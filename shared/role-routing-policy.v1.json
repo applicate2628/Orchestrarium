@@ -129,7 +129,7 @@
       "allowedProfiles": ["balanced-medium", "balanced-high", "frontier-high"]
     },
     "worker": {
-      "defaultProfile": "balanced-high",
+      "defaultProfile": "frontier-high",
       "allowedProfiles": ["balanced-medium", "balanced-high", "frontier-high", "frontier-xhigh"]
     },
     "analyst": {
@@ -157,7 +157,7 @@
       "allowedProfiles": ["frontier-xhigh", "apex-max"]
     },
     "security-engineer": {
-      "defaultProfile": "frontier-high",
+      "defaultProfile": "frontier-xhigh",
       "allowedProfiles": ["frontier-high", "frontier-xhigh"]
     },
     "security-reviewer": {
@@ -169,7 +169,7 @@
       "allowedProfiles": ["balanced-medium", "balanced-high", "frontier-high", "frontier-xhigh"]
     },
     "platform-engineer": {
-      "defaultProfile": "balanced-high",
+      "defaultProfile": "frontier-high",
       "allowedProfiles": ["balanced-medium", "balanced-high", "frontier-high", "frontier-xhigh"]
     },
     "qa-engineer": {
