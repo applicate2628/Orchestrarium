@@ -75,6 +75,10 @@ def _load_module(packed_root: Path | None = None):
         shutil.copyfile(MODULE_PATH, module_path)
         shutil.copyfile(CAPSULE_PATH, shared / "external-prompt-governance.md")
         shutil.copyfile(
+            ROOT / "shared" / "external-role-taxonomy.v1.json",
+            shared / "external-role-taxonomy.v1.json",
+        )
+        shutil.copyfile(
             ROOT / "shared" / "provider-prompt-projections.v1.json",
             shared / "provider-prompt-projections.v1.json",
         )

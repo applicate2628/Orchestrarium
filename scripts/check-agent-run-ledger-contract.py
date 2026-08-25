@@ -585,8 +585,8 @@ def check_schema(root: Path) -> None:
     schema = json.loads(schema_path.read_text(encoding="utf-8"))
     props = schema["properties"]
     evidence_items = props["evidence"]["items"]
-    owner_path = root / "scripts" / "solution_attempt_state.py"
-    spec = importlib.util.spec_from_file_location("solution_attempt_state_contract_check", owner_path)
+    owner_path = root / "scripts" / "solution_attempt" / "reducer.py"
+    spec = importlib.util.spec_from_file_location("solution_attempt_reducer_contract_check", owner_path)
     require(spec is not None and spec.loader is not None, "V3 reducer owner must be loadable")
     owner = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(owner)

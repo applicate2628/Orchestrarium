@@ -1,4 +1,4 @@
-"""Phase A contracts for the future sole durable agent-run store."""
+"""Phase A contracts for the sole durable agent-run operation store."""
 
 from __future__ import annotations
 
@@ -78,23 +78,24 @@ def test_owned_resource_census_is_explicit() -> None:
 
 def test_red_store_owner_missing() -> None:
     owner = _load_owner(
-        ROOT / "scripts" / "agent_run_store.py",
-        "agent_run_store_phase_a",
+        ROOT / "scripts" / "agent_run_persistence" / "operation_store.py",
+        "operation_store_phase_a",
         "the sole durable V1/V2/V3 writer and recovery protocol",
     )
     assert callable(getattr(owner, "commit_operation", None)), (
-        "missing-contract: scripts/agent_run_store.py must expose commit_operation"
+        "missing-contract: scripts/agent_run_persistence/operation_store.py must expose "
+        "commit_operation"
     )
 
 
 def test_disabled_route_denies_before_any_ledger_write(tmp_path: Path) -> None:
     owner = _load_owner(
-        ROOT / "scripts" / "agent_run_store.py",
-        "agent_run_store_disabled",
+        ROOT / "scripts" / "agent_run_persistence" / "operation_store.py",
+        "operation_store_disabled",
         "the sole durable V1/V2/V3 writer and recovery protocol",
     )
     route_owner = _load_owner(
-        ROOT / "scripts" / "route_activation_registry.py",
+        ROOT / "scripts" / "process_supervision" / "route_activation_registry.py",
         "route_activation_registry_for_store",
         "the seven-route disabled-by-default activation registry",
     )
@@ -119,8 +120,8 @@ def test_disabled_route_denies_before_any_ledger_write(tmp_path: Path) -> None:
 
 def test_denied_reducer_result_is_preserved_without_touching_path(tmp_path: Path) -> None:
     owner = _load_owner(
-        ROOT / "scripts" / "agent_run_store.py",
-        "agent_run_store_reducer_denial",
+        ROOT / "scripts" / "agent_run_persistence" / "operation_store.py",
+        "operation_store_reducer_denial",
         "the sole durable V1/V2/V3 writer and recovery protocol",
     )
     ledger = tmp_path / "agent-runs.jsonl"

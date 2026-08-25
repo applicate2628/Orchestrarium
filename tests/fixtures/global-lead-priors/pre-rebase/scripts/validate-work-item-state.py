@@ -221,9 +221,9 @@ def load_solution_attempt_owner():
     global _SOLUTION_ATTEMPT_OWNER
     if _SOLUTION_ATTEMPT_OWNER is not None:
         return _SOLUTION_ATTEMPT_OWNER
-    owner_path = Path(__file__).with_name("solution_attempt") / "reducer.py"
+    owner_path = Path(__file__).with_name("solution_attempt_state.py")
     spec = importlib.util.spec_from_file_location(
-        "solution_attempt_reducer_for_validation",
+        "solution_attempt_state_for_validation",
         owner_path,
     )
     if spec is None or spec.loader is None:

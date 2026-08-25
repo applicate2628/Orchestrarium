@@ -14,7 +14,7 @@ from typing import Callable
 
 
 def _load_registry_owner() -> ModuleType:
-    owner_path = Path(__file__).resolve().parents[1] / "route_activation_registry.py"
+    owner_path = Path(__file__).with_name("route_activation_registry.py")
     spec = importlib.util.spec_from_file_location(
         "route_activation_registry_for_launcher",
         owner_path,

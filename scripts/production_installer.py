@@ -41,6 +41,7 @@ RUNTIME_HELPERS = (
     "resolve-agents-mode.py",
     "review_loop_state.py",
     "skill_pack_validator_runtime.py",
+    "solution_attempt/reducer.py",
     "validate-work-item-state.py",
     "validate-work-item-state.sh",
     "validate-provider-prompt-projections.py",
@@ -53,6 +54,7 @@ TRANSPORT_PROJECTION_FILES = (
     "invoke-kimi-prompt.py",
     "invoke-grok-prompt.py",
     "external-prompt-governance.md",
+    "external-role-taxonomy.v1.json",
 )
 TRANSPORT_PROJECTION_MANIFEST = "provider-prompt-projections.v1.json"
 STOCK_8521_CLAUDE_TRANSPORT_PROJECTION_SHA256 = (
@@ -63,6 +65,15 @@ STOCK_8521_CLAUDE_TRANSPORT_PROJECTION_SHA256 = (
     ("invoke-grok-prompt.py", "1f0f4f6bb03d816b3f40ff56ebe71973301d2d7104ef1d7f335b1ffa0b248559"),
     ("external-prompt-governance.md", "c7a59ccec7d6e46be76584a107b0a5b30b249368b4f0958cb78177962dc34b00"),
     (TRANSPORT_PROJECTION_MANIFEST, "d7c873527e67a1aa81906aa2ee73d25088420f18b3453a429ff80085ecd4af6b"),
+)
+STOCK_7872_CLAUDE_TRANSPORT_PROJECTION_SHA256 = (
+    ("provider_prompt.py", "54985ea4e35fcaa5e6d660adcab95fcf5c1cd9a6bb593f6e7e4c5808d01438ba"),
+    ("invoke-codex-prompt.py", "0b085a6fd0e28a5a486c8ef25bf52d4c69123d94cc8712d63dd30deadcc5f665"),
+    ("invoke-claude-prompt.py", "3250c9a85e36ab2e57a218688c5d7d3cfed59552c1f2bad7eb52f45370df80f3"),
+    ("invoke-kimi-prompt.py", "05679dac1daded511debf617e8f1189dd941d21a5d1c7f6e3dd3ec21d4c0bc75"),
+    ("invoke-grok-prompt.py", "1f0f4f6bb03d816b3f40ff56ebe71973301d2d7104ef1d7f335b1ffa0b248559"),
+    ("external-prompt-governance.md", "c7a59ccec7d6e46be76584a107b0a5b30b249368b4f0958cb78177962dc34b00"),
+    (TRANSPORT_PROJECTION_MANIFEST, "7e14945c36bfd8ea2aee6db91e781df5e36365df67c7ef2efa0ffe84edc46190"),
 )
 E7_LEGACY_PROVIDER_PROMPT_SHA256 = (
     "825bc6db49408c5975627fba95c95ca479fe45c508e5be71d06c5e6f6c4b8121"
@@ -106,6 +117,10 @@ RUNTIME_RESOURCES = (
     (
         "shared/external-prompt-governance.md",
         "scripts/external-prompt-governance.md",
+    ),
+    (
+        "shared/external-role-taxonomy.v1.json",
+        "scripts/external-role-taxonomy.v1.json",
     ),
     (
         f"shared/{TRANSPORT_PROJECTION_MANIFEST}",
@@ -1718,7 +1733,7 @@ def _stage_claude_transport_projection(
     if states == ("absent",) * len(TRANSPORT_PROJECTION_FILES) and manifest_state == "absent":
         pending_files = files
         manifest_pending = True
-    elif states == ("absent", "current", "current", "absent", "absent", "absent") and manifest_state == "absent":
+    elif states == ("absent", "current", "current", "absent", "absent", "absent", "absent") and manifest_state == "absent":
         pending_files = tuple(
             (name, payload)
             for (name, payload), state in zip(files, states)
@@ -1732,7 +1747,15 @@ def _stage_claude_transport_projection(
         (witness.path.name, witness.sha256)
         for witness in witnesses
         if witness.state == "regular"
-    ) == STOCK_8521_CLAUDE_TRANSPORT_PROJECTION_SHA256:
+    ) in {
+        STOCK_8521_CLAUDE_TRANSPORT_PROJECTION_SHA256,
+        STOCK_7872_CLAUDE_TRANSPORT_PROJECTION_SHA256,
+    }:
+        observed_prior = tuple(
+            (witness.path.name, witness.sha256)
+            for witness in witnesses
+            if witness.state == "regular"
+        )
         pending_files = tuple(
             (name, payload)
             for (name, payload), witness in zip(files, witnesses)
@@ -1741,8 +1764,12 @@ def _stage_claude_transport_projection(
         manifest_pending = (
             witnesses[-1].sha256 != hashlib.sha256(manifest_payload).hexdigest()
         )
-        accepted_prior_set = "8521b638"
-    elif states == ("accepted-prior", "current", "current", "absent", "absent", "absent") and manifest_state == "absent":
+        accepted_prior_set = (
+            "7872d36d"
+            if observed_prior == STOCK_7872_CLAUDE_TRANSPORT_PROJECTION_SHA256
+            else "8521b638"
+        )
+    elif states == ("accepted-prior", "current", "current", "absent", "absent", "absent", "absent") and manifest_state == "absent":
         pending_files = files
         manifest_pending = True
         replace_legacy_singleton = True
@@ -1775,9 +1802,13 @@ def _apply_claude_transport_projection(
         projection_relative = projection_root.relative_to(owner.anchor)
     except ValueError as exc:
         raise ValueError("E_TRANSPORT_PROJECTION_PARITY: destination escape") from exc
-    exact_prior = dict(STOCK_8521_CLAUDE_TRANSPORT_PROJECTION_SHA256)
+    exact_prior = dict(
+        STOCK_7872_CLAUDE_TRANSPORT_PROJECTION_SHA256
+        if stage.accepted_prior_set == "7872d36d"
+        else STOCK_8521_CLAUDE_TRANSPORT_PROJECTION_SHA256
+    )
     for name, payload in stage.pending_files:
-        if stage.accepted_prior_set == "8521b638":
+        if stage.accepted_prior_set in {"8521b638", "7872d36d"} and name in exact_prior:
             owner.migrate_exact_file(
                 projection_relative / name,
                 exact_prior[name],
@@ -1797,7 +1828,7 @@ def _apply_claude_transport_projection(
         relative = (
             projection_relative.parent / "shared" / TRANSPORT_PROJECTION_MANIFEST
         )
-        if stage.accepted_prior_set == "8521b638":
+        if stage.accepted_prior_set in {"8521b638", "7872d36d"}:
             owner.migrate_exact_file(
                 relative,
                 exact_prior[TRANSPORT_PROJECTION_MANIFEST],
@@ -4523,7 +4554,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                     for authority in claude_link_authorities:
                         _assert_global_claude_linked_subroot_authority(root, authority)
                     # The non-transport Claude runtime set must exist before the
-                    # create-only six-member transport set claims its shared/scripts parents.
+                    # complete manifest-bound transport set claims its shared/scripts parents.
                     # Transaction snapshots therefore retain ownership of every
                     # mutable runtime leaf through any later failure.
                     claude_runtime_destinations = tuple(

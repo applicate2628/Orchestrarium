@@ -54,6 +54,9 @@ def _projected_entrypoint(tmp_path: Path, provider: str) -> Path:
     (scripts / "external-prompt-governance.md").write_bytes(
         (ROOT / "shared" / "external-prompt-governance.md").read_bytes()
     )
+    (scripts / "external-role-taxonomy.v1.json").write_bytes(
+        (ROOT / "shared" / "external-role-taxonomy.v1.json").read_bytes()
+    )
     entrypoint = scripts / ENTRYPOINTS[provider].name
     entrypoint.write_bytes(ENTRYPOINTS[provider].read_bytes())
     support = tmp_path / "scripts"
@@ -828,6 +831,11 @@ def test_unlaunched_ledger_failure_uses_one_v2_envelope_without_durable_ledger_c
     (
         ("qa-engineer", "external-reviewer"),
         ("backend-engineer", "external-worker"),
+        ("frontend-engineer", "external-worker"),
+        ("toolchain-engineer", "external-worker"),
+        ("ux-designer", "external-worker"),
+        ("accessibility-reviewer", "external-reviewer"),
+        ("performance-reviewer", "external-reviewer"),
         ("consultant", "consultant"),
         ("lead", "none"),
     ),
@@ -1104,6 +1112,50 @@ def test_triple_cleanup_denial_is_nonclean_and_retained(tmp_path: Path, monkeypa
     cleanup = lifecycle.cleanup()
     assert not cleanup.clean and cleanup.recovery_retained
     assert "scrub-unlink-failed" in cleanup.issues
+
+
+def test_recovery_write_failure_after_successful_purge_returns_bounded_cleanup_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lifecycle = _lifecycle(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        owner.shutil,
+        "rmtree",
+        lambda _path: (_ for _ in ()).throw(PermissionError("primary")),
+    )
+    monkeypatch.setattr(
+        lifecycle,
+        "_write_redacted_recovery",
+        lambda _issue: (_ for _ in ()).throw(PermissionError("recovery")),
+    )
+
+    cleanup = lifecycle.cleanup()
+
+    assert cleanup.recovery_retained is False
+    assert "recovery-record-write-failed" in cleanup.issues
+    assert len(cleanup.issues) <= 32
+    assert all(len(issue) <= 64 for issue in cleanup.issues)
+    assert not any(lifecycle.root.glob(".capture-tombstone-*"))
+
+
+def test_settle_once_converts_unexpected_cleanup_failure_to_combined_terminal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lifecycle = _lifecycle(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        lifecycle,
+        "cleanup",
+        lambda: (_ for _ in ()).throw(FileNotFoundError("vanished")),
+    )
+    terminal = owner.TerminalResult(
+        Path("<fixture>"), "completed", "PASS", "fixture", "COMPLETE:PASS", 0
+    )
+
+    outcome = owner.settle_once(0, terminal, lifecycle, external=True)
+
+    assert outcome.token == "UNVERIFIED:E_EXTERNAL_CAPTURE_CLEANUP"
+    assert outcome.cleanup_status == "incomplete"
+    assert outcome.cleanup_issue_count == 1
 
 
 @pytest.mark.parametrize("failure_stage", ("write", "flush"))
@@ -1410,10 +1462,20 @@ def test_exact_child_credential_echo_is_blocked_before_v2_result_materialization
 
 @pytest.mark.parametrize("invalid_secret", ("not-ascii-\u0436", "nul\x00credential"))
 def test_invalid_credential_needle_fails_before_prompt_consumption(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], invalid_secret: str
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    invalid_secret: str,
 ) -> None:
     prompt_reads: list[bool] = []
-    monkeypatch.setattr(owner.os, "environ", {"ANTHROPIC_" "API_KEY": invalid_secret})
+    monkeypatch.setattr(
+        owner.os,
+        "environ",
+        {
+            "USERPROFILE": str(tmp_path.resolve()),
+            "ANTHROPIC_" "API_KEY": invalid_secret,
+        },
+    )
     monkeypatch.setattr(owner, "resolve_provider_command", lambda _provider: None)
     monkeypatch.setattr(
         owner,
@@ -1428,6 +1490,239 @@ def test_invalid_credential_needle_fails_before_prompt_consumption(
     assert prompt_reads == []
 
 
+@pytest.mark.parametrize("blocked_flag", ("--setting-sources", "--settings"))
+def test_claude_caller_cannot_override_automated_setting_sources(
+    blocked_flag: str,
+) -> None:
+    with pytest.raises(ValueError, match="E_EXTERNAL_PROVIDER_SETTINGS_OVERRIDE"):
+        owner.resolved_profile(
+            "claude",
+            [
+                "-p",
+                "--output-format",
+                "text",
+                "--model",
+                "opus",
+                "--effort",
+                "xhigh",
+                blocked_flag,
+                "project",
+            ],
+        )
+
+
+def test_bedrock_child_environment_preserves_only_selected_mode_controls(
+    tmp_path: Path,
+) -> None:
+    config = tmp_path / "aws-config"
+    credentials = tmp_path / "aws-credentials"
+    token = tmp_path / "web-identity-token"
+    for path in (config, credentials, token):
+        path.write_text("fixture\n", encoding="utf-8")
+    environment = {
+        "PATH": "fixture-path",
+        "USERPROFILE": str(tmp_path),
+        "CLAUDE_CODE_USE_BEDROCK": "true",
+        "AWS_PROFILE": "fixture-profile",
+        "AWS_REGION": "eu-west-1",
+        "AWS_CONFIG_FILE": str(config.resolve()),
+        "AWS_SHARED_CREDENTIALS_FILE": str(credentials.resolve()),
+        "AWS_WEB_IDENTITY_TOKEN_FILE": str(token.resolve()),
+        "AWS_ROLE_ARN": "arn:aws:iam::123456789012:role/fixture",
+        "AWS_SESSION_TOKEN": "bedrock-secret-001",
+        "GOOGLE_APPLICATION_CREDENTIALS": str(config.resolve()),
+        "CLOUDSDK_CONFIG": str(tmp_path.resolve()),
+    }
+
+    resolved = owner.resolve_provider_auth_configuration("claude", environment)
+
+    assert resolved.mode == "claude-bedrock"
+    assert resolved.child_environment == {
+        "PATH": "fixture-path",
+        "USERPROFILE": str(tmp_path),
+        "CLAUDE_CODE_USE_BEDROCK": "true",
+        "AWS_PROFILE": "fixture-profile",
+        "AWS_REGION": "eu-west-1",
+        "AWS_CONFIG_FILE": str(config.resolve()),
+        "AWS_SHARED_CREDENTIALS_FILE": str(credentials.resolve()),
+        "AWS_WEB_IDENTITY_TOKEN_FILE": str(token.resolve()),
+        "AWS_ROLE_ARN": "arn:aws:iam::123456789012:role/fixture",
+        "AWS_SESSION_TOKEN": "bedrock-secret-001",
+    }
+    assert resolved.needles == (b"bedrock-secret-001",)
+
+
+def test_vertex_child_environment_preserves_selected_paths_and_config_dir(
+    tmp_path: Path,
+) -> None:
+    credentials = tmp_path / "google-credentials.json"
+    credentials.write_text("{}\n", encoding="utf-8")
+    cloud_config = tmp_path / "gcloud"
+    cloud_config.mkdir()
+    claude_config = tmp_path / "claude-config"
+    claude_config.mkdir()
+    environment = {
+        "HOME": str(tmp_path),
+        "CLAUDE_CONFIG_DIR": str(claude_config.resolve()),
+        "CLAUDE_CODE_USE_VERTEX": "true",
+        "GOOGLE_APPLICATION_CREDENTIALS": str(credentials.resolve()),
+        "CLOUDSDK_CONFIG": str(cloud_config.resolve()),
+        "CLOUD_ML_REGION": "us-central1",
+        "ANTHROPIC_VERTEX_PROJECT_ID": "anthropic-project",
+        "GCLOUD_PROJECT": "gcloud-project",
+        "GOOGLE_CLOUD_PROJECT": "google-project",
+        "GOOGLE_OAUTH_ACCESS_TOKEN": "vertex-secret-001",
+        "AWS_PROFILE": "must-not-leak",
+    }
+
+    resolved = owner.resolve_provider_auth_configuration("claude", environment)
+
+    assert resolved.mode == "claude-vertex"
+    assert resolved.child_environment == {
+        "HOME": str(tmp_path),
+        "CLAUDE_CONFIG_DIR": str(claude_config.resolve()),
+        "CLAUDE_CODE_USE_VERTEX": "true",
+        "GOOGLE_APPLICATION_CREDENTIALS": str(credentials.resolve()),
+        "CLOUDSDK_CONFIG": str(cloud_config.resolve()),
+        "CLOUD_ML_REGION": "us-central1",
+        "ANTHROPIC_VERTEX_PROJECT_ID": "anthropic-project",
+        "GCLOUD_PROJECT": "gcloud-project",
+        "GOOGLE_CLOUD_PROJECT": "google-project",
+        "GOOGLE_OAUTH_ACCESS_TOKEN": "vertex-secret-001",
+    }
+    assert resolved.needles == (b"vertex-secret-001",)
+
+
+def test_selected_provider_path_control_must_be_absolute_ordinary_existing_file(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(
+        ValueError, match="E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE: path control"
+    ):
+        owner.resolve_provider_auth_configuration(
+            "claude",
+                {
+                    "USERPROFILE": str(tmp_path),
+                    "CLAUDE_CODE_USE_VERTEX": "true",
+                "GOOGLE_APPLICATION_CREDENTIALS": "relative.json",
+            },
+        )
+
+
+def test_windows_user_settings_surface_ignores_home_and_requires_userprofile(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    spoofed = tmp_path / "spoofed-home" / ".claude"
+    spoofed.mkdir(parents=True)
+    (spoofed / "settings.json").write_text(
+        '{"apiKeyHelper": "spoofed"}\n', encoding="utf-8"
+    )
+    monkeypatch.setattr(owner, "_claude_settings_os_name", lambda: "nt")
+
+    with pytest.raises(
+        ValueError,
+        match="E_EXTERNAL_PROVIDER_CLAUDE_SETTINGS_SURFACE_UNAVAILABLE",
+    ):
+        owner.resolve_provider_auth_configuration(
+            "claude", {"HOME": str(spoofed.parent.resolve())}
+        )
+
+
+@pytest.mark.parametrize("root_kind", ("relative", "file"))
+def test_claude_user_settings_surface_rejects_invalid_root_type(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, root_kind: str
+) -> None:
+    root = "relative-profile" if root_kind == "relative" else str(tmp_path / "profile-file")
+    if root_kind == "file":
+        Path(root).write_text("not a directory\n", encoding="utf-8")
+    monkeypatch.setattr(owner, "_claude_settings_os_name", lambda: "nt")
+
+    with pytest.raises(
+        ValueError,
+        match="E_EXTERNAL_PROVIDER_CLAUDE_SETTINGS_SURFACE_UNAVAILABLE",
+    ):
+        owner.resolve_provider_auth_configuration(
+            "claude", {"USERPROFILE": root}
+        )
+
+
+def test_windows_userprofile_wins_conflict_with_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    userprofile = tmp_path / "profile"
+    userprofile.mkdir()
+    spoofed = tmp_path / "home" / ".claude"
+    spoofed.mkdir(parents=True)
+    (spoofed / "settings.json").write_text(
+        '{"apiKeyHelper": "spoofed"}\n', encoding="utf-8"
+    )
+    monkeypatch.setattr(owner, "_claude_settings_os_name", lambda: "nt")
+
+    with pytest.raises(owner.ClaudeSubscriptionRefusal):
+        owner.resolve_provider_auth_configuration(
+            "claude",
+            {
+                "USERPROFILE": str(userprofile.resolve()),
+                "HOME": str(spoofed.parent.resolve()),
+            },
+        )
+
+
+def test_posix_user_settings_surface_ignores_userprofile_and_requires_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    spoofed = tmp_path / "profile" / ".claude"
+    spoofed.mkdir(parents=True)
+    (spoofed / "settings.json").write_text(
+        '{"apiKeyHelper": "spoofed"}\n', encoding="utf-8"
+    )
+    monkeypatch.setattr(owner, "_claude_settings_os_name", lambda: "posix")
+    with pytest.raises(
+        ValueError,
+        match="E_EXTERNAL_PROVIDER_CLAUDE_SETTINGS_SURFACE_UNAVAILABLE",
+    ):
+        owner.resolve_provider_auth_configuration(
+            "claude", {"USERPROFILE": spoofed.parent.as_posix()}
+        )
+
+
+def test_posix_home_wins_conflict_with_userprofile(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    spoofed = tmp_path / "profile" / ".claude"
+    spoofed.mkdir(parents=True)
+    (spoofed / "settings.json").write_text(
+        '{"apiKeyHelper": "spoofed"}\n', encoding="utf-8"
+    )
+    monkeypatch.setattr(owner, "_claude_settings_os_name", lambda: "posix")
+    with pytest.raises(owner.ClaudeSubscriptionRefusal):
+        owner.resolve_provider_auth_configuration(
+            "claude", {"HOME": str(tmp_path.resolve()), "USERPROFILE": spoofed.parent.as_posix()}
+        )
+
+
+def test_programfiles_managed_helper_is_inert_and_subscription_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    userprofile = tmp_path / "profile"
+    userprofile.mkdir()
+    managed = tmp_path / "program-files" / "ClaudeCode"
+    managed.mkdir(parents=True)
+    (managed / "managed-settings.json").write_text(
+        '{"apiKeyHelper": "managed-only"}\n', encoding="utf-8"
+    )
+    monkeypatch.setattr(owner, "_claude_settings_os_name", lambda: "nt")
+
+    with pytest.raises(owner.ClaudeSubscriptionRefusal):
+        owner.resolve_provider_auth_configuration(
+            "claude",
+            {
+                "USERPROFILE": str(userprofile.resolve()),
+                "ProgramFiles": str(managed.parent.resolve()),
+            },
+        )
+
+
 def test_subscription_only_claude_refusal_precedes_s1_inventory_and_all_launch_side_effects(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -1436,7 +1731,10 @@ def test_subscription_only_claude_refusal_precedes_s1_inventory_and_all_launch_s
     monkeypatch.setattr(
         owner,
         "resolve_provider_auth_configuration",
-        lambda *_args, **_kwargs: calls.append("credential-registry"),
+        lambda *_args, **_kwargs: (
+            calls.append("credential-registry"),
+            (_ for _ in ()).throw(owner.ClaudeSubscriptionRefusal("subscription")),
+        )[-1],
     )
     monkeypatch.setattr(
         owner,
@@ -1458,7 +1756,7 @@ def test_subscription_only_claude_refusal_precedes_s1_inventory_and_all_launch_s
 
     assert code == 3
     assert "commercial authentication" in capsys.readouterr().err
-    assert calls == []
+    assert calls == ["credential-registry"]
 
 
 @pytest.mark.parametrize("provider", ("codex", "claude"))

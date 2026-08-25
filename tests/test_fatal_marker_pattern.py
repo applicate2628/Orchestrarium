@@ -54,6 +54,9 @@ def _projected_codex_entrypoint(tmp_path: Path) -> Path:
     (scripts / "external-prompt-governance.md").write_bytes(
         (ROOT / "shared" / "external-prompt-governance.md").read_bytes()
     )
+    (scripts / "external-role-taxonomy.v1.json").write_bytes(
+        (ROOT / "shared" / "external-role-taxonomy.v1.json").read_bytes()
+    )
     support = tmp_path / "scripts"
     support.mkdir(exist_ok=True)
     for name in ("check-hook-health.py", "universal_hooks_manifest.py", "agent-run-ledger.py"):

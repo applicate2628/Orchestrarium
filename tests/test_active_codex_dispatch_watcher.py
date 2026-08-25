@@ -284,6 +284,10 @@ def test_python_prompt_owner_returns_complete_result_and_reclaims_artifacts(
         ROOT / "shared" / "external-prompt-governance.md",
         projection / "external-prompt-governance.md",
     )
+    shutil.copyfile(
+        ROOT / "shared" / "external-role-taxonomy.v1.json",
+        projection / "external-role-taxonomy.v1.json",
+    )
     env_capture = tmp_path / f"{provider}.env"
     fake = tmp_path / f"fake-{provider}.py"
     fake.write_text(

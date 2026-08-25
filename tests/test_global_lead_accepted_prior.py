@@ -4,6 +4,7 @@ import base64
 import hashlib
 import importlib.util
 import io
+import json
 import shutil
 import subprocess
 import sys
@@ -23,6 +24,9 @@ CURRENT_GLOBAL_LEAD_TREE_SHA256 = (
 )
 PRE_REBASE_GLOBAL_LEAD_TREE_SHA256 = (
     "d0bec9fd61bf3fde6e48ba38cdbc7c021053a4167bbb694c8aa5c03e06283083"
+)
+PRE_REBASE_FIXTURE_ROOT = (
+    ROOT / "tests" / "fixtures" / "global-lead-priors" / "pre-rebase"
 )
 # Exact bytes for the two staged destinations changed after the accepted
 # historical trees were observed. Base64 preserves their final-newline state.
@@ -217,8 +221,13 @@ PRE_H2_ONLY_HISTORICAL_FILES = {
         "scripts/mutate-work-item.py",
     ),
 }
+POST_7872_GLOBAL_LEAD_RUNTIME_FILES = (
+    "scripts/solution_attempt/reducer.py",
+    "scripts/external-role-taxonomy.v1.json",
+)
 OBSERVED_GLOBAL_LEAD_ABSENT_TRANSPORT_FILES = (
     "scripts/external-prompt-governance.md",
+    *POST_7872_GLOBAL_LEAD_RUNTIME_FILES,
     "scripts/invoke-claude-prompt.py",
     "scripts/invoke-codex-prompt.py",
     "scripts/invoke-grok-prompt.py",
@@ -246,6 +255,42 @@ def _historical_blob(revision: str, source: str) -> bytes:
         check=True,
         capture_output=True,
     ).stdout
+
+
+def _pre_rebase_fixture_payloads() -> dict[str, bytes]:
+    manifest_path = PRE_REBASE_FIXTURE_ROOT / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert set(manifest) == {"schemaVersion", "baseline", "files"}
+    assert manifest["schemaVersion"] == 1
+    assert manifest["baseline"] == "7872d36d"
+    files = manifest["files"]
+    assert isinstance(files, dict) and files
+    fixture_files = {
+        path.relative_to(PRE_REBASE_FIXTURE_ROOT).as_posix()
+        for path in PRE_REBASE_FIXTURE_ROOT.rglob("*")
+        if path.is_file() and path != manifest_path
+    }
+    assert fixture_files == set(files)
+
+    payloads: dict[str, bytes] = {}
+    for relative, expected_sha256 in files.items():
+        fixture_relative = Path(relative)
+        assert not fixture_relative.is_absolute()
+        assert ".." not in fixture_relative.parts
+        payload = (PRE_REBASE_FIXTURE_ROOT / fixture_relative).read_bytes()
+        assert hashlib.sha256(payload).hexdigest() == expected_sha256
+        payloads[relative] = payload
+    return payloads
+
+
+def _remove_historical_members(lead: Path, relatives: tuple[str, ...]) -> None:
+    for relative in relatives:
+        target = lead / relative
+        target.unlink()
+        parent = target.parent
+        while parent != lead and not any(parent.iterdir()):
+            parent.rmdir()
+            parent = parent.parent
 
 
 def _extract_8521_skill(name: str, destination: Path) -> Path:
@@ -305,6 +350,9 @@ def _seed_pre_rebase_staged_lead(installer, destination: Path) -> Path:
     lead = _copy_current_staged_lead(installer, destination)
     for relative, payload in PRE_REBASE_STAGED_LEAD_OVERLAYS.items():
         (lead / relative).write_bytes(payload)
+    for relative, payload in _pre_rebase_fixture_payloads().items():
+        (lead / relative).write_bytes(payload)
+    _remove_historical_members(lead, POST_7872_GLOBAL_LEAD_RUNTIME_FILES)
     return lead
 
 
@@ -488,8 +536,7 @@ def _seed_exact_observed_global_lead(
             else _historical_blob(*historical_file)
         )
         (lead / relative).write_bytes(payload)
-    for relative in OBSERVED_GLOBAL_LEAD_ABSENT_TRANSPORT_FILES:
-        (lead / relative).unlink()
+    _remove_historical_members(lead, OBSERVED_GLOBAL_LEAD_ABSENT_TRANSPORT_FILES)
     assert (
         installer._tree_sha256(lead, ignore_runtime_cache=True)
         == expected_digest

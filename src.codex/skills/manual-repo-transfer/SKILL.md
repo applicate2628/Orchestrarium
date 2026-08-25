@@ -5,11 +5,11 @@ description: Use when a Git repository moves machines without losing dirty work,
 
 # Manual Repository Transfer
 
-Transfer Git history plus a verified local-state overlay. Size, age, naming, and ignored status never prove data disposable.
+Transfer Git history when it exists plus a verified local-state overlay. Size, age, naming, and ignored status never prove data disposable.
 
 ## Invariants
 
-- Git covers required commits/refs; the overlay covers selected local state.
+- For a committed repository, Git covers required commits/refs; the overlay covers selected local state. An unborn repository has no `HEAD` history to claim, so its overlay and Git metadata are evidence only.
 - One manifest assigns every local file or link one non-overlapping disposition.
 - ZIP contains regular-file bytes. Restricted data and links use content-bound external receipts.
 - A Lead or human selects and verifies one explicit absolute Git executable outside the repository before invoking the helper; the helper never resolves `git` from PATH, the current directory, or an environment override.
@@ -19,7 +19,7 @@ Transfer Git history plus a verified local-state overlay. Size, age, naming, and
 ## Workflow
 
 1. Read repository governance and validation docs. Inventory dot-directories, ignored/untracked state, and self-ignored workspaces. A clean `git status` is insufficient. Query owning tools through API/MCP; validate stored config/memory against the active project. Use [local-state categories](references/manifest-schema.md#local-state-categories).
-2. Quiesce writers. Record `HEAD`, refs, credential-redacted remotes, dirty/index state, reparse points, lifecycle state, stashes, registered worktrees, and Git recovery surfaces. The helper excludes `.git`; audit it separately.
+2. Quiesce writers. Record the repository history state, `HEAD` when committed, refs, credential-redacted remotes, dirty/index state, reparse points, lifecycle state, stashes, registered worktrees, and Git recovery surfaces. The helper excludes `.git`; audit it separately.
 3. Generate an inventory outside the worktree:
 
    ```text
@@ -35,7 +35,7 @@ Transfer Git history plus a verified local-state overlay. Size, age, naming, and
    | `delete` | Add a content-bound, evidence-backed item to the preview-only deletion plan. |
 
    Rows may not overlap. Ambiguity means `include`. Never follow a link; classify its target separately.
-5. Use the selected remote's local-tracking evidence plus policy-required server probes. Otherwise create and verify a Git bundle; copying `.git` is not the default.
+5. For a committed repository, use the selected remote's local-tracking evidence plus policy-required server probes. Otherwise create and verify a Git bundle; copying `.git` is not the default. For an unborn repository, select only `gitStrategy.mode: none`: no remote can cover a nonexistent `HEAD`, and a standard Git bundle cannot preserve nonexistent history.
 6. Build and source-verify the overlay:
 
    ```text
@@ -45,7 +45,7 @@ Transfer Git history plus a verified local-state overlay. Size, age, naming, and
 
 7. Store the artifact independently from the source PC. If the receiver is unavailable, rehearse a clean local restore before authorizing a wipe. Generate the deletion preview with `cleanup`; after separate authorization, the owner applies it and proves the resulting census.
 8. Finish lifecycle and Git recovery cleanup, quiesce again, inventory again, rebuild, and reverify. Only this post-finalization artifact is the handoff.
-9. On the receiver: verify the ZIP against its separate SHA-256; restore Git and regular-file overlay entries; run payload/source verification; restore external artifacts through receipts; regenerate dependencies/caches; run repository checks. Retain artifacts until acceptance.
+9. On the receiver: verify the ZIP against its separate SHA-256; restore Git and regular-file overlay entries; run payload/source verification; restore external artifacts through receipts; regenerate dependencies/caches; run repository checks. For an unborn inventory, the ZIP preserves file bytes plus staged/unstaged/status evidence but does not recreate index equivalence or fabricate an initial commit. Retain artifacts until acceptance.
 
 ## Stop conditions
 

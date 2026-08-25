@@ -1,4 +1,4 @@
-"""Phase A contracts for the future pure solution-attempt reducer."""
+"""Phase A contracts for the pure solution-attempt reducer."""
 
 from __future__ import annotations
 
@@ -66,8 +66,8 @@ def _load_owner(path: Path, module_name: str, contract: str):
 
 def _owner():
     return _load_owner(
-        ROOT / "scripts" / "solution_attempt_state.py",
-        "solution_attempt_state_phase_b",
+        ROOT / "scripts" / "solution_attempt" / "reducer.py",
+        "solution_attempt_reducer_phase_b",
         "the pure V3 solution-attempt reducer",
     )
 
@@ -207,12 +207,12 @@ def test_version_matrix_has_expand_contract_and_reader_floor() -> None:
 
 def test_red_reducer_owner_missing() -> None:
     owner = _load_owner(
-        ROOT / "scripts" / "solution_attempt_state.py",
-        "solution_attempt_state_phase_a",
+        ROOT / "scripts" / "solution_attempt" / "reducer.py",
+        "solution_attempt_reducer_phase_a",
         "the pure V3 solution-attempt reducer",
     )
     assert callable(getattr(owner, "reduce_solution_attempt", None)), (
-        "missing-contract: scripts/solution_attempt_state.py must expose "
+        "missing-contract: scripts/solution_attempt/reducer.py must expose "
         "reduce_solution_attempt"
     )
 
@@ -567,7 +567,7 @@ def test_launch_state_outcome_cartesian_is_closed() -> None:
 
 
 def test_solution_attempt_owner_is_pure_and_heuristic_free() -> None:
-    path = ROOT / "scripts" / "solution_attempt_state.py"
+    path = ROOT / "scripts" / "solution_attempt" / "reducer.py"
     source = path.read_text(encoding="utf-8")
     tree = ast.parse(source)
     imported = {

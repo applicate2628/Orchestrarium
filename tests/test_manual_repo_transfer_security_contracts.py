@@ -1165,6 +1165,63 @@ class SecurityContractTests(unittest.TestCase):
         result = self.bundle()
         self.assert_contract_error(result, "invalid selection")
 
+    def test_unborn_inventory_requires_safe_history_contract_and_none_strategy(self) -> None:
+        module = load_transfer_module()
+        entry = {
+            "path": "work.txt",
+            "entryType": "file",
+            "gitClass": "untracked",
+            "dirtyTracked": False,
+            "size": 4,
+            "sha256": sha256(b"work"),
+        }
+        repository = {
+            "historyState": "unborn",
+            "head": None,
+            "remotes": [],
+            "remoteEvidence": {},
+            "gitExecutable": {"path": str(GIT_EXECUTABLE), "sha256": sha256(GIT_EXECUTABLE.read_bytes())},
+            "gitMetadataHashes": {},
+        }
+        inventory = {"schemaVersion": 1, "repository": repository, "entries": [entry]}
+        inventory["snapshot"] = {"digest": sha256(canonical_json({"entries": [entry], "repository": repository}))}
+        module.validate_inventory(inventory)
+        base_selection = {
+            "schemaVersion": 1,
+            "inventoryDigest": inventory["snapshot"]["digest"],
+            "items": [{"path": "work.txt", "disposition": "include", "reason": "local work"}],
+        }
+        valid = {**base_selection, "gitStrategy": {"mode": "none"}}
+        self.assertEqual("work.txt", module.validate_selection(self.repo, inventory, valid)[0]["path"])
+        for strategy in (
+            {"mode": "git-bundle"},
+            {"mode": "remote-clone", "remote": "origin", "expectedHead": None},
+        ):
+            with self.subTest(strategy=strategy):
+                with self.assertRaisesRegex(module.ContractError, "unborn repositories require git strategy none"):
+                    module.validate_selection(self.repo, inventory, {**base_selection, "gitStrategy": strategy})
+
+        delete_selection = {
+            **base_selection,
+            "gitStrategy": {"mode": "none"},
+            "items": [{
+                "path": "work.txt",
+                "disposition": "delete",
+                "reason": "invalid history claim",
+                "proof": {"kind": "git-recoverable", "setSha256": sha256(canonical_json([entry]))},
+            }],
+        }
+        with self.assertRaisesRegex(module.ContractError, "unborn repository has no verified Git history"):
+            module.validate_selection(self.repo, inventory, delete_selection)
+
+        for history_state, head in (("committed", None), ("unborn", "0" * 40), ("unknown", None), (None, "0" * 40)):
+            with self.subTest(history_state=history_state, head=head):
+                malformed_repository = {**repository, "historyState": history_state, "head": head}
+                malformed = {**inventory, "repository": malformed_repository}
+                malformed["snapshot"] = {"digest": sha256(canonical_json({"entries": [entry], "repository": malformed_repository}))}
+                with self.assertRaisesRegex(module.ContractError, "invalid inventory snapshot"):
+                    module.validate_inventory(malformed)
+
     def test_portable_identity_reserves_mixed_case_and_nfkc_equivalent_git_paths(self) -> None:
         module = load_transfer_module()
         for path in (".GIT/config", ".\uff27\uff29\uff34/config"):
@@ -1249,6 +1306,21 @@ class SecurityContractTests(unittest.TestCase):
         self.rewrite_bundle_manifest(self.bundle_path, head_drift, lambda manifest: manifest["repository"].update(head="0" * 40))
         self.assert_contract_error(run_cli("verify", "--bundle", head_drift, "--inventory", self.inventory_path, "--selection", self.selection_path, "--source", self.repo), "bundle does not match trusted inventory")
 
+    def test_v1_committed_inventory_and_manifest_without_history_state_remain_readable(self) -> None:
+        module = load_transfer_module()
+        inventory = self.inventory()
+        inventory["repository"].pop("historyState")
+        inventory["snapshot"] = {"digest": sha256(canonical_json({"entries": inventory["entries"], "repository": inventory["repository"]}))}
+        module.validate_inventory(inventory)
+
+        current = self.inventory()
+        self.write_selection(self.selection(current))
+        self.assertEqual(0, self.bundle().returncode)
+        legacy_manifest = self.root / "legacy-v1-manifest.zip"
+        self.rewrite_bundle_manifest(self.bundle_path, legacy_manifest, lambda manifest: manifest["repository"].pop("historyState"))
+        result = run_cli("verify", "--bundle", legacy_manifest)
+        self.assertEqual(0, result.returncode, result.stderr)
+
     def test_portable_tree_rejects_selection_and_manifest_cross_category_conflicts(self) -> None:
         module = load_transfer_module()
         repository = {"head": "0" * 40, "remotes": [], "remoteEvidence": {}, "gitMetadataHashes": {}}
@@ -1285,6 +1357,7 @@ class SecurityContractTests(unittest.TestCase):
             ("schema-bool", lambda manifest: manifest.update(schemaVersion=True)),
             ("inventory-missing", lambda manifest: manifest.pop("inventoryDigest")),
             ("selection-bool", lambda manifest: manifest.update(selectionDigest=True)),
+            ("repository-not-object", lambda manifest: manifest.update(repository=[])),
             ("repository-head-bool", lambda manifest: manifest.update(repository={"head": True})),
             ("payload-not-list", lambda manifest: manifest.update(payload={})),
             ("metadata-not-list", lambda manifest: manifest.update(metadata={})),

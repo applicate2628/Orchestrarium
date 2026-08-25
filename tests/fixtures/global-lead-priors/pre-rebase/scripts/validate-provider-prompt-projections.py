@@ -4,12 +4,10 @@
 from __future__ import annotations
 
 import argparse
-import ast
 from dataclasses import dataclass
 import hashlib
 import json
 import os
-import re
 import stat
 import sys
 import types
@@ -26,7 +24,6 @@ TRANSPORT_FILES = (
     "invoke-kimi-prompt.py",
     "invoke-grok-prompt.py",
     "external-prompt-governance.md",
-    "external-role-taxonomy.v1.json",
 )
 EXTERNAL_GOVERNANCE_BEGIN = "<!-- BEGIN ORCHESTRARIUM EXTERNAL GOVERNANCE V1 -->"
 EXTERNAL_GOVERNANCE_END = "<!-- END ORCHESTRARIUM EXTERNAL GOVERNANCE V1 -->"
@@ -37,9 +34,6 @@ _AUTHORED_SOURCE_PATHS = {
 }
 _AUTHORED_SOURCE_PATHS["external-prompt-governance.md"] = (
     Path("shared") / "external-prompt-governance.md"
-)
-_AUTHORED_SOURCE_PATHS["external-role-taxonomy.v1.json"] = (
-    Path("shared") / "external-role-taxonomy.v1.json"
 )
 _PACKED_RUNTIME_DESTINATIONS = {
     name: Path("scripts") / name for name in TRANSPORT_FILES
@@ -311,88 +305,6 @@ def _validate_external_governance_projection(source_root: Path) -> None:
         raise _fail("external governance projection drift")
 
 
-def _validate_external_role_taxonomy(source_root: Path) -> None:
-    taxonomy_raw = _read_bound_bytes(
-        Path(source_root) / _AUTHORED_SOURCE_PATHS["external-role-taxonomy.v1.json"],
-        "source/external-role-taxonomy.v1.json",
-    )
-    provider_raw = _read_bound_bytes(
-        Path(source_root) / _AUTHORED_SOURCE_PATHS["provider_prompt.py"],
-        "source/provider_prompt.py taxonomy binding",
-    )
-    try:
-        provider_tree = ast.parse(provider_raw.decode("utf-8", errors="strict"))
-    except (UnicodeDecodeError, SyntaxError) as exc:
-        raise _fail("external role taxonomy digest literal") from exc
-    literals: list[str] = []
-    for node in provider_tree.body:
-        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
-            continue
-        target = node.targets[0]
-        if (
-            isinstance(target, ast.Name)
-            and target.id == "EXTERNAL_ROLE_TAXONOMY_SHA256"
-            and isinstance(node.value, ast.Constant)
-            and isinstance(node.value.value, str)
-        ):
-            literals.append(node.value.value)
-    expected_taxonomy_digest = hashlib.sha256(taxonomy_raw).hexdigest()
-    if literals != [expected_taxonomy_digest]:
-        raise _fail("external role taxonomy digest literal")
-    try:
-        taxonomy = json.loads(taxonomy_raw.decode("utf-8", errors="strict"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise _fail("external role taxonomy JSON") from exc
-    if (
-        not isinstance(taxonomy, dict)
-        or set(taxonomy) != {"schemaVersion", "roles"}
-        or taxonomy.get("schemaVersion") != 1
-        or not isinstance(taxonomy.get("roles"), dict)
-    ):
-        raise _fail("external role taxonomy shape")
-    mapping = taxonomy["roles"]
-    if len(mapping) != 33 or any(
-        not isinstance(role, str)
-        or lane not in {"consultant", "external-worker", "external-reviewer", "none"}
-        for role, lane in mapping.items()
-    ):
-        raise _fail("external role taxonomy membership")
-
-    governance = _read_bound_bytes(
-        Path(source_root) / "shared" / "AGENTS.shared.md", "shared role index"
-    )
-    if len(governance) > 2 * 1024 * 1024:
-        raise _fail("shared role index exceeds byte limit")
-    try:
-        text = governance.decode("utf-8", errors="strict")
-    except UnicodeDecodeError as exc:
-        raise _fail("shared role index is not UTF-8") from exc
-    marker = "## Role index\n"
-    start = text.find(marker)
-    end = text.find("\n## ", start + len(marker)) if start >= 0 else -1
-    if start < 0 or end < 0:
-        raise _fail("shared role index bounds")
-    role_lines = [
-        line
-        for line in text[start:end].splitlines()
-        if line.startswith(
-            (
-                "- Roadmap and orchestration:",
-                "- Research, design, planning, and specialist constraints:",
-                "- Implementation:",
-                "- Review and verification:",
-            )
-        )
-    ]
-    indexed_roles = re.findall(
-        r"\$([a-z][a-z0-9-]+)", "\n".join(role_lines)
-    )
-    if len(indexed_roles) != 33 or len(set(indexed_roles)) != 33:
-        raise _fail("shared role index membership")
-    if set(indexed_roles) != set(mapping):
-        raise _fail("external role taxonomy parity")
-
-
 def validate_projection_manifest(
     manifest_path: Path,
     source_root: Path,
@@ -426,7 +338,6 @@ def validate_projection_manifest(
 
     files = manifest["files"]
     _validate_external_governance_projection(source_root)
-    _validate_external_role_taxonomy(source_root)
     bindings: list[tuple[_BoundOrdinaryFile, str, str]] = []
     try:
         if claude_agents_authority is not None:
@@ -485,7 +396,6 @@ def validate_source_manifest(manifest_path: Path, source_root: Path) -> dict[str
     manifest = _load_manifest(Path(manifest_path))
     files = manifest["files"]
     _validate_external_governance_projection(source_root)
-    _validate_external_role_taxonomy(source_root)
     bindings: list[tuple[_BoundOrdinaryFile, str, str]] = []
     try:
         for name in TRANSPORT_FILES:

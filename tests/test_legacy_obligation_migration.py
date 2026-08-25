@@ -956,7 +956,7 @@ def test_path_scoped_diff_guard_excludes_protected_surfaces(tmp_path: Path) -> N
         "scripts/agent-run-ledger.py",
         "scripts/check-work-items-state.py",
         "scripts/mutate-work-item.py",
-        "scripts/solution_attempt_state.py",
+        "scripts/solution_attempt/reducer.py",
         "scripts/universal-hooks/scripts/workitem_sentinels.py",
         "scripts/validate-work-item-state.py",
         "tests/test_agent_run_ledger.py",

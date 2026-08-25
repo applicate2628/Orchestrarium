@@ -4,7 +4,7 @@
   "files": {
     "provider_prompt.py": {
       "source": "scripts/provider_prompt.py",
-      "sha256": "441824a51462855aa6222cd417ba034a23019fa5f84e5f6e9833f87fa7505248",
+      "sha256": "54985ea4e35fcaa5e6d660adcab95fcf5c1cd9a6bb593f6e7e4c5808d01438ba",
       "destination": "scripts/provider_prompt.py"
     },
     "invoke-codex-prompt.py": {
@@ -31,11 +31,6 @@
       "source": "shared/external-prompt-governance.md",
       "sha256": "c7a59ccec7d6e46be76584a107b0a5b30b249368b4f0958cb78177962dc34b00",
       "destination": "scripts/external-prompt-governance.md"
-    },
-    "external-role-taxonomy.v1.json": {
-      "source": "shared/external-role-taxonomy.v1.json",
-      "sha256": "c26585be7117568e2e61c3904ddf7192e81eebdc3ab72b29d9cab17e3a7ab647",
-      "destination": "scripts/external-role-taxonomy.v1.json"
     }
   }
 }

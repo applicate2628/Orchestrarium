@@ -25,12 +25,17 @@ TRANSPORT_FILES = (
     "invoke-kimi-prompt.py",
     "invoke-grok-prompt.py",
     "external-prompt-governance.md",
+    "external-role-taxonomy.v1.json",
 )
+STOCK_8521_TRANSPORT_FILES = TRANSPORT_FILES[:-1]
 AUTHORED_TRANSPORT_SOURCES = {
     name: Path("scripts") / name for name in TRANSPORT_FILES
 }
 AUTHORED_TRANSPORT_SOURCES["external-prompt-governance.md"] = (
     Path("shared") / "external-prompt-governance.md"
+)
+AUTHORED_TRANSPORT_SOURCES["external-role-taxonomy.v1.json"] = (
+    Path("shared") / "external-role-taxonomy.v1.json"
 )
 STOCK_8521_PROJECTION_SHA256 = {
     "provider_prompt.py": "4bfb92cb92039f73ce5eca397f22a5df7b9ef9203486cbd81c654e485315edf1",
@@ -40,6 +45,15 @@ STOCK_8521_PROJECTION_SHA256 = {
     "invoke-grok-prompt.py": "1f0f4f6bb03d816b3f40ff56ebe71973301d2d7104ef1d7f335b1ffa0b248559",
     "external-prompt-governance.md": "c7a59ccec7d6e46be76584a107b0a5b30b249368b4f0958cb78177962dc34b00",
     "provider-prompt-projections.v1.json": "d7c873527e67a1aa81906aa2ee73d25088420f18b3453a429ff80085ecd4af6b",
+}
+STOCK_7872_PROJECTION_SHA256 = {
+    "provider_prompt.py": "54985ea4e35fcaa5e6d660adcab95fcf5c1cd9a6bb593f6e7e4c5808d01438ba",
+    "invoke-codex-prompt.py": "0b085a6fd0e28a5a486c8ef25bf52d4c69123d94cc8712d63dd30deadcc5f665",
+    "invoke-claude-prompt.py": "3250c9a85e36ab2e57a218688c5d7d3cfed59552c1f2bad7eb52f45370df80f3",
+    "invoke-kimi-prompt.py": "05679dac1daded511debf617e8f1189dd941d21a5d1c7f6e3dd3ec21d4c0bc75",
+    "invoke-grok-prompt.py": "1f0f4f6bb03d816b3f40ff56ebe71973301d2d7104ef1d7f335b1ffa0b248559",
+    "external-prompt-governance.md": "c7a59ccec7d6e46be76584a107b0a5b30b249368b4f0958cb78177962dc34b00",
+    "provider-prompt-projections.v1.json": "7e14945c36bfd8ea2aee6db91e781df5e36365df67c7ef2efa0ffe84edc46190",
 }
 
 
@@ -65,14 +79,48 @@ def _stock_8521_blob(name: str) -> bytes:
 
 def _seed_stock_8521_transport(projection: Path) -> dict[str, Path]:
     projection.mkdir(parents=True, exist_ok=True)
+    current_only = projection / "external-role-taxonomy.v1.json"
+    if current_only.exists():
+        current_only.unlink()
     paths: dict[str, Path] = {}
-    for name in TRANSPORT_FILES:
+    for name in STOCK_8521_TRANSPORT_FILES:
         path = projection / name
         path.write_bytes(_stock_8521_blob(name))
         paths[name] = path
     manifest = projection.parent / "shared" / "provider-prompt-projections.v1.json"
     manifest.parent.mkdir(parents=True, exist_ok=True)
     manifest.write_bytes(_stock_8521_blob(manifest.name))
+    paths[manifest.name] = manifest
+    return paths
+
+
+def _seed_stock_7872_transport(projection: Path) -> dict[str, Path]:
+    projection.mkdir(parents=True, exist_ok=True)
+    current_only = projection / "external-role-taxonomy.v1.json"
+    if current_only.exists():
+        current_only.unlink()
+    paths: dict[str, Path] = {}
+    for name in STOCK_8521_TRANSPORT_FILES:
+        path = projection / name
+        payload = subprocess.run(
+            ["git", "cat-file", "blob", f"7872d36d:{AUTHORED_TRANSPORT_SOURCES[name].as_posix()}"],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+        ).stdout
+        assert _sha(payload) == STOCK_7872_PROJECTION_SHA256[name]
+        path.write_bytes(payload)
+        paths[name] = path
+    manifest = projection.parent / "shared" / "provider-prompt-projections.v1.json"
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    payload = subprocess.run(
+        ["git", "cat-file", "blob", "7872d36d:shared/provider-prompt-projections.v1.json"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+    ).stdout
+    assert _sha(payload) == STOCK_7872_PROJECTION_SHA256[manifest.name]
+    manifest.write_bytes(payload)
     paths[manifest.name] = manifest
     return paths
 
@@ -118,7 +166,41 @@ def test_source_manifest_binds_the_generated_governance_capsule() -> None:
         "invoke-kimi-prompt.py",
         "invoke-grok-prompt.py",
         "external-prompt-governance.md",
+        "external-role-taxonomy.v1.json",
     ]
+
+
+def test_validator_rejects_provider_taxonomy_digest_literal_mismatch(
+    tmp_path: Path,
+) -> None:
+    validator = _load_validator()
+    source, canonical, claude, manifest_path = _fixture(tmp_path)
+    mismatched = (
+        'EXTERNAL_ROLE_TAXONOMY_SHA256 = "'
+        + ("0" * 64)
+        + '"\n'
+    ).encode("utf-8")
+    for path in (
+        source / "scripts" / "provider_prompt.py",
+        canonical / "provider_prompt.py",
+        claude / "provider_prompt.py",
+    ):
+        path.write_bytes(mismatched)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["files"]["provider_prompt.py"]["sha256"] = _sha(mismatched)
+    encoded = (json.dumps(manifest, indent=2) + "\n").encode("utf-8")
+    manifest_path.write_bytes(encoded)
+    (source / "shared" / "provider-prompt-projections.v1.json").write_bytes(encoded)
+
+    with pytest.raises(
+        validator.ProjectionParityError,
+        match="E_TRANSPORT_PROJECTION_PARITY: external role taxonomy digest literal",
+    ):
+        validator.validate_projection_manifest(
+            manifest_path,
+            source,
+            (("canonical", canonical), ("claude-host", claude)),
+        )
 
 
 def test_source_manifest_binds_approved_codex_and_claude_thin_wrappers() -> None:
@@ -183,9 +265,20 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
     claude = tmp_path / "claude" / "agents" / "scripts"
     for directory in (source / "scripts", source / "shared", canonical, claude):
         directory.mkdir(parents=True)
+    taxonomy_payload = (
+        ROOT / "shared" / "external-role-taxonomy.v1.json"
+    ).read_bytes()
     files: dict[str, dict[str, object]] = {}
     for name in TRANSPORT_FILES:
-        payload = f"# {name}\n".encode()
+        if name == "external-role-taxonomy.v1.json":
+            payload = taxonomy_payload
+        elif name == "provider_prompt.py":
+            taxonomy_digest = hashlib.sha256(taxonomy_payload).hexdigest()
+            payload = (
+                f'EXTERNAL_ROLE_TAXONOMY_SHA256 = "{taxonomy_digest}"\n'
+            ).encode("utf-8")
+        else:
+            payload = f"# {name}\n".encode()
         _authored_transport_path(source, name).write_bytes(payload)
         (canonical / name).write_bytes(payload)
         (claude / name).write_bytes(payload)
@@ -205,8 +298,14 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
     ) + "\n"
     manifest.write_text(manifest_text, encoding="utf-8")
     capsule = _authored_transport_path(source, "external-prompt-governance.md").read_bytes()
+    shared_governance = (ROOT / "shared" / "AGENTS.shared.md").read_bytes()
+    role_start = shared_governance.index(b"## Role index\n")
+    role_end = shared_governance.index(b"\n## ", role_start + 1)
+    role_index = shared_governance[role_start:role_end] + b"\n"
     (source / "shared" / "AGENTS.shared.md").write_bytes(
-        b"before\n"
+        role_index
+        + b"\n## Common skills\n"
+        + b"before\n"
         b"<!-- BEGIN ORCHESTRARIUM EXTERNAL GOVERNANCE V1 -->\n"
         + capsule
         + b"<!-- END ORCHESTRARIUM EXTERNAL GOVERNANCE V1 -->\n"
@@ -688,11 +787,73 @@ def test_exact_8521_transport_set_is_one_atomic_prior_plan(tmp_path: Path) -> No
     assert staged.accepted_prior_set == "8521b638"
     assert tuple(name for name, _payload in staged.pending_files) == (
         "provider_prompt.py",
+        "external-role-taxonomy.v1.json",
     )
     assert staged.manifest_pending is True
     assert {
-        witness.path.name: witness.sha256 for witness in staged.witnesses
+        witness.path.name: witness.sha256
+        for witness in staged.witnesses
+        if witness.state == "regular"
     } == STOCK_8521_PROJECTION_SHA256
+
+
+def test_exact_7872_six_member_transport_is_one_atomic_seven_member_plan(
+    tmp_path: Path,
+) -> None:
+    installer = _load_installer()
+    canonical = tmp_path / "canonical" / "scripts"
+    projection = tmp_path / "claude" / "agents" / "scripts"
+    canonical.mkdir(parents=True)
+    for name in TRANSPORT_FILES:
+        (canonical / name).write_bytes(_authored_transport_path(ROOT, name).read_bytes())
+    _seed_stock_7872_transport(projection)
+
+    staged = installer._stage_claude_transport_projection(ROOT, canonical, projection)
+
+    assert staged.accepted_prior_set == "7872d36d"
+    assert tuple(name for name, _payload in staged.pending_files) == (
+        "provider_prompt.py",
+        "external-role-taxonomy.v1.json",
+    )
+    assert staged.manifest_pending is True
+
+
+def test_exact_7872_migration_failure_restores_six_member_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    installer = _load_installer()
+    target = tmp_path / "target"
+    target.mkdir()
+    args = [
+        "--target",
+        str(target),
+        "--force",
+        "--allow-unsafe-target",
+        "--no-hypothesis-hook",
+    ]
+    assert installer.install("claude", args) == 0
+    projection = target / ".claude" / "agents" / "scripts"
+    paths = _seed_stock_7872_transport(projection)
+    before = {name: path.read_bytes() for name, path in paths.items()}
+    original = installer._CreateOnlyMutablePath.migrate_exact_file
+    calls = 0
+
+    def fail_first(self, relative, expected_digest, payload):
+        nonlocal calls
+        result = original(self, relative, expected_digest, payload)
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("injected 7872 migration failure")
+        return result
+
+    monkeypatch.setattr(
+        installer._CreateOnlyMutablePath, "migrate_exact_file", fail_first
+    )
+
+    assert installer.install("claude", args) == 1
+    assert calls == 1
+    assert {name: path.read_bytes() for name, path in paths.items()} == before
+    assert not (projection / "external-role-taxonomy.v1.json").exists()
 
 
 @pytest.mark.parametrize("name", tuple(STOCK_8521_PROJECTION_SHA256))
@@ -985,7 +1146,7 @@ def test_8521_transport_dry_run_reports_two_replacements_without_mutation(
 
     assert installer.install("claude", [*args, "--dry-run"]) == 0
     output = capsys.readouterr().out
-    assert "transport prior 8521b638: 2 replacements" in output
+    assert "transport prior 8521b638: 3 replacements" in output
     assert {
         name: (
             path.read_bytes(),

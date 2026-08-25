@@ -26,6 +26,9 @@ def _projected_wrapper(tmp_path: Path) -> Path:
     (scripts / "external-prompt-governance.md").write_bytes(
         (ROOT / "shared" / "external-prompt-governance.md").read_bytes()
     )
+    (scripts / "external-role-taxonomy.v1.json").write_bytes(
+        (ROOT / "shared" / "external-role-taxonomy.v1.json").read_bytes()
+    )
     wrapper = scripts / WRAPPER.name
     wrapper.write_bytes(WRAPPER.read_bytes())
     support = tmp_path / "scripts"
@@ -119,8 +122,50 @@ def test_api_key_helper_settings_launch(tmp_path: Path) -> None:
     (home / "settings.json").write_text(
         '{"apiKeyHelper": "approved-helper"}\n', encoding="utf-8"
     )
-    result = _run(tmp_path)
+    child = (
+        "import sys\n"
+        "assert sys.argv.count('--setting-sources') == 1\n"
+        "index = sys.argv.index('--setting-sources')\n"
+        "assert sys.argv[index + 1] == 'user'\n"
+        "assert '--settings' not in sys.argv\n"
+        "print('GATE: PASS')\n"
+    )
+    result = _run(tmp_path, child_source=child)
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize(
+    "settings_text",
+    ('{"apiKeyHelper": {}}\n', '{"apiKeyHelper": ""}\n', "{not-json}\n"),
+)
+def test_malformed_user_api_key_helper_fails_before_capture_or_launch(
+    tmp_path: Path, settings_text: str
+) -> None:
+    home = tmp_path / "home/.claude"
+    home.mkdir(parents=True)
+    (home / "settings.json").write_text(settings_text, encoding="utf-8")
+
+    result = _run(tmp_path)
+
+    assert result.returncode != 0
+    assert "E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE" in result.stderr
+    assert not (tmp_path / "artifacts").exists()
+
+
+def test_project_api_key_helper_claim_does_not_authorize_automated_launch(
+    tmp_path: Path,
+) -> None:
+    project_settings = tmp_path / ".claude"
+    project_settings.mkdir()
+    (project_settings / "settings.json").write_text(
+        '{"apiKeyHelper": "project-controlled-helper"}\n', encoding="utf-8"
+    )
+
+    result = _run(tmp_path)
+
+    assert result.returncode == 3
+    assert "commercial authentication" in result.stderr
+    assert not (tmp_path / "artifacts").exists()
 
 
 def test_vertex_closed_stdin_after_terminal_is_deterministically_benign(tmp_path: Path) -> None:

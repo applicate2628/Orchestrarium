@@ -38,9 +38,6 @@ CAPTURE_MAX_BYTES_HARD = 256 * 1024 * 1024
 STDERR_SCAN_MAX_BYTES = 64 * 1024
 RESULT_PREFIX = "ORCHESTRARIUM_PROVIDER_RESULT_V2="
 EXTERNAL_PROVIDER_NAMES = frozenset({"codex", "claude"})
-SETTINGS_SNAPSHOT_MAX_BYTES = 1024 * 1024
-CLEANUP_ISSUE_LIMIT = 32
-CLEANUP_ISSUE_TOKEN_MAX = 64
 PROVIDER_AUTH_SECRET_ENV_KEYS_V1 = {
     "codex-api-key": ("OPENAI_API_KEY",),
     "codex-auth-file": (),
@@ -66,44 +63,6 @@ _NONSECRET_CHILD_ENV_NAMES = (
     "TEMP", "TMP", "TMPDIR", "USERPROFILE", "LOCALAPPDATA", "APPDATA",
     "HOME", "LANG", "LC_ALL",
 )
-PROVIDER_AUTH_CONTROL_ENV_KEYS_V1 = types.MappingProxyType(
-    {
-        "claude-bedrock": types.MappingProxyType(
-            {
-                "selector": "CLAUDE_CODE_USE_BEDROCK",
-                "scalar": ("AWS_PROFILE", "AWS_REGION", "AWS_ROLE_ARN"),
-                "file": (
-                    "AWS_CONFIG_FILE",
-                    "AWS_SHARED_CREDENTIALS_FILE",
-                    "AWS_WEB_IDENTITY_TOKEN_FILE",
-                ),
-                "directory": (),
-            }
-        ),
-        "claude-vertex": types.MappingProxyType(
-            {
-                "selector": "CLAUDE_CODE_USE_VERTEX",
-                "scalar": (
-                    "CLOUD_ML_REGION",
-                    "ANTHROPIC_VERTEX_PROJECT_ID",
-                    "GCLOUD_PROJECT",
-                    "GOOGLE_CLOUD_PROJECT",
-                ),
-                "file": ("GOOGLE_APPLICATION_CREDENTIALS",),
-                "directory": ("CLOUDSDK_CONFIG",),
-            }
-        ),
-        "claude-direct": types.MappingProxyType(
-            {"selector": None, "scalar": (), "file": (), "directory": ()}
-        ),
-        "claude-api-key-helper": types.MappingProxyType(
-            {"selector": None, "scalar": (), "file": (), "directory": ()}
-        ),
-        "claude-subscription-override": types.MappingProxyType(
-            {"selector": None, "scalar": (), "file": (), "directory": ()}
-        ),
-    }
-)
 PROMPT_SNAPSHOT_MAX_BYTES = 16 * 1024 * 1024
 EXTERNAL_GOVERNANCE_CAPSULE_NAME = "external-prompt-governance.md"
 EXTERNAL_GOVERNANCE_CAPSULE_SHA256 = (
@@ -115,9 +74,9 @@ EXTERNAL_UNAVAILABLE_IDS = {
     "kimi": "E_KIMI_READINESS_UNVERIFIED",
     "grok": "E_GROK_CONTAINMENT_UNAVAILABLE",
 }
-EXTERNAL_ROLE_TAXONOMY_NAME = "external-role-taxonomy.v1.json"
-EXTERNAL_ROLE_TAXONOMY_MAX_BYTES = 64 * 1024
-EXTERNAL_ROLE_TAXONOMY_SHA256 = "c26585be7117568e2e61c3904ddf7192e81eebdc3ab72b29d9cab17e3a7ab647"
+_ROLE_TAXONOMY_RESOLVER_SHA256 = (
+    "bfdbf9695dbdaadb7507681259a02f9202931b1c38f98617f4d91cf6148766ea"
+)
 
 
 @dataclass
@@ -202,18 +161,7 @@ class ProviderAuthConfiguration:
     needles: tuple[bytes, ...]
 
 
-@dataclass(frozen=True)
-class ClaudeUserSettingsSurface:
-    root: Path
-    settings_path: Path
-    forwarded_config_dir: str | None
-
-
 class ResultMaterializationError(RuntimeError):
-    pass
-
-
-class ClaudeSubscriptionRefusal(ValueError):
     pass
 
 
@@ -338,15 +286,6 @@ def resolved_profile(provider: str, flags: list[str]) -> tuple[list[str], str, s
                 "xhigh",
             ]
         )
-    if provider == "claude" and any(
-        token in {"--setting-sources", "--settings"}
-        or token.startswith("--setting-sources=")
-        or token.startswith("--settings=")
-        for token in flags
-    ):
-        raise ValueError(
-            "E_EXTERNAL_PROVIDER_SETTINGS_OVERRIDE: automated Claude settings are fixed"
-        )
     model = ""
     effort = ""
     for index, token in enumerate(flags):
@@ -372,8 +311,6 @@ def resolved_profile(provider: str, flags: list[str]) -> tuple[list[str], str, s
             f"A12 violation - resolved {provider} flags carry no explicit model "
             f"and/or effort. Pass the FULL per-profile flag set, e.g.: {example}"
         )
-    if provider == "claude":
-        flags = [*flags, "--setting-sources", "user"]
     return flags, model, effort
 
 
@@ -386,27 +323,19 @@ def _lexically_within(path: Path, root: Path) -> bool:
 
 
 def _external_role_taxonomy() -> tuple[set[str], set[str], set[str]]:
-    """Load the dedicated complete taxonomy without executing another policy owner."""
+    """Read the routing policy's role taxonomy instead of inferring a lane from task class."""
 
     try:
-        script = Path(__file__).resolve()
-        source_candidate = script.parent.parent / "shared" / EXTERNAL_ROLE_TAXONOMY_NAME
-        taxonomy_path = (
-            source_candidate
-            if script == script.parent.parent / "scripts" / script.name
-            and source_candidate.is_file()
-            else script.with_name(EXTERNAL_ROLE_TAXONOMY_NAME)
-        )
-        validate_no_reparse_components(taxonomy_path)
-        metadata = taxonomy_path.lstat()
+        resolver_path = Path(__file__).resolve().with_name("resolve-agents-mode.py")
+        metadata = resolver_path.lstat()
         if (
             not stat.S_ISREG(metadata.st_mode)
             or stat.S_ISLNK(metadata.st_mode)
             or _metadata_is_reparse(metadata)
         ):
-            raise ValueError("taxonomy is not ordinary")
+            raise ValueError("resolver sibling is not ordinary")
         descriptor = os.open(
-            taxonomy_path,
+            resolver_path,
             os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0),
         )
         try:
@@ -416,55 +345,51 @@ def _external_role_taxonomy() -> tuple[set[str], set[str], set[str]]:
                 metadata.st_ino,
                 metadata.st_mode,
             ):
-                raise ValueError("taxonomy identity changed")
-            payload = os.read(descriptor, EXTERNAL_ROLE_TAXONOMY_MAX_BYTES + 1)
+                raise ValueError("resolver sibling identity changed")
+            chunks: list[bytes] = []
+            while chunk := os.read(descriptor, 1024 * 1024):
+                chunks.append(chunk)
+            payload = b"".join(chunks)
         finally:
             os.close(descriptor)
-        if len(payload) > EXTERNAL_ROLE_TAXONOMY_MAX_BYTES:
-            raise ValueError("taxonomy exceeds byte limit")
-        if hashlib.sha256(payload).hexdigest() != EXTERNAL_ROLE_TAXONOMY_SHA256:
-            raise RuntimeError("E_EXTERNAL_PROVENANCE_ROLE_TAXONOMY_INTEGRITY")
-        document = json.loads(payload.decode("utf-8", errors="strict"))
-        if not isinstance(document, dict) or set(document) != {"schemaVersion", "roles"}:
-            raise ValueError("taxonomy shape")
-        if document["schemaVersion"] != 1 or not isinstance(document["roles"], dict):
-            raise ValueError("taxonomy version")
-        mapping = document["roles"]
-        if len(mapping) != 33 or any(
-            not isinstance(role, str)
-            or not role
-            or lane not in {"consultant", "external-worker", "external-reviewer", "none"}
-            for role, lane in mapping.items()
-        ):
-            raise ValueError("taxonomy membership")
-        roles = set(mapping)
-        reviewers = {role for role, lane in mapping.items() if lane == "external-reviewer"}
-        workers = {role for role, lane in mapping.items() if lane == "external-worker"}
-        if {role for role, lane in mapping.items() if lane == "consultant"} != {"consultant"}:
-            raise ValueError("taxonomy consultant lane")
-    except RuntimeError as exc:
-        if str(exc) == "E_EXTERNAL_PROVENANCE_ROLE_TAXONOMY_INTEGRITY":
-            raise ValueError(str(exc)) from exc
-        raise
-    except (
-        AttributeError,
-        KeyError,
-        OSError,
-        TypeError,
-        ValueError,
-        UnicodeDecodeError,
-        json.JSONDecodeError,
-    ) as exc:
+        if hashlib.sha256(payload).hexdigest() != _ROLE_TAXONOMY_RESOLVER_SHA256:
+            raise ValueError("resolver sibling digest drift")
+        module_name = "_orchestrarium_external_role_taxonomy"
+        prior = sys.modules.get(module_name)
+        resolver = types.ModuleType(module_name)
+        resolver.__file__ = str(resolver_path)
+        sys.modules[module_name] = resolver
+        try:
+            exec(compile(payload, str(resolver_path), "exec"), resolver.__dict__)
+            policy, _ = resolver.load_role_policy(resolver_path.parent.parent)
+        finally:
+            if prior is None:
+                sys.modules.pop(module_name, None)
+            else:
+                sys.modules[module_name] = prior
+        roles = set(policy["roles"])
+        eligibility = policy["taskRoleEligibility"]
+        reviewers = set(eligibility["review"])
+        workers = set().union(
+            eligibility["exploration"],
+            eligibility["planning"],
+            eligibility["engineering"],
+            eligibility["recovery"],
+        )
+    except (AttributeError, ImportError, KeyError, OSError, TypeError, ValueError, SyntaxError) as exc:
         raise ValueError("E_EXTERNAL_PROVENANCE_ROLE_INVALID: role taxonomy") from exc
+    # These owner/advisory identities are canonical governance roles but deliberately
+    # have no native dispatch profile. They remain truthful assignments with no lane.
+    roles.update({"consultant", "lead", "product-manager"})
     return roles, reviewers, workers
 
 
 def external_role_provenance(control: Control, provider: str) -> ExternalRoleProvenance:
     """Freeze S3 role provenance before external side effects begin."""
 
-    roles, reviewers, workers = _external_role_taxonomy()
     if provider in {"codex", "claude"} and not control.ledger_role_explicit:
         return ExternalRoleProvenance("none", "none")
+    roles, reviewers, workers = _external_role_taxonomy()
     assigned = control.ledger_role if control.ledger_role_explicit else "none"
     if assigned != "none" and assigned not in roles:
         raise ValueError("E_EXTERNAL_PROVENANCE_ROLE_INVALID: assigned role")
@@ -569,112 +494,18 @@ def _truthy(value: str | None) -> bool:
     return bool(value and value.lower() in {"1", "true", "yes"})
 
 
-def _read_settings_object(path: Path, label: str) -> dict[str, object]:
-    """Read one bounded ordinary settings file through an identity-bound handle."""
-
+def _api_key_helper_configured() -> bool:
     try:
-        candidate = Path(os.path.abspath(path))
-        validate_no_reparse_components(candidate)
-        before = candidate.lstat()
-        if (
-            not stat.S_ISREG(before.st_mode)
-            or stat.S_ISLNK(before.st_mode)
-            or _metadata_is_reparse(before)
-        ):
-            raise ValueError("settings file type")
-        descriptor = os.open(
-            candidate,
-            os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0),
-        )
-        with os.fdopen(descriptor, "rb") as stream:
-            opened = os.fstat(stream.fileno())
-            if (opened.st_dev, opened.st_ino, opened.st_mode) != (
-                before.st_dev,
-                before.st_ino,
-                before.st_mode,
-            ):
-                raise ValueError("settings identity changed")
-            raw = stream.read(SETTINGS_SNAPSHOT_MAX_BYTES + 1)
-    except (OSError, ValueError) as exc:
-        raise ValueError(
-            f"E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE: {label}"
-        ) from exc
-    if len(raw) > SETTINGS_SNAPSHOT_MAX_BYTES:
-        raise ValueError(
-            f"E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE: {label}"
-        )
-    try:
-        parsed = json.loads(raw.decode("utf-8", errors="strict"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise ValueError(
-            f"E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE: {label}"
-        ) from exc
-    if not isinstance(parsed, dict):
-        raise ValueError(
-            f"E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE: {label}"
-        )
-    return parsed
-
-
-def _claude_user_settings_surface(
-    environment: dict[str, str],
-) -> ClaudeUserSettingsSurface:
-    configured = environment.get("CLAUDE_CONFIG_DIR")
-    if configured:
-        user_root = Path(configured)
-        forwarded = configured
-    else:
-        home_key = "USERPROFILE" if _claude_settings_os_name() == "nt" else "HOME"
-        home = environment.get(home_key)
-        user_root = Path(home) if home else Path("")
-        forwarded = None
-    try:
-        if not user_root.is_absolute():
-            raise ValueError("relative")
-        validate_no_reparse_components(user_root)
-        metadata = user_root.lstat()
-        if not stat.S_ISDIR(metadata.st_mode) or _metadata_is_reparse(metadata):
-            raise ValueError("type")
-    except (OSError, ValueError) as exc:
-        raise ValueError(
-            "E_EXTERNAL_PROVIDER_CLAUDE_SETTINGS_SURFACE_UNAVAILABLE"
-        ) from exc
-    settings_root = user_root if configured else user_root / ".claude"
-    if os.path.lexists(settings_root):
+        settings = [Path.home() / ".claude" / "settings.json", Path.cwd() / ".claude" / "settings.json"]
+    except RuntimeError:
+        return False
+    for path in settings:
         try:
-            validate_no_reparse_components(settings_root)
-            settings_metadata = settings_root.lstat()
-            if not stat.S_ISDIR(settings_metadata.st_mode) or _metadata_is_reparse(
-                settings_metadata
-            ):
-                raise ValueError("settings root type")
-        except (OSError, ValueError) as exc:
-            raise ValueError(
-                "E_EXTERNAL_PROVIDER_CLAUDE_SETTINGS_SURFACE_UNAVAILABLE"
-            ) from exc
-    return ClaudeUserSettingsSurface(
-        user_root, settings_root / "settings.json", forwarded
-    )
-
-
-def _claude_settings_os_name() -> str:
-    return os.name
-
-
-def _api_key_helper_configured(surface: ClaudeUserSettingsSurface) -> bool:
-    """Inspect only the selected user settings file; never execute its helper."""
-
-    if not os.path.lexists(surface.settings_path):
-        return False
-    settings = _read_settings_object(surface.settings_path, "user settings")
-    if "apiKeyHelper" not in settings:
-        return False
-    helper = settings["apiKeyHelper"]
-    if not isinstance(helper, str) or not helper.strip() or "\x00" in helper:
-        raise ValueError(
-            "E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE: apiKeyHelper"
-        )
-    return True
+            if '"apiKeyHelper"' in path.read_text(encoding="utf-8"):
+                return True
+        except OSError:
+            continue
+    return False
 
 
 def _child_environment_baseline(environment: dict[str, str]) -> dict[str, str]:
@@ -683,43 +514,6 @@ def _child_environment_baseline(environment: dict[str, str]) -> dict[str, str]:
         for name in _NONSECRET_CHILD_ENV_NAMES
         if (value := environment.get(name))
     }
-
-
-def _copy_provider_path_control(
-    child: dict[str, str], source: dict[str, str], name: str, expected: str
-) -> None:
-    value = source.get(name)
-    if not value:
-        return
-    path = Path(value)
-    try:
-        if not path.is_absolute():
-            raise ValueError("relative")
-        validate_no_reparse_components(path)
-        metadata = path.lstat()
-        expected_type = stat.S_ISREG if expected == "file" else stat.S_ISDIR
-        if not expected_type(metadata.st_mode) or _metadata_is_reparse(metadata):
-            raise ValueError("type")
-        if expected == "file":
-            descriptor = os.open(
-                path,
-                os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0),
-            )
-            try:
-                opened = os.fstat(descriptor)
-                if (opened.st_dev, opened.st_ino, opened.st_mode) != (
-                    metadata.st_dev,
-                    metadata.st_ino,
-                    metadata.st_mode,
-                ):
-                    raise ValueError("identity")
-            finally:
-                os.close(descriptor)
-    except (OSError, ValueError) as exc:
-        raise ValueError(
-            "E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE: path control"
-        ) from exc
-    child[name] = value
 
 
 def resolve_provider_auth_configuration(
@@ -732,7 +526,6 @@ def resolve_provider_auth_configuration(
     if provider == "codex":
         mode = "codex-api-key" if source.get("OPENAI_API_KEY") else "codex-auth-file"
     elif provider == "claude":
-        user_settings_surface = _claude_user_settings_surface(source)
         selected = []
         if _truthy(source.get("CLAUDE_CODE_USE_BEDROCK")):
             selected.append("claude-bedrock")
@@ -740,28 +533,17 @@ def resolve_provider_auth_configuration(
             selected.append("claude-vertex")
         if source.get("ANTHROPIC_API_KEY") or source.get("ANTHROPIC_AUTH_TOKEN"):
             selected.append("claude-direct")
-        if _api_key_helper_configured(user_settings_surface):
+        if _api_key_helper_configured():
             selected.append("claude-api-key-helper")
         if source.get("ORCHESTRARIUM_ALLOW_SUBSCRIPTION_CLAUDE") == "1":
             selected.append("claude-subscription-override")
-        if not selected:
-            raise ClaudeSubscriptionRefusal("subscription-only Claude authentication")
         if len(selected) != 1:
             raise ValueError("E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE: auth mode")
         mode = selected[0]
-        controls = PROVIDER_AUTH_CONTROL_ENV_KEYS_V1[mode]
-        selector = controls["selector"]
-        if selector is not None:
-            child[selector] = "true"
-        for name in controls["scalar"]:
-            if (value := source.get(name)):
-                child[name] = value
-        for name in controls["file"]:
-            _copy_provider_path_control(child, source, name, "file")
-        for name in controls["directory"]:
-            _copy_provider_path_control(child, source, name, "directory")
-        if user_settings_surface.forwarded_config_dir is not None:
-            child["CLAUDE_CONFIG_DIR"] = user_settings_surface.forwarded_config_dir
+        if mode == "claude-bedrock":
+            child["CLAUDE_CODE_USE_BEDROCK"] = "true"
+        elif mode == "claude-vertex":
+            child["CLAUDE_CODE_USE_VERTEX"] = "true"
     else:
         raise ValueError("E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE: provider")
 
@@ -794,11 +576,15 @@ def resolve_provider_auth_configuration(
 
 
 def claude_commercial_auth_present() -> bool:
-    try:
-        resolve_provider_auth_configuration("claude")
-    except ClaudeSubscriptionRefusal:
-        return False
-    return True
+    if (
+        os.environ.get("ANTHROPIC_API_KEY")
+        or os.environ.get("ANTHROPIC_AUTH_TOKEN")
+        or _truthy(os.environ.get("CLAUDE_CODE_USE_BEDROCK"))
+        or _truthy(os.environ.get("CLAUDE_CODE_USE_VERTEX"))
+        or os.environ.get("ORCHESTRARIUM_ALLOW_SUBSCRIPTION_CLAUDE") == "1"
+    ):
+        return True
+    return _api_key_helper_configured()
 
 
 def _metadata_is_reparse(metadata: os.stat_result) -> bool:
@@ -1228,7 +1014,6 @@ class RunCaptureLifecycle:
 
     def cleanup(self) -> CleanupResult:
         tombstone: Path | None = None
-        primary_issue = "cleanup-failed"
         try:
             self._validate_identity()
             tombstone = self.root / f".capture-tombstone-{secrets.token_hex(16)}"
@@ -1241,82 +1026,36 @@ class RunCaptureLifecycle:
             shutil.rmtree(tombstone)
             return CleanupResult(())
         except (OSError, ValueError) as exc:
-            primary_issue = type(exc).__name__
-            if tombstone is not None and os.path.lexists(tombstone):
-                try:
-                    scrub_issues = self._scrub_tombstone(tombstone)
-                except (OSError, ValueError):
-                    scrub_issues = ("scrub-enumeration-failed",)
+            if tombstone is not None and tombstone.exists():
+                scrub_issues = self._scrub_tombstone(tombstone)
                 try:
                     self._purge_tombstone(tombstone)
-                    try:
-                        self._write_redacted_recovery(primary_issue)
-                    except (OSError, ValueError):
-                        return _bounded_cleanup_result(
-                            (primary_issue, *scrub_issues, "recovery-record-write-failed"),
-                            recovery_retained=False,
-                        )
-                    return _bounded_cleanup_result(
-                        (primary_issue, *scrub_issues), recovery_retained=True
+                    self._write_redacted_recovery(type(exc).__name__)
+                    return CleanupResult(
+                        (type(exc).__name__, *scrub_issues), recovery_retained=True
                     )
                 except (OSError, ValueError):
-                    if not os.path.lexists(tombstone):
-                        return _bounded_cleanup_result(
-                            (primary_issue, *scrub_issues, "recovery-record-write-failed"),
-                            recovery_retained=False,
-                        )
-                    try:
-                        unlink_issues = self._unlink_owned_payloads(tombstone)
-                    except (OSError, ValueError):
-                        unlink_issues = ("unlink-enumeration-failed",)
+                    unlink_issues = self._unlink_owned_payloads(tombstone)
                     try:
                         self._purge_tombstone(tombstone)
-                        try:
-                            self._write_redacted_recovery(primary_issue)
-                        except (OSError, ValueError):
-                            return _bounded_cleanup_result(
-                                (
-                                    primary_issue,
-                                    *scrub_issues,
-                                    *unlink_issues,
-                                    "recovery-record-write-failed",
-                                ),
-                                recovery_retained=False,
-                            )
-                        return _bounded_cleanup_result(
-                            (primary_issue, *scrub_issues, *unlink_issues),
+                        self._write_redacted_recovery(type(exc).__name__)
+                        return CleanupResult(
+                            (type(exc).__name__, *scrub_issues, *unlink_issues),
                             recovery_retained=True,
                         )
                     except (OSError, ValueError):
-                        return _bounded_cleanup_result(
+                        return CleanupResult(
                             (
-                                primary_issue,
+                                type(exc).__name__,
                                 *scrub_issues,
                                 *unlink_issues,
                                 "scrub-unlink-failed",
                             ),
-                            recovery_retained=os.path.lexists(tombstone),
+                            recovery_retained=True,
                         )
             # A failed purge leaves the tombstone quarantined and is never a
             # clean outcome. Its raw contents are never serialized as recovery.
-            return _bounded_cleanup_result(
-                (primary_issue,),
-                recovery_retained=bool(tombstone and os.path.lexists(tombstone)),
-            )
-
-
-def _bounded_cleanup_result(
-    issues: tuple[str, ...], *, recovery_retained: bool
-) -> CleanupResult:
-    bounded: list[str] = []
-    for issue in issues:
-        token = re.sub(r"[^A-Za-z0-9_.:-]+", "-", str(issue))[
-            :CLEANUP_ISSUE_TOKEN_MAX
-        ]
-        bounded.append(token or "cleanup-issue")
-        if len(bounded) == CLEANUP_ISSUE_LIMIT:
-            break
-    return CleanupResult(tuple(bounded), recovery_retained=recovery_retained)
+            return CleanupResult((type(exc).__name__,), recovery_retained=True)
 
 
 def _posix_start_marker(pid: int) -> str | None:
@@ -1910,16 +1649,10 @@ def settle_once(
 ) -> FinalOutcome:
     """Complete cleanup/recovery before the caller emits the sole durable terminal."""
 
-    try:
-        cleanup = lifecycle.cleanup()
-    except Exception:
-        cleanup = _bounded_cleanup_result(
-            ("cleanup-owner-failed",), recovery_retained=True
-        )
     return combine_terminal_outcomes(
         exit_code,
         terminal,
-        cleanup,
+        lifecycle.cleanup(),
         lifecycle,
         external=external,
         primary_terminal=primary_terminal,
@@ -2372,9 +2105,7 @@ def launch(provider: str, argv: list[str]) -> int:
     except ValueError as exc:
         return fail(str(exc))
 
-    try:
-        auth_configuration = resolve_provider_auth_configuration(provider)
-    except ClaudeSubscriptionRefusal:
+    if provider == "claude" and not claude_commercial_auth_present():
         print(
             "WARNING: Refusing automated Claude launch.\n"
             "Automated `claude -p` under a subscription is not permitted.\n"
@@ -2385,6 +2116,8 @@ def launch(provider: str, argv: list[str]) -> int:
             file=sys.stderr,
         )
         return 3
+    try:
+        auth_configuration = resolve_provider_auth_configuration(provider)
     except ValueError as exc:
         return fail(str(exc))
 

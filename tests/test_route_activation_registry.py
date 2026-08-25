@@ -98,18 +98,19 @@ def test_install_generation_and_rollback_stay_disabled() -> None:
 
 def test_red_registry_owner_missing() -> None:
     owner = _load_owner(
-        ROOT / "scripts" / "route_activation_registry.py",
+        ROOT / "scripts" / "process_supervision" / "route_activation_registry.py",
         "route_activation_registry_phase_a",
         "the seven-route disabled-by-default activation registry",
     )
     assert callable(getattr(owner, "check_route", None)), (
-        "missing-contract: scripts/route_activation_registry.py must expose check_route"
+        "missing-contract: scripts/process_supervision/route_activation_registry.py "
+        "must expose check_route"
     )
 
 
 def test_all_catalog_routes_are_disabled_even_when_binding_matches() -> None:
     owner = _load_owner(
-        ROOT / "scripts" / "route_activation_registry.py",
+        ROOT / "scripts" / "process_supervision" / "route_activation_registry.py",
         "route_activation_registry_disabled",
         "the seven-route disabled-by-default activation registry",
     )
@@ -140,7 +141,7 @@ def test_all_catalog_routes_are_disabled_even_when_binding_matches() -> None:
 )
 def test_missing_or_stale_route_binding_denies(route_id, expected, observed) -> None:
     owner = _load_owner(
-        ROOT / "scripts" / "route_activation_registry.py",
+        ROOT / "scripts" / "process_supervision" / "route_activation_registry.py",
         "route_activation_registry_stale",
         "the seven-route disabled-by-default activation registry",
     )

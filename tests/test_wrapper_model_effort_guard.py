@@ -43,6 +43,9 @@ def _projected_entrypoint(tmp_path: Path, provider: str) -> Path:
     (scripts / "external-prompt-governance.md").write_bytes(
         (ROOT / "shared" / "external-prompt-governance.md").read_bytes()
     )
+    (scripts / "external-role-taxonomy.v1.json").write_bytes(
+        (ROOT / "shared" / "external-role-taxonomy.v1.json").read_bytes()
+    )
     entrypoint = scripts / ENTRYPOINTS[provider].name
     entrypoint.write_bytes(ENTRYPOINTS[provider].read_bytes())
     support = tmp_path / "scripts"
@@ -188,6 +191,10 @@ def test_root_thin_wrapper_delivers_one_governance_frame_then_exact_task_bytes(
     shutil.copyfile(
         ROOT / "shared" / "external-prompt-governance.md",
         runtime_scripts / "external-prompt-governance.md",
+    )
+    shutil.copyfile(
+        ROOT / "shared" / "external-role-taxonomy.v1.json",
+        runtime_scripts / "external-role-taxonomy.v1.json",
     )
     support = tmp_path / "runtime" / "scripts"
     support.mkdir()
@@ -387,6 +394,8 @@ def test_default_profile_reaches_fake_provider_with_explicit_model_and_effort(
             "opus",
             "--effort",
             "xhigh",
+            "--setting-sources",
+            "user",
         ]
     )
     assert received[-len(expected) :] == expected
@@ -412,7 +421,12 @@ def test_full_profile_override_reaches_fake_provider_byte_for_byte(
     result, capture, _ = _run_transport(tmp_path, provider, ["--", *override])
     assert result.returncode == 0, result.stderr
     received = json.loads(capture.read_text(encoding="utf-8"))
-    assert received[-len(override) :] == override
+    expected = (
+        override
+        if provider == "codex"
+        else [*override, "--setting-sources", "user"]
+    )
+    assert received[-len(expected) :] == expected
 
 
 @pytest.mark.parametrize("provider", ("codex", "claude"))

@@ -18,9 +18,11 @@ ENFORCEMENT_UNAVAILABLE = "SOL-E007-ENFORCEMENT-UNAVAILABLE"
 
 
 def _load_reducer_owner() -> ModuleType:
-    owner_path = Path(__file__).with_name("solution_attempt_state.py")
+    owner_path = (
+        Path(__file__).resolve().parents[1] / "solution_attempt" / "reducer.py"
+    )
     spec = importlib.util.spec_from_file_location(
-        "solution_attempt_state_for_store",
+        "solution_attempt_reducer_for_store",
         owner_path,
     )
     if spec is None or spec.loader is None:

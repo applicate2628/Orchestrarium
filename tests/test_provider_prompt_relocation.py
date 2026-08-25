@@ -71,27 +71,23 @@ def test_role_taxonomy_rejects_a_malicious_cwd_resolver_before_secret_or_process
     assert not marker.exists()
 
 
-def test_role_taxonomy_rejects_drifted_or_linked_sibling_before_execution(
+def test_role_taxonomy_rejects_malformed_or_linked_sibling(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     owner = _load_owner(ROOT_OWNER, "provider_prompt_taxonomy_degraded")
     scripts = tmp_path / "scripts"
     scripts.mkdir()
-    marker = tmp_path / "resolver-side-effect"
-    sibling = scripts / "resolve-agents-mode.py"
-    sibling.write_text(
-        "from pathlib import Path\n"
-        f"Path({str(marker)!r}).write_text('executed')\n",
-        encoding="utf-8",
-    )
+    sibling = scripts / "external-role-taxonomy.v1.json"
+    sibling.write_text('{"schemaVersion": 1, "roles": {}}\n', encoding="utf-8")
     monkeypatch.setattr(owner, "__file__", str(scripts / "provider_prompt.py"))
 
-    with pytest.raises(ValueError, match="^E_EXTERNAL_PROVENANCE_ROLE_INVALID: role taxonomy"):
+    with pytest.raises(
+        ValueError, match="^E_EXTERNAL_PROVENANCE_ROLE_TAXONOMY_INTEGRITY$"
+    ):
         owner._external_role_taxonomy()
-    assert not marker.exists()
 
-    linked = scripts / "linked-resolver.py"
-    linked.write_bytes((ROOT / "scripts" / "resolve-agents-mode.py").read_bytes())
+    linked = scripts / "linked-taxonomy.json"
+    linked.write_bytes((ROOT / "shared" / "external-role-taxonomy.v1.json").read_bytes())
     sibling.unlink()
     try:
         sibling.symlink_to(linked)
@@ -101,27 +97,62 @@ def test_role_taxonomy_rejects_drifted_or_linked_sibling_before_execution(
         owner._external_role_taxonomy()
 
 
-def test_role_taxonomy_executes_only_attested_sibling_bytes(
+def test_role_taxonomy_loads_only_the_structured_sibling_taxonomy(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     owner = _load_owner(ROOT_OWNER, "provider_prompt_taxonomy_attested")
     scripts = tmp_path / "scripts"
     scripts.mkdir()
-    sibling = scripts / "resolve-agents-mode.py"
-    payload = (ROOT / "scripts" / "resolve-agents-mode.py").read_bytes()
+    sibling = scripts / "external-role-taxonomy.v1.json"
+    payload = (ROOT / "shared" / "external-role-taxonomy.v1.json").read_bytes()
     sibling.write_bytes(payload)
-    (tmp_path / "shared").mkdir()
-    (tmp_path / "shared" / "role-routing-policy.v1.json").write_bytes(
-        (ROOT / "shared" / "role-routing-policy.v1.json").read_bytes()
-    )
     monkeypatch.setattr(owner, "__file__", str(scripts / "provider_prompt.py"))
 
     roles, reviewers, workers = owner._external_role_taxonomy()
 
-    assert hashlib.sha256(payload).hexdigest() == owner._ROLE_TAXONOMY_RESOLVER_SHA256
     assert "qa-engineer" in roles
+    assert "frontend-engineer" in roles
     assert "qa-engineer" in reviewers
     assert workers
+
+
+@pytest.mark.parametrize("mutation", ("lane", "whitespace"))
+def test_role_taxonomy_rejects_schema_valid_byte_drift(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutation: str
+) -> None:
+    owner = _load_owner(ROOT_OWNER, f"provider_prompt_taxonomy_drift_{mutation}")
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    payload = (ROOT / "shared" / "external-role-taxonomy.v1.json").read_bytes()
+    if mutation == "lane":
+        payload = payload.replace(b'"external-worker"', b'"external-reviewer"', 1)
+    else:
+        payload += b"\n"
+    (scripts / "external-role-taxonomy.v1.json").write_bytes(payload)
+    monkeypatch.setattr(owner, "__file__", str(scripts / "provider_prompt.py"))
+
+    with pytest.raises(
+        ValueError,
+        match="^E_EXTERNAL_PROVENANCE_ROLE_TAXONOMY_INTEGRITY$",
+    ):
+        owner._external_role_taxonomy()
+
+
+def test_roleless_provenance_still_attests_taxonomy_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    owner = _load_owner(ROOT_OWNER, "provider_prompt_taxonomy_roleless_drift")
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    payload = (ROOT / "shared" / "external-role-taxonomy.v1.json").read_bytes() + b"\n"
+    (scripts / "external-role-taxonomy.v1.json").write_bytes(payload)
+    monkeypatch.setattr(owner, "__file__", str(scripts / "provider_prompt.py"))
+
+    with pytest.raises(
+        ValueError,
+        match="^E_EXTERNAL_PROVENANCE_ROLE_TAXONOMY_INTEGRITY$",
+    ):
+        owner.external_role_provenance(owner.Control(), "claude")
 
 
 def test_packed_capsule_view_needs_manifest_and_digest_not_shared_agents(
@@ -131,8 +162,16 @@ def test_packed_capsule_view_needs_manifest_and_digest_not_shared_agents(
     scripts = pack_root / "lead" / "scripts"
     scripts.mkdir(parents=True)
     (pack_root / "shared").mkdir()
-    for name in ("provider_prompt.py", "external-prompt-governance.md"):
-        source = ROOT / ("shared" if name.endswith(".md") else "scripts") / name
+    for name in (
+        "provider_prompt.py",
+        "external-prompt-governance.md",
+        "external-role-taxonomy.v1.json",
+    ):
+        source = ROOT / (
+            "shared"
+            if name in {"external-prompt-governance.md", "external-role-taxonomy.v1.json"}
+            else "scripts"
+        ) / name
         (scripts / name).write_bytes(source.read_bytes())
     (pack_root / "shared" / "provider-prompt-projections.v1.json").write_bytes(
         (ROOT / "shared" / "provider-prompt-projections.v1.json").read_bytes()

@@ -5,6 +5,8 @@ from __future__ import annotations
 import importlib.util
 import json
 import re
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -120,3 +122,74 @@ def test_missing_gate_binding_fields_deny() -> None:
         "result": "SOL-E001-STATE-INVALID",
         "eligible": False,
     }
+
+
+@pytest.mark.parametrize(
+    ("provider", "installed_scripts"),
+    (
+        ("codex", Path(".agents/skills/lead/scripts")),
+        ("claude", Path(".claude/agents/scripts")),
+    ),
+)
+def test_disposable_install_exposes_only_the_v3_reducer(
+    tmp_path: Path, provider: str, installed_scripts: Path
+) -> None:
+    project = tmp_path / provider
+    project.mkdir()
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts" / f"install-{provider}.py"),
+            "--target",
+            str(project),
+            "--force",
+            "--allow-unsafe-target",
+            "--no-hypothesis-hook",
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    scripts = project / installed_scripts
+    reducer_path = scripts / "solution_attempt" / "reducer.py"
+    assert reducer_path.is_file()
+    assert not (scripts / "agent_run_persistence" / "operation_store.py").exists()
+    assert not (
+        scripts / "process_supervision" / "route_activation_registry.py"
+    ).exists()
+
+    reducer = _load_owner(reducer_path, f"installed_{provider}_solution_attempt_reducer")
+    event = {
+        "schemaVersion": 3,
+        "eventId": "event-bootstrap-0001",
+        "operationId": "bootstrap-0001",
+        "fingerprint": "1" * 64,
+        "priorHead": "GENESIS",
+        "recordedAt": "2026-08-13T07:30:00Z",
+        "eventType": "solution-bootstrap",
+        "payload": {
+            "capsule": {
+                "version": 1,
+                "declarationSetId": "declaration-one",
+                "objects": [
+                    {
+                        "decisionObjectId": "object-one",
+                        "mutationSurfaces": ["scripts/example.py"],
+                        "solutionClasses": ["class-one"],
+                        "initialClassId": "class-one",
+                        "initialAttemptId": "attempt-one",
+                        "guardIds": ["required-oracle"],
+                    }
+                ],
+                "baseline": "b" * 64,
+                "author": "accepted-admission-run",
+            }
+        },
+    }
+    reduced = reducer.reduce_solution_attempt(None, event)
+    assert reduced["result"] == "SOL-OK"
+    assert reduced["changed"] is True

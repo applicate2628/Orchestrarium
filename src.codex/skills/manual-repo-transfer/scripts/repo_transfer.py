@@ -372,17 +372,49 @@ def nul_delimited_paths(result: subprocess.CompletedProcess[bytes]) -> set[str]:
     return {item.decode("utf-8", "surrogateescape") for item in result.stdout.split(b"\0") if item}
 
 
-def remote_evidence(root: Path, git_executable: Path, head: str) -> tuple[list[dict[str, str]], dict[str, dict[str, Any]]]:
+def repository_history(root: Path, git_executable: Path) -> tuple[str, str | None]:
+    resolved = run_git(root, git_executable, "rev-parse", "--verify", "--quiet", "HEAD", check=False)
+    if resolved.returncode == 0:
+        head = resolved.stdout.decode("utf-8").strip()
+        if not head:
+            raise ContractError("invalid HEAD state")
+        return "committed", head
+    symbolic = run_git(root, git_executable, "symbolic-ref", "--quiet", "HEAD", check=False)
+    if symbolic.returncode != 0 or not symbolic.stdout.strip():
+        raise ContractError("invalid HEAD state")
+    current_ref = symbolic.stdout.decode("utf-8").strip()
+    existing_ref = run_git(root, git_executable, "show-ref", "--verify", "--quiet", current_ref, check=False)
+    if existing_ref.returncode == 1:
+        return "unborn", None
+    raise ContractError("invalid HEAD state")
+
+
+def document_history_state(repository: Any) -> str:
+    if not isinstance(repository, dict):
+        raise ContractError("invalid repository history state")
+    history_state = repository.get("historyState")
+    head = repository.get("head")
+    if "historyState" not in repository and isinstance(head, str):
+        return "committed"
+    if history_state == "committed" and isinstance(head, str):
+        return "committed"
+    if history_state == "unborn" and head is None:
+        return "unborn"
+    raise ContractError("invalid repository history state")
+
+
+def remote_evidence(root: Path, git_executable: Path, head: str | None) -> tuple[list[dict[str, str]], dict[str, dict[str, Any]]]:
     remotes: list[dict[str, str]] = []
     evidence: dict[str, dict[str, Any]] = {}
     for name in run_git(root, git_executable, "remote").stdout.decode("utf-8").splitlines():
         raw_url = run_git(root, git_executable, "remote", "get-url", name, check=False).stdout.decode("utf-8", "replace").strip()
         reachable = False
         references = run_git(root, git_executable, "for-each-ref", "--format=%(refname)", f"refs/remotes/{name}/").stdout.decode("utf-8").splitlines()
-        for reference in references:
-            if run_git(root, git_executable, "merge-base", "--is-ancestor", head, reference, check=False).returncode == 0:
-                reachable = True
-                break
+        if head is not None:
+            for reference in references:
+                if run_git(root, git_executable, "merge-base", "--is-ancestor", head, reference, check=False).returncode == 0:
+                    reachable = True
+                    break
         remotes.append({"name": name, "url": safe_remote_url(raw_url)})
         evidence[name] = {"kind": "local-tracking", "headReachable": reachable}
     return remotes, evidence
@@ -428,18 +460,19 @@ def walk_repository(root: Path) -> Iterable[tuple[str, Path, str]]:
 def build_inventory(repository: BoundRepository) -> dict[str, Any]:
     root = repository.root
     git_executable = repository.git_executable
+    history_state, head = repository_history(root, git_executable)
     index_tracked = nul_delimited_paths(run_git(root, git_executable, "ls-files", "-z"))
-    head_tracked = nul_delimited_paths(run_git(root, git_executable, "ls-tree", "-r", "-z", "--name-only", "HEAD"))
+    head_tracked = set() if head is None else nul_delimited_paths(run_git(root, git_executable, "ls-tree", "-r", "-z", "--name-only", head))
     tracked = index_tracked | head_tracked
     ignored = nul_delimited_paths(run_git(root, git_executable, "ls-files", "--others", "--ignored", "--exclude-standard", "-z"))
-    dirty = nul_delimited_paths(run_git(root, git_executable, "diff", "--no-renames", "--name-only", "-z", "HEAD"))
+    dirty = nul_delimited_paths(run_git(root, git_executable, "diff", "--no-renames", "--cached", "--name-only", "-z"))
+    dirty |= nul_delimited_paths(run_git(root, git_executable, "diff", "--no-renames", "--name-only", "-z"))
     flagged_tracked = {
         item[2:].decode("utf-8", "surrogateescape")
         for item in run_git(root, git_executable, "ls-files", "-v", "-z").stdout.split(b"\0")
         if len(item) > 2 and item[1:2] == b" " and (item[:1].islower() or item[:1].upper() == b"S")
     }
     dirty |= flagged_tracked
-    head = run_git(root, git_executable, "rev-parse", "HEAD").stdout.decode("utf-8").strip()
     remotes, evidence = remote_evidence(root, git_executable, head)
     metadata_hashes = {name: sha256_bytes(data) for name, data in git_metadata(root, git_executable).items()}
     entries: list[dict[str, Any]] = []
@@ -465,7 +498,7 @@ def build_inventory(repository: BoundRepository) -> dict[str, Any]:
         if entry["path"] in colliding_paths:
             entry.update(metadataOnly=True, hostile=True)
     entries.sort(key=lambda entry: entry["path"])
-    repository_data = {"head": head, "remotes": remotes, "remoteEvidence": evidence, "gitExecutable": {"path": str(git_executable), "sha256": repository.git_executable_sha256}, "gitMetadataHashes": metadata_hashes}
+    repository_data = {"historyState": history_state, "head": head, "remotes": remotes, "remoteEvidence": evidence, "gitExecutable": {"path": str(git_executable), "sha256": repository.git_executable_sha256}, "gitMetadataHashes": metadata_hashes}
     snapshot = {"entries": entries, "repository": repository_data}
     return {"schemaVersion": SCHEMA_VERSION, "repository": repository_data, "entries": entries, "snapshot": {"digest": sha256_bytes(canonical_json(snapshot))}}
 
@@ -529,10 +562,13 @@ def validate_inventory(inventory: dict[str, Any]) -> None:
         raise ContractError("invalid inventory snapshot")
     repository = inventory["repository"]
     entries = inventory["entries"]
+    try:
+        document_history_state(repository)
+    except ContractError as error:
+        raise ContractError("invalid inventory snapshot") from error
     if (
         inventory.get("schemaVersion") != SCHEMA_VERSION
         or inventory.get("snapshot", {}).get("digest") != expected
-        or not isinstance(repository.get("head"), str)
         or not isinstance(repository.get("remotes"), list)
         or not isinstance(repository.get("remoteEvidence"), dict)
         or not isinstance(repository.get("gitExecutable"), dict)
@@ -593,6 +629,9 @@ def validate_selection(root: Path, inventory: dict[str, Any], selection: dict[st
     mode = strategy.get("mode")
     if not isinstance(mode, str):
         raise ContractError("invalid selection")
+    history_state = document_history_state(inventory["repository"])
+    if history_state == "unborn" and mode != "none":
+        raise ContractError("unborn repositories require git strategy none")
     if mode == "remote-clone":
         remote = strategy.get("remote")
         expected_head = strategy.get("expectedHead")
@@ -638,6 +677,8 @@ def validate_selection(root: Path, inventory: dict[str, Any], selection: dict[st
             proof = row.get("proof")
             if not isinstance(proof, dict) or proof.get("kind") not in DELETE_PROOF_KINDS or proof.get("setSha256") != expected_digest:
                 raise ContractError("delete proof setSha256 mismatch")
+            if history_state == "unborn" and proof["kind"] == "git-recoverable":
+                raise ContractError("unborn repository has no verified Git history")
             if proof["kind"] == "regenerate" and (not isinstance(proof.get("command"), str) or not proof["command"].strip()):
                 raise ContractError("delete proof is incomplete")
         normalized.append({**row, "path": path})
@@ -735,7 +776,7 @@ def bundle(repository: BoundRepository, inventory_path: Path, selection_path: Pa
     rows = validate_selection(root, inventory, selection)
     require_current_inventory(repository, inventory)
     payload, metadata = expected_material(root, repository.git_executable, inventory, rows)
-    manifest = {"schemaVersion": SCHEMA_VERSION, "inventoryDigest": inventory["snapshot"]["digest"], "selectionDigest": sha256_bytes(canonical_json(selection)), "repository": {"head": inventory["repository"]["head"], "gitExecutable": inventory["repository"]["gitExecutable"]}, "payload": [{"path": name, "size": entry["size"], "sha256": entry["sha256"]} for name, entry in sorted(payload.items())], "metadata": [{"path": name, "size": len(data), "sha256": sha256_bytes(data)} for name, data in sorted(metadata.items())], "deletions": expected_deletions(inventory, rows)}
+    manifest = {"schemaVersion": SCHEMA_VERSION, "inventoryDigest": inventory["snapshot"]["digest"], "selectionDigest": sha256_bytes(canonical_json(selection)), "repository": {"historyState": document_history_state(inventory["repository"]), "head": inventory["repository"]["head"], "gitExecutable": inventory["repository"]["gitExecutable"]}, "payload": [{"path": name, "size": entry["size"], "sha256": entry["sha256"]} for name, entry in sorted(payload.items())], "metadata": [{"path": name, "size": len(data), "sha256": sha256_bytes(data)} for name, data in sorted(metadata.items())], "deletions": expected_deletions(inventory, rows)}
     manifest_bytes = capped_canonical_json(manifest, "archive resource limit")
     declared_sizes = [entry["size"] for entry in payload.values()] + [len(data) for data in metadata.values()] + [len(manifest_bytes)]
     if len(declared_sizes) > MAX_ARCHIVE_ENTRIES or any(size > MAX_ARCHIVE_ENTRY_BYTES for size in declared_sizes) or sum(declared_sizes) > MAX_ARCHIVE_UNCOMPRESSED_BYTES:
@@ -859,13 +900,16 @@ def read_archive(archive: zipfile.ZipFile) -> tuple[dict[str, Any], set[str], se
                 manifest = read_json_bytes(stream.read(MAX_JSON_BYTES + 1), "internal manifest")
         except (OSError, UnicodeError, ValueError, ContractError, zipfile.BadZipFile, NotImplementedError) as error:
             raise ContractError("invalid internal manifest") from error
+        try:
+            document_history_state(manifest.get("repository", {}))
+        except ContractError as error:
+            raise ContractError("invalid internal manifest") from error
         if (
             type(manifest.get("schemaVersion")) is not int
             or manifest.get("schemaVersion") != SCHEMA_VERSION
             or not is_sha256(manifest.get("inventoryDigest"))
             or not is_sha256(manifest.get("selectionDigest"))
             or not isinstance(manifest.get("repository"), dict)
-            or not isinstance(manifest["repository"].get("head"), str)
             or not isinstance(manifest["repository"].get("gitExecutable"), dict)
             or not isinstance(manifest.get("payload"), list)
             or not isinstance(manifest.get("metadata"), list)
@@ -974,6 +1018,7 @@ def verify_trusted_material(archive: zipfile.ZipFile, manifest: dict[str, Any], 
     if (
         manifest.get("inventoryDigest") != inventory["snapshot"]["digest"]
         or manifest.get("selectionDigest") != sha256_bytes(canonical_json(selection))
+        or document_history_state(manifest["repository"]) != document_history_state(inventory["repository"])
         or manifest["repository"]["head"] != inventory["repository"]["head"]
         or manifest["repository"]["gitExecutable"] != inventory["repository"]["gitExecutable"]
         or manifest.get("deletions", []) != expected_deletions(inventory, rows)
