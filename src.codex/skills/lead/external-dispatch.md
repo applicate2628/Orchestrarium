@@ -20,7 +20,7 @@ parallelMode: auto  # allowed: manual | auto | force; default: auto
 mcpMode: auto  # allowed: auto | force; default: auto
 preferExternalWorker: true  # allowed: false | true; default: false
 preferExternalReviewer: true  # allowed: false | true; default: false
-externalProvider: auto  # allowed here: auto | codex | claude | gemini | qwen | kimi | grok; default: auto; kimi/grok are explicit-only; gemini/qwen are explicit example-only and not recommended for shipped auto
+externalProvider: auto  # allowed here: auto | codex | claude | gemini | qwen | kimi | grok; default: auto; kimi/grok are policy-only, unavailable, and disabled in 1.x; gemini/qwen are explicit example-only and not recommended for shipped auto
 externalPriorityProfile: balanced  # allowed: balanced | quality-first | <repo-local production profile>; default: balanced
 reserveResolver: claude-sonnet  # allowed: disabled | claude-sonnet | claude-wrapper | wrapper:<command>; default: claude-sonnet
 externalPriorityProfiles: {}  # allowed: structured profile map
@@ -51,8 +51,8 @@ externalClaudeProfile: opus-xhigh  # allowed: sonnet-high | opus-xhigh | opus-ma
 - `reserve` is a symbolic supplemental read-only candidate that may appear only in advisory and review profile orders after primary `claude`/`codex`. It is independent of the primary `claude` candidate, not a scalar provider key, not a primary-provider retry, and not an implementation or editing fallback. The concrete resolver comes from `reserveResolver` and must be recorded in the execution artifact.
 - Treat named fallback paths as alternate limit or budget pools only when runtime observation shows they exhaust independently. That is repo-local operator policy, not an official provider guarantee.
 - Every provider-backed run MUST carry the resolved model/profile and effort as explicit launch flags in that invocation, even when they equal configured defaults; never rely on provider config defaults. Resolve `runtime-default` to the installed runtime's observed supported model/effort before launch, or report the route unavailable if it cannot be made explicit. Record the exact flags in the execution artifact.
-- Kimi and Grok are explicit-only routes. Before either launch, call the pure `resolve_external_dispatch(provider, task_class, role)` policy. It admits only eligible read-only `exploration`, `planning`, and `review` work with independent verification required; all other classes, roles, writes, and missing verification fail closed with the provider-specific dispatch ID and no fallback.
-- The root-authored `provider_prompt.py` transport and approved thin `invoke-<provider>-prompt` wrapper entries are the only Slice-B substantive transport sources; installed canonical and Claude-host projections must pass their byte-parity manifest before launch. Kimi is pinned to `kimi-code/k3` and has no native effort flag, so a required explicit effort is unavailable rather than silently defaulted; it runs from a neutral scratch directory with no live worktree input. Grok is pinned to the signed official binary/model and may run only after its capability, auth, result-shape, and read-only live-root immutability gates pass. Neither provider result alone authorizes a critical decision, commit, push, release, or publication.
+- Kimi and Grok are policy classifier names only; their transports are unavailable and disabled in 1.x. `resolve_external_dispatch(provider, task_class, role)` remains a non-executing policy check; it does not authorize a launcher or probe. Do not launch or probe either provider, and do not present either as usable.
+- The root-authored `provider_prompt.py` transport remains the only substantive transport source for available providers. Its governance capsule is authored at `shared/external-prompt-governance.md` and projected into installed wrapper directories as `scripts/external-prompt-governance.md`; canonical and Claude-host projections must retain byte parity. Kimi/Grok transports are unavailable and disabled in 1.x, so no realization or provider probe is a transport surface.
 - `externalClaudeProfile` is Codex-line only and selects or overrides the Claude CLI execution profile when `externalProvider` resolves to Claude. Supported values: `sonnet-high` (`--model sonnet --effort high`), `opus-xhigh` (`--model opus --effort xhigh`, the shipped default), `opus-max` (`--model opus --effort max`, max-depth escalation at caller discretion for especially hard tasks), and `fable-xhigh` (`--model fable --effort xhigh`, the current Claude flagship-family best-effort tier — the `fable` flagship alias as of 2026-07, recorded from the installed model list, not a verified capability ranking).
 - The preference flags are independent.
 - Any write to this file must preserve unknown keys and the other known keys.
@@ -99,7 +99,7 @@ externalClaudeProfile: opus-xhigh  # allowed: sonnet-high | opus-xhigh | opus-ma
 
 The prompt file is the only governance an external Command-Line Interface (CLI) inherits. Before launch it must:
 
-- Remain a raw, caller-authored handoff. The provider-neutral `provider_prompt.py::launch` wrapper seam snapshots and prefixes the installed generated `external-prompt-governance.md` capsule in memory; role and provider documents must reference this seam and must not copy its policy text. Substantive raw provider Command-Line Interface (CLI) prompt routes are unsupported: use an approved thin `invoke-<provider>-prompt` wrapper.
+- Remain a raw, caller-authored handoff. The provider-neutral `provider_prompt.py::launch` wrapper seam snapshots and prefixes the installed `scripts/external-prompt-governance.md` projection in memory; its sole authored source is `shared/external-prompt-governance.md`. Role and provider documents must reference this seam and must not copy its policy text. Substantive raw provider Command-Line Interface (CLI) prompt routes are unsupported: use an approved thin `invoke-<provider>-prompt` wrapper.
 - Include the complete handoff template verbatim from the owning `subagent-contracts.md`, including its mandatory pre-dispatch fill rule and defect-class completeness trigger; this contract cites that owner and does not reproduce its field list.
 - State the assigned role's gate vocabulary and one-artifact requirement.
 - Include a provenance-header echo instruction using this contract's header fields.
@@ -230,10 +230,10 @@ Every external or consultant memo/report should record one explicit execution re
 
 - `Execution role: <consultant | external-worker | external-reviewer>`
 - `Assigned / replaced internal role: <eligible internal role label | none>`
-- `Requested provider: <internal | codex | claude | gemini | qwen | kimi | grok>`
-- `Resolved provider: <Codex CLI | Claude CLI | Gemini CLI | Qwen Code | Kimi CLI | Grok CLI | none>`
+- `Requested provider: <internal | codex | claude | gemini | qwen>`
+- `Resolved provider: <Codex CLI | Claude CLI | Gemini CLI | Qwen Code | none>`
 - `Requested consultant mode: <external | internal | disabled>` when consultant routing is relevant; otherwise `not-applicable`
-- `Actual execution path: <internal consultant | external CLI (Codex CLI) | external CLI (Claude CLI) | external CLI (Gemini CLI) | external CLI (Qwen Code) | external CLI (Kimi CLI) | external CLI (Grok CLI) | role disabled>`
+- `Actual execution path: <internal consultant | external CLI (Codex CLI) | external CLI (Claude CLI) | external CLI (Gemini CLI) | external CLI (Qwen Code) | role disabled>`
 - `Model / profile used: <actual profile or model when known | runtime default | unspecified by runtime>`
 - `Launch flags: <exact argv model / effort / sandbox flags>`
 - `Run record: <started and finished timestamps or duration; wrapper exit; terminal ledger runId when tracked>`
@@ -241,6 +241,7 @@ Every external or consultant memo/report should record one explicit execution re
 
 Rules:
 
+- Kimi/Grok are unavailable policy-only classifiers, disabled in 1.x; never select, resolve, execute, or record either as a provenance provider.
 - Before declaring a route unavailable, run `command -v` or `Get-Command` for the resolved CLI in the current session and record the availability-probe output in the execution artifact; a route change requires the probe result plus a populated `Deviation reason`. A missing approved prompt wrapper is a direct dependency failure; an older failed run does not prove the CLI is unavailable.
 - Keep `Execution role` and `Assigned / replaced internal role` on separate lines. Do not merge them into one ambiguous label.
 - `Requested provider: internal` means no explicit external provider was requested by the caller and routing/default resolution picked the provider. It must not be rendered as `auto` in the artifact.

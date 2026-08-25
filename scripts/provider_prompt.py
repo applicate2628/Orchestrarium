@@ -19,6 +19,7 @@ import sys
 import tempfile
 import threading
 import time
+import types
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -36,7 +37,7 @@ CAPTURE_MAX_BYTES_DEFAULT = 16 * 1024 * 1024
 CAPTURE_MAX_BYTES_HARD = 256 * 1024 * 1024
 STDERR_SCAN_MAX_BYTES = 64 * 1024
 RESULT_PREFIX = "ORCHESTRARIUM_PROVIDER_RESULT_V2="
-EXTERNAL_PROVIDER_NAMES = frozenset({"codex", "claude", "kimi", "grok"})
+EXTERNAL_PROVIDER_NAMES = frozenset({"codex", "claude"})
 PROVIDER_AUTH_SECRET_ENV_KEYS_V1 = {
     "codex-api-key": ("OPENAI_API_KEY",),
     "codex-auth-file": (),
@@ -56,16 +57,12 @@ PROVIDER_AUTH_SECRET_ENV_KEYS_V1 = {
     "claude-direct": ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"),
     "claude-api-key-helper": (),
     "claude-subscription-override": (),
-    "kimi-current": (),
-    "grok-current": (),
 }
 _NONSECRET_CHILD_ENV_NAMES = (
     "COMSPEC", "SystemRoot", "SYSTEMROOT", "WINDIR", "PATH", "PATHEXT",
     "TEMP", "TMP", "TMPDIR", "USERPROFILE", "LOCALAPPDATA", "APPDATA",
     "HOME", "LANG", "LC_ALL",
 )
-KIMI_TASK_PROMPT = "Read the bounded agent-file task and return the requested analysis."
-KIMI_SMOKE_PROMPT = "Return exactly KIMI_CONTAINMENT_SMOKE_OK."
 PROMPT_SNAPSHOT_MAX_BYTES = 16 * 1024 * 1024
 EXTERNAL_GOVERNANCE_CAPSULE_NAME = "external-prompt-governance.md"
 EXTERNAL_GOVERNANCE_CAPSULE_SHA256 = (
@@ -77,6 +74,9 @@ EXTERNAL_UNAVAILABLE_IDS = {
     "kimi": "E_KIMI_READINESS_UNVERIFIED",
     "grok": "E_GROK_CONTAINMENT_UNAVAILABLE",
 }
+_ROLE_TAXONOMY_RESOLVER_SHA256 = (
+    "bfdbf9695dbdaadb7507681259a02f9202931b1c38f98617f4d91cf6148766ea"
+)
 
 
 @dataclass
@@ -99,55 +99,11 @@ class Control:
 
 
 @dataclass(frozen=True)
-class KimiLaunchPlan:
-    argv: tuple[str, ...]
-    cwd: Path
-    stdin: bytes
-    provenance: dict[str, str]
-
-
-@dataclass(frozen=True)
-class ExecutionProvenance:
-    work_item: str
-    assigned_internal_role: str
-    provider: str
-    artifact_identity: str
-    external_dispatch_id: str
-    external_evidence_run_id: str
-    model: str
-    effort: str
-    mapping_loss: str
-    actual_execution_path: str = "direct-external-cli"
-
-    def payload(self) -> dict[str, str]:
-        return {
-            "workItem": self.work_item,
-            "assignedInternalRole": self.assigned_internal_role,
-            "provider": self.provider,
-            "artifactIdentity": self.artifact_identity,
-            "externalDispatchId": self.external_dispatch_id,
-            "externalEvidenceRunId": self.external_evidence_run_id,
-            "model": self.model,
-            "effort": self.effort,
-            "mappingLoss": self.mapping_loss,
-            "actualExecutionPath": self.actual_execution_path,
-        }
-
-
-@dataclass(frozen=True)
 class ExternalRoleProvenance:
     """The caller assignment and actual external adapter lane are distinct facts."""
 
     assigned_role: str
     execution_role: str
-
-
-@dataclass(frozen=True)
-class GrokCapability:
-    fingerprint: str
-    version: str
-    signature_status: str
-    signer: str
 
 
 @dataclass(frozen=True)
@@ -286,11 +242,6 @@ def parse_control(argv: list[str], *, external: bool = False) -> Control:
         if result.topic is None:
             result.topic = token
         else:
-            if key in {"--grok-result-shape-file", "--fixture-root"}:
-                raise ValueError(
-                    "E_GROK_RESULT_SHAPE_UNVERIFIED: caller-owned Grok "
-                    "shape and fixture inputs are forbidden"
-                )
             result.provider_flags.append(token)
         index += 1
     if result.result_max_bytes > RESULT_MAX_BYTES_HARD:
@@ -304,12 +255,6 @@ def parse_control(argv: list[str], *, external: bool = False) -> Control:
     if result.result_max_bytes > result.capture_max_bytes:
         raise ValueError("--result-max-bytes must not exceed --capture-max-bytes")
     return result
-
-
-def parse_external_control(argv: list[str]) -> Control:
-    """Consume external-only controls without changing Codex/Claude forwarding."""
-
-    return parse_control(argv, external=True)
 
 
 def validate_topic(topic: str | None) -> str:
@@ -377,233 +322,51 @@ def _lexically_within(path: Path, root: Path) -> bool:
     return True
 
 
-def build_kimi_launch_plan(
-    *,
-    task_file: Path,
-    neutral_cwd: Path,
-    live_root: Path,
-    provider_flags: list[str],
-) -> KimiLaunchPlan:
-    """Construct Kimi 0.38.0 argv without probing or touching a live worktree."""
-
-    task_file = Path(task_file).resolve(strict=False)
-    neutral_cwd = Path(neutral_cwd).resolve(strict=False)
-    live_root = Path(live_root).resolve(strict=False)
-    if _lexically_within(task_file, live_root) or _lexically_within(
-        neutral_cwd, live_root
-    ):
-        raise ValueError(
-            "E_KIMI_MUTATION_UNSUPPORTED: task snapshot and cwd must be outside "
-            "the live repository"
-        )
-    lowered = [flag.casefold() for flag in provider_flags]
-    prompt_conflicts = {"--plan", "-y", "--yolo", "--auto", "-p", "--prompt"}
-    if any(
-        flag in prompt_conflicts
-        or flag.startswith("--prompt=")
-        or flag.startswith("--plan=")
-        or flag.startswith("--auto=")
-        for flag in lowered
-    ):
-        raise ValueError(
-            "E_KIMI_PROMPT_FLAG_CONFLICT: Kimi 0.38.0 prompt mode cannot be "
-            "combined with caller-supplied prompt/plan/auto/yolo flags"
-        )
-    if any("effort" in flag or "reasoning" in flag for flag in lowered):
-        raise ValueError(
-            "E_KIMI_EFFORT_UNSUPPORTED: Kimi 0.38.0 exposes no native "
-            "effort or reasoning flag"
-        )
-    if provider_flags:
-        raise ValueError(
-            "E_KIMI_PROMPT_FLAG_CONFLICT: Kimi transport accepts no additional "
-            "provider flags"
-        )
-    return KimiLaunchPlan(
-        argv=(
-            "-m",
-            "kimi-code/k3",
-            "--output-format",
-            "stream-json",
-            "--agent-file",
-            str(task_file.with_name("kimi-agent.md")),
-            "--skills-dir",
-            str(task_file.parent / "kimi-empty-skills"),
-            "-p",
-            KIMI_TASK_PROMPT,
-        ),
-        cwd=neutral_cwd,
-        stdin=b"",
-        provenance={
-            "runtime_version": "0.38.0",
-            "model": "kimi-code/k3",
-            "native_effort": "unsupported",
-            "independent_verification": "required",
-            "mapping_loss": (
-                "model-only realization; current Kimi help exposes no "
-                "effort/reasoning flag"
-            ),
-        },
-    )
-
-
-def run_kimi_containment_smoke(
-    command: list[str],
-    plan: KimiLaunchPlan,
-    live_root: Path,
-    outside_canary: Path,
-    environment: dict[str, str],
-) -> None:
-    """Require one wrapper-owned no-tool Kimi smoke before the ordinary task."""
-
-    smoke_argv = [*command, *plan.argv[:-1], KIMI_SMOKE_PROMPT]
-    before = outside_canary.read_bytes()
-    if str(Path(live_root).resolve()) in "\x00".join((*smoke_argv, str(plan.cwd))):
-        raise ValueError("E_KIMI_CONTAINMENT_UNAVAILABLE: live root in smoke plan")
-    try:
-        completed = subprocess.run(
-            smoke_argv,
-            cwd=plan.cwd,
-            env=environment,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False,
-            timeout=30,
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise ValueError("E_KIMI_CONTAINMENT_UNAVAILABLE: smoke launch") from exc
-    output = bytes(completed.stdout)
-    if completed.returncode or outside_canary.read_bytes() != before:
-        raise ValueError("E_KIMI_CONTAINMENT_UNAVAILABLE: smoke execution")
-    try:
-        lines = output.decode("utf-8", errors="strict").splitlines()
-        records = [json.loads(line) for line in lines if line]
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise ValueError("E_KIMI_CONTAINMENT_UNAVAILABLE: smoke stream-json") from exc
-    if not records or any(
-        "tool" in json.dumps(record, sort_keys=True).casefold()
-        or "subagent" in json.dumps(record, sort_keys=True).casefold()
-        for record in records
-    ):
-        raise ValueError("E_KIMI_CONTAINMENT_UNAVAILABLE: smoke tool event")
-    text = "\n".join(json.dumps(record, sort_keys=True) for record in records)
-    if (
-        KIMI_SMOKE_PROMPT in text
-        or str(Path(live_root).resolve()) in text
-        or "KIMI_CONTAINMENT_SMOKE_OK" not in text
-    ):
-        raise ValueError("E_KIMI_CONTAINMENT_UNAVAILABLE: smoke output exposure")
-
-
-def resolve_external_policy(provider: str, task_class: str, role: str) -> dict[str, object]:
-    """Load the staged sibling resolver and settle policy before binary discovery."""
-
-    resolver_path = Path(__file__).resolve().with_name("resolve-agents-mode.py")
-    if not resolver_path.is_file():
-        return {
-            "status": "denied",
-            "stableId": f"E_{provider.upper()}_DISPATCH_DENIED",
-        }
-    spec = importlib.util.spec_from_file_location(
-        "_orchestrarium_external_dispatch_resolver", resolver_path
-    )
-    if spec is None or spec.loader is None:
-        return {
-            "status": "denied",
-            "stableId": f"E_{provider.upper()}_DISPATCH_DENIED",
-        }
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    try:
-        spec.loader.exec_module(module)
-        decision = module.resolve_external_dispatch(
-            provider,
-            task_class,
-            role,
-            repo_root=resolver_path.parent.parent,
-        )
-    except (AttributeError, OSError, TypeError, ValueError):
-        return {
-            "status": "denied",
-            "stableId": f"E_{provider.upper()}_DISPATCH_DENIED",
-        }
-    return decision if isinstance(decision, dict) else {
-        "status": "denied",
-        "stableId": f"E_{provider.upper()}_DISPATCH_DENIED",
-    }
-
-
-def require_external_realization(
-    provider: str, policy: dict[str, object]
-) -> dict[str, object]:
-    """Consume the complete resolver result before any transport side effect."""
-
-    expected = {
-        "kimi": {
-            "requiredEffort": "high",
-            "nativeEffort": "unsupported",
-            "effortMappingLoss": "no-native-effort-control",
-        },
-        "grok": {
-            "requiredEffort": "high",
-            "nativeEffort": "high",
-            "effortMappingLoss": "none",
-        },
-    }.get(provider)
-    if expected is None:
-        raise ValueError("E_EXTERNAL_DISPATCH_DENIED: unsupported external provider")
-    required = {
-        "status": "external-required",
-        "mutationClass": "read-only",
-        "independentVerification": True,
-        "finalAuthorizingRole": False,
-        **expected,
-    }
-    if any(policy.get(name) != value for name, value in required.items()):
-        raise ValueError(f"E_{provider.upper()}_EFFORT_UNSUPPORTED: policy realization")
-    return policy
-
-
-def external_execution_provenance(
-    control: Control,
-    provider: str,
-    dispatch_id: str,
-    model: str,
-    effort: str,
-    mapping_loss: str,
-) -> ExecutionProvenance:
-    """Freeze caller-approved external identity once; envelope and ledger reuse it."""
-
-    return ExecutionProvenance(
-        work_item=control.ledger or "",
-        assigned_internal_role=control.role or "",
-        provider=provider,
-        artifact_identity=control.ledger_artifact or f"provider-result:{dispatch_id}",
-        external_dispatch_id=dispatch_id,
-        external_evidence_run_id=f"external-evidence-{dispatch_id}",
-        model=model,
-        effort=effort,
-        mapping_loss=mapping_loss,
-    )
-
-
 def _external_role_taxonomy() -> tuple[set[str], set[str], set[str]]:
     """Read the routing policy's role taxonomy instead of inferring a lane from task class."""
 
     try:
-        resolver_path = next(
-            path for path in (
-                Path(__file__).resolve().with_name("resolve-agents-mode.py"),
-                Path.cwd() / "scripts" / "resolve-agents-mode.py",
-            ) if path.is_file()
+        resolver_path = Path(__file__).resolve().with_name("resolve-agents-mode.py")
+        metadata = resolver_path.lstat()
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or stat.S_ISLNK(metadata.st_mode)
+            or _metadata_is_reparse(metadata)
+        ):
+            raise ValueError("resolver sibling is not ordinary")
+        descriptor = os.open(
+            resolver_path,
+            os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0),
         )
-        spec = importlib.util.spec_from_file_location("_orchestrarium_external_role_taxonomy", resolver_path)
-        if spec is None or spec.loader is None:
-            raise ValueError("resolver unavailable")
-        resolver = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(resolver)
-        policy, _ = resolver.load_role_policy(resolver_path.parent.parent)
+        try:
+            opened = os.fstat(descriptor)
+            if (opened.st_dev, opened.st_ino, opened.st_mode) != (
+                metadata.st_dev,
+                metadata.st_ino,
+                metadata.st_mode,
+            ):
+                raise ValueError("resolver sibling identity changed")
+            chunks: list[bytes] = []
+            while chunk := os.read(descriptor, 1024 * 1024):
+                chunks.append(chunk)
+            payload = b"".join(chunks)
+        finally:
+            os.close(descriptor)
+        if hashlib.sha256(payload).hexdigest() != _ROLE_TAXONOMY_RESOLVER_SHA256:
+            raise ValueError("resolver sibling digest drift")
+        module_name = "_orchestrarium_external_role_taxonomy"
+        prior = sys.modules.get(module_name)
+        resolver = types.ModuleType(module_name)
+        resolver.__file__ = str(resolver_path)
+        sys.modules[module_name] = resolver
+        try:
+            exec(compile(payload, str(resolver_path), "exec"), resolver.__dict__)
+            policy, _ = resolver.load_role_policy(resolver_path.parent.parent)
+        finally:
+            if prior is None:
+                sys.modules.pop(module_name, None)
+            else:
+                sys.modules[module_name] = prior
         roles = set(policy["roles"])
         eligibility = policy["taskRoleEligibility"]
         reviewers = set(eligibility["review"])
@@ -613,7 +376,7 @@ def _external_role_taxonomy() -> tuple[set[str], set[str], set[str]]:
             eligibility["engineering"],
             eligibility["recovery"],
         )
-    except (AttributeError, ImportError, KeyError, OSError, StopIteration, TypeError, ValueError) as exc:
+    except (AttributeError, ImportError, KeyError, OSError, TypeError, ValueError, SyntaxError) as exc:
         raise ValueError("E_EXTERNAL_PROVENANCE_ROLE_INVALID: role taxonomy") from exc
     # These owner/advisory identities are canonical governance roles but deliberately
     # have no native dispatch profile. They remain truthful assignments with no lane.
@@ -626,17 +389,8 @@ def external_role_provenance(control: Control, provider: str) -> ExternalRolePro
 
     if provider in {"codex", "claude"} and not control.ledger_role_explicit:
         return ExternalRoleProvenance("none", "none")
-    if provider in {"kimi", "grok"} and not control.role and not control.ledger_role_explicit:
-        return ExternalRoleProvenance("none", "none")
     roles, reviewers, workers = _external_role_taxonomy()
-    if provider in {"kimi", "grok"}:
-        assigned = control.role or (
-            control.ledger_role if control.ledger_role_explicit else "none"
-        )
-        if control.role and control.ledger_role_explicit and control.ledger_role != assigned:
-            raise ValueError("E_EXTERNAL_LEDGER_UNVERIFIED: assigned role mismatch")
-    else:
-        assigned = control.ledger_role if control.ledger_role_explicit else "none"
+    assigned = control.ledger_role if control.ledger_role_explicit else "none"
     if assigned != "none" and assigned not in roles:
         raise ValueError("E_EXTERNAL_PROVENANCE_ROLE_INVALID: assigned role")
     if assigned == "consultant":
@@ -683,413 +437,6 @@ def require_transport_projection_parity() -> None:
         raise ValueError(detail) from exc
 
 
-def resolve_grok_executable(
-    home: Path,
-    environment: dict[str, str],
-    path_lookup=shutil.which,
-) -> Path:
-    """Resolve only the official per-user Grok binary and reject override routes."""
-
-    override_keys = ("GROK_BIN", "GROK_PATH", "ORCHESTRARIUM_GROK_BIN")
-    if any(environment.get(key) for key in override_keys):
-        raise ValueError("E_GROK_PATH_CONFLICT: Grok executable overrides are forbidden")
-    exact = Path(home).expanduser().resolve(strict=False) / ".grok" / "bin" / "grok.exe"
-    try:
-        metadata = exact.lstat()
-    except OSError as exc:
-        raise ValueError("E_GROK_IDENTITY_INVALID: exact Grok executable is missing") from exc
-    if (
-        not stat.S_ISREG(metadata.st_mode)
-        or stat.S_ISLNK(metadata.st_mode)
-        or _metadata_is_reparse(metadata)
-    ):
-        raise ValueError("E_GROK_IDENTITY_INVALID: exact Grok executable type")
-    discovered = path_lookup("grok")
-    if discovered and os.path.normcase(os.path.abspath(discovered)) != os.path.normcase(
-        os.path.abspath(exact)
-    ):
-        raise ValueError("E_GROK_PATH_CONFLICT: PATH resolves a different Grok command")
-    return exact
-
-
-def resolve_kimi_executable(home: Path, environment: dict[str, str]) -> Path:
-    """Bind Kimi only to its ordinary per-user executable, never ambient lookup."""
-
-    if environment.get("KIMI_BIN"):
-        raise ValueError("E_KIMI_IDENTITY_INVALID: KIMI_BIN override is forbidden")
-    base = Path(home).expanduser()
-    if not base.is_absolute():
-        raise ValueError("E_KIMI_IDENTITY_INVALID: user home is not absolute")
-    exact = base / ".kimi-code" / "bin" / "kimi.exe"
-    try:
-        validate_no_reparse_components(exact)
-        metadata = exact.lstat()
-    except OSError as exc:
-        raise ValueError("E_KIMI_IDENTITY_INVALID: exact Kimi executable is missing") from exc
-    if (
-        not stat.S_ISREG(metadata.st_mode)
-        or stat.S_ISLNK(metadata.st_mode)
-        or _metadata_is_reparse(metadata)
-        or exact.suffix.casefold() != ".exe"
-    ):
-        raise ValueError("E_KIMI_IDENTITY_INVALID: exact Kimi executable type")
-    return exact
-
-
-def _normalized_tokens(value: object) -> set[str]:
-    return set(re.findall(r"--?[A-Za-z][A-Za-z0-9-]*|[A-Za-z][A-Za-z0-9.-]*", str(value)))
-
-
-def validate_grok_capability_observation(
-    observation: dict[str, object], live_root: Path
-) -> GrokCapability:
-    """Validate a freshly collected official-Grok capability observation."""
-
-    if observation.get("signatureStatus") != "Valid" or observation.get("signer") != "X.AI LLC":
-        raise ValueError("E_GROK_IDENTITY_INVALID: Authenticode identity mismatch")
-    version = observation.get("version")
-    if not isinstance(version, str) or not re.fullmatch(
-        r"grok \d+\.\d+\.\d+ \([0-9a-f]+\) \[stable\]", version.strip()
-    ):
-        raise ValueError("E_GROK_CAPABILITY_UNAVAILABLE: stable version surface")
-    help_tokens = _normalized_tokens(observation.get("help"))
-    required = {
-        "--prompt-file",
-        "--output-format",
-        "json",
-        "--permission-mode",
-        "dontAsk",
-        "--sandbox",
-        "read-only",
-    }
-    if not required <= help_tokens or not (
-        {"--reasoning-effort", "--effort"} & help_tokens
-    ):
-        raise ValueError("E_GROK_CAPABILITY_UNAVAILABLE: command help token set")
-    if "--json" not in _normalized_tokens(observation.get("inspectHelp")):
-        raise ValueError("E_GROK_CAPABILITY_UNAVAILABLE: inspect JSON capability")
-    models = str(observation.get("models", ""))
-    if "logged in" not in models.casefold():
-        raise ValueError("E_GROK_AUTH_UNREADY: Grok authentication is not ready")
-    if not re.search(r"(?m)^\s*\*?\s*grok-4\.6\s+\(default\)\s*$", models):
-        raise ValueError("E_GROK_MODEL_UNAVAILABLE: grok-4.6 is not the default")
-    inspection = observation.get("inspectJson")
-    expected_root = str(Path(live_root).resolve())
-    if not isinstance(inspection, dict) or inspection.get("projectRoot") != expected_root:
-        raise ValueError("E_GROK_CAPABILITY_UNAVAILABLE: discovery root mismatch")
-    instructions = inspection.get("instructionFiles")
-    skills = inspection.get("skillRoots")
-    if (
-        not isinstance(instructions, list)
-        or not any(Path(str(item)).name.casefold() in {"agents.md", "claude.md"} for item in instructions)
-        or not isinstance(skills, list)
-        or ".agents/skills" not in {str(item).replace("\\", "/") for item in skills}
-    ):
-        raise ValueError("E_GROK_CAPABILITY_UNAVAILABLE: instruction or skill discovery")
-    fingerprint_payload = {
-        "signatureStatus": observation["signatureStatus"],
-        "signer": observation["signer"],
-        "version": version.strip(),
-        "helpTokens": sorted(help_tokens),
-        "inspectHelpTokens": sorted(_normalized_tokens(observation["inspectHelp"])),
-        "model": "grok-4.6",
-        "projectRoot": expected_root,
-        "instructionFiles": sorted(str(item) for item in instructions),
-        "skillRoots": sorted(str(item).replace("\\", "/") for item in skills),
-    }
-    encoded = json.dumps(
-        fingerprint_payload, sort_keys=True, separators=(",", ":")
-    ).encode()
-    return GrokCapability(
-        fingerprint=hashlib.sha256(encoded).hexdigest(),
-        version=version.strip(),
-        signature_status="Valid",
-        signer="X.AI LLC",
-    )
-
-
-def parse_grok_bounded_result(payload: bytes, capability_fingerprint: str) -> str:
-    if len(payload) > RESULT_MAX_BYTES_HARD:
-        raise ValueError("E_GROK_RESULT_SHAPE_UNVERIFIED: oversized result")
-    try:
-        record = json.loads(payload.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise ValueError("E_GROK_RESULT_SHAPE_UNVERIFIED: invalid JSON") from exc
-    if not isinstance(record, dict) or set(record) != {"type", "output"}:
-        raise ValueError("E_GROK_RESULT_SHAPE_UNVERIFIED: task result shape")
-    if record.get("type") != "result" or not isinstance(record.get("output"), str):
-        raise ValueError("E_GROK_RESULT_SHAPE_UNVERIFIED: task result payload")
-    if not re.fullmatch(r"[0-9a-f]{64}", capability_fingerprint):
-        raise ValueError("E_GROK_RESULT_SHAPE_UNVERIFIED: capability fingerprint")
-    return record["output"]
-
-
-def parse_external_provider_result(
-    provider: str, payload: bytes, capability_fingerprint: str
-) -> str:
-    """Parse one bounded external wire record and accept advisory PASS/REVISE only."""
-
-    if len(payload) > RESULT_MAX_BYTES_HARD:
-        raise ValueError("E_EXTERNAL_RESULT_UNVERIFIED: oversized result")
-    try:
-        text = payload.decode("utf-8", errors="strict")
-    except UnicodeDecodeError as exc:
-        raise ValueError("E_EXTERNAL_RESULT_UNVERIFIED: invalid UTF-8") from exc
-    if provider == "grok":
-        result = parse_grok_bounded_result(payload, capability_fingerprint)
-    elif provider == "kimi":
-        if not text.endswith("\n") or text.count("\n") != 1:
-            raise ValueError("E_EXTERNAL_RESULT_UNVERIFIED: Kimi stream cardinality")
-        try:
-            record = json.loads(text[:-1])
-        except json.JSONDecodeError as exc:
-            raise ValueError("E_EXTERNAL_RESULT_UNVERIFIED: Kimi stream JSON") from exc
-        if (
-            not isinstance(record, dict)
-            or set(record) != {"type", "text"}
-            or record.get("type") != "assistant_message"
-            or not isinstance(record.get("text"), str)
-        ):
-            raise ValueError("E_EXTERNAL_RESULT_UNVERIFIED: Kimi stream shape")
-        result = record["text"]
-    else:
-        raise ValueError("E_EXTERNAL_RESULT_UNVERIFIED: unknown provider")
-    if _final_nonblank_line(result) not in {"GATE: PASS", "GATE: REVISE"}:
-        raise ValueError("E_EXTERNAL_RESULT_UNVERIFIED: semantic terminal")
-    return result
-
-
-def _publication_safety_findings(text: str):
-    """Load the existing publication-safety owner; no transport-local detector copy."""
-
-    candidates = (
-        Path(__file__).with_name("check-publication-safety.py"),
-        Path(__file__).parent / "universal-hooks" / "scripts" / "check-publication-safety.py",
-    )
-    script = next((candidate for candidate in candidates if candidate.is_file()), None)
-    if script is None:
-        raise ValueError("E_EXTERNAL_RESULT_UNSAFE: detector-unavailable")
-    spec = importlib.util.spec_from_file_location("_provider_publication_safety", script)
-    if spec is None or spec.loader is None:
-        raise ValueError("E_EXTERNAL_RESULT_UNSAFE: detector-unavailable")
-    module = importlib.util.module_from_spec(spec)
-    try:
-        spec.loader.exec_module(module)
-        finder = module._path_finder(script)
-        hits = module._content_hits(text, "provider-result.txt", finder, subject_kind="path-blob")
-    except Exception as exc:
-        raise ValueError("E_EXTERNAL_RESULT_UNSAFE: detector-unavailable") from exc
-    return hits
-
-
-def assert_external_result_safe(text: str) -> None:
-    hits = _publication_safety_findings(text)
-    if hits:
-        classes = {str(getattr(hit, "rule", "content")) for hit in hits}
-        detector = "machine-path" if "machine-path" in classes else "credential"
-        raise ValueError(f"E_EXTERNAL_RESULT_UNSAFE: {detector}")
-
-
-def build_grok_launch_plan(
-    *,
-    task_file: Path,
-    live_root: Path,
-    capability: GrokCapability,
-    provider_flags: list[str],
-) -> None:
-    lowered = [flag.casefold() for flag in provider_flags]
-    if any("effort" in flag or "reasoning" in flag for flag in lowered):
-        raise ValueError(
-            "E_GROK_EFFORT_UNSUPPORTED: no explicit native effort value has "
-            "a fingerprint-bound acceptance record"
-        )
-    if provider_flags:
-        raise ValueError(
-            "E_GROK_CAPABILITY_UNAVAILABLE: Grok transport accepts no additional flags"
-        )
-    raise ValueError(
-        "E_GROK_CONTAINMENT_UNAVAILABLE: no provider-observed containment/schema "
-        "smoke is bound to this fingerprint"
-    )
-
-
-def assert_grok_repo_immutable(
-    before: dict[str, object], after: dict[str, object]
-) -> None:
-    if json.dumps(before, sort_keys=True, separators=(",", ":")) != json.dumps(
-        after, sort_keys=True, separators=(",", ":")
-    ):
-        raise ValueError(
-            "E_GROK_LIVE_REPO_MUTATION: repository baseline changed during Grok run"
-        )
-
-
-def _probe_grok_authenticode(executable: Path) -> dict[str, str]:
-    powershell = shutil.which("pwsh.exe") or shutil.which("powershell.exe")
-    if os.name != "nt" or powershell is None:
-        raise ValueError(
-            "E_GROK_IDENTITY_INVALID: Windows Authenticode probe is unavailable"
-        )
-    script = (
-        "$s=Get-AuthenticodeSignature -LiteralPath $args[0];"
-        "@{signatureStatus=[string]$s.Status;signer=[string]$s.SignerCertificate.Subject}"
-        "|ConvertTo-Json -Compress"
-    )
-    completed = subprocess.run(
-        [powershell, "-NoProfile", "-NonInteractive", "-Command", script, str(executable)],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="strict",
-        timeout=20,
-        check=False,
-    )
-    if completed.returncode or len(completed.stdout.encode("utf-8")) > 65536:
-        raise ValueError("E_GROK_IDENTITY_INVALID: Authenticode probe failed")
-    try:
-        raw = json.loads(completed.stdout)
-    except json.JSONDecodeError as exc:
-        raise ValueError("E_GROK_IDENTITY_INVALID: Authenticode result shape") from exc
-    subject = str(raw.get("signer", ""))
-    signer_match = re.search(r"(?:^|,)\s*O=([^,]+)", subject)
-    return {
-        "signatureStatus": str(raw.get("signatureStatus", "")),
-        "signer": signer_match.group(1).strip() if signer_match else subject.strip(),
-    }
-
-
-def _run_grok_probe(argv: list[str], cwd: Path) -> str:
-    completed = subprocess.run(
-        argv,
-        cwd=cwd,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="strict",
-        timeout=20,
-        check=False,
-    )
-    payload_bytes = completed.stdout.encode("utf-8")
-    if completed.returncode or not completed.stdout.strip() or len(payload_bytes) > 65536:
-        raise ValueError("Grok probe returned no bounded successful output")
-    return completed.stdout.strip()
-
-
-def _probe_grok_capabilities(
-    executable: Path,
-    live_root: Path,
-    *,
-    identity_probe=_probe_grok_authenticode,
-    command_runner=_run_grok_probe,
-) -> GrokCapability:
-    """Re-probe identity, auth, model, discovery, and help before every task."""
-
-    executable = Path(executable)
-    live_root = Path(live_root).resolve()
-    try:
-        identity = identity_probe(executable)
-    except ValueError:
-        raise
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise ValueError("E_GROK_IDENTITY_INVALID: identity probe failed") from exc
-    try:
-        version = command_runner([str(executable), "--version"], live_root)
-        help_text = command_runner([str(executable), "--help"], live_root)
-        inspect_help = command_runner(
-            [str(executable), "inspect", "--help"], live_root
-        )
-        models = command_runner([str(executable), "models"], live_root)
-        inspect_text = command_runner(
-            [str(executable), "inspect", "--json"], live_root
-        )
-        inspection = json.loads(inspect_text)
-    except (OSError, ValueError, subprocess.SubprocessError, json.JSONDecodeError) as exc:
-        raise ValueError(
-            "E_GROK_CAPABILITY_UNAVAILABLE: required prelaunch probe failed"
-        ) from exc
-    observation: dict[str, object] = {
-        **identity,
-        "version": version,
-        "help": help_text,
-        "inspectHelp": inspect_help,
-        "models": models,
-        "inspectJson": inspection,
-    }
-    return validate_grok_capability_observation(observation, live_root)
-
-
-def _bounded_git_text(live_root: Path, *arguments: str) -> str:
-    completed = subprocess.run(
-        ["git", "-C", str(live_root), *arguments],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="strict",
-        timeout=20,
-        check=False,
-    )
-    if completed.returncode or len(completed.stdout.encode("utf-8")) > 1024 * 1024:
-        raise ValueError("E_GROK_LIVE_REPO_MUTATION: repository snapshot failed")
-    return completed.stdout
-
-
-def _bounded_fixture_inventory(root: Path) -> list[list[str]]:
-    root = Path(root).resolve()
-    if not root.is_dir():
-        raise ValueError("E_GROK_LIVE_REPO_MUTATION: fixture root is not a directory")
-    inventory: list[list[str]] = []
-    for current, directories, files in os.walk(root, followlinks=False):
-        current_path = Path(current)
-        directories[:] = sorted(
-            name
-            for name in directories
-            if name != ".git"
-            and not (current_path / name).is_symlink()
-            and not _metadata_is_reparse((current_path / name).lstat())
-        )
-        for name in sorted(files):
-            path = current_path / name
-            metadata = path.lstat()
-            if stat.S_ISLNK(metadata.st_mode) or _metadata_is_reparse(metadata):
-                raise ValueError(
-                    "E_GROK_LIVE_REPO_MUTATION: fixture inventory contains a link"
-                )
-            if len(inventory) >= 4096 or metadata.st_size > 16 * 1024 * 1024:
-                raise ValueError(
-                    "E_GROK_LIVE_REPO_MUTATION: fixture inventory exceeds its bound"
-                )
-            inventory.append(
-                [
-                    path.relative_to(root).as_posix(),
-                    hashlib.sha256(path.read_bytes()).hexdigest(),
-                ]
-            )
-    return inventory
-
-
-def capture_grok_repo_snapshot(
-    live_root: Path, fixture_root: Path | None = None
-) -> dict[str, object]:
-    live_root = Path(live_root).resolve()
-    fixture = Path(fixture_root).resolve() if fixture_root is not None else live_root
-    if not _lexically_within(fixture, live_root):
-        raise ValueError(
-            "E_GROK_LIVE_REPO_MUTATION: fixture root must be inside the live root"
-        )
-    return {
-        "status": _bounded_git_text(
-            live_root, "status", "--porcelain=v1", "--untracked-files=all"
-        ),
-        "unstagedDiff": _bounded_git_text(
-            live_root, "diff", "--no-ext-diff", "--"
-        ),
-        "stagedDiff": _bounded_git_text(
-            live_root, "diff", "--cached", "--no-ext-diff", "--"
-        ),
-        "fixtureInventory": _bounded_fixture_inventory(fixture),
-    }
-
-
 def _command_from_path(path: str) -> list[str] | None:
     candidate = Path(path).expanduser()
     resolved = str(candidate.resolve()) if candidate.is_file() else shutil.which(path)
@@ -1130,7 +477,6 @@ def resolve_provider_command(provider: str) -> list[str] | None:
     environment_key = {
         "codex": "CODEX_BIN",
         "claude": "CLAUDE_BIN",
-        "kimi": "KIMI_BIN",
     }.get(provider)
     if environment_key is None:
         return None
@@ -1198,8 +544,6 @@ def resolve_provider_auth_configuration(
             child["CLAUDE_CODE_USE_BEDROCK"] = "true"
         elif mode == "claude-vertex":
             child["CLAUDE_CODE_USE_VERTEX"] = "true"
-    elif provider in {"kimi", "grok"}:
-        mode = f"{provider}-current"
     else:
         raise ValueError("E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE: provider")
 
@@ -1274,20 +618,12 @@ def secure_output_dir(provider: str) -> Path:
     env_key = {
         "codex": "CODEX_PROMPTS_DIR",
         "claude": "CLAUDE_PROMPTS_DIR",
-        "kimi": "KIMI_PROMPTS_DIR",
-        "grok": "GROK_PROMPTS_DIR",
     }.get(provider, "PROVIDER_PROMPTS_DIR")
     configured = os.environ.get(env_key)
     if configured:
         output = Path(configured).expanduser()
         if not output.is_absolute():
             raise ValueError(f"{env_key} must name an absolute owner-controlled directory")
-    elif provider in {"kimi", "grok"}:
-        output = (
-            Path(tempfile.gettempdir())
-            / "orchestrarium"
-            / f"{provider}-prompts"
-        )
     else:
         output = Path.cwd() / ".scratch" / f"{provider}-prompts"
     output = Path(os.path.abspath(output))
@@ -1334,9 +670,47 @@ def _external_prompt_file_snapshot(path: Path) -> bytes:
 
 
 def external_governance_capsule_path() -> Path:
-    """Return the installed adjacent projection; callers never discover policy elsewhere."""
+    """Resolve the manifest-authorized authored or packed capsule view."""
 
-    return Path(__file__).resolve().with_name(EXTERNAL_GOVERNANCE_CAPSULE_NAME)
+    script = Path(__file__).resolve()
+    source_root = script.parent.parent
+    source_view = (
+        script == source_root / "scripts" / "provider_prompt.py"
+        and (source_root / "AGENTS.md").is_file()
+        and (source_root / "shared" / "AGENTS.shared.md").is_file()
+    )
+    if source_view:
+        root = source_root
+    else:
+        candidates = tuple(
+            root
+            for root in (script.parent.parent, script.parent.parent.parent)
+            if (root / "shared" / "provider-prompt-projections.v1.json").is_file()
+        )
+        if len(candidates) != 1:
+            raise ValueError("E_EXTERNAL_PROMPT_GOVERNANCE_MISSING")
+        root = candidates[0]
+    manifest_path = root / "shared" / "provider-prompt-projections.v1.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        record = manifest["files"][EXTERNAL_GOVERNANCE_CAPSULE_NAME]
+        source = Path(str(record["source"]))
+        destination = Path(str(record["destination"]))
+    except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise ValueError("E_EXTERNAL_PROMPT_GOVERNANCE_MISSING") from exc
+    if source != Path("shared") / EXTERNAL_GOVERNANCE_CAPSULE_NAME or destination != Path(
+        "scripts"
+    ) / EXTERNAL_GOVERNANCE_CAPSULE_NAME:
+        raise ValueError("E_EXTERNAL_PROMPT_GOVERNANCE_MISSING")
+    if source_view:
+        authored = root / source
+        if authored.is_file():
+            return authored
+        raise ValueError("E_EXTERNAL_PROMPT_GOVERNANCE_MISSING")
+    packed = script.parent / destination.name
+    if packed.is_file():
+        return packed
+    raise ValueError("E_EXTERNAL_PROMPT_GOVERNANCE_MISSING")
 
 
 def external_governance_capsule_snapshot(path: Path | None = None) -> bytes:
@@ -1405,7 +779,6 @@ class RunCaptureLifecycle:
     device: int
     inode: int
     prompt_path: Path
-    kimi_agent_path: Path
     out_path: Path
     err_path: Path
     pid_path: Path
@@ -1436,7 +809,6 @@ class RunCaptureLifecycle:
                 device=metadata.st_dev,
                 inode=metadata.st_ino,
                 prompt_path=run_dir / "prompt.md",
-                kimi_agent_path=run_dir / "kimi-agent.md",
                 out_path=run_dir / "provider.out",
                 err_path=run_dir / "provider.err",
                 pid_path=run_dir / "provider.pid",
@@ -1451,7 +823,6 @@ class RunCaptureLifecycle:
     def _validate_child(self, path: Path) -> None:
         if path.parent != self.run_dir or path not in {
             self.prompt_path,
-            self.kimi_agent_path,
             self.out_path,
             self.err_path,
             self.pid_path,
@@ -1485,20 +856,6 @@ class RunCaptureLifecycle:
         self.write_new(self.out_path, b"")
         self.write_new(self.err_path, b"")
         self.write_new(self.pid_path, b"")
-
-    def initialize_kimi_agent(self, snapshot: bytes) -> None:
-        """Materialize the bounded no-tool Kimi contract inside the capture."""
-        if len(snapshot) > RESULT_MAX_BYTES_HARD:
-            raise ValueError("E_KIMI_CONTAINMENT_UNAVAILABLE: snapshot exceeds bound")
-        agent = (
-            b"---\ntools: []\nsubagents: []\n---\n\n"
-            b"Read only the bounded snapshot below. Do not invoke tools or delegates.\n\n"
-            b"## Snapshot\n\n" + snapshot
-        )
-        self.write_new(self.kimi_agent_path, agent)
-        skills_dir = self.run_dir / "kimi-empty-skills"
-        self._validate_identity()
-        skills_dir.mkdir(mode=0o700)
 
     def open_for_write(self, path: Path):
         self._validate_identity()
@@ -1701,24 +1058,6 @@ class RunCaptureLifecycle:
             return CleanupResult((type(exc).__name__,), recovery_retained=True)
 
 
-def external_child_environment(provider: str) -> dict[str, str]:
-    """Default-deny environment for the new external providers only."""
-    base_names = (
-        "SystemRoot", "TEMP", "TMP", "USERPROFILE", "LOCALAPPDATA", "APPDATA"
-    )
-    environment = {
-        name: value for name in base_names if (value := os.environ.get(name))
-    }
-    if provider == "kimi":
-        environment["KIMI_CODE_HOME"] = str(Path.home() / ".kimi-code")
-        environment["KIMI_CODE_EXPERIMENTAL_FLAG"] = "1"
-    elif provider == "grok":
-        environment["GROK_HOME"] = str(Path.home() / ".grok")
-    else:
-        raise ValueError("external child environment is only defined for Kimi/Grok")
-    return environment
-
-
 def _posix_start_marker(pid: int) -> str | None:
     try:
         raw = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
@@ -1904,37 +1243,12 @@ def external_terminal_ledger_args(
         "--authorizing", "false",
         "--actual-execution-path", "direct-external-cli",
     ]
-    role_provenance = external_role_provenance(control, provider)
-    if provider in {"codex", "claude"}:
-        if realization is not None:
-            raise ValueError("E_EXTERNAL_LEDGER_UNVERIFIED: unexpected provider realization")
-        values = list(common)
-        if control.ledger_artifact:
-            values += ["--artifact-identity", control.ledger_artifact]
-        return values
-
-    payload = realization.get("executionProvenance") if realization else None
-    if not isinstance(payload, dict):
-        raise ValueError("E_EXTERNAL_LEDGER_UNVERIFIED: missing execution provenance")
-    expected = external_execution_provenance(
-        control,
-        provider,
-        slug,
-        model,
-        effort,
-        "no-native-effort-control" if provider == "kimi" else "none",
-    ).payload()
-    if payload != expected:
-        raise ValueError("E_EXTERNAL_LEDGER_UNVERIFIED: execution provenance")
-    if payload.get("assignedInternalRole") != role_provenance.assigned_role:
-        raise ValueError("E_EXTERNAL_LEDGER_UNVERIFIED: assigned role provenance")
-    return [
-        "--run-id", str(payload["externalEvidenceRunId"]),
-        "--artifact-identity", str(payload["artifactIdentity"]),
-        "--external-dispatch-id", str(payload["externalDispatchId"]),
-        "--external-evidence-run-id", str(payload["externalEvidenceRunId"]),
-        *common,
-    ]
+    if realization is not None:
+        raise ValueError("E_EXTERNAL_LEDGER_UNVERIFIED: unexpected provider realization")
+    values = list(common)
+    if control.ledger_artifact:
+        values += ["--artifact-identity", control.ledger_artifact]
+    return values
 
 
 def _final_nonblank_line(text: str) -> str:
@@ -2438,10 +1752,7 @@ def emit_provider_result(
             }
         )
     if realization is not None:
-        payload["realization"] = realization
-        provenance = realization.get("executionProvenance")
-        if isinstance(provenance, dict):
-            payload["executionProvenance"] = provenance
+        raise ValueError("provider result realization is unsupported")
     line = RESULT_PREFIX + json.dumps(
         payload, ensure_ascii=True, separators=(",", ":")
     )
@@ -2675,37 +1986,6 @@ def finalize_run(
             )
             print("FAIL: result materialization failed", file=sys.stderr)
         else:
-            if provider in {"kimi", "grok"}:
-                try:
-                    if provider == "grok":
-                        if realization is None:
-                            raise ValueError("E_GROK_RESULT_SHAPE_UNVERIFIED: missing realization")
-                        result_text = parse_external_provider_result(
-                            "grok",
-                            lifecycle.read_bounded(lifecycle.out_path, control.result_max_bytes, "Grok result"),
-                            realization.get("grokCapabilityFingerprint", ""),
-                        )
-                    else:
-                        result_text = parse_external_provider_result(
-                            "kimi",
-                            lifecycle.read_bounded(lifecycle.out_path, control.result_max_bytes, "Kimi result"),
-                            "",
-                        )
-                    assert_external_result_safe(result_text)
-                    final_gate = _final_nonblank_line(result_text).removeprefix("GATE: ")
-                    terminal = TerminalResult(
-                        terminal.evidence_path,
-                        "completed" if final_gate == "PASS" else "revise",
-                        final_gate,
-                        f"external parser: final-line GATE: {final_gate}",
-                        f"COMPLETE:{final_gate}",
-                        terminal.stderr_marker_count,
-                    )
-                except (OSError, ValueError, ResultMaterializationError) as exc:
-                    terminal = TerminalResult(terminal.evidence_path, "blocked", "none", str(exc), "UNVERIFIED:external-result", terminal.stderr_marker_count)
-                    result_text = ""
-                    if exit_code == 0:
-                        exit_code = 1
             primary_terminal = terminal
             if terminal.token.startswith("COMPLETE:"):
                 terminal = TerminalResult(
@@ -2808,19 +2088,13 @@ def settle_initialized_setup_failure(
 
 
 def launch(provider: str, argv: list[str]) -> int:
+    unavailable = EXTERNAL_UNAVAILABLE_IDS.get(provider)
+    if unavailable is not None:
+        return fail(f"{unavailable}: provider execution is unavailable")
     try:
-        control = (
-            parse_external_control(argv)
-            if provider in {"kimi", "grok"}
-            else parse_control(argv)
-        )
+        control = parse_control(argv)
         topic = validate_topic(control.topic)
-        if provider in {"kimi", "grok"}:
-            flags: list[str] = []
-            model = "kimi-code/k3" if provider == "kimi" else "grok-4.6"
-            effort = "unsupported" if provider == "kimi" else "runtime-default"
-        else:
-            flags, model, effort = resolved_profile(provider, control.provider_flags)
+        flags, model, effort = resolved_profile(provider, control.provider_flags)
     except ValueError as exc:
         return fail(str(exc))
 
@@ -2830,35 +2104,6 @@ def launch(provider: str, argv: list[str]) -> int:
         role_provenance = external_role_provenance(control, provider)
     except ValueError as exc:
         return fail(str(exc))
-
-    if provider in {"kimi", "grok"}:
-        if not control.task_class or not control.role:
-            return fail(
-                f"E_{provider.upper()}_DISPATCH_DENIED: --task-class and --role "
-                "are required"
-            )
-        policy = resolve_external_policy(provider, control.task_class, control.role)
-        if policy.get("status") != "external-required":
-            return fail(
-                f"{policy.get('stableId') or f'E_{provider.upper()}_DISPATCH_DENIED'}: "
-                "external dispatch policy denied the task/role pair"
-            )
-        try:
-            require_external_realization(provider, policy)
-        except ValueError as exc:
-            return fail(str(exc))
-        try:
-            require_transport_projection_parity()
-        except ValueError as exc:
-            return fail(str(exc))
-        # The provider integration is intentionally installed but not currently
-        # authorized to execute. Do not consume a prompt, inspect a binary, or
-        # allocate capture state until the separately admitted observed smoke
-        # establishes readiness for the current fingerprint.
-        return fail(
-            f"{EXTERNAL_UNAVAILABLE_IDS[provider]}: provider-observed readiness "
-            "smoke is not available"
-        )
 
     if provider == "claude" and not claude_commercial_auth_present():
         print(
@@ -2882,39 +2127,15 @@ def launch(provider: str, argv: list[str]) -> int:
         return fail(str(exc))
 
     query_cwd = Path.cwd().resolve()
-    grok_before: dict[str, object] | None = None
-    grok_capability: GrokCapability | None = None
-    grok_live_root: Path | None = None
-    if provider == "grok":
-        try:
-            home_value = os.environ.get("USERPROFILE") or os.environ.get("HOME")
-            if not home_value:
-                raise ValueError("E_GROK_PATH_CONFLICT: user home is unavailable")
-            grok_live_root = (control.live_root or query_cwd).resolve()
-            executable = resolve_grok_executable(
-                Path(home_value), dict(os.environ), shutil.which
-            )
-            command = [str(executable)]
-            grok_capability = _probe_grok_capabilities(
-                executable, grok_live_root
-            )
-            grok_before = capture_grok_repo_snapshot(
-                grok_live_root, grok_live_root
-            )
-        except (OSError, ValueError) as exc:
-            return fail(str(exc))
-    else:
-        command = resolve_provider_command(provider)
-        if command is None:
-            key = {
-                "codex": "CODEX_BIN",
-                "claude": "CLAUDE_BIN",
-                "kimi": "KIMI_BIN",
-            }.get(provider, "PROVIDER_BIN")
-            return fail(
-                f"{provider} binary '{os.environ.get(key) or provider}' not found on PATH. "
-                f"Set {key} if installed elsewhere."
-            )
+    command = resolve_provider_command(provider)
+    if command is None:
+        key = {"codex": "CODEX_BIN", "claude": "CLAUDE_BIN"}.get(
+            provider, "PROVIDER_BIN"
+        )
+        return fail(
+            f"{provider} binary '{os.environ.get(key) or provider}' not found on PATH. "
+            f"Set {key} if installed elsewhere."
+        )
     if provider == "codex":
         if not Path(command[0]).is_absolute() or not Path(command[0]).is_file():
             return fail("resolved Codex executable is not an absolute regular file")
@@ -2928,78 +2149,13 @@ def launch(provider: str, argv: list[str]) -> int:
     lifecycle: RunCaptureLifecycle | None = None
     lifecycle_initialized = False
     realization: dict[str, str] | None = None
-    provider_stdin: bytes | None = None
-    provider_cwd: Path | None = None
     try:
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         slug = f"{topic}-{timestamp}-{secrets.token_hex(4)}"
         lifecycle = RunCaptureLifecycle.create(provider, slug)
         lifecycle.initialize(body)
         lifecycle_initialized = True
-        if provider == "kimi":
-            lifecycle.initialize_kimi_agent(body)
-            agent_contract = lifecycle.kimi_agent_path.read_text(encoding="utf-8")
-            if "tools: []" not in agent_contract or "subagents: []" not in agent_contract:
-                raise ValueError("E_KIMI_CONTAINMENT_UNAVAILABLE: agent containment contract")
-            neutral_cwd = lifecycle.run_dir / "workspace"
-            neutral_cwd.mkdir(mode=0o700)
-            plan = build_kimi_launch_plan(
-                task_file=lifecycle.prompt_path,
-                neutral_cwd=neutral_cwd,
-                live_root=control.live_root or query_cwd,
-                provider_flags=control.provider_flags,
-            )
-            smoke_canary = lifecycle.run_dir / "kimi-smoke-canary"
-            smoke_canary.write_bytes(b"orchestrarium-kimi-smoke-canary")
-            run_kimi_containment_smoke(
-                command,
-                plan,
-                control.live_root or query_cwd,
-                smoke_canary,
-                external_child_environment("kimi"),
-            )
-            flags = list(plan.argv)
-            provider_stdin = plan.stdin
-            provider_cwd = plan.cwd
-            realization = {
-                **plan.provenance,
-                "executionProvenance": external_execution_provenance(
-                    control,
-                    provider,
-                    slug,
-                    model,
-                    effort,
-                    plan.provenance["mapping_loss"],
-                ).payload(),
-            }
-        elif provider == "grok":
-            assert grok_capability is not None
-            assert grok_live_root is not None
-            plan = build_grok_launch_plan(
-                task_file=lifecycle.prompt_path,
-                live_root=grok_live_root,
-                capability=grok_capability,
-                provider_flags=control.provider_flags,
-            )
-            flags = list(plan.argv)
-            provider_stdin = plan.stdin
-            provider_cwd = plan.cwd
-            realization = {
-                **plan.provenance,
-                "executionProvenance": external_execution_provenance(
-                    control,
-                    provider,
-                    slug,
-                    model,
-                    effort,
-                    plan.provenance["mapping_loss"],
-                ).payload(),
-            }
     except (OSError, ValueError) as exc:
-        if provider in {"kimi", "grok"} and lifecycle is not None and lifecycle_initialized:
-            return settle_initialized_setup_failure(
-                control, provider, model, effort, slug, lifecycle, exc, realization
-            )
         if lifecycle is not None:
             cleanup = RunCaptureLifecycle.release_provisional(lifecycle.run_dir)
             for issue in cleanup.issues:
@@ -3054,11 +2210,7 @@ def launch(provider: str, argv: list[str]) -> int:
         if provider == "codex"
         else flags
     )
-    child_environment = (
-        external_child_environment(provider)
-        if provider in {"kimi", "grok"}
-        else dict(auth_configuration.child_environment)
-    )
+    child_environment = dict(auth_configuration.child_environment)
     if provider == "claude":
         child_environment["ORCHESTRARIUM_DISPATCHED_REVIEW"] = "1"
     elif provider == "codex":
@@ -3078,7 +2230,7 @@ def launch(provider: str, argv: list[str]) -> int:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             env=child_environment,
-            cwd=provider_cwd if provider in {"kimi", "grok"} else query_cwd if provider == "codex" else None,
+            cwd=query_cwd if provider == "codex" else None,
             bufsize=0,
         )
         marker = process_start_marker(process.pid)
@@ -3095,7 +2247,7 @@ def launch(provider: str, argv: list[str]) -> int:
         ) = supervise_provider_io(
             process,
             lifecycle,
-            body if provider_stdin is None else provider_stdin,
+            body,
             control.capture_max_bytes,
             control.timeout_secs,
         )
@@ -3112,17 +2264,6 @@ def launch(provider: str, argv: list[str]) -> int:
         launch_error = f"{launch_error + '; ' if launch_error else ''}stream capture incomplete: {detail}"
         if exit_code == 0:
             exit_code = 1
-    if provider == "grok" and grok_before is not None:
-        try:
-            assert grok_live_root is not None
-            after = capture_grok_repo_snapshot(grok_live_root, grok_live_root)
-            assert_grok_repo_immutable(grok_before, after)
-        except (OSError, ValueError) as exc:
-            launch_error = (
-                f"{launch_error + '; ' if launch_error else ''}{exc}"
-            )
-            if exit_code == 0:
-                exit_code = 1
     return finalize_run(
         control,
         provider,

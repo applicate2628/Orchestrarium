@@ -181,6 +181,41 @@
       "allowedProfiles": ["balanced-medium", "balanced-high"]
     }
   },
+  "mechanicalExecutionContract": {
+    "schemaVersion": 1,
+    "requiresFullySpecifiedTask": true,
+    "decisionAuthority": "none",
+    "ambiguity": "abort",
+    "fallback": "none",
+    "objectiveOracle": "caller-required",
+    "scout": {
+      "status": "disabled-until-host-containment",
+      "stableId": "E_LUNA_EXECUTION_CONTAINMENT_UNAVAILABLE",
+      "planContract": "LunaExecutionContractV1",
+      "outputContract": "ScoutFactsV1",
+      "readProbeOrder": "caller-specified-exact-order",
+      "targetBinding": "optional-exact-git-root",
+      "allowedTools": "caller-supplied-exact-runtime-ids",
+      "allowedOperations": [
+        "path-kind",
+        "file-size",
+        "sha256",
+        "read-lines",
+        "list-directory",
+        "literal-equals"
+      ],
+      "toolAttestation": "caller-required-exact-equality",
+      "factsOnly": true,
+      "forbiddenOutputs": ["diagnosis", "design", "selection", "recommendation", "risk", "gate"]
+    },
+    "worker": {
+      "status": "disabled-until-host-containment",
+      "stableId": "E_LUNA_WRITE_CONTAINMENT_UNAVAILABLE",
+      "sandboxMode": "read-only",
+      "directCodeOrPatchAuthoring": false,
+      "decisionRoute": "terra-or-sol"
+    }
+  },
   "taskRoleEligibility": {
     "micro": ["mechanical-scout"],
     "mechanical-read": ["mechanical-scout"],

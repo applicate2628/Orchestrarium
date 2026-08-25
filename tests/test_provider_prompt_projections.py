@@ -26,6 +26,55 @@ TRANSPORT_FILES = (
     "invoke-grok-prompt.py",
     "external-prompt-governance.md",
 )
+AUTHORED_TRANSPORT_SOURCES = {
+    name: Path("scripts") / name for name in TRANSPORT_FILES
+}
+AUTHORED_TRANSPORT_SOURCES["external-prompt-governance.md"] = (
+    Path("shared") / "external-prompt-governance.md"
+)
+STOCK_8521_PROJECTION_SHA256 = {
+    "provider_prompt.py": "4bfb92cb92039f73ce5eca397f22a5df7b9ef9203486cbd81c654e485315edf1",
+    "invoke-codex-prompt.py": "0b085a6fd0e28a5a486c8ef25bf52d4c69123d94cc8712d63dd30deadcc5f665",
+    "invoke-claude-prompt.py": "3250c9a85e36ab2e57a218688c5d7d3cfed59552c1f2bad7eb52f45370df80f3",
+    "invoke-kimi-prompt.py": "05679dac1daded511debf617e8f1189dd941d21a5d1c7f6e3dd3ec21d4c0bc75",
+    "invoke-grok-prompt.py": "1f0f4f6bb03d816b3f40ff56ebe71973301d2d7104ef1d7f335b1ffa0b248559",
+    "external-prompt-governance.md": "c7a59ccec7d6e46be76584a107b0a5b30b249368b4f0958cb78177962dc34b00",
+    "provider-prompt-projections.v1.json": "d7c873527e67a1aa81906aa2ee73d25088420f18b3453a429ff80085ecd4af6b",
+}
+
+
+def _authored_transport_path(root: Path, name: str) -> Path:
+    return root / AUTHORED_TRANSPORT_SOURCES[name]
+
+
+def _stock_8521_blob(name: str) -> bytes:
+    source = (
+        f"shared/{name}"
+        if name == "provider-prompt-projections.v1.json"
+        else f"scripts/{name}"
+    )
+    payload = subprocess.run(
+        ["git", "show", f"8521b638:{source}"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+    ).stdout
+    assert hashlib.sha256(payload).hexdigest() == STOCK_8521_PROJECTION_SHA256[name]
+    return payload
+
+
+def _seed_stock_8521_transport(projection: Path) -> dict[str, Path]:
+    projection.mkdir(parents=True, exist_ok=True)
+    paths: dict[str, Path] = {}
+    for name in TRANSPORT_FILES:
+        path = projection / name
+        path.write_bytes(_stock_8521_blob(name))
+        paths[name] = path
+    manifest = projection.parent / "shared" / "provider-prompt-projections.v1.json"
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    manifest.write_bytes(_stock_8521_blob(manifest.name))
+    paths[manifest.name] = manifest
+    return paths
 
 
 def _load_validator():
@@ -85,6 +134,18 @@ def test_source_manifest_binds_approved_codex_and_claude_thin_wrappers() -> None
         assert (ROOT / "scripts" / name).is_file()
 
 
+def test_governance_capsule_has_shared_authored_source_and_scripts_runtime_destination() -> None:
+    manifest = json.loads(
+        (ROOT / "shared" / "provider-prompt-projections.v1.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    capsule = manifest["files"]["external-prompt-governance.md"]
+    assert capsule["source"] == "shared/external-prompt-governance.md"
+    assert capsule["destination"] == "scripts/external-prompt-governance.md"
+
+
 def _tree_bytes(root: Path) -> dict[str, bytes]:
     return {
         path.relative_to(root).as_posix(): path.read_bytes()
@@ -120,16 +181,16 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
     source = tmp_path / "source"
     canonical = tmp_path / "canonical" / "scripts"
     claude = tmp_path / "claude" / "agents" / "scripts"
-    for directory in (source / "scripts", canonical, claude):
+    for directory in (source / "scripts", source / "shared", canonical, claude):
         directory.mkdir(parents=True)
     files: dict[str, dict[str, object]] = {}
     for name in TRANSPORT_FILES:
         payload = f"# {name}\n".encode()
-        (source / "scripts" / name).write_bytes(payload)
+        _authored_transport_path(source, name).write_bytes(payload)
         (canonical / name).write_bytes(payload)
         (claude / name).write_bytes(payload)
         files[name] = {
-            "source": f"scripts/{name}",
+            "source": AUTHORED_TRANSPORT_SOURCES[name].as_posix(),
             "sha256": _sha(payload),
             "destination": f"scripts/{name}",
         }
@@ -143,8 +204,7 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
         indent=2,
     ) + "\n"
     manifest.write_text(manifest_text, encoding="utf-8")
-    (source / "shared").mkdir()
-    capsule = (source / "scripts" / "external-prompt-governance.md").read_bytes()
+    capsule = _authored_transport_path(source, "external-prompt-governance.md").read_bytes()
     (source / "shared" / "AGENTS.shared.md").write_bytes(
         b"before\n"
         b"<!-- BEGIN ORCHESTRARIUM EXTERNAL GOVERNANCE V1 -->\n"
@@ -212,7 +272,7 @@ def test_project_scope_uses_its_paired_projections_without_reading_home(
     for destination in (canonical, claude):
         destination.mkdir(parents=True)
         for name in TRANSPORT_FILES:
-            shutil.copyfile(source / "scripts" / name, destination / name)
+            shutil.copyfile(_authored_transport_path(source, name), destination / name)
     home = tmp_path / "poisoned-home"
     poisoned = home / ".agents" / "skills" / "lead" / "scripts"
     poisoned.mkdir(parents=True)
@@ -273,7 +333,7 @@ def test_global_scope_uses_the_named_install_root_not_home(
     ):
         destination.mkdir(parents=True)
         for name in TRANSPORT_FILES:
-            shutil.copyfile(source / "scripts" / name, destination / name)
+            shutil.copyfile(_authored_transport_path(source, name), destination / name)
     monkeypatch.setenv("HOME", str(tmp_path / "poisoned-home"))
     monkeypatch.delenv("USERPROFILE", raising=False)
     result = subprocess.run(
@@ -567,7 +627,7 @@ def test_claude_projection_stage_has_one_create_only_apply_path(tmp_path: Path) 
     assert recorder.calls == [
         (
             claude.relative_to(tmp_path) / name,
-            (source / "scripts" / name).read_bytes(),
+            _authored_transport_path(source, name).read_bytes(),
         )
         for name in TRANSPORT_FILES
     ] + [
@@ -596,13 +656,343 @@ def test_claude_transport_preflight_admits_only_atomic_projection_states(
         (claude / name).unlink()
     if state == "current":
         for name in TRANSPORT_FILES:
-            (claude / name).write_bytes((source / "scripts" / name).read_bytes())
+            (claude / name).write_bytes(_authored_transport_path(source, name).read_bytes())
         (claude.parent / "shared").mkdir(parents=True)
         (claude.parent / "shared" / "provider-prompt-projections.v1.json").write_bytes(
             (source / "shared" / "provider-prompt-projections.v1.json").read_bytes()
         )
     staged = installer._stage_claude_transport_projection(source, canonical, claude)
     assert tuple(name for name, _payload in staged.pending_files) == expected_names
+
+
+def _current_canonical_with_stock_8521_projection(
+    tmp_path: Path,
+) -> tuple[Path, Path, dict[str, Path]]:
+    canonical = tmp_path / "canonical" / "scripts"
+    projection = tmp_path / "claude" / "agents" / "scripts"
+    canonical.mkdir(parents=True)
+    for name in TRANSPORT_FILES:
+        (canonical / name).write_bytes(_authored_transport_path(ROOT, name).read_bytes())
+    paths = _seed_stock_8521_transport(projection)
+    return canonical, projection, paths
+
+
+def test_exact_8521_transport_set_is_one_atomic_prior_plan(tmp_path: Path) -> None:
+    installer = _load_installer()
+    canonical, projection, _paths = _current_canonical_with_stock_8521_projection(
+        tmp_path
+    )
+
+    staged = installer._stage_claude_transport_projection(ROOT, canonical, projection)
+
+    assert staged.accepted_prior_set == "8521b638"
+    assert tuple(name for name, _payload in staged.pending_files) == (
+        "provider_prompt.py",
+    )
+    assert staged.manifest_pending is True
+    assert {
+        witness.path.name: witness.sha256 for witness in staged.witnesses
+    } == STOCK_8521_PROJECTION_SHA256
+
+
+@pytest.mark.parametrize("name", tuple(STOCK_8521_PROJECTION_SHA256))
+@pytest.mark.parametrize("mutation", ("drift", "missing", "type"))
+def test_8521_transport_prior_rejects_every_non_exact_member(
+    tmp_path: Path, name: str, mutation: str
+) -> None:
+    installer = _load_installer()
+    canonical, projection, paths = _current_canonical_with_stock_8521_projection(
+        tmp_path
+    )
+    path = paths[name]
+    if mutation == "drift":
+        path.write_bytes(path.read_bytes() + b"custom drift\n")
+    elif mutation == "missing":
+        path.unlink()
+    else:
+        path.unlink()
+        path.mkdir()
+
+    with pytest.raises(
+        ValueError, match="E_TRANSPORT_PROJECTION_PARITY: atomic projection state"
+    ):
+        installer._stage_claude_transport_projection(ROOT, canonical, projection)
+
+
+@pytest.mark.parametrize("name", tuple(STOCK_8521_PROJECTION_SHA256))
+def test_8521_transport_prior_rejects_every_linked_member(
+    tmp_path: Path, name: str
+) -> None:
+    installer = _load_installer()
+    canonical, projection, paths = _current_canonical_with_stock_8521_projection(
+        tmp_path
+    )
+    path = paths[name]
+    backing = tmp_path / f"{name}.backing"
+    backing.write_bytes(path.read_bytes())
+    path.unlink()
+    try:
+        path.symlink_to(backing)
+    except (NotImplementedError, OSError) as exc:
+        pytest.skip(f"file symlink unavailable: {exc}")
+
+    with pytest.raises(
+        ValueError, match="E_TRANSPORT_PROJECTION_PARITY: atomic projection state"
+    ):
+        installer._stage_claude_transport_projection(ROOT, canonical, projection)
+
+
+@pytest.mark.parametrize(
+    "current_member", ("provider_prompt.py", "provider-prompt-projections.v1.json")
+)
+def test_8521_transport_prior_rejects_mixed_old_and_current_sets(
+    tmp_path: Path, current_member: str
+) -> None:
+    installer = _load_installer()
+    canonical, projection, paths = _current_canonical_with_stock_8521_projection(
+        tmp_path
+    )
+    current = (
+        (ROOT / "shared" / current_member).read_bytes()
+        if current_member == "provider-prompt-projections.v1.json"
+        else _authored_transport_path(ROOT, current_member).read_bytes()
+    )
+    paths[current_member].write_bytes(current)
+
+    with pytest.raises(
+        ValueError, match="E_TRANSPORT_PROJECTION_PARITY: atomic projection state"
+    ):
+        installer._stage_claude_transport_projection(ROOT, canonical, projection)
+
+
+def test_invalid_8521_transport_set_fails_before_transaction_entry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    installer = _load_installer()
+    target = tmp_path / "target"
+    target.mkdir()
+    args = [
+        "--target",
+        str(target),
+        "--force",
+        "--allow-unsafe-target",
+        "--no-hypothesis-hook",
+    ]
+    assert installer.install("claude", args) == 0
+    projection = target / ".claude" / "agents" / "scripts"
+    paths = _seed_stock_8521_transport(projection)
+    paths["provider-prompt-projections.v1.json"].write_bytes(b"mixed manifest\n")
+    entered: list[object] = []
+    original_enter = installer._InstallTransaction.__enter__
+
+    def observe_enter(transaction):
+        entered.append(transaction)
+        return original_enter(transaction)
+
+    monkeypatch.setattr(installer._InstallTransaction, "__enter__", observe_enter)
+
+    assert installer.install("claude", args) == 1
+    assert entered == []
+
+
+def test_8521_transport_plan_revalidates_all_witnesses_before_first_write(
+    tmp_path: Path,
+) -> None:
+    installer = _load_installer()
+    canonical, projection, paths = _current_canonical_with_stock_8521_projection(
+        tmp_path
+    )
+    staged = installer._stage_claude_transport_projection(ROOT, canonical, projection)
+    paths["invoke-codex-prompt.py"].write_bytes(b"post-preflight race\n")
+
+    class MutationSpy:
+        anchor = tmp_path
+        dry_run = False
+
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        def create_file(self, *_args, **_kwargs) -> None:
+            self.calls.append("create_file")
+
+        def migrate_exact_file(self, *_args, **_kwargs) -> None:
+            self.calls.append("migrate_exact_file")
+
+    owner = MutationSpy()
+    with pytest.raises(
+        ValueError, match="E_TRANSPORT_PROJECTION_PARITY: preflight drift"
+    ):
+        installer._apply_claude_transport_projection(staged, projection, owner)
+    assert owner.calls == []
+
+
+def _installed_target_with_stock_8521_transport(
+    tmp_path: Path, installer
+) -> tuple[Path, list[str], Path, dict[str, Path]]:
+    target = tmp_path / "target"
+    target.mkdir()
+    args = [
+        "--target",
+        str(target),
+        "--force",
+        "--allow-unsafe-target",
+        "--no-hypothesis-hook",
+    ]
+    assert installer.install("claude", args) == 0
+    projection = target / ".claude" / "agents" / "scripts"
+    paths = _seed_stock_8521_transport(projection)
+    return target, args, projection, paths
+
+
+@pytest.mark.parametrize("fail_after", (1, 2))
+def test_8521_transport_replacement_failure_restores_bytes_and_identities(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fail_after: int,
+) -> None:
+    installer = _load_installer()
+    _target, args, projection, paths = _installed_target_with_stock_8521_transport(
+        tmp_path, installer
+    )
+    before = {
+        name: (
+            path.read_bytes(),
+            installer._CreateOnlyMutablePath._identity(path),
+        )
+        for name, path in paths.items()
+    }
+    original = installer._CreateOnlyMutablePath.migrate_exact_file
+    calls = 0
+
+    def fail_after_migration(self, relative, expected_digest, payload):
+        nonlocal calls
+        result = original(self, relative, expected_digest, payload)
+        calls += 1
+        if calls == fail_after:
+            raise RuntimeError(f"injected transport migration failure {fail_after}")
+        return result
+
+    monkeypatch.setattr(
+        installer._CreateOnlyMutablePath,
+        "migrate_exact_file",
+        fail_after_migration,
+    )
+
+    assert installer.install("claude", args) == 1
+    assert calls == fail_after
+    assert {
+        name: (
+            path.read_bytes(),
+            installer._CreateOnlyMutablePath._identity(path),
+        )
+        for name, path in paths.items()
+    } == before
+    assert not tuple(projection.parent.rglob("*.prior"))
+
+
+def test_8521_transport_final_parity_failure_restores_original_identities(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    installer = _load_installer()
+    _target, args, projection, paths = _installed_target_with_stock_8521_transport(
+        tmp_path, installer
+    )
+    before = {
+        name: (
+            path.read_bytes(),
+            installer._CreateOnlyMutablePath._identity(path),
+        )
+        for name, path in paths.items()
+    }
+
+    def reject_final_parity(*_args, **_kwargs):
+        raise ValueError("E_TRANSPORT_PROJECTION_PARITY: injected final parity")
+
+    monkeypatch.setattr(
+        installer, "_validate_committed_transport_projection", reject_final_parity
+    )
+
+    assert installer.install("claude", args) == 1
+    assert {
+        name: (
+            path.read_bytes(),
+            installer._CreateOnlyMutablePath._identity(path),
+        )
+        for name, path in paths.items()
+    } == before
+    assert not tuple(projection.parent.rglob("*.prior"))
+
+
+def test_8521_transport_real_install_replaces_two_members_then_is_noop(
+    tmp_path: Path,
+) -> None:
+    installer = _load_installer()
+    _target, args, projection, paths = _installed_target_with_stock_8521_transport(
+        tmp_path, installer
+    )
+    before_identities = {
+        name: installer._CreateOnlyMutablePath._identity(path)
+        for name, path in paths.items()
+    }
+
+    assert installer.install("claude", args) == 0
+    current_manifest = ROOT / "shared" / "provider-prompt-projections.v1.json"
+    for name, path in paths.items():
+        expected = (
+            current_manifest.read_bytes()
+            if name == current_manifest.name
+            else _authored_transport_path(ROOT, name).read_bytes()
+        )
+        assert path.read_bytes() == expected
+    after_first = {
+        name: (
+            path.read_bytes(),
+            installer._CreateOnlyMutablePath._identity(path),
+        )
+        for name, path in paths.items()
+    }
+    assert after_first["provider_prompt.py"][1] != before_identities["provider_prompt.py"]
+    assert after_first[current_manifest.name][1] != before_identities[current_manifest.name]
+    for name in set(paths) - {"provider_prompt.py", current_manifest.name}:
+        assert after_first[name][1] == before_identities[name]
+    assert not tuple(projection.parent.rglob("*.prior"))
+
+    assert installer.install("claude", args) == 0
+    assert {
+        name: (
+            path.read_bytes(),
+            installer._CreateOnlyMutablePath._identity(path),
+        )
+        for name, path in paths.items()
+    } == after_first
+
+
+def test_8521_transport_dry_run_reports_two_replacements_without_mutation(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    installer = _load_installer()
+    _target, args, _projection, paths = _installed_target_with_stock_8521_transport(
+        tmp_path, installer
+    )
+    capsys.readouterr()
+    before = {
+        name: (
+            path.read_bytes(),
+            installer._CreateOnlyMutablePath._identity(path),
+        )
+        for name, path in paths.items()
+    }
+
+    assert installer.install("claude", [*args, "--dry-run"]) == 0
+    output = capsys.readouterr().out
+    assert "transport prior 8521b638: 2 replacements" in output
+    assert {
+        name: (
+            path.read_bytes(),
+            installer._CreateOnlyMutablePath._identity(path),
+        )
+        for name, path in paths.items()
+    } == before
 
 
 def test_claude_transport_preflight_accepts_only_true_e7_legacy_singleton(
@@ -614,7 +1004,7 @@ def test_claude_transport_preflight_accepts_only_true_e7_legacy_singleton(
     canonical.mkdir(parents=True)
     projection.mkdir(parents=True)
     for name in TRANSPORT_FILES:
-        (canonical / name).write_bytes((ROOT / "scripts" / name).read_bytes())
+        (canonical / name).write_bytes(_authored_transport_path(ROOT, name).read_bytes())
     legacy = subprocess.run(
         ["git", "show", "e7a691dea4f1d3cb154d338c63b274ebcd74ee4c:src.claude/agents/scripts/provider_prompt.py"],
         cwd=ROOT,
@@ -624,7 +1014,7 @@ def test_claude_transport_preflight_accepts_only_true_e7_legacy_singleton(
     assert hashlib.sha256(legacy).hexdigest() == installer.E7_LEGACY_PROVIDER_PROMPT_SHA256
     (projection / "provider_prompt.py").write_bytes(legacy)
     for name in ("invoke-codex-prompt.py", "invoke-claude-prompt.py"):
-        (projection / name).write_bytes((ROOT / "scripts" / name).read_bytes())
+        (projection / name).write_bytes(_authored_transport_path(ROOT, name).read_bytes())
 
     staged = installer._stage_claude_transport_projection(ROOT, canonical, projection)
 
@@ -643,7 +1033,7 @@ def test_claude_transport_preflight_accepts_the_published_pre_e7_singleton(
     canonical.mkdir(parents=True)
     projection.mkdir(parents=True)
     for name in TRANSPORT_FILES:
-        (canonical / name).write_bytes((ROOT / "scripts" / name).read_bytes())
+        (canonical / name).write_bytes(_authored_transport_path(ROOT, name).read_bytes())
     legacy = subprocess.run(
         ["git", "show", "8b9fce435853e1988c449805786c9ce9cbf9579e:src.claude/agents/scripts/provider_prompt.py"],
         cwd=ROOT,
@@ -653,7 +1043,7 @@ def test_claude_transport_preflight_accepts_the_published_pre_e7_singleton(
     assert hashlib.sha256(legacy).hexdigest() == installer.PRE_E7_LEGACY_PROVIDER_PROMPT_SHA256
     (projection / "provider_prompt.py").write_bytes(legacy)
     for name in ("invoke-codex-prompt.py", "invoke-claude-prompt.py"):
-        (projection / name).write_bytes((ROOT / "scripts" / name).read_bytes())
+        (projection / name).write_bytes(_authored_transport_path(ROOT, name).read_bytes())
 
     staged = installer._stage_claude_transport_projection(ROOT, canonical, projection)
 
@@ -776,7 +1166,7 @@ def test_claude_transport_preflight_rejects_mixed_state_before_apply(
     for name in TRANSPORT_FILES:
         (claude / name).unlink()
     (claude / TRANSPORT_FILES[0]).write_bytes(
-        (source / "scripts" / TRANSPORT_FILES[0]).read_bytes()
+        _authored_transport_path(source, TRANSPORT_FILES[0]).read_bytes()
     )
     (claude / TRANSPORT_FILES[1]).write_text("drift\n", encoding="utf-8")
 
@@ -894,12 +1284,52 @@ def test_canonical_stage_publishes_and_validates_transport_before_skill_projecti
 
     assert not hasattr(installer, "_install_claude_transport_projections")
     for name in TRANSPORT_FILES:
-        expected = (ROOT / "scripts" / name).read_bytes()
+        expected = _authored_transport_path(ROOT, name).read_bytes()
         assert (canonical / "lead" / "scripts" / name).read_bytes() == expected
         assert (claude / name).read_bytes() == expected
     assert (
         claude.parent / "shared" / "provider-prompt-projections.v1.json"
     ).read_bytes() == (ROOT / "shared" / "provider-prompt-projections.v1.json").read_bytes()
+
+
+def test_global_claude_canonical_collision_preflights_before_transaction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A rejected stock upgrade must not recreate the shared skills root."""
+
+    installer = _load_installer()
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setenv("HOME", str(home))
+    assert installer.install("claude", ["--global", "--no-hypothesis-hook"]) == 0
+
+    skills = home / ".agents" / "skills"
+    consultant = skills / "consultant" / "SKILL.md"
+    consultant.write_bytes(consultant.read_bytes() + b"custom collision\n")
+    before_bytes = _tree_bytes(skills)
+    before_identity = installer._CreateOnlyMutablePath._identity(skills)
+    entered: list[object] = []
+    restored: list[object] = []
+    original_enter = installer._InstallTransaction.__enter__
+    original_restore = installer._InstallTransaction._restore_entry
+
+    def observe_enter(transaction):
+        entered.append(transaction)
+        return original_enter(transaction)
+
+    def observe_restore(transaction, entry):
+        restored.append(entry)
+        return original_restore(transaction, entry)
+
+    monkeypatch.setattr(installer._InstallTransaction, "__enter__", observe_enter)
+    monkeypatch.setattr(installer._InstallTransaction, "_restore_entry", observe_restore)
+
+    assert installer.install("claude", ["--global", "--no-hypothesis-hook"]) == 1
+    assert entered == []
+    assert restored == []
+    assert _tree_bytes(skills) == before_bytes
+    assert installer._CreateOnlyMutablePath._identity(skills) == before_identity
 
 
 def test_global_claude_declared_linked_subroots_are_bound_and_dry_run_is_read_only(

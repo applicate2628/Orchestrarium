@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import io
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -10,7 +11,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 MODULE_PATH = ROOT / "scripts" / "provider_prompt.py"
-CAPSULE_PATH = ROOT / "scripts" / "external-prompt-governance.md"
+CAPSULE_PATH = ROOT / "shared" / "external-prompt-governance.md"
 
 TRANSPORT_CONSUMERS = {
     "codex-dispatch-owner": ROOT / "src.codex" / "skills" / "lead" / "external-dispatch.md",
@@ -63,9 +64,24 @@ TRANSPORT_CONSUMER_REQUIREMENTS = (
 )
 
 
-def _load_module():
+def _load_module(packed_root: Path | None = None):
+    module_path = MODULE_PATH
+    if packed_root is not None:
+        scripts = packed_root / "scripts"
+        shared = packed_root / "shared"
+        scripts.mkdir(parents=True)
+        shared.mkdir()
+        module_path = scripts / "provider_prompt.py"
+        shutil.copyfile(MODULE_PATH, module_path)
+        shutil.copyfile(CAPSULE_PATH, shared / "external-prompt-governance.md")
+        shutil.copyfile(
+            ROOT / "shared" / "provider-prompt-projections.v1.json",
+            shared / "provider-prompt-projections.v1.json",
+        )
+        (packed_root / "AGENTS.md").write_text("fixture\n", encoding="utf-8")
+        (shared / "AGENTS.shared.md").write_text("fixture\n", encoding="utf-8")
     spec = importlib.util.spec_from_file_location(
-        "external_prompt_governance_test", MODULE_PATH
+        "external_prompt_governance_test", module_path
     )
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
@@ -74,10 +90,12 @@ def _load_module():
     return module
 
 
-def test_composer_prefixes_canonical_capsule_and_never_treats_task_marker_as_idempotency() -> None:
+def test_composer_prefixes_canonical_capsule_and_never_treats_task_marker_as_idempotency(
+    tmp_path: Path,
+) -> None:
     """Catches a composer that omits, strips, or trusts task-local governance text."""
 
-    provider_prompt = _load_module()
+    provider_prompt = _load_module(tmp_path)
     capsule = CAPSULE_PATH.read_bytes()
     task = (
         b"ORCHESTRARIUM_EXTERNAL_GOVERNANCE_V1\n"
@@ -100,7 +118,7 @@ def test_capsule_snapshot_fails_closed_on_untrusted_local_input(
 ) -> None:
     """Catches a capsule loader that would use a missing, altered, or linked policy file."""
 
-    provider_prompt = _load_module()
+    provider_prompt = _load_module(tmp_path)
     capsule = tmp_path / "external-prompt-governance.md"
     if kind == "drift":
         capsule.write_bytes(b"altered\n")
@@ -114,10 +132,12 @@ def test_capsule_snapshot_fails_closed_on_untrusted_local_input(
         provider_prompt.external_governance_capsule_snapshot(capsule)
 
 
-def test_composer_counts_the_governance_frame_inside_the_existing_prompt_limit() -> None:
+def test_composer_counts_the_governance_frame_inside_the_existing_prompt_limit(
+    tmp_path: Path,
+) -> None:
     """Catches a size guard that only counts caller task bytes."""
 
-    provider_prompt = _load_module()
+    provider_prompt = _load_module(tmp_path)
     with pytest.raises(
         ValueError,
         match="^E_EXTERNAL_PROMPT_INVALID: composed prompt exceeds the byte limit$",
@@ -211,7 +231,7 @@ def test_wrapper_rejects_composed_overflow_before_provider_or_capture(
 ) -> None:
     """Catches a wrapper that validates task bytes but not capsule-plus-frame bytes."""
 
-    provider_prompt = _load_module()
+    provider_prompt = _load_module(tmp_path)
     task = tmp_path / "task.md"
     overhead = (
         len(provider_prompt.EXTERNAL_GOVERNANCE_BEGIN)

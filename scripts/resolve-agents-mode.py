@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import importlib.util
 import json
@@ -24,6 +25,84 @@ PROVIDER_DIRS = {
 }
 EXTERNAL_DISPATCH_PROVIDERS = ("kimi", "grok")
 PROVIDER_CHOICES = tuple(sorted((*PROVIDER_DIRS, *EXTERNAL_DISPATCH_PROVIDERS)))
+_MECHANICAL_ROLES = frozenset({"mechanical-scout", "mechanical-worker"})
+_LUNA_OPERATION_SCHEMA_V1 = {
+    "path-kind": frozenset({"path"}),
+    "file-size": frozenset({"path"}),
+    "sha256": frozenset({"path"}),
+    "read-lines": frozenset({"path", "start", "count"}),
+    "list-directory": frozenset({"path"}),
+    "literal-equals": frozenset({"left", "right"}),
+}
+_MECHANICAL_EXECUTION_CONTRACT_V1 = {
+    "schemaVersion": 1,
+    "requiresFullySpecifiedTask": True,
+    "decisionAuthority": "none",
+    "ambiguity": "abort",
+    "fallback": "none",
+    "objectiveOracle": "caller-required",
+    "scout": {
+        "status": "disabled-until-host-containment",
+        "stableId": "E_LUNA_EXECUTION_CONTAINMENT_UNAVAILABLE",
+        "planContract": "LunaExecutionContractV1",
+        "outputContract": "ScoutFactsV1",
+        "readProbeOrder": "caller-specified-exact-order",
+        "targetBinding": "optional-exact-git-root",
+        "allowedTools": "caller-supplied-exact-runtime-ids",
+        "allowedOperations": list(_LUNA_OPERATION_SCHEMA_V1),
+        "toolAttestation": "caller-required-exact-equality",
+        "factsOnly": True,
+        "forbiddenOutputs": [
+            "diagnosis",
+            "design",
+            "selection",
+            "recommendation",
+            "risk",
+            "gate",
+        ],
+    },
+    "worker": {
+        "status": "disabled-until-host-containment",
+        "stableId": "E_LUNA_WRITE_CONTAINMENT_UNAVAILABLE",
+        "sandboxMode": "read-only",
+        "directCodeOrPatchAuthoring": False,
+        "decisionRoute": "terra-or-sol",
+    },
+}
+
+_LUNA_PLAN_FIELDS = frozenset(
+    {
+        "version",
+        "probeId",
+        "role",
+        "taskClass",
+        "targetBinding",
+        "allowedTools",
+        "operations",
+        "expectedFactsVersion",
+    }
+)
+_SCOUT_FACTS_FIELDS = frozenset(
+    {"version", "probeId", "role", "facts", "observedTools"}
+)
+_SCOUT_FACT_FIELDS = frozenset(
+    {"ordinal", "op", "execution", "value", "errorId"}
+)
+_LUNA_ERROR_ID = re.compile(r"E_[A-Z0-9_]{1,120}\Z")
+_LUNA_AUTHORITY_FIELDS = frozenset(
+    {
+        "pass",
+        "status",
+        "verdict",
+        "decision",
+        "recommendation",
+        "risk",
+        "gate",
+        "publication",
+        "authorizing",
+        "nextstep",
+    }
+)
 
 # Layer-provenance trust boundary (F9): ranks supplied by the user's own machine-global
 # configuration vs. ranks a cloned repository can supply. Executable-bearing values
@@ -65,6 +144,223 @@ def _ordinary_directory(path: Path) -> bool:
         and not _is_reparse_metadata(metadata)
         and not getattr(os.path, "isjunction", lambda _path: False)(path)
     )
+
+
+def _luna_validation_result(stable_id: str | None) -> dict[str, Any]:
+    """Return a caller-owned, nonauthorizing validation outcome."""
+
+    return {
+        "schemaVersion": 1,
+        "valid": stable_id is None,
+        "stableId": stable_id,
+        "fallback": "none",
+        "authorizing": False,
+    }
+
+
+def _exact_fields(value: Any, fields: frozenset[str]) -> bool:
+    return isinstance(value, dict) and set(value) == fields
+
+
+def _valid_luna_identifier(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", value))
+    )
+
+
+def _valid_tool_ids(value: Any) -> bool:
+    return (
+        isinstance(value, list)
+        and bool(value)
+        and len(value) == len(set(value))
+        and all(_valid_luna_identifier(tool) for tool in value)
+    )
+
+
+def _valid_relative_probe_path(value: Any) -> bool:
+    if not isinstance(value, str) or not value or "\x00" in value:
+        return False
+    path = Path(value)
+    components = value.replace("\\", "/").split("/")
+    return not path.is_absolute() and ".." not in components and all(components)
+
+
+def _normalized_absolute_path(value: Any) -> str | None:
+    if not isinstance(value, str) or not value:
+        return None
+    path = Path(value)
+    if not path.is_absolute():
+        return None
+    return os.path.normcase(os.path.normpath(str(path)))
+
+
+def _validate_luna_operation(operation: Any, expected_ordinal: int) -> str | None:
+    if not _exact_fields(operation, frozenset({"ordinal", "op", "args"})):
+        return "E_LUNA_PLAN_INVALID"
+    if operation["ordinal"] != expected_ordinal:
+        return "E_LUNA_PLAN_INVALID"
+    op = operation["op"]
+    if op not in _LUNA_OPERATION_SCHEMA_V1:
+        return "E_LUNA_FORBIDDEN_OPERATION"
+    args = operation["args"]
+    expected_fields = _LUNA_OPERATION_SCHEMA_V1[op]
+    if not _exact_fields(args, expected_fields):
+        return "E_LUNA_PLAN_INVALID"
+    if "path" in args and not _valid_relative_probe_path(args["path"]):
+        return "E_LUNA_PLAN_INVALID"
+    if op == "read-lines" and (
+        isinstance(args["start"], bool)
+        or not isinstance(args["start"], int)
+        or args["start"] < 0
+        or isinstance(args["count"], bool)
+        or not isinstance(args["count"], int)
+        or args["count"] <= 0
+    ):
+        return "E_LUNA_PLAN_INVALID"
+    if op == "literal-equals" and any(
+        isinstance(item, (dict, list, tuple, set))
+        for item in (args["left"], args["right"])
+    ):
+        return "E_LUNA_PLAN_INVALID"
+    return None
+
+
+def validate_luna_execution_plan(
+    plan: Any, *, observed_git_root: Any = None
+) -> dict[str, Any]:
+    """Validate one caller-authored Luna read plan without launching it.
+
+    The caller owns discovery of the actual Git root.  This function only
+    checks the supplied observation against an exact, non-reparse plan binding.
+    """
+
+    if not _exact_fields(plan, _LUNA_PLAN_FIELDS):
+        return _luna_validation_result("E_LUNA_PLAN_INVALID")
+    if plan["role"] == "mechanical-worker":
+        return _luna_validation_result("E_LUNA_WRITE_CONTAINMENT_UNAVAILABLE")
+    if (
+        plan["version"] != "LunaExecutionContractV1"
+        or not _valid_luna_identifier(plan["probeId"])
+        or plan["role"] != "mechanical-scout"
+        or plan["taskClass"] not in {"micro", "mechanical-read"}
+        or plan["expectedFactsVersion"] != "ScoutFactsV1"
+        or not _valid_tool_ids(plan["allowedTools"])
+        or not isinstance(plan["operations"], list)
+        or not plan["operations"]
+    ):
+        return _luna_validation_result("E_LUNA_PLAN_INVALID")
+    for ordinal, operation in enumerate(plan["operations"]):
+        stable_id = _validate_luna_operation(operation, ordinal)
+        if stable_id is not None:
+            return _luna_validation_result(stable_id)
+
+    binding = plan["targetBinding"]
+    if binding is None:
+        return _luna_validation_result(
+            None
+            if all(operation["op"] == "literal-equals" for operation in plan["operations"])
+            else "E_LUNA_PRECONDITION_FAILED"
+        )
+    if not _exact_fields(
+        binding,
+        frozenset({"kind", "requestedRoot", "expectedRoot", "followLinks"}),
+    ) or binding["kind"] != "exact-git-root" or binding["followLinks"] is not False:
+        return _luna_validation_result("E_LUNA_PLAN_INVALID")
+    requested_root = _normalized_absolute_path(binding["requestedRoot"])
+    expected_root = _normalized_absolute_path(binding["expectedRoot"])
+    observed_root = _normalized_absolute_path(observed_git_root)
+    if requested_root is None or expected_root is None:
+        return _luna_validation_result("E_LUNA_PLAN_INVALID")
+    if (
+        requested_root != expected_root
+        or observed_root != expected_root
+        or not _ordinary_directory(Path(requested_root))
+    ):
+        return _luna_validation_result("E_LUNA_PRECONDITION_FAILED")
+    return _luna_validation_result(None)
+
+
+def _valid_scout_fact_value(operation: str, value: Any) -> bool:
+    if operation == "path-kind":
+        return value in {"missing", "file", "directory", "other"}
+    if operation == "file-size":
+        return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+    if operation == "sha256":
+        return isinstance(value, str) and bool(re.fullmatch(r"[0-9a-f]{64}", value))
+    if operation == "read-lines":
+        return isinstance(value, list) and all(isinstance(line, str) for line in value)
+    if operation == "list-directory":
+        return (
+            isinstance(value, list)
+            and all(
+                _exact_fields(item, frozenset({"name", "kind"}))
+                and isinstance(item["name"], str)
+                and item["name"]
+                and item["kind"] in {"file", "directory", "other"}
+                for item in value
+            )
+            and value
+            == sorted(value, key=lambda item: (item["name"], item["kind"]))
+        )
+    return isinstance(value, bool)
+
+
+def validate_scout_facts(
+    plan: Any,
+    facts: Any,
+    *,
+    observed_tools: Any,
+    consumer_purpose: Any,
+    observed_git_root: Any = None,
+) -> dict[str, Any]:
+    """Validate facts against one exact Luna plan and caller-owned tool trace."""
+
+    if consumer_purpose != "facts-only":
+        return _luna_validation_result("E_LUNA_AUTHORITY_VIOLATION")
+    plan_result = validate_luna_execution_plan(
+        plan, observed_git_root=observed_git_root
+    )
+    if not plan_result["valid"]:
+        return plan_result
+    if not _valid_tool_ids(observed_tools):
+        return _luna_validation_result("E_LUNA_EXECUTION_ATTESTATION_UNAVAILABLE")
+    if any(tool not in plan["allowedTools"] for tool in observed_tools):
+        return _luna_validation_result("E_LUNA_TOOL_SCOPE_VIOLATION")
+    if isinstance(facts, dict) and any(
+        isinstance(field, str) and field.casefold() in _LUNA_AUTHORITY_FIELDS
+        for field in facts
+    ):
+        return _luna_validation_result("E_LUNA_AUTHORITY_VIOLATION")
+    if not _exact_fields(facts, _SCOUT_FACTS_FIELDS):
+        return _luna_validation_result("E_LUNA_FACTS_INVALID")
+    if (
+        facts["version"] != "ScoutFactsV1"
+        or facts["probeId"] != plan["probeId"]
+        or facts["role"] != "mechanical-scout"
+        or facts["observedTools"] != observed_tools
+        or not isinstance(facts["facts"], list)
+        or len(facts["facts"]) != len(plan["operations"])
+    ):
+        return _luna_validation_result("E_LUNA_FACTS_INVALID")
+    for ordinal, (operation, fact) in enumerate(zip(plan["operations"], facts["facts"])):
+        if not _exact_fields(fact, _SCOUT_FACT_FIELDS):
+            return _luna_validation_result("E_LUNA_FACTS_INVALID")
+        if fact["ordinal"] != ordinal or fact["op"] != operation["op"]:
+            return _luna_validation_result("E_LUNA_FACTS_INVALID")
+        if fact["execution"] == "ok":
+            if fact["errorId"] is not None or not _valid_scout_fact_value(
+                operation["op"], fact["value"]
+            ):
+                return _luna_validation_result("E_LUNA_FACTS_INVALID")
+        elif (
+            fact["execution"] != "error"
+            or fact["value"] is not None
+            or not isinstance(fact["errorId"], str)
+            or not _LUNA_ERROR_ID.fullmatch(fact["errorId"])
+        ):
+            return _luna_validation_result("E_LUNA_FACTS_INVALID")
+    return _luna_validation_result(None)
 def is_executable_bearing(key: str, value: Any) -> bool:
     """True when a resolved key/value names an arbitrary executable a repo could supply."""
     return key == "reserveResolver" and isinstance(value, str) and value.startswith("wrapper:")
@@ -186,6 +482,7 @@ def load_role_policy(repo_root: Path) -> tuple[dict[str, Any], Path]:
     eligibility = policy.get("taskRoleEligibility")
     realizations = policy.get("providerRealizations")
     final_authorizing_roles = policy.get("finalAuthorizingRoles")
+    mechanical_execution_contract = policy.get("mechanicalExecutionContract")
     if not all(
         isinstance(value, dict)
         for value in (profiles, task_classes, roles, eligibility, realizations)
@@ -201,6 +498,8 @@ def load_role_policy(repo_root: Path) -> tuple[dict[str, Any], Path]:
         or len(final_authorizing_roles) != len(set(final_authorizing_roles))
     ):
         raise ValueError("E_ROLE_POLICY_INVALID: finalAuthorizingRoles must be unique")
+    if mechanical_execution_contract != _MECHANICAL_EXECUTION_CONTRACT_V1:
+        raise ValueError("E_ROLE_POLICY_INVALID: mechanical execution contract")
 
     model_index = {value: index for index, value in enumerate(model_tiers)}
     effort_index = {value: index for index, value in enumerate(efforts)}
@@ -241,16 +540,14 @@ def load_role_policy(repo_root: Path) -> tuple[dict[str, Any], Path]:
                 raise ValueError(
                     f"E_ROLE_POLICY_INVALID: task {task_name} unknown role {role_name}"
                 )
-            corridor = roles[role_name]["allowedProfiles"]
-            if not any(
-                model_index[profiles[profile]["modelTier"]]
-                >= model_index[required_model]
-                and effort_index[profiles[profile]["effort"]]
-                >= effort_index[required_effort]
-                for profile in corridor
+            default_profile = roles[role_name]["defaultProfile"]
+            profile = profiles[default_profile]
+            if (
+                model_index[profile["modelTier"]] < model_index[required_model]
+                or effort_index[profile["effort"]] < effort_index[required_effort]
             ):
                 raise ValueError(
-                    f"E_ROLE_POLICY_INVALID: task {task_name} role {role_name} corridor"
+                    f"E_ROLE_POLICY_INVALID: task {task_name} role {role_name} default"
                 )
 
     if set(eligibility) != set(task_classes):
@@ -287,8 +584,9 @@ def _role_dispatch_decision(
     requested_model: str | None,
     requested_effort: str | None,
     sandbox: str | None,
+    execution_contract: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return {
+    decision = {
         "schemaVersion": 1,
         "status": status,
         "stableId": stable_id,
@@ -300,6 +598,9 @@ def _role_dispatch_decision(
         "sandbox": sandbox,
         "fallback": "none",
     }
+    if execution_contract is not None:
+        decision["executionContract"] = copy.deepcopy(execution_contract)
+    return decision
 
 
 def _role_dispatch_invalid(
@@ -431,7 +732,7 @@ def _load_role_dispatch_contract(
         sandbox = role_toml.get("sandbox_mode")
         expected_sandbox = (
             "read-only"
-            if task["mutationClass"] == "read-only"
+            if task["mutationClass"] == "read-only" or role_name == "mechanical-worker"
             else "workspace-write"
         )
         if (
@@ -450,6 +751,11 @@ def _load_role_dispatch_contract(
             "sandbox": sandbox,
             "roleSha256": record["sha256"],
             "policySha256": manifest["policySha256"],
+            "executionContract": (
+                policy["mechanicalExecutionContract"]
+                if role_name in _MECHANICAL_ROLES
+                else None
+            ),
         }, None
     except (KeyError, OSError, UnicodeDecodeError, ValueError, json.JSONDecodeError, tomllib.TOMLDecodeError) as exc:
         return None, _role_dispatch_invalid(task_class, role_name, str(exc))
@@ -478,6 +784,21 @@ def _resolve_role_dispatch_in_layout(
     assert contract is not None
     if effective_feature_state not in {"enabled", "disabled"}:
         return _role_dispatch_invalid(task_class, role, "feature-state")
+    if contract["role"] in _MECHANICAL_ROLES:
+        execution_contract = contract["executionContract"]
+        assert isinstance(execution_contract, dict)
+        contract_name = "worker" if contract["role"] == "mechanical-worker" else "scout"
+        return _role_dispatch_decision(
+            status="unavailable",
+            stable_id=execution_contract[contract_name]["stableId"],
+            task_class=contract["taskClass"],
+            role=contract["role"],
+            requested_profile=contract["profile"],
+            requested_model=contract["model"],
+            requested_effort=contract["effort"],
+            sandbox=contract["sandbox"],
+            execution_contract=execution_contract,
+        )
     if effective_feature_state == "disabled":
         return _role_dispatch_decision(
             status="unavailable",
@@ -488,6 +809,7 @@ def _resolve_role_dispatch_in_layout(
             requested_model=contract["model"],
             requested_effort=contract["effort"],
             sandbox=contract["sandbox"],
+            execution_contract=contract["executionContract"],
         )
     return _role_dispatch_decision(
         status="native-required",
@@ -498,6 +820,7 @@ def _resolve_role_dispatch_in_layout(
         requested_model=contract["model"],
         requested_effort=contract["effort"],
         sandbox=contract["sandbox"],
+        execution_contract=contract["executionContract"],
     )
 
 

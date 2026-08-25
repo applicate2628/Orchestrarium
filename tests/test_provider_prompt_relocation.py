@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import hashlib
+import importlib.util
+import sys
 from pathlib import Path
+
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,3 +28,123 @@ def test_codex_and_claude_host_wrappers_remain_thin_adjacent_consumers() -> None
         assert "from provider_prompt import launch" in python_text
         assert f'launch("{provider}", sys.argv[1:])' in python_text
         assert "provider_prompt.py" not in shell_wrapper.read_text(encoding="utf-8")
+
+
+def _load_owner(path: Path, name: str):
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_role_taxonomy_rejects_a_malicious_cwd_resolver_before_secret_or_process(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only the exact sibling is a trust input; cwd is never a resolver fallback."""
+
+    owner = _load_owner(ROOT_OWNER, "provider_prompt_taxonomy_cwd")
+    malicious = tmp_path / "cwd" / "scripts" / "resolve-agents-mode.py"
+    malicious.parent.mkdir(parents=True)
+    marker = tmp_path / "resolver-side-effect"
+    malicious.write_text(
+        "from pathlib import Path\n"
+        "import os\n"
+        f"Path({str(marker)!r}).write_text(os.environ['TAXONOMY_SECRET'])\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(owner, "__file__", str(tmp_path / "isolated" / "provider_prompt.py"))
+    monkeypatch.chdir(malicious.parent.parent)
+    monkeypatch.setenv("TAXONOMY_SECRET", "must-not-be-read")
+    monkeypatch.setattr(
+        owner.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("no process")),
+    )
+
+    with pytest.raises(ValueError, match="^E_EXTERNAL_PROVENANCE_ROLE_INVALID: role taxonomy"):
+        owner.external_role_provenance(
+            owner.Control(ledger_role="qa-engineer", ledger_role_explicit=True), "codex"
+        )
+
+    assert not marker.exists()
+
+
+def test_role_taxonomy_rejects_drifted_or_linked_sibling_before_execution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    owner = _load_owner(ROOT_OWNER, "provider_prompt_taxonomy_degraded")
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    marker = tmp_path / "resolver-side-effect"
+    sibling = scripts / "resolve-agents-mode.py"
+    sibling.write_text(
+        "from pathlib import Path\n"
+        f"Path({str(marker)!r}).write_text('executed')\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(owner, "__file__", str(scripts / "provider_prompt.py"))
+
+    with pytest.raises(ValueError, match="^E_EXTERNAL_PROVENANCE_ROLE_INVALID: role taxonomy"):
+        owner._external_role_taxonomy()
+    assert not marker.exists()
+
+    linked = scripts / "linked-resolver.py"
+    linked.write_bytes((ROOT / "scripts" / "resolve-agents-mode.py").read_bytes())
+    sibling.unlink()
+    try:
+        sibling.symlink_to(linked)
+    except OSError as exc:
+        pytest.skip(f"symlink unavailable: {exc}")
+    with pytest.raises(ValueError, match="^E_EXTERNAL_PROVENANCE_ROLE_INVALID: role taxonomy"):
+        owner._external_role_taxonomy()
+
+
+def test_role_taxonomy_executes_only_attested_sibling_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    owner = _load_owner(ROOT_OWNER, "provider_prompt_taxonomy_attested")
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    sibling = scripts / "resolve-agents-mode.py"
+    payload = (ROOT / "scripts" / "resolve-agents-mode.py").read_bytes()
+    sibling.write_bytes(payload)
+    (tmp_path / "shared").mkdir()
+    (tmp_path / "shared" / "role-routing-policy.v1.json").write_bytes(
+        (ROOT / "shared" / "role-routing-policy.v1.json").read_bytes()
+    )
+    monkeypatch.setattr(owner, "__file__", str(scripts / "provider_prompt.py"))
+
+    roles, reviewers, workers = owner._external_role_taxonomy()
+
+    assert hashlib.sha256(payload).hexdigest() == owner._ROLE_TAXONOMY_RESOLVER_SHA256
+    assert "qa-engineer" in roles
+    assert "qa-engineer" in reviewers
+    assert workers
+
+
+def test_packed_capsule_view_needs_manifest_and_digest_not_shared_agents(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pack_root = tmp_path / ".agents" / "skills"
+    scripts = pack_root / "lead" / "scripts"
+    scripts.mkdir(parents=True)
+    (pack_root / "shared").mkdir()
+    for name in ("provider_prompt.py", "external-prompt-governance.md"):
+        source = ROOT / ("shared" if name.endswith(".md") else "scripts") / name
+        (scripts / name).write_bytes(source.read_bytes())
+    (pack_root / "shared" / "provider-prompt-projections.v1.json").write_bytes(
+        (ROOT / "shared" / "provider-prompt-projections.v1.json").read_bytes()
+    )
+    owner = _load_owner(scripts / "provider_prompt.py", "provider_prompt_packed_view")
+    monkeypatch.setattr(
+        owner.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("no process")),
+    )
+
+    assert owner.external_governance_capsule_snapshot() == (
+        ROOT / "shared" / "external-prompt-governance.md"
+    ).read_bytes()
+    assert owner.launch("kimi", ["ignored-invalid-input"]) == 1

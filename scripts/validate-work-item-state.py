@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import hashlib
+import io
 import importlib.util
 import json
 import os
@@ -415,14 +416,21 @@ def load_jsonl(
     path: Path,
     errors: list[str],
     raw_metadata: list[dict[str, object]] | None = None,
+    source_bytes: bytes | None = None,
 ) -> list[dict]:
     if not path.exists():
         fail(errors, f"missing ledger: {path}")
         return []
     events: list[dict] = []
+    if source_bytes is None:
+        try:
+            source_bytes = path.read_bytes()
+        except OSError as exc:
+            fail(errors, f"cannot read ledger: {path}: {exc}")
+            return []
     try:
-        stream = path.open("r", encoding="utf-8", newline="")
-    except OSError as exc:
+        stream = io.StringIO(source_bytes.decode("utf-8", errors="strict"), newline="")
+    except UnicodeDecodeError as exc:
         fail(errors, f"cannot read ledger: {path}: {exc}")
         return []
     with stream:
@@ -660,6 +668,73 @@ def _safe_repo_relative(value: str) -> bool:
         return False
     candidate = PurePosixPath(value)
     return not candidate.is_absolute() and value == candidate.as_posix() and ".." not in candidate.parts
+
+
+_LEGACY_PROJECTION_IDENTIFIER_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", re.ASCII)
+
+
+def confine_legacy_projection_path(
+    root: Path,
+    value: object,
+    *,
+    prefix: tuple[str, ...] = (),
+    leaf_kind: str | None = None,
+    allow_missing_leaf: bool = False,
+    failure_id: str = "WI-LEDGER-MIGRATION-TARGET-IDENTITY",
+) -> Path:
+    """Return one pre-dereference repository-relative projection capability.
+
+    This is intentionally the only projection parser that converts a parsed
+    path string into a filesystem path.  It performs lexical validation and an
+    lstat-only component walk before a caller may probe or read content.
+    """
+    if (
+        not isinstance(value, str)
+        or not value
+        or "\x00" in value
+        or "\\" in value
+        or ":" in value
+        or value.startswith("/")
+        or value.startswith("//")
+    ):
+        raise ValueError(f"{failure_id}: unsafe projection path")
+    parts = value.split("/")
+    if any(part in {"", ".", ".."} for part in parts) or tuple(parts[:len(prefix)]) != prefix:
+        raise ValueError(f"{failure_id}: projection path escapes its structural scope")
+    root = Path(root)
+    if not root.is_absolute():
+        raise ValueError(f"{failure_id}: projection repository root is not absolute")
+    candidate = root.joinpath(*parts)
+    cursor = root
+    try:
+        root_info = os.lstat(cursor)
+    except OSError as exc:
+        raise ValueError(f"{failure_id}: projection repository root is unavailable") from exc
+    if stat_module.S_ISLNK(root_info.st_mode) or bool(getattr(root_info, "st_file_attributes", 0) & getattr(stat_module, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)):
+        raise ValueError(f"{failure_id}: projection repository root is linked")
+    for index, part in enumerate(parts, start=1):
+        cursor = cursor / part
+        try:
+            info = os.lstat(cursor)
+        except FileNotFoundError:
+            if allow_missing_leaf:
+                return candidate
+            raise ValueError(f"{failure_id}: projection path component is unavailable")
+        except OSError as exc:
+            raise ValueError(f"{failure_id}: projection path component is unavailable") from exc
+        if stat_module.S_ISLNK(info.st_mode) or bool(getattr(info, "st_file_attributes", 0) & getattr(stat_module, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)):
+            raise ValueError(f"{failure_id}: projection path contains a link or reparse point")
+    if leaf_kind == "file" and not stat_module.S_ISREG(info.st_mode):
+        raise ValueError(f"{failure_id}: projection path is not a regular file")
+    if leaf_kind == "directory" and not stat_module.S_ISDIR(info.st_mode):
+        raise ValueError(f"{failure_id}: projection path is not a directory")
+    return candidate
+
+
+def confine_legacy_projection_identifier(value: object, *, failure_id: str = "WI-LEDGER-MIGRATION-TARGET-IDENTITY") -> str:
+    if not isinstance(value, str) or _LEGACY_PROJECTION_IDENTIFIER_RE.fullmatch(value) is None:
+        raise ValueError(f"{failure_id}: unsafe projection identifier")
+    return value
 
 
 def validate_scratch_evidence(
@@ -1727,6 +1802,614 @@ def migration_terminal_launch_relation_error(events: list[dict], target_pos: int
     return None
 
 
+LEGACY_PROJECTION_MANIFEST_DIR = "legacy-ledger-projection-manifests"
+LEGACY_PROJECTION_REGISTRY = "legacy-ledger-projections.jsonl"
+LEGACY_PROJECTION_PROFILE_REGISTRY = {
+    ("canonical-v0-shape", 1),
+    ("attempt-pair-v0", 1),
+    ("review-summary-v0", 1),
+}
+LEGACY_PROJECTION_IDS = {
+    "profile": "WI-LEDGER-MIGRATION-PROFILE-UNSUPPORTED",
+    "manifest": "WI-LEDGER-MIGRATION-MANIFEST-INVALID",
+    "identity": "WI-LEDGER-MIGRATION-TARGET-IDENTITY",
+    "ledger": "WI-LEDGER-MIGRATION-LEDGER-DRIFT",
+    "digest": "WI-LEDGER-MIGRATION-TARGET-DIGEST",
+    "replacement": "WI-LEDGER-MIGRATION-REPLACEMENT-MISMATCH",
+    "topology": "WI-LEDGER-MIGRATION-TOPOLOGY",
+    "settlement": "WI-LEDGER-MIGRATION-SETTLEMENT-FORBIDDEN",
+}
+_LEGACY_ROLE_MAP = {"qa": "qa-engineer", "analysis": "analyst", "lead": "lead"}
+_LEGACY_EXECUTION_ROLE_MAP = {"lead": "main", "main": "main", "internal": "internal"}
+_STRICT_UTC_RE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z", re.ASCII)
+
+
+def _projection_fail(errors: list[str], kind: str, detail: str) -> None:
+    fail(errors, f"{LEGACY_PROJECTION_IDS[kind]}: {detail}")
+
+
+def _is_link_or_reparse(path: Path) -> bool:
+    try:
+        info = os.lstat(path)
+    except OSError:
+        return True
+    return stat_module.S_ISLNK(info.st_mode) or bool(
+        getattr(info, "st_file_attributes", 0)
+        & getattr(stat_module, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+    )
+
+
+def _projection_json_object(raw: bytes, source: Path | str, errors: list[str]) -> dict | None:
+    try:
+        decoded = raw.decode("utf-8", errors="strict")
+        return decode_json_object(decoded, source=str(source), maximum_bytes=max(len(raw), 1))
+    except (UnicodeDecodeError, ValueError) as exc:
+        _projection_fail(errors, "manifest", f"{source}: {exc}")
+        return None
+
+
+def _canonical_projection_bytes(value: object) -> bytes:
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode("utf-8")
+
+
+def _strict_shape(value: object, required: set[str], allowed: set[str], errors: list[str], label: str) -> bool:
+    if not isinstance(value, dict):
+        _projection_fail(errors, "manifest", f"{label} must be an object")
+        return False
+    missing = required - set(value)
+    unknown = set(value) - allowed
+    if missing or unknown:
+        _projection_fail(errors, "manifest", f"{label} has invalid fields missing={sorted(missing)} unknown={sorted(unknown)}")
+        return False
+    return True
+
+
+def _projection_profile_key(profile_id: object, profile_version: object, errors: list[str], label: str) -> tuple[str, int] | None:
+    if not isinstance(profile_id, str) or type(profile_version) is not int:
+        _projection_fail(errors, "profile", f"{label} profileId/profileVersion must be string/integer")
+        return None
+    return profile_id, profile_version
+
+
+def _profile_projection(profile: tuple[str, int], raws: list[dict], item: Path, entry: dict, errors: list[str]) -> list[dict] | None:
+    profile_id, _ = profile
+    if profile_id == "canonical-v0-shape":
+        if len(raws) != 1:
+            _projection_fail(errors, "topology", "canonical-v0-shape requires exactly one raw line")
+            return None
+        raw = raws[0]
+        required = {"runId", "workItem", "role", "executionRole", "status", "gate", "scope", "evidence", "started", "updated"}
+        allowed = required | {
+            "artifact", "lane", "eventKind", "findingClass", "scratchEvidence", "launchRunId",
+        }
+        if not _strict_shape(raw, required, allowed, errors, "canonical-v0-shape raw event"):
+            return None
+        if not isinstance(raw["role"], str):
+            _projection_fail(errors, "profile", "canonical-v0-shape role must be a string")
+            return None
+        role = _LEGACY_ROLE_MAP.get(raw["role"], raw["role"])
+        execution_role = _LEGACY_EXECUTION_ROLE_MAP.get(raw["executionRole"])
+        if role not in {"lead", "analyst", "qa-engineer", "architect", "planner"} or execution_role is None:
+            _projection_fail(errors, "profile", "canonical-v0-shape role mapping is not closed")
+            return None
+        if not all(isinstance(raw.get(key), str) and raw[key].strip() for key in required):
+            _projection_fail(errors, "replacement", "canonical-v0-shape requires non-empty scalar fields")
+            return None
+        if raw["status"] not in STATUS_VALUES or raw["gate"] not in GATE_VALUES:
+            _projection_fail(errors, "profile", "canonical-v0-shape status or gate is unsupported")
+            return None
+        projected = {
+            "schemaVersion": 2, "runId": raw["runId"], "workItem": raw["workItem"], "role": role,
+            "executionRole": execution_role, "status": raw["status"], "gate": raw["gate"],
+            "scope": [raw["scope"]], "evidence": [{"kind": "manual-check", "ref": raw["evidence"]}],
+            "startedAt": raw["started"], "updatedAt": raw["updated"],
+        }
+        for key in ("artifact", "lane", "eventKind", "findingClass", "scratchEvidence", "launchRunId"):
+            if key in raw:
+                projected[key] = raw[key]
+        return [projected]
+    if profile_id == "attempt-pair-v0":
+        if len(raws) != 2:
+            _projection_fail(errors, "topology", "attempt-pair-v0 requires both raw lines atomically")
+            return None
+        allowed = {"attemptId", "state", "role", "task", "scope", "evidence", "artifact", "started", "updated"}
+        required = {"attemptId", "state", "role", "task", "scope", "evidence", "started", "updated"}
+        if any(not _strict_shape(raw, required, allowed, errors, "attempt-pair-v0 raw event") for raw in raws):
+            return None
+        if raws[0]["attemptId"] != raws[1]["attemptId"] or raws[0]["state"] not in {"pending", "running"} or raws[1]["state"] not in {"completed", "interrupted"}:
+            _projection_fail(errors, "topology", "attempt-pair-v0 requires one ordered attempt and exact raw outcome")
+            return None
+        if not isinstance(raws[0]["role"], str) or not isinstance(raws[1]["role"], str):
+            _projection_fail(errors, "profile", "attempt-pair-v0 role must be a string")
+            return None
+        role = _LEGACY_ROLE_MAP.get(raws[0]["role"], raws[0]["role"])
+        if role not in {"lead", "analyst", "qa-engineer", "architect", "planner"} or raws[1]["role"] != raws[0]["role"]:
+            _projection_fail(errors, "profile", "attempt-pair-v0 role mapping is not closed")
+            return None
+        prefix = f"legacy-attempt-{raws[0]['attemptId']}"
+        return [
+            {"schemaVersion": 2, "runId": f"{prefix}-start", "workItem": item.name, "role": role, "executionRole": "main", "status": "running", "gate": "none", "scope": [raws[0]["scope"]], "evidence": [{"kind": "manual-check", "ref": raws[0]["evidence"]}], "startedAt": raws[0]["started"], "updatedAt": raws[0]["updated"]},
+            {"schemaVersion": 2, "runId": f"{prefix}-outcome", "workItem": item.name, "role": role, "executionRole": "main", "status": "completed" if raws[1]["state"] == "completed" else "cancelled", "gate": "none", "scope": [raws[1]["scope"]], "evidence": [{"kind": "manual-check", "ref": raws[1]["evidence"]}], "startedAt": raws[1]["started"], "updatedAt": raws[1]["updated"]},
+        ]
+    if profile_id == "review-summary-v0":
+        if len(raws) != 1:
+            _projection_fail(errors, "topology", "review-summary-v0 requires exactly one raw line")
+            return None
+        raw = raws[0]
+        required = {"stage", "role", "task", "artifact", "result", "timestamp"}
+        if not _strict_shape(raw, required, required | {"evidence"}, errors, "review-summary-v0 raw event"):
+            return None
+        if not isinstance(raw["role"], str):
+            _projection_fail(errors, "profile", "review-summary-v0 role must be a string")
+            return None
+        role = _LEGACY_ROLE_MAP.get(raw["role"], raw["role"])
+        result = raw["result"]
+        if role not in {"qa-engineer", "architect", "analyst"} or result not in {"PASS", "REVISE"}:
+            _projection_fail(errors, "profile", "review-summary-v0 role/result mapping is not closed")
+            return None
+        root = repo_root_for(item)
+        try:
+            artifact = confine_legacy_projection_path(
+                root if root is not None else Path(),
+                (item.relative_to(root).as_posix() + "/" + raw["artifact"]) if root is not None and isinstance(raw.get("artifact"), str) else "",
+                prefix=("work-items",), leaf_kind="file" if result == "PASS" else None,
+                allow_missing_leaf=result == "PASS",
+            )
+        except (ValueError, TypeError):
+            _projection_fail(errors, "identity", "review-summary-v0 artifact is outside the owning work item")
+            return None
+        if artifact.parent != item and item not in artifact.parents:
+            _projection_fail(errors, "identity", "review-summary-v0 artifact is outside the owning work item")
+            return None
+        artifact_digest = entry.get("artifactSha256")
+        if result == "PASS" and (not artifact.is_file() or not isinstance(artifact_digest, str) or digest_file(artifact) != artifact_digest):
+            _projection_fail(errors, "digest", "review-summary-v0 PASS requires existing exact artifact digest")
+            return None
+        return [{"schemaVersion": 2, "runId": f"legacy-review-{hashlib.sha256(raw['task'].encode('utf-8')).hexdigest()[:16]}", "workItem": item.name, "role": role, "executionRole": "main", "status": "completed" if result == "PASS" else "revise", "gate": result, "scope": [raw["stage"]], "evidence": [{"kind": "artifact", "ref": raw["artifact"]}], "artifact": raw["artifact"], "startedAt": raw["timestamp"], "updatedAt": raw["timestamp"]}]
+    _projection_fail(errors, "profile", f"unsupported projection profile {profile_id!r}")
+    return None
+
+
+def digest_file(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def project_manifest_bound_legacy_ledger_projections(
+    events: list[dict], raw_metadata: list[dict[str, object]], item: Path,
+    selected_ledger: Path, ledger_bytes: bytes,
+    manifest_blobs: dict[str, bytes] | None = None,
+    registry_bytes: bytes | None = None,
+) -> tuple[list[dict], dict[str, int], list[str]]:
+    """Read verified immutable legacy rows through closed shape-only profiles."""
+    counters = {"manifest-apply": 0, "manifest-revoke": 0, "manifest-projected": 0}
+    errors: list[str] = []
+    root = repo_root_for(item)
+    if root is None:
+        return events, counters, errors
+    work_items = root / "work-items"
+    manifests = work_items / LEGACY_PROJECTION_MANIFEST_DIR
+    registry = work_items / LEGACY_PROJECTION_REGISTRY
+    candidate_input = manifest_blobs is not None or registry_bytes is not None
+    if candidate_input and (manifest_blobs is None or registry_bytes is None):
+        _projection_fail(errors, "manifest", "candidate projection requires both manifest blobs and registry bytes")
+        return events, counters, errors
+    if not candidate_input:
+        try:
+            manifests = confine_legacy_projection_path(
+                root, f"work-items/{LEGACY_PROJECTION_MANIFEST_DIR}", prefix=("work-items",), allow_missing_leaf=True,
+                failure_id="WI-LEDGER-MIGRATION-MANIFEST-INVALID",
+            )
+            registry = confine_legacy_projection_path(
+                root, f"work-items/{LEGACY_PROJECTION_REGISTRY}", prefix=("work-items",), allow_missing_leaf=True,
+                failure_id="WI-LEDGER-MIGRATION-COMMIT-INDETERMINATE",
+            )
+        except ValueError as exc:
+            _projection_fail(errors, "identity", f"projection live input is unsafe: {exc}")
+            return events, counters, errors
+        if not manifests.exists() and not registry.exists():
+            return events, counters, errors
+        if not manifests.is_dir() or not registry.is_file() or _is_link_or_reparse(manifests) or _is_link_or_reparse(registry):
+            _projection_fail(errors, "manifest", "projection manifest directory or registry is missing or unsafe")
+            return events, counters, errors
+    canonical_ledger = item / "agent-runs.jsonl"
+    if selected_ledger != canonical_ledger:
+        _projection_fail(errors, "ledger", "candidate ledger path differs from immutable live ledger identity")
+        return events, counters, errors
+    ledger = selected_ledger
+    if _is_link_or_reparse(ledger):
+        _projection_fail(errors, "identity", "ledger is a link or reparse point")
+        return events, counters, errors
+    if candidate_input:
+        assert manifest_blobs is not None and registry_bytes is not None
+        manifest_inputs: list[tuple[str, bytes, str]] = []
+        for name, raw in manifest_blobs.items():
+            if not isinstance(name, str) or Path(name).name != name or not name.endswith(".json") or not isinstance(raw, bytes):
+                _projection_fail(errors, "manifest", "candidate manifest blobs require safe json filenames and bytes")
+                continue
+            manifest_inputs.append((name, raw, f"candidate:{name}"))
+        registry_lines = registry_bytes.splitlines(keepends=True)
+        registry_source = "candidate:legacy-ledger-projections.jsonl"
+    else:
+        try:
+            registry_lines = registry.read_bytes().splitlines(keepends=True)
+            manifest_inputs = [(path.name, None, str(path)) for path in sorted(manifests.iterdir())]
+        except OSError as exc:
+            _projection_fail(errors, "manifest", f"cannot read projection input: {exc}")
+            return events, counters, errors
+        registry_source = str(registry)
+    manifest_by_id: dict[str, tuple[dict, bytes]] = {}
+    for name, raw, source in manifest_inputs:
+        path = manifests / name
+        if not candidate_input:
+            try:
+                path = confine_legacy_projection_path(
+                    root, f"work-items/{LEGACY_PROJECTION_MANIFEST_DIR}/{name}",
+                    prefix=("work-items", LEGACY_PROJECTION_MANIFEST_DIR), leaf_kind="file",
+                    failure_id="WI-LEDGER-MIGRATION-MANIFEST-INVALID",
+                )
+            except ValueError as exc:
+                _projection_fail(errors, "manifest", f"unsafe manifest path {name}: {exc}")
+                continue
+            if path.suffix != ".json":
+                _projection_fail(errors, "manifest", f"unsafe manifest path {name}")
+                continue
+            raw = path.read_bytes()
+        assert isinstance(raw, bytes)
+        manifest = _projection_json_object(raw, source, errors)
+        required = {"schemaVersion", "manifestId", "profiles", "entries"}
+        if manifest is None or not _strict_shape(manifest, required, required, errors, f"manifest {name}"):
+            continue
+        if manifest["schemaVersion"] != 1 or not isinstance(manifest["manifestId"], str) or name != f"{manifest['manifestId']}.json":
+            _projection_fail(errors, "manifest", f"manifest identity does not match create-only filename {name}")
+            continue
+        if manifest["manifestId"] in manifest_by_id:
+            _projection_fail(errors, "manifest", f"duplicate manifestId {manifest['manifestId']}")
+            continue
+        profile_keys: set[tuple[str, int]] = set()
+        manifest_valid = isinstance(manifest["profiles"], list) and isinstance(manifest["entries"], list)
+        if not manifest_valid:
+            _projection_fail(errors, "manifest", f"manifest {name} profiles and entries must be arrays")
+            continue
+        for profile_row in manifest["profiles"]:
+            if not _strict_shape(profile_row, {"profileId", "profileVersion"}, {"profileId", "profileVersion"}, errors, f"manifest {name} profile"):
+                manifest_valid = False
+                continue
+            key = _projection_profile_key(profile_row["profileId"], profile_row["profileVersion"], errors, f"manifest {name}")
+            if key is None:
+                manifest_valid = False
+                continue
+            if key not in LEGACY_PROJECTION_PROFILE_REGISTRY:
+                _projection_fail(errors, "profile", f"manifest {name} names unsupported profile {key!r}")
+                manifest_valid = False
+            elif key in profile_keys:
+                _projection_fail(errors, "manifest", f"manifest {name} repeats profile {key!r}")
+                manifest_valid = False
+            profile_keys.add(key)
+        entry_ids: set[str] = set()
+        entry_required = {"entryId", "profileId", "profileVersion", "workItem", "ledgerPath", "ledgerSha256", "rawLineOrdinals", "rawLineSha256", "projectedEvents", "projectedEventSha256"}
+        for entry in manifest["entries"]:
+            if not _strict_shape(entry, entry_required, entry_required | {"artifactSha256"}, errors, f"manifest {name} entry"):
+                manifest_valid = False
+                continue
+            entry_key = _projection_profile_key(entry["profileId"], entry["profileVersion"], errors, f"manifest {name} entry")
+            entry_id = entry["entryId"]
+            if entry_key is None or not isinstance(entry_id, str) or entry_id in entry_ids or entry_key not in profile_keys:
+                _projection_fail(errors, "manifest", f"manifest {name} entry identity/profile binding is invalid")
+                manifest_valid = False
+                continue
+            entry_ids.add(entry_id)
+        if not manifest_valid:
+            continue
+        manifest_by_id[manifest["manifestId"]] = (manifest, raw)
+    active: dict[tuple[str, int], tuple[dict, bytes, dict]] = {}
+    operation_ids: set[str] = set()
+    apply_lines: dict[str, tuple[tuple[str, int], bytes]] = {}
+    seen_group_ids: set[str] = set()
+    current_group_id: str | None = None
+    history_groups: dict[str, list[dict]] = {}
+    for ordinal, physical in enumerate(registry_lines, start=1):
+        record = _projection_json_object(physical.rstrip(b"\r\n"), f"{registry_source}:{ordinal}", errors)
+        required = {"schemaVersion", "operationId", "state", "profileId", "profileVersion", "manifestId", "manifestSha256", "manifestEntryId", "workItem", "ledgerPath", "ledgerSha256", "rawLineOrdinal", "rawLineSha256", "projectedEvent", "projectedEventSha256", "recordedAt"}
+        if record is None:
+            continue
+        version = record.get("schemaVersion")
+        if version == 1:
+            allowed = required | {"revokeOfOperationId", "revokeOfRecordSha256"}
+        elif version == 2:
+            required = required | {"operationGroupId", "groupMemberIndex", "groupMemberCount"}
+            allowed = required | {"revokeOfOperationId", "revokeOfRecordSha256", "revokeOfOperationGroupId"}
+        else:
+            _projection_fail(errors, "manifest", f"projection registry line {ordinal} schemaVersion is unsupported")
+            continue
+        if not _strict_shape(record, required, allowed, errors, f"projection registry line {ordinal}"):
+            continue
+        record = dict(record)
+        if version == 1:
+            # Backward-compatible singleton only; a legacy multi-row group was
+            # never published and cannot be inferred from a string prefix.
+            record.update({"operationGroupId": record["operationId"], "groupMemberIndex": 1, "groupMemberCount": 1})
+        elif (
+            not isinstance(record["operationGroupId"], str)
+            or not isinstance(record["groupMemberIndex"], int)
+            or not isinstance(record["groupMemberCount"], int)
+            or record["groupMemberIndex"] < 1
+            or record["groupMemberIndex"] > record["groupMemberCount"]
+        ):
+            _projection_fail(errors, "topology", f"projection registry line {ordinal} group metadata is invalid")
+            continue
+        record["_registryOrdinal"] = ordinal
+        group_key = record["operationGroupId"].casefold()
+        if current_group_id != group_key:
+            if group_key in seen_group_ids:
+                _projection_fail(errors, "topology", f"projection group {record['operationGroupId']} is reused in complete history")
+                continue
+            seen_group_ids.add(group_key)
+            current_group_id = group_key
+        history_groups.setdefault(group_key, []).append(record)
+        if not isinstance(record["operationId"], str) or record["operationId"] in operation_ids:
+            _projection_fail(errors, "topology", f"duplicate or invalid operationId at registry line {ordinal}")
+            continue
+        operation_ids.add(record["operationId"])
+        profile = _projection_profile_key(record["profileId"], record["profileVersion"], errors, f"registry line {ordinal}")
+        if profile is None or profile not in LEGACY_PROJECTION_PROFILE_REGISTRY:
+            _projection_fail(errors, "profile", f"registry line {ordinal} names unsupported profile")
+            continue
+        if not isinstance(record["manifestId"], str):
+            _projection_fail(errors, "manifest", f"registry line {ordinal} manifestId must be a string")
+            continue
+        manifest_pair = manifest_by_id.get(record["manifestId"])
+        if manifest_pair is None or record["manifestSha256"] != hashlib.sha256(manifest_pair[1]).hexdigest():
+            _projection_fail(errors, "manifest", f"registry line {ordinal} manifest digest mismatch")
+            continue
+        manifest, _ = manifest_pair
+        entries = [entry for entry in manifest.get("entries", []) if isinstance(entry, dict) and entry.get("entryId") == record["manifestEntryId"]]
+        if len(entries) != 1:
+            _projection_fail(errors, "identity", f"registry line {ordinal} does not bind one manifest entry")
+            continue
+        entry = entries[0]
+        entry_required = {"entryId", "profileId", "profileVersion", "workItem", "ledgerPath", "ledgerSha256", "rawLineOrdinals", "rawLineSha256", "projectedEvents", "projectedEventSha256"}
+        if not _strict_shape(entry, entry_required, entry_required | {"artifactSha256"}, errors, f"manifest entry {record['manifestEntryId']}"):
+            continue
+        if any(record.get(key) != entry.get(key) for key in ("profileId", "profileVersion", "workItem", "ledgerPath", "ledgerSha256")):
+            _projection_fail(errors, "identity", f"registry line {ordinal} differs from manifest target")
+            continue
+        profile_rows = [
+            row for row in manifest.get("profiles", [])
+            if isinstance(row, dict) and row == {"profileId": entry["profileId"], "profileVersion": entry["profileVersion"]}
+        ]
+        if len(profile_rows) != 1:
+            _projection_fail(errors, "profile", f"manifest entry {entry['entryId']} does not bind one closed profile")
+            continue
+        if record["workItem"] != item.relative_to(root).as_posix() or record["ledgerPath"] != ledger.relative_to(root).as_posix():
+            continue
+        if record["ledgerSha256"] != hashlib.sha256(ledger_bytes).hexdigest():
+            _projection_fail(errors, "ledger", f"registry line {ordinal} ledger digest drift")
+            raw_ordinal = record.get("rawLineOrdinal")
+            raw_lines = ledger_bytes.splitlines(keepends=True)
+            if not isinstance(raw_ordinal, int) or raw_ordinal < 1 or raw_ordinal > len(raw_lines) or hashlib.sha256(raw_lines[raw_ordinal - 1]).hexdigest() != record.get("rawLineSha256"):
+                _projection_fail(errors, "digest", f"registry line {ordinal} raw physical line digest drift")
+            continue
+        raw_ordinals = entry["rawLineOrdinals"]
+        raw_digests = entry["rawLineSha256"]
+        projected_events = entry["projectedEvents"]
+        projected_digests = entry["projectedEventSha256"]
+        if not all(isinstance(value, list) for value in (raw_ordinals, raw_digests, projected_events, projected_digests)) or not (len(raw_ordinals) == len(raw_digests) == len(projected_events) == len(projected_digests)):
+            _projection_fail(errors, "manifest", f"manifest entry {entry['entryId']} has non-parallel bindings")
+            continue
+        if (
+            not raw_ordinals
+            or any(type(value) is not int or value < 1 for value in raw_ordinals)
+            or len(set(raw_ordinals)) != len(raw_ordinals)
+            or any(not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None for value in (*raw_digests, *projected_digests))
+            or any(not isinstance(value, dict) for value in projected_events)
+        ):
+            _projection_fail(errors, "manifest", f"manifest entry {entry['entryId']} bindings are not one unique typed set")
+            continue
+        if version == 1 and len(raw_ordinals) != 1:
+            _projection_fail(errors, "topology", f"legacy v1 projection line {ordinal} cannot infer multi-row membership")
+            continue
+        if version == 2:
+            expected_ids = [
+                record["operationGroupId"] if len(raw_ordinals) == 1 else "m:" + hashlib.sha256(
+                    json.dumps([record["operationGroupId"], index, len(raw_ordinals)], ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+                ).hexdigest()
+                for index in range(1, len(raw_ordinals) + 1)
+            ]
+            member_index = record["groupMemberIndex"] - 1
+            if (
+                record["groupMemberCount"] != len(raw_ordinals)
+                or record["operationId"] != expected_ids[member_index]
+            ):
+                _projection_fail(errors, "topology", f"projection registry line {ordinal} group member identity differs")
+                continue
+        try:
+            raw_index = raw_ordinals.index(record["rawLineOrdinal"])
+        except ValueError:
+            _projection_fail(errors, "identity", f"registry line {ordinal} raw ordinal is not manifest-bound")
+            continue
+        if raw_index >= len(raw_digests) or raw_index >= len(projected_events) or raw_index >= len(projected_digests) or record["rawLineSha256"] != raw_digests[raw_index] or record["projectedEvent"] != projected_events[raw_index] or record["projectedEventSha256"] != projected_digests[raw_index] or hashlib.sha256(_canonical_projection_bytes(record["projectedEvent"])).hexdigest() != record["projectedEventSha256"]:
+            _projection_fail(errors, "digest", f"registry line {ordinal} target or projected digest mismatch")
+            continue
+        if record["state"] == "revoke":
+            target = record.get("revokeOfOperationId")
+            applied = apply_lines.get(target) if isinstance(target, str) else None
+            raw_key = (record["ledgerPath"], record["rawLineOrdinal"])
+            active_row = active.get(raw_key)
+            if applied is None or active_row is None or record.get("revokeOfRecordSha256") != hashlib.sha256(applied[1]).hexdigest() or applied[0] != raw_key or active_row[0].get("operationId") != target:
+                _projection_fail(errors, "topology", f"registry line {ordinal} revoke is not bound to its exact apply line")
+                continue
+            if version == 2 and record.get("revokeOfOperationGroupId") != active_row[0].get("operationGroupId"):
+                _projection_fail(errors, "topology", f"registry line {ordinal} revoke group does not bind its apply group")
+                continue
+            active.pop(raw_key)
+            counters["manifest-revoke"] += 1
+            continue
+        if record["state"] != "apply":
+            _projection_fail(errors, "manifest", f"registry line {ordinal} has invalid apply/revoke state")
+            continue
+        raw_key = (record["ledgerPath"], record["rawLineOrdinal"])
+        if raw_key in active:
+            _projection_fail(errors, "topology", f"registry line {ordinal} creates more than one active projection for a raw line")
+            continue
+        active[raw_key] = (record, physical, entry)
+        apply_lines[record["operationId"]] = (raw_key, physical)
+        counters["manifest-apply"] += 1
+    for group_key, members in history_groups.items():
+        first = members[0]
+        count = first["groupMemberCount"]
+        if (
+            len(members) != count
+            or [member["groupMemberIndex"] for member in members] != list(range(1, count + 1))
+            or [member["_registryOrdinal"] for member in members] != list(range(members[0]["_registryOrdinal"], members[0]["_registryOrdinal"] + count))
+            or any(
+                member["state"] != first["state"]
+                or member["manifestId"] != first["manifestId"]
+                or member["manifestEntryId"] != first["manifestEntryId"]
+                or member["groupMemberCount"] != count
+                for member in members
+            )
+        ):
+            _projection_fail(errors, "topology", f"projection group {first['operationGroupId']} is not one complete ordered historical group")
+            continue
+        if first["state"] == "revoke" and (
+            any(member.get("revokeOfOperationGroupId") != first.get("revokeOfOperationGroupId") for member in members)
+            or any(member.get("revokeOfOperationId") is None for member in members)
+        ):
+            _projection_fail(errors, "topology", f"projection revoke group {first['operationGroupId']} has inconsistent apply binding")
+    lines = ledger_bytes.splitlines(keepends=True)
+    replacement_by_line: dict[int, dict] = {}
+    entries_active: dict[tuple[str, str], list[tuple[dict, dict]]] = {}
+    for (_, raw_ordinal), (record, _, entry) in active.items():
+        entries_active.setdefault((record["manifestId"], record["manifestEntryId"]), []).append((record, entry))
+        if not isinstance(raw_ordinal, int) or raw_ordinal < 1 or raw_ordinal > len(lines):
+            _projection_fail(errors, "identity", "active projection raw ordinal is outside ledger")
+            continue
+        if hashlib.sha256(lines[raw_ordinal - 1]).hexdigest() != record["rawLineSha256"]:
+            _projection_fail(errors, "digest", f"raw physical line digest drift at ordinal {raw_ordinal}")
+    groups_active: dict[str, list[tuple[dict, dict]]] = {}
+    for bindings in entries_active.values():
+        for binding in bindings:
+            groups_active.setdefault(binding[0]["operationGroupId"], []).append(binding)
+    for group_id, bindings in groups_active.items():
+        first_record, first_entry = bindings[0]
+        count = first_record["groupMemberCount"]
+        if (
+            len(bindings) != count
+            or {record["groupMemberIndex"] for record, _entry in bindings} != set(range(1, count + 1))
+            or sorted(record["_registryOrdinal"] for record, _entry in bindings) != list(range(min(record["_registryOrdinal"] for record, _entry in bindings), min(record["_registryOrdinal"] for record, _entry in bindings) + count))
+            or any(
+                record["state"] != first_record["state"]
+                or record["manifestId"] != first_record["manifestId"]
+                or record["manifestEntryId"] != first_record["manifestEntryId"]
+                or record["groupMemberCount"] != count
+                for record, _entry in bindings
+            )
+        ):
+            _projection_fail(errors, "topology", f"projection group {group_id} is partial or inconsistent")
+            continue
+        ordered = sorted(bindings, key=lambda pair: pair[0]["groupMemberIndex"])
+        if [record["rawLineOrdinal"] for record, _entry in ordered] != first_entry["rawLineOrdinals"]:
+            _projection_fail(errors, "topology", f"projection group {group_id} ordinal order differs from its manifest entry")
+    for (_, entry_id), bindings in entries_active.items():
+        entry = bindings[0][1]
+        if len(bindings) != len(entry["rawLineOrdinals"]):
+            _projection_fail(errors, "topology", f"manifest entry {entry_id} is only partially active")
+            continue
+        raws: list[dict] = []
+        for raw_ordinal in entry["rawLineOrdinals"]:
+            try:
+                raw_event = _projection_json_object(lines[raw_ordinal - 1].rstrip(b"\r\n"), f"{ledger}:{raw_ordinal}", errors)
+            except IndexError:
+                raw_event = None
+            if raw_event is None:
+                _projection_fail(errors, "identity", f"manifest entry {entry_id} raw line is unavailable")
+                break
+            raws.append(raw_event)
+        if len(raws) != len(entry["rawLineOrdinals"]):
+            continue
+        profile = _projection_profile_key(entry["profileId"], entry["profileVersion"], errors, f"manifest entry {entry_id}")
+        if profile is None:
+            continue
+        calculated = _profile_projection(profile, raws, item, entry, errors)
+        if calculated is None or calculated != entry["projectedEvents"]:
+            _projection_fail(errors, "replacement", f"manifest entry {entry_id} projected event is not deterministic")
+            continue
+        if any(
+            "closesRunIds" in event
+            or event.get("gate") == "PASS" and raw.get("gate") == "REVISE"
+            or event.get("eventKind") == "terminal" and raw.get("eventKind") != "terminal"
+            for event, raw in zip(calculated, raws)
+        ):
+            _projection_fail(errors, "settlement", f"manifest entry {entry_id} crosses the settlement boundary")
+            continue
+        for raw_ordinal, projected in zip(entry["rawLineOrdinals"], calculated):
+            replacement_by_line[raw_ordinal] = projected
+            counters["manifest-projected"] += 1
+    effective = [
+        replacement_by_line.get(metadata.get("line"), event)
+        for event, metadata in zip(events, raw_metadata)
+    ]
+    return effective, counters, errors
+
+
+def validate_manifest_bound_irrecoverable_disposition(
+    disposition: object, archive_identity: str, archive_item: Path
+) -> list[str]:
+    """Validate a read-only exact archived-artifact disposition; never applies one."""
+    errors: list[str] = []
+    required = {"schemaVersion", "archiveIdentity", "workItem", "missingPath", "disposition", "expectedDigest", "searchReceipt", "survivingArtifacts", "approvedBy", "approvedAt"}
+    if not _strict_shape(disposition, required, required, errors, "irrecoverable disposition"):
+        return errors
+    assert isinstance(disposition, dict)
+    if not isinstance(archive_identity, str) or not archive_identity.strip() or disposition["schemaVersion"] != 1 or disposition["archiveIdentity"] != archive_identity or disposition["disposition"] != "irrecoverable" or disposition["expectedDigest"] != "unknown":
+        _projection_fail(errors, "manifest", "irrecoverable disposition must bind exact archive identity and unknown digest")
+    if not isinstance(disposition["missingPath"], str) or not disposition["missingPath"].strip() or "*" in disposition["missingPath"] or not _safe_repo_relative(disposition["missingPath"]):
+        _projection_fail(errors, "manifest", "irrecoverable disposition requires one exact missing path")
+    if not isinstance(disposition["workItem"], str) or not disposition["workItem"].startswith("work-items/archive/"):
+        _projection_fail(errors, "manifest", "irrecoverable disposition requires an exact archived work-item")
+    else:
+        root = repo_root_for(archive_item)
+        expected = archive_item.relative_to(root).as_posix() if root is not None else None
+        try:
+            confined_archive = confine_legacy_projection_path(
+                root if root is not None else Path(), disposition["workItem"], prefix=("work-items", "archive"), leaf_kind="directory"
+            )
+        except ValueError:
+            confined_archive = None
+        if expected != disposition["workItem"] or confined_archive != archive_item or "archive" not in archive_item.parts:
+            _projection_fail(errors, "identity", "irrecoverable disposition work-item does not bind the observed archive")
+    try:
+        missing = confine_legacy_projection_path(
+            root if 'root' in locals() and root is not None else Path(),
+            (archive_item.relative_to(root).as_posix() + "/" + disposition["missingPath"]) if 'root' in locals() and root is not None and isinstance(disposition["missingPath"], str) else "",
+            prefix=("work-items", "archive"), allow_missing_leaf=True,
+        )
+    except (ValueError, TypeError):
+        missing = None
+        _projection_fail(errors, "identity", "irrecoverable disposition missing path is unsafe")
+    if missing is not None and missing.exists():
+        _projection_fail(errors, "identity", "irrecoverable disposition missing path exists in observed archive")
+    if not isinstance(disposition["searchReceipt"], str) or not disposition["searchReceipt"].strip() or not isinstance(disposition["approvedBy"], str) or not disposition["approvedBy"].strip() or not isinstance(disposition["approvedAt"], str) or _STRICT_UTC_RE.fullmatch(disposition["approvedAt"]) is None:
+        _projection_fail(errors, "manifest", "irrecoverable disposition requires audit evidence and strict approval timestamp")
+    artifacts = disposition["survivingArtifacts"]
+    if not isinstance(artifacts, list) or not artifacts or any(not isinstance(row, dict) or set(row) != {"path", "sha256"} or not isinstance(row["path"], str) or not _safe_repo_relative(row["path"]) or not isinstance(row["sha256"], str) or SHA256_RE.fullmatch(row["sha256"]) is None for row in artifacts):
+        _projection_fail(errors, "manifest", "irrecoverable disposition requires exact canonical surviving artifacts")
+    elif all(isinstance(row, dict) and isinstance(row.get("path"), str) and isinstance(row.get("sha256"), str) for row in artifacts):
+        for row in artifacts:
+            try:
+                path = confine_legacy_projection_path(
+                    root if 'root' in locals() and root is not None else Path(),
+                    (archive_item.relative_to(root).as_posix() + "/" + row["path"]) if 'root' in locals() and root is not None else "",
+                    prefix=("work-items", "archive"), leaf_kind="file",
+                )
+            except ValueError:
+                _projection_fail(errors, "identity", f"irrecoverable disposition surviving artifact is unsafe: {row['path']}")
+                continue
+            if digest_file(path) != row["sha256"]:
+                _projection_fail(errors, "digest", f"irrecoverable disposition surviving artifact is not exact: {row['path']}")
+    return errors
+
+
 def validate_status(item: Path, events: list[dict], errors: list[str]) -> None:
     status_path = item / "status.md"
     if not status_path.exists():
@@ -2038,6 +2721,8 @@ def validate_work_item(
     strict_revise: bool = True,
     telemetry: dict[str, int] | None = None,
     validate_status_file: bool = True,
+    projection_manifest_blobs: dict[str, bytes] | None = None,
+    projection_registry_bytes: bytes | None = None,
 ) -> list[str]:
     """ledger_path: candidate-validation seam — validate THIS file instead of the live
     ledger (the atomic-write flow validates its temp candidate before os.replace).
@@ -2056,9 +2741,23 @@ def validate_work_item(
         and is_quick_fix_status(status_text)
     )
     raw_metadata: list[dict[str, object]] = []
-    events = [] if ledger_free_quick_fix else load_jsonl(selected_ledger, errors, raw_metadata)
+    ledger_bytes = b""
+    if not ledger_free_quick_fix:
+        try:
+            ledger_bytes = selected_ledger.read_bytes()
+        except OSError as exc:
+            fail(errors, f"cannot read ledger: {selected_ledger}: {exc}")
+        events = load_jsonl(selected_ledger, errors, raw_metadata, ledger_bytes)
+    else:
+        events = []
+    shape_events, projection_counters, projection_errors = project_manifest_bound_legacy_ledger_projections(
+        events, raw_metadata, item, selected_ledger, ledger_bytes,
+        manifest_blobs=projection_manifest_blobs,
+        registry_bytes=projection_registry_bytes,
+    )
+    errors.extend(projection_errors)
     effective_events, migration_counters, migration_errors = project_legacy_obligation_migrations(
-        events, raw_metadata, item
+        shape_events, raw_metadata, item
     )
     errors.extend(migration_errors)
     if ledger_path is not None and any(event.get("schemaVersion") == 3 for event in events):
@@ -2085,6 +2784,8 @@ def validate_work_item(
     )
     if telemetry is not None:
         for name, value in migration_counters.items():
+            telemetry[f"ledger-migration-{name}"] = value
+        for name, value in projection_counters.items():
             telemetry[f"ledger-migration-{name}"] = value
         reopened_revise = max(0, len(open_revise) - len(raw_open_revise))
         reopened_launch = max(0, len(open_launches) - len(raw_open_launches))

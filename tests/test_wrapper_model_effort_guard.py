@@ -5,6 +5,7 @@ import argparse
 import importlib.util
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -36,8 +37,11 @@ def _projected_entrypoint(tmp_path: Path, provider: str) -> Path:
     scripts = tmp_path / "claude-projection" / "agents" / "scripts"
     scripts.mkdir(parents=True, exist_ok=True)
     (scripts / "provider_prompt.py").write_bytes(MODULE.read_bytes())
+    (scripts / "resolve-agents-mode.py").write_bytes(
+        (ROOT / "scripts" / "resolve-agents-mode.py").read_bytes()
+    )
     (scripts / "external-prompt-governance.md").write_bytes(
-        (ROOT / "scripts" / "external-prompt-governance.md").read_bytes()
+        (ROOT / "shared" / "external-prompt-governance.md").read_bytes()
     )
     entrypoint = scripts / ENTRYPOINTS[provider].name
     entrypoint.write_bytes(ENTRYPOINTS[provider].read_bytes())
@@ -45,10 +49,23 @@ def _projected_entrypoint(tmp_path: Path, provider: str) -> Path:
     support.mkdir(exist_ok=True)
     for name in ("check-hook-health.py", "universal_hooks_manifest.py", "agent-run-ledger.py"):
         (support / name).write_bytes((ROOT / "scripts" / name).read_bytes())
-    shared = tmp_path / "shared"
+    shared = scripts.parent.parent / "shared"
     shared.mkdir(exist_ok=True)
+    (scripts.parent / "shared").mkdir(exist_ok=True)
+    (scripts.parent / "shared" / "provider-prompt-projections.v1.json").write_bytes(
+        (ROOT / "shared" / "provider-prompt-projections.v1.json").read_bytes()
+    )
+    (scripts.parent / "shared" / "role-routing-policy.v1.json").write_bytes(
+        (ROOT / "shared" / "role-routing-policy.v1.json").read_bytes()
+    )
     (shared / "AGENTS.shared.md").write_bytes(
         (ROOT / "shared" / "AGENTS.shared.md").read_bytes()
+    )
+    (shared / "role-routing-policy.v1.json").write_bytes(
+        (ROOT / "shared" / "role-routing-policy.v1.json").read_bytes()
+    )
+    (scripts / "check-hook-health.py").write_bytes(
+        (ROOT / "scripts" / "check-hook-health.py").read_bytes()
     )
     return entrypoint
 
@@ -159,6 +176,35 @@ def test_root_thin_wrapper_delivers_one_governance_frame_then_exact_task_bytes(
 ) -> None:
     """Catches a root wrapper that bypasses the shared in-memory transport seam."""
 
+    runtime_scripts = tmp_path / "runtime" / "agents" / "scripts"
+    runtime_scripts.mkdir(parents=True)
+    entrypoint = runtime_scripts / f"invoke-{provider}-prompt.py"
+    shutil.copyfile(ROOT / "scripts" / entrypoint.name, entrypoint)
+    shutil.copyfile(ROOT / "scripts" / "provider_prompt.py", runtime_scripts / "provider_prompt.py")
+    shutil.copyfile(
+        ROOT / "scripts" / "resolve-agents-mode.py",
+        runtime_scripts / "resolve-agents-mode.py",
+    )
+    shutil.copyfile(
+        ROOT / "shared" / "external-prompt-governance.md",
+        runtime_scripts / "external-prompt-governance.md",
+    )
+    support = tmp_path / "runtime" / "scripts"
+    support.mkdir()
+    shared = runtime_scripts.parent / "shared"
+    shared.mkdir()
+    shutil.copyfile(
+        ROOT / "shared" / "provider-prompt-projections.v1.json",
+        shared / "provider-prompt-projections.v1.json",
+    )
+    (runtime_scripts.parent / "shared").mkdir(exist_ok=True)
+    shutil.copyfile(
+        ROOT / "shared" / "role-routing-policy.v1.json",
+        runtime_scripts.parent / "shared" / "role-routing-policy.v1.json",
+    )
+    for name in ("check-hook-health.py", "universal_hooks_manifest.py"):
+        shutil.copyfile(ROOT / "scripts" / name, support / name)
+        shutil.copyfile(ROOT / "scripts" / name, runtime_scripts / name)
     prompt = tmp_path / "task.md"
     task = b"root-wrapper task\n"
     prompt.write_bytes(task)
@@ -175,7 +221,7 @@ def test_root_thin_wrapper_delivers_one_governance_frame_then_exact_task_bytes(
     result = subprocess.run(
         [
             sys.executable,
-            str(ROOT / "scripts" / f"invoke-{provider}-prompt.py"),
+            str(entrypoint),
             "root-wrapper-fixture",
             "--prompt-file",
             str(prompt),
@@ -190,7 +236,7 @@ def test_root_thin_wrapper_delivers_one_governance_frame_then_exact_task_bytes(
 
     assert result.returncode == 0, result.stderr
     delivered = stdin_capture.read_bytes()
-    capsule = (ROOT / "scripts" / "external-prompt-governance.md").read_bytes()
+    capsule = (ROOT / "shared" / "external-prompt-governance.md").read_bytes()
     expected = (
         b"ORCHESTRARIUM_EXTERNAL_GOVERNANCE_V1\n"
         + capsule
@@ -200,6 +246,24 @@ def test_root_thin_wrapper_delivers_one_governance_frame_then_exact_task_bytes(
     assert delivered == expected
     assert delivered.splitlines().count(b"ORCHESTRARIUM_EXTERNAL_GOVERNANCE_V1") == 1
     assert result.stdout.count("ORCHESTRARIUM_PROVIDER_RESULT_V2=") == 1
+
+    root_result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts" / f"invoke-{provider}-prompt.py"),
+            "root-wrapper-fixture",
+            "--prompt-file",
+            str(prompt),
+        ],
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=30,
+    )
+    assert root_result.returncode == 0, root_result.stderr
+    assert stdin_capture.read_bytes() == expected
 
 
 @pytest.mark.parametrize(

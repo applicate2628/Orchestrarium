@@ -23,10 +23,11 @@ import stat
 import sys
 import tempfile
 import threading
+from collections import Counter
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from types import MappingProxyType
 from typing import Iterable
 
@@ -9450,6 +9451,627 @@ def run_trial(root: Path, fixture_path: Path) -> tuple[str, str]:
     return first, second
 
 
+LEGACY_PROJECTION_MANIFEST_DIR = "legacy-ledger-projection-manifests"
+LEGACY_PROJECTION_REGISTRY = "legacy-ledger-projections.jsonl"
+LEGACY_PROJECTION_RECEIPTS = "legacy-ledger-projection-receipts"
+LEGACY_HISTORICAL_DISPOSITIONS = "legacy-ledger-historical-dispositions"
+_PROJECTION_OPERATION_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", re.ASCII)
+
+
+def _projection_fail(failure_id: str, message: str) -> None:
+    raise LifecycleError(failure_id, message)
+
+
+def _projection_object(data: bytes, label: str) -> dict:
+    try:
+        value = json.loads(data.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        _projection_fail("WI-LEDGER-MIGRATION-MANIFEST-INVALID", f"{label} is not one JSON object")
+        raise AssertionError from exc
+    if not isinstance(value, dict):
+        _projection_fail("WI-LEDGER-MIGRATION-MANIFEST-INVALID", f"{label} is not one JSON object")
+    return value
+
+
+def _projection_json(data: dict) -> bytes:
+    return json.dumps(data, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode("utf-8")
+
+
+def _projection_operation(operation_id: str, recorded_at: str) -> None:
+    if _PROJECTION_OPERATION_RE.fullmatch(operation_id) is None:
+        _projection_fail("WI-LEDGER-MIGRATION-TARGET-IDENTITY", "projection operation id is not bounded")
+    _load_agent_run_ledger()._strict_migration_inputs(operation_id, recorded_at)
+
+
+def _projection_paths(root: Path) -> tuple[Path, Path, Path, Path]:
+    work_items = _work_items_root(root)
+    repository = work_items.parent
+    manifests = _require_lifecycle_mutation_path(repository, work_items / LEGACY_PROJECTION_MANIFEST_DIR, failure_id="WI-LEDGER-MIGRATION-MANIFEST-INVALID")
+    registry = _require_lifecycle_mutation_path(repository, work_items / LEGACY_PROJECTION_REGISTRY, failure_id="WI-LEDGER-MIGRATION-COMMIT-INDETERMINATE")
+    receipts = _require_lifecycle_mutation_path(repository, work_items / LEGACY_PROJECTION_RECEIPTS, failure_id="WI-LEDGER-MIGRATION-RECEIPT-MISMATCH")
+    dispositions = _require_lifecycle_mutation_path(repository, work_items / LEGACY_HISTORICAL_DISPOSITIONS, failure_id="WI-LEDGER-MIGRATION-MANIFEST-INVALID")
+    return manifests, registry, receipts, dispositions
+
+
+def _projection_manifest_blobs(root: Path, manifests: Path, manifest_id: str, supplied: bytes) -> dict[str, bytes]:
+    blobs: dict[str, bytes] = {}
+    validator = _load_agent_run_ledger().load_validator()
+    try:
+        manifest_id = validator.confine_legacy_projection_identifier(
+            manifest_id, failure_id="WI-LEDGER-MIGRATION-MANIFEST-INVALID"
+        )
+    except ValueError as exc:
+        _projection_fail("WI-LEDGER-MIGRATION-MANIFEST-INVALID", f"projection manifest id is unsafe: {exc}")
+        raise AssertionError from exc
+    if manifests.exists():
+        if not manifests.is_dir() or _lifecycle_path_has_reparse(manifests):
+            _projection_fail("WI-LEDGER-MIGRATION-MANIFEST-INVALID", "projection manifest directory is unsafe")
+        for path in manifests.iterdir():
+            if path.suffix != ".json" or _lifecycle_path_has_reparse(path):
+                _projection_fail("WI-LEDGER-MIGRATION-MANIFEST-INVALID", "projection manifest directory has unsafe member")
+            try:
+                safe = validator.confine_legacy_projection_path(
+                    root, f"work-items/{LEGACY_PROJECTION_MANIFEST_DIR}/{path.name}",
+                    prefix=("work-items", LEGACY_PROJECTION_MANIFEST_DIR), leaf_kind="file",
+                    failure_id="WI-LEDGER-MIGRATION-MANIFEST-INVALID",
+                )
+            except ValueError as exc:
+                _projection_fail("WI-LEDGER-MIGRATION-MANIFEST-INVALID", f"projection manifest member is unsafe: {exc}")
+                raise AssertionError from exc
+            blobs[safe.name] = safe.read_bytes()
+    name = f"{manifest_id}.json"
+    current = blobs.get(name)
+    if current is not None and current != supplied:
+        _projection_fail("WI-LEDGER-MIGRATION-MANIFEST-INVALID", "create-only manifest bytes differ")
+    blobs[name] = supplied
+    return blobs
+
+
+def _projection_registry_records(data: bytes) -> list[tuple[dict, bytes]]:
+    records: list[tuple[dict, bytes]] = []
+    for ordinal, line in enumerate(data.splitlines(keepends=True), start=1):
+        record = _projection_object(line.rstrip(b"\r\n"), f"registry line {ordinal}")
+        records.append((record, line))
+    return records
+
+
+def _projection_entry(manifest: dict, entry_id: str, raw_ordinal: int, root: Path) -> dict:
+    manifest_id = manifest.get("manifestId")
+    if not isinstance(manifest_id, str) or _PROJECTION_OPERATION_RE.fullmatch(manifest_id) is None:
+        _projection_fail("WI-LEDGER-MIGRATION-MANIFEST-INVALID", "manifest id is invalid")
+    entries = [entry for entry in manifest.get("entries", []) if isinstance(entry, dict) and entry.get("entryId") == entry_id]
+    if len(entries) != 1 or not isinstance(raw_ordinal, int):
+        _projection_fail("WI-LEDGER-MIGRATION-TARGET-IDENTITY", "manifest entry or raw ordinal is not unique")
+    entry = entries[0]
+    required = {"entryId", "profileId", "profileVersion", "workItem", "ledgerPath", "ledgerSha256", "rawLineOrdinals", "rawLineSha256", "projectedEvents", "projectedEventSha256"}
+    if (
+        not required <= set(entry)
+        or set(entry) - (required | {"artifactSha256"})
+        or not all(isinstance(entry[key], list) for key in ("rawLineOrdinals", "rawLineSha256", "projectedEvents", "projectedEventSha256"))
+    ):
+        _projection_fail("WI-LEDGER-MIGRATION-MANIFEST-INVALID", "manifest entry shape is incomplete")
+    ordinals = entry["rawLineOrdinals"]
+    raw_digests = entry["rawLineSha256"]
+    projected_events = entry["projectedEvents"]
+    projected_digests = entry["projectedEventSha256"]
+    if (
+        not ordinals
+        or not (len(ordinals) == len(raw_digests) == len(projected_events) == len(projected_digests))
+        or any(not isinstance(value, int) or value < 1 for value in ordinals)
+        or len(set(ordinals)) != len(ordinals)
+        or any(not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None for value in (*raw_digests, *projected_digests))
+        or any(not isinstance(value, dict) for value in projected_events)
+    ):
+        _projection_fail("WI-LEDGER-MIGRATION-MANIFEST-INVALID", "manifest entry bindings are not one unique parallel set")
+    try:
+        index = entry["rawLineOrdinals"].index(raw_ordinal)
+        raw_digest = entry["rawLineSha256"][index]
+        projected = entry["projectedEvents"][index]
+        projected_digest = entry["projectedEventSha256"][index]
+    except (ValueError, IndexError):
+        _projection_fail("WI-LEDGER-MIGRATION-TARGET-IDENTITY", "raw ordinal is not bound by the manifest entry")
+    if (
+        not isinstance(entry.get("entryId"), str)
+        or not isinstance(entry.get("profileId"), str)
+        or not isinstance(entry.get("profileVersion"), int)
+        or entry["profileVersion"] < 1
+        or not all(isinstance(value, str) for value in (entry["workItem"], entry["ledgerPath"], entry["ledgerSha256"], raw_digest, projected_digest))
+        or re.fullmatch(r"[0-9a-f]{64}", entry["ledgerSha256"]) is None
+        or not isinstance(projected, dict)
+    ):
+        _projection_fail("WI-LEDGER-MIGRATION-MANIFEST-INVALID", "manifest entry value types are invalid")
+    def controlled_path(value: str, label: str) -> Path:
+        try:
+            return _load_agent_run_ledger().load_validator().confine_legacy_projection_path(
+                root, value, prefix=("work-items",), failure_id="WI-LEDGER-MIGRATION-TARGET-IDENTITY"
+            )
+        except ValueError as exc:
+            _projection_fail("WI-LEDGER-MIGRATION-TARGET-IDENTITY", f"{label} is unsafe: {exc}")
+            raise AssertionError from exc
+
+    item = controlled_path(entry["workItem"], "manifest work item")
+    ledger = controlled_path(entry["ledgerPath"], "manifest ledger")
+    item_parts = entry["workItem"].split("/")
+    if (
+        len(item_parts) != 3
+        or item_parts[:2] != ["work-items", "active"]
+        or _PROJECTION_OPERATION_RE.fullmatch(item_parts[2]) is None
+        or not item.is_dir() or _lifecycle_path_has_reparse(item)
+        or ledger != item / "agent-runs.jsonl" or not ledger.is_file() or _lifecycle_path_has_reparse(ledger)
+    ):
+        _projection_fail("WI-LEDGER-MIGRATION-TARGET-IDENTITY", "manifest target is not one safe active work-item ledger")
+    ledger_bytes = ledger.read_bytes()
+    lines = ledger_bytes.splitlines(keepends=True)
+    if _sha256_bytes(ledger_bytes) != entry["ledgerSha256"]:
+        _projection_fail("WI-LEDGER-MIGRATION-LEDGER-DRIFT", "manifest ledger digest differs")
+    for bound_ordinal, bound_digest, bound_projected, bound_projected_digest in zip(
+        ordinals, raw_digests, projected_events, projected_digests
+    ):
+        if bound_ordinal > len(lines) or _sha256_bytes(lines[bound_ordinal - 1]) != bound_digest:
+            _projection_fail("WI-LEDGER-MIGRATION-TARGET-DIGEST", "manifest raw line digest differs")
+        if _sha256_bytes(_projection_json(bound_projected)) != bound_projected_digest:
+            _projection_fail("WI-LEDGER-MIGRATION-TARGET-DIGEST", "manifest projected event digest differs")
+    return {**entry, "_item": item, "_ledger": ledger, "_ledgerBytes": ledger_bytes, "_rawDigest": raw_digest, "_projected": projected, "_projectedDigest": projected_digest}
+
+
+def _projection_record(manifest: dict, manifest_bytes: bytes, entry_id: str, raw_ordinal: int, operation_group_id: str, group_member_index: int, group_member_count: int, recorded_at: str, root: Path) -> dict:
+    entry = _projection_entry(manifest, entry_id, raw_ordinal, root)
+    operation_id = _projection_group_ids(operation_group_id, group_member_count)[group_member_index - 1]
+    return {
+        "schemaVersion": 2, "operationId": operation_id, "operationGroupId": operation_group_id,
+        "groupMemberIndex": group_member_index, "groupMemberCount": group_member_count, "state": "apply",
+        "profileId": entry["profileId"], "profileVersion": entry["profileVersion"],
+        "manifestId": manifest["manifestId"], "manifestSha256": _sha256_bytes(manifest_bytes),
+        "manifestEntryId": entry_id, "workItem": entry["workItem"], "ledgerPath": entry["ledgerPath"],
+        "ledgerSha256": entry["ledgerSha256"], "rawLineOrdinal": raw_ordinal,
+        "rawLineSha256": entry["_rawDigest"], "projectedEvent": entry["_projected"],
+        "projectedEventSha256": entry["_projectedDigest"], "recordedAt": recorded_at,
+    }
+
+
+def _projection_confine_output_sink(path: Path, failure_id: str) -> tuple[Path, bool]:
+    """Return one ordinary direct-child output sink before any content probe/write.
+
+    Pre-existing links/reparse leaves are rejected through lstat.  This is a
+    deterministic preflight only; hostile same-user rename races remain outside
+    the existing lifecycle-lock claim.
+    """
+    parent = path.parent
+    parent.mkdir(parents=True, exist_ok=True)
+    try:
+        parent_info = parent.lstat()
+    except OSError as exc:
+        raise LifecycleError(failure_id, "projection output parent is unavailable") from exc
+    if _lifecycle_path_has_reparse(parent) or not stat.S_ISDIR(parent_info.st_mode):
+        _projection_fail(failure_id, "projection output parent is unsafe")
+    if path.parent != parent or path.name in {"", ".", ".."}:
+        _projection_fail(failure_id, "projection output is not one direct child")
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return path, False
+    except OSError as exc:
+        raise LifecycleError(failure_id, "projection output leaf is unavailable") from exc
+    if _lifecycle_path_has_reparse(path) or not stat.S_ISREG(info.st_mode):
+        _projection_fail(failure_id, "projection output leaf is unsafe")
+    return path, True
+
+
+def _projection_create_or_exact(path: Path, data: bytes, failure_id: str) -> bool:
+    path, replay = _projection_confine_output_sink(path, failure_id)
+    if replay:
+        if path.read_bytes() != data:
+            _projection_fail(failure_id, "create-only target differs after write")
+        return True
+    temporary: Path | None = None
+    try:
+        descriptor, name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+        temporary = Path(name)
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        try:
+            os.link(temporary, path)
+        except FileExistsError:
+            path, replay = _projection_confine_output_sink(path, failure_id)
+            if not replay:
+                _projection_fail(failure_id, "projection output disappeared during create-only write")
+        except OSError as exc:
+            raise LifecycleError(failure_id, "atomic create-only write is unavailable") from exc
+        path, _replay = _projection_confine_output_sink(path, failure_id)
+        if path.read_bytes() != data:
+            _projection_fail(failure_id, "create-only target differs after write")
+        return replay
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+def _projection_reconcile_receipt(receipts: Path, facts: dict) -> None:
+    try:
+        operation_id = _load_agent_run_ledger().load_validator().confine_legacy_projection_identifier(
+            facts.get("operationId"), failure_id="WI-LEDGER-MIGRATION-RECEIPT-MISMATCH"
+        )
+    except ValueError as exc:
+        _projection_fail("WI-LEDGER-MIGRATION-RECEIPT-MISMATCH", f"projection receipt identifier is unsafe: {exc}")
+        raise AssertionError from exc
+    path = receipts / f"{operation_id}.json"
+    _projection_create_or_exact(path, (json.dumps(facts, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode("utf-8"), "WI-LEDGER-MIGRATION-RECEIPT-MISMATCH")
+
+
+def _projection_candidate_errors(entry: dict, manifests: dict[str, bytes], registry_bytes: bytes) -> list[str]:
+    validator = _load_agent_run_ledger().load_validator()
+    return validator.validate_work_item(
+        entry["_item"], validate_status_file=False,
+        projection_manifest_blobs=manifests,
+        projection_registry_bytes=registry_bytes,
+    )
+
+
+def _projection_group_ids(operation_id: str, count: int) -> list[str]:
+    if count < 1:
+        _projection_fail("WI-LEDGER-MIGRATION-TOPOLOGY", "projection group count must be positive")
+    values = [operation_id] if count == 1 else [
+        "m:" + _sha256_bytes(
+            json.dumps([operation_id, index, count], ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        )
+        for index in range(1, count + 1)
+    ]
+    if any(len(value) > 128 for value in values):
+        _projection_fail("WI-LEDGER-MIGRATION-TARGET-IDENTITY", "derived projection member id exceeds its bounded grammar")
+    return values
+
+
+def _projection_group_facts(
+    operation_id: str,
+    lines: list[bytes],
+    registry_before: bytes,
+    registry_prefix: bytes,
+) -> dict:
+    record_hashes = [_sha256_bytes(line) for line in lines]
+    return {
+        "schemaVersion": 1,
+        "operationId": operation_id,
+        "recordSha256": record_hashes[0] if len(record_hashes) == 1 else record_hashes,
+        "registryBeforeSha256": _sha256_bytes(registry_before),
+        "registrySha256": _sha256_bytes(registry_prefix),
+    }
+
+
+def _projection_existing_group(
+    records: list[tuple[dict, bytes]], child_ids: list[str], lines: list[bytes]
+) -> tuple[bytes, bytes] | None:
+    """Return exact before/after prefixes for one persisted append group.
+
+    Receipt facts are derived from the durable prefix ending at this group, not
+    from the current whole registry.  This keeps replays byte-stable after a
+    later independent append.
+    """
+    positions: list[int] = []
+    for child_id, expected_line in zip(child_ids, lines):
+        matched = [index for index, (record, _physical) in enumerate(records) if record.get("operationId") == child_id]
+        if len(matched) > 1:
+            _projection_fail("WI-LEDGER-MIGRATION-TOPOLOGY", "projection operation id is duplicated")
+        if not matched:
+            return None
+        index = matched[0]
+        if records[index][1] != expected_line:
+            _projection_fail("WI-LEDGER-MIGRATION-TOPOLOGY", "projection operation group differs from its exact inputs")
+        positions.append(index)
+    if positions != list(range(positions[0], positions[0] + len(positions))):
+        _projection_fail("WI-LEDGER-MIGRATION-TOPOLOGY", "projection operation group is non-contiguous")
+    before = b"".join(physical for _record, physical in records[:positions[0]])
+    after = b"".join(physical for _record, physical in records[:positions[-1] + 1])
+    return before, after
+
+
+def _projection_require_replay_anchor(expected_registry_sha256: str, group_before: bytes, current_registry: bytes) -> None:
+    """One replay rule for singleton and v2 groups, independent of later appends."""
+    accepted = {_sha256_bytes(group_before), _sha256_bytes(current_registry)}
+    if expected_registry_sha256 not in accepted:
+        _projection_fail("WI-LEDGER-MIGRATION-LEDGER-DRIFT", "replay expected registry digest differs from durable anchors")
+
+
+def _apply_legacy_ledger_projection_locked(root: Path, manifest_bytes: bytes, entry_id: str, raw_ordinal: int, expected_registry_sha256: str, operation_id: str, recorded_at: str, *, inject_failure: str | None = None) -> dict:
+    _projection_operation(operation_id, recorded_at)
+    manifests_path, registry_path, receipts, _dispositions = _projection_paths(root)
+    manifest = _projection_object(manifest_bytes, "manifest")
+    manifest_id = manifest.get("manifestId")
+    if not isinstance(manifest_id, str) or _PROJECTION_OPERATION_RE.fullmatch(manifest_id) is None:
+        _projection_fail("WI-LEDGER-MIGRATION-MANIFEST-INVALID", "manifest id is required")
+    manifests = _projection_manifest_blobs(Path(root).resolve(), manifests_path, manifest_id, manifest_bytes)
+    before = registry_path.read_bytes() if registry_path.exists() else b""
+    if registry_path.exists() and (not registry_path.is_file() or _lifecycle_path_has_reparse(registry_path)):
+        _projection_fail("WI-LEDGER-MIGRATION-COMMIT-INDETERMINATE", "projection registry is unsafe")
+    configured_entries = [row for row in manifest.get("entries", []) if isinstance(row, dict) and row.get("entryId") == entry_id]
+    if len(configured_entries) != 1 or not configured_entries[0].get("rawLineOrdinals"):
+        _projection_fail("WI-LEDGER-MIGRATION-TARGET-IDENTITY", "manifest entry is unavailable")
+    repository = Path(root).resolve()
+    if repository.name == "work-items" or _lifecycle_path_has_reparse(repository / "work-items"):
+        _projection_fail("WI-LEDGER-MIGRATION-TARGET-IDENTITY", "projection writer requires one ordinary repository root")
+    seed = _projection_entry(manifest, entry_id, raw_ordinal, repository)
+    ordinals = seed["rawLineOrdinals"]
+    child_ids = _projection_group_ids(operation_id, len(ordinals))
+    records = [
+        _projection_record(manifest, manifest_bytes, entry_id, ordinal, operation_id, index, len(ordinals), recorded_at, repository)
+        for index, ordinal in enumerate(ordinals, start=1)
+    ]
+    lines = [_projection_json(record) + b"\n" for record in records]
+    registry_records = _projection_registry_records(before)
+    persisted = _projection_existing_group(registry_records, child_ids, lines)
+    if persisted is not None:
+        persisted_before, persisted_after = persisted
+        _projection_require_replay_anchor(expected_registry_sha256, persisted_before, before)
+        _projection_create_or_exact(manifests_path / f"{manifest_id}.json", manifest_bytes, "WI-LEDGER-MIGRATION-MANIFEST-INVALID")
+        facts = _projection_group_facts(operation_id, lines, persisted_before, persisted_after)
+        _projection_reconcile_receipt(receipts, facts)
+        return {**facts, "replay": True}
+    existing_ids = {record.get("operationId") for record, _physical in registry_records}
+    if any(child_id in existing_ids for child_id in child_ids):
+        _projection_fail("WI-LEDGER-MIGRATION-TOPOLOGY", "projection operation group is partial")
+    if any(
+        isinstance(existing_id, str)
+        and existing_id.casefold() == child_id.casefold()
+        and existing_id != child_id
+        for existing_id in existing_ids
+        for child_id in child_ids
+    ):
+        _projection_fail("WI-LEDGER-MIGRATION-TOPOLOGY", "projection operation id collides case-insensitively")
+    if _sha256_bytes(before) != expected_registry_sha256:
+        _projection_fail("WI-LEDGER-MIGRATION-LEDGER-DRIFT", "projection registry digest changed")
+    candidate = before + b"".join(lines)
+    errors = _projection_candidate_errors(seed, manifests, candidate)
+    if errors:
+        _projection_fail("WI-LEDGER-MIGRATION-CANDIDATE-INVALID", "; ".join(errors))
+    if inject_failure == "before-registry":
+        _projection_fail("WI-LEDGER-MIGRATION-COMMIT-INDETERMINATE", "injected interruption before registry commit")
+    try:
+        _atomic_write(registry_path, candidate)
+        if inject_failure == "corrupt-registry":
+            registry_path.write_bytes(candidate + b"corrupt")
+        actual = registry_path.read_bytes()
+    except OSError as exc:
+        raise LifecycleError("WI-LEDGER-MIGRATION-COMMIT-INDETERMINATE", "projection registry readback failed") from exc
+    if actual != candidate:
+        if actual == before:
+            _projection_fail("WI-LEDGER-MIGRATION-COMMIT-INDETERMINATE", "projection registry remains exact before image")
+        _projection_fail("WI-LEDGER-MIGRATION-COMMIT-INDETERMINATE", "projection registry is neither exact before nor after")
+    if inject_failure == "after-registry":
+        _projection_fail("WI-LEDGER-MIGRATION-COMMIT-INDETERMINATE", "injected interruption after registry commit")
+    _projection_create_or_exact(manifests_path / f"{manifest_id}.json", manifest_bytes, "WI-LEDGER-MIGRATION-MANIFEST-INVALID")
+    facts = _projection_group_facts(operation_id, lines, before, candidate)
+    _projection_reconcile_receipt(receipts, facts)
+    return {**facts, "replay": False}
+
+
+_apply_legacy_ledger_projection_transaction = _lifecycle_participant(_apply_legacy_ledger_projection_locked)
+
+
+def apply_legacy_ledger_projection(root: Path, manifest_bytes: bytes, entry_id: str, raw_ordinal: int, expected_registry_sha256: str, operation_id: str, recorded_at: str, *, dry_run: bool = False, inject_failure: str | None = None) -> dict:
+    if dry_run:
+        _projection_operation(operation_id, recorded_at)
+        manifest = _projection_object(manifest_bytes, "manifest")
+        entry = _projection_entry(manifest, entry_id, raw_ordinal, Path(root).resolve())
+        child_ids = _projection_group_ids(operation_id, len(entry["rawLineOrdinals"]))
+        return {"schemaVersion": 1, "dryRun": True, "byteInventory": {}, "operationIds": child_ids}
+    return _apply_legacy_ledger_projection_transaction(root, manifest_bytes, entry_id, raw_ordinal, expected_registry_sha256, operation_id, recorded_at, inject_failure=inject_failure)
+
+
+def _projection_active_records(records: list[tuple[dict, bytes]]) -> dict[str, tuple[dict, bytes]]:
+    """Reduce exact apply/revoke lines without granting the registry new authority."""
+    active: dict[str, tuple[dict, bytes]] = {}
+    for record, physical in records:
+        operation = record.get("operationId")
+        if not isinstance(operation, str):
+            _projection_fail("WI-LEDGER-MIGRATION-TOPOLOGY", "registry operation id is invalid")
+        if record.get("state") == "apply":
+            if operation in active:
+                _projection_fail("WI-LEDGER-MIGRATION-TOPOLOGY", "registry apply operation id is duplicated")
+            active[operation] = (record, physical)
+        elif record.get("state") == "revoke":
+            target = record.get("revokeOfOperationId")
+            if not isinstance(target, str) or target not in active:
+                _projection_fail("WI-LEDGER-MIGRATION-TOPOLOGY", "registry revoke lacks one earlier active apply")
+            if record.get("revokeOfRecordSha256") != _sha256_bytes(active[target][1]):
+                _projection_fail("WI-LEDGER-MIGRATION-TARGET-DIGEST", "registry revoke does not bind exact apply bytes")
+            active.pop(target)
+        else:
+            _projection_fail("WI-LEDGER-MIGRATION-TOPOLOGY", "registry state is not apply or revoke")
+    return active
+
+
+def _projection_digest_list(value: object, expected_count: int) -> list[str]:
+    values = [value] if isinstance(value, str) else value
+    if (
+        not isinstance(values, list)
+        or len(values) != expected_count
+        or any(not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None for digest in values)
+    ):
+        _projection_fail("WI-LEDGER-MIGRATION-TARGET-DIGEST", "revoke must bind every exact apply record digest")
+    return values
+
+
+def _projection_cli_record_digests(value: str) -> str | list[str]:
+    """Accept the scalar legacy form or one JSON array for an atomic row group."""
+    if not value.startswith("["):
+        return value
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        _projection_fail("WI-LEDGER-MIGRATION-TARGET-DIGEST", "record digest group is not valid JSON")
+    if not isinstance(parsed, list):
+        _projection_fail("WI-LEDGER-MIGRATION-TARGET-DIGEST", "record digest group is not an array")
+    return parsed
+
+
+def _revoke_legacy_ledger_projection_locked(root: Path, apply_operation_id: str, apply_record_sha256: str | list[str], expected_registry_sha256: str, operation_id: str, recorded_at: str) -> dict:
+    _projection_operation(operation_id, recorded_at)
+    manifests_path, registry_path, receipts, _dispositions = _projection_paths(root)
+    repository = Path(root).resolve()
+    if repository.name == "work-items" or _lifecycle_path_has_reparse(repository / "work-items"):
+        _projection_fail("WI-LEDGER-MIGRATION-TARGET-IDENTITY", "projection writer requires one ordinary repository root")
+    if not registry_path.is_file() or _lifecycle_path_has_reparse(registry_path):
+        _projection_fail("WI-LEDGER-MIGRATION-TARGET-IDENTITY", "projection registry is unavailable")
+    before = registry_path.read_bytes()
+    records = _projection_registry_records(before)
+    matching = [
+        (index, record, physical) for index, (record, physical) in enumerate(records)
+        if record.get("operationGroupId", record.get("operationId")) == apply_operation_id
+    ]
+    if matching:
+        target_index, target_record, _physical = matching[0]
+    else:
+        _projection_fail("WI-LEDGER-MIGRATION-TARGET-IDENTITY", "revoke target apply operation is unavailable")
+    if target_record.get("state") != "apply":
+        _projection_fail("WI-LEDGER-MIGRATION-TOPOLOGY", "revoke target is not an apply record")
+    validator = _load_agent_run_ledger().load_validator()
+    try:
+        manifest_id = validator.confine_legacy_projection_identifier(
+            target_record.get("manifestId"), failure_id="WI-LEDGER-MIGRATION-MANIFEST-INVALID"
+        )
+        manifest_path = validator.confine_legacy_projection_path(
+            repository, f"work-items/{LEGACY_PROJECTION_MANIFEST_DIR}/{manifest_id}.json",
+            prefix=("work-items", LEGACY_PROJECTION_MANIFEST_DIR), leaf_kind="file",
+            failure_id="WI-LEDGER-MIGRATION-MANIFEST-INVALID",
+        )
+    except ValueError as exc:
+        _projection_fail("WI-LEDGER-MIGRATION-MANIFEST-INVALID", f"target manifest is unsafe: {exc}")
+        raise AssertionError from exc
+    manifest_bytes = manifest_path.read_bytes()
+    manifest = _projection_object(manifest_bytes, "target manifest")
+    entry = _projection_entry(manifest, target_record["manifestEntryId"], target_record["rawLineOrdinal"], repository)
+    child_ids = _projection_group_ids(apply_operation_id, len(entry["rawLineOrdinals"]))
+    apply_lines: list[bytes] = []
+    apply_records: list[dict] = []
+    apply_indices: list[int] = []
+    for child_id, raw_ordinal in zip(child_ids, entry["rawLineOrdinals"]):
+        matches = [(index, record, physical) for index, (record, physical) in enumerate(records) if record.get("operationId") == child_id]
+        if len(matches) != 1 or matches[0][1].get("state") != "apply" or matches[0][1].get("rawLineOrdinal") != raw_ordinal:
+            _projection_fail("WI-LEDGER-MIGRATION-TOPOLOGY", "revoke target apply group is partial or differs")
+        apply_indices.append(matches[0][0])
+        apply_lines.append(matches[0][2])
+        apply_records.append(matches[0][1])
+    if apply_indices != list(range(apply_indices[0], apply_indices[0] + len(apply_indices))):
+        _projection_fail("WI-LEDGER-MIGRATION-TOPOLOGY", "revoke target apply group is non-contiguous")
+    supplied_digests = _projection_digest_list(apply_record_sha256, len(apply_lines))
+    if supplied_digests != [_sha256_bytes(line) for line in apply_lines]:
+        _projection_fail("WI-LEDGER-MIGRATION-TARGET-DIGEST", "revoke target does not bind exact apply group bytes")
+    revoke_ids = _projection_group_ids(operation_id, len(child_ids))
+    revokes = []
+    for member_index, (revoke_id, apply_id, apply_line, apply_record) in enumerate(zip(revoke_ids, child_ids, apply_lines, apply_records), start=1):
+        revokes.append({
+            **{key: apply_record[key] for key in ("schemaVersion", "profileId", "profileVersion", "manifestId", "manifestSha256", "manifestEntryId", "workItem", "ledgerPath", "ledgerSha256", "rawLineOrdinal", "rawLineSha256", "projectedEvent", "projectedEventSha256")},
+            "operationGroupId": operation_id, "groupMemberIndex": member_index, "groupMemberCount": len(revoke_ids),
+            "operationId": revoke_id, "state": "revoke", "recordedAt": recorded_at,
+            "revokeOfOperationId": apply_id, "revokeOfOperationGroupId": apply_operation_id, "revokeOfRecordSha256": _sha256_bytes(apply_line),
+        })
+    revoke_lines = [_projection_json(record) + b"\n" for record in revokes]
+    persisted = _projection_existing_group(records, revoke_ids, revoke_lines)
+    if persisted is not None:
+        persisted_before, persisted_after = persisted
+        _projection_require_replay_anchor(expected_registry_sha256, persisted_before, before)
+        facts = _projection_group_facts(operation_id, revoke_lines, persisted_before, persisted_after)
+        _projection_reconcile_receipt(receipts, facts)
+        return {**facts, "replay": True}
+    active = _projection_active_records(records)
+    if any(child_id not in active for child_id in child_ids):
+        _projection_fail("WI-LEDGER-MIGRATION-TOPOLOGY", "apply group is already revoked or partially active")
+    for later, _physical in records[apply_indices[-1] + 1:]:
+        if (
+            later.get("manifestId") == target_record["manifestId"]
+            and later.get("manifestEntryId") == target_record["manifestEntryId"]
+            and later.get("state") in {"apply", "revoke"}
+        ):
+            _projection_fail("WI-LEDGER-MIGRATION-TOPOLOGY", "revoke is blocked by a later dependent entry operation")
+    existing_ids = {record.get("operationId") for record, _physical in records}
+    if any(revoke_id in existing_ids for revoke_id in revoke_ids):
+        _projection_fail("WI-LEDGER-MIGRATION-TOPOLOGY", "revoke operation group is partial")
+    if _sha256_bytes(before) != expected_registry_sha256:
+        _projection_fail("WI-LEDGER-MIGRATION-LEDGER-DRIFT", "projection registry digest changed")
+    candidate = before + b"".join(revoke_lines)
+    manifests = _projection_manifest_blobs(repository, manifests_path, manifest["manifestId"], manifest_bytes)
+    baseline = b"".join(physical for index, (_record, physical) in enumerate(records) if index not in set(apply_indices))
+    baseline_errors = _projection_candidate_errors(entry, manifests, baseline)
+    candidate_errors = _projection_candidate_errors(entry, manifests, candidate)
+    if Counter(candidate_errors) != Counter(baseline_errors):
+        _projection_fail("WI-LEDGER-MIGRATION-CANDIDATE-INVALID", "; ".join(candidate_errors))
+    try:
+        _atomic_write(registry_path, candidate)
+        actual = registry_path.read_bytes()
+    except OSError as exc:
+        raise LifecycleError("WI-LEDGER-MIGRATION-COMMIT-INDETERMINATE", "projection revoke registry readback failed") from exc
+    if actual != candidate:
+        _projection_fail("WI-LEDGER-MIGRATION-COMMIT-INDETERMINATE", "projection revoke registry readback differs")
+    facts = _projection_group_facts(operation_id, revoke_lines, before, candidate)
+    _projection_reconcile_receipt(receipts, facts)
+    return {**facts, "replay": False}
+
+
+_revoke_legacy_ledger_projection_transaction = _lifecycle_participant(_revoke_legacy_ledger_projection_locked)
+
+
+def revoke_legacy_ledger_projection(root: Path, apply_operation_id: str, apply_record_sha256: str | list[str], expected_registry_sha256: str, operation_id: str, recorded_at: str) -> dict:
+    return _revoke_legacy_ledger_projection_transaction(root, apply_operation_id, apply_record_sha256, expected_registry_sha256, operation_id, recorded_at)
+
+
+def _write_legacy_ledger_irrecoverable_disposition_locked(root: Path, disposition_bytes: bytes) -> dict:
+    _manifests, _registry, _receipts, dispositions = _projection_paths(root)
+    disposition = _projection_object(disposition_bytes, "irrecoverable disposition")
+    work_item = disposition.get("workItem")
+    archive_identity = disposition.get("archiveIdentity")
+    if not isinstance(work_item, str) or not isinstance(archive_identity, str):
+        _projection_fail("WI-LEDGER-MIGRATION-MANIFEST-INVALID", "irrecoverable disposition lacks exact identity")
+    validator = _load_agent_run_ledger().load_validator()
+    repository = Path(root).resolve()
+    try:
+        validator.confine_legacy_projection_identifier(
+            archive_identity, failure_id="WI-LEDGER-MIGRATION-TARGET-IDENTITY"
+        )
+        archive = validator.confine_legacy_projection_path(
+            repository, work_item, prefix=("work-items", "archive"), leaf_kind="directory",
+            failure_id="WI-LEDGER-MIGRATION-TARGET-IDENTITY",
+        )
+    except ValueError as exc:
+        _projection_fail("WI-LEDGER-MIGRATION-TARGET-IDENTITY", f"irrecoverable disposition target is unsafe: {exc}")
+        raise AssertionError from exc
+    errors = validator.validate_manifest_bound_irrecoverable_disposition(disposition, archive_identity, archive)
+    if errors:
+        _projection_fail("WI-LEDGER-MIGRATION-MANIFEST-INVALID", "; ".join(errors))
+    try:
+        receipt = validator.confine_legacy_projection_path(
+            repository, f"{work_item}/lifecycle-transition-receipt.json",
+            prefix=("work-items", "archive"), leaf_kind="file",
+            failure_id="WI-LEDGER-MIGRATION-TARGET-IDENTITY",
+        )
+    except ValueError as exc:
+        _projection_fail("WI-LEDGER-MIGRATION-TARGET-IDENTITY", f"archive transition receipt is unsafe: {exc}")
+        raise AssertionError from exc
+    try:
+        observed = json.loads(receipt.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise LifecycleError("WI-LEDGER-MIGRATION-TARGET-IDENTITY", "archive identity receipt is unavailable") from exc
+    if not isinstance(observed, dict) or observed.get("operationId") != archive_identity:
+        _projection_fail("WI-LEDGER-MIGRATION-TARGET-IDENTITY", "archive identity differs")
+    try:
+        archive_identity = validator.confine_legacy_projection_identifier(
+            archive_identity, failure_id="WI-LEDGER-MIGRATION-TARGET-IDENTITY"
+        )
+    except ValueError as exc:
+        _projection_fail("WI-LEDGER-MIGRATION-TARGET-IDENTITY", f"disposition output identifier is unsafe: {exc}")
+        raise AssertionError from exc
+    target = dispositions / f"{archive_identity}.json"
+    replay = _projection_create_or_exact(target, disposition_bytes, "WI-LEDGER-MIGRATION-MANIFEST-INVALID")
+    return {"schemaVersion": 1, "archiveIdentity": archive_identity, "replay": replay}
+
+
+_write_legacy_ledger_irrecoverable_disposition_transaction = _lifecycle_participant(_write_legacy_ledger_irrecoverable_disposition_locked)
+
+
+def write_legacy_ledger_irrecoverable_disposition(root: Path, disposition_bytes: bytes) -> dict:
+    return _write_legacy_ledger_irrecoverable_disposition_transaction(root, disposition_bytes)
+
+
 def _read_arg_file(path: str) -> bytes:
     return Path(path).read_bytes()
 
@@ -9622,6 +10244,25 @@ def build_parser() -> argparse.ArgumentParser:
     revoke_legacy.add_argument("--expected-ledger-sha256", required=True)
     revoke_legacy.add_argument("--operation-id", required=True)
     revoke_legacy.add_argument("--recorded-at", required=True)
+    projection_apply = sub.add_parser("apply-legacy-ledger-projection")
+    _add_root(projection_apply)
+    projection_apply.add_argument("--manifest-file", required=True)
+    projection_apply.add_argument("--manifest-entry-id", required=True)
+    projection_apply.add_argument("--raw-line-ordinal", required=True, type=int)
+    projection_apply.add_argument("--expected-registry-sha256", required=True)
+    projection_apply.add_argument("--operation-id", required=True)
+    projection_apply.add_argument("--recorded-at", required=True)
+    projection_apply.add_argument("--dry-run", action="store_true")
+    projection_revoke = sub.add_parser("revoke-legacy-ledger-projection")
+    _add_root(projection_revoke)
+    projection_revoke.add_argument("--apply-operation-id", required=True)
+    projection_revoke.add_argument("--apply-record-sha256", required=True)
+    projection_revoke.add_argument("--expected-registry-sha256", required=True)
+    projection_revoke.add_argument("--operation-id", required=True)
+    projection_revoke.add_argument("--recorded-at", required=True)
+    projection_disposition = sub.add_parser("write-legacy-ledger-irrecoverable-disposition")
+    _add_root(projection_disposition)
+    projection_disposition.add_argument("--disposition-file", required=True)
     archive_successor = sub.add_parser("archive-with-successor")
     _add_root(archive_successor)
     archive_successor.add_argument("--slug", required=True)
@@ -9914,6 +10555,24 @@ def main(argv: list[str]) -> int:
                 "WI-LEDGER-MIGRATION-REVOKED "
                 f"operation={result['operationId']} after={result['afterLedgerSha256']}"
             )
+        elif args.command == "apply-legacy-ledger-projection":
+            result = apply_legacy_ledger_projection(
+                root, _read_arg_file(args.manifest_file), args.manifest_entry_id,
+                args.raw_line_ordinal, args.expected_registry_sha256,
+                args.operation_id, args.recorded_at, dry_run=args.dry_run,
+            )
+            print(json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+        elif args.command == "revoke-legacy-ledger-projection":
+            result = revoke_legacy_ledger_projection(
+                root, args.apply_operation_id, _projection_cli_record_digests(args.apply_record_sha256),
+                args.expected_registry_sha256, args.operation_id, args.recorded_at,
+            )
+            print(json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+        elif args.command == "write-legacy-ledger-irrecoverable-disposition":
+            result = write_legacy_ledger_irrecoverable_disposition(
+                root, _read_arg_file(args.disposition_file),
+            )
+            print(json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
         elif args.command == "archive-with-successor":
             result = archive_with_successor(
                 root,

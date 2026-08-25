@@ -1,0 +1,4 @@
+interface:
+  display_name: "Manual Repository Transfer"
+  short_description: "Audit and move Git repositories safely"
+  default_prompt: "Use $manual-repo-transfer to prepare this repository for manual transfer."

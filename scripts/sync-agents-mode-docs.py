@@ -214,19 +214,25 @@ def scalar_keys_for_provider(
 
 def scalar_comment(scalar: dict[str, Any], provider: str) -> str:
     name = scalar["name"]
-    allowed = " | ".join(str(value) for value in scalar["allowed"])
+    allowed_values = [str(value) for value in scalar["allowed"]]
     default = scalar["default"]
     if name == "externalProvider":
+        selectable = " | ".join(
+            value for value in allowed_values if value not in {"kimi", "grok"}
+        )
         if provider == "qwen":
             return (
-                f"# allowed here: {allowed}; default: {default}; "
-                "kimi/grok are explicit-only; gemini/qwen are WEAK MODEL / "
+                f"# selectable here: {selectable}; default: {default}; "
+                "kimi/grok are policy-only classifiers, unavailable and disabled in 1.x; "
+                "never select them; gemini/qwen are WEAK MODEL / "
                 "NOT RECOMMENDED example-only routes"
             )
         return (
-            f"# allowed here: {allowed}; default: {default}; "
-            "kimi/grok are explicit-only; gemini/qwen are example-only and not recommended"
+            f"# selectable here: {selectable}; default: {default}; "
+            "kimi/grok are policy-only classifiers, unavailable and disabled in 1.x; "
+            "never select them; gemini/qwen are example-only and not recommended"
         )
+    allowed = " | ".join(allowed_values)
     return f"# allowed: {allowed}; default: {default}"
 
 

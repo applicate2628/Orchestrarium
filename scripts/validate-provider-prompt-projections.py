@@ -29,6 +29,15 @@ EXTERNAL_GOVERNANCE_BEGIN = "<!-- BEGIN ORCHESTRARIUM EXTERNAL GOVERNANCE V1 -->
 EXTERNAL_GOVERNANCE_END = "<!-- END ORCHESTRARIUM EXTERNAL GOVERNANCE V1 -->"
 _TOP_KEYS = frozenset({"schemaVersion", "packRevision", "files"})
 _FILE_KEYS = frozenset({"source", "sha256", "destination"})
+_AUTHORED_SOURCE_PATHS = {
+    name: Path("scripts") / name for name in TRANSPORT_FILES
+}
+_AUTHORED_SOURCE_PATHS["external-prompt-governance.md"] = (
+    Path("shared") / "external-prompt-governance.md"
+)
+_PACKED_RUNTIME_DESTINATIONS = {
+    name: Path("scripts") / name for name in TRANSPORT_FILES
+}
 _CROSS_HOST_MARKERS = (
     "from scripts.provider_prompt",
     "src.claude/agents/scripts/provider_prompt",
@@ -155,21 +164,21 @@ def _load_manifest(path: Path) -> dict[str, Any]:
     return manifest
 
 
-def _validate_record(name: str, record: Any) -> tuple[Path, str]:
+def _validate_record(name: str, record: Any) -> tuple[Path, Path, str]:
     if not isinstance(record, dict) or set(record) != _FILE_KEYS:
         raise _fail(f"manifest record shape for {name}")
-    expected_source = f"scripts/{name}"
-    expected_destination = f"scripts/{name}"
+    expected_source = _AUTHORED_SOURCE_PATHS[name]
+    expected_destination = _PACKED_RUNTIME_DESTINATIONS[name]
     digest = record.get("sha256")
     if (
-        record.get("source") != expected_source
-        or record.get("destination") != expected_destination
+        record.get("source") != expected_source.as_posix()
+        or record.get("destination") != expected_destination.as_posix()
         or not isinstance(digest, str)
         or len(digest) != 64
         or any(character not in "0123456789abcdef" for character in digest)
     ):
         raise _fail(f"manifest binding for {name}")
-    return Path(expected_source), digest
+    return expected_source, expected_destination, digest
 
 
 def _validate_bound_bytes(
@@ -289,7 +298,7 @@ def _validate_external_governance_projection(source_root: Path) -> None:
         Path(source_root) / "shared" / "AGENTS.shared.md"
     )
     actual = _read_bound_bytes(
-        Path(source_root) / "scripts" / "external-prompt-governance.md",
+        Path(source_root) / _AUTHORED_SOURCE_PATHS["external-prompt-governance.md"],
         "source/external-prompt-governance.md",
     )
     if actual != expected:
@@ -334,10 +343,14 @@ def validate_projection_manifest(
         if claude_agents_authority is not None:
             _assert_current_claude_agents_authority(claude_agents_authority)
         for name in TRANSPORT_FILES:
-            relative, digest = _validate_record(name, files[name])
-            bindings.append(
-                (_open_ordinary_file(source_root / relative, f"source/{name}"), digest, f"source/{name}")
+            authored_source, packed_destination, digest = _validate_record(
+                name, files[name]
             )
+            bindings.append(
+                (_open_ordinary_file(source_root / authored_source, f"source/{name}"), digest, f"source/{name}")
+            )
+            if packed_destination != Path("scripts") / name:
+                raise _fail(f"packed runtime destination for {name}")
             for label, projection_root in normalized:
                 bindings.append(
                     (
@@ -386,9 +399,11 @@ def validate_source_manifest(manifest_path: Path, source_root: Path) -> dict[str
     bindings: list[tuple[_BoundOrdinaryFile, str, str]] = []
     try:
         for name in TRANSPORT_FILES:
-            relative, digest = _validate_record(name, files[name])
+            authored_source, _packed_destination, digest = _validate_record(
+                name, files[name]
+            )
             bindings.append(
-                (_open_ordinary_file(Path(source_root) / relative, f"source/{name}"), digest, f"source/{name}")
+                (_open_ordinary_file(Path(source_root) / authored_source, f"source/{name}"), digest, f"source/{name}")
             )
         for bound, digest, label in bindings:
             _validate_bound_bytes(bound, digest, label)

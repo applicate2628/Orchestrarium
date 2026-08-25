@@ -34,7 +34,7 @@ Candidate launch arguments MUST NOT select or resume an existing provider sessio
 
 ## Steps
 
-1. **Read the routing surface.** Read and normalize `.agents/.agents-mode.yaml` first; honor `parallelMode`, `externalProvider`, `externalPriorityProfile`, and the other structured routing keys. Shipped `auto` stays on the Codex/Claude pair; Kimi/Grok remain explicit-only read-only routes.
+1. **Read the routing surface.** Read and normalize `.agents/.agents-mode.yaml` first; honor `parallelMode`, `externalProvider`, `externalPriorityProfile`, and the other structured routing keys. Shipped `auto` stays on the Codex/Claude pair; Kimi/Grok are policy classifiers only, with transports unavailable and disabled in 1.x.
 2. **Pinned-input gate.** Confirm one admitted objective, scope, and evidence/constraint package exist. A panel multiplies an unverified premise across every lane — verify it first.
 3. **Choose N and framings.** Default `N=2`. Pick a distinct, bounded framing per lane and pre-register them (lane id, framing, resolved role) before dispatch.
 4. **Dispatch the candidate lanes** through the external surface, each carrying the identical pinned input and its own framing, with file-based prompt delivery (write the prompt body to a temporary file; argv stays for launcher flags and file paths). Inspect the resolved provider argv and fail closed on every session-reuse route listed by `DP3-NATIVE-ROUTE-UNVERIFIED`. Run concurrently when the runtime supports it, else sequentially in fresh contexts. Each lane writes its candidate to `design-<lane>.md`, never `design.md`.

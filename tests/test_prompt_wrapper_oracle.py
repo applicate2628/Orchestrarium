@@ -26,8 +26,6 @@ BIN_ENV = {"codex": "CODEX_BIN", "claude": "CLAUDE_BIN"}
 OUTPUT_ENV = {
     "codex": "CODEX_PROMPTS_DIR",
     "claude": "CLAUDE_PROMPTS_DIR",
-    "kimi": "KIMI_PROMPTS_DIR",
-    "grok": "GROK_PROMPTS_DIR",
 }
 spec = importlib.util.spec_from_file_location("provider_prompt_oracle_test", MODULE)
 assert spec and spec.loader
@@ -39,9 +37,22 @@ spec.loader.exec_module(owner)
 def _projected_entrypoint(tmp_path: Path, provider: str) -> Path:
     scripts = tmp_path / "claude-projection" / "agents" / "scripts"
     scripts.mkdir(parents=True, exist_ok=True)
+    projection_shared = scripts.parents[1] / "shared"
+    projection_shared.mkdir()
+    (projection_shared / "provider-prompt-projections.v1.json").write_bytes(
+        (ROOT / "shared" / "provider-prompt-projections.v1.json").read_bytes()
+    )
+    policy_shared = scripts.parent / "shared"
+    policy_shared.mkdir()
+    (policy_shared / "role-routing-policy.v1.json").write_bytes(
+        (ROOT / "shared" / "role-routing-policy.v1.json").read_bytes()
+    )
     (scripts / "provider_prompt.py").write_bytes(MODULE.read_bytes())
+    (scripts / "resolve-agents-mode.py").write_bytes(
+        (ROOT / "scripts" / "resolve-agents-mode.py").read_bytes()
+    )
     (scripts / "external-prompt-governance.md").write_bytes(
-        (ROOT / "scripts" / "external-prompt-governance.md").read_bytes()
+        (ROOT / "shared" / "external-prompt-governance.md").read_bytes()
     )
     entrypoint = scripts / ENTRYPOINTS[provider].name
     entrypoint.write_bytes(ENTRYPOINTS[provider].read_bytes())
@@ -769,31 +780,7 @@ def test_oversize_finalize_is_nonpass_and_preserves_secure_recovery(
     assert not lifecycle.run_dir.exists()
 
 
-def test_external_initialized_setup_failure_settles_before_one_envelope_without_raw_capture(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    lifecycle = _lifecycle(tmp_path, monkeypatch, provider="kimi")
-    stream = io.StringIO()
-    monkeypatch.setattr(owner.sys, "stdout", stream)
-    code = owner.settle_initialized_setup_failure(
-        owner.Control(task_class="review", role="qa-engineer"),
-        "kimi",
-        "kimi-code/k3",
-        "unsupported",
-        "setup-failure-fixture",
-        lifecycle,
-        ValueError("agent setup failed"),
-        None,
-    )
-    payload = owner.parse_provider_result(stream.getvalue())
-    assert code != 0
-    assert payload["token"] == "UNVERIFIED:external-result"
-    assert payload["captureRecoveryRetained"] is False
-    assert not lifecycle.run_dir.exists()
-    assert "fixture prompt" not in stream.getvalue()
-
-
-@pytest.mark.parametrize("provider", ("codex", "claude", "kimi", "grok"))
+@pytest.mark.parametrize("provider", ("codex", "claude"))
 @pytest.mark.parametrize("failure_name", ("ledger helper unavailable", "launch ledger append failed"))
 def test_unlaunched_ledger_failure_uses_one_v2_envelope_without_durable_ledger_claim(
     tmp_path: Path,
@@ -834,100 +821,6 @@ def test_unlaunched_ledger_failure_uses_one_v2_envelope_without_durable_ledger_c
     assert ledger_calls == []
     assert popen_calls == []
     assert not lifecycle.run_dir.exists()
-
-
-def test_external_terminal_producer_persists_exact_nonauthorizing_tuple(tmp_path: Path) -> None:
-    item = _make_work_item(tmp_path, "external-terminal")
-    control = owner.Control(
-        ledger=str(item),
-        task_class="review",
-        role="qa-engineer",
-        ledger_artifact="design.md",
-    )
-    provenance = owner.external_execution_provenance(
-        control,
-        "kimi",
-        "dispatch-external-fixture",
-        "kimi-code/k3",
-        "unsupported",
-        "no-native-effort-control",
-    )
-    outcome = owner.FinalOutcome(
-        1, "UNVERIFIED:external-result", "blocked", "none", "fixture",
-        1, "UNVERIFIED:external-result", "blocked", "none", "fixture",
-        "complete", 0, "", False, 0,
-    )
-    assert owner.run_ledger([
-        "--work-item", str(item), "append", "--run-id", "launch-external-fixture",
-        "--role", "external-reviewer", "--execution-role", "external-reviewer",
-        "--assigned-role", "qa-engineer", "--provider", "kimi", "--model", "kimi-code/k3",
-        "--effort", "high", "--status", "running", "--gate", "none",
-        "--event-kind", "launch", "--scope", "external run: dispatch-external-fixture",
-        "--artifact", "design.md", "--notes", "fixture launch",
-    ])
-    assert owner.record_terminal(
-        control,
-        "kimi",
-        "kimi-code/k3",
-        "unsupported",
-        "dispatch-external-fixture",
-        "launch-external-fixture",
-        outcome,
-        cancelled=False,
-        timed_out=False,
-        result_delivered=True,
-        realization={"executionProvenance": provenance.payload()},
-    )
-    terminal = _ledger_events(item)[-1]
-    assert terminal["terminalClass"] == "external-nonauthorizing"
-    assert terminal["authorizing"] is False
-    assert terminal["actualExecutionPath"] == "direct-external-cli"
-    assert terminal["assignedRole"] == "qa-engineer"
-    assert terminal["artifactIdentity"] == "design.md"
-    assert terminal["externalDispatchId"] == "dispatch-external-fixture"
-    assert terminal["externalEvidenceRunId"] == terminal["runId"]
-    assert terminal["closesRunIds"] == []
-
-
-@pytest.mark.parametrize("provider", ("kimi", "grok"))
-@pytest.mark.parametrize(
-    "realization",
-    (None, {"executionProvenance": {"externalDispatchId": "incomplete"}}),
-)
-def test_kimi_and_grok_terminal_reject_missing_or_incomplete_frozen_realization(
-    provider: str, realization: dict[str, object] | None
-) -> None:
-    control = owner.Control(
-        ledger="work-item", task_class="review", role="qa-engineer", ledger_artifact="design.md"
-    )
-
-    with pytest.raises(ValueError, match="E_EXTERNAL_LEDGER_UNVERIFIED"):
-        owner.external_terminal_ledger_args(
-            control, provider, "fixture-model", "high", "fixture-dispatch", realization
-        )
-
-
-@pytest.mark.parametrize("provider", ("kimi", "grok"))
-def test_kimi_and_grok_terminal_retains_exact_frozen_realization(provider: str) -> None:
-    control = owner.Control(
-        ledger="work-item", task_class="review", role="qa-engineer", ledger_artifact="design.md"
-    )
-    provenance = owner.external_execution_provenance(
-        control,
-        provider,
-        "fixture-dispatch",
-        "fixture-model",
-        "high",
-        "no-native-effort-control" if provider == "kimi" else "none",
-    ).payload()
-
-    args = owner.external_terminal_ledger_args(
-        control, provider, "fixture-model", "high", "fixture-dispatch",
-        {"executionProvenance": provenance},
-    )
-
-    assert args[args.index("--external-dispatch-id") + 1] == "fixture-dispatch"
-    assert args[args.index("--external-evidence-run-id") + 1] == "external-evidence-fixture-dispatch"
 
 
 @pytest.mark.parametrize(
@@ -1586,9 +1479,18 @@ def test_ledger_closes_are_rejected_before_prompt_or_provider_launch(
     assert not marker.exists()
 
 
-@pytest.mark.parametrize("provider", ("kimi", "grok"))
-def test_unavailable_external_provider_rejects_ledger_closes_before_prompt_consumption(
-    provider: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+@pytest.mark.parametrize(
+    ("provider", "stable_id"),
+    (
+        ("kimi", "E_KIMI_READINESS_UNVERIFIED"),
+        ("grok", "E_GROK_CONTAINMENT_UNAVAILABLE"),
+    ),
+)
+def test_unavailable_external_provider_rejects_before_prompt_consumption(
+    provider: str,
+    stable_id: str,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     prompt_reads: list[bool] = []
     monkeypatch.setattr(
@@ -1597,10 +1499,10 @@ def test_unavailable_external_provider_rejects_ledger_closes_before_prompt_consu
         lambda *_args, **_kwargs: prompt_reads.append(True) or b"task",
     )
 
-    code = owner.launch(provider, ["closure-fixture", "--ledger-closes", "run-critical-gate-001"])
+    code = owner.launch(provider, ["unavailable-fixture"])
 
     assert code != 0
-    assert "E_EXTERNAL_CLOSES_FORBIDDEN" in capsys.readouterr().err
+    assert stable_id in capsys.readouterr().err
     assert prompt_reads == []
 
 

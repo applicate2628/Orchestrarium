@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import sys
 from pathlib import Path
+import inspect
 
 import pytest
 
@@ -15,40 +16,24 @@ sys.modules[SPEC.name] = OWNER
 SPEC.loader.exec_module(OWNER)
 
 
-def test_wrapper_parser_safety_and_authority_guards() -> None:
-    fingerprint = "a" * 64
-    assert OWNER.parse_grok_bounded_result(
-        b'{"type":"result","output":"advisory"}', fingerprint
-    ) == "advisory"
-    with pytest.raises(ValueError, match="E_GROK_RESULT_SHAPE_UNVERIFIED"):
-        OWNER.parse_grok_bounded_result(b"[]", fingerprint)
-    with pytest.raises(ValueError, match="E_EXTERNAL_RESULT_UNSAFE"):
-        OWNER.assert_external_result_safe("API_KEY=secret")
+def test_unavailable_providers_ship_no_unreachable_executor_surface() -> None:
+    launch_source = inspect.getsource(OWNER.launch)
+    forbidden_runtime_branches = (
+        "resolve_grok_executable",
+        "_probe_grok_capabilities",
+        "build_kimi_launch_plan",
+        "build_grok_launch_plan",
+        "external_child_environment",
+        "capture_grok_repo_snapshot",
+    )
+    assert all(name not in launch_source for name in forbidden_runtime_branches)
 
 
-def test_external_parser_requires_one_declared_wire_shape_and_semantic_gate() -> None:
-    fingerprint = "a" * 64
-    assert OWNER.parse_external_provider_result(
-        "grok", b'{"type":"result","output":"GATE: REVISE"}', fingerprint
-    ) == "GATE: REVISE"
-    with pytest.raises(ValueError, match="E_EXTERNAL_RESULT_UNVERIFIED"):
-        OWNER.parse_external_provider_result(
-            "grok", b'{"type":"result","output":"GATE: BLOCKED"}', fingerprint
-        )
-    with pytest.raises(ValueError, match="E_EXTERNAL_RESULT_UNVERIFIED"):
-        OWNER.parse_external_provider_result(
-            "kimi", b'{"type":"assistant_message","text":"GATE: PASS"}\n{}\n', fingerprint
-        )
-
-
-def test_external_controls_do_not_change_legacy_provider_flag_forwarding() -> None:
+def test_unavailable_provider_removal_preserves_codex_claude_flag_forwarding() -> None:
     legacy = OWNER.parse_control(["topic", "--task-class", "review", "--role", "qa-engineer"])
     assert legacy.task_class is None and legacy.role is None
     assert legacy.provider_flags == ["--task-class", "review", "--role", "qa-engineer"]
-    external = OWNER.parse_external_control(
-        ["topic", "--task-class", "review", "--role", "qa-engineer"]
-    )
-    assert external.task_class == "review" and external.role == "qa-engineer"
+    assert not hasattr(OWNER, "parse_external_control")
 
 
 def test_external_prompt_snapshot_is_bounded_and_strict_utf8(
@@ -66,16 +51,54 @@ def test_external_prompt_snapshot_is_bounded_and_strict_utf8(
 
 
 @pytest.mark.parametrize(
-    "field",
-    ("workItem", "assignedInternalRole", "provider", "model", "effort", "mappingLoss", "artifactIdentity", "externalDispatchId", "externalEvidenceRunId", "actualExecutionPath"),
+    ("provider", "stable_id"),
+    (
+        ("kimi", "E_KIMI_READINESS_UNVERIFIED"),
+        ("grok", "E_GROK_CONTAINMENT_UNAVAILABLE"),
+    ),
 )
-def test_external_terminal_ledger_rejects_each_provenance_override(field: str) -> None:
-    control = OWNER.Control(ledger="item", task_class="review", role="qa-engineer", ledger_artifact="design.md")
-    payload = OWNER.external_execution_provenance(
-        control, "kimi", "dispatch", "kimi-code/k3", "unsupported", "no-native-effort-control"
-    ).payload()
-    payload[field] = "forged"
-    with pytest.raises(ValueError, match="E_EXTERNAL_LEDGER_UNVERIFIED"):
-        OWNER.external_terminal_ledger_args(
-            control, "kimi", "kimi-code/k3", "unsupported", "dispatch", {"executionProvenance": payload}
-        )
+def test_admitted_unavailable_route_stops_before_prompt_resolution_capture_probe_or_popen(
+    provider: str, stable_id: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def forbidden(name: str):
+        return lambda *_args, **_kwargs: pytest.fail(f"{name} reached")
+
+    monkeypatch.setattr(OWNER, "prompt_bytes", forbidden("prompt_bytes"))
+    monkeypatch.setattr(OWNER, "parse_control", forbidden("parse_control"))
+    monkeypatch.setattr(OWNER, "resolve_provider_command", forbidden("resolution"))
+    monkeypatch.setattr(OWNER.RunCaptureLifecycle, "create", forbidden("capture"))
+    monkeypatch.setattr(OWNER.subprocess, "Popen", forbidden("Popen"))
+    monkeypatch.setattr(OWNER.shutil, "which", forbidden("probe"))
+
+    assert OWNER.launch(
+        provider, ["admitted-route", "--task-class", "exploration", "--role", "analyst"]
+    ) == 1
+    assert stable_id in capsys.readouterr().err
+
+
+def test_live_kimi_grok_docs_keep_policy_admission_separate_from_execution() -> None:
+    """Release notes and archives are intentionally outside this live-surface census."""
+    live_consumers = (
+        "docs/agents-mode-reference.md",
+        "docs/provider-runtime-layouts.md",
+        "docs/external-worker-design.md",
+        "shared/AGENTS.shared.md",
+        "src.claude/agents/contracts/external-dispatch.md",
+        "src.claude/agents/contracts/operating-model.md",
+        "src.claude/agents/contracts/subagent-contracts.md",
+        "src.codex/skills/lead/external-dispatch.md",
+        "src.codex/skills/lead/operating-model.md",
+    )
+    stale = (
+        "explicit-only read-only routes",
+        "before any provider probe",
+        "before either launch",
+    )
+    for relative in live_consumers:
+        text = (ROOT / relative).read_text(encoding="utf-8")
+        assert "unavailable and disabled in 1.x" in text, relative
+        assert all(token not in text for token in stale), relative
+
+    canonical = (ROOT / "docs/agents-mode-reference.md").read_text(encoding="utf-8")
+    assert "not executable availability" in canonical
+    assert "must not cause prompt reading, launcher preparation, probing, or a provider process" in canonical

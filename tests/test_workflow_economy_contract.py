@@ -63,8 +63,6 @@ PROVENANCE_PROVIDER_TEMPLATES = (
     "src.codex/skills/lead/external-dispatch.md",
     "src.codex/skills/consultant/SKILL.md",
     "src.claude/agents/contracts/external-dispatch.md",
-    "src.gemini/skills/lead/external-dispatch.md",
-    "src.qwen/skills/lead/external-dispatch.md",
 )
 
 
@@ -83,7 +81,8 @@ class TestWorkflowEconomyContract(unittest.TestCase):
             "one final QA package with only the relevant mandatory risk owners",
             "Re-review only the exact open finding and its changed delta",
             "new defect class or a material upstream revision",
-            "Consultant, Kimi, Grok, and `$external-brigade` are off by default",
+            "Consultant and `$external-brigade` are off by default",
+            "Kimi/Grok remain policy classifiers/examples, unavailable and disabled in 1.x, and never selectable, execution, or provenance providers",
             "quick-fix has no pre-implementation review ceremony",
             "one canonical artifact",
             "concise root ledger",
@@ -116,7 +115,7 @@ class TestWorkflowEconomyContract(unittest.TestCase):
                 "**Directory-level entity separation:**",
                 "**Trash hygiene and archival:**",
             ),
-            "scripts/external-prompt-governance.md": (
+            "shared/external-prompt-governance.md": (
                 "**Directory-level entity separation:**",
                 "**Trash hygiene and archival:**",
             ),
@@ -171,15 +170,25 @@ class TestWorkflowEconomyContract(unittest.TestCase):
         self.assertNotIn("Проза `.out` ревьюера", text)
         self.assertNotIn("обёртка `--ledger`", text)
 
-    def test_provenance_templates_cover_the_full_explicit_provider_universe(self) -> None:
+    def test_provenance_templates_exclude_unavailable_policy_classifiers(self) -> None:
         for relative in PROVENANCE_PROVIDER_TEMPLATES:
             text = self._read(relative)
-            for provider in ("kimi", "grok"):
-                with self.subTest(relative=relative, provider=provider):
-                    self.assertIn(provider, text)
-            for execution_path in ("external CLI (Kimi CLI)", "external CLI (Grok CLI)"):
-                with self.subTest(relative=relative, execution_path=execution_path):
-                    self.assertIn(execution_path, text)
+            with self.subTest(relative=relative, field="requested provider"):
+                self.assertIn(
+                    "<internal | codex | claude | gemini | qwen>",
+                    text,
+                )
+            for forbidden in (
+                "<internal | codex | claude | gemini | qwen | kimi | grok>",
+                "Kimi CLI",
+                "Grok CLI",
+                "external CLI (Kimi",
+                "external CLI (Grok",
+            ):
+                with self.subTest(relative=relative, forbidden=forbidden):
+                    self.assertNotIn(forbidden, text)
+            with self.subTest(relative=relative, boundary="disabled non-provenance"):
+                self.assertIn("never select, resolve, execute, or record either as a provenance provider", text)
 
     def test_substantive_prompt_policy_allows_only_the_fixed_synthetic_smoke_exception(self) -> None:
         reference = self._read("docs/agents-mode-reference.md")

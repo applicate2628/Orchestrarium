@@ -147,8 +147,8 @@ def test_external_dispatch_denies_unsupported_provider_and_native_is_unchanged()
         "mechanical-read", "mechanical-scout", "enabled", repo_root=ROOT
     ) == {
         "schemaVersion": 1,
-        "status": "native-required",
-        "stableId": None,
+        "status": "unavailable",
+        "stableId": "E_LUNA_EXECUTION_CONTAINMENT_UNAVAILABLE",
         "taskClass": "mechanical-read",
         "role": "mechanical-scout",
         "requestedProfile": "fast-high",
@@ -156,6 +156,9 @@ def test_external_dispatch_denies_unsupported_provider_and_native_is_unchanged()
         "requestedEffort": "high",
         "sandbox": "read-only",
         "fallback": "none",
+        "executionContract": json.loads(
+            (ROOT / "shared" / "role-routing-policy.v1.json").read_text(encoding="utf-8")
+        )["mechanicalExecutionContract"],
     }
 
 

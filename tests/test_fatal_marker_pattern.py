@@ -35,11 +35,24 @@ SHIPPED_PATTERN = (
 def _projected_codex_entrypoint(tmp_path: Path) -> Path:
     scripts = tmp_path / "claude-projection" / "agents" / "scripts"
     scripts.mkdir(parents=True, exist_ok=True)
+    projection_shared = scripts.parents[1] / "shared"
+    projection_shared.mkdir()
+    (projection_shared / "provider-prompt-projections.v1.json").write_bytes(
+        (ROOT / "shared" / "provider-prompt-projections.v1.json").read_bytes()
+    )
+    policy_shared = scripts.parent / "shared"
+    policy_shared.mkdir()
+    (policy_shared / "role-routing-policy.v1.json").write_bytes(
+        (ROOT / "shared" / "role-routing-policy.v1.json").read_bytes()
+    )
     (scripts / "provider_prompt.py").write_bytes(SOURCE.read_bytes())
+    (scripts / "resolve-agents-mode.py").write_bytes(
+        (ROOT / "scripts" / "resolve-agents-mode.py").read_bytes()
+    )
     entrypoint = scripts / CODEX.name
     entrypoint.write_bytes(CODEX.read_bytes())
     (scripts / "external-prompt-governance.md").write_bytes(
-        (ROOT / "scripts" / "external-prompt-governance.md").read_bytes()
+        (ROOT / "shared" / "external-prompt-governance.md").read_bytes()
     )
     support = tmp_path / "scripts"
     support.mkdir(exist_ok=True)

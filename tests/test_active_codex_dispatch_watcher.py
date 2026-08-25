@@ -274,8 +274,14 @@ def test_python_prompt_owner_returns_complete_result_and_reclaims_artifacts(
     projected_entrypoint = projection / entrypoint.name
     shutil.copyfile(entrypoint, projected_entrypoint)
     shutil.copyfile(ROOT / "scripts" / "provider_prompt.py", projection / "provider_prompt.py")
+    projection_shared = projection.parents[1] / "shared"
+    projection_shared.mkdir()
     shutil.copyfile(
-        ROOT / "scripts" / "external-prompt-governance.md",
+        ROOT / "shared" / "provider-prompt-projections.v1.json",
+        projection_shared / "provider-prompt-projections.v1.json",
+    )
+    shutil.copyfile(
+        ROOT / "shared" / "external-prompt-governance.md",
         projection / "external-prompt-governance.md",
     )
     env_capture = tmp_path / f"{provider}.env"

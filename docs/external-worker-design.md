@@ -4,7 +4,7 @@
 **Status:** Approved
 **Scope:** Orchestrarium skill-pack routing canon across the production Codex/Claude core plus explicit example integrations
 
-**2026-04-28 production note:** Shipped production `externalProvider: auto` routing is now limited to the Codex/Claude pair. Gemini CLI and Qwen remain explicit example integrations, both classified here as `WEAK MODEL / NOT RECOMMENDED`, while Kimi Code and official Grok are explicit-only read-only routes; none of them participates in shipped production profiles or the production-only provider fallback/workdir schema.
+**2026-04-28 production note:** Shipped production `externalProvider: auto` routing is now limited to the Codex/Claude pair. Gemini CLI and Qwen remain explicit example integrations, both classified here as `WEAK MODEL / NOT RECOMMENDED`; Kimi Code and official Grok remain policy classifiers/examples only, with transports unavailable and disabled in 1.x. None participates in shipped production profiles or the production-only provider fallback/workdir schema.
 
 ## Problem
 
@@ -203,7 +203,7 @@ The orchestrator (the main conversation, as Lead) **prefers** external roles by 
 - `mcpMode: auto | force` — `auto` uses MCP by judgment; `force` treats relevant MCP use as an explicit standing instruction
 - `preferExternalWorker: true` — `$external-worker` on eligible worker-side lanes
 - `preferExternalReviewer: true` — `$external-reviewer` on eligible `review` + `QA` stages
-- `externalProvider: auto | codex | claude | gemini | qwen | kimi | grok` — `auto` resolves through the shipped Codex/Claude profile, while Gemini/Qwen example routes and Kimi/Grok read-only routes stay explicit-only and outside the production profile set
+- `externalProvider: auto | codex | claude | gemini | qwen | kimi | grok` — `auto` resolves through the shipped Codex/Claude profile, while Gemini/Qwen are example routes and Kimi/Grok are policy classifiers only; Kimi/Grok transports are unavailable and disabled in 1.x
 - `externalPriorityProfile: balanced | quality-first | <custom>` — select which ordered provider map `auto` uses
 - `reserveResolver: disabled | claude-sonnet | claude-wrapper | wrapper:<command>` — choose the concrete read-only resolver for symbolic `reserve`; `wrapper:<command>` is a PATH-resolved command or repo-relative wrapper path
 - `externalPriorityProfiles` — maintain the per-profile lane matrix; the shipped production profiles stay on the Codex/Claude pair plus advisory/review-only `reserve`

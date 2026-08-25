@@ -12,7 +12,7 @@ Reference for routing, interaction types, periodic controls, and role aliases. R
 
 ## Workflow economy projection
 
-Apply the binding shared **Workflow economy (binding)** rule. This Claude projection adds no default review, consultant, Kimi/Grok, or external-brigade fan-out: select those only from evidence, explicit user/configuration intent, or a documented risk trigger. Preserve every template-required security, performance, or geometry role and the human publication/leak-check gate.
+Apply the binding shared **Workflow economy (binding)** rule. This Claude projection adds no default review, consultant, or external-brigade fan-out unless evidence, explicit user/configuration intent, or a documented risk trigger admits it. Kimi/Grok are policy-only, disabled, and non-executing in 1.x; never select either provider. Preserve every template-required security, performance, or geometry role and the human publication/leak-check gate.
 
 ## Template-based routing
 
@@ -62,7 +62,7 @@ Claude-line keeps one shared local config file at `.claude/.agents-mode.yaml`.
 - `mcpMode: auto` allows MCP use by judgment when appropriate; `force` makes relevant MCP use an explicit standing instruction.
 - `preferExternalWorker: true` prefers `$external-worker` for eligible worker-side slots.
 - `preferExternalReviewer: true` prefers `$external-reviewer` for eligible review and QA-side slots.
-- `externalProvider: auto` resolves by the active named production priority profile instead of a host-line default; shipped `auto` uses the Codex/Claude pair only. Gemini/Qwen stay explicit `WEAK MODEL / NOT RECOMMENDED` example-only paths; Kimi/Grok are explicit-only read-only routes that require the pre-dispatch policy and independent verification.
+- `externalProvider: auto` resolves by the active named production priority profile instead of a host-line default; shipped `auto` uses the Codex/Claude pair only. Gemini/Qwen stay explicit `WEAK MODEL / NOT RECOMMENDED` example-only paths; Kimi/Grok are policy classifiers/examples only, with transports unavailable and disabled in 1.x. A policy-admitted `external-required` result is not executable availability and must not read prompts, launch, or probe either provider.
 - The Claude-line canonical schema may include the shared `externalModelMode` and `externalCodexProfile`; `externalClaudeProfile` remains Codex-line only.
 - The team template JSON does not change; routing substitutions happen at execution time.
 - `Assigned role` in provenance names the internal role being replaced; it does not narrow the adapter to only one profession.

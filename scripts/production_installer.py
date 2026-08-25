@@ -37,7 +37,6 @@ RUNTIME_HELPERS = (
     "invoke-claude-prompt.py",
     "invoke-kimi-prompt.py",
     "invoke-grok-prompt.py",
-    "external-prompt-governance.md",
     "linked_runtime_subroots.py",
     "resolve-agents-mode.py",
     "review_loop_state.py",
@@ -56,6 +55,15 @@ TRANSPORT_PROJECTION_FILES = (
     "external-prompt-governance.md",
 )
 TRANSPORT_PROJECTION_MANIFEST = "provider-prompt-projections.v1.json"
+STOCK_8521_CLAUDE_TRANSPORT_PROJECTION_SHA256 = (
+    ("provider_prompt.py", "4bfb92cb92039f73ce5eca397f22a5df7b9ef9203486cbd81c654e485315edf1"),
+    ("invoke-codex-prompt.py", "0b085a6fd0e28a5a486c8ef25bf52d4c69123d94cc8712d63dd30deadcc5f665"),
+    ("invoke-claude-prompt.py", "3250c9a85e36ab2e57a218688c5d7d3cfed59552c1f2bad7eb52f45370df80f3"),
+    ("invoke-kimi-prompt.py", "05679dac1daded511debf617e8f1189dd941d21a5d1c7f6e3dd3ec21d4c0bc75"),
+    ("invoke-grok-prompt.py", "1f0f4f6bb03d816b3f40ff56ebe71973301d2d7104ef1d7f335b1ffa0b248559"),
+    ("external-prompt-governance.md", "c7a59ccec7d6e46be76584a107b0a5b30b249368b4f0958cb78177962dc34b00"),
+    (TRANSPORT_PROJECTION_MANIFEST, "d7c873527e67a1aa81906aa2ee73d25088420f18b3453a429ff80085ecd4af6b"),
+)
 E7_LEGACY_PROVIDER_PROMPT_SHA256 = (
     "825bc6db49408c5975627fba95c95ca479fe45c508e5be71d06c5e6f6c4b8121"
 )
@@ -77,13 +85,28 @@ E7_CANONICAL_SKILL_TREE_SHA256 = {
     "review-loop": "d5a5190926d170a6498399e221028e11087974aef7fb7e49abb1d2052acac089",
     "second-opinion": "d3f1e93ddb6641b21e05c13e28e1f291137e608922c00c00a59fa28ccad54741",
 }
+STOCK_8521_CANONICAL_SKILL_TREE_SHA256 = {
+    "consultant": "57da94b645283cc695ff8f82a108a6f490f0036a564be76c22f663ba6afa3a38",
+    "design-panel": "ac107c9d6c4a3833d0af90756c8b560f7ca4c4dfcc3d14d6a14faae1530f859f",
+    "init-project": "4f0a5fdb8af605dc10cb2044f33db3339b410feaf23764cc395f9c3feaaf6353",
+    "review-loop": "2d78f499bf7b4bb2e6dafdf0ef875f2d9d39448c28df6f3835bc8153fba02ce0",
+    "second-opinion": "f9a2114c8baead9ec8a259288ff74e157af60864c9f3d70ba0bcc52154b2b4b6",
+}
 GLOBAL_LEAD_ACCEPTED_PRIOR_TREE_SHA256 = frozenset(
     {
         "e09377e4cf15c446e2ff19ab160a09835ac6683d51e54a89585625dc1de935ca",
         "fd28049deb001bf088b0033e2dcc82ffc372e8257dd8aaf1bc6384d49be328b3",
+        "8088b25e70702f2c77d811bcd0c74e339474a7429a2e997f2df7662c6d75db0f",
+        "fefe8d5ff71dfa8475fea381cdb756848740b7ea0f4a7573d69bff5b5db113cc",
+        "b7d78ee5082cce97e0cb2fcb59ee2e5712617b43212a1c6c3199370797f9aa21",
+        "d0bec9fd61bf3fde6e48ba38cdbc7c021053a4167bbb694c8aa5c03e06283083",
     }
 )
 RUNTIME_RESOURCES = (
+    (
+        "shared/external-prompt-governance.md",
+        "scripts/external-prompt-governance.md",
+    ),
     (
         f"shared/{TRANSPORT_PROJECTION_MANIFEST}",
         f"shared/{TRANSPORT_PROJECTION_MANIFEST}",
@@ -324,6 +347,23 @@ class _SliceACreatedRecord:
 
 
 @dataclass(frozen=True)
+class _SliceAMigratedFileRecord:
+    """Identity proof for one explicitly admitted stock native-role upgrade."""
+
+    anchor_path: Path
+    anchor_identity: tuple[int, int, int, int]
+    parent_path: Path
+    parent_identity: tuple[int, int, int, int]
+    leaf_path: Path
+    old_identity: tuple[int, int, int, int]
+    old_digest: str
+    new_identity: tuple[int, int, int, int]
+    new_digest: str
+    tombstone_path: Path
+    tombstone_identity: tuple[int, int, int, int]
+
+
+@dataclass(frozen=True)
 class _RollbackFailureMember:
     phase: str
     ordinal: int
@@ -415,6 +455,7 @@ class _InstallTransaction:
         self._entries: list[dict[str, object]] = []
         self._absent_parents: set[Path] = set()
         self._slice_a_created: list[_SliceACreatedRecord] = []
+        self._slice_a_migrated: list[_SliceAMigratedFileRecord] = []
         # A single transaction may span the ordinary global home plus one or
         # more explicitly bound Claude subroots.  Each record carries its own
         # anchor identity, so rollback selects the matching owner rather than
@@ -537,6 +578,17 @@ class _InstallTransaction:
             raise RuntimeError("E_ROLLBACK_CREATED_IDENTITY_CHANGED")
         self._slice_a_created.append(record)
 
+    def register_slice_a_migrated(
+        self, record: _SliceAMigratedFileRecord, owner: "_CreateOnlyMutablePath"
+    ) -> None:
+        """Record a stock-role replacement whose prior inode remains recoverable."""
+
+        key = os.path.normcase(str(owner.anchor))
+        prior = self._slice_a_owners.setdefault(key, owner)
+        if prior is not owner:
+            raise RuntimeError("E_ROLLBACK_CREATED_IDENTITY_CHANGED")
+        self._slice_a_migrated.append(record)
+
     @staticmethod
     def _paths_overlap(left: Path, right: Path) -> bool:
         return left == right or left in right.parents or right in left.parents
@@ -600,6 +652,55 @@ class _InstallTransaction:
                 unresolved.append(record.leaf_path)
         return unresolved, failures
 
+    def _settle_migrated(
+        self,
+    ) -> tuple[list[Path], list[_RollbackFailureMember]]:
+        unresolved: list[Path] = []
+        failures: list[_RollbackFailureMember] = []
+        for ordinal in range(len(self._slice_a_migrated) - 1, -1, -1):
+            record = self._slice_a_migrated[ordinal]
+            try:
+                owner = self._slice_a_owners.get(
+                    os.path.normcase(str(record.anchor_path))
+                )
+                if owner is None:
+                    raise RuntimeError("E_ROLLBACK_CREATED_IDENTITY_CHANGED")
+                owner.rollback_migrated(record)
+            except BaseException as exc:
+                failures.append(
+                    _RollbackFailureMember(
+                        "migration",
+                        ordinal,
+                        str(record.leaf_path),
+                        "E_ROLLBACK_CREATED_IDENTITY_CHANGED",
+                        str(exc),
+                    )
+                )
+                unresolved.append(record.leaf_path)
+        return unresolved, failures
+
+    def _commit_migrated(self) -> list[_RollbackFailureMember]:
+        failures: list[_RollbackFailureMember] = []
+        for ordinal, record in enumerate(self._slice_a_migrated):
+            try:
+                owner = self._slice_a_owners.get(
+                    os.path.normcase(str(record.anchor_path))
+                )
+                if owner is None:
+                    raise RuntimeError("E_ROLLBACK_CREATED_IDENTITY_CHANGED")
+                owner.commit_migrated(record)
+            except BaseException as exc:
+                failures.append(
+                    _RollbackFailureMember(
+                        "migration",
+                        ordinal,
+                        str(record.leaf_path),
+                        "E_ROLLBACK_CREATED_IDENTITY_CHANGED",
+                        str(exc),
+                    )
+                )
+        return failures
+
     def _settle_snapshots(
         self, unresolved: list[Path]
     ) -> tuple[list[_RollbackFailureMember], bool]:
@@ -658,15 +759,17 @@ class _InstallTransaction:
             return False
         assert self._temporary is not None
         if self.committed:
+            migration_failures = self._commit_migrated()
             cleanup = self._discard_backup()
             recovery_path = self._temporary if cleanup is not None else None
             self._temporary = None
-            if cleanup is not None:
+            if migration_failures or cleanup is not None:
+                members = tuple(migration_failures + ([cleanup] if cleanup is not None else []))
                 raise _InstallFailure(
-                    "E_ROLLBACK_BACKUP_CLEANUP_FAILED",
-                    "backup",
-                    cleanup.cause,
-                    members=(cleanup,),
+                    "E_ROLLBACK_SETTLEMENT_FAILED",
+                    "migration" if migration_failures else "backup",
+                    migration_failures[0].cause if migration_failures else cleanup.cause,
+                    members=members,
                     recovery_path=recovery_path,
                 )
             return False
@@ -676,7 +779,10 @@ class _InstallTransaction:
             "transaction",
             "enabled transaction exited without commit",
         )
-        unresolved, failures = self._settle_created()
+        unresolved, failures = self._settle_migrated()
+        created_unresolved, created_failures = self._settle_created()
+        unresolved.extend(created_unresolved)
+        failures.extend(created_failures)
         snapshot_failures, retain_backup = self._settle_snapshots(unresolved)
         failures.extend(snapshot_failures)
         recovery_path: Path | None = None
@@ -693,8 +799,8 @@ class _InstallTransaction:
                 sorted(
                     failures,
                     key=lambda member: (
-                        {"created": 0, "snapshot": 1, "backup": 2}[member.phase],
-                        -member.ordinal if member.phase == "created" else member.ordinal,
+                        {"migration": 0, "created": 1, "snapshot": 2, "backup": 3}[member.phase],
+                        -member.ordinal if member.phase in {"migration", "created"} else member.ordinal,
                         os.path.normcase(member.path),
                         member.stable_id,
                     ),
@@ -1032,6 +1138,126 @@ class _CreateOnlyMutablePath:
             raise ValueError("E_MUTABLE_PATH_POSTCONDITION")
         return path
 
+    def migrate_exact_file(
+        self, relative: Path, expected_digest: str, payload: bytes
+    ) -> Path:
+        """Replace one hash-pinned regular file and retain its inode for rollback."""
+
+        path = self.destination(relative)
+        self._assert_regular(path, existing=True)
+        if _file_sha256(path) != expected_digest:
+            raise ValueError(f"E_ACCEPTED_PRIOR_COLLISION: {relative}")
+        if self.dry_run:
+            return path
+        old_identity = self._identity(path)
+        new_digest = hashlib.sha256(payload).hexdigest()
+        descriptor, name = tempfile.mkstemp(
+            prefix=f".{path.name}.native-role-upgrade.", suffix=".tmp", dir=path.parent
+        )
+        temporary = Path(name)
+        tombstone = temporary.with_suffix(".prior")
+        try:
+            with os.fdopen(descriptor, "wb") as stream:
+                stream.write(payload)
+                stream.flush()
+                os.fsync(stream.fileno())
+            self._walk_existing(path.parent)
+            self._assert_regular(path, existing=True)
+            if (
+                self._identity(path) != old_identity
+                or _file_sha256(path) != expected_digest
+                or tombstone.exists()
+                or tombstone.is_symlink()
+            ):
+                raise ValueError(f"E_ACCEPTED_PRIOR_COLLISION: {relative}")
+            os.replace(path, tombstone)
+            try:
+                os.replace(temporary, path)
+            except BaseException:
+                if tombstone.exists() and not (path.exists() or path.is_symlink()):
+                    os.replace(tombstone, path)
+                raise
+            self._assert_regular(path, existing=True)
+            self._assert_regular(tombstone, existing=True)
+            if (
+                _file_sha256(path) != new_digest
+                or _file_sha256(tombstone) != expected_digest
+                or self._identity(tombstone) != old_identity
+            ):
+                raise ValueError("E_MUTABLE_PATH_POSTCONDITION")
+            self.transaction.register_slice_a_migrated(
+                _SliceAMigratedFileRecord(
+                    anchor_path=self.anchor,
+                    anchor_identity=self._identity(self.anchor),
+                    parent_path=path.parent,
+                    parent_identity=self._identity(path.parent),
+                    leaf_path=path,
+                    old_identity=old_identity,
+                    old_digest=expected_digest,
+                    new_identity=self._identity(path),
+                    new_digest=new_digest,
+                    tombstone_path=tombstone,
+                    tombstone_identity=self._identity(tombstone),
+                ),
+                self,
+            )
+        except BaseException:
+            if tombstone.exists() and not (path.exists() or path.is_symlink()):
+                os.replace(tombstone, path)
+            raise
+        finally:
+            temporary.unlink(missing_ok=True)
+        return path
+
+    def rollback_migrated(self, record: _SliceAMigratedFileRecord) -> None:
+        """Restore the original stock role through its retained inode, never a copy."""
+
+        try:
+            if (
+                os.path.normcase(str(record.anchor_path))
+                != os.path.normcase(str(self.anchor))
+                or self._identity(record.anchor_path) != record.anchor_identity
+            ):
+                self._rollback_identity_changed()
+            for path in (record.parent_path, record.leaf_path, record.tombstone_path):
+                if os.path.normcase(
+                    os.path.commonpath((str(record.anchor_path), str(path)))
+                ) != os.path.normcase(str(record.anchor_path)):
+                    self._rollback_identity_changed()
+            self._walk_existing(record.parent_path)
+            self._walk_existing(record.leaf_path)
+            self._walk_existing(record.tombstone_path)
+            if (
+                self._identity(record.parent_path) != record.parent_identity
+                or self._identity(record.leaf_path) != record.new_identity
+                or self._identity(record.tombstone_path) != record.tombstone_identity
+                or _file_sha256(record.leaf_path) != record.new_digest
+                or _file_sha256(record.tombstone_path) != record.old_digest
+            ):
+                self._rollback_identity_changed()
+            os.replace(record.tombstone_path, record.leaf_path)
+            if (
+                self._identity(record.leaf_path) != record.old_identity
+                or _file_sha256(record.leaf_path) != record.old_digest
+            ):
+                self._rollback_identity_changed()
+        except (OSError, ValueError):
+            self._rollback_identity_changed()
+
+    def commit_migrated(self, record: _SliceAMigratedFileRecord) -> None:
+        """Release a retained prior inode only after the committed role is verified."""
+
+        self._walk_existing(record.leaf_path)
+        self._walk_existing(record.tombstone_path)
+        if (
+            self._identity(record.leaf_path) != record.new_identity
+            or self._identity(record.tombstone_path) != record.tombstone_identity
+            or _file_sha256(record.leaf_path) != record.new_digest
+            or _file_sha256(record.tombstone_path) != record.old_digest
+        ):
+            self._rollback_identity_changed()
+        record.tombstone_path.unlink()
+
     def replace_exact_tree(
         self,
         relative: Path,
@@ -1196,6 +1422,22 @@ class _CreateOnlyMutablePath:
         return target
 
 
+def _select_global_home_environment(
+    userprofile: str | None, home: str | None, *, platform: str | None = None
+) -> tuple[str, str, str | None]:
+    """Choose the platform-authorized global-home environment route."""
+
+    if (platform or os.name) == "nt":
+        if not userprofile:
+            raise ValueError("E_GLOBAL_HOME_AMBIGUOUS: USERPROFILE is required")
+        return "USERPROFILE", userprofile, home
+    if userprofile:
+        return "USERPROFILE", userprofile, home
+    if home:
+        return "HOME", home, None
+    raise ValueError("E_GLOBAL_HOME_AMBIGUOUS: USERPROFILE or HOME is required")
+
+
 def _resolve_global_home() -> Path:
     """Select the one explicit, non-reparse global home; never fall back."""
 
@@ -1209,17 +1451,16 @@ def _resolve_global_home() -> Path:
                 raise ValueError("E_GLOBAL_HOME_REPARSE") from exc
             raise
 
-    userprofile = os.environ.get("USERPROFILE")
-    if not userprofile:
-        raise ValueError("E_GLOBAL_HOME_AMBIGUOUS: USERPROFILE is required")
-    primary = Path(os.path.abspath(os.path.expanduser(userprofile)))
+    primary_name, primary_value, alternate_value = _select_global_home_environment(
+        os.environ.get("USERPROFILE"), os.environ.get("HOME")
+    )
+    primary = Path(os.path.abspath(os.path.expanduser(primary_value)))
     if not primary.is_dir():
-        raise ValueError("E_GLOBAL_HOME_AMBIGUOUS: USERPROFILE is not a directory")
+        raise ValueError(f"E_GLOBAL_HOME_AMBIGUOUS: {primary_name} is not a directory")
     require_non_reparse(primary)
-    home = os.environ.get("HOME")
-    if not home:
+    if not alternate_value:
         return primary
-    alternate = Path(os.path.abspath(os.path.expanduser(home)))
+    alternate = Path(os.path.abspath(os.path.expanduser(alternate_value)))
     if not alternate.is_dir():
         raise ValueError("E_GLOBAL_HOME_AMBIGUOUS: HOME is not a directory")
     require_non_reparse(alternate)
@@ -1327,6 +1568,15 @@ class _CanonicalLeadStage:
 
 
 @dataclass(frozen=True)
+class _ProjectionWitness:
+    path: Path
+    state: str
+    identity: tuple[int, int, int, int] | None
+    size: int | None
+    sha256: str | None
+
+
+@dataclass(frozen=True)
 class _ClaudeTransportProjectionStage:
     """One preflighted Claude transport set derived from canonical-stage bytes."""
 
@@ -1336,6 +1586,44 @@ class _ClaudeTransportProjectionStage:
     manifest_pending: bool
     replace_legacy_singleton: bool = False
     replacement_digest: str | None = None
+    accepted_prior_set: str | None = None
+    witnesses: tuple[_ProjectionWitness, ...] = ()
+
+
+def _projection_witness(path: Path) -> _ProjectionWitness:
+    """Bind one ordinary projection leaf without following links."""
+
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError:
+        return _ProjectionWitness(path, "absent", None, None, None)
+    except OSError as exc:
+        raise ValueError(
+            "E_TRANSPORT_PROJECTION_PARITY: destination inspection"
+        ) from exc
+    identity = (
+        metadata.st_dev,
+        metadata.st_ino,
+        metadata.st_mode,
+        getattr(metadata, "st_file_attributes", 0),
+    )
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or stat.S_ISLNK(metadata.st_mode)
+        or _is_reparse_metadata(metadata)
+    ):
+        return _ProjectionWitness(path, "invalid", identity, metadata.st_size, None)
+    try:
+        payload = path.read_bytes()
+    except OSError as exc:
+        raise ValueError("E_TRANSPORT_PROJECTION_PARITY: destination read") from exc
+    return _ProjectionWitness(
+        path,
+        "regular",
+        identity,
+        metadata.st_size,
+        hashlib.sha256(payload).hexdigest(),
+    )
 
 
 def _projection_validator(root: Path):
@@ -1366,31 +1654,15 @@ def _projection_file_state(
 ) -> str:
     """Classify one no-follow destination against its staged bytes."""
 
-    try:
-        metadata = path.lstat()
-    except FileNotFoundError:
-        return "absent"
-    except OSError as exc:
-        raise ValueError(
-            "E_TRANSPORT_PROJECTION_PARITY: destination inspection"
-        ) from exc
-    if (
-        not stat.S_ISREG(metadata.st_mode)
-        or stat.S_ISLNK(metadata.st_mode)
-        or _is_reparse_metadata(metadata)
-    ):
-        return "invalid"
-    try:
-        content = path.read_bytes()
-        if content == expected:
-            return "current"
-        if hashlib.sha256(content).hexdigest() in accepted_prior_sha256:
-            return "accepted-prior"
-        return "drift"
-    except OSError as exc:
-        raise ValueError(
-            "E_TRANSPORT_PROJECTION_PARITY: destination read"
-        ) from exc
+    witness = _projection_witness(path)
+    if witness.state != "regular":
+        return witness.state
+    expected_digest = hashlib.sha256(expected).hexdigest()
+    if witness.sha256 == expected_digest:
+        return "current"
+    if witness.sha256 in accepted_prior_sha256:
+        return "accepted-prior"
+    return "drift"
 
 
 def _stage_claude_transport_projection(
@@ -1422,6 +1694,11 @@ def _stage_claude_transport_projection(
             detail = f"E_TRANSPORT_PROJECTION_PARITY: {detail}"
         raise ValueError(detail) from exc
 
+    manifest_target = projection_root.parent / "shared" / TRANSPORT_PROJECTION_MANIFEST
+    witness_paths = tuple(projection_root / name for name in TRANSPORT_PROJECTION_FILES) + (
+        manifest_target,
+    )
+    witnesses = tuple(_projection_witness(path) for path in witness_paths)
     states = tuple(
         _projection_file_state(
             projection_root / name,
@@ -1434,10 +1711,10 @@ def _stage_claude_transport_projection(
         )
         for name, payload in files
     )
-    manifest_target = projection_root.parent / "shared" / TRANSPORT_PROJECTION_MANIFEST
     manifest_state = _projection_file_state(manifest_target, manifest_payload)
     replace_legacy_singleton = False
     replacement_digest: str | None = None
+    accepted_prior_set: str | None = None
     if states == ("absent",) * len(TRANSPORT_PROJECTION_FILES) and manifest_state == "absent":
         pending_files = files
         manifest_pending = True
@@ -1451,6 +1728,20 @@ def _stage_claude_transport_projection(
     elif states == ("current",) * len(TRANSPORT_PROJECTION_FILES) and manifest_state == "current":
         pending_files = ()
         manifest_pending = False
+    elif tuple(
+        (witness.path.name, witness.sha256)
+        for witness in witnesses
+        if witness.state == "regular"
+    ) == STOCK_8521_CLAUDE_TRANSPORT_PROJECTION_SHA256:
+        pending_files = tuple(
+            (name, payload)
+            for (name, payload), witness in zip(files, witnesses)
+            if witness.sha256 != hashlib.sha256(payload).hexdigest()
+        )
+        manifest_pending = (
+            witnesses[-1].sha256 != hashlib.sha256(manifest_payload).hexdigest()
+        )
+        accepted_prior_set = "8521b638"
     elif states == ("accepted-prior", "current", "current", "absent", "absent", "absent") and manifest_state == "absent":
         pending_files = files
         manifest_pending = True
@@ -1465,6 +1756,8 @@ def _stage_claude_transport_projection(
         manifest_pending,
         replace_legacy_singleton,
         replacement_digest,
+        accepted_prior_set,
+        witnesses,
     )
 
 
@@ -1475,12 +1768,22 @@ def _apply_claude_transport_projection(
 ) -> None:
     """Materialize only the preflighted missing members through the sole owner."""
 
+    current_witnesses = tuple(_projection_witness(item.path) for item in stage.witnesses)
+    if current_witnesses != stage.witnesses:
+        raise ValueError("E_TRANSPORT_PROJECTION_PARITY: preflight drift")
     try:
         projection_relative = projection_root.relative_to(owner.anchor)
     except ValueError as exc:
         raise ValueError("E_TRANSPORT_PROJECTION_PARITY: destination escape") from exc
+    exact_prior = dict(STOCK_8521_CLAUDE_TRANSPORT_PROJECTION_SHA256)
     for name, payload in stage.pending_files:
-        if stage.replace_legacy_singleton and name == "provider_prompt.py":
+        if stage.accepted_prior_set == "8521b638":
+            owner.migrate_exact_file(
+                projection_relative / name,
+                exact_prior[name],
+                payload,
+            )
+        elif stage.replace_legacy_singleton and name == "provider_prompt.py":
             if stage.replacement_digest not in ACCEPTED_LEGACY_PROVIDER_PROMPT_SHA256:
                 raise ValueError("E_TRANSPORT_PROJECTION_PARITY: legacy replacement digest")
             owner.replace_exact_file(
@@ -1491,10 +1794,17 @@ def _apply_claude_transport_projection(
         else:
             owner.create_file(projection_relative / name, payload)
     if stage.manifest_pending:
-        owner.create_file(
-            projection_relative.parent / "shared" / TRANSPORT_PROJECTION_MANIFEST,
-            stage.manifest_payload,
+        relative = (
+            projection_relative.parent / "shared" / TRANSPORT_PROJECTION_MANIFEST
         )
+        if stage.accepted_prior_set == "8521b638":
+            owner.migrate_exact_file(
+                relative,
+                exact_prior[TRANSPORT_PROJECTION_MANIFEST],
+                stage.manifest_payload,
+            )
+        else:
+            owner.create_file(relative, stage.manifest_payload)
 
 
 def _validate_committed_transport_projection(
@@ -1914,12 +2224,16 @@ def _installer_mutation_paths(
     claude_commands_target: Path | None = None,
     claude_skills_target: Path | None = None,
     claude_projection_snapshot_paths: tuple[Path, ...] = (),
+    claude_transport_migration_paths: tuple[Path, ...] = (),
 ) -> list[Path]:
     """Return only paths whose contents this installer can mutate."""
     if provider not in {"codex", "claude"}:
         raise ValueError(f"unsupported provider: {provider}")
 
     paths: list[Path] = []
+    retained_transport_witnesses = {
+        Path(os.path.abspath(path)) for path in claude_transport_migration_paths
+    }
     # Accepted-prior e7 canonical skill trees are transaction-restored if upgraded.
     paths.append(
         target_tree
@@ -1927,8 +2241,9 @@ def _installer_mutation_paths(
         else target.parent / ".agents" / "skills"
     )
     if provider == "codex":
-        # Slice-A skills, native roles, and config use the created-only ledger,
-        # never the snapshot-and-restore transaction surface.
+        # Slice-A skills and native-role/config records use the create/migration
+        # ledger, never snapshot restoration, so accepted-prior inode recovery
+        # remains identity-preserving.
         helper_target = target_tree / "lead" / "scripts"
         retired_root = agents_root
         retired_manifest = _CODEX_RETIRED_PS1
@@ -1963,8 +2278,14 @@ def _installer_mutation_paths(
     )
     paths.extend(helper_target / helper for helper in mutable_runtime_helpers)
     if provider == "claude":
-        paths.extend(helper_target / name for name in TRANSPORT_PROJECTION_FILES)
-        paths.append(helper_target.parent / "shared" / TRANSPORT_PROJECTION_MANIFEST)
+        paths.extend(
+            path
+            for path in (helper_target / name for name in TRANSPORT_PROJECTION_FILES)
+            if Path(os.path.abspath(path)) not in retained_transport_witnesses
+        )
+        manifest_target = helper_target.parent / "shared" / TRANSPORT_PROJECTION_MANIFEST
+        if Path(os.path.abspath(manifest_target)) not in retained_transport_witnesses:
+            paths.append(manifest_target)
     paths.append(agents_root / UI_CONTINUITY_CONTRACT_TARGET)
     paths.extend(
         helper_target.parent / destination
@@ -1978,7 +2299,6 @@ def _installer_mutation_paths(
                 codex_hook_inventory
                 if codex_hook_inventory is not None
                 else registration.parent / CODEX_HOOK_INVENTORY,
-                target / "config.toml",
                 target / CODEX_LEGACY_LUNA_ROLE,
             )
         )
@@ -2004,7 +2324,11 @@ def _installer_mutation_paths(
             if provider == "claude" and relative_path.parts[0] == "agents"
             else retired_root / relative_path
         )
-    return paths
+    return [
+        path
+        for path in paths
+        if Path(os.path.abspath(path)) not in retained_transport_witnesses
+    ]
 
 
 def _normalize_agents_mode(
@@ -2148,9 +2472,39 @@ _ROLE_TRUST_BOUNDARY = (
 _READ_ONLY_ROLES = frozenset({
     "explorer", "analyst", "planner", "architect", "architecture-reviewer",
     "algorithm-scientist", "computational-scientist", "security-engineer",
-    "security-reviewer", "qa-engineer", "mechanical-scout",
+    "security-reviewer", "qa-engineer", "mechanical-scout", "mechanical-worker",
 })
-_BOUNDED_WRITE_ROLES = frozenset({"default", "worker", "backend-engineer", "platform-engineer", "knowledge-archivist", "mechanical-worker"})
+_BOUNDED_WRITE_ROLES = frozenset({"default", "worker", "backend-engineer", "platform-engineer", "knowledge-archivist"})
+_STOCK_NATIVE_ROLE_MIGRATION_SHA256 = {
+    "worker": frozenset({
+        "2d950ebfa4e9cc7293ee32cbc71ad3910fa6938a80a339bbbc3434ecc6c4d860",
+        "960f0c617b4b5856585fa3f3afac7e0ef9fb99bfc1977b74fe6dd99626b2a57d",
+    }),
+    "platform-engineer": frozenset({
+        "2f62aaf20edd4b30838db3e728d6a907e8f6826620d2eede78c02a1cd0b7a214",
+        "ceb30fcd546bef82045f7b3c3b48e39f98ae83ebbea17a6c5210c2b46cb2140d",
+    }),
+    "security-engineer": frozenset({
+        "aeb2800e4e498ad7d3a63951608e780eb730ef2bd744ff679fee5c697f5d837a",
+        "54117decdfcf9bff576e23d31a1dc6aa2d2f4fd0d498820f9c1244b6742f78f9",
+    }),
+    "mechanical-scout": frozenset({"4521ff3194ed13831214f94ad228c7aa0eba97b6d40bec56e990b3490fdcc672"}),
+    "mechanical-worker": frozenset({"8c126a95d35301bd493e3e2f89e4061781aaf28ca4444a3d4a67b1868c4c7568"}),
+}
+_STOCK_NATIVE_ROLE_REGISTRATION_PRIORS = {
+    "mechanical-scout": (
+        {
+            "description": "Read-only deterministic mechanical scout for bounded inventories and checks.",
+            "config_file": "agents/mechanical-scout.toml",
+        },
+    ),
+    "mechanical-worker": (
+        {
+            "description": "Bounded-write deterministic mechanical worker for predescribed artifacts.",
+            "config_file": "agents/mechanical-worker.toml",
+        },
+    ),
+}
 
 
 def _source_codex_role_manifest_unchecked(
@@ -2205,6 +2559,26 @@ class _NativeRoleRegistration:
         return f"agents/{self.relative_path.as_posix()}"
 
 
+@dataclass(frozen=True)
+class _NativeRoleFilePlan:
+    relative_path: Path
+    payload: bytes
+    installed_digest: str | None
+    accepted_prior: str | None
+
+
+@dataclass(frozen=True)
+class _CodexNativeRolesPlan:
+    manifest: dict[str, Any]
+    registrations: tuple[_NativeRoleRegistration, ...]
+    role_files: tuple[_NativeRoleFilePlan, ...]
+    config_exists: bool
+    config_payload: bytes
+    config_prior_digest: str | None
+    legacy_path: Path | None
+    legacy_exists: bool
+
+
 def _native_role_registrations(
     source_agents: Path, manifest: dict[str, Any]
 ) -> tuple[_NativeRoleRegistration, ...]:
@@ -2228,6 +2602,184 @@ def _native_role_registrations(
     return tuple(registrations)
 
 
+def _preflight_native_regular_file(path: Path, relative: Path) -> bytes | None:
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError:
+        return None
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or path.is_symlink()
+        or _is_reparse_metadata(metadata)
+    ):
+        raise ValueError(f"E_CREATE_ONLY_TYPE_COLLISION: {relative}")
+    return path.read_bytes()
+
+
+def _toml_table_bounds(lines: list[str], header: str) -> tuple[int, int]:
+    headers = [index for index, line in enumerate(lines) if line.strip() == header]
+    if len(headers) != 1:
+        raise ValueError(f"E_CREATE_ONLY_COLLISION: {header.removeprefix('[agents.')[:-1]}")
+    start = headers[0]
+    end = len(lines)
+    for index in range(start + 1, len(lines)):
+        stripped = lines[index].strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            end = index
+            break
+    return start, end
+
+
+def _replace_stock_registration_description(
+    payload: bytes, name: str, prior: str, current: str
+) -> bytes:
+    text = payload.decode("utf-8")
+    lines = text.splitlines(keepends=True)
+    start, end = _toml_table_bounds(lines, f"[agents.{name}]")
+    matches = [
+        index
+        for index in range(start + 1, end)
+        if "description" in lines[index] and prior in lines[index]
+    ]
+    if len(matches) != 1:
+        raise ValueError(f"E_CREATE_ONLY_COLLISION: agents.{name}")
+    index = matches[0]
+    lines[index] = lines[index].replace(prior, current, 1)
+    return "".join(lines).encode("utf-8")
+
+
+def _preflight_codex_native_roles(
+    root: Path, source_agents: Path, target_agents: Path, config_path: Path
+) -> _CodexNativeRolesPlan:
+    """Classify the complete native-role/config change before transaction entry."""
+
+    manifest = _source_codex_role_manifest(root, source_agents)
+    registrations = _native_role_registrations(source_agents, manifest)
+    config_relative = Path(".codex") / "config.toml"
+    config_bytes = _preflight_native_regular_file(config_path, config_relative)
+    config_exists = config_bytes is not None
+    original_config = config_bytes if config_bytes is not None else b""
+    try:
+        parsed = tomllib.loads(original_config.decode("utf-8"))
+    except (UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
+        raise ValueError("E_CREATE_ONLY_CONFIG_INVALID") from exc
+    features = parsed.get("features")
+    if features is not None and not isinstance(features, dict):
+        raise ValueError("E_CREATE_ONLY_CONFIG_INVALID")
+    if isinstance(features, dict):
+        value = features.get("multi_agent_v2")
+        if value is not None and type(value) is not bool:
+            raise ValueError("E_CREATE_ONLY_CONFIG_INVALID")
+    agents_config = parsed.get("agents")
+    if agents_config is None:
+        agents_config = {}
+    if not isinstance(agents_config, dict):
+        raise ValueError("E_CREATE_ONLY_CONFIG_INVALID")
+
+    payload = original_config
+    expected_by_name = {
+        registration.name: {
+            "description": registration.description,
+            "config_file": registration.config_file,
+        }
+        for registration in registrations
+    }
+    for name, expected in expected_by_name.items():
+        actual = agents_config.get(name)
+        if actual is None or actual == expected:
+            continue
+        if actual not in _STOCK_NATIVE_ROLE_REGISTRATION_PRIORS.get(name, ()):
+            raise ValueError(f"E_CREATE_ONLY_COLLISION: agents.{name}")
+        payload = _replace_stock_registration_description(
+            payload, name, str(actual["description"]), str(expected["description"])
+        )
+
+    legacy_relative = Path("agents") / CODEX_LEGACY_LUNA_ROLE.name
+    legacy_path = target_agents / CODEX_LEGACY_LUNA_ROLE.name
+    legacy_bytes = _preflight_native_regular_file(legacy_path, legacy_relative)
+    legacy_exists = legacy_bytes is not None
+    legacy = agents_config.get(CODEX_LEGACY_LUNA_CONFIG_NAME)
+    if legacy is None:
+        if legacy_exists:
+            raise ValueError(f"E_CREATE_ONLY_COLLISION: {legacy_relative}")
+    else:
+        expected_legacy = {
+            "description": CODEX_LEGACY_LUNA_DESCRIPTION,
+            "config_file": CODEX_LEGACY_LUNA_ROLE.as_posix(),
+        }
+        if legacy != expected_legacy:
+            raise ValueError("E_CREATE_ONLY_COLLISION: agents.luna_mechanical")
+        if legacy_exists and hashlib.sha256(legacy_bytes).hexdigest() != CODEX_LEGACY_LUNA_SHA256:
+            raise ValueError(f"E_CREATE_ONLY_COLLISION: {legacy_relative}")
+        payload = _remove_frozen_legacy_luna_block(payload)
+
+    parsed_payload = tomllib.loads(payload.decode("utf-8"))
+    missing = tuple(
+        registration
+        for registration in registrations
+        if registration.name
+        not in (
+            parsed_payload.get("agents")
+            if isinstance(parsed_payload.get("agents"), dict)
+            else {}
+        )
+    )
+    if config_exists:
+        payload = _append_native_role_blocks(payload, missing)
+    else:
+        payload = _append_native_role_blocks(
+            b"[features]\nmulti_agent_v2 = true\n", registrations
+        )
+
+    known_roles = {f"{name}.toml" for name in manifest["roles"]}
+    try:
+        target_metadata = target_agents.lstat()
+    except FileNotFoundError:
+        target_metadata = None
+    if target_metadata is not None:
+        if (
+            not stat.S_ISDIR(target_metadata.st_mode)
+            or target_agents.is_symlink()
+            or _is_reparse_metadata(target_metadata)
+        ):
+            raise ValueError("E_CREATE_ONLY_TYPE_COLLISION: agents")
+        for entry in sorted(os.scandir(target_agents), key=lambda candidate: candidate.name):
+            if entry.name == CODEX_ROLE_MANIFEST or (
+                entry.name.endswith(".toml")
+                and entry.name not in known_roles
+                and not (legacy_exists and entry.name == CODEX_LEGACY_LUNA_ROLE.name)
+            ):
+                raise ValueError(f"E_CREATE_ONLY_COLLISION: agents/{entry.name}")
+
+    role_files: list[_NativeRoleFilePlan] = []
+    for name, record in sorted(manifest["roles"].items()):
+        relative = Path(record["relativePath"])
+        source_payload = (source_agents / relative).read_bytes()
+        installed = _preflight_native_regular_file(target_agents / relative, Path("agents") / relative)
+        installed_digest = (
+            hashlib.sha256(installed).hexdigest() if installed is not None else None
+        )
+        source_digest = hashlib.sha256(source_payload).hexdigest()
+        accepted_prior = None
+        if installed_digest is not None and installed_digest != source_digest:
+            if installed_digest not in _STOCK_NATIVE_ROLE_MIGRATION_SHA256.get(name, frozenset()):
+                raise ValueError(f"E_CREATE_ONLY_COLLISION: agents/{relative}")
+            accepted_prior = installed_digest
+        role_files.append(
+            _NativeRoleFilePlan(relative, source_payload, installed_digest, accepted_prior)
+        )
+    return _CodexNativeRolesPlan(
+        manifest,
+        registrations,
+        tuple(role_files),
+        config_exists,
+        payload,
+        hashlib.sha256(original_config).hexdigest() if config_exists else None,
+        legacy_path if legacy_exists else None,
+        legacy_exists,
+    )
+
+
 def _install_codex_native_roles(
     root: Path,
     source_agents: Path,
@@ -2235,7 +2787,20 @@ def _install_codex_native_roles(
     owner: _CreateOnlyMutablePath,
     *,
     manifest: dict[str, Any] | None = None,
+    plan: _CodexNativeRolesPlan | None = None,
 ) -> None:
+    if plan is not None:
+        target_relative = target_agents.relative_to(owner.anchor)
+        for item in plan.role_files:
+            relative = target_relative / item.relative_path
+            if item.installed_digest is None or item.accepted_prior is None:
+                owner.create_file(relative, item.payload)
+            else:
+                owner.migrate_exact_file(
+                    relative, item.accepted_prior, item.payload
+                )
+            print(f"  Native role create-only verified: {item.relative_path}")
+        return
     manifest = (
         manifest
         if manifest is not None
@@ -2252,7 +2817,22 @@ def _install_codex_native_roles(
                 raise ValueError(f"E_CREATE_ONLY_COLLISION: {target_relative / entry.name}")
     for name, record in sorted(manifest["roles"].items()):
         relative = Path(record["relativePath"])
-        owner.create_file(target_relative / relative, (source_agents / relative).read_bytes())
+        payload = (source_agents / relative).read_bytes()
+        target = owner.destination(target_relative / relative)
+        expected_priors = _STOCK_NATIVE_ROLE_MIGRATION_SHA256.get(name, frozenset())
+        if expected_priors and (target.exists() or target.is_symlink()):
+            owner._assert_regular(target, existing=True)
+            installed_digest = _file_sha256(target)
+            if installed_digest == hashlib.sha256(payload).hexdigest():
+                owner.create_file(target_relative / relative, payload)
+            elif installed_digest not in expected_priors:
+                raise ValueError(f"E_ACCEPTED_PRIOR_COLLISION: {target_relative / relative}")
+            else:
+                owner.migrate_exact_file(
+                    target_relative / relative, installed_digest, payload
+                )
+        else:
+            owner.create_file(target_relative / relative, payload)
         print(f"  Native role create-only verified: {relative}")
 
 
@@ -2315,10 +2895,14 @@ def _preflight_canonical_skills(
                 else None
             )
             prior = E7_CANONICAL_SKILL_TREE_SHA256.get(skill.name)
+            stock_8521_prior = STOCK_8521_CANONICAL_SKILL_TREE_SHA256.get(
+                skill.name
+            )
             accepted_priors = frozenset(
                 value
                 for value in (
                     prior,
+                    stock_8521_prior,
                     *(
                         GLOBAL_LEAD_ACCEPTED_PRIOR_TREE_SHA256
                         if skill.name == "lead"
@@ -2662,8 +3246,45 @@ def _reconcile_codex_native_config(
     target_agents: Path | None = None,
     manifest: dict[str, Any] | None = None,
     role_owner: _CreateOnlyMutablePath | None = None,
+    plan: _CodexNativeRolesPlan | None = None,
 ) -> None:
     relative = config_path.relative_to(owner.anchor)
+    if plan is not None:
+        config_exists = config_path.exists() or config_path.is_symlink()
+        if plan.config_exists:
+            owner.destination(relative)
+            owner._assert_regular(config_path, existing=True)
+            if _file_sha256(config_path) != plan.config_prior_digest:
+                raise ValueError(f"E_ACCEPTED_PRIOR_COLLISION: {relative}")
+            if config_path.read_bytes() != plan.config_payload:
+                owner.migrate_exact_file(
+                    relative, str(plan.config_prior_digest), plan.config_payload
+                )
+                print("  Updated Codex native-role config without rewriting unrelated bytes")
+            else:
+                print("  Codex config registration is exact and left byte-exact")
+        else:
+            if config_exists:
+                owner.create_file(relative, plan.config_payload)
+            else:
+                owner.create_file(relative, plan.config_payload)
+            print(f"  Created Codex multi_agent_v2 and native-role config: {config_path}")
+        if plan.legacy_exists:
+            assert plan.legacy_path is not None
+            legacy_owner = role_owner or owner
+            legacy_relative = plan.legacy_path.relative_to(legacy_owner.anchor)
+            legacy_owner.destination(legacy_relative)
+            legacy_owner._assert_regular(plan.legacy_path, existing=True)
+            if _file_sha256(plan.legacy_path) != CODEX_LEGACY_LUNA_SHA256:
+                raise ValueError(f"E_ACCEPTED_PRIOR_COLLISION: {legacy_relative}")
+            if not owner.dry_run:
+                if role_owner is not None and role_owner.linked_authority is not None:
+                    role_owner.linked_authority.assert_current()
+                plan.legacy_path.unlink()
+                if plan.legacy_path.exists() or plan.legacy_path.is_symlink():
+                    raise ValueError("E_MUTABLE_PATH_POSTCONDITION")
+            print(f"  Removed frozen legacy native role: {plan.legacy_path}")
+        return
     config_exists = config_path.exists() or config_path.is_symlink()
     if config_exists:
         owner.destination(relative)
@@ -3591,6 +4212,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
     args = _parser(provider).parse_args(argv)
     script = Path(__file__)
     root = _repo_root(script)
+    canonical_plan: _CanonicalSkillsPlan | None = None
     source = root / f"src.{provider}"
     try:
         mode, target, project = _target(provider, args)
@@ -3646,8 +4268,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
             target_tree = claude_agents_root
             mode_target = target / ".agents-mode.yaml"
             normalize_provider = "shared"
-        home_value = os.environ.get("USERPROFILE") or os.environ.get("HOME")
-        home = Path(home_value).expanduser() if home_value else None
+        home = _resolve_global_home() if mode == "global" else None
         shared_mode_target: Path | None = None
         if mode == "global":
             if home is None:
@@ -3674,6 +4295,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
         canonical_lead = canonical_skills_target / "lead"
         codex_post_tree_runtime: tuple[tuple[Path, Path], ...] = ()
         codex_role_manifest: dict[str, Any] | None = None
+        codex_native_role_plan: _CodexNativeRolesPlan | None = None
         codex_hook_inventory = registration.parent / CODEX_HOOK_INVENTORY
         if provider == "codex":
             codex_role_manifest = _source_codex_role_manifest(
@@ -3723,6 +4345,33 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                 canonical_skills_target,
                 claude_skills_projection_target,
             )
+            canonical_plan = _preflight_canonical_skills(
+                root / "src.codex" / "skills",
+                canonical_skills_target,
+                root=root,
+                claude_transport_root=target_tree / "scripts",
+            )
+            if (
+                args.dry_run
+                and canonical_plan.transport_stage is not None
+                and canonical_plan.transport_stage.accepted_prior_set is not None
+            ):
+                replacement_count = len(
+                    canonical_plan.transport_stage.pending_files
+                ) + int(canonical_plan.transport_stage.manifest_pending)
+                print(
+                    "  [dry-run] transport prior "
+                    f"{canonical_plan.transport_stage.accepted_prior_set}: "
+                    f"{replacement_count} replacements"
+                )
+        elif provider == "codex":
+            assert codex_agents_target is not None
+            codex_native_role_plan = _preflight_codex_native_roles(
+                root,
+                source / "agents",
+                codex_agents_target,
+                target / "config.toml",
+            )
         transaction_paths = _installer_mutation_paths(
             provider=provider,
             source=source,
@@ -3746,6 +4395,17 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                     claude_skills_projection_target
                     / f".{item.name}.projection.tombstone",
                 )
+            ),
+            claude_transport_migration_paths=(
+                tuple(
+                    witness.path
+                    for witness in canonical_plan.transport_stage.witnesses
+                )
+                if provider == "claude"
+                and canonical_plan is not None
+                and canonical_plan.transport_stage is not None
+                and canonical_plan.transport_stage.accepted_prior_set is not None
+                else ()
             ),
         )
         transaction = _InstallTransaction(
@@ -3834,15 +4494,9 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                 )
             else:
                 # The canonical skill trees plus the paired Claude transport
-                # projection are the accepted-prior affected set.  Classify
-                # them before any Claude sync operation; the later call is the
-                # single transaction-owned apply path for that accepted plan.
-                canonical_plan = _preflight_canonical_skills(
-                    root / "src.codex" / "skills",
-                    canonical_skills_target,
-                    root=root,
-                    claude_transport_root=target_tree / "scripts",
-                )
+                # projection were bound before this transaction so a rejected
+                # canonical-skill collision never enters rollback settlement.
+                assert canonical_plan is not None
                 try:
                     for authority in claude_link_authorities:
                         _assert_global_claude_linked_subroot_authority(root, authority)
@@ -3912,6 +4566,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                     )
                 finally:
                     _discard_canonical_skills_plan(canonical_plan)
+                    canonical_plan = None
             helper_target = (
                 skills_target / "lead" / "scripts"
                 if provider == "codex"
@@ -3946,6 +4601,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                     target_agents=codex_agents_target,
                     manifest=codex_role_manifest,
                     role_owner=codex_agents_owner,
+                    plan=codex_native_role_plan,
                 )
                 _install_codex_native_roles(
                     root,
@@ -3953,6 +4609,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                     codex_agents_target,
                     codex_agents_owner or create_only,
                     manifest=codex_role_manifest,
+                    plan=codex_native_role_plan,
                 )
                 _merge_codex_agents(root, source, docs_target, args.dry_run)
             else:
@@ -3977,7 +4634,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
             if provider == "claude":
                 mode_project = project if project is not None else target.parent / ".orchestrarium-global-install"
                 effective_delegation_mode = _resolve_claude_delegation_mode(
-                    root, mode_project, home
+                    root, mode_project, home if home is not None else mode_project
                 )
                 _merge_claude_main_agent_settings(
                     root,
@@ -4061,3 +4718,6 @@ def install(provider: str, argv: list[str] | None = None) -> int:
     except (OSError, RuntimeError, ValueError) as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
         return 1
+    finally:
+        if canonical_plan is not None:
+            _discard_canonical_skills_plan(canonical_plan)

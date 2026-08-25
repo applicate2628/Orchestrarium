@@ -128,14 +128,15 @@ Do not invoke for:
 - Every consultant memo must include a provenance header:
   - **Execution role:** `consultant`
   - **Assigned / replaced internal role:** `none`
-  - **Requested provider:** <internal | codex | claude | gemini | qwen | kimi | grok>
-  - **Resolved provider:** <Codex CLI | Claude CLI | Gemini CLI | Qwen Code | Kimi CLI | Grok CLI | none>
+  - **Requested provider:** <internal | codex | claude | gemini | qwen>
+  - **Resolved provider:** <Codex CLI | Claude CLI | Gemini CLI | Qwen Code | none>
   - **Requested consultant mode:** <external | internal | disabled>
-  - **Actual execution path:** <internal consultant | external CLI (Codex CLI) | external CLI (Claude CLI) | external CLI (Gemini CLI) | external CLI (Qwen Code) | external CLI (Kimi CLI) | external CLI (Grok CLI) | role-play (violation)>
+  - **Actual execution path:** <internal consultant | external CLI (Codex CLI) | external CLI (Claude CLI) | external CLI (Gemini CLI) | external CLI (Qwen Code) | role-play (violation)>
   - **Model / profile used:** <actual profile or model when known | runtime default | unspecified by runtime>
   - **Prompt form:** <blind-options | critique-of-choice | not-applicable: reason>
   - **Inputs consumed:** <artifacts/files used, such as canonical brief, design decision id, or diff range>
   - **Deviation reason:** <none | external unavailable: [reason]>
+  - **Unavailable policy classifiers:** Kimi/Grok are disabled in 1.x; never select, resolve, execute, or record either as a provenance provider.
 - Every consultant memo must end with an explicit continuation section:
   - **Continuation prompt:** one ready-to-send second prompt that can be used verbatim to continue the work.
   - The continuation prompt must begin with a direct imperative to continue, for example `Continue working:` or `Proceed with the next batch:`.

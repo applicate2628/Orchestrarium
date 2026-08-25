@@ -51,6 +51,8 @@ PRODUCTION_SHELL_ENTRYPOINTS = frozenset(
 )
 BASH = shutil.which("bash")
 BASH_SMOKE_AVAILABLE = BASH is not None and os.name != "nt"
+
+
 def _load(path: Path, name: str):
     spec = importlib.util.spec_from_file_location(name, path)
     assert spec and spec.loader
@@ -195,6 +197,12 @@ exec \"$PYTHON\" \"$SCRIPT_DIR/owner.py\" \"$@\"
         _assert_thin_python_launcher(bad_launcher)
 
 
+def test_global_home_selection_uses_home_when_posix_lacks_userprofile() -> None:
+    assert INSTALLER._select_global_home_environment(
+        None, "/tmp/orchestrarium-home", platform="posix"
+    ) == ("HOME", "/tmp/orchestrarium-home", None)
+
+
 @pytest.mark.skipif(
     not BASH_SMOKE_AVAILABLE,
     reason="POSIX bash launcher smoke is unavailable on this host",
@@ -236,6 +244,32 @@ def test_posix_launcher_forwards_stdin_argv_and_exit_code(entrypoint: str) -> No
         assert Path(argv[0]).resolve() == shell.with_suffix(".py").resolve()
         assert argv[1:] == ["first", "second value"]
         assert stdin_path.read_text(encoding="utf-8") == "stdin payload\n"
+
+
+@pytest.mark.skipif(
+    not BASH_SMOKE_AVAILABLE,
+    reason="POSIX bash installer dry-run is unavailable on this host",
+)
+@pytest.mark.parametrize("entrypoint", ("scripts/install-codex.sh", "scripts/install-claude.sh"))
+def test_posix_global_dry_run_uses_home_without_userprofile(entrypoint: str) -> None:
+    with tempfile.TemporaryDirectory() as td:
+        home = Path(td) / "home"
+        home.mkdir()
+        env = os.environ.copy()
+        env.pop("USERPROFILE", None)
+        env["HOME"] = str(home)
+        result = subprocess.run(
+            [BASH, str(ROOT / entrypoint), "--global", "--dry-run", "--no-hypothesis-hook"],
+            cwd=ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    provider = "codex" if "codex" in entrypoint else "claude"
+    assert f"Target: {home / f'.{provider}'}" in result.stdout
 
 
 def test_publication_scanner_python_mirrors_match_canon() -> None:

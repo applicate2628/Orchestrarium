@@ -26,8 +26,8 @@ PROVIDER_RUNTIME_MIRRORS = (
     ROOT / "src.claude/agents/scripts/skill_pack_validator_runtime.py",
 )
 EXPECTED_SUMMARIES = (
-    "PASS: 554  WARN: 0  FAIL: 0",
-    "Checks: 470  |  Passed: 470  |  Warnings: 0  |  Errors: 0",
+    "PASS: 556  WARN: 0  FAIL: 0",
+    "Checks: 473  |  Passed: 473  |  Warnings: 0  |  Errors: 0",
 )
 
 
@@ -548,14 +548,18 @@ def test_scoped_action_registry_keeps_source_only_maintainer_checks_out_of_insta
         any(str(value).startswith("@ROOT/docs/") for value in action)
         for action in source_only_actions
     )
-    assert any(
-        action[0] == "check_normalizer_strips_example_auto_providers"
-        for action in source_only_actions
-    )
-    assert any(
-        "@ROOT/shared/agents-mode.defaults.yaml" in action
-        for action in source_only_actions
-    )
+    assert (
+        "check_contains",
+        "@ROOT/docs/agents-mode-reference.md",
+        "## Canonical maintenance",
+        "agents-mode reference defines canonical maintenance",
+    ) in source_only_actions
+    assert (
+        "check_contains",
+        "@ROOT/docs/agents-mode-reference.md",
+        "Substantive task prompts are file-based by default",
+        "agents-mode reference documents file-based external CLI prompts",
+    ) in source_only_actions
     installed_actions = tuple(
         action
         for scope, actions in module.ACTIONS

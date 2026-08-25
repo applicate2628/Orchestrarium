@@ -17,9 +17,14 @@ OWNER = ROOT / "scripts/provider_prompt.py"
 def _projected_wrapper(tmp_path: Path) -> Path:
     scripts = tmp_path / "claude-projection" / "agents" / "scripts"
     scripts.mkdir(parents=True, exist_ok=True)
+    projection_shared = scripts.parents[1] / "shared"
+    projection_shared.mkdir()
+    (projection_shared / "provider-prompt-projections.v1.json").write_bytes(
+        (ROOT / "shared" / "provider-prompt-projections.v1.json").read_bytes()
+    )
     (scripts / "provider_prompt.py").write_bytes(OWNER.read_bytes())
     (scripts / "external-prompt-governance.md").write_bytes(
-        (ROOT / "scripts" / "external-prompt-governance.md").read_bytes()
+        (ROOT / "shared" / "external-prompt-governance.md").read_bytes()
     )
     wrapper = scripts / WRAPPER.name
     wrapper.write_bytes(WRAPPER.read_bytes())

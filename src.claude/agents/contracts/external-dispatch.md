@@ -17,7 +17,7 @@ parallelMode: auto  # allowed: manual | auto | force; default: auto
 mcpMode: auto  # allowed: auto | force; default: auto
 preferExternalWorker: true  # allowed: false | true; default: false
 preferExternalReviewer: true  # allowed: false | true; default: false
-externalProvider: auto  # allowed here: auto | codex | claude | gemini | qwen | kimi | grok; default: auto; kimi/grok are explicit-only; gemini/qwen are explicit example-only and not recommended for shipped auto
+externalProvider: auto  # allowed here: auto | codex | claude | gemini | qwen | kimi | grok; default: auto; kimi/grok are policy-only, unavailable, and disabled in 1.x; gemini/qwen are explicit example-only and not recommended for shipped auto
 externalPriorityProfile: balanced  # allowed: balanced | quality-first | <repo-local production profile>; default: balanced
 reserveResolver: claude-sonnet  # allowed: disabled | claude-sonnet | claude-wrapper | wrapper:<command>; default: claude-sonnet
 externalPriorityProfiles: {}  # allowed: structured profile map
@@ -72,7 +72,7 @@ Semantics:
 - Use `gpt-5.6-terra` as the balanced cheaper-than-flagship Codex reasoning lane when full `gpt-5.6-sol` depth is not required; a genuine reasoning model whose output stays review-gated like any external lane. Gemini and Qwen routes stay manual `WEAK MODEL / NOT RECOMMENDED` example-only paths and do not add separate production fallback keys to this schema.
 - Every substantive external task prompt must use an approved thin wrapper and file/stdin delivery. Command-line arguments are limited to launcher flags, model/profile options, and paths; inline argv is permitted only for a fixed synthetic non-substantive smoke token, never a provider limitation or real task.
 - The canonical Claude-pack transports for primary runs are `.claude/agents/scripts/invoke-codex-prompt.py` / `.sh` and `.claude/agents/scripts/invoke-claude-prompt.py` / `.sh`; invoke the approved thin wrapper synchronously and consume its single V2 `ORCHESTRARIUM_PROVIDER_RESULT_V2` envelope through the strict V2 parser, using its complete untrusted/potentially-sensitive resultText, full external-nonauthorizing tuple, combined outcome, cleanup status, and wrapper process exit. For tracked runs, read the path-free terminal ledger back separately after return. Wrapper-private prompt, stdout, stderr, and process paths are not consumer surfaces. No transport-neutral inline, sidecar, or raw provider chain is an approved substantive prompt path; fail or reroute when an approved wrapper is unavailable.
-- Kimi and Grok are explicit-only routes. `resolve_external_dispatch(provider, task_class, role)` must admit the request before any provider probe; only eligible read-only `exploration`, `planning`, and `review` work is admitted, independent verification is mandatory, and all other work fails closed with no fallback. The root-authored `provider_prompt.py` transport plus thin `invoke-kimi-prompt.py` / `invoke-grok-prompt.py` entries must pass the canonical/Claude-host byte-parity manifest before launch. Kimi uses `kimi-code/k3` and cannot satisfy a required native effort; it receives only a neutral scratch snapshot. Grok needs its official signed binary/model, capability, auth, result-shape, and live-root read-only immutability gates. Neither provider result alone authorizes a critical decision, commit, push, release, or publication.
+- Kimi and Grok are policy classifier names only; their transports are unavailable and disabled in 1.x. `resolve_external_dispatch(provider, task_class, role)` remains a non-executing policy check; it does not authorize a launcher or probe. Do not launch or probe either provider, and do not present either as usable.
 - **WARNING — automated Claude authentication:** the `invoke-claude-prompt.py` / `.sh` transport requires commercial API-key authentication for automated `claude -p` and fails closed under subscription sign-in (OAuth). Use `invoke-claude-api.py` / `.sh` as the key-backed path; it loads `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_BASE_URL` from `SECRET.md`. Other accepted commercial paths are `ANTHROPIC_API_KEY`, `apiKeyHelper`, Amazon Bedrock, and Google Vertex AI. See [Anthropic's Claude Code legal and compliance guidance](https://code.claude.com/docs/en/legal-and-compliance).
 - For wide release or parity audits, split the admitted scope by repo, file set, or lane instead of launching one mega neutral-dir prompt across the whole pack family.
 - Provider-backed consultant execution in `external` mode plus `$external-worker` and `$external-reviewer` must use direct external launch from the orchestrating runtime or an approved transport wrapper script. Do not proxy them through an internal agent/helper/subagent host.
@@ -92,7 +92,7 @@ Semantics:
 
 The prompt file is the only governance an external Command-Line Interface (CLI) inherits. Before launch it must:
 
-- Remain a raw, caller-authored handoff. The provider-neutral `provider_prompt.py::launch` wrapper seam snapshots and prefixes the installed generated `external-prompt-governance.md` capsule in memory; role and provider documents must reference this seam and must not copy its policy text. Substantive raw provider Command-Line Interface (CLI) prompt routes are unsupported: use an approved thin `invoke-<provider>-prompt` wrapper.
+- Remain a raw, caller-authored handoff. The provider-neutral `provider_prompt.py::launch` wrapper seam snapshots and prefixes the installed `scripts/external-prompt-governance.md` projection in memory; its sole authored source is `shared/external-prompt-governance.md`. Role and provider documents must reference this seam and must not copy its policy text. Substantive raw provider Command-Line Interface (CLI) prompt routes are unsupported: use an approved thin `invoke-<provider>-prompt` wrapper.
 - Include the complete handoff template verbatim from the owning `contracts/subagent-contracts.md`, including its mandatory pre-dispatch fill rule and defect-class completeness trigger; this contract cites that owner and does not reproduce its field list.
 - State the assigned role's gate vocabulary and one-artifact requirement.
 - Include a provenance-header echo instruction using this contract's header fields.
@@ -192,10 +192,10 @@ Every external or consultant artifact should include one explicit execution reco
 
 - `Execution role: <consultant | external-worker | external-reviewer>`
 - `Assigned / replaced internal role: <eligible internal role label | none>`
-- `Requested provider: <internal | codex | claude | gemini | qwen | kimi | grok>`
-- `Resolved provider: <Codex CLI | Claude CLI | Gemini CLI | Qwen Code | Kimi CLI | Grok CLI | none>`
+- `Requested provider: <internal | codex | claude | gemini | qwen>`
+- `Resolved provider: <Codex CLI | Claude CLI | Gemini CLI | Qwen Code | none>`
 - `Requested consultant mode: <external | internal | disabled>` when consultant routing is relevant; otherwise `not-applicable`
-- `Actual execution path: <internal consultant | external CLI (Codex CLI) | external CLI (Claude CLI) | external CLI (Gemini CLI) | external CLI (Qwen Code) | external CLI (Kimi CLI) | external CLI (Grok CLI) | role disabled>`
+- `Actual execution path: <internal consultant | external CLI (Codex CLI) | external CLI (Claude CLI) | external CLI (Gemini CLI) | external CLI (Qwen Code) | role disabled>`
 - `Model / profile used: <actual profile or model when known | runtime default | unspecified by runtime>`
 - `Launch flags: <exact argv model / effort / sandbox flags>`
 - `Run record: <started and finished timestamps or duration; wrapper exit; terminal ledger runId when tracked>`
@@ -203,6 +203,7 @@ Every external or consultant artifact should include one explicit execution reco
 
 Rules:
 
+- Kimi/Grok are unavailable policy-only classifiers, disabled in 1.x; never select, resolve, execute, or record either as a provenance provider.
 - Before declaring a route unavailable, run `command -v` or `Get-Command` for the resolved CLI in the current session and record the availability-probe output in the execution artifact; a route change requires the probe result plus a populated `Deviation reason`. A missing wrapper, older failed run, or empty `.out` is indirect evidence and does not prove unavailability.
 - Keep `Execution role` and `Assigned / replaced internal role` on separate lines. Do not merge them into one ambiguous label.
 - `Requested provider: internal` means no explicit external provider was requested by the caller and routing/default resolution picked the provider. It must not be rendered as `auto` in the artifact.
