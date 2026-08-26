@@ -213,24 +213,59 @@ def test_create_owner_rejects_forged_stale_cross_run_and_mismatched_admissions()
         lambda: calls.append("create") or "created",
     )
     mutations = (
-        dataclasses.replace(admission, _seal=object()),
-        dataclasses.replace(admission, expires_at_monotonic=time.monotonic() - 1.0),
-        dataclasses.replace(admission, run_token_sha256="0" * 64),
-        dataclasses.replace(admission, resolved_executable_identity="0" * 64),
-        dataclasses.replace(admission, resolved_executable_version="0" * 64),
-        dataclasses.replace(admission, profile_id="git-rev-parse-sq-quote-v1"),
-        dataclasses.replace(admission, actual_argv_shape_sha256="0" * 64),
-        dataclasses.replace(
-            admission,
-            probe_observed_argv_sha256=admission.probe_requested_argv_sha256,
-            _child_evidence_seal=object(),
+        (
+            dataclasses.replace(admission, _seal=object()),
+            "PSV1-ARGV-ATTESTATION",
+            "request-validation",
+        ),
+        (
+            dataclasses.replace(
+                admission, expires_at_monotonic=time.monotonic() - 1.0
+            ),
+            "PSV1-DEADLINE",
+            "deadline",
+        ),
+        (
+            dataclasses.replace(admission, run_token_sha256="0" * 64),
+            "PSV1-ARGV-ATTESTATION",
+            "request-validation",
+        ),
+        (
+            dataclasses.replace(admission, resolved_executable_identity="0" * 64),
+            "PSV1-ARGV-ATTESTATION",
+            "request-validation",
+        ),
+        (
+            dataclasses.replace(admission, resolved_executable_version="0" * 64),
+            "PSV1-ARGV-ATTESTATION",
+            "request-validation",
+        ),
+        (
+            dataclasses.replace(admission, profile_id="git-rev-parse-sq-quote-v1"),
+            "PSV1-ARGV-ATTESTATION",
+            "request-validation",
+        ),
+        (
+            dataclasses.replace(admission, actual_argv_shape_sha256="0" * 64),
+            "PSV1-ARGV-ATTESTATION",
+            "request-validation",
+        ),
+        (
+            dataclasses.replace(
+                admission,
+                probe_observed_argv_sha256=admission.probe_requested_argv_sha256,
+                _child_evidence_seal=object(),
+            ),
+            "PSV1-ARGV-ATTESTATION",
+            "request-validation",
         ),
     )
     try:
-        for invalid in mutations:
+        for invalid, failure_id, terminal_stage in mutations:
             with pytest.raises(module.ProcessSupervisionError) as caught:
                 create_owner.create_task(lifecycle, request, invalid)
-            assert caught.value.failure_id == "PSV1-ARGV-ATTESTATION"
+            assert caught.value.failure_id == failure_id
+            assert caught.value.terminal_stage == terminal_stage
         changed_request = dataclasses.replace(request, argv=(*request.argv, "changed"))
         with pytest.raises(module.ProcessSupervisionError):
             create_owner.create_task(lifecycle, changed_request, admission)
@@ -268,6 +303,67 @@ def test_probe_preserves_original_task_deadline(monkeypatch: pytest.MonkeyPatch)
     owner.run(request)
 
     assert observed == [original_deadline]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows admission expiry classification")
+def test_successful_probe_then_pre_task_expiry_is_typed_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Expiry at task consume is DEADLINE/timed_out and never starts the task."""
+
+    module = _load_runner()
+    owner = module.ProcessRunnerV1()
+    marker = tmp_path / "task-started.txt"
+    request = _request(
+        module,
+        owner,
+        (
+            str(Path(sys.executable).resolve()),
+            str(CHILD),
+            "marker",
+            "--marker",
+            str(marker),
+        ),
+        "python-validator-json-echo-v1",
+    )
+    original_deadline = request.deadline_monotonic
+    real_monotonic = module.time.monotonic
+
+    class OneShotClock:
+        expire_next = False
+
+        def __call__(self) -> float:
+            if self.expire_next:
+                self.expire_next = False
+                return original_deadline + 1.0
+            return real_monotonic()
+
+    clock = OneShotClock()
+    original_create_task = module.WindowsCreateOwnerV1.create_task
+
+    def expire_before_consume(create_owner, lifecycle, task_request, admission):
+        clock.expire_next = True
+        return original_create_task(
+            create_owner, lifecycle, task_request, admission
+        )
+
+    monkeypatch.setattr(module.time, "monotonic", clock)
+    monkeypatch.setattr(
+        module.WindowsCreateOwnerV1,
+        "create_task",
+        expire_before_consume,
+    )
+
+    result = owner.run(request)
+
+    assert request.deadline_monotonic == original_deadline
+    assert result.failure_id == "PSV1-DEADLINE"
+    assert result.terminal_stage == "deadline"
+    assert result.timed_out is True
+    assert result.target_exit_code is None
+    assert result.tree.tree_empty
+    assert result.resources_closed
+    assert not marker.exists()
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows internal probe lifecycle")

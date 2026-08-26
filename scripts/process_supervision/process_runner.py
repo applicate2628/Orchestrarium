@@ -1348,13 +1348,14 @@ class WindowsArgvAdmissionOwnerV1:
             and admission.actual_argv_shape_sha256 == _argv_shape_sha256(request.argv)
             and admission.probe_requested_argv_sha256
             == admission.probe_observed_argv_sha256
-            and admission.expires_at_monotonic >= time.monotonic()
             and admission.status == "pass"
         )
         if not valid:
             raise ProcessSupervisionError(
                 "PSV1-ARGV-ATTESTATION", "request-validation"
             )
+        if admission.expires_at_monotonic < time.monotonic():
+            raise ProcessSupervisionError("PSV1-DEADLINE", "deadline")
         with self._lock:
             if admission.run_token_sha256 in self._consumed_run_tokens:
                 raise ProcessSupervisionError(
@@ -1562,7 +1563,8 @@ def _request_failure(request: ProcessRequestV1, error: ProcessSupervisionError, 
         _json_argv_sha256(argv),
         len(argv),
         None,
-        False,
+        error.failure_id == "PSV1-DEADLINE"
+        and error.terminal_stage == "deadline",
         False,
         max(0.0, time.monotonic() - started),
         StdinObservationV1(len(request.stdin_bytes or b""), 0, not request.stdin_bytes),
@@ -2398,6 +2400,11 @@ class _WindowsBackendV1:
         except ProcessSupervisionError as exc:
             if failure_id is None:
                 failure_id, stage = exc.failure_id, exc.terminal_stage
+            if (
+                exc.failure_id == "PSV1-DEADLINE"
+                and exc.terminal_stage == "deadline"
+            ):
+                timed_out = True
             if not terminate_job():
                 last_close_after_terminate_failure()
             if handles["process"]:
