@@ -29,7 +29,14 @@ def _load_runner():
     return module
 
 
-def _request(module, owner, argv: tuple[str, ...], profile_id: str):
+def _request(
+    module,
+    owner,
+    argv: tuple[str, ...],
+    profile_id: str,
+    *,
+    cwd: Path = ROOT,
+):
     executable = Path(argv[0]).resolve()
     rows = tuple(
         module.EnvironmentRowV1(name, os.environ[name])
@@ -40,7 +47,7 @@ def _request(module, owner, argv: tuple[str, ...], profile_id: str):
         schema_version=1,
         argv=(str(executable), *argv[1:]),
         resolved_executable=executable,
-        cwd=str(ROOT),
+        cwd=str(cwd),
         environment=rows,
         stdin_bytes=None,
         deadline_monotonic=time.monotonic() + 10.0,
@@ -69,6 +76,26 @@ def _release(owner, lifecycle) -> None:
     owner._release_lifecycle(lifecycle)
 
 
+def _fake_kimi(module, path: Path, version: str = "0.38.0", *, duplicate: bool = False) -> Path:
+    marker = module.KIMI_BUILD_INFO_MARKER_TEMPLATE_V1.format(version=version).encode("ascii")
+    path.write_bytes(b"synthetic-prefix\0" + marker + (marker if duplicate else b"") + b"\0synthetic-suffix")
+    return path
+
+
+def _kimi_argv(module, executable: Path, prompt_file: Path) -> tuple[str, ...]:
+    return (
+        str(executable.resolve()),
+        "--model",
+        "kimi-code/k3",
+        "--output-format",
+        "text",
+        "--prompt",
+        module.KIMI_FILE_REFERENCE_PREFIX_V1
+        + str(prompt_file.resolve())
+        + module.KIMI_FILE_REFERENCE_SUFFIX_V1,
+    )
+
+
 def test_request_contract_removes_adapter_authored_attestation_fields() -> None:
     """A caller cannot supply requested-as-observed argv evidence on the request."""
 
@@ -92,6 +119,125 @@ def test_admission_owner_has_no_direct_subprocess_escape_hatch() -> None:
     assert "subprocess.run" not in source
     assert "subprocess.Popen" not in source
     assert "_bounded_probe_run" not in source
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows Kimi argv profile contract")
+def test_kimi_profile_accepts_only_fixed_transport_and_binds_prompt_file(tmp_path: Path) -> None:
+    module = _load_runner()
+    owner = module.ProcessRunnerV1()
+    neutral = tmp_path / "neutral root-Москва"
+    neutral.mkdir()
+    prompt = neutral / "prompt instructions.md"
+    prompt.write_text("facts only\nGATE: PASS\n", encoding="utf-8")
+    executable = _fake_kimi(module, tmp_path / "kimi.exe")
+    request = _request(
+        module,
+        owner,
+        _kimi_argv(module, executable, prompt),
+        "kimi-file-reference-text-v1",
+        cwd=neutral,
+    )
+
+    lifecycle, admission = _admit(module, owner, request)
+    try:
+        assert admission.profile_id == "kimi-file-reference-text-v1"
+        assert admission.probe_kind == "kimi-fixed-file-reference-v1"
+        assert admission.prompt_file_canonical == str(prompt.resolve())
+        assert admission.prompt_file_identity
+        assert admission.prompt_file_sha256
+        owner.windows_argv_admission_owner.consume(lifecycle, request, admission)
+    finally:
+        _release(owner, lifecycle)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows Kimi argv profile contract")
+@pytest.mark.parametrize(
+    "mutate",
+    (
+        lambda argv: (*argv[:1], "-m", *argv[2:]),
+        lambda argv: (*argv[:1], "--output-format", "text", "--model", "kimi-code/k3", *argv[5:]),
+        lambda argv: (*argv, "--extra"),
+        lambda argv: (*argv[:2], "other-model", *argv[3:]),
+        lambda argv: (*argv[:4], "stream-json", *argv[5:]),
+        lambda argv: (*argv[:6], argv[6] + " "),
+    ),
+)
+def test_kimi_profile_rejects_argv_variants_without_probe(tmp_path: Path, mutate) -> None:
+    module = _load_runner()
+    owner = module.ProcessRunnerV1()
+    neutral = tmp_path / "neutral"
+    neutral.mkdir()
+    prompt = neutral / "prompt.md"
+    prompt.write_text("GATE: PASS\n", encoding="utf-8")
+    executable = _fake_kimi(module, tmp_path / "kimi.exe")
+    request = _request(
+        module,
+        owner,
+        tuple(mutate(_kimi_argv(module, executable, prompt))),
+        "kimi-file-reference-text-v1",
+        cwd=neutral,
+    )
+    lifecycle = owner._begin_lifecycle()
+    try:
+        with pytest.raises(module.ProcessSupervisionError) as caught:
+            owner.windows_argv_admission_owner.admit(lifecycle, request)
+        assert caught.value.failure_id == "PSV1-ARGV-CODEC-UNSUPPORTED"
+    finally:
+        _release(owner, lifecycle)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows Kimi argv profile contract")
+@pytest.mark.parametrize("version,duplicate", (("0.37.0", False), ("0.38.0", True)))
+def test_kimi_profile_rejects_wrong_or_ambiguous_embedded_version(
+    tmp_path: Path, version: str, duplicate: bool
+) -> None:
+    module = _load_runner()
+    owner = module.ProcessRunnerV1()
+    neutral = tmp_path / "neutral"
+    neutral.mkdir()
+    prompt = neutral / "prompt.md"
+    prompt.write_text("GATE: PASS\n", encoding="utf-8")
+    executable = _fake_kimi(module, tmp_path / "kimi.exe", version, duplicate=duplicate)
+    request = _request(
+        module,
+        owner,
+        _kimi_argv(module, executable, prompt),
+        "kimi-file-reference-text-v1",
+        cwd=neutral,
+    )
+    lifecycle = owner._begin_lifecycle()
+    try:
+        with pytest.raises(module.ProcessSupervisionError) as caught:
+            owner.windows_argv_admission_owner.admit(lifecycle, request)
+        assert caught.value.failure_id == "PSV1-EXECUTABLE-UNRESOLVED"
+    finally:
+        _release(owner, lifecycle)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows Kimi argv profile contract")
+def test_kimi_profile_rejects_prompt_mutation_between_admit_and_consume(tmp_path: Path) -> None:
+    module = _load_runner()
+    owner = module.ProcessRunnerV1()
+    neutral = tmp_path / "neutral"
+    neutral.mkdir()
+    prompt = neutral / "prompt.md"
+    prompt.write_text("GATE: PASS\n", encoding="utf-8")
+    executable = _fake_kimi(module, tmp_path / "kimi.exe")
+    request = _request(
+        module,
+        owner,
+        _kimi_argv(module, executable, prompt),
+        "kimi-file-reference-text-v1",
+        cwd=neutral,
+    )
+    lifecycle, admission = _admit(module, owner, request)
+    try:
+        prompt.write_text("changed\nGATE: PASS\n", encoding="utf-8")
+        with pytest.raises(module.ProcessSupervisionError) as caught:
+            owner.windows_argv_admission_owner.consume(lifecycle, request, admission)
+        assert caught.value.failure_id == "PSV1-ARGV-ATTESTATION"
+    finally:
+        _release(owner, lifecycle)
 
 
 @pytest.mark.skipif(os.name != "nt", reason="real Windows argv probe contract")

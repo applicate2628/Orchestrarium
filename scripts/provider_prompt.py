@@ -25,6 +25,8 @@ try:
     from process_supervision.process_runner import (
         CapturePolicyV1,
         EnvironmentRowV1,
+        KIMI_FILE_REFERENCE_PREFIX_V1,
+        KIMI_FILE_REFERENCE_SUFFIX_V1,
         ProcessRequestV1,
         ProcessResultV1,
         ProcessRunnerV1,
@@ -35,6 +37,8 @@ except ModuleNotFoundError:
     from scripts.process_supervision.process_runner import (
         CapturePolicyV1,
         EnvironmentRowV1,
+        KIMI_FILE_REFERENCE_PREFIX_V1,
+        KIMI_FILE_REFERENCE_SUFFIX_V1,
         ProcessRequestV1,
         ProcessResultV1,
         ProcessRunnerV1,
@@ -58,7 +62,7 @@ RESULT_PREFIX = "ORCHESTRARIUM_PROVIDER_RESULT_V2="
 E_EXTERNAL_PROVIDER_WINDOWS_NATIVE_ARGV_UNAVAILABLE = (
     "E_EXTERNAL_PROVIDER_WINDOWS_NATIVE_ARGV_UNAVAILABLE"
 )
-EXTERNAL_PROVIDER_NAMES = frozenset({"codex", "claude"})
+EXTERNAL_PROVIDER_NAMES = frozenset({"codex", "claude", "kimi"})
 SETTINGS_SNAPSHOT_MAX_BYTES = 1024 * 1024
 CLEANUP_ISSUE_LIMIT = 32
 CLEANUP_ISSUE_TOKEN_MAX = 64
@@ -80,6 +84,7 @@ PROVIDER_AUTH_SECRET_ENV_KEYS_V1 = {
     ),
     "claude-direct": ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"),
     "claude-subscription-override": (),
+    "kimi-user-session": (),
 }
 _NONSECRET_CHILD_ENV_NAMES = (
     "COMSPEC", "SystemRoot", "SYSTEMROOT", "WINDIR", "PATH", "PATHEXT",
@@ -129,7 +134,6 @@ EXTERNAL_GOVERNANCE_CAPSULE_SHA256 = (
 EXTERNAL_GOVERNANCE_BEGIN = b"ORCHESTRARIUM_EXTERNAL_GOVERNANCE_V1\n"
 EXTERNAL_GOVERNANCE_END = b"END_ORCHESTRARIUM_EXTERNAL_GOVERNANCE_V1\n\n"
 EXTERNAL_UNAVAILABLE_IDS = {
-    "kimi": "E_KIMI_READINESS_UNVERIFIED",
     "grok": "E_GROK_CONTAINMENT_UNAVAILABLE",
 }
 EXTERNAL_ROLE_TAXONOMY_NAME = "external-role-taxonomy.v1.json"
@@ -341,6 +345,12 @@ def validate_topic(topic: str | None) -> str:
 
 
 def resolved_profile(provider: str, flags: list[str]) -> tuple[list[str], str, str]:
+    if provider == "kimi":
+        if flags:
+            raise ValueError(
+                "E_KIMI_PROFILE_FIXED: Kimi 1.x accepts no caller-supplied provider flags"
+            )
+        return [], "kimi-code/k3", "unsupported"
     if not flags:
         flags = (
             ["--model", "gpt-5.6-sol", "-c", "model_reasoning_effort=xhigh"]
@@ -549,6 +559,7 @@ def resolve_provider_command(provider: str) -> list[str] | None:
     environment_key = {
         "codex": "CODEX_BIN",
         "claude": "CLAUDE_BIN",
+        "kimi": "KIMI_BIN",
     }.get(provider)
     if environment_key is None:
         return None
@@ -761,6 +772,8 @@ def resolve_provider_auth_configuration(
             and user_settings_surface.forwarded_config_dir is not None
         ):
             child["CLAUDE_CONFIG_DIR"] = user_settings_surface.forwarded_config_dir
+    elif provider == "kimi":
+        mode = "kimi-user-session"
     else:
         raise ValueError("E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE: provider")
 
@@ -1536,7 +1549,23 @@ def provider_windows_argv_profile_id(
         return None
     if executable.resolve() == Path(sys.executable).resolve():
         return "python-validator-json-echo-v1"
+    if provider == "kimi" and executable.name.casefold() == "kimi.exe":
+        return "kimi-file-reference-text-v1"
     return None
+
+
+def kimi_provider_args(prompt_file: Path) -> list[str]:
+    """Build the one admitted Kimi file-reference grammar."""
+
+    prompt = str(prompt_file.resolve(strict=True))
+    return [
+        "--model",
+        "kimi-code/k3",
+        "--output-format",
+        "text",
+        "--prompt",
+        KIMI_FILE_REFERENCE_PREFIX_V1 + prompt + KIMI_FILE_REFERENCE_SUFFIX_V1,
+    ]
 
 
 def run_provider_process(
@@ -1545,7 +1574,7 @@ def run_provider_process(
     provider_args: list[str],
     child_environment: dict[str, str],
     query_cwd: Path,
-    body: bytes,
+    body: bytes | None,
     control: Control,
     provider: str | None = None,
 ) -> tuple[ProcessResultV1, bytes, bytes]:
@@ -2344,6 +2373,8 @@ def _launch_with_runner(
             *flags,
         ]
         if provider == "codex"
+        else kimi_provider_args(lifecycle.prompt_path)
+        if provider == "kimi"
         else flags
     )
     child_environment = dict(auth_configuration.child_environment)
@@ -2366,8 +2397,8 @@ def _launch_with_runner(
             command,
             provider_args,
             child_environment,
-            query_cwd,
-            body,
+            lifecycle.run_dir if provider == "kimi" else query_cwd,
+            None if provider == "kimi" else body,
             control,
             provider,
         )

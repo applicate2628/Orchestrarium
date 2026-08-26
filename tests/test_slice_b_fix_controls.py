@@ -53,7 +53,6 @@ def test_external_prompt_snapshot_is_bounded_and_strict_utf8(
 @pytest.mark.parametrize(
     ("provider", "stable_id"),
     (
-        ("kimi", "E_KIMI_READINESS_UNVERIFIED"),
         ("grok", "E_GROK_CONTAINMENT_UNAVAILABLE"),
     ),
 )
@@ -76,12 +75,9 @@ def test_admitted_unavailable_route_stops_before_prompt_resolution_capture_probe
     assert stable_id in capsys.readouterr().err
 
 
-def test_live_kimi_grok_docs_keep_policy_admission_separate_from_execution() -> None:
-    """Release notes and archives are intentionally outside this live-surface census."""
+def test_installed_kimi_grok_contract_splits_admitted_and_unavailable_routes() -> None:
+    """Installed contracts admit Kimi read-only while keeping Grok unavailable."""
     live_consumers = (
-        "docs/agents-mode-reference.md",
-        "docs/provider-runtime-layouts.md",
-        "docs/external-worker-design.md",
         "shared/AGENTS.shared.md",
         "src.claude/agents/contracts/external-dispatch.md",
         "src.claude/agents/contracts/operating-model.md",
@@ -89,16 +85,9 @@ def test_live_kimi_grok_docs_keep_policy_admission_separate_from_execution() -> 
         "src.codex/skills/lead/external-dispatch.md",
         "src.codex/skills/lead/operating-model.md",
     )
-    stale = (
-        "explicit-only read-only routes",
-        "before any provider probe",
-        "before either launch",
-    )
     for relative in live_consumers:
         text = (ROOT / relative).read_text(encoding="utf-8")
-        assert "unavailable and disabled in 1.x" in text, relative
-        assert all(token not in text for token in stale), relative
-
-    canonical = (ROOT / "docs/agents-mode-reference.md").read_text(encoding="utf-8")
-    assert "not executable availability" in canonical
-    assert "must not cause prompt reading, launcher preparation, probing, or a provider process" in canonical
+        assert "Kimi" in text and "read-only" in text, relative
+        assert "independent" in text and "nonauthorizing" in text, relative
+        assert "Grok" in text and "unavailable" in text, relative
+        assert "Kimi/Grok are unavailable" not in text, relative

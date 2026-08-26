@@ -119,8 +119,21 @@ _WINDOWS_ARGV_PROFILES = frozenset(
     {
         "python-validator-json-echo-v1",
         "git-rev-parse-sq-quote-v1",
+        "kimi-file-reference-text-v1",
     }
 )
+KIMI_FILE_REFERENCE_PREFIX_V1 = "Read the complete task instructions from the file at "
+KIMI_FILE_REFERENCE_SUFFIX_V1 = (
+    " and follow them exactly. Treat the file contents as the entire task."
+)
+KIMI_BUILD_INFO_MARKER_TEMPLATE_V1 = (
+    'KIMI_BUILD_INFO = {{\n\t\tversion: optionalBuildString("{version}"),\n\t\tchannel:'
+)
+_KIMI_BUILD_INFO_PREFIX_V1 = b'KIMI_BUILD_INFO = {\n\t\tversion: optionalBuildString("'
+_KIMI_BUILD_INFO_PATTERN_V1 = re.compile(
+    rb'KIMI_BUILD_INFO = \{\n\t\tversion: optionalBuildString\("([^"\r\n]{1,32})"\),\n\t\tchannel:'
+)
+_KIMI_EXPECTED_VERSION_V1 = "0.38.0"
 _WINDOWS_INTERNAL_PROBE_CAPTURE_BYTES = 64 * 1024
 _WINDOWS_ARGV_PROBE_CANARIES = (
     "",
@@ -202,6 +215,9 @@ class WindowsArgvAdmissionV1:
     status: str
     _seal: object = field(repr=False, compare=False)
     _child_evidence_seal: object = field(repr=False, compare=False)
+    prompt_file_canonical: str | None = None
+    prompt_file_identity: str | None = None
+    prompt_file_sha256: str | None = None
 
 
 @dataclass(frozen=True)
@@ -867,6 +883,29 @@ def serialize_msvcrt_argv(argv: Sequence[str]) -> str:
     return subprocess.list2cmdline(tuple(argv))
 
 
+def _windows_argv_roundtrip(argv: Sequence[str]) -> tuple[str, ...]:
+    if os.name != "nt":
+        raise ProcessSupervisionError("PSV1-ARGV-ATTESTATION", "request-validation")
+    from ctypes import wintypes
+
+    shell32 = ctypes.WinDLL("shell32", use_last_error=True)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    command_line_to_argv = shell32.CommandLineToArgvW
+    command_line_to_argv.argtypes = [wintypes.LPCWSTR, ctypes.POINTER(ctypes.c_int)]
+    command_line_to_argv.restype = ctypes.POINTER(wintypes.LPWSTR)
+    local_free = kernel32.LocalFree
+    local_free.argtypes = [ctypes.c_void_p]
+    local_free.restype = ctypes.c_void_p
+    count = ctypes.c_int()
+    parsed = command_line_to_argv(serialize_msvcrt_argv(argv), ctypes.byref(count))
+    if not parsed:
+        raise ProcessSupervisionError("PSV1-ARGV-ATTESTATION", "request-validation")
+    try:
+        return tuple(parsed[index] for index in range(count.value))
+    finally:
+        local_free(parsed)
+
+
 def _json_argv_sha256(argv: Sequence[str]) -> str:
     return hashlib.sha256(
         json.dumps(list(argv), ensure_ascii=False, separators=(",", ":")).encode("utf-8")
@@ -991,36 +1030,165 @@ def bind_cwd_identity(path: str) -> CwdIdentityV1:
         raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation") from exc
 
 
-def resolve_executable_identity(path: Path) -> str:
+def _stream_executable_binding(path: Path) -> tuple[str, str]:
     try:
         absolute = Path(path)
         if not absolute.is_absolute():
             raise OSError("not absolute")
+        is_kimi = absolute.name.casefold() == "kimi.exe"
+        if is_kimi:
+            normalized = Path(os.path.abspath(absolute))
+            if os.path.normcase(str(normalized)) != os.path.normcase(str(absolute)):
+                raise OSError("not normalized")
+            for component in reversed((absolute, *absolute.parents)):
+                component_metadata = component.lstat()
+                if stat.S_ISLNK(component_metadata.st_mode) or _is_reparse(component_metadata):
+                    raise OSError("reparse executable path")
         metadata = absolute.stat()
-        if not stat.S_ISREG(metadata.st_mode) or stat.S_ISLNK(absolute.lstat().st_mode) or _is_reparse(absolute.lstat()):
+        leaf = absolute.lstat()
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or stat.S_ISLNK(leaf.st_mode)
+            or _is_reparse(leaf)
+        ):
             raise OSError("not ordinary executable")
         digest = hashlib.sha256()
+        kimi_versions: list[str] = []
+        kimi_prefixes = 0
+        scan_tail = b""
+        scan_overlap = 256
         with absolute.open("rb") as stream:
             while True:
                 chunk = stream.read(1024 * 1024)
                 if not chunk:
                     break
                 digest.update(chunk)
+                if is_kimi:
+                    window = scan_tail + chunk
+                    tail_length = len(scan_tail)
+                    for match in _KIMI_BUILD_INFO_PATTERN_V1.finditer(window):
+                        if match.end() > tail_length:
+                            kimi_versions.append(match.group(1).decode("ascii", errors="strict"))
+                    start = 0
+                    while True:
+                        found = window.find(_KIMI_BUILD_INFO_PREFIX_V1, start)
+                        if found < 0:
+                            break
+                        if found + len(_KIMI_BUILD_INFO_PREFIX_V1) > tail_length:
+                            kimi_prefixes += 1
+                        start = found + 1
+                    scan_tail = window[-scan_overlap:]
         digest.update(struct.pack(">QQ", metadata.st_size, metadata.st_mtime_ns & ((1 << 64) - 1)))
-        return digest.hexdigest()
-    except (OSError, ValueError, OverflowError) as exc:
+        identity = digest.hexdigest()
+        if is_kimi:
+            if kimi_prefixes != 1 or kimi_versions != [_KIMI_EXPECTED_VERSION_V1]:
+                raise OSError("unsupported or ambiguous Kimi build info")
+            version_source = f"kimi:{_KIMI_EXPECTED_VERSION_V1}:{identity}"
+        elif absolute.resolve() == Path(sys.executable).resolve():
+            version_source = (
+                f"python:{sys.version_info.major}.{sys.version_info.minor}."
+                f"{sys.version_info.micro}:{identity}"
+            )
+        else:
+            version_source = f"native:{identity}"
+        version = hashlib.sha256(version_source.encode("ascii")).hexdigest()
+        return identity, version
+    except (OSError, ValueError, OverflowError, UnicodeError) as exc:
         raise ProcessSupervisionError(
             "PSV1-EXECUTABLE-UNRESOLVED", "request-validation"
         ) from exc
 
 
+def resolve_executable_identity(path: Path) -> str:
+    return _stream_executable_binding(path)[0]
+
+
 def resolve_executable_version(path: Path) -> str:
-    identity = resolve_executable_identity(path)
-    if Path(path).resolve() == Path(sys.executable).resolve():
-        source = f"python:{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}:{identity}"
-    else:
-        source = f"native:{identity}"
-    return hashlib.sha256(source.encode("ascii")).hexdigest()
+    return _stream_executable_binding(path)[1]
+
+
+def _kimi_prompt_file_binding(
+    request: ProcessRequestV1, *, failure_id: str
+) -> tuple[str, str, str]:
+    def reject() -> ProcessSupervisionError:
+        return ProcessSupervisionError(failure_id, "request-validation")
+
+    try:
+        argv = request.argv
+        if (
+            len(argv) != 7
+            or argv[1:6]
+            != ("--model", "kimi-code/k3", "--output-format", "text", "--prompt")
+            or not argv[6].startswith(KIMI_FILE_REFERENCE_PREFIX_V1)
+            or not argv[6].endswith(KIMI_FILE_REFERENCE_SUFFIX_V1)
+        ):
+            raise reject()
+        raw_path = argv[6][
+            len(KIMI_FILE_REFERENCE_PREFIX_V1) : -len(KIMI_FILE_REFERENCE_SUFFIX_V1)
+        ]
+        if not raw_path or "\x00" in raw_path:
+            raise reject()
+        prompt = Path(raw_path)
+        normalized = Path(os.path.abspath(prompt))
+        if (
+            not prompt.is_absolute()
+            or os.path.normcase(str(normalized)) != os.path.normcase(raw_path)
+        ):
+            raise reject()
+        root = Path(os.path.abspath(request.cwd))
+        bind_cwd_identity(str(root))
+        try:
+            relative = normalized.relative_to(root)
+        except ValueError as exc:
+            raise reject() from exc
+        if not relative.parts:
+            raise reject()
+        for component in reversed((normalized, *normalized.parents)):
+            metadata = component.lstat()
+            if stat.S_ISLNK(metadata.st_mode) or _is_reparse(metadata):
+                raise reject()
+            if component == root:
+                break
+        else:
+            raise reject()
+        before = normalized.lstat()
+        if not stat.S_ISREG(before.st_mode):
+            raise reject()
+        descriptor = os.open(
+            normalized,
+            os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0),
+        )
+        try:
+            opened = os.fstat(descriptor)
+            if (opened.st_dev, opened.st_ino, opened.st_mode) != (
+                before.st_dev,
+                before.st_ino,
+                before.st_mode,
+            ):
+                raise reject()
+            digest = hashlib.sha256()
+            while True:
+                chunk = os.read(descriptor, 1024 * 1024)
+                if not chunk:
+                    break
+                digest.update(chunk)
+        finally:
+            os.close(descriptor)
+        identity = hashlib.sha256(
+            struct.pack(
+                ">QQQQQ",
+                opened.st_dev & ((1 << 64) - 1),
+                opened.st_ino & ((1 << 64) - 1),
+                opened.st_mode & ((1 << 64) - 1),
+                opened.st_size & ((1 << 64) - 1),
+                opened.st_mtime_ns & ((1 << 64) - 1),
+            )
+        ).hexdigest()
+        return str(normalized), identity, digest.hexdigest()
+    except ProcessSupervisionError:
+        raise
+    except (OSError, ValueError, OverflowError, UnicodeError) as exc:
+        raise reject() from exc
 
 
 def _argv_shape_sha256(argv: Sequence[str]) -> str:
@@ -1284,8 +1452,16 @@ class WindowsArgvAdmissionOwnerV1:
                 "PSV1-ARGV-CODEC-UNSUPPORTED", "request-validation"
             )
         executable = Path(request.resolved_executable)
-        identity = resolve_executable_identity(executable)
-        version = resolve_executable_version(executable)
+        prompt_binding: tuple[str, str, str] | None = None
+        if profile_id == "kimi-file-reference-text-v1":
+            prompt_binding = _kimi_prompt_file_binding(
+                request, failure_id="PSV1-ARGV-CODEC-UNSUPPORTED"
+            )
+            if executable.name.casefold() != "kimi.exe":
+                raise ProcessSupervisionError(
+                    "PSV1-EXECUTABLE-UNRESOLVED", "request-validation"
+                )
+        identity, version = _stream_executable_binding(executable)
         if profile_id == "python-validator-json-echo-v1":
             probe_kind, requested, observed = self._python_probe(
                 lifecycle, request, executable
@@ -1294,6 +1470,13 @@ class WindowsArgvAdmissionOwnerV1:
             probe_kind, requested, observed = self._git_probe(
                 lifecycle, request, executable
             )
+        elif profile_id == "kimi-file-reference-text-v1":
+            if _windows_argv_roundtrip(request.argv) != request.argv:
+                raise ProcessSupervisionError(
+                    "PSV1-ARGV-ATTESTATION", "request-validation"
+                )
+            probe_kind = "kimi-fixed-file-reference-v1"
+            requested = observed = _json_argv_sha256(request.argv)
         else:
             raise ProcessSupervisionError(
                 "PSV1-ARGV-CODEC-UNSUPPORTED", "request-validation"
@@ -1319,6 +1502,7 @@ class WindowsArgvAdmissionOwnerV1:
             "pass",
             _WINDOWS_ARGV_ADMISSION_SEAL,
             _WINDOWS_ARGV_CHILD_EVIDENCE_SEAL,
+            *(prompt_binding or (None, None, None)),
         )
 
     def consume(
@@ -1328,6 +1512,12 @@ class WindowsArgvAdmissionOwnerV1:
         admission: WindowsArgvAdmissionV1,
     ) -> None:
         executable = Path(request.resolved_executable)
+        identity, version = _stream_executable_binding(executable)
+        prompt_binding = (
+            _kimi_prompt_file_binding(request, failure_id="PSV1-ARGV-ATTESTATION")
+            if admission.profile_id == "kimi-file-reference-text-v1"
+            else (None, None, None)
+        )
         valid = (
             type(admission) is WindowsArgvAdmissionV1
             and admission._seal is _WINDOWS_ARGV_ADMISSION_SEAL
@@ -1336,15 +1526,19 @@ class WindowsArgvAdmissionOwnerV1:
             and admission.run_token_sha256 == lifecycle.token.sha256
             and admission.profile_id == request.windows_argv_profile_id
             and admission.codec == "msvcrt-v1"
-            and admission.resolved_executable_identity
-            == resolve_executable_identity(executable)
-            and admission.resolved_executable_version
-            == resolve_executable_version(executable)
+            and admission.resolved_executable_identity == identity
+            and admission.resolved_executable_version == version
             and admission.actual_argv_sha256 == _json_argv_sha256(request.argv)
             and admission.actual_argv_shape_sha256 == _argv_shape_sha256(request.argv)
             and admission.probe_requested_argv_sha256
             == admission.probe_observed_argv_sha256
             and admission.status == "pass"
+            and (
+                admission.prompt_file_canonical,
+                admission.prompt_file_identity,
+                admission.prompt_file_sha256,
+            )
+            == prompt_binding
         )
         if not valid:
             raise ProcessSupervisionError(

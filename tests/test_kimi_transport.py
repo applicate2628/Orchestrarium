@@ -28,29 +28,42 @@ def test_kimi_wrapper_stays_thin() -> None:
     assert "subprocess" not in text
 
 
-def test_kimi_unavailable_before_parse_prompt_probe_or_process(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+def test_kimi_profile_is_fixed_and_has_no_native_effort_control() -> None:
+    owner = _load_owner()
+    assert owner.resolved_profile("kimi", []) == ([], "kimi-code/k3", "unsupported")
+    with pytest.raises(ValueError, match="E_KIMI_PROFILE_FIXED"):
+        owner.resolved_profile("kimi", ["--model", "other"])
+
+
+def test_kimi_file_reference_argv_is_exact(tmp_path: Path) -> None:
+    owner = _load_owner()
+    prompt = tmp_path / "prompt with spaces.md"
+    prompt.write_text("GATE: PASS\n", encoding="utf-8")
+    assert owner.kimi_provider_args(prompt) == [
+        "--model",
+        "kimi-code/k3",
+        "--output-format",
+        "text",
+        "--prompt",
+        owner.KIMI_FILE_REFERENCE_PREFIX_V1
+        + str(prompt.resolve())
+        + owner.KIMI_FILE_REFERENCE_SUFFIX_V1,
+    ]
+
+
+def test_kimi_command_resolution_is_native_and_explicit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     owner = _load_owner()
-    assert not hasattr(owner, "parse_external_control")
-    for name in ("prompt_bytes", "resolve_provider_command"):
-        monkeypatch.setattr(
-            owner, name, lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError(name))
-        )
-    monkeypatch.setattr(
-        owner.subprocess,
-        "Popen",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("process")),
-    )
-
-    assert owner.launch("kimi", ["bad", "--unknown"]) == 1
-    assert capsys.readouterr().err == "FAIL: E_KIMI_READINESS_UNVERIFIED: provider execution is unavailable\n"
+    executable = tmp_path / "kimi.exe"
+    executable.write_bytes(b"synthetic")
+    monkeypatch.setenv("KIMI_BIN", str(executable))
+    assert owner.resolve_provider_command("kimi") == [str(executable.resolve())]
 
 
-def test_kimi_executor_only_state_is_absent() -> None:
+def test_kimi_transport_adds_no_second_lifecycle_or_smoke_path() -> None:
     text = OWNER_PATH.read_text(encoding="utf-8")
     forbidden = (
-        "KIMI_BIN",
         "KIMI_PROMPTS_DIR",
         "KIMI_TASK_PROMPT",
         "KIMI_SMOKE_PROMPT",
@@ -59,5 +72,6 @@ def test_kimi_executor_only_state_is_absent() -> None:
         "resolve_kimi_executable",
         "build_kimi_launch_plan",
         "run_kimi_containment_smoke",
+        "subprocess.run",
     )
     assert all(token not in text for token in forbidden)

@@ -17,7 +17,7 @@ The roadmap loop decides what should enter discovery or delivery. The delivery l
 
 ## Workflow economy projection
 
-Apply the binding shared **Workflow economy (binding)** rule. This Codex projection adds no default review, consultant, or external-brigade fan-out unless evidence, explicit user/configuration intent, or a documented risk trigger admits it. Kimi/Grok are policy-only, disabled, and non-executing in 1.x; never select either provider. Preserve every template-required security, performance, or geometry role and the human publication/leak-check gate.
+Apply the binding shared **Workflow economy (binding)** rule. This Codex projection adds no default review, consultant, or external-brigade fan-out unless evidence, explicit user/configuration intent, or a documented risk trigger admits it. Kimi may be selected explicitly only for read-only research/review with independent verification and nonauthorizing results; Grok remains disabled and non-executing in 1.x. Preserve every template-required security, performance, or geometry role and the human publication/leak-check gate.
 
 ## Rolling-loop execution
 
@@ -68,7 +68,7 @@ Apply the binding shared **Workflow economy (binding)** rule. This Codex project
 - If the requested work is not advisory consultant work, worker-side work, or review/QA-side work, fail fast instead of probing provider availability.
 - There is no generic external adapter for owner roles such as `$product-manager` or `$lead`.
 - An explicit request for `external` on an unsupported owner role changes the disclosure, not the eligibility. The lead must say the route is unsupported and reroute honestly.
-- `externalProvider: auto` is the ordinary default only; it resolves through the active production profile and uses the shipped Codex/Claude pair only. Explicit user override or documented repo-local heuristics may still choose a different honest provider for the task domain; Kimi/Grok are policy classifiers/examples only, with transports unavailable and disabled in 1.x. A policy-admitted `external-required` result is not executable availability and must not read prompts, launch, or probe either provider.
+- `externalProvider: auto` is the ordinary default only; it resolves through the active production profile and uses the shipped Codex/Claude pair only. Explicit user override may choose Kimi for a policy-admitted read-only research/review lane; the fixed Kimi transport remains independently verified and nonauthorizing. Grok remains unavailable and must not be launched or probed in 1.x.
 - The shipped shared profiles do not hardwire example-only providers into visual lanes. If a clearly visual worker or review lane should demonstrate Qwen, or deliberately use the weaker/not-recommended Gemini path, do that through a scalar explicit provider override only; do not place Gemini or Qwen inside `externalPriorityProfiles`.
 - `parallelMode` is the general orchestrator rule for whether independent helper lanes should be parallelized by judgment at all; external fan-out is one overlay on top of that rule.
 - Independent external adapters may run in parallel when their scopes are disjoint, `parallelMode` permits ordinary parallel fan-out, and provider runtimes support it. If native internal slot limits would otherwise block additional independent eligible lanes, prefer available external adapters over silent serialization or dropped lanes.
