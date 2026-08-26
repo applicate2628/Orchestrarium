@@ -58,6 +58,10 @@ class BaselineInventoryTests(unittest.TestCase):
             self.repo / "src.claude" / "commands" / "agents-test.md",
             "# Test command\n",
         )
+        write(
+            self.repo / "src.qwen" / "commands" / "agents" / "help.md",
+            "# Agent command help\n",
+        )
         write(self.repo / "scripts" / "check.py", "print('ok')\n")
         write(self.repo / "tests" / "test_alpha.py", "def test_alpha():\n    assert True\n")
         write(self.repo / "tests" / "fixtures" / "data.json", '{"ok": true}\n')
@@ -99,7 +103,7 @@ class BaselineInventoryTests(unittest.TestCase):
 
         paths = [entry["path"] for entry in capability["entries"]]
         self.assertEqual(paths, sorted(paths))
-        self.assertEqual(len(paths), 8)
+        self.assertEqual(len(paths), 9)
         self.assertNotIn("later.txt", paths)
         self.assertEqual(capability["baseline"]["commitSha"], self.baseline)
         self.assertEqual(manifest["baseline"]["commitSha"], self.baseline)
@@ -109,6 +113,10 @@ class BaselineInventoryTests(unittest.TestCase):
         self.assertEqual(by_path["RELEASE_NOTES.md"]["primarySurface"], "release-log")
         self.assertIn("skill", by_path["src.codex/skills/architect/SKILL.md"]["surfaces"])
         self.assertIn("command", by_path["src.claude/commands/agents-test.md"]["surfaces"])
+        nested_command = by_path["src.qwen/commands/agents/help.md"]
+        self.assertIn("agent", nested_command["surfaces"])
+        self.assertIn("command", nested_command["surfaces"])
+        self.assertEqual(nested_command["primarySurface"], "command")
         self.assertIn("script", by_path["scripts/check.py"]["surfaces"])
         self.assertIn("test", by_path["tests/test_alpha.py"]["surfaces"])
 
