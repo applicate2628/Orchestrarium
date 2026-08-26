@@ -8,6 +8,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -338,6 +339,95 @@ def test_validator_process_adapter_preserves_exact_python_argv(tmp_path: Path) -
     assert result.direct_reaped
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX cwd ownership and mode contract")
+def test_validator_process_adapter_uses_owned_private_posix_cwd_and_cleans_it(
+    tmp_path: Path,
+) -> None:
+    runtime = _load(RUNTIME, "validator_private_posix_cwd")
+    layout_root = tmp_path / "world-writable-layout"
+    layout_root.mkdir()
+    layout_root.chmod(0o777)
+    base = runtime.detect_layout(VALIDATORS[0], "codex", ROOT)
+    validator = runtime.Validator(
+        runtime.Layout(
+            root=layout_root,
+            provider=base.provider,
+            dev_repo=base.dev_repo,
+            standalone=base.standalone,
+            pack=base.pack,
+            skills=base.skills,
+            scripts=base.scripts,
+            agents_text=base.agents_text,
+        )
+    )
+    child = _write_python(
+        tmp_path,
+        "echo_cwd.py",
+        "import json, os, stat\n"
+        "metadata = os.stat(os.getcwd())\n"
+        "print(json.dumps({\n"
+        "    'cwd': os.getcwd(),\n"
+        "    'mode': stat.S_IMODE(metadata.st_mode),\n"
+        "    'owner': metadata.st_uid,\n"
+        "    'effective_user': os.geteuid(),\n"
+        "}))\n",
+    )
+
+    try:
+        result = validator._run_python(child, timeout_seconds=10.0)
+    finally:
+        validator.close()
+
+    assert stat.S_IMODE(layout_root.stat().st_mode) == 0o777
+    assert result.returncode == 0, result.stderr
+    observed = json.loads(result.stdout)
+    assert observed["cwd"] != str(layout_root)
+    assert observed["owner"] == observed["effective_user"]
+    assert observed["mode"] & 0o077 == 0
+    assert not Path(observed["cwd"]).exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX cwd ownership and mode contract")
+@pytest.mark.parametrize(
+    ("name", "body", "timeout_seconds", "timed_out"),
+    (
+        (
+            "child_failure",
+            "import os, sys\nprint(os.getcwd(), flush=True)\nsys.exit(7)\n",
+            10.0,
+            False,
+        ),
+        (
+            "child_cancel",
+            "import os, time\nprint(os.getcwd(), flush=True)\ntime.sleep(60)\n",
+            0.2,
+            True,
+        ),
+    ),
+)
+def test_validator_private_posix_cwd_cleans_after_failure_or_cancellation(
+    tmp_path: Path,
+    name: str,
+    body: str,
+    timeout_seconds: float,
+    timed_out: bool,
+) -> None:
+    runtime = _load(RUNTIME, f"validator_private_posix_cwd_{name}")
+    child = _write_python(tmp_path, f"{name}.py", body)
+    validator = _validator(runtime)
+
+    try:
+        result = validator._run_python(child, timeout_seconds=timeout_seconds)
+    finally:
+        validator.close()
+
+    child_cwd = Path(result.stdout.strip())
+    assert result.returncode != 0
+    assert result.timed_out is timed_out
+    assert child_cwd != ROOT
+    assert not child_cwd.exists()
+
+
 def test_validator_process_adapter_bounds_infinite_output_and_settles(
     tmp_path: Path,
 ) -> None:
@@ -463,6 +553,41 @@ class _RecordingRunner:
         return SimpleNamespace(outcome="closed", failure_id=None)
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX cwd ownership and mode contract")
+def test_validator_private_posix_cwd_cleans_when_runner_raises(tmp_path: Path) -> None:
+    runtime = _load(RUNTIME, "validator_private_posix_cwd_exception")
+
+    class ExplodingRunner:
+        def __init__(self) -> None:
+            self.cwd: Path | None = None
+
+        def mint_memory_capture_sink(self):
+            return _RecordingBinding()
+
+        def run(self, request):
+            self.cwd = Path(request.cwd)
+            metadata = self.cwd.stat()
+            assert metadata.st_uid == os.geteuid()
+            assert stat.S_IMODE(metadata.st_mode) & 0o077 == 0
+            raise RuntimeError("runner-exploded")
+
+        def close(self):
+            return SimpleNamespace(outcome="closed", failure_id=None)
+
+    runner = ExplodingRunner()
+    validator = runtime.Validator(
+        runtime.detect_layout(VALIDATORS[0], "codex", ROOT), process_runner=runner
+    )
+    child = _write_python(tmp_path, "never_started.py", "raise AssertionError\n")
+
+    with pytest.raises(RuntimeError, match="runner-exploded"):
+        validator._run_python(child, timeout_seconds=10.0)
+    validator.close()
+
+    assert runner.cwd is not None
+    assert not runner.cwd.exists()
+
+
 @pytest.mark.parametrize(
     ("budget_delta", "expected_launches"),
     ((-0.001, 0), (0.0, 1), (1.0, 1)),
@@ -499,7 +624,11 @@ def test_validator_sequence_budget_denies_below_and_accepts_exact_or_above(
             "--root",
             str(ROOT),
         )
-        assert request.cwd == str(ROOT)
+        if os.name == "nt":
+            assert request.cwd == str(ROOT)
+        else:
+            assert request.cwd != str(ROOT)
+            assert not Path(request.cwd).exists()
         assert request.environment == runtime.validator_environment_rows()
         assert tuple(row.name for row in request.environment) == tuple(
             name

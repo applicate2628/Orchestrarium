@@ -539,24 +539,34 @@ class Validator:
         argv = (str(executable), str(script), *args)
         capture_policy = ValidatorCapturePolicyV1()
         sink = self._process_runner.mint_memory_capture_sink()
-        request = ProcessRequestV1(
-            schema_version=1,
-            argv=argv,
-            resolved_executable=executable,
-            cwd=str(self.layout.root),
-            environment=validator_environment_rows(),
-            stdin_bytes=None,
-            deadline_monotonic=time.monotonic() + float(deadline_seconds),
-            capture_policy=capture_policy.to_capture_policy(),
-            capture_sink_binding=sink,
-            settle_policy=SettlePolicyV1(
-                timeout_seconds=VALIDATOR_SETTLEMENT_TIMEOUT_SECONDS
-            ),
-            windows_argv_profile_id=(
-                "python-validator-json-echo-v1" if os.name == "nt" else None
-            ),
+        temporary_cwd = (
+            None
+            if os.name == "nt"
+            else tempfile.TemporaryDirectory(prefix="orchestrarium-validator-")
         )
-        result = self._process_runner.run(request)
+        child_cwd = str(self.layout.root) if temporary_cwd is None else temporary_cwd.name
+        try:
+            request = ProcessRequestV1(
+                schema_version=1,
+                argv=argv,
+                resolved_executable=executable,
+                cwd=child_cwd,
+                environment=validator_environment_rows(),
+                stdin_bytes=None,
+                deadline_monotonic=time.monotonic() + float(deadline_seconds),
+                capture_policy=capture_policy.to_capture_policy(),
+                capture_sink_binding=sink,
+                settle_policy=SettlePolicyV1(
+                    timeout_seconds=VALIDATOR_SETTLEMENT_TIMEOUT_SECONDS
+                ),
+                windows_argv_profile_id=(
+                    "python-validator-json-echo-v1" if os.name == "nt" else None
+                ),
+            )
+            result = self._process_runner.run(request)
+        finally:
+            if temporary_cwd is not None:
+                temporary_cwd.cleanup()
         stdout = sink.bytes_for("stdout")
         stderr = sink.bytes_for("stderr")
         returncode = (
