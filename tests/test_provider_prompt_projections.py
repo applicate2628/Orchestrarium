@@ -76,6 +76,24 @@ STOCK_8F92_PROJECTION_SHA256 = {
     "external-role-taxonomy.v1.json": "c26585be7117568e2e61c3904ddf7192e81eebdc3ab72b29d9cab17e3a7ab647",
     "provider-prompt-projections.v1.json": "ff669ccc267771921e1bc05754cfe1f9fdf848c129daa166a3187bc8f64b7f36",
 }
+STOCK_D130_PROJECTION_SHA256 = {
+    **{
+        name: digest
+        for name, digest in STOCK_8F92_PROJECTION_SHA256.items()
+        if name not in {"provider_prompt.py", "provider-prompt-projections.v1.json"}
+    },
+    "provider_prompt.py": "1a636a300dfe9256714ccd14f4c0775cd8077b4243be36b9fa0c8876a9e91bd9",
+    "provider-prompt-projections.v1.json": "ccc1573ac8c2ac5ac63c7ce040d4cbba4f73e71664182cb4f1ce67c5cdab5cc5",
+}
+STOCK_F874_PROJECTION_SHA256 = {
+    **{
+        name: digest
+        for name, digest in STOCK_D130_PROJECTION_SHA256.items()
+        if name != "provider-prompt-projections.v1.json"
+    },
+    "process_supervision/process_runner.py": "8fb478d0767622ed71655242b7e7bf519ca990a487f0af93156f95075346cdb6",
+    "provider-prompt-projections.v1.json": "6f9ed1cbe5e25009febd3cb07303706c8b65e3bee449348c9654aff10253f572",
+}
 
 
 def _authored_transport_path(root: Path, name: str) -> Path:
@@ -194,6 +212,53 @@ def _seed_stock_8f92_transport(projection: Path) -> dict[str, Path]:
     manifest = projection.parent / "shared" / "provider-prompt-projections.v1.json"
     manifest.parent.mkdir(parents=True, exist_ok=True)
     manifest.write_bytes(_stock_8f92_blob(manifest.name))
+    paths[manifest.name] = manifest
+    return paths
+
+
+def _seed_historical_transport(
+    projection: Path,
+    commit: str,
+    expected: dict[str, str],
+) -> dict[str, Path]:
+    projection.mkdir(parents=True, exist_ok=True)
+    paths: dict[str, Path] = {}
+    for name in TRANSPORT_FILES:
+        path = projection / name
+        if name not in expected:
+            if path.exists():
+                path.unlink()
+            continue
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = subprocess.run(
+            [
+                "git",
+                "cat-file",
+                "blob",
+                f"{commit}:{AUTHORED_TRANSPORT_SOURCES[name].as_posix()}",
+            ],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+        ).stdout
+        assert _sha(payload) == expected[name]
+        path.write_bytes(payload)
+        paths[name] = path
+    manifest = projection.parent / "shared" / "provider-prompt-projections.v1.json"
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    payload = subprocess.run(
+        [
+            "git",
+            "cat-file",
+            "blob",
+            f"{commit}:shared/provider-prompt-projections.v1.json",
+        ],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+    ).stdout
+    assert _sha(payload) == expected[manifest.name]
+    manifest.write_bytes(payload)
     paths[manifest.name] = manifest
     return paths
 
@@ -866,6 +931,33 @@ def _current_canonical_with_stock_8f92_projection(
     return canonical, projection, paths
 
 
+def _current_canonical_with_historical_projection(
+    tmp_path: Path,
+    commit: str,
+    expected: dict[str, str],
+) -> tuple[Path, Path, dict[str, Path]]:
+    source, canonical, projection, _manifest = _fixture(tmp_path)
+    for name in TRANSPORT_FILES:
+        payload = _authored_transport_path(ROOT, name).read_bytes()
+        _write_transport(canonical, name, payload)
+        _write_transport(source, AUTHORED_TRANSPORT_SOURCES[name].as_posix(), payload)
+    (source / "shared" / "AGENTS.shared.md").write_bytes(
+        (ROOT / "shared" / "AGENTS.shared.md").read_bytes()
+    )
+    manifest_path = source / "shared" / "provider-prompt-projections.v1.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    for name in TRANSPORT_FILES:
+        manifest["files"][name]["sha256"] = _sha(
+            _authored_transport_path(ROOT, name).read_bytes()
+        )
+    manifest_path.write_text(
+        json.dumps(manifest, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    paths = _seed_historical_transport(projection, commit, expected)
+    return source, canonical, paths
+
+
 def test_exact_8f92_transport_set_is_one_atomic_prior_plan(tmp_path: Path) -> None:
     installer = _load_installer()
     canonical, projection, _paths = _current_canonical_with_stock_8f92_projection(
@@ -885,6 +977,155 @@ def test_exact_8f92_transport_set_is_one_atomic_prior_plan(tmp_path: Path) -> No
         for witness in staged.witnesses
         if witness.state == "regular"
     } == STOCK_8F92_PROJECTION_SHA256
+
+
+@pytest.mark.parametrize(
+    ("commit", "expected", "pending"),
+    (
+        (
+            "d1309ee5",
+            STOCK_D130_PROJECTION_SHA256,
+            ("provider_prompt.py", "process_supervision/process_runner.py"),
+        ),
+        (
+            "f87414e7",
+            STOCK_F874_PROJECTION_SHA256,
+            ("provider_prompt.py", "process_supervision/process_runner.py"),
+        ),
+    ),
+)
+def test_exact_published_transport_set_is_one_atomic_prior_plan(
+    tmp_path: Path,
+    commit: str,
+    expected: dict[str, str],
+    pending: tuple[str, ...],
+) -> None:
+    installer = _load_installer()
+    source, canonical, paths = _current_canonical_with_historical_projection(
+        tmp_path,
+        commit,
+        expected,
+    )
+    projection = tmp_path / "claude" / "agents" / "scripts"
+
+    staged = installer._stage_claude_transport_projection(
+        source,
+        canonical,
+        projection,
+    )
+
+    assert staged.accepted_prior_set == commit
+    assert tuple(name for name, _payload in staged.pending_files) == pending
+    assert staged.manifest_pending is True
+    observed = {
+        (
+            witness.path.relative_to(projection).as_posix()
+            if witness.path.is_relative_to(projection)
+            else witness.path.name
+        ): witness.sha256
+        for witness in staged.witnesses
+        if witness.state == "regular"
+    }
+    assert observed == expected
+    assert set(paths) == set(expected)
+
+
+@pytest.mark.parametrize(
+    ("commit", "expected"),
+    (
+        ("d1309ee5", STOCK_D130_PROJECTION_SHA256),
+        ("f87414e7", STOCK_F874_PROJECTION_SHA256),
+    ),
+)
+def test_published_transport_prior_rejects_a_customized_member(
+    tmp_path: Path,
+    commit: str,
+    expected: dict[str, str],
+) -> None:
+    installer = _load_installer()
+    source, canonical, paths = _current_canonical_with_historical_projection(
+        tmp_path,
+        commit,
+        expected,
+    )
+    projection = tmp_path / "claude" / "agents" / "scripts"
+    paths["provider_prompt.py"].write_bytes(
+        paths["provider_prompt.py"].read_bytes() + b"custom drift\n"
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="E_TRANSPORT_PROJECTION_PARITY: atomic projection state",
+    ):
+        installer._stage_claude_transport_projection(
+            source,
+            canonical,
+            projection,
+        )
+
+
+@pytest.mark.parametrize(
+    ("commit", "expected"),
+    (
+        ("d1309ee5", STOCK_D130_PROJECTION_SHA256),
+        ("f87414e7", STOCK_F874_PROJECTION_SHA256),
+    ),
+)
+def test_published_transport_migration_failure_restores_bytes_and_identities(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    commit: str,
+    expected: dict[str, str],
+) -> None:
+    installer = _load_installer()
+    target = tmp_path / "target"
+    target.mkdir()
+    args = [
+        "--target",
+        str(target),
+        "--force",
+        "--allow-unsafe-target",
+        "--no-hypothesis-hook",
+    ]
+    assert installer.install("claude", args) == 0
+    projection = target / ".claude" / "agents" / "scripts"
+    paths = _seed_historical_transport(projection, commit, expected)
+    before = {
+        name: (
+            path.read_bytes(),
+            installer._CreateOnlyMutablePath._identity(path),
+        )
+        for name, path in paths.items()
+    }
+    before_tree = _tree_bytes(projection.parent)
+    original = installer._CreateOnlyMutablePath.migrate_exact_file
+    calls = 0
+
+    def fail_after_second_migration(self, relative, expected_digest, payload):
+        nonlocal calls
+        result = original(self, relative, expected_digest, payload)
+        calls += 1
+        if calls == 2:
+            raise RuntimeError("injected published transport migration failure")
+        return result
+
+    monkeypatch.setattr(
+        installer._CreateOnlyMutablePath,
+        "migrate_exact_file",
+        fail_after_second_migration,
+    )
+
+    assert installer.install("claude", args) == 1
+    assert calls == 2
+    assert {
+        name: (
+            path.read_bytes(),
+            installer._CreateOnlyMutablePath._identity(path),
+        )
+        for name, path in paths.items()
+    } == before
+    assert _tree_bytes(projection.parent) == before_tree
+    assert not tuple(projection.parent.rglob("*.prior"))
 
 
 @pytest.mark.parametrize("name", tuple(STOCK_8F92_PROJECTION_SHA256))

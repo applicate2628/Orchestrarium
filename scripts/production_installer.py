@@ -97,10 +97,33 @@ STOCK_8F92_CLAUDE_TRANSPORT_PROJECTION_SHA256 = (
     ("external-role-taxonomy.v1.json", "c26585be7117568e2e61c3904ddf7192e81eebdc3ab72b29d9cab17e3a7ab647"),
     (TRANSPORT_PROJECTION_MANIFEST, "ff669ccc267771921e1bc05754cfe1f9fdf848c129daa166a3187bc8f64b7f36"),
 )
+STOCK_D130_CLAUDE_TRANSPORT_PROJECTION_SHA256 = (
+    ("provider_prompt.py", "1a636a300dfe9256714ccd14f4c0775cd8077b4243be36b9fa0c8876a9e91bd9"),
+    ("invoke-codex-prompt.py", "0b085a6fd0e28a5a486c8ef25bf52d4c69123d94cc8712d63dd30deadcc5f665"),
+    ("invoke-claude-prompt.py", "3250c9a85e36ab2e57a218688c5d7d3cfed59552c1f2bad7eb52f45370df80f3"),
+    ("invoke-kimi-prompt.py", "05679dac1daded511debf617e8f1189dd941d21a5d1c7f6e3dd3ec21d4c0bc75"),
+    ("invoke-grok-prompt.py", "1f0f4f6bb03d816b3f40ff56ebe71973301d2d7104ef1d7f335b1ffa0b248559"),
+    ("external-prompt-governance.md", "c7a59ccec7d6e46be76584a107b0a5b30b249368b4f0958cb78177962dc34b00"),
+    ("external-role-taxonomy.v1.json", "c26585be7117568e2e61c3904ddf7192e81eebdc3ab72b29d9cab17e3a7ab647"),
+    (TRANSPORT_PROJECTION_MANIFEST, "ccc1573ac8c2ac5ac63c7ce040d4cbba4f73e71664182cb4f1ce67c5cdab5cc5"),
+)
+STOCK_F874_CLAUDE_TRANSPORT_PROJECTION_SHA256 = (
+    ("provider_prompt.py", "1a636a300dfe9256714ccd14f4c0775cd8077b4243be36b9fa0c8876a9e91bd9"),
+    ("process_supervision/process_runner.py", "8fb478d0767622ed71655242b7e7bf519ca990a487f0af93156f95075346cdb6"),
+    ("invoke-codex-prompt.py", "0b085a6fd0e28a5a486c8ef25bf52d4c69123d94cc8712d63dd30deadcc5f665"),
+    ("invoke-claude-prompt.py", "3250c9a85e36ab2e57a218688c5d7d3cfed59552c1f2bad7eb52f45370df80f3"),
+    ("invoke-kimi-prompt.py", "05679dac1daded511debf617e8f1189dd941d21a5d1c7f6e3dd3ec21d4c0bc75"),
+    ("invoke-grok-prompt.py", "1f0f4f6bb03d816b3f40ff56ebe71973301d2d7104ef1d7f335b1ffa0b248559"),
+    ("external-prompt-governance.md", "c7a59ccec7d6e46be76584a107b0a5b30b249368b4f0958cb78177962dc34b00"),
+    ("external-role-taxonomy.v1.json", "c26585be7117568e2e61c3904ddf7192e81eebdc3ab72b29d9cab17e3a7ab647"),
+    (TRANSPORT_PROJECTION_MANIFEST, "6f9ed1cbe5e25009febd3cb07303706c8b65e3bee449348c9654aff10253f572"),
+)
 ACCEPTED_CLAUDE_TRANSPORT_PROJECTION_PRIORS = {
     "8521b638": STOCK_8521_CLAUDE_TRANSPORT_PROJECTION_SHA256,
     "7872d36d": STOCK_7872_CLAUDE_TRANSPORT_PROJECTION_SHA256,
     "8f92dc73": STOCK_8F92_CLAUDE_TRANSPORT_PROJECTION_SHA256,
+    "d1309ee5": STOCK_D130_CLAUDE_TRANSPORT_PROJECTION_SHA256,
+    "f87414e7": STOCK_F874_CLAUDE_TRANSPORT_PROJECTION_SHA256,
 }
 E7_LEGACY_PROVIDER_PROMPT_SHA256 = (
     "825bc6db49408c5975627fba95c95ca479fe45c508e5be71d06c5e6f6c4b8121"
@@ -1757,6 +1780,12 @@ def _stage_claude_transport_projection(
         for name, payload in files
     )
     manifest_state = _projection_file_state(manifest_target, manifest_payload)
+    witness_names = TRANSPORT_PROJECTION_FILES + (TRANSPORT_PROJECTION_MANIFEST,)
+    observed_prior = tuple(
+        (name, witness.sha256)
+        for name, witness in zip(witness_names, witnesses)
+        if witness.state == "regular"
+    )
     replace_legacy_singleton = False
     replacement_digest: str | None = None
     accepted_prior_set: str | None = None
@@ -1776,16 +1805,7 @@ def _stage_claude_transport_projection(
     elif states == ("current",) * len(TRANSPORT_PROJECTION_FILES) and manifest_state == "current":
         pending_files = ()
         manifest_pending = False
-    elif tuple(
-        (witness.path.name, witness.sha256)
-        for witness in witnesses
-        if witness.state == "regular"
-    ) in set(ACCEPTED_CLAUDE_TRANSPORT_PROJECTION_PRIORS.values()):
-        observed_prior = tuple(
-            (witness.path.name, witness.sha256)
-            for witness in witnesses
-            if witness.state == "regular"
-        )
+    elif observed_prior in set(ACCEPTED_CLAUDE_TRANSPORT_PROJECTION_PRIORS.values()):
         pending_files = tuple(
             (name, payload)
             for (name, payload), witness in zip(files, witnesses)
