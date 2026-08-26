@@ -58,7 +58,6 @@ PROVIDER_AUTH_SECRET_ENV_KEYS_V1 = {
         "CLOUDSDK_AUTH_ACCESS_TOKEN",
     ),
     "claude-direct": ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"),
-    "claude-api-key-helper": (),
     "claude-subscription-override": (),
 }
 _NONSECRET_CHILD_ENV_NAMES = (
@@ -94,9 +93,6 @@ PROVIDER_AUTH_CONTROL_ENV_KEYS_V1 = types.MappingProxyType(
             }
         ),
         "claude-direct": types.MappingProxyType(
-            {"selector": None, "scalar": (), "file": (), "directory": ()}
-        ),
-        "claude-api-key-helper": types.MappingProxyType(
             {"selector": None, "scalar": (), "file": (), "directory": ()}
         ),
         "claude-subscription-override": types.MappingProxyType(
@@ -385,7 +381,7 @@ def _lexically_within(path: Path, root: Path) -> bool:
     return True
 
 
-def _external_role_taxonomy() -> tuple[set[str], set[str], set[str]]:
+def _external_role_taxonomy() -> tuple[set[str], set[str], set[str], set[str]]:
     """Load the dedicated complete taxonomy without executing another policy owner."""
 
     try:
@@ -440,6 +436,7 @@ def _external_role_taxonomy() -> tuple[set[str], set[str], set[str]]:
         roles = set(mapping)
         reviewers = {role for role, lane in mapping.items() if lane == "external-reviewer"}
         workers = {role for role, lane in mapping.items() if lane == "external-worker"}
+        unsupported = {role for role, lane in mapping.items() if lane == "none"}
         if {role for role, lane in mapping.items() if lane == "consultant"} != {"consultant"}:
             raise ValueError("taxonomy consultant lane")
     except RuntimeError as exc:
@@ -456,18 +453,20 @@ def _external_role_taxonomy() -> tuple[set[str], set[str], set[str]]:
         json.JSONDecodeError,
     ) as exc:
         raise ValueError("E_EXTERNAL_PROVENANCE_ROLE_INVALID: role taxonomy") from exc
-    return roles, reviewers, workers
+    return roles, reviewers, workers, unsupported
 
 
 def external_role_provenance(control: Control, provider: str) -> ExternalRoleProvenance:
     """Freeze S3 role provenance before external side effects begin."""
 
-    roles, reviewers, workers = _external_role_taxonomy()
+    roles, reviewers, workers, unsupported = _external_role_taxonomy()
     if provider in {"codex", "claude"} and not control.ledger_role_explicit:
         return ExternalRoleProvenance("none", "none")
     assigned = control.ledger_role if control.ledger_role_explicit else "none"
-    if assigned != "none" and assigned not in roles:
+    if assigned not in roles:
         raise ValueError("E_EXTERNAL_PROVENANCE_ROLE_INVALID: assigned role")
+    if assigned in unsupported:
+        raise ValueError("E_EXTERNAL_PROVENANCE_ROLE_UNSUPPORTED: assigned role")
     if assigned == "consultant":
         execution = "consultant"
     elif assigned in reviewers:
@@ -661,20 +660,15 @@ def _claude_settings_os_name() -> str:
     return os.name
 
 
-def _api_key_helper_configured(surface: ClaudeUserSettingsSurface) -> bool:
-    """Inspect only the selected user settings file; never execute its helper."""
+def _refuse_api_key_helper(surface: ClaudeUserSettingsSurface) -> None:
+    """Reject the selected user helper without executing or interpreting it."""
 
     if not os.path.lexists(surface.settings_path):
-        return False
+        return
     settings = _read_settings_object(surface.settings_path, "user settings")
     if "apiKeyHelper" not in settings:
-        return False
-    helper = settings["apiKeyHelper"]
-    if not isinstance(helper, str) or not helper.strip() or "\x00" in helper:
-        raise ValueError(
-            "E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE: apiKeyHelper"
-        )
-    return True
+        return
+    raise ValueError("E_EXTERNAL_PROVIDER_API_KEY_HELPER_UNSUPPORTED")
 
 
 def _child_environment_baseline(environment: dict[str, str]) -> dict[str, str]:
@@ -732,7 +726,6 @@ def resolve_provider_auth_configuration(
     if provider == "codex":
         mode = "codex-api-key" if source.get("OPENAI_API_KEY") else "codex-auth-file"
     elif provider == "claude":
-        user_settings_surface = _claude_user_settings_surface(source)
         selected = []
         if _truthy(source.get("CLAUDE_CODE_USE_BEDROCK")):
             selected.append("claude-bedrock")
@@ -740,15 +733,20 @@ def resolve_provider_auth_configuration(
             selected.append("claude-vertex")
         if source.get("ANTHROPIC_API_KEY") or source.get("ANTHROPIC_AUTH_TOKEN"):
             selected.append("claude-direct")
-        if _api_key_helper_configured(user_settings_surface):
-            selected.append("claude-api-key-helper")
         if source.get("ORCHESTRARIUM_ALLOW_SUBSCRIPTION_CLAUDE") == "1":
             selected.append("claude-subscription-override")
         if not selected:
+            user_settings_surface = _claude_user_settings_surface(source)
+            _refuse_api_key_helper(user_settings_surface)
             raise ClaudeSubscriptionRefusal("subscription-only Claude authentication")
         if len(selected) != 1:
             raise ValueError("E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE: auth mode")
         mode = selected[0]
+        user_settings_surface = (
+            _claude_user_settings_surface(source)
+            if source.get("CLAUDE_CONFIG_DIR")
+            else None
+        )
         controls = PROVIDER_AUTH_CONTROL_ENV_KEYS_V1[mode]
         selector = controls["selector"]
         if selector is not None:
@@ -760,7 +758,10 @@ def resolve_provider_auth_configuration(
             _copy_provider_path_control(child, source, name, "file")
         for name in controls["directory"]:
             _copy_provider_path_control(child, source, name, "directory")
-        if user_settings_surface.forwarded_config_dir is not None:
+        if (
+            user_settings_surface is not None
+            and user_settings_surface.forwarded_config_dir is not None
+        ):
             child["CLAUDE_CONFIG_DIR"] = user_settings_surface.forwarded_config_dir
     else:
         raise ValueError("E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE: provider")
@@ -2380,7 +2381,7 @@ def launch(provider: str, argv: list[str]) -> int:
             "Automated `claude -p` under a subscription is not permitted.\n"
             "Anthropic policy: https://code.claude.com/docs/en/legal-and-compliance\n\n"
             "Use commercial authentication (ANTHROPIC_API_KEY, "
-            "ANTHROPIC_AUTH_TOKEN, apiKeyHelper, Amazon Bedrock, or Google "
+            "ANTHROPIC_AUTH_TOKEN, Amazon Bedrock, or Google "
             "Vertex AI), or explicitly set ORCHESTRARIUM_ALLOW_SUBSCRIPTION_CLAUDE=1.",
             file=sys.stderr,
         )

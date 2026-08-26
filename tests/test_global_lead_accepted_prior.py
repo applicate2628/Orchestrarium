@@ -28,6 +28,17 @@ PRE_REBASE_GLOBAL_LEAD_TREE_SHA256 = (
 PRE_RANGE_V3_GLOBAL_LEAD_TREE_SHA256 = (
     "1ffea3eb0fcf6589ac874ab49e508807eb0726dff88473d82b8b22b5baa42bf0"
 )
+PROVIDER_AUTH_BASELINE_GLOBAL_LEAD_TREE_SHA256 = (
+    "f03d3b74d68c032ec5c1539ce7936065d5083624b702ec4403fa7e2cc509adc7"
+)
+PROVIDER_AUTH_BASELINE_STAGED_LEAD_OVERLAYS = {
+    "external-dispatch.md": ("8f92dc73", "src.codex/skills/lead/external-dispatch.md"),
+    "scripts/provider_prompt.py": ("8f92dc73", "scripts/provider_prompt.py"),
+    "shared/provider-prompt-projections.v1.json": (
+        "8f92dc73",
+        "shared/provider-prompt-projections.v1.json",
+    ),
+}
 PRE_REBASE_FIXTURE_ROOT = (
     ROOT / "tests" / "fixtures" / "global-lead-priors" / "pre-rebase"
 )
@@ -187,6 +198,7 @@ STOCK_8521_CANONICAL_SKILL_TREE_SHA256 = {
 # These entries are pinned historical source blobs, not a version-range
 # approximation. The target omits the current transport set below.
 PRE_RANGE_V3_STAGED_LEAD_OVERLAYS = {
+    **PROVIDER_AUTH_BASELINE_STAGED_LEAD_OVERLAYS,
     "scripts/check-publication-safety.py": (
         "6850a129321288fc23538b89582cf2cfd413e48c",
         "src.codex/skills/lead/scripts/check-publication-safety.py",
@@ -379,6 +391,43 @@ def _seed_pre_range_v3_staged_lead(installer, destination: Path) -> Path:
     for relative, source in PRE_RANGE_V3_STAGED_LEAD_OVERLAYS.items():
         (lead / relative).write_bytes(_historical_blob(*source))
     return lead
+
+
+def _seed_provider_auth_baseline_staged_lead(installer, destination: Path) -> Path:
+    lead = _copy_current_staged_lead(installer, destination)
+    for relative, source in PROVIDER_AUTH_BASELINE_STAGED_LEAD_OVERLAYS.items():
+        (lead / relative).write_bytes(_historical_blob(*source))
+    return lead
+
+
+def test_exact_provider_auth_baseline_lead_is_accepted_and_drift_refused(
+    tmp_path: Path,
+) -> None:
+    installer = _load_installer()
+    skills_root = tmp_path / ".agents" / "skills"
+    historical = _seed_provider_auth_baseline_staged_lead(
+        installer, skills_root / "lead"
+    )
+    assert installer._tree_sha256(
+        historical, ignore_runtime_cache=True
+    ) == PROVIDER_AUTH_BASELINE_GLOBAL_LEAD_TREE_SHA256
+
+    plan = installer._preflight_canonical_skills(
+        ROOT / "src.codex" / "skills", skills_root, root=ROOT
+    )
+    try:
+        lead = next(skill for skill in plan.skills if skill.name == "lead")
+        assert lead.accepted_prior == PROVIDER_AUTH_BASELINE_GLOBAL_LEAD_TREE_SHA256
+    finally:
+        installer._discard_canonical_skills_plan(plan)
+
+    _seed_provider_auth_baseline_staged_lead(installer, skills_root / "lead")
+    with (skills_root / "lead" / "SKILL.md").open("ab") as stream:
+        stream.write(b"customized\n")
+    with pytest.raises(ValueError, match="E_ACCEPTED_PRIOR_COLLISION: lead"):
+        installer._preflight_canonical_skills(
+            ROOT / "src.codex" / "skills", skills_root, root=ROOT
+        )
 
 
 def test_exact_pre_range_v3_lead_is_accepted_and_customized_tree_refused(

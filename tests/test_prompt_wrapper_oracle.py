@@ -837,25 +837,28 @@ def test_unlaunched_ledger_failure_uses_one_v2_envelope_without_durable_ledger_c
         ("accessibility-reviewer", "external-reviewer"),
         ("performance-reviewer", "external-reviewer"),
         ("consultant", "consultant"),
-        ("lead", "none"),
     ),
 )
+@pytest.mark.parametrize("provider", ("codex", "claude"))
 def test_codex_and_claude_external_role_provenance_uses_only_explicit_ledger_role(
-    ledger_role: str, expected_execution_role: str
+    ledger_role: str, expected_execution_role: str, provider: str
 ) -> None:
     control = owner.parse_control(["fixture", "--ledger-role", ledger_role])
 
-    provenance = owner.external_role_provenance(control, "codex")
+    provenance = owner.external_role_provenance(control, provider)
 
     assert provenance.assigned_role == ledger_role
     assert provenance.execution_role == expected_execution_role
     assert control.ledger_role_explicit is True
 
 
-def test_codex_and_claude_external_role_provenance_uses_none_without_ledger_role() -> None:
+@pytest.mark.parametrize("provider", ("codex", "claude"))
+def test_codex_and_claude_external_role_provenance_uses_none_without_ledger_role(
+    provider: str,
+) -> None:
     control = owner.parse_control(["fixture"])
 
-    provenance = owner.external_role_provenance(control, "claude")
+    provenance = owner.external_role_provenance(control, provider)
 
     assert provenance.assigned_role == "none"
     assert provenance.execution_role == "none"
@@ -867,6 +870,70 @@ def test_external_role_provenance_rejects_unknown_explicit_ledger_role() -> None
 
     with pytest.raises(ValueError, match="E_EXTERNAL_PROVENANCE_ROLE_INVALID"):
         owner.external_role_provenance(control, "codex")
+
+
+def test_explicit_none_ledger_role_cannot_masquerade_as_roleless() -> None:
+    control = owner.parse_control(["fixture", "--ledger-role", "none"])
+
+    with pytest.raises(
+        ValueError,
+        match="^E_EXTERNAL_PROVENANCE_ROLE_INVALID: assigned role$",
+    ):
+        owner.external_role_provenance(control, "claude")
+
+
+@pytest.mark.parametrize(
+    "ledger_role",
+    (
+        "product-manager",
+        "lead",
+        "knowledge-archivist",
+        "external-worker",
+        "external-reviewer",
+    ),
+)
+def test_taxonomy_none_role_fails_before_external_launch_side_effects(
+    ledger_role: str,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr(
+        owner,
+        "resolve_provider_auth_configuration",
+        lambda *_args, **_kwargs: calls.append("auth"),
+    )
+    monkeypatch.setattr(
+        owner,
+        "prompt_bytes",
+        lambda *_args, **_kwargs: calls.append("prompt") or b"task",
+    )
+    monkeypatch.setattr(
+        owner,
+        "resolve_provider_command",
+        lambda *_args, **_kwargs: calls.append("binary") or ["provider"],
+    )
+    monkeypatch.setattr(
+        owner,
+        "secure_output_dir",
+        lambda *_args, **_kwargs: calls.append("capture") or Path("capture"),
+    )
+    monkeypatch.setattr(
+        owner,
+        "run_ledger",
+        lambda *_args, **_kwargs: calls.append("ledger") or True,
+    )
+    monkeypatch.setattr(
+        owner.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: calls.append("popen"),
+    )
+
+    code = owner.launch("claude", ["fixture", "--ledger-role", ledger_role])
+
+    assert code != 0
+    assert "E_EXTERNAL_PROVENANCE_ROLE_UNSUPPORTED" in capsys.readouterr().err
+    assert calls == []
 
 
 @pytest.mark.parametrize("provider", ("codex", "claude"))
@@ -1509,6 +1576,98 @@ def test_claude_caller_cannot_override_automated_setting_sources(
                 "project",
             ],
         )
+
+
+@pytest.mark.parametrize(
+    ("expected_mode", "environment"),
+    (
+        ("claude-direct", {"ANTHROPIC_" "API_KEY": "fixture"}),
+        ("claude-direct", {"ANTHROPIC_" "AUTH_TOKEN": "fixture"}),
+        ("claude-bedrock", {"CLAUDE_CODE_USE_BEDROCK": "true"}),
+        ("claude-vertex", {"CLAUDE_CODE_USE_VERTEX": "true"}),
+        (
+            "claude-subscription-override",
+            {"ORCHESTRARIUM_ALLOW_SUBSCRIPTION_CLAUDE": "1"},
+        ),
+    ),
+)
+def test_explicit_claude_auth_mode_does_not_require_posix_home(
+    expected_mode: str,
+    environment: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(owner, "_claude_settings_os_name", lambda: "posix")
+
+    resolved = owner.resolve_provider_auth_configuration("claude", environment)
+
+    assert resolved.mode == expected_mode
+    assert "HOME" not in resolved.child_environment
+
+
+def test_explicit_claude_auth_ignores_api_key_helper_settings_candidate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_dir = tmp_path / "claude-config"
+    config_dir.mkdir()
+    (config_dir / "settings.json").write_text(
+        '{"apiKeyHelper": "must-not-be-read"}\n', encoding="utf-8"
+    )
+    monkeypatch.setattr(
+        owner,
+        "_read_settings_object",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("explicit auth read settings")
+        ),
+    )
+
+    resolved = owner.resolve_provider_auth_configuration(
+        "claude",
+        {
+            "ANTHROPIC_" "API_KEY": "fixture",
+            "CLAUDE_CONFIG_DIR": str(config_dir.resolve()),
+        },
+    )
+
+    assert resolved.mode == "claude-direct"
+    assert resolved.child_environment["CLAUDE_CONFIG_DIR"] == str(config_dir.resolve())
+
+
+def test_explicit_claude_auth_conflict_fails_without_settings_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(owner, "_claude_settings_os_name", lambda: "posix")
+
+    with pytest.raises(
+        ValueError,
+        match="^E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE: auth mode$",
+    ):
+        owner.resolve_provider_auth_configuration(
+            "claude",
+            {
+                "ANTHROPIC_" "API_KEY": "fixture",
+                "CLAUDE_CODE_USE_BEDROCK": "true",
+            },
+        )
+
+
+def test_api_key_helper_is_a_typed_refusal_when_no_explicit_mode_exists(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home = tmp_path.resolve()
+    settings = home / ".claude"
+    settings.mkdir()
+    (settings / "settings.json").write_text(
+        '{"apiKeyHelper": "configured-helper"}\n', encoding="utf-8"
+    )
+    monkeypatch.setattr(owner, "_claude_settings_os_name", lambda: "posix")
+
+    with pytest.raises(
+        ValueError,
+        match="^E_EXTERNAL_PROVIDER_API_KEY_HELPER_UNSUPPORTED$",
+    ):
+        owner.resolve_provider_auth_configuration("claude", {"HOME": str(home)})
 
 
 def test_bedrock_child_environment_preserves_only_selected_mode_controls(

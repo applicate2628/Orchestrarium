@@ -19,7 +19,7 @@ For an offline machine move, `$manual-repo-transfer` inventories dirty, ignored,
 
 ## WARNING: Claude external authentication
 
-The Python-owned `invoke-claude-prompt.py` transport (also exposed through the thin POSIX launcher `invoke-claude-prompt.sh`) runs automated, headless `claude -p`. Subscription sign-in (OAuth), including Claude Pro and Max, is not permitted for these orchestrated runs; use a commercial API key, `apiKeyHelper`, Amazon Bedrock, or Google Vertex AI instead. The transport fails closed when it cannot detect one of those commercial-auth signals. For the secret-backed path, use `invoke-claude-api.py` or its thin `invoke-claude-api.sh` launcher with the credentials documented in `SECRET.md`. See [Anthropic's Claude Code legal and compliance guidance](https://code.claude.com/docs/en/legal-and-compliance).
+The Python-owned `invoke-claude-prompt.py` transport (also exposed through the thin POSIX launcher `invoke-claude-prompt.sh`) runs automated, headless `claude -p`. Subscription sign-in (OAuth), including Claude Pro and Max, is not permitted for these orchestrated runs unless the existing explicit Orchestrarium override is set; use `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, Amazon Bedrock, or Google Vertex AI instead. Orchestrarium 1.x refuses `apiKeyHelper` before prompt capture or provider lookup because a helper-generated credential cannot be bound to the transport's exact output scan. For the secret-backed path, use `invoke-claude-api.py` or its thin `invoke-claude-api.sh` launcher with the credentials documented in `SECRET.md`. See [Anthropic's Claude Code legal and compliance guidance](https://code.claude.com/docs/en/legal-and-compliance).
 
 ## Repository layout
 

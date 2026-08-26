@@ -346,11 +346,11 @@ Resolve external routing in this order: `role eligibility -> provider selection 
 | Advisory second opinion | `$consultant` | Advisory-only. Never becomes a worker lane, reviewer, or approver. |
 | Eligible worker-side role | `$external-worker` | Valid only after routing has already classified the slot as non-owner, non-review work. This includes research, design, planning, scientist or constraint, implementation, and repository-hygiene roles. The supplemental `reserve` candidate is not available to worker-side lanes. |
 | Eligible review or QA-side role | `$external-reviewer` | Valid only after routing has already classified the slot as review or QA work. |
-| Owner roles such as `$product-manager` or `$lead` | unsupported | There is no generic external owner adapter. Fail fast before probing provider CLI availability and reroute honestly. |
+| Roles mapped to `none` by `external-role-taxonomy.v1.json` | unsupported | Fail fast before probing provider Command-Line Interface (CLI) availability. The current mapping includes `$product-manager`, `$lead`, `$knowledge-archivist`, `$external-worker`, and `$external-reviewer`; the taxonomy remains authoritative. |
 
 Notes:
 - An explicit user request for `external` does not create a new adapter type. Owner roles stay unsupported unless a repository defines a dedicated external owner adapter explicitly.
-- Worker-side specialist lanes such as `analyst`, `architect`, `planner`, `knowledge-archivist`, `algorithm-scientist`, `computational-scientist`, `security-engineer`, `performance-engineer`, and `reliability-engineer` stay eligible for `$external-worker` when routing selects external substitution.
+- Worker-side specialist lanes such as `analyst`, `architect`, `planner`, `algorithm-scientist`, `computational-scientist`, `security-engineer`, `performance-engineer`, and `reliability-engineer` stay eligible for `$external-worker` when routing selects external substitution. `$knowledge-archivist` keeps its taxonomy `none` disposition and is not silently remapped.
 - `reserve` is advisory/review-only. It must not be used for worker-side lanes, even when the worker artifact is read-only.
 
 ### `reserve`

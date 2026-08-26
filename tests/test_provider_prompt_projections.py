@@ -55,6 +55,16 @@ STOCK_7872_PROJECTION_SHA256 = {
     "external-prompt-governance.md": "c7a59ccec7d6e46be76584a107b0a5b30b249368b4f0958cb78177962dc34b00",
     "provider-prompt-projections.v1.json": "7e14945c36bfd8ea2aee6db91e781df5e36365df67c7ef2efa0ffe84edc46190",
 }
+STOCK_8F92_PROJECTION_SHA256 = {
+    "provider_prompt.py": "441824a51462855aa6222cd417ba034a23019fa5f84e5f6e9833f87fa7505248",
+    "invoke-codex-prompt.py": "0b085a6fd0e28a5a486c8ef25bf52d4c69123d94cc8712d63dd30deadcc5f665",
+    "invoke-claude-prompt.py": "3250c9a85e36ab2e57a218688c5d7d3cfed59552c1f2bad7eb52f45370df80f3",
+    "invoke-kimi-prompt.py": "05679dac1daded511debf617e8f1189dd941d21a5d1c7f6e3dd3ec21d4c0bc75",
+    "invoke-grok-prompt.py": "1f0f4f6bb03d816b3f40ff56ebe71973301d2d7104ef1d7f335b1ffa0b248559",
+    "external-prompt-governance.md": "c7a59ccec7d6e46be76584a107b0a5b30b249368b4f0958cb78177962dc34b00",
+    "external-role-taxonomy.v1.json": "c26585be7117568e2e61c3904ddf7192e81eebdc3ab72b29d9cab17e3a7ab647",
+    "provider-prompt-projections.v1.json": "ff669ccc267771921e1bc05754cfe1f9fdf848c129daa166a3187bc8f64b7f36",
+}
 
 
 def _authored_transport_path(root: Path, name: str) -> Path:
@@ -121,6 +131,36 @@ def _seed_stock_7872_transport(projection: Path) -> dict[str, Path]:
     ).stdout
     assert _sha(payload) == STOCK_7872_PROJECTION_SHA256[manifest.name]
     manifest.write_bytes(payload)
+    paths[manifest.name] = manifest
+    return paths
+
+
+def _stock_8f92_blob(name: str) -> bytes:
+    source = (
+        AUTHORED_TRANSPORT_SOURCES[name].as_posix()
+        if name in AUTHORED_TRANSPORT_SOURCES
+        else "shared/provider-prompt-projections.v1.json"
+    )
+    payload = subprocess.run(
+        ["git", "show", f"8f92dc73:{source}"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+    ).stdout
+    assert _sha(payload) == STOCK_8F92_PROJECTION_SHA256[name]
+    return payload
+
+
+def _seed_stock_8f92_transport(projection: Path) -> dict[str, Path]:
+    projection.mkdir(parents=True, exist_ok=True)
+    paths: dict[str, Path] = {}
+    for name in TRANSPORT_FILES:
+        path = projection / name
+        path.write_bytes(_stock_8f92_blob(name))
+        paths[name] = path
+    manifest = projection.parent / "shared" / "provider-prompt-projections.v1.json"
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    manifest.write_bytes(_stock_8f92_blob(manifest.name))
     paths[manifest.name] = manifest
     return paths
 
@@ -774,6 +814,55 @@ def _current_canonical_with_stock_8521_projection(
         (canonical / name).write_bytes(_authored_transport_path(ROOT, name).read_bytes())
     paths = _seed_stock_8521_transport(projection)
     return canonical, projection, paths
+
+
+def _current_canonical_with_stock_8f92_projection(
+    tmp_path: Path,
+) -> tuple[Path, Path, dict[str, Path]]:
+    canonical = tmp_path / "canonical" / "scripts"
+    projection = tmp_path / "claude" / "agents" / "scripts"
+    canonical.mkdir(parents=True)
+    for name in TRANSPORT_FILES:
+        (canonical / name).write_bytes(_authored_transport_path(ROOT, name).read_bytes())
+    paths = _seed_stock_8f92_transport(projection)
+    return canonical, projection, paths
+
+
+def test_exact_8f92_transport_set_is_one_atomic_prior_plan(tmp_path: Path) -> None:
+    installer = _load_installer()
+    canonical, projection, _paths = _current_canonical_with_stock_8f92_projection(
+        tmp_path
+    )
+
+    staged = installer._stage_claude_transport_projection(ROOT, canonical, projection)
+
+    assert staged.accepted_prior_set == "8f92dc73"
+    assert tuple(name for name, _payload in staged.pending_files) == (
+        "provider_prompt.py",
+    )
+    assert staged.manifest_pending is True
+    assert {
+        witness.path.name: witness.sha256
+        for witness in staged.witnesses
+        if witness.state == "regular"
+    } == STOCK_8F92_PROJECTION_SHA256
+
+
+@pytest.mark.parametrize("name", tuple(STOCK_8F92_PROJECTION_SHA256))
+def test_8f92_transport_prior_rejects_every_non_exact_member(
+    tmp_path: Path,
+    name: str,
+) -> None:
+    installer = _load_installer()
+    canonical, projection, paths = _current_canonical_with_stock_8f92_projection(
+        tmp_path
+    )
+    paths[name].write_bytes(paths[name].read_bytes() + b"custom drift\n")
+
+    with pytest.raises(
+        ValueError, match="E_TRANSPORT_PROJECTION_PARITY: atomic projection state"
+    ):
+        installer._stage_claude_transport_projection(ROOT, canonical, projection)
 
 
 def test_exact_8521_transport_set_is_one_atomic_prior_plan(tmp_path: Path) -> None:

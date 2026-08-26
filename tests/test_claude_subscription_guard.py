@@ -1,6 +1,7 @@
 """Commercial-auth fail-closed tests for the Python Claude prompt owner."""
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -116,30 +117,54 @@ def test_commercial_or_explicit_override_signals_launch(
     assert result.returncode == 0, result.stderr
 
 
-def test_api_key_helper_settings_launch(tmp_path: Path) -> None:
+def test_api_key_helper_is_refused_without_running_helper_or_leaking_child_output(
+    tmp_path: Path,
+) -> None:
+    leak_probe = "helper-output-probe"
+    helper_marker = tmp_path / "helper-ran"
+    provider_marker = tmp_path / "provider-ran"
+    helper = tmp_path / "helper.py"
+    helper.write_text(
+        "import pathlib\n"
+        f"pathlib.Path({str(helper_marker)!r}).write_text('ran', encoding='utf-8')\n"
+        f"print({leak_probe!r})\n",
+        encoding="utf-8",
+    )
     home = tmp_path / "home/.claude"
     home.mkdir(parents=True)
     (home / "settings.json").write_text(
-        '{"apiKeyHelper": "approved-helper"}\n', encoding="utf-8"
+        json.dumps({"apiKeyHelper": f'"{sys.executable}" "{helper}"'}) + "\n",
+        encoding="utf-8",
     )
     child = (
-        "import sys\n"
-        "assert sys.argv.count('--setting-sources') == 1\n"
-        "index = sys.argv.index('--setting-sources')\n"
-        "assert sys.argv[index + 1] == 'user'\n"
-        "assert '--settings' not in sys.argv\n"
+        "import pathlib\n"
+        f"pathlib.Path({str(provider_marker)!r}).write_text('ran', encoding='utf-8')\n"
+        f"print({leak_probe!r})\n"
         "print('GATE: PASS')\n"
     )
     result = _run(tmp_path, child_source=child)
-    assert result.returncode == 0, result.stderr
+
+    assert result.returncode != 0
+    assert "E_EXTERNAL_PROVIDER_API_KEY_HELPER_UNSUPPORTED" in result.stderr
+    assert not helper_marker.exists()
+    assert not provider_marker.exists()
+    assert leak_probe not in result.stdout
+    assert leak_probe not in result.stderr
+    assert not (tmp_path / "artifacts").exists()
 
 
 @pytest.mark.parametrize(
-    "settings_text",
-    ('{"apiKeyHelper": {}}\n', '{"apiKeyHelper": ""}\n', "{not-json}\n"),
+    ("settings_text", "expected_error"),
+    (
+        ('{"apiKeyHelper": {}}\n', "E_EXTERNAL_PROVIDER_API_KEY_HELPER_UNSUPPORTED"),
+        ('{"apiKeyHelper": ""}\n', "E_EXTERNAL_PROVIDER_API_KEY_HELPER_UNSUPPORTED"),
+        ("{not-json}\n", "E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE"),
+    ),
 )
 def test_malformed_user_api_key_helper_fails_before_capture_or_launch(
-    tmp_path: Path, settings_text: str
+    tmp_path: Path,
+    settings_text: str,
+    expected_error: str,
 ) -> None:
     home = tmp_path / "home/.claude"
     home.mkdir(parents=True)
@@ -148,7 +173,7 @@ def test_malformed_user_api_key_helper_fails_before_capture_or_launch(
     result = _run(tmp_path)
 
     assert result.returncode != 0
-    assert "E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE" in result.stderr
+    assert expected_error in result.stderr
     assert not (tmp_path / "artifacts").exists()
 
 

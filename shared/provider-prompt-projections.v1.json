@@ -4,7 +4,7 @@
   "files": {
     "provider_prompt.py": {
       "source": "scripts/provider_prompt.py",
-      "sha256": "441824a51462855aa6222cd417ba034a23019fa5f84e5f6e9833f87fa7505248",
+      "sha256": "1a636a300dfe9256714ccd14f4c0775cd8077b4243be36b9fa0c8876a9e91bd9",
       "destination": "scripts/provider_prompt.py"
     },
     "invoke-codex-prompt.py": {

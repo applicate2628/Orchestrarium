@@ -108,12 +108,19 @@ def test_role_taxonomy_loads_only_the_structured_sibling_taxonomy(
     sibling.write_bytes(payload)
     monkeypatch.setattr(owner, "__file__", str(scripts / "provider_prompt.py"))
 
-    roles, reviewers, workers = owner._external_role_taxonomy()
+    roles, reviewers, workers, unsupported = owner._external_role_taxonomy()
 
     assert "qa-engineer" in roles
     assert "frontend-engineer" in roles
     assert "qa-engineer" in reviewers
     assert workers
+    assert unsupported == {
+        "product-manager",
+        "lead",
+        "knowledge-archivist",
+        "external-worker",
+        "external-reviewer",
+    }
 
 
 @pytest.mark.parametrize("mutation", ("lane", "whitespace"))
