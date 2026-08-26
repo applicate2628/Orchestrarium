@@ -15,9 +15,9 @@ inherit from, or modify any other pull-request branch.
 
 ## Immutable Stage 0 tooling
 
-`baseline-pin.json` records the Git blob identifiers of both generators and both
-differential comparators. Materialize those exact implementations before producing or
-comparing evidence; do not invoke whatever version happens to exist in a later working tree.
+`baseline-pin.json` records the owning commit and Git blob identifiers of both generators
+and both differential comparators. Materialize those exact implementations before producing
+or comparing evidence; do not invoke whatever version happens to exist in a later working tree.
 
 ```bash
 CANDIDATE_ROOT=/absolute/path/to/candidate-worktree
@@ -40,8 +40,11 @@ PY
 materialize_tool() {
   key="$1"
   output="$2"
+  owner="$(pin_value "tooling.$key.owningCommit")"
   blob="$(pin_value "tooling.$key.gitBlobSha")"
+  test "$(git -C "$CANDIDATE_ROOT" rev-parse --verify "$owner^{commit}")" = "$owner"
   test "$(git -C "$CANDIDATE_ROOT" cat-file -t "$blob")" = blob
+  test "$(git -C "$CANDIDATE_ROOT" ls-tree "$owner" -- "$(pin_value "tooling.$key.path")" | awk '{print $3}')" = "$blob"
   git -C "$CANDIDATE_ROOT" cat-file blob "$blob" > "$output"
 }
 
@@ -54,7 +57,8 @@ materialize_tool commandComparator "$TOOL_ROOT/compare_command_baseline.py"
 ## Local-only verification
 
 Stage 0 intentionally does **not** use GitHub Actions. Generated evidence stays under
-`.scratch/`, which is not a second source of truth.
+`.scratch/`, which is not a second source of truth. Temporary `_orche_pr2_verify*.yml` and
+`_orche_pr2_review*.yml` workflows are ignored and must never be committed.
 
 Run the focused tests:
 
@@ -98,8 +102,8 @@ BASELINE_TREE="$(git -C "$BASELINE_ROOT" rev-parse 'HEAD^{tree}')"
 CANDIDATE_REF="$(git -C "$CANDIDATE_ROOT" rev-parse HEAD)"
 test "$BASELINE_REF" = "$PIN_COMMIT"
 test "$BASELINE_TREE" = "$PIN_TREE"
-git -C "$BASELINE_ROOT" diff --quiet
-git -C "$CANDIDATE_ROOT" diff --quiet
+test -z "$(git -C "$BASELINE_ROOT" status --porcelain=v1 --untracked-files=all)"
+test -z "$(git -C "$CANDIDATE_ROOT" status --porcelain=v1 --untracked-files=all)"
 rm -rf "$OUTPUT_ROOT/runs"
 mkdir -p "$OUTPUT_ROOT/runs"
 
@@ -132,9 +136,12 @@ run_isolated() {
 }
 ```
 
-Run Pytest in both lanes and feed both process exit codes into the pinned comparator:
+Run Pytest in both lanes and feed both process exit codes into the pinned comparator. Remove
+old XML before starting and require each current process to produce a fresh report.
 
 ```bash
+rm -f "$OUTPUT_ROOT/baseline.xml" "$OUTPUT_ROOT/candidate.xml" \
+  "$OUTPUT_ROOT/pytest-comparison.json"
 set +e
 run_isolated pytest-baseline "$BASELINE_ROOT" \
   python -m pytest --junitxml="$OUTPUT_ROOT/baseline.xml"
@@ -143,6 +150,8 @@ run_isolated pytest-candidate "$CANDIDATE_ROOT" \
   python -m pytest --junitxml="$OUTPUT_ROOT/candidate.xml"
 candidate_exit=$?
 set -e
+test -f "$OUTPUT_ROOT/baseline.xml"
+test -f "$OUTPUT_ROOT/candidate.xml"
 
 python "$TOOL_ROOT/compare_pytest_baseline.py" \
   --baseline-junit "$OUTPUT_ROOT/baseline.xml" \
@@ -155,12 +164,14 @@ python "$TOOL_ROOT/compare_pytest_baseline.py" \
 ```
 
 Existing baseline failures may resolve. New failures, disappeared tests, failures hidden by
-skip, regressions of previously passing tests, and newly changed nonzero Pytest exits block.
+skip, changed failure/error kinds, regressions of previously passing tests, contradictory
+exit/JUnit evidence, and newly changed nonzero Pytest exits block.
 
 ## Validator command differential
 
-Run every validator in both worktrees and compare exit codes and diagnostics. The installer
-validator declares its UUID scratch component as volatile; no other text is discarded.
+Run every repository-standard validator in both worktrees and compare exit codes and
+diagnostics. The installer validator declares its UUID scratch component as volatile; no
+other text is discarded.
 
 ```bash
 compare_validator() {
@@ -192,6 +203,16 @@ compare_validator() {
 
 compare_validator agents-spine \
   python scripts/validate-agents-spine.py --spine shared/AGENTS.shared.md
+compare_validator codex-pack \
+  bash src.codex/skills/lead/scripts/validate-skill-pack.sh
+compare_validator claude-pack \
+  bash src.claude/agents/scripts/validate-skill-pack.sh
+compare_validator gemini-pack \
+  bash src.gemini/scripts/validate-pack.sh
+compare_validator qwen-pack \
+  bash src.qwen/scripts/validate-pack.sh
+compare_validator agents-mode-docs \
+  python scripts/sync-agents-mode-docs.py --root . --check
 compare_validator universal-hooks \
   python scripts/sync-universal-hooks.py --check
 compare_validator agents-mode-installers \
