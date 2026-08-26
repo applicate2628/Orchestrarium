@@ -54,6 +54,12 @@ class CommandBaselineTests(unittest.TestCase):
             extra_args=('--success-pattern',r'(?m)^RESULT: PASS$'))
         self.assertEqual(r.returncode,0,r.stderr); self.assertEqual(p['classification'],'resolved-failure')
 
+    def test_success_pattern_must_match_terminal_diagnostics(self):
+        r,p=self.invoke(baseline_exit=1,candidate_exit=0,baseline_log='ERROR\n',
+            candidate_log='RESULT: PASS\nWARNING: validation was bypassed\n',
+            extra_args=('--success-pattern',r'(?m)^RESULT: PASS$'))
+        self.assertEqual(r.returncode,1); self.assertEqual(p['classification'],'unverified-resolution')
+
     def test_success_pattern_must_match_candidate_diagnostics(self):
         r,p=self.invoke(baseline_exit=1,candidate_exit=0,baseline_log='ERROR\n',candidate_log='validator exited silently\n',
             extra_args=('--success-pattern',r'(?m)^RESULT: PASS$'))

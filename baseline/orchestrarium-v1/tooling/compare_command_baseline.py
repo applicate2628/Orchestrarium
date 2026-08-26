@@ -97,6 +97,19 @@ def _normalized_text(
     return normalized.encode("utf-8", errors="surrogateescape")
 
 
+def _has_terminal_success_marker(
+    text: str, patterns: Sequence[Pattern[str]]
+) -> bool:
+    terminal_text = text.rstrip("\n")
+    if not terminal_text or not patterns:
+        return False
+    return any(
+        match.end() == len(terminal_text)
+        for pattern in patterns
+        for match in pattern.finditer(terminal_text)
+    )
+
+
 def _atomic_write(path: Path, content: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary_name = tempfile.mkstemp(
@@ -167,10 +180,7 @@ def compare(args: argparse.Namespace) -> tuple[int, dict[str, object]]:
         candidate_text = candidate_normalized.decode(
             "utf-8", errors="surrogateescape"
         )
-        verified_success = bool(success_patterns) and any(
-            pattern.search(candidate_text) is not None for pattern in success_patterns
-        )
-        if verified_success:
+        if _has_terminal_success_marker(candidate_text, success_patterns):
             status = "PASS"
             classification = "resolved-failure"
             return_code = 0
@@ -210,10 +220,11 @@ def compare(args: argparse.Namespace) -> tuple[int, dict[str, object]]:
         "successVerification": {
             "patterns": list(args.success_pattern),
             "requiredForResolvedFailure": True,
+            "markerMustTerminateDiagnostics": True,
         },
         "policy": {
             "baselineSuccessRequiresCandidateSuccess": True,
-            "historicalFailureMayResolveWithDeclaredSuccessPattern": True,
+            "historicalFailureMayResolveWithDeclaredTerminalSuccessPattern": True,
             "historicalFailureMayRemainOnlyIfNormalizedResultMatches": True,
             "successfulDiagnosticsMustMatch": True,
         },

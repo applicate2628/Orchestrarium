@@ -34,7 +34,7 @@
   "tooling": {
     "commandComparator": {
       "deterministic": true,
-      "gitBlobSha": "5604a864267bf2541055e9484329286034c7b445",
+      "gitBlobSha": "450170f7c916a0d7c51ca25bb1e74d1a17547533",
       "materialization": "git-cat-file-reviewed-tree-blob",
       "path": "baseline/orchestrarium-v1/tooling/compare_command_baseline.py",
       "runtimeMutation": false,
