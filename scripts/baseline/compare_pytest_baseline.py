@@ -6,7 +6,8 @@ but blocks:
 - failures/errors not present in the baseline failure set;
 - baseline tests that disappear from candidate collection;
 - baseline failures hidden by a skip;
-- baseline passing tests that regress to skipped/failure/error.
+- baseline passing tests that regress to skipped/failure/error;
+- a successful candidate process exit whose JUnit still contains failures/errors.
 
 Output is deterministic JSON. Pure stdlib.
 """
@@ -165,12 +166,23 @@ def compare(
             }
         ]
     )
+    candidate_exit_contradiction = (
+        [
+            {
+                "candidateExitCode": candidate_exit,
+                "junitFailureCount": len(candidate_failures),
+            }
+        ]
+        if candidate_exit == 0 and candidate_failures
+        else []
+    )
     blockers = {
         "newFailures": new_failures,
         "missingBaselineTests": missing_baseline_tests,
         "maskedBaselineFailures": masked_failures,
         "passingTestRegressions": regressions,
         "pytestExitCodeRegression": pytest_exit_code_regression,
+        "candidateExitContradiction": candidate_exit_contradiction,
     }
     verdict = "PASS" if all(not values for values in blockers.values()) else "BLOCKED"
 
@@ -198,7 +210,11 @@ def compare(
             "resolvedBaselineFailures": resolved_failures,
             "unchangedBaselineFailures": sorted(baseline_failures & candidate_failures),
             "changedKnownFailureKind": changed_known_failure_kind,
-            "resolvedPytestExitCode": baseline_exit != 0 and candidate_exit == 0,
+            "resolvedPytestExitCode": (
+                baseline_exit != 0
+                and candidate_exit == 0
+                and not candidate_failures
+            ),
         },
         "baselineFailureDetails": [
             _record(baseline[test_id]) for test_id in sorted(baseline_failures)
