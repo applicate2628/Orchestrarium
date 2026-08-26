@@ -31,6 +31,10 @@ PRE_RANGE_V3_GLOBAL_LEAD_TREE_SHA256 = (
 PROVIDER_AUTH_BASELINE_GLOBAL_LEAD_TREE_SHA256 = (
     "f03d3b74d68c032ec5c1539ce7936065d5083624b702ec4403fa7e2cc509adc7"
 )
+PRE_KIMI_GLOBAL_LEAD_REVISION = "7872d36d1019d1ac8c2e1615a9f9dbde47395815"
+PRE_KIMI_GLOBAL_LEAD_TREE_SHA256 = (
+    "565f305b4498f045e7fb40821e5ba30902ca56b0a532d299a96d6c8a1e595d50"
+)
 PROVIDER_AUTH_BASELINE_STAGED_LEAD_OVERLAYS = {
     "external-dispatch.md": ("8f92dc73", "src.codex/skills/lead/external-dispatch.md"),
     "scripts/provider_prompt.py": ("8f92dc73", "scripts/provider_prompt.py"),
@@ -288,6 +292,37 @@ def _load_installer():
     return module
 
 
+def _seed_revision_staged_lead(revision: str, destination: Path) -> Path:
+    source = destination.parent / "historical-source"
+    archive = subprocess.run(
+        ["git", "archive", "--format=tar", revision],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+    ).stdout
+    with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as package:
+        package.extractall(source, filter="data")
+
+    installer_path = source / "scripts" / "production_installer.py"
+    module_name = f"global_lead_historical_{revision}"
+    spec = importlib.util.spec_from_file_location(module_name, installer_path)
+    assert spec and spec.loader
+    historical_installer = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = historical_installer
+    spec.loader.exec_module(historical_installer)
+    stage = historical_installer._stage_canonical_lead_tree(
+        source,
+        source / "src.codex" / "skills" / "lead",
+        destination / "scripts",
+    )
+    try:
+        shutil.copytree(stage.path, destination)
+    finally:
+        shutil.rmtree(stage.path, ignore_errors=True)
+        sys.modules.pop(module_name, None)
+    return destination
+
+
 def _historical_blob(revision: str, source: str) -> bytes:
     return subprocess.run(
         ["git", "show", f"{revision}:{source}"],
@@ -427,6 +462,47 @@ def test_exact_provider_auth_baseline_lead_is_accepted_and_drift_refused(
     with pytest.raises(ValueError, match="E_ACCEPTED_PRIOR_COLLISION: lead"):
         installer._preflight_canonical_skills(
             ROOT / "src.codex" / "skills", skills_root, root=ROOT
+        )
+
+
+def test_exact_pre_kimi_global_lead_is_accepted_and_one_byte_drift_refused(
+    tmp_path: Path,
+) -> None:
+    installer = _load_installer()
+    historical = _seed_revision_staged_lead(
+        PRE_KIMI_GLOBAL_LEAD_REVISION, tmp_path / "historical" / "lead"
+    )
+    assert installer._tree_sha256(
+        historical, ignore_runtime_cache=True
+    ) == PRE_KIMI_GLOBAL_LEAD_TREE_SHA256
+
+    skills_root = tmp_path / "exact" / ".agents" / "skills"
+    shutil.copytree(historical, skills_root / "lead")
+    plan = installer._preflight_canonical_skills(
+        ROOT / "src.codex" / "skills", skills_root, root=ROOT
+    )
+    try:
+        lead = next(skill for skill in plan.skills if skill.name == "lead")
+        assert lead.accepted_prior == PRE_KIMI_GLOBAL_LEAD_TREE_SHA256
+        owner = installer._CreateOnlyMutablePath(
+            tmp_path,
+            installer._InstallTransaction([], enabled=False),
+            dry_run=False,
+        )
+        installer._apply_canonical_skills_plan(plan, skills_root, owner, root=ROOT)
+        assert installer._tree_sha256(
+            skills_root / "lead", ignore_runtime_cache=True
+        ) == lead.source_digest
+    finally:
+        installer._discard_canonical_skills_plan(plan)
+
+    drift_root = tmp_path / "drift" / ".agents" / "skills"
+    shutil.copytree(historical, drift_root / "lead")
+    with (drift_root / "lead" / "SKILL.md").open("ab") as stream:
+        stream.write(b"x")
+    with pytest.raises(ValueError, match="E_ACCEPTED_PRIOR_COLLISION: lead"):
+        installer._preflight_canonical_skills(
+            ROOT / "src.codex" / "skills", drift_root, root=ROOT
         )
 
 
