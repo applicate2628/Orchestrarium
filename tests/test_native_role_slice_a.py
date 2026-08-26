@@ -2367,6 +2367,90 @@ def test_top_level_projection_record_and_rollback_only_delete_exact_identity(
     assert installer._projection_resolves_to(target, replacement)
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows read-only directory semantics")
+def test_exact_tree_upgrade_removes_nested_readonly_runtime_cache(
+    tmp_path: Path,
+) -> None:
+    anchor = tmp_path / "global-home"
+    source = tmp_path / "canonical-skills" / "analyst"
+    target = anchor / "skills" / "analyst"
+    cache = target / "scripts" / "__pycache__"
+    source.mkdir(parents=True)
+    cache.mkdir(parents=True)
+    (source / "SKILL.md").write_text("canonical\n", encoding="utf-8")
+    (target / "SKILL.md").write_text("historical\n", encoding="utf-8")
+    (cache / "runtime.pyc").write_bytes(b"historical bytecode")
+    expected = installer._tree_sha256(target)
+    assert expected is not None
+    cache.chmod(stat.S_IREAD)
+    assert cache.stat().st_file_attributes & stat.FILE_ATTRIBUTE_READONLY
+
+    try:
+        owner = installer._CreateOnlyMutablePath(
+            anchor, installer._InstallTransaction([], enabled=False), dry_run=False
+        )
+        owner.replace_exact_tree(Path("skills") / "analyst", expected, source)
+
+        assert (target / "SKILL.md").read_text(encoding="utf-8") == "canonical\n"
+        assert not cache.exists()
+        assert not tuple(target.parent.glob(".analyst.upgrade.*"))
+    finally:
+        for path in (anchor, source.parent.parent):
+            if path.exists():
+                installer._remove_readonly_tree(path)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows read-only directory semantics")
+def test_exact_tree_post_upgrade_failure_restores_nested_readonly_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    anchor = tmp_path / "global-home"
+    source = tmp_path / "canonical-skills" / "analyst"
+    target = anchor / "skills" / "analyst"
+    cache = target / "scripts" / "__pycache__"
+    source.mkdir(parents=True)
+    cache.mkdir(parents=True)
+    historical_skill = b"historical\n"
+    historical_cache = b"historical bytecode"
+    (source / "SKILL.md").write_text("canonical\n", encoding="utf-8")
+    (target / "SKILL.md").write_bytes(historical_skill)
+    (cache / "runtime.pyc").write_bytes(historical_cache)
+    expected = installer._tree_sha256(target)
+    assert expected is not None
+    cache.chmod(stat.S_IREAD)
+    readonly_flag = cache.stat().st_file_attributes & stat.FILE_ATTRIBUTE_READONLY
+    assert readonly_flag
+
+    temporary_paths: list[Path] = []
+    real_mkdtemp = installer.tempfile.mkdtemp
+
+    def record_mkdtemp(suffix=None, prefix=None, dir=None):
+        path = Path(real_mkdtemp(suffix=suffix, prefix=prefix, dir=dir))
+        temporary_paths.append(path)
+        return str(path)
+
+    monkeypatch.setattr(installer.tempfile, "mkdtemp", record_mkdtemp)
+    try:
+        with pytest.raises(RuntimeError, match="^forced post-upgrade failure$"):
+            transaction = installer._InstallTransaction([target], enabled=True)
+            with transaction:
+                owner = installer._CreateOnlyMutablePath(
+                    anchor, transaction, dry_run=False
+                )
+                owner.replace_exact_tree(Path("skills") / "analyst", expected, source)
+                raise RuntimeError("forced post-upgrade failure")
+
+        assert (target / "SKILL.md").read_bytes() == historical_skill
+        assert (cache / "runtime.pyc").read_bytes() == historical_cache
+        assert cache.stat().st_file_attributes & stat.FILE_ATTRIBUTE_READONLY
+        assert not tuple(target.parent.glob(".analyst.upgrade.*"))
+        assert temporary_paths and all(not path.exists() for path in temporary_paths)
+    finally:
+        for path in (anchor, source.parent.parent):
+            if path.exists():
+                installer._remove_readonly_tree(path)
+
+
 def test_readonly_historical_projection_migration_uses_transaction_safe_rename(
     tmp_path: Path,
 ) -> None:

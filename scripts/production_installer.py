@@ -656,7 +656,7 @@ class _InstallTransaction:
         elif getattr(os.path, "isjunction", lambda _path: False)(path):
             path.rmdir()
         elif path.is_dir():
-            shutil.rmtree(path)
+            _remove_readonly_tree(path)
 
     def _restore_entry(self, entry: dict[str, object]) -> None:
         path = entry["path"]
@@ -1210,7 +1210,7 @@ class _CreateOnlyMutablePath:
                     != record.digest
                 ):
                     self._rollback_identity_changed()
-                shutil.rmtree(record.leaf_path)
+                _remove_readonly_tree(record.leaf_path)
             else:
                 self._rollback_identity_changed()
         except (OSError, ValueError):
@@ -1412,15 +1412,15 @@ class _CreateOnlyMutablePath:
             raise ValueError("E_MUTABLE_PATH_POSTCONDITION: invalid source tree")
         staged = Path(tempfile.mkdtemp(prefix=f".{target.name}.upgrade.", dir=target.parent))
         try:
-            shutil.rmtree(staged)
+            _remove_readonly_tree(staged)
             shutil.copytree(source, staged, symlinks=True)
             if digest(staged) != current_digest:
                 raise ValueError("E_MUTABLE_PATH_POSTCONDITION")
-            shutil.rmtree(target)
+            _remove_readonly_tree(target)
             os.replace(staged, target)
         finally:
             if staged.exists():
-                shutil.rmtree(staged, ignore_errors=True)
+                _remove_readonly_tree(staged)
         if digest(target) != current_digest:
             raise ValueError("E_MUTABLE_PATH_POSTCONDITION")
         return target
@@ -1448,7 +1448,7 @@ class _CreateOnlyMutablePath:
         self._ensure_parent(target)
         staged = Path(tempfile.mkdtemp(prefix=f".{target.name}.", dir=target.parent))
         try:
-            shutil.rmtree(staged)
+            _remove_readonly_tree(staged)
             shutil.copytree(source, staged, symlinks=True)
             if _tree_sha256(staged, ignore_runtime_cache=ignore_runtime_cache) != expected:
                 raise ValueError("E_MUTABLE_PATH_POSTCONDITION")
@@ -1456,7 +1456,7 @@ class _CreateOnlyMutablePath:
             os.replace(staged, target)
         finally:
             if staged.exists():
-                shutil.rmtree(staged)
+                _remove_readonly_tree(staged)
         if _tree_sha256(target, ignore_runtime_cache=ignore_runtime_cache) != expected:
             raise ValueError("E_MUTABLE_PATH_POSTCONDITION")
         self._record_created(
