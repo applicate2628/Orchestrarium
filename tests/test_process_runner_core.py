@@ -172,6 +172,48 @@ def test_capture_prefix_tail_and_digest_cover_persisted_bytes() -> None:
     assert stream.digest == hashlib.sha256(b"0123456789").hexdigest()
 
 
+def test_result_freeze_rejects_capture_crossed_after_child_exit() -> None:
+    """Catches a fast child exiting before the polling loop observes overflow."""
+
+    runner = _load_runner()
+    request = _request(
+        runner,
+        (sys.executable, str(CHILD), "identity"),
+        limit=8,
+    )
+    capture = runner.BoundedCaptureV1(
+        request.capture_policy, request.capture_sink_binding
+    )
+    capture.feed("stdout", b"123456789")
+
+    result = runner._result_from_parts(
+        request,
+        time.monotonic(),
+        backend="controlled-post-exit-v1",
+        capture=capture,
+        stdin_state={"written": 0, "complete": True},
+        exit_code=0,
+        failure_id=None,
+        stage="completed",
+        timed_out=False,
+        cancelled=False,
+        ownership_confirmed=True,
+        settlement_state="EMPTY",
+        direct_reaped=True,
+        primary_thread_closed=True,
+        job_handle_closed=True,
+        resources_closed=True,
+        poisoned=False,
+        cleanup_issues=(),
+    )
+
+    assert result.outcome == "supervisor-failure"
+    assert result.failure_id == "PSV1-CAPTURE-LIMIT"
+    assert result.terminal_stage == "capture-limit"
+    assert result.target_exit_code == 0
+    assert result.stdout.truncated is True
+
+
 def test_finalizer_is_idempotent_and_preserves_original_baseexception() -> None:
     """Catches repeated cleanup or replacement of the primary BaseException."""
     runner = _load_runner()

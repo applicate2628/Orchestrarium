@@ -7,6 +7,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -552,6 +553,75 @@ def test_infinite_output_is_bounded_and_settled(tmp_path: Path) -> None:
     assert receipt.treeEmpty is True
     assert receipt.resourcesClosed is True
     assert sum(path.stat().st_size for path in attempts.iterdir()) < 128 * 1024
+
+
+def test_fast_oversized_git_status_cannot_be_consumed_as_complete(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A truncated Git status prefix cannot be accepted as exact repository state."""
+
+    module = _load()
+    from scripts.process_supervision import process_runner
+
+    limit = 64
+    policy = process_runner.CapturePolicyV1(
+        "detached-fast-git-v1",
+        limit,
+        limit,
+        limit,
+        limit,
+    )
+    monkeypatch.setattr(
+        module.ValidatorCapturePolicyV1,
+        "to_capture_policy",
+        lambda _self: policy,
+    )
+    complete_status = b"?? " + (b"a" * 60) + b"\0?? b\0"
+    observed = []
+
+    def backend_factory(_runner, _lifecycle):
+        def backend(request, _owned_lifecycle, _validated_cwd):
+            capture = process_runner.BoundedCaptureV1(
+                request.capture_policy, request.capture_sink_binding
+            )
+            capture.feed("stdout", complete_status)
+            result = process_runner._result_from_parts(
+                request,
+                time.monotonic(),
+                backend="controlled-fast-git-v1",
+                capture=capture,
+                stdin_state={"written": 0, "complete": True},
+                exit_code=0,
+                failure_id=None,
+                stage="completed",
+                timed_out=False,
+                cancelled=False,
+                ownership_confirmed=True,
+                settlement_state="EMPTY",
+                direct_reaped=True,
+                primary_thread_closed=True,
+                job_handle_closed=True,
+                resources_closed=True,
+                poisoned=False,
+                cleanup_issues=(),
+            )
+            observed.append(result)
+            return result
+
+        return backend
+
+    runner = module.ProcessRunnerV1(backend_factory=backend_factory)
+    try:
+        with pytest.raises(RuntimeError, match=r"git status .* failed"):
+            module._status(runner, tmp_path)
+    finally:
+        close_result = runner.close()
+
+    assert close_result.outcome == "closed"
+    assert len(observed) == 1
+    assert observed[0].outcome == "supervisor-failure"
+    assert observed[0].failure_id == "PSV1-CAPTURE-LIMIT"
+    assert observed[0].stdout.truncated is True
 
 
 def test_timeout_settles_parent_and_descendant(tmp_path: Path) -> None:

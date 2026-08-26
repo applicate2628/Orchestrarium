@@ -1466,6 +1466,11 @@ def _result_from_parts(
     cleanup_issues: Sequence[str],
 ) -> ProcessResultV1:
     streams = capture.snapshot()
+    if failure_id is None and (
+        capture.limit_crossed or any(stream.truncated for stream in streams.values())
+    ):
+        failure_id = "PSV1-CAPTURE-LIMIT"
+        stage = "capture-limit"
     if failure_id:
         outcome = "supervisor-failure"
     elif exit_code == 0:

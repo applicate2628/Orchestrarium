@@ -241,6 +241,26 @@ def test_concurrent_runs_keep_jobs_capture_and_outcomes_isolated() -> None:
     assert shared.windows_inheritance_coordinator.poisoned is False
 
 
+def test_fast_finite_cap_plus_one_output_is_never_success() -> None:
+    """A finite child cannot authorize its truncated capture."""
+
+    runner = _load_runner()
+    limit = 1025
+    request = _request(
+        runner,
+        (sys.executable, str(CHILD), "emit", "--bytes", "513"),
+        limit=limit,
+    )
+
+    result = runner.ProcessRunnerV1().run(request)
+
+    assert result.outcome == "supervisor-failure"
+    assert result.failure_id == "PSV1-CAPTURE-LIMIT"
+    assert result.terminal_stage == "capture-limit"
+    assert result.stdout.persisted_bytes + result.stderr.persisted_bytes == limit
+    assert result.stdout.truncated or result.stderr.truncated
+
+
 def test_nested_job_host_is_supported_or_denied_before_first_marker(tmp_path: Path) -> None:
     """The target host's outer Job cannot produce a partially-started nested launch."""
     runner = _load_runner()
