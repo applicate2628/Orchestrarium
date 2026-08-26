@@ -1165,17 +1165,13 @@ class WindowsArgvAdmissionOwnerV1:
             result.failure_id is not None
             or result.outcome != "success"
             or result.target_exit_code != 0
-        ):
-            raise _WindowsArgvProbeFailure(result)
-        if (
-            not result.tree.tree_empty
+            or not result.tree.tree_empty
             or not result.resources_closed
+            or result.cleanup_uncertain
             or result.stdout.truncated
             or result.stderr.truncated
         ):
-            raise ProcessSupervisionError(
-                "PSV1-ARGV-ATTESTATION", "request-validation"
-            )
+            raise _WindowsArgvProbeFailure(result)
         if time.monotonic() >= probe_request.deadline_monotonic:
             raise ProcessSupervisionError("PSV1-DEADLINE", "deadline")
         return probe_request.capture_sink_binding.bytes_for("stdout")

@@ -487,6 +487,158 @@ def test_nonzero_probe_preserves_child_failure_evidence_and_never_starts_task(
     assert not marker.exists()
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows internal probe settlement")
+@pytest.mark.parametrize("case", ("resource-uncertain", "tree-nonempty", "truncated"))
+def test_ineligible_probe_settlement_preserves_original_evidence_and_zero_task(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    case: str,
+) -> None:
+    """Ineligible settled probe evidence crosses the private handoff unchanged."""
+
+    module = _load_runner()
+    owner = module.ProcessRunnerV1()
+    marker = tmp_path / "task-started.txt"
+    request = _request(
+        module,
+        owner,
+        (
+            str(Path(sys.executable).resolve()),
+            str(CHILD),
+            "marker",
+            "--marker",
+            str(marker),
+        ),
+        "python-validator-json-echo-v1",
+    )
+    expected_tree_empty = case != "tree-nonempty"
+    expected_resources_closed = case != "resource-uncertain"
+    expected_uncertain = case == "resource-uncertain"
+    expected_truncated = case == "truncated"
+    expected_cleanup = (
+        ("PSV1-RESOURCE-CLOSE",) if case == "resource-uncertain" else ()
+    )
+
+    def ineligible_result(_lifecycle, probe_request, _admission):
+        base = module._request_failure(
+            probe_request,
+            module.ProcessSupervisionError("PSV1-INTERNAL", "execution"),
+            time.monotonic(),
+        )
+        stdout = (
+            module.StreamObservationV1(
+                65537,
+                65536,
+                True,
+                b"x",
+                b"y",
+                "d" * 64,
+                "e" * 64,
+            )
+            if expected_truncated
+            else module._empty_stream()
+        )
+        return dataclasses.replace(
+            base,
+            outcome="success",
+            failure_id=None,
+            terminal_stage="completed",
+            target_exit_code=0,
+            stdout=stdout,
+            tree=module.TreeObservationV1(
+                "windows-job-v1",
+                True,
+                "EMPTY" if expected_tree_empty else "NONEMPTY",
+                expected_tree_empty,
+                True,
+                True,
+                True,
+            ),
+            resources_closed=expected_resources_closed,
+            cleanup_uncertain=expected_uncertain,
+            cleanup_issues=expected_cleanup,
+            policy_id="windows-internal-argv-probe-v1",
+        )
+
+    monkeypatch.setattr(
+        owner.windows_argv_admission_owner,
+        "_run_internal_probe",
+        ineligible_result,
+    )
+
+    result = owner.run(request)
+
+    assert result.outcome == "success"
+    assert result.failure_id is None
+    assert result.target_exit_code == 0
+    assert result.tree.backend == "windows-job-v1"
+    assert result.tree.tree_empty is expected_tree_empty
+    assert result.resources_closed is expected_resources_closed
+    assert result.cleanup_uncertain is expected_uncertain
+    assert result.cleanup_issues == expected_cleanup
+    assert result.stdout.truncated is expected_truncated
+    assert result.stdout.observed_bytes == (65537 if expected_truncated else 0)
+    assert result.policy_id == "windows-internal-argv-probe-v1"
+    assert not marker.exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows internal probe content")
+def test_fully_settled_probe_content_mismatch_remains_argv_attestation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only eligible settlement reaches content parsing; malformed echo stays typed."""
+
+    module = _load_runner()
+    owner = module.ProcessRunnerV1()
+    marker = tmp_path / "task-started.txt"
+    request = _request(
+        module,
+        owner,
+        (
+            str(Path(sys.executable).resolve()),
+            str(CHILD),
+            "marker",
+            "--marker",
+            str(marker),
+        ),
+        "python-validator-json-echo-v1",
+    )
+
+    def eligible_but_empty(_lifecycle, probe_request, _admission):
+        base = module._request_failure(
+            probe_request,
+            module.ProcessSupervisionError("PSV1-INTERNAL", "execution"),
+            time.monotonic(),
+        )
+        return dataclasses.replace(
+            base,
+            outcome="success",
+            failure_id=None,
+            terminal_stage="completed",
+            target_exit_code=0,
+            tree=module.TreeObservationV1(
+                "windows-job-v1", True, "EMPTY", True, True, True, True
+            ),
+            resources_closed=True,
+            cleanup_uncertain=False,
+            cleanup_issues=(),
+            policy_id="windows-internal-argv-probe-v1",
+        )
+
+    monkeypatch.setattr(
+        owner.windows_argv_admission_owner,
+        "_run_internal_probe",
+        eligible_but_empty,
+    )
+
+    result = owner.run(request)
+
+    assert result.failure_id == "PSV1-ARGV-ATTESTATION"
+    assert result.terminal_stage == "request-validation"
+    assert result.outcome == "supervisor-failure"
+    assert not marker.exists()
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows internal probe lifecycle")
 def test_runner_close_cancels_and_reaps_active_probe(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
