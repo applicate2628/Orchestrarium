@@ -35,6 +35,10 @@ PRE_KIMI_GLOBAL_LEAD_REVISION = "7872d36d1019d1ac8c2e1615a9f9dbde47395815"
 PRE_KIMI_GLOBAL_LEAD_TREE_SHA256 = (
     "565f305b4498f045e7fb40821e5ba30902ca56b0a532d299a96d6c8a1e595d50"
 )
+PRE_K3_WIRE_FIX_GLOBAL_LEAD_REVISION = "dfd43c4534ba1cc7be89ccbcce2bc4595f052fa0"
+PRE_K3_WIRE_FIX_GLOBAL_LEAD_TREE_SHA256 = (
+    "dd652b00b68a51273470ad4d3924454255d9ab5260da743fa2aa6bf2a7396627"
+)
 PROVIDER_AUTH_BASELINE_STAGED_LEAD_OVERLAYS = {
     "external-dispatch.md": ("8f92dc73", "src.codex/skills/lead/external-dispatch.md"),
     "scripts/provider_prompt.py": ("8f92dc73", "scripts/provider_prompt.py"),
@@ -555,16 +559,29 @@ def test_exact_provider_auth_baseline_lead_is_accepted_and_drift_refused(
         )
 
 
-def test_exact_pre_kimi_global_lead_is_accepted_and_one_byte_drift_refused(
+@pytest.mark.parametrize(
+    ("revision", "expected_digest"),
+    (
+        (PRE_KIMI_GLOBAL_LEAD_REVISION, PRE_KIMI_GLOBAL_LEAD_TREE_SHA256),
+        (
+            PRE_K3_WIRE_FIX_GLOBAL_LEAD_REVISION,
+            PRE_K3_WIRE_FIX_GLOBAL_LEAD_TREE_SHA256,
+        ),
+    ),
+    ids=("pre-kimi", "pre-k3-wire-fix"),
+)
+def test_exact_shipped_global_lead_is_accepted_and_one_byte_drift_refused(
     tmp_path: Path,
+    revision: str,
+    expected_digest: str,
 ) -> None:
     installer = _load_installer()
     historical = _seed_revision_staged_lead(
-        PRE_KIMI_GLOBAL_LEAD_REVISION, tmp_path / "historical" / "lead"
+        revision, tmp_path / "historical" / "lead"
     )
     assert installer._tree_sha256(
         historical, ignore_runtime_cache=True
-    ) == PRE_KIMI_GLOBAL_LEAD_TREE_SHA256
+    ) == expected_digest
 
     skills_root = tmp_path / "exact" / ".agents" / "skills"
     shutil.copytree(historical, skills_root / "lead")
@@ -573,7 +590,7 @@ def test_exact_pre_kimi_global_lead_is_accepted_and_one_byte_drift_refused(
     )
     try:
         lead = next(skill for skill in plan.skills if skill.name == "lead")
-        assert lead.accepted_prior == PRE_KIMI_GLOBAL_LEAD_TREE_SHA256
+        assert lead.accepted_prior == expected_digest
         owner = installer._CreateOnlyMutablePath(
             tmp_path,
             installer._InstallTransaction([], enabled=False),
