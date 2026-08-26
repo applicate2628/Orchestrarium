@@ -9,7 +9,9 @@ import shutil
 import subprocess
 import sys
 import threading
+import ast
 from dataclasses import replace
+from types import SimpleNamespace
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -255,10 +257,8 @@ def _write_result(
     *,
     stderr: bytes = b"",
 ) -> None:
-    with lifecycle.open_for_write(lifecycle.out_path) as stream:
-        stream.write(data)
-    with lifecycle.open_for_write(lifecycle.err_path) as stream:
-        stream.write(stderr)
+    lifecycle._test_stdout = data
+    lifecycle._test_stderr = stderr
 
 
 def _outcome() -> owner.FinalOutcome:
@@ -297,14 +297,16 @@ def test_codex_hook_trust_uses_target_sidecar_and_ignores_helper_sibling(
     stale_inventory.write_text("stale", encoding="utf-8")
     observed: list[str] = []
 
-    def probe(arguments, **_kwargs):
+    def probe(_runner, arguments, **_kwargs):
         observed.extend(arguments)
-        return subprocess.CompletedProcess(arguments, 0, "", "")
+        return SimpleNamespace(outcome="success", target_exit_code=0), b"", b""
 
     monkeypatch.setattr(owner, "codex_hook_health_helper", lambda _home: helper)
-    monkeypatch.setattr(owner.subprocess, "run", probe)
+    monkeypatch.setattr(owner, "run_support_command", probe)
 
-    assert owner.require_codex_hook_trust(["codex", "exec"], codex_home, tmp_path) == 0
+    assert owner.require_codex_hook_trust(
+        owner.ProcessRunnerV1(), ["codex", "exec"], codex_home, tmp_path
+    ) == 0
     assert observed[observed.index("--target") + 1] == str(target.resolve())
     assert target_inventory.is_file()
     assert "--inventory" not in observed
@@ -417,7 +419,7 @@ def test_partial_exclusive_child_creation_is_reclaimed(
     def fail_second_open(path, flags, mode=0o777):
         nonlocal calls
         calls += 1
-        if calls == 2:
+        if calls == 1:
             raise PermissionError("fixture exclusive creation denial")
         return real_open(path, flags, mode)
 
@@ -425,11 +427,11 @@ def test_partial_exclusive_child_creation_is_reclaimed(
         scoped.setattr(owner.os, "open", fail_second_open)
         with pytest.raises(PermissionError, match="exclusive creation denial"):
             lifecycle.initialize(b"prompt")
-    assert lifecycle.prompt_path.is_file()
+    assert not lifecycle.prompt_path.exists()
     provisional = owner.RunCaptureLifecycle.release_provisional(lifecycle.run_dir)
-    assert not provisional.clean
-    assert provisional.recovery_retained
-    assert lifecycle.run_dir.is_dir()
+    assert provisional.clean
+    assert not provisional.recovery_retained
+    assert not lifecycle.run_dir.exists()
 
 
 def test_empty_provisional_directory_uses_only_rmdir(
@@ -511,6 +513,7 @@ def test_provider_adapter_uses_settled_canonical_runner_result(tmp_path: Path) -
             environment[name] = os.environ[name]
 
     result, stdout, stderr = owner.run_provider_process(
+        owner.ProcessRunnerV1(),
         [sys.executable, str(child)],
         [],
         environment,
@@ -540,6 +543,7 @@ def test_provider_adapter_settles_retained_pipe_descendant(tmp_path: Path) -> No
             environment[name] = os.environ[name]
 
     result, _stdout, _stderr = owner.run_provider_process(
+        owner.ProcessRunnerV1(),
         [sys.executable, str(ROOT / "tests" / "fixtures" / "process_supervision" / "child_helper.py")],
         ["grandchild-retains-pipe", "--marker", str(tmp_path / "grandchild")],
         environment,
@@ -624,6 +628,7 @@ def test_provider_adapter_injected_cancellation_emits_nonpass_terminal(
             environment[name] = os.environ[name]
     original_runner = owner.run_provider_process
     base, _stdout, _stderr = original_runner(
+        owner.ProcessRunnerV1(),
         [sys.executable, str(child)],
         [],
         environment,
@@ -676,6 +681,70 @@ def test_provider_adapter_injected_cancellation_emits_nonpass_terminal(
     _assert_external_terminal_is_nonauthorizing(item, payload)
 
 
+def test_provider_launch_injects_one_runner_through_trust_ledger_and_child(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fake = _make_fake_provider(tmp_path, "codex")
+    prompt = tmp_path / "prompt.md"
+    prompt.write_text("fixture", encoding="utf-8")
+    item = _make_work_item(tmp_path, "runner-identity")
+    home = prepare_codex_home(tmp_path)
+    runner = owner.ProcessRunnerV1()
+    original_provider = owner.run_provider_process
+    base, raw_stdout, raw_stderr = original_provider(
+        runner,
+        [sys.executable, str(fake)],
+        ["exec", "--skip-git-repo-check", "--json"],
+        {"OPENAI_API_KEY": "fixture", "CODEX_HOME": str(home)},
+        ROOT,
+        b"fixture",
+        owner.Control(timeout_secs=5, capture_max_bytes=1024),
+    )
+    observed: list[int] = []
+    monkeypatch.setattr(owner, "ProcessRunnerV1", lambda: runner)
+    monkeypatch.setattr(
+        owner,
+        "require_codex_hook_trust",
+        lambda supplied, *_args: observed.append(id(supplied)) or 0,
+    )
+    monkeypatch.setattr(
+        owner,
+        "run_ledger",
+        lambda supplied, _args: observed.append(id(supplied)) or True,
+    )
+    monkeypatch.setattr(owner, "read_back_external_terminal", lambda *_args: {})
+    monkeypatch.setattr(
+        owner,
+        "run_provider_process",
+        lambda supplied, *_args: (observed.append(id(supplied)) or base, raw_stdout, raw_stderr),
+    )
+    monkeypatch.setenv("CODEX_BIN", str(fake))
+    monkeypatch.setenv("CODEX_HOME", str(home))
+    monkeypatch.setenv("OPENAI_API_KEY", "fixture")
+    monkeypatch.setenv("CODEX_PROMPTS_DIR", str((tmp_path / "captures").resolve()))
+
+    assert owner.launch(
+        "codex",
+        ["fixture", "--prompt-file", str(prompt), "--ledger", str(item)],
+    ) == 0
+    assert owner.parse_provider_result(capsys.readouterr().out)["authorizing"] is False
+    assert observed == [id(runner), id(runner), id(runner), id(runner)]
+
+
+def test_provider_owner_has_no_direct_subprocess_launches() -> None:
+    tree = ast.parse(MODULE.read_text(encoding="utf-8"))
+    direct = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "subprocess"
+        and node.func.attr in {"run", "Popen"}
+    ]
+    assert direct == []
+
+
 def test_materialization_accepts_limit_and_rejects_limit_plus_one(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -692,30 +761,6 @@ def test_materialization_accepts_limit_and_rejects_limit_plus_one(
         owner.materialize_terminal(oversized, "claude", 0, 16)
     assert oversized.run_dir.is_dir()
     assert oversized.cleanup().clean
-
-
-def test_result_read_denial_is_nonpass_and_preserves_secure_recovery(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    lifecycle = _lifecycle(tmp_path, monkeypatch)
-    _write_result(lifecycle, b"GATE: PASS\n")
-
-    def deny(*_args, **_kwargs):
-        raise PermissionError(f"denied {lifecycle.run_dir}")
-
-    monkeypatch.setattr(lifecycle, "read_bounded", deny)
-    stream = io.StringIO()
-    monkeypatch.setattr(owner.sys, "stdout", stream)
-    code = owner.finalize_run(
-        owner.Control(), "claude", "opus", "xhigh", "fixture", "", lifecycle, 0
-    )
-    payload = owner.parse_provider_result(stream.getvalue())
-    assert code != 0
-    assert payload["token"] == "UNVERIFIED:result-materialization"
-    assert payload["gate"] == "none"
-    assert payload["captureRecoveryRetained"] is False
-    assert str(lifecycle.run_dir) not in json.dumps(payload)
-    assert not lifecycle.run_dir.exists()
 
 
 def test_oversize_finalize_is_nonpass_and_preserves_secure_recovery(
@@ -921,11 +966,12 @@ def test_codex_terminal_record_requires_actual_terminal_readback(
         0, "COMPLETE:PASS", "completed", "PASS", "fixture",
         "complete", 0, "", False, 0,
     )
-    monkeypatch.setattr(owner, "run_ledger", lambda _args: True)
+    monkeypatch.setattr(owner, "run_ledger", lambda _runner, _args: True)
 
     recorded = owner.record_terminal(
         control, "codex", "fixture-model", "high", "fixture-slug", "launch-codex-001",
         outcome, cancelled=False, timed_out=False, result_delivered=True,
+        runner=owner.ProcessRunnerV1(),
     )
 
     assert recorded is False
@@ -1047,7 +1093,7 @@ def test_per_file_scrub_failure_still_attempts_all_and_purges_canaries(
     monkeypatch.setattr(owner.RunCaptureLifecycle, "_scrub_regular_payload", staticmethod(fail_one))
     cleanup = lifecycle.cleanup()
     assert not cleanup.clean and cleanup.recovery_retained
-    assert {"prompt.md", "provider.out", "provider.err", "provider.pid"} <= set(calls)
+    assert calls == ["prompt.md"]
     assert not any(
         b"RAW_PROMPT_CANARY" in path.read_bytes() or b"RAW_PROVIDER_CANARY" in path.read_bytes()
         for path in lifecycle.root.rglob("*") if path.is_file()
@@ -1327,12 +1373,9 @@ def test_no_dead_verdict_artifact_or_writer_remains(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     lifecycle = _lifecycle(tmp_path, monkeypatch)
-    assert {path.name for path in lifecycle.run_dir.iterdir()} == {
-        "prompt.md",
-        "provider.out",
-        "provider.err",
-        "provider.pid",
-    }
+    assert {path.name for path in lifecycle.run_dir.iterdir()} == {"prompt.md"}
+    assert not hasattr(lifecycle, "open_for_write")
+    assert not hasattr(lifecycle, "write_pid")
     source = MODULE.read_text(encoding="utf-8")
     assert ".verdict" not in source
     assert "write_verdict" not in source

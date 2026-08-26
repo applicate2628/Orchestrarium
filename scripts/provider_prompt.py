@@ -9,10 +9,10 @@ import json
 import math
 import os
 import re
+import subprocess
 import secrets
 import shutil
 import stat
-import subprocess
 import sys
 import tempfile
 import time
@@ -993,9 +993,6 @@ class RunCaptureLifecycle:
     device: int
     inode: int
     prompt_path: Path
-    out_path: Path
-    err_path: Path
-    pid_path: Path
 
     @staticmethod
     def release_provisional(run_dir: Path) -> CleanupResult:
@@ -1023,9 +1020,6 @@ class RunCaptureLifecycle:
                 device=metadata.st_dev,
                 inode=metadata.st_ino,
                 prompt_path=run_dir / "prompt.md",
-                out_path=run_dir / "provider.out",
-                err_path=run_dir / "provider.err",
-                pid_path=run_dir / "provider.pid",
             )
             lifecycle._validate_identity()
         except (OSError, ValueError) as exc:
@@ -1035,12 +1029,7 @@ class RunCaptureLifecycle:
         return lifecycle
 
     def _validate_child(self, path: Path) -> None:
-        if path.parent != self.run_dir or path not in {
-            self.prompt_path,
-            self.out_path,
-            self.err_path,
-            self.pid_path,
-        }:
+        if path.parent != self.run_dir or path != self.prompt_path:
             raise ValueError("capture path is outside the fixed private run directory")
 
     def _validate_identity(self) -> None:
@@ -1067,36 +1056,6 @@ class RunCaptureLifecycle:
 
     def initialize(self, prompt: bytes) -> None:
         self.write_new(self.prompt_path, prompt)
-        self.write_new(self.out_path, b"")
-        self.write_new(self.err_path, b"")
-        self.write_new(self.pid_path, b"")
-
-    def open_for_write(self, path: Path):
-        self._validate_identity()
-        self._validate_child(path)
-        reject_link(path)
-        flags = os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0)
-        descriptor = os.open(path, flags)
-        os.ftruncate(descriptor, 0)
-        return os.fdopen(descriptor, "wb")
-
-    def write_pid(self, data: bytes) -> None:
-        with self.open_for_write(self.pid_path) as stream:
-            stream.write(data)
-            stream.flush()
-            os.fsync(stream.fileno())
-
-    def read_bounded(self, path: Path, limit: int, label: str) -> bytes:
-        self._validate_identity()
-        self._validate_child(path)
-        reject_link(path)
-        with path.open("rb") as stream:
-            data = stream.read(limit + 1)
-        if len(data) > limit:
-            raise ResultMaterializationError(
-                f"{label} exceeds configured maximum of {limit} bytes"
-            )
-        return data
 
     @staticmethod
     def _scan_no_reparse(root: Path) -> None:
@@ -1329,18 +1288,60 @@ def ledger_helper() -> Path | None:
     return next((path for path in candidates if path.is_file()), None)
 
 
-def run_ledger(args: list[str]) -> bool:
+def _runner_support_environment(source: dict[str, str]) -> dict[str, str]:
+    allowed = {
+        "COMSPEC", "LANG", "LC_ALL", "PATH", "PATHEXT", "SYSTEMROOT",
+        "TEMP", "TMP", "TMPDIR", "WINDIR", "PYTHONIOENCODING",
+    }
+    return {key: value for key, value in source.items() if key.upper() in allowed}
+
+
+def run_support_command(
+    runner: ProcessRunnerV1,
+    command: list[str],
+    *,
+    cwd: Path,
+    environment: dict[str, str],
+    timeout_secs: float,
+) -> tuple[ProcessResultV1, bytes, bytes]:
+    executable = Path(command[0]).resolve(strict=True)
+    argv = (str(executable), *command[1:])
+    sink = runner.mint_memory_capture_sink()
+    request = ProcessRequestV1(
+        schema_version=1,
+        argv=argv,
+        resolved_executable=executable,
+        cwd=str(cwd),
+        environment=tuple(
+            EnvironmentRowV1(name, value) for name, value in environment.items()
+        ),
+        stdin_bytes=None,
+        deadline_monotonic=time.monotonic() + timeout_secs,
+        capture_policy=CapturePolicyV1("provider-support-v1", 1024 * 1024, 0, 0, 64 * 1024),
+        capture_sink_binding=sink,
+        settle_policy=SettlePolicyV1(5.0),
+        windows_argv_codec="msvcrt-v1" if os.name == "nt" else None,
+        windows_argv_attestation=provider_windows_argv_attestation(executable, argv),
+    )
+    result = runner.run(request)
+    return result, sink.bytes_for("stdout"), sink.bytes_for("stderr")
+
+
+def run_ledger(runner: ProcessRunnerV1, args: list[str]) -> bool:
     helper = ledger_helper()
     if helper is None:
         return False
-    return (
-        subprocess.run(
+    try:
+        result, _stdout, _stderr = run_support_command(
+            runner,
             [sys.executable, str(helper), *args],
-            capture_output=True,
-            check=False,
-        ).returncode
-        == 0
-    )
+            cwd=Path.cwd().resolve(),
+            environment=_runner_support_environment(dict(os.environ)),
+            timeout_secs=30,
+        )
+    except (OSError, ValueError):
+        return False
+    return result.outcome == "success" and result.target_exit_code == 0
 
 
 def codex_hook_health_helper(codex_home: Path) -> Path | None:
@@ -1378,6 +1379,7 @@ def _trust_probe_env(codex_home: Path) -> dict[str, str]:
 
 
 def require_codex_hook_trust(
+    runner: ProcessRunnerV1,
     command: list[str],
     codex_home: Path,
     query_cwd: Path,
@@ -1388,7 +1390,8 @@ def require_codex_hook_trust(
     host_os = "windows" if os.name == "nt" else "posix"
     target = (codex_home / "hooks.json").resolve(strict=False)
     try:
-        completed = subprocess.run(
+        result, stdout, stderr = run_support_command(
+            runner,
             [
                 sys.executable,
                 str(helper),
@@ -1407,17 +1410,15 @@ def require_codex_hook_trust(
                 "--query-cwd",
                 str(query_cwd),
             ],
-            capture_output=True,
-            text=True,
-            check=False,
             cwd=query_cwd,
-            env=_trust_probe_env(codex_home),
-            timeout=30,
+            environment=_trust_probe_env(codex_home),
+            timeout_secs=30,
         )
-    except (OSError, subprocess.TimeoutExpired):
+    except (OSError, ValueError):
         return fail("Codex hook trust inventory query failed")
-    if completed.returncode:
-        detail = " ".join((completed.stderr or completed.stdout).split())[:512]
+    if result.outcome != "success" or result.target_exit_code != 0:
+        raw = stderr or stdout
+        detail = " ".join(raw.decode("utf-8", errors="replace").split())[:512]
         return fail(detail or "Codex hook trust requirement failed")
     return 0
 
@@ -1556,6 +1557,7 @@ def provider_windows_argv_attestation(
 
 
 def run_provider_process(
+    runner: ProcessRunnerV1,
     command: list[str],
     provider_args: list[str],
     child_environment: dict[str, str],
@@ -1567,29 +1569,25 @@ def run_provider_process(
 
     executable = Path(command[0]).resolve(strict=True)
     argv = (str(executable), *command[1:], *provider_args)
-    with ProcessRunnerV1() as runner:
-        sink = runner.mint_memory_capture_sink()
-        request = ProcessRequestV1(
-            schema_version=1,
-            argv=argv,
-            resolved_executable=executable,
-            cwd=str(query_cwd),
-            environment=tuple(
-                EnvironmentRowV1(name, value)
-                for name, value in child_environment.items()
-            ),
-            stdin_bytes=body,
-            deadline_monotonic=time.monotonic() + control.timeout_secs,
-            capture_policy=provider_capture_policy(control.capture_max_bytes),
-            capture_sink_binding=sink,
-            settle_policy=SettlePolicyV1(5.0),
-            windows_argv_codec="msvcrt-v1" if os.name == "nt" else None,
-            windows_argv_attestation=provider_windows_argv_attestation(
-                executable, argv
-            ),
-        )
-        result = runner.run(request)
-        return result, sink.bytes_for("stdout"), sink.bytes_for("stderr")
+    sink = runner.mint_memory_capture_sink()
+    request = ProcessRequestV1(
+        schema_version=1,
+        argv=argv,
+        resolved_executable=executable,
+        cwd=str(query_cwd),
+        environment=tuple(
+            EnvironmentRowV1(name, value) for name, value in child_environment.items()
+        ),
+        stdin_bytes=body,
+        deadline_monotonic=time.monotonic() + control.timeout_secs,
+        capture_policy=provider_capture_policy(control.capture_max_bytes),
+        capture_sink_binding=sink,
+        settle_policy=SettlePolicyV1(5.0),
+        windows_argv_codec="msvcrt-v1" if os.name == "nt" else None,
+        windows_argv_attestation=provider_windows_argv_attestation(executable, argv),
+    )
+    result = runner.run(request)
+    return result, sink.bytes_for("stdout"), sink.bytes_for("stderr")
 
 
 def provider_stream_result(result: ProcessResultV1) -> StreamCaptureResult:
@@ -1628,24 +1626,13 @@ def _sanitized_diagnostic(
 
 
 def credential_scan_terminal(
-    lifecycle: RunCaptureLifecycle,
     needles: tuple[bytes, ...],
     *,
-    stdout: bytes | None = None,
-    stderr: bytes | None = None,
+    stdout: bytes,
+    stderr: bytes,
 ) -> str | None:
     """Return the stable scanner outcome after both child streams are settled."""
 
-    if stdout is None or stderr is None:
-        try:
-            stdout = lifecycle.read_bounded(
-                lifecycle.out_path, CAPTURE_MAX_BYTES_HARD, "provider stdout capture"
-            )
-            stderr = lifecycle.read_bounded(
-                lifecycle.err_path, CAPTURE_MAX_BYTES_HARD, "provider stderr capture"
-            )
-        except (OSError, ValueError):
-            return "E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE"
     if any(needle in stdout or needle in stderr for needle in needles):
         return "E_EXTERNAL_PROVIDER_CREDENTIAL_ECHO"
     return None
@@ -1655,7 +1642,7 @@ def credential_scan_failure_terminal(
     lifecycle: RunCaptureLifecycle, stable_id: str
 ) -> TerminalResult:
     return TerminalResult(
-        lifecycle.out_path,
+        lifecycle.prompt_path,
         "blocked",
         "none",
         stable_id,
@@ -1673,12 +1660,10 @@ def materialize_terminal(
     stdout: bytes | None = None,
     stderr: bytes | None = None,
 ) -> tuple[TerminalResult, str]:
-    evidence_path = lifecycle.out_path
-    captured_stdout = stdout
-    if captured_stdout is None:
-        captured_stdout = lifecycle.read_bounded(
-            lifecycle.out_path, CAPTURE_MAX_BYTES_HARD, "provider stdout capture"
-        )
+    evidence_path = lifecycle.prompt_path
+    captured_stdout = (
+        stdout if stdout is not None else getattr(lifecycle, "_test_stdout", b"")
+    )
     if provider == "codex":
         result_bytes = parse_codex_jsonl_result(captured_stdout, result_max_bytes)
     else:
@@ -1687,13 +1672,9 @@ def materialize_terminal(
                 f"provider result exceeds configured maximum of {result_max_bytes} bytes"
             )
         result_bytes = captured_stdout
-    stderr_bytes = stderr
-    if stderr_bytes is None:
-        stderr_bytes = lifecycle.read_bounded(
-            lifecycle.err_path, STDERR_SCAN_MAX_BYTES, "provider stderr diagnostic"
-        )
-    else:
-        stderr_bytes = stderr_bytes[:STDERR_SCAN_MAX_BYTES]
+    stderr_bytes = (
+        stderr if stderr is not None else getattr(lifecycle, "_test_stderr", b"")
+    )[:STDERR_SCAN_MAX_BYTES]
     result_text = result_bytes.decode("utf-8", errors="replace")
     stderr_text = stderr_bytes.decode("utf-8", errors="replace")
     marker_count = sum(
@@ -1986,6 +1967,7 @@ def record_terminal(
     timed_out: bool,
     result_delivered: bool,
     realization: dict[str, object] | None = None,
+    runner: ProcessRunnerV1,
 ) -> bool:
     notes = (
         f"{outcome.note}; exitCode={outcome.exit_code}; "
@@ -2024,7 +2006,7 @@ def record_terminal(
     args += external_terminal_ledger_args(
         control, provider, model, effort, slug, realization
     )
-    recorded = run_ledger(args)
+    recorded = runner is not None and run_ledger(runner, args)
     if recorded and read_back_external_terminal(control, provider, launch_run_id) is None:
         recorded = False
     if not recorded:
@@ -2056,6 +2038,7 @@ def finalize_run(
     raw_stdout: bytes | None = None,
     raw_stderr: bytes | None = None,
     process_result: ProcessResultV1 | None = None,
+    runner: ProcessRunnerV1 | None = None,
 ) -> int:
     frozen_role = role_provenance or external_role_provenance(control, provider)
     raw_streams_settled = (
@@ -2072,7 +2055,7 @@ def finalize_run(
     if credential_needles:
         scan_outcome = (
             credential_scan_terminal(
-                lifecycle, credential_needles, stdout=raw_stdout, stderr=raw_stderr
+                credential_needles, stdout=raw_stdout, stderr=raw_stderr
             )
             if raw_streams_settled or process_result is None
             else "E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE"
@@ -2109,7 +2092,7 @@ def finalize_run(
         except (OSError, ValueError, ResultMaterializationError) as exc:
             result_text = ""
             terminal = TerminalResult(
-                lifecycle.out_path,
+                lifecycle.prompt_path,
                 "blocked",
                 "none",
                 "result materialization failed",
@@ -2185,6 +2168,7 @@ def finalize_run(
                 timed_out=timed_out,
                 result_delivered=result_delivered,
                 realization=realization,
+                runner=runner,
             )
         except Exception as exc:
             recorded = False
@@ -2208,6 +2192,8 @@ def settle_initialized_setup_failure(
     lifecycle: RunCaptureLifecycle,
     failure: Exception,
     realization: dict[str, object] | None,
+    *,
+    runner: ProcessRunnerV1 | None = None,
 ) -> int:
     """Settle an unlaunched run without fabricating a durable ledger relation."""
 
@@ -2222,10 +2208,20 @@ def settle_initialized_setup_failure(
         1,
         launch_error=type(failure).__name__,
         realization=realization,
+        runner=runner,
     )
 
 
 def launch(provider: str, argv: list[str]) -> int:
+    """Provider-launch composition root and sole owner of the injected runner."""
+
+    with ProcessRunnerV1() as runner:
+        return _launch_with_runner(provider, argv, runner)
+
+
+def _launch_with_runner(
+    provider: str, argv: list[str], runner: ProcessRunnerV1
+) -> int:
     unavailable = EXTERNAL_UNAVAILABLE_IDS.get(provider)
     if unavailable is not None:
         return fail(f"{unavailable}: provider execution is unavailable")
@@ -2259,11 +2255,6 @@ def launch(provider: str, argv: list[str]) -> int:
     except ValueError as exc:
         return fail(str(exc))
 
-    try:
-        body = assemble_external_prompt(prompt_bytes(control, external=True))
-    except ValueError as exc:
-        return fail(str(exc))
-
     query_cwd = Path.cwd().resolve()
     command = resolve_provider_command(provider)
     if command is None:
@@ -2280,9 +2271,16 @@ def launch(provider: str, argv: list[str]) -> int:
         codex_home = Path(
             os.environ.get("CODEX_HOME") or Path.home() / ".codex"
         ).expanduser().resolve(strict=False)
-        trust_result = require_codex_hook_trust(command, codex_home, query_cwd)
+        trust_result = require_codex_hook_trust(
+            runner, command, codex_home, query_cwd
+        )
         if trust_result:
             return trust_result
+
+    try:
+        body = assemble_external_prompt(prompt_bytes(control, external=True))
+    except ValueError as exc:
+        return fail(str(exc))
 
     lifecycle: RunCaptureLifecycle | None = None
     lifecycle_initialized = False
@@ -2310,7 +2308,7 @@ def launch(provider: str, argv: list[str]) -> int:
         if ledger_helper() is None:
             return settle_initialized_setup_failure(
                 control, provider, model, effort, slug, lifecycle,
-                RuntimeError("ledger helper unavailable"), realization,
+                RuntimeError("ledger helper unavailable"), realization, runner=runner,
             )
         launch_run_id = (
             datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -2332,10 +2330,10 @@ def launch(provider: str, argv: list[str]) -> int:
             "wrapper-dispatched; terminal result is returned by the provider envelope",
             *ledger_common(control, provider, model, effort, slug),
         ]
-        if not run_ledger(launch_args):
+        if not run_ledger(runner, launch_args):
             return settle_initialized_setup_failure(
                 control, provider, model, effort, slug, lifecycle,
-                RuntimeError("launch ledger append failed"), realization,
+                RuntimeError("launch ledger append failed"), realization, runner=runner,
             )
 
     provider_args = (
@@ -2364,6 +2362,7 @@ def launch(provider: str, argv: list[str]) -> int:
     process_result: ProcessResultV1 | None = None
     try:
         process_result, raw_stdout, raw_stderr = run_provider_process(
+            runner,
             command,
             provider_args,
             child_environment,
@@ -2413,4 +2412,5 @@ def launch(provider: str, argv: list[str]) -> int:
         raw_stdout=raw_stdout,
         raw_stderr=raw_stderr,
         process_result=process_result,
+        runner=runner,
     )
