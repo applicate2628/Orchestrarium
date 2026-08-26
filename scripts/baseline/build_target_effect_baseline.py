@@ -38,6 +38,8 @@ def _load_inventory(path: Path) -> dict[str, object]:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise TargetEffectError(f"cannot read capability inventory {path}: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise TargetEffectError("capability inventory top level must be an object")
     if payload.get("schemaVersion") != 1:
         raise TargetEffectError(
             f"unsupported capability inventory schemaVersion: {payload.get('schemaVersion')!r}"
