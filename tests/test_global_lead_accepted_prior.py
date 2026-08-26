@@ -200,6 +200,9 @@ STOCK_8521_CANONICAL_SKILL_TREE_SHA256 = {
 STOCK_7872_CANONICAL_SKILL_TREE_SHA256 = {
     "consultant": "f1a23b5ceaa93c29cf0c5f9c9eec8c5997a7b4339fcd90abd13798df77e60793",
     "design-panel": "685b75f5726dd16dbcf2b5fb3238652b8564242e5b66f0daf2b582267905f67b",
+    "init-project": "cd5bc7386f286393ee8dab782ed603fff7ad61e8c828f34cca102a3a5e2aba9f",
+    "review-loop": "d956cf70db42a7c936d21984fe6aeb83748de02c544eec56ca54971629f85f7e",
+    "second-opinion": "b82628910567799a6f03962f3ec0289cb47b4607093c074466b1a2656b53f432",
 }
 
 

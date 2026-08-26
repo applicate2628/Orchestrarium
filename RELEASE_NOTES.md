@@ -4,7 +4,7 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-08-27
 
-- **Global Codex upgrades now recognize the exact previously shipped `7872d36d` Consultant and Design Panel skill trees.** The installer admits only the two complete hash-pinned stock trees through its existing rollback-safe accepted-prior migration; current trees remain no-ops and any byte of customization still fails closed. **Why it matters:** an operator can upgrade that legitimate prior install to the current explicit Kimi policy without manually overwriting canonical skills or weakening create-only ownership.
+- **Global Codex upgrades now recognize five exact previously shipped `7872d36d` skill trees.** Consultant, Design Panel, Init Project, Review Loop, and Second Opinion are admitted only as complete hash-pinned stock trees through the existing rollback-safe accepted-prior migration; current trees remain no-ops and any byte of customization still fails closed. **Why it matters:** an operator can upgrade that legitimate prior install to the current explicit Kimi policy without manually overwriting canonical skills or weakening create-only ownership.
 
 ## 2026-08-26
 
