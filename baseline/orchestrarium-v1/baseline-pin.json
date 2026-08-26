@@ -37,9 +37,9 @@
     },
     "inventoryGenerator": {
       "deterministic": true,
-      "gitBlobSha": "09b8a75284554a8eb5d14529163c78fe529da37f",
+      "gitBlobSha": "72b5b4b3106d5ccb3a849280f1adf1c9651c63fc",
       "materialization": "git-cat-file-blob",
-      "owningCommit": "73d97aa6871503d93ce12e78312ec78618a084bb",
+      "owningCommit": "4b85f7050dc7a922684259afc573bc7bcaa15394",
       "path": "scripts/baseline/build_inventory.py",
       "runtimeMutation": false
     },
