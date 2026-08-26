@@ -436,25 +436,42 @@ def git_metadata(root: Path, git_executable: Path, paths: list[str] | None = Non
 
 
 def walk_repository(root: Path) -> Iterable[tuple[str, Path, str]]:
-    for current, directories, files in os.walk(root, topdown=True, followlinks=False):
+    def traversal_error(error: OSError) -> None:
+        raise ContractError("repository traversal failed") from error
+
+    def classify(child: Path, relative: str) -> str:
+        try:
+            metadata = child.lstat()
+        except OSError as error:
+            raise ContractError(f"repository entry is unreadable: {relative}") from error
+        attributes = getattr(metadata, "st_file_attributes", 0) or 0
+        if stat.S_ISLNK(metadata.st_mode) or attributes & 0x400:
+            return "reparse"
+        if stat.S_ISDIR(metadata.st_mode):
+            return "directory"
+        if stat.S_ISREG(metadata.st_mode):
+            return "file"
+        raise ContractError(f"unsupported repository entry: {relative}")
+
+    for current, directories, files in os.walk(
+        root,
+        topdown=True,
+        followlinks=False,
+        onerror=traversal_error,
+    ):
         current_path = Path(current)
         kept_directories: list[str] = []
-        for name in sorted(directories):
+        for name in sorted(set(directories) | set(files)):
             child = current_path / name
             relative = child.relative_to(root).as_posix()
             if name == ".git":
                 continue
-            if is_reparse_point(child):
-                yield relative, child, "reparse"
-            else:
+            entry_type = classify(child, relative)
+            if entry_type == "directory":
                 kept_directories.append(name)
+            else:
+                yield relative, child, entry_type
         directories[:] = kept_directories
-        for name in sorted(files):
-            child = current_path / name
-            if name == ".git":
-                continue
-            relative = child.relative_to(root).as_posix()
-            yield relative, child, "reparse" if is_reparse_point(child) else "file"
 
 
 def build_inventory(repository: BoundRepository) -> dict[str, Any]:

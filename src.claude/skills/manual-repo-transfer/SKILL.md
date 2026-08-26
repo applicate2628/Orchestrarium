@@ -10,6 +10,7 @@ Transfer Git history when it exists plus a verified local-state overlay. Size, a
 ## Invariants
 
 - For a committed repository, Git covers required commits/refs; the overlay covers selected local state. An unborn repository has no `HEAD` history to claim, so its overlay and Git metadata are evidence only.
+- Inventory is all-or-nothing: traverse ordinary directories, record reparse entries as metadata without descending, and admit only non-reparse regular files. An unreadable subtree or entry, named pipe, socket, device, or unknown filesystem type blocks inventory before output.
 - One manifest assigns every local file or link one non-overlapping disposition.
 - ZIP contains regular-file bytes. Restricted data and links use content-bound external receipts.
 - A Lead or human selects and verifies one explicit absolute Git executable outside the repository before invoking the helper; the helper never resolves `git` from PATH, the current directory, or an environment override.
@@ -49,7 +50,7 @@ Transfer Git history when it exists plus a verified local-state overlay. Size, a
 
 ## Stop conditions
 
-Unclassified state, overlap, drift, unsafe archive members, missing hashes, live writers, path escapes, unexpected links, unverifiable receipts, or failed restore checks block cleanup and wipe. Copy success, listing, size, or callback is not integrity evidence. Transfer preparation never grants publication, wipe, or deletion authority.
+Unclassified or incompletely enumerated state, unreadable or unsupported filesystem entries, overlap, drift, unsafe archive members, missing hashes, live writers, path escapes, unexpected links, unverifiable receipts, or failed restore checks block cleanup and wipe. Copy success, listing, size, or callback is not integrity evidence. Transfer preparation never grants publication, wipe, or deletion authority.
 
 ## Terms and Abbreviations
 

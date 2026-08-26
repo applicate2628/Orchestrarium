@@ -21,6 +21,7 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 
@@ -68,6 +69,50 @@ def path_covers(parent: str, child: str) -> bool:
 
 
 class IoBoundaryTests(unittest.TestCase):
+    def test_special_entry_modes_fail_before_hashing(self) -> None:
+        module = load_transfer_module()
+        empty_git_result = subprocess.CompletedProcess([], 0, stdout=b"", stderr=b"")
+        special_modes = (
+            ("fifo", stat.S_IFIFO),
+            ("socket", stat.S_IFSOCK),
+            ("character-device", stat.S_IFCHR),
+            ("block-device", stat.S_IFBLK),
+            ("unknown", 0o170000),
+        )
+        with tempfile.TemporaryDirectory(prefix="repo-transfer-special-mode-") as temp:
+            root = Path(temp)
+            special = root / "special-entry"
+            special.write_bytes(b"must not be hashed")
+            original_lstat = module.Path.lstat
+
+            for label, entry_mode in special_modes:
+                with self.subTest(label=label):
+                    def controlled_lstat(path: Path, *args: object, **kwargs: object):
+                        if path == special:
+                            return SimpleNamespace(
+                                st_mode=entry_mode | 0o600,
+                                st_file_attributes=0,
+                            )
+                        return original_lstat(path, *args, **kwargs)
+
+                    hasher = mock.Mock(return_value="0" * 64)
+                    with (
+                        mock.patch.object(module, "repository_history", return_value=("unborn", None)),
+                        mock.patch.object(module, "run_git", return_value=empty_git_result),
+                        mock.patch.object(module, "remote_evidence", return_value=([], {})),
+                        mock.patch.object(module, "git_metadata", return_value={}),
+                        mock.patch.object(module, "sha256_file", hasher),
+                        mock.patch.object(module.Path, "lstat", new=controlled_lstat),
+                    ):
+                        with self.assertRaisesRegex(
+                            module.ContractError,
+                            r"^unsupported repository entry: special-entry$",
+                        ):
+                            module.build_inventory(
+                                module.BoundRepository(root, GIT_EXECUTABLE, "0" * 64)
+                            )
+                    hasher.assert_not_called()
+
     def test_inventory_json_budget_includes_final_newline_and_refuses_overage_before_output(self) -> None:
         module = load_transfer_module()
         inventory = {"entries": [{"path": "entry"}]}
@@ -406,6 +451,74 @@ class SecurityContractTests(unittest.TestCase):
             "--output",
             self.bundle_path,
         )
+
+    def test_inventory_scandir_failure_is_stable_and_writes_no_output(self) -> None:
+        module = load_transfer_module()
+        blocked = self.repo / "blocked-subtree"
+        blocked.mkdir()
+        (blocked / "unique.txt").write_text("unique\n", encoding="utf-8")
+        output = self.root / "denied-inventory.json"
+        original_scandir = os.scandir
+
+        def controlled_scandir(path: object):
+            if Path(path) == blocked:
+                raise PermissionError("injected unreadable subtree")
+            return original_scandir(path)
+
+        stderr = io.StringIO()
+        with (
+            mock.patch.object(module.os, "scandir", side_effect=controlled_scandir),
+            contextlib.redirect_stderr(stderr),
+        ):
+            result = module.main(
+                [
+                    "inventory",
+                    "--repo",
+                    str(self.repo),
+                    "--git-executable",
+                    str(GIT_EXECUTABLE),
+                    "--output",
+                    str(output),
+                ]
+            )
+        self.assertEqual(2, result)
+        self.assertEqual("repository traversal failed", stderr.getvalue().strip())
+        self.assertFalse(output.exists())
+
+    def test_inventory_lstat_failure_is_stable_and_writes_no_output(self) -> None:
+        module = load_transfer_module()
+        unreadable = self.repo / "unreadable-entry"
+        unreadable.write_bytes(b"unique")
+        output = self.root / "unreadable-inventory.json"
+        original_lstat = module.Path.lstat
+
+        def controlled_lstat(path: Path, *args: object, **kwargs: object):
+            if path == unreadable:
+                raise PermissionError("injected unreadable entry")
+            return original_lstat(path, *args, **kwargs)
+
+        stderr = io.StringIO()
+        with (
+            mock.patch.object(module.Path, "lstat", new=controlled_lstat),
+            contextlib.redirect_stderr(stderr),
+        ):
+            result = module.main(
+                [
+                    "inventory",
+                    "--repo",
+                    str(self.repo),
+                    "--git-executable",
+                    str(GIT_EXECUTABLE),
+                    "--output",
+                    str(output),
+                ]
+            )
+        self.assertEqual(2, result)
+        self.assertEqual(
+            "repository entry is unreadable: unreadable-entry",
+            stderr.getvalue().strip(),
+        )
+        self.assertFalse(output.exists())
 
     def test_selection_rows_never_overlap_in_either_direction(self) -> None:
         inventory = self.inventory()

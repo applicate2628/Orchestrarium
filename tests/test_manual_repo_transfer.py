@@ -18,9 +18,16 @@ if not GIT_EXECUTABLE.is_file():
     raise RuntimeError("test host must provide an explicit Git executable")
 
 
-def run(*args: object, cwd: Path | None = None, expect: int = 0) -> subprocess.CompletedProcess[str]:
+def run(
+    *args: object,
+    cwd: Path | None = None,
+    expect: int = 0,
+    timeout: float | None = None,
+) -> subprocess.CompletedProcess[str]:
     command = [sys.executable, str(SCRIPT), *(str(arg) for arg in args), "--git-executable", str(GIT_EXECUTABLE)]
-    result = subprocess.run(command, cwd=cwd, text=True, capture_output=True)
+    result = subprocess.run(
+        command, cwd=cwd, text=True, capture_output=True, timeout=timeout
+    )
     if result.returncode != expect:
         raise AssertionError(
             f"expected exit {expect}, got {result.returncode}\n"
@@ -435,6 +442,76 @@ class RepoTransferTests(unittest.TestCase):
             expect=2,
         )
         self.assertIn("reparse entries require external disposition", result.stderr)
+
+    @unittest.skipUnless(
+        os.name != "nt" and hasattr(os, "mkfifo"),
+        "POSIX named-pipe integration contract",
+    )
+    def test_fifo_fails_inventory_and_every_source_recensus_without_blocking(self) -> None:
+        inventory = self.inventory()
+        self.write_selection(inventory)
+        run(
+            "bundle",
+            "--repo",
+            self.repo,
+            "--inventory",
+            self.inventory_path,
+            "--selection",
+            self.selection,
+            "--output",
+            self.bundle,
+        )
+        fifo = self.repo / "blocked.fifo"
+        os.mkfifo(fifo)
+        later_inventory = self.root / "fifo-inventory.json"
+        later_bundle = self.root / "fifo-transfer.zip"
+
+        commands = (
+            ("inventory", "--repo", self.repo, "--output", later_inventory),
+            (
+                "bundle",
+                "--repo",
+                self.repo,
+                "--inventory",
+                self.inventory_path,
+                "--selection",
+                self.selection,
+                "--output",
+                later_bundle,
+            ),
+            (
+                "verify",
+                "--bundle",
+                self.bundle,
+                "--inventory",
+                self.inventory_path,
+                "--selection",
+                self.selection,
+                "--source",
+                self.repo,
+            ),
+            (
+                "cleanup",
+                "--repo",
+                self.repo,
+                "--inventory",
+                self.inventory_path,
+                "--selection",
+                self.selection,
+                "--bundle",
+                self.bundle,
+            ),
+        )
+        for command in commands:
+            with self.subTest(command=command[0]):
+                result = run(*command, expect=2, timeout=5)
+                self.assertEqual(
+                    "unsupported repository entry: blocked.fifo",
+                    result.stderr.strip(),
+                )
+                self.assertEqual("", result.stdout)
+        self.assertFalse(later_inventory.exists())
+        self.assertFalse(later_bundle.exists())
 
 
 class UnbornRepoTransferTests(unittest.TestCase):
