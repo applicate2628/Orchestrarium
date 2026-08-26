@@ -16,6 +16,7 @@ import stat
 import sys
 import tempfile
 import time
+import tomllib
 import types
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
@@ -63,7 +64,7 @@ E_EXTERNAL_PROVIDER_WINDOWS_NATIVE_ARGV_UNAVAILABLE = (
 EXTERNAL_PROVIDER_NAMES = frozenset({"codex", "claude", "kimi"})
 KIMI_WINDOWS_PROFILE_V1 = KimiWindowsProfileV1
 KIMI_EXECUTABLE_BINDING_SCHEMA_V1 = "orchestrarium.kimi-executable-binding.v1"
-KIMI_EXECUTABLE_BINDING_FILENAME_V1 = "kimi-executable-binding-v1.json"
+KIMI_EXECUTABLE_BINDING_FILENAME_V1 = "executable-binding-v1.json"
 SETTINGS_SNAPSHOT_MAX_BYTES = 1024 * 1024
 CLEANUP_ISSUE_LIMIT = 32
 CLEANUP_ISSUE_TOKEN_MAX = 64
@@ -578,26 +579,18 @@ def resolve_provider_command(provider: str) -> list[str] | None:
 
 
 def _kimi_binding_path() -> Path:
-    # Source tests use the repository shared directory; installed Lead uses
-    # its sibling shared directory.  Neither path is environment-controlled.
-    script_dir = Path(__file__).resolve().parent
-    candidates = (script_dir.parent / "shared", script_dir / "shared")
-    return next((path / KIMI_EXECUTABLE_BINDING_FILENAME_V1 for path in candidates if path.is_dir()), candidates[0] / KIMI_EXECUTABLE_BINDING_FILENAME_V1)
+    return _kimi_runtime_root() / KIMI_EXECUTABLE_BINDING_FILENAME_V1
 
 
-def _ordinary_file_sha256(path: Path) -> str:
-    validate_no_reparse_components(path)
-    before = path.lstat()
-    if not stat.S_ISREG(before.st_mode):
-        raise ValueError("E_KIMI_EXECUTABLE_BINDING_INVALID")
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        while chunk := stream.read(1024 * 1024):
-            digest.update(chunk)
-    after = path.lstat()
-    if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns):
-        raise ValueError("E_KIMI_EXECUTABLE_BINDING_DRIFT")
-    return digest.hexdigest()
+def _kimi_runtime_root() -> Path:
+    """Return the fixed global Codex state owner; never use ambient temp."""
+
+    home = Path(os.environ.get("USERPROFILE") or Path.home())
+    if not home.is_absolute():
+        raise ValueError("E_KIMI_RUNTIME_STATE_INVALID")
+    root = Path(os.path.abspath(home / ".codex" / "orchestrarium-runtime" / "kimi"))
+    validate_no_reparse_components(root)
+    return root
 
 
 def resolve_enrolled_kimi_command() -> list[str]:
@@ -606,15 +599,16 @@ def resolve_enrolled_kimi_command() -> list[str]:
         validate_no_reparse_components(binding_path)
         data = json.loads(binding_path.read_text(encoding="utf-8"))
         path = Path(data["path"])
-        digest = str(data["sha256"])
+        digest = str(data["sha256"]).lower()
         size = int(data["size"])
         if (
             data.get("schema") != KIMI_EXECUTABLE_BINDING_SCHEMA_V1
             or not path.is_absolute()
             or Path(os.path.abspath(path)) != path
             or path.name.casefold() != "kimi.exe"
+            or size != KimiWindowsProfileV1.expected_size
+            or digest != KimiWindowsProfileV1.accepted_sha256
             or path.stat().st_size != size
-            or _ordinary_file_sha256(path) != digest
         ):
             raise ValueError("E_KIMI_EXECUTABLE_BINDING_DRIFT")
         return [str(path)]
@@ -822,7 +816,8 @@ def resolve_provider_auth_configuration(
         ):
             child["CLAUDE_CONFIG_DIR"] = user_settings_surface.forwarded_config_dir
     elif provider == "kimi":
-        mode = "kimi-user-session"
+        # Kimi credentials are copied only after a private per-run home exists.
+        return ProviderAuthConfiguration("kimi-user-session", {}, ())
     else:
         raise ValueError("E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE: provider")
 
@@ -891,9 +886,12 @@ def validate_no_reparse_components(path: Path) -> None:
 
 def secure_output_dir(provider: str) -> Path:
     if provider == "kimi":
-        # Kimi never captures under the caller's repository or an ambient
-        # redirect.  The per-run directory is created directly by the OS.
-        return Path(tempfile.gettempdir())
+        root = _kimi_runtime_root() / "runs"
+        root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        validate_no_reparse_components(root)
+        if not root.is_dir():
+            raise ValueError("E_KIMI_RUNTIME_STATE_INVALID")
+        return root
     env_key = {
         "codex": "CODEX_PROMPTS_DIR",
         "claude": "CLAUDE_PROMPTS_DIR",
@@ -914,6 +912,102 @@ def secure_output_dir(provider: str) -> Path:
     return output
 
 
+def _private_file(path: Path, data: bytes) -> None:
+    descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    with os.fdopen(descriptor, "wb") as stream:
+        stream.write(data)
+        stream.flush()
+        os.fsync(stream.fileno())
+
+
+def _kimi_sanitized_runtime_home(run_dir: Path) -> ProviderAuthConfiguration:
+    """Copy exactly the selected Kimi OAuth record into an empty private home."""
+
+    source_home = Path(os.environ.get("USERPROFILE") or Path.home()) / ".kimi-code"
+    config_path = source_home / "config.toml"
+    try:
+        validate_no_reparse_components(config_path)
+        raw_config = config_path.read_bytes()
+        config = tomllib.loads(raw_config.decode("utf-8"))
+        provider = config["providers"]["managed:kimi-code"]
+        model = config["models"][KimiWindowsProfileV1.model]
+        oauth_reference = provider["oauth"]
+        if (
+            config.get("default_model") != KimiWindowsProfileV1.model
+            or not isinstance(provider, dict)
+            or not isinstance(model, dict)
+            or model.get("provider") != "managed:kimi-code"
+            or model.get("model") != KimiWindowsProfileV1.model
+            or not isinstance(oauth_reference, str)
+        ):
+            raise ValueError("configuration")
+        oauth_relative = Path(oauth_reference)
+        if (
+            oauth_relative.is_absolute()
+            or oauth_relative.parts[:1] != ("credentials",)
+            or len(oauth_relative.parts) != 2
+            or oauth_relative.suffix != ".json"
+        ):
+            raise ValueError("credential reference")
+        oauth_source = source_home / oauth_relative
+        validate_no_reparse_components(oauth_source)
+        oauth_bytes = oauth_source.read_bytes()
+        oauth = json.loads(oauth_bytes.decode("utf-8"))
+        access_token = oauth.get("access_token")
+        refresh_token = oauth.get("refresh_token")
+        if not all(isinstance(token, str) and token for token in (access_token, refresh_token)):
+            raise ValueError("OAuth token")
+        access_bytes = access_token.encode("utf-8")
+        refresh_bytes = refresh_token.encode("utf-8")
+        if b"\x00" in access_bytes or b"\x00" in refresh_bytes:
+            raise ValueError("OAuth token")
+        provider_type = provider.get("type")
+        base_url = provider.get("base_url")
+        if not isinstance(provider_type, str) or not isinstance(base_url, str):
+            raise ValueError("provider configuration")
+    except (OSError, ValueError, KeyError, TypeError, UnicodeError, tomllib.TOMLDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("E_KIMI_AUTH_STORAGE_INVALID") from exc
+
+    private_home = run_dir / "kimi-code-home"
+    credential_dir = private_home / "credentials"
+    temporary = run_dir / "kimi-tmp"
+    try:
+        private_home.mkdir(mode=0o700)
+        credential_dir.mkdir(mode=0o700)
+        temporary.mkdir(mode=0o700)
+        rendered = (
+            'default_model = "kimi-code/k3"\n\n'
+            '[providers."managed:kimi-code"]\n'
+            f'type = {json.dumps(provider_type)}\n'
+            f'base_url = {json.dumps(base_url)}\n'
+            f'oauth = {json.dumps(oauth_reference)}\n\n'
+            '[models."kimi-code/k3"]\n'
+            'model = "kimi-code/k3"\n'
+            'provider = "managed:kimi-code"\n'
+        ).encode("utf-8")
+        _private_file(private_home / "config.toml", rendered)
+        _private_file(credential_dir / oauth_relative.name, oauth_bytes)
+        source = os.environ
+        child = {
+            name: source[name]
+            for name in ("SystemRoot", "SYSTEMROOT", "WINDIR", "COMSPEC")
+            if source.get(name)
+        }
+        child.update(
+            {
+                "KIMI_CODE_HOME": str(private_home),
+                "TEMP": str(temporary),
+                "TMP": str(temporary),
+                "DO_NOT_TRACK": "1",
+            }
+        )
+        return ProviderAuthConfiguration(
+            "kimi-user-session", child, tuple(dict.fromkeys((access_bytes, refresh_bytes)))
+        )
+    except (OSError, ValueError) as exc:
+        raise ValueError("E_KIMI_RUNTIME_HOME_INVALID") from exc
+
+
 def kimi_agent_bundle(body: bytes, run_dir: Path) -> tuple[Path, Path]:
     """Materialize the only Kimi input: a no-tools, no-subagent agent bundle."""
 
@@ -923,7 +1017,7 @@ def kimi_agent_bundle(body: bytes, run_dir: Path) -> tuple[Path, Path]:
     agent = run_dir / "kimi-agent.md"
     skills = run_dir / "kimi-empty-skills"
     skills.mkdir(mode=0o700)
-    agent.write_bytes(b"---\ntools: []\nsubagents: []\n---\n\n" + task)
+    agent.write_bytes(KimiWindowsProfileV1.agent_frontmatter + task)
     return agent, skills
 
 
@@ -1086,9 +1180,7 @@ class RunCaptureLifecycle:
     @classmethod
     def create(cls, provider: str, slug: str) -> "RunCaptureLifecycle":
         root = secure_output_dir(provider)
-        run_dir = Path(tempfile.mkdtemp(prefix=f"{slug}-", dir=None if provider == "kimi" else root))
-        if provider == "kimi":
-            root = run_dir.parent
+        run_dir = Path(tempfile.mkdtemp(prefix=f"{slug}-", dir=root))
         try:
             metadata = run_dir.lstat()
             if not stat.S_ISDIR(metadata.st_mode) or run_dir.parent != root:
@@ -2429,6 +2521,14 @@ def _launch_with_runner(
 
     assert lifecycle is not None
 
+    if provider == "kimi":
+        try:
+            auth_configuration = _kimi_sanitized_runtime_home(lifecycle.run_dir)
+        except ValueError as exc:
+            return settle_initialized_setup_failure(
+                control, provider, model, effort, slug, lifecycle, exc, realization, runner=runner,
+            )
+
     launch_run_id = ""
     if control.ledger:
         if ledger_helper() is None:
@@ -2488,13 +2588,6 @@ def _launch_with_runner(
         child_environment["ORCHESTRARIUM_DISPATCHED_REVIEW"] = "1"
     elif provider == "codex":
         child_environment["CODEX_HOME"] = str(codex_home)
-    elif provider == "kimi":
-        source_environment = os.environ
-        child_environment = {
-            key: source_environment[key]
-            for key in ("SystemRoot", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "USERPROFILE", "KIMI_CODE_HOME")
-            if source_environment.get(key)
-        }
 
     exit_code = 1
     launch_error: str | None = None

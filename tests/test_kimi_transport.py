@@ -39,7 +39,12 @@ def test_kimi_file_reference_argv_is_exact(tmp_path: Path) -> None:
     owner = _load_owner()
     agent = tmp_path / "agent.md"
     skills = tmp_path / "empty-skills"
-    agent.write_text("---\ntools: []\nsubagents: []\n---\nGATE: PASS\n", encoding="utf-8")
+    agent.write_text(
+        "---\nname: orchestrarium-bundle-reviewer\n"
+        "description: Reviews only the context bundled in this file\n"
+        "tools: []\nsubagents: []\n---\nGATE: PASS\n",
+        encoding="utf-8",
+    )
     skills.mkdir()
     assert owner.kimi_provider_args(agent, skills) == [
         "--agent-file",
@@ -75,10 +80,14 @@ def test_kimi_bundle_is_no_tools_and_no_subagents(tmp_path: Path) -> None:
     owner = _load_owner()
     agent, skills = owner.kimi_agent_bundle(b"Review the sealed context.", tmp_path)
     assert skills.is_dir() and not tuple(skills.iterdir())
+    expected = (
+        "---\nname: orchestrarium-bundle-reviewer\n"
+        "description: Reviews only the context bundled in this file\n"
+        "tools: []\nsubagents: []\n---\n\n"
+    )
     text = agent.read_text(encoding="utf-8")
-    assert "tools: []" in text
-    assert "subagents: []" in text
-    assert "Review the sealed context." in text
+    assert text.startswith(expected)
+    assert text == expected + "Review the sealed context."
 
 
 def test_kimi_transport_adds_no_second_lifecycle_or_smoke_path() -> None:

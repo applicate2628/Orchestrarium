@@ -22,6 +22,11 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
+try:
+    from process_supervision.process_runner import KimiWindowsProfileV1
+except ModuleNotFoundError:
+    from scripts.process_supervision.process_runner import KimiWindowsProfileV1
+
 
 CODEX_BEGIN = "<!-- BEGIN ORCHESTRARIUM CODEX PACK -->"
 CODEX_END = "<!-- END ORCHESTRARIUM CODEX PACK -->"
@@ -305,20 +310,25 @@ def _parser(provider: str) -> argparse.ArgumentParser:
     return parser
 
 
-def _enroll_kimi_executable(home: Path, lead_root: Path, *, dry_run: bool) -> None:
+def _enroll_kimi_executable(home: Path, runtime_root: Path, *, dry_run: bool) -> None:
     """Record a user-approved, local Kimi continuity pin; never trust PATH."""
 
     executable = home / ".kimi-code" / "bin" / "kimi.exe"
-    pin = lead_root / "shared" / "kimi-executable-binding-v1.json"
+    pin = runtime_root / "executable-binding-v1.json"
     if _contains_reparse(executable) or not executable.is_file():
         raise ValueError("E_KIMI_ENROLLMENT_INVALID: fixed executable path")
     digest = _file_sha256(executable)
+    if (
+        executable.stat().st_size != KimiWindowsProfileV1.expected_size
+        or digest.lower() != KimiWindowsProfileV1.accepted_sha256
+    ):
+        raise ValueError("E_KIMI_ENROLLMENT_INVALID: observed release binding")
     payload = json.dumps(
         {
             "schema": "orchestrarium.kimi-executable-binding.v1",
             "path": str(executable),
-            "size": executable.stat().st_size,
-            "sha256": digest,
+            "size": KimiWindowsProfileV1.expected_size,
+            "sha256": KimiWindowsProfileV1.accepted_sha256,
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -2353,6 +2363,7 @@ def _installer_mutation_paths(
     claude_skills_target: Path | None = None,
     claude_projection_snapshot_paths: tuple[Path, ...] = (),
     claude_transport_migration_paths: tuple[Path, ...] = (),
+    kimi_runtime_binding: Path | None = None,
 ) -> list[Path]:
     """Return only paths whose contents this installer can mutate."""
     if provider not in {"codex", "claude"}:
@@ -2445,6 +2456,8 @@ def _installer_mutation_paths(
                 shared_mode_target.with_suffix(""),
             )
         )
+    if kimi_runtime_binding is not None:
+        paths.append(kimi_runtime_binding)
     for relative in retired_manifest:
         relative_path = Path(relative)
         paths.append(
@@ -4660,6 +4673,11 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                 and canonical_plan.transport_stage.accepted_prior_set is not None
                 else ()
             ),
+            kimi_runtime_binding=(
+                target / "orchestrarium-runtime" / "kimi" / "executable-binding-v1.json"
+                if args.enroll_kimi
+                else None
+            ),
         )
         transaction = _InstallTransaction(
             transaction_paths,
@@ -4913,7 +4931,11 @@ def install(provider: str, argv: list[str] | None = None) -> int:
             if args.dry_run:
                 if args.enroll_kimi:
                     assert home is not None
-                    _enroll_kimi_executable(home, canonical_lead, dry_run=True)
+                    _enroll_kimi_executable(
+                        home,
+                        target / "orchestrarium-runtime" / "kimi",
+                        dry_run=True,
+                    )
                 print("RESULT: DRY-RUN complete (no files modified).")
                 return 0
 
@@ -4968,7 +4990,11 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                 )
             if args.enroll_kimi:
                 assert home is not None
-                _enroll_kimi_executable(home, canonical_lead, dry_run=False)
+                _enroll_kimi_executable(
+                    home,
+                    target / "orchestrarium-runtime" / "kimi",
+                    dry_run=False,
+                )
             print(
                 f"RESULT: OK - {provider.capitalize()} pack installed to {target}"
             )

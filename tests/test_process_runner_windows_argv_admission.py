@@ -76,15 +76,16 @@ def _release(owner, lifecycle) -> None:
     owner._release_lifecycle(lifecycle)
 
 
-def _fake_kimi(module, path: Path, version: str = "0.38.0", *, duplicate: bool = False) -> Path:
-    marker = module.KIMI_BUILD_INFO_MARKER_TEMPLATE_V1.format(version=version).encode("ascii")
-    path.write_bytes(b"synthetic-prefix\0" + marker + (marker if duplicate else b"") + b"\0synthetic-suffix")
+def _fake_kimi(module, path: Path, payload: bytes = b"synthetic-kimi") -> Path:
+    path.write_bytes(payload)
     return path
 
 
 def _kimi_argv(module, executable: Path, prompt_file: Path) -> tuple[str, ...]:
-    prompt_file.write_text(
-        "---\ntools: []\nsubagents: []\n---\nGATE: PASS\n", encoding="utf-8"
+    prompt_file.write_bytes(
+        b"---\nname: orchestrarium-bundle-reviewer\n"
+        b"description: Reviews only the context bundled in this file\n"
+        b"tools: []\nsubagents: []\n---\n\nGATE: PASS\n"
     )
     skills = prompt_file.parent / "empty-skills"
     skills.mkdir(exist_ok=True)
@@ -120,7 +121,7 @@ def test_admission_owner_has_no_direct_subprocess_escape_hatch() -> None:
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows Kimi argv profile contract")
-def test_kimi_profile_accepts_only_fixed_transport_and_binds_prompt_file(tmp_path: Path) -> None:
+def test_kimi_profile_accepts_only_fixed_transport_and_binds_prompt_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     module = _load_runner()
     owner = module.ProcessRunnerV1()
     neutral = tmp_path / "neutral root-Москва"
@@ -128,6 +129,9 @@ def test_kimi_profile_accepts_only_fixed_transport_and_binds_prompt_file(tmp_pat
     prompt = neutral / "prompt instructions.md"
     prompt.write_text("facts only\nGATE: PASS\n", encoding="utf-8")
     executable = _fake_kimi(module, tmp_path / "kimi.exe")
+    digest = __import__("hashlib").sha256(executable.read_bytes()).hexdigest()
+    monkeypatch.setattr(module.KimiWindowsProfileV1, "accepted_sha256", digest)
+    monkeypatch.setattr(module.KimiWindowsProfileV1, "expected_size", executable.stat().st_size)
     request = _request(
         module,
         owner,
@@ -185,17 +189,18 @@ def test_kimi_profile_rejects_argv_variants_without_probe(tmp_path: Path, mutate
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows Kimi argv profile contract")
-@pytest.mark.parametrize("version,duplicate", (("0.37.0", False), ("0.38.0", True)))
-def test_kimi_profile_rejects_wrong_or_ambiguous_embedded_version(
-    tmp_path: Path, version: str, duplicate: bool
-) -> None:
+def test_kimi_profile_rejects_marker_only_fake_release(tmp_path: Path) -> None:
     module = _load_runner()
     owner = module.ProcessRunnerV1()
     neutral = tmp_path / "neutral"
     neutral.mkdir()
     prompt = neutral / "prompt.md"
     prompt.write_text("GATE: PASS\n", encoding="utf-8")
-    executable = _fake_kimi(module, tmp_path / "kimi.exe", version, duplicate=duplicate)
+    executable = _fake_kimi(
+        module,
+        tmp_path / "kimi.exe",
+        b'KIMI_BUILD_INFO = {\n\t\tversion: optionalBuildString("0.38.0"),\n\t\tchannel:',
+    )
     request = _request(
         module,
         owner,
@@ -213,7 +218,7 @@ def test_kimi_profile_rejects_wrong_or_ambiguous_embedded_version(
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows Kimi argv profile contract")
-def test_kimi_profile_rejects_prompt_mutation_between_admit_and_consume(tmp_path: Path) -> None:
+def test_kimi_profile_rejects_prompt_mutation_between_admit_and_consume(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     module = _load_runner()
     owner = module.ProcessRunnerV1()
     neutral = tmp_path / "neutral"
@@ -221,6 +226,12 @@ def test_kimi_profile_rejects_prompt_mutation_between_admit_and_consume(tmp_path
     prompt = neutral / "prompt.md"
     prompt.write_text("GATE: PASS\n", encoding="utf-8")
     executable = _fake_kimi(module, tmp_path / "kimi.exe")
+    monkeypatch.setattr(
+        module.KimiWindowsProfileV1,
+        "accepted_sha256",
+        __import__("hashlib").sha256(executable.read_bytes()).hexdigest(),
+    )
+    monkeypatch.setattr(module.KimiWindowsProfileV1, "expected_size", executable.stat().st_size)
     request = _request(
         module,
         owner,

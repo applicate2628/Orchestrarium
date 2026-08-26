@@ -255,7 +255,7 @@ Use these global anchor roles:
 
 External dispatch roles also exist in the installed skills tree as bidirectional adapters:
 
-- `$external-worker`: external worker-side adapter for eligible non-owner, non-review roles; dispatches through the shared provider universe `auto | codex | claude | gemini | qwen | kimi | grok`, where shipped production `auto` profiles use the Codex/Claude pair only; Gemini/Qwen stay explicit example-only, Kimi is explicit read-only and nonauthorizing, and Grok remains unavailable in 1.x
+- `$external-worker`: external worker-side adapter for eligible non-owner, non-review roles; dispatches through the shared provider universe `auto | codex | claude | gemini | qwen | kimi | grok`, where shipped production `auto` profiles use the Codex/Claude pair only; Gemini/Qwen stay explicit example-only, Kimi is explicit Windows-enrolled read-only no-tools bundle review, independently verified and nonauthorizing, and Grok remains unavailable in 1.x
 - `$external-reviewer`: external review/QA adapter for eligible review-side roles; dispatches through the shared provider universe `auto | codex | claude | gemini | qwen | kimi | grok`, where shipped production `auto` profiles use the Codex/Claude pair only; Kimi may be selected explicitly for read-only broad research/review with independent verification, while Grok remains unavailable in 1.x
 
 These roles are adapters, not aliases for `$consultant`.

@@ -130,6 +130,16 @@ class KimiWindowsProfileV1:
     profile_id = "kimi-sealed-bundle-text-v1"
     model = "kimi-code/k3"
     constant_prompt = "Review the sealed bundle and return only the requested result."
+    accepted_sha256 = "B7E658D06176284384D1E9EB627D11E5A26627B3964BF8787F197915D1484B1E".lower()
+    expected_size = 150901248
+    agent_frontmatter = (
+        b"---\n"
+        b"name: orchestrarium-bundle-reviewer\n"
+        b"description: Reviews only the context bundled in this file\n"
+        b"tools: []\n"
+        b"subagents: []\n"
+        b"---\n\n"
+    )
 
     @classmethod
     def build_args(cls, agent_file: Path, skills_dir: Path) -> list[str]:
@@ -140,14 +150,6 @@ class KimiWindowsProfileV1:
             "--output-format", "text",
             "--prompt", cls.constant_prompt,
         ]
-KIMI_BUILD_INFO_MARKER_TEMPLATE_V1 = (
-    'KIMI_BUILD_INFO = {{\n\t\tversion: optionalBuildString("{version}"),\n\t\tchannel:'
-)
-_KIMI_BUILD_INFO_PREFIX_V1 = b'KIMI_BUILD_INFO = {\n\t\tversion: optionalBuildString("'
-_KIMI_BUILD_INFO_PATTERN_V1 = re.compile(
-    rb'KIMI_BUILD_INFO = \{\n\t\tversion: optionalBuildString\("([^"\r\n]{1,32})"\),\n\t\tchannel:'
-)
-_KIMI_EXPECTED_VERSION_V1 = "0.38.0"
 _WINDOWS_INTERNAL_PROBE_CAPTURE_BYTES = 64 * 1024
 _WINDOWS_ARGV_PROBE_CANARIES = (
     "",
@@ -232,6 +234,16 @@ class WindowsArgvAdmissionV1:
     prompt_file_canonical: str | None = None
     prompt_file_identity: str | None = None
     prompt_file_sha256: str | None = None
+    executable_binding: "ExecutableBindingV1 | None" = None
+
+
+@dataclass(frozen=True)
+class ExecutableBindingV1:
+    """The exact release binding carried from Kimi admission to creation."""
+
+    path: str
+    size: int
+    sha256: str
 
 
 @dataclass(frozen=True)
@@ -1049,15 +1061,6 @@ def _stream_executable_binding(path: Path) -> tuple[str, str]:
         absolute = Path(path)
         if not absolute.is_absolute():
             raise OSError("not absolute")
-        is_kimi = absolute.name.casefold() == "kimi.exe"
-        if is_kimi:
-            normalized = Path(os.path.abspath(absolute))
-            if os.path.normcase(str(normalized)) != os.path.normcase(str(absolute)):
-                raise OSError("not normalized")
-            for component in reversed((absolute, *absolute.parents)):
-                component_metadata = component.lstat()
-                if stat.S_ISLNK(component_metadata.st_mode) or _is_reparse(component_metadata):
-                    raise OSError("reparse executable path")
         metadata = absolute.stat()
         leaf = absolute.lstat()
         if (
@@ -1067,38 +1070,15 @@ def _stream_executable_binding(path: Path) -> tuple[str, str]:
         ):
             raise OSError("not ordinary executable")
         digest = hashlib.sha256()
-        kimi_versions: list[str] = []
-        kimi_prefixes = 0
-        scan_tail = b""
-        scan_overlap = 256
         with absolute.open("rb") as stream:
             while True:
                 chunk = stream.read(1024 * 1024)
                 if not chunk:
                     break
                 digest.update(chunk)
-                if is_kimi:
-                    window = scan_tail + chunk
-                    tail_length = len(scan_tail)
-                    for match in _KIMI_BUILD_INFO_PATTERN_V1.finditer(window):
-                        if match.end() > tail_length:
-                            kimi_versions.append(match.group(1).decode("ascii", errors="strict"))
-                    start = 0
-                    while True:
-                        found = window.find(_KIMI_BUILD_INFO_PREFIX_V1, start)
-                        if found < 0:
-                            break
-                        if found + len(_KIMI_BUILD_INFO_PREFIX_V1) > tail_length:
-                            kimi_prefixes += 1
-                        start = found + 1
-                    scan_tail = window[-scan_overlap:]
         digest.update(struct.pack(">QQ", metadata.st_size, metadata.st_mtime_ns & ((1 << 64) - 1)))
         identity = digest.hexdigest()
-        if is_kimi:
-            if kimi_prefixes != 1 or kimi_versions != [_KIMI_EXPECTED_VERSION_V1]:
-                raise OSError("unsupported or ambiguous Kimi build info")
-            version_source = f"kimi:{_KIMI_EXPECTED_VERSION_V1}:{identity}"
-        elif absolute.resolve() == Path(sys.executable).resolve():
+        if absolute.resolve() == Path(sys.executable).resolve():
             version_source = (
                 f"python:{sys.version_info.major}.{sys.version_info.minor}."
                 f"{sys.version_info.micro}:{identity}"
@@ -1108,6 +1088,50 @@ def _stream_executable_binding(path: Path) -> tuple[str, str]:
         version = hashlib.sha256(version_source.encode("ascii")).hexdigest()
         return identity, version
     except (OSError, ValueError, OverflowError, UnicodeError) as exc:
+        raise ProcessSupervisionError(
+            "PSV1-EXECUTABLE-UNRESOLVED", "request-validation"
+        ) from exc
+
+
+def _validate_kimi_executable_binding(path: Path) -> ExecutableBindingV1:
+    """Read the enrolled executable once and accept only the observed release."""
+
+    try:
+        absolute = Path(path)
+        if not absolute.is_absolute() or absolute.name.casefold() != "kimi.exe":
+            raise OSError("Kimi executable path")
+        normalized = Path(os.path.abspath(absolute))
+        if os.path.normcase(str(normalized)) != os.path.normcase(str(absolute)):
+            raise OSError("Kimi executable path normalization")
+        for component in reversed((absolute, *absolute.parents)):
+            metadata = component.lstat()
+            if stat.S_ISLNK(metadata.st_mode) or _is_reparse(metadata):
+                raise OSError("Kimi executable reparse")
+        before = absolute.lstat()
+        if not stat.S_ISREG(before.st_mode) or before.st_size != KimiWindowsProfileV1.expected_size:
+            raise OSError("Kimi executable size")
+        digest = hashlib.sha256()
+        with absolute.open("rb") as stream:
+            while chunk := stream.read(1024 * 1024):
+                digest.update(chunk)
+        after = absolute.lstat()
+        if (
+            before.st_dev,
+            before.st_ino,
+            before.st_size,
+            before.st_mtime_ns,
+        ) != (
+            after.st_dev,
+            after.st_ino,
+            after.st_size,
+            after.st_mtime_ns,
+        ):
+            raise OSError("Kimi executable drift")
+        actual = digest.hexdigest()
+        if not hmac.compare_digest(actual, KimiWindowsProfileV1.accepted_sha256):
+            raise OSError("Kimi executable digest")
+        return ExecutableBindingV1(str(absolute), before.st_size, actual)
+    except (OSError, ValueError, UnicodeError) as exc:
         raise ProcessSupervisionError(
             "PSV1-EXECUTABLE-UNRESOLVED", "request-validation"
         ) from exc
@@ -1182,8 +1206,8 @@ def _kimi_bundle_file_binding(
                 digest.update(chunk)
         finally:
             os.close(descriptor)
-        content = normalized.read_text(encoding="utf-8")
-        if "tools: []" not in content or "subagents: []" not in content or "${" in content:
+        content = normalized.read_bytes()
+        if not content.startswith(KimiWindowsProfileV1.agent_frontmatter) or b"${" in content:
             raise reject()
         skills = Path(argv[4])
         if not skills.is_absolute() or Path(os.path.abspath(skills)) != skills or not skills.is_dir() or any(skills.iterdir()):
@@ -1471,6 +1495,7 @@ class WindowsArgvAdmissionOwnerV1:
             )
         executable = Path(request.resolved_executable)
         prompt_binding: tuple[str, str, str] | None = None
+        executable_binding: ExecutableBindingV1 | None = None
         if profile_id == "kimi-sealed-bundle-text-v1":
             prompt_binding = _kimi_bundle_file_binding(
                 request, failure_id="PSV1-ARGV-CODEC-UNSUPPORTED"
@@ -1479,7 +1504,13 @@ class WindowsArgvAdmissionOwnerV1:
                 raise ProcessSupervisionError(
                     "PSV1-EXECUTABLE-UNRESOLVED", "request-validation"
                 )
-        identity, version = _stream_executable_binding(executable)
+            executable_binding = _validate_kimi_executable_binding(executable)
+            identity = executable_binding.sha256
+            version = hashlib.sha256(
+                f"kimi-release:{executable_binding.size}:{identity}".encode("ascii")
+            ).hexdigest()
+        else:
+            identity, version = _stream_executable_binding(executable)
         if profile_id == "python-validator-json-echo-v1":
             probe_kind, requested, observed = self._python_probe(
                 lifecycle, request, executable
@@ -1521,6 +1552,7 @@ class WindowsArgvAdmissionOwnerV1:
             _WINDOWS_ARGV_ADMISSION_SEAL,
             _WINDOWS_ARGV_CHILD_EVIDENCE_SEAL,
             *(prompt_binding or (None, None, None)),
+            executable_binding,
         )
 
     def consume(
@@ -1530,7 +1562,18 @@ class WindowsArgvAdmissionOwnerV1:
         admission: WindowsArgvAdmissionV1,
     ) -> None:
         executable = Path(request.resolved_executable)
-        identity, version = _stream_executable_binding(executable)
+        executable_binding = (
+            _validate_kimi_executable_binding(executable)
+            if admission.profile_id == "kimi-sealed-bundle-text-v1"
+            else None
+        )
+        if executable_binding is not None:
+            identity = executable_binding.sha256
+            version = hashlib.sha256(
+                f"kimi-release:{executable_binding.size}:{identity}".encode("ascii")
+            ).hexdigest()
+        else:
+            identity, version = _stream_executable_binding(executable)
         prompt_binding = (
             _kimi_bundle_file_binding(request, failure_id="PSV1-ARGV-ATTESTATION")
             if admission.profile_id == "kimi-sealed-bundle-text-v1"
@@ -1546,6 +1589,7 @@ class WindowsArgvAdmissionOwnerV1:
             and admission.codec == "msvcrt-v1"
             and admission.resolved_executable_identity == identity
             and admission.resolved_executable_version == version
+            and admission.executable_binding == executable_binding
             and admission.actual_argv_sha256 == _json_argv_sha256(request.argv)
             and admission.actual_argv_shape_sha256 == _argv_shape_sha256(request.argv)
             and admission.probe_requested_argv_sha256
