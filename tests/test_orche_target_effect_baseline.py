@@ -176,6 +176,20 @@ class TargetEffectBaselineTests(unittest.TestCase):
             self.assertIn("inventorySha256 mismatch", result.stderr)
             self.assertFalse(output.exists())
 
+    def test_rejects_valid_json_with_non_object_top_level_without_traceback(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            inventory = root / "capability.json"
+            output = root / "target.json"
+            inventory.write_text("[]\n", encoding="utf-8")
+
+            result = self.run_script(inventory, output)
+
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("top level must be an object", result.stderr)
+            self.assertNotIn("Traceback", result.stderr)
+            self.assertFalse(output.exists())
+
     def test_output_is_deterministic_and_check_detects_drift(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
