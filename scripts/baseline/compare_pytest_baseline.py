@@ -2,21 +2,18 @@
 """Compare candidate pytest JUnit results against an immutable baseline run.
 
 The comparator allows additional passing tests and resolved baseline failures,
-but blocks:
-- failures/errors not present in the baseline failure set;
-- baseline tests that disappear from candidate collection;
-- baseline failures hidden by a skip;
-- baseline passing tests that regress to skipped/failure/error;
-- a successful candidate process exit whose JUnit still contains failures/errors.
-
-Output is deterministic JSON. Pure stdlib.
+but blocks new failures, missing tests, hidden failures, changed failure kinds,
+passing-test regressions, and contradictions between the Pytest process exit
+code and the JUnit report. Reports are written atomically. Pure stdlib.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+import tempfile
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
@@ -111,6 +108,14 @@ def _record(result: TestCaseResult) -> dict[str, object]:
     }
 
 
+def _exit_contradiction(exit_code: int, failure_count: int) -> list[dict[str, int]]:
+    if (exit_code == 0 and failure_count > 0) or (
+        exit_code != 0 and failure_count == 0
+    ):
+        return [{"exitCode": exit_code, "junitFailureCount": failure_count}]
+    return []
+
+
 def compare(
     baseline: dict[str, TestCaseResult],
     candidate: dict[str, TestCaseResult],
@@ -122,6 +127,7 @@ def compare(
 ) -> dict[str, object]:
     if baseline_exit < 0 or candidate_exit < 0:
         raise ComparisonError("pytest exit codes must be non-negative")
+
     baseline_ids = set(baseline)
     candidate_ids = set(candidate)
     baseline_failures = {
@@ -156,9 +162,21 @@ def compare(
         if baseline[test_id].status != candidate[test_id].status
     )
 
+    baseline_exit_contradiction = _exit_contradiction(
+        baseline_exit, len(baseline_failures)
+    )
+    candidate_exit_contradiction = _exit_contradiction(
+        candidate_exit, len(candidate_failures)
+    )
+    resolved_exit = (
+        baseline_exit != 0
+        and candidate_exit == 0
+        and not candidate_failures
+        and not baseline_exit_contradiction
+    )
     pytest_exit_code_regression = (
         []
-        if candidate_exit == 0 or candidate_exit == baseline_exit
+        if candidate_exit == baseline_exit or resolved_exit
         else [
             {
                 "baselineExitCode": baseline_exit,
@@ -166,23 +184,16 @@ def compare(
             }
         ]
     )
-    candidate_exit_contradiction = (
-        [
-            {
-                "candidateExitCode": candidate_exit,
-                "junitFailureCount": len(candidate_failures),
-            }
-        ]
-        if candidate_exit == 0 and candidate_failures
-        else []
-    )
+
     blockers = {
         "newFailures": new_failures,
         "missingBaselineTests": missing_baseline_tests,
         "maskedBaselineFailures": masked_failures,
         "passingTestRegressions": regressions,
-        "pytestExitCodeRegression": pytest_exit_code_regression,
+        "changedKnownFailureKind": changed_known_failure_kind,
+        "baselineExitContradiction": baseline_exit_contradiction,
         "candidateExitContradiction": candidate_exit_contradiction,
+        "pytestExitCodeRegression": pytest_exit_code_regression,
     }
     verdict = "PASS" if all(not values for values in blockers.values()) else "BLOCKED"
 
@@ -209,12 +220,7 @@ def compare(
             "additionalCandidateTests": additional_candidate_tests,
             "resolvedBaselineFailures": resolved_failures,
             "unchangedBaselineFailures": sorted(baseline_failures & candidate_failures),
-            "changedKnownFailureKind": changed_known_failure_kind,
-            "resolvedPytestExitCode": (
-                baseline_exit != 0
-                and candidate_exit == 0
-                and not candidate_failures
-            ),
+            "resolvedPytestExitCode": resolved_exit,
         },
         "baselineFailureDetails": [
             _record(baseline[test_id]) for test_id in sorted(baseline_failures)
@@ -228,6 +234,23 @@ def compare(
 
 def _canonical_json(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+
+
+def _atomic_write(path: Path, content: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", dir=path.parent
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
 
 
 def parse_args(argv: Sequence[str]) -> argparse.Namespace:
@@ -253,8 +276,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             baseline_ref=args.baseline_ref,
             candidate_ref=args.candidate_ref,
         )
-        args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(_canonical_json(report), encoding="utf-8")
+        _atomic_write(
+            args.output, _canonical_json(report).encode("utf-8")
+        )
         print(
             "RESULT: "
             f"{report['verdict']} pytest-baseline "
