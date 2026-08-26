@@ -25,8 +25,7 @@ try:
     from process_supervision.process_runner import (
         CapturePolicyV1,
         EnvironmentRowV1,
-        KIMI_FILE_REFERENCE_PREFIX_V1,
-        KIMI_FILE_REFERENCE_SUFFIX_V1,
+        KimiWindowsProfileV1,
         ProcessRequestV1,
         ProcessResultV1,
         ProcessRunnerV1,
@@ -37,8 +36,7 @@ except ModuleNotFoundError:
     from scripts.process_supervision.process_runner import (
         CapturePolicyV1,
         EnvironmentRowV1,
-        KIMI_FILE_REFERENCE_PREFIX_V1,
-        KIMI_FILE_REFERENCE_SUFFIX_V1,
+        KimiWindowsProfileV1,
         ProcessRequestV1,
         ProcessResultV1,
         ProcessRunnerV1,
@@ -63,6 +61,9 @@ E_EXTERNAL_PROVIDER_WINDOWS_NATIVE_ARGV_UNAVAILABLE = (
     "E_EXTERNAL_PROVIDER_WINDOWS_NATIVE_ARGV_UNAVAILABLE"
 )
 EXTERNAL_PROVIDER_NAMES = frozenset({"codex", "claude", "kimi"})
+KIMI_WINDOWS_PROFILE_V1 = KimiWindowsProfileV1
+KIMI_EXECUTABLE_BINDING_SCHEMA_V1 = "orchestrarium.kimi-executable-binding.v1"
+KIMI_EXECUTABLE_BINDING_FILENAME_V1 = "kimi-executable-binding-v1.json"
 SETTINGS_SNAPSHOT_MAX_BYTES = 1024 * 1024
 CLEANUP_ISSUE_LIMIT = 32
 CLEANUP_ISSUE_TOKEN_MAX = 64
@@ -556,10 +557,13 @@ def _command_from_path(path: str) -> list[str] | None:
 
 
 def resolve_provider_command(provider: str) -> list[str] | None:
+    # Kimi is bound only by an explicit installer enrollment receipt.  It must
+    # never inherit a caller's PATH or KIMI_BIN selection.
+    if provider == "kimi":
+        return None
     environment_key = {
         "codex": "CODEX_BIN",
         "claude": "CLAUDE_BIN",
-        "kimi": "KIMI_BIN",
     }.get(provider)
     if environment_key is None:
         return None
@@ -571,6 +575,51 @@ def resolve_provider_command(provider: str) -> list[str] | None:
             if command:
                 return command
     return None
+
+
+def _kimi_binding_path() -> Path:
+    # Source tests use the repository shared directory; installed Lead uses
+    # its sibling shared directory.  Neither path is environment-controlled.
+    script_dir = Path(__file__).resolve().parent
+    candidates = (script_dir.parent / "shared", script_dir / "shared")
+    return next((path / KIMI_EXECUTABLE_BINDING_FILENAME_V1 for path in candidates if path.is_dir()), candidates[0] / KIMI_EXECUTABLE_BINDING_FILENAME_V1)
+
+
+def _ordinary_file_sha256(path: Path) -> str:
+    validate_no_reparse_components(path)
+    before = path.lstat()
+    if not stat.S_ISREG(before.st_mode):
+        raise ValueError("E_KIMI_EXECUTABLE_BINDING_INVALID")
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        while chunk := stream.read(1024 * 1024):
+            digest.update(chunk)
+    after = path.lstat()
+    if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns):
+        raise ValueError("E_KIMI_EXECUTABLE_BINDING_DRIFT")
+    return digest.hexdigest()
+
+
+def resolve_enrolled_kimi_command() -> list[str]:
+    try:
+        binding_path = _kimi_binding_path()
+        validate_no_reparse_components(binding_path)
+        data = json.loads(binding_path.read_text(encoding="utf-8"))
+        path = Path(data["path"])
+        digest = str(data["sha256"])
+        size = int(data["size"])
+        if (
+            data.get("schema") != KIMI_EXECUTABLE_BINDING_SCHEMA_V1
+            or not path.is_absolute()
+            or Path(os.path.abspath(path)) != path
+            or path.name.casefold() != "kimi.exe"
+            or path.stat().st_size != size
+            or _ordinary_file_sha256(path) != digest
+        ):
+            raise ValueError("E_KIMI_EXECUTABLE_BINDING_DRIFT")
+        return [str(path)]
+    except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
+        raise ValueError("E_KIMI_EXECUTABLE_BINDING_INVALID") from exc
 
 
 def _truthy(value: str | None) -> bool:
@@ -841,6 +890,10 @@ def validate_no_reparse_components(path: Path) -> None:
 
 
 def secure_output_dir(provider: str) -> Path:
+    if provider == "kimi":
+        # Kimi never captures under the caller's repository or an ambient
+        # redirect.  The per-run directory is created directly by the OS.
+        return Path(tempfile.gettempdir())
     env_key = {
         "codex": "CODEX_PROMPTS_DIR",
         "claude": "CLAUDE_PROMPTS_DIR",
@@ -859,6 +912,19 @@ def secure_output_dir(provider: str) -> Path:
     if not output.is_dir():
         raise ValueError(f"capture root '{output}' is not a directory")
     return output
+
+
+def kimi_agent_bundle(body: bytes, run_dir: Path) -> tuple[Path, Path]:
+    """Materialize the only Kimi input: a no-tools, no-subagent agent bundle."""
+
+    if b"${" in body:
+        raise ValueError("E_KIMI_BUNDLE_TEMPLATE_INVALID")
+    task = _bounded_strict_utf8_snapshot(body, "Kimi bundle")
+    agent = run_dir / "kimi-agent.md"
+    skills = run_dir / "kimi-empty-skills"
+    skills.mkdir(mode=0o700)
+    agent.write_bytes(b"---\ntools: []\nsubagents: []\n---\n\n" + task)
+    return agent, skills
 
 
 def _bounded_strict_utf8_snapshot(data: bytes, label: str) -> bytes:
@@ -1020,7 +1086,9 @@ class RunCaptureLifecycle:
     @classmethod
     def create(cls, provider: str, slug: str) -> "RunCaptureLifecycle":
         root = secure_output_dir(provider)
-        run_dir = Path(tempfile.mkdtemp(prefix=f"{slug}-", dir=root))
+        run_dir = Path(tempfile.mkdtemp(prefix=f"{slug}-", dir=None if provider == "kimi" else root))
+        if provider == "kimi":
+            root = run_dir.parent
         try:
             metadata = run_dir.lstat()
             if not stat.S_ISDIR(metadata.st_mode) or run_dir.parent != root:
@@ -1550,22 +1618,14 @@ def provider_windows_argv_profile_id(
     if executable.resolve() == Path(sys.executable).resolve():
         return "python-validator-json-echo-v1"
     if provider == "kimi" and executable.name.casefold() == "kimi.exe":
-        return "kimi-file-reference-text-v1"
+        return KIMI_WINDOWS_PROFILE_V1.profile_id
     return None
 
 
-def kimi_provider_args(prompt_file: Path) -> list[str]:
-    """Build the one admitted Kimi file-reference grammar."""
+def kimi_provider_args(agent_file: Path, skills_dir: Path) -> list[str]:
+    """Delegate the exact sealed Kimi argv to the runner-owned profile."""
 
-    prompt = str(prompt_file.resolve(strict=True))
-    return [
-        "--model",
-        "kimi-code/k3",
-        "--output-format",
-        "text",
-        "--prompt",
-        KIMI_FILE_REFERENCE_PREFIX_V1 + prompt + KIMI_FILE_REFERENCE_SUFFIX_V1,
-    ]
+    return KIMI_WINDOWS_PROFILE_V1.build_args(agent_file, skills_dir)
 
 
 def run_provider_process(
@@ -1649,6 +1709,37 @@ def credential_scan_terminal(
 
     if any(needle in stdout or needle in stderr for needle in needles):
         return "E_EXTERNAL_PROVIDER_CREDENTIAL_ECHO"
+    return None
+
+
+def provider_output_safety_scan_terminal(
+    provider: str, needles: tuple[bytes, ...], *, stdout: bytes, stderr: bytes
+) -> str | None:
+    """Reuse the publication machine-path classifier before serializing Kimi output."""
+
+    credential = credential_scan_terminal(needles, stdout=stdout, stderr=stderr)
+    if credential is not None:
+        return credential
+    if provider != "kimi":
+        return None
+    try:
+        script_dir = Path(__file__).resolve().parent
+        candidates = (
+            script_dir.parent / "hooks" / "check-machine-local-path.py",
+            script_dir / "universal-hooks" / "hooks" / "check-machine-local-path.py",
+        )
+        classifier = next(path for path in candidates if path.is_file())
+        spec = importlib.util.spec_from_file_location("_kimi_machine_path_classifier", classifier)
+        if spec is None or spec.loader is None:
+            raise ValueError("classifier")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        finder = getattr(module, "find_machine_paths")
+        text = (stdout + b"\n" + stderr).decode("utf-8", errors="replace")
+        if finder(text):
+            return "E_EXTERNAL_PROVIDER_MACHINE_PATH_ECHO"
+    except (OSError, ValueError, StopIteration, AttributeError, ImportError):
+        return "E_EXTERNAL_PROVIDER_OUTPUT_SCAN_UNAVAILABLE"
     return None
 
 
@@ -2066,15 +2157,15 @@ def finalize_run(
         and raw_stderr is not None
     )
     scan_outcome = None
-    if credential_needles:
+    if credential_needles or provider == "kimi":
         scan_outcome = (
-            credential_scan_terminal(
-                credential_needles, stdout=raw_stdout, stderr=raw_stderr
+            provider_output_safety_scan_terminal(
+                provider, credential_needles, stdout=raw_stdout, stderr=raw_stderr
             )
             if raw_streams_settled
             else "E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE"
         )
-    if credential_needles and stream is not None and stream.overflow:
+    if (credential_needles or provider == "kimi") and stream is not None and stream.overflow:
         scan_outcome = "E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE"
     if scan_outcome is not None:
         result_text = ""
@@ -2229,6 +2320,9 @@ def settle_initialized_setup_failure(
 def launch(provider: str, argv: list[str]) -> int:
     """Provider-launch composition root and sole owner of the injected runner."""
 
+    if provider == "kimi" and os.name != "nt":
+        return fail("E_KIMI_WINDOWS_ONLY: Kimi bundle review is Windows-only")
+
     with ProcessRunnerV1() as runner:
         return _launch_with_runner(provider, argv, runner)
 
@@ -2270,7 +2364,10 @@ def _launch_with_runner(
         return fail(str(exc))
 
     query_cwd = Path.cwd().resolve()
-    command = resolve_provider_command(provider)
+    try:
+        command = resolve_enrolled_kimi_command() if provider == "kimi" else resolve_provider_command(provider)
+    except ValueError as exc:
+        return fail(str(exc))
     if command is None:
         key = {"codex": "CODEX_BIN", "claude": "CLAUDE_BIN"}.get(
             provider, "PROVIDER_BIN"
@@ -2365,6 +2462,15 @@ def _launch_with_runner(
                 RuntimeError("launch ledger append failed"), realization, runner=runner,
             )
 
+    kimi_agent: Path | None = None
+    kimi_skills: Path | None = None
+    if provider == "kimi":
+        try:
+            kimi_agent, kimi_skills = kimi_agent_bundle(body, lifecycle.run_dir)
+        except (OSError, ValueError) as exc:
+            return settle_initialized_setup_failure(
+                control, provider, model, effort, slug, lifecycle, exc, realization, runner=runner,
+            )
     provider_args = (
         [
             "exec",
@@ -2373,7 +2479,7 @@ def _launch_with_runner(
             *flags,
         ]
         if provider == "codex"
-        else kimi_provider_args(lifecycle.prompt_path)
+        else kimi_provider_args(kimi_agent, kimi_skills)
         if provider == "kimi"
         else flags
     )
@@ -2382,6 +2488,13 @@ def _launch_with_runner(
         child_environment["ORCHESTRARIUM_DISPATCHED_REVIEW"] = "1"
     elif provider == "codex":
         child_environment["CODEX_HOME"] = str(codex_home)
+    elif provider == "kimi":
+        source_environment = os.environ
+        child_environment = {
+            key: source_environment[key]
+            for key in ("SystemRoot", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "USERPROFILE", "KIMI_CODE_HOME")
+            if source_environment.get(key)
+        }
 
     exit_code = 1
     launch_error: str | None = None

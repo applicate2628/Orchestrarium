@@ -37,28 +37,48 @@ def test_kimi_profile_is_fixed_and_has_no_native_effort_control() -> None:
 
 def test_kimi_file_reference_argv_is_exact(tmp_path: Path) -> None:
     owner = _load_owner()
-    prompt = tmp_path / "prompt with spaces.md"
-    prompt.write_text("GATE: PASS\n", encoding="utf-8")
-    assert owner.kimi_provider_args(prompt) == [
+    agent = tmp_path / "agent.md"
+    skills = tmp_path / "empty-skills"
+    agent.write_text("---\ntools: []\nsubagents: []\n---\nGATE: PASS\n", encoding="utf-8")
+    skills.mkdir()
+    assert owner.kimi_provider_args(agent, skills) == [
+        "--agent-file",
+        str(agent.resolve()),
+        "--skills-dir",
+        str(skills.resolve()),
         "--model",
         "kimi-code/k3",
         "--output-format",
         "text",
         "--prompt",
-        owner.KIMI_FILE_REFERENCE_PREFIX_V1
-        + str(prompt.resolve())
-        + owner.KIMI_FILE_REFERENCE_SUFFIX_V1,
+        owner.KIMI_WINDOWS_PROFILE_V1.constant_prompt,
     ]
 
 
-def test_kimi_command_resolution_is_native_and_explicit(
+def test_kimi_command_resolution_ignores_ambient_binary_override(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     owner = _load_owner()
     executable = tmp_path / "kimi.exe"
     executable.write_bytes(b"synthetic")
     monkeypatch.setenv("KIMI_BIN", str(executable))
-    assert owner.resolve_provider_command("kimi") == [str(executable.resolve())]
+    assert owner.resolve_provider_command("kimi") is None
+
+
+def test_kimi_bundle_rejects_ambient_template_variables(tmp_path: Path) -> None:
+    owner = _load_owner()
+    with pytest.raises(ValueError, match="E_KIMI_BUNDLE_TEMPLATE_INVALID"):
+        owner.kimi_agent_bundle(b"Review ${cwd}", tmp_path)
+
+
+def test_kimi_bundle_is_no_tools_and_no_subagents(tmp_path: Path) -> None:
+    owner = _load_owner()
+    agent, skills = owner.kimi_agent_bundle(b"Review the sealed context.", tmp_path)
+    assert skills.is_dir() and not tuple(skills.iterdir())
+    text = agent.read_text(encoding="utf-8")
+    assert "tools: []" in text
+    assert "subagents: []" in text
+    assert "Review the sealed context." in text
 
 
 def test_kimi_transport_adds_no_second_lifecycle_or_smoke_path() -> None:

@@ -119,13 +119,27 @@ _WINDOWS_ARGV_PROFILES = frozenset(
     {
         "python-validator-json-echo-v1",
         "git-rev-parse-sq-quote-v1",
-        "kimi-file-reference-text-v1",
+        "kimi-sealed-bundle-text-v1",
     }
 )
-KIMI_FILE_REFERENCE_PREFIX_V1 = "Read the complete task instructions from the file at "
-KIMI_FILE_REFERENCE_SUFFIX_V1 = (
-    " and follow them exactly. Treat the file contents as the entire task."
-)
+
+
+class KimiWindowsProfileV1:
+    """The sole owner of the sealed Windows Kimi bundle grammar."""
+
+    profile_id = "kimi-sealed-bundle-text-v1"
+    model = "kimi-code/k3"
+    constant_prompt = "Review the sealed bundle and return only the requested result."
+
+    @classmethod
+    def build_args(cls, agent_file: Path, skills_dir: Path) -> list[str]:
+        return [
+            "--agent-file", str(agent_file.resolve(strict=True)),
+            "--skills-dir", str(skills_dir.resolve(strict=True)),
+            "--model", cls.model,
+            "--output-format", "text",
+            "--prompt", cls.constant_prompt,
+        ]
 KIMI_BUILD_INFO_MARKER_TEMPLATE_V1 = (
     'KIMI_BUILD_INFO = {{\n\t\tversion: optionalBuildString("{version}"),\n\t\tchannel:'
 )
@@ -1107,7 +1121,7 @@ def resolve_executable_version(path: Path) -> str:
     return _stream_executable_binding(path)[1]
 
 
-def _kimi_prompt_file_binding(
+def _kimi_bundle_file_binding(
     request: ProcessRequestV1, *, failure_id: str
 ) -> tuple[str, str, str]:
     def reject() -> ProcessSupervisionError:
@@ -1115,17 +1129,11 @@ def _kimi_prompt_file_binding(
 
     try:
         argv = request.argv
-        if (
-            len(argv) != 7
-            or argv[1:6]
-            != ("--model", "kimi-code/k3", "--output-format", "text", "--prompt")
-            or not argv[6].startswith(KIMI_FILE_REFERENCE_PREFIX_V1)
-            or not argv[6].endswith(KIMI_FILE_REFERENCE_SUFFIX_V1)
-        ):
+        if len(argv) != 11 or argv[1::2] != (
+            "--agent-file", "--skills-dir", "--model", "--output-format", "--prompt"
+        ) or argv[6] != KimiWindowsProfileV1.model or argv[8] != "text" or argv[10] != KimiWindowsProfileV1.constant_prompt:
             raise reject()
-        raw_path = argv[6][
-            len(KIMI_FILE_REFERENCE_PREFIX_V1) : -len(KIMI_FILE_REFERENCE_SUFFIX_V1)
-        ]
+        raw_path = argv[2]
         if not raw_path or "\x00" in raw_path:
             raise reject()
         prompt = Path(raw_path)
@@ -1174,6 +1182,16 @@ def _kimi_prompt_file_binding(
                 digest.update(chunk)
         finally:
             os.close(descriptor)
+        content = normalized.read_text(encoding="utf-8")
+        if "tools: []" not in content or "subagents: []" not in content or "${" in content:
+            raise reject()
+        skills = Path(argv[4])
+        if not skills.is_absolute() or Path(os.path.abspath(skills)) != skills or not skills.is_dir() or any(skills.iterdir()):
+            raise reject()
+        try:
+            skills.relative_to(root)
+        except ValueError as exc:
+            raise reject() from exc
         identity = hashlib.sha256(
             struct.pack(
                 ">QQQQQ",
@@ -1453,8 +1471,8 @@ class WindowsArgvAdmissionOwnerV1:
             )
         executable = Path(request.resolved_executable)
         prompt_binding: tuple[str, str, str] | None = None
-        if profile_id == "kimi-file-reference-text-v1":
-            prompt_binding = _kimi_prompt_file_binding(
+        if profile_id == "kimi-sealed-bundle-text-v1":
+            prompt_binding = _kimi_bundle_file_binding(
                 request, failure_id="PSV1-ARGV-CODEC-UNSUPPORTED"
             )
             if executable.name.casefold() != "kimi.exe":
@@ -1470,12 +1488,12 @@ class WindowsArgvAdmissionOwnerV1:
             probe_kind, requested, observed = self._git_probe(
                 lifecycle, request, executable
             )
-        elif profile_id == "kimi-file-reference-text-v1":
+        elif profile_id == "kimi-sealed-bundle-text-v1":
             if _windows_argv_roundtrip(request.argv) != request.argv:
                 raise ProcessSupervisionError(
                     "PSV1-ARGV-ATTESTATION", "request-validation"
                 )
-            probe_kind = "kimi-fixed-file-reference-v1"
+            probe_kind = "kimi-sealed-bundle-v1"
             requested = observed = _json_argv_sha256(request.argv)
         else:
             raise ProcessSupervisionError(
@@ -1514,8 +1532,8 @@ class WindowsArgvAdmissionOwnerV1:
         executable = Path(request.resolved_executable)
         identity, version = _stream_executable_binding(executable)
         prompt_binding = (
-            _kimi_prompt_file_binding(request, failure_id="PSV1-ARGV-ATTESTATION")
-            if admission.profile_id == "kimi-file-reference-text-v1"
+            _kimi_bundle_file_binding(request, failure_id="PSV1-ARGV-ATTESTATION")
+            if admission.profile_id == "kimi-sealed-bundle-text-v1"
             else (None, None, None)
         )
         valid = (
@@ -4032,6 +4050,7 @@ __all__ = [
     "RunTokenV1",
     "WindowsArgvAdmissionOwnerV1",
     "WindowsArgvAdmissionV1",
+    "KimiWindowsProfileV1",
     "WindowsCreateOwnerV1",
     "WindowsInheritanceCoordinatorV1",
     "ValidatedCwdV1",

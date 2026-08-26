@@ -301,7 +301,53 @@ def _parser(provider: str) -> argparse.ArgumentParser:
     parser.add_argument("--dry-run", "-DryRun", action="store_true")
     parser.add_argument("--allow-unsafe-target", "-AllowUnsafeTarget", action="store_true")
     parser.add_argument("--no-hypothesis-hook", "-NoHypothesisHook", action="store_true")
+    parser.add_argument("--enroll-kimi", action="store_true")
     return parser
+
+
+def _enroll_kimi_executable(home: Path, lead_root: Path, *, dry_run: bool) -> None:
+    """Record a user-approved, local Kimi continuity pin; never trust PATH."""
+
+    executable = home / ".kimi-code" / "bin" / "kimi.exe"
+    pin = lead_root / "shared" / "kimi-executable-binding-v1.json"
+    if _contains_reparse(executable) or not executable.is_file():
+        raise ValueError("E_KIMI_ENROLLMENT_INVALID: fixed executable path")
+    digest = _file_sha256(executable)
+    payload = json.dumps(
+        {
+            "schema": "orchestrarium.kimi-executable-binding.v1",
+            "path": str(executable),
+            "size": executable.stat().st_size,
+            "sha256": digest,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8") + b"\n"
+    if pin.exists():
+        if _contains_reparse(pin) or not pin.is_file():
+            raise ValueError("E_KIMI_ENROLLMENT_INVALID: existing pin")
+        if pin.read_bytes() == payload:
+            print("  Kimi executable enrollment is exact and left byte-exact")
+            return
+        raise ValueError("E_KIMI_ENROLLMENT_DRIFT: re-enrollment requires explicit replacement workflow")
+    if dry_run:
+        print("  [dry-run] Kimi executable enrollment would create local continuity pin")
+        return
+    pin.parent.mkdir(parents=True, exist_ok=True)
+    if _contains_reparse(pin.parent):
+        raise ValueError("E_KIMI_ENROLLMENT_INVALID: pin root")
+    descriptor, temporary_name = tempfile.mkstemp(prefix=".kimi-binding.", suffix=".tmp", dir=pin.parent)
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, pin)
+    finally:
+        temporary.unlink(missing_ok=True)
+    if pin.read_bytes() != payload:
+        raise ValueError("E_KIMI_ENROLLMENT_POSTCONDITION")
 
 
 def _repo_root(script: Path) -> Path:
@@ -4421,6 +4467,8 @@ def install(provider: str, argv: list[str] | None = None) -> int:
     source = root / f"src.{provider}"
     try:
         mode, target, project = _target(provider, args)
+        if args.enroll_kimi and (provider != "codex" or mode != "global"):
+            raise ValueError("E_KIMI_ENROLLMENT_SCOPE: --enroll-kimi requires global Codex install")
         canonical_agents_root = (
             target.parent / ".agents" if mode == "global" else project / ".agents"
         )
@@ -4863,6 +4911,9 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                 args.dry_run,
             )
             if args.dry_run:
+                if args.enroll_kimi:
+                    assert home is not None
+                    _enroll_kimi_executable(home, canonical_lead, dry_run=True)
                 print("RESULT: DRY-RUN complete (no files modified).")
                 return 0
 
@@ -4915,6 +4966,9 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                     "verify",
                     "documentation or agents-mode output missing",
                 )
+            if args.enroll_kimi:
+                assert home is not None
+                _enroll_kimi_executable(home, canonical_lead, dry_run=False)
             print(
                 f"RESULT: OK - {provider.capitalize()} pack installed to {target}"
             )

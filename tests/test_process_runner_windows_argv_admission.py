@@ -83,16 +83,14 @@ def _fake_kimi(module, path: Path, version: str = "0.38.0", *, duplicate: bool =
 
 
 def _kimi_argv(module, executable: Path, prompt_file: Path) -> tuple[str, ...]:
+    prompt_file.write_text(
+        "---\ntools: []\nsubagents: []\n---\nGATE: PASS\n", encoding="utf-8"
+    )
+    skills = prompt_file.parent / "empty-skills"
+    skills.mkdir(exist_ok=True)
     return (
         str(executable.resolve()),
-        "--model",
-        "kimi-code/k3",
-        "--output-format",
-        "text",
-        "--prompt",
-        module.KIMI_FILE_REFERENCE_PREFIX_V1
-        + str(prompt_file.resolve())
-        + module.KIMI_FILE_REFERENCE_SUFFIX_V1,
+        *module.KimiWindowsProfileV1.build_args(prompt_file, skills),
     )
 
 
@@ -134,14 +132,14 @@ def test_kimi_profile_accepts_only_fixed_transport_and_binds_prompt_file(tmp_pat
         module,
         owner,
         _kimi_argv(module, executable, prompt),
-        "kimi-file-reference-text-v1",
+        "kimi-sealed-bundle-text-v1",
         cwd=neutral,
     )
 
     lifecycle, admission = _admit(module, owner, request)
     try:
-        assert admission.profile_id == "kimi-file-reference-text-v1"
-        assert admission.probe_kind == "kimi-fixed-file-reference-v1"
+        assert admission.profile_id == "kimi-sealed-bundle-text-v1"
+        assert admission.probe_kind == "kimi-sealed-bundle-v1"
         assert admission.prompt_file_canonical == str(prompt.resolve())
         assert admission.prompt_file_identity
         assert admission.prompt_file_sha256
@@ -174,7 +172,7 @@ def test_kimi_profile_rejects_argv_variants_without_probe(tmp_path: Path, mutate
         module,
         owner,
         tuple(mutate(_kimi_argv(module, executable, prompt))),
-        "kimi-file-reference-text-v1",
+        "kimi-sealed-bundle-text-v1",
         cwd=neutral,
     )
     lifecycle = owner._begin_lifecycle()
@@ -202,7 +200,7 @@ def test_kimi_profile_rejects_wrong_or_ambiguous_embedded_version(
         module,
         owner,
         _kimi_argv(module, executable, prompt),
-        "kimi-file-reference-text-v1",
+        "kimi-sealed-bundle-text-v1",
         cwd=neutral,
     )
     lifecycle = owner._begin_lifecycle()
@@ -227,7 +225,7 @@ def test_kimi_profile_rejects_prompt_mutation_between_admit_and_consume(tmp_path
         module,
         owner,
         _kimi_argv(module, executable, prompt),
-        "kimi-file-reference-text-v1",
+        "kimi-sealed-bundle-text-v1",
         cwd=neutral,
     )
     lifecycle, admission = _admit(module, owner, request)
