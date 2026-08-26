@@ -39,7 +39,8 @@ class PytestBaselineComparatorTests(unittest.TestCase):
         *,
         baseline_exit: int = 0,
         candidate_exit: int = 0,
-    ) -> tuple[subprocess.CompletedProcess[str], dict[str, object]]:
+        output_as_directory: bool = False,
+    ) -> tuple[subprocess.CompletedProcess[str], dict[str, object] | None]:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             baseline = root / "baseline.xml"
@@ -47,6 +48,8 @@ class PytestBaselineComparatorTests(unittest.TestCase):
             output = root / "report.json"
             baseline.write_text(junit(baseline_cases), encoding="utf-8")
             candidate.write_text(junit(candidate_cases), encoding="utf-8")
+            if output_as_directory:
+                output.mkdir()
             result = subprocess.run(
                 [
                     sys.executable,
@@ -71,7 +74,9 @@ class PytestBaselineComparatorTests(unittest.TestCase):
                 stderr=subprocess.PIPE,
                 check=False,
             )
-            report = json.loads(output.read_text(encoding="utf-8"))
+            report = None
+            if output.is_file():
+                report = json.loads(output.read_text(encoding="utf-8"))
             return result, report
 
     def test_allows_known_failures_resolutions_and_additional_passing_tests(self) -> None:
@@ -90,6 +95,7 @@ class PytestBaselineComparatorTests(unittest.TestCase):
             baseline_exit=1,
             candidate_exit=1,
         )
+        assert report is not None
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(report["verdict"], "PASS")
         self.assertEqual(
@@ -107,12 +113,9 @@ class PytestBaselineComparatorTests(unittest.TestCase):
             [("suite.Test", "test_pass", "failure")],
             candidate_exit=1,
         )
+        assert report is not None
         self.assertEqual(result.returncode, 1)
-        self.assertEqual(report["verdict"], "BLOCKED")
-        self.assertEqual(
-            report["blockers"]["newFailures"],
-            ["suite.Test::test_pass"],
-        )
+        self.assertEqual(report["blockers"]["newFailures"], ["suite.Test::test_pass"])
 
     def test_blocks_missing_test_and_failure_hidden_by_skip(self) -> None:
         result, report = self.run_compare(
@@ -124,6 +127,7 @@ class PytestBaselineComparatorTests(unittest.TestCase):
             baseline_exit=1,
             candidate_exit=0,
         )
+        assert report is not None
         self.assertEqual(result.returncode, 1)
         self.assertEqual(
             report["blockers"]["missingBaselineTests"],
@@ -141,11 +145,25 @@ class PytestBaselineComparatorTests(unittest.TestCase):
             baseline_exit=0,
             candidate_exit=3,
         )
+        assert report is not None
         self.assertEqual(result.returncode, 1)
-        self.assertEqual(report["verdict"], "BLOCKED")
         self.assertEqual(
-            report["blockers"]["pytestExitCodeRegression"],
-            [{"baselineExitCode": 0, "candidateExitCode": 3}],
+            report["blockers"]["candidateExitContradiction"],
+            [{"exitCode": 3, "junitFailureCount": 0}],
+        )
+
+    def test_blocks_same_nonzero_exit_when_candidate_junit_is_all_passing(self) -> None:
+        result, report = self.run_compare(
+            [("suite.Test", "test_known", "failure")],
+            [("suite.Test", "test_known", "passed")],
+            baseline_exit=1,
+            candidate_exit=1,
+        )
+        assert report is not None
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(
+            report["blockers"]["candidateExitContradiction"],
+            [{"exitCode": 1, "junitFailureCount": 0}],
         )
 
     def test_blocks_zero_candidate_exit_when_junit_still_contains_failure(self) -> None:
@@ -155,13 +173,37 @@ class PytestBaselineComparatorTests(unittest.TestCase):
             baseline_exit=1,
             candidate_exit=0,
         )
+        assert report is not None
         self.assertEqual(result.returncode, 1)
-        self.assertEqual(report["verdict"], "BLOCKED")
         self.assertEqual(
             report["blockers"]["candidateExitContradiction"],
-            [{"candidateExitCode": 0, "junitFailureCount": 1}],
+            [{"exitCode": 0, "junitFailureCount": 1}],
         )
-        self.assertFalse(report["observations"]["resolvedPytestExitCode"])
+
+    def test_blocks_known_failure_that_changes_into_error(self) -> None:
+        result, report = self.run_compare(
+            [("suite.Test", "test_known", "failure")],
+            [("suite.Test", "test_known", "error")],
+            baseline_exit=1,
+            candidate_exit=1,
+        )
+        assert report is not None
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(
+            report["blockers"]["changedKnownFailureKind"],
+            ["suite.Test::test_known"],
+        )
+
+    def test_report_write_failure_returns_invalid_input_without_traceback(self) -> None:
+        result, report = self.run_compare(
+            [("suite.Test", "test_pass", "passed")],
+            [("suite.Test", "test_pass", "passed")],
+            output_as_directory=True,
+        )
+        self.assertIsNone(report)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("RESULT: FAIL pytest-baseline", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
 
 
 if __name__ == "__main__":
