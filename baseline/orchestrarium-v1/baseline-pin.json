@@ -19,16 +19,41 @@
     ],
     "verificationMode": "local-only"
   },
-  "generator": {
-    "command": "python scripts/baseline/build_inventory.py",
-    "deterministic": true,
-    "runtimeMutation": false
-  },
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "signedTag": {
     "name": "orchestrarium-v1-parity-baseline",
     "required": true,
     "status": "human-gate-pending"
   },
-  "status": "baseline-identity-pinned"
+  "status": "baseline-identity-and-tooling-pinned",
+  "tooling": {
+    "commandComparator": {
+      "deterministic": true,
+      "gitBlobSha": "f5315f4d3851cf45e47a9f67952b407fa863c043",
+      "materialization": "git-cat-file-blob",
+      "path": "scripts/baseline/compare_command_baseline.py",
+      "runtimeMutation": false
+    },
+    "inventoryGenerator": {
+      "deterministic": true,
+      "gitBlobSha": "09b8a75284554a8eb5d14529163c78fe529da37f",
+      "materialization": "git-cat-file-blob",
+      "path": "scripts/baseline/build_inventory.py",
+      "runtimeMutation": false
+    },
+    "pytestComparator": {
+      "deterministic": true,
+      "gitBlobSha": "391ea9f3e35bdf97320e5df10345cfeebb379a7e",
+      "materialization": "git-cat-file-blob",
+      "path": "scripts/baseline/compare_pytest_baseline.py",
+      "runtimeMutation": false
+    },
+    "targetEffectGenerator": {
+      "deterministic": true,
+      "gitBlobSha": "d23d7a1084966c3e408f0b124d2def19c2969704",
+      "materialization": "git-cat-file-blob",
+      "path": "scripts/baseline/build_target_effect_baseline.py",
+      "runtimeMutation": false
+    }
+  }
 }

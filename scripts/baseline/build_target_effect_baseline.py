@@ -91,6 +91,7 @@ def _is_instruction_entrypoint(path_text: str) -> bool:
         "agents.shared.md",
         "claude.md",
         "gemini.md",
+        "qwen.md",
     }:
         return False
     if any(

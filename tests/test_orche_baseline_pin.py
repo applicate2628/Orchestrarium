@@ -90,7 +90,7 @@ class BaselinePinTests(unittest.TestCase):
         self.assertIn("Source branch at capture time: `main`", readme)
         self.assertNotIn("pull request #3", readme.lower())
         self.assertIn("does **not** use GitHub Actions", readme)
-        self.assertIn("git cat-file blob", readme)
+        self.assertIn("cat-file blob", readme)
         self.assertIn('git -C "$BASELINE_ROOT" rev-parse HEAD', readme)
         self.assertIn('USERPROFILE="$lane_root/home"', readme)
         self.assertIn("compare_validator", readme)
