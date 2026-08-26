@@ -37,6 +37,9 @@ print(value)
 PY
 }
 
+EVIDENCE_ROOT="$CANDIDATE_ROOT/$(pin_value evidence.generatedOutputDirectory)"
+mkdir -p "$EVIDENCE_ROOT"
+
 materialize_tool() {
   key="$1"
   output="$2"
@@ -70,25 +73,30 @@ python tests/test_orche_target_effect_baseline.py
 python tests/test_orche_command_baseline.py
 ```
 
-Generate evidence with the materialized pinned tools:
+Generate evidence with the materialized pinned tools. The machine-readable
+`evidence.generatedOutputDirectory` field is the single source of truth for the output path:
 
 ```bash
 PIN_COMMIT="$(pin_value baseline.commitSha)"
-rm -rf "$OUTPUT_ROOT/evidence"
+rm -rf "$EVIDENCE_ROOT"
+mkdir -p "$EVIDENCE_ROOT"
 python "$TOOL_ROOT/build_inventory.py" \
   --repo-root "$CANDIDATE_ROOT" \
   --repository applicate2628/Orchestrarium \
   --ref "$PIN_COMMIT" \
-  --output-dir "$OUTPUT_ROOT/evidence"
+  --output-dir "$EVIDENCE_ROOT"
 python "$TOOL_ROOT/build_target_effect_baseline.py" \
-  --inventory "$OUTPUT_ROOT/evidence/capability-inventory.json" \
-  --output "$OUTPUT_ROOT/evidence/target-effect-baseline.json"
+  --inventory "$EVIDENCE_ROOT/capability-inventory.json" \
+  --output "$EVIDENCE_ROOT/target-effect-baseline.json"
 ```
 
 ## Isolated baseline and candidate runs
 
 Use clean worktrees. Derive the reported refs from the worktrees that are actually tested,
-and fail if the baseline worktree does not match the pin.
+and fail if the baseline worktree does not match the pin. Normal untracked changes are rejected
+through porcelain status. Ignored files are checked separately because Pytest and repository
+validators can execute them even when Git status hides them; only known local cache/output
+locations are excluded.
 
 ```bash
 BASELINE_ROOT=/absolute/path/to/baseline-worktree
@@ -102,8 +110,36 @@ BASELINE_TREE="$(git -C "$BASELINE_ROOT" rev-parse 'HEAD^{tree}')"
 CANDIDATE_REF="$(git -C "$CANDIDATE_ROOT" rev-parse HEAD)"
 test "$BASELINE_REF" = "$PIN_COMMIT"
 test "$BASELINE_TREE" = "$PIN_TREE"
-test -z "$(git -C "$BASELINE_ROOT" status --porcelain=v1 --untracked-files=all)"
-test -z "$(git -C "$CANDIDATE_ROOT" status --porcelain=v1 --untracked-files=all)"
+
+ignored_executable_inputs() {
+  repo="$1"
+  git -C "$repo" ls-files --others --ignored --exclude-standard -- \
+    ':(glob)tests/**' \
+    ':(glob)**/conftest.py' \
+    ':(glob)scripts/**' \
+    ':(glob)**/*.py' \
+    ':(glob)**/*.sh' \
+    ':(glob)**/*.ps1' \
+    ':(glob)**/pyproject.toml' \
+    ':(glob)**/pytest.ini' \
+    ':(glob)**/tox.ini' \
+    ':(glob)**/setup.cfg' \
+    ':(exclude,glob).scratch/**' \
+    ':(exclude,glob)**/__pycache__/**' \
+    ':(exclude,glob).pytest_cache/**' \
+    ':(exclude,glob)node_modules/**' \
+    ':(exclude,glob).venv/**' \
+    ':(exclude,glob)venv/**'
+}
+
+assert_clean_worktree() {
+  repo="$1"
+  test -z "$(git -C "$repo" status --porcelain=v1 --untracked-files=all)"
+  test -z "$(ignored_executable_inputs "$repo")"
+}
+
+assert_clean_worktree "$BASELINE_ROOT"
+assert_clean_worktree "$CANDIDATE_ROOT"
 rm -rf "$OUTPUT_ROOT/runs"
 mkdir -p "$OUTPUT_ROOT/runs"
 
