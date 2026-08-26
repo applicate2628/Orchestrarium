@@ -1,4 +1,4 @@
-"""Keep unavailable Kimi/Grok policy names out of executable documentation."""
+"""Keep live Kimi and Grok documentation within their distinct policy bounds."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 # This is the complete live Markdown/YAML inventory allowed to name either
-# unavailable provider. New hits require an explicit review of their wording.
+# provider. New hits require an explicit review of their wording.
 EXPECTED_HIT_FILES = frozenset({
     "INSTALL.md",
     "README.md",
@@ -42,13 +42,28 @@ SEMANTIC_TERMS = re.compile(
     r"\b(?:route|use|select(?:ed|ion)?|resolved|execution|launch(?:er|ed|ing)?|spawn|probe|read-only)\b",
     re.IGNORECASE,
 )
-SAFE_TERMS = re.compile(
+GROK_NONEXECUTION_TERMS = re.compile(
     r"\b(?:unavailable|disabled|policy[- ](?:only|classifier|name)|non-executing)\b",
     re.IGNORECASE,
 )
-FORBIDDEN_TERMS = re.compile(r"\b(?:explicit-only|read-only route)\b", re.IGNORECASE)
-KIMI_GROK_SELECTION = re.compile(
-    r"\b(?:kimi|grok)\b[^.]{0,80}\bselect(?:ed|ion)?\b", re.IGNORECASE
+KIMI_ADMISSION_TERMS = {
+    "explicit": re.compile(r"\bexplicit(?:-only)?\b", re.IGNORECASE),
+    "read-only": re.compile(r"\bread-only\b", re.IGNORECASE),
+    "independent verification": re.compile(
+        r"\bindependent(?:ly)?\s+verif(?:y|ies|ied|ication)\b", re.IGNORECASE
+    ),
+    "nonauthorizing": re.compile(
+        r"\bnon[- ]?authoriz(?:e[ds]?|ing)\b", re.IGNORECASE
+    ),
+}
+KIMI_ADMISSION_TRIGGER = re.compile(
+    r"(?:\bkimi\b\s+(?:is|may|can|uses?|remains)\b|"
+    r"\b(?:choose|select(?:ed)?|route|use)\s+\bkimi\b|"
+    r"\bexplicit(?:-only)?\s+\bkimi\b)",
+    re.IGNORECASE,
+)
+GROK_SELECTION = re.compile(
+    r"\bgrok\b[^.]{0,80}\bselect(?:ed|ion)?\b", re.IGNORECASE
 )
 POLICY_ENUMERATION = re.compile(
     r"`externalProvider:\s*auto \| codex \| claude \| gemini \| qwen \| kimi \| grok`",
@@ -81,7 +96,7 @@ def _provider_clauses(line: str) -> tuple[str, ...]:
 
 
 def test_kimi_grok_live_inventory_and_nonexecution_language() -> None:
-    """Every live executable-sounding mention must also state the unavailable boundary."""
+    """Every live mention must state its provider-specific safety boundary."""
 
     hits: dict[str, tuple[str, ...]] = {}
     for path in _live_docs_and_yaml():
@@ -102,21 +117,29 @@ def test_kimi_grok_live_inventory_and_nonexecution_language() -> None:
             for clause in _provider_clauses(line):
                 if not re.search(r"\b(?:kimi|grok)\b", clause, re.IGNORECASE):
                     continue
+                mentions_grok = re.search(r"\bgrok\b", clause, re.IGNORECASE)
                 if SEMANTIC_TERMS.search(clause) and not POLICY_ENUMERATION.search(clause):
-                    assert SAFE_TERMS.search(clause), (
-                        f"unsafe Kimi/Grok clause in {relative_path}: {clause}"
-                    )
-                assert not FORBIDDEN_TERMS.search(clause), (
-                    f"selectable Kimi/Grok wording in {relative_path}: {clause}"
-                )
-                if KIMI_GROK_SELECTION.search(clause):
-                    assert "never select" in clause.lower(), (
-                        f"Kimi/Grok selection wording in {relative_path}: {clause}"
+                    if mentions_grok:
+                        assert GROK_NONEXECUTION_TERMS.search(clause), (
+                            f"executable Grok clause in {relative_path}: {clause}"
+                        )
+                if GROK_SELECTION.search(clause):
+                    assert re.search(
+                        r"\bnever(?:\s+be)?\s+select", clause, re.IGNORECASE
+                    ), (
+                        f"Grok selection wording in {relative_path}: {clause}"
                     )
 
     for relative_path, lines in hits.items():
         text = "\n".join(lines)
-        assert "Kimi CLI" not in text, f"resolved-provider template leaks Kimi in {relative_path}"
+        if KIMI_ADMISSION_TRIGGER.search(text):
+            for boundary, pattern in KIMI_ADMISSION_TERMS.items():
+                assert pattern.search(text), (
+                    f"Kimi admission lacks {boundary} in {relative_path}"
+                )
+        elif SEMANTIC_TERMS.search(text):
+            assert GROK_NONEXECUTION_TERMS.search(text), (
+                f"Kimi is neither safely admitted nor unavailable in {relative_path}"
+            )
         assert "Grok CLI" not in text, f"resolved-provider template leaks Grok in {relative_path}"
-        assert "external CLI (Kimi" not in text, f"execution template leaks Kimi in {relative_path}"
         assert "external CLI (Grok" not in text, f"execution template leaks Grok in {relative_path}"
