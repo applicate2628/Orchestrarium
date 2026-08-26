@@ -19,7 +19,7 @@
     ],
     "verificationMode": "local-only"
   },
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "signedTag": {
     "name": "orchestrarium-v1-parity-baseline",
     "required": true,
@@ -31,6 +31,7 @@
       "deterministic": true,
       "gitBlobSha": "f5315f4d3851cf45e47a9f67952b407fa863c043",
       "materialization": "git-cat-file-blob",
+      "owningCommit": "73d97aa6871503d93ce12e78312ec78618a084bb",
       "path": "scripts/baseline/compare_command_baseline.py",
       "runtimeMutation": false
     },
@@ -38,20 +39,23 @@
       "deterministic": true,
       "gitBlobSha": "09b8a75284554a8eb5d14529163c78fe529da37f",
       "materialization": "git-cat-file-blob",
+      "owningCommit": "73d97aa6871503d93ce12e78312ec78618a084bb",
       "path": "scripts/baseline/build_inventory.py",
       "runtimeMutation": false
     },
     "pytestComparator": {
       "deterministic": true,
-      "gitBlobSha": "391ea9f3e35bdf97320e5df10345cfeebb379a7e",
+      "gitBlobSha": "c70f09cee28e2fc852cede59f3c611b4ea4b8090",
       "materialization": "git-cat-file-blob",
+      "owningCommit": "73d97aa6871503d93ce12e78312ec78618a084bb",
       "path": "scripts/baseline/compare_pytest_baseline.py",
       "runtimeMutation": false
     },
     "targetEffectGenerator": {
       "deterministic": true,
-      "gitBlobSha": "d23d7a1084966c3e408f0b124d2def19c2969704",
+      "gitBlobSha": "db2359989c268aeaaaaa98dbe9c1247138639659",
       "materialization": "git-cat-file-blob",
+      "owningCommit": "73d97aa6871503d93ce12e78312ec78618a084bb",
       "path": "scripts/baseline/build_target_effect_baseline.py",
       "runtimeMutation": false
     }
