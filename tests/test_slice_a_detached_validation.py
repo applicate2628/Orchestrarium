@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -25,10 +26,12 @@ def _load():
     return module
 
 
-def _git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
+def _git(
+    repo: Path, *args: str, check: bool = True
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["git", "-C", str(repo), *args],
-        check=True,
+        check=check,
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -77,6 +80,84 @@ def _validate(module, repo: Path, run_dir: Path, baseline: Path, digest: str, co
     )
 
 
+def _run_direct(module, tmp_path: Path, command):
+    attempts = tmp_path / "attempts"
+    attempts.mkdir()
+    runner = module.ProcessRunnerV1()
+    try:
+        receipt = module._run_child(runner, command, tmp_path, attempts, 1)
+    finally:
+        close_result = runner.close()
+    assert close_result.outcome == "closed"
+    assert close_result.unsettled_run_token_sha256 == ()
+    return receipt, attempts
+
+
+def _process_running(pid: int) -> bool:
+    """Use an operating-system process oracle instead of task-list text."""
+
+    if os.name == "nt":
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        open_process = kernel32.OpenProcess
+        open_process.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        open_process.restype = wintypes.HANDLE
+        wait = kernel32.WaitForSingleObject
+        wait.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        wait.restype = wintypes.DWORD
+        close = kernel32.CloseHandle
+        close.argtypes = [wintypes.HANDLE]
+        close.restype = wintypes.BOOL
+        handle = open_process(0x00100000, False, pid)
+        if not handle:
+            return False
+        try:
+            return wait(handle, 0) == 0x00000102
+        finally:
+            close(handle)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+def _receipt_v2(module, **changes):
+    values = {
+        "schemaVersion": 2,
+        "name": "fixture-command",
+        "argv": (sys.executable, "-c", "pass"),
+        "cwd": ".",
+        "environmentKeys": ("PATH",),
+        "timeoutSeconds": 5.0,
+        "outcome": "success",
+        "terminalStage": "completed",
+        "failureId": None,
+        "exitCode": 0,
+        "timedOut": False,
+        "cancelled": False,
+        "reaped": True,
+        "durationSeconds": 0.01,
+        "stdoutObservedBytes": 0,
+        "stdoutPersistedBytes": 0,
+        "stdoutTruncated": False,
+        "stdoutSha256": hashlib.sha256(b"").hexdigest(),
+        "stderrObservedBytes": 0,
+        "stderrPersistedBytes": 0,
+        "stderrTruncated": False,
+        "stderrSha256": hashlib.sha256(b"").hexdigest(),
+        "treeBackend": "windows-job-v1" if os.name == "nt" else "posix-group-oracle-v1",
+        "ownershipConfirmed": True,
+        "settlementState": "EMPTY",
+        "treeEmpty": True,
+        "resourcesClosed": True,
+    }
+    values.update(changes)
+    return module.ChildReceipt(**values)
+
+
 def test_cli_help_is_side_effect_free() -> None:
     result = subprocess.run(
         [sys.executable, str(SCRIPT), "--help"],
@@ -87,6 +168,29 @@ def test_cli_help_is_side_effect_free() -> None:
     )
     assert result.returncode == 0, result.stderr
     assert "--platform-only" in result.stdout
+
+
+def test_detached_adapter_has_one_canonical_process_owner() -> None:
+    """Every production child path must route through ProcessRunnerV1."""
+
+    source = SCRIPT.read_text(encoding="utf-8")
+    assert "ProcessRunnerV1" in source
+    assert "GitResultV1" in source
+    assert "import subprocess" not in source
+    assert "subprocess." not in source
+    assert "subprocess.run(" not in source
+    assert "subprocess.Popen(" not in source
+    assert "taskkill" not in source.casefold()
+    assert "_terminate_process_tree" not in source
+    assert "except ModuleNotFoundError" not in source
+    assert (
+        'if __name__ == "__main__":\n'
+        "    from process_supervision.process_runner import ("
+    ) in source
+    assert (
+        "else:\n"
+        "    from scripts.process_supervision.process_runner import ("
+    ) in source
 
 
 def test_slice_a_authorization_scope_polarity(
@@ -139,21 +243,21 @@ def _inject_partial_add(
     targets: list[Path] = []
     state = {"registration": False}
 
-    def injected(repo_root: Path, *args: str, check: bool = True):
+    def injected(runner, repo_root: Path, *args: str, check: bool = True):
         if args[:3] == ("worktree", "list", "--porcelain") and state["registration"]:
             payload = (
                 f"worktree {targets[0]}\n"
                 "HEAD 0000000000000000000000000000000000000000\n"
                 "detached\n\n"
             ).encode("utf-8")
-            return subprocess.CompletedProcess(["git", *args], 0, payload, b"")
+            return module.GitResultV1(("git", *args), 0, payload, b"")
         if args[:2] == ("worktree", "remove") and targets:
             state["registration"] = False
             if targets[0].exists():
                 shutil.rmtree(targets[0])
-            return subprocess.CompletedProcess(["git", *args], 0, b"", b"")
+            return module.GitResultV1(("git", *args), 0, b"", b"")
         if args[:2] != ("worktree", "add"):
-            return real_git(repo_root, *args, check=check)
+            return real_git(runner, repo_root, *args, check=check)
         worktree = Path(args[-2])
         targets.append(worktree)
         if effect in {"path-only", "both"}:
@@ -165,19 +269,19 @@ def _inject_partial_add(
             raise AssertionError(effect)
         if interrupt:
             raise KeyboardInterrupt()
-        return subprocess.CompletedProcess(
-            ["git", *args], 1, stdout=b"", stderr=b"injected add failure"
+        return module.GitResultV1(
+            ("git", *args), 1, stdout=b"", stderr=b"injected add failure"
         )
 
     monkeypatch.setattr(module, "_git", injected)
     return targets, real_git, state
 
 
-def _cleanup_partial_fixture(real_git, repo: Path, worktree: Path) -> None:
-    real_git(repo, "worktree", "remove", "--force", str(worktree), check=False)
+def _cleanup_partial_fixture(repo: Path, worktree: Path) -> None:
+    _git(repo, "worktree", "remove", "--force", str(worktree), check=False)
     if worktree.exists() or worktree.is_symlink():
         shutil.rmtree(worktree, ignore_errors=True)
-    real_git(repo, "worktree", "prune", "--expire", "now", check=False)
+    _git(repo, "worktree", "prune", "--expire", "now", check=False)
 
 
 def _failed_add_validation(module, repo, baseline, digest, run_dir):
@@ -209,7 +313,7 @@ def test_worktree_add_nonzero_path_only_cleanup(
         assert state["registration"] is False
     finally:
         if targets:
-            _cleanup_partial_fixture(real_git, repo, targets[0])
+            _cleanup_partial_fixture(repo, targets[0])
 
 
 def test_worktree_add_nonzero_registration_only_cleanup(
@@ -234,7 +338,7 @@ def test_worktree_add_nonzero_registration_only_cleanup(
         assert state["registration"] is False
     finally:
         if targets:
-            _cleanup_partial_fixture(real_git, repo, targets[0])
+            _cleanup_partial_fixture(repo, targets[0])
 
 
 def test_worktree_add_nonzero_both_side_effects_cleanup(
@@ -253,7 +357,7 @@ def test_worktree_add_nonzero_both_side_effects_cleanup(
         assert state["registration"] is False
     finally:
         if targets:
-            _cleanup_partial_fixture(real_git, repo, targets[0])
+            _cleanup_partial_fixture(repo, targets[0])
 
 
 def test_worktree_add_interruption_partial_cleanup(
@@ -274,7 +378,7 @@ def test_worktree_add_interruption_partial_cleanup(
         assert not (run_dir / module.TERMINAL_MANIFEST_NAME).exists()
     finally:
         if targets:
-            _cleanup_partial_fixture(real_git, repo, targets[0])
+            _cleanup_partial_fixture(repo, targets[0])
 
 
 def test_partial_acquisition_cleanup_failure_manifest_is_durable_before_interrupt(
@@ -309,7 +413,7 @@ def test_partial_acquisition_cleanup_failure_manifest_is_durable_before_interrup
     finally:
         monkeypatch.setattr(module.shutil, "rmtree", real_rmtree)
         if targets:
-            _cleanup_partial_fixture(real_git, repo, targets[0])
+            _cleanup_partial_fixture(repo, targets[0])
 
 
 def test_deep_evidence_directory_uses_a_bounded_workspace_worktree_path(
@@ -322,10 +426,10 @@ def test_deep_evidence_directory_uses_a_bounded_workspace_worktree_path(
     real_git = module._git
     targets: list[Path] = []
 
-    def observed_git(repo_root: Path, *args: str, check: bool = True):
+    def observed_git(runner, repo_root: Path, *args: str, check: bool = True):
         if args[:2] == ("worktree", "add"):
             targets.append(Path(args[-2]))
-        return real_git(repo_root, *args, check=check)
+        return real_git(runner, repo_root, *args, check=check)
 
     monkeypatch.setattr(module, "_git", observed_git)
     run_dir = repo / ".scratch" / ("deep-evidence-segment-" * 8) / "run"
@@ -375,20 +479,129 @@ def test_child_failure_has_attempt_receipt_but_no_terminal_manifest(
 
 
 def test_real_child_timeout_is_reaped(tmp_path: Path) -> None:
-    """The process supervisor kills and reaps a child whose sleep exceeds its timeout."""
+    """A deadline produces bounded, settled version-2 evidence."""
 
     module = _load()
-    attempts = tmp_path / "attempts"
-    attempts.mkdir()
-    receipt = module._run_child(
-        _command(module, "import time", "time.sleep(5)", timeout=0.05),
+    receipt, attempts = _run_direct(
+        module,
         tmp_path,
-        attempts,
-        1,
+        _command(module, "import time", "time.sleep(5)", timeout=0.05),
     )
+    assert receipt.schemaVersion == 2
     assert receipt.timedOut is True
     assert receipt.reaped is True
-    assert receipt.spoolsClosed is True
+    assert receipt.terminalStage == "deadline"
+    assert receipt.failureId == "PSV1-DEADLINE"
+    assert receipt.treeEmpty is True
+    assert receipt.settlementState == "EMPTY"
+    assert receipt.resourcesClosed is True
+    assert not list(attempts.glob("*.stdout.log"))
+    assert not list(attempts.glob("*.stderr.log"))
+
+
+def test_exact_argv_reaches_real_child(tmp_path: Path) -> None:
+    """Empty, quoted, slash-heavy, spaced, and Unicode argv remain exact."""
+
+    module = _load()
+    observed = tmp_path / "observed-argv.json"
+    expected = (
+        "",
+        "two words",
+        'quote"inside',
+        'backslashes\\before"quote',
+        "C:\\path with space\\",
+        "Москва-测试",
+    )
+    command = module.SliceACommand(
+        name="exact-argv",
+        argv=(
+            sys.executable,
+            "-c",
+            "import json,sys;from pathlib import Path;"
+            "Path(sys.argv[1]).write_text(json.dumps(sys.argv[2:], ensure_ascii=False), encoding='utf-8')",
+            str(observed),
+            *expected,
+        ),
+        timeout_seconds=5.0,
+    )
+    receipt, _attempts = _run_direct(module, tmp_path, command)
+    assert receipt.failureId is None
+    assert receipt.exitCode == 0
+    assert receipt.argv == command.argv
+    assert receipt.cwd == "."
+    assert receipt.environmentKeys == tuple(sorted(module._child_environment()))
+    assert json.loads(observed.read_text(encoding="utf-8")) == list(expected)
+
+
+def test_infinite_output_is_bounded_and_settled(tmp_path: Path) -> None:
+    """Capture overflow stops the whole run without an unbounded target spool."""
+
+    module = _load()
+    command = _command(
+        module,
+        "import os",
+        "exec(\"while True:\\n os.write(1, b'x' * 65536)\")",
+        timeout=5.0,
+    )
+    receipt, attempts = _run_direct(module, tmp_path, command)
+    assert receipt.failureId == "PSV1-CAPTURE-LIMIT"
+    assert receipt.terminalStage == "capture-limit"
+    assert receipt.stdoutObservedBytes > receipt.stdoutPersistedBytes
+    assert receipt.stdoutPersistedBytes <= 1024 * 1024
+    assert receipt.stdoutTruncated is True
+    assert receipt.treeEmpty is True
+    assert receipt.resourcesClosed is True
+    assert sum(path.stat().st_size for path in attempts.iterdir()) < 128 * 1024
+
+
+def test_timeout_settles_parent_and_descendant(tmp_path: Path) -> None:
+    """A timed-out parent cannot leave its sleeping descendant alive."""
+
+    module = _load()
+    descendant_pid = tmp_path / "descendant-timeout.pid"
+    body = (
+        "import subprocess,sys,time",
+        "from pathlib import Path",
+        "child=subprocess.Popen([sys.executable,'-c','import time;time.sleep(30)'])",
+        "Path(sys.argv[1]).write_text(str(child.pid), encoding='ascii')",
+        "time.sleep(30)",
+    )
+    command = module.SliceACommand(
+        name="orphan-timeout",
+        argv=(sys.executable, "-c", ";".join(body), str(descendant_pid)),
+        timeout_seconds=0.5,
+    )
+    receipt, _attempts = _run_direct(module, tmp_path, command)
+    pid = int(descendant_pid.read_text(encoding="ascii"))
+    assert receipt.failureId == "PSV1-DEADLINE"
+    assert receipt.treeEmpty is True
+    assert receipt.reaped is True
+    assert not _process_running(pid)
+
+
+def test_direct_exit_with_retained_pipe_settles_descendant(tmp_path: Path) -> None:
+    """A descendant retaining both capture pipes cannot outlive the receipt."""
+
+    module = _load()
+    descendant_pid = tmp_path / "descendant-retained-pipe.pid"
+    body = (
+        "import subprocess,sys",
+        "from pathlib import Path",
+        "child=subprocess.Popen([sys.executable,'-c','import time;time.sleep(30)'])",
+        "Path(sys.argv[1]).write_text(str(child.pid), encoding='ascii')",
+    )
+    command = module.SliceACommand(
+        name="retained-pipe",
+        argv=(sys.executable, "-c", ";".join(body), str(descendant_pid)),
+        timeout_seconds=15.0,
+    )
+    receipt, _attempts = _run_direct(module, tmp_path, command)
+    pid = int(descendant_pid.read_text(encoding="ascii"))
+    assert receipt.failureId == "PSV1-TREE-SETTLEMENT"
+    assert receipt.terminalStage == "tree-settlement"
+    assert receipt.treeEmpty is True
+    assert receipt.resourcesClosed is True
+    assert not _process_running(pid)
 
 
 def test_timed_out_receipt_with_clean_cleanup_has_no_terminal_manifest(
@@ -399,23 +612,23 @@ def test_timed_out_receipt_with_clean_cleanup_has_no_terminal_manifest(
     module = _load()
     repo, baseline, digest = _repo(tmp_path)
     run_dir = repo / ".scratch" / "runs" / "timed-out-receipt"
-    receipt = module.ChildReceipt(
-        schemaVersion=1,
-        name="fixture-command",
-        argv=(sys.executable, "-c", "pass"),
-        cwd=".",
-        environmentKeys=("PATH",),
-        timeoutSeconds=5.0,
+    receipt = _receipt_v2(
+        module,
+        outcome="supervisor-failure",
+        terminalStage="deadline",
+        failureId="PSV1-DEADLINE",
         exitCode=-1,
         timedOut=True,
-        cancelled=False,
-        reaped=True,
-        spoolsClosed=True,
-        durationSeconds=0.01,
-        stdoutSha256="0" * 64,
-        stderrSha256="0" * 64,
     )
-    monkeypatch.setattr(module, "_run_child", lambda *_args, **_kwargs: receipt)
+
+    def timed_out_receipt(_runner, _command, _worktree, attempts, ordinal, **_kwargs):
+        module._atomic_json(
+            attempts / f"{ordinal:02d}-fixture-command.receipt.json",
+            module._receipt_payload(receipt),
+        )
+        return receipt
+
+    monkeypatch.setattr(module, "_run_child", timed_out_receipt)
     manifest = _validate(
         module, repo, run_dir, baseline, digest, _command(module, "pass")
     )
@@ -436,28 +649,89 @@ def test_missing_or_unclosed_receipt_fails_without_terminal_manifest(
     if mode == "missing":
         result = None
     else:
-        result = module.ChildReceipt(
-            schemaVersion=1,
-            name="fixture-command",
-            argv=(sys.executable, "-c", "pass"),
-            cwd=".",
-            environmentKeys=("PATH",),
-            timeoutSeconds=5.0,
-            exitCode=0,
-            timedOut=False,
-            cancelled=False,
-            reaped=True,
-            spoolsClosed=False,
-            durationSeconds=0.01,
-            stdoutSha256="0" * 64,
-            stderrSha256="0" * 64,
+        result = _receipt_v2(
+            module,
+            resourcesClosed=False,
         )
-    monkeypatch.setattr(module, "_run_child", lambda *_args, **_kwargs: result)
+    def incomplete_receipt(_runner, _command, _worktree, attempts, ordinal, **_kwargs):
+        if result is not None:
+            module._atomic_json(
+                attempts / f"{ordinal:02d}-fixture-command.receipt.json",
+                module._receipt_payload(result),
+            )
+        return result
+
+    monkeypatch.setattr(module, "_run_child", incomplete_receipt)
     manifest = _validate(
         module, repo, run_dir, baseline, digest, _command(module, "pass")
     )
     assert manifest is None
     assert not (run_dir / module.TERMINAL_MANIFEST_NAME).exists()
+
+
+def test_legacy_v1_receipt_is_readable_but_nonauthorizing(tmp_path: Path) -> None:
+    """Compatibility may describe v1 evidence but can never promote it to current."""
+
+    module = _load()
+    receipt_path = tmp_path / "legacy.receipt.json"
+    receipt_path.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "name": "fixture-command",
+                "argv": [sys.executable, "-c", "pass"],
+                "cwd": ".",
+                "environmentKeys": ["PATH"],
+                "timeoutSeconds": 5.0,
+                "exitCode": 0,
+                "timedOut": False,
+                "cancelled": False,
+                "reaped": True,
+                "spoolsClosed": True,
+                "durationSeconds": 0.01,
+                "stdoutSha256": "0" * 64,
+                "stderrSha256": "0" * 64,
+                "authorizing": False,
+            }
+        ),
+        encoding="utf-8",
+    )
+    loaded = module._read_receipt(receipt_path)
+    summary = module._receipt_summary(loaded)
+    assert summary["schemaVersion"] == 1
+    assert summary["legacy"] is True
+    assert summary["currentEvidence"] is False
+    assert summary["authorizing"] is False
+
+
+def test_receipt_drift_denies_terminal_pass(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The persisted receipt, not an in-memory pre-drift object, owns evidence."""
+
+    module = _load()
+    repo, baseline, digest = _repo(tmp_path)
+    run_dir = repo / ".scratch" / "runs" / "receipt-drift"
+    real_run = module._run_child
+
+    def drift_receipt(*args, **kwargs):
+        receipt = real_run(*args, **kwargs)
+        receipt_path = run_dir / "attempts" / "01-fixture-command.receipt.json"
+        payload = json.loads(receipt_path.read_text(encoding="utf-8"))
+        payload["stdoutSha256"] = "f" * 64
+        receipt_path.write_text(json.dumps(payload), encoding="utf-8")
+        return receipt
+
+    monkeypatch.setattr(module, "_run_child", drift_receipt)
+    manifest = _validate(
+        module, repo, run_dir, baseline, digest, _command(module, "pass")
+    )
+    assert manifest is None
+    assert not (run_dir / module.TERMINAL_MANIFEST_NAME).exists()
+    error = json.loads(
+        (run_dir / "attempts" / "supervisor-error.json").read_text(encoding="utf-8")
+    )
+    assert error["stableId"] == "E_SLICE_A_VALIDATION_INCOMPLETE"
 
 
 def test_shell_census_omission_fails_before_child_and_without_manifest(
@@ -529,7 +803,7 @@ def test_cleanup_failure_publishes_one_nonpass_with_recovery_path(
     real_remove = module._remove_worktree
     retained: list[Path] = []
 
-    def fail_remove(repo_root: Path, worktree: Path):
+    def fail_remove(runner, repo_root: Path, worktree: Path):
         retained.append(worktree)
         return module.CleanupOutcome(
             worktree_removed=False,
@@ -559,7 +833,7 @@ def test_cleanup_failure_publishes_one_nonpass_with_recovery_path(
     finally:
         monkeypatch.setattr(module, "_remove_worktree", real_remove)
         assert len(retained) == 1
-        real_remove(repo, retained[0])
+        _cleanup_partial_fixture(repo, retained[0])
 
 
 @pytest.mark.parametrize("boundary", ("child", "publication"))

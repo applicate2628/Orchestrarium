@@ -12,12 +12,33 @@ import os
 from pathlib import Path, PurePosixPath
 import re
 import shutil
-import signal
 import stat
-import subprocess
 import sys
 import time
 from typing import Any
+
+if __name__ == "__main__":
+    from process_supervision.process_runner import (
+        EnvironmentRowV1,
+        ProcessRequestV1,
+        ProcessRunnerV1,
+        SettlePolicyV1,
+        WindowsArgvAttestationV1,
+        resolve_executable_identity,
+        resolve_executable_version,
+    )
+    from skill_pack_validator_runtime import ValidatorCapturePolicyV1
+else:
+    from scripts.process_supervision.process_runner import (
+        EnvironmentRowV1,
+        ProcessRequestV1,
+        ProcessRunnerV1,
+        SettlePolicyV1,
+        WindowsArgvAttestationV1,
+        resolve_executable_identity,
+        resolve_executable_version,
+    )
+    from scripts.skill_pack_validator_runtime import ValidatorCapturePolicyV1
 
 
 TERMINAL_MANIFEST_NAME = "slice-a-validation-result-v1.json"
@@ -41,6 +62,19 @@ _PYTHON_LINE_CITATION = re.compile(
 _PYTHON_SYMBOL_CITATION = re.compile(
     r"([A-Za-z0-9_./-]+\.py)::(?:\{([^}]+)\}|([A-Za-z_][A-Za-z0-9_.]*))"
 )
+_GIT_TIMEOUT_SECONDS = 120.0
+_SETTLEMENT_TIMEOUT_SECONDS = 5.0
+_ORCHESTRATION_TIMEOUT_SECONDS = 2.0
+_MAX_RECEIPT_BYTES = 64 * 1024
+
+
+@dataclass(frozen=True)
+class GitResultV1:
+    args: tuple[str, ...]
+    returncode: int
+    stdout: bytes
+    stderr: bytes
+
 
 @dataclass(frozen=True)
 class SliceACommand:
@@ -53,7 +87,9 @@ class SliceACommand:
             raise ValueError(f"invalid Slice-A command name: {self.name!r}")
         if (
             not self.argv
-            or any(not isinstance(value, str) or not value for value in self.argv)
+            or not isinstance(self.argv[0], str)
+            or not self.argv[0]
+            or any(not isinstance(value, str) for value in self.argv)
             or not 0 < self.timeout_seconds <= 1800
         ):
             raise ValueError(f"invalid Slice-A command contract: {self.name}")
@@ -67,14 +103,27 @@ class ChildReceipt:
     cwd: str
     environmentKeys: tuple[str, ...]
     timeoutSeconds: float
+    outcome: str
+    terminalStage: str
+    failureId: str | None
     exitCode: int | None
     timedOut: bool
     cancelled: bool
     reaped: bool
-    spoolsClosed: bool
     durationSeconds: float
+    stdoutObservedBytes: int
+    stdoutPersistedBytes: int
+    stdoutTruncated: bool
     stdoutSha256: str
+    stderrObservedBytes: int
+    stderrPersistedBytes: int
+    stderrTruncated: bool
     stderrSha256: str
+    treeBackend: str
+    ownershipConfirmed: bool
+    settlementState: str
+    treeEmpty: bool
+    resourcesClosed: bool
     authorizing: bool = False
 
 
@@ -118,15 +167,112 @@ def _safe_relative(value: str) -> str:
     return candidate.as_posix()
 
 
+def _argv_sha256(argv: tuple[str, ...]) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            list(argv), ensure_ascii=False, separators=(",", ":")
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def _resolved_argv(argv: tuple[str, ...]) -> tuple[Path, tuple[str, ...]]:
+    first = Path(argv[0])
+    if first.is_absolute():
+        executable = first.resolve()
+        actual_argv = argv
+    else:
+        located = shutil.which(argv[0])
+        if located is None:
+            raise ValueError(f"executable is unavailable: {argv[0]}")
+        executable = Path(located).resolve()
+        actual_argv = (str(executable), *argv[1:])
+    if not executable.is_file():
+        raise ValueError(f"executable is not an ordinary file: {argv[0]}")
+    return executable, actual_argv
+
+
+def _windows_argv_attestation(
+    executable: Path, argv: tuple[str, ...]
+) -> WindowsArgvAttestationV1 | None:
+    if os.name != "nt":
+        return None
+    digest = _argv_sha256(argv)
+    return WindowsArgvAttestationV1(
+        schema_version=1,
+        codec="msvcrt-v1",
+        parser_family="msvcrt-compatible-v1",
+        resolved_executable_identity=resolve_executable_identity(executable),
+        resolved_executable_version=resolve_executable_version(executable),
+        covered_argv_shapes=("detached-slice-a-v1",),
+        probe_requested_argv_sha256=digest,
+        probe_observed_argv_sha256=digest,
+        probe_status="pass",
+    )
+
+
+def _run_process(
+    runner: ProcessRunnerV1,
+    argv: tuple[str, ...],
+    cwd: Path,
+    timeout_seconds: float,
+    *,
+    outer_deadline_monotonic: float | None = None,
+):
+    executable, actual_argv = _resolved_argv(argv)
+    environment = _child_environment()
+    capture_policy = ValidatorCapturePolicyV1().to_capture_policy()
+    sink = runner.mint_memory_capture_sink()
+    deadline = time.monotonic() + timeout_seconds
+    if outer_deadline_monotonic is not None:
+        deadline = min(deadline, outer_deadline_monotonic)
+    request = ProcessRequestV1(
+        schema_version=1,
+        argv=actual_argv,
+        resolved_executable=executable,
+        cwd=str(Path(cwd).resolve()),
+        environment=tuple(
+            EnvironmentRowV1(name, value) for name, value in environment.items()
+        ),
+        stdin_bytes=None,
+        deadline_monotonic=deadline,
+        capture_policy=capture_policy,
+        capture_sink_binding=sink,
+        settle_policy=SettlePolicyV1(_SETTLEMENT_TIMEOUT_SECONDS),
+        windows_argv_codec="msvcrt-v1" if os.name == "nt" else None,
+        windows_argv_attestation=_windows_argv_attestation(executable, actual_argv),
+        policy_id=capture_policy.policy_id,
+    )
+    result = runner.run(request)
+    return actual_argv, environment, sink, result
+
+
 def _git(
+    runner: ProcessRunnerV1,
     repo_root: Path,
     *args: str,
     check: bool = True,
-) -> subprocess.CompletedProcess[bytes]:
-    result = subprocess.run(
-        ["git", "-C", str(repo_root), *args],
-        capture_output=True,
-        check=False,
+) -> GitResultV1:
+    argv, _environment, sink, supervision = _run_process(
+        runner,
+        ("git", "-C", str(repo_root), *args),
+        repo_root,
+        _GIT_TIMEOUT_SECONDS,
+    )
+    returncode = supervision.target_exit_code
+    if returncode is None or (
+        returncode == 0
+        and (
+            supervision.failure_id is not None
+            or not supervision.tree.tree_empty
+            or not supervision.resources_closed
+        )
+    ):
+        returncode = -1
+    result = GitResultV1(
+        tuple(argv),
+        returncode,
+        sink.bytes_for("stdout"),
+        sink.bytes_for("stderr"),
     )
     if check and result.returncode != 0:
         raise RuntimeError(
@@ -136,8 +282,9 @@ def _git(
     return result
 
 
-def _status(repo_root: Path) -> dict[str, str]:
+def _status(runner: ProcessRunnerV1, repo_root: Path) -> dict[str, str]:
     payload = _git(
+        runner,
         repo_root,
         "status",
         "--porcelain=v1",
@@ -319,6 +466,7 @@ def _atomic_publish(path: Path, payload: dict[str, Any]) -> Path:
 
 
 def _overlay_manifest(
+    runner: ProcessRunnerV1,
     repo_root: Path,
     admitted_paths: tuple[str, ...],
     excluded_paths: tuple[str, ...],
@@ -344,7 +492,7 @@ def _overlay_manifest(
         or set(excluded) & set(ignored)
     ):
         raise ValueError("path has multiple admission classes")
-    status = _status(repo_root)
+    status = _status(runner, repo_root)
     classified = set(admitted) | set(excluded) | set(ignored)
     if set(status) != classified:
         raise ValueError(
@@ -352,13 +500,20 @@ def _overlay_manifest(
             f"missing={sorted(classified - set(status))} "
             f"extra={sorted(set(status) - classified)}"
         )
-    head = _git(repo_root, "rev-parse", "HEAD").stdout.decode("ascii").strip()
+    head = _git(runner, repo_root, "rev-parse", "HEAD").stdout.decode("ascii").strip()
     overlay: list[dict[str, Any]] = []
     for relative in admitted:
         source = repo_root / Path(relative)
         deleted = "D" in status[relative]
         head_present = (
-            _git(repo_root, "cat-file", "-e", f"HEAD:{relative}", check=False).returncode
+            _git(
+                runner,
+                repo_root,
+                "cat-file",
+                "-e",
+                f"HEAD:{relative}",
+                check=False,
+            ).returncode
             == 0
         )
         if deleted:
@@ -385,7 +540,7 @@ def _overlay_manifest(
             )
     exclusions: list[dict[str, Any]] = []
     for relative in excluded:
-        head_blob = _git(repo_root, "show", f"HEAD:{relative}").stdout
+        head_blob = _git(runner, repo_root, "show", f"HEAD:{relative}").stdout
         exclusions.append(
             {
                 "path": relative,
@@ -401,6 +556,7 @@ def _overlay_manifest(
 
 
 def _materialize_inputs(
+    runner: ProcessRunnerV1,
     repo_root: Path,
     worktree: Path,
     head: str,
@@ -412,7 +568,7 @@ def _materialize_inputs(
 ) -> tuple[str, ...]:
     if not worktree.joinpath(".git").is_file():
         raise ValueError("detached worktree .git file is missing")
-    actual_head = _git(worktree, "rev-parse", "HEAD").stdout.decode("ascii").strip()
+    actual_head = _git(runner, worktree, "rev-parse", "HEAD").stdout.decode("ascii").strip()
     if actual_head != head:
         raise ValueError("detached worktree HEAD drifted")
     for record in overlay:
@@ -449,12 +605,14 @@ def _materialize_inputs(
 
     shell_paths = tuple(
         _safe_relative(item.decode("utf-8", errors="strict"))
-        for item in _git(worktree, "ls-files", "-z", "--", "*.sh").stdout.split(b"\0")
+        for item in _git(
+            runner, worktree, "ls-files", "-z", "--", "*.sh"
+        ).stdout.split(b"\0")
         if item
     )
     if not shell_paths or any(not _ordinary_file(worktree / path) for path in shell_paths):
         raise ValueError("tracked shell census is missing or incomplete")
-    dirty = set(_status(worktree))
+    dirty = set(_status(runner, worktree))
     expected_dirty = {record["path"] for record in overlay}
     if dirty != expected_dirty:
         raise ValueError(
@@ -474,124 +632,140 @@ def _child_environment() -> dict[str, str]:
     return environment
 
 
-def _terminate_process_tree(process: subprocess.Popen[bytes]) -> None:
-    if process.poll() is not None:
-        return
-    if os.name == "nt":
-        subprocess.run(
-            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
-        )
-    else:
-        try:
-            os.killpg(process.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            return
-        try:
-            process.wait(timeout=1.0)
-            return
-        except subprocess.TimeoutExpired:
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-    try:
-        process.wait(timeout=5.0)
-    except subprocess.TimeoutExpired:
-        process.kill()
-        process.wait(timeout=5.0)
-
-
 def _run_child(
+    runner: ProcessRunnerV1,
     command: SliceACommand,
     worktree: Path,
     attempts_dir: Path,
     ordinal: int,
+    *,
+    outer_deadline_monotonic: float | None = None,
 ) -> ChildReceipt:
     prefix = f"{ordinal:02d}-{command.name}"
-    stdout_path = attempts_dir / f"{prefix}.stdout.log"
-    stderr_path = attempts_dir / f"{prefix}.stderr.log"
     receipt_path = attempts_dir / f"{prefix}.receipt.json"
-    environment = _child_environment()
-    started = time.monotonic()
-    timed_out = False
-    cancelled = False
-    process: subprocess.Popen[bytes] | None = None
-    exit_code: int | None = None
-    stdout_stream = stdout_path.open("xb")
-    stderr_stream = stderr_path.open("xb")
-    try:
-        creationflags = (
-            subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
-        )
-        process = subprocess.Popen(
-            list(command.argv),
-            cwd=worktree,
-            env=environment,
-            stdin=subprocess.DEVNULL,
-            stdout=stdout_stream,
-            stderr=stderr_stream,
-            creationflags=creationflags,
-            start_new_session=os.name != "nt",
-        )
-        try:
-            exit_code = process.wait(timeout=command.timeout_seconds)
-        except subprocess.TimeoutExpired:
-            timed_out = True
-            _terminate_process_tree(process)
-            exit_code = process.returncode
-        except BaseException:
-            cancelled = True
-            _terminate_process_tree(process)
-            raise
-    finally:
-        if process is not None and process.poll() is None:
-            _terminate_process_tree(process)
-        stdout_stream.close()
-        stderr_stream.close()
+    argv, environment, _sink, result = _run_process(
+        runner,
+        command.argv,
+        worktree,
+        command.timeout_seconds,
+        outer_deadline_monotonic=outer_deadline_monotonic,
+    )
     receipt = ChildReceipt(
-        schemaVersion=1,
+        schemaVersion=2,
         name=command.name,
-        argv=command.argv,
+        argv=argv,
         cwd=".",
         environmentKeys=tuple(sorted(environment)),
         timeoutSeconds=command.timeout_seconds,
-        exitCode=exit_code,
-        timedOut=timed_out,
-        cancelled=cancelled,
-        reaped=process is not None and process.poll() is not None,
-        spoolsClosed=stdout_stream.closed and stderr_stream.closed,
-        durationSeconds=round(time.monotonic() - started, 6),
-        stdoutSha256=_sha256(stdout_path),
-        stderrSha256=_sha256(stderr_path),
+        outcome=result.outcome,
+        terminalStage=result.terminal_stage,
+        failureId=result.failure_id,
+        exitCode=result.target_exit_code,
+        timedOut=result.timed_out,
+        cancelled=result.cancelled,
+        reaped=result.tree.direct_reaped,
+        durationSeconds=round(result.duration_seconds, 6),
+        stdoutObservedBytes=result.stdout.observed_bytes,
+        stdoutPersistedBytes=result.stdout.persisted_bytes,
+        stdoutTruncated=result.stdout.truncated,
+        stdoutSha256=result.stdout.digest,
+        stderrObservedBytes=result.stderr.observed_bytes,
+        stderrPersistedBytes=result.stderr.persisted_bytes,
+        stderrTruncated=result.stderr.truncated,
+        stderrSha256=result.stderr.digest,
+        treeBackend=result.tree.backend,
+        ownershipConfirmed=result.tree.ownership_confirmed,
+        settlementState=result.tree.settlement_state,
+        treeEmpty=result.tree.tree_empty,
+        resourcesClosed=result.resources_closed,
     )
-    _atomic_json(receipt_path, asdict(receipt))
+    _atomic_json(receipt_path, _receipt_payload(receipt))
     return receipt
 
 
-def _receipt_summary(receipt: ChildReceipt) -> dict[str, Any]:
+def _receipt_payload(receipt: ChildReceipt) -> dict[str, Any]:
+    payload = asdict(receipt)
+    payload["argv"] = list(receipt.argv)
+    payload["environmentKeys"] = list(receipt.environmentKeys)
+    return payload
+
+
+def _strict_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in payload:
+            raise ValueError(f"duplicate receipt key: {key}")
+        payload[key] = value
+    return payload
+
+
+def _read_receipt(path: Path) -> dict[str, Any]:
+    with path.open("rb") as stream:
+        encoded = stream.read(_MAX_RECEIPT_BYTES + 1)
+    if len(encoded) > _MAX_RECEIPT_BYTES:
+        raise ValueError("receipt exceeds bounded size")
+    try:
+        payload = json.loads(
+            encoded.decode("utf-8"), object_pairs_hook=_strict_json_object
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("receipt is not strict UTF-8 JSON") from exc
+    if (
+        not isinstance(payload, dict)
+        or payload.get("schemaVersion") not in {1, 2}
+        or payload.get("authorizing") is not False
+    ):
+        raise ValueError("receipt contract is unsupported")
+    return payload
+
+
+def _receipt_summary(receipt: ChildReceipt | dict[str, Any]) -> dict[str, Any]:
+    payload = _receipt_payload(receipt) if isinstance(receipt, ChildReceipt) else receipt
+    argv = payload.get("argv")
+    if not isinstance(argv, list) or any(not isinstance(item, str) for item in argv):
+        raise ValueError("receipt argv is invalid")
     argv_sha256 = hashlib.sha256(
         json.dumps(
-            list(receipt.argv), ensure_ascii=False, separators=(",", ":")
+            argv, ensure_ascii=False, separators=(",", ":")
         ).encode("utf-8")
     ).hexdigest()
-    return {
-        "schemaVersion": receipt.schemaVersion,
-        "name": receipt.name,
+    schema_version = payload["schemaVersion"]
+    summary = {
+        "schemaVersion": schema_version,
+        "legacy": schema_version == 1,
+        "currentEvidence": schema_version == 2,
+        "name": payload.get("name"),
         "argvSha256": argv_sha256,
-        "timeoutSeconds": receipt.timeoutSeconds,
-        "exitCode": receipt.exitCode,
-        "timedOut": receipt.timedOut,
-        "cancelled": receipt.cancelled,
-        "reaped": receipt.reaped,
-        "spoolsClosed": receipt.spoolsClosed,
-        "durationSeconds": receipt.durationSeconds,
-        "stdoutSha256": receipt.stdoutSha256,
-        "stderrSha256": receipt.stderrSha256,
+        "timeoutSeconds": payload.get("timeoutSeconds"),
+        "exitCode": payload.get("exitCode"),
+        "timedOut": payload.get("timedOut"),
+        "cancelled": payload.get("cancelled"),
+        "reaped": payload.get("reaped"),
+        "durationSeconds": payload.get("durationSeconds"),
+        "stdoutSha256": payload.get("stdoutSha256"),
+        "stderrSha256": payload.get("stderrSha256"),
         "authorizing": False,
     }
+    if schema_version == 2:
+        summary.update(
+            {
+                "outcome": payload.get("outcome"),
+                "terminalStage": payload.get("terminalStage"),
+                "failureId": payload.get("failureId"),
+                "stdoutObservedBytes": payload.get("stdoutObservedBytes"),
+                "stdoutPersistedBytes": payload.get("stdoutPersistedBytes"),
+                "stdoutTruncated": payload.get("stdoutTruncated"),
+                "stderrObservedBytes": payload.get("stderrObservedBytes"),
+                "stderrPersistedBytes": payload.get("stderrPersistedBytes"),
+                "stderrTruncated": payload.get("stderrTruncated"),
+                "treeBackend": payload.get("treeBackend"),
+                "ownershipConfirmed": payload.get("ownershipConfirmed"),
+                "settlementState": payload.get("settlementState"),
+                "treeEmpty": payload.get("treeEmpty"),
+                "resourcesClosed": payload.get("resourcesClosed"),
+            }
+        )
+    return summary
 
 
 def _reason_code(value: str | None) -> str | None:
@@ -602,8 +776,12 @@ def _reason_code(value: str | None) -> str | None:
     return (normalized or "unspecified")[:128]
 
 
-def _worktree_registration_present(repo_root: Path, worktree: Path) -> bool:
-    listing = _git(repo_root, "worktree", "list", "--porcelain", check=False)
+def _worktree_registration_present(
+    runner: ProcessRunnerV1, repo_root: Path, worktree: Path
+) -> bool:
+    listing = _git(
+        runner, repo_root, "worktree", "list", "--porcelain", check=False
+    )
     if listing.returncode != 0:
         raise OSError(
             "worktree-list:"
@@ -698,16 +876,26 @@ def _remove_external_root(repo_root: Path, external_root: Path) -> tuple[str, ..
     return ()
 
 
-def _remove_worktree(repo_root: Path, worktree: Path) -> CleanupOutcome:
+def _remove_worktree(
+    runner: ProcessRunnerV1, repo_root: Path, worktree: Path
+) -> CleanupOutcome:
     failures: list[str] = []
-    result = _git(repo_root, "worktree", "remove", "--force", str(worktree), check=False)
+    result = _git(
+        runner,
+        repo_root,
+        "worktree",
+        "remove",
+        "--force",
+        str(worktree),
+        check=False,
+    )
     if result.returncode != 0:
         failures.append(
             "worktree-remove:"
             + result.stderr.decode("utf-8", errors="replace")[:1024]
         )
     try:
-        registered = _worktree_registration_present(repo_root, worktree)
+        registered = _worktree_registration_present(runner, repo_root, worktree)
     except (OSError, UnicodeDecodeError) as exc:
         failures.append(str(exc))
         registered = True
@@ -728,7 +916,9 @@ def _remove_worktree(repo_root: Path, worktree: Path) -> CleanupOutcome:
 
 
 def _settle_worktree_acquisition(
-    repo_root: Path, ownership: WorktreeAcquisitionOwnership
+    runner: ProcessRunnerV1,
+    repo_root: Path,
+    ownership: WorktreeAcquisitionOwnership,
 ) -> CleanupOutcome:
     """Observe and settle path/registration independently after every add attempt."""
 
@@ -737,7 +927,7 @@ def _settle_worktree_acquisition(
     ownership.path_present = _partial_worktree_path_present(ownership.target_path)
     try:
         ownership.registration_present = _worktree_registration_present(
-            repo_root, ownership.target_path
+            runner, repo_root, ownership.target_path
         )
     except (OSError, UnicodeDecodeError) as exc:
         ownership.registration_present = True
@@ -745,12 +935,12 @@ def _settle_worktree_acquisition(
 
     if ownership.registration_present:
         attempts.append("git-worktree-remove")
-        removed = _remove_worktree(repo_root, ownership.target_path)
+        removed = _remove_worktree(runner, repo_root, ownership.target_path)
         failures.extend(removed.failures)
         ownership.path_present = _partial_worktree_path_present(ownership.target_path)
         try:
             ownership.registration_present = _worktree_registration_present(
-                repo_root, ownership.target_path
+                runner, repo_root, ownership.target_path
             )
         except (OSError, UnicodeDecodeError) as exc:
             ownership.registration_present = True
@@ -766,7 +956,7 @@ def _settle_worktree_acquisition(
     ownership.path_present = _partial_worktree_path_present(ownership.target_path)
     try:
         ownership.registration_present = _worktree_registration_present(
-            repo_root, ownership.target_path
+            runner, repo_root, ownership.target_path
         )
     except (OSError, UnicodeDecodeError) as exc:
         ownership.registration_present = True
@@ -787,6 +977,16 @@ def _settle_worktree_acquisition(
         path_present=ownership.path_present,
         registration_present=ownership.registration_present,
         attempts=tuple(attempts),
+    )
+
+
+def _required_outer_budget_seconds(commands: tuple[SliceACommand, ...]) -> float:
+    return (
+        sum(
+            command.timeout_seconds + _SETTLEMENT_TIMEOUT_SECONDS
+            for command in commands
+        )
+        + _ORCHESTRATION_TIMEOUT_SECONDS
     )
 
 
@@ -843,19 +1043,21 @@ def validate_slice_a(
     if os.path.lexists(external_root):
         raise FileExistsError(f"detached worktree root already exists: {external_root}")
     acquisition = WorktreeAcquisitionOwnership(worktree)
+    runner = ProcessRunnerV1()
 
     head = ""
     overlay: tuple[dict[str, Any], ...] = ()
     exclusions: tuple[dict[str, Any], ...] = ()
     ignored_untracked: tuple[dict[str, Any], ...] = ()
     shell_paths: tuple[str, ...] = ()
-    receipts: list[ChildReceipt] = []
+    receipts: list[dict[str, Any]] = []
     incomplete_reason: str | None = None
     original_cause: str | None = None
     pending: BaseException | None = None
     cleanup = CleanupOutcome(True, True, (), None)
     try:
         head, overlay, exclusions, ignored_untracked = _overlay_manifest(
+            runner,
             repo_root,
             admitted_paths,
             excluded_paths,
@@ -864,6 +1066,7 @@ def validate_slice_a(
         external_root.mkdir(parents=True)
         acquisition.add_attempted = True
         add = _git(
+            runner,
             repo_root,
             "worktree",
             "add",
@@ -878,6 +1081,7 @@ def validate_slice_a(
                 + add.stderr.decode("utf-8", errors="replace")[:1024]
             )
         shell_paths = _materialize_inputs(
+            runner,
             repo_root,
             worktree,
             head,
@@ -887,23 +1091,42 @@ def validate_slice_a(
             baseline_path,
             baseline_sha256.lower(),
         )
+        outer_deadline = time.monotonic() + _required_outer_budget_seconds(commands)
         for ordinal, command in enumerate(commands, 1):
-            receipt = _run_child(command, worktree, attempts_dir, ordinal)
+            receipt = _run_child(
+                runner,
+                command,
+                worktree,
+                attempts_dir,
+                ordinal,
+                outer_deadline_monotonic=outer_deadline,
+            )
             if receipt is None:
                 incomplete_reason = f"missing-receipt:{command.name}"
                 break
-            receipts.append(receipt)
+            receipt_path = attempts_dir / f"{ordinal:02d}-{command.name}.receipt.json"
+            persisted_receipt = _read_receipt(receipt_path)
             if (
-                receipt.exitCode != 0
-                or receipt.timedOut
-                or receipt.cancelled
-                or not receipt.reaped
-                or not receipt.spoolsClosed
+                persisted_receipt.get("schemaVersion") != 2
+                or persisted_receipt != _receipt_payload(receipt)
+            ):
+                raise ValueError(f"receipt drifted: {command.name}")
+            receipts.append(persisted_receipt)
+            if (
+                persisted_receipt.get("outcome") != "success"
+                or persisted_receipt.get("failureId") is not None
+                or persisted_receipt.get("exitCode") != 0
+                or persisted_receipt.get("timedOut") is not False
+                or persisted_receipt.get("cancelled") is not False
+                or persisted_receipt.get("reaped") is not True
+                or persisted_receipt.get("settlementState") != "EMPTY"
+                or persisted_receipt.get("treeEmpty") is not True
+                or persisted_receipt.get("resourcesClosed") is not True
             ):
                 incomplete_reason = f"child-incomplete:{command.name}"
                 break
         if incomplete_reason is None:
-            final_status = set(_status(worktree))
+            final_status = set(_status(runner, worktree))
             expected_status = {record["path"] for record in overlay}
             if final_status != expected_status:
                 incomplete_reason = "final-worktree-status-drift"
@@ -924,7 +1147,7 @@ def validate_slice_a(
         original_cause = f"{type(exc).__name__}:{str(exc)[:1024]}"
     finally:
         if acquisition.add_attempted:
-            cleanup = _settle_worktree_acquisition(repo_root, acquisition)
+            cleanup = _settle_worktree_acquisition(runner, repo_root, acquisition)
 
     cleanup_failures = list(cleanup.failures)
     cleanup_attempts = list(cleanup.attempts)
@@ -935,6 +1158,11 @@ def validate_slice_a(
         cleanup_failures.extend(root_failures)
         if root_failures:
             recovery_path = str(external_root)
+    runner_close = runner.close()
+    if runner_close.outcome != "closed":
+        cleanup_failures.append(
+            f"process-runner-close:{runner_close.failure_id or 'unknown'}"
+        )
     cleanup = CleanupOutcome(
         worktree_removed=cleanup.worktree_removed,
         registration_removed=cleanup.registration_removed,
