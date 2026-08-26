@@ -8,7 +8,7 @@ honored from assistant prose, tool calls, or tool output), or (b) the current
 turn's model tool CALLS show a publication-safety scan invocation AND that
 SAME invocation's OWN tool OUTPUT this turn — correlated by call identity,
 never by mere co-occurrence in the turn — reports one clean, non-empty,
-message-complete version-2 range receipt bound to the admitted solitary direct
+complete-history version-3 range receipt bound to the admitted solitary direct
 push. Tracked, path, legacy, and zero-commit results are non-authorizing. The 2026-07-26 hardening made
 branch (b) key on a CORRELATED result, not merely invocation and not an
 uncorrelated result appearing anywhere in the turn; see
@@ -1513,13 +1513,14 @@ def run_hook(
 
         def authoritative(binding):
             if binding.route == "strict":
-                receipt = module.RangeReceiptV2(
-                    0, 1, "a" * 64, binding.remote, binding.destination,
-                    binding.source_oid,
+                receipt = module.RangeReceiptV3(
+                    1, "a" * 64, 1, "b" * 64, 0, "c" * 64,
+                    0, 0, 0, 0, "d" * 64, 0, "e" * 64,
+                    binding.remote, binding.destination, binding.source_oid,
                 )
                 return module.AuthoritativeScanObservation(
                     "test-owned", binding,
-                    module.PublicationSafetyObservation("valid-v2", receipt), "fixture-consume",
+                    module.PublicationSafetyObservation("valid-v3", receipt), "fixture-consume",
                 )
             return _fixture_authoritative_observation(module, entries, binding)
 
@@ -1556,7 +1557,7 @@ def _fixture_authoritative_observation(module, entries, binding):
     row = usable[0]
     observation = row.observation
     receipt = observation.receipt
-    if observation.kind == "valid-v2" and receipt is not None:
+    if observation.kind == "valid-v3" and receipt is not None:
         if (receipt.remote, receipt.destination) != (binding.remote, binding.destination):
             failure = "PGG-RANGE-BINDING" if prefix == "PGG" else "PRG-RECEIPT-MISMATCH"
             raise module.PrRouteDenied(failure)
@@ -1821,7 +1822,7 @@ def repository_head_oid() -> str:
 RANGE_TIP = repository_head_oid()
 
 
-def range_receipt_v2(
+def range_receipt_v3(
     *,
     files: int = 2,
     commits: int = 1,
@@ -1831,12 +1832,21 @@ def range_receipt_v2(
     digest: str = "a" * 64,
 ) -> str:
     if commits == 0:
-        return "publication-safety: clean (range, receipt=v2, files=0, commits=0 -- nothing to publish)"
+        raise ValueError("V3 receipts require a non-empty commit set")
+    objects = commits + files + 1
     return (
-        "publication-safety: clean (range, receipt=v2, "
-        f"files={files}, commits={commits}, commit-set={digest}, messages=complete, "
+        "publication-safety: clean (range, receipt=v3, "
+        f"commits={commits}, commit-set={digest}, messages=complete, "
+        f"objects={objects}, object-set={'b' * 64}, blobs={files}, "
+        f"blob-set={'c' * 64}, blob-bytes={files}, text={files}, binary=0, "
+        f"subjects={files}, subject-set={'d' * 64}, paths={files}, "
+        f"path-set={'e' * 64}, history=complete, "
         f"remote={quote(remote, safe='-._~')}, dst={quote(dst, safe='-._~')}, tip={tip})"
     )
+
+
+def legacy_range_receipt_v2_zero() -> str:
+    return "publication-safety: clean (range, receipt=v2, files=0, commits=0 -- nothing to publish)"
 
 SCAN_CALL_RANGE_MODE = assistant_tool_use(
     "Bash",
@@ -1845,27 +1855,27 @@ SCAN_CALL_RANGE_MODE = assistant_tool_use(
 )
 
 SCAN_RESULT_CLEAN_RANGE = tool_result(
-    range_receipt_v2(files=3),
+    range_receipt_v3(files=3),
     tool_id="toolu_scan_range",
 )
 
 SCAN_RESULT_CLEAN_RANGE_DST_MAIN = tool_result(
-    range_receipt_v2(files=1, dst="main"),
+    range_receipt_v3(files=1, dst="main"),
     tool_id="toolu_scan_range",
 )
 
 SCAN_RESULT_CLEAN_RANGE_REMOTE_UPSTREAM = tool_result(
-    range_receipt_v2(files=1, remote="upstream"),
+    range_receipt_v3(files=1, remote="upstream"),
     tool_id="toolu_scan_range",
 )
 
 SCAN_RESULT_CLEAN_RANGE_EMPTY = tool_result(
-    range_receipt_v2(files=0, commits=0),
+    legacy_range_receipt_v2_zero(),
     tool_id="toolu_scan_range",
 )
 
 SCAN_RESULT_RANGE_WITH_FAILURE_MARKER = tool_result(
-    f"c3d4e5f6a1b2:notes.md:1:token = \"{range_receipt_v2(files=3)}\"\n"
+    f"c3d4e5f6a1b2:notes.md:1:token = \"{range_receipt_v3(files=3)}\"\n"
     "publication-safety scan found potential tracked-content leak markers",
     tool_id="toolu_scan_range",
 )
@@ -1877,7 +1887,7 @@ CODEX_SCAN_CALL_RANGE_MODE = codex_function_call(
 )
 
 CODEX_SCAN_RESULT_CLEAN_RANGE = codex_function_call_output(
-    range_receipt_v2(files=2),
+    range_receipt_v3(files=2),
     call_id="call_scan_range",
 )
 
@@ -2094,7 +2104,7 @@ class TestGitPushGate(unittest.TestCase):
             tool_id="toolu_scan_range",
         )
         scan_result = tool_result(
-            range_receipt_v2(dst="feat/audit-wave-e"), tool_id="toolu_scan_range"
+            range_receipt_v3(dst="feat/audit-wave-e"), tool_id="toolu_scan_range"
         )
         self.assert_outcome(
             [user("запушь wave E после проверки"),
@@ -2105,7 +2115,7 @@ class TestGitPushGate(unittest.TestCase):
 
     def test_scan_evidence_singular_file_count_allows(self) -> None:
         # A canonical v2 receipt preserves the exact numeric file count.
-        singular = tool_result(range_receipt_v2(files=1), tool_id="toolu_scan_range")
+        singular = tool_result(range_receipt_v3(files=1), tool_id="toolu_scan_range")
         self.assert_outcome(
             [user("push the branch"),
              SCAN_CALL_RANGE_MODE, singular],
@@ -2283,7 +2293,7 @@ class TestGitPushGate(unittest.TestCase):
         # swallowed by `\s*`, not left dangling past the anchor) -- verified
         # here, not assumed.
         crlf_result = tool_result(
-            range_receipt_v2(files=3) + "\r\n", tool_id="toolu_scan_range"
+            range_receipt_v3(files=3) + "\r\n", tool_id="toolu_scan_range"
         )
         self.assert_outcome(
             [user("push the branch"), SCAN_CALL_RANGE_MODE, crlf_result],
@@ -2296,7 +2306,7 @@ class TestGitPushGate(unittest.TestCase):
         # all -- `$` must match at true end-of-string here, not only
         # immediately before a `\n`.
         sole_line_result = tool_result(
-            range_receipt_v2(files=3), tool_id="toolu_scan_range"
+            range_receipt_v3(files=3), tool_id="toolu_scan_range"
         )
         self.assert_outcome(
             [user("push the branch"), SCAN_CALL_RANGE_MODE, sole_line_result],
@@ -2589,7 +2599,7 @@ class TestGitPushGate(unittest.TestCase):
             tool_id="toolu_ps_file",
         )
         ps_result = tool_result(
-            range_receipt_v2(files=5), tool_id="toolu_ps_file"
+            range_receipt_v3(files=5), tool_id="toolu_ps_file"
         )
         self.assert_outcome(
             [user("push the branch"), ps_call, ps_result],
@@ -2624,7 +2634,7 @@ class TestGitPushGate(unittest.TestCase):
             tool_id="toolu_direct",
         )
         direct_result = tool_result(
-            range_receipt_v2(files=2), tool_id="toolu_direct"
+            range_receipt_v3(files=2), tool_id="toolu_direct"
         )
         self.assert_outcome(
             [user("push the branch"), direct_call, direct_result],
@@ -2644,7 +2654,7 @@ class TestGitPushGate(unittest.TestCase):
             call_id="call_real_name",
         )
         real_name_result = codex_function_call_output(
-            range_receipt_v2(files=4), call_id="call_real_name"
+            range_receipt_v3(files=4), call_id="call_real_name"
         )
         self.assert_outcome(
             [user("push the branch"), real_name_call, real_name_result],
@@ -3043,7 +3053,7 @@ class TestGitPushGate(unittest.TestCase):
                 self.assertIn("canonical sibling scanner", reason)
                 self.assertIn("gate itself", reason)
                 self.assertIn("standalone", reason)
-                self.assertIn("non-empty version-2 range scan", reason)
+                self.assertIn("non-empty version-3 complete-history range scan", reason)
                 self.assertIn("--dry-run", reason)
                 self.assertIn("BACKSTOP", reason)
 
@@ -3141,7 +3151,7 @@ class TestGitPushGateRangeMode(unittest.TestCase):
                  tool_id="toolu_scan_range",
              ),
              tool_result(
-                 range_receipt_v2(files=1, dst="refs/heads/claude"),
+                 range_receipt_v3(files=1, dst="refs/heads/claude"),
                  tool_id="toolu_scan_range",
              )],
             "git push origin HEAD:refs/heads/claude",
@@ -3876,7 +3886,7 @@ class TestCanonicalPublicationCommandGrammar(unittest.TestCase):
             tool_id="toolu_scan_main",
         )
         scan_result = tool_result(
-            range_receipt_v2(dst="main"), tool_id="toolu_scan_main"
+            range_receipt_v3(dst="main"), tool_id="toolu_scan_main"
         )
         entries = [user("push the branch"), scan_call, scan_result]
         self.assert_gate(
@@ -4164,7 +4174,7 @@ class TestCanonicalPublicationCommandGrammar(unittest.TestCase):
             tool_id="toolu_scan_main",
         )
         scan_result = tool_result(
-            range_receipt_v2(dst="main"), tool_id="toolu_scan_main"
+            range_receipt_v3(dst="main"), tool_id="toolu_scan_main"
         )
         entries = [user("push the branch"), scan_call, scan_result]
         for command, failure_id in cases:
@@ -4179,7 +4189,7 @@ class TestCanonicalPublicationCommandGrammar(unittest.TestCase):
             tool_id="toolu_scan_main",
         )
         scan_result = tool_result(
-            range_receipt_v2(dst="main"), tool_id="toolu_scan_main"
+            range_receipt_v3(dst="main"), tool_id="toolu_scan_main"
         )
         entries = [user("push the branch"), scan_call, scan_result]
         cases = (
@@ -4308,7 +4318,7 @@ class TestCanonicalPublicationCommandGrammar(unittest.TestCase):
             tool_id="toolu_scan_main",
         )
         scan_result = tool_result(
-            range_receipt_v2(dst="main"), tool_id="toolu_scan_main"
+            range_receipt_v3(dst="main"), tool_id="toolu_scan_main"
         )
         entries = [user("push the branch"), scan_call, scan_result]
         for script in self.ALL_HOOKS:
@@ -4453,13 +4463,14 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
             dialect_override = "powershell" if (tool_name or self._tool_name(script)) == "PowerShell" else "posix"
 
         def authoritative(binding):
-            receipt = module.RangeReceiptV2(
-                0, 1, "a" * 64, binding.remote, binding.destination,
-                binding.source_oid,
+            receipt = module.RangeReceiptV3(
+                1, "a" * 64, 1, "b" * 64, 0, "c" * 64,
+                0, 0, 0, 0, "d" * 64, 0, "e" * 64,
+                binding.remote, binding.destination, binding.source_oid,
             )
             return module.AuthoritativeScanObservation(
                 "test-owned", binding,
-                module.PublicationSafetyObservation("valid-v2", receipt), "fixture-consume",
+                module.PublicationSafetyObservation("valid-v3", receipt), "fixture-consume",
             )
 
         with synthetic_transcript(entries) as transcript_path:
@@ -4961,7 +4972,7 @@ class TestGitPushGateResultStatus(unittest.TestCase):
                 "claude-range-false",
                 [user("push the branch"), SCAN_CALL_RANGE_MODE,
                  tool_result(
-                     range_receipt_v2(files=3),
+                     range_receipt_v3(files=3),
                      tool_id="toolu_scan_range",
                      is_error=False,
                  )],
@@ -4971,7 +4982,7 @@ class TestGitPushGateResultStatus(unittest.TestCase):
                 "codex-v2-zero",
                 [user("push the branch"), CODEX_SCAN_CALL_RANGE_MODE,
                  codex_function_call_output(
-                     "Exit code: 0\n" + range_receipt_v2(files=2),
+                     "Exit code: 0\n" + range_receipt_v3(files=2),
                      call_id="call_scan_range",
                  )],
                 "git push origin HEAD:claude",
@@ -4989,7 +5000,7 @@ class TestGitPushGateResultStatus(unittest.TestCase):
         self.assert_outcome(
             [user("push the branch"), CODEX_SCAN_CALL_RANGE_MODE,
              codex_function_call_output(
-                 range_receipt_v2(files=2) + "\nExit code: 1",
+                 range_receipt_v3(files=2) + "\nExit code: 1",
                  call_id="call_scan_range",
              )],
             "git push origin HEAD:claude",
@@ -6118,8 +6129,8 @@ class TestR14CooperativeOracle(unittest.TestCase):
         self.assertEqual(self._cardinalities(), baseline)
 
 
-class TestPublicationSafetyRangeReceiptV2(unittest.TestCase):
-    """Item-6 receipt contract at the universal producer/consumer seam."""
+class TestPublicationSafetyRangeReceiptV3(unittest.TestCase):
+    """Complete-history receipt contract at the producer/consumer seam."""
 
     def _head(self) -> str:
         return RANGE_TIP
@@ -6136,9 +6147,14 @@ class TestPublicationSafetyRangeReceiptV2(unittest.TestCase):
     ) -> str:
         if commits == 0:
             return "publication-safety: clean (range, receipt=v2, files=0, commits=0 -- nothing to publish)"
+        objects = commits + files + 1
         return (
-            "publication-safety: clean (range, receipt=v2, "
-            f"files={files}, commits={commits}, commit-set={digest}, messages=complete, "
+            "publication-safety: clean (range, receipt=v3, "
+            f"commits={commits}, commit-set={digest}, messages=complete, "
+            f"objects={objects}, object-set={'b' * 64}, blobs={files}, "
+            f"blob-set={'c' * 64}, blob-bytes={files}, text={files}, binary=0, "
+            f"subjects={files}, subject-set={'d' * 64}, paths={files}, "
+            f"path-set={'e' * 64}, history=complete, "
             f"remote={quote(remote, safe='-._~')}, dst={quote(dst, safe='-._~')}, "
             f"tip={tip or self._head()})"
         )
@@ -6166,13 +6182,19 @@ class TestPublicationSafetyRangeReceiptV2(unittest.TestCase):
         ]
         return run_hook(CANONICAL_HOOK, entries, command)
 
-    def test_v2_receipt_parser_matrix(self) -> None:
-        module = _load_gate_module(CANONICAL_HOOK, "publication_v2_parser_matrix")
+    def test_v3_receipt_parser_matrix(self) -> None:
+        module = _load_gate_module(CANONICAL_HOOK, "publication_v3_parser_matrix")
         self.assertTrue(hasattr(module, "parse_publication_safety_observation"))
         valid = module.parse_publication_safety_observation(self._receipt())
-        self.assertEqual(valid.kind, "valid-v2")
+        self.assertEqual(valid.kind, "valid-v3")
         self.assertEqual(valid.receipt.commits, 1)
         self.assertEqual(valid.receipt.commit_set, "a" * 64)
+        self.assertEqual(valid.receipt.objects, 4)
+        self.assertEqual(valid.receipt.blobs, 2)
+        self.assertEqual(valid.receipt.text, 2)
+        self.assertEqual(valid.receipt.binary, 0)
+        self.assertEqual(valid.receipt.subjects, 2)
+        self.assertEqual(valid.receipt.paths, 2)
         self.assertEqual(valid.receipt.remote, "origin")
         self.assertEqual(valid.receipt.destination, "claude")
         rows = (
@@ -6183,13 +6205,26 @@ class TestPublicationSafetyRangeReceiptV2(unittest.TestCase):
             (self._receipt(digest="A" * 64), "malformed"),
             (self._receipt().replace("remote=origin", "remote=origin%2fone"), "malformed"),
             (self._receipt() + "\n" + self._receipt(), "malformed"),
+            (self._receipt(files=0).replace("blob-bytes=0", "blob-bytes=1"), "malformed"),
+            (self._receipt(files=0).replace("text=0", "text=1"), "malformed"),
+            (self._receipt(files=0).replace("binary=0", "binary=1"), "malformed"),
+            (self._receipt(files=0).replace("subjects=0", "subjects=1"), "malformed"),
+            (self._receipt(files=0).replace("paths=0", "paths=1"), "malformed"),
+            (self._receipt().replace("subjects=2", "subjects=1"), "malformed"),
+            (self._receipt().replace("paths=2", "paths=1"), "malformed"),
+            (
+                self._receipt() + "\npublication-safety: clean (range, receipt=v2, "
+                "files=1, commits=1, commit-set=" + "a" * 64 + ", messages=complete, "
+                "remote=origin, dst=claude, tip=" + self._head() + ")",
+                "malformed",
+            ),
             ("unrelated output", "none"),
         )
         for text, kind in rows:
             with self.subTest(kind=kind, shape=text[:24]):
                 self.assertEqual(module.parse_publication_safety_observation(text).kind, kind)
 
-    def test_v2_generic_binding_and_source_tip_matrix(self) -> None:
+    def test_v3_generic_binding_and_source_tip_matrix(self) -> None:
         valid = self._generic(self._receipt())
         self.assertEqual(valid.returncode, 0, valid.stderr)
         self.assertFalse(denies(valid), valid.stdout)
@@ -6209,7 +6244,7 @@ class TestPublicationSafetyRangeReceiptV2(unittest.TestCase):
                 self.assertTrue(denies(proc), proc.stdout)
                 self.assertIn(failure_id, proc.stdout)
 
-    def test_v2_strict_pr_binding_and_reuse_matrix(self) -> None:
+    def test_v3_strict_pr_binding_and_reuse_matrix(self) -> None:
         TestPrScopedPublicationGrant.setUpClass()
         try:
             helper = TestPrScopedPublicationGrant(methodName="test_each_pr_push_requires_new_range_receipt")
@@ -6230,12 +6265,12 @@ class TestPublicationSafetyRangeReceiptV2(unittest.TestCase):
             TestPrScopedPublicationGrant.tearDownClass()
 
     def test_receipt_expand_contract_matrix(self) -> None:
-        module = _load_gate_module(CANONICAL_HOOK, "publication_v2_expand_contract")
+        module = _load_gate_module(CANONICAL_HOOK, "publication_v3_expand_contract")
         self.assertTrue(hasattr(module, "parse_publication_safety_observation"))
         legacy = f"publication-safety: clean (range, examined 1 file, remote origin, dst claude, tip {self._head()})"
         self.assertEqual(module.parse_publication_safety_observation(legacy).kind, "legacy-nonauthorizing")
         self.assertIsNone(module.SCAN_CLEAN_RANGE_REGEX.search(self._receipt()))
-        self.assertEqual(module.parse_publication_safety_observation(self._receipt()).kind, "valid-v2")
+        self.assertEqual(module.parse_publication_safety_observation(self._receipt()).kind, "valid-v3")
         self.assertFalse(hasattr(module, "SCAN_CLEAN_TRACKED_REGEX") and module.SCAN_CLEAN_TRACKED_REGEX.search(self._receipt()))
 
     def test_tracked_path_legacy_and_zero_commit_are_non_authorizing(self) -> None:
@@ -6251,7 +6286,7 @@ class TestPublicationSafetyRangeReceiptV2(unittest.TestCase):
                 self.assertTrue(denies(proc), proc.stdout)
                 self.assertIn("PGG-RANGE-RECEIPT-VERSION", proc.stdout)
 
-    def test_v2_failure_marker_and_contradictory_result_denied(self) -> None:
+    def test_v3_failure_marker_and_contradictory_result_denied(self) -> None:
         rows = (
             self._receipt() + "\nPS-MSG-DECODE",
             self._receipt() + "\nPS-FINDING-COMMIT-MESSAGE",
@@ -6381,7 +6416,7 @@ class TestPublicationSafetyTrustedScanR2(unittest.TestCase):
             finally:
                 os.chdir(previous)
         self.assertEqual(type(observation).__name__, "ConsumedAuthoritativeEvidence")
-        self.assertEqual(observation.parsed_outcome.kind, "valid-v2")
+        self.assertEqual(observation.parsed_outcome.kind, "valid-v3")
         self.assertEqual(observation.parsed_outcome.receipt.commits, 1)
         self.assertTrue(observation.consumption_id)
         self.assertEqual(observation.execution.pending.state, module.PendingState.CONSUMED)
@@ -6605,9 +6640,11 @@ class TestPublicationSafetyTrustedScanR3(unittest.TestCase):
             self._closure(module), interpreter_identity=interpreter_id
         )
         valid = module.PublicationSafetyObservation(
-            "valid-v2",
-            module.RangeReceiptV2(
-                0, 1, "a" * 64, "origin", "refs/heads/main", "1" * 40
+            "valid-v3",
+            module.RangeReceiptV3(
+                1, "a" * 64, 1, "b" * 64, 0, "c" * 64,
+                0, 0, 0, 0, "d" * 64, 0, "e" * 64,
+                "origin", "refs/heads/main", "1" * 40,
             ),
         )
         fd = os.open(os.devnull, os.O_RDONLY)
@@ -7005,11 +7042,11 @@ class TestPublicationSafetyTrustedScanR4(unittest.TestCase):
                 pending.attempt_id, binding, pending.exact_argv,
                 pending.result_slot,
             )
-            receipt = (
-                "publication-safety: clean (range, receipt=v2, files=0, "
-                "commits=1, commit-set=" + "c" * 64
-                + ", messages=complete, remote=origin, "
-                "dst=refs%2Fheads%2Fmain, tip=" + "1" * 40 + ")"
+            receipt = range_receipt_v3(
+                files=0,
+                remote=binding.remote,
+                dst=binding.destination,
+                tip=binding.source_oid,
             ).encode("ascii")
             record = module.TrustedExecutionRecord(
                 pending, launched, pending.result_slot, True, 0, receipt, b"",
@@ -7199,12 +7236,11 @@ class TestPublicationSafetyTrustedScanR5Proof(unittest.TestCase):
             pending.attempt_id, binding, pending.exact_argv,
             pending.result_slot,
         )
-        receipt = (
-            "publication-safety: clean (range, receipt=v2, files=0, "
-            "commits=1, commit-set=" + "c" * 64
-            + ", messages=complete, remote=" + quote(remote, safe="")
-            + ", dst=" + quote(destination, safe="")
-            + ", tip=" + "1" * 40 + ")"
+        receipt = range_receipt_v3(
+            files=0,
+            remote=remote,
+            dst=destination,
+            tip=binding.source_oid,
         ).encode("ascii")
         record = module.TrustedExecutionRecord(
             pending, launched, pending.result_slot, True, 0, receipt, b"",

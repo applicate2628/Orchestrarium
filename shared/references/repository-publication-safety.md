@@ -32,6 +32,7 @@ The rules below apply to every tracked file in the repository, including docs, r
 - If tracked content looks like scratch material, move it back to local-only space or redact it before commit.
 - `$security-reviewer`, `$knowledge-archivist`, or another relevant reviewer may also run the scan as part of a spot check or publication gate.
 - Any author may run the scan as a local self-check, but that does not replace the required human publication review.
+- Scan-derived push authorization requires one gate-owned Version 3 range receipt covering the complete unpublished commit/tree/blob graph and every commit/raw-path/blob subject. Version 2, tracked, path, manual, zero-commit, incomplete, mixed, malformed, finding, refusal, timeout, cancellation, drift, or cleanup-failed evidence is non-authorizing.
 - Only `$security-reviewer` may approve a publication-safety exception to a scan finding. Any publication proceeding without that approval is `BLOCKED`.
 - Exact publication-safety commands live in the root repository docs and the corresponding pack runtime docs. This reference intentionally keeps the policy generic so all current and future packs can share one design-level source of truth.
 

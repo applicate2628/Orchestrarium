@@ -176,6 +176,8 @@ If a repo-local lane policy explicitly asks for consultant input at closeout, it
 
 See [INSTALL.md](INSTALL.md) for quick install, pack-specific install details, dual-platform setup, and post-install customization.
 
+Publication scan-derived push credit now requires one gate-owned Version 3 range receipt over the complete unpublished Git commit/tree/blob graph. Version 2 and manual/default/path scan output remain diagnostic only and cannot authorize a push.
+
 ## Orchestration utilities
 
 Two independence techniques ship on the Claude and Codex production lines (currently primary-pack only; the Gemini/Qwen demo mirror is deferred):

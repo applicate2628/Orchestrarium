@@ -111,6 +111,7 @@ GLOBAL_LEAD_ACCEPTED_PRIOR_TREE_SHA256 = frozenset(
         "fefe8d5ff71dfa8475fea381cdb756848740b7ea0f4a7573d69bff5b5db113cc",
         "b7d78ee5082cce97e0cb2fcb59ee2e5712617b43212a1c6c3199370797f9aa21",
         "d0bec9fd61bf3fde6e48ba38cdbc7c021053a4167bbb694c8aa5c03e06283083",
+        "1ffea3eb0fcf6589ac874ab49e508807eb0726dff88473d82b8b22b5baa42bf0",
     }
 )
 RUNTIME_RESOURCES = (

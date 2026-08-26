@@ -11,13 +11,18 @@ import os
 import re
 import subprocess
 import sys
+import time
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable, Iterable
 from urllib.parse import quote
 
 
-SCANNER_BASENAME = "check-publication-safety.py"
+_SCANNER_EXEMPT_PATHS = frozenset({
+    "scripts/universal-hooks/scripts/check-publication-safety.py",
+    "src.codex/skills/lead/scripts/check-publication-safety.py",
+    "src.claude/agents/scripts/check-publication-safety.py",
+})
 _SIMPLE_PATTERNS = (
     re.compile(r"AKIA[0-9A-Z]{16}"),
     re.compile(r"ghp_[A-Za-z0-9]{36}"),
@@ -66,9 +71,27 @@ _SCANNER_REGEX_CATALOG_LINE = re.compile(
 
 _OID_RE = re.compile(r"[0-9a-f]{40}")
 _MAX_COMMITS = 10_000
+_MAX_OBJECTS = 100_000
+_MAX_BLOBS = 50_000
+_MAX_SUBJECTS = 1_000_000
+_MAX_BLOB_PATHS = 50_000
+_MAX_PATH_BYTES = 4_096
 _MAX_MESSAGE_BYTES = 1_048_576
 _MAX_AGGREGATE_MESSAGE_BYTES = 16_777_216
-_RECEIPT_DOMAIN = b"publication-safety-range-receipt-v2"
+_MAX_COMMIT_TREE_BYTES = 1_048_576
+_MAX_TREE_CACHE_BYTES = 64 * 1_048_576
+_MAX_BLOB_BYTES = 64 * 1_048_576
+_MAX_AGGREGATE_BLOB_BYTES = 512 * 1_048_576
+_MAX_LINE_BYTES = 8 * 1_048_576
+_MAX_FINDINGS = 32
+_READ_CHUNK_BYTES = 64 * 1_024
+_SCAN_DEADLINE_SECONDS = 240.0
+_MAX_TREE_VISITS = _MAX_SUBJECTS
+_MAX_TREE_FRONTIER = _MAX_OBJECTS
+_MAX_TREE_CACHE_ENTRIES = _MAX_OBJECTS
+_MAX_COMMIT_LIST_BYTES = _MAX_COMMITS * 41
+_MAX_OBJECT_LIST_BYTES = _MAX_OBJECTS * 41
+_RECEIPT_DOMAIN = b"publication-safety-range-receipt-v3"
 _OBJECT_REQUEST_TIMEOUT_SECONDS = 5.0
 OBJECT_REAP_ATTEMPT_SECONDS = 3.0
 OBJECT_REAP_MAX_ATTEMPTS = 2
@@ -105,7 +128,7 @@ class RangeSelection:
     destination: str
     tip: str
     expected_oids: tuple[str, ...]
-    changed_paths: tuple[str, ...]
+    object_oids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -285,6 +308,7 @@ class ReaderReapCertificate:
             and self.finalizer.completion_observed
             and not self.finalizer.cancelled
             and not self.finalizer.exception_observed
+            and not self.cleanup_errors
             and self.verified_at_monotonic_tick > max(participant_ticks)
         )
 
@@ -299,13 +323,54 @@ class DecodedMessage:
 
 
 @dataclass(frozen=True)
-class RangeReceiptV2:
-    files: int
+class CommitRecord:
+    root_tree: str
+    parents: tuple[str, ...]
+    message: DecodedMessage
+
+
+@dataclass(frozen=True)
+class TreeEntry:
+    kind: str
+    name: bytes
+    oid: str
+
+
+@dataclass(frozen=True)
+class RangeReceiptV3:
     commits: int
     commit_set: str
+    objects: int
+    object_set: str
+    blobs: int
+    blob_set: str
+    blob_bytes: int
+    text: int
+    binary: int
+    subjects: int
+    subject_set: str
+    paths: int
+    path_set: str
     remote: str
     destination: str
     tip: str
+
+
+@dataclass(frozen=True)
+class HistoryProof:
+    commit_ids: tuple[str, ...]
+    object_ids: tuple[str, ...]
+    blob_ids: tuple[str, ...]
+    blob_bytes: int
+    text_blobs: int
+    binary_blobs: int
+    subjects: tuple[tuple[str, bytes, str], ...]
+    paths: tuple[tuple[str, bytes], ...]
+    commit_set: str
+    object_set: str
+    blob_set: str
+    subject_set: str
+    path_set: str
 
 
 @dataclass(frozen=True)
@@ -318,15 +383,19 @@ class ScanOutcome:
     selection: RangeSelection | None = None
     coverage: CoverageProof | None = None
     reap_certificate: ReaderReapCertificate | None = None
+    history: HistoryProof | None = None
 
 
-def _run_git(args: list[str], *, text: bool = False) -> subprocess.CompletedProcess:
+def _run_git(
+    args: list[str], *, text: bool = False, timeout: float | None = None
+) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["git", *args],
         capture_output=True,
         text=text,
         encoding="utf-8" if text else None,
         errors="replace" if text else None,
+        timeout=timeout,
     )
 
 
@@ -384,11 +453,18 @@ def _content_hits(
     find_machine_paths,
     *,
     subject_kind: str = "tracked-blob",
+    max_findings: int | None = None,
 ) -> list[Finding]:
     findings: list[Finding] = []
-    scanner = subject_kind != "commit-message" and Path(path).name == SCANNER_BASENAME
+    normalized_path = path.replace("\\", "/")
+    scanner = (
+        subject_kind != "commit-message"
+        and normalized_path in _SCANNER_EXEMPT_PATHS
+    )
     locator = _safe_locator(path, subject_kind)
     for line_number, line in enumerate(text.splitlines(), 1):
+        if max_findings is not None and len(findings) >= max_findings:
+            break
         if scanner and _intentional_scanner_line(line):
             continue
         for index, pattern in enumerate(_SIMPLE_PATTERNS):
@@ -400,6 +476,8 @@ def _content_hits(
                     line_number,
                     f"simple-{index + 1}",
                 ))
+                if max_findings is not None and len(findings) >= max_findings:
+                    break
                 break
         else:
             for family, pattern in _VALUE_RULES:
@@ -411,7 +489,11 @@ def _content_hits(
                         line_number,
                         f"value-{family}",
                     ))
+                    if max_findings is not None and len(findings) >= max_findings:
+                        break
                     break
+        if max_findings is not None and len(findings) >= max_findings:
+            continue
         if find_machine_paths(line):
             findings.append(Finding(
                 "PS-FINDING-COMMIT-MESSAGE" if subject_kind == "commit-message" else "PS-FINDING-CONTENT",
@@ -441,32 +523,42 @@ def _tracked_files() -> tuple[list[str], dict[str, bytes]]:
     return paths, blobs
 
 
-def _canonical_commit_ids(rows: Iterable[str]) -> tuple[str, ...]:
-    result: list[str] = []
-    seen: set[str] = set()
-    for raw in rows:
-        oid = raw.strip().lower()
-        if not _OID_RE.fullmatch(oid):
-            raise ValueError("frame: malformed oid")
-        if oid in seen:
-            raise ValueError("frame: duplicate oid")
-        seen.add(oid)
-        result.append(oid)
-        if len(result) > _MAX_COMMITS:
-            raise ValueError("limit: commit count")
-    return tuple(result)
+def _length_frame(value: bytes) -> bytes:
+    return len(value).to_bytes(8, "big") + value
+
+
+def _digest_frames(domain: bytes, rows: Iterable[bytes]) -> str:
+    digest = hashlib.sha256(_length_frame(_RECEIPT_DOMAIN) + _length_frame(domain))
+    for row in rows:
+        digest.update(_length_frame(row))
+    return digest.hexdigest()
 
 
 def _commit_set_digest(commit_ids: Iterable[str]) -> str:
-    canonical = [value.lower() for value in commit_ids]
-    framed = _RECEIPT_DOMAIN + b"\0" + b"\0".join(
-        value.encode("ascii") for value in canonical
+    return _digest_frames(
+        b"commit-set",
+        (value.lower().encode("ascii") for value in commit_ids),
     )
-    return hashlib.sha256(framed).hexdigest()
 
 
-def _resolve_head() -> str:
-    proc = _run_git(["rev-parse", "--verify", "HEAD^{commit}"], text=True)
+def _oid_set_digest(domain: bytes, object_ids: Iterable[str]) -> str:
+    return _digest_frames(
+        domain,
+        (value.lower().encode("ascii") for value in sorted(object_ids)),
+    )
+
+
+def _remaining_seconds(deadline: float) -> float:
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise subprocess.TimeoutExpired("publication-safety-range", 0)
+    return remaining
+
+
+def _resolve_head(timeout: float | None = None) -> str:
+    proc = _run_git(
+        ["rev-parse", "--verify", "HEAD^{commit}"], text=True, timeout=timeout
+    )
     if proc.returncode:
         raise ValueError("head")
     oid = proc.stdout.strip().lower()
@@ -475,50 +567,184 @@ def _resolve_head() -> str:
     return oid
 
 
-def _range_selection(remote: str, destination: str) -> RangeSelection | Refusal:
-    remotes = _run_git(["remote"], text=True)
+async def _read_git_oid_lines_bounded(
+    argv: tuple[str, ...],
+    *,
+    count_cap: int,
+    byte_cap: int,
+    deadline: float,
+) -> tuple[str, ...] | Refusal:
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *argv,
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return _refusal("PS-MSG-SPAWN", "selection")
+    if process.stdout is None:
+        if process.returncode is None:
+            process.kill()
+            await process.wait()
+        return _refusal("PS-MSG-READ", "selection-pipe")
+
+    rows: list[str] = []
+    seen: set[str] = set()
+    pending = bytearray()
+    total_bytes = 0
+    refusal: Refusal | None = None
+
+    def accept(raw: bytes) -> Refusal | None:
+        if len(raw) != 40:
+            return _refusal("PS-MSG-FRAME", "oid")
+        try:
+            oid = raw.decode("ascii").lower()
+        except UnicodeDecodeError:
+            return _refusal("PS-MSG-FRAME", "oid")
+        if not _OID_RE.fullmatch(oid) or oid in seen:
+            return _refusal("PS-MSG-FRAME", "oid")
+        if len(rows) >= count_cap:
+            return _refusal("PS-MSG-LIMIT", "count")
+        seen.add(oid)
+        rows.append(oid)
+        return None
+
+    try:
+        while refusal is None:
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                refusal = _refusal("PS-MSG-READ-TIMEOUT", "deadline")
+                break
+            try:
+                chunk = await asyncio.wait_for(
+                    process.stdout.read(_READ_CHUNK_BYTES), timeout=remaining
+                )
+            except asyncio.TimeoutError:
+                refusal = _refusal("PS-MSG-READ-TIMEOUT", "deadline")
+                break
+            if not chunk:
+                break
+            total_bytes += len(chunk)
+            if total_bytes > byte_cap:
+                refusal = _refusal("PS-MSG-LIMIT", "bytes")
+                break
+            pending.extend(chunk)
+            while refusal is None:
+                newline = pending.find(b"\n")
+                if newline < 0:
+                    if len(pending) > 40:
+                        refusal = _refusal("PS-MSG-FRAME", "oid")
+                    break
+                raw = bytes(pending[:newline])
+                del pending[:newline + 1]
+                refusal = accept(raw)
+        if refusal is None and pending:
+            refusal = accept(bytes(pending))
+    except asyncio.CancelledError:
+        refusal = _refusal("PS-MSG-READ", "cancelled")
+    except Exception:
+        refusal = _refusal("PS-MSG-READ", "selection")
+
+    if refusal is None:
+        remaining = deadline - asyncio.get_running_loop().time()
+        if remaining <= 0:
+            refusal = _refusal("PS-MSG-READ-TIMEOUT", "deadline")
+        else:
+            try:
+                await asyncio.wait_for(process.wait(), timeout=remaining)
+            except asyncio.TimeoutError:
+                refusal = _refusal("PS-MSG-READ-TIMEOUT", "deadline")
+            except Exception:
+                refusal = _refusal("PS-MSG-READ", "selection-wait")
+
+    if process.returncode is None:
+        try:
+            process.kill()
+        except ProcessLookupError:
+            pass
+        try:
+            await asyncio.wait_for(
+                process.wait(), timeout=OBJECT_REAP_ATTEMPT_SECONDS
+            )
+        except Exception:
+            return _refusal("PS-MSG-REAP", "selection-child")
+    if process.returncode is None:
+        return _refusal("PS-MSG-REAP", "selection-child")
+    if refusal is not None:
+        return refusal
+    if process.returncode != 0:
+        return _refusal("PS-MSG-RANGE", "selection-child")
+    return tuple(rows)
+
+
+async def _range_selection(
+    remote: str, destination: str, deadline: float | None = None
+) -> RangeSelection | Refusal:
+    deadline = deadline if deadline is not None else time.monotonic() + _SCAN_DEADLINE_SECONDS
+    try:
+        remotes = _run_git(
+            ["remote"], text=True, timeout=_remaining_seconds(deadline)
+        )
+    except subprocess.TimeoutExpired:
+        return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
     configured = [line for line in remotes.stdout.splitlines() if line]
     if remotes.returncode or remote not in configured:
         return _refusal("PS-MSG-RANGE", "remote")
     if not destination:
         return _refusal("PS-MSG-RANGE", "destination")
     try:
-        tip = _resolve_head()
-    except (OSError, ValueError):
+        tip = _resolve_head(_remaining_seconds(deadline))
+    except (OSError, ValueError, subprocess.TimeoutExpired):
         return _refusal("PS-MSG-RANGE", "head")
-    commits = _run_git(
-        ["rev-list", "--topo-order", tip, "--not", f"--remotes={remote}"],
-        text=True,
+    commit_ids = await _read_git_oid_lines_bounded(
+        (
+            "git", "rev-list", "--topo-order", tip,
+            "--not", f"--remotes={remote}",
+        ),
+        count_cap=_MAX_COMMITS,
+        byte_cap=_MAX_COMMIT_LIST_BYTES,
+        deadline=asyncio.get_running_loop().time()
+        + max(0.0, deadline - time.monotonic()),
     )
-    if commits.returncode:
-        return _refusal("PS-MSG-RANGE", "selection")
-    try:
-        commit_ids = _canonical_commit_ids(commits.stdout.splitlines())
-    except ValueError as exc:
-        failure_id = "PS-MSG-LIMIT" if str(exc).startswith("limit:") else "PS-MSG-FRAME"
-        return _refusal(failure_id, "count" if failure_id.endswith("LIMIT") else "oid")
-    paths: dict[str, None] = {}
-    for oid in commit_ids:
-        names = _run_git(
-            ["diff-tree", "--root", "--no-commit-id", "--name-only", "-r", "-z", oid]
-        )
-        if names.returncode:
-            return _refusal("PS-MSG-RANGE", "paths")
-        for raw in names.stdout.split(b"\0"):
-            if raw:
-                paths[raw.decode("utf-8", "surrogateescape")] = None
+    if isinstance(commit_ids, Refusal):
+        return commit_ids
+    object_ids = await _read_git_oid_lines_bounded(
+        (
+            "git", "rev-list", "--objects", "--no-object-names", tip,
+            "--not", f"--remotes={remote}",
+        ),
+        count_cap=_MAX_OBJECTS,
+        byte_cap=_MAX_OBJECT_LIST_BYTES,
+        deadline=asyncio.get_running_loop().time()
+        + max(0.0, deadline - time.monotonic()),
+    )
+    if isinstance(object_ids, Refusal):
+        return object_ids
+    if commit_ids and not object_ids:
+        return _refusal("PS-MSG-COVERAGE", "objects")
+    object_set = frozenset(object_ids)
+    if any(oid not in object_set for oid in commit_ids):
+        return _refusal("PS-MSG-COVERAGE", "commit-object-set")
     return RangeSelection(
         remote,
         destination,
         tip,
         commit_ids,
-        tuple(paths),
+        object_ids,
     )
 
 
 def _parse_batch_header(
     header: bytes, expected_oid: str, expected_type: str
 ) -> int | Refusal:
+    parsed = _parse_batch_frame_header(header, expected_oid, expected_type)
+    return parsed if isinstance(parsed, Refusal) else parsed[1]
+
+
+def _parse_batch_frame_header(
+    header: bytes, expected_oid: str, expected_type: str | None
+) -> tuple[str, int] | Refusal:
     expected = expected_oid.encode("ascii")
     if header == expected + b" missing":
         return _refusal("PS-MSG-READ", "missing")
@@ -526,7 +752,15 @@ def _parse_batch_header(
     if len(parts) != 3:
         return _refusal("PS-MSG-FRAME", "header")
     raw_oid, raw_type, raw_length = parts
-    if raw_oid != expected or raw_type != expected_type.encode("ascii"):
+    if raw_oid != expected:
+        return _refusal("PS-MSG-FRAME", "identity")
+    try:
+        object_type = raw_type.decode("ascii")
+    except UnicodeDecodeError:
+        return _refusal("PS-MSG-FRAME", "type")
+    if object_type not in {"commit", "tree", "blob"}:
+        return _refusal("PS-MSG-FRAME", "type")
+    if expected_type is not None and object_type != expected_type:
         return _refusal("PS-MSG-FRAME", "identity")
     try:
         length = int(raw_length)
@@ -534,7 +768,7 @@ def _parse_batch_header(
         return _refusal("PS-MSG-FRAME", "length")
     if length < 0:
         return _refusal("PS-MSG-FRAME", "length")
-    return length
+    return object_type, length
 
 
 @dataclass(frozen=True)
@@ -616,7 +850,13 @@ class _AsyncGitObjectReader:
             raise asyncio.TimeoutError
         return await asyncio.wait_for(awaitable, timeout=remaining)
 
-    async def read(self, oid: str, expected_type: str) -> ObjectReadSuccess | Refusal:
+    async def read(
+        self,
+        oid: str,
+        expected_type: str | None,
+        *,
+        scan_deadline: float | None = None,
+    ) -> ObjectReadSuccess | Refusal:
         process = self._process
         if (
             self._poisoned
@@ -627,6 +867,8 @@ class _AsyncGitObjectReader:
         ):
             return _refusal("PS-MSG-READ", "reader-state")
         deadline = asyncio.get_running_loop().time() + self._request_timeout
+        if scan_deadline is not None:
+            deadline = min(deadline, scan_deadline)
         try:
             process.stdin.write(oid.encode("ascii") + b"\n")
             await self._within(process.stdin.drain(), deadline)
@@ -634,16 +876,30 @@ class _AsyncGitObjectReader:
             if not header.endswith(b"\n"):
                 self._poisoned = True
                 return _refusal("PS-MSG-FRAME", "header-delimiter")
-            length = _parse_batch_header(header[:-1], oid, expected_type)
-            if isinstance(length, Refusal):
+            parsed = _parse_batch_frame_header(header[:-1], oid, expected_type)
+            if isinstance(parsed, Refusal):
                 self._poisoned = True
-                return length
-            raw = await self._within(process.stdout.readexactly(length), deadline)
+                return parsed
+            object_type, length = parsed
+            size_cap = _MAX_BLOB_BYTES if object_type == "blob" else _MAX_COMMIT_TREE_BYTES
+            if length > size_cap:
+                self._poisoned = True
+                return _refusal("PS-MSG-LIMIT", f"{object_type}-bytes")
+            chunks: list[bytes] = []
+            remaining = length
+            while remaining:
+                chunk = await self._within(
+                    process.stdout.readexactly(min(remaining, _READ_CHUNK_BYTES)),
+                    deadline,
+                )
+                chunks.append(chunk)
+                remaining -= len(chunk)
+            raw = b"".join(chunks)
             delimiter = await self._within(process.stdout.readexactly(1), deadline)
             if delimiter != b"\n":
                 self._poisoned = True
                 return _refusal("PS-MSG-FRAME", "record-delimiter")
-            return ObjectReadSuccess(oid, oid, expected_type, raw)
+            return ObjectReadSuccess(oid, oid, object_type, raw)
         except asyncio.TimeoutError:
             self._poisoned = True
             return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
@@ -732,7 +988,14 @@ class _AsyncGitObjectReader:
         )
         if process.stdout is not None and child.terminal_observed:
             try:
-                trailing = await self._within(process.stdout.read(), deadline)
+                trailing = False
+                while True:
+                    chunk = await self._within(
+                        process.stdout.read(_READ_CHUNK_BYTES), deadline
+                    )
+                    if not chunk:
+                        break
+                    trailing = True
                 if trailing:
                     errors.append("stdout-trailing")
                 stdout = TransportObservation("owned", "output-eof", True, None, loop.time())
@@ -819,33 +1082,108 @@ def _decode_commit_message(raw: bytes) -> DecodedMessage | Refusal:
         return _refusal("PS-MSG-DECODE", "utf8")
 
 
-def _tip_blob_ids(selection: RangeSelection) -> dict[str, str] | Refusal:
-    tree = _run_git(["ls-tree", "-r", "-z", "--full-tree", selection.tip])
-    if tree.returncode:
-        return _refusal("PS-MSG-READ", "tree")
-    candidates = set(selection.changed_paths)
-    result: dict[str, str] = {}
-    for record in tree.stdout.split(b"\0"):
-        if not record:
+def _decode_commit_record(raw: bytes) -> CommitRecord | Refusal:
+    decoded = _decode_commit_message(raw)
+    if isinstance(decoded, Refusal):
+        return decoded
+    separator = raw.find(b"\n\n")
+    headers = raw[:separator].splitlines()
+    trees: list[str] = []
+    parents: list[str] = []
+    for header in headers:
+        if header.startswith(b"tree "):
+            target = trees
+            value = header[5:]
+        elif header.startswith(b"parent "):
+            target = parents
+            value = header[7:]
+        else:
             continue
         try:
-            metadata, raw_path = record.split(b"\t", 1)
-            mode, object_type, raw_oid = metadata.split(b" ", 2)
-            path = raw_path.decode("utf-8", "surrogateescape")
-            oid = raw_oid.decode("ascii").lower()
-        except (ValueError, UnicodeError):
-            return _refusal("PS-MSG-FRAME", "tree")
-        if path not in candidates:
-            continue
-        if object_type != b"blob" or not _OID_RE.fullmatch(oid) or not mode:
-            return _refusal("PS-MSG-FRAME", "tree")
-        result[path] = oid
-    return result
+            oid = value.decode("ascii").lower()
+        except UnicodeDecodeError:
+            return _refusal("PS-MSG-FRAME", "commit-header")
+        if not _OID_RE.fullmatch(oid):
+            return _refusal("PS-MSG-FRAME", "commit-header")
+        target.append(oid)
+    if len(trees) != 1:
+        return _refusal("PS-MSG-FRAME", "commit-tree")
+    return CommitRecord(trees[0], tuple(parents), decoded)
 
 
-def _confirm_tip(initial_tip: str, resolver: Callable[[], str] = _resolve_head) -> Refusal | None:
+def _parse_tree(raw: bytes) -> tuple[TreeEntry, ...] | Refusal:
+    entries: list[TreeEntry] = []
+    offset = 0
+    while offset < len(raw):
+        space = raw.find(b" ", offset)
+        nul = raw.find(b"\0", space + 1 if space >= 0 else offset)
+        if space <= offset or nul <= space + 1 or nul + 21 > len(raw):
+            return _refusal("PS-MSG-FRAME", "tree")
+        mode = raw[offset:space]
+        name = raw[space + 1:nul]
+        raw_oid = raw[nul + 1:nul + 21]
+        if b"/" in name or not name:
+            return _refusal("PS-MSG-FRAME", "tree-path")
+        if mode in {b"100644", b"100755", b"120000"}:
+            kind = "blob"
+        elif mode in {b"40000", b"040000"}:
+            kind = "tree"
+        elif mode == b"160000":
+            kind = "gitlink"
+        else:
+            return _refusal("PS-MSG-FRAME", "tree-mode")
+        entries.append(TreeEntry(kind, name, raw_oid.hex()))
+        offset = nul + 21
+    return tuple(entries)
+
+
+def _line_limit_refusal(raw: bytes) -> Refusal | None:
+    start = 0
+    while True:
+        end = raw.find(b"\n", start)
+        if end < 0:
+            return (
+                _refusal("PS-MSG-LIMIT", "line-bytes")
+                if len(raw) - start > _MAX_LINE_BYTES else None
+            )
+        if end - start > _MAX_LINE_BYTES:
+            return _refusal("PS-MSG-LIMIT", "line-bytes")
+        start = end + 1
+
+
+def _append_findings(target: list[Finding], rows: Iterable[Finding]) -> None:
+    remaining = _MAX_FINDINGS - len(target)
+    if remaining > 0:
+        target.extend(list(rows)[:remaining])
+
+
+def _subject_set_digest(subjects: Iterable[tuple[str, bytes, str]]) -> str:
+    rows = (
+        _length_frame(commit.encode("ascii"))
+        + _length_frame(path)
+        + _length_frame(blob.encode("ascii"))
+        for commit, path, blob in subjects
+    )
+    return _digest_frames(b"subject-set", rows)
+
+
+def _path_set_digest(paths: Iterable[tuple[str, bytes]]) -> str:
+    rows = (
+        _length_frame(blob.encode("ascii")) + _length_frame(path)
+        for blob, path in paths
+    )
+    return _digest_frames(b"path-set", rows)
+
+
+def _confirm_tip(
+    initial_tip: str,
+    resolver: Callable[[], str] = _resolve_head,
+    timeout: float | None = None,
+) -> Refusal | None:
     try:
-        final_tip = resolver().lower()
+        final_tip = (
+            resolver(timeout).lower() if resolver is _resolve_head else resolver().lower()
+        )
     except Exception:
         return _refusal("PS-MSG-TIP-CHANGED", "head")
     if final_tip != initial_tip:
@@ -933,6 +1271,259 @@ async def _finalize_reader(reader: _AsyncGitObjectReader) -> Refusal | None:
         return _refusal("PS-MSG-REAP", "unexpected")
 
 
+def _tree_traversal_guard(
+    *,
+    deadline: float,
+    frontier: int,
+    visits: int,
+    visited: int,
+    cache_entries: int,
+) -> Refusal | None:
+    if asyncio.get_running_loop().time() >= deadline:
+        return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
+    if frontier > _MAX_TREE_FRONTIER:
+        return _refusal("PS-MSG-LIMIT", "tree-frontier")
+    if visits > _MAX_TREE_VISITS:
+        return _refusal("PS-MSG-LIMIT", "tree-visits")
+    if visited > _MAX_TREE_CACHE_ENTRIES:
+        return _refusal("PS-MSG-LIMIT", "tree-visited")
+    if cache_entries > _MAX_TREE_CACHE_ENTRIES:
+        return _refusal("PS-MSG-LIMIT", "tree-cache-count")
+    return None
+
+
+async def _acquire_history(
+    selection: RangeSelection,
+    reader: _AsyncGitObjectReader,
+    find_machine_paths,
+    coverage_recorder: CoverageRecorder,
+    scan_deadline: float,
+) -> tuple[HistoryProof, CoverageProof, tuple[Finding, ...]] | Refusal:
+    commit_set = set(selection.expected_oids)
+    object_types: dict[str, str] = {}
+    commit_records: dict[str, CommitRecord] = {}
+    tree_cache: dict[str, bytes] = {}
+    blob_contents: dict[str, bytes] = {}
+    findings: list[Finding] = []
+    aggregate_messages = 0
+    aggregate_blobs = 0
+    aggregate_trees = 0
+
+    for oid in selection.object_oids:
+        if asyncio.get_running_loop().time() >= scan_deadline:
+            return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
+        expected_type = "commit" if oid in commit_set else None
+        if expected_type == "commit":
+            coverage_recorder.record(CoverageEvent.REQUESTED, oid)
+        result = await reader.read(
+            oid, expected_type, scan_deadline=scan_deadline
+        )
+        if isinstance(result, Refusal):
+            return result
+        if result.returned_oid != oid:
+            return _refusal("PS-MSG-COVERAGE", "object-identity")
+        object_types[oid] = result.object_type
+        if result.object_type == "commit":
+            if oid not in commit_set:
+                return _refusal("PS-MSG-COVERAGE", "unexpected-commit")
+            coverage_recorder.record(CoverageEvent.ACQUIRED, result.returned_oid)
+            record = _decode_commit_record(result.raw)
+            if isinstance(record, Refusal):
+                return record
+            aggregate_messages += record.message.raw_size
+            if aggregate_messages > _MAX_AGGREGATE_MESSAGE_BYTES:
+                return _refusal("PS-MSG-LIMIT", "aggregate-message-bytes")
+            _append_findings(findings, _content_hits(
+                record.message.text,
+                oid,
+                find_machine_paths,
+                subject_kind="commit-message",
+                max_findings=max(0, _MAX_FINDINGS - len(findings)),
+            ))
+            coverage_recorder.record(CoverageEvent.SCANNED, oid)
+            commit_records[oid] = record
+        elif result.object_type == "tree":
+            aggregate_trees += len(result.raw)
+            if aggregate_trees > _MAX_TREE_CACHE_BYTES:
+                return _refusal("PS-MSG-LIMIT", "tree-cache-bytes")
+            tree_cache[oid] = result.raw
+        elif result.object_type == "blob":
+            if len(blob_contents) >= _MAX_BLOBS:
+                return _refusal("PS-MSG-LIMIT", "blob-count")
+            aggregate_blobs += len(result.raw)
+            if aggregate_blobs > _MAX_AGGREGATE_BLOB_BYTES:
+                return _refusal("PS-MSG-LIMIT", "aggregate-blob-bytes")
+            blob_contents[oid] = result.raw
+        else:
+            return _refusal("PS-MSG-FRAME", "object-type")
+
+    if tuple(object_types) != selection.object_oids:
+        return _refusal("PS-MSG-COVERAGE", "object-set")
+    if set(commit_records) != commit_set:
+        return _refusal("PS-MSG-COVERAGE", "commit-set")
+    coverage = coverage_recorder.proof()
+    if isinstance(coverage, Refusal):
+        return coverage
+
+    async def load_tree(oid: str) -> bytes | Refusal:
+        nonlocal aggregate_trees
+        guard = _tree_traversal_guard(
+            deadline=scan_deadline,
+            frontier=0,
+            visits=0,
+            visited=0,
+            cache_entries=len(tree_cache),
+        )
+        if guard is not None:
+            return guard
+        cached = tree_cache.get(oid)
+        if cached is not None:
+            return cached
+        guard = _tree_traversal_guard(
+            deadline=scan_deadline,
+            frontier=0,
+            visits=0,
+            visited=0,
+            cache_entries=len(tree_cache) + 1,
+        )
+        if guard is not None:
+            return guard
+        result = await reader.read(oid, "tree", scan_deadline=scan_deadline)
+        if isinstance(result, Refusal):
+            return result
+        aggregate_trees += len(result.raw)
+        if aggregate_trees > _MAX_TREE_CACHE_BYTES:
+            return _refusal("PS-MSG-LIMIT", "tree-cache-bytes")
+        tree_cache[oid] = result.raw
+        return result.raw
+
+    unpublished_trees = {
+        oid for oid, object_type in object_types.items() if object_type == "tree"
+    }
+    unpublished_blobs = set(blob_contents)
+    reached_unpublished_trees: set[str] = set()
+    visited_tree_ids: set[str] = set()
+    tree_visits = 0
+    subjects: list[tuple[str, bytes, str]] = []
+    subject_set: set[tuple[str, bytes, str]] = set()
+    for commit_oid in selection.expected_oids:
+        guard = _tree_traversal_guard(
+            deadline=scan_deadline,
+            frontier=0,
+            visits=tree_visits,
+            visited=len(visited_tree_ids),
+            cache_entries=len(tree_cache),
+        )
+        if guard is not None:
+            return guard
+        root_tree = commit_records[commit_oid].root_tree
+        stack: list[tuple[str, bytes, tuple[str, ...]]] = [(root_tree, b"", ())]
+        while stack:
+            next_tree_oid = stack[-1][0]
+            guard = _tree_traversal_guard(
+                deadline=scan_deadline,
+                frontier=len(stack),
+                visits=tree_visits + 1,
+                visited=len(visited_tree_ids) + (next_tree_oid not in visited_tree_ids),
+                cache_entries=len(tree_cache),
+            )
+            if guard is not None:
+                return guard
+            tree_oid, prefix, ancestors = stack.pop()
+            tree_visits += 1
+            visited_tree_ids.add(tree_oid)
+            if tree_oid in ancestors:
+                return _refusal("PS-MSG-FRAME", "tree-cycle")
+            raw_tree = await load_tree(tree_oid)
+            if isinstance(raw_tree, Refusal):
+                return raw_tree
+            if tree_oid in unpublished_trees:
+                reached_unpublished_trees.add(tree_oid)
+            entries = _parse_tree(raw_tree)
+            if isinstance(entries, Refusal):
+                return entries
+            for entry in reversed(entries):
+                guard = _tree_traversal_guard(
+                    deadline=scan_deadline,
+                    frontier=len(stack),
+                    visits=tree_visits,
+                    visited=len(visited_tree_ids),
+                    cache_entries=len(tree_cache),
+                )
+                if guard is not None:
+                    return guard
+                path = prefix + (b"/" if prefix else b"") + entry.name
+                if len(path) > _MAX_PATH_BYTES:
+                    return _refusal("PS-MSG-LIMIT", "path-bytes")
+                if entry.kind == "tree":
+                    guard = _tree_traversal_guard(
+                        deadline=scan_deadline,
+                        frontier=len(stack) + 1,
+                        visits=tree_visits,
+                        visited=len(visited_tree_ids),
+                        cache_entries=len(tree_cache),
+                    )
+                    if guard is not None:
+                        return guard
+                    stack.append((entry.oid, path, ancestors + (tree_oid,)))
+                elif entry.kind == "blob" and entry.oid in unpublished_blobs:
+                    subject = (commit_oid, path, entry.oid)
+                    if subject in subject_set:
+                        return _refusal("PS-MSG-COVERAGE", "duplicate-subject")
+                    subject_set.add(subject)
+                    subjects.append(subject)
+                    if len(subjects) > _MAX_SUBJECTS:
+                        return _refusal("PS-MSG-LIMIT", "subject-count")
+
+    if reached_unpublished_trees != unpublished_trees:
+        return _refusal("PS-MSG-COVERAGE", "tree-subjects")
+    if {blob for _commit, _path, blob in subjects} != unpublished_blobs:
+        return _refusal("PS-MSG-COVERAGE", "blob-subjects")
+    blob_paths = {(path, blob) for _commit, path, blob in subjects}
+    if len(blob_paths) > _MAX_BLOB_PATHS:
+        return _refusal("PS-MSG-LIMIT", "blob-path-count")
+
+    binary_blobs = {oid for oid, raw in blob_contents.items() if _is_binary(raw)}
+    text_blobs = set(blob_contents) - binary_blobs
+    for path, blob_oid in sorted(blob_paths):
+        decoded_path = path.decode("utf-8", "surrogateescape")
+        _append_findings(
+            findings, _filename_findings(decoded_path, "history-blob")
+        )
+        raw = blob_contents[blob_oid]
+        line_refusal = _line_limit_refusal(raw)
+        if line_refusal is not None:
+            return line_refusal
+        _append_findings(findings, _content_hits(
+            raw.decode("utf-8", "replace"),
+            decoded_path,
+            find_machine_paths,
+            subject_kind="history-blob",
+            max_findings=max(0, _MAX_FINDINGS - len(findings)),
+        ))
+
+    canonical_subjects = tuple(sorted(subjects))
+    canonical_paths = tuple(sorted((blob, path) for path, blob in blob_paths))
+    canonical_objects = tuple(sorted(selection.object_oids))
+    canonical_blobs = tuple(sorted(blob_contents))
+    proof = HistoryProof(
+        selection.expected_oids,
+        canonical_objects,
+        canonical_blobs,
+        aggregate_blobs,
+        len(text_blobs),
+        len(binary_blobs),
+        canonical_subjects,
+        canonical_paths,
+        _commit_set_digest(selection.expected_oids),
+        _oid_set_digest(b"object-set", canonical_objects),
+        _oid_set_digest(b"blob-set", canonical_blobs),
+        _subject_set_digest(canonical_subjects),
+        _path_set_digest(canonical_paths),
+    )
+    return proof, coverage, tuple(findings)
+
+
 async def _scan_range_async(
     remote: str,
     destination: str,
@@ -942,8 +1533,10 @@ async def _scan_range_async(
     reader_factory: Callable[[], _AsyncGitObjectReader] = _AsyncGitObjectReader,
     coverage_observer: Callable[[CoverageEvent, str], None] | None = None,
     coverage_fault: CoverageFaultPort | None = None,
+    scan_timeout: float = _SCAN_DEADLINE_SECONDS,
 ) -> ScanOutcome:
-    selection = _range_selection(remote, destination)
+    wall_deadline = time.monotonic() + scan_timeout
+    selection = await _range_selection(remote, destination, wall_deadline)
     if isinstance(selection, Refusal):
         return ScanOutcome("refusal", "range", refusal=selection)
     if not selection.expected_oids:
@@ -952,23 +1545,13 @@ async def _scan_range_async(
             refusal=_refusal("PS-MSG-COVERAGE", "empty-selection"),
             selection=selection,
         )
-    blob_ids = _tip_blob_ids(selection)
-    if isinstance(blob_ids, Refusal):
-        return ScanOutcome(
-            "refusal", "range", refusal=blob_ids,
-            selection=selection,
-        )
-
-    findings: list[Finding] = []
     coverage_recorder = CoverageRecorder(
         selection.expected_oids, coverage_observer, coverage_fault
     )
-    aggregate = 0
-    file_count = 0
     pending: ScanOutcome | None = None
     reader: _AsyncGitObjectReader | None = None
 
-    if selection.expected_oids or blob_ids:
+    if selection.object_oids:
         reader = reader_factory()
         try:
             start_refusal = await reader.start()
@@ -977,80 +1560,44 @@ async def _scan_range_async(
                     "refusal", "range", refusal=start_refusal, selection=selection
                 )
             else:
-                for oid in selection.expected_oids:
-                    coverage_recorder.record(CoverageEvent.REQUESTED, oid)
-                    result = await reader.read(oid, "commit")
-                    if isinstance(result, Refusal):
-                        pending = ScanOutcome(
-                            "refusal", "range", refusal=result, selection=selection
-                        )
-                        break
-                    coverage_recorder.record(CoverageEvent.ACQUIRED, result.returned_oid)
-                    decoded = _decode_commit_message(result.raw)
-                    if isinstance(decoded, Refusal):
-                        pending = ScanOutcome(
-                            "refusal", "range", refusal=decoded, selection=selection
-                        )
-                        break
-                    aggregate += decoded.raw_size
-                    if aggregate > _MAX_AGGREGATE_MESSAGE_BYTES:
-                        pending = ScanOutcome(
-                            "refusal", "range",
-                            refusal=_refusal("PS-MSG-LIMIT", "aggregate"),
-                            selection=selection,
-                        )
-                        break
-                    findings.extend(_content_hits(
-                        decoded.text,
-                        oid,
+                loop = asyncio.get_running_loop()
+                remaining = wall_deadline - time.monotonic()
+                if remaining <= 0:
+                    acquisition = _refusal("PS-MSG-READ-TIMEOUT", "deadline")
+                else:
+                    acquisition = await _acquire_history(
+                        selection,
+                        reader,
                         find_machine_paths,
-                        subject_kind="commit-message",
-                    ))
-                    coverage_recorder.record(CoverageEvent.SCANNED, oid)
-
-                coverage: CoverageProof | Refusal | None = None
-                if pending is None:
-                    coverage = coverage_recorder.proof()
-                    if isinstance(coverage, Refusal):
-                        pending = ScanOutcome(
-                            "refusal", "range", refusal=coverage, selection=selection
-                        )
-
-                if pending is None:
-                    for path, oid in blob_ids.items():
-                        result = await reader.read(oid, "blob")
-                        if isinstance(result, Refusal):
-                            pending = ScanOutcome(
-                                "refusal", "range", refusal=result, selection=selection
-                            )
-                            break
-                        if _is_binary(result.raw):
-                            continue
-                        file_count += 1
-                        findings.extend(_content_hits(
-                            result.raw.decode("utf-8", "replace"),
-                            path,
-                            find_machine_paths,
-                            subject_kind="tip-blob",
-                        ))
-
-                if pending is None:
-                    drift = _confirm_tip(selection.tip, head_resolver)
+                        coverage_recorder,
+                        loop.time() + remaining,
+                    )
+                if isinstance(acquisition, Refusal):
+                    pending = ScanOutcome(
+                        "refusal", "range", refusal=acquisition, selection=selection
+                    )
+                else:
+                    history, coverage, findings = acquisition
+                    drift = _confirm_tip(
+                        selection.tip,
+                        head_resolver,
+                        max(0.001, wall_deadline - time.monotonic()),
+                    )
                     if drift is not None:
                         pending = ScanOutcome(
                             "refusal", "range", refusal=drift, selection=selection
                         )
                     elif findings:
                         pending = ScanOutcome(
-                            "findings", "range", file_count=file_count,
+                            "findings", "range", file_count=len(history.paths),
                             findings=tuple(findings), selection=selection,
-                            coverage=coverage if isinstance(coverage, CoverageProof) else None,
+                            coverage=coverage, history=history,
                         )
                     else:
                         pending = ScanOutcome(
-                            "clean", "range", file_count=file_count,
+                            "clean", "range", file_count=len(history.paths),
                             selection=selection,
-                            coverage=coverage if isinstance(coverage, CoverageProof) else None,
+                            coverage=coverage, history=history,
                         )
         except asyncio.CancelledError:
             pending = ScanOutcome(
@@ -1116,30 +1663,48 @@ def _encode_receipt_token(value: str) -> str:
     return quote(value, safe="-._~", encoding="utf-8", errors="strict")
 
 
-def _serialize_range_receipt_v2(
-    files: int,
-    commit_ids: Iterable[str],
+def _serialize_range_receipt_v3(
+    history: HistoryProof,
     remote: str,
     destination: str,
     tip: str,
 ) -> str:
-    commits = _canonical_commit_ids(commit_ids)
-    if not commits:
+    if not history.commit_ids or not history.object_ids:
         raise ValueError("non-empty receipt")
-    if files < 0 or not _OID_RE.fullmatch(tip):
+    if (
+        history.text_blobs + history.binary_blobs != len(history.blob_ids)
+        or history.blob_bytes < 0
+        or not _OID_RE.fullmatch(tip)
+    ):
         raise ValueError("receipt fields")
-    receipt = RangeReceiptV2(
-        files,
-        len(commits),
-        _commit_set_digest(commits),
+    receipt = RangeReceiptV3(
+        len(history.commit_ids),
+        history.commit_set,
+        len(history.object_ids),
+        history.object_set,
+        len(history.blob_ids),
+        history.blob_set,
+        history.blob_bytes,
+        history.text_blobs,
+        history.binary_blobs,
+        len(history.subjects),
+        history.subject_set,
+        len(history.paths),
+        history.path_set,
         _encode_receipt_token(remote),
         _encode_receipt_token(destination),
         tip,
     )
     return (
-        "publication-safety: clean (range, receipt=v2, "
-        f"files={receipt.files}, commits={receipt.commits}, "
+        "publication-safety: clean (range, receipt=v3, "
+        f"commits={receipt.commits}, "
         f"commit-set={receipt.commit_set}, messages=complete, "
+        f"objects={receipt.objects}, object-set={receipt.object_set}, "
+        f"blobs={receipt.blobs}, blob-set={receipt.blob_set}, "
+        f"blob-bytes={receipt.blob_bytes}, text={receipt.text}, "
+        f"binary={receipt.binary}, subjects={receipt.subjects}, "
+        f"subject-set={receipt.subject_set}, paths={receipt.paths}, "
+        f"path-set={receipt.path_set}, history=complete, "
         f"remote={receipt.remote}, dst={receipt.destination}, tip={receipt.tip})"
     )
 
@@ -1236,11 +1801,13 @@ def _format_outcome(outcome: ScanOutcome) -> tuple[str, str, int]:
         selection = outcome.selection
         coverage = outcome.coverage
         certificate = outcome.reap_certificate
+        history = outcome.history
         if (
             selection is None
             or coverage is None
             or certificate is None
             or not certificate.complete
+            or history is None
         ):
             return (
                 "",
@@ -1257,9 +1824,8 @@ def _format_outcome(outcome: ScanOutcome) -> tuple[str, str, int]:
             )
         try:
             return (
-                _serialize_range_receipt_v2(
-                    outcome.file_count,
-                    coverage.scanned_message_oids,
+                _serialize_range_receipt_v3(
+                    history,
                     selection.remote,
                     selection.destination,
                     selection.tip,

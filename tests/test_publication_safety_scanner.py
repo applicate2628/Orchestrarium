@@ -102,6 +102,25 @@ def _load_canonical_scanner(name: str):
     return mod
 
 
+def _empty_history_proof(module, selection):
+    object_ids = tuple(sorted(selection.object_oids))
+    return module.HistoryProof(
+        selection.expected_oids,
+        object_ids,
+        (),
+        0,
+        0,
+        0,
+        (),
+        (),
+        module._commit_set_digest(selection.expected_oids),
+        module._oid_set_digest(b"object-set", object_ids),
+        module._oid_set_digest(b"blob-set", ()),
+        module._subject_set_digest(()),
+        module._path_set_digest(()),
+    )
+
+
 # --- Row builders (assembled at runtime; no flaggable literal in source) ------
 # Each entry is the file CONTENT to stage. Drive letters / separators / root
 # words / segments are kept as fragments and joined so the tracked test source
@@ -552,7 +571,7 @@ class TestPublicationSafetyScanner(unittest.TestCase):
                     self._run_cached(
                         scanner,
                         f"nonpath_patterns=(\\n  {leak!r}\\n)",
-                        filename="scripts/check-publication-safety.py",
+                        filename="scripts/universal-hooks/scripts/check-publication-safety.py",
                     ),
                     1,
                 )
@@ -575,7 +594,7 @@ class TestPublicationSafetyScanner(unittest.TestCase):
                     self._run_cached(
                         scanner,
                         catalog,
-                        filename="scripts/check-publication-safety.py",
+                        filename="scripts/universal-hooks/scripts/check-publication-safety.py",
                     ),
                     0,
                 )
@@ -588,7 +607,7 @@ class TestPublicationSafetyScanner(unittest.TestCase):
                     self._run_cached(
                         scanner,
                         _join("re.compile(r\"secret", "_key\"), # ", leak),
-                        filename="scripts/check-publication-safety.py",
+                        filename="scripts/universal-hooks/scripts/check-publication-safety.py",
                     ),
                     1,
                 )
@@ -611,7 +630,7 @@ class TestPublicationSafetyScanner(unittest.TestCase):
                         self._run_cached(
                             scanner,
                             prefix + leak,
-                            filename="scripts/check-publication-safety.py",
+                            filename="scripts/universal-hooks/scripts/check-publication-safety.py",
                         ),
                         1,
                     )
@@ -627,7 +646,10 @@ class TestPublicationSafetyScanner(unittest.TestCase):
         for scanner in SCANNERS:
             with self.subTest(scanner=scanner.parent.parent.name):
                 self.assertEqual(
-                    self._run_cached(scanner, content, filename="scripts/check-publication-safety.py"),
+                    self._run_cached(
+                        scanner, content,
+                        filename="scripts/universal-hooks/scripts/check-publication-safety.py",
+                    ),
                     0,
                     "scanner source under its own name must PASS (no gate self-block)",
                 )
@@ -711,9 +733,12 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
                     self.assertEqual(rc, 0, err)
                     self.assertRegex(
                         out,
-                        rf"^publication-safety: clean \(range, receipt=v2, files=1, commits=1, "
-                        rf"commit-set=[0-9a-f]{{64}}, messages=complete, remote=origin, "
-                        rf"dst=claude, tip={tip}\)\n?$",
+                        rf"^publication-safety: clean \(range, receipt=v3, commits=1, "
+                        rf"commit-set=[0-9a-f]{{64}}, messages=complete, objects=3, "
+                        rf"object-set=[0-9a-f]{{64}}, blobs=1, blob-set=[0-9a-f]{{64}}, "
+                        rf"blob-bytes=43, text=1, binary=0, subjects=1, "
+                        rf"subject-set=[0-9a-f]{{64}}, paths=1, path-set=[0-9a-f]{{64}}, "
+                        rf"history=complete, remote=origin, dst=claude, tip={tip}\)\n?$",
                     )
 
     def test_range_mode_empty_range_reports_zero_and_is_not_creditable(self) -> None:
@@ -760,24 +785,273 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
                     self.assertEqual(rc, 1, out)
                     self.assertIn("publication-safety scan found potential tracked-content leak markers", err)
 
-    def test_range_mode_add_then_delete_path_skipped_not_over_blocked(self) -> None:
-        # FM-5: a path added then deleted again within the range has NO
-        # content at `tip` -- it must be silently skipped (not counted, not
-        # an error), never over-blocked.
+    def test_range_mode_add_then_delete_secret_blocks(self) -> None:
+        # Complete-history coverage: unpublished content remains publication
+        # input even when a later unpublished commit deletes its final path.
+        leak = "pass" + "word" + ": hunter2"
         for scanner in SCANNERS:
             with self.subTest(scanner=scanner.parent.parent.name):
                 with tempfile.TemporaryDirectory() as td:
                     repo = self._init_range_repo(Path(td))
-                    self._commit_file(repo, "gone.txt", "temporary, nothing machine-local here")
+                    self._commit_file(repo, "gone.txt", leak)
                     self._rm_file(repo, "gone.txt")
                     rc, out, err = self._run_range(scanner, repo, "origin", "claude")
-                    self.assertEqual(rc, 0, err)
-                    self.assertRegex(
-                        out,
-                        r"^publication-safety: clean \(range, receipt=v2, files=0, commits=2, "
-                        r"commit-set=[0-9a-f]{64}, messages=complete, remote=origin, "
-                        r"dst=claude, tip=[0-9a-f]{40,64}\)\n?$",
-                    )
+                    self.assertEqual(rc, 1, out + err)
+                    self.assertEqual(out, "")
+                    self.assertIn("PS-FINDING-CONTENT", err)
+                    self.assertNotIn(leak, err)
+
+    def test_range_mode_sanitized_tip_still_blocks_historical_secret(self) -> None:
+        leak = "pass" + "word" + ": hunter2"
+        with tempfile.TemporaryDirectory() as td:
+            repo = self._init_range_repo(Path(td))
+            self._commit_file(repo, "history.txt", leak, message="unsafe history")
+            self._commit_file(repo, "history.txt", "clean replacement", message="sanitize tip")
+            rc, out, err = self._run_range(CANONICAL_SCANNER, repo, "origin", "claude")
+            self.assertEqual(rc, 1, out + err)
+            self.assertIn("PS-FINDING-CONTENT", err)
+            self.assertNotIn(leak, err)
+
+    def test_range_mode_rename_maps_historical_blob_to_both_paths(self) -> None:
+        leak = "pass" + "word" + ": hunter2"
+        with tempfile.TemporaryDirectory() as td:
+            repo = self._init_range_repo(Path(td))
+            self._commit_file(repo, "before.txt", leak, message="unsafe path")
+            subprocess.run([_git(), "-C", str(repo), "mv", "before.txt", "after.txt"], check=True)
+            subprocess.run([_git(), "-C", str(repo), "commit", "-q", "-m", "rename"], check=True)
+            rc, out, err = self._run_range(CANONICAL_SCANNER, repo, "origin", "claude")
+            self.assertEqual(rc, 1, out + err)
+            self.assertIn("PS-FINDING-CONTENT", err)
+
+    def test_range_mode_root_history_without_published_seed_is_scanned(self) -> None:
+        leak = "pass" + "word" + ": hunter2"
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            origin = root / "origin.git"
+            repo = root / "repo"
+            subprocess.run([_git(), "init", "-q", "--bare", str(origin)], check=True)
+            subprocess.run([_git(), "init", "-q", str(repo)], check=True)
+            subprocess.run([_git(), "-C", str(repo), "config", "user.email", "t@t"], check=True)
+            subprocess.run([_git(), "-C", str(repo), "config", "user.name", "t"], check=True)
+            subprocess.run([_git(), "-C", str(repo), "remote", "add", "origin", str(origin)], check=True)
+            self._commit_file(repo, "root.txt", leak, message="root commit")
+            rc, out, err = self._run_range(CANONICAL_SCANNER, repo, "origin", "claude")
+            self.assertEqual(rc, 1, out + err)
+            self.assertIn("PS-FINDING-CONTENT", err)
+
+    def test_range_mode_merge_parent_history_is_scanned_after_tip_delete(self) -> None:
+        leak = "pass" + "word" + ": hunter2"
+        with tempfile.TemporaryDirectory() as td:
+            repo = self._init_range_repo(Path(td))
+            base = subprocess.run(
+                [_git(), "-C", str(repo), "branch", "--show-current"],
+                check=True, capture_output=True, text=True,
+            ).stdout.strip()
+            subprocess.run([_git(), "-C", str(repo), "checkout", "-q", "-b", "side"], check=True)
+            self._commit_file(repo, "side-secret.txt", leak, message="side secret")
+            subprocess.run([_git(), "-C", str(repo), "checkout", "-q", base], check=True)
+            self._commit_file(repo, "main.txt", "clean main", message="main change")
+            subprocess.run(
+                [_git(), "-C", str(repo), "merge", "--no-ff", "-q", "side", "-m", "merge side"],
+                check=True,
+            )
+            self._rm_file(repo, "side-secret.txt", message="delete merged secret")
+            rc, out, err = self._run_range(CANONICAL_SCANNER, repo, "origin", "claude")
+            self.assertEqual(rc, 1, out + err)
+            self.assertIn("PS-FINDING-CONTENT", err)
+
+    def test_range_mode_shared_blob_keeps_path_local_scanner_exemption(self) -> None:
+        content = CANONICAL_SCANNER.read_text(encoding="utf-8")
+        with tempfile.TemporaryDirectory() as td:
+            repo = self._init_range_repo(Path(td))
+            first = repo / "scripts" / "check-publication-safety.py"
+            second = repo / "copies" / "not-the-scanner.py"
+            first.parent.mkdir(parents=True)
+            second.parent.mkdir(parents=True)
+            first.write_text(content, encoding="utf-8")
+            second.write_text(content, encoding="utf-8")
+            subprocess.run([_git(), "-C", str(repo), "add", "scripts", "copies"], check=True)
+            subprocess.run([_git(), "-C", str(repo), "commit", "-q", "-m", "shared blob"], check=True)
+            rc, out, err = self._run_range(CANONICAL_SCANNER, repo, "origin", "claude")
+            self.assertEqual(rc, 1, out + err)
+            self.assertIn("PS-FINDING-CONTENT", err)
+
+    def test_range_mode_deduplicates_blob_bytes_but_keeps_each_subject(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = self._init_range_repo(Path(td))
+            for name in ("a.txt", "b.txt"):
+                (repo / name).write_text("shared clean\n", encoding="utf-8")
+            subprocess.run([_git(), "-C", str(repo), "add", "a.txt", "b.txt"], check=True)
+            subprocess.run([_git(), "-C", str(repo), "commit", "-q", "-m", "shared clean blob"], check=True)
+            rc, out, err = self._run_range(CANONICAL_SCANNER, repo, "origin", "claude")
+            self.assertEqual(rc, 0, err)
+            self.assertIn("blobs=1", out)
+            self.assertIn("blob-bytes=14", out)
+            self.assertIn("text=1, binary=0", out)
+            self.assertIn("subjects=2", out)
+            self.assertIn("paths=2", out)
+
+    def test_range_mode_same_raw_path_with_two_blobs_binds_two_detector_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = self._init_range_repo(Path(td))
+            self._commit_file(repo, "versioned.txt", "clean version one")
+            self._commit_file(repo, "versioned.txt", "clean version two")
+            rc, out, err = self._run_range(CANONICAL_SCANNER, repo, "origin", "claude")
+            self.assertEqual(rc, 0, err)
+            self.assertIn("blobs=2", out)
+            self.assertIn("subjects=2", out)
+            self.assertIn("paths=2", out)
+
+    def test_range_mode_receipt_records_explicit_text_and_binary_disposition(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = self._init_range_repo(Path(td))
+            (repo / "text.txt").write_text("clean text\n", encoding="utf-8")
+            (repo / "binary.bin").write_bytes(b"\0\xff\x01")
+            subprocess.run([_git(), "-C", str(repo), "add", "text.txt", "binary.bin"], check=True)
+            subprocess.run([_git(), "-C", str(repo), "commit", "-q", "-m", "mixed blobs"], check=True)
+            rc, out, err = self._run_range(CANONICAL_SCANNER, repo, "origin", "claude")
+            self.assertEqual(rc, 0, err)
+            self.assertIn("blobs=2", out)
+            self.assertIn("blob-bytes=15", out)
+            self.assertIn("text=1, binary=1", out)
+
+    def test_range_mode_binary_blob_with_secret_marker_blocks_and_redacts(self) -> None:
+        sentinel = "A1B2C3D4E5F6G7H8IJK"
+        leak = _join("to", "ken", " = ", sentinel).encode("ascii")
+        with tempfile.TemporaryDirectory() as td:
+            repo = self._init_range_repo(Path(td))
+            (repo / "binary-secret.bin").write_bytes(b"\0prefix " + leak + b" suffix")
+            subprocess.run([_git(), "-C", str(repo), "add", "binary-secret.bin"], check=True)
+            subprocess.run([_git(), "-C", str(repo), "commit", "-q", "-m", "binary payload"], check=True)
+            rc, out, err = self._run_range(CANONICAL_SCANNER, repo, "origin", "claude")
+            self.assertEqual(rc, 1, out + err)
+            self.assertIn("PS-FINDING-CONTENT", err)
+            self.assertNotIn(sentinel, out + err)
+
+    def test_range_mode_decoy_scanner_basename_has_no_exemption(self) -> None:
+        content = CANONICAL_SCANNER.read_text(encoding="utf-8")
+        with tempfile.TemporaryDirectory() as td:
+            repo = self._init_range_repo(Path(td))
+            self._commit_file(
+                repo,
+                "decoy/check-publication-safety.py",
+                content,
+                message="decoy scanner basename",
+            )
+            rc, out, err = self._run_range(CANONICAL_SCANNER, repo, "origin", "claude")
+            self.assertEqual(rc, 1, out + err)
+            self.assertIn("PS-FINDING-CONTENT", err)
+
+    def test_range_mode_exact_scanner_owner_paths_keep_catalog_exemption(self) -> None:
+        content = CANONICAL_SCANNER.read_text(encoding="utf-8")
+        approved = (
+            "scripts/universal-hooks/scripts/check-publication-safety.py",
+            "src.codex/skills/lead/scripts/check-publication-safety.py",
+            "src.claude/agents/scripts/check-publication-safety.py",
+        )
+        for path in approved:
+            with self.subTest(path=path), tempfile.TemporaryDirectory() as td:
+                repo = self._init_range_repo(Path(td))
+                self._commit_file(repo, path, content, message="approved scanner owner")
+                rc, out, err = self._run_range(CANONICAL_SCANNER, repo, "origin", "claude")
+                self.assertEqual(rc, 0, out + err)
+                self.assertIn("receipt=v3", out)
+
+    def test_bounded_oid_reader_refuses_count_bytes_and_deadline(self) -> None:
+        module = _load_canonical_scanner("_scanner_v3_oid_stream")
+        oid = "1" * 40
+
+        async def run_row(body: str, *, count_cap: int, byte_cap: int, timeout: float):
+            deadline = asyncio.get_running_loop().time() + timeout
+            return await module._read_git_oid_lines_bounded(
+                (sys.executable, "-u", "-c", body),
+                count_cap=count_cap,
+                byte_cap=byte_cap,
+                deadline=deadline,
+            )
+
+        rows = {
+            "count": (
+                "import sys;sys.stdout.buffer.write(b'1'*40+b'\\n'+b'2'*40+b'\\n'+b'3'*40+b'\\n')",
+                2,
+                1_000,
+                1.0,
+                "PS-MSG-LIMIT",
+            ),
+            "bytes": (
+                "import sys;sys.stdout.buffer.write(b'1'*40+b'\\n')",
+                2,
+                40,
+                1.0,
+                "PS-MSG-LIMIT",
+            ),
+            "deadline": (
+                "import time;time.sleep(60)",
+                2,
+                1_000,
+                0.1,
+                "PS-MSG-READ-TIMEOUT",
+            ),
+            "duplicate": (
+                "import sys;sys.stdout.buffer.write((b'1'*40+b'\\n')*2)",
+                2,
+                1_000,
+                1.0,
+                "PS-MSG-FRAME",
+            ),
+            "malformed": (
+                "import sys;sys.stdout.buffer.write(b'x'*40+b'\\n')",
+                2,
+                1_000,
+                1.0,
+                "PS-MSG-FRAME",
+            ),
+        }
+        for name, (body, count_cap, byte_cap, timeout, failure_id) in rows.items():
+            with self.subTest(name=name):
+                result = asyncio.run(run_row(
+                    body, count_cap=count_cap, byte_cap=byte_cap, timeout=timeout
+                ))
+                self.assertIsInstance(result, module.Refusal)
+                self.assertEqual(result.failure_id, failure_id, result)
+
+    def test_tree_traversal_refuses_frontier_visit_and_cache_caps(self) -> None:
+        deadline_module = _load_canonical_scanner("_scanner_v3_tree_deadline")
+
+        async def expired_guard():
+            loop = asyncio.get_running_loop()
+            return deadline_module._tree_traversal_guard(
+                deadline=loop.time() - 1.0,
+                frontier=0,
+                visits=0,
+                visited=0,
+                cache_entries=0,
+            )
+
+        deadline_refusal = asyncio.run(expired_guard())
+        self.assertEqual(deadline_refusal.failure_id, "PS-MSG-READ-TIMEOUT")
+
+        with tempfile.TemporaryDirectory() as td:
+            repo = self._init_range_repo(Path(td))
+            self._commit_file(repo, "nested/value.txt", "clean nested value")
+            previous = Path.cwd()
+            try:
+                os.chdir(repo)
+                for name in (
+                    "_MAX_TREE_FRONTIER",
+                    "_MAX_TREE_VISITS",
+                    "_MAX_TREE_CACHE_ENTRIES",
+                ):
+                    module = _load_canonical_scanner("_scanner_v3_tree_" + name.lower())
+                    setattr(module, name, 0)
+                    with self.subTest(cap=name):
+                        outcome = module._scan_range(
+                            "origin", "claude", lambda _line: []
+                        )
+                        self.assertEqual(outcome.kind, "refusal")
+                        self.assertEqual(outcome.refusal.failure_id, "PS-MSG-LIMIT")
+            finally:
+                os.chdir(previous)
 
     def test_range_mode_self_exemption_for_scanner_copy_inside_range(self) -> None:
         # Guard G3: the scanner's own copy, committed inside a scanned range,
@@ -789,7 +1063,12 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
             with self.subTest(scanner=scanner.parent.parent.name):
                 with tempfile.TemporaryDirectory() as td:
                     repo = self._init_range_repo(Path(td))
-                    self._commit_file(repo, "scripts/check-publication-safety.py", content, message="add scanner")
+                    self._commit_file(
+                        repo,
+                        "scripts/universal-hooks/scripts/check-publication-safety.py",
+                        content,
+                        message="add scanner",
+                    )
                     rc, out, err = self._run_range(scanner, repo, "origin", "claude")
                     self.assertEqual(rc, 0, err)
 
@@ -833,7 +1112,7 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
 
 
 @unittest.skipIf(_git() is None, "needs git on PATH")
-class TestPublicationSafetyScannerV2(unittest.TestCase):
+class TestPublicationSafetyScannerV3(unittest.TestCase):
     """Item-6 contract guards target the universal owner directly."""
 
     def _git_run(
@@ -902,10 +1181,14 @@ class TestPublicationSafetyScannerV2(unittest.TestCase):
 
     def _expected_digest(self, rows: list[str]) -> str:
         ordered = [value.lower() for value in rows]
-        framed = b"publication-safety-range-receipt-v2\0" + b"\0".join(
-            value.encode("ascii") for value in ordered
+        frame = lambda value: len(value).to_bytes(8, "big") + value
+        digest = hashlib.sha256(
+            frame(b"publication-safety-range-receipt-v3")
+            + frame(b"commit-set")
         )
-        return hashlib.sha256(framed).hexdigest()
+        for value in ordered:
+            digest.update(frame(value.encode("ascii")))
+        return digest.hexdigest()
 
     def _leak_message(self, label: str) -> str:
         return _join(label, "\n\n", "to", "ken", " = ", "A1B2C3D4E5F6G7H8IJK")
@@ -954,18 +1237,13 @@ class TestPublicationSafetyScannerV2(unittest.TestCase):
             self.assertIn(f"commit-set={self._expected_digest(selected)}", proc.stdout)
             self.assertIn("messages=complete", proc.stdout)
 
-    def test_range_message_row_mutation(self) -> None:
-        module = _load_canonical_scanner("_scanner_v2_mutation")
-        self.assertTrue(hasattr(module, "_canonical_commit_ids"))
+    def test_v3_commit_set_digest_row_mutation(self) -> None:
         rows = ["1" * 40, "2" * 40, "3" * 40]
-        self.assertEqual(module._canonical_commit_ids(rows), tuple(rows))
         for mutation in (rows[:-1], rows + [rows[-1]], [rows[0], rows[1], "4" * 40]):
             with self.subTest(mutation=tuple(mutation)):
-                if len(mutation) != len(set(mutation)):
-                    with self.assertRaises(ValueError):
-                        module._canonical_commit_ids(mutation)
-                else:
-                    self.assertNotEqual(self._expected_digest(rows), self._expected_digest(mutation))
+                self.assertNotEqual(
+                    self._expected_digest(rows), self._expected_digest(mutation)
+                )
 
     def test_range_commit_graph_matrix(self) -> None:
         cases = ("non-tip-body", "trailer", "rename", "delete", "binary", "add-delete", "initial", "other-remote", "merge")
@@ -1019,17 +1297,16 @@ class TestPublicationSafetyScannerV2(unittest.TestCase):
             self._git_run(repo, "commit", "-q", "-m", "clean delete")
             proc = self._run_range(repo)
             self.assertEqual(proc.returncode, 0, proc.stderr)
-            self.assertIn("files=0, commits=1", proc.stdout)
+            self.assertIn("receipt=v3, commits=1", proc.stdout)
+            self.assertIn("blobs=0", proc.stdout)
+            self.assertIn("subjects=0", proc.stdout)
+            self.assertIn("paths=0", proc.stdout)
             self.assertIn("messages=complete", proc.stdout)
 
     def test_range_fail_closed_matrix(self) -> None:
-        module = _load_canonical_scanner("_scanner_v2_failures")
-        for name in ("Refusal", "_canonical_commit_ids", "_decode_commit_message", "_parse_batch_header"):
+        module = _load_canonical_scanner("_scanner_v3_failures")
+        for name in ("Refusal", "_decode_commit_message", "_parse_batch_header"):
             self.assertTrue(hasattr(module, name), name)
-        with self.assertRaises(ValueError):
-            module._canonical_commit_ids(["x" * 40])
-        with self.assertRaises(ValueError):
-            module._canonical_commit_ids(["1" * 40, "1" * 40])
         failures = (
             (b"tree " + b"1" * 40 + b"\nencoding latin1\n\nclean", "PS-MSG-DECODE"),
             (b"tree " + b"1" * 40 + b"\n\n\xff", "PS-MSG-DECODE"),
@@ -1052,23 +1329,33 @@ class TestPublicationSafetyScannerV2(unittest.TestCase):
             self.assertNotIn("publication-safety: clean", proc.stdout + proc.stderr)
 
     def test_range_tip_changed(self) -> None:
-        module = _load_canonical_scanner("_scanner_v2_tip")
+        module = _load_canonical_scanner("_scanner_v3_tip")
         self.assertTrue(hasattr(module, "_confirm_tip"))
         refusal = module._confirm_tip("1" * 40, lambda: "2" * 40)
         self.assertEqual(refusal.failure_id, "PS-MSG-TIP-CHANGED")
 
-    def test_receipt_v2_canonicalization(self) -> None:
-        module = _load_canonical_scanner("_scanner_v2_receipt")
-        self.assertTrue(hasattr(module, "_serialize_range_receipt_v2"))
+    def test_receipt_v3_canonicalization(self) -> None:
+        module = _load_canonical_scanner("_scanner_v3_receipt")
         rows = ["2" * 40, "1" * 40]
-        line = module._serialize_range_receipt_v2(0, rows, "origin one", "refs/heads/topic", "2" * 40)
+        selection = module.RangeSelection(
+            "origin one", "refs/heads/topic", "2" * 40,
+            tuple(rows), tuple(rows),
+        )
+        history = _empty_history_proof(module, selection)
+        line = module._serialize_range_receipt_v3(
+            history, selection.remote, selection.destination, selection.tip
+        )
         self.assertEqual(
             line,
-            "publication-safety: clean (range, receipt=v2, files=0, commits=2, "
+            "publication-safety: clean (range, receipt=v3, commits=2, "
             f"commit-set={self._expected_digest(rows)}, messages=complete, "
+            f"objects=2, object-set={history.object_set}, blobs=0, "
+            f"blob-set={history.blob_set}, blob-bytes=0, text=0, binary=0, "
+            f"subjects=0, subject-set={history.subject_set}, paths=0, "
+            f"path-set={history.path_set}, history=complete, "
             "remote=origin%20one, dst=refs%2Fheads%2Ftopic, tip=" + "2" * 40 + ")",
         )
-        self.assertFalse(hasattr(module, "_serialize_empty_range_v2"))
+        self.assertFalse(hasattr(module, "_serialize_range_receipt_v2"))
 
     def test_redacted_finding_output(self) -> None:
         sentinel = "A1B2C3D4E5F6G7H8IJK"
@@ -1269,15 +1556,10 @@ class TestPublicationSafetyScannerR2Contract(unittest.TestCase):
         module = self._module("all_returns")
         oid = "1" * 40
         other = "2" * 40
-        clean_raw = b"tree " + other.encode("ascii") + b"\n\nclean"
         selection = module.RangeSelection(
-            "origin", "refs/heads/main", oid, (oid,), ()
+            "origin", "refs/heads/main", oid, (oid,), (oid,)
         )
-        originals = (
-            module._range_selection,
-            module._tip_blob_ids,
-            module._build_coverage_proof,
-        )
+        originals = (module._range_selection, module._acquire_history)
 
         def complete_certificate(identity: str = "fixture"):
             tick = asyncio.get_running_loop().time()
@@ -1304,15 +1586,6 @@ class TestPublicationSafetyScannerR2Contract(unittest.TestCase):
                     return module._refusal("PS-MSG-READ", "spawn")
                 return None
 
-            async def read(self, requested: str, object_type: str):
-                if self.row == "read-exception":
-                    raise RuntimeError("synthetic")
-                if self.row == "read-refusal":
-                    return module._refusal("PS-MSG-READ", "short-read")
-                raw = b"invalid" if self.row == "decode-refusal" else clean_raw
-                returned = other if self.row == "coverage-refusal" else requested
-                return module.ObjectReadSuccess(requested, returned, object_type, raw)
-
             async def finalize(self):
                 self.finalize_calls += 1
                 if self.row == "cleanup-refusal":
@@ -1323,8 +1596,37 @@ class TestPublicationSafetyScannerR2Contract(unittest.TestCase):
                 return None
 
         async def exercise() -> None:
-            module._range_selection = lambda _remote, _destination: selection
-            module._tip_blob_ids = lambda _selection: {}
+            module._range_selection = mock.AsyncMock(return_value=selection)
+
+            async def acquire(
+                selected, reader, find_machine_paths, recorder, _deadline
+            ):
+                if reader.row == "read-exception":
+                    raise RuntimeError("synthetic")
+                if reader.row == "read-refusal":
+                    return module._refusal("PS-MSG-READ", "short-read")
+                if reader.row == "decode-refusal":
+                    return module._refusal("PS-MSG-FRAME", "commit-separator")
+                recorder.record(module.CoverageEvent.REQUESTED, oid)
+                recorder.record(
+                    module.CoverageEvent.ACQUIRED,
+                    other if reader.row == "coverage-refusal" else oid,
+                )
+                findings = module._content_hits(
+                    "clean", oid, find_machine_paths,
+                    subject_kind="commit-message",
+                )
+                recorder.record(module.CoverageEvent.SCANNED, oid)
+                coverage = recorder.proof()
+                if isinstance(coverage, module.Refusal):
+                    return coverage
+                return (
+                    _empty_history_proof(module, selected),
+                    coverage,
+                    tuple(findings),
+                )
+
+            module._acquire_history = acquire
             rows = {
                 "start-exception": "PS-MSG-READ",
                 "start-refusal": "PS-MSG-READ",
@@ -1377,11 +1679,7 @@ class TestPublicationSafetyScannerR2Contract(unittest.TestCase):
         try:
             asyncio.run(exercise())
         finally:
-            (
-                module._range_selection,
-                module._tip_blob_ids,
-                module._build_coverage_proof,
-            ) = originals
+            module._range_selection, module._acquire_history = originals
 
 
 class TestPublicationSafetyScannerR3Contract(unittest.TestCase):
@@ -1436,7 +1734,7 @@ class TestPublicationSafetyScannerR3Contract(unittest.TestCase):
 
         oid = "1" * 40
         selection = module.RangeSelection(
-            "origin", "refs/heads/main", "2" * 40, (oid,), ()
+            "origin", "refs/heads/main", "2" * 40, (oid,), (oid,)
         )
 
         class Reader:
@@ -1447,12 +1745,6 @@ class TestPublicationSafetyScannerR3Contract(unittest.TestCase):
 
             async def start(self):
                 return None
-
-            async def read(self, requested_oid, expected_type):
-                raw = b"tree " + b"3" * 40 + b"\n\nclean message"
-                return module.ObjectReadSuccess(
-                    requested_oid, self.returned_oid, expected_type, raw
-                )
 
             async def finalize(self):
                 tick = asyncio.get_running_loop().time()
@@ -1470,20 +1762,34 @@ class TestPublicationSafetyScannerR3Contract(unittest.TestCase):
 
         originals = (
             module._range_selection,
-            module._tip_blob_ids,
+            module._acquire_history,
             module._confirm_tip,
             module._content_hits,
         )
 
+        async def acquire(selected, reader, finder, recorder, _deadline):
+            oid_value = selected.expected_oids[0]
+            recorder.record(module.CoverageEvent.REQUESTED, oid_value)
+            recorder.record(module.CoverageEvent.ACQUIRED, reader.returned_oid)
+            module._content_hits(
+                "clean message", oid_value, finder,
+                subject_kind="commit-message",
+            )
+            recorder.record(module.CoverageEvent.SCANNED, oid_value)
+            coverage = recorder.proof()
+            if isinstance(coverage, module.Refusal):
+                return coverage
+            return _empty_history_proof(module, selected), coverage, ()
+
         async def run_case(*, returned_oid=oid, expected=(oid,), detector_fault=False):
-            module._range_selection = lambda *_args: module.RangeSelection(
+            module._range_selection = mock.AsyncMock(return_value=module.RangeSelection(
                 selection.remote,
                 selection.destination,
                 selection.tip,
                 expected,
-                selection.changed_paths,
-            )
-            module._tip_blob_ids = lambda _selection: {}
+                expected,
+            ))
+            module._acquire_history = acquire
             module._confirm_tip = lambda *_args: None
             if detector_fault:
                 module._content_hits = lambda *_args, **_kwargs: (_ for _ in ()).throw(
@@ -1527,7 +1833,7 @@ class TestPublicationSafetyScannerR3Contract(unittest.TestCase):
         finally:
             (
                 module._range_selection,
-                module._tip_blob_ids,
+                module._acquire_history,
                 module._confirm_tip,
                 module._content_hits,
             ) = originals
@@ -1653,12 +1959,6 @@ class TestPublicationSafetyScannerR4Contract(unittest.TestCase):
             async def start(self):
                 return None
 
-            async def read(self, requested_oid, expected_type):
-                raw = b"tree " + b"3" * 40 + b"\n\nclean message"
-                return module.ObjectReadSuccess(
-                    requested_oid, requested_oid, expected_type, raw
-                )
-
             async def finalize(self):
                 tick = asyncio.get_running_loop().time()
                 child = module.ChildObservation("fixture", 0, True, tick)
@@ -1674,20 +1974,36 @@ class TestPublicationSafetyScannerR4Contract(unittest.TestCase):
                 return None
 
         originals = (
-            module._range_selection, module._tip_blob_ids,
+            module._range_selection, module._acquire_history,
             module._confirm_tip, module._content_hits,
         )
-        module._range_selection = lambda *_args: module.RangeSelection(
-            "origin", "refs/heads/main", "4" * 40, expected, ()
-        )
-        module._tip_blob_ids = lambda _selection: {}
+        module._range_selection = mock.AsyncMock(return_value=module.RangeSelection(
+            "origin", "refs/heads/main", "4" * 40, expected, expected
+        ))
         module._confirm_tip = lambda *_args: None
         module._content_hits = lambda *_args, **_kwargs: []
 
+        async def acquire(selected, _reader, _finder, recorder, _deadline):
+            for oid in selected.expected_oids:
+                recorder.record(module.CoverageEvent.REQUESTED, oid)
+                recorder.record(module.CoverageEvent.ACQUIRED, oid)
+                module._content_hits(
+                    "clean message", oid, lambda _line: [],
+                    subject_kind="commit-message",
+                )
+                recorder.record(module.CoverageEvent.SCANNED, oid)
+            coverage = recorder.proof()
+            if isinstance(coverage, module.Refusal):
+                return coverage
+            return _empty_history_proof(module, selected), coverage, ()
+
+        module._acquire_history = acquire
+
         def run(transform, selection_oids=expected):
-            module._range_selection = lambda *_args: module.RangeSelection(
-                "origin", "refs/heads/main", "4" * 40, selection_oids, ()
-            )
+            module._range_selection = mock.AsyncMock(return_value=module.RangeSelection(
+                "origin", "refs/heads/main", "4" * 40,
+                selection_oids, selection_oids,
+            ))
             outcome = asyncio.run(module._scan_range_async(
                 "origin", "refs/heads/main", lambda _line: [],
                 reader_factory=Reader,
@@ -1724,14 +2040,14 @@ class TestPublicationSafetyScannerR4Contract(unittest.TestCase):
                 with self.subTest(row=row):
                     self.assertEqual(outcome.refusal.failure_id, "PS-MSG-COVERAGE")
                     self.assertEqual(code, 2)
-                    self.assertNotIn("receipt=v2", stdout + stderr)
+                    self.assertNotIn("receipt=v3", stdout + stderr)
 
             duplicate_input, code, stdout, stderr = run(
                 lambda event, oid: ((event, oid),), (first, first)
             )
             self.assertEqual(duplicate_input.refusal.failure_id, "PS-MSG-COVERAGE")
             self.assertEqual(code, 2)
-            self.assertNotIn("receipt=v2", stdout + stderr)
+            self.assertNotIn("receipt=v3", stdout + stderr)
 
             deferred = []
             def reorder(event, oid):
@@ -1744,24 +2060,20 @@ class TestPublicationSafetyScannerR4Contract(unittest.TestCase):
 
             reordered, code, stdout, stderr = run(reorder)
             independently_observed = (second, first)
-            independent_digest = hashlib.sha256(
-                b"publication-safety-range-receipt-v2"
-                + b"\0" + b"\0".join(oid.encode("ascii") for oid in independently_observed)
-            ).hexdigest()
             self.assertEqual(reordered.coverage.scanned_message_oids, independently_observed)
             self.assertEqual(code, 0)
-            self.assertIn("commit-set=" + independent_digest, stdout)
+            self.assertIn("commit-set=" + module._commit_set_digest(expected), stdout)
             self.assertEqual(stderr, "")
 
             clean, code, stdout, stderr = run(lambda event, oid: ((event, oid),))
             self.assertEqual(clean.kind, "clean")
             self.assertEqual(clean.coverage.scanned_message_oids, expected)
             self.assertEqual(code, 0)
-            self.assertIn("receipt=v2", stdout)
+            self.assertIn("receipt=v3", stdout)
             self.assertEqual(stderr, "")
         finally:
             (
-                module._range_selection, module._tip_blob_ids,
+                module._range_selection, module._acquire_history,
                 module._confirm_tip, module._content_hits,
             ) = originals
 
@@ -1770,14 +2082,14 @@ class TestPublicationSafetyScannerR4Contract(unittest.TestCase):
         sentinels = {
             "staged": "R4_STAGE_SENTINEL",
             "path": "R4_PATH_SENTINEL",
-            "tip": "R4_TIP_SENTINEL",
+            "history": "R4_HISTORY_SENTINEL",
             "subject": "R4_SUBJECT_SENTINEL",
             "body": "R4_BODY_SENTINEL",
             "trailer": "R4_TRAILER_SENTINEL",
             "machine": _join(WIN, BS, USERS, BS, "r4-sentinel-user"),
         }
         subjects = {
-            "staged": "tracked-blob", "path": "path-blob", "tip": "tip-blob",
+            "staged": "tracked-blob", "path": "path-blob", "history": "history-blob",
             "subject": "commit-message", "body": "commit-message",
             "trailer": "commit-message", "machine": "path-blob",
         }
@@ -1950,7 +2262,7 @@ class TestPublicationSafetyScannerR5Proof(unittest.TestCase):
         module = self._module("coverage_redaction")
         oid = "1" * 40
         selection = module.RangeSelection(
-            "origin", "refs/heads/main", "2" * 40, (oid,), ()
+            "origin", "refs/heads/main", "2" * 40, (oid,), (oid,)
         )
 
         class Reader:
@@ -1960,12 +2272,6 @@ class TestPublicationSafetyScannerR5Proof(unittest.TestCase):
 
             async def start(self):
                 return None
-
-            async def read(self, requested_oid, expected_type):
-                raw = b"tree " + b"3" * 40 + b"\n\nclean message"
-                return module.ObjectReadSuccess(
-                    requested_oid, requested_oid, expected_type, raw
-                )
 
             async def finalize(self):
                 tick = asyncio.get_running_loop().time()
@@ -1989,13 +2295,28 @@ class TestPublicationSafetyScannerR5Proof(unittest.TestCase):
 
         originals = (
             module._range_selection,
-            module._tip_blob_ids,
+            module._acquire_history,
             module._confirm_tip,
             module._content_hits,
         )
-        module._range_selection = lambda *_args: selection
-        module._tip_blob_ids = lambda _selection: {}
+        module._range_selection = mock.AsyncMock(return_value=selection)
         module._confirm_tip = lambda *_args: None
+
+        async def acquire(selected, _reader, finder, recorder, _deadline):
+            for selected_oid in selected.expected_oids:
+                recorder.record(module.CoverageEvent.REQUESTED, selected_oid)
+                recorder.record(module.CoverageEvent.ACQUIRED, selected_oid)
+                module._content_hits(
+                    "clean message", selected_oid, finder,
+                    subject_kind="commit-message",
+                )
+                recorder.record(module.CoverageEvent.SCANNED, selected_oid)
+            coverage = recorder.proof()
+            if isinstance(coverage, module.Refusal):
+                return coverage
+            return _empty_history_proof(module, selected), coverage, ()
+
+        module._acquire_history = acquire
 
         async def run(*, detector_completes: bool):
             state = {"complete": False}
@@ -2028,7 +2349,7 @@ class TestPublicationSafetyScannerR5Proof(unittest.TestCase):
                 )
             self.assertEqual(clean.kind, "clean")
             self.assertEqual(code, 0)
-            self.assertIn("receipt=v2", output)
+            self.assertIn("receipt=v3", output)
             self.assertGreaterEqual(counter.call_count, 5, "R5-LIVE-COUNTER-BYPASSED")
             self.assertEqual(
                 [event for event, _value in events],
@@ -2044,7 +2365,7 @@ class TestPublicationSafetyScannerR5Proof(unittest.TestCase):
             )
             self.assertEqual(skipped.kind, "refusal")
             self.assertEqual(code, 2)
-            self.assertNotIn("receipt=v2", output)
+            self.assertNotIn("receipt=v3", output)
 
             module._content_hits = originals[3]
 
@@ -2066,7 +2387,7 @@ class TestPublicationSafetyScannerR5Proof(unittest.TestCase):
                 "machine-classifier": module._content_hits(
                     "ordinary line", path_sentinel,
                     lambda _line: [machine_sentinel],
-                    subject_kind="tip-blob",
+                    subject_kind="history-blob",
                 ),
             }
             scratch = REPO_ROOT / ".scratch"
@@ -2100,7 +2421,7 @@ class TestPublicationSafetyScannerR5Proof(unittest.TestCase):
         finally:
             (
                 module._range_selection,
-                module._tip_blob_ids,
+                module._acquire_history,
                 module._confirm_tip,
                 module._content_hits,
             ) = originals

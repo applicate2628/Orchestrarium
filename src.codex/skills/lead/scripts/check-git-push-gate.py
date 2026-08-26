@@ -647,7 +647,7 @@ class PendingScanInvocation:
                     raise PrRouteDenied(prefix + "-SCAN-REFUSAL")
                 if execution.exit_code != 0:
                     raise PrRouteDenied(prefix + "-SCAN-EXECUTION")
-                if parsed.kind != "valid-v2" or parsed.receipt is None:
+                if parsed.kind != "valid-v3" or parsed.receipt is None:
                     mismatch = "PGG-RANGE-RECEIPT-VERSION" if prefix == "PGG" else "PRG-RECEIPT-MISMATCH"
                     raise PrRouteDenied(mismatch)
                 receipt = parsed.receipt
@@ -775,10 +775,20 @@ class ParsedTranscriptCommand(NamedTuple):
 
 
 
-class RangeReceiptV2(NamedTuple):
-    files: int
+class RangeReceiptV3(NamedTuple):
     commits: int
     commit_set: str
+    objects: int
+    object_set: str
+    blobs: int
+    blob_set: str
+    blob_bytes: int
+    text: int
+    binary: int
+    subjects: int
+    subject_set: str
+    paths: int
+    path_set: str
     remote: str
     destination: str
     tip: str
@@ -786,7 +796,7 @@ class RangeReceiptV2(NamedTuple):
 
 class PublicationSafetyObservation(NamedTuple):
     kind: str
-    receipt: RangeReceiptV2 | None
+    receipt: RangeReceiptV3 | None
 
 
 class UntrustedTranscriptScanObservation(NamedTuple):
@@ -1009,17 +1019,18 @@ SCAN_CLEAN_RANGE_REGEX = re.compile(
     re.IGNORECASE | re.MULTILINE,
 )
 
-SCAN_CLEAN_RANGE_V2_REGEX = re.compile(
-    r"^publication-safety: clean \(range, receipt=v2, "
-    r"files=(?P<files>0|[1-9]\d*), commits=(?P<commits>[1-9]\d*), "
+SCAN_CLEAN_RANGE_V3_REGEX = re.compile(
+    r"^publication-safety: clean \(range, receipt=v3, "
+    r"commits=(?P<commits>[1-9]\d*), "
     r"commit-set=(?P<commit_set>[0-9a-f]{64}), messages=complete, "
+    r"objects=(?P<objects>[1-9]\d*), object-set=(?P<object_set>[0-9a-f]{64}), "
+    r"blobs=(?P<blobs>0|[1-9]\d*), blob-set=(?P<blob_set>[0-9a-f]{64}), "
+    r"blob-bytes=(?P<blob_bytes>0|[1-9]\d*), text=(?P<text>0|[1-9]\d*), "
+    r"binary=(?P<binary>0|[1-9]\d*), subjects=(?P<subjects>0|[1-9]\d*), "
+    r"subject-set=(?P<subject_set>[0-9a-f]{64}), paths=(?P<paths>0|[1-9]\d*), "
+    r"path-set=(?P<path_set>[0-9a-f]{64}), history=complete, "
     r"remote=(?P<remote>[A-Za-z0-9._~%-]+), "
     r"dst=(?P<dst>[A-Za-z0-9._~%-]+), tip=(?P<tip>[0-9a-f]{40})\)$",
-    re.MULTILINE,
-)
-SCAN_CLEAN_RANGE_V2_EMPTY_REGEX = re.compile(
-    r"^publication-safety: clean \(range, receipt=v2, files=0, "
-    r"commits=0 -- nothing to publish\)$",
     re.MULTILINE,
 )
 SCAN_CLEAN_PATH_REGEX = re.compile(
@@ -1049,7 +1060,7 @@ def parse_publication_safety_observation(text: str) -> PublicationSafetyObservat
     text = text.replace("\r\n", "\n")
     if "\r" in text:
         return PublicationSafetyObservation("malformed", None)
-    v2_matches = list(SCAN_CLEAN_RANGE_V2_REGEX.finditer(text))
+    v3_matches = list(SCAN_CLEAN_RANGE_V3_REGEX.finditer(text))
     clean_lines = [
         line for line in text.splitlines()
         if line.startswith("publication-safety: clean (")
@@ -1057,32 +1068,70 @@ def parse_publication_safety_observation(text: str) -> PublicationSafetyObservat
     has_failure = bool(
         SCAN_FAILURE_MARKER_REGEX.search(text) or SCAN_TYPED_FAILURE_REGEX.search(text)
     )
-    if len(v2_matches) == 1 and len(clean_lines) == 1 and not has_failure:
-        match = v2_matches[0]
+    if len(v3_matches) == 1 and len(clean_lines) == 1 and not has_failure:
+        match = v3_matches[0]
         remote = _decode_canonical_receipt_token(match.group("remote"))
         destination = _decode_canonical_receipt_token(match.group("dst"))
         if remote is None or destination is None:
             return PublicationSafetyObservation("malformed", None)
+        counts = {
+            name: int(match.group(name))
+            for name in (
+                "commits", "objects", "blobs", "blob_bytes", "text",
+                "binary", "subjects", "paths",
+            )
+        }
+        if (
+            counts["commits"] > counts["objects"]
+            or counts["blobs"] > counts["objects"]
+            or counts["text"] + counts["binary"] != counts["blobs"]
+            or (
+                counts["blobs"] == 0
+                and any(counts[name] != 0 for name in (
+                    "blob_bytes", "text", "binary", "subjects", "paths"
+                ))
+            )
+            or (
+                counts["blobs"] > 0
+                and not (
+                    counts["subjects"] >= counts["paths"] >= counts["blobs"]
+                )
+            )
+        ):
+            return PublicationSafetyObservation("malformed", None)
         return PublicationSafetyObservation(
-            "valid-v2",
-            RangeReceiptV2(
-                int(match.group("files")),
-                int(match.group("commits")),
+            "valid-v3",
+            RangeReceiptV3(
+                counts["commits"],
                 match.group("commit_set"),
+                counts["objects"],
+                match.group("object_set"),
+                counts["blobs"],
+                match.group("blob_set"),
+                counts["blob_bytes"],
+                counts["text"],
+                counts["binary"],
+                counts["subjects"],
+                match.group("subject_set"),
+                counts["paths"],
+                match.group("path_set"),
                 remote,
                 destination,
                 match.group("tip"),
             ),
         )
-    if v2_matches or "publication-safety: clean (range, receipt=v2" in text:
-        if SCAN_CLEAN_RANGE_V2_EMPTY_REGEX.search(text) and len(clean_lines) == 1 and not has_failure:
-            return PublicationSafetyObservation("legacy-nonauthorizing", None)
+    if v3_matches or "publication-safety: clean (range, receipt=v3" in text:
         return PublicationSafetyObservation("malformed", None)
+    if "publication-safety: clean (range, receipt=v2" in text:
+        return (
+            PublicationSafetyObservation("legacy-nonauthorizing", None)
+            if len(clean_lines) == 1 and not has_failure
+            else PublicationSafetyObservation("malformed", None)
+        )
     if (
         SCAN_CLEAN_TRACKED_REGEX.search(text)
         or SCAN_CLEAN_RANGE_REGEX.search(text)
         or SCAN_CLEAN_PATH_REGEX.search(text)
-        or SCAN_CLEAN_RANGE_V2_EMPTY_REGEX.search(text)
     ):
         return PublicationSafetyObservation("legacy-nonauthorizing", None)
     if clean_lines or has_failure:
@@ -2501,7 +2550,7 @@ def _correlate_publication_safety_observations(
             ))
             continue
         observation = parse_publication_safety_observation(result.output_text)
-        if observation.kind == "valid-v2":
+        if observation.kind == "valid-v3":
             receipt = observation.receipt
             range_binding = project_scan_range_binding(parsed_command.parsed)
             if (
@@ -2680,7 +2729,7 @@ def compose_gate_result(preflight: PreflightResult) -> int:
         "PGG-DESTINATION-SHAPE": "Use a refspec with a non-empty destination.",
         "PGG-RANGE-BINDING": "Correct the remote and destination binding, then retry the same push.",
         "PGG-RANGE-TIP-BINDING": "Push the current HEAD commit directly and retry for a fresh gate-owned check.",
-        "PGG-RANGE-RECEIPT-VERSION": "Retry the push so the gate emits one message-complete version-2 receipt.",
+        "PGG-RANGE-RECEIPT-VERSION": "Retry the push so the gate emits one complete-history version-3 receipt.",
         "PGG-RECEIPT-USED": "The prior receipt is consumed; retry the push for a fresh gate-owned check.",
     }
     if failure_id is not None:
@@ -2709,7 +2758,7 @@ def compose_gate_result(preflight: PreflightResult) -> int:
         "recovery route for an already-committed change.\n\n"
         "  (b) If the user already instructed you to push in their last "
         "message, retry one admissible solitary push. The gate itself runs one "
-        "fresh non-empty version-2 range scan from the canonical sibling "
+        "fresh non-empty version-3 complete-history range scan from the canonical sibling "
         "scanner, using an immutable in-memory source snapshot and its current "
         "trusted interpreter. Manual or transcript-visible scanner calls are "
         "diagnostic only and cannot authorize publication. If this route "

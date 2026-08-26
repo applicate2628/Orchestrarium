@@ -25,6 +25,9 @@ CURRENT_GLOBAL_LEAD_TREE_SHA256 = (
 PRE_REBASE_GLOBAL_LEAD_TREE_SHA256 = (
     "d0bec9fd61bf3fde6e48ba38cdbc7c021053a4167bbb694c8aa5c03e06283083"
 )
+PRE_RANGE_V3_GLOBAL_LEAD_TREE_SHA256 = (
+    "1ffea3eb0fcf6589ac874ab49e508807eb0726dff88473d82b8b22b5baa42bf0"
+)
 PRE_REBASE_FIXTURE_ROOT = (
     ROOT / "tests" / "fixtures" / "global-lead-priors" / "pre-rebase"
 )
@@ -183,8 +186,33 @@ STOCK_8521_CANONICAL_SKILL_TREE_SHA256 = {
 
 # These entries are pinned historical source blobs, not a version-range
 # approximation. The target omits the current transport set below.
+PRE_RANGE_V3_STAGED_LEAD_OVERLAYS = {
+    "scripts/check-publication-safety.py": (
+        "6850a129321288fc23538b89582cf2cfd413e48c",
+        "src.codex/skills/lead/scripts/check-publication-safety.py",
+    ),
+    "scripts/check-git-push-gate.py": (
+        "6850a129321288fc23538b89582cf2cfd413e48c",
+        "src.codex/skills/lead/scripts/check-git-push-gate.py",
+    ),
+}
+H2_STAGED_RUNTIME_OVERLAYS = {
+    "scripts/check-publication-safety.py": (
+        "7872d36d1019d1ac8c2e1615a9f9dbde47395815",
+        "src.codex/skills/lead/scripts/check-publication-safety.py",
+    ),
+    "scripts/check-git-push-gate.py": (
+        "7872d36d1019d1ac8c2e1615a9f9dbde47395815",
+        "src.codex/skills/lead/scripts/check-git-push-gate.py",
+    ),
+    "scripts/resolve-agents-mode.py": (
+        "ab6cd8a30557b8040b3820be3bddccdf5e4c7755",
+        "scripts/resolve-agents-mode.py",
+    ),
+}
 OBSERVED_GLOBAL_LEAD_HISTORICAL_FILES = {
     **PRE_REBASE_STAGED_LEAD_OVERLAYS,
+    **H2_STAGED_RUNTIME_OVERLAYS,
     "external-dispatch.md": (
         "1641fd1c10d501d83891f1bbd27ab93a92eb03b7",
         "src.codex/skills/lead/external-dispatch.md",
@@ -346,12 +374,49 @@ def _copy_current_staged_lead(installer, destination: Path) -> Path:
     return destination
 
 
+def _seed_pre_range_v3_staged_lead(installer, destination: Path) -> Path:
+    lead = _copy_current_staged_lead(installer, destination)
+    for relative, source in PRE_RANGE_V3_STAGED_LEAD_OVERLAYS.items():
+        (lead / relative).write_bytes(_historical_blob(*source))
+    return lead
+
+
+def test_exact_pre_range_v3_lead_is_accepted_and_customized_tree_refused(
+    tmp_path: Path,
+) -> None:
+    installer = _load_installer()
+    skills_root = tmp_path / ".agents" / "skills"
+    historical = _seed_pre_range_v3_staged_lead(installer, skills_root / "lead")
+    assert installer._tree_sha256(
+        historical, ignore_runtime_cache=True
+    ) == PRE_RANGE_V3_GLOBAL_LEAD_TREE_SHA256
+
+    plan = installer._preflight_canonical_skills(
+        ROOT / "src.codex" / "skills", skills_root, root=ROOT
+    )
+    try:
+        lead = next(skill for skill in plan.skills if skill.name == "lead")
+        assert lead.accepted_prior == PRE_RANGE_V3_GLOBAL_LEAD_TREE_SHA256
+    finally:
+        installer._discard_canonical_skills_plan(plan)
+
+    _seed_pre_range_v3_staged_lead(installer, skills_root / "lead")
+    with (skills_root / "lead" / "SKILL.md").open("ab") as stream:
+        stream.write(b"customized\n")
+    with pytest.raises(ValueError, match="E_ACCEPTED_PRIOR_COLLISION: lead"):
+        installer._preflight_canonical_skills(
+            ROOT / "src.codex" / "skills", skills_root, root=ROOT
+        )
+
+
 def _seed_pre_rebase_staged_lead(installer, destination: Path) -> Path:
     lead = _copy_current_staged_lead(installer, destination)
     for relative, payload in PRE_REBASE_STAGED_LEAD_OVERLAYS.items():
         (lead / relative).write_bytes(payload)
     for relative, payload in _pre_rebase_fixture_payloads().items():
         (lead / relative).write_bytes(payload)
+    for relative, source in H2_STAGED_RUNTIME_OVERLAYS.items():
+        (lead / relative).write_bytes(_historical_blob(*source))
     _remove_historical_members(lead, POST_7872_GLOBAL_LEAD_RUNTIME_FILES)
     return lead
 
