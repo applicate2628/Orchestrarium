@@ -158,6 +158,10 @@ STOCK_8521_CANONICAL_SKILL_TREE_SHA256 = {
     "review-loop": "2d78f499bf7b4bb2e6dafdf0ef875f2d9d39448c28df6f3835bc8153fba02ce0",
     "second-opinion": "f9a2114c8baead9ec8a259288ff74e157af60864c9f3d70ba0bcc52154b2b4b6",
 }
+STOCK_7872_CANONICAL_SKILL_TREE_SHA256 = {
+    "consultant": "f1a23b5ceaa93c29cf0c5f9c9eec8c5997a7b4339fcd90abd13798df77e60793",
+    "design-panel": "685b75f5726dd16dbcf2b5fb3238652b8564242e5b66f0daf2b582267905f67b",
+}
 GLOBAL_LEAD_ACCEPTED_PRIOR_TREE_SHA256 = frozenset(
     {
         "e09377e4cf15c446e2ff19ab160a09835ac6683d51e54a89585625dc1de935ca",
@@ -3162,11 +3166,15 @@ def _preflight_canonical_skills(
             stock_8521_prior = STOCK_8521_CANONICAL_SKILL_TREE_SHA256.get(
                 skill.name
             )
+            stock_7872_prior = STOCK_7872_CANONICAL_SKILL_TREE_SHA256.get(
+                skill.name
+            )
             accepted_priors = frozenset(
                 value
                 for value in (
                     prior,
                     stock_8521_prior,
+                    stock_7872_prior,
                     *(
                         GLOBAL_LEAD_ACCEPTED_PRIOR_TREE_SHA256
                         if skill.name == "lead"

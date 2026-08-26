@@ -2,6 +2,10 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-08-27
+
+- **Global Codex upgrades now recognize the exact previously shipped `7872d36d` Consultant and Design Panel skill trees.** The installer admits only the two complete hash-pinned stock trees through its existing rollback-safe accepted-prior migration; current trees remain no-ops and any byte of customization still fails closed. **Why it matters:** an operator can upgrade that legitimate prior install to the current explicit Kimi policy without manually overwriting canonical skills or weakening create-only ownership.
+
 ## 2026-08-26
 
 - **Windows Kimi 0.38.0 is now admitted through one sealed read-only bundle profile.** The sole provider transport fixes model `kimi-code/k3`, text output, a constant tiny prompt, an explicit no-tools/no-subagents agent bundle, and an empty skills directory inside a fresh OS-temp capture root; `ProcessRunnerV1` rechecks executable version/content and sealed bundle identity/digest immediately before process creation, while generic native Windows command-line execution stays denied. The explicit global Codex `--enroll-kimi` operation pins only the fixed user Kimi path by normalized path, size, and SHA-256; runtime rejects `KIMI_BIN`, `PATH`, malformed pins, reparse paths, and pin drift. Kimi remains explicit-only, independently verified, nonauthorizing, and outside production `auto`; Grok remains unavailable in 1.x. **Why it matters:** operators can use Kimi for bounded broad research/review without live-repository tool access, an unobserved argv shape, second process owner, quota canary, or hidden native-effort claim.

@@ -197,6 +197,10 @@ STOCK_8521_CANONICAL_SKILL_TREE_SHA256 = {
     "review-loop": "2d78f499bf7b4bb2e6dafdf0ef875f2d9d39448c28df6f3835bc8153fba02ce0",
     "second-opinion": "f9a2114c8baead9ec8a259288ff74e157af60864c9f3d70ba0bcc52154b2b4b6",
 }
+STOCK_7872_CANONICAL_SKILL_TREE_SHA256 = {
+    "consultant": "f1a23b5ceaa93c29cf0c5f9c9eec8c5997a7b4339fcd90abd13798df77e60793",
+    "design-panel": "685b75f5726dd16dbcf2b5fb3238652b8564242e5b66f0daf2b582267905f67b",
+}
 
 
 # These entries are pinned historical source blobs, not a version-range
@@ -404,6 +408,88 @@ def _extract_8521_skill(name: str, destination: Path) -> Path:
     with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as package:
         package.extractall(destination, filter="data")
     return destination / "src.codex" / "skills" / name
+
+
+def _extract_7872_skill(name: str, destination: Path) -> Path:
+    archive = subprocess.run(
+        [
+            "git",
+            "archive",
+            "--format=tar",
+            PRE_KIMI_GLOBAL_LEAD_REVISION,
+            f"src.codex/skills/{name}",
+        ],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+    ).stdout
+    with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as package:
+        package.extractall(destination, filter="data")
+    return destination / "src.codex" / "skills" / name
+
+
+def _assert_exact_stock_skill_is_accepted_and_drift_refused(
+    installer,
+    tmp_path: Path,
+    name: str,
+    expected_prior: str,
+    historical: Path,
+) -> None:
+    assert installer._tree_sha256(historical) == expected_prior
+
+    skills_root = tmp_path / "target" / ".agents" / "skills"
+    skills_root.mkdir(parents=True)
+    shutil.copytree(historical, skills_root / name)
+    plan = installer._preflight_canonical_skills(
+        ROOT / "src.codex" / "skills", skills_root, root=ROOT
+    )
+    try:
+        selected = next(skill for skill in plan.skills if skill.name == name)
+        assert selected.accepted_prior == expected_prior
+        owner = installer._CreateOnlyMutablePath(
+            tmp_path / "target",
+            installer._InstallTransaction([], enabled=False),
+            dry_run=False,
+        )
+        installer._apply_canonical_skills_plan(plan, skills_root, owner, root=ROOT)
+        assert (
+            installer._tree_sha256(
+                skills_root / name, ignore_runtime_cache=selected.ignore_runtime_cache
+            )
+            == selected.source_digest
+        )
+    finally:
+        installer._discard_canonical_skills_plan(plan)
+
+    before_noop = {
+        path.relative_to(skills_root): path.read_bytes()
+        for path in skills_root.rglob("*")
+        if path.is_file()
+    }
+    current_plan = installer._preflight_canonical_skills(
+        ROOT / "src.codex" / "skills", skills_root, root=ROOT
+    )
+    try:
+        selected = next(skill for skill in current_plan.skills if skill.name == name)
+        assert selected.accepted_prior is None
+        installer._apply_canonical_skills_plan(current_plan, skills_root, owner, root=ROOT)
+        assert {
+            path.relative_to(skills_root): path.read_bytes()
+            for path in skills_root.rglob("*")
+            if path.is_file()
+        } == before_noop
+    finally:
+        installer._discard_canonical_skills_plan(current_plan)
+
+    drift_root = tmp_path / "drift" / ".agents" / "skills"
+    drift_root.mkdir(parents=True)
+    shutil.copytree(historical, drift_root / name)
+    with (drift_root / name / "SKILL.md").open("ab") as stream:
+        stream.write(b"one byte of drift\n")
+    with pytest.raises(ValueError, match=rf"E_ACCEPTED_PRIOR_COLLISION: {name}"):
+        installer._preflight_canonical_skills(
+            ROOT / "src.codex" / "skills", drift_root, root=ROOT
+        )
 
 
 def _copy_current_staged_lead(installer, destination: Path) -> Path:
@@ -652,51 +738,25 @@ def test_exact_8521_stock_skill_is_accepted_and_drift_refused(
 
     installer = _load_installer()
     historical = _extract_8521_skill(name, tmp_path / "historical")
-    assert installer._tree_sha256(historical) == expected_prior
-
-    skills_root = tmp_path / "target" / ".agents" / "skills"
-    skills_root.mkdir(parents=True)
-    shutil.copytree(historical, skills_root / name)
-    plan = installer._preflight_canonical_skills(
-        ROOT / "src.codex" / "skills", skills_root, root=ROOT
+    _assert_exact_stock_skill_is_accepted_and_drift_refused(
+        installer, tmp_path, name, expected_prior, historical
     )
-    try:
-        selected = next(skill for skill in plan.skills if skill.name == name)
-        assert selected.accepted_prior == expected_prior
-        owner = installer._CreateOnlyMutablePath(
-            tmp_path / "target", installer._InstallTransaction([], enabled=False), dry_run=False
-        )
-        installer._apply_canonical_skills_plan(plan, skills_root, owner, root=ROOT)
-        assert (
-            installer._tree_sha256(
-                skills_root / name, ignore_runtime_cache=selected.ignore_runtime_cache
-            )
-            == selected.source_digest
-        )
-    finally:
-        installer._discard_canonical_skills_plan(plan)
 
-    before_noop = {path.relative_to(skills_root): path.read_bytes() for path in skills_root.rglob("*") if path.is_file()}
-    current_plan = installer._preflight_canonical_skills(
-        ROOT / "src.codex" / "skills", skills_root, root=ROOT
+
+@pytest.mark.parametrize(
+    ("name", "expected_prior"),
+    tuple(STOCK_7872_CANONICAL_SKILL_TREE_SHA256.items()),
+)
+def test_exact_7872_stock_skill_is_accepted_and_drift_refused(
+    tmp_path: Path, name: str, expected_prior: str
+) -> None:
+    """Only each exact shipped 7872 tree may upgrade to the current skill."""
+
+    installer = _load_installer()
+    historical = _extract_7872_skill(name, tmp_path / "historical")
+    _assert_exact_stock_skill_is_accepted_and_drift_refused(
+        installer, tmp_path, name, expected_prior, historical
     )
-    try:
-        selected = next(skill for skill in current_plan.skills if skill.name == name)
-        assert selected.accepted_prior is None
-        installer._apply_canonical_skills_plan(current_plan, skills_root, owner, root=ROOT)
-        assert {path.relative_to(skills_root): path.read_bytes() for path in skills_root.rglob("*") if path.is_file()} == before_noop
-    finally:
-        installer._discard_canonical_skills_plan(current_plan)
-
-    drift_root = tmp_path / "drift" / ".agents" / "skills"
-    drift_root.mkdir(parents=True)
-    shutil.copytree(historical, drift_root / name)
-    with (drift_root / name / "SKILL.md").open("ab") as stream:
-        stream.write(b"one byte of drift\n")
-    with pytest.raises(ValueError, match=rf"E_ACCEPTED_PRIOR_COLLISION: {name}"):
-        installer._preflight_canonical_skills(
-            ROOT / "src.codex" / "skills", drift_root, root=ROOT
-        )
 
 
 def test_h2_global_lead_rebaseline_diff_is_only_mutate_work_item() -> None:
