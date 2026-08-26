@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import dataclasses
 import importlib.util
+import inspect
 import os
 import shutil
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -77,6 +79,19 @@ def test_request_contract_removes_adapter_authored_attestation_fields() -> None:
     assert "windows_argv_attestation" not in names
     assert "windows_argv_codec" not in names
     assert not hasattr(module, "WindowsArgvAttestationV1")
+    assert "WindowsInternalProbeAdmissionV1" not in module.__all__
+    assert hasattr(module.WindowsCreateOwnerV1, "create_internal_probe")
+    assert hasattr(module.WindowsCreateOwnerV1, "create_task")
+
+
+def test_admission_owner_has_no_direct_subprocess_escape_hatch() -> None:
+    """Internal probes cannot bypass the lifecycle through subprocess helpers."""
+
+    module = _load_runner()
+    source = inspect.getsource(module.WindowsArgvAdmissionOwnerV1)
+    assert "subprocess.run" not in source
+    assert "subprocess.Popen" not in source
+    assert "_bounded_probe_run" not in source
 
 
 @pytest.mark.skipif(os.name != "nt", reason="real Windows argv probe contract")
@@ -194,7 +209,7 @@ def test_create_owner_rejects_forged_stale_cross_run_and_mismatched_admissions()
     calls = []
     create_owner = module.WindowsCreateOwnerV1(
         owner.windows_argv_admission_owner,
-        lifecycle,
+        request,
         lambda: calls.append("create") or "created",
     )
     mutations = (
@@ -214,13 +229,168 @@ def test_create_owner_rejects_forged_stale_cross_run_and_mismatched_admissions()
     try:
         for invalid in mutations:
             with pytest.raises(module.ProcessSupervisionError) as caught:
-                create_owner.create(request, invalid)
+                create_owner.create_task(lifecycle, request, invalid)
             assert caught.value.failure_id == "PSV1-ARGV-ATTESTATION"
         changed_request = dataclasses.replace(request, argv=(*request.argv, "changed"))
         with pytest.raises(module.ProcessSupervisionError):
-            create_owner.create(changed_request, admission)
+            create_owner.create_task(lifecycle, changed_request, admission)
         assert calls == []
-        assert create_owner.create(request, admission) == "created"
+        assert create_owner.create_task(lifecycle, request, admission) == "created"
         assert calls == ["create"]
     finally:
         _release(owner, lifecycle)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows internal probe lifecycle")
+def test_probe_preserves_original_task_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Admission never replaces or extends the caller's absolute deadline."""
+
+    module = _load_runner()
+    owner = module.ProcessRunnerV1()
+    request = _request(
+        module,
+        owner,
+        (str(Path(sys.executable).resolve()), str(CHILD), "identity"),
+        "python-validator-json-echo-v1",
+    )
+    original_deadline = request.deadline_monotonic
+    observed: list[float] = []
+
+    def backend(task_request, _lifecycle, _validated_cwd):
+        observed.append(task_request.deadline_monotonic)
+        return module._request_failure(
+            task_request,
+            module.ProcessSupervisionError("PSV1-INTERNAL", "execution"),
+            time.monotonic(),
+        )
+
+    owner._backend_factory = lambda *_args: backend
+    owner.run(request)
+
+    assert observed == [original_deadline]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows internal probe lifecycle")
+def test_slow_probe_respects_original_deadline_and_never_starts_task(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A slow probe is killed and settled without borrowing a fresh timeout."""
+
+    module = _load_runner()
+    monkeypatch.setattr(
+        module,
+        "_PYTHON_ARGV_ECHO_HELPER",
+        "import time;time.sleep(60)",
+    )
+    owner = module.ProcessRunnerV1()
+    marker = tmp_path / "task-started.txt"
+    request = _request(
+        module,
+        owner,
+        (
+            str(Path(sys.executable).resolve()),
+            str(CHILD),
+            "marker",
+            "--marker",
+            str(marker),
+        ),
+        "python-validator-json-echo-v1",
+    )
+    request = dataclasses.replace(
+        request, deadline_monotonic=time.monotonic() + 0.25
+    )
+
+    started = time.monotonic()
+    result = owner.run(request)
+
+    assert time.monotonic() - started < 5.0
+    assert result.failure_id == "PSV1-DEADLINE"
+    assert result.tree.tree_empty
+    assert result.resources_closed
+    assert not marker.exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows internal probe lifecycle")
+def test_probe_capture_cap_is_active_and_reaps_before_task(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The 64 KiB probe cap terminates output instead of retaining full capture."""
+
+    module = _load_runner()
+    monkeypatch.setattr(
+        module,
+        "_PYTHON_ARGV_ECHO_HELPER",
+        "import sys,time;sys.stdout.buffer.write(b'x'*65537);"
+        "sys.stdout.buffer.flush();time.sleep(60)",
+    )
+    owner = module.ProcessRunnerV1()
+    marker = tmp_path / "task-started.txt"
+    request = _request(
+        module,
+        owner,
+        (
+            str(Path(sys.executable).resolve()),
+            str(CHILD),
+            "marker",
+            "--marker",
+            str(marker),
+        ),
+        "python-validator-json-echo-v1",
+    )
+
+    result = owner.run(request)
+
+    assert result.failure_id == "PSV1-CAPTURE-LIMIT"
+    assert result.tree.tree_empty
+    assert result.resources_closed
+    assert not marker.exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows internal probe lifecycle")
+def test_runner_close_cancels_and_reaps_active_probe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Runner close owns active-probe cancellation and settles within five seconds."""
+
+    module = _load_runner()
+    monkeypatch.setattr(
+        module,
+        "_PYTHON_ARGV_ECHO_HELPER",
+        "import time;time.sleep(60)",
+    )
+    owner = module.ProcessRunnerV1()
+    request = _request(
+        module,
+        owner,
+        (str(Path(sys.executable).resolve()), str(CHILD), "identity"),
+        "python-validator-json-echo-v1",
+    )
+    request = dataclasses.replace(
+        request, deadline_monotonic=time.monotonic() + 30.0
+    )
+    results = []
+    thread = threading.Thread(target=lambda: results.append(owner.run(request)))
+    thread.start()
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
+        with owner._lock:
+            lifecycles = tuple(owner._active.values())
+        if lifecycles and any(
+            "windows-probe-handle:process" in lifecycle.resource_names
+            for lifecycle in lifecycles
+        ):
+            break
+        time.sleep(0.01)
+    else:
+        pytest.fail("probe process did not enter the lifecycle")
+
+    started = time.monotonic()
+    close_result = owner.close()
+    thread.join(5.0)
+
+    assert time.monotonic() - started <= 5.0
+    assert not thread.is_alive()
+    assert close_result.outcome == "closed"
+    assert results and results[0].failure_id == "PSV1-CANCELLED"
+    assert results[0].tree.tree_empty
+    assert results[0].resources_closed

@@ -121,8 +121,21 @@ _WINDOWS_ARGV_PROFILES = frozenset(
         "git-rev-parse-sq-quote-v1",
     }
 )
-_WINDOWS_ARGV_ADMISSION_SECONDS = 30.0
-_WINDOWS_ARGV_PROBE_MAX_BYTES = 512 * 1024
+_WINDOWS_INTERNAL_PROBE_CAPTURE_BYTES = 64 * 1024
+_WINDOWS_ARGV_PROBE_CANARIES = (
+    "",
+    "plain",
+    "two words",
+    'quote"inside',
+    'backslashes\\before"quote',
+    "C:\\path with space\\",
+    "Москва-测试",
+)
+_PYTHON_ARGV_ECHO_HELPER = (
+    "import json,sys;"
+    "sys.stdout.buffer.write(json.dumps(sys.argv[1:],ensure_ascii=False,"
+    "separators=(',',':')).encode('utf-8'))"
+)
 
 
 class ProcessSupervisionError(ValueError):
@@ -136,6 +149,15 @@ class ProcessSupervisionError(ValueError):
         self.failure_id = failure_id
         self.terminal_stage = terminal_stage
         super().__init__(f"{failure_id}:{terminal_stage}")
+
+
+class _WindowsArgvProbeFailure(ProcessSupervisionError):
+    def __init__(self, result: ProcessResultV1) -> None:
+        self.result = result
+        super().__init__(
+            result.failure_id or "PSV1-ARGV-ATTESTATION",
+            result.terminal_stage,
+        )
 
 
 @dataclass(frozen=True)
@@ -160,6 +182,7 @@ class SettlePolicyV1:
 
 _WINDOWS_ARGV_ADMISSION_SEAL = object()
 _WINDOWS_ARGV_CHILD_EVIDENCE_SEAL = object()
+_WINDOWS_INTERNAL_PROBE_ADMISSION_SEAL = object()
 
 
 @dataclass(frozen=True)
@@ -179,6 +202,17 @@ class WindowsArgvAdmissionV1:
     status: str
     _seal: object = field(repr=False, compare=False)
     _child_evidence_seal: object = field(repr=False, compare=False)
+
+
+@dataclass(frozen=True)
+class WindowsInternalProbeAdmissionV1:
+    schema_version: int
+    run_token_sha256: str
+    profile_id: str
+    purpose: str
+    request_sha256: str
+    expires_at_monotonic: float
+    _seal: object = field(repr=False, compare=False)
 
 
 class CancellationProbeV1(Protocol):
@@ -436,6 +470,10 @@ class RunLifecycleV1:
             if len(self._workers) >= MAX_IO_WORKERS:
                 raise ProcessSupervisionError("PSV1-WORKER-LIMIT", "execution")
             self._workers.add(name)
+
+    def release_worker(self, name: str) -> None:
+        with self._condition:
+            self._workers.discard(name)
 
     def register_resource(
         self, name: str, action: Callable[[float], None]
@@ -1008,129 +1046,234 @@ def _argv_shape_sha256(argv: Sequence[str]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _probe_environment(rows: Sequence[EnvironmentRowV1]) -> dict[str, str]:
+def _probe_environment_rows(
+    rows: Sequence[EnvironmentRowV1],
+) -> tuple[EnvironmentRowV1, ...]:
     allowed = {
         "LANG", "LC_ALL", "PATH", "PATHEXT", "PYTHONIOENCODING",
         "SYSTEMROOT", "TEMP", "TMP", "TMPDIR", "WINDIR",
     }
-    return {row.name: row.value for row in rows if row.name.upper() in allowed}
-
-
-def _bounded_probe_run(
-    executable: Path,
-    argv: Sequence[str],
-    request: ProcessRequestV1,
-    *,
-    cwd: str | None = None,
-) -> subprocess.CompletedProcess[bytes]:
-    remaining = _WINDOWS_ARGV_ADMISSION_SECONDS
-    try:
-        result = subprocess.run(
-            tuple(argv),
-            executable=str(executable),
-            shell=False,
-            cwd=request.cwd if cwd is None else cwd,
-            env=_probe_environment(request.environment),
-            input=b"",
-            capture_output=True,
-            timeout=remaining,
-            check=False,
-            close_fds=True,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    return tuple(
+        sorted(
+            (row for row in rows if row.name.upper() in allowed),
+            key=lambda row: row.name.casefold(),
         )
-    except (OSError, subprocess.SubprocessError, ValueError) as exc:
-        raise ProcessSupervisionError(
-            "PSV1-ARGV-ATTESTATION", "request-validation"
-        ) from exc
-    if (
-        not isinstance(result.stdout, bytes)
-        or not isinstance(result.stderr, bytes)
-        or len(result.stdout) > _WINDOWS_ARGV_PROBE_MAX_BYTES
-        or len(result.stderr) > _WINDOWS_ARGV_PROBE_MAX_BYTES
-    ):
-        raise ProcessSupervisionError("PSV1-ARGV-ATTESTATION", "request-validation")
-    return result
+    )
+
+
+def _internal_probe_request_sha256(
+    request: ProcessRequestV1, profile_id: str, purpose: str
+) -> str:
+    payload = {
+        "schemaVersion": request.schema_version,
+        "profileId": profile_id,
+        "purpose": purpose,
+        "argv": list(request.argv),
+        "resolvedExecutableIdentity": resolve_executable_identity(
+            request.resolved_executable
+        ),
+        "cwd": request.cwd,
+        "environment": [
+            {"name": row.name, "value": row.value} for row in request.environment
+        ],
+        "stdin": None if request.stdin_bytes is None else "present",
+        "deadlineMonotonicHex": request.deadline_monotonic.hex(),
+        "capturePolicy": dataclasses.asdict(request.capture_policy),
+        "settlePolicy": dataclasses.asdict(request.settle_policy),
+        "windowsArgvProfileId": request.windows_argv_profile_id,
+    }
+    encoded = json.dumps(
+        payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 class WindowsArgvAdmissionOwnerV1:
     """Runner-owned issuer and consumer of same-run Windows argv evidence."""
 
-    def __init__(self, seal: object) -> None:
+    def __init__(
+        self,
+        seal: object,
+        run_internal_probe: Callable[
+            [RunLifecycleV1, ProcessRequestV1, WindowsInternalProbeAdmissionV1],
+            ProcessResultV1,
+        ],
+    ) -> None:
         if seal is not _WINDOWS_ARGV_ADMISSION_SEAL:
             raise ProcessSupervisionError(
                 "PSV1-ARGV-ATTESTATION", "request-validation"
             )
         self._seal = seal
+        self._run_internal_probe = run_internal_probe
         self._consumed_run_tokens: set[str] = set()
+        self._consumed_internal: set[tuple[str, str]] = set()
         self._lock = threading.Lock()
 
+    def _probe_request(
+        self,
+        lifecycle: RunLifecycleV1,
+        request: ProcessRequestV1,
+        executable: Path,
+        profile_id: str,
+        purpose: str,
+        argv: tuple[str, ...],
+    ) -> tuple[ProcessRequestV1, WindowsInternalProbeAdmissionV1]:
+        if lifecycle.cancelled or request.deadline_monotonic <= time.monotonic():
+            raise ProcessSupervisionError("PSV1-DEADLINE", "deadline")
+        sink = CaptureSinkBindingV1(
+            "bounded-memory-v1", BoundedMemoryCaptureSinkV1(), _SINK_BINDING_SEAL
+        )
+        remaining = max(0.001, request.deadline_monotonic - time.monotonic())
+        probe_request = ProcessRequestV1(
+            schema_version=1,
+            argv=argv,
+            resolved_executable=executable,
+            cwd=request.cwd,
+            environment=_probe_environment_rows(request.environment),
+            stdin_bytes=None,
+            deadline_monotonic=request.deadline_monotonic,
+            capture_policy=CapturePolicyV1(
+                "windows-internal-argv-probe-v1",
+                _WINDOWS_INTERNAL_PROBE_CAPTURE_BYTES,
+                _WINDOWS_INTERNAL_PROBE_CAPTURE_BYTES,
+                0,
+                16 * 1024,
+            ),
+            capture_sink_binding=sink,
+            settle_policy=SettlePolicyV1(min(5.0, remaining)),
+            windows_argv_profile_id=None,
+        )
+        admission = WindowsInternalProbeAdmissionV1(
+            1,
+            lifecycle.token.sha256,
+            profile_id,
+            purpose,
+            _internal_probe_request_sha256(probe_request, profile_id, purpose),
+            request.deadline_monotonic,
+            _WINDOWS_INTERNAL_PROBE_ADMISSION_SEAL,
+        )
+        return probe_request, admission
+
+    def _execute_probe(
+        self,
+        lifecycle: RunLifecycleV1,
+        probe_request: ProcessRequestV1,
+        admission: WindowsInternalProbeAdmissionV1,
+    ) -> bytes:
+        result = self._run_internal_probe(lifecycle, probe_request, admission)
+        if result.failure_id is not None:
+            raise _WindowsArgvProbeFailure(result)
+        if (
+            result.outcome != "success"
+            or result.target_exit_code != 0
+            or not result.tree.tree_empty
+            or not result.resources_closed
+            or result.stdout.truncated
+            or result.stderr.truncated
+        ):
+            raise ProcessSupervisionError(
+                "PSV1-ARGV-ATTESTATION", "request-validation"
+            )
+        if time.monotonic() >= probe_request.deadline_monotonic:
+            raise ProcessSupervisionError("PSV1-DEADLINE", "deadline")
+        return probe_request.capture_sink_binding.bytes_for("stdout")
+
     def _python_probe(
-        self, request: ProcessRequestV1, executable: Path
+        self,
+        lifecycle: RunLifecycleV1,
+        request: ProcessRequestV1,
+        executable: Path,
     ) -> tuple[str, str, str]:
         if executable.resolve() != Path(sys.executable).resolve():
             raise ProcessSupervisionError(
                 "PSV1-ARGV-ATTESTATION", "request-validation"
             )
-        helper = (
-            "import json,sys;"
-            "sys.stdout.buffer.write(json.dumps(sys.argv[1:],ensure_ascii=False,"
-            "separators=(',',':')).encode('utf-8'))"
+        probe = (
+            str(executable),
+            "-I",
+            "-c",
+            _PYTHON_ARGV_ECHO_HELPER,
+            *_WINDOWS_ARGV_PROBE_CANARIES,
         )
-        probe = (str(executable), "-I", "-c", helper, *request.argv[1:])
         if len(serialize_msvcrt_argv(probe).encode("utf-16-le")) // 2 > MAX_WINDOWS_COMMAND_LINE_UNITS:
             raise ProcessSupervisionError(
                 "PSV1-ARGV-ATTESTATION", "request-validation"
             )
-        result = _bounded_probe_run(executable, probe, request)
+        probe_request, admission = self._probe_request(
+            request=request,
+            lifecycle=lifecycle,
+            executable=executable,
+            profile_id="python-validator-json-echo-v1",
+            purpose="python-json-argv-echo-v1",
+            argv=probe,
+        )
+        stdout = self._execute_probe(lifecycle, probe_request, admission)
         try:
-            observed_tail = json.loads(result.stdout.decode("utf-8"))
+            observed_tail = json.loads(stdout.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise ProcessSupervisionError(
                 "PSV1-ARGV-ATTESTATION", "request-validation"
             ) from exc
         if (
-            result.returncode != 0
-            or not isinstance(observed_tail, list)
+            not isinstance(observed_tail, list)
             or not all(isinstance(item, str) for item in observed_tail)
         ):
             raise ProcessSupervisionError(
                 "PSV1-ARGV-ATTESTATION", "request-validation"
             )
+        requested_argv = (request.argv[0], *_WINDOWS_ARGV_PROBE_CANARIES)
         observed = (request.argv[0], *observed_tail)
         return (
             "python-json-argv-echo-v1",
-            _json_argv_sha256(request.argv),
+            _json_argv_sha256(requested_argv),
             _json_argv_sha256(observed),
         )
 
     def _git_probe(
-        self, request: ProcessRequestV1, executable: Path
+        self,
+        lifecycle: RunLifecycleV1,
+        request: ProcessRequestV1,
+        executable: Path,
     ) -> tuple[str, str, str]:
         if executable.name.casefold() not in {"git", "git.exe"}:
             raise ProcessSupervisionError(
                 "PSV1-ARGV-ATTESTATION", "request-validation"
             )
-        probe_tail = tuple(request.argv[1:])
-        probe = (str(executable), "rev-parse", "--sq-quote", "--", *probe_tail)
+        probe = (
+            str(executable),
+            "rev-parse",
+            "--sq-quote",
+            "--",
+            *_WINDOWS_ARGV_PROBE_CANARIES,
+        )
         if len(serialize_msvcrt_argv(probe).encode("utf-16-le")) // 2 > MAX_WINDOWS_COMMAND_LINE_UNITS:
             raise ProcessSupervisionError(
                 "PSV1-ARGV-ATTESTATION", "request-validation"
             )
-        result = _bounded_probe_run(executable, probe, request)
+        probe_request, admission = self._probe_request(
+            request=request,
+            lifecycle=lifecycle,
+            executable=executable,
+            profile_id="git-rev-parse-sq-quote-v1",
+            purpose="git-rev-parse-sq-quote-v1",
+            argv=probe,
+        )
+        stdout = self._execute_probe(lifecycle, probe_request, admission)
         try:
-            parsed = tuple(shlex.split(result.stdout.decode("utf-8"), posix=True))
+            parsed = tuple(shlex.split(stdout.decode("utf-8"), posix=True))
         except (UnicodeDecodeError, ValueError) as exc:
             raise ProcessSupervisionError(
                 "PSV1-ARGV-ATTESTATION", "request-validation"
             ) from exc
-        if result.returncode != 0 or not parsed or parsed[0] != "--":
+        if not parsed or parsed[0] != "--":
             raise ProcessSupervisionError(
                 "PSV1-ARGV-ATTESTATION", "request-validation"
             )
+        requested_argv = (request.argv[0], *_WINDOWS_ARGV_PROBE_CANARIES)
         observed = (request.argv[0], *parsed[1:])
         return (
             "git-rev-parse-sq-quote-v1",
-            _json_argv_sha256(request.argv),
+            _json_argv_sha256(requested_argv),
             _json_argv_sha256(observed),
         )
 
@@ -1146,9 +1289,13 @@ class WindowsArgvAdmissionOwnerV1:
         identity = resolve_executable_identity(executable)
         version = resolve_executable_version(executable)
         if profile_id == "python-validator-json-echo-v1":
-            probe_kind, requested, observed = self._python_probe(request, executable)
+            probe_kind, requested, observed = self._python_probe(
+                lifecycle, request, executable
+            )
         elif profile_id == "git-rev-parse-sq-quote-v1":
-            probe_kind, requested, observed = self._git_probe(request, executable)
+            probe_kind, requested, observed = self._git_probe(
+                lifecycle, request, executable
+            )
         else:
             raise ProcessSupervisionError(
                 "PSV1-ARGV-CODEC-UNSUPPORTED", "request-validation"
@@ -1157,8 +1304,7 @@ class WindowsArgvAdmissionOwnerV1:
             raise ProcessSupervisionError(
                 "PSV1-ARGV-ATTESTATION", "request-validation"
             )
-        now = time.monotonic()
-        expires = now + _WINDOWS_ARGV_ADMISSION_SECONDS
+        expires = request.deadline_monotonic
         return WindowsArgvAdmissionV1(
             1,
             lifecycle.token.sha256,
@@ -1214,6 +1360,43 @@ class WindowsArgvAdmissionOwnerV1:
                 )
             self._consumed_run_tokens.add(admission.run_token_sha256)
 
+    def _consume_internal(
+        self,
+        lifecycle: RunLifecycleV1,
+        request: ProcessRequestV1,
+        admission: WindowsInternalProbeAdmissionV1,
+    ) -> None:
+        valid_profiles = {
+            "python-validator-json-echo-v1": "python-json-argv-echo-v1",
+            "git-rev-parse-sq-quote-v1": "git-rev-parse-sq-quote-v1",
+        }
+        valid = (
+            type(admission) is WindowsInternalProbeAdmissionV1
+            and admission._seal is _WINDOWS_INTERNAL_PROBE_ADMISSION_SEAL
+            and admission.schema_version == 1
+            and admission.run_token_sha256 == lifecycle.token.sha256
+            and valid_profiles.get(admission.profile_id) == admission.purpose
+            and admission.request_sha256
+            == _internal_probe_request_sha256(
+                request, admission.profile_id, admission.purpose
+            )
+            and admission.expires_at_monotonic == request.deadline_monotonic
+            and admission.expires_at_monotonic > time.monotonic()
+            and request.stdin_bytes is None
+            and request.windows_argv_profile_id is None
+        )
+        if not valid:
+            raise ProcessSupervisionError(
+                "PSV1-ARGV-CODEC-UNSUPPORTED", "request-validation"
+            )
+        key = (admission.run_token_sha256, admission.purpose)
+        with self._lock:
+            if key in self._consumed_internal:
+                raise ProcessSupervisionError(
+                    "PSV1-ARGV-CODEC-UNSUPPORTED", "request-validation"
+                )
+            self._consumed_internal.add(key)
+
 
 class WindowsCreateOwnerV1:
     """The sole Windows process-create seam; admission is consumed first."""
@@ -1221,17 +1404,30 @@ class WindowsCreateOwnerV1:
     def __init__(
         self,
         admission_owner: WindowsArgvAdmissionOwnerV1,
-        lifecycle: RunLifecycleV1,
+        request: ProcessRequestV1,
         create_process: Callable[[], object],
     ) -> None:
         self._admission_owner = admission_owner
-        self._lifecycle = lifecycle
+        self._request = request
         self._create_process = create_process
 
-    def create(
-        self, request: ProcessRequestV1, admission: WindowsArgvAdmissionV1
+    def create_internal_probe(
+        self,
+        lifecycle: RunLifecycleV1,
+        admission: WindowsInternalProbeAdmissionV1,
     ) -> object:
-        self._admission_owner.consume(self._lifecycle, request, admission)
+        self._admission_owner._consume_internal(
+            lifecycle, self._request, admission
+        )
+        return self._create_process()
+
+    def create_task(
+        self,
+        lifecycle: RunLifecycleV1,
+        request: ProcessRequestV1,
+        admission: WindowsArgvAdmissionV1,
+    ) -> object:
+        self._admission_owner.consume(lifecycle, request, admission)
         return self._create_process()
 
 
@@ -1787,9 +1983,26 @@ class _WindowsBackendV1:
         request: ProcessRequestV1,
         lifecycle: RunLifecycleV1,
         validated_cwd: ValidatedCwdV1,
-        admission: WindowsArgvAdmissionV1,
+        admission: WindowsArgvAdmissionV1 | None = None,
+        internal_probe_admission: WindowsInternalProbeAdmissionV1 | None = None,
     ) -> ProcessResultV1:
         import msvcrt
+
+        if (admission is None) == (internal_probe_admission is None):
+            raise ProcessSupervisionError(
+                "PSV1-ARGV-CODEC-UNSUPPORTED", "request-validation"
+            )
+        internal_probe = internal_probe_admission is not None
+        handle_prefix = "windows-probe-handle:" if internal_probe else "windows-handle:"
+        backend_resource_name = (
+            "windows-probe-backend" if internal_probe else "windows-backend"
+        )
+        worker_prefix = "windows-probe-worker:" if internal_probe else ""
+
+        def phase_deadline(now: float | None = None) -> float:
+            current = time.monotonic() if now is None else now
+            deadline = current + request.settle_policy.timeout_seconds
+            return min(deadline, request.deadline_monotonic) if internal_probe else deadline
 
         started = time.monotonic()
         k = self.api.k32
@@ -1821,7 +2034,7 @@ class _WindowsBackendV1:
 
         def register_handle(name: str, handle: int) -> None:
             handles[name] = handle
-            resource_name = f"windows-handle:{name}"
+            resource_name = f"{handle_prefix}{name}"
 
             def close_owned_handle(_remaining: float) -> None:
                 current = handles.get(name)
@@ -1836,7 +2049,7 @@ class _WindowsBackendV1:
 
         def close_handle(name: str) -> None:
             nonlocal primary_thread_closed, job_handle_closed
-            resource_name = f"windows-handle:{name}"
+            resource_name = f"{handle_prefix}{name}"
             if lifecycle.has_resource(resource_name):
                 if not lifecycle.close_resource(
                     resource_name,
@@ -1880,10 +2093,18 @@ class _WindowsBackendV1:
         def cleanup_windows_backend(remaining: float) -> None:
             before = len(issues)
             deadline = time.monotonic() + remaining
-            for thread in (*reader_threads, *((writer_thread,) if writer_thread else ())):
+            named_threads = [
+                *(("stdout", thread) for thread in reader_threads[:1]),
+                *(("stderr", thread) for thread in reader_threads[1:2]),
+            ]
+            if writer_thread is not None:
+                named_threads.append(("stdin", writer_thread))
+            for name, thread in named_threads:
                 thread.join(max(0.0, deadline - time.monotonic()))
                 if thread.is_alive():
                     issues.append("PSV1-RESOURCE-CLOSE")
+                else:
+                    lifecycle.release_worker(f"{worker_prefix}{name}")
             for name in (
                 "thread",
                 "process",
@@ -1906,7 +2127,7 @@ class _WindowsBackendV1:
             if len(issues) != before:
                 raise OSError("windows backend cleanup incomplete")
 
-        lifecycle.register_resource("windows-backend", cleanup_windows_backend)
+        lifecycle.register_resource(backend_resource_name, cleanup_windows_backend)
 
         try:
             if self.coordinator.poisoned:
@@ -1977,14 +2198,23 @@ class _WindowsBackendV1:
                         enabled.append(name)
                     create_owner = WindowsCreateOwnerV1(
                         self.admission_owner,
-                        lifecycle,
+                        request,
                         lambda: k.CreateProcessW(
                             str(request.resolved_executable), command, None, None, True,
                             self.api.CREATE_SUSPENDED | self.api.CREATE_UNICODE_ENVIRONMENT | self.api.EXTENDED_STARTUPINFO_PRESENT,
                             environment, validated_cwd.canonical_absolute, ctypes.byref(startup.StartupInfo), ctypes.byref(info),
                         ),
                     )
-                    if not create_owner.create(request, admission):
+                    created = (
+                        create_owner.create_internal_probe(
+                            lifecycle, internal_probe_admission
+                        )
+                        if internal_probe_admission is not None
+                        else create_owner.create_task(
+                            lifecycle, request, admission
+                        )
+                    )
+                    if not created:
                         raise ProcessSupervisionError("PSV1-PROCESS-CREATE", "process-create")
                     register_handle("process", info.hProcess)
                     register_handle("thread", info.hThread)
@@ -2021,7 +2251,7 @@ class _WindowsBackendV1:
             def convert_parent(name: str, flags: int) -> tuple[int, str]:
                 handle = handles[name]
                 assert handle is not None
-                resource_name = f"windows-handle:{name}"
+                resource_name = f"{handle_prefix}{name}"
                 try:
                     descriptor = _convert_windows_handle_to_fd(
                         handle,
@@ -2048,7 +2278,7 @@ class _WindowsBackendV1:
                 (stdout_fd, "stdout", stdout_resource),
                 (stderr_fd, "stderr", stderr_resource),
             ):
-                lifecycle.register_worker(name)
+                lifecycle.register_worker(f"{worker_prefix}{name}")
                 thread = threading.Thread(
                     target=_reader_fd,
                     args=(
@@ -2064,7 +2294,7 @@ class _WindowsBackendV1:
                 )
                 thread.start()
                 reader_threads.append(thread)
-            lifecycle.register_worker("stdin")
+            lifecycle.register_worker(f"{worker_prefix}stdin")
             writer_thread = threading.Thread(
                 target=_writer_fd,
                 args=(
@@ -2112,7 +2342,7 @@ class _WindowsBackendV1:
                     if all(not thread.is_alive() for thread in reader_threads):
                         break
                     if settle_deadline is None:
-                        settle_deadline = now + request.settle_policy.timeout_seconds
+                        settle_deadline = phase_deadline(now)
                     elif now >= settle_deadline:
                         if failure_id is None:
                             failure_id, stage = "PSV1-TREE-SETTLEMENT", "tree-settlement"
@@ -2123,7 +2353,7 @@ class _WindowsBackendV1:
                     direct_reaped = True
                     break
             code = wintypes.DWORD()
-            reap_until = time.monotonic() + request.settle_policy.timeout_seconds
+            reap_until = phase_deadline()
             while time.monotonic() <= reap_until:
                 if not k.GetExitCodeProcess(handles["process"], ctypes.byref(code)):
                     break
@@ -2132,16 +2362,20 @@ class _WindowsBackendV1:
                     exit_code = ctypes.c_int32(code.value).value
                     break
                 time.sleep(ENGINE_POLL_INTERVAL_SECONDS)
-            for thread in reader_threads:
-                thread.join(request.settle_policy.timeout_seconds)
+            for name, thread in zip(("stdout", "stderr"), reader_threads):
+                thread.join(max(0.0, phase_deadline() - time.monotonic()))
+                if not thread.is_alive():
+                    lifecycle.release_worker(f"{worker_prefix}{name}")
             if writer_thread is not None:
-                writer_thread.join(request.settle_policy.timeout_seconds)
+                writer_thread.join(max(0.0, phase_deadline() - time.monotonic()))
+                if not writer_thread.is_alive():
+                    lifecycle.release_worker(f"{worker_prefix}stdin")
             if any(thread.is_alive() for thread in reader_threads) or (writer_thread and writer_thread.is_alive()):
                 issues.append("PSV1-RESOURCE-CLOSE")
             if not job_terminate_failed and handles["job"]:
                 accounting = JOBOBJECT_BASIC_ACCOUNTING_INFORMATION()
                 returned = wintypes.DWORD()
-                settle_until = time.monotonic() + request.settle_policy.timeout_seconds
+                settle_until = phase_deadline()
                 while True:
                     if not k.QueryInformationJobObject(handles["job"], 1, ctypes.byref(accounting), ctypes.sizeof(accounting), ctypes.byref(returned)):
                         settlement = "AMBIGUOUS"
@@ -2165,12 +2399,15 @@ class _WindowsBackendV1:
             if not terminate_job():
                 last_close_after_terminate_failure()
             if handles["process"]:
-                k.WaitForSingleObject(handles["process"], int(request.settle_policy.timeout_seconds * 1000))
+                k.WaitForSingleObject(
+                    handles["process"],
+                    max(0, int((phase_deadline() - time.monotonic()) * 1000)),
+                )
                 direct_reaped = True
             if handles["job"]:
                 accounting = JOBOBJECT_BASIC_ACCOUNTING_INFORMATION()
                 returned = wintypes.DWORD()
-                settle_until = time.monotonic() + request.settle_policy.timeout_seconds
+                settle_until = phase_deadline()
                 while time.monotonic() <= settle_until:
                     if not k.QueryInformationJobObject(
                         handles["job"],
@@ -2188,9 +2425,12 @@ class _WindowsBackendV1:
             if not terminate_job():
                 last_close_after_terminate_failure()
             raise
-        finalization = lifecycle.finalize_once(
-            time.monotonic() + request.settle_policy.timeout_seconds
-        )
+        if internal_probe:
+            if not lifecycle.close_resource(backend_resource_name, phase_deadline()):
+                issues.append("PSV1-RESOURCE-CLOSE")
+            finalization = lifecycle.observation
+        else:
+            finalization = lifecycle.finalize_once(phase_deadline())
         issues.extend(finalization.cleanup_issues)
         resources_closed = not any(handles.values()) and not issues
         if settlement == "AMBIGUOUS" and direct_reaped and ownership_confirmed and not failure_id:
@@ -2540,7 +2780,8 @@ class ProcessRunnerV1:
     ) -> None:
         self.windows_inheritance_coordinator = WindowsInheritanceCoordinatorV1()
         self.windows_argv_admission_owner = WindowsArgvAdmissionOwnerV1(
-            _WINDOWS_ARGV_ADMISSION_SEAL
+            _WINDOWS_ARGV_ADMISSION_SEAL,
+            self._run_internal_windows_probe,
         )
         self._backend_factory = backend_factory
         self._windows_api = windows_api
@@ -2557,6 +2798,53 @@ class ProcessRunnerV1:
     def mint_memory_capture_sink(self) -> CaptureSinkBindingV1:
         return CaptureSinkBindingV1(
             "bounded-memory-v1", BoundedMemoryCaptureSinkV1(), _SINK_BINDING_SEAL
+        )
+
+    def _run_internal_windows_probe(
+        self,
+        lifecycle: RunLifecycleV1,
+        request: ProcessRequestV1,
+        admission: WindowsInternalProbeAdmissionV1,
+    ) -> ProcessResultV1:
+        if os.name != "nt":
+            raise ProcessSupervisionError(
+                "PSV1-ARGV-CODEC-UNSUPPORTED", "request-validation"
+            )
+        sink_resource = "windows-probe-capture-sink"
+        lifecycle.register_resource(
+            sink_resource,
+            lambda _remaining: request.capture_sink_binding.close(),
+        )
+        canonical = os.path.abspath(request.cwd)
+        validated_cwd = ValidatedCwdV1(canonical, bind_cwd_identity(canonical))
+        result = _WindowsBackendV1(
+            self.windows_inheritance_coordinator,
+            self.windows_argv_admission_owner,
+            self._windows_api,
+        ).run(
+            request,
+            lifecycle,
+            validated_cwd,
+            internal_probe_admission=admission,
+        )
+        sink_closed = lifecycle.close_resource(
+            sink_resource, request.deadline_monotonic
+        )
+        probe_resources_closed = all(
+            lifecycle.resource_state(name) == "CLOSED"
+            for name in lifecycle.resource_names
+            if name.startswith("windows-probe-")
+        )
+        return dataclasses.replace(
+            result,
+            resources_closed=(
+                result.resources_closed and sink_closed and probe_resources_closed
+            ),
+            cleanup_uncertain=(
+                result.cleanup_uncertain
+                or not sink_closed
+                or not probe_resources_closed
+            ),
         )
 
     def __exit__(self, *_exc: object) -> None:
@@ -2619,20 +2907,35 @@ class ProcessRunnerV1:
         try:
             validated_cwd = validate_process_request(request)
             if os.name == "nt":
-                admission_started = time.monotonic()
                 admission = self.windows_argv_admission_owner.admit(
                     owned_lifecycle, request
                 )
-                request = dataclasses.replace(
-                    request,
-                    deadline_monotonic=(
-                        request.deadline_monotonic
-                        + time.monotonic()
-                        - admission_started
-                    ),
-                )
             else:
                 admission = None
+        except _WindowsArgvProbeFailure as exc:
+            observation = owned_lifecycle.finalize_once(
+                min(
+                    request.deadline_monotonic,
+                    time.monotonic() + RUNNER_CLOSE_TIMEOUT_SECONDS,
+                )
+            )
+            result = dataclasses.replace(
+                exc.result,
+                run_token_sha256=owned_lifecycle.token.sha256,
+                cleanup_issues=tuple(
+                    dict.fromkeys(
+                        (*exc.result.cleanup_issues, *observation.cleanup_issues)
+                    )
+                ),
+                resources_closed=(
+                    exc.result.resources_closed and observation.resources_closed
+                ),
+                cleanup_uncertain=(
+                    exc.result.cleanup_uncertain or not observation.resources_closed
+                ),
+            )
+            self._release_lifecycle(owned_lifecycle)
+            return result
         except ProcessSupervisionError as exc:
             result = _request_failure(request, exc, started)
             owned_lifecycle.finalize_once(time.monotonic() + RUNNER_CLOSE_TIMEOUT_SECONDS)
