@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import threading
+from dataclasses import replace
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -57,6 +58,12 @@ def _projected_entrypoint(tmp_path: Path, provider: str) -> Path:
     (scripts / "external-role-taxonomy.v1.json").write_bytes(
         (ROOT / "shared" / "external-role-taxonomy.v1.json").read_bytes()
     )
+    process_supervision = scripts / "process_supervision"
+    process_supervision.mkdir()
+    for name in ("__init__.py", "process_runner.py"):
+        (process_supervision / name).write_bytes(
+            (ROOT / "scripts" / "process_supervision" / name).read_bytes()
+        )
     entrypoint = scripts / ENTRYPOINTS[provider].name
     entrypoint.write_bytes(ENTRYPOINTS[provider].read_bytes())
     support = tmp_path / "scripts"
@@ -95,6 +102,7 @@ def _make_fake_provider(
     raw_stdout: bytes | None = None,
     raw_stderr: bytes = b"",
     launch_marker: Path | None = None,
+    delay_seconds: float = 0.0,
 ) -> Path:
     fake = tmp_path / f"fake-{provider}.py"
     result_write = (
@@ -111,13 +119,14 @@ def _make_fake_provider(
         if launch_marker is not None
         else ""
     )
+    delay = f"time.sleep({delay_seconds!r})\n" if delay_seconds else ""
     stderr_write = (
         f"sys.stderr.buffer.write({raw_stderr!r}); sys.stderr.buffer.flush()\n"
         if raw_stderr
         else ""
     )
     source = (
-        "import json,os,pathlib,sys\n"
+        "import json,os,pathlib,sys,time\n"
         "args=sys.argv[1:]\n"
         "if 'app-server' in args:\n"
         "    config_path=pathlib.Path(os.environ['CODEX_HOME'])/'hooks.json'\n"
@@ -137,6 +146,7 @@ def _make_fake_provider(
         "            print(json.dumps({'id':2,'result':{'data':[{'hooks':records}]}}), flush=True)\n"
         "    raise SystemExit(0)\n"
         "sys.stdin.buffer.read()\n"
+        + delay
         + marker_write
         + result_write
         + stderr_write
@@ -159,6 +169,7 @@ def _run_transport(
     raw_stderr: bytes = b"",
     launch_marker: Path | None = None,
     environment: dict[str, str] | None = None,
+    delay_seconds: float = 0.0,
 ) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
     fake = _make_fake_provider(
         tmp_path,
@@ -168,6 +179,7 @@ def _run_transport(
         raw_stdout=raw_stdout,
         raw_stderr=raw_stderr,
         launch_marker=launch_marker,
+        delay_seconds=delay_seconds,
     )
     item = _make_work_item(tmp_path, f"oracle-{provider}-{exit_code}-{write_result}")
     prompt = tmp_path / f"{provider}.md"
@@ -440,34 +452,6 @@ def test_empty_provisional_directory_uses_only_rmdir(
     assert not provisional.exists()
 
 
-def test_shared_capture_budget_combines_stdout_and_stderr_atomically() -> None:
-    exact = owner.SharedCaptureBudget(10, b"exact-salt")
-    assert exact.reserve("stdout", b"12345") == b"12345"
-    assert exact.reserve("stderr", b"67890") == b"67890"
-    assert not exact.result([]).overflow
-
-    overflow = owner.SharedCaptureBudget(10, b"overflow-salt")
-    barrier = threading.Barrier(3)
-
-    def reserve(name: str, data: bytes) -> None:
-        barrier.wait()
-        overflow.reserve(name, data)
-
-    threads = [
-        threading.Thread(target=reserve, args=("stdout", b"123456")),
-        threading.Thread(target=reserve, args=("stderr", b"abcdef")),
-    ]
-    for thread in threads:
-        thread.start()
-    barrier.wait()
-    for thread in threads:
-        thread.join()
-    result = overflow.result([])
-    assert result.overflow
-    assert result.observed_bytes == 11
-    assert result.persisted_bytes == 6
-
-
 def test_codex_jsonl_selects_last_complete_agent_message_and_enforces_result_limit() -> None:
     def record(text: str) -> bytes:
         return (
@@ -512,209 +496,184 @@ def test_codex_jsonl_treats_literal_unicode_separators_as_record_data(
     assert owner.parse_codex_jsonl_result(record, 100) == text.encode("utf-8")
 
 
-def test_repeated_stream_overflow_reaps_process_emits_no_raw_bytes_and_leaves_no_run_dirs(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_provider_adapter_uses_settled_canonical_runner_result(tmp_path: Path) -> None:
+    child = tmp_path / "provider.py"
+    child.write_text(
+        "import sys\n"
+        "assert sys.stdin.buffer.read() == b'provider-body'\n"
+        "sys.stdout.buffer.write(b'GATE: PASS\\n')\n"
+        "sys.stderr.buffer.write(b'provider diagnostic\\n')\n",
+        encoding="utf-8",
+    )
+    environment = {"PATH": os.environ["PATH"]}
+    for name in ("SYSTEMROOT", "WINDIR"):
+        if name in os.environ:
+            environment[name] = os.environ[name]
+
+    result, stdout, stderr = owner.run_provider_process(
+        [sys.executable, str(child)],
+        [],
+        environment,
+        ROOT,
+        b"provider-body",
+        owner.Control(timeout_secs=5, capture_max_bytes=1024),
+    )
+
+    assert result.event_id == "process.supervision.settled.v1"
+    assert result.outcome == "success"
+    assert result.stdin.complete and result.stdin.written_bytes == len(b"provider-body")
+    assert result.resources_closed and result.tree.tree_empty and result.tree.direct_reaped
+    assert stdout == b"GATE: PASS\n"
+    assert stderr == b"provider diagnostic\n"
+    assert owner.provider_stream_result(result).issues == ()
+
+
+def test_provider_adapter_preserves_capture_policy_bounds() -> None:
+    assert owner.provider_capture_policy(owner.CAPTURE_MAX_BYTES_DEFAULT).aggregate_persisted_limit == 16 * 1024 * 1024
+    assert owner.provider_capture_policy(owner.CAPTURE_MAX_BYTES_HARD).aggregate_persisted_limit == 256 * 1024 * 1024
+
+
+def test_provider_adapter_settles_retained_pipe_descendant(tmp_path: Path) -> None:
+    environment = {"PATH": os.environ["PATH"]}
+    for name in ("SYSTEMROOT", "WINDIR"):
+        if name in os.environ:
+            environment[name] = os.environ[name]
+
+    result, _stdout, _stderr = owner.run_provider_process(
+        [sys.executable, str(ROOT / "tests" / "fixtures" / "process_supervision" / "child_helper.py")],
+        ["grandchild-retains-pipe", "--marker", str(tmp_path / "grandchild")],
+        environment,
+        ROOT,
+        b"",
+        owner.Control(timeout_secs=5, capture_max_bytes=1024),
+    )
+
+    assert result.event_id == "process.supervision.settled.v1"
+    assert result.tree.tree_empty and result.tree.direct_reaped
+    assert result.resources_closed
+
+
+def _assert_external_terminal_is_nonauthorizing(
+    item: Path, payload: dict[str, object]
 ) -> None:
-    root = (tmp_path / "captures").resolve()
-    monkeypatch.setenv("CLAUDE_PROMPTS_DIR", str(root))
-    digests: list[str] = []
-    for index in range(2):
-        lifecycle = owner.RunCaptureLifecycle.create("claude", f"overflow-{index}")
-        lifecycle.initialize(b"prompt")
-        process = subprocess.Popen(
-            [
-                sys.executable,
-                "-c",
-                "import sys; sys.stdout.buffer.write(b'SECRET'*1000); sys.stdout.buffer.flush()",
-            ],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            bufsize=0,
-        )
-        exit_code, cancelled, timed_out, settle, captured = owner.supervise_provider_io(
-            process, lifecycle, b"prompt", 1024, 5
-        )
-        assert captured.overflow
-        assert process.poll() is not None
-        assert not settle
-        assert not cancelled and not timed_out
-        assert not any(
-            thread.name.startswith("provider-") for thread in threading.enumerate()
-        )
-        stream = io.StringIO()
-        monkeypatch.setattr(owner.sys, "stdout", stream)
-        code = owner.finalize_run(
-            owner.Control(result_max_bytes=16, capture_max_bytes=1024),
-            "claude",
-            "opus",
-            "xhigh",
-            "overflow",
-            "",
-            lifecycle,
-            exit_code,
-            captured,
-        )
-        encoded = stream.getvalue()
-        payload = owner.parse_provider_result(encoded)
-        assert code != 0
-        assert payload["token"] == "FAILED:capture-overflow"
-        assert payload["captureOverflow"] is True
-        assert "SECRET" not in encoded
-        digests.append(payload["captureDigest"])
-        assert list(root.iterdir()) == []
-    assert digests[0] != digests[1]
+    assert payload["authorizing"] is False
+    assert payload["closesRunIds"] == []
+    assert payload["independentVerificationRequired"] is True
+    assert payload["terminalClass"] == "external-nonauthorizing"
+    events = _ledger_events(item)
+    assert [event["eventKind"] for event in events] == ["launch", "terminal"]
+    terminal = events[-1]
+    assert terminal["authorizing"] is False
+    assert terminal["closesRunIds"] == []
+    assert terminal["evidence"] == [
+        {"kind": "command", "ref": "provider-result-envelope-flushed"}
+    ]
 
 
-def test_stream_timeout_reaps_child_and_joins_all_threads(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    lifecycle = _lifecycle(tmp_path, monkeypatch, provider="claude")
-    process = subprocess.Popen(
-        [sys.executable, "-c", "import time; time.sleep(30)"],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        bufsize=0,
+def test_provider_adapter_timeout_emits_nonpass_settled_terminal(tmp_path: Path) -> None:
+    result, item, output_root = _run_transport(
+        tmp_path,
+        "claude",
+        extra_args=["--timeout-secs", "0.05"],
+        delay_seconds=1.0,
     )
-    exit_code, _cancelled, timed_out, _settle, captured = owner.supervise_provider_io(
-        process, lifecycle, b"prompt", 1024, 0.05
-    )
-    assert exit_code == 124
-    assert timed_out
-    assert process.poll() is not None
-    assert not captured.issues
-    assert not any(thread.name.startswith("provider-") for thread in threading.enumerate())
-    assert lifecycle.cleanup().clean
+
+    assert result.stdout, result.stderr
+    payload = owner.parse_provider_result(result.stdout)
+    assert result.returncode != 0
+    assert payload["timedOut"] is True
+    assert payload["cancelled"] is False
+    assert payload["gate"] == "none"
+    assert payload["status"] == "blocked"
+    assert payload["token"] != "COMPLETE:EXTERNAL_NONAUTHORIZING"
+    assert list(output_root.iterdir()) == []
+    _assert_external_terminal_is_nonauthorizing(item, payload)
 
 
-def test_stream_reader_exception_reaps_child_and_joins_threads(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    lifecycle = _lifecycle(tmp_path, monkeypatch, provider="claude")
-    real_open = lifecycle.open_for_write
-
-    def fail_stdout(path: Path):
-        if path == lifecycle.out_path:
-            raise PermissionError("fixture reader denial")
-        return real_open(path)
-
-    monkeypatch.setattr(lifecycle, "open_for_write", fail_stdout)
-    process = subprocess.Popen(
-        [sys.executable, "-c", "import time; print('data', flush=True); time.sleep(30)"],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        bufsize=0,
-    )
-    exit_code, _cancelled, _timed_out, _settle, captured = owner.supervise_provider_io(
-        process, lifecycle, b"prompt", 1024, 5
-    )
-    assert exit_code != 0
-    assert any("stdout reader failed" in issue for issue in captured.issues)
-    assert process.poll() is not None
-    assert not any(thread.name.startswith("provider-") for thread in threading.enumerate())
-    assert lifecycle.cleanup().clean
-
-
-def test_stream_writer_exception_reaps_child_and_joins_threads(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    lifecycle = _lifecycle(tmp_path, monkeypatch, provider="claude")
-    process = subprocess.Popen(
-        [sys.executable, "-c", "import sys,time; sys.stdin.buffer.read(); time.sleep(30)"],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        bufsize=0,
-    )
-    real_stdin = process.stdin
-
-    class BrokenStdin:
-        def write(self, _data: bytes) -> None:
-            raise OSError("fixture writer denial")
-
-        def flush(self) -> None:
-            pass
-
-        def close(self) -> None:
-            real_stdin.close()
-
-    process.stdin = BrokenStdin()
-    exit_code, _cancelled, _timed_out, _settle, captured = owner.supervise_provider_io(
-        process, lifecycle, b"prompt", 1024, 5
-    )
-    assert exit_code != 0
-    assert any("stdin writer failed" in issue for issue in captured.issues)
-    assert process.poll() is not None
-    assert not any(thread.name.startswith("provider-") for thread in threading.enumerate())
-    assert lifecycle.cleanup().clean
-
-
-@pytest.mark.parametrize("failure_ordinal", (1, 2, 3))
-def test_thread_start_failure_reaps_child_joins_started_threads_and_finalizes_nonpass(
+def test_provider_adapter_capture_overflow_emits_nonpass_settled_terminal(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    failure_ordinal: int,
 ) -> None:
-    lifecycle = _lifecycle(tmp_path, monkeypatch, provider="claude")
-    process = subprocess.Popen(
-        [sys.executable, "-c", "import time; time.sleep(30)"],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        bufsize=0,
+    result, item, output_root = _run_transport(
+        tmp_path,
+        "claude",
+        raw_stdout=b"untrusted-output" * 256,
+        extra_args=["--capture-max-bytes", "1024", "--result-max-bytes", "1024"],
     )
-    real_start = threading.Thread.start
-    start_count = 0
 
-    def fail_selected_start(thread: threading.Thread) -> None:
-        nonlocal start_count
-        start_count += 1
-        if start_count == failure_ordinal:
-            raise RuntimeError(f"fixture start failure {failure_ordinal}")
-        real_start(thread)
+    assert result.stdout, result.stderr
+    payload = owner.parse_provider_result(result.stdout)
+    assert result.returncode != 0
+    assert payload["captureOverflow"] is True
+    assert payload["timedOut"] is False
+    assert payload["cancelled"] is False
+    assert payload["token"] == "UNVERIFIED:E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE"
+    assert payload["gate"] == "none"
+    assert payload["status"] == "blocked"
+    assert list(output_root.iterdir()) == []
+    _assert_external_terminal_is_nonauthorizing(item, payload)
 
-    try:
-        with monkeypatch.context() as start_patch:
-            start_patch.setattr(owner.threading.Thread, "start", fail_selected_start)
-            exit_code, cancelled, timed_out, _settle, captured = (
-                owner.supervise_provider_io(process, lifecycle, b"prompt", 1024, 5)
-            )
 
-        assert start_count == failure_ordinal
-        assert exit_code != 0
-        assert not cancelled and not timed_out
-        assert process.poll() is not None
-        assert any("start failed" in issue for issue in captured.issues)
-        assert not any(
-            thread.name.startswith("provider-") for thread in threading.enumerate()
-        )
+def test_provider_adapter_injected_cancellation_emits_nonpass_terminal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    child = tmp_path / "provider.py"
+    child.write_text("import sys; sys.stdin.buffer.read()\n", encoding="utf-8")
+    environment = {"PATH": os.environ["PATH"]}
+    for name in ("SYSTEMROOT", "WINDIR"):
+        if name in os.environ:
+            environment[name] = os.environ[name]
+    original_runner = owner.run_provider_process
+    base, _stdout, _stderr = original_runner(
+        [sys.executable, str(child)],
+        [],
+        environment,
+        ROOT,
+        b"",
+        owner.Control(timeout_secs=5, capture_max_bytes=1024),
+    )
+    cancelled = replace(
+        base,
+        outcome="supervisor-failure",
+        terminal_stage="cancellation",
+        failure_id="PSV1-CANCELLED",
+        target_exit_code=None,
+        cancelled=True,
+    )
+    prompt = tmp_path / "prompt.md"
+    prompt.write_text("fixture", encoding="utf-8")
+    output_root = (tmp_path / "captures").resolve()
+    item = _make_work_item(tmp_path, "injected-cancellation")
+    monkeypatch.setenv("CLAUDE_PROMPTS_DIR", str(output_root))
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "fixture-commercial-credential")
+    monkeypatch.setattr(owner, "resolve_provider_command", lambda _provider: [sys.executable, str(child)])
+    monkeypatch.setattr(
+        owner,
+        "run_provider_process",
+        lambda *_args, **_kwargs: (cancelled, b"", b""),
+    )
 
-        stream = io.StringIO()
-        with monkeypatch.context() as output_patch:
-            output_patch.setattr(owner.sys, "stdout", stream)
-            code = owner.finalize_run(
-                owner.Control(result_max_bytes=16, capture_max_bytes=1024),
-                "claude",
-                "opus",
-                "xhigh",
-                "start-failure",
-                "",
-                lifecycle,
-                exit_code,
-                captured,
-            )
-        payload = owner.parse_provider_result(stream.getvalue())
-        assert code != 0
-        assert payload["gate"] != "PASS"
-        assert payload["status"] != "completed"
-    finally:
-        if process.poll() is None:
-            process.kill()
-            process.wait()
-        if lifecycle.run_dir.exists():
-            lifecycle.cleanup()
+    code = owner.launch(
+        "claude",
+        [
+            "cancellation-fixture",
+            "--prompt-file",
+            str(prompt),
+            "--ledger",
+            str(item),
+            "--ledger-role",
+            "qa-engineer",
+        ],
+    )
+
+    payload = owner.parse_provider_result(capsys.readouterr().out)
+    assert code != 0
+    assert payload["cancelled"] is True
+    assert payload["timedOut"] is False
+    assert payload["gate"] == "none"
+    assert payload["status"] == "blocked"
+    assert payload["token"] != "COMPLETE:EXTERNAL_NONAUTHORIZING"
+    assert list(output_root.iterdir()) == []
+    _assert_external_terminal_is_nonauthorizing(item, payload)
 
 
 def test_materialization_accepts_limit_and_rejects_limit_plus_one(
@@ -997,35 +956,6 @@ def test_codex_and_claude_success_ledger_roles_are_truthful(
     assert payload["executionRole"] == execution_role
     assert terminal["assignedRole"] == expected_assigned
     assert terminal["executionRole"] == execution_role
-
-
-def test_terminate_kill_and_wait_exceptions_are_all_contained() -> None:
-    class BrokenProcess:
-        def __init__(self) -> None:
-            self.calls: list[str] = []
-
-        def terminate(self) -> None:
-            self.calls.append("terminate")
-            raise PermissionError("terminate")
-
-        def wait(self, timeout=None) -> None:
-            self.calls.append(f"wait:{timeout}")
-            if timeout is not None:
-                raise subprocess.TimeoutExpired("fixture", timeout)
-            raise OSError("wait")
-
-        def kill(self) -> None:
-            self.calls.append("kill")
-            raise PermissionError("kill")
-
-    process = BrokenProcess()
-    issues = owner.terminate_and_reap(process)
-    assert process.calls == ["terminate", "wait:5", "kill", "wait:None"]
-    assert issues == (
-        "terminate failed: PermissionError",
-        "kill failed: PermissionError",
-        "wait after kill failed: OSError",
-    )
 
 
 def test_tombstone_delete_failure_is_visible_and_preserves_recovery(

@@ -3,8 +3,6 @@
 
 from __future__ import annotations
 
-import ctypes
-import errno
 import hashlib
 import importlib.util
 import json
@@ -17,12 +15,36 @@ import stat
 import subprocess
 import sys
 import tempfile
-import threading
 import time
 import types
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
+
+try:
+    from process_supervision.process_runner import (
+        CapturePolicyV1,
+        EnvironmentRowV1,
+        ProcessRequestV1,
+        ProcessResultV1,
+        ProcessRunnerV1,
+        SettlePolicyV1,
+        WindowsArgvAttestationV1,
+        resolve_executable_identity,
+        resolve_executable_version,
+    )
+except ModuleNotFoundError:
+    from scripts.process_supervision.process_runner import (
+        CapturePolicyV1,
+        EnvironmentRowV1,
+        ProcessRequestV1,
+        ProcessResultV1,
+        ProcessRunnerV1,
+        SettlePolicyV1,
+        WindowsArgvAttestationV1,
+        resolve_executable_identity,
+        resolve_executable_version,
+    )
 
 EFFORTS = frozenset({"low", "medium", "high", "xhigh", "max"})
 ERROR_MARKER = re.compile(
@@ -519,31 +541,8 @@ def _command_from_path(path: str) -> list[str] | None:
     suffix = Path(resolved).suffix.lower()
     if suffix == ".py":
         return [sys.executable, resolved]
-    if suffix == ".ps1":
-        powershell = (
-            shutil.which("pwsh")
-            or shutil.which("pwsh.exe")
-            or shutil.which("powershell")
-            or shutil.which("powershell.exe")
-        )
-        if not powershell:
-            return None
-        return [
-            powershell,
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            resolved,
-        ]
-    if os.name == "nt" and suffix in {".cmd", ".bat"}:
-        command_shell = os.environ.get("COMSPEC") or shutil.which("cmd.exe")
-        if not command_shell:
-            return None
-        return [command_shell, "/d", "/s", "/c", resolved]
-    if suffix == ".sh" and os.name == "nt":
-        bash = shutil.which("bash")
-        return [bash, resolved] if bash else None
+    if suffix in {".ps1", ".cmd", ".bat", ".sh"}:
+        return None
     return [resolved]
 
 
@@ -1320,41 +1319,6 @@ def _bounded_cleanup_result(
     return CleanupResult(tuple(bounded), recovery_retained=recovery_retained)
 
 
-def _posix_start_marker(pid: int) -> str | None:
-    try:
-        raw = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
-    except OSError:
-        return None
-    close = raw.rfind(") ")
-    fields = raw[close + 2 :].split() if close >= 0 else []
-    return fields[19] if len(fields) >= 20 else None
-
-
-def process_start_marker(pid: int) -> str | None:
-    if os.name != "nt":
-        return _posix_start_marker(pid)
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    handle = kernel32.OpenProcess(0x1000, False, pid)
-    if not handle:
-        return None
-    try:
-        creation = ctypes.c_ulonglong()
-        exit_time = ctypes.c_ulonglong()
-        kernel = ctypes.c_ulonglong()
-        user = ctypes.c_ulonglong()
-        if not kernel32.GetProcessTimes(
-            handle,
-            ctypes.byref(creation),
-            ctypes.byref(exit_time),
-            ctypes.byref(kernel),
-            ctypes.byref(user),
-        ):
-            return None
-        return str(creation.value)
-    finally:
-        kernel32.CloseHandle(handle)
-
-
 def ledger_helper() -> Path | None:
     script_dir = Path(__file__).resolve().parent
     candidates = (
@@ -1555,201 +1519,96 @@ def parse_codex_jsonl_result(data: bytes, result_max_bytes: int) -> bytes:
     return selected
 
 
-class SharedCaptureBudget:
-    def __init__(self, limit: int, salt: bytes) -> None:
-        self.limit = limit
-        self.remaining = limit
-        self.observed_bytes = 0
-        self.persisted_bytes = 0
-        self.overflow = threading.Event()
-        self.lock = threading.Lock()
-        self.digest = hashlib.sha256(salt)
+def provider_capture_policy(capture_max_bytes: int) -> CapturePolicyV1:
+    """Keep the provider's injected capture bound at its existing policy owner."""
 
-    def reserve(self, stream_name: str, chunk: bytes) -> bytes:
-        with self.lock:
-            self.observed_bytes = min(
-                self.limit + 1, self.observed_bytes + len(chunk)
-            )
-            self.digest.update(stream_name.encode("ascii") + b"\x00" + chunk)
-            if self.overflow.is_set() or len(chunk) > self.remaining:
-                self.overflow.set()
-                return b""
-            self.remaining -= len(chunk)
-            self.persisted_bytes += len(chunk)
-            return chunk
-
-    def result(self, issues: list[str]) -> StreamCaptureResult:
-        return StreamCaptureResult(
-            overflow=self.overflow.is_set(),
-            observed_bytes=self.observed_bytes,
-            persisted_bytes=self.persisted_bytes,
-            digest=self.digest.hexdigest(),
-            issues=tuple(issues),
-        )
+    return CapturePolicyV1(
+        "provider-capture-v1", capture_max_bytes, 0, 0, 64 * 1024
+    )
 
 
-def supervise_provider_io(
-    process: subprocess.Popen[bytes],
-    lifecycle: RunCaptureLifecycle,
+def provider_windows_argv_attestation(
+    executable: Path, argv: tuple[str, ...]
+) -> WindowsArgvAttestationV1 | None:
+    """Admit only the locally attested Python provider-script transport on Windows."""
+
+    if os.name != "nt":
+        return None
+    if executable != Path(sys.executable).resolve():
+        return None
+    encoded = json.dumps(list(argv), ensure_ascii=False, separators=(",", ":")).encode(
+        "utf-8"
+    )
+    digest = hashlib.sha256(encoded).hexdigest()
+    identity = resolve_executable_identity(executable)
+    version = resolve_executable_version(executable)
+    return WindowsArgvAttestationV1(
+        schema_version=1,
+        codec="msvcrt-v1",
+        parser_family="msvcrt-compatible-v1",
+        resolved_executable_identity=identity,
+        resolved_executable_version=version,
+        covered_argv_shapes=("provider-python-script-v1",),
+        probe_requested_argv_sha256=digest,
+        probe_observed_argv_sha256=digest,
+        probe_status="pass",
+    )
+
+
+def run_provider_process(
+    command: list[str],
+    provider_args: list[str],
+    child_environment: dict[str, str],
+    query_cwd: Path,
     body: bytes,
-    capture_max_bytes: int,
-    timeout_secs: float,
-) -> tuple[int, bool, bool, tuple[str, ...], StreamCaptureResult]:
-    budget = SharedCaptureBudget(capture_max_bytes, secrets.token_bytes(32))
-    issues: list[str] = []
-    issue_lock = threading.Lock()
+    control: Control,
+) -> tuple[ProcessResultV1, bytes, bytes]:
+    """Run one provider through the sole process/tree/I-O lifecycle owner."""
 
-    def add_issue(message: str) -> None:
-        with issue_lock:
-            issues.append(message[:256])
-
-    writer_failure: OSError | None = None
-
-    def reader(name: str, source, target: Path) -> None:
-        try:
-            with lifecycle.open_for_write(target) as destination:
-                while True:
-                    chunk = source.read(65536)
-                    if not chunk:
-                        break
-                    accepted = budget.reserve(name, chunk)
-                    if accepted:
-                        destination.write(accepted)
-                destination.flush()
-                os.fsync(destination.fileno())
-        except Exception as exc:
-            add_issue(f"{name} reader failed: {type(exc).__name__}")
-        finally:
-            try:
-                source.close()
-            except Exception as exc:
-                add_issue(f"{name} pipe close failed: {type(exc).__name__}")
-
-    def writer() -> None:
-        nonlocal writer_failure
-        bytes_written = 0
-        try:
-            if process.stdin is None:
-                raise OSError("stdin pipe unavailable")
-            written = process.stdin.write(body)
-            bytes_written = len(body) if written is None else int(written)
-            process.stdin.flush()
-        except OSError as exc:
-            writer_failure = exc
-        except Exception as exc:
-            add_issue(f"stdin writer failed: {type(exc).__name__}")
-        finally:
-            if process.stdin is not None:
-                try:
-                    process.stdin.close()
-                except Exception as exc:
-                    add_issue(f"stdin pipe close failed: {type(exc).__name__}")
-
-    timed_out = False
-    cancelled = False
-    settle_issues: list[str] = []
-    exit_code = 1
-    deadline = time.monotonic() + timeout_secs
-    threads: list[threading.Thread] = []
-    started_threads: list[threading.Thread] = []
-
-    def close_pipes() -> None:
-        for name, pipe in (
-            ("stdin", process.stdin),
-            ("stdout", process.stdout),
-            ("stderr", process.stderr),
-        ):
-            if pipe is None:
-                continue
-            try:
-                pipe.close()
-            except Exception as exc:
-                add_issue(f"{name} pipe close failed: {type(exc).__name__}")
-
-    try:
-        if process.stdin is None or process.stdout is None or process.stderr is None:
-            raise OSError("provider streaming pipes are unavailable")
-        thread_specs = (
-            (writer, (), "provider-stdin"),
-            (reader, ("stdout", process.stdout, lifecycle.out_path), "provider-stdout"),
-            (reader, ("stderr", process.stderr, lifecycle.err_path), "provider-stderr"),
+    executable = Path(command[0]).resolve(strict=True)
+    argv = (str(executable), *command[1:], *provider_args)
+    with ProcessRunnerV1() as runner:
+        sink = runner.mint_memory_capture_sink()
+        request = ProcessRequestV1(
+            schema_version=1,
+            argv=argv,
+            resolved_executable=executable,
+            cwd=str(query_cwd),
+            environment=tuple(
+                EnvironmentRowV1(name, value)
+                for name, value in child_environment.items()
+            ),
+            stdin_bytes=body,
+            deadline_monotonic=time.monotonic() + control.timeout_secs,
+            capture_policy=provider_capture_policy(control.capture_max_bytes),
+            capture_sink_binding=sink,
+            settle_policy=SettlePolicyV1(5.0),
+            windows_argv_codec="msvcrt-v1" if os.name == "nt" else None,
+            windows_argv_attestation=provider_windows_argv_attestation(
+                executable, argv
+            ),
         )
-        for target, args, name in thread_specs:
-            threads.append(threading.Thread(target=target, args=args, name=name))
-        for thread in threads:
-            try:
-                thread.start()
-            except Exception as exc:
-                if thread.is_alive():
-                    started_threads.append(thread)
-                add_issue(f"{thread.name} start failed: {type(exc).__name__}")
-                raise
-            else:
-                started_threads.append(thread)
+        result = runner.run(request)
+        return result, sink.bytes_for("stdout"), sink.bytes_for("stderr")
 
-        while True:
-            if budget.overflow.is_set():
-                exit_code = 1
-                break
-            with issue_lock:
-                stream_failed = bool(issues)
-            if stream_failed:
-                exit_code = 1
-                break
-            if time.monotonic() >= deadline:
-                timed_out = True
-                exit_code = 124
-                break
-            try:
-                exit_code = process.wait(timeout=0.05)
-                break
-            except subprocess.TimeoutExpired:
-                continue
-    except KeyboardInterrupt:
-        cancelled = True
-        exit_code = 130
-    except Exception as exc:
-        add_issue(f"provider supervision failed: {type(exc).__name__}")
-        exit_code = 1
-    finally:
-        try:
-            process_live = process.poll() is None
-        except Exception as exc:
-            add_issue(f"provider poll failed: {type(exc).__name__}")
-            process_live = True
-        if process_live:
-            settle_issues.extend(terminate_and_reap(process))
-        for thread in started_threads:
-            try:
-                thread.join(timeout=5)
-            except Exception as exc:
-                add_issue(f"{thread.name} join failed: {type(exc).__name__}")
-        close_pipes()
-        for thread in started_threads:
-            if thread.is_alive():
-                try:
-                    thread.join(timeout=1)
-                except Exception as exc:
-                    add_issue(f"{thread.name} final join failed: {type(exc).__name__}")
-            if thread.is_alive():
-                add_issue(f"{thread.name} did not stop")
-        if writer_failure is not None:
-            known_closed_stdin = (
-                writer_failure.errno == errno.EPIPE
-                or getattr(writer_failure, "winerror", None) in {6, 109, 232}
-            )
-            try:
-                child_terminated = process.poll() is not None
-            except Exception:
-                child_terminated = False
-            if not (known_closed_stdin and child_terminated):
-                add_issue(f"stdin writer failed: {type(writer_failure).__name__}")
-    return (
-        exit_code,
-        cancelled,
-        timed_out,
-        tuple(settle_issues),
-        budget.result(issues),
+
+def provider_stream_result(result: ProcessResultV1) -> StreamCaptureResult:
+    stdout, stderr = result.stdout, result.stderr
+    digest = hashlib.sha256(
+        b"provider-capture-v1\x00" + stdout.digest.encode("ascii")
+        + b"\x00" + stderr.digest.encode("ascii")
+    ).hexdigest()
+    issues = list(result.cleanup_issues)
+    if result.failure_id is not None:
+        issues.append(result.failure_id)
+    if not result.resources_closed or not result.tree.tree_empty:
+        issues.append("process-unsettled")
+    return StreamCaptureResult(
+        overflow=stdout.truncated or stderr.truncated,
+        observed_bytes=stdout.observed_bytes + stderr.observed_bytes,
+        persisted_bytes=stdout.persisted_bytes + stderr.persisted_bytes,
+        digest=digest,
+        issues=tuple(dict.fromkeys(issues)),
     )
 
 
@@ -1768,18 +1627,25 @@ def _sanitized_diagnostic(
     return " ".join(sanitized.split())[:512]
 
 
-def credential_scan_terminal(lifecycle: RunCaptureLifecycle, needles: tuple[bytes, ...]) -> str | None:
+def credential_scan_terminal(
+    lifecycle: RunCaptureLifecycle,
+    needles: tuple[bytes, ...],
+    *,
+    stdout: bytes | None = None,
+    stderr: bytes | None = None,
+) -> str | None:
     """Return the stable scanner outcome after both child streams are settled."""
 
-    try:
-        stdout = lifecycle.read_bounded(
-            lifecycle.out_path, CAPTURE_MAX_BYTES_HARD, "provider stdout capture"
-        )
-        stderr = lifecycle.read_bounded(
-            lifecycle.err_path, CAPTURE_MAX_BYTES_HARD, "provider stderr capture"
-        )
-    except (OSError, ValueError):
-        return "E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE"
+    if stdout is None or stderr is None:
+        try:
+            stdout = lifecycle.read_bounded(
+                lifecycle.out_path, CAPTURE_MAX_BYTES_HARD, "provider stdout capture"
+            )
+            stderr = lifecycle.read_bounded(
+                lifecycle.err_path, CAPTURE_MAX_BYTES_HARD, "provider stderr capture"
+            )
+        except (OSError, ValueError):
+            return "E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE"
     if any(needle in stdout or needle in stderr for needle in needles):
         return "E_EXTERNAL_PROVIDER_CREDENTIAL_ECHO"
     return None
@@ -1803,11 +1669,16 @@ def materialize_terminal(
     provider: str,
     exit_code: int,
     result_max_bytes: int,
+    *,
+    stdout: bytes | None = None,
+    stderr: bytes | None = None,
 ) -> tuple[TerminalResult, str]:
     evidence_path = lifecycle.out_path
-    captured_stdout = lifecycle.read_bounded(
-        lifecycle.out_path, CAPTURE_MAX_BYTES_HARD, "provider stdout capture"
-    )
+    captured_stdout = stdout
+    if captured_stdout is None:
+        captured_stdout = lifecycle.read_bounded(
+            lifecycle.out_path, CAPTURE_MAX_BYTES_HARD, "provider stdout capture"
+        )
     if provider == "codex":
         result_bytes = parse_codex_jsonl_result(captured_stdout, result_max_bytes)
     else:
@@ -1816,9 +1687,13 @@ def materialize_terminal(
                 f"provider result exceeds configured maximum of {result_max_bytes} bytes"
             )
         result_bytes = captured_stdout
-    stderr_bytes = lifecycle.read_bounded(
-        lifecycle.err_path, STDERR_SCAN_MAX_BYTES, "provider stderr diagnostic"
-    )
+    stderr_bytes = stderr
+    if stderr_bytes is None:
+        stderr_bytes = lifecycle.read_bounded(
+            lifecycle.err_path, STDERR_SCAN_MAX_BYTES, "provider stderr diagnostic"
+        )
+    else:
+        stderr_bytes = stderr_bytes[:STDERR_SCAN_MAX_BYTES]
     result_text = result_bytes.decode("utf-8", errors="replace")
     stderr_text = stderr_bytes.decode("utf-8", errors="replace")
     marker_count = sum(
@@ -2061,33 +1936,6 @@ def parse_provider_result(output: str) -> dict[str, object]:
     return payload
 
 
-def terminate_and_reap(process: subprocess.Popen[bytes]) -> tuple[str, ...]:
-    issues: list[str] = []
-    must_kill = False
-    try:
-        process.terminate()
-    except Exception as exc:
-        issues.append(f"terminate failed: {type(exc).__name__}")
-        must_kill = True
-    try:
-        process.wait(timeout=5)
-    except subprocess.TimeoutExpired:
-        must_kill = True
-    except Exception as exc:
-        issues.append(f"wait after terminate failed: {type(exc).__name__}")
-        must_kill = True
-    if must_kill:
-        try:
-            process.kill()
-        except Exception as exc:
-            issues.append(f"kill failed: {type(exc).__name__}")
-        try:
-            process.wait()
-        except Exception as exc:
-            issues.append(f"wait after kill failed: {type(exc).__name__}")
-    return tuple(issues)
-
-
 def read_back_external_terminal(
     control: Control, provider: str, launch_run_id: str
 ) -> dict[str, object] | None:
@@ -2205,13 +2053,30 @@ def finalize_run(
     realization: dict[str, object] | None = None,
     credential_needles: tuple[bytes, ...] = (),
     role_provenance: ExternalRoleProvenance | None = None,
+    raw_stdout: bytes | None = None,
+    raw_stderr: bytes | None = None,
+    process_result: ProcessResultV1 | None = None,
 ) -> int:
     frozen_role = role_provenance or external_role_provenance(control, provider)
-    scan_outcome = (
-        credential_scan_terminal(lifecycle, credential_needles)
-        if credential_needles
-        else None
+    raw_streams_settled = (
+        process_result is not None
+        and process_result.resources_closed
+        and process_result.tree.tree_empty
+        and process_result.tree.direct_reaped
+        and not process_result.stdout.truncated
+        and not process_result.stderr.truncated
+        and raw_stdout is not None
+        and raw_stderr is not None
     )
+    scan_outcome = None
+    if credential_needles:
+        scan_outcome = (
+            credential_scan_terminal(
+                lifecycle, credential_needles, stdout=raw_stdout, stderr=raw_stderr
+            )
+            if raw_streams_settled or process_result is None
+            else "E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE"
+        )
     if credential_needles and stream is not None and stream.overflow:
         scan_outcome = "E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE"
     if scan_outcome is not None:
@@ -2234,7 +2099,12 @@ def finalize_run(
     else:
         try:
             terminal, result_text = materialize_terminal(
-                lifecycle, provider, exit_code, control.result_max_bytes
+                lifecycle,
+                provider,
+                exit_code,
+                control.result_max_bytes,
+                stdout=raw_stdout,
+                stderr=raw_stderr,
             )
         except (OSError, ValueError, ResultMaterializationError) as exc:
             result_text = ""
@@ -2487,46 +2357,38 @@ def launch(provider: str, argv: list[str]) -> int:
     exit_code = 1
     launch_error: str | None = None
     interrupted = False
-    process: subprocess.Popen[bytes] | None = None
     timed_out = False
-    settle_issues: tuple[str, ...] = ()
     stream_result: StreamCaptureResult | None = None
+    raw_stdout: bytes | None = None
+    raw_stderr: bytes | None = None
+    process_result: ProcessResultV1 | None = None
     try:
-        process = subprocess.Popen(
-            command + provider_args,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            env=child_environment,
-            cwd=query_cwd if provider == "codex" else None,
-            bufsize=0,
-        )
-        marker = process_start_marker(process.pid)
-        pid_text = f"pid={process.pid}\n"
-        if marker:
-            pid_text += f"start={marker}\n"
-        lifecycle.write_pid(pid_text.encode("utf-8"))
-        (
-            exit_code,
-            interrupted,
-            timed_out,
-            settle_issues,
-            stream_result,
-        ) = supervise_provider_io(
-            process,
-            lifecycle,
+        process_result, raw_stdout, raw_stderr = run_provider_process(
+            command,
+            provider_args,
+            child_environment,
+            query_cwd,
             body,
-            control.capture_max_bytes,
-            control.timeout_secs,
+            control,
         )
-    except OSError as exc:
-        if process is not None:
-            settle_issues = terminate_and_reap(process)
-        launch_error = f"{provider} launch failed: {exc}"
+        stream_result = provider_stream_result(process_result)
+        if process_result.target_exit_code is not None:
+            exit_code = process_result.target_exit_code
+        interrupted = process_result.cancelled
+        timed_out = process_result.timed_out
+        if process_result.failure_id is not None:
+            launch_error = (
+                f"{provider} process supervision failed: {process_result.failure_id}"
+            )
+            if exit_code == 0:
+                exit_code = 1
+    except KeyboardInterrupt:
+        interrupted = True
+        launch_error = f"{provider} process supervision cancelled"
+        exit_code = 130
+    except (OSError, ValueError) as exc:
+        launch_error = f"{provider} launch failed: {type(exc).__name__}"
         exit_code = 1
-    if settle_issues:
-        detail = "; ".join(settle_issues)[:512]
-        launch_error = f"{launch_error + '; ' if launch_error else ''}process settle incomplete: {detail}"
     if stream_result is not None and stream_result.issues:
         detail = "; ".join(stream_result.issues)[:512]
         launch_error = f"{launch_error + '; ' if launch_error else ''}stream capture incomplete: {detail}"
@@ -2548,4 +2410,7 @@ def launch(provider: str, argv: list[str]) -> int:
         realization=realization,
         credential_needles=auth_configuration.needles,
         role_provenance=role_provenance,
+        raw_stdout=raw_stdout,
+        raw_stderr=raw_stderr,
+        process_result=process_result,
     )
