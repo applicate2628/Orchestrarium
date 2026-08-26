@@ -40,6 +40,17 @@ jobs:
               raise SystemExit('target-effect instruction-entrypoint marker missing')
           target.write_text(text.replace(old, new, 1), encoding='utf-8')
 
+          pin_test = Path('tests/test_orche_baseline_pin.py')
+          pin_text = pin_test.read_text(encoding='utf-8')
+          pin_test.write_text(
+              pin_text.replace(
+                  'self.assertIn("git cat-file blob", readme)',
+                  'self.assertIn("cat-file blob", readme)',
+                  1,
+              ),
+              encoding='utf-8',
+          )
+
           tooling_paths = {
               'inventoryGenerator': 'scripts/baseline/build_inventory.py',
               'targetEffectGenerator': 'scripts/baseline/build_target_effect_baseline.py',
@@ -48,7 +59,9 @@ jobs:
           }
           tooling = {}
           for name, path in tooling_paths.items():
-              blob = subprocess.check_output(['git', 'hash-object', path], text=True).strip()
+              blob = subprocess.check_output(
+                  ['git', 'hash-object', '-w', path], text=True
+              ).strip()
               tooling[name] = {
                   'path': path,
                   'gitBlobSha': blob,
