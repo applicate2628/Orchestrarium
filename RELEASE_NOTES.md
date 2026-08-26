@@ -10,6 +10,12 @@ Keep the log in reverse-chronological `## YYYY-MM-DD` sections. Add new explanat
 
 Do not add entries for purely local-only hygiene edits such as formatting, link fixes, report-only churn, scratch cleanup, archive moves, or non-semantic wording cleanup.
 
+## 2026-08-26
+
+### Added
+
+- **Stage 0 now provides a reproducible immutable parity baseline before Orche 2.0 runtime migration begins.** The new developer workflow pins the accepted `main` commit and tree, deterministically inventories every tracked baseline file and test, records repository-shape target effects without inventing unavailable runtime measurements, and compares candidate Pytest and command outcomes with the pinned baseline. **Why it matters:** maintainers can prove that files, tests, known failures, exit semantics, and baseline identity were not silently lost before later migration or legacy removal. **Developer workflow:** run the commands documented in `baseline/orchestrarium-v1/README.md`; generated review evidence remains local under `.scratch/orche-stage0/`. **Preserved:** installed provider runtimes, roles, workflows, hooks, installers, user configuration, publication behavior, and current Orchestrarium runtime semantics are unchanged.
+
 ## 2026-08-09
 
 ### Fixed
