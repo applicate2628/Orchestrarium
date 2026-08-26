@@ -21,6 +21,7 @@ STABLE_ID = "E_TRANSPORT_PROJECTION_PARITY"
 SCHEMA_VERSION = 1
 TRANSPORT_FILES = (
     "provider_prompt.py",
+    "process_supervision/process_runner.py",
     "invoke-codex-prompt.py",
     "invoke-claude-prompt.py",
     "invoke-kimi-prompt.py",

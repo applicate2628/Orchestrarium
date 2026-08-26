@@ -7,6 +7,11 @@
       "sha256": "1a636a300dfe9256714ccd14f4c0775cd8077b4243be36b9fa0c8876a9e91bd9",
       "destination": "scripts/provider_prompt.py"
     },
+    "process_supervision/process_runner.py": {
+      "source": "scripts/process_supervision/process_runner.py",
+      "sha256": "8fb478d0767622ed71655242b7e7bf519ca990a487f0af93156f95075346cdb6",
+      "destination": "scripts/process_supervision/process_runner.py"
+    },
     "invoke-codex-prompt.py": {
       "source": "scripts/invoke-codex-prompt.py",
       "sha256": "0b085a6fd0e28a5a486c8ef25bf52d4c69123d94cc8712d63dd30deadcc5f665",

@@ -33,6 +33,7 @@ RUNTIME_HELPERS = (
     "check-work-items-state.sh",
     "mutate-work-item.py",
     "provider_prompt.py",
+    "process_supervision/process_runner.py",
     "invoke-codex-prompt.py",
     "invoke-claude-prompt.py",
     "invoke-kimi-prompt.py",
@@ -49,6 +50,7 @@ RUNTIME_HELPERS = (
 CODEX_RUNTIME_HELPERS = ("check-hook-health.py",)
 TRANSPORT_PROJECTION_FILES = (
     "provider_prompt.py",
+    "process_supervision/process_runner.py",
     "invoke-codex-prompt.py",
     "invoke-claude-prompt.py",
     "invoke-kimi-prompt.py",
@@ -57,6 +59,16 @@ TRANSPORT_PROJECTION_FILES = (
     "external-role-taxonomy.v1.json",
 )
 TRANSPORT_PROJECTION_MANIFEST = "provider-prompt-projections.v1.json"
+
+
+def _is_transport_runtime_source(root: Path, source: Path) -> bool:
+    if source.name in TRANSPORT_PROJECTION_FILES:
+        return True
+    try:
+        relative = source.relative_to(root / "scripts").as_posix()
+    except ValueError:
+        return False
+    return relative in TRANSPORT_PROJECTION_FILES
 STOCK_8521_CLAUDE_TRANSPORT_PROJECTION_SHA256 = (
     ("provider_prompt.py", "4bfb92cb92039f73ce5eca397f22a5df7b9ef9203486cbd81c654e485315edf1"),
     ("invoke-codex-prompt.py", "0b085a6fd0e28a5a486c8ef25bf52d4c69123d94cc8712d63dd30deadcc5f665"),
@@ -1751,7 +1763,10 @@ def _stage_claude_transport_projection(
     if states == ("absent",) * len(TRANSPORT_PROJECTION_FILES) and manifest_state == "absent":
         pending_files = files
         manifest_pending = True
-    elif states == ("absent", "current", "current", "absent", "absent", "absent", "absent") and manifest_state == "absent":
+    elif states in {
+        ("absent", "absent", "current", "current", "absent", "absent", "absent", "absent"),
+        ("absent", "absent", "absent", "absent", "absent", "absent", "current", "current"),
+    } and manifest_state == "absent":
         pending_files = tuple(
             (name, payload)
             for (name, payload), state in zip(files, states)
@@ -1784,7 +1799,7 @@ def _stage_claude_transport_projection(
             for name, expected in ACCEPTED_CLAUDE_TRANSPORT_PROJECTION_PRIORS.items()
             if observed_prior == expected
         )
-    elif states == ("accepted-prior", "current", "current", "absent", "absent", "absent", "absent") and manifest_state == "absent":
+    elif states == ("accepted-prior", "absent", "current", "current", "absent", "absent", "absent", "absent") and manifest_state == "absent":
         pending_files = files
         manifest_pending = True
         replace_legacy_singleton = True
@@ -2140,7 +2155,7 @@ def _post_materialization_writer_destinations(
             root, target / "agents" / "scripts"
         ):
             if (
-                runtime_source.name not in TRANSPORT_PROJECTION_FILES
+                not _is_transport_runtime_source(root, runtime_source)
                 and runtime_source.name != TRANSPORT_PROJECTION_MANIFEST
             ):
                 add("runtime-outside", destination)
@@ -4700,7 +4715,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                         for source_path, destination in _runtime_file_destinations(
                             root, target_tree / "scripts"
                         )
-                        if source_path.name not in TRANSPORT_PROJECTION_FILES
+                        if not _is_transport_runtime_source(root, source_path)
                         and source_path.name != TRANSPORT_PROJECTION_MANIFEST
                     )
                     _install_runtime_files(

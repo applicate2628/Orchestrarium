@@ -20,6 +20,7 @@ VALIDATOR_PATH = ROOT / "scripts" / "validate-provider-prompt-projections.py"
 INSTALLER_PATH = ROOT / "scripts" / "production_installer.py"
 TRANSPORT_FILES = (
     "provider_prompt.py",
+    "process_supervision/process_runner.py",
     "invoke-codex-prompt.py",
     "invoke-claude-prompt.py",
     "invoke-kimi-prompt.py",
@@ -27,7 +28,17 @@ TRANSPORT_FILES = (
     "external-prompt-governance.md",
     "external-role-taxonomy.v1.json",
 )
-STOCK_8521_TRANSPORT_FILES = TRANSPORT_FILES[:-1]
+STOCK_8521_TRANSPORT_FILES = (
+    "provider_prompt.py",
+    "invoke-codex-prompt.py",
+    "invoke-claude-prompt.py",
+    "invoke-kimi-prompt.py",
+    "invoke-grok-prompt.py",
+    "external-prompt-governance.md",
+)
+STOCK_8F92_TRANSPORT_FILES = STOCK_8521_TRANSPORT_FILES + (
+    "external-role-taxonomy.v1.json",
+)
 AUTHORED_TRANSPORT_SOURCES = {
     name: Path("scripts") / name for name in TRANSPORT_FILES
 }
@@ -71,6 +82,19 @@ def _authored_transport_path(root: Path, name: str) -> Path:
     return root / AUTHORED_TRANSPORT_SOURCES[name]
 
 
+def _write_transport(root: Path, name: str, payload: bytes) -> Path:
+    path = root / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(payload)
+    return path
+
+
+def _copy_transport(source: Path, destination: Path, name: str) -> None:
+    target = destination / name
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(_authored_transport_path(source, name), target)
+
+
 def _stock_8521_blob(name: str) -> bytes:
     source = (
         f"shared/{name}"
@@ -89,9 +113,12 @@ def _stock_8521_blob(name: str) -> bytes:
 
 def _seed_stock_8521_transport(projection: Path) -> dict[str, Path]:
     projection.mkdir(parents=True, exist_ok=True)
-    current_only = projection / "external-role-taxonomy.v1.json"
-    if current_only.exists():
-        current_only.unlink()
+    for current_only in (
+        projection / "external-role-taxonomy.v1.json",
+        projection / "process_supervision" / "process_runner.py",
+    ):
+        if current_only.exists():
+            current_only.unlink()
     paths: dict[str, Path] = {}
     for name in STOCK_8521_TRANSPORT_FILES:
         path = projection / name
@@ -106,9 +133,12 @@ def _seed_stock_8521_transport(projection: Path) -> dict[str, Path]:
 
 def _seed_stock_7872_transport(projection: Path) -> dict[str, Path]:
     projection.mkdir(parents=True, exist_ok=True)
-    current_only = projection / "external-role-taxonomy.v1.json"
-    if current_only.exists():
-        current_only.unlink()
+    for current_only in (
+        projection / "external-role-taxonomy.v1.json",
+        projection / "process_supervision" / "process_runner.py",
+    ):
+        if current_only.exists():
+            current_only.unlink()
     paths: dict[str, Path] = {}
     for name in STOCK_8521_TRANSPORT_FILES:
         path = projection / name
@@ -153,8 +183,11 @@ def _stock_8f92_blob(name: str) -> bytes:
 
 def _seed_stock_8f92_transport(projection: Path) -> dict[str, Path]:
     projection.mkdir(parents=True, exist_ok=True)
+    current_only = projection / "process_supervision" / "process_runner.py"
+    if current_only.exists():
+        current_only.unlink()
     paths: dict[str, Path] = {}
-    for name in TRANSPORT_FILES:
+    for name in STOCK_8F92_TRANSPORT_FILES:
         path = projection / name
         path.write_bytes(_stock_8f92_blob(name))
         paths[name] = path
@@ -201,6 +234,7 @@ def test_source_manifest_binds_the_generated_governance_capsule() -> None:
 
     assert result["files"] == [
         "provider_prompt.py",
+        "process_supervision/process_runner.py",
         "invoke-codex-prompt.py",
         "invoke-claude-prompt.py",
         "invoke-kimi-prompt.py",
@@ -319,9 +353,13 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
             ).encode("utf-8")
         else:
             payload = f"# {name}\n".encode()
-        _authored_transport_path(source, name).write_bytes(payload)
-        (canonical / name).write_bytes(payload)
-        (claude / name).write_bytes(payload)
+        for path in (
+            _authored_transport_path(source, name),
+            canonical / name,
+            claude / name,
+        ):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(payload)
         files[name] = {
             "source": AUTHORED_TRANSPORT_SOURCES[name].as_posix(),
             "sha256": _sha(payload),
@@ -411,7 +449,7 @@ def test_project_scope_uses_its_paired_projections_without_reading_home(
     for destination in (canonical, claude):
         destination.mkdir(parents=True)
         for name in TRANSPORT_FILES:
-            shutil.copyfile(_authored_transport_path(source, name), destination / name)
+            _copy_transport(source, destination, name)
     home = tmp_path / "poisoned-home"
     poisoned = home / ".agents" / "skills" / "lead" / "scripts"
     poisoned.mkdir(parents=True)
@@ -472,7 +510,7 @@ def test_global_scope_uses_the_named_install_root_not_home(
     ):
         destination.mkdir(parents=True)
         for name in TRANSPORT_FILES:
-            shutil.copyfile(_authored_transport_path(source, name), destination / name)
+            _copy_transport(source, destination, name)
     monkeypatch.setenv("HOME", str(tmp_path / "poisoned-home"))
     monkeypatch.delenv("USERPROFILE", raising=False)
     result = subprocess.run(
@@ -795,7 +833,7 @@ def test_claude_transport_preflight_admits_only_atomic_projection_states(
         (claude / name).unlink()
     if state == "current":
         for name in TRANSPORT_FILES:
-            (claude / name).write_bytes(_authored_transport_path(source, name).read_bytes())
+            _write_transport(claude, name, _authored_transport_path(source, name).read_bytes())
         (claude.parent / "shared").mkdir(parents=True)
         (claude.parent / "shared" / "provider-prompt-projections.v1.json").write_bytes(
             (source / "shared" / "provider-prompt-projections.v1.json").read_bytes()
@@ -811,7 +849,7 @@ def _current_canonical_with_stock_8521_projection(
     projection = tmp_path / "claude" / "agents" / "scripts"
     canonical.mkdir(parents=True)
     for name in TRANSPORT_FILES:
-        (canonical / name).write_bytes(_authored_transport_path(ROOT, name).read_bytes())
+        _write_transport(canonical, name, _authored_transport_path(ROOT, name).read_bytes())
     paths = _seed_stock_8521_transport(projection)
     return canonical, projection, paths
 
@@ -823,7 +861,7 @@ def _current_canonical_with_stock_8f92_projection(
     projection = tmp_path / "claude" / "agents" / "scripts"
     canonical.mkdir(parents=True)
     for name in TRANSPORT_FILES:
-        (canonical / name).write_bytes(_authored_transport_path(ROOT, name).read_bytes())
+        _write_transport(canonical, name, _authored_transport_path(ROOT, name).read_bytes())
     paths = _seed_stock_8f92_transport(projection)
     return canonical, projection, paths
 
@@ -839,6 +877,7 @@ def test_exact_8f92_transport_set_is_one_atomic_prior_plan(tmp_path: Path) -> No
     assert staged.accepted_prior_set == "8f92dc73"
     assert tuple(name for name, _payload in staged.pending_files) == (
         "provider_prompt.py",
+        "process_supervision/process_runner.py",
     )
     assert staged.manifest_pending is True
     assert {
@@ -876,6 +915,7 @@ def test_exact_8521_transport_set_is_one_atomic_prior_plan(tmp_path: Path) -> No
     assert staged.accepted_prior_set == "8521b638"
     assert tuple(name for name, _payload in staged.pending_files) == (
         "provider_prompt.py",
+        "process_supervision/process_runner.py",
         "external-role-taxonomy.v1.json",
     )
     assert staged.manifest_pending is True
@@ -894,7 +934,7 @@ def test_exact_7872_six_member_transport_is_one_atomic_seven_member_plan(
     projection = tmp_path / "claude" / "agents" / "scripts"
     canonical.mkdir(parents=True)
     for name in TRANSPORT_FILES:
-        (canonical / name).write_bytes(_authored_transport_path(ROOT, name).read_bytes())
+        _write_transport(canonical, name, _authored_transport_path(ROOT, name).read_bytes())
     _seed_stock_7872_transport(projection)
 
     staged = installer._stage_claude_transport_projection(ROOT, canonical, projection)
@@ -902,6 +942,7 @@ def test_exact_7872_six_member_transport_is_one_atomic_seven_member_plan(
     assert staged.accepted_prior_set == "7872d36d"
     assert tuple(name for name, _payload in staged.pending_files) == (
         "provider_prompt.py",
+        "process_supervision/process_runner.py",
         "external-role-taxonomy.v1.json",
     )
     assert staged.manifest_pending is True
@@ -1235,7 +1276,7 @@ def test_8521_transport_dry_run_reports_two_replacements_without_mutation(
 
     assert installer.install("claude", [*args, "--dry-run"]) == 0
     output = capsys.readouterr().out
-    assert "transport prior 8521b638: 3 replacements" in output
+    assert "transport prior 8521b638: 4 replacements" in output
     assert {
         name: (
             path.read_bytes(),
@@ -1254,7 +1295,7 @@ def test_claude_transport_preflight_accepts_only_true_e7_legacy_singleton(
     canonical.mkdir(parents=True)
     projection.mkdir(parents=True)
     for name in TRANSPORT_FILES:
-        (canonical / name).write_bytes(_authored_transport_path(ROOT, name).read_bytes())
+        _write_transport(canonical, name, _authored_transport_path(ROOT, name).read_bytes())
     legacy = subprocess.run(
         ["git", "show", "e7a691dea4f1d3cb154d338c63b274ebcd74ee4c:src.claude/agents/scripts/provider_prompt.py"],
         cwd=ROOT,
@@ -1283,7 +1324,7 @@ def test_claude_transport_preflight_accepts_the_published_pre_e7_singleton(
     canonical.mkdir(parents=True)
     projection.mkdir(parents=True)
     for name in TRANSPORT_FILES:
-        (canonical / name).write_bytes(_authored_transport_path(ROOT, name).read_bytes())
+        _write_transport(canonical, name, _authored_transport_path(ROOT, name).read_bytes())
     legacy = subprocess.run(
         ["git", "show", "8b9fce435853e1988c449805786c9ce9cbf9579e:src.claude/agents/scripts/provider_prompt.py"],
         cwd=ROOT,
