@@ -4,14 +4,76 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
+import math
+import os
 import re
-import subprocess
 import sys
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Iterator, Sequence
+
+
+def _load_process_runner_module():
+    module_name = "_orchestrarium_process_runner_v1"
+    existing = sys.modules.get(module_name)
+    if existing is not None:
+        return existing
+    path = Path(__file__).resolve().parent / "process_supervision" / "process_runner.py"
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("process-runner-v1-unavailable")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    try:
+        spec.loader.exec_module(module)
+    except BaseException:
+        sys.modules.pop(module_name, None)
+        raise
+    return module
+
+
+_PROCESS_RUNNER = _load_process_runner_module()
+CapturePolicyV1 = _PROCESS_RUNNER.CapturePolicyV1
+EnvironmentRowV1 = _PROCESS_RUNNER.EnvironmentRowV1
+ProcessRequestV1 = _PROCESS_RUNNER.ProcessRequestV1
+ProcessRunnerV1 = _PROCESS_RUNNER.ProcessRunnerV1
+SettlePolicyV1 = _PROCESS_RUNNER.SettlePolicyV1
+WindowsArgvAttestationV1 = _PROCESS_RUNNER.WindowsArgvAttestationV1
+
+
+VALIDATOR_CHILD_TIMEOUT_SECONDS = 120.0
+VALIDATOR_SETTLEMENT_TIMEOUT_SECONDS = 5.0
+VALIDATOR_ORCHESTRATION_SECONDS = 2.0
+VALIDATOR_ENVIRONMENT_ALLOWLIST = (
+    "ALLUSERSPROFILE",
+    "APPDATA",
+    "COMSPEC",
+    "HOME",
+    "HOMEDRIVE",
+    "HOMEPATH",
+    "LANG",
+    "LC_ALL",
+    "LOCALAPPDATA",
+    "PATH",
+    "PATHEXT",
+    "PROGRAMDATA",
+    "PROGRAMFILES",
+    "PROGRAMW6432",
+    "PUBLIC",
+    "PYTHONIOENCODING",
+    "PYTHONUTF8",
+    "SYSTEMDRIVE",
+    "SYSTEMROOT",
+    "TEMP",
+    "TMP",
+    "TMPDIR",
+    "USERPROFILE",
+    "WINDIR",
+)
 
 
 LAW_ID_RE = re.compile(r"\b(A[1-9]|B[1-3]|C[1-6]|D[1-5])\b")
@@ -37,6 +99,72 @@ class Layout:
     skills: Path
     scripts: Path
     agents_text: str
+
+
+@dataclass(frozen=True)
+class ValidatorCapturePolicyV1:
+    """Single owner of the validator's enforceable capture values."""
+
+    policy_id: str = "validator-bounded-v1"
+    aggregate_persisted_limit: int = 1024 * 1024
+    prefix_limit_per_stream: int = 64 * 1024
+    tail_limit_per_stream: int = 128 * 1024
+    chunk_size: int = 64 * 1024
+
+    def to_capture_policy(self) -> CapturePolicyV1:
+        return CapturePolicyV1(
+            policy_id=self.policy_id,
+            aggregate_persisted_limit=self.aggregate_persisted_limit,
+            prefix_limit_per_stream=self.prefix_limit_per_stream,
+            tail_limit_per_stream=self.tail_limit_per_stream,
+            chunk_size=self.chunk_size,
+        )
+
+
+@dataclass(frozen=True)
+class ValidatorProcessResultV1:
+    returncode: int
+    stdout: str
+    stderr: str
+    failure_id: str | None
+    timed_out: bool
+    stdout_observed_bytes: int
+    stdout_persisted_bytes: int
+    stdout_truncated: bool
+    stderr_observed_bytes: int
+    stderr_persisted_bytes: int
+    stderr_truncated: bool
+    resources_closed: bool
+    settlement_state: str
+    tree_empty: bool
+    direct_reaped: bool
+    primary_thread_closed: bool
+    job_handle_closed: bool
+
+
+def required_validator_sequence_budget(child_deadlines: Sequence[float]) -> float:
+    deadlines = tuple(child_deadlines)
+    if not deadlines:
+        return 0.0
+    if any(
+        not isinstance(value, (int, float))
+        or not math.isfinite(value)
+        or value <= 0
+        for value in deadlines
+    ):
+        raise ValueError("validator-child-deadline-invalid")
+    return (
+        sum(float(value) + VALIDATOR_SETTLEMENT_TIMEOUT_SECONDS for value in deadlines)
+        + VALIDATOR_ORCHESTRATION_SECONDS
+    )
+
+
+def validator_environment_rows() -> tuple[EnvironmentRowV1, ...]:
+    return tuple(
+        EnvironmentRowV1(name, os.environ[name])
+        for name in VALIDATOR_ENVIRONMENT_ALLOWLIST
+        if name in os.environ
+    )
 
 
 def _read(path: Path) -> str:
@@ -149,12 +277,75 @@ def detect_layout(script: Path, provider: str, requested_root: Path | None = Non
     raise RuntimeError(f"Could not detect Orchestrarium {provider} layout ({expected}).")
 
 
+def _argv_sha256(argv: Sequence[str]) -> str:
+    return hashlib.sha256(
+        json.dumps(list(argv), ensure_ascii=False, separators=(",", ":")).encode(
+            "utf-8"
+        )
+    ).hexdigest()
+
+
+def _python_argv_attestation(
+    executable: Path,
+    argv: tuple[str, ...],
+) -> WindowsArgvAttestationV1 | None:
+    if os.name != "nt":
+        return None
+    digest = _argv_sha256(argv)
+    return WindowsArgvAttestationV1(
+        schema_version=1,
+        codec="msvcrt-v1",
+        parser_family="msvcrt-compatible-v1",
+        resolved_executable_identity=(
+            _PROCESS_RUNNER.resolve_executable_identity(executable)
+        ),
+        resolved_executable_version=(
+            _PROCESS_RUNNER.resolve_executable_version(executable)
+        ),
+        covered_argv_shapes=("python-script", "generic"),
+        probe_requested_argv_sha256=digest,
+        probe_observed_argv_sha256=digest,
+        probe_status="pass",
+    )
+
+
+def _diagnostic_text(
+    content: bytes,
+    policy: ValidatorCapturePolicyV1,
+) -> str:
+    retained = policy.prefix_limit_per_stream + policy.tail_limit_per_stream
+    if len(content) > retained:
+        content = (
+            content[: policy.prefix_limit_per_stream]
+            + content[-policy.tail_limit_per_stream :]
+        )
+    return content.decode("utf-8", errors="replace")
+
+
 class Validator:
-    def __init__(self, layout: Layout) -> None:
+    def __init__(
+        self,
+        layout: Layout,
+        *,
+        process_runner=None,
+        child_timeout_seconds: float = VALIDATOR_CHILD_TIMEOUT_SECONDS,
+    ) -> None:
+        if (
+            not isinstance(child_timeout_seconds, (int, float))
+            or not math.isfinite(child_timeout_seconds)
+            or child_timeout_seconds <= 0
+        ):
+            raise ValueError("validator-child-deadline-invalid")
         self.layout = layout
         self.passed = 0
         self.warnings = 0
         self.errors = 0
+        self.process_failure_id: str | None = None
+        self._process_runner = (
+            process_runner if process_runner is not None else ProcessRunnerV1()
+        )
+        self._child_timeout_seconds = child_timeout_seconds
+        self._runner_closed = False
 
     @property
     def checks(self) -> int:
@@ -360,16 +551,83 @@ class Validator:
                 f"(expected {expected}, actual {actual})"
             )
 
-    def _run_python(self, script: Path, *args: str) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            [sys.executable, str(script), *args],
-            cwd=self.layout.root,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            check=False,
+    def _run_python(
+        self,
+        script: Path,
+        *args: str,
+        timeout_seconds: float | None = None,
+    ) -> ValidatorProcessResultV1:
+        deadline_seconds = (
+            self._child_timeout_seconds
+            if timeout_seconds is None
+            else timeout_seconds
         )
+        if (
+            not isinstance(deadline_seconds, (int, float))
+            or not math.isfinite(deadline_seconds)
+            or deadline_seconds <= 0
+        ):
+            raise ValueError("validator-child-deadline-invalid")
+        executable = Path(sys.executable).resolve()
+        argv = (str(executable), str(script), *args)
+        capture_policy = ValidatorCapturePolicyV1()
+        sink = self._process_runner.mint_memory_capture_sink()
+        request = ProcessRequestV1(
+            schema_version=1,
+            argv=argv,
+            resolved_executable=executable,
+            cwd=str(self.layout.root),
+            environment=validator_environment_rows(),
+            stdin_bytes=None,
+            deadline_monotonic=time.monotonic() + float(deadline_seconds),
+            capture_policy=capture_policy.to_capture_policy(),
+            capture_sink_binding=sink,
+            settle_policy=SettlePolicyV1(
+                timeout_seconds=VALIDATOR_SETTLEMENT_TIMEOUT_SECONDS
+            ),
+            windows_argv_codec="msvcrt-v1" if os.name == "nt" else None,
+            windows_argv_attestation=_python_argv_attestation(executable, argv),
+        )
+        result = self._process_runner.run(request)
+        stdout = sink.bytes_for("stdout")
+        stderr = sink.bytes_for("stderr")
+        returncode = (
+            result.target_exit_code
+            if result.outcome in {"success", "child-failure"}
+            and result.target_exit_code is not None
+            else 1
+        )
+        return ValidatorProcessResultV1(
+            returncode=returncode,
+            stdout=_diagnostic_text(stdout, capture_policy),
+            stderr=_diagnostic_text(stderr, capture_policy),
+            failure_id=result.failure_id,
+            timed_out=result.timed_out,
+            stdout_observed_bytes=result.stdout.observed_bytes,
+            stdout_persisted_bytes=result.stdout.persisted_bytes,
+            stdout_truncated=result.stdout.truncated,
+            stderr_observed_bytes=result.stderr.observed_bytes,
+            stderr_persisted_bytes=result.stderr.persisted_bytes,
+            stderr_truncated=result.stderr.truncated,
+            resources_closed=result.resources_closed,
+            settlement_state=result.tree.settlement_state,
+            tree_empty=result.tree.tree_empty,
+            direct_reaped=result.tree.direct_reaped,
+            primary_thread_closed=result.tree.primary_thread_closed,
+            job_handle_closed=result.tree.job_handle_closed,
+        )
+
+    def close(self) -> None:
+        if self._runner_closed:
+            return
+        self._runner_closed = True
+        result = self._process_runner.close()
+        if result.outcome != "closed":
+            self.process_failure_id = result.failure_id
+            self.fail(
+                "validator process runner failed to settle "
+                f"({result.failure_id or 'PSV1-RUNNER-CLOSE-INCOMPLETE'})"
+            )
 
     def check_agent_run_ledger_contract(self, label: str) -> None:
         if not self.layout.dev_repo:
@@ -707,20 +965,12 @@ def installer_default_is_production_pair(root: Path) -> bool:
     )
 
 
-def run_agents_mode_contract(root: Path) -> bool:
-    result = subprocess.run(
-        [
-            sys.executable,
-            str(root / "scripts/validate-agents-mode-contract.py"),
-            "--root",
-            str(root),
-        ],
-        cwd=root,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        check=False,
+def run_agents_mode_contract(validator: Validator) -> bool:
+    root = validator.layout.root
+    result = validator._run_python(
+        root / "scripts/validate-agents-mode-contract.py",
+        "--root",
+        str(root),
     )
     return result.returncode == 0
 
@@ -1046,7 +1296,7 @@ def _direct(
     if kind == "agents_contract":
         _verdict(
             validator,
-            run_agents_mode_contract(layout.root),
+            run_agents_mode_contract(validator),
             "agents-mode machine-readable contract matches docs and init preset surfaces",
         )
         return
@@ -1121,6 +1371,28 @@ def _applicable_actions(
         yield entry
 
 
+def _planned_validator_child_deadlines(
+    actions: Sequence[tuple[str, ...]],
+    layout: Layout,
+    child_timeout_seconds: float,
+) -> tuple[float, ...]:
+    if not layout.dev_repo:
+        return ()
+    count = 0
+    for action in actions:
+        operation = action[0]
+        if operation in {
+            "check_agent_run_ledger_contract",
+            "check_arch_layering_slices",
+        }:
+            count += 1
+        elif operation == "check_normalizer_strips_example_auto_providers":
+            count += 3
+        elif operation == "direct" and len(action) >= 2 and action[1] == "agents_contract":
+            count += 1
+    return (child_timeout_seconds,) * count
+
+
 def validate_pack(
     *,
     script: Path,
@@ -1131,33 +1403,63 @@ def validate_pack(
     curated_role_skills: frozenset[str],
     root: Path | None = None,
     enforce_reusable_instruction_boundaries: bool = False,
+    process_runner=None,
+    child_timeout_seconds: float = VALIDATOR_CHILD_TIMEOUT_SECONDS,
+    outer_budget_seconds: float | None = None,
 ) -> Validator:
     layout = detect_layout(script, provider, root)
-    validator = Validator(layout)
-    if enforce_reusable_instruction_boundaries:
-        validator.check_reusable_instruction_boundaries()
-    applicable_actions = tuple(_applicable_actions(actions, layout))
-    common_skill_pin_names = frozenset(
-        action[1]
-        for action in applicable_actions
-        if len(action) >= 2 and action[0] == "check_common_skill_body_pin"
+    validator = Validator(
+        layout,
+        process_runner=process_runner,
+        child_timeout_seconds=child_timeout_seconds,
     )
-    for action in applicable_actions:
-        operation, *args = action
-        if operation == "direct":
-            _direct(
-                validator,
-                *args,
-                maintainer_only_shared_reference_names=(
-                    maintainer_only_shared_reference_names
-                ),
-                utility_skills=utility_skills,
-                curated_role_skills=curated_role_skills,
-                common_skill_pin_names=common_skill_pin_names,
+    try:
+        if enforce_reusable_instruction_boundaries:
+            validator.check_reusable_instruction_boundaries()
+        applicable_actions = tuple(_applicable_actions(actions, layout))
+        child_deadlines = _planned_validator_child_deadlines(
+            applicable_actions,
+            layout,
+            child_timeout_seconds,
+        )
+        required_budget = required_validator_sequence_budget(child_deadlines)
+        admitted_budget = (
+            required_budget if outer_budget_seconds is None else outer_budget_seconds
+        )
+        if (
+            not isinstance(admitted_budget, (int, float))
+            or not math.isfinite(admitted_budget)
+            or admitted_budget < required_budget
+        ):
+            validator.process_failure_id = "PSV1-DEADLINE-COMPOSITION"
+            validator.fail(
+                "validator process sequence budget is insufficient "
+                "(PSV1-DEADLINE-COMPOSITION)"
             )
-        else:
-            validator.dispatch(operation, args)
-    return validator
+            return validator
+        common_skill_pin_names = frozenset(
+            action[1]
+            for action in applicable_actions
+            if len(action) >= 2 and action[0] == "check_common_skill_body_pin"
+        )
+        for action in applicable_actions:
+            operation, *args = action
+            if operation == "direct":
+                _direct(
+                    validator,
+                    *args,
+                    maintainer_only_shared_reference_names=(
+                        maintainer_only_shared_reference_names
+                    ),
+                    utility_skills=utility_skills,
+                    curated_role_skills=curated_role_skills,
+                    common_skill_pin_names=common_skill_pin_names,
+                )
+            else:
+                validator.dispatch(operation, args)
+        return validator
+    finally:
+        validator.close()
 
 
 def run_validator_cli(

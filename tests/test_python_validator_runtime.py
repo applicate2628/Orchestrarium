@@ -4,13 +4,16 @@ from __future__ import annotations
 import ast
 import hashlib
 import importlib.util
+import json
 import os
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -128,6 +131,16 @@ def _run_validator(
     return result
 
 
+def _copy_validator_runtime(destination: Path) -> None:
+    destination.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(RUNTIME, destination / RUNTIME.name)
+    shutil.copytree(
+        ROOT / "scripts" / "process_supervision",
+        destination / "process_supervision",
+        dirs_exist_ok=True,
+    )
+
+
 def _materialize_installed_pack(
     tmp_path: Path,
     provider: str,
@@ -162,7 +175,7 @@ def _materialize_installed_pack(
         "validate-work-item-state.sh",
     ):
         shutil.copy2(ROOT / "scripts" / name, scripts / name)
-    shutil.copy2(RUNTIME, scripts / RUNTIME.name)
+    _copy_validator_runtime(scripts)
     contract = pack / "contracts" / "ui-transition-continuity.md"
     contract.parent.mkdir()
     shutil.copy2(ROOT / "shared/references/ui-transition-continuity.md", contract)
@@ -247,6 +260,255 @@ def test_canonical_runtime_is_the_only_engine_and_exports_public_entrypoints() -
     runtime = _load(RUNTIME, "canonical_skill_pack_validator_runtime")
     assert callable(runtime.validate_pack)
     assert callable(runtime.run_validator_cli)
+
+
+def _validator(runtime):
+    return runtime.Validator(runtime.detect_layout(VALIDATORS[0], "codex", ROOT))
+
+
+def _write_python(tmp_path: Path, name: str, body: str) -> Path:
+    path = tmp_path / name
+    path.write_text(body, encoding="utf-8")
+    return path
+
+
+def test_validator_capture_policy_is_the_single_exact_process_policy_owner() -> None:
+    runtime = _load(RUNTIME, "validator_capture_policy_owner")
+    policy = runtime.ValidatorCapturePolicyV1()
+    process_policy = policy.to_capture_policy()
+
+    assert process_policy.policy_id == "validator-bounded-v1"
+    assert process_policy.aggregate_persisted_limit == 1024 * 1024
+    assert process_policy.prefix_limit_per_stream == 64 * 1024
+    assert process_policy.tail_limit_per_stream == 128 * 1024
+    assert process_policy.chunk_size == 64 * 1024
+    assert not hasattr(process_policy, "worker_count")
+    assert not hasattr(process_policy, "poll_cadence")
+    assert not hasattr(process_policy, "filesystem_write_limit")
+
+
+def test_validator_runtime_has_no_direct_subprocess_or_tree_helper() -> None:
+    tree = ast.parse(RUNTIME.read_text(encoding="utf-8"))
+    assert not any(
+        isinstance(node, (ast.Import, ast.ImportFrom))
+        and any(alias.name == "subprocess" for alias in node.names)
+        for node in ast.walk(tree)
+    )
+    assert not any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "subprocess"
+        for node in ast.walk(tree)
+    )
+    text = RUNTIME.read_text(encoding="utf-8")
+    assert "ProcessRunnerV1" in text
+    assert "taskkill" not in text.casefold()
+
+
+def test_validator_process_adapter_preserves_exact_python_argv(tmp_path: Path) -> None:
+    runtime = _load(RUNTIME, "validator_exact_argv")
+    child = _write_python(
+        tmp_path,
+        "echo_argv.py",
+        "import json, sys\n"
+        "payload = json.dumps(sys.argv[1:], ensure_ascii=False).encode('utf-8')\n"
+        "sys.stdout.buffer.write(payload)\n",
+    )
+    expected = (
+        "",
+        "two words",
+        'quote"inside',
+        "backslashes\\\\before\\\"quote",
+        "C:\\path with space\\",
+        "Москва-测试",
+    )
+
+    result = _validator(runtime)._run_python(
+        child,
+        *expected,
+        timeout_seconds=10.0,
+    )
+
+    assert result.returncode == 0
+    assert json.loads(result.stdout) == list(expected)
+    assert result.failure_id is None
+    assert result.resources_closed
+    assert result.tree_empty
+    assert result.direct_reaped
+
+
+def test_validator_process_adapter_bounds_infinite_output_and_settles(
+    tmp_path: Path,
+) -> None:
+    runtime = _load(RUNTIME, "validator_infinite_output")
+    child = _write_python(
+        tmp_path,
+        "infinite_output.py",
+        "import os\nchunk = b'x' * 65536\nwhile True:\n    os.write(1, chunk)\n",
+    )
+    before = {path.name for path in tmp_path.iterdir()}
+    started = time.monotonic()
+
+    result = _validator(runtime)._run_python(child, timeout_seconds=0.5)
+
+    assert time.monotonic() - started < 8.0
+    assert result.returncode != 0
+    assert result.failure_id in {"PSV1-CAPTURE-LIMIT", "PSV1-DEADLINE"}
+    assert result.stdout_persisted_bytes + result.stderr_persisted_bytes <= 1024 * 1024
+    assert len(result.stdout.encode("utf-8")) <= (64 + 128) * 1024
+    assert result.resources_closed
+    assert result.tree_empty
+    assert result.direct_reaped
+    assert result.primary_thread_closed
+    assert result.job_handle_closed
+    assert {path.name for path in tmp_path.iterdir()} == before
+
+
+def test_validator_process_adapter_returns_typed_timeout_and_settles(
+    tmp_path: Path,
+) -> None:
+    runtime = _load(RUNTIME, "validator_typed_timeout")
+    child = _write_python(
+        tmp_path,
+        "sleep_forever.py",
+        "import time\ntime.sleep(60)\n",
+    )
+
+    result = _validator(runtime)._run_python(child, timeout_seconds=0.2)
+
+    assert result.returncode != 0
+    assert result.failure_id == "PSV1-DEADLINE"
+    assert result.timed_out
+    assert result.resources_closed
+    assert result.tree_empty
+    assert result.direct_reaped
+    assert result.primary_thread_closed
+    assert result.job_handle_closed
+
+
+def test_validator_process_adapter_reaps_output_retaining_grandchild(
+    tmp_path: Path,
+) -> None:
+    runtime = _load(RUNTIME, "validator_output_retaining_grandchild")
+    parent = _write_python(
+        tmp_path,
+        "retaining_parent.py",
+        "import subprocess, sys\n"
+        "code = \"import os, time\\nchunk = b'g' * 65536\\n"
+        "while True:\\n    os.write(1, chunk)\\n    time.sleep(0.01)\"\n"
+        "child = subprocess.Popen([sys.executable, '-c', code])\n"
+        "print(f'GRANDCHILD={child.pid}', flush=True)\n",
+    )
+    started = time.monotonic()
+
+    result = _validator(runtime)._run_python(parent, timeout_seconds=0.5)
+
+    assert time.monotonic() - started < 8.0
+    assert "GRANDCHILD=" in result.stdout
+    match = re.search(r"GRANDCHILD=(\d+)", result.stdout)
+    assert match is not None
+    with pytest.raises(runtime._PROCESS_RUNNER.ProcessSupervisionError):
+        runtime._PROCESS_RUNNER.get_process_start_marker(int(match.group(1)))
+    assert result.returncode != 0
+    assert result.failure_id in {"PSV1-CAPTURE-LIMIT", "PSV1-DEADLINE"}
+    assert result.resources_closed
+    assert result.tree_empty
+    assert result.direct_reaped
+    assert result.primary_thread_closed
+    assert result.job_handle_closed
+
+
+class _RecordingBinding:
+    def bytes_for(self, _stream: str) -> bytes:
+        return b""
+
+
+class _RecordingRunner:
+    def __init__(self) -> None:
+        self.requests = []
+
+    def mint_memory_capture_sink(self):
+        return _RecordingBinding()
+
+    def run(self, request):
+        self.requests.append(request)
+        stream = SimpleNamespace(
+            observed_bytes=0,
+            persisted_bytes=0,
+            truncated=False,
+            prefix_bytes=b"",
+            tail_bytes=b"",
+        )
+        tree = SimpleNamespace(
+            tree_empty=True,
+            direct_reaped=True,
+            primary_thread_closed=True,
+            job_handle_closed=True,
+            settlement_state="EMPTY",
+        )
+        return SimpleNamespace(
+            outcome="success",
+            target_exit_code=0,
+            failure_id=None,
+            timed_out=False,
+            stdout=stream,
+            stderr=stream,
+            tree=tree,
+            resources_closed=True,
+            cleanup_uncertain=False,
+        )
+
+    def close(self):
+        return SimpleNamespace(outcome="closed", failure_id=None)
+
+
+@pytest.mark.parametrize(
+    ("budget_delta", "expected_launches"),
+    ((-0.001, 0), (0.0, 1), (1.0, 1)),
+)
+def test_validator_sequence_budget_denies_below_and_accepts_exact_or_above(
+    budget_delta: float,
+    expected_launches: int,
+) -> None:
+    runtime = _load(RUNTIME, f"validator_sequence_budget_{budget_delta}")
+    runner = _RecordingRunner()
+    child_deadline = 1.0
+    required = runtime.required_validator_sequence_budget((child_deadline,))
+
+    result = runtime.validate_pack(
+        script=VALIDATORS[0],
+        provider="codex",
+        actions=(("check_agent_run_ledger_contract", "sequence probe"),),
+        maintainer_only_shared_reference_names=frozenset(),
+        utility_skills=frozenset(),
+        curated_role_skills=frozenset(),
+        root=ROOT,
+        process_runner=runner,
+        child_timeout_seconds=child_deadline,
+        outer_budget_seconds=required + budget_delta,
+    )
+
+    assert len(runner.requests) == expected_launches
+    if expected_launches:
+        assert result.errors == 0
+        request = runner.requests[0]
+        assert request.argv == (
+            str(Path(sys.executable).resolve()),
+            str(ROOT / "scripts/check-agent-run-ledger-contract.py"),
+            "--root",
+            str(ROOT),
+        )
+        assert request.cwd == str(ROOT)
+        assert request.environment == runtime.validator_environment_rows()
+        assert tuple(row.name for row in request.environment) == tuple(
+            name
+            for name in runtime.VALIDATOR_ENVIRONMENT_ALLOWLIST
+            if name in os.environ
+        )
+    else:
+        assert result.errors == 1
+        assert result.process_failure_id == "PSV1-DEADLINE-COMPOSITION"
 
 
 @pytest.mark.parametrize(
@@ -441,7 +703,7 @@ def test_extracted_style_source_loader_runs_with_root_canonical_engine(
     shutil.copy2(validator, adapter)
     engine = extracted / "scripts" / RUNTIME.name
     engine.parent.mkdir(parents=True)
-    shutil.copy2(RUNTIME, engine)
+    _copy_validator_runtime(engine.parent)
     _run_validator(adapter, summary, cwd=extracted)
 
 
@@ -458,7 +720,7 @@ def test_installed_sibling_loader_runs_fresh_validator(
     scripts.mkdir(parents=True)
     adapter = scripts / validator.name
     shutil.copy2(validator, adapter)
-    shutil.copy2(RUNTIME, scripts / RUNTIME.name)
+    _copy_validator_runtime(scripts)
     _run_validator(adapter, summary, cwd=scripts)
 
 
