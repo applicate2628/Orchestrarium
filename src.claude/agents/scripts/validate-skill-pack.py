@@ -1360,7 +1360,6 @@ def _is_source_only_maintainer_action(action: tuple[str, ...]) -> bool:
 _ALL_ACTIONS = (
     _DECLARED_ACTIONS[0:42]
     + _DECLARED_ACTIONS[114:256]
-    + _DECLARED_ACTIONS[308:309]
     + _APAT_ACTIONS
 )
 
@@ -1380,6 +1379,8 @@ ACTIONS = (
         + _DECLARED_ACTIONS[274:279]
         + _DECLARED_ACTIONS[280:284]
         + _DECLARED_ACTIONS[293:308]
+        # Declaration 308 reads the source-only root README, absent when installed.
+        + _DECLARED_ACTIONS[308:309]
         + tuple(
             action for action in _ALL_ACTIONS
             if _is_source_only_maintainer_action(action)

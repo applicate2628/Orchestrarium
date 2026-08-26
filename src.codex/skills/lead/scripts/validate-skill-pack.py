@@ -1706,7 +1706,8 @@ _ALL_ACTIONS = (
     _DECLARED_ACTIONS[0:35]
     + _DECLARED_ACTIONS[142:304]
     + _DECLARED_ACTIONS[322:329]
-    + _DECLARED_ACTIONS[366:372]
+    # Include declaration 372 so its @ROOT/docs prefix routes it to dev_repo.
+    + _DECLARED_ACTIONS[366:373]
     + _APAT_ACTIONS
 )
 
