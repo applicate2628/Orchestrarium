@@ -1047,6 +1047,60 @@ def _installed_role_dispatch_layout(
     )
 
 
+def _installed_external_policy_root(
+    resolver: Path,
+    project_root: Path,
+    home: Path,
+) -> Path:
+    candidates = (
+        (
+            project_root,
+            (".agents", "skills", "lead", "scripts"),
+        ),
+        (
+            home,
+            (".agents", "skills", "lead", "scripts"),
+        ),
+        (
+            project_root,
+            (".claude", "agents", "scripts"),
+        ),
+        (
+            home,
+            (".claude", "agents", "scripts"),
+        ),
+    )
+    selected = [
+        (base, directories)
+        for base, directories in candidates
+        if _same_path(
+            resolver,
+            base.joinpath(*directories, "resolve-agents-mode.py"),
+        )
+    ]
+    if len(selected) != 1:
+        raise ValueError("installed external resolver layout is missing or ambiguous")
+
+    base, directories = selected[0]
+    current = base
+    for directory in directories:
+        current /= directory
+        if not _ordinary_directory(current):
+            raise ValueError("installed external resolver layout contains a reparse or missing root")
+
+    policy_root = resolver.parent.parent
+    shared_root = policy_root / "shared"
+    policy_path = shared_root / "role-routing-policy.v1.json"
+    if (
+        not _ordinary_file(resolver)
+        or not _ordinary_directory(policy_root)
+        or not _ordinary_directory(shared_root)
+        or not _ordinary_file(policy_path)
+    ):
+        raise ValueError("installed external resolver layout contains a reparse or missing root")
+    return policy_root
+
+
 def layer_paths(provider: str, project_root: Path, home: Path) -> list[tuple[str, Path]]:
     provider_dir = PROVIDER_DIRS[provider]
     return [
@@ -1184,12 +1238,10 @@ def main() -> int:
             external_root = source_root
         else:
             try:
-                external_root, _manifest_path, _role_root, _authority = (
-                    _installed_role_dispatch_layout(
-                        resolver_path,
-                        project_root,
-                        home,
-                    )
+                external_root = _installed_external_policy_root(
+                    resolver_path,
+                    project_root,
+                    home,
                 )
             except (OSError, ValueError):
                 external_root = repo_root / "__invalid_external_layout__"

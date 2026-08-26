@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -11,6 +12,8 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 RESOLVER_PATH = ROOT / "scripts" / "resolve-agents-mode.py"
+sys.path.insert(0, str(ROOT / "scripts"))
+import production_installer as installer  # noqa: E402
 
 
 def _load_resolver():
@@ -25,6 +28,71 @@ def _load_resolver():
 
 
 RESOLVER = _load_resolver()
+
+
+def _install_dispatch_layout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    pack: str,
+    mode: str,
+) -> tuple[Path, Path, Path, Path]:
+    install_root = tmp_path / f"installed-{pack}-{mode}"
+    install_root.mkdir()
+    arguments = ["--force", "--no-hypothesis-hook"]
+    if mode == "project":
+        arguments.extend(["--target", str(install_root), "--allow-unsafe-target"])
+        project_root = install_root
+        home = tmp_path / f"clean-home-{pack}"
+        home.mkdir()
+    else:
+        monkeypatch.setenv("USERPROFILE", str(install_root))
+        monkeypatch.setenv("HOME", str(install_root))
+        arguments.append("--global")
+        project_root = tmp_path / f"clean-project-{pack}"
+        project_root.mkdir()
+        home = install_root
+
+    assert installer.install(pack, arguments) == 0
+    if pack == "codex":
+        policy_root = install_root / ".agents" / "skills" / "lead"
+    else:
+        policy_root = install_root / ".claude" / "agents"
+    resolver = policy_root / "scripts" / "resolve-agents-mode.py"
+    return resolver, policy_root, project_root, home
+
+
+def _run_installed_external_dispatch(
+    resolver: Path,
+    *,
+    provider: str,
+    task_class: str,
+    role: str,
+    project_root: Path,
+    home: Path,
+    cwd: Path,
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [
+            sys.executable,
+            str(resolver),
+            "--provider",
+            provider,
+            "--project-root",
+            str(project_root),
+            "--home",
+            str(home),
+            "--resolve-external-dispatch",
+            "--task-class",
+            task_class,
+            "--role",
+            role,
+            "--json",
+        ],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
 
 
 def _canonical_sha(value: object) -> str:
@@ -174,4 +242,186 @@ def test_external_dispatch_rejects_policy_declared_final_authorizers(
     assert decision["status"] == "denied"
     assert decision["stableId"] == f"E_{provider.upper()}_FINAL_OWNER_DENIED"
     assert decision["finalAuthorizingRole"] is True
+    assert decision["fallback"] == "none"
+
+
+@pytest.mark.parametrize(
+    ("mode", "provider", "task_class", "role"),
+    (
+        ("project", "kimi", "exploration", "analyst"),
+        ("global", "kimi", "exploration", "analyst"),
+        ("project", "grok", "review", "qa-engineer"),
+        ("global", "grok", "review", "qa-engineer"),
+    ),
+)
+def test_installed_claude_external_dispatch_uses_its_own_policy_root_from_foreign_cwd(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mode: str,
+    provider: str,
+    task_class: str,
+    role: str,
+) -> None:
+    resolver, policy_root, project_root, home = _install_dispatch_layout(
+        tmp_path, monkeypatch, "claude", mode
+    )
+    assert resolver.read_bytes() == RESOLVER_PATH.read_bytes()
+    assert resolver.parent.parent == policy_root
+    assert (policy_root / "shared" / "role-routing-policy.v1.json").read_bytes() == (
+        ROOT / "shared" / "role-routing-policy.v1.json"
+    ).read_bytes()
+
+    foreign = tmp_path / f"foreign-claude-{mode}-{provider}"
+    foreign.joinpath("shared").mkdir(parents=True)
+    foreign.joinpath("shared", "role-routing-policy.v1.json").write_text(
+        '{"schemaVersion":0}\n', encoding="utf-8"
+    )
+    result = _run_installed_external_dispatch(
+        resolver,
+        provider=provider,
+        task_class=task_class,
+        role=role,
+        project_root=project_root,
+        home=home,
+        cwd=foreign,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout) == RESOLVER.resolve_external_dispatch(
+        provider, task_class, role, repo_root=ROOT
+    )
+
+
+@pytest.mark.parametrize("mode", ("project", "global"))
+def test_installed_codex_external_dispatch_retains_policy_parity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mode: str,
+) -> None:
+    resolver, _policy_root, project_root, home = _install_dispatch_layout(
+        tmp_path, monkeypatch, "codex", mode
+    )
+    foreign = tmp_path / f"foreign-codex-{mode}"
+    foreign.mkdir()
+    result = _run_installed_external_dispatch(
+        resolver,
+        provider="kimi",
+        task_class="exploration",
+        role="analyst",
+        project_root=project_root,
+        home=home,
+        cwd=foreign,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout) == RESOLVER.resolve_external_dispatch(
+        "kimi", "exploration", "analyst", repo_root=ROOT
+    )
+
+
+def test_installed_external_dispatch_rejects_absent_anchor(
+    tmp_path: Path,
+) -> None:
+    policy_root = tmp_path / "standalone" / "agents"
+    scripts = policy_root / "scripts"
+    scripts.mkdir(parents=True)
+    resolver = scripts / "resolve-agents-mode.py"
+    resolver.write_bytes(RESOLVER_PATH.read_bytes())
+    shared = policy_root / "shared"
+    shared.mkdir()
+    shared.joinpath("role-routing-policy.v1.json").write_bytes(
+        (ROOT / "shared" / "role-routing-policy.v1.json").read_bytes()
+    )
+    project_root = tmp_path / "project"
+    home = tmp_path / "home"
+    project_root.mkdir()
+    home.mkdir()
+
+    result = _run_installed_external_dispatch(
+        resolver,
+        provider="kimi",
+        task_class="exploration",
+        role="analyst",
+        project_root=project_root,
+        home=home,
+        cwd=tmp_path,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    decision = json.loads(result.stdout)
+    assert decision["status"] == "denied"
+    assert decision["stableId"] == "E_KIMI_DISPATCH_DENIED"
+    assert decision["fallback"] == "none"
+
+
+def test_installed_claude_external_dispatch_rejects_ambiguous_anchor(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    resolver, _policy_root, project_root, _home = _install_dispatch_layout(
+        tmp_path, monkeypatch, "claude", "project"
+    )
+    result = _run_installed_external_dispatch(
+        resolver,
+        provider="kimi",
+        task_class="exploration",
+        role="analyst",
+        project_root=project_root,
+        home=project_root,
+        cwd=tmp_path,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    decision = json.loads(result.stdout)
+    assert decision["status"] == "denied"
+    assert decision["stableId"] == "E_KIMI_DISPATCH_DENIED"
+    assert decision["fallback"] == "none"
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ("missing-policy", "malformed-policy", "linked-policy", "linked-resolver"),
+)
+def test_installed_claude_external_dispatch_fails_closed_on_invalid_layout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+) -> None:
+    resolver, policy_root, project_root, home = _install_dispatch_layout(
+        tmp_path, monkeypatch, "claude", "project"
+    )
+    policy = policy_root / "shared" / "role-routing-policy.v1.json"
+    if mutation == "missing-policy":
+        policy.unlink()
+    elif mutation == "malformed-policy":
+        policy.write_text('{"schemaVersion":0}\n', encoding="utf-8")
+    elif mutation == "linked-policy":
+        target = tmp_path / "linked-policy.json"
+        policy.replace(target)
+        try:
+            policy.symlink_to(target)
+        except OSError as exc:
+            pytest.skip(f"file symlink unavailable: {exc}")
+    else:
+        target = tmp_path / "linked-resolver.py"
+        resolver.replace(target)
+        try:
+            resolver.symlink_to(target)
+        except OSError as exc:
+            pytest.skip(f"file symlink unavailable: {exc}")
+
+    result = _run_installed_external_dispatch(
+        resolver,
+        provider="kimi",
+        task_class="exploration",
+        role="analyst",
+        project_root=project_root,
+        home=home,
+        cwd=tmp_path,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    decision = json.loads(result.stdout)
+    assert decision["status"] == "denied"
+    assert decision["stableId"] == "E_KIMI_DISPATCH_DENIED"
     assert decision["fallback"] == "none"
