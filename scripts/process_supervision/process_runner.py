@@ -1161,12 +1161,14 @@ class WindowsArgvAdmissionOwnerV1:
         admission: WindowsInternalProbeAdmissionV1,
     ) -> bytes:
         result = self._run_internal_probe(lifecycle, probe_request, admission)
-        if result.failure_id is not None:
+        if (
+            result.failure_id is not None
+            or result.outcome != "success"
+            or result.target_exit_code != 0
+        ):
             raise _WindowsArgvProbeFailure(result)
         if (
-            result.outcome != "success"
-            or result.target_exit_code != 0
-            or not result.tree.tree_empty
+            not result.tree.tree_empty
             or not result.resources_closed
             or result.stdout.truncated
             or result.stderr.truncated

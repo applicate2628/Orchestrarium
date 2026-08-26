@@ -347,6 +347,51 @@ def test_probe_capture_cap_is_active_and_reaps_before_task(
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows internal probe lifecycle")
+def test_nonzero_probe_preserves_child_failure_evidence_and_never_starts_task(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A clean nonzero probe exit returns its settled evidence, not a generic shell."""
+
+    module = _load_runner()
+    monkeypatch.setattr(
+        module,
+        "_PYTHON_ARGV_ECHO_HELPER",
+        "import sys;sys.exit(23)",
+    )
+    owner = module.ProcessRunnerV1()
+    marker = tmp_path / "task-started.txt"
+    request = _request(
+        module,
+        owner,
+        (
+            str(Path(sys.executable).resolve()),
+            str(CHILD),
+            "marker",
+            "--marker",
+            str(marker),
+        ),
+        "python-validator-json-echo-v1",
+    )
+
+    result = owner.run(request)
+
+    assert result.outcome == "child-failure"
+    assert result.failure_id is None
+    assert result.target_exit_code == 23
+    assert result.tree.backend == "windows-job-v1"
+    assert result.tree.ownership_confirmed
+    assert result.tree.tree_empty
+    assert result.tree.direct_reaped
+    assert result.resources_closed
+    assert result.policy_id == "windows-internal-argv-probe-v1"
+    assert result.stdout.observed_bytes == 0
+    assert result.stderr.observed_bytes == 0
+    assert not result.stdout.truncated
+    assert not result.stderr.truncated
+    assert not marker.exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows internal probe lifecycle")
 def test_runner_close_cancels_and_reaps_active_probe(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
