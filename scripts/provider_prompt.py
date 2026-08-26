@@ -944,13 +944,9 @@ def _kimi_sanitized_runtime_home(run_dir: Path) -> ProviderAuthConfiguration:
         ):
             raise ValueError("configuration")
         oauth_key = oauth_reference["key"]
-        if (
-            not oauth_key
-            or oauth_key in {".", ".."}
-            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", oauth_key)
-        ):
+        if not re.fullmatch(r"oauth/[A-Za-z0-9][A-Za-z0-9._-]{0,127}", oauth_key):
             raise ValueError("credential reference")
-        oauth_filename = f"{oauth_key}.json"
+        oauth_filename = f"{oauth_key.removeprefix('oauth/')}.json"
         oauth_source = source_home / "credentials" / oauth_filename
         validate_no_reparse_components(oauth_source)
         oauth_bytes = oauth_source.read_bytes()

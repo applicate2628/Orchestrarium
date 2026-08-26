@@ -105,7 +105,7 @@ def _write_kimi_home(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     *,
-    oauth: str = '{ storage = "file", key = "primary" }',
+    oauth: str = '{ storage = "file", key = "oauth/kimi-code" }',
     credential: bool = True,
 ) -> tuple[Path, Path]:
     user_home = tmp_path / "user"
@@ -122,7 +122,7 @@ def _write_kimi_home(
         encoding="utf-8",
     )
     if credential:
-        (credentials / "primary.json").write_text(
+        (credentials / "kimi-code.json").write_text(
             '{"access_token":"access-secret","refresh_token":"refresh-secret"}',
             encoding="utf-8",
         )
@@ -141,12 +141,12 @@ def test_kimi_private_home_copies_only_exact_oauth_shape_and_token_needles(
     configuration = owner._kimi_sanitized_runtime_home(run_dir)
 
     private_home = run_dir / "kimi-code-home"
-    copied = private_home / "credentials" / "primary.json"
+    copied = private_home / "credentials" / "kimi-code.json"
     parsed = tomllib.loads((private_home / "config.toml").read_text(encoding="utf-8"))
     assert parsed["providers"]["managed:kimi-code"]["oauth"] == {
-        "storage": "file", "key": "primary"
+        "storage": "file", "key": "oauth/kimi-code"
     }
-    assert copied.read_bytes() == (source / "credentials" / "primary.json").read_bytes()
+    assert copied.read_bytes() == (source / "credentials" / "kimi-code.json").read_bytes()
     assert {path.name for path in private_home.iterdir()} == {"config.toml", "credentials"}
     assert configuration.needles == (b"access-secret", b"refresh-secret")
     assert "USERPROFILE" not in configuration.child_environment
@@ -157,9 +157,11 @@ def test_kimi_private_home_copies_only_exact_oauth_shape_and_token_needles(
 @pytest.mark.parametrize(
     "oauth,credential",
     (
-        ('{ storage = "memory", key = "primary" }', True),
-        ('{ storage = "file", key = "../escape" }', True),
-        ('{ storage = "file", key = "primary" }', False),
+        ('{ storage = "memory", key = "oauth/kimi-code" }', True),
+        ('{ storage = "file", key = "oauth/kimi-code/extra" }', True),
+        ('{ storage = "file", key = "oauth/../escape" }', True),
+        ('{ storage = "file", key = "oauth/" }', True),
+        ('{ storage = "file", key = "oauth/kimi-code" }', False),
     ),
 )
 def test_kimi_private_home_rejects_unknown_or_unsafe_oauth_storage(
@@ -180,6 +182,7 @@ def test_kimi_profile_identifier_has_one_production_owner() -> None:
         encoding="utf-8"
     )
     assert source.count('"kimi-sealed-bundle-text-v1"') == 1
+    assert source.count('"--agent-file"') == 1
 
 
 def test_runtime_pin_is_restored_after_injected_post_enrollment_failure(

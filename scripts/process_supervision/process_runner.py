@@ -131,6 +131,13 @@ class KimiWindowsProfileV1:
     constant_prompt = "Review the sealed bundle and return only the requested result."
     accepted_sha256 = "B7E658D06176284384D1E9EB627D11E5A26627B3964BF8787F197915D1484B1E".lower()
     expected_size = 150901248
+    argv_shape = (
+        "--agent-file", None,
+        "--skills-dir", None,
+        "--model", model,
+        "--output-format", "text",
+        "--prompt", constant_prompt,
+    )
     agent_frontmatter = (
         b"---\n"
         b"name: orchestrarium-bundle-reviewer\n"
@@ -142,13 +149,18 @@ class KimiWindowsProfileV1:
 
     @classmethod
     def build_args(cls, agent_file: Path, skills_dir: Path) -> list[str]:
-        return [
-            "--agent-file", str(agent_file.resolve(strict=True)),
-            "--skills-dir", str(skills_dir.resolve(strict=True)),
-            "--model", cls.model,
-            "--output-format", "text",
-            "--prompt", cls.constant_prompt,
-        ]
+        arguments = list(cls.argv_shape)
+        arguments[1] = str(agent_file.resolve(strict=True))
+        arguments[3] = str(skills_dir.resolve(strict=True))
+        return arguments
+
+    @classmethod
+    def matches_argv(cls, argv: Sequence[str]) -> bool:
+        values = argv[1:]
+        return len(values) == len(cls.argv_shape) and all(
+            expected is None or actual == expected
+            for actual, expected in zip(values, cls.argv_shape, strict=True)
+        )
 
 
 _WINDOWS_ARGV_PROFILES = _WINDOWS_ARGV_PROFILES | frozenset(
@@ -1157,9 +1169,7 @@ def _kimi_bundle_file_binding(
 
     try:
         argv = request.argv
-        if len(argv) != 11 or argv[1::2] != (
-            "--agent-file", "--skills-dir", "--model", "--output-format", "--prompt"
-        ) or argv[6] != KimiWindowsProfileV1.model or argv[8] != "text" or argv[10] != KimiWindowsProfileV1.constant_prompt:
+        if not KimiWindowsProfileV1.matches_argv(argv):
             raise reject()
         raw_path = argv[2]
         if not raw_path or "\x00" in raw_path:

@@ -102,6 +102,7 @@ def test_global_codex_kimi_clauses_do_not_claim_unavailability() -> None:
         ROOT / "INSTALL.md",
         ROOT / "docs" / "agents-mode-reference.md",
         ROOT / "src.codex" / "skills" / "init-project" / "SKILL.md",
+        ROOT / "src.codex" / "skills" / "init-project" / "agents" / "openai.yaml",
         ROOT / "src.codex" / "skills" / "second-opinion" / "SKILL.md",
         ROOT / "src.codex" / "skills" / "second-opinion" / "agents" / "openai.yaml",
     )
