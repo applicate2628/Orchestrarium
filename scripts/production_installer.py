@@ -428,6 +428,7 @@ SLICE_A_FAILURE_IDS = frozenset(
         "E_CREATE_ONLY_TYPE_COLLISION",
         "E_CREATE_ONLY_PROJECTION_COLLISION",
         "E_CREATE_ONLY_CONFIG_INVALID",
+        "E_CREATE_ONLY_CONFIG_INLINE_AGENTS",
         "E_NATIVE_ROLE_MANIFEST_INVALID",
         "E_MUTABLE_PATH_REPARSE",
         "E_MUTABLE_PATH_ESCAPE",
@@ -2647,6 +2648,129 @@ def _preflight_native_regular_file(path: Path, relative: Path) -> bytes | None:
     return path.read_bytes()
 
 
+def _skip_toml_string(text: str, start: int) -> int:
+    quote = text[start]
+    delimiter = quote * 3 if text.startswith(quote * 3, start) else quote
+    position = start + len(delimiter)
+    while position < len(text):
+        if text.startswith(delimiter, position):
+            return position + len(delimiter)
+        if quote == '"' and text[position] == "\\":
+            position += 2
+        else:
+            position += 1
+    raise ValueError("E_CREATE_ONLY_CONFIG_INVALID")
+
+
+def _skip_toml_value(text: str, start: int) -> int:
+    square_depth = 0
+    curly_depth = 0
+    position = start
+    while position < len(text):
+        character = text[position]
+        if character in "\"'":
+            position = _skip_toml_string(text, position)
+            continue
+        if character == "#":
+            newline = text.find("\n", position)
+            if newline < 0:
+                return len(text)
+            if square_depth == 0 and curly_depth == 0:
+                return newline + 1
+            position = newline + 1
+            continue
+        if character == "[":
+            square_depth += 1
+        elif character == "]":
+            square_depth -= 1
+        elif character == "{":
+            curly_depth += 1
+        elif character == "}":
+            curly_depth -= 1
+        elif character in "\r\n" and square_depth == 0 and curly_depth == 0:
+            return position + 1
+        position += 1
+    return position
+
+
+def _toml_key_part(text: str, start: int) -> tuple[str, int]:
+    if text[start] in "\"'":
+        end = _skip_toml_string(text, start)
+        if end - start > 2 and text.startswith(text[start] * 3, start):
+            raise ValueError("E_CREATE_ONLY_CONFIG_INVALID")
+        try:
+            parsed = tomllib.loads(f"{text[start:end]} = 0")
+        except tomllib.TOMLDecodeError as exc:
+            raise ValueError("E_CREATE_ONLY_CONFIG_INVALID") from exc
+        return next(iter(parsed)), end
+
+    position = start
+    while position < len(text) and (
+        text[position].isalnum() or text[position] in "_-"
+    ):
+        position += 1
+    if position == start:
+        raise ValueError("E_CREATE_ONLY_CONFIG_INVALID")
+    return text[start:position], position
+
+
+def _toml_root_value_start(text: str, target: str) -> int | None:
+    """Locate one root key's value without treating comments or strings as syntax."""
+
+    position = 0
+    while position < len(text):
+        while position < len(text):
+            if text[position].isspace():
+                position += 1
+            elif text[position] == "#":
+                newline = text.find("\n", position)
+                position = len(text) if newline < 0 else newline + 1
+            else:
+                break
+        if position >= len(text) or text[position] == "[":
+            return None
+
+        key: list[str] = []
+        while True:
+            while position < len(text) and text[position] in " \t":
+                position += 1
+            part, position = _toml_key_part(text, position)
+            key.append(part)
+            while position < len(text) and text[position] in " \t":
+                position += 1
+            if position < len(text) and text[position] == ".":
+                position += 1
+                continue
+            if position >= len(text) or text[position] != "=":
+                raise ValueError("E_CREATE_ONLY_CONFIG_INVALID")
+            position += 1
+            break
+
+        while position < len(text) and text[position] in " \t":
+            position += 1
+        if key == [target]:
+            return position
+        position = _skip_toml_value(text, position)
+    return None
+
+
+def _uses_root_inline_table(
+    text: str, parsed: dict[str, Any], target: str
+) -> bool:
+    if not isinstance(parsed.get(target), dict):
+        return False
+    value_start = _toml_root_value_start(text, target)
+    return value_start is not None and text.startswith("{", value_start)
+
+
+def _parse_codex_config(payload: bytes) -> tuple[str, dict[str, Any]]:
+    try:
+        text = payload.decode("utf-8")
+        return text, tomllib.loads(text)
+    except (UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
+        raise ValueError("E_CREATE_ONLY_CONFIG_INVALID") from exc
+
+
 def _toml_table_bounds(lines: list[str], header: str) -> tuple[int, int]:
     headers = [index for index, line in enumerate(lines) if line.strip() == header]
     if len(headers) != 1:
@@ -2690,10 +2814,7 @@ def _preflight_codex_native_roles(
     config_bytes = _preflight_native_regular_file(config_path, config_relative)
     config_exists = config_bytes is not None
     original_config = config_bytes if config_bytes is not None else b""
-    try:
-        parsed = tomllib.loads(original_config.decode("utf-8"))
-    except (UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
-        raise ValueError("E_CREATE_ONLY_CONFIG_INVALID") from exc
+    config_text, parsed = _parse_codex_config(original_config)
     features = parsed.get("features")
     if features is not None and not isinstance(features, dict):
         raise ValueError("E_CREATE_ONLY_CONFIG_INVALID")
@@ -2706,6 +2827,8 @@ def _preflight_codex_native_roles(
         agents_config = {}
     if not isinstance(agents_config, dict):
         raise ValueError("E_CREATE_ONLY_CONFIG_INVALID")
+    if _uses_root_inline_table(config_text, parsed, "agents"):
+        raise ValueError("E_CREATE_ONLY_CONFIG_INLINE_AGENTS")
 
     payload = original_config
     expected_by_name = {
@@ -2761,6 +2884,7 @@ def _preflight_codex_native_roles(
         payload = _append_native_role_blocks(
             b"[features]\nmulti_agent_v2 = true\n", registrations
         )
+    _parse_codex_config(payload)
 
     known_roles = {f"{name}.toml" for name in manifest["roles"]}
     try:

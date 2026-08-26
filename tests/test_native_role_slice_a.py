@@ -583,6 +583,122 @@ def test_native_role_config_mapping_collision_is_preserved_without_mutation(
     assert not (project / ".codex" / "agents" / "analyst.toml").exists()
 
 
+@pytest.mark.parametrize(
+    "payload",
+    (
+        b'agents = { max_concurrent_threads_per_session = 16 }\n',
+        b'agents = { analyst = { description = "operator", config_file = "agents/analyst.toml" } }\n',
+    ),
+    ids=("thread-only", "existing-role"),
+)
+@pytest.mark.parametrize("dry_run", (False, True), ids=("install", "dry-run"))
+def test_inline_agents_table_fails_before_transaction_without_mutation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    payload: bytes,
+    dry_run: bool,
+) -> None:
+    assert "E_CREATE_ONLY_CONFIG_INLINE_AGENTS" in installer.SLICE_A_FAILURE_IDS
+    project = tmp_path / "project"
+    config = project / ".codex" / "config.toml"
+    config.parent.mkdir(parents=True)
+    config.write_bytes(payload)
+    before = _no_follow_inventory(project)
+    config_identity = installer._CreateOnlyMutablePath._identity(config)
+
+    def transaction_entered(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("transaction entered")
+
+    monkeypatch.setattr(installer, "_InstallTransaction", transaction_entered)
+    arguments = [
+        "--target",
+        str(project),
+        "--force",
+        "--allow-unsafe-target",
+        "--no-hypothesis-hook",
+    ]
+    if dry_run:
+        arguments.append("--dry-run")
+
+    result = installer.install("codex", arguments)
+    captured = capsys.readouterr()
+
+    assert result == 1
+    assert "E_CREATE_ONLY_CONFIG_INLINE_AGENTS" in captured.err
+    assert _no_follow_inventory(project) == before
+    assert config.read_bytes() == payload
+    assert installer._CreateOnlyMutablePath._identity(config) == config_identity
+
+
+@pytest.mark.parametrize(
+    "payload",
+    (
+        b"[agents]\nmax_concurrent_threads_per_session = 16\n",
+        b"agents.max_concurrent_threads_per_session = 16\n",
+        b"# agents = { max_concurrent_threads_per_session = 16 }\n",
+        b'message = "agents = { is text, not syntax"\n',
+    ),
+    ids=("ordinary-table", "dotted-key", "comment", "string"),
+)
+def test_non_inline_agents_representations_and_lookalikes_are_preserved(
+    tmp_path: Path, payload: bytes
+) -> None:
+    project = tmp_path / "project"
+    config = project / ".codex" / "config.toml"
+    config.parent.mkdir(parents=True)
+    config.write_bytes(payload)
+
+    result = _run_codex_installer(project, install_hooks=False)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert config.read_bytes().startswith(payload)
+    tomllib.loads(config.read_text(encoding="utf-8"))
+    _assert_callable_native_role_mappings(config)
+
+
+def test_proposed_native_config_payload_is_reparsed_before_transaction(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    project = tmp_path / "project"
+    config = project / ".codex" / "config.toml"
+    config.parent.mkdir(parents=True)
+    config.write_bytes(b"# preserve\n")
+    before = _no_follow_inventory(project)
+    config_identity = installer._CreateOnlyMutablePath._identity(config)
+
+    monkeypatch.setattr(
+        installer,
+        "_append_native_role_blocks",
+        lambda _payload, _registrations: b"agents = {",
+    )
+
+    def transaction_entered(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("transaction entered")
+
+    monkeypatch.setattr(installer, "_InstallTransaction", transaction_entered)
+
+    result = installer.install(
+        "codex",
+        [
+            "--target",
+            str(project),
+            "--force",
+            "--allow-unsafe-target",
+            "--no-hypothesis-hook",
+        ],
+    )
+    captured = capsys.readouterr()
+
+    assert result == 1
+    assert "E_CREATE_ONLY_CONFIG_INVALID" in captured.err
+    assert _no_follow_inventory(project) == before
+    assert config.read_bytes() == b"# preserve\n"
+    assert installer._CreateOnlyMutablePath._identity(config) == config_identity
+
+
 @pytest.mark.parametrize("legacy_file", ("exact", "missing"))
 def test_exact_legacy_luna_registration_migrates_to_manifest_roles(
     tmp_path: Path, legacy_file: str
