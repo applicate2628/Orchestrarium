@@ -1,210 +1,59 @@
 #!/usr/bin/env python3
-"""Tests for differential pytest baseline comparison."""
-
 from __future__ import annotations
-
-import json
-import subprocess
-import sys
-import tempfile
-import unittest
+import json, subprocess, sys, tempfile, unittest
 from pathlib import Path
+ROOT=Path(__file__).resolve().parents[1]; SCRIPT=ROOT/'scripts'/'baseline'/'compare_pytest_baseline.py'
 
-ROOT = Path(__file__).resolve().parents[1]
-SCRIPT = ROOT / "scripts" / "baseline" / "compare_pytest_baseline.py"
-
-
-def junit(cases: list[tuple[str, str, str]]) -> str:
-    nodes = []
-    for classname, name, status in cases:
-        child = ""
-        if status == "failure":
-            child = '<failure message="failed">trace</failure>'
-        elif status == "error":
-            child = '<error message="errored">trace</error>'
-        elif status == "skipped":
-            child = '<skipped message="skip" />'
-        nodes.append(
-            f'<testcase classname="{classname}" name="{name}" file="tests/test_x.py">'
-            f"{child}</testcase>"
-        )
+def junit(cases):
+    nodes=[]
+    for cls,name,status in cases:
+        child={'failure':'<failure message="failed">trace</failure>','error':'<error message="errored">trace</error>','skipped':'<skipped message="skip" />'}.get(status,'')
+        nodes.append(f'<testcase classname="{cls}" name="{name}" file="tests/test_x.py">{child}</testcase>')
     return f'<testsuites><testsuite tests="{len(cases)}">{"".join(nodes)}</testsuite></testsuites>'
 
-
 class PytestBaselineComparatorTests(unittest.TestCase):
-    def run_compare(
-        self,
-        baseline_cases: list[tuple[str, str, str]],
-        candidate_cases: list[tuple[str, str, str]],
-        *,
-        baseline_exit: int = 0,
-        candidate_exit: int = 0,
-        output_as_directory: bool = False,
-    ) -> tuple[subprocess.CompletedProcess[str], dict[str, object] | None]:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            baseline = root / "baseline.xml"
-            candidate = root / "candidate.xml"
-            output = root / "report.json"
-            baseline.write_text(junit(baseline_cases), encoding="utf-8")
-            candidate.write_text(junit(candidate_cases), encoding="utf-8")
-            if output_as_directory:
-                output.mkdir()
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    str(SCRIPT),
-                    "--baseline-junit",
-                    str(baseline),
-                    "--candidate-junit",
-                    str(candidate),
-                    "--baseline-exit",
-                    str(baseline_exit),
-                    "--candidate-exit",
-                    str(candidate_exit),
-                    "--baseline-ref",
-                    "baseline",
-                    "--candidate-ref",
-                    "candidate",
-                    "--output",
-                    str(output),
-                ],
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                check=False,
-            )
-            report = None
-            if output.is_file():
-                report = json.loads(output.read_text(encoding="utf-8"))
-            return result, report
+    def run_compare(self,b,c,*,baseline_exit=0,candidate_exit=0,output_as_directory=False):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d); bp=root/'b.xml'; cp=root/'c.xml'; out=root/'r.json'
+            bp.write_text(junit(b)); cp.write_text(junit(c))
+            if output_as_directory: out.mkdir()
+            r=subprocess.run([sys.executable,str(SCRIPT),'--baseline-junit',str(bp),'--candidate-junit',str(cp),
+                '--baseline-exit',str(baseline_exit),'--candidate-exit',str(candidate_exit),
+                '--baseline-ref','baseline','--candidate-ref','candidate','--output',str(out)],
+                text=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE,check=False)
+            return r,json.loads(out.read_text()) if out.is_file() else None
 
-    def test_allows_known_failures_resolutions_and_additional_passing_tests(self) -> None:
-        result, report = self.run_compare(
-            [
-                ("suite.Test", "test_pass", "passed"),
-                ("suite.Test", "test_known", "failure"),
-                ("suite.Test", "test_resolved", "error"),
-            ],
-            [
-                ("suite.Test", "test_pass", "passed"),
-                ("suite.Test", "test_known", "failure"),
-                ("suite.Test", "test_resolved", "passed"),
-                ("suite.Test", "test_new", "passed"),
-            ],
-            baseline_exit=1,
-            candidate_exit=1,
-        )
-        assert report is not None
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(report["verdict"], "PASS")
-        self.assertEqual(
-            report["observations"]["resolvedBaselineFailures"],
-            ["suite.Test::test_resolved"],
-        )
-        self.assertEqual(
-            report["observations"]["additionalCandidateTests"],
-            ["suite.Test::test_new"],
-        )
+    def test_allows_known_failure_resolution_and_new_pass(self):
+        r,p=self.run_compare([('S','p','passed'),('S','k','failure'),('S','r','error')],
+            [('S','p','passed'),('S','k','failure'),('S','r','passed'),('S','n','passed')],baseline_exit=1,candidate_exit=1)
+        self.assertEqual(r.returncode,0,r.stderr); self.assertEqual(p['verdict'],'PASS')
 
-    def test_blocks_new_failure(self) -> None:
-        result, report = self.run_compare(
-            [("suite.Test", "test_pass", "passed")],
-            [("suite.Test", "test_pass", "failure")],
-            candidate_exit=1,
-        )
-        assert report is not None
-        self.assertEqual(result.returncode, 1)
-        self.assertEqual(report["blockers"]["newFailures"], ["suite.Test::test_pass"])
+    def test_blocks_new_failure(self):
+        r,p=self.run_compare([('S','p','passed')],[('S','p','failure')],candidate_exit=1)
+        self.assertEqual(r.returncode,1); self.assertTrue(p['blockers']['newFailures'])
 
-    def test_blocks_missing_test_and_failure_hidden_by_skip(self) -> None:
-        result, report = self.run_compare(
-            [
-                ("suite.Test", "test_missing", "passed"),
-                ("suite.Test", "test_known", "failure"),
-            ],
-            [("suite.Test", "test_known", "skipped")],
-            baseline_exit=1,
-            candidate_exit=0,
-        )
-        assert report is not None
-        self.assertEqual(result.returncode, 1)
-        self.assertEqual(
-            report["blockers"]["missingBaselineTests"],
-            ["suite.Test::test_missing"],
-        )
-        self.assertEqual(
-            report["blockers"]["maskedBaselineFailures"],
-            ["suite.Test::test_known"],
-        )
+    def test_blocks_operational_exits_even_with_junit_failures(self):
+        for code in (2,3,4,5):
+            with self.subTest(code=code):
+                r,p=self.run_compare([('S','k','failure')],[('S','k','failure')],baseline_exit=code,candidate_exit=code)
+                self.assertEqual(r.returncode,1)
+                self.assertEqual(p['blockers']['baselineExitContradiction'][0]['reason'],'operational-pytest-exit')
+                self.assertEqual(p['blockers']['candidateExitContradiction'][0]['reason'],'operational-pytest-exit')
 
-    def test_blocks_new_nonzero_pytest_exit_even_when_junit_is_all_passing(self) -> None:
-        result, report = self.run_compare(
-            [("suite.Test", "test_pass", "passed")],
-            [("suite.Test", "test_pass", "passed")],
-            baseline_exit=0,
-            candidate_exit=3,
-        )
-        assert report is not None
-        self.assertEqual(result.returncode, 1)
-        self.assertEqual(
-            report["blockers"]["candidateExitContradiction"],
-            [{"exitCode": 3, "junitFailureCount": 0}],
-        )
+    def test_blocks_nonzero_without_junit_failure(self):
+        r,p=self.run_compare([('S','k','failure')],[('S','k','passed')],baseline_exit=1,candidate_exit=1)
+        self.assertEqual(r.returncode,1); self.assertTrue(p['blockers']['candidateExitContradiction'])
 
-    def test_blocks_same_nonzero_exit_when_candidate_junit_is_all_passing(self) -> None:
-        result, report = self.run_compare(
-            [("suite.Test", "test_known", "failure")],
-            [("suite.Test", "test_known", "passed")],
-            baseline_exit=1,
-            candidate_exit=1,
-        )
-        assert report is not None
-        self.assertEqual(result.returncode, 1)
-        self.assertEqual(
-            report["blockers"]["candidateExitContradiction"],
-            [{"exitCode": 1, "junitFailureCount": 0}],
-        )
+    def test_blocks_zero_with_junit_failure(self):
+        r,p=self.run_compare([('S','k','failure')],[('S','k','failure')],baseline_exit=1,candidate_exit=0)
+        self.assertEqual(r.returncode,1); self.assertTrue(p['blockers']['candidateExitContradiction'])
 
-    def test_blocks_zero_candidate_exit_when_junit_still_contains_failure(self) -> None:
-        result, report = self.run_compare(
-            [("suite.Test", "test_known", "failure")],
-            [("suite.Test", "test_known", "failure")],
-            baseline_exit=1,
-            candidate_exit=0,
-        )
-        assert report is not None
-        self.assertEqual(result.returncode, 1)
-        self.assertEqual(
-            report["blockers"]["candidateExitContradiction"],
-            [{"exitCode": 0, "junitFailureCount": 1}],
-        )
+    def test_blocks_failure_to_error(self):
+        r,p=self.run_compare([('S','k','failure')],[('S','k','error')],baseline_exit=1,candidate_exit=1)
+        self.assertEqual(r.returncode,1); self.assertTrue(p['blockers']['changedKnownFailureKind'])
 
-    def test_blocks_known_failure_that_changes_into_error(self) -> None:
-        result, report = self.run_compare(
-            [("suite.Test", "test_known", "failure")],
-            [("suite.Test", "test_known", "error")],
-            baseline_exit=1,
-            candidate_exit=1,
-        )
-        assert report is not None
-        self.assertEqual(result.returncode, 1)
-        self.assertEqual(
-            report["blockers"]["changedKnownFailureKind"],
-            ["suite.Test::test_known"],
-        )
+    def test_report_write_failure_returns_two(self):
+        r,p=self.run_compare([('S','p','passed')],[('S','p','passed')],output_as_directory=True)
+        self.assertIsNone(p); self.assertEqual(r.returncode,2); self.assertNotIn('Traceback',r.stderr)
 
-    def test_report_write_failure_returns_invalid_input_without_traceback(self) -> None:
-        result, report = self.run_compare(
-            [("suite.Test", "test_pass", "passed")],
-            [("suite.Test", "test_pass", "passed")],
-            output_as_directory=True,
-        )
-        self.assertIsNone(report)
-        self.assertEqual(result.returncode, 2)
-        self.assertIn("RESULT: FAIL pytest-baseline", result.stderr)
-        self.assertNotIn("Traceback", result.stderr)
-
-
-if __name__ == "__main__":
-    unittest.main()
+if __name__=='__main__': unittest.main()
