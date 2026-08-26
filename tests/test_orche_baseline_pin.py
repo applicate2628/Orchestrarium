@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 BASELINE_DIR = ROOT / "baseline" / "orchestrarium-v1"
 PIN_PATH = BASELINE_DIR / "baseline-pin.json"
 README_PATH = BASELINE_DIR / "README.md"
+GITIGNORE_PATH = ROOT / ".gitignore"
 EXPECTED_COMMIT = "ce2052fb773576fd6e3206c2a7e21e01852d556b"
 EXPECTED_TREE = "04dccf4575f17c9c5533474d2e0fd1503bfeceb7"
 TOOL_PATHS = {
@@ -94,6 +95,7 @@ class BaselinePinTests(unittest.TestCase):
         payload = json.loads(PIN_PATH.read_text(encoding="utf-8"))
         evidence = payload["evidence"]
         tracked = set(git("ls-files").splitlines())
+        ignored_patterns = GITIGNORE_PATH.read_text(encoding="utf-8")
 
         self.assertEqual(evidence["verificationMode"], "local-only")
         self.assertFalse(evidence["commitGeneratedOutputs"])
@@ -101,6 +103,8 @@ class BaselinePinTests(unittest.TestCase):
         self.assertNotIn(".github/workflows/_orche_pr2_review2.yml", tracked)
         self.assertNotIn(".github/workflows/_orche_pr2_verify2.yml", tracked)
         self.assertNotIn(".github/workflows/_orche_pr2_verify3.yml", tracked)
+        self.assertIn("/.github/workflows/_orche_pr2_verify*.yml", ignored_patterns)
+        self.assertIn("/.github/workflows/_orche_pr2_review*.yml", ignored_patterns)
 
         for name in evidence["requiredGeneratedOutputs"]:
             self.assertNotIn(f"baseline/orchestrarium-v1/{name}", tracked)
@@ -118,6 +122,8 @@ class BaselinePinTests(unittest.TestCase):
         self.assertIn('USERPROFILE="$lane_root/home"', readme)
         self.assertIn("compare_validator", readme)
         self.assertIn("--volatile-pattern", readme)
+        self.assertIn('rm -f "$OUTPUT_ROOT/baseline.xml"', readme)
+        self.assertIn('test -f "$OUTPUT_ROOT/candidate.xml"', readme)
         for marker in VALIDATOR_MARKERS:
             self.assertIn(marker, readme)
         self.assertIn("scripts/check-publication-gate.py", readme)
