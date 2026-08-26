@@ -4,7 +4,7 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-08-27
 
-- **Global Codex upgrades now recognize five exact previously shipped `7872d36d` skill trees.** Consultant, Design Panel, Init Project, Review Loop, and Second Opinion are admitted only as complete hash-pinned stock trees through the existing rollback-safe accepted-prior migration; current trees remain no-ops and any byte of customization still fails closed. **Why it matters:** an operator can upgrade that legitimate prior install to the current explicit Kimi policy without manually overwriting canonical skills or weakening create-only ownership.
+- **Global Codex upgrades now recognize six exact previously shipped `7872d36d` skill trees.** Consultant, Design Panel, Init Project, Manual Repo Transfer, Review Loop, and Second Opinion are admitted only as complete hash-pinned stock trees through the existing rollback-safe accepted-prior migration. Python interpreter caches (`__pycache__` with `.pyc` files) are excluded from canonical identity for every skill tree, matching the existing Lead behavior; current trees remain no-ops, while source, documentation, configuration, and arbitrary non-cache additions still fail closed. **Why it matters:** an operator can upgrade that legitimate prior install to the current explicit Kimi policy without manually overwriting canonical skills or weakening create-only ownership.
 
 ## 2026-08-26
 

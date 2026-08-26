@@ -201,6 +201,7 @@ STOCK_7872_CANONICAL_SKILL_TREE_SHA256 = {
     "consultant": "f1a23b5ceaa93c29cf0c5f9c9eec8c5997a7b4339fcd90abd13798df77e60793",
     "design-panel": "685b75f5726dd16dbcf2b5fb3238652b8564242e5b66f0daf2b582267905f67b",
     "init-project": "cd5bc7386f286393ee8dab782ed603fff7ad61e8c828f34cca102a3a5e2aba9f",
+    "manual-repo-transfer": "03c0c2fd12a8273f8325fb145dc2b8e9e97502e497649fc2d474988a9f95070b",
     "review-loop": "d956cf70db42a7c936d21984fe6aeb83748de02c544eec56ca54971629f85f7e",
     "second-opinion": "b82628910567799a6f03962f3ec0289cb47b4607093c074466b1a2656b53f432",
 }
@@ -760,6 +761,104 @@ def test_exact_7872_stock_skill_is_accepted_and_drift_refused(
     _assert_exact_stock_skill_is_accepted_and_drift_refused(
         installer, tmp_path, name, expected_prior, historical
     )
+
+
+def _copy_manual_transfer_with_runtime_cache(source: Path, destination: Path) -> Path:
+    shutil.copytree(source, destination)
+    cache = destination / "scripts" / "__pycache__"
+    cache.mkdir()
+    (cache / "repo_transfer.cpython-314.pyc").write_bytes(b"synthetic runtime cache")
+    return destination
+
+
+def test_current_canonical_skill_runtime_cache_is_a_noop(tmp_path: Path) -> None:
+    installer = _load_installer()
+    skills_root = tmp_path / "target" / ".agents" / "skills"
+    skills_root.mkdir(parents=True)
+    installed = _copy_manual_transfer_with_runtime_cache(
+        ROOT / "src.codex" / "skills" / "manual-repo-transfer",
+        skills_root / "manual-repo-transfer",
+    )
+    before = {
+        path.relative_to(installed): path.read_bytes()
+        for path in installed.rglob("*")
+        if path.is_file()
+    }
+
+    plan = installer._preflight_canonical_skills(
+        ROOT / "src.codex" / "skills", skills_root, root=ROOT
+    )
+    try:
+        selected = next(
+            skill for skill in plan.skills if skill.name == "manual-repo-transfer"
+        )
+        assert selected.installed_digest == selected.source_digest
+        assert selected.accepted_prior is None
+        owner = installer._CreateOnlyMutablePath(
+            tmp_path / "target",
+            installer._InstallTransaction([], enabled=False),
+            dry_run=False,
+        )
+        installer._apply_canonical_skills_plan(plan, skills_root, owner, root=ROOT)
+        assert {
+            path.relative_to(installed): path.read_bytes()
+            for path in installed.rglob("*")
+            if path.is_file()
+        } == before
+    finally:
+        installer._discard_canonical_skills_plan(plan)
+
+
+def test_stock_canonical_skill_runtime_cache_migrates(tmp_path: Path) -> None:
+    installer = _load_installer()
+    name = "manual-repo-transfer"
+    expected_prior = STOCK_7872_CANONICAL_SKILL_TREE_SHA256[name]
+    historical = _extract_7872_skill(name, tmp_path / "historical")
+    skills_root = tmp_path / "target" / ".agents" / "skills"
+    skills_root.mkdir(parents=True)
+    installed = _copy_manual_transfer_with_runtime_cache(
+        historical, skills_root / name
+    )
+
+    plan = installer._preflight_canonical_skills(
+        ROOT / "src.codex" / "skills", skills_root, root=ROOT
+    )
+    try:
+        selected = next(skill for skill in plan.skills if skill.name == name)
+        assert selected.installed_digest == expected_prior
+        assert selected.accepted_prior == expected_prior
+        owner = installer._CreateOnlyMutablePath(
+            tmp_path / "target",
+            installer._InstallTransaction([], enabled=False),
+            dry_run=False,
+        )
+        installer._apply_canonical_skills_plan(plan, skills_root, owner, root=ROOT)
+        assert not (installed / "scripts" / "__pycache__").exists()
+        assert installer._tree_sha256(installed, ignore_runtime_cache=True) == (
+            selected.source_digest
+        )
+    finally:
+        installer._discard_canonical_skills_plan(plan)
+
+
+def test_non_cache_extra_inside_runtime_cache_directory_is_collision(
+    tmp_path: Path,
+) -> None:
+    installer = _load_installer()
+    name = "manual-repo-transfer"
+    historical = _extract_7872_skill(name, tmp_path / "historical")
+    skills_root = tmp_path / "target" / ".agents" / "skills"
+    skills_root.mkdir(parents=True)
+    installed = skills_root / name
+    shutil.copytree(historical, installed)
+    cache = installed / "scripts" / "__pycache__"
+    cache.mkdir()
+    (cache / "operator-note.txt").write_text("not runtime cache", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="E_ACCEPTED_PRIOR_COLLISION: manual-repo-transfer"):
+        installer._preflight_canonical_skills(
+            ROOT / "src.codex" / "skills", skills_root, root=ROOT
+        )
 
 
 def test_h2_global_lead_rebaseline_diff_is_only_mutate_work_item() -> None:
