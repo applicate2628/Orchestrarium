@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Regression tests for the committed Stage 0 baseline pin and local-only policy."""
 from __future__ import annotations
-import json, os, subprocess, tempfile, unittest
+import json, os, subprocess, sys, tempfile, time, unittest
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 BASELINE_DIR=ROOT/'baseline'/'orchestrarium-v1'; PIN_PATH=BASELINE_DIR/'baseline-pin.json'; README_PATH=BASELINE_DIR/'README.md'; GITIGNORE_PATH=ROOT/'.gitignore'
@@ -24,9 +24,15 @@ def git(*args,cwd=ROOT):
     if r.returncode: raise AssertionError(f"git {' '.join(args)} failed ({r.returncode})\n{r.stdout}\n{r.stderr}")
     return r.stdout.strip()
 
-def read_guard():
-    text=README_PATH.read_text(); start=text.index('# BEGIN ORCHE_CLEAN_WORKTREE_GUARD'); end=text.index('# END ORCHE_CLEAN_WORKTREE_GUARD')
+def read_section(start_marker,end_marker):
+    text=README_PATH.read_text(); start=text.index(start_marker)+len(start_marker); end=text.index(end_marker,start)
     return text[start:end]
+
+def read_guard():
+    return read_section('# BEGIN ORCHE_CLEAN_WORKTREE_GUARD','# END ORCHE_CLEAN_WORKTREE_GUARD')
+
+def read_timeout_runner():
+    return read_section('# BEGIN ORCHE_TIMEOUT_RUNNER','# END ORCHE_TIMEOUT_RUNNER')
 
 class BaselinePinTests(unittest.TestCase):
     def test_pin_matches_main_and_frozen_tool_blobs_in_reviewed_tree(self):
@@ -61,19 +67,32 @@ class BaselinePinTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             repo=Path(d)/'repo'; repo.mkdir(); subprocess.run(['git','init','-q'],cwd=repo,check=True); subprocess.run(['git','config','user.name','Test'],cwd=repo,check=True); subprocess.run(['git','config','user.email','t@example.invalid'],cwd=repo,check=True)
             (repo/'tracked.txt').write_text('clean\n'); subprocess.run(['git','add','.'],cwd=repo,check=True); subprocess.run(['git','commit','-qm','base'],cwd=repo,check=True); (repo/'tracked.txt').write_text('dirty\n')
-            script=read_guard()+"\nassert_clean_worktree \"$1\"\n"; r=subprocess.run(['bash','-c',script,'bash',str(repo)],text=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+            script='VERIFIER_GIT=git\n'+read_guard()+"\nassert_clean_worktree \"$1\"\n"; r=subprocess.run(['bash','-c',script,'bash',str(repo)],text=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
             self.assertNotEqual(r.returncode,0); self.assertIn('BLOCKED: dirty worktree',r.stderr)
+
+    @unittest.skipIf(os.name=='nt', 'POSIX process-group timeout runner')
+    def test_timeout_runner_terminates_hanging_command(self):
+        runner=read_timeout_runner()
+        start=time.monotonic()
+        r=subprocess.run([sys.executable,'-c',runner,'0.2',sys.executable,'-c','import time; time.sleep(30)'],text=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE,check=False,timeout=10)
+        elapsed=time.monotonic()-start
+        self.assertEqual(r.returncode,124,r.stderr); self.assertIn('BLOCKED: command timed out',r.stderr); self.assertLess(elapsed,8)
 
     def test_readme_hardens_toolchain_and_all_gates(self):
         p=json.loads(PIN_PATH.read_text()); readme=README_PATH.read_text()
         self.assertIn(EXPECTED_COMMIT,readme); self.assertIn(EXPECTED_TREE,readme); self.assertNotIn('pull request #3',readme.lower()); self.assertIn('does **not** use GitHub Actions',readme)
         self.assertIn('git-cat-file-reviewed-tree-blob',PIN_PATH.read_text()); self.assertIn('ls-tree "$REVIEWED_REF"',readme); self.assertNotIn('tooling.$key.owningCommit',readme)
-        self.assertIn('PATH="$VERIFIER_PATH"',readme); self.assertNotIn('PATH="$PATH"',readme); self.assertIn('assert_external_tool "$VERIFIER_PYTHON"',readme); self.assertIn('"$BASELINE_ROOT"/*|"$CANDIDATE_ROOT"/*',readme)
+        self.assertIn('PATH="$VERIFIER_PATH"',readme); self.assertIn('export PATH="$VERIFIER_PATH"',readme); self.assertNotIn('PATH="$PATH"',readme); self.assertIn('"$BASELINE_ROOT"/*|"$CANDIDATE_ROOT"/*',readme)
+        self.assertLess(readme.index('assert_external_tool "$VERIFIER_PYTHON" || exit 1'),readme.index('pin_value()'))
+        self.assertLess(readme.index('assert_external_tool "$VERIFIER_GIT" || exit 1'),readme.index('REVIEWED_REF="$CANDIDATE_REF"'))
+        self.assertIn('assert_clean_worktree "$BASELINE_ROOT" || exit 1',readme); self.assertIn('assert_clean_worktree "$CANDIDATE_ROOT" || exit 1',readme)
         self.assertIn('status --porcelain=v1 --untracked-files=all',readme); self.assertIn('ls-files --others --ignored --exclude-standard',readme); self.assertIn('BLOCKED: dirty worktree',readme)
         for spec in IGNORED_EXECUTABLE_PATHS: self.assertIn(spec,readme)
         self.assertIn('EVIDENCE_ROOT="$CANDIDATE_ROOT/$(pin_value evidence.generatedOutputDirectory)"',readme); self.assertNotIn('$OUTPUT_ROOT/evidence',readme)
         self.assertEqual(p['evidence']['generatedOutputDirectory'],'.scratch/orche-stage0/orchestrarium-v1')
         self.assertIn('successful diagnostics',readme.lower()); self.assertIn('operational exits',readme.lower())
+        self.assertIn('start_new_session=True',readme); self.assertIn('os.killpg',readme); self.assertIn('raise SystemExit(124)',readme); self.assertIn('ORCHE_COMMAND_TIMEOUT_SECONDS',readme)
+        self.assertIn('--success-pattern "$success_pattern"',readme); self.assertIn('empty or unconditional `exit 0`',readme)
         for marker in VALIDATOR_MARKERS: self.assertIn(marker,readme)
         self.assertIn('scripts/check-publication-gate.py',readme); self.assertLess(readme.index('$knowledge-archivist'),readme.index('git push origin refs/tags/'))
 

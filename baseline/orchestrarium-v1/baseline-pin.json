@@ -34,7 +34,7 @@
   "tooling": {
     "commandComparator": {
       "deterministic": true,
-      "gitBlobSha": "4c278b5b7727996a418d5f8e3d453284ab018507",
+      "gitBlobSha": "5604a864267bf2541055e9484329286034c7b445",
       "materialization": "git-cat-file-reviewed-tree-blob",
       "path": "baseline/orchestrarium-v1/tooling/compare_command_baseline.py",
       "runtimeMutation": false,
@@ -42,7 +42,7 @@
     },
     "inventoryGenerator": {
       "deterministic": true,
-      "gitBlobSha": "72b5b4b3106d5ccb3a849280f1adf1c9651c63fc",
+      "gitBlobSha": "563760d3a494dcd761c7d0d91b84769e03c5354e",
       "materialization": "git-cat-file-reviewed-tree-blob",
       "path": "baseline/orchestrarium-v1/tooling/build_inventory.py",
       "runtimeMutation": false,

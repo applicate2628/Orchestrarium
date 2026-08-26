@@ -10,7 +10,8 @@ baseline remains reproducible after later commits. It emits:
 - summary.md: a human-readable compact baseline report.
 
 Exit 0 means the requested write/check succeeded. Exit 1 in --check mode means
-committed outputs drift from the deterministic rendering. Pure stdlib.
+committed outputs drift from the deterministic rendering. Exit 2 means invalid
+input or an operational/evidence-access failure. Pure stdlib.
 """
 
 from __future__ import annotations
@@ -435,7 +436,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     except (InventoryError, OSError, ValueError) as exc:
         print(f"RESULT: FAIL baseline-inventory: {exc}", file=sys.stderr)
-        return 1
+        return 2
 
 
 if __name__ == "__main__":

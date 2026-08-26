@@ -146,6 +146,26 @@ class BaselineInventoryTests(unittest.TestCase):
             (self.repo / "baseline" / "orchestrarium-v1" / "capability-inventory.json").exists()
         )
 
+    def test_invalid_ref_uses_operational_exit_two(self) -> None:
+        output = self.repo / ".scratch" / "invalid-ref"
+        result = run(
+            sys.executable,
+            os.fspath(SCRIPT),
+            "--repo-root",
+            os.fspath(self.repo),
+            "--repository",
+            "example/orche",
+            "--ref",
+            "missing-stage0-ref",
+            "--output-dir",
+            os.fspath(output),
+            "--check",
+            check=False,
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("RESULT: FAIL baseline-inventory", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
     def test_output_is_deterministic_and_check_mode_detects_drift(self) -> None:
         output = self.repo / ".scratch" / "baseline"
         self.invoke(output)

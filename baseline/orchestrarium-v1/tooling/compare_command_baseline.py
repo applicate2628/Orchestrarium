@@ -42,18 +42,20 @@ def _read_log(path: Path) -> bytes:
         raise CommandBaselineError(f"cannot read command log {path}: {exc}") from exc
 
 
-def _compile_patterns(values: Sequence[str]) -> list[Pattern[str]]:
+def _compile_patterns(
+    values: Sequence[str], *, label: str
+) -> list[Pattern[str]]:
     compiled: list[Pattern[str]] = []
     for value in values:
         try:
             pattern = re.compile(value)
         except re.error as exc:
             raise CommandBaselineError(
-                f"invalid volatile pattern {value!r}: {exc}"
+                f"invalid {label} pattern {value!r}: {exc}"
             ) from exc
         if pattern.search("") is not None:
             raise CommandBaselineError(
-                f"volatile pattern must not match empty text: {value!r}"
+                f"{label} pattern must not match empty text: {value!r}"
             )
         compiled.append(pattern)
     return compiled
@@ -128,7 +130,8 @@ def compare(args: argparse.Namespace) -> tuple[int, dict[str, object]]:
     if args.baseline_exit < 0 or args.candidate_exit < 0:
         raise CommandBaselineError("exit codes must be non-negative")
 
-    patterns = _compile_patterns(args.volatile_pattern)
+    patterns = _compile_patterns(args.volatile_pattern, label="volatile")
+    success_patterns = _compile_patterns(args.success_pattern, label="success")
     baseline_raw = _read_log(args.baseline_log)
     candidate_raw = _read_log(args.candidate_log)
     baseline_normalized = _normalized_text(
@@ -161,9 +164,20 @@ def compare(args: argparse.Namespace) -> tuple[int, dict[str, object]]:
         classification = "new-failure"
         return_code = 1
     elif args.candidate_exit == 0:
-        status = "PASS"
-        classification = "resolved-failure"
-        return_code = 0
+        candidate_text = candidate_normalized.decode(
+            "utf-8", errors="surrogateescape"
+        )
+        verified_success = bool(success_patterns) and any(
+            pattern.search(candidate_text) is not None for pattern in success_patterns
+        )
+        if verified_success:
+            status = "PASS"
+            classification = "resolved-failure"
+            return_code = 0
+        else:
+            status = "FAIL"
+            classification = "unverified-resolution"
+            return_code = 1
     elif same_result:
         status = "PASS"
         classification = "preserved-failure"
@@ -193,9 +207,13 @@ def compare(args: argparse.Namespace) -> tuple[int, dict[str, object]]:
         "normalization": {
             "volatilePatterns": list(args.volatile_pattern),
         },
+        "successVerification": {
+            "patterns": list(args.success_pattern),
+            "requiredForResolvedFailure": True,
+        },
         "policy": {
             "baselineSuccessRequiresCandidateSuccess": True,
-            "historicalFailureMayResolve": True,
+            "historicalFailureMayResolveWithDeclaredSuccessPattern": True,
             "historicalFailureMayRemainOnlyIfNormalizedResultMatches": True,
             "successfulDiagnosticsMustMatch": True,
         },
@@ -215,6 +233,7 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--baseline-ref", required=True)
     parser.add_argument("--candidate-ref", required=True)
     parser.add_argument("--volatile-pattern", action="append", default=[])
+    parser.add_argument("--success-pattern", action="append", default=[])
     parser.add_argument("--output", type=Path, required=True)
     return parser.parse_args(argv)
 

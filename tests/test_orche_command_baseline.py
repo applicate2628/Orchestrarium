@@ -45,9 +45,19 @@ class CommandBaselineTests(unittest.TestCase):
             baseline_log='/tmp/baseline/failure '+ 'a'*40+'\r\n',candidate_log='/tmp/candidate/failure '+'b'*40+'\n')
         self.assertEqual(r.returncode,0,r.stderr); self.assertEqual(p['classification'],'preserved-failure')
 
-    def test_resolved_failure_passes(self):
+    def test_resolved_failure_requires_declared_success_pattern(self):
         r,p=self.invoke(baseline_exit=1,candidate_exit=0,baseline_log='ERROR\n',candidate_log='RESULT: PASS\n')
-        self.assertEqual(r.returncode,0); self.assertEqual(p['classification'],'resolved-failure')
+        self.assertEqual(r.returncode,1); self.assertEqual(p['classification'],'unverified-resolution')
+
+    def test_resolved_failure_passes_with_declared_success_pattern(self):
+        r,p=self.invoke(baseline_exit=1,candidate_exit=0,baseline_log='ERROR\n',candidate_log='RESULT: PASS\n',
+            extra_args=('--success-pattern',r'(?m)^RESULT: PASS$'))
+        self.assertEqual(r.returncode,0,r.stderr); self.assertEqual(p['classification'],'resolved-failure')
+
+    def test_success_pattern_must_match_candidate_diagnostics(self):
+        r,p=self.invoke(baseline_exit=1,candidate_exit=0,baseline_log='ERROR\n',candidate_log='validator exited silently\n',
+            extra_args=('--success-pattern',r'(?m)^RESULT: PASS$'))
+        self.assertEqual(r.returncode,1); self.assertEqual(p['classification'],'unverified-resolution')
 
     def test_changed_failure_is_rejected(self):
         r,p=self.invoke(baseline_exit=1,candidate_exit=1,baseline_log='ERROR A\n',candidate_log='ERROR B\n')
@@ -68,6 +78,11 @@ class CommandBaselineTests(unittest.TestCase):
             candidate_log='/tmp/candidate/agents-mode-installer-regression/'+'b'*32+'/x\n',
             extra_args=('--volatile-pattern',pattern))
         self.assertEqual(r.returncode,0,r.stderr); self.assertEqual(p['classification'],'preserved-failure')
+
+    def test_invalid_success_pattern_uses_invalid_input_exit(self):
+        r,p=self.invoke(baseline_exit=1,candidate_exit=0,baseline_log='ERROR\n',candidate_log='PASS\n',
+            extra_args=('--success-pattern','('))
+        self.assertEqual(p,{}); self.assertEqual(r.returncode,2); self.assertIn('invalid success pattern',r.stderr)
 
     def test_report_write_failure_uses_invalid_input_exit(self):
         r,p=self.invoke(baseline_exit=0,candidate_exit=0,baseline_log='PASS\n',candidate_log='PASS\n',output_parent_is_file=True)
