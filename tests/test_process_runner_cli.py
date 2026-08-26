@@ -28,19 +28,6 @@ def _load_runner():
 
 def _header(runner, nonce: bytes, argv: tuple[str, ...], stdin: bytes, *, request_id: str = "a" * 32):
     executable = Path(sys.executable).resolve()
-    identity = runner.resolve_executable_identity(executable)
-    argv_digest = runner._json_argv_sha256(argv)
-    attestation = {
-        "schemaVersion": 1,
-        "codec": "msvcrt-v1",
-        "parserFamily": "msvcrt-compatible-v1",
-        "resolvedExecutableIdentity": identity,
-        "resolvedExecutableVersion": runner.resolve_executable_version(executable),
-        "coveredArgvShapes": ["generic"],
-        "probeRequestedArgvSha256": argv_digest,
-        "probeObservedArgvSha256": argv_digest,
-        "probeStatus": "pass",
-    }
     return {
         "schema": "orchestrarium.process-request.v1",
         "requestId": request_id,
@@ -48,8 +35,9 @@ def _header(runner, nonce: bytes, argv: tuple[str, ...], stdin: bytes, *, reques
         "parentStartMarker": runner.get_process_start_marker(os.getpid()),
         "capabilitySha256": "0" * 64,
         "argv": list(argv),
-        "windowsArgvCodec": "msvcrt-v1" if os.name == "nt" else None,
-        "windowsArgvAttestation": attestation if os.name == "nt" else None,
+        "windowsArgvProfileId": (
+            "python-validator-json-echo-v1" if os.name == "nt" else None
+        ),
         "cwd": str(ROOT),
         "environment": [
             {"name": name, "value": os.environ[name]}

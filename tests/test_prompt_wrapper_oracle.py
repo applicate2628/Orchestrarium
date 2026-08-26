@@ -886,6 +886,99 @@ def test_explicit_none_ledger_role_cannot_masquerade_as_roleless() -> None:
         owner.external_role_provenance(control, "claude")
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows native provider refusal")
+@pytest.mark.parametrize("provider", ("codex", "claude"))
+def test_windows_native_provider_refuses_before_prompt_capture_or_launch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    provider: str,
+) -> None:
+    """Native Windows providers fail typed before prompt/auth/capture/child work."""
+
+    executable = tmp_path / f"{provider}.exe"
+    executable.write_bytes(b"native-provider-fixture")
+    marker = tmp_path / "child-marker.txt"
+    calls: list[str] = []
+    monkeypatch.setattr(
+        owner,
+        "resolve_provider_command",
+        lambda selected: calls.append(f"resolve:{selected}") or [str(executable)],
+    )
+    monkeypatch.setattr(
+        owner,
+        "resolve_provider_auth_configuration",
+        lambda *_args, **_kwargs: (
+            calls.append("auth")
+            or SimpleNamespace(child_environment={}, needles=())
+        ),
+    )
+    monkeypatch.setattr(
+        owner,
+        "prompt_bytes",
+        lambda *_args, **_kwargs: calls.append("prompt") or b"task",
+    )
+    monkeypatch.setattr(
+        owner,
+        "secure_output_dir",
+        lambda *_args, **_kwargs: calls.append("capture") or tmp_path,
+    )
+    monkeypatch.setattr(
+        owner,
+        "run_provider_process",
+        lambda *_args, **_kwargs: calls.append("launch")
+        or marker.write_text("started", encoding="utf-8"),
+    )
+    monkeypatch.setattr(
+        owner,
+        "require_codex_hook_trust",
+        lambda *_args, **_kwargs: calls.append("trust") or 0,
+    )
+
+    code = owner.launch(provider, ["fixture"])
+
+    assert code != 0
+    assert owner.E_EXTERNAL_PROVIDER_WINDOWS_NATIVE_ARGV_UNAVAILABLE in capsys.readouterr().err
+    assert calls == ["auth", f"resolve:{provider}"]
+    assert not marker.exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="live Windows provider resolver")
+@pytest.mark.parametrize("provider", ("codex", "claude"))
+def test_live_windows_native_provider_resolver_returns_typed_denial(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    provider: str,
+) -> None:
+    """The installed native resolver path remains a zero-prompt typed denial."""
+
+    command = owner.resolve_provider_command(provider)
+    if command is None or len(command) != 1 or Path(command[0]).suffix.casefold() != ".exe":
+        pytest.skip(f"{provider} native executable is unavailable")
+    monkeypatch.setattr(
+        owner,
+        "resolve_provider_auth_configuration",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            child_environment={}, needles=()
+        ),
+    )
+    monkeypatch.setattr(
+        owner,
+        "prompt_bytes",
+        lambda *_args, **_kwargs: pytest.fail("prompt must remain unread"),
+    )
+    monkeypatch.setattr(
+        owner,
+        "run_provider_process",
+        lambda *_args, **_kwargs: pytest.fail("provider must remain unlaunched"),
+    )
+
+    code = owner.launch(provider, ["fixture"])
+
+    assert code != 0
+    assert owner.E_EXTERNAL_PROVIDER_WINDOWS_NATIVE_ARGV_UNAVAILABLE in capsys.readouterr().err
+
+
 @pytest.mark.parametrize(
     "ledger_role",
     (

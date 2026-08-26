@@ -19,6 +19,7 @@ import math
 import os
 import re
 import secrets
+import shlex
 import signal
 import stat
 import struct
@@ -114,6 +115,14 @@ _WINDOWS_SHELL_HOSTS = frozenset(
     {"cmd.exe", "powershell.exe", "pwsh.exe", "wscript.exe", "cscript.exe"}
 )
 _POSIX_SHELL_HOSTS = frozenset({"sh", "bash", "dash", "zsh", "fish", "ksh", "csh"})
+_WINDOWS_ARGV_PROFILES = frozenset(
+    {
+        "python-validator-json-echo-v1",
+        "git-rev-parse-sq-quote-v1",
+    }
+)
+_WINDOWS_ARGV_ADMISSION_SECONDS = 30.0
+_WINDOWS_ARGV_PROBE_MAX_BYTES = 512 * 1024
 
 
 class ProcessSupervisionError(ValueError):
@@ -149,17 +158,27 @@ class SettlePolicyV1:
     timeout_seconds: float
 
 
+_WINDOWS_ARGV_ADMISSION_SEAL = object()
+_WINDOWS_ARGV_CHILD_EVIDENCE_SEAL = object()
+
+
 @dataclass(frozen=True)
-class WindowsArgvAttestationV1:
+class WindowsArgvAdmissionV1:
     schema_version: int
+    run_token_sha256: str
+    profile_id: str
     codec: str
-    parser_family: str
     resolved_executable_identity: str
     resolved_executable_version: str
-    covered_argv_shapes: tuple[str, ...]
+    actual_argv_sha256: str
+    actual_argv_shape_sha256: str
+    probe_kind: str
     probe_requested_argv_sha256: str
     probe_observed_argv_sha256: str
-    probe_status: str
+    expires_at_monotonic: float
+    status: str
+    _seal: object = field(repr=False, compare=False)
+    _child_evidence_seal: object = field(repr=False, compare=False)
 
 
 class CancellationProbeV1(Protocol):
@@ -260,8 +279,7 @@ class ProcessRequestV1:
     settle_policy: SettlePolicyV1
     cancellation_probe: CancellationProbeV1 | None = None
     diagnostic_port: DiagnosticPortV1 | None = None
-    windows_argv_codec: str | None = None
-    windows_argv_attestation: WindowsArgvAttestationV1 | None = None
+    windows_argv_profile_id: str | None = None
     request_id: str | None = None
     policy_id: str | None = None
 
@@ -967,6 +985,256 @@ def resolve_executable_version(path: Path) -> str:
     return hashlib.sha256(source.encode("ascii")).hexdigest()
 
 
+def _argv_shape_sha256(argv: Sequence[str]) -> str:
+    shapes: list[tuple[str, ...]] = []
+    for index, item in enumerate(argv):
+        classes: list[str] = ["argv0" if index == 0 else "argument"]
+        if not item:
+            classes.append("empty")
+        if any(character.isspace() for character in item):
+            classes.append("whitespace")
+        if '"' in item:
+            classes.append("quote")
+        if '\\"' in item:
+            classes.append("backslash-before-quote")
+        if item.endswith("\\"):
+            classes.append("trailing-backslash")
+        if any(ord(character) > 127 for character in item):
+            classes.append("non-ascii")
+        if "/" in item or "\\" in item or (len(item) >= 2 and item[1] == ":"):
+            classes.append("path-like")
+        shapes.append(tuple(classes))
+    encoded = json.dumps(shapes, separators=(",", ":")).encode("ascii")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _probe_environment(rows: Sequence[EnvironmentRowV1]) -> dict[str, str]:
+    allowed = {
+        "LANG", "LC_ALL", "PATH", "PATHEXT", "PYTHONIOENCODING",
+        "SYSTEMROOT", "TEMP", "TMP", "TMPDIR", "WINDIR",
+    }
+    return {row.name: row.value for row in rows if row.name.upper() in allowed}
+
+
+def _bounded_probe_run(
+    executable: Path,
+    argv: Sequence[str],
+    request: ProcessRequestV1,
+    *,
+    cwd: str | None = None,
+) -> subprocess.CompletedProcess[bytes]:
+    remaining = _WINDOWS_ARGV_ADMISSION_SECONDS
+    try:
+        result = subprocess.run(
+            tuple(argv),
+            executable=str(executable),
+            shell=False,
+            cwd=request.cwd if cwd is None else cwd,
+            env=_probe_environment(request.environment),
+            input=b"",
+            capture_output=True,
+            timeout=remaining,
+            check=False,
+            close_fds=True,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except (OSError, subprocess.SubprocessError, ValueError) as exc:
+        raise ProcessSupervisionError(
+            "PSV1-ARGV-ATTESTATION", "request-validation"
+        ) from exc
+    if (
+        not isinstance(result.stdout, bytes)
+        or not isinstance(result.stderr, bytes)
+        or len(result.stdout) > _WINDOWS_ARGV_PROBE_MAX_BYTES
+        or len(result.stderr) > _WINDOWS_ARGV_PROBE_MAX_BYTES
+    ):
+        raise ProcessSupervisionError("PSV1-ARGV-ATTESTATION", "request-validation")
+    return result
+
+
+class WindowsArgvAdmissionOwnerV1:
+    """Runner-owned issuer and consumer of same-run Windows argv evidence."""
+
+    def __init__(self, seal: object) -> None:
+        if seal is not _WINDOWS_ARGV_ADMISSION_SEAL:
+            raise ProcessSupervisionError(
+                "PSV1-ARGV-ATTESTATION", "request-validation"
+            )
+        self._seal = seal
+        self._consumed_run_tokens: set[str] = set()
+        self._lock = threading.Lock()
+
+    def _python_probe(
+        self, request: ProcessRequestV1, executable: Path
+    ) -> tuple[str, str, str]:
+        if executable.resolve() != Path(sys.executable).resolve():
+            raise ProcessSupervisionError(
+                "PSV1-ARGV-ATTESTATION", "request-validation"
+            )
+        helper = (
+            "import json,sys;"
+            "sys.stdout.buffer.write(json.dumps(sys.argv[1:],ensure_ascii=False,"
+            "separators=(',',':')).encode('utf-8'))"
+        )
+        probe = (str(executable), "-I", "-c", helper, *request.argv[1:])
+        if len(serialize_msvcrt_argv(probe).encode("utf-16-le")) // 2 > MAX_WINDOWS_COMMAND_LINE_UNITS:
+            raise ProcessSupervisionError(
+                "PSV1-ARGV-ATTESTATION", "request-validation"
+            )
+        result = _bounded_probe_run(executable, probe, request)
+        try:
+            observed_tail = json.loads(result.stdout.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ProcessSupervisionError(
+                "PSV1-ARGV-ATTESTATION", "request-validation"
+            ) from exc
+        if (
+            result.returncode != 0
+            or not isinstance(observed_tail, list)
+            or not all(isinstance(item, str) for item in observed_tail)
+        ):
+            raise ProcessSupervisionError(
+                "PSV1-ARGV-ATTESTATION", "request-validation"
+            )
+        observed = (request.argv[0], *observed_tail)
+        return (
+            "python-json-argv-echo-v1",
+            _json_argv_sha256(request.argv),
+            _json_argv_sha256(observed),
+        )
+
+    def _git_probe(
+        self, request: ProcessRequestV1, executable: Path
+    ) -> tuple[str, str, str]:
+        if executable.name.casefold() not in {"git", "git.exe"}:
+            raise ProcessSupervisionError(
+                "PSV1-ARGV-ATTESTATION", "request-validation"
+            )
+        probe_tail = tuple(request.argv[1:])
+        probe = (str(executable), "rev-parse", "--sq-quote", "--", *probe_tail)
+        if len(serialize_msvcrt_argv(probe).encode("utf-16-le")) // 2 > MAX_WINDOWS_COMMAND_LINE_UNITS:
+            raise ProcessSupervisionError(
+                "PSV1-ARGV-ATTESTATION", "request-validation"
+            )
+        result = _bounded_probe_run(executable, probe, request)
+        try:
+            parsed = tuple(shlex.split(result.stdout.decode("utf-8"), posix=True))
+        except (UnicodeDecodeError, ValueError) as exc:
+            raise ProcessSupervisionError(
+                "PSV1-ARGV-ATTESTATION", "request-validation"
+            ) from exc
+        if result.returncode != 0 or not parsed or parsed[0] != "--":
+            raise ProcessSupervisionError(
+                "PSV1-ARGV-ATTESTATION", "request-validation"
+            )
+        observed = (request.argv[0], *parsed[1:])
+        return (
+            "git-rev-parse-sq-quote-v1",
+            _json_argv_sha256(request.argv),
+            _json_argv_sha256(observed),
+        )
+
+    def admit(
+        self, lifecycle: RunLifecycleV1, request: ProcessRequestV1
+    ) -> WindowsArgvAdmissionV1:
+        profile_id = request.windows_argv_profile_id
+        if profile_id not in _WINDOWS_ARGV_PROFILES:
+            raise ProcessSupervisionError(
+                "PSV1-ARGV-CODEC-UNSUPPORTED", "request-validation"
+            )
+        executable = Path(request.resolved_executable)
+        identity = resolve_executable_identity(executable)
+        version = resolve_executable_version(executable)
+        if profile_id == "python-validator-json-echo-v1":
+            probe_kind, requested, observed = self._python_probe(request, executable)
+        elif profile_id == "git-rev-parse-sq-quote-v1":
+            probe_kind, requested, observed = self._git_probe(request, executable)
+        else:
+            raise ProcessSupervisionError(
+                "PSV1-ARGV-CODEC-UNSUPPORTED", "request-validation"
+            )
+        if not hmac.compare_digest(requested, observed):
+            raise ProcessSupervisionError(
+                "PSV1-ARGV-ATTESTATION", "request-validation"
+            )
+        now = time.monotonic()
+        expires = now + _WINDOWS_ARGV_ADMISSION_SECONDS
+        return WindowsArgvAdmissionV1(
+            1,
+            lifecycle.token.sha256,
+            profile_id,
+            "msvcrt-v1",
+            identity,
+            version,
+            _json_argv_sha256(request.argv),
+            _argv_shape_sha256(request.argv),
+            probe_kind,
+            requested,
+            observed,
+            expires,
+            "pass",
+            _WINDOWS_ARGV_ADMISSION_SEAL,
+            _WINDOWS_ARGV_CHILD_EVIDENCE_SEAL,
+        )
+
+    def consume(
+        self,
+        lifecycle: RunLifecycleV1,
+        request: ProcessRequestV1,
+        admission: WindowsArgvAdmissionV1,
+    ) -> None:
+        executable = Path(request.resolved_executable)
+        valid = (
+            type(admission) is WindowsArgvAdmissionV1
+            and admission._seal is _WINDOWS_ARGV_ADMISSION_SEAL
+            and admission._child_evidence_seal is _WINDOWS_ARGV_CHILD_EVIDENCE_SEAL
+            and admission.schema_version == 1
+            and admission.run_token_sha256 == lifecycle.token.sha256
+            and admission.profile_id == request.windows_argv_profile_id
+            and admission.codec == "msvcrt-v1"
+            and admission.resolved_executable_identity
+            == resolve_executable_identity(executable)
+            and admission.resolved_executable_version
+            == resolve_executable_version(executable)
+            and admission.actual_argv_sha256 == _json_argv_sha256(request.argv)
+            and admission.actual_argv_shape_sha256 == _argv_shape_sha256(request.argv)
+            and admission.probe_requested_argv_sha256
+            == admission.probe_observed_argv_sha256
+            and admission.expires_at_monotonic >= time.monotonic()
+            and admission.status == "pass"
+        )
+        if not valid:
+            raise ProcessSupervisionError(
+                "PSV1-ARGV-ATTESTATION", "request-validation"
+            )
+        with self._lock:
+            if admission.run_token_sha256 in self._consumed_run_tokens:
+                raise ProcessSupervisionError(
+                    "PSV1-ARGV-ATTESTATION", "request-validation"
+                )
+            self._consumed_run_tokens.add(admission.run_token_sha256)
+
+
+class WindowsCreateOwnerV1:
+    """The sole Windows process-create seam; admission is consumed first."""
+
+    def __init__(
+        self,
+        admission_owner: WindowsArgvAdmissionOwnerV1,
+        lifecycle: RunLifecycleV1,
+        create_process: Callable[[], object],
+    ) -> None:
+        self._admission_owner = admission_owner
+        self._lifecycle = lifecycle
+        self._create_process = create_process
+
+    def create(
+        self, request: ProcessRequestV1, admission: WindowsArgvAdmissionV1
+    ) -> object:
+        self._admission_owner.consume(self._lifecycle, request, admission)
+        return self._create_process()
+
+
 def validate_capture_policy(policy: CapturePolicyV1) -> None:
     token = policy.policy_id
     if (
@@ -1037,26 +1305,11 @@ def validate_process_request(request: ProcessRequestV1) -> ValidatedCwdV1:
     if os.name == "nt":
         if suffix in {".bat", ".cmd", ".ps1", ".sh"} or basename in _WINDOWS_SHELL_HOSTS:
             raise ProcessSupervisionError("PSV1-ARGV-CODEC-UNSUPPORTED", "request-validation")
-        if request.windows_argv_codec != "msvcrt-v1":
+        if request.windows_argv_profile_id not in _WINDOWS_ARGV_PROFILES:
             raise ProcessSupervisionError("PSV1-ARGV-CODEC-UNSUPPORTED", "request-validation")
         command = serialize_msvcrt_argv(request.argv)
         if len(command.encode("utf-16-le")) // 2 > MAX_WINDOWS_COMMAND_LINE_UNITS:
             raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
-        attestation = request.windows_argv_attestation
-        digest = _json_argv_sha256(request.argv)
-        if (
-            not isinstance(attestation, WindowsArgvAttestationV1)
-            or attestation.schema_version != 1
-            or attestation.codec != "msvcrt-v1"
-            or attestation.parser_family != "msvcrt-compatible-v1"
-            or attestation.resolved_executable_identity != identity
-            or attestation.resolved_executable_version != resolve_executable_version(executable)
-            or attestation.probe_requested_argv_sha256 != digest
-            or attestation.probe_observed_argv_sha256 != digest
-            or attestation.probe_status != "pass"
-            or not attestation.covered_argv_shapes
-        ):
-            raise ProcessSupervisionError("PSV1-ARGV-ATTESTATION", "request-validation")
     elif basename in _POSIX_SHELL_HOSTS:
         raise ProcessSupervisionError("PSV1-ARGV-CODEC-UNSUPPORTED", "request-validation")
     _validate_environment(request.environment)
@@ -1519,8 +1772,14 @@ def _result_from_parts(
 
 
 class _WindowsBackendV1:
-    def __init__(self, coordinator: WindowsInheritanceCoordinatorV1, api: _WindowsKernelV1 | None = None) -> None:
+    def __init__(
+        self,
+        coordinator: WindowsInheritanceCoordinatorV1,
+        admission_owner: WindowsArgvAdmissionOwnerV1,
+        api: _WindowsKernelV1 | None = None,
+    ) -> None:
         self.coordinator = coordinator
+        self.admission_owner = admission_owner
         self.api = api or _WindowsKernelV1()
 
     def run(
@@ -1528,6 +1787,7 @@ class _WindowsBackendV1:
         request: ProcessRequestV1,
         lifecycle: RunLifecycleV1,
         validated_cwd: ValidatedCwdV1,
+        admission: WindowsArgvAdmissionV1,
     ) -> ProcessResultV1:
         import msvcrt
 
@@ -1715,11 +1975,16 @@ class _WindowsBackendV1:
                         if not k.SetHandleInformation(handles[name], self.api.HANDLE_FLAG_INHERIT, self.api.HANDLE_FLAG_INHERIT):
                             raise ProcessSupervisionError("PSV1-HANDLE-INHERITANCE", "handle-preparation")
                         enabled.append(name)
-                    if not k.CreateProcessW(
-                        str(request.resolved_executable), command, None, None, True,
-                        self.api.CREATE_SUSPENDED | self.api.CREATE_UNICODE_ENVIRONMENT | self.api.EXTENDED_STARTUPINFO_PRESENT,
-                        environment, validated_cwd.canonical_absolute, ctypes.byref(startup.StartupInfo), ctypes.byref(info),
-                    ):
+                    create_owner = WindowsCreateOwnerV1(
+                        self.admission_owner,
+                        lifecycle,
+                        lambda: k.CreateProcessW(
+                            str(request.resolved_executable), command, None, None, True,
+                            self.api.CREATE_SUSPENDED | self.api.CREATE_UNICODE_ENVIRONMENT | self.api.EXTENDED_STARTUPINFO_PRESENT,
+                            environment, validated_cwd.canonical_absolute, ctypes.byref(startup.StartupInfo), ctypes.byref(info),
+                        ),
+                    )
+                    if not create_owner.create(request, admission):
                         raise ProcessSupervisionError("PSV1-PROCESS-CREATE", "process-create")
                     register_handle("process", info.hProcess)
                     register_handle("thread", info.hThread)
@@ -2274,6 +2539,9 @@ class ProcessRunnerV1:
         windows_api: _WindowsKernelV1 | None = None,
     ) -> None:
         self.windows_inheritance_coordinator = WindowsInheritanceCoordinatorV1()
+        self.windows_argv_admission_owner = WindowsArgvAdmissionOwnerV1(
+            _WINDOWS_ARGV_ADMISSION_SEAL
+        )
         self._backend_factory = backend_factory
         self._windows_api = windows_api
         self._closed = False
@@ -2350,6 +2618,21 @@ class ProcessRunnerV1:
                 return _request_failure(request, exc, started)
         try:
             validated_cwd = validate_process_request(request)
+            if os.name == "nt":
+                admission_started = time.monotonic()
+                admission = self.windows_argv_admission_owner.admit(
+                    owned_lifecycle, request
+                )
+                request = dataclasses.replace(
+                    request,
+                    deadline_monotonic=(
+                        request.deadline_monotonic
+                        + time.monotonic()
+                        - admission_started
+                    ),
+                )
+            else:
+                admission = None
         except ProcessSupervisionError as exc:
             result = _request_failure(request, exc, started)
             owned_lifecycle.finalize_once(time.monotonic() + RUNNER_CLOSE_TIMEOUT_SECONDS)
@@ -2390,9 +2673,12 @@ class ProcessRunnerV1:
                 backend = self._backend_factory(self, owned_lifecycle)
                 result = backend(request, owned_lifecycle, validated_cwd)
             elif os.name == "nt":
+                assert admission is not None
                 result = _WindowsBackendV1(
-                    self.windows_inheritance_coordinator, self._windows_api
-                ).run(request, owned_lifecycle, validated_cwd)
+                    self.windows_inheritance_coordinator,
+                    self.windows_argv_admission_owner,
+                    self._windows_api,
+                ).run(request, owned_lifecycle, validated_cwd, admission)
             else:
                 result = _PosixBackendV1().run(
                     request, owned_lifecycle, validated_cwd
@@ -2728,8 +3014,8 @@ def encode_request_bundle(header: Mapping[str, object], stdin_bytes: bytes) -> b
 _HEADER_KEYS = frozenset(
     {
         "schema", "requestId", "parentPid", "parentStartMarker",
-        "capabilitySha256", "argv", "windowsArgvCodec",
-        "windowsArgvAttestation", "cwd", "environment", "stdinSha256",
+        "capabilitySha256", "argv", "windowsArgvProfileId", "cwd",
+        "environment", "stdinSha256",
         "policyId", "deadlineMilliseconds", "nonAuthorizing",
         "claimDirectoryIdentitySha256",
     }
@@ -2766,27 +3052,6 @@ def get_process_start_marker(pid: int) -> str:
         return str((creation.dwHighDateTime << 32) | creation.dwLowDateTime)
     finally:
         k32.CloseHandle(handle)
-
-
-def _attestation_from_json(value: object) -> WindowsArgvAttestationV1 | None:
-    if value is None:
-        return None
-    if not isinstance(value, dict):
-        raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
-    keys = {
-        "schemaVersion", "codec", "parserFamily", "resolvedExecutableIdentity",
-        "resolvedExecutableVersion", "coveredArgvShapes", "probeRequestedArgvSha256",
-        "probeObservedArgvSha256", "probeStatus",
-    }
-    if set(value) != keys or not isinstance(value["coveredArgvShapes"], list):
-        raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
-    return WindowsArgvAttestationV1(
-        int(value["schemaVersion"]), str(value["codec"]), str(value["parserFamily"]),
-        str(value["resolvedExecutableIdentity"]), str(value["resolvedExecutableVersion"]),
-        tuple(str(item) for item in value["coveredArgvShapes"]),
-        str(value["probeRequestedArgvSha256"]), str(value["probeObservedArgvSha256"]),
-        str(value["probeStatus"]),
-    )
 
 
 def _decode_cli_cwd(value: object) -> str:
@@ -2851,8 +3116,7 @@ def _header_to_request(
         1, tuple(argv), resolved, _decode_cli_cwd(header.get("cwd")), tuple(rows),
         decoded.stdin_bytes, time.monotonic() + deadline_ms / 1000.0,
         _cli_capture_policy(), owner.mint_memory_capture_sink(), SettlePolicyV1(5.0),
-        windows_argv_codec=header.get("windowsArgvCodec"),
-        windows_argv_attestation=_attestation_from_json(header.get("windowsArgvAttestation")),
+        windows_argv_profile_id=header.get("windowsArgvProfileId"),
         request_id=request_id, policy_id="cli-bounded-v1",
     )
 
@@ -3264,7 +3528,9 @@ __all__ = [
     "RunLifecycleV1",
     "RunnerCloseResultV1",
     "RunTokenV1",
-    "WindowsArgvAttestationV1",
+    "WindowsArgvAdmissionOwnerV1",
+    "WindowsArgvAdmissionV1",
+    "WindowsCreateOwnerV1",
     "WindowsInheritanceCoordinatorV1",
     "ValidatedCwdV1",
     "bind_cwd_identity",

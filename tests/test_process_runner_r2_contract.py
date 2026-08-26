@@ -70,18 +70,6 @@ def _settle_policy(runner):
 
 def _request(runner, argv: tuple[str, ...], *, deadline: float = 5.0):
     executable = Path(sys.executable).resolve()
-    digest = runner._json_argv_sha256(argv)
-    attestation = runner.WindowsArgvAttestationV1(
-        1,
-        "msvcrt-v1",
-        "msvcrt-compatible-v1",
-        runner.resolve_executable_identity(executable),
-        runner.resolve_executable_version(executable),
-        ("generic",),
-        digest,
-        digest,
-        "pass",
-    )
     environment = tuple(
         runner.EnvironmentRowV1(name, os.environ[name])
         for name in ("PATH", "SYSTEMROOT", "TEMP", "TMP")
@@ -98,8 +86,9 @@ def _request(runner, argv: tuple[str, ...], *, deadline: float = 5.0):
         _policy(runner),
         runner.ProcessRunnerV1().mint_memory_capture_sink(),
         _settle_policy(runner),
-        windows_argv_codec="msvcrt-v1" if os.name == "nt" else None,
-        windows_argv_attestation=attestation if os.name == "nt" else None,
+        windows_argv_profile_id=(
+            "python-validator-json-echo-v1" if os.name == "nt" else None
+        ),
     )
 
 
@@ -378,16 +367,25 @@ def test_five_pairs_are_development_only_and_production_p95_needs_forty() -> Non
         protocol.summarize_pairs(pairs, production=True)
 
 
-def test_phase_one_has_no_production_consumer_or_native_dependency_edge() -> None:
-    """The dormant module cannot activate a protected consumer or Rust path."""
-    protected = (
-        ROOT / "scripts" / "provider_prompt.py",
-        ROOT / "scripts" / "skill_pack_validator_runtime.py",
-        ROOT / "scripts" / "validate-slice-a-detached.py",
+def test_process_runner_activation_inventory_is_exact_and_python_only() -> None:
+    """Only the three approved Python consumers import the canonical runner."""
+    active = {
+        ROOT / "scripts" / "provider_prompt.py": "process_supervision.process_runner",
+        ROOT / "scripts" / "skill_pack_validator_runtime.py": (
+            '"process_supervision" / "process_runner.py"'
+        ),
+        ROOT / "scripts" / "validate-slice-a-detached.py": (
+            "process_supervision.process_runner"
+        ),
+    }
+    inactive = (
         ROOT / "scripts" / "process_supervision" / "guarded_launcher.py",
         ROOT / "scripts" / "process_supervision" / "route_activation_registry.py",
     )
-    for path in protected:
+    for path, marker in active.items():
+        text = path.read_text(encoding="utf-8")
+        assert marker in text
+    for path in inactive:
         text = path.read_text(encoding="utf-8")
         assert "process_supervision.process_runner" not in text
         assert "process_runner import" not in text

@@ -35,18 +35,6 @@ def _protocol():
 def _request(module, owner):
     executable = Path(sys.executable).resolve()
     argv = (sys.executable, str(CHILD), "identity")
-    digest = module._json_argv_sha256(argv)
-    attestation = module.WindowsArgvAttestationV1(
-        1,
-        "msvcrt-v1",
-        "msvcrt-compatible-v1",
-        module.resolve_executable_identity(executable),
-        module.resolve_executable_version(executable),
-        ("generic",),
-        digest,
-        digest,
-        "pass",
-    )
     environment = tuple(
         module.EnvironmentRowV1(name, os.environ[name])
         for name in ("PATH", "SYSTEMROOT", "TEMP", "TMP")
@@ -65,8 +53,9 @@ def _request(module, owner):
         ),
         owner.mint_memory_capture_sink(),
         module.SettlePolicyV1(5.0),
-        windows_argv_codec="msvcrt-v1" if os.name == "nt" else None,
-        windows_argv_attestation=attestation if os.name == "nt" else None,
+        windows_argv_profile_id=(
+            "python-validator-json-echo-v1" if os.name == "nt" else None
+        ),
     )
 
 

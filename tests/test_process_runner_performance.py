@@ -52,13 +52,6 @@ def _environment(runner):
 
 def _request(runner, argv: tuple[str, ...], *, limit=1024 * 1024, deadline=15.0):
     executable = Path(sys.executable).resolve()
-    digest = runner._json_argv_sha256(argv)
-    attestation = runner.WindowsArgvAttestationV1(
-        1, "msvcrt-v1", "msvcrt-compatible-v1",
-        runner.resolve_executable_identity(executable),
-        runner.resolve_executable_version(executable),
-        ("generic",), digest, digest, "pass",
-    )
     policy = runner.CapturePolicyV1(
         "validator-benchmark-v1", limit, min(limit, 64 * 1024),
         min(limit, 128 * 1024), 64 * 1024,
@@ -66,8 +59,8 @@ def _request(runner, argv: tuple[str, ...], *, limit=1024 * 1024, deadline=15.0)
     return runner.ProcessRequestV1(
         1, argv, executable, str(ROOT), _environment(runner), None,
         time.monotonic() + deadline, policy, runner.ProcessRunnerV1().mint_memory_capture_sink(),
-        runner.SettlePolicyV1(5.0), windows_argv_codec="msvcrt-v1",
-        windows_argv_attestation=attestation,
+        runner.SettlePolicyV1(5.0),
+        windows_argv_profile_id="python-validator-json-echo-v1",
     )
 
 

@@ -23,9 +23,6 @@ if __name__ == "__main__":
         ProcessRequestV1,
         ProcessRunnerV1,
         SettlePolicyV1,
-        WindowsArgvAttestationV1,
-        resolve_executable_identity,
-        resolve_executable_version,
     )
     from skill_pack_validator_runtime import ValidatorCapturePolicyV1
 else:
@@ -34,9 +31,6 @@ else:
         ProcessRequestV1,
         ProcessRunnerV1,
         SettlePolicyV1,
-        WindowsArgvAttestationV1,
-        resolve_executable_identity,
-        resolve_executable_version,
     )
     from scripts.skill_pack_validator_runtime import ValidatorCapturePolicyV1
 
@@ -167,14 +161,6 @@ def _safe_relative(value: str) -> str:
     return candidate.as_posix()
 
 
-def _argv_sha256(argv: tuple[str, ...]) -> str:
-    return hashlib.sha256(
-        json.dumps(
-            list(argv), ensure_ascii=False, separators=(",", ":")
-        ).encode("utf-8")
-    ).hexdigest()
-
-
 def _resolved_argv(argv: tuple[str, ...]) -> tuple[Path, tuple[str, ...]]:
     first = Path(argv[0])
     if first.is_absolute():
@@ -191,23 +177,14 @@ def _resolved_argv(argv: tuple[str, ...]) -> tuple[Path, tuple[str, ...]]:
     return executable, actual_argv
 
 
-def _windows_argv_attestation(
-    executable: Path, argv: tuple[str, ...]
-) -> WindowsArgvAttestationV1 | None:
+def _windows_argv_profile_id(executable: Path) -> str | None:
     if os.name != "nt":
         return None
-    digest = _argv_sha256(argv)
-    return WindowsArgvAttestationV1(
-        schema_version=1,
-        codec="msvcrt-v1",
-        parser_family="msvcrt-compatible-v1",
-        resolved_executable_identity=resolve_executable_identity(executable),
-        resolved_executable_version=resolve_executable_version(executable),
-        covered_argv_shapes=("detached-slice-a-v1",),
-        probe_requested_argv_sha256=digest,
-        probe_observed_argv_sha256=digest,
-        probe_status="pass",
-    )
+    if executable.resolve() == Path(sys.executable).resolve():
+        return "python-validator-json-echo-v1"
+    if executable.name.casefold() in {"git", "git.exe"}:
+        return "git-rev-parse-sq-quote-v1"
+    return None
 
 
 def _run_process(
@@ -238,8 +215,7 @@ def _run_process(
         capture_policy=capture_policy,
         capture_sink_binding=sink,
         settle_policy=SettlePolicyV1(_SETTLEMENT_TIMEOUT_SECONDS),
-        windows_argv_codec="msvcrt-v1" if os.name == "nt" else None,
-        windows_argv_attestation=_windows_argv_attestation(executable, actual_argv),
+        windows_argv_profile_id=_windows_argv_profile_id(executable),
         policy_id=capture_policy.policy_id,
     )
     result = runner.run(request)

@@ -42,7 +42,6 @@ EnvironmentRowV1 = _PROCESS_RUNNER.EnvironmentRowV1
 ProcessRequestV1 = _PROCESS_RUNNER.ProcessRequestV1
 ProcessRunnerV1 = _PROCESS_RUNNER.ProcessRunnerV1
 SettlePolicyV1 = _PROCESS_RUNNER.SettlePolicyV1
-WindowsArgvAttestationV1 = _PROCESS_RUNNER.WindowsArgvAttestationV1
 
 
 VALIDATOR_CHILD_TIMEOUT_SECONDS = 120.0
@@ -275,38 +274,6 @@ def detect_layout(script: Path, provider: str, requested_root: Path | None = Non
                     )
     expected = "src.codex/.codex/.agents" if provider == "codex" else "src.claude/.claude"
     raise RuntimeError(f"Could not detect Orchestrarium {provider} layout ({expected}).")
-
-
-def _argv_sha256(argv: Sequence[str]) -> str:
-    return hashlib.sha256(
-        json.dumps(list(argv), ensure_ascii=False, separators=(",", ":")).encode(
-            "utf-8"
-        )
-    ).hexdigest()
-
-
-def _python_argv_attestation(
-    executable: Path,
-    argv: tuple[str, ...],
-) -> WindowsArgvAttestationV1 | None:
-    if os.name != "nt":
-        return None
-    digest = _argv_sha256(argv)
-    return WindowsArgvAttestationV1(
-        schema_version=1,
-        codec="msvcrt-v1",
-        parser_family="msvcrt-compatible-v1",
-        resolved_executable_identity=(
-            _PROCESS_RUNNER.resolve_executable_identity(executable)
-        ),
-        resolved_executable_version=(
-            _PROCESS_RUNNER.resolve_executable_version(executable)
-        ),
-        covered_argv_shapes=("python-script", "generic"),
-        probe_requested_argv_sha256=digest,
-        probe_observed_argv_sha256=digest,
-        probe_status="pass",
-    )
 
 
 def _diagnostic_text(
@@ -585,8 +552,9 @@ class Validator:
             settle_policy=SettlePolicyV1(
                 timeout_seconds=VALIDATOR_SETTLEMENT_TIMEOUT_SECONDS
             ),
-            windows_argv_codec="msvcrt-v1" if os.name == "nt" else None,
-            windows_argv_attestation=_python_argv_attestation(executable, argv),
+            windows_argv_profile_id=(
+                "python-validator-json-echo-v1" if os.name == "nt" else None
+            ),
         )
         result = self._process_runner.run(request)
         stdout = sink.bytes_for("stdout")

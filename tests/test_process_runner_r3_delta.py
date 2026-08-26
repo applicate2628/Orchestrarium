@@ -39,18 +39,6 @@ def _protocol():
 def _request(module, owner, *, cwd=None, sink_binding=None):
     executable = Path(sys.executable).resolve()
     argv = (sys.executable, str(CHILD), "identity")
-    digest = module._json_argv_sha256(argv)
-    attestation = module.WindowsArgvAttestationV1(
-        1,
-        "msvcrt-v1",
-        "msvcrt-compatible-v1",
-        module.resolve_executable_identity(executable),
-        module.resolve_executable_version(executable),
-        ("generic",),
-        digest,
-        digest,
-        "pass",
-    )
     policy = module.CapturePolicyV1(
         "r3-delta-v1", 1024 * 1024, 64 * 1024, 128 * 1024, 64 * 1024
     )
@@ -69,8 +57,9 @@ def _request(module, owner, *, cwd=None, sink_binding=None):
         "capture_policy": policy,
         "capture_sink_binding": sink_binding or owner.mint_memory_capture_sink(),
         "settle_policy": module.SettlePolicyV1(5.0),
-        "windows_argv_codec": "msvcrt-v1" if os.name == "nt" else None,
-        "windows_argv_attestation": attestation if os.name == "nt" else None,
+        "windows_argv_profile_id": (
+            "python-validator-json-echo-v1" if os.name == "nt" else None
+        ),
     }
     return module.ProcessRequestV1(**values)
 

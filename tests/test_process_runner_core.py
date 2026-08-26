@@ -39,24 +39,6 @@ def _policy(runner, *, limit: int = 1024 * 1024):
     )
 
 
-def _attestation(runner, executable: Path, argv: tuple[str, ...]):
-    identity = runner.resolve_executable_identity(executable)
-    digest = hashlib.sha256(
-        json.dumps(list(argv), ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-    ).hexdigest()
-    return runner.WindowsArgvAttestationV1(
-        schema_version=1,
-        codec="msvcrt-v1",
-        parser_family="msvcrt-compatible-v1",
-        resolved_executable_identity=identity,
-        resolved_executable_version=runner.resolve_executable_version(executable),
-        covered_argv_shapes=("empty", "whitespace", "quote", "backslash-quote", "trailing-backslash", "unicode", "generic"),
-        probe_requested_argv_sha256=digest,
-        probe_observed_argv_sha256=digest,
-        probe_status="pass",
-    )
-
-
 def _request(runner, argv: tuple[str, ...], *, stdin: bytes | None = None, limit: int = 1024 * 1024, deadline: float = 10.0):
     executable = Path(sys.executable).resolve()
     return runner.ProcessRequestV1(
@@ -74,8 +56,9 @@ def _request(runner, argv: tuple[str, ...], *, stdin: bytes | None = None, limit
         capture_policy=_policy(runner, limit=limit),
         capture_sink_binding=runner.ProcessRunnerV1().mint_memory_capture_sink(),
         settle_policy=runner.SettlePolicyV1(timeout_seconds=5.0),
-        windows_argv_codec="msvcrt-v1" if os.name == "nt" else None,
-        windows_argv_attestation=_attestation(runner, executable, argv) if os.name == "nt" else None,
+        windows_argv_profile_id=(
+            "python-validator-json-echo-v1" if os.name == "nt" else None
+        ),
     )
 
 

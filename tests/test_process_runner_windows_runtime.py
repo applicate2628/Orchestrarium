@@ -94,12 +94,6 @@ def _policy(runner, limit: int = 1024 * 1024):
 
 def _request(runner, argv: tuple[str, ...], *, limit: int = 1024 * 1024, diagnostic=None, deadline=8.0):
     executable = Path(sys.executable).resolve()
-    identity = runner.resolve_executable_identity(executable)
-    digest = runner._json_argv_sha256(argv)
-    attestation = runner.WindowsArgvAttestationV1(
-        1, "msvcrt-v1", "msvcrt-compatible-v1", identity,
-        runner.resolve_executable_version(executable), ("generic",), digest, digest, "pass",
-    )
     rows = tuple(
         runner.EnvironmentRowV1(name, os.environ[name])
         for name in ("PATH", "SYSTEMROOT", "TEMP", "TMP") if name in os.environ
@@ -108,7 +102,7 @@ def _request(runner, argv: tuple[str, ...], *, limit: int = 1024 * 1024, diagnos
         1, argv, executable, str(ROOT), rows, None, time.monotonic() + deadline,
         _policy(runner, limit), runner.ProcessRunnerV1().mint_memory_capture_sink(),
         runner.SettlePolicyV1(5.0), diagnostic_port=diagnostic,
-        windows_argv_codec="msvcrt-v1", windows_argv_attestation=attestation,
+        windows_argv_profile_id="python-validator-json-echo-v1",
     )
 
 
@@ -621,20 +615,6 @@ def test_real_broken_stdin_pipe_reports_written_bytes_incomplete() -> None:
     runner = _load_runner()
     request = _request(runner, (sys.executable, str(CHILD), "close-stdin", "--sleep", "30"))
     request = runner.dataclasses.replace(request, stdin_bytes=b"x" * (4 * 1024 * 1024))
-    request = runner.dataclasses.replace(
-        request,
-        windows_argv_attestation=runner.WindowsArgvAttestationV1(
-            1,
-            "msvcrt-v1",
-            "msvcrt-compatible-v1",
-            runner.resolve_executable_identity(request.resolved_executable),
-            runner.resolve_executable_version(request.resolved_executable),
-            ("generic",),
-            runner._json_argv_sha256(request.argv),
-            runner._json_argv_sha256(request.argv),
-            "pass",
-        ),
-    )
     result = runner.ProcessRunnerV1().run(request)
     assert result.failure_id in {"PSV1-STDIN-BROKEN-PIPE", "PSV1-STDIN-SHORT-WRITE"}
     assert result.stdin.complete is False

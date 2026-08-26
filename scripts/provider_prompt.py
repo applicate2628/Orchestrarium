@@ -29,9 +29,7 @@ try:
         ProcessResultV1,
         ProcessRunnerV1,
         SettlePolicyV1,
-        WindowsArgvAttestationV1,
         resolve_executable_identity,
-        resolve_executable_version,
     )
 except ModuleNotFoundError:
     from scripts.process_supervision.process_runner import (
@@ -41,9 +39,7 @@ except ModuleNotFoundError:
         ProcessResultV1,
         ProcessRunnerV1,
         SettlePolicyV1,
-        WindowsArgvAttestationV1,
         resolve_executable_identity,
-        resolve_executable_version,
     )
 
 EFFORTS = frozenset({"low", "medium", "high", "xhigh", "max"})
@@ -59,6 +55,9 @@ CAPTURE_MAX_BYTES_DEFAULT = 16 * 1024 * 1024
 CAPTURE_MAX_BYTES_HARD = 256 * 1024 * 1024
 STDERR_SCAN_MAX_BYTES = 64 * 1024
 RESULT_PREFIX = "ORCHESTRARIUM_PROVIDER_RESULT_V2="
+E_EXTERNAL_PROVIDER_WINDOWS_NATIVE_ARGV_UNAVAILABLE = (
+    "E_EXTERNAL_PROVIDER_WINDOWS_NATIVE_ARGV_UNAVAILABLE"
+)
 EXTERNAL_PROVIDER_NAMES = frozenset({"codex", "claude"})
 SETTINGS_SNAPSHOT_MAX_BYTES = 1024 * 1024
 CLEANUP_ISSUE_LIMIT = 32
@@ -1320,8 +1319,9 @@ def run_support_command(
         capture_policy=CapturePolicyV1("provider-support-v1", 1024 * 1024, 0, 0, 64 * 1024),
         capture_sink_binding=sink,
         settle_policy=SettlePolicyV1(5.0),
-        windows_argv_codec="msvcrt-v1" if os.name == "nt" else None,
-        windows_argv_attestation=provider_windows_argv_attestation(executable, argv),
+        windows_argv_profile_id=provider_windows_argv_profile_id(
+            "python-support", executable
+        ),
     )
     result = runner.run(request)
     return result, sink.bytes_for("stdout"), sink.bytes_for("stderr")
@@ -1528,32 +1528,15 @@ def provider_capture_policy(capture_max_bytes: int) -> CapturePolicyV1:
     )
 
 
-def provider_windows_argv_attestation(
-    executable: Path, argv: tuple[str, ...]
-) -> WindowsArgvAttestationV1 | None:
-    """Admit only the locally attested Python provider-script transport on Windows."""
-
+def provider_windows_argv_profile_id(
+    provider: str, executable: Path
+) -> str | None:
+    """Select one sealed runner profile without constructing observed evidence."""
     if os.name != "nt":
         return None
-    if executable != Path(sys.executable).resolve():
-        return None
-    encoded = json.dumps(list(argv), ensure_ascii=False, separators=(",", ":")).encode(
-        "utf-8"
-    )
-    digest = hashlib.sha256(encoded).hexdigest()
-    identity = resolve_executable_identity(executable)
-    version = resolve_executable_version(executable)
-    return WindowsArgvAttestationV1(
-        schema_version=1,
-        codec="msvcrt-v1",
-        parser_family="msvcrt-compatible-v1",
-        resolved_executable_identity=identity,
-        resolved_executable_version=version,
-        covered_argv_shapes=("provider-python-script-v1",),
-        probe_requested_argv_sha256=digest,
-        probe_observed_argv_sha256=digest,
-        probe_status="pass",
-    )
+    if executable.resolve() == Path(sys.executable).resolve():
+        return "python-validator-json-echo-v1"
+    return None
 
 
 def run_provider_process(
@@ -1564,6 +1547,7 @@ def run_provider_process(
     query_cwd: Path,
     body: bytes,
     control: Control,
+    provider: str | None = None,
 ) -> tuple[ProcessResultV1, bytes, bytes]:
     """Run one provider through the sole process/tree/I-O lifecycle owner."""
 
@@ -1583,8 +1567,9 @@ def run_provider_process(
         capture_policy=provider_capture_policy(control.capture_max_bytes),
         capture_sink_binding=sink,
         settle_policy=SettlePolicyV1(5.0),
-        windows_argv_codec="msvcrt-v1" if os.name == "nt" else None,
-        windows_argv_attestation=provider_windows_argv_attestation(executable, argv),
+        windows_argv_profile_id=provider_windows_argv_profile_id(
+            provider or "python-support", executable
+        ),
     )
     result = runner.run(request)
     return result, sink.bytes_for("stdout"), sink.bytes_for("stderr")
@@ -2265,6 +2250,21 @@ def _launch_with_runner(
             f"{provider} binary '{os.environ.get(key) or provider}' not found on PATH. "
             f"Set {key} if installed elsewhere."
         )
+    if os.name == "nt" and provider in {"codex", "claude"}:
+        executable = Path(command[0])
+        try:
+            identity_available = (
+                executable.is_absolute()
+                and executable.is_file()
+                and bool(resolve_executable_identity(executable))
+            )
+        except (OSError, ValueError):
+            identity_available = False
+        if identity_available and len(command) == 1:
+            return fail(
+                f"{E_EXTERNAL_PROVIDER_WINDOWS_NATIVE_ARGV_UNAVAILABLE}: "
+                f"native {provider} argv observation is unavailable on Windows"
+            )
     if provider == "codex":
         if not Path(command[0]).is_absolute() or not Path(command[0]).is_file():
             return fail("resolved Codex executable is not an absolute regular file")
@@ -2369,6 +2369,7 @@ def _launch_with_runner(
             query_cwd,
             body,
             control,
+            provider,
         )
         stream_result = provider_stream_result(process_result)
         if process_result.target_exit_code is not None:

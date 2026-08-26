@@ -37,21 +37,6 @@ def main() -> int:
         "--sleep",
         "60",
     )
-    identity = module.resolve_executable_identity(executable)
-    digest = hashlib.sha256(
-        json.dumps(list(argv), ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-    ).hexdigest()
-    attestation = module.WindowsArgvAttestationV1(
-        1,
-        "msvcrt-v1",
-        "msvcrt-compatible-v1",
-        identity,
-        module.resolve_executable_version(executable),
-        ("generic",),
-        digest,
-        digest,
-        "pass",
-    )
     environment = tuple(
         module.EnvironmentRowV1(name, os.environ[name])
         for name in ("PATH", "SYSTEMROOT", "TEMP", "TMP")
@@ -75,8 +60,7 @@ def main() -> int:
         policy,
         module.ProcessRunnerV1().mint_memory_capture_sink(),
         module.SettlePolicyV1(5.0),
-        windows_argv_codec="msvcrt-v1",
-        windows_argv_attestation=attestation,
+        windows_argv_profile_id="python-validator-json-echo-v1",
     )
     result = module.ProcessRunnerV1().run(request)
     return 0 if result.outcome == "success" else 1
