@@ -1,0 +1,973 @@
+name: Orche PR2 second review fixes
+
+on:
+  push:
+    branches:
+      - orche/impl-000-baseline
+
+permissions:
+  contents: write
+
+concurrency:
+  group: orche-pr2-second-review-fixes
+  cancel-in-progress: false
+
+jobs:
+  fix-and-verify:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: orche/impl-000-baseline
+          fetch-depth: 0
+
+      - name: Add failing regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          Path('tests/test_orche_baseline_pin.py').write_text(r'''#!/usr/bin/env python3
+          """Regression tests for the committed Stage 0 baseline pin and local-only policy."""
+
+          from __future__ import annotations
+
+          import json
+          import subprocess
+          import unittest
+          from pathlib import Path
+
+          ROOT = Path(__file__).resolve().parents[1]
+          BASELINE_DIR = ROOT / "baseline" / "orchestrarium-v1"
+          PIN_PATH = BASELINE_DIR / "baseline-pin.json"
+          README_PATH = BASELINE_DIR / "README.md"
+          EXPECTED_COMMIT = "ce2052fb773576fd6e3206c2a7e21e01852d556b"
+          EXPECTED_TREE = "04dccf4575f17c9c5533474d2e0fd1503bfeceb7"
+          TOOL_PATHS = {
+              "inventoryGenerator": "scripts/baseline/build_inventory.py",
+              "targetEffectGenerator": "scripts/baseline/build_target_effect_baseline.py",
+              "pytestComparator": "scripts/baseline/compare_pytest_baseline.py",
+              "commandComparator": "scripts/baseline/compare_command_baseline.py",
+          }
+
+
+          def git(*args: str) -> str:
+              result = subprocess.run(
+                  ["git", *args],
+                  cwd=ROOT,
+                  text=True,
+                  stdout=subprocess.PIPE,
+                  stderr=subprocess.PIPE,
+                  check=False,
+              )
+              if result.returncode != 0:
+                  raise AssertionError(
+                      f"git {' '.join(args)} failed ({result.returncode})\n"
+                      f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+                  )
+              return result.stdout.strip()
+
+
+          class BaselinePinTests(unittest.TestCase):
+              def test_pin_matches_exact_main_git_object_and_tool_blobs(self) -> None:
+                  payload = json.loads(PIN_PATH.read_text(encoding="utf-8"))
+                  baseline = payload["baseline"]
+
+                  self.assertEqual(payload["schemaVersion"], 3)
+                  self.assertEqual(baseline["sourceBranch"], "main")
+                  self.assertEqual(baseline["commitSha"], EXPECTED_COMMIT)
+                  self.assertEqual(baseline["sourceBranchHeadAtCapture"], EXPECTED_COMMIT)
+                  self.assertEqual(baseline["treeSha"], EXPECTED_TREE)
+                  self.assertNotIn("sourcePullRequest", baseline)
+                  self.assertNotIn("sourcePullRequestHeadAtCapture", baseline)
+                  self.assertEqual(
+                      git("rev-parse", "--verify", f"{EXPECTED_COMMIT}^{{commit}}"),
+                      EXPECTED_COMMIT,
+                  )
+                  self.assertEqual(
+                      git("rev-parse", "--verify", f"{EXPECTED_COMMIT}^{{tree}}"),
+                      EXPECTED_TREE,
+                  )
+
+                  tooling = payload["tooling"]
+                  self.assertEqual(set(tooling), set(TOOL_PATHS))
+                  for name, relative_path in TOOL_PATHS.items():
+                      record = tooling[name]
+                      blob_sha = record["gitBlobSha"]
+                      self.assertEqual(record["path"], relative_path)
+                      self.assertEqual(record["materialization"], "git-cat-file-blob")
+                      self.assertEqual(git("hash-object", relative_path), blob_sha)
+                      self.assertEqual(git("cat-file", "-t", blob_sha), "blob")
+
+              def test_verification_is_local_only_and_large_outputs_are_not_tracked(self) -> None:
+                  payload = json.loads(PIN_PATH.read_text(encoding="utf-8"))
+                  evidence = payload["evidence"]
+                  tracked = set(git("ls-files").splitlines())
+
+                  self.assertEqual(evidence["verificationMode"], "local-only")
+                  self.assertFalse(evidence["commitGeneratedOutputs"])
+                  self.assertNotIn(".github/workflows/orche-stage0-baseline.yml", tracked)
+                  self.assertNotIn(".github/workflows/_orche_pr2_review2.yml", tracked)
+
+                  for name in evidence["requiredGeneratedOutputs"]:
+                      self.assertNotIn(f"baseline/orchestrarium-v1/{name}", tracked)
+
+              def test_readme_repeats_pin_isolation_differential_and_publication_gates(self) -> None:
+                  readme = README_PATH.read_text(encoding="utf-8")
+                  self.assertIn(EXPECTED_COMMIT, readme)
+                  self.assertIn(EXPECTED_TREE, readme)
+                  self.assertIn("Source branch at capture time: `main`", readme)
+                  self.assertNotIn("pull request #3", readme.lower())
+                  self.assertIn("does **not** use GitHub Actions", readme)
+                  self.assertIn("git cat-file blob", readme)
+                  self.assertIn('git -C "$BASELINE_ROOT" rev-parse HEAD', readme)
+                  self.assertIn('USERPROFILE="$lane_root/home"', readme)
+                  self.assertIn("compare_validator", readme)
+                  self.assertIn("--volatile-pattern", readme)
+                  self.assertIn("scripts/check-publication-gate.py", readme)
+                  self.assertIn("$knowledge-archivist", readme)
+                  self.assertLess(
+                      readme.index("$knowledge-archivist"),
+                      readme.index("git push origin refs/tags/"),
+                  )
+
+
+          if __name__ == "__main__":
+              unittest.main()
+          '''.replace('\n          ', '\n').lstrip(), encoding='utf-8')
+
+          Path('tests/test_orche_target_effect_baseline.py').write_text(r'''#!/usr/bin/env python3
+          """Tests for the Stage 0 target-effect baseline generator."""
+
+          from __future__ import annotations
+
+          import hashlib
+          import json
+          import subprocess
+          import sys
+          import tempfile
+          import unittest
+          from pathlib import Path
+
+          ROOT = Path(__file__).resolve().parents[1]
+          SCRIPT = ROOT / "scripts" / "baseline" / "build_target_effect_baseline.py"
+
+
+          def canonical_json(value: object) -> str:
+              return json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+
+
+          def inventory_payload() -> dict[str, object]:
+              entries = [
+                  {"path": "AGENTS.md", "sizeBytes": 10, "contentSha256": "a" * 64, "surfaces": ["documentation", "governance"]},
+                  {"path": "shared/AGENTS.shared.md", "sizeBytes": 15, "contentSha256": "f" * 64, "surfaces": ["documentation", "governance", "shared-source"]},
+                  {"path": "shared/agents-mode.schema.json", "sizeBytes": 20, "contentSha256": "b" * 64, "surfaces": ["configuration", "shared-source"]},
+                  {"path": "shared/references/cross-pack-reconciliation.md", "sizeBytes": 30, "contentSha256": "c" * 64, "surfaces": ["documentation", "shared-source"]},
+                  {"path": "src.codex/skills/architect/SKILL.md", "sizeBytes": 40, "contentSha256": "d" * 64, "surfaces": ["provider-pack", "provider:codex", "skill"]},
+                  {"path": "src.claude/skills/architect/SKILL.md", "sizeBytes": 40, "contentSha256": "d" * 64, "surfaces": ["provider-pack", "provider:claude", "skill"]},
+                  {"path": "src.qwen/QWEN.md", "sizeBytes": 25, "contentSha256": "8" * 64, "surfaces": ["documentation", "provider-pack", "provider:qwen"]},
+                  {"path": "tests/test_alpha.py", "sizeBytes": 50, "contentSha256": "e" * 64, "surfaces": ["script", "test"]},
+                  {"path": "tests/test_registry_governance_reconciliation_contract.py", "sizeBytes": 60, "contentSha256": "9" * 64, "surfaces": ["script", "test"]},
+              ]
+              payload: dict[str, object] = {
+                  "schemaVersion": 1,
+                  "baseline": {"commitSha": "1" * 40, "repository": "example/orche", "requestedRef": "baseline", "treeSha": "2" * 40},
+                  "entries": entries,
+                  "summary": {"trackedLeafEntries": len(entries), "surfaceCounts": {}},
+              }
+              payload["inventorySha256"] = hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()
+              return payload
+
+
+          class TargetEffectBaselineTests(unittest.TestCase):
+              def run_script(self, inventory: Path, output: Path, *extra: str) -> subprocess.CompletedProcess[str]:
+                  return subprocess.run(
+                      [sys.executable, str(SCRIPT), "--inventory", str(inventory), "--output", str(output), *extra],
+                      text=True,
+                      stdout=subprocess.PIPE,
+                      stderr=subprocess.PIPE,
+                      check=False,
+                  )
+
+              def test_measures_repository_shape_and_keeps_runtime_unknown(self) -> None:
+                  with tempfile.TemporaryDirectory() as directory:
+                      root = Path(directory)
+                      inventory = root / "capability.json"
+                      output = root / "target.json"
+                      inventory.write_text(canonical_json(inventory_payload()), encoding="utf-8")
+                      result = self.run_script(inventory, output)
+                      self.assertEqual(result.returncode, 0, result.stderr)
+                      payload = json.loads(output.read_text(encoding="utf-8"))
+
+                      self.assertEqual(payload["repositoryShape"]["trackedLeafEntries"], 9)
+                      self.assertEqual(payload["repositoryShape"]["trackedBytes"], 290)
+                      self.assertEqual(payload["repositoryShape"]["providerPackCount"], 3)
+                      self.assertEqual(payload["repositoryShape"]["skillBodies"], {"bytes": 80, "duplicateBodiesByDigest": 1, "total": 2, "uniqueContentDigests": 1})
+                      self.assertEqual(
+                          [item["path"] for item in payload["repositoryShape"]["instructionEntrypoints"]],
+                          ["AGENTS.md", "shared/AGENTS.shared.md", "src.qwen/QWEN.md"],
+                      )
+                      self.assertEqual(payload["repositoryShape"]["legacySettingsStack"]["paths"], ["shared/agents-mode.schema.json"])
+                      self.assertEqual(payload["repositoryShape"]["manualReconciliationArtifacts"]["paths"], ["shared/references/cross-pack-reconciliation.md"])
+                      self.assertIsNone(payload["runtimeMeasurements"]["alwaysLoadedPromptTokens"])
+                      self.assertEqual(payload["runtimeMeasurements"]["status"], "MEASUREMENT_PENDING_RUNTIME_INSTRUMENTATION")
+
+              def test_rejects_valid_json_when_declared_semantic_digest_no_longer_matches(self) -> None:
+                  with tempfile.TemporaryDirectory() as directory:
+                      root = Path(directory)
+                      inventory = root / "capability.json"
+                      output = root / "target.json"
+                      payload = inventory_payload()
+                      entries = payload["entries"]
+                      assert isinstance(entries, list) and isinstance(entries[0], dict)
+                      entries[0]["sizeBytes"] = 11
+                      inventory.write_text(canonical_json(payload), encoding="utf-8")
+                      result = self.run_script(inventory, output)
+                      self.assertEqual(result.returncode, 2)
+                      self.assertIn("inventorySha256 mismatch", result.stderr)
+                      self.assertFalse(output.exists())
+
+              def test_output_is_deterministic_and_check_detects_drift(self) -> None:
+                  with tempfile.TemporaryDirectory() as directory:
+                      root = Path(directory)
+                      inventory = root / "capability.json"
+                      output = root / "target.json"
+                      inventory.write_text(canonical_json(inventory_payload()), encoding="utf-8")
+                      first = self.run_script(inventory, output)
+                      self.assertEqual(first.returncode, 0, first.stderr)
+                      first_bytes = output.read_bytes()
+                      second = self.run_script(inventory, output)
+                      self.assertEqual(second.returncode, 0, second.stderr)
+                      self.assertEqual(first_bytes, output.read_bytes())
+                      checked = self.run_script(inventory, output, "--check")
+                      self.assertEqual(checked.returncode, 0, checked.stderr)
+                      output.write_text("{}\n", encoding="utf-8")
+                      drift = self.run_script(inventory, output, "--check")
+                      self.assertEqual(drift.returncode, 1)
+                      self.assertIn("DRIFT", drift.stderr)
+
+
+          if __name__ == "__main__":
+              unittest.main()
+          '''.replace('\n          ', '\n').lstrip(), encoding='utf-8')
+
+          Path('tests/test_orche_command_baseline.py').write_text(r'''#!/usr/bin/env python3
+          """Tests for the generic Stage 0 command differential gate."""
+
+          from __future__ import annotations
+
+          import json
+          import subprocess
+          import sys
+          import tempfile
+          import unittest
+          from pathlib import Path
+
+          ROOT = Path(__file__).resolve().parents[1]
+          SCRIPT = ROOT / "scripts" / "baseline" / "compare_command_baseline.py"
+
+
+          class CommandBaselineTests(unittest.TestCase):
+              def invoke(
+                  self,
+                  *,
+                  baseline_exit: int,
+                  candidate_exit: int,
+                  baseline_log: str | bytes,
+                  candidate_log: str | bytes,
+                  baseline_root: str = "/tmp/baseline",
+                  candidate_root: str = "/tmp/candidate",
+                  extra_args: tuple[str, ...] = (),
+                  output_parent_is_file: bool = False,
+              ) -> tuple[subprocess.CompletedProcess[str], dict[str, object]]:
+                  with tempfile.TemporaryDirectory() as directory:
+                      root = Path(directory)
+                      baseline_path = root / "baseline.log"
+                      candidate_path = root / "candidate.log"
+                      if output_parent_is_file:
+                          blocker = root / "not-a-directory"
+                          blocker.write_text("blocked\n", encoding="utf-8")
+                          report_path = blocker / "report.json"
+                      else:
+                          report_path = root / "report.json"
+                      baseline_path.write_bytes(baseline_log if isinstance(baseline_log, bytes) else baseline_log.encode("utf-8"))
+                      candidate_path.write_bytes(candidate_log if isinstance(candidate_log, bytes) else candidate_log.encode("utf-8"))
+                      command = [
+                          sys.executable, str(SCRIPT), "--name", "agents-mode-installers",
+                          "--baseline-exit", str(baseline_exit), "--candidate-exit", str(candidate_exit),
+                          "--baseline-log", str(baseline_path), "--candidate-log", str(candidate_path),
+                          "--baseline-root", baseline_root, "--candidate-root", candidate_root,
+                          "--baseline-ref", "a" * 40, "--candidate-ref", "b" * 40,
+                          "--output", str(report_path), *extra_args,
+                      ]
+                      result = subprocess.run(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+                      report = json.loads(report_path.read_text(encoding="utf-8")) if report_path.is_file() else {}
+                      return result, report
+
+              def test_two_successes_pass(self) -> None:
+                  result, report = self.invoke(baseline_exit=0, candidate_exit=0, baseline_log="RESULT: PASS\n", candidate_log="RESULT: PASS\n")
+                  self.assertEqual(result.returncode, 0, result.stderr)
+                  self.assertEqual(report["classification"], "preserved-success")
+
+              def test_new_candidate_failure_is_rejected(self) -> None:
+                  result, report = self.invoke(baseline_exit=0, candidate_exit=1, baseline_log="RESULT: PASS\n", candidate_log="ERROR: new failure\n")
+                  self.assertEqual(result.returncode, 1)
+                  self.assertEqual(report["classification"], "new-failure")
+
+              def test_identical_normalized_baseline_failure_is_characterized(self) -> None:
+                  result, report = self.invoke(
+                      baseline_exit=1,
+                      candidate_exit=1,
+                      baseline_log="/tmp/baseline/shared/agents-mode.schema.json: failure at " + "a" * 40 + "\r\n",
+                      candidate_log="/tmp/candidate/shared/agents-mode.schema.json: failure at " + "b" * 40 + "\n",
+                  )
+                  self.assertEqual(result.returncode, 0, result.stderr)
+                  self.assertEqual(report["classification"], "preserved-failure")
+
+              def test_resolved_baseline_failure_passes(self) -> None:
+                  result, report = self.invoke(baseline_exit=1, candidate_exit=0, baseline_log="ERROR: historical failure\n", candidate_log="RESULT: PASS\n")
+                  self.assertEqual(result.returncode, 0, result.stderr)
+                  self.assertEqual(report["classification"], "resolved-failure")
+
+              def test_changed_failure_is_rejected(self) -> None:
+                  result, report = self.invoke(baseline_exit=1, candidate_exit=1, baseline_log="ERROR: historical failure\n", candidate_log="ERROR: different failure\n")
+                  self.assertEqual(result.returncode, 1)
+                  self.assertEqual(report["classification"], "drifted-failure")
+
+              def test_exit_code_drift_is_rejected_even_with_same_log(self) -> None:
+                  result, report = self.invoke(baseline_exit=1, candidate_exit=2, baseline_log="ERROR: historical failure\n", candidate_log="ERROR: historical failure\n")
+                  self.assertEqual(result.returncode, 1)
+                  self.assertEqual(report["classification"], "drifted-failure")
+
+              def test_distinct_invalid_utf8_diagnostics_are_not_collapsed(self) -> None:
+                  result, report = self.invoke(
+                      baseline_exit=1,
+                      candidate_exit=1,
+                      baseline_log=b"ERROR: invalid byte " + bytes([0xFF]) + b"\n",
+                      candidate_log=b"ERROR: invalid byte " + bytes([0xFE]) + b"\n",
+                  )
+                  self.assertEqual(result.returncode, 1)
+                  self.assertEqual(report["classification"], "drifted-failure")
+
+              def test_declared_uuid_path_is_normalized(self) -> None:
+                  pattern = r"agents-mode-installer-regression[/\\][0-9a-f]{32}"
+                  result, report = self.invoke(
+                      baseline_exit=1,
+                      candidate_exit=1,
+                      baseline_log="/tmp/baseline/.scratch/agents-mode-installer-regression/" + "a" * 32 + "/failure\n",
+                      candidate_log="/tmp/candidate/.scratch/agents-mode-installer-regression/" + "b" * 32 + "/failure\n",
+                      extra_args=("--volatile-pattern", pattern),
+                  )
+                  self.assertEqual(result.returncode, 0, result.stderr)
+                  self.assertEqual(report["classification"], "preserved-failure")
+                  self.assertEqual(report["normalization"]["volatilePatterns"], [pattern])
+
+              def test_report_write_failure_uses_invalid_input_exit(self) -> None:
+                  result, report = self.invoke(
+                      baseline_exit=0,
+                      candidate_exit=0,
+                      baseline_log="RESULT: PASS\n",
+                      candidate_log="RESULT: PASS\n",
+                      output_parent_is_file=True,
+                  )
+                  self.assertEqual(report, {})
+                  self.assertEqual(result.returncode, 2)
+                  self.assertIn("COMMAND_BASELINE_INVALID", result.stderr)
+                  self.assertNotIn("Traceback", result.stderr)
+
+
+          if __name__ == "__main__":
+              unittest.main()
+          '''.replace('\n          ', '\n').lstrip(), encoding='utf-8')
+          PY
+
+          set +e
+          python tests/test_orche_baseline_pin.py
+          pin_red=$?
+          python tests/test_orche_target_effect_baseline.py
+          target_red=$?
+          python tests/test_orche_command_baseline.py
+          command_red=$?
+          set -e
+          if [ "$pin_red" -eq 0 ] || [ "$target_red" -eq 0 ] || [ "$command_red" -eq 0 ]; then
+            echo "Expected all three new regression suites to fail before implementation" >&2
+            exit 1
+          fi
+
+      - name: Implement review fixes and documentation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          target = Path('scripts/baseline/build_target_effect_baseline.py')
+          text = target.read_text(encoding='utf-8')
+          old = '''        "claude.md",\n        "gemini.md",\n'''
+          new = '''        "claude.md",\n        "gemini.md",\n        "qwen.md",\n'''
+          if old not in text:
+              raise SystemExit('target-effect entrypoint allowlist marker missing')
+          target.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          Path('scripts/baseline/compare_command_baseline.py').write_text(r'''#!/usr/bin/env python3
+          """Compare one candidate command result with its immutable baseline result.
+
+          Stage 0 permits an already-existing failure only when the candidate preserves
+          its normalized exit code and diagnostics. Exit 0 = PASS, exit 1 = semantic
+          regression, exit 2 = invalid input or evidence-write failure. Pure stdlib.
+          """
+
+          from __future__ import annotations
+
+          import argparse
+          import hashlib
+          import json
+          import os
+          import re
+          import sys
+          import tempfile
+          from pathlib import Path
+          from typing import Pattern, Sequence
+
+          SCHEMA_VERSION = 1
+
+
+          class CommandBaselineError(RuntimeError):
+              """Stable user-facing command-baseline error."""
+
+
+          def _sha256(data: bytes) -> str:
+              return hashlib.sha256(data).hexdigest()
+
+
+          def _canonical_json(value: object) -> str:
+              return json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+
+
+          def _read_log(path: Path) -> bytes:
+              try:
+                  return path.read_bytes()
+              except OSError as exc:
+                  raise CommandBaselineError(f"cannot read command log {path}: {exc}") from exc
+
+
+          def _compile_patterns(values: Sequence[str]) -> list[Pattern[str]]:
+              compiled: list[Pattern[str]] = []
+              for value in values:
+                  try:
+                      pattern = re.compile(value)
+                  except re.error as exc:
+                      raise CommandBaselineError(f"invalid volatile pattern {value!r}: {exc}") from exc
+                  if pattern.search("") is not None:
+                      raise CommandBaselineError(f"volatile pattern must not match empty text: {value!r}")
+                  compiled.append(pattern)
+              return compiled
+
+
+          def _normalized_text(
+              data: bytes,
+              *,
+              root: str,
+              ref: str,
+              volatile_patterns: Sequence[Pattern[str]],
+          ) -> bytes:
+              text = data.decode("utf-8", errors="surrogateescape")
+              text = text.replace("\r\n", "\n").replace("\r", "\n")
+              root_variants = {root, root.rstrip("/\\"), root.replace("\\", "/"), root.replace("/", "\\")}
+              for variant in sorted((item for item in root_variants if item), key=len, reverse=True):
+                  text = text.replace(variant, "<ROOT>")
+              if ref:
+                  text = text.replace(ref, "<REF>")
+              for pattern in volatile_patterns:
+                  text = pattern.sub("<VOLATILE>", text)
+              lines = [line.rstrip(" \t") for line in text.split("\n")]
+              while lines and not lines[-1]:
+                  lines.pop()
+              normalized = "\n".join(lines)
+              if normalized:
+                  normalized += "\n"
+              return normalized.encode("utf-8", errors="surrogateescape")
+
+
+          def _atomic_write(path: Path, content: bytes) -> None:
+              path.parent.mkdir(parents=True, exist_ok=True)
+              descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+              temporary = Path(temporary_name)
+              try:
+                  with os.fdopen(descriptor, "wb") as handle:
+                      handle.write(content)
+                      handle.flush()
+                      os.fsync(handle.fileno())
+                  os.replace(temporary, path)
+              finally:
+                  if temporary.exists():
+                      temporary.unlink()
+
+
+          def _result_record(raw: bytes, normalized: bytes, exit_code: int) -> dict[str, object]:
+              return {
+                  "exitCode": exit_code,
+                  "normalizedSha256": _sha256(normalized),
+                  "normalizedSizeBytes": len(normalized),
+                  "rawSha256": _sha256(raw),
+                  "rawSizeBytes": len(raw),
+              }
+
+
+          def compare(args: argparse.Namespace) -> tuple[int, dict[str, object]]:
+              if args.baseline_exit < 0 or args.candidate_exit < 0:
+                  raise CommandBaselineError("exit codes must be non-negative")
+              patterns = _compile_patterns(args.volatile_pattern)
+              baseline_raw = _read_log(args.baseline_log)
+              candidate_raw = _read_log(args.candidate_log)
+              baseline_normalized = _normalized_text(baseline_raw, root=args.baseline_root, ref=args.baseline_ref, volatile_patterns=patterns)
+              candidate_normalized = _normalized_text(candidate_raw, root=args.candidate_root, ref=args.candidate_ref, volatile_patterns=patterns)
+              same_failure = args.baseline_exit == args.candidate_exit and baseline_normalized == candidate_normalized
+              if args.baseline_exit == 0 and args.candidate_exit == 0:
+                  status, classification, return_code = "PASS", "preserved-success", 0
+              elif args.baseline_exit == 0:
+                  status, classification, return_code = "FAIL", "new-failure", 1
+              elif args.candidate_exit == 0:
+                  status, classification, return_code = "PASS", "resolved-failure", 0
+              elif same_failure:
+                  status, classification, return_code = "PASS", "preserved-failure", 0
+              else:
+                  status, classification, return_code = "FAIL", "drifted-failure", 1
+              payload: dict[str, object] = {
+                  "schemaVersion": SCHEMA_VERSION,
+                  "name": args.name,
+                  "baselineRef": args.baseline_ref,
+                  "candidateRef": args.candidate_ref,
+                  "baseline": _result_record(baseline_raw, baseline_normalized, args.baseline_exit),
+                  "candidate": _result_record(candidate_raw, candidate_normalized, args.candidate_exit),
+                  "classification": classification,
+                  "status": status,
+                  "normalization": {"volatilePatterns": list(args.volatile_pattern)},
+                  "policy": {
+                      "baselineSuccessRequiresCandidateSuccess": True,
+                      "historicalFailureMayResolve": True,
+                      "historicalFailureMayRemainOnlyIfNormalizedResultMatches": True,
+                  },
+              }
+              return return_code, payload
+
+
+          def parse_args(argv: Sequence[str]) -> argparse.Namespace:
+              parser = argparse.ArgumentParser(description=__doc__)
+              parser.add_argument("--name", required=True)
+              parser.add_argument("--baseline-exit", type=int, required=True)
+              parser.add_argument("--candidate-exit", type=int, required=True)
+              parser.add_argument("--baseline-log", type=Path, required=True)
+              parser.add_argument("--candidate-log", type=Path, required=True)
+              parser.add_argument("--baseline-root", required=True)
+              parser.add_argument("--candidate-root", required=True)
+              parser.add_argument("--baseline-ref", required=True)
+              parser.add_argument("--candidate-ref", required=True)
+              parser.add_argument("--volatile-pattern", action="append", default=[])
+              parser.add_argument("--output", type=Path, required=True)
+              return parser.parse_args(argv)
+
+
+          def main(argv: Sequence[str] | None = None) -> int:
+              args = parse_args(sys.argv[1:] if argv is None else argv)
+              try:
+                  return_code, payload = compare(args)
+                  _atomic_write(args.output, _canonical_json(payload).encode("utf-8"))
+              except (CommandBaselineError, OSError) as exc:
+                  print(f"COMMAND_BASELINE_INVALID: {exc}", file=sys.stderr)
+                  return 2
+              marker = f"RESULT: {payload['status']} command-baseline name={payload['name']} classification={payload['classification']}"
+              print(marker, file=sys.stdout if return_code == 0 else sys.stderr)
+              return return_code
+
+
+          if __name__ == "__main__":
+              raise SystemExit(main())
+          '''.replace('\n          ', '\n').lstrip(), encoding='utf-8')
+
+          Path('baseline/orchestrarium-v1/README.md').write_text(r'''# Orchestrarium Version 1 (V1) parity baseline
+
+          This directory anchors Stage 0 of the Orche 2.0 migration.
+
+          ## Immutable source
+
+          - Repository: `applicate2628/Orchestrarium`
+          - Source branch at capture time: `main`
+          - Accepted commit: `ce2052fb773576fd6e3206c2a7e21e01852d556b`
+          - Git tree: `04dccf4575f17c9c5533474d2e0fd1503bfeceb7`
+          - Intended signed tag: `orchestrarium-v1-parity-baseline`
+
+          The baseline is pinned directly to the immutable `main` commit above. It does not depend on,
+          inherit from, or modify any other pull-request branch.
+
+          ## Immutable Stage 0 tooling
+
+          `baseline-pin.json` records the Git blob identifiers of both generators and both
+          differential comparators. Materialize those exact implementations before producing or
+          comparing evidence; do not invoke whatever version happens to exist in a later working tree.
+
+          ```bash
+          CANDIDATE_ROOT=/absolute/path/to/candidate-worktree
+          PIN_PATH="$CANDIDATE_ROOT/baseline/orchestrarium-v1/baseline-pin.json"
+          OUTPUT_ROOT="$CANDIDATE_ROOT/.scratch/orche-stage0/differential"
+          TOOL_ROOT="$OUTPUT_ROOT/tools"
+          mkdir -p "$TOOL_ROOT"
+
+          pin_value() {
+            python - "$PIN_PATH" "$1" <<'PY'
+          import json
+          import sys
+          value = json.load(open(sys.argv[1], encoding="utf-8"))
+          for part in sys.argv[2].split("."):
+              value = value[part]
+          print(value)
+          PY
+          }
+
+          materialize_tool() {
+            key="$1"
+            output="$2"
+            blob="$(pin_value "tooling.$key.gitBlobSha")"
+            test "$(git -C "$CANDIDATE_ROOT" cat-file -t "$blob")" = blob
+            git -C "$CANDIDATE_ROOT" cat-file blob "$blob" > "$output"
+          }
+
+          materialize_tool inventoryGenerator "$TOOL_ROOT/build_inventory.py"
+          materialize_tool targetEffectGenerator "$TOOL_ROOT/build_target_effect_baseline.py"
+          materialize_tool pytestComparator "$TOOL_ROOT/compare_pytest_baseline.py"
+          materialize_tool commandComparator "$TOOL_ROOT/compare_command_baseline.py"
+          ```
+
+          ## Local-only verification
+
+          Stage 0 intentionally does **not** use GitHub Actions. Generated evidence stays under
+          `.scratch/`, which is not a second source of truth.
+
+          Run the focused tests:
+
+          ```bash
+          python tests/test_orche_baseline_pin.py
+          python tests/test_orche_pytest_baseline.py
+          python tests/test_orche_baseline_inventory.py
+          python tests/test_orche_target_effect_baseline.py
+          python tests/test_orche_command_baseline.py
+          ```
+
+          Generate evidence with the materialized pinned tools:
+
+          ```bash
+          PIN_COMMIT="$(pin_value baseline.commitSha)"
+          rm -rf "$OUTPUT_ROOT/evidence"
+          python "$TOOL_ROOT/build_inventory.py" \
+            --repo-root "$CANDIDATE_ROOT" \
+            --repository applicate2628/Orchestrarium \
+            --ref "$PIN_COMMIT" \
+            --output-dir "$OUTPUT_ROOT/evidence"
+          python "$TOOL_ROOT/build_target_effect_baseline.py" \
+            --inventory "$OUTPUT_ROOT/evidence/capability-inventory.json" \
+            --output "$OUTPUT_ROOT/evidence/target-effect-baseline.json"
+          ```
+
+          ## Isolated baseline and candidate runs
+
+          Use clean worktrees. Derive the reported refs from the worktrees that are actually tested,
+          and fail if the baseline worktree does not match the pin.
+
+          ```bash
+          BASELINE_ROOT=/absolute/path/to/baseline-worktree
+          CANDIDATE_ROOT=/absolute/path/to/candidate-worktree
+          PIN_PATH="$CANDIDATE_ROOT/baseline/orchestrarium-v1/baseline-pin.json"
+          OUTPUT_ROOT="$CANDIDATE_ROOT/.scratch/orche-stage0/differential"
+          PIN_COMMIT="$(pin_value baseline.commitSha)"
+          PIN_TREE="$(pin_value baseline.treeSha)"
+          BASELINE_REF="$(git -C "$BASELINE_ROOT" rev-parse HEAD)"
+          BASELINE_TREE="$(git -C "$BASELINE_ROOT" rev-parse 'HEAD^{tree}')"
+          CANDIDATE_REF="$(git -C "$CANDIDATE_ROOT" rev-parse HEAD)"
+          test "$BASELINE_REF" = "$PIN_COMMIT"
+          test "$BASELINE_TREE" = "$PIN_TREE"
+          git -C "$BASELINE_ROOT" diff --quiet
+          git -C "$CANDIDATE_ROOT" diff --quiet
+          rm -rf "$OUTPUT_ROOT/runs"
+          mkdir -p "$OUTPUT_ROOT/runs"
+
+          run_isolated() {
+            lane="$1"
+            repo="$2"
+            shift 2
+            lane_root="$OUTPUT_ROOT/runs/$lane"
+            rm -rf "$lane_root"
+            mkdir -p "$lane_root/home" "$lane_root/tmp" "$lane_root/appdata" \
+              "$lane_root/localappdata" "$lane_root/xdg-config" "$lane_root/xdg-cache" \
+              "$lane_root/xdg-data" "$lane_root/xdg-state" "$lane_root/codex" \
+              "$lane_root/claude" "$lane_root/gemini" "$lane_root/qwen" "$lane_root/kimi"
+            : > "$lane_root/gitconfig"
+            (
+              cd "$repo"
+              env -i \
+                PATH="$PATH" LANG="${LANG:-C}" LC_ALL="${LC_ALL:-C}" \
+                HOME="$lane_root/home" USERPROFILE="$lane_root/home" \
+                APPDATA="$lane_root/appdata" LOCALAPPDATA="$lane_root/localappdata" \
+                XDG_CONFIG_HOME="$lane_root/xdg-config" XDG_CACHE_HOME="$lane_root/xdg-cache" \
+                XDG_DATA_HOME="$lane_root/xdg-data" XDG_STATE_HOME="$lane_root/xdg-state" \
+                CODEX_HOME="$lane_root/codex" CLAUDE_CONFIG_DIR="$lane_root/claude" \
+                GEMINI_HOME="$lane_root/gemini" QWEN_CODE_HOME="$lane_root/qwen" \
+                KIMI_CODE_HOME="$lane_root/kimi" TMPDIR="$lane_root/tmp" \
+                GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL="$lane_root/gitconfig" \
+                PYTHONDONTWRITEBYTECODE=1 PYTHONUTF8=1 CI=1 \
+                "$@"
+            )
+          }
+          ```
+
+          Run Pytest in both lanes and feed both process exit codes into the pinned comparator:
+
+          ```bash
+          set +e
+          run_isolated pytest-baseline "$BASELINE_ROOT" \
+            python -m pytest --junitxml="$OUTPUT_ROOT/baseline.xml"
+          baseline_exit=$?
+          run_isolated pytest-candidate "$CANDIDATE_ROOT" \
+            python -m pytest --junitxml="$OUTPUT_ROOT/candidate.xml"
+          candidate_exit=$?
+          set -e
+
+          python "$TOOL_ROOT/compare_pytest_baseline.py" \
+            --baseline-junit "$OUTPUT_ROOT/baseline.xml" \
+            --candidate-junit "$OUTPUT_ROOT/candidate.xml" \
+            --baseline-exit "$baseline_exit" \
+            --candidate-exit "$candidate_exit" \
+            --baseline-ref "$BASELINE_REF" \
+            --candidate-ref "$CANDIDATE_REF" \
+            --output "$OUTPUT_ROOT/pytest-comparison.json"
+          ```
+
+          Existing baseline failures may resolve. New failures, disappeared tests, failures hidden by
+          skip, regressions of previously passing tests, and newly changed nonzero Pytest exits block.
+
+          ## Validator command differential
+
+          Run every validator in both worktrees and compare exit codes and diagnostics. The installer
+          validator declares its UUID scratch component as volatile; no other text is discarded.
+
+          ```bash
+          compare_validator() {
+            name="$1"
+            shift
+            baseline_log="$OUTPUT_ROOT/$name-baseline.log"
+            candidate_log="$OUTPUT_ROOT/$name-candidate.log"
+            set +e
+            run_isolated "$name-baseline" "$BASELINE_ROOT" "$@" >"$baseline_log" 2>&1
+            baseline_exit=$?
+            run_isolated "$name-candidate" "$CANDIDATE_ROOT" "$@" >"$candidate_log" 2>&1
+            candidate_exit=$?
+            set -e
+            volatile_args=()
+            if [ "$name" = agents-mode-installers ]; then
+              volatile_args=(--volatile-pattern 'agents-mode-installer-regression[/\\][0-9a-f]{32}')
+            fi
+            python "$TOOL_ROOT/compare_command_baseline.py" \
+              --name "$name" \
+              --baseline-exit "$baseline_exit" --candidate-exit "$candidate_exit" \
+              --baseline-log "$baseline_log" --candidate-log "$candidate_log" \
+              --baseline-root "$BASELINE_ROOT" --candidate-root "$CANDIDATE_ROOT" \
+              --baseline-ref "$BASELINE_REF" --candidate-ref "$CANDIDATE_REF" \
+              --output "$OUTPUT_ROOT/$name-comparison.json" \
+              "${volatile_args[@]}"
+          }
+
+          compare_validator agents-spine \
+            python scripts/validate-agents-spine.py --spine shared/AGENTS.shared.md
+          compare_validator universal-hooks \
+            python scripts/sync-universal-hooks.py --check
+          compare_validator agents-mode-installers \
+            python scripts/validate-agents-mode-installers.py --root .
+          ```
+
+          ## Committed files
+
+          - `baseline-pin.json` — immutable commit/tree and Stage 0 tool-blob identities.
+          - `README.md` — reproduction and acceptance instructions.
+
+          Generated inventories, summaries, manifests, logs, and comparison reports remain local under
+          `.scratch/orche-stage0/` and are not committed.
+
+          ## Signed tag publication gate
+
+          The pin is not a cryptographic signature. The commands below are **not** authorization to
+          publish. Before any tag push:
+
+          1. Stage the exact accepted tracked change in a clean publication-review checkout.
+          2. `$lead` runs `python scripts/check-publication-gate.py`, `git diff --cached --check`, and a
+             human leak review of the staged diff.
+          3. A distinct human `$knowledge-archivist` records publication approval. An exception, if any,
+             requires `$security-reviewer`; author self-check is insufficient.
+          4. Confirm the approved destination is exactly
+             `refs/tags/orchestrarium-v1-parity-baseline` and no tracked bytes changed after approval.
+
+          Only after those gates pass may the repository owner run:
+
+          ```bash
+          git tag -s orchestrarium-v1-parity-baseline \
+            ce2052fb773576fd6e3206c2a7e21e01852d556b \
+            -m "Immutable Orchestrarium V1 parity baseline for Orche 2.0"
+          git tag -v orchestrarium-v1-parity-baseline
+          git push origin refs/tags/orchestrarium-v1-parity-baseline:refs/tags/orchestrarium-v1-parity-baseline
+          ```
+
+          Until the tag exists and verifies, the cryptographic Stage 0 gate remains `BLOCKED`.
+
+          ## Terms and Abbreviations
+
+          - **CLI:** Command-Line Interface, a program operated through terminal commands.
+          - **GPG:** GNU Privacy Guard, a tool and key format for cryptographically signed Git tags.
+          - **JUnit XML:** machine-readable test results consumed by the differential comparator.
+          - **POSIX:** Portable Operating System Interface, the shell model used by the example.
+          - **Pytest:** the Python test runner used for repository suites.
+          - **SHA-256:** Secure Hash Algorithm 256-bit, a content digest.
+          - **SSH:** Secure Shell, whose key format can also sign Git tags.
+          - **UUID:** Universally Unique Identifier, used by an existing validator for scratch paths.
+          - **V1:** Version 1, the accepted legacy behavior frozen before Orche 2.0 migration.
+          '''.replace('\n          ', '\n').lstrip(), encoding='utf-8')
+          PY
+
+          python - <<'PY'
+          import json
+          import subprocess
+          from pathlib import Path
+
+          tooling_paths = {
+              'inventoryGenerator': 'scripts/baseline/build_inventory.py',
+              'targetEffectGenerator': 'scripts/baseline/build_target_effect_baseline.py',
+              'pytestComparator': 'scripts/baseline/compare_pytest_baseline.py',
+              'commandComparator': 'scripts/baseline/compare_command_baseline.py',
+          }
+          tooling = {}
+          for name, path in tooling_paths.items():
+              blob = subprocess.check_output(['git', 'hash-object', path], text=True).strip()
+              tooling[name] = {
+                  'path': path,
+                  'gitBlobSha': blob,
+                  'materialization': 'git-cat-file-blob',
+                  'deterministic': True,
+                  'runtimeMutation': False,
+              }
+          payload = {
+              'baseline': {
+                  'commitSha': 'ce2052fb773576fd6e3206c2a7e21e01852d556b',
+                  'repository': 'applicate2628/Orchestrarium',
+                  'requestedRef': 'ce2052fb773576fd6e3206c2a7e21e01852d556b',
+                  'sourceBranch': 'main',
+                  'sourceBranchHeadAtCapture': 'ce2052fb773576fd6e3206c2a7e21e01852d556b',
+                  'treeSha': '04dccf4575f17c9c5533474d2e0fd1503bfeceb7',
+              },
+              'evidence': {
+                  'commitGeneratedOutputs': False,
+                  'generatedOutputDirectory': '.scratch/orche-stage0/orchestrarium-v1',
+                  'requiredGeneratedOutputs': [
+                      'baseline-manifest.json', 'capability-inventory.json', 'summary.md',
+                      'target-effect-baseline.json', 'test-inventory.json',
+                  ],
+                  'verificationMode': 'local-only',
+              },
+              'schemaVersion': 3,
+              'signedTag': {
+                  'name': 'orchestrarium-v1-parity-baseline',
+                  'required': True,
+                  'status': 'human-gate-pending',
+              },
+              'status': 'baseline-identity-and-tooling-pinned',
+              'tooling': tooling,
+          }
+          Path('baseline/orchestrarium-v1/baseline-pin.json').write_text(
+              json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + '\n',
+              encoding='utf-8',
+          )
+          PY
+
+      - name: Run focused regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tests/test_orche_baseline_pin.py
+          python tests/test_orche_pytest_baseline.py
+          python tests/test_orche_baseline_inventory.py
+          python tests/test_orche_target_effect_baseline.py
+          python tests/test_orche_command_baseline.py
+          python -m compileall -q \
+            scripts/baseline/build_inventory.py \
+            scripts/baseline/build_target_effect_baseline.py \
+            scripts/baseline/compare_pytest_baseline.py \
+            scripts/baseline/compare_command_baseline.py \
+            tests/test_orche_baseline_pin.py \
+            tests/test_orche_pytest_baseline.py \
+            tests/test_orche_baseline_inventory.py \
+            tests/test_orche_target_effect_baseline.py \
+            tests/test_orche_command_baseline.py
+
+      - name: Exercise command differential in isolated worktrees
+        shell: bash
+        run: |
+          set -euo pipefail
+          baseline_root="$RUNNER_TEMP/orche-baseline"
+          output_root="$RUNNER_TEMP/orche-differential"
+          git worktree add --detach "$baseline_root" ce2052fb773576fd6e3206c2a7e21e01852d556b
+          cleanup() { git worktree remove --force "$baseline_root" >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+
+          run_isolated() {
+            lane="$1"; repo="$2"; shift 2
+            lane_root="$output_root/$lane"
+            rm -rf "$lane_root"
+            mkdir -p "$lane_root/home" "$lane_root/tmp" "$lane_root/appdata" "$lane_root/localappdata" \
+              "$lane_root/xdg-config" "$lane_root/xdg-cache" "$lane_root/xdg-data" "$lane_root/xdg-state" \
+              "$lane_root/codex" "$lane_root/claude" "$lane_root/gemini" "$lane_root/qwen" "$lane_root/kimi"
+            : > "$lane_root/gitconfig"
+            (cd "$repo" && env -i PATH="$PATH" LANG=C LC_ALL=C HOME="$lane_root/home" \
+              USERPROFILE="$lane_root/home" APPDATA="$lane_root/appdata" LOCALAPPDATA="$lane_root/localappdata" \
+              XDG_CONFIG_HOME="$lane_root/xdg-config" XDG_CACHE_HOME="$lane_root/xdg-cache" \
+              XDG_DATA_HOME="$lane_root/xdg-data" XDG_STATE_HOME="$lane_root/xdg-state" \
+              CODEX_HOME="$lane_root/codex" CLAUDE_CONFIG_DIR="$lane_root/claude" \
+              GEMINI_HOME="$lane_root/gemini" QWEN_CODE_HOME="$lane_root/qwen" KIMI_CODE_HOME="$lane_root/kimi" \
+              TMPDIR="$lane_root/tmp" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL="$lane_root/gitconfig" \
+              PYTHONDONTWRITEBYTECODE=1 PYTHONUTF8=1 CI=1 "$@")
+          }
+
+          compare_one() {
+            name="$1"; shift
+            mkdir -p "$output_root"
+            set +e
+            run_isolated "$name-baseline" "$baseline_root" "$@" >"$output_root/$name-baseline.log" 2>&1
+            baseline_exit=$?
+            run_isolated "$name-candidate" "$PWD" "$@" >"$output_root/$name-candidate.log" 2>&1
+            candidate_exit=$?
+            set -e
+            volatile_args=()
+            if [ "$name" = agents-mode-installers ]; then
+              volatile_args=(--volatile-pattern 'agents-mode-installer-regression[/\\][0-9a-f]{32}')
+            fi
+            python scripts/baseline/compare_command_baseline.py \
+              --name "$name" --baseline-exit "$baseline_exit" --candidate-exit "$candidate_exit" \
+              --baseline-log "$output_root/$name-baseline.log" --candidate-log "$output_root/$name-candidate.log" \
+              --baseline-root "$baseline_root" --candidate-root "$PWD" \
+              --baseline-ref ce2052fb773576fd6e3206c2a7e21e01852d556b --candidate-ref "$(git rev-parse HEAD)" \
+              --output "$output_root/$name.json" "${volatile_args[@]}"
+          }
+
+          compare_one agents-spine python scripts/validate-agents-spine.py --spine shared/AGENTS.shared.md
+          compare_one universal-hooks python scripts/sync-universal-hooks.py --check
+          compare_one agents-mode-installers python scripts/validate-agents-mode-installers.py --root .
+
+      - name: Commit verified fixes and remove migration workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/_orche_pr2_review2.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add baseline/orchestrarium-v1 scripts/baseline tests .github/workflows/_orche_pr2_review2.yml
+          git diff --cached --check
+          git commit -m 'fix: harden Stage 0 reproducibility gates'
+          git push origin HEAD:orche/impl-000-baseline
