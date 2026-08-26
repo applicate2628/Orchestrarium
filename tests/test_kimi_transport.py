@@ -107,6 +107,8 @@ def _write_kimi_home(
     *,
     oauth: str = '{ storage = "file", key = "oauth/kimi-code" }',
     credential: bool = True,
+    provider_type: str = "kimi",
+    model_value: str = "k3",
 ) -> tuple[Path, Path]:
     user_home = tmp_path / "user"
     source = user_home / ".kimi-code"
@@ -115,10 +117,10 @@ def _write_kimi_home(
     (source / "config.toml").write_text(
         "default_model = \"kimi-code/k3\"\n\n"
         "[providers.\"managed:kimi-code\"]\n"
-        "type = \"openai\"\nbase_url = \"https://api.example.invalid\"\n"
+        f"type = {provider_type!r}\nbase_url = \"https://api.example.invalid\"\n"
         f"oauth = {oauth}\n\n"
         "[models.\"kimi-code/k3\"]\n"
-        "model = \"kimi-code/k3\"\nprovider = \"managed:kimi-code\"\n",
+        f"model = {model_value!r}\nprovider = \"managed:kimi-code\"\n",
         encoding="utf-8",
     )
     if credential:
@@ -146,6 +148,8 @@ def test_kimi_private_home_copies_only_exact_oauth_shape_and_token_needles(
     assert parsed["providers"]["managed:kimi-code"]["oauth"] == {
         "storage": "file", "key": "oauth/kimi-code"
     }
+    assert parsed["providers"]["managed:kimi-code"]["type"] == "kimi"
+    assert parsed["models"]["kimi-code/k3"]["model"] == "k3"
     assert copied.read_bytes() == (source / "credentials" / "kimi-code.json").read_bytes()
     assert {path.name for path in private_home.iterdir()} == {"config.toml", "credentials"}
     assert configuration.needles == (b"access-secret", b"refresh-secret")
@@ -175,6 +179,22 @@ def test_kimi_private_home_rejects_unknown_or_unsafe_oauth_storage(
     with pytest.raises(ValueError, match="E_KIMI_AUTH_STORAGE_INVALID"):
         owner._kimi_sanitized_runtime_home(run_dir)
     assert not (run_dir / "kimi-code-home").exists()
+
+
+@pytest.mark.parametrize(
+    "provider_type,model_value",
+    (("other", "k3"), ("kimi", "other")),
+)
+def test_kimi_private_home_rejects_mismatched_production_model_contract(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, provider_type: str, model_value: str
+) -> None:
+    owner = _load_owner()
+    _source, run_dir = _write_kimi_home(
+        monkeypatch, tmp_path, provider_type=provider_type, model_value=model_value
+    )
+
+    with pytest.raises(ValueError, match="E_KIMI_AUTH_STORAGE_INVALID"):
+        owner._kimi_sanitized_runtime_home(run_dir)
 
 
 def test_kimi_profile_identifier_has_one_production_owner() -> None:

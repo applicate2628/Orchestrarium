@@ -937,7 +937,8 @@ def _kimi_sanitized_runtime_home(run_dir: Path) -> ProviderAuthConfiguration:
             or not isinstance(provider, dict)
             or not isinstance(model, dict)
             or model.get("provider") != "managed:kimi-code"
-            or model.get("model") != KimiWindowsProfileV1.model
+            or model.get("model") != "k3"
+            or provider.get("type") != "kimi"
             or not isinstance(oauth_reference, dict)
             or oauth_reference.get("storage") != "file"
             or not isinstance(oauth_reference.get("key"), str)
@@ -981,7 +982,7 @@ def _kimi_sanitized_runtime_home(run_dir: Path) -> ProviderAuthConfiguration:
             'oauth = { storage = "file", '
             f'key = {json.dumps(oauth_key)} }}\n\n'
             '[models."kimi-code/k3"]\n'
-            'model = "kimi-code/k3"\n'
+            'model = "k3"\n'
             'provider = "managed:kimi-code"\n'
         ).encode("utf-8")
         _private_file(private_home / "config.toml", rendered)
