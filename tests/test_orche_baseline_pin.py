@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -30,6 +32,24 @@ VALIDATOR_MARKERS = (
     "scripts/validate-agents-spine.py",
     "scripts/sync-universal-hooks.py",
     "scripts/validate-agents-mode-installers.py",
+)
+IGNORED_EXECUTABLE_PATHS = (
+    ":(glob)tests/**",
+    ":(glob)**/conftest.py",
+    ":(glob)scripts/**",
+    ":(glob)**/*.py",
+    ":(glob)**/*.sh",
+    ":(glob)**/*.ps1",
+    ":(glob)**/pyproject.toml",
+    ":(glob)**/pytest.ini",
+    ":(glob)**/tox.ini",
+    ":(glob)**/setup.cfg",
+    ":(exclude,glob).scratch/**",
+    ":(exclude,glob)**/__pycache__/**",
+    ":(exclude,glob).pytest_cache/**",
+    ":(exclude,glob)node_modules/**",
+    ":(exclude,glob).venv/**",
+    ":(exclude,glob)venv/**",
 )
 
 
@@ -109,7 +129,52 @@ class BaselinePinTests(unittest.TestCase):
         for name in evidence["requiredGeneratedOutputs"]:
             self.assertNotIn(f"baseline/orchestrarium-v1/{name}", tracked)
 
+    def test_ignored_executable_inputs_are_detected_without_blocking_scratch(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory) / "repo"
+            repo.mkdir()
+            subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+            (repo / ".gitignore").write_text(
+                ".scratch/\ntests/conftest.py\nscripts/local.py\n",
+                encoding="utf-8",
+            )
+            (repo / "tests").mkdir()
+            (repo / "tests" / "conftest.py").write_text("raise RuntimeError\n", encoding="utf-8")
+            (repo / "scripts").mkdir()
+            (repo / "scripts" / "local.py").write_text("raise RuntimeError\n", encoding="utf-8")
+            (repo / ".scratch").mkdir()
+            (repo / ".scratch" / "cache.py").write_text("raise RuntimeError\n", encoding="utf-8")
+
+            environment = {
+                **os.environ,
+                "GIT_CONFIG_NOSYSTEM": "1",
+                "GIT_CONFIG_GLOBAL": os.devnull,
+            }
+            result = subprocess.run(
+                [
+                    "git",
+                    "ls-files",
+                    "--others",
+                    "--ignored",
+                    "--exclude-standard",
+                    "--",
+                    *IGNORED_EXECUTABLE_PATHS,
+                ],
+                cwd=repo,
+                env=environment,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                result.stdout.splitlines(),
+                ["scripts/local.py", "tests/conftest.py"],
+            )
+
     def test_readme_repeats_pin_isolation_differential_and_publication_gates(self) -> None:
+        payload = json.loads(PIN_PATH.read_text(encoding="utf-8"))
         readme = README_PATH.read_text(encoding="utf-8")
         self.assertIn(EXPECTED_COMMIT, readme)
         self.assertIn(EXPECTED_TREE, readme)
@@ -119,6 +184,20 @@ class BaselinePinTests(unittest.TestCase):
         self.assertIn("cat-file blob", readme)
         self.assertIn('git -C "$BASELINE_ROOT" rev-parse HEAD', readme)
         self.assertIn("status --porcelain=v1 --untracked-files=all", readme)
+        self.assertIn("ls-files --others --ignored --exclude-standard", readme)
+        for pathspec in IGNORED_EXECUTABLE_PATHS:
+            self.assertIn(pathspec, readme)
+        self.assertIn('assert_clean_worktree "$BASELINE_ROOT"', readme)
+        self.assertIn('assert_clean_worktree "$CANDIDATE_ROOT"', readme)
+        self.assertIn(
+            'EVIDENCE_ROOT="$CANDIDATE_ROOT/$(pin_value evidence.generatedOutputDirectory)"',
+            readme,
+        )
+        self.assertNotIn('$OUTPUT_ROOT/evidence', readme)
+        self.assertEqual(
+            payload["evidence"]["generatedOutputDirectory"],
+            ".scratch/orche-stage0/orchestrarium-v1",
+        )
         self.assertIn('USERPROFILE="$lane_root/home"', readme)
         self.assertIn("compare_validator", readme)
         self.assertIn("--volatile-pattern", readme)
