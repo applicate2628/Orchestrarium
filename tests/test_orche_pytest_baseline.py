@@ -148,6 +148,21 @@ class PytestBaselineComparatorTests(unittest.TestCase):
             [{"baselineExitCode": 0, "candidateExitCode": 3}],
         )
 
+    def test_blocks_zero_candidate_exit_when_junit_still_contains_failure(self) -> None:
+        result, report = self.run_compare(
+            [("suite.Test", "test_known", "failure")],
+            [("suite.Test", "test_known", "failure")],
+            baseline_exit=1,
+            candidate_exit=0,
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(report["verdict"], "BLOCKED")
+        self.assertEqual(
+            report["blockers"]["candidateExitContradiction"],
+            [{"candidateExitCode": 0, "junitFailureCount": 1}],
+        )
+        self.assertFalse(report["observations"]["resolvedPytestExitCode"])
+
 
 if __name__ == "__main__":
     unittest.main()
