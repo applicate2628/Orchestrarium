@@ -58,6 +58,12 @@ def inventory_payload() -> dict[str, object]:
             "surfaces": ["provider-pack", "provider:claude", "skill"],
         },
         {
+            "path": "src.qwen/QWEN.md",
+            "sizeBytes": 25,
+            "contentSha256": "8" * 64,
+            "surfaces": ["documentation", "provider-pack", "provider:qwen"],
+        },
+        {
             "path": "tests/test_alpha.py",
             "sizeBytes": 50,
             "contentSha256": "e" * 64,
@@ -117,9 +123,9 @@ class TargetEffectBaselineTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             payload = json.loads(output.read_text(encoding="utf-8"))
 
-            self.assertEqual(payload["repositoryShape"]["trackedLeafEntries"], 8)
-            self.assertEqual(payload["repositoryShape"]["trackedBytes"], 265)
-            self.assertEqual(payload["repositoryShape"]["providerPackCount"], 2)
+            self.assertEqual(payload["repositoryShape"]["trackedLeafEntries"], 9)
+            self.assertEqual(payload["repositoryShape"]["trackedBytes"], 290)
+            self.assertEqual(payload["repositoryShape"]["providerPackCount"], 3)
             self.assertEqual(
                 payload["repositoryShape"]["skillBodies"],
                 {
@@ -134,7 +140,7 @@ class TargetEffectBaselineTests(unittest.TestCase):
                     item["path"]
                     for item in payload["repositoryShape"]["instructionEntrypoints"]
                 ],
-                ["AGENTS.md", "shared/AGENTS.shared.md"],
+                ["AGENTS.md", "shared/AGENTS.shared.md", "src.qwen/QWEN.md"],
             )
             self.assertEqual(
                 payload["repositoryShape"]["legacySettingsStack"]["paths"],
