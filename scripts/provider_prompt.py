@@ -988,11 +988,14 @@ def _kimi_sanitized_runtime_home(run_dir: Path) -> ProviderAuthConfiguration:
         _private_file(private_home / "config.toml", rendered)
         _private_file(credential_dir / oauth_filename, oauth_bytes)
         source = os.environ
+        system_root = source.get("SYSTEMROOT") or source.get("SystemRoot")
         child = {
             name: source[name]
-            for name in ("SystemRoot", "SYSTEMROOT", "WINDIR", "COMSPEC")
+            for name in ("WINDIR", "COMSPEC")
             if source.get(name)
         }
+        if system_root:
+            child["SYSTEMROOT"] = system_root
         child.update(
             {
                 "KIMI_CODE_HOME": str(private_home),

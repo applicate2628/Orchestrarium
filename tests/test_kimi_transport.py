@@ -158,6 +158,33 @@ def test_kimi_private_home_copies_only_exact_oauth_shape_and_token_needles(
     assert configuration.child_environment["DO_NOT_TRACK"] == "1"
 
 
+def test_kimi_private_home_canonicalizes_case_equivalent_system_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    owner = _load_owner()
+    _source, run_dir = _write_kimi_home(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        owner.os,
+        "environ",
+        {
+            "USERPROFILE": str(tmp_path / "user"),
+            "SystemRoot": "legacy-system-root",
+            "SYSTEMROOT": "canonical-system-root",
+            "WINDIR": "windows-directory",
+            "COMSPEC": "command-shell",
+        },
+    )
+
+    configuration = owner._kimi_sanitized_runtime_home(run_dir)
+
+    names = tuple(configuration.child_environment)
+    assert len({name.casefold() for name in names}) == len(names)
+    assert [name for name in names if name.casefold() == "systemroot"] == ["SYSTEMROOT"]
+    assert configuration.child_environment["SYSTEMROOT"] == "canonical-system-root"
+    assert configuration.child_environment["WINDIR"] == "windows-directory"
+    assert configuration.child_environment["COMSPEC"] == "command-shell"
+
+
 @pytest.mark.parametrize(
     "oauth,credential",
     (
