@@ -681,6 +681,72 @@ def test_provider_adapter_injected_cancellation_emits_nonpass_terminal(
     _assert_external_terminal_is_nonauthorizing(item, payload)
 
 
+@pytest.mark.parametrize(
+    ("exception_type", "expected_code"),
+    ((KeyboardInterrupt, 130), (OSError, 1), (ValueError, 1)),
+)
+def test_provider_launch_exception_without_settled_streams_emits_and_records_unavailable_scan_terminal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    exception_type: type[BaseException],
+    expected_code: int,
+) -> None:
+    """A launch exception must settle before any byte-only credential scan."""
+    prompt = tmp_path / "prompt.md"
+    prompt.write_text("fixture", encoding="utf-8")
+    output_root = (tmp_path / "captures").resolve()
+    item = _make_work_item(tmp_path, f"exception-{exception_type.__name__}")
+    emitted = io.StringIO()
+    ledger_after_envelope: list[bool] = []
+    original_record_terminal = owner.record_terminal
+
+    def raise_from_provider(*_args, **_kwargs):
+        raise exception_type("injected provider failure")
+
+    def record_after_envelope(*args, **kwargs) -> bool:
+        ledger_after_envelope.append(
+            emitted.getvalue().startswith(owner.RESULT_PREFIX)
+        )
+        return original_record_terminal(*args, **kwargs)
+
+    monkeypatch.setenv("CLAUDE_PROMPTS_DIR", str(output_root))
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "fixture-commercial-credential")
+    monkeypatch.setattr(owner.sys, "stdout", emitted)
+    monkeypatch.setattr(
+        owner,
+        "resolve_provider_command",
+        lambda _provider: [sys.executable, str(tmp_path / "unused-provider.py")],
+    )
+    monkeypatch.setattr(owner, "run_provider_process", raise_from_provider)
+    monkeypatch.setattr(owner, "record_terminal", record_after_envelope)
+
+    code = owner.launch(
+        "claude",
+        [
+            "exception-fixture",
+            "--prompt-file",
+            str(prompt),
+            "--ledger",
+            str(item),
+            "--ledger-role",
+            "qa-engineer",
+        ],
+    )
+
+    payload = owner.parse_provider_result(emitted.getvalue())
+    events = _ledger_events(item)
+    assert code == expected_code
+    assert payload["schema"] == "orchestrarium.provider-result.v2"
+    assert payload["token"] == "UNVERIFIED:E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE"
+    assert payload["gate"] == "none"
+    assert payload["cleanupStatus"] == "complete"
+    assert payload["captureRecoveryRetained"] is False
+    assert ledger_after_envelope == [True]
+    assert [event["eventKind"] for event in events] == ["launch", "terminal"]
+    _assert_external_terminal_is_nonauthorizing(item, payload)
+    assert list(output_root.iterdir()) == []
+
+
 def test_provider_launch_injects_one_runner_through_trust_ledger_and_child(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

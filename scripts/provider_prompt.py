@@ -2042,7 +2042,7 @@ def finalize_run(
             credential_scan_terminal(
                 credential_needles, stdout=raw_stdout, stderr=raw_stderr
             )
-            if raw_streams_settled or process_result is None
+            if raw_streams_settled
             else "E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE"
         )
     if credential_needles and stream is not None and stream.overflow:
