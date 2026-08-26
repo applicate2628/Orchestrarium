@@ -225,7 +225,7 @@ externalPriorityProfiles:
 Guardrails:
 - Keep the nesting capped at `profile -> lane -> ordered provider list`.
 - Provider names in production worker `auto` profiles are limited to the Codex/Claude pair; advisory and review profiles may additionally include `reserve` as the last supplemental candidate.
-- Example-only Gemini/Qwen require an explicit scalar provider override and are not valid profile entries. Unavailable Kimi/Grok are policy classifier names and are not valid profile entries.
+- Example-only Gemini/Qwen require an explicit scalar provider override and are not valid profile entries. Kimi requires explicit global Windows enrollment and is not a profile entry; Grok remains an unavailable policy classifier and is not a profile entry.
 - These structured blocks are the approved multi-line exception to older flat one-key-per-line guidance and should be preserved verbatim by update tools.
 
 Recommended shipped profiles:

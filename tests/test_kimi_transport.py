@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -10,10 +11,20 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 OWNER_PATH = ROOT / "scripts" / "provider_prompt.py"
 WRAPPER_PATH = ROOT / "scripts" / "invoke-kimi-prompt.py"
+INSTALLER_PATH = ROOT / "scripts" / "production_installer.py"
 
 
 def _load_owner():
     spec = importlib.util.spec_from_file_location("kimi_unavailable_owner", OWNER_PATH)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_installer():
+    spec = importlib.util.spec_from_file_location("kimi_installer_owner", INSTALLER_PATH)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
@@ -88,6 +99,104 @@ def test_kimi_bundle_is_no_tools_and_no_subagents(tmp_path: Path) -> None:
     text = agent.read_text(encoding="utf-8")
     assert text.startswith(expected)
     assert text == expected + "Review the sealed context."
+
+
+def _write_kimi_home(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    oauth: str = '{ storage = "file", key = "primary" }',
+    credential: bool = True,
+) -> tuple[Path, Path]:
+    user_home = tmp_path / "user"
+    source = user_home / ".kimi-code"
+    credentials = source / "credentials"
+    credentials.mkdir(parents=True)
+    (source / "config.toml").write_text(
+        "default_model = \"kimi-code/k3\"\n\n"
+        "[providers.\"managed:kimi-code\"]\n"
+        "type = \"openai\"\nbase_url = \"https://api.example.invalid\"\n"
+        f"oauth = {oauth}\n\n"
+        "[models.\"kimi-code/k3\"]\n"
+        "model = \"kimi-code/k3\"\nprovider = \"managed:kimi-code\"\n",
+        encoding="utf-8",
+    )
+    if credential:
+        (credentials / "primary.json").write_text(
+            '{"access_token":"access-secret","refresh_token":"refresh-secret"}',
+            encoding="utf-8",
+        )
+    monkeypatch.setenv("USERPROFILE", str(user_home))
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    return source, run_dir
+
+
+def test_kimi_private_home_copies_only_exact_oauth_shape_and_token_needles(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    owner = _load_owner()
+    source, run_dir = _write_kimi_home(monkeypatch, tmp_path)
+
+    configuration = owner._kimi_sanitized_runtime_home(run_dir)
+
+    private_home = run_dir / "kimi-code-home"
+    copied = private_home / "credentials" / "primary.json"
+    parsed = tomllib.loads((private_home / "config.toml").read_text(encoding="utf-8"))
+    assert parsed["providers"]["managed:kimi-code"]["oauth"] == {
+        "storage": "file", "key": "primary"
+    }
+    assert copied.read_bytes() == (source / "credentials" / "primary.json").read_bytes()
+    assert {path.name for path in private_home.iterdir()} == {"config.toml", "credentials"}
+    assert configuration.needles == (b"access-secret", b"refresh-secret")
+    assert "USERPROFILE" not in configuration.child_environment
+    assert configuration.child_environment["KIMI_CODE_HOME"] == str(private_home)
+    assert configuration.child_environment["DO_NOT_TRACK"] == "1"
+
+
+@pytest.mark.parametrize(
+    "oauth,credential",
+    (
+        ('{ storage = "memory", key = "primary" }', True),
+        ('{ storage = "file", key = "../escape" }', True),
+        ('{ storage = "file", key = "primary" }', False),
+    ),
+)
+def test_kimi_private_home_rejects_unknown_or_unsafe_oauth_storage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, oauth: str, credential: bool
+) -> None:
+    owner = _load_owner()
+    _source, run_dir = _write_kimi_home(
+        monkeypatch, tmp_path, oauth=oauth, credential=credential
+    )
+
+    with pytest.raises(ValueError, match="E_KIMI_AUTH_STORAGE_INVALID"):
+        owner._kimi_sanitized_runtime_home(run_dir)
+    assert not (run_dir / "kimi-code-home").exists()
+
+
+def test_kimi_profile_identifier_has_one_production_owner() -> None:
+    source = (ROOT / "scripts" / "process_supervision" / "process_runner.py").read_text(
+        encoding="utf-8"
+    )
+    assert source.count('"kimi-sealed-bundle-text-v1"') == 1
+
+
+def test_runtime_pin_is_restored_after_injected_post_enrollment_failure(
+    tmp_path: Path,
+) -> None:
+    installer = _load_installer()
+    pin = tmp_path / "runtime" / "kimi" / "executable-binding-v1.json"
+    pin.parent.mkdir(parents=True)
+    before = b'{"accepted":"prior"}\n'
+    pin.write_bytes(before)
+
+    with pytest.raises(RuntimeError, match="injected"):
+        with installer._InstallTransaction([pin], enabled=True):
+            pin.write_bytes(b'{"accepted":"new"}\n')
+            raise RuntimeError("injected post-enrollment failure")
+
+    assert pin.read_bytes() == before
 
 
 def test_kimi_transport_adds_no_second_lifecycle_or_smoke_path() -> None:

@@ -95,6 +95,25 @@ def _provider_clauses(line: str) -> tuple[str, ...]:
     return tuple(re.split(r"(?<=[.!?])\s+", line))
 
 
+def test_global_codex_kimi_clauses_do_not_claim_unavailability() -> None:
+    """Only the Claude-specific documentation may describe Kimi as unavailable."""
+
+    global_codex_surfaces = (
+        ROOT / "INSTALL.md",
+        ROOT / "docs" / "agents-mode-reference.md",
+        ROOT / "src.codex" / "skills" / "init-project" / "SKILL.md",
+        ROOT / "src.codex" / "skills" / "second-opinion" / "SKILL.md",
+        ROOT / "src.codex" / "skills" / "second-opinion" / "agents" / "openai.yaml",
+    )
+    for path in global_codex_surfaces:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            for clause in re.split(r"(?<=[.!?;])\s+|,\s+and\s+(?=Grok\b)", line):
+                if re.search(r"\bKimi (?:is explicit-only|requires explicit global)", clause):
+                    assert not re.search(r"\b(?:unavailable|disabled)\b", clause, re.IGNORECASE), (
+                        f"stale Kimi unavailability clause in {path.relative_to(ROOT)}: {clause}"
+                    )
+
+
 def test_kimi_grok_live_inventory_and_nonexecution_language() -> None:
     """Every live mention must state its provider-specific safety boundary."""
 

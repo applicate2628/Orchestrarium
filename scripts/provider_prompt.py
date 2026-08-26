@@ -938,18 +938,20 @@ def _kimi_sanitized_runtime_home(run_dir: Path) -> ProviderAuthConfiguration:
             or not isinstance(model, dict)
             or model.get("provider") != "managed:kimi-code"
             or model.get("model") != KimiWindowsProfileV1.model
-            or not isinstance(oauth_reference, str)
+            or not isinstance(oauth_reference, dict)
+            or oauth_reference.get("storage") != "file"
+            or not isinstance(oauth_reference.get("key"), str)
         ):
             raise ValueError("configuration")
-        oauth_relative = Path(oauth_reference)
+        oauth_key = oauth_reference["key"]
         if (
-            oauth_relative.is_absolute()
-            or oauth_relative.parts[:1] != ("credentials",)
-            or len(oauth_relative.parts) != 2
-            or oauth_relative.suffix != ".json"
+            not oauth_key
+            or oauth_key in {".", ".."}
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", oauth_key)
         ):
             raise ValueError("credential reference")
-        oauth_source = source_home / oauth_relative
+        oauth_filename = f"{oauth_key}.json"
+        oauth_source = source_home / "credentials" / oauth_filename
         validate_no_reparse_components(oauth_source)
         oauth_bytes = oauth_source.read_bytes()
         oauth = json.loads(oauth_bytes.decode("utf-8"))
@@ -980,13 +982,14 @@ def _kimi_sanitized_runtime_home(run_dir: Path) -> ProviderAuthConfiguration:
             '[providers."managed:kimi-code"]\n'
             f'type = {json.dumps(provider_type)}\n'
             f'base_url = {json.dumps(base_url)}\n'
-            f'oauth = {json.dumps(oauth_reference)}\n\n'
+            'oauth = { storage = "file", '
+            f'key = {json.dumps(oauth_key)} }}\n\n'
             '[models."kimi-code/k3"]\n'
             'model = "kimi-code/k3"\n'
             'provider = "managed:kimi-code"\n'
         ).encode("utf-8")
         _private_file(private_home / "config.toml", rendered)
-        _private_file(credential_dir / oauth_relative.name, oauth_bytes)
+        _private_file(credential_dir / oauth_filename, oauth_bytes)
         source = os.environ
         child = {
             name: source[name]

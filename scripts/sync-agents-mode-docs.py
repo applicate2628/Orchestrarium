@@ -227,6 +227,13 @@ def scalar_comment(scalar: dict[str, Any], provider: str) -> str:
                 "never select them; gemini/qwen are WEAK MODEL / "
                 "NOT RECOMMENDED example-only routes"
             )
+        if provider == "codex":
+            return (
+                f"# selectable here: {selectable}; default: {default}; "
+                "kimi requires explicit global Windows enrollment and is not "
+                "initialized as a project-local scalar; grok remains unavailable "
+                "in 1.x; gemini/qwen are example-only and not recommended"
+            )
         return (
             f"# selectable here: {selectable}; default: {default}; "
             "kimi/grok are policy-only classifiers, unavailable and disabled in 1.x; "

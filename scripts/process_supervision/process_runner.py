@@ -119,7 +119,6 @@ _WINDOWS_ARGV_PROFILES = frozenset(
     {
         "python-validator-json-echo-v1",
         "git-rev-parse-sq-quote-v1",
-        "kimi-sealed-bundle-text-v1",
     }
 )
 
@@ -150,6 +149,11 @@ class KimiWindowsProfileV1:
             "--output-format", "text",
             "--prompt", cls.constant_prompt,
         ]
+
+
+_WINDOWS_ARGV_PROFILES = _WINDOWS_ARGV_PROFILES | frozenset(
+    {KimiWindowsProfileV1.profile_id}
+)
 _WINDOWS_INTERNAL_PROBE_CAPTURE_BYTES = 64 * 1024
 _WINDOWS_ARGV_PROBE_CANARIES = (
     "",
@@ -1496,7 +1500,7 @@ class WindowsArgvAdmissionOwnerV1:
         executable = Path(request.resolved_executable)
         prompt_binding: tuple[str, str, str] | None = None
         executable_binding: ExecutableBindingV1 | None = None
-        if profile_id == "kimi-sealed-bundle-text-v1":
+        if profile_id == KimiWindowsProfileV1.profile_id:
             prompt_binding = _kimi_bundle_file_binding(
                 request, failure_id="PSV1-ARGV-CODEC-UNSUPPORTED"
             )
@@ -1519,7 +1523,7 @@ class WindowsArgvAdmissionOwnerV1:
             probe_kind, requested, observed = self._git_probe(
                 lifecycle, request, executable
             )
-        elif profile_id == "kimi-sealed-bundle-text-v1":
+        elif profile_id == KimiWindowsProfileV1.profile_id:
             if _windows_argv_roundtrip(request.argv) != request.argv:
                 raise ProcessSupervisionError(
                     "PSV1-ARGV-ATTESTATION", "request-validation"
@@ -1564,7 +1568,7 @@ class WindowsArgvAdmissionOwnerV1:
         executable = Path(request.resolved_executable)
         executable_binding = (
             _validate_kimi_executable_binding(executable)
-            if admission.profile_id == "kimi-sealed-bundle-text-v1"
+            if admission.profile_id == KimiWindowsProfileV1.profile_id
             else None
         )
         if executable_binding is not None:
@@ -1576,7 +1580,7 @@ class WindowsArgvAdmissionOwnerV1:
             identity, version = _stream_executable_binding(executable)
         prompt_binding = (
             _kimi_bundle_file_binding(request, failure_id="PSV1-ARGV-ATTESTATION")
-            if admission.profile_id == "kimi-sealed-bundle-text-v1"
+            if admission.profile_id == KimiWindowsProfileV1.profile_id
             else (None, None, None)
         )
         valid = (

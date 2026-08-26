@@ -147,7 +147,7 @@ Routing conventions (not persisted as keys):
    mcpMode: {value}  # allowed: auto | force; default: auto
    preferExternalWorker: {value}  # allowed: false | true; default: false
    preferExternalReviewer: {value}  # allowed: false | true; default: false
-   externalProvider: {value}  # selectable here: auto | codex | claude | gemini | qwen; default: auto; kimi/grok are policy-only classifiers, unavailable and disabled in 1.x; never select them; gemini/qwen are example-only and not recommended
+   externalProvider: {value}  # selectable here: auto | codex | claude | gemini | qwen; default: auto; kimi requires explicit global Windows enrollment and is not initialized as a project-local scalar; grok remains unavailable in 1.x; gemini/qwen are example-only and not recommended
    externalPriorityProfile: {value}  # allowed: balanced | quality-first | <repo-local production profile>; default: balanced
    reserveResolver: {value}  # allowed: disabled | claude-sonnet | claude-wrapper | wrapper:<command>; default: claude-sonnet
    externalPriorityProfiles: {value}  # allowed: structured profile map
