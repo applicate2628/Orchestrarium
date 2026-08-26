@@ -57,7 +57,7 @@ def _run_git(repo_root: Path, *args: str, text: bool = True) -> str | bytes:
 
 def _resolve_commit(repo_root: Path, ref: str) -> tuple[str, str]:
     commit = str(_run_git(repo_root, "rev-parse", "--verify", f"{ref}^{{commit}}")).strip()
-    tree = str(_run_git(repo_root, "rev-parse", "--verify", f"{commit}^{{tree}}")).strip()
+    tree = str(_run_git(repo_root, "rev-parse", "--verify", f"{commit}^{{tree}}" )).strip()
     return commit, tree
 
 
@@ -182,8 +182,8 @@ def _primary_surface(surfaces: Sequence[str]) -> str:
     precedence = (
         "test",
         "skill",
-        "agent",
         "command",
+        "agent",
         "hook",
         "installer",
         "lifecycle",
