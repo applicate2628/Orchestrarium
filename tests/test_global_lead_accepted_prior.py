@@ -1062,8 +1062,12 @@ def test_exact_provider_auth_baseline_lead_is_accepted_and_drift_refused(
             PRE_K3_WIRE_FIX_GLOBAL_LEAD_TREE_SHA256,
         ),
         (STOCK_77EC_GLOBAL_LEAD_REVISION, STOCK_77EC_GLOBAL_LEAD_TREE_SHA256),
+        (
+            "3dadb8b66e4580df929fecdc5d8d9bf20dcb2c59",
+            "836f24dafcc409be2d120248a19ec34772af03238b7600389961a708315a15b7",
+        ),
     ),
-    ids=("pre-kimi", "pre-k3-wire-fix", "stock-77ec"),
+    ids=("pre-kimi", "pre-k3-wire-fix", "stock-77ec", "stock-3dad"),
 )
 def test_exact_shipped_global_lead_is_accepted_and_one_byte_drift_refused(
     tmp_path: Path,

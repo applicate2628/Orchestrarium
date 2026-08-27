@@ -5,8 +5,8 @@ from __future__ import annotations
 
 import sys
 
-from provider_prompt import launch
+from provider_prompt import kimi_main
 
 
 if __name__ == "__main__":
-    raise SystemExit(launch("kimi", sys.argv[1:]))
+    raise SystemExit(kimi_main(sys.argv[1:]))

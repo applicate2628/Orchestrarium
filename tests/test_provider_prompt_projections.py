@@ -981,6 +981,7 @@ def test_exact_8f92_transport_set_is_one_atomic_prior_plan(tmp_path: Path) -> No
     assert tuple(name for name, _payload in staged.pending_files) == (
         "provider_prompt.py",
         "process_supervision/process_runner.py",
+        "invoke-kimi-prompt.py",
         "external-role-taxonomy.v1.json",
     )
     assert staged.manifest_pending is True
@@ -997,28 +998,31 @@ def test_exact_8f92_transport_set_is_one_atomic_prior_plan(tmp_path: Path) -> No
         (
             "d1309ee5",
             STOCK_D130_PROJECTION_SHA256,
-            (
-                "provider_prompt.py",
-                "process_supervision/process_runner.py",
-                "external-role-taxonomy.v1.json",
+                (
+                    "provider_prompt.py",
+                    "process_supervision/process_runner.py",
+                    "invoke-kimi-prompt.py",
+                    "external-role-taxonomy.v1.json",
             ),
         ),
         (
             "f87414e7",
             STOCK_F874_PROJECTION_SHA256,
-            (
-                "provider_prompt.py",
-                "process_supervision/process_runner.py",
-                "external-role-taxonomy.v1.json",
+                (
+                    "provider_prompt.py",
+                    "process_supervision/process_runner.py",
+                    "invoke-kimi-prompt.py",
+                    "external-role-taxonomy.v1.json",
             ),
         ),
         (
             "9a637574",
             STOCK_9A63_PROJECTION_SHA256,
-            (
-                "provider_prompt.py",
-                "process_supervision/process_runner.py",
-                "external-role-taxonomy.v1.json",
+                (
+                    "provider_prompt.py",
+                    "process_supervision/process_runner.py",
+                    "invoke-kimi-prompt.py",
+                    "external-role-taxonomy.v1.json",
             ),
         ),
     ),
@@ -1188,6 +1192,7 @@ def test_exact_8521_transport_set_is_one_atomic_prior_plan(tmp_path: Path) -> No
     assert tuple(name for name, _payload in staged.pending_files) == (
         "provider_prompt.py",
         "process_supervision/process_runner.py",
+        "invoke-kimi-prompt.py",
         "external-role-taxonomy.v1.json",
     )
     assert staged.manifest_pending is True
@@ -1215,6 +1220,7 @@ def test_exact_7872_six_member_transport_is_one_atomic_seven_member_plan(
     assert tuple(name for name, _payload in staged.pending_files) == (
         "provider_prompt.py",
         "process_supervision/process_runner.py",
+        "invoke-kimi-prompt.py",
         "external-role-taxonomy.v1.json",
     )
     assert staged.manifest_pending is True
@@ -1486,7 +1492,7 @@ def test_8521_transport_final_parity_failure_restores_original_identities(
     assert not tuple(projection.parent.rglob("*.prior"))
 
 
-def test_8521_transport_real_install_replaces_two_members_then_is_noop(
+def test_8521_transport_real_install_replaces_five_members_then_is_noop(
     tmp_path: Path,
 ) -> None:
     installer = _load_installer()
@@ -1515,8 +1521,15 @@ def test_8521_transport_real_install_replaces_two_members_then_is_noop(
         for name, path in paths.items()
     }
     assert after_first["provider_prompt.py"][1] != before_identities["provider_prompt.py"]
+    assert after_first["invoke-kimi-prompt.py"][1] != before_identities[
+        "invoke-kimi-prompt.py"
+    ]
     assert after_first[current_manifest.name][1] != before_identities[current_manifest.name]
-    for name in set(paths) - {"provider_prompt.py", current_manifest.name}:
+    for name in set(paths) - {
+        "provider_prompt.py",
+        "invoke-kimi-prompt.py",
+        current_manifest.name,
+    }:
         assert after_first[name][1] == before_identities[name]
     assert not tuple(projection.parent.rglob("*.prior"))
 
@@ -1530,7 +1543,7 @@ def test_8521_transport_real_install_replaces_two_members_then_is_noop(
     } == after_first
 
 
-def test_8521_transport_dry_run_reports_two_replacements_without_mutation(
+def test_8521_transport_dry_run_reports_five_replacements_without_mutation(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     installer = _load_installer()
@@ -1548,7 +1561,7 @@ def test_8521_transport_dry_run_reports_two_replacements_without_mutation(
 
     assert installer.install("claude", [*args, "--dry-run"]) == 0
     output = capsys.readouterr().out
-    assert "transport prior 8521b638: 4 replacements" in output
+    assert "transport prior 8521b638: 5 replacements" in output
     assert {
         name: (
             path.read_bytes(),

@@ -4,7 +4,7 @@
   "files": {
     "provider_prompt.py": {
       "source": "scripts/provider_prompt.py",
-      "sha256": "dc2625f2e2a623477d7c48dd07d46527dbc409be7c3f91ff63b5a920dcdfec1d",
+      "sha256": "27ae351407f7b91cece3a29c9147a8c63a889c57d6b77c7fde428b219b5b381a",
       "destination": "scripts/provider_prompt.py"
     },
     "process_supervision/process_runner.py": {
@@ -24,7 +24,7 @@
     },
     "invoke-kimi-prompt.py": {
       "source": "scripts/invoke-kimi-prompt.py",
-      "sha256": "05679dac1daded511debf617e8f1189dd941d21a5d1c7f6e3dd3ec21d4c0bc75",
+      "sha256": "480af94ce089d5a6340e92d00239a5762c9c1374375a8c12c921afdcfcaa6e47",
       "destination": "scripts/invoke-kimi-prompt.py"
     },
     "invoke-grok-prompt.py": {

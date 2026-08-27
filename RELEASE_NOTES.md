@@ -2,6 +2,10 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-08-28
+
+- **The installed Kimi wrapper can now enroll and verify its fixed Windows executable binding directly.** `--enroll-executable` atomically creates the same path/size/SHA-256 pin used by the global installer, exact replay is byte-preserving, and any different existing pin or release identity still fails closed. Read-only `--verify-enrollment` checks the current binary content without launching Kimi, while missing or malformed binding errors print the exact installed wrapper enrollment command. The wrapper does not inspect or manage Kimi authentication and never trusts `PATH` or `KIMI_BIN`. **Why it matters:** an operator can restore a missing local binding immediately without a full pack reinstall or a second binding implementation, while malformed or drifted state still requires explicit disposition.
+
 ## 2026-08-27
 
 - The git-push publication gate now preserves its fixed transcript bounds while recovering the final pull-request authorization state from a stable, complete-record transcript suffix when full history exceeds the cap. Existing exact URL grants continue through the unchanged pull-request oracle and fresh version-3 publication scan, while revocations, malformed reserved markers, split records, transcript mutation, invalid data, and suffixes without authorization still deny publication.

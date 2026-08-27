@@ -23,9 +23,9 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from process_supervision.process_runner import KimiWindowsProfileV1
+    from provider_prompt import enroll_kimi_executable
 except ModuleNotFoundError:
-    from scripts.process_supervision.process_runner import KimiWindowsProfileV1
+    from scripts.provider_prompt import enroll_kimi_executable
 
 
 CODEX_BEGIN = "<!-- BEGIN ORCHESTRARIUM CODEX PACK -->"
@@ -217,6 +217,7 @@ GLOBAL_LEAD_ACCEPTED_PRIOR_TREE_SHA256 = frozenset(
         "bc0e280d4319f71078daae8476015d6d80a9ce15ffe7a05ffc2c2438875bae88",
         "68619d80e3dc7283aec38399961d7cb2267292f01d9975a61f4b9ac59418d12d",
         "a4afc1fe35ddb5b0417f3ba8c170dceeeef61e95a7eb0b4e617bd28db271a2ff",
+        "836f24dafcc409be2d120248a19ec34772af03238b7600389961a708315a15b7",
     }
 )
 RUNTIME_RESOURCES = (
@@ -359,53 +360,9 @@ def _parser(provider: str) -> argparse.ArgumentParser:
 
 
 def _enroll_kimi_executable(home: Path, runtime_root: Path, *, dry_run: bool) -> None:
-    """Record a user-approved, local Kimi continuity pin; never trust PATH."""
+    """Delegate installer enrollment to the provider binding owner."""
 
-    executable = home / ".kimi-code" / "bin" / "kimi.exe"
-    pin = runtime_root / "executable-binding-v1.json"
-    if _contains_reparse(executable) or not executable.is_file():
-        raise ValueError("E_KIMI_ENROLLMENT_INVALID: fixed executable path")
-    digest = _file_sha256(executable)
-    if (
-        executable.stat().st_size != KimiWindowsProfileV1.expected_size
-        or digest.lower() != KimiWindowsProfileV1.accepted_sha256
-    ):
-        raise ValueError("E_KIMI_ENROLLMENT_INVALID: observed release binding")
-    payload = json.dumps(
-        {
-            "schema": "orchestrarium.kimi-executable-binding.v1",
-            "path": str(executable),
-            "size": KimiWindowsProfileV1.expected_size,
-            "sha256": KimiWindowsProfileV1.accepted_sha256,
-        },
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8") + b"\n"
-    if pin.exists():
-        if _contains_reparse(pin) or not pin.is_file():
-            raise ValueError("E_KIMI_ENROLLMENT_INVALID: existing pin")
-        if pin.read_bytes() == payload:
-            print("  Kimi executable enrollment is exact and left byte-exact")
-            return
-        raise ValueError("E_KIMI_ENROLLMENT_DRIFT: re-enrollment requires explicit replacement workflow")
-    if dry_run:
-        print("  [dry-run] Kimi executable enrollment would create local continuity pin")
-        return
-    pin.parent.mkdir(parents=True, exist_ok=True)
-    if _contains_reparse(pin.parent):
-        raise ValueError("E_KIMI_ENROLLMENT_INVALID: pin root")
-    descriptor, temporary_name = tempfile.mkstemp(prefix=".kimi-binding.", suffix=".tmp", dir=pin.parent)
-    temporary = Path(temporary_name)
-    try:
-        with os.fdopen(descriptor, "wb") as stream:
-            stream.write(payload)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temporary, pin)
-    finally:
-        temporary.unlink(missing_ok=True)
-    if pin.read_bytes() != payload:
-        raise ValueError("E_KIMI_ENROLLMENT_POSTCONDITION")
+    enroll_kimi_executable(home, runtime_root, dry_run=dry_run)
 
 
 def _repo_root(script: Path) -> Path:

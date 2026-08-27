@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -34,9 +35,64 @@ def _load_installer():
 
 def test_kimi_wrapper_stays_thin() -> None:
     text = WRAPPER_PATH.read_text(encoding="utf-8")
-    assert "from provider_prompt import launch" in text
-    assert 'launch("kimi", sys.argv[1:])' in text
+    assert "from provider_prompt import kimi_main" in text
+    assert "kimi_main(sys.argv[1:])" in text
     assert "subprocess" not in text
+
+
+def test_kimi_maintenance_modes_never_launch_provider(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    owner = _load_owner()
+    enrolled: list[tuple[Path, Path, bool]] = []
+    verified = [False]
+
+    def enroll(home: Path, runtime_root: Path, *, dry_run: bool) -> None:
+        enrolled.append((home, runtime_root, dry_run))
+
+    def verify() -> list[str]:
+        verified[0] = True
+        return [r"C:\fixed\kimi.exe"]
+
+    def forbidden_launch(_provider: str, _argv: list[str]) -> int:
+        raise AssertionError("maintenance mode reached provider launch")
+
+    monkeypatch.setattr(owner, "enroll_kimi_executable", enroll)
+    monkeypatch.setattr(owner, "verify_kimi_enrollment", verify)
+    monkeypatch.setattr(owner, "launch", forbidden_launch)
+
+    assert owner.kimi_main(["--enroll-executable"]) == 0
+    assert len(enrolled) == 1
+    assert enrolled[0][0].is_absolute()
+    assert enrolled[0][1].name == "kimi"
+    assert enrolled[0][2] is False
+    assert owner.kimi_main(["--verify-enrollment"]) == 0
+    assert verified == [True]
+    assert "KIMI-EXECUTABLE-ENROLLMENT: PASS" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "argv",
+    (
+        ["--enroll-executable", "topic"],
+        ["--verify-enrollment", "--enroll-executable"],
+        ["topic", "--verify-enrollment"],
+    ),
+)
+def test_kimi_maintenance_flags_fail_closed_when_combined(
+    argv: list[str], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    owner = _load_owner()
+    monkeypatch.setattr(
+        owner,
+        "launch",
+        lambda _provider, _argv: (_ for _ in ()).throw(
+            AssertionError("invalid maintenance arguments reached provider launch")
+        ),
+    )
+
+    assert owner.kimi_main(argv) == 1
+    assert "E_KIMI_MAINTENANCE_ARGUMENTS_INVALID" in capsys.readouterr().err
 
 
 def test_kimi_profile_is_fixed_and_has_no_native_effort_control() -> None:
@@ -704,6 +760,197 @@ def test_kimi_enrollment_drift_preserves_specific_error(
 
     with pytest.raises(ValueError, match="^E_KIMI_EXECUTABLE_BINDING_DRIFT$"):
         owner.resolve_enrolled_kimi_command()
+
+
+def test_missing_kimi_binding_names_exact_wrapper_enrollment_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    owner = _load_owner()
+    user_home = tmp_path / "user"
+    user_home.mkdir()
+    monkeypatch.setenv("USERPROFILE", str(user_home))
+    expected = subprocess.list2cmdline(
+        [sys.executable, str(WRAPPER_PATH.resolve()), "--enroll-executable"]
+    )
+
+    with pytest.raises(ValueError) as failure:
+        owner.resolve_enrolled_kimi_command()
+
+    assert str(failure.value) == (
+        f"E_KIMI_EXECUTABLE_BINDING_INVALID: run {expected}"
+    )
+
+
+def test_kimi_binding_owner_enrolls_replays_and_refuses_drift(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    owner = _load_owner()
+    installer = _load_installer()
+    user_home = tmp_path / "user"
+    executable = user_home / ".kimi-code" / "bin" / "kimi.exe"
+    executable.parent.mkdir(parents=True)
+    payload = b"synthetic-kimi-release"
+    executable.write_bytes(payload)
+    runtime_root = user_home / ".codex" / "orchestrarium-runtime" / "kimi"
+    profile = SimpleNamespace(
+        expected_size=len(payload),
+        accepted_sha256=hashlib.sha256(payload).hexdigest(),
+    )
+    monkeypatch.setattr(owner, "KimiWindowsProfileV1", profile)
+
+    owner.enroll_kimi_executable(user_home, runtime_root, dry_run=False)
+    pin = runtime_root / owner.KIMI_EXECUTABLE_BINDING_FILENAME_V1
+    expected_binding = {
+        "path": str(executable.resolve()),
+        "schema": owner.KIMI_EXECUTABLE_BINDING_SCHEMA_V1,
+        "sha256": profile.accepted_sha256,
+        "size": len(payload),
+    }
+    assert json.loads(pin.read_text(encoding="utf-8")) == expected_binding
+
+    replay_bytes = pin.read_bytes()
+    replay_metadata = pin.stat()
+    replay_identity = (
+        replay_metadata.st_dev,
+        replay_metadata.st_ino,
+        replay_metadata.st_size,
+        replay_metadata.st_mtime_ns,
+    )
+    monkeypatch.setattr(
+        owner.tempfile,
+        "mkstemp",
+        lambda *_args: (_ for _ in ()).throw(
+            AssertionError("exact replay attempted temporary publication")
+        ),
+    )
+    monkeypatch.setattr(
+        owner.os,
+        "link",
+        lambda *_args: (_ for _ in ()).throw(
+            AssertionError("exact replay attempted create-only publication")
+        ),
+    )
+    owner.enroll_kimi_executable(user_home, runtime_root, dry_run=False)
+    replay_after = pin.stat()
+    assert pin.read_bytes() == replay_bytes
+    assert (
+        replay_after.st_dev,
+        replay_after.st_ino,
+        replay_after.st_size,
+        replay_after.st_mtime_ns,
+    ) == replay_identity
+    assert not tuple(runtime_root.glob(".kimi-binding.*.tmp"))
+
+    pin.write_text("{}\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="^E_KIMI_ENROLLMENT_DRIFT"):
+        owner.enroll_kimi_executable(user_home, runtime_root, dry_run=False)
+
+    installer_call: list[tuple[Path, Path, bool]] = []
+    monkeypatch.setattr(
+        installer,
+        "enroll_kimi_executable",
+        lambda home, root, *, dry_run: installer_call.append(
+            (home, root, dry_run)
+        ),
+    )
+    installer._enroll_kimi_executable(user_home, runtime_root, dry_run=True)
+    assert installer_call == [(user_home, runtime_root, True)]
+
+
+def test_kimi_enrollment_preserves_destination_created_at_placement_time(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    owner = _load_owner()
+    user_home = tmp_path / "user"
+    executable = user_home / ".kimi-code" / "bin" / "kimi.exe"
+    executable.parent.mkdir(parents=True)
+    executable_payload = b"synthetic-kimi-release"
+    executable.write_bytes(executable_payload)
+    runtime_root = user_home / ".codex" / "orchestrarium-runtime" / "kimi"
+    profile = SimpleNamespace(
+        expected_size=len(executable_payload),
+        accepted_sha256=hashlib.sha256(executable_payload).hexdigest(),
+    )
+    monkeypatch.setattr(owner, "KimiWindowsProfileV1", profile)
+    pin = runtime_root / owner.KIMI_EXECUTABLE_BINDING_FILENAME_V1
+    competing_payload = b"concurrent binding owner\n"
+    real_replace = owner.os.replace
+    real_link = owner.os.link
+
+    def race_replace(source: Path, destination: Path) -> None:
+        Path(destination).write_bytes(competing_payload)
+        real_replace(source, destination)
+
+    def race_link(source: Path, destination: Path) -> None:
+        Path(destination).write_bytes(competing_payload)
+        real_link(source, destination)
+
+    monkeypatch.setattr(owner.os, "replace", race_replace)
+    monkeypatch.setattr(owner.os, "link", race_link)
+
+    with pytest.raises(ValueError, match="^E_KIMI_ENROLLMENT_DRIFT"):
+        owner.enroll_kimi_executable(user_home, runtime_root, dry_run=False)
+
+    assert pin.read_bytes() == competing_payload
+    assert not tuple(runtime_root.glob(".kimi-binding.*.tmp"))
+
+
+def test_kimi_enrollment_preserves_dangling_binding_symlink(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    owner = _load_owner()
+    user_home = tmp_path / "user"
+    executable = user_home / ".kimi-code" / "bin" / "kimi.exe"
+    executable.parent.mkdir(parents=True)
+    executable_payload = b"synthetic-kimi-release"
+    executable.write_bytes(executable_payload)
+    runtime_root = user_home / ".codex" / "orchestrarium-runtime" / "kimi"
+    runtime_root.mkdir(parents=True)
+    profile = SimpleNamespace(
+        expected_size=len(executable_payload),
+        accepted_sha256=hashlib.sha256(executable_payload).hexdigest(),
+    )
+    monkeypatch.setattr(owner, "KimiWindowsProfileV1", profile)
+    pin = runtime_root / owner.KIMI_EXECUTABLE_BINDING_FILENAME_V1
+    missing_target = tmp_path / "missing-binding-target.json"
+    try:
+        pin.symlink_to(missing_target)
+    except OSError as exc:
+        pytest.skip(f"file symlink creation unavailable: {exc}")
+
+    with pytest.raises(
+        ValueError, match="^E_KIMI_ENROLLMENT_INVALID: existing pin$"
+    ):
+        owner.enroll_kimi_executable(user_home, runtime_root, dry_run=False)
+
+    assert pin.is_symlink()
+    assert pin.resolve(strict=False) == missing_target.resolve(strict=False)
+    assert not missing_target.exists()
+    assert not tuple(runtime_root.glob(".kimi-binding.*.tmp"))
+
+
+def test_verify_kimi_enrollment_detects_same_size_content_drift(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    owner = _load_owner()
+    user_home = tmp_path / "user"
+    executable = user_home / ".kimi-code" / "bin" / "kimi.exe"
+    executable.parent.mkdir(parents=True)
+    payload = b"release-A"
+    executable.write_bytes(payload)
+    runtime_root = user_home / ".codex" / "orchestrarium-runtime" / "kimi"
+    profile = SimpleNamespace(
+        expected_size=len(payload),
+        accepted_sha256=hashlib.sha256(payload).hexdigest(),
+    )
+    monkeypatch.setattr(owner, "KimiWindowsProfileV1", profile)
+    monkeypatch.setenv("USERPROFILE", str(user_home))
+    owner.enroll_kimi_executable(user_home, runtime_root, dry_run=False)
+
+    assert owner.verify_kimi_enrollment() == [str(executable.resolve())]
+    executable.write_bytes(b"release-B")
+    with pytest.raises(ValueError, match="^E_KIMI_EXECUTABLE_BINDING_DRIFT$"):
+        owner.verify_kimi_enrollment()
 
 
 def test_kimi_release_profile_pins_official_039_windows_x64_identity() -> None:

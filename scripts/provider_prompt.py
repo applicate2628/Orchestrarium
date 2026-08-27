@@ -834,18 +834,158 @@ def _kimi_runtime_root() -> Path:
     return root
 
 
+def _kimi_user_home() -> Path:
+    home = Path(os.environ.get("USERPROFILE") or Path.home())
+    if not home.is_absolute():
+        raise ValueError("E_KIMI_RUNTIME_STATE_INVALID")
+    return Path(os.path.abspath(home))
+
+
+def _kimi_enrollment_command() -> str:
+    wrapper = Path(__file__).with_name("invoke-kimi-prompt.py").resolve()
+    return subprocess.list2cmdline(
+        [sys.executable, str(wrapper), "--enroll-executable"]
+    )
+
+
+def _fixed_kimi_executable(home: Path) -> Path:
+    absolute_home = Path(os.path.abspath(home))
+    if not home.is_absolute() or absolute_home != home:
+        raise ValueError("E_KIMI_ENROLLMENT_INVALID: fixed executable path")
+    return absolute_home / ".kimi-code" / "bin" / "kimi.exe"
+
+
+def _observe_kimi_executable(path: Path, failure_id: str) -> dict[str, object]:
+    try:
+        validate_no_reparse_components(path)
+        before = path.lstat()
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or stat.S_ISLNK(before.st_mode)
+            or _metadata_is_reparse(before)
+            or before.st_size != KimiWindowsProfileV1.expected_size
+        ):
+            raise OSError("Kimi executable metadata")
+        digest = hashlib.sha256()
+        flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(path, flags)
+        with os.fdopen(descriptor, "rb") as stream:
+            opened = os.fstat(stream.fileno())
+            if (opened.st_dev, opened.st_ino, opened.st_size) != (
+                before.st_dev,
+                before.st_ino,
+                before.st_size,
+            ):
+                raise OSError("Kimi executable identity")
+            while chunk := stream.read(1024 * 1024):
+                digest.update(chunk)
+        after = path.lstat()
+        if (
+            after.st_dev,
+            after.st_ino,
+            after.st_size,
+            after.st_mtime_ns,
+        ) != (
+            before.st_dev,
+            before.st_ino,
+            before.st_size,
+            before.st_mtime_ns,
+        ):
+            raise OSError("Kimi executable drift")
+        observed_sha256 = digest.hexdigest()
+        if not secrets.compare_digest(
+            observed_sha256, KimiWindowsProfileV1.accepted_sha256
+        ):
+            raise OSError("Kimi executable digest")
+        return {
+            "schema": KIMI_EXECUTABLE_BINDING_SCHEMA_V1,
+            "path": str(path),
+            "size": before.st_size,
+            "sha256": observed_sha256,
+        }
+    except (OSError, ValueError, UnicodeError) as exc:
+        raise ValueError(failure_id) from exc
+
+
+def enroll_kimi_executable(
+    home: Path, runtime_root: Path, *, dry_run: bool
+) -> None:
+    """Create the fixed Kimi continuity pin without launching the provider."""
+
+    executable = _fixed_kimi_executable(home)
+    observed = _observe_kimi_executable(
+        executable, "E_KIMI_ENROLLMENT_INVALID: observed release binding"
+    )
+    pin = Path(os.path.abspath(runtime_root)) / KIMI_EXECUTABLE_BINDING_FILENAME_V1
+    if not runtime_root.is_absolute() or pin.parent != runtime_root:
+        raise ValueError("E_KIMI_ENROLLMENT_INVALID: pin root")
+    payload = json.dumps(
+        observed, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8") + b"\n"
+    if os.path.lexists(pin):
+        try:
+            validate_no_reparse_components(pin)
+            metadata = pin.lstat()
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or stat.S_ISLNK(metadata.st_mode)
+                or _metadata_is_reparse(metadata)
+            ):
+                raise OSError("existing pin")
+            existing = pin.read_bytes()
+        except (OSError, ValueError) as exc:
+            raise ValueError("E_KIMI_ENROLLMENT_INVALID: existing pin") from exc
+        if existing == payload:
+            print("  Kimi executable enrollment is exact and left byte-exact")
+            return
+        raise ValueError(
+            "E_KIMI_ENROLLMENT_DRIFT: re-enrollment requires explicit replacement workflow"
+        )
+    if dry_run:
+        print("  [dry-run] Kimi executable enrollment would create local continuity pin")
+        return
+    pin.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    try:
+        validate_no_reparse_components(pin.parent)
+    except (OSError, ValueError) as exc:
+        raise ValueError("E_KIMI_ENROLLMENT_INVALID: pin root") from exc
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=".kimi-binding.", suffix=".tmp", dir=pin.parent
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        try:
+            os.link(temporary, pin)
+        except FileExistsError as exc:
+            raise ValueError(
+                "E_KIMI_ENROLLMENT_DRIFT: re-enrollment requires explicit replacement workflow"
+            ) from exc
+        except OSError as exc:
+            raise ValueError("E_KIMI_ENROLLMENT_INVALID: pin create") from exc
+    finally:
+        temporary.unlink(missing_ok=True)
+    if pin.read_bytes() != payload:
+        raise ValueError("E_KIMI_ENROLLMENT_POSTCONDITION")
+
+
 def resolve_enrolled_kimi_command() -> list[str]:
     try:
         binding_path = _kimi_binding_path()
         validate_no_reparse_components(binding_path)
         data = json.loads(binding_path.read_text(encoding="utf-8"))
         path = Path(data["path"])
+        fixed_path = _fixed_kimi_executable(_kimi_user_home())
         digest = str(data["sha256"]).lower()
         size = int(data["size"])
         if (
             data.get("schema") != KIMI_EXECUTABLE_BINDING_SCHEMA_V1
             or not path.is_absolute()
             or Path(os.path.abspath(path)) != path
+            or path != fixed_path
             or path.name.casefold() != "kimi.exe"
             or size != KimiWindowsProfileV1.expected_size
             or digest != KimiWindowsProfileV1.accepted_sha256
@@ -856,7 +996,17 @@ def resolve_enrolled_kimi_command() -> list[str]:
     except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
         if str(exc) == "E_KIMI_EXECUTABLE_BINDING_DRIFT":
             raise
-        raise ValueError("E_KIMI_EXECUTABLE_BINDING_INVALID") from exc
+        raise ValueError(
+            "E_KIMI_EXECUTABLE_BINDING_INVALID: run " + _kimi_enrollment_command()
+        ) from exc
+
+
+def verify_kimi_enrollment() -> list[str]:
+    command = resolve_enrolled_kimi_command()
+    _observe_kimi_executable(
+        Path(command[0]), "E_KIMI_EXECUTABLE_BINDING_DRIFT"
+    )
+    return command
 
 
 def _truthy(value: str | None) -> bool:
@@ -2817,6 +2967,31 @@ def launch(provider: str, argv: list[str]) -> int:
 
     with ProcessRunnerV1() as runner:
         return _launch_with_runner(provider, argv, runner)
+
+
+def kimi_main(argv: list[str]) -> int:
+    """Route Kimi maintenance modes locally; all other arguments remain launches."""
+
+    maintenance_flags = {"--enroll-executable", "--verify-enrollment"}
+    selected = maintenance_flags.intersection(argv)
+    if not selected:
+        return launch("kimi", argv)
+    if argv == ["--enroll-executable"]:
+        try:
+            home = _kimi_user_home()
+            enroll_kimi_executable(home, _kimi_runtime_root(), dry_run=False)
+        except ValueError as exc:
+            return fail(str(exc))
+        print("KIMI-EXECUTABLE-ENROLLMENT: PASS")
+        return 0
+    if argv == ["--verify-enrollment"]:
+        try:
+            command = verify_kimi_enrollment()
+        except ValueError as exc:
+            return fail(str(exc))
+        print(f"KIMI-EXECUTABLE-ENROLLMENT: PASS path={command[0]}")
+        return 0
+    return fail("E_KIMI_MAINTENANCE_ARGUMENTS_INVALID")
 
 
 def _launch_with_runner(
