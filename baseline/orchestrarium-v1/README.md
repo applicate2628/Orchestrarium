@@ -175,7 +175,14 @@ if timeout <= 0 or not command:
     print("BLOCKED: invalid timeout runner arguments", file=sys.stderr)
     raise SystemExit(2)
 
-process = subprocess.Popen(command, start_new_session=True)
+try:
+    process = subprocess.Popen(command, start_new_session=True)
+except FileNotFoundError as exc:
+    print(f"BLOCKED: command executable not found: {command[0]!r}: {exc}", file=sys.stderr)
+    raise SystemExit(127)
+except OSError as exc:
+    print(f"BLOCKED: command launch failed: {command[0]!r}: {exc}", file=sys.stderr)
+    raise SystemExit(126)
 
 def terminate_group() -> None:
     try:
@@ -218,7 +225,8 @@ configuration are not inherited. `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` prevents thi
 entry-point plugins from the verifier installation from joining either lane. Any repository-required
 Pytest plugin must be loaded explicitly and pinned by the reviewed procedure. Every differential
 lane uses the same explicitly selected external verifier tools, a positive per-command deadline,
-and process-group cleanup on timeout. Exit `124` is reserved by this procedure for a timed-out lane and is always blocking evidence.
+and process-group cleanup on timeout. Exit `124` is reserved by this procedure for a timed-out lane
+and is always blocking evidence.
 
 ## Immutable Stage 0 tooling
 
@@ -269,6 +277,8 @@ run_isolated focused-target-effect "$CANDIDATE_ROOT" \
   "$VERIFIER_PYTHON" tests/test_orche_target_effect_baseline.py
 run_isolated focused-command "$CANDIDATE_ROOT" \
   "$VERIFIER_PYTHON" tests/test_orche_command_baseline.py
+run_isolated focused-verifier-isolation "$CANDIDATE_ROOT" \
+  "$VERIFIER_PYTHON" tests/test_orche_verifier_isolation.py
 ```
 
 Generate evidence using the materialized frozen tools. The machine-readable
