@@ -13,6 +13,7 @@ import re
 import stat
 import sys
 import tomllib
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +37,7 @@ _EXTERNAL_DISPOSITION_AVAILABILITY_PAIRS = frozenset(
     }
 )
 _MECHANICAL_ROLES = frozenset({"mechanical-scout", "mechanical-worker"})
+_LUNA_ALLOWED_REASONING_EFFORTS = ("high", "xhigh", "max")
 _LUNA_OPERATION_SCHEMA_V1 = {
     "path-kind": frozenset({"path"}),
     "file-size": frozenset({"path"}),
@@ -51,13 +53,14 @@ _MECHANICAL_EXECUTION_CONTRACT_V1 = {
     "ambiguity": "abort",
     "fallback": "none",
     "objectiveOracle": "caller-required",
+    "defaultEffort": "high",
+    "allowedCallerEfforts": list(_LUNA_ALLOWED_REASONING_EFFORTS),
     "scout": {
-        "status": "disabled-until-host-containment",
-        "stableId": "E_LUNA_EXECUTION_CONTAINMENT_UNAVAILABLE",
+        "status": "native-required-when-feature-enabled",
         "planContract": "LunaExecutionContractV1",
         "outputContract": "ScoutFactsV1",
         "readProbeOrder": "caller-specified-exact-order",
-        "targetBinding": "optional-exact-git-root",
+        "targetBinding": "required-exact-git-root",
         "allowedTools": "caller-supplied-exact-runtime-ids",
         "allowedOperations": list(_LUNA_OPERATION_SCHEMA_V1),
         "toolAttestation": "caller-required-exact-equality",
@@ -72,24 +75,67 @@ _MECHANICAL_EXECUTION_CONTRACT_V1 = {
         ],
     },
     "worker": {
-        "status": "disabled-until-host-containment",
-        "stableId": "E_LUNA_WRITE_CONTAINMENT_UNAVAILABLE",
-        "sandboxMode": "read-only",
+        "status": "native-required-when-feature-enabled",
+        "planContract": "LunaExecutionContractV1",
+        "sandboxMode": "workspace-write",
+        "targetBinding": "required-exact-git-root",
+        "allowedTools": "caller-supplied-exact-runtime-ids",
+        "allowedOperations": ["apply-exact-patch"],
+        "precondition": "caller-specified-exact-pre-image-sha256",
+        "postcondition": "caller-verifies-exact-post-image-sha256",
+        "forbiddenOperations": ["shell", "delete", "rename", "path-choice"],
         "directCodeOrPatchAuthoring": False,
-        "decisionRoute": "terra-or-sol",
     },
 }
 
-_LUNA_PLAN_FIELDS = frozenset(
+_LUNA_PLAN_COMMON_FIELDS = frozenset(
     {
         "version",
         "probeId",
         "role",
         "taskClass",
-        "targetBinding",
+        "decisionAuthority",
+        "exactRoot",
         "allowedTools",
         "operations",
-        "expectedFactsVersion",
+        "objectiveOracle",
+    }
+)
+_LUNA_SCOUT_PLAN_FIELDS = _LUNA_PLAN_COMMON_FIELDS | {"expectedFactsVersion"}
+_LUNA_WORKER_OPERATION_FIELDS = frozenset({"ordinal", "op", "tool", "args"})
+_LUNA_WORKER_PATCH_FIELDS = frozenset(
+    {
+        "path",
+        "patch",
+        "patchSha256",
+        "preImageSha256",
+        "postImageSha256",
+        "preflight",
+    }
+)
+_LUNA_WORKER_PREFLIGHT_FIELDS = frozenset({"kind", "expectedRoot"})
+_LUNA_SHA256 = re.compile(r"[0-9a-f]{64}\Z")
+_LUNA_RESERVED_TOOL_SURFACES = frozenset(
+    {
+        "runtimedefault",
+        "default",
+        "runtime",
+        "inherit",
+        "inherited",
+        "auto",
+        "all",
+        "any",
+        "none",
+        "shell",
+        "shellcommand",
+        "execcommand",
+        "bash",
+        "powershell",
+        "pwsh",
+        "cmd",
+        "terminal",
+        "command",
+        "exec",
     }
 )
 _SCOUT_FACTS_FIELDS = frozenset(
@@ -179,24 +225,208 @@ def _valid_luna_identifier(value: Any) -> bool:
     )
 
 
-def _valid_tool_ids(value: Any) -> bool:
-    return (
-        isinstance(value, list)
-        and bool(value)
-        and len(value) == len(set(value))
-        and all(_valid_luna_identifier(tool) for tool in value)
+def _luna_tool_identity(value: Any) -> tuple[str, ...] | None:
+    if not isinstance(value, str):
+        return None
+    normalized = unicodedata.normalize("NFKC", value).casefold()
+    if not _valid_luna_identifier(normalized):
+        return None
+    tokens = tuple(
+        token for token in re.split(r"[^a-z0-9]+", normalized) if token
     )
+    if not tokens or any(token in _LUNA_RESERVED_TOOL_SURFACES for token in tokens):
+        return None
+    for start in range(len(tokens)):
+        adjacent = ""
+        for token in tokens[start:]:
+            adjacent += token
+            if adjacent in _LUNA_RESERVED_TOOL_SURFACES:
+                return None
+    return tokens
+
+
+def _valid_luna_tool_id(value: Any) -> bool:
+    return _luna_tool_identity(value) is not None
+
+
+def _valid_luna_tools(value: Any, *, scalar_tool: Any = None) -> bool:
+    if not isinstance(value, list):
+        return False
+    identities = [_luna_tool_identity(tool) for tool in value]
+    if any(identity is None for identity in identities):
+        return False
+    if len(identities) != len(set(identities)):
+        return False
+    if scalar_tool is None:
+        return True
+    return _valid_luna_tool_id(scalar_tool) and value == [scalar_tool]
 
 
 def _valid_relative_probe_path(value: Any) -> bool:
-    if not isinstance(value, str) or not value or "\x00" in value:
+    if (
+        not isinstance(value, str)
+        or not value
+        or "\x00" in value
+        or "\\" in value
+        or ":" in value
+        or value.startswith("/")
+    ):
         return False
-    path = Path(value)
-    components = value.replace("\\", "/").split("/")
-    return not path.is_absolute() and ".." not in components and all(components)
+    components = value.split("/")
+    return all(component not in {"", ".", ".."} for component in components)
+
+
+def _luna_metadata_signature(metadata: Any) -> tuple[Any, ...]:
+    return (
+        metadata.st_mode,
+        metadata.st_dev,
+        metadata.st_ino,
+        metadata.st_size,
+        getattr(metadata, "st_mtime_ns", None),
+        getattr(metadata, "st_ctime_ns", None),
+        getattr(metadata, "st_file_attributes", 0),
+    )
+
+
+def _luna_component_metadata(
+    path: Path,
+    *,
+    allow_anchor_mount: bool,
+) -> Any | None:
+    try:
+        metadata = os.lstat(path)
+        is_junction = getattr(os.path, "isjunction", lambda _path: False)(path)
+        is_mount = os.path.ismount(path)
+    except OSError:
+        return None
+    if (
+        stat.S_ISLNK(metadata.st_mode)
+        or _is_reparse_metadata(metadata)
+        or is_junction
+        or (is_mount and not allow_anchor_mount)
+    ):
+        return None
+    return metadata
+
+
+def _luna_absolute_chain(path: Path) -> list[Path] | None:
+    if not path.is_absolute() or not path.anchor:
+        return None
+    anchor = Path(path.anchor)
+    chain = [anchor]
+    cursor = anchor
+    for component in path.parts[1:]:
+        cursor = cursor / component
+        chain.append(cursor)
+    return chain
+
+
+def _luna_stable_ordinary_chain(
+    chain: list[Path] | None,
+    *,
+    leaf_kind: str,
+) -> tuple[Path, Any] | None:
+    if not chain:
+        return None
+    snapshots: list[tuple[Path, tuple[Any, ...]]] = []
+    leaf_metadata: Any = None
+    for index, path in enumerate(chain):
+        metadata = _luna_component_metadata(
+            path,
+            allow_anchor_mount=path == Path(path.anchor),
+        )
+        if metadata is None:
+            return None
+        is_leaf = index == len(chain) - 1
+        if not is_leaf or leaf_kind == "directory":
+            if not stat.S_ISDIR(metadata.st_mode):
+                return None
+        elif leaf_kind == "file":
+            if not stat.S_ISREG(metadata.st_mode):
+                return None
+        elif leaf_kind == "ordinary":
+            if not (stat.S_ISREG(metadata.st_mode) or stat.S_ISDIR(metadata.st_mode)):
+                return None
+        else:
+            return None
+        snapshots.append((path, _luna_metadata_signature(metadata)))
+        leaf_metadata = metadata
+    for index, (path, signature) in enumerate(snapshots):
+        metadata = _luna_component_metadata(
+            path,
+            allow_anchor_mount=path == Path(path.anchor),
+        )
+        if metadata is None or _luna_metadata_signature(metadata) != signature:
+            return None
+    return chain[-1], leaf_metadata
+
+
+def _luna_existing_target(
+    exact_root: Path,
+    value: Any,
+    *,
+    leaf_kind: str,
+) -> tuple[Path, Any] | None:
+    if not _valid_relative_probe_path(value):
+        return None
+    root_chain = _luna_absolute_chain(exact_root)
+    if _luna_stable_ordinary_chain(root_chain, leaf_kind="directory") is None:
+        return None
+    components = value.split("/")
+    candidate = exact_root.joinpath(*components)
+    try:
+        relative = candidate.relative_to(exact_root)
+    except ValueError:
+        return None
+    if tuple(relative.parts) != tuple(components):
+        return None
+    target_chain = [exact_root]
+    cursor = exact_root
+    for component in components:
+        cursor = cursor / component
+        target_chain.append(cursor)
+    return _luna_stable_ordinary_chain(target_chain, leaf_kind=leaf_kind)
+
+
+def _luna_existing_file_sha256(path: Path, expected_metadata: Any) -> str | None:
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    descriptor: int | None = None
+    try:
+        descriptor = os.open(path, flags)
+        opened = os.fstat(descriptor)
+        expected_identity = (
+            stat.S_IFMT(expected_metadata.st_mode),
+            expected_metadata.st_dev,
+            expected_metadata.st_ino,
+        )
+        opened_identity = (stat.S_IFMT(opened.st_mode), opened.st_dev, opened.st_ino)
+        if not stat.S_ISREG(opened.st_mode) or opened_identity != expected_identity:
+            return None
+        digest = hashlib.sha256()
+        while True:
+            chunk = os.read(descriptor, 1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+        after = _luna_component_metadata(path, allow_anchor_mount=False)
+        if (
+            after is None
+            or _luna_metadata_signature(after)
+            != _luna_metadata_signature(expected_metadata)
+            or os.fstat(descriptor).st_size != opened.st_size
+        ):
+            return None
+        return digest.hexdigest()
+    except OSError:
+        return None
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
 
 
 def _normalized_absolute_path(value: Any) -> str | None:
+    if isinstance(value, os.PathLike):
+        value = os.fspath(value)
     if not isinstance(value, str) or not value:
         return None
     path = Path(value)
@@ -205,7 +435,12 @@ def _normalized_absolute_path(value: Any) -> str | None:
     return os.path.normcase(os.path.normpath(str(path)))
 
 
-def _validate_luna_operation(operation: Any, expected_ordinal: int) -> str | None:
+def _validate_luna_operation(
+    operation: Any,
+    expected_ordinal: int,
+    *,
+    exact_root: Path,
+) -> str | None:
     if not _exact_fields(operation, frozenset({"ordinal", "op", "args"})):
         return "E_LUNA_PLAN_INVALID"
     if operation["ordinal"] != expected_ordinal:
@@ -217,8 +452,22 @@ def _validate_luna_operation(operation: Any, expected_ordinal: int) -> str | Non
     expected_fields = _LUNA_OPERATION_SCHEMA_V1[op]
     if not _exact_fields(args, expected_fields):
         return "E_LUNA_PLAN_INVALID"
-    if "path" in args and not _valid_relative_probe_path(args["path"]):
-        return "E_LUNA_PLAN_INVALID"
+    if "path" in args:
+        leaf_kind = (
+            "directory"
+            if op == "list-directory"
+            else "ordinary"
+            if op == "path-kind"
+            else "file"
+        )
+        if not _valid_relative_probe_path(args["path"]):
+            return "E_LUNA_PLAN_INVALID"
+        if _luna_existing_target(
+            exact_root,
+            args["path"],
+            leaf_kind=leaf_kind,
+        ) is None:
+            return "E_LUNA_PRECONDITION_FAILED"
     if op == "read-lines" and (
         isinstance(args["start"], bool)
         or not isinstance(args["start"], int)
@@ -236,58 +485,167 @@ def _validate_luna_operation(operation: Any, expected_ordinal: int) -> str | Non
     return None
 
 
+def _valid_luna_plan_fields(plan: Any, required: frozenset[str]) -> bool:
+    if not isinstance(plan, dict):
+        return False
+    fields = set(plan)
+    return fields == required or fields == required | {"reasoningEffort"}
+
+
+def _validate_luna_worker_operation(
+    operation: Any,
+    *,
+    exact_root: str,
+    allowed_tools: list[str],
+) -> str | None:
+    if not _exact_fields(operation, _LUNA_WORKER_OPERATION_FIELDS):
+        return "E_LUNA_PLAN_INVALID"
+    if operation["ordinal"] != 0 or operation["op"] != "apply-exact-patch":
+        return "E_LUNA_FORBIDDEN_OPERATION"
+    tool = operation["tool"]
+    if not _valid_luna_tools(allowed_tools, scalar_tool=tool):
+        return "E_LUNA_FORBIDDEN_OPERATION"
+
+    args = operation["args"]
+    if not _exact_fields(args, _LUNA_WORKER_PATCH_FIELDS):
+        return "E_LUNA_PLAN_INVALID"
+    path = args["path"]
+    if not _valid_relative_probe_path(path):
+        return "E_LUNA_PLAN_INVALID"
+    preflight = args["preflight"]
+    if (
+        not _exact_fields(preflight, _LUNA_WORKER_PREFLIGHT_FIELDS)
+        or preflight["kind"] != "exact-git-root"
+        or _normalized_absolute_path(preflight["expectedRoot"]) != exact_root
+    ):
+        return "E_LUNA_PRECONDITION_FAILED"
+
+    patch = args["patch"]
+    patch_hash = args["patchSha256"]
+    pre_hash = args["preImageSha256"]
+    post_hash = args["postImageSha256"]
+    if (
+        not isinstance(patch, str)
+        or not patch
+        or "\x00" in patch
+        or not isinstance(patch_hash, str)
+        or not isinstance(pre_hash, str)
+        or not isinstance(post_hash, str)
+        or not _LUNA_SHA256.fullmatch(patch_hash)
+        or not _LUNA_SHA256.fullmatch(pre_hash)
+        or not _LUNA_SHA256.fullmatch(post_hash)
+        or pre_hash == post_hash
+        or hashlib.sha256(patch.encode("utf-8")).hexdigest() != patch_hash
+    ):
+        return "E_LUNA_PLAN_INVALID"
+
+    target = _luna_existing_target(Path(exact_root), path, leaf_kind="file")
+    if target is None:
+        return "E_LUNA_PRECONDITION_FAILED"
+    target_path, target_metadata = target
+    observed_pre_hash = _luna_existing_file_sha256(target_path, target_metadata)
+    if observed_pre_hash is None or observed_pre_hash != pre_hash:
+        return "E_LUNA_PRECONDITION_FAILED"
+
+    patch_lines = patch.splitlines()
+    normalized_path = path.replace("\\", "/")
+    update_header = f"*** Update File: {normalized_path}"
+    if (
+        len(patch_lines) < 4
+        or patch_lines[0] != "*** Begin Patch"
+        or patch_lines[-1] != "*** End Patch"
+        or patch_lines.count(update_header) != 1
+        or sum(line.startswith("*** Update File: ") for line in patch_lines) != 1
+        or any(
+            line.startswith(("*** Add File: ", "*** Delete File: ", "*** Move to: "))
+            for line in patch_lines
+        )
+        or any(
+            line.casefold().startswith(
+                ("rename from ", "rename to ", "deleted file mode ", "new file mode ")
+            )
+            or line.strip() == "/dev/null"
+            for line in patch_lines
+        )
+    ):
+        return "E_LUNA_FORBIDDEN_OPERATION"
+    return None
+
+
 def validate_luna_execution_plan(
     plan: Any, *, observed_git_root: Any = None
 ) -> dict[str, Any]:
-    """Validate one caller-authored Luna read plan without launching it.
+    """Validate one caller-authored Luna plan without launching it.
 
     The caller owns discovery of the actual Git root.  This function only
-    checks the supplied observation against an exact, non-reparse plan binding.
+    checks the supplied observation against the exact, non-reparse plan root.
     """
 
-    if not _exact_fields(plan, _LUNA_PLAN_FIELDS):
+    if not isinstance(plan, dict):
         return _luna_validation_result("E_LUNA_PLAN_INVALID")
-    if plan["role"] == "mechanical-worker":
-        return _luna_validation_result("E_LUNA_WRITE_CONTAINMENT_UNAVAILABLE")
+    role = plan.get("role")
+    required_fields = (
+        _LUNA_SCOUT_PLAN_FIELDS
+        if role == "mechanical-scout"
+        else _LUNA_PLAN_COMMON_FIELDS
+    )
+    if not _valid_luna_plan_fields(plan, required_fields):
+        return _luna_validation_result("E_LUNA_PLAN_INVALID")
+    reasoning_effort = plan.get("reasoningEffort", "high")
     if (
         plan["version"] != "LunaExecutionContractV1"
         or not _valid_luna_identifier(plan["probeId"])
-        or plan["role"] != "mechanical-scout"
-        or plan["taskClass"] not in {"micro", "mechanical-read"}
-        or plan["expectedFactsVersion"] != "ScoutFactsV1"
-        or not _valid_tool_ids(plan["allowedTools"])
+        or role not in _MECHANICAL_ROLES
+        or plan["decisionAuthority"] != "none"
+        or plan["objectiveOracle"] != "caller-required"
+        or reasoning_effort not in _LUNA_ALLOWED_REASONING_EFFORTS
+        or not _valid_luna_tools(plan["allowedTools"])
         or not isinstance(plan["operations"], list)
         or not plan["operations"]
     ):
         return _luna_validation_result("E_LUNA_PLAN_INVALID")
-    for ordinal, operation in enumerate(plan["operations"]):
-        stable_id = _validate_luna_operation(operation, ordinal)
-        if stable_id is not None:
-            return _luna_validation_result(stable_id)
-
-    binding = plan["targetBinding"]
-    if binding is None:
-        return _luna_validation_result(
-            None
-            if all(operation["op"] == "literal-equals" for operation in plan["operations"])
-            else "E_LUNA_PRECONDITION_FAILED"
-        )
-    if not _exact_fields(
-        binding,
-        frozenset({"kind", "requestedRoot", "expectedRoot", "followLinks"}),
-    ) or binding["kind"] != "exact-git-root" or binding["followLinks"] is not False:
-        return _luna_validation_result("E_LUNA_PLAN_INVALID")
-    requested_root = _normalized_absolute_path(binding["requestedRoot"])
-    expected_root = _normalized_absolute_path(binding["expectedRoot"])
+    expected_root = _normalized_absolute_path(plan["exactRoot"])
     observed_root = _normalized_absolute_path(observed_git_root)
-    if requested_root is None or expected_root is None:
+    if expected_root is None:
         return _luna_validation_result("E_LUNA_PLAN_INVALID")
     if (
-        requested_root != expected_root
-        or observed_root != expected_root
-        or not _ordinary_directory(Path(requested_root))
+        observed_root != expected_root
+        or _luna_stable_ordinary_chain(
+            _luna_absolute_chain(Path(expected_root)),
+            leaf_kind="directory",
+        )
+        is None
     ):
         return _luna_validation_result("E_LUNA_PRECONDITION_FAILED")
+
+    if role == "mechanical-scout":
+        if (
+            plan["taskClass"] not in {"micro", "mechanical-read"}
+            or plan["expectedFactsVersion"] != "ScoutFactsV1"
+        ):
+            return _luna_validation_result("E_LUNA_PLAN_INVALID")
+        for ordinal, operation in enumerate(plan["operations"]):
+            stable_id = _validate_luna_operation(
+                operation,
+                ordinal,
+                exact_root=Path(expected_root),
+            )
+            if stable_id is not None:
+                return _luna_validation_result(stable_id)
+    else:
+        if (
+            plan["taskClass"] != "mechanical"
+            or len(plan["allowedTools"]) != 1
+            or len(plan["operations"]) != 1
+        ):
+            return _luna_validation_result("E_LUNA_PLAN_INVALID")
+        stable_id = _validate_luna_worker_operation(
+            plan["operations"][0],
+            exact_root=expected_root,
+            allowed_tools=plan["allowedTools"],
+        )
+        if stable_id is not None:
+            return _luna_validation_result(stable_id)
     return _luna_validation_result(None)
 
 
@@ -333,7 +691,7 @@ def validate_scout_facts(
     )
     if not plan_result["valid"]:
         return plan_result
-    if not _valid_tool_ids(observed_tools):
+    if not _valid_luna_tools(observed_tools):
         return _luna_validation_result("E_LUNA_EXECUTION_ATTESTATION_UNAVAILABLE")
     if any(tool not in plan["allowedTools"] for tool in observed_tools):
         return _luna_validation_result("E_LUNA_TOOL_SCOPE_VIOLATION")
@@ -750,7 +1108,7 @@ def _load_role_dispatch_contract(
         sandbox = role_toml.get("sandbox_mode")
         expected_sandbox = (
             "read-only"
-            if task["mutationClass"] == "read-only" or role_name == "mechanical-worker"
+            if task["mutationClass"] == "read-only"
             else "workspace-write"
         )
         if (
@@ -802,21 +1160,6 @@ def _resolve_role_dispatch_in_layout(
     assert contract is not None
     if effective_feature_state not in {"enabled", "disabled"}:
         return _role_dispatch_invalid(task_class, role, "feature-state")
-    if contract["role"] in _MECHANICAL_ROLES:
-        execution_contract = contract["executionContract"]
-        assert isinstance(execution_contract, dict)
-        contract_name = "worker" if contract["role"] == "mechanical-worker" else "scout"
-        return _role_dispatch_decision(
-            status="unavailable",
-            stable_id=execution_contract[contract_name]["stableId"],
-            task_class=contract["taskClass"],
-            role=contract["role"],
-            requested_profile=contract["profile"],
-            requested_model=contract["model"],
-            requested_effort=contract["effort"],
-            sandbox=contract["sandbox"],
-            execution_contract=execution_contract,
-        )
     if effective_feature_state == "disabled":
         return _role_dispatch_decision(
             status="unavailable",

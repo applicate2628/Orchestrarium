@@ -313,6 +313,7 @@ def _validate_external_governance_projection(source_root: Path) -> None:
 
 
 def _validate_external_role_taxonomy(source_root: Path) -> None:
+    provenance_only_roles = frozenset({"explorer"})
     taxonomy_raw = _read_bound_bytes(
         Path(source_root) / _AUTHORED_SOURCE_PATHS["external-role-taxonomy.v1.json"],
         "source/external-role-taxonomy.v1.json",
@@ -388,9 +389,9 @@ def _validate_external_role_taxonomy(source_root: Path) -> None:
     indexed_roles = re.findall(
         r"\$([a-z][a-z0-9-]+)", "\n".join(role_lines)
     )
-    if len(indexed_roles) != 34 or len(set(indexed_roles)) != 34:
+    if len(indexed_roles) != 33 or len(set(indexed_roles)) != 33:
         raise _fail("shared role index membership")
-    if set(indexed_roles) != set(mapping):
+    if set(mapping) != set(indexed_roles) | provenance_only_roles:
         raise _fail("external role taxonomy parity")
 
 

@@ -5,6 +5,7 @@ import importlib.util
 import inspect
 import json
 import os
+import stat
 import subprocess
 import sys
 import tomllib
@@ -142,19 +143,80 @@ def _install_codex_layout(
     )
 
 
-def _luna_plan(*, target_binding: object = None) -> dict:
-    return {
+def _luna_plan(*, exact_root: object = None, reasoning_effort: object = None) -> dict:
+    plan = {
         "version": "LunaExecutionContractV1",
         "probeId": "probe-001",
         "role": "mechanical-scout",
         "taskClass": "mechanical-read",
-        "targetBinding": target_binding,
+        "decisionAuthority": "none",
+        "exactRoot": str(ROOT) if exact_root is None else exact_root,
         "allowedTools": ["filesystem.read"],
         "operations": [
             {"ordinal": 0, "op": "path-kind", "args": {"path": "README.md"}},
             {"ordinal": 1, "op": "file-size", "args": {"path": "README.md"}},
         ],
+        "objectiveOracle": "caller-required",
         "expectedFactsVersion": "ScoutFactsV1",
+    }
+    if reasoning_effort is not None:
+        plan["reasoningEffort"] = reasoning_effort
+    return plan
+
+
+def _worker_plan(
+    *,
+    exact_root: Path = ROOT,
+    tool: object = "apply_patch",
+    path: str = "shared/example.txt",
+    patch_kind: str = "Update",
+) -> dict:
+    pre_image_sha256 = "1" * 64
+    if (
+        path
+        and "\\" not in path
+        and ":" not in path
+        and not path.startswith("/")
+        and all(component not in {"", ".", ".."} for component in path.split("/"))
+    ):
+        target = exact_root.joinpath(*path.split("/"))
+        if target.is_file():
+            pre_image_sha256 = hashlib.sha256(target.read_bytes()).hexdigest()
+    patch = (
+        "*** Begin Patch\n"
+        f"*** {patch_kind} File: {path}\n"
+        "@@\n"
+        "-before\n"
+        "+after\n"
+        "*** End Patch"
+    )
+    return {
+        "version": "LunaExecutionContractV1",
+        "probeId": "worker-001",
+        "role": "mechanical-worker",
+        "taskClass": "mechanical",
+        "decisionAuthority": "none",
+        "exactRoot": str(exact_root),
+        "allowedTools": [tool],
+        "operations": [
+            {
+                "ordinal": 0,
+                "op": "apply-exact-patch",
+                "tool": tool,
+                "args": {
+                    "path": path,
+                    "patch": patch,
+                    "patchSha256": hashlib.sha256(patch.encode("utf-8")).hexdigest(),
+                    "preImageSha256": pre_image_sha256,
+                    "postImageSha256": "2" * 64,
+                    "preflight": {
+                        "kind": "exact-git-root",
+                        "expectedRoot": str(exact_root),
+                    },
+                },
+            }
+        ],
+        "objectiveOracle": "caller-required",
     }
 
 
@@ -219,16 +281,10 @@ def test_luna_execution_plan_rejects_choices_forbidden_operations_and_stale_root
     stale_root = tmp_path / "stale-root"
     exact_root.mkdir()
     stale_root.mkdir()
+    (exact_root / "README.md").write_text("exact root\n", encoding="utf-8")
 
     accepted = resolver.validate_luna_execution_plan(
-        _luna_plan(
-            target_binding={
-                "kind": "exact-git-root",
-                "requestedRoot": str(exact_root),
-                "expectedRoot": str(exact_root),
-                "followLinks": False,
-            }
-        ),
+        _luna_plan(exact_root=str(exact_root)),
         observed_git_root=str(exact_root),
     )
     assert accepted == {
@@ -240,27 +296,14 @@ def test_luna_execution_plan_rejects_choices_forbidden_operations_and_stale_root
     }
 
     two_targets = _luna_plan()
-    two_targets["targetBinding"] = {
-        "kind": "exact-git-root",
-        "requestedRoot": str(exact_root),
-        "expectedRoot": str(exact_root),
-        "followLinks": False,
-        "alternativeRoot": str(stale_root),
-    }
+    two_targets["alternativeRoot"] = str(stale_root)
     assert resolver.validate_luna_execution_plan(two_targets)["stableId"] == "E_LUNA_PLAN_INVALID"
 
     choice = _luna_plan()
-    choice["targetBinding"] = "choose current"
+    choice["exactRoot"] = "choose current"
     assert resolver.validate_luna_execution_plan(choice)["stableId"] == "E_LUNA_PLAN_INVALID"
 
-    stale = _luna_plan(
-        target_binding={
-            "kind": "exact-git-root",
-            "requestedRoot": str(exact_root),
-            "expectedRoot": str(exact_root),
-            "followLinks": False,
-        }
-    )
+    stale = _luna_plan(exact_root=str(exact_root))
     assert (
         resolver.validate_luna_execution_plan(
             stale, observed_git_root=str(stale_root)
@@ -271,17 +314,19 @@ def test_luna_execution_plan_rejects_choices_forbidden_operations_and_stale_root
     forbidden = _luna_plan()
     forbidden["operations"][0]["op"] = "shell"
     assert (
-        resolver.validate_luna_execution_plan(forbidden)["stableId"]
+        resolver.validate_luna_execution_plan(
+            forbidden, observed_git_root=ROOT
+        )["stableId"]
         == "E_LUNA_FORBIDDEN_OPERATION"
     )
 
 
-def test_luna_path_operations_require_exact_root_but_literal_comparison_does_not() -> None:
-    """Catches a path probe admitted without the caller's exact-Git-root precondition."""
+def test_luna_operations_require_exact_root_even_for_literal_comparison() -> None:
+    """Catches any Luna plan admitted without the caller's exact Git root."""
 
     resolver = _resolver_module()
     assert (
-        resolver.validate_luna_execution_plan(_luna_plan())["stableId"]
+        resolver.validate_luna_execution_plan(_luna_plan(), observed_git_root=None)["stableId"]
         == "E_LUNA_PRECONDITION_FAILED"
     )
     literal_only = _luna_plan()
@@ -292,7 +337,444 @@ def test_luna_path_operations_require_exact_root_but_literal_comparison_does_not
             "args": {"left": "one", "right": "one"},
         }
     ]
-    assert resolver.validate_luna_execution_plan(literal_only)["valid"] is True
+    assert resolver.validate_luna_execution_plan(
+        literal_only, observed_git_root=ROOT
+    )["valid"] is True
+
+
+@pytest.mark.parametrize("effort", (None, "high", "xhigh", "max"))
+def test_luna_plan_allows_only_caller_owned_high_or_higher_effort(
+    effort: str | None,
+) -> None:
+    """Catches loss of the high default or rejection of allowed escalation."""
+
+    resolver = _resolver_module()
+
+    result = resolver.validate_luna_execution_plan(
+        _luna_plan(reasoning_effort=effort), observed_git_root=ROOT
+    )
+
+    assert result["valid"] is True
+
+
+@pytest.mark.parametrize("effort", ("low", "medium", "ultra", "unknown", ""))
+def test_luna_plan_rejects_effort_below_or_outside_caller_corridor(effort: str) -> None:
+    """Catches a caller request that escapes the exact high/xhigh/max corridor."""
+
+    resolver = _resolver_module()
+
+    result = resolver.validate_luna_execution_plan(
+        _luna_plan(reasoning_effort=effort), observed_git_root=ROOT
+    )
+
+    assert result["stableId"] == "E_LUNA_PLAN_INVALID"
+
+
+def test_luna_worker_plan_requires_exact_caller_patch_root_tool_path_and_hashes(
+    tmp_path: Path,
+) -> None:
+    """Catches a worker plan that can choose or mutate beyond one exact caller patch."""
+
+    resolver = _resolver_module()
+    exact_root = tmp_path / "exact-root"
+    target = exact_root / "shared" / "example.txt"
+    target.parent.mkdir(parents=True)
+    target.write_text("before\n", encoding="utf-8")
+    accepted = _worker_plan(exact_root=exact_root)
+
+    assert resolver.validate_luna_execution_plan(
+        accepted, observed_git_root=exact_root
+    )["valid"] is True
+
+    mutations = []
+    wrong_tool = _worker_plan(exact_root=exact_root)
+    wrong_tool["operations"][0]["tool"] = "other.patch"
+    mutations.append(wrong_tool)
+    mutations.append(_worker_plan(exact_root=exact_root, tool="shell_command"))
+    path_escape = _worker_plan(exact_root=exact_root)
+    path_escape["operations"][0]["args"]["path"] = "../outside.txt"
+    mutations.append(path_escape)
+    wrong_patch_hash = _worker_plan(exact_root=exact_root)
+    wrong_patch_hash["operations"][0]["args"]["patchSha256"] = "0" * 64
+    mutations.append(wrong_patch_hash)
+    wrong_pre_image_hash = _worker_plan(exact_root=exact_root)
+    wrong_pre_image_hash["operations"][0]["args"]["preImageSha256"] = "0" * 64
+    mutations.append(wrong_pre_image_hash)
+    same_image_hash = _worker_plan(exact_root=exact_root)
+    same_image_hash["operations"][0]["args"]["postImageSha256"] = (
+        same_image_hash["operations"][0]["args"]["preImageSha256"]
+    )
+    mutations.append(same_image_hash)
+    wrong_preflight = _worker_plan(exact_root=exact_root)
+    wrong_preflight["operations"][0]["args"]["preflight"]["expectedRoot"] = str(
+        tmp_path
+    )
+    mutations.append(wrong_preflight)
+    delete_patch = _worker_plan(exact_root=exact_root)
+    delete_patch["operations"][0]["args"]["patch"] = (
+        "*** Begin Patch\n*** Delete File: shared/example.txt\n*** End Patch"
+    )
+    delete_patch["operations"][0]["args"]["patchSha256"] = hashlib.sha256(
+        delete_patch["operations"][0]["args"]["patch"].encode("utf-8")
+    ).hexdigest()
+    mutations.append(delete_patch)
+    rename_patch = _worker_plan(exact_root=exact_root)
+    rename_patch["operations"][0]["args"]["patch"] = (
+        "*** Begin Patch\n*** Update File: shared/example.txt\n"
+        "*** Move to: shared/other.txt\n*** End Patch"
+    )
+    rename_patch["operations"][0]["args"]["patchSha256"] = hashlib.sha256(
+        rename_patch["operations"][0]["args"]["patch"].encode("utf-8")
+    ).hexdigest()
+    mutations.append(rename_patch)
+
+    for invalid in mutations:
+        assert resolver.validate_luna_execution_plan(
+            invalid, observed_git_root=exact_root
+        )["valid"] is False
+
+
+@pytest.mark.parametrize(
+    "hostile_path",
+    (
+        "C:escape.txt",
+        "C:/escape.txt",
+        "C:\\escape.txt",
+        "/absolute.txt",
+        "\\root-relative.txt",
+        "\\\\server\\share\\escape.txt",
+        "\\\\?\\C:\\escape.txt",
+        "\\\\.\\C:\\escape.txt",
+        "shared/example.txt:stream",
+        "",
+        ".",
+        "..",
+        "shared//example.txt",
+        "shared/./example.txt",
+        "shared/../example.txt",
+        "shared\\..\\example.txt",
+        "shared/..\\example.txt",
+    ),
+)
+def test_luna_worker_rejects_portable_windows_and_traversal_target_shapes(
+    tmp_path: Path,
+    hostile_path: str,
+) -> None:
+    """Catches host-dependent parsing that lets a target escape or select an ADS."""
+
+    resolver = _resolver_module()
+    exact_root = tmp_path / "exact-root"
+    target = exact_root / "shared" / "example.txt"
+    target.parent.mkdir(parents=True)
+    target.write_text("before\n", encoding="utf-8")
+    plan = _worker_plan(exact_root=exact_root, path=hostile_path)
+
+    result = resolver.validate_luna_execution_plan(
+        plan, observed_git_root=exact_root
+    )
+
+    assert result["valid"] is False
+
+
+def test_luna_worker_target_must_be_existing_ordinary_file_below_exact_root(
+    tmp_path: Path,
+) -> None:
+    """Catches missing, directory, linked, reparsed, or raced worker targets."""
+
+    resolver = _resolver_module()
+    exact_root = tmp_path / "exact-root"
+    existing = exact_root / "shared" / "example.txt"
+    existing.parent.mkdir(parents=True)
+    existing.write_text("before\n", encoding="utf-8")
+
+    accepted = _worker_plan(exact_root=exact_root)
+    assert resolver.validate_luna_execution_plan(
+        accepted, observed_git_root=exact_root
+    )["valid"] is True
+
+    missing_update = _worker_plan(exact_root=exact_root, path="shared/missing.txt")
+    missing_add = _worker_plan(
+        exact_root=exact_root,
+        path="shared/missing.txt",
+        patch_kind="Add",
+    )
+    missing_parent = _worker_plan(
+        exact_root=exact_root,
+        path="missing/example.txt",
+    )
+    directory_leaf = _worker_plan(exact_root=exact_root, path="shared")
+    for invalid in (missing_update, missing_add, missing_parent, directory_leaf):
+        assert resolver.validate_luna_execution_plan(
+            invalid, observed_git_root=exact_root
+        )["valid"] is False
+
+    original_lstat = resolver.os.lstat
+    raced_leaf_calls = 0
+
+    class RacedMetadata:
+        def __init__(self, metadata: os.stat_result, inode: int) -> None:
+            self.__dict__.update(
+                st_mode=metadata.st_mode,
+                st_dev=metadata.st_dev,
+                st_ino=inode,
+                st_size=metadata.st_size,
+                st_mtime_ns=metadata.st_mtime_ns,
+                st_ctime_ns=metadata.st_ctime_ns,
+                st_file_attributes=getattr(metadata, "st_file_attributes", 0),
+            )
+
+    def raced_lstat(path: object, *args: object, **kwargs: object) -> object:
+        nonlocal raced_leaf_calls
+        metadata = original_lstat(path, *args, **kwargs)
+        if Path(path) != existing:
+            return metadata
+        raced_leaf_calls += 1
+        return RacedMetadata(metadata, metadata.st_ino + raced_leaf_calls)
+
+    with pytest.MonkeyPatch.context() as patcher:
+        patcher.setattr(resolver.os, "lstat", raced_lstat)
+        assert resolver.validate_luna_execution_plan(
+            accepted, observed_git_root=exact_root
+        )["valid"] is False
+
+
+def test_luna_target_walk_rejects_reparse_component_and_metadata_error(
+    tmp_path: Path,
+) -> None:
+    """Catches following a linked/reparse component or failing open on lstat errors."""
+
+    resolver = _resolver_module()
+    exact_root = tmp_path / "exact-root"
+    target = exact_root / "shared" / "example.txt"
+    target.parent.mkdir(parents=True)
+    target.write_text("before\n", encoding="utf-8")
+    plan = _worker_plan(exact_root=exact_root)
+    original_lstat = resolver.os.lstat
+
+    class ReparseMetadata:
+        def __init__(self, metadata: os.stat_result) -> None:
+            self.__dict__.update(
+                st_mode=metadata.st_mode,
+                st_dev=metadata.st_dev,
+                st_ino=metadata.st_ino,
+                st_size=metadata.st_size,
+                st_mtime_ns=metadata.st_mtime_ns,
+                st_ctime_ns=metadata.st_ctime_ns,
+                st_file_attributes=0x400,
+            )
+
+    def reparsed_lstat(path: object, *args: object, **kwargs: object) -> object:
+        metadata = original_lstat(path, *args, **kwargs)
+        return ReparseMetadata(metadata) if Path(path) == target.parent else metadata
+
+    with pytest.MonkeyPatch.context() as patcher:
+        patcher.setattr(resolver.os, "lstat", reparsed_lstat)
+        assert resolver.validate_luna_execution_plan(
+            plan, observed_git_root=exact_root
+        )["valid"] is False
+
+    def linked_lstat(path: object, *args: object, **kwargs: object) -> object:
+        metadata = original_lstat(path, *args, **kwargs)
+        if Path(path) != target.parent:
+            return metadata
+        linked = ReparseMetadata(metadata)
+        linked.st_mode = stat.S_IFLNK | 0o777
+        linked.st_file_attributes = 0
+        return linked
+
+    with pytest.MonkeyPatch.context() as patcher:
+        patcher.setattr(resolver.os, "lstat", linked_lstat)
+        assert resolver.validate_luna_execution_plan(
+            plan, observed_git_root=exact_root
+        )["valid"] is False
+
+    original_ismount = resolver.os.path.ismount
+
+    def mounted_component(path: object) -> bool:
+        return Path(path) == target.parent or original_ismount(path)
+
+    with pytest.MonkeyPatch.context() as patcher:
+        patcher.setattr(resolver.os.path, "ismount", mounted_component)
+        assert resolver.validate_luna_execution_plan(
+            plan, observed_git_root=exact_root
+        )["valid"] is False
+
+    def denied_lstat(path: object, *args: object, **kwargs: object) -> object:
+        if Path(path) == target:
+            raise PermissionError("denied target metadata")
+        return original_lstat(path, *args, **kwargs)
+
+    with pytest.MonkeyPatch.context() as patcher:
+        patcher.setattr(resolver.os, "lstat", denied_lstat)
+        assert resolver.validate_luna_execution_plan(
+            plan, observed_git_root=exact_root
+        )["valid"] is False
+
+
+def test_luna_exact_root_walk_rejects_reparse_ancestor_for_literal_plan(
+    tmp_path: Path,
+) -> None:
+    """Catches a no-target plan whose exact root crosses a reparse ancestor."""
+
+    resolver = _resolver_module()
+    exact_root = tmp_path / "parent" / "exact-root"
+    exact_root.mkdir(parents=True)
+    plan = _luna_literal_plan()
+    plan["exactRoot"] = str(exact_root)
+    original_lstat = resolver.os.lstat
+
+    class ReparseMetadata:
+        def __init__(self, metadata: os.stat_result) -> None:
+            self.__dict__.update(
+                st_mode=metadata.st_mode,
+                st_dev=metadata.st_dev,
+                st_ino=metadata.st_ino,
+                st_size=metadata.st_size,
+                st_mtime_ns=metadata.st_mtime_ns,
+                st_ctime_ns=metadata.st_ctime_ns,
+                st_file_attributes=0x400,
+            )
+
+    def reparsed_lstat(path: object, *args: object, **kwargs: object) -> object:
+        metadata = original_lstat(path, *args, **kwargs)
+        return ReparseMetadata(metadata) if Path(path) == exact_root.parent else metadata
+
+    with pytest.MonkeyPatch.context() as patcher:
+        patcher.setattr(resolver.os, "lstat", reparsed_lstat)
+        assert resolver.validate_luna_execution_plan(
+            plan, observed_git_root=exact_root
+        )["valid"] is False
+
+
+@pytest.mark.parametrize(
+    "reserved_tool",
+    (
+        "runtime-default",
+        "runtime_default",
+        "runtime.default",
+        "Runtime:Default",
+        "default",
+        "runtime",
+        "inherit",
+        "inherited",
+        "auto",
+        "all",
+        "any",
+        "none",
+        "shell",
+        "shell_command",
+        "exec-command",
+        "bash",
+        "powershell",
+        "pwsh",
+        "cmd",
+        "mcp__shell__exec",
+        "shell.v2",
+        "mcp__runtime__default",
+        "auto.tool",
+        "mcp__PowerShell__read",
+        "mcp__power--shell__read",
+        "mcp__cmd__read",
+        "mcp__bash__read",
+        "mcp__terminal__read",
+        "mcp__command__read",
+        "mcp__exec__read",
+        "mcp__shell--command__read",
+        "mcp__exec--command__read",
+        "*",
+    ),
+)
+def test_luna_tools_reject_ambient_or_default_surface_aliases(
+    tmp_path: Path,
+    reserved_tool: str,
+) -> None:
+    """Catches a selected tool alias that expands to ambient runtime authority."""
+
+    resolver = _resolver_module()
+    exact_root = tmp_path / "exact-root"
+    target = exact_root / "shared" / "example.txt"
+    target.parent.mkdir(parents=True)
+    target.write_text("before\n", encoding="utf-8")
+
+    result = resolver.validate_luna_execution_plan(
+        _worker_plan(exact_root=exact_root, tool=reserved_tool),
+        observed_git_root=exact_root,
+    )
+
+    assert result["valid"] is False
+
+
+def test_luna_tools_preserve_exact_membership_and_explicit_empty_selection(
+    tmp_path: Path,
+) -> None:
+    """Catches normalized membership, duplicate IDs, or invention from an empty selection."""
+
+    resolver = _resolver_module()
+    valid = _luna_literal_plan()
+    valid["allowedTools"] = ["mcp__server__read"]
+    assert resolver.validate_luna_execution_plan(
+        valid, observed_git_root=ROOT
+    )["valid"] is True
+
+    empty = _luna_literal_plan()
+    empty["allowedTools"] = []
+    assert resolver.validate_luna_execution_plan(
+        empty, observed_git_root=ROOT
+    )["valid"] is True
+    empty_facts = _luna_literal_facts()
+    empty_facts["observedTools"] = []
+    assert resolver.validate_scout_facts(
+        empty,
+        empty_facts,
+        observed_tools=[],
+        consumer_purpose="facts-only",
+        observed_git_root=ROOT,
+    )["valid"] is True
+
+    duplicate = _luna_literal_plan()
+    duplicate["allowedTools"] = ["mcp__server__read", "mcp__server__read"]
+    assert resolver.validate_luna_execution_plan(
+        duplicate, observed_git_root=ROOT
+    )["valid"] is False
+
+    normalized_duplicate = _luna_literal_plan()
+    normalized_duplicate["allowedTools"] = [
+        "mcp__server__read",
+        "MCP--server--read",
+    ]
+    assert resolver.validate_luna_execution_plan(
+        normalized_duplicate, observed_git_root=ROOT
+    )["valid"] is False
+
+    exact_root = tmp_path / "exact-root"
+    target = exact_root / "shared" / "example.txt"
+    target.parent.mkdir(parents=True)
+    target.write_text("before\n", encoding="utf-8")
+    exact_worker = _worker_plan(
+        exact_root=exact_root,
+        tool="mcp__server__read",
+    )
+    assert resolver.validate_luna_execution_plan(
+        exact_worker, observed_git_root=exact_root
+    )["valid"] is True
+
+    worker = _worker_plan(exact_root=exact_root, tool="mcp__server__read")
+    worker["allowedTools"] = ["MCP__server__read"]
+    assert resolver.validate_luna_execution_plan(
+        worker, observed_git_root=exact_root
+    )["valid"] is False
+
+
+def test_scout_plan_rejects_worker_only_operation_fields() -> None:
+    """Catches worker patch authority leaking into the facts-only scout role."""
+
+    resolver = _resolver_module()
+    plan = _luna_plan()
+    plan["operations"] = _worker_plan()["operations"]
+
+    assert resolver.validate_luna_execution_plan(
+        plan, observed_git_root=ROOT
+    )["stableId"] == "E_LUNA_PLAN_INVALID"
 
 
 def test_luna_scout_facts_require_exact_plan_ordinals_and_attested_tools() -> None:
@@ -302,7 +784,11 @@ def test_luna_scout_facts_require_exact_plan_ordinals_and_attested_tools() -> No
     plan = _luna_literal_plan()
     facts = _luna_literal_facts()
     accepted = resolver.validate_scout_facts(
-        plan, facts, observed_tools=["filesystem.read"], consumer_purpose="facts-only"
+        plan,
+        facts,
+        observed_tools=["filesystem.read"],
+        consumer_purpose="facts-only",
+        observed_git_root=ROOT,
     )
     assert accepted == {
         "schemaVersion": 1,
@@ -316,7 +802,11 @@ def test_luna_scout_facts_require_exact_plan_ordinals_and_attested_tools() -> No
     missing["facts"].pop()
     assert (
         resolver.validate_scout_facts(
-            plan, missing, observed_tools=["filesystem.read"], consumer_purpose="facts-only"
+            plan,
+            missing,
+            observed_tools=["filesystem.read"],
+            consumer_purpose="facts-only",
+            observed_git_root=ROOT,
         )["stableId"]
         == "E_LUNA_FACTS_INVALID"
     )
@@ -325,7 +815,11 @@ def test_luna_scout_facts_require_exact_plan_ordinals_and_attested_tools() -> No
     duplicate["facts"].append(dict(duplicate["facts"][0]))
     assert (
         resolver.validate_scout_facts(
-            plan, duplicate, observed_tools=["filesystem.read"], consumer_purpose="facts-only"
+            plan,
+            duplicate,
+            observed_tools=["filesystem.read"],
+            consumer_purpose="facts-only",
+            observed_git_root=ROOT,
         )["stableId"]
         == "E_LUNA_FACTS_INVALID"
     )
@@ -334,7 +828,11 @@ def test_luna_scout_facts_require_exact_plan_ordinals_and_attested_tools() -> No
     prose["PASS"] = True
     assert (
         resolver.validate_scout_facts(
-            plan, prose, observed_tools=["filesystem.read"], consumer_purpose="facts-only"
+            plan,
+            prose,
+            observed_tools=["filesystem.read"],
+            consumer_purpose="facts-only",
+            observed_git_root=ROOT,
         )["stableId"]
         == "E_LUNA_AUTHORITY_VIOLATION"
     )
@@ -343,12 +841,22 @@ def test_luna_scout_facts_require_exact_plan_ordinals_and_attested_tools() -> No
     unlisted["observedTools"] = ["filesystem.write"]
     assert (
         resolver.validate_scout_facts(
-            plan, unlisted, observed_tools=["filesystem.write"], consumer_purpose="facts-only"
+            plan,
+            unlisted,
+            observed_tools=["filesystem.write"],
+            consumer_purpose="facts-only",
+            observed_git_root=ROOT,
         )["stableId"]
         == "E_LUNA_TOOL_SCOPE_VIOLATION"
     )
     assert (
-        resolver.validate_scout_facts(plan, _luna_literal_facts(), observed_tools=None, consumer_purpose="facts-only")[
+        resolver.validate_scout_facts(
+            plan,
+            _luna_literal_facts(),
+            observed_tools=None,
+            consumer_purpose="facts-only",
+            observed_git_root=ROOT,
+        )[
             "stableId"
         ]
         == "E_LUNA_EXECUTION_ATTESTATION_UNAVAILABLE"
@@ -366,6 +874,7 @@ def test_luna_facts_require_explicit_facts_only_consumption() -> None:
         facts,
         observed_tools=["filesystem.read"],
         consumer_purpose="facts-only",
+        observed_git_root=ROOT,
     )["valid"] is True
     for purpose in ("decision", "verdict", "gate", "publication"):
         assert (
@@ -374,6 +883,7 @@ def test_luna_facts_require_explicit_facts_only_consumption() -> None:
                 facts,
                 observed_tools=["filesystem.read"],
                 consumer_purpose=purpose,
+                observed_git_root=ROOT,
             )["stableId"]
             == "E_LUNA_AUTHORITY_VIOLATION"
         )
@@ -385,6 +895,7 @@ def test_luna_facts_require_explicit_facts_only_consumption() -> None:
             authority_shaped,
             observed_tools=["filesystem.read"],
             consumer_purpose="facts-only",
+            observed_git_root=ROOT,
         )["stableId"]
         == "E_LUNA_AUTHORITY_VIOLATION"
     )
@@ -446,6 +957,12 @@ def test_luna_policy_profiles_tasks_and_exclusive_corridors(tmp_path: Path) -> N
             "defaultProfile": "fast-high",
             "allowedProfiles": ["fast-high"],
         }
+    assert policy["mechanicalExecutionContract"]["defaultEffort"] == "high"
+    assert policy["mechanicalExecutionContract"]["allowedCallerEfforts"] == [
+        "high",
+        "xhigh",
+        "max",
+    ]
     luna_profiles = {
         name
         for name, profile in policy["profiles"].items()
@@ -481,13 +998,14 @@ def test_luna_mechanical_corridor_is_exactly_restricted_and_exposed(
         "ambiguity": "abort",
         "fallback": "none",
         "objectiveOracle": "caller-required",
+        "defaultEffort": "high",
+        "allowedCallerEfforts": ["high", "xhigh", "max"],
         "scout": {
-            "status": "disabled-until-host-containment",
-            "stableId": "E_LUNA_EXECUTION_CONTAINMENT_UNAVAILABLE",
+            "status": "native-required-when-feature-enabled",
             "planContract": "LunaExecutionContractV1",
             "outputContract": "ScoutFactsV1",
             "readProbeOrder": "caller-specified-exact-order",
-            "targetBinding": "optional-exact-git-root",
+            "targetBinding": "required-exact-git-root",
             "allowedTools": "caller-supplied-exact-runtime-ids",
             "allowedOperations": [
                 "path-kind",
@@ -509,11 +1027,16 @@ def test_luna_mechanical_corridor_is_exactly_restricted_and_exposed(
             ],
         },
         "worker": {
-            "status": "disabled-until-host-containment",
-            "stableId": "E_LUNA_WRITE_CONTAINMENT_UNAVAILABLE",
-            "sandboxMode": "read-only",
+            "status": "native-required-when-feature-enabled",
+            "planContract": "LunaExecutionContractV1",
+            "sandboxMode": "workspace-write",
+            "targetBinding": "required-exact-git-root",
+            "allowedTools": "caller-supplied-exact-runtime-ids",
+            "allowedOperations": ["apply-exact-patch"],
+            "precondition": "caller-specified-exact-pre-image-sha256",
+            "postcondition": "caller-verifies-exact-post-image-sha256",
+            "forbiddenOperations": ["shell", "delete", "rename", "path-choice"],
             "directCodeOrPatchAuthoring": False,
-            "decisionRoute": "terra-or-sol",
         },
     }
     policy = _policy()
@@ -532,16 +1055,16 @@ def test_luna_mechanical_corridor_is_exactly_restricted_and_exposed(
     scout = resolver.resolve_role_dispatch(
         "micro", "mechanical-scout", "enabled", repo_root=ROOT
     )
-    assert scout["status"] == "unavailable"
-    assert scout["stableId"] == "E_LUNA_EXECUTION_CONTAINMENT_UNAVAILABLE"
+    assert scout["status"] == "native-required"
+    assert scout["stableId"] is None
     assert scout["executionContract"] == expected
     worker = resolver.resolve_role_dispatch(
         "mechanical", "mechanical-worker", "enabled", repo_root=ROOT
     )
-    assert worker["status"] == "unavailable"
-    assert worker["stableId"] == "E_LUNA_WRITE_CONTAINMENT_UNAVAILABLE"
+    assert worker["status"] == "native-required"
+    assert worker["stableId"] is None
     assert worker["executionContract"] == expected
-    assert worker["sandbox"] == "read-only"
+    assert worker["sandbox"] == "workspace-write"
     assert "executionContract" not in resolver.resolve_role_dispatch(
         "engineering", "worker", "enabled", repo_root=ROOT
     )
@@ -549,31 +1072,44 @@ def test_luna_mechanical_corridor_is_exactly_restricted_and_exposed(
         (AGENTS_SOURCE / "mechanical-scout.toml").read_text(encoding="utf-8")
     )["developer_instructions"].casefold()
     assert "lunaexecutioncontractv1" in scout_instructions
-    assert "unavailable" in scout_instructions
-    assert "do not diagnose, design, select, recommend, assess risk, or issue a gate verdict" in scout_instructions
+    assert "decision authority" in scout_instructions
+    assert "caller validates" in scout_instructions
     worker_instructions = tomllib.loads(
         (AGENTS_SOURCE / "mechanical-worker.toml").read_text(encoding="utf-8")
     )
-    assert worker_instructions["sandbox_mode"] == "read-only"
-    assert "disabled" in worker_instructions["developer_instructions"].casefold()
-    assert "no writes" in worker_instructions["developer_instructions"].casefold()
+    assert worker_instructions["sandbox_mode"] == "workspace-write"
+    worker_contract = worker_instructions["developer_instructions"].casefold()
+    assert "caller-authored exact patch" in worker_contract
+    assert all(value in worker_contract for value in ("no shell", "delete", "rename", "path choice"))
 
 
-def test_luna_scout_is_unavailable_until_host_execution_containment_exists() -> None:
-    """Catches a native Luna scout spawn admission without host-enforced containment."""
+def test_luna_roles_are_native_required_only_when_feature_is_enabled() -> None:
+    """Catches restoration of unconditional unavailability or loss of feature gating."""
 
     resolver = _resolver_module()
     for task_class in ("micro", "mechanical-read"):
         decision = resolver.resolve_role_dispatch(
             task_class, "mechanical-scout", "enabled", repo_root=ROOT
         )
-        assert decision["status"] == "unavailable"
-        assert decision["stableId"] == "E_LUNA_EXECUTION_CONTAINMENT_UNAVAILABLE"
+        assert decision["status"] == "native-required"
+        assert decision["stableId"] is None
         assert decision["fallback"] == "none"
     worker = resolver.resolve_role_dispatch(
         "mechanical", "mechanical-worker", "enabled", repo_root=ROOT
     )
-    assert worker["stableId"] == "E_LUNA_WRITE_CONTAINMENT_UNAVAILABLE"
+    assert worker["status"] == "native-required"
+    assert worker["stableId"] is None
+    for task_class, role_name in (
+        ("micro", "mechanical-scout"),
+        ("mechanical-read", "mechanical-scout"),
+        ("mechanical", "mechanical-worker"),
+    ):
+        disabled = resolver.resolve_role_dispatch(
+            task_class, role_name, "disabled", repo_root=ROOT
+        )
+        assert disabled["status"] == "unavailable"
+        assert disabled["stableId"] == "E_NATIVE_V2_DISABLED"
+        assert disabled["fallback"] == "none"
 
 
 def test_luna_semantic_task_matrix_never_authorizes_write_or_decision() -> None:
@@ -593,12 +1129,8 @@ def test_luna_semantic_task_matrix_never_authorizes_write_or_decision() -> None:
         assert contract["ambiguity"] == "abort"
         assert contract["fallback"] == "none"
         assert contract["worker"]["directCodeOrPatchAuthoring"] is False
-        if role_name == "mechanical-worker":
-            assert decision["status"] == "unavailable"
-            assert decision["stableId"] == "E_LUNA_WRITE_CONTAINMENT_UNAVAILABLE"
-        else:
-            assert decision["status"] == "unavailable"
-            assert decision["stableId"] == "E_LUNA_EXECUTION_CONTAINMENT_UNAVAILABLE"
+        assert decision["status"] == "native-required"
+        assert decision["stableId"] is None
 
 
 def test_luna_native_tomls_are_standalone_trusted_and_manifest_bound() -> None:
@@ -612,7 +1144,7 @@ def test_luna_native_tomls_are_standalone_trusted_and_manifest_bound() -> None:
     assert set(manifest["roles"]) == set(policy["roles"])
     for role_name, sandbox in (
         ("mechanical-scout", "read-only"),
-        ("mechanical-worker", "read-only"),
+        ("mechanical-worker", "workspace-write"),
     ):
         role_path = AGENTS_SOURCE / f"{role_name}.toml"
         role_bytes = role_path.read_bytes()
@@ -633,8 +1165,9 @@ def test_luna_native_tomls_are_standalone_trusted_and_manifest_bound() -> None:
             "relativePath": f"{role_name}.toml",
             "sha256": hashlib.sha256(role_bytes).hexdigest(),
         }
-    assert installer._READ_ONLY_ROLES >= {"mechanical-scout", "mechanical-worker"}
-    assert "mechanical-worker" not in installer._BOUNDED_WRITE_ROLES
+    assert "mechanical-scout" in installer._READ_ONLY_ROLES
+    assert "mechanical-worker" not in installer._READ_ONLY_ROLES
+    assert "mechanical-worker" in installer._BOUNDED_WRITE_ROLES
     for role_name, expected_digest in PROTECTED_EXISTING_ROLE_DIGESTS.items():
         assert hashlib.sha256(
             (AGENTS_SOURCE / f"{role_name}.toml").read_bytes()
@@ -873,7 +1406,7 @@ def test_resolve_role_dispatch_policy_only() -> None:
     assert unavailable == {
         "schemaVersion": 1,
         "status": "unavailable",
-        "stableId": "E_LUNA_EXECUTION_CONTAINMENT_UNAVAILABLE",
+        "stableId": "E_NATIVE_V2_DISABLED",
         "taskClass": "mechanical-read",
         "role": "mechanical-scout",
         "requestedProfile": "fast-high",
@@ -885,8 +1418,8 @@ def test_resolve_role_dispatch_policy_only() -> None:
     }
     assert admitted == {
         "schemaVersion": 1,
-        "status": "unavailable",
-        "stableId": "E_LUNA_EXECUTION_CONTAINMENT_UNAVAILABLE",
+        "status": "native-required",
+        "stableId": None,
         "taskClass": "mechanical-read",
         "role": "mechanical-scout",
         "requestedProfile": "fast-high",
@@ -905,8 +1438,8 @@ def test_luna_native_handoff_is_nonauthorizing() -> None:
     policy = resolver.resolve_role_dispatch(
         "mechanical-read", "mechanical-scout", "enabled", repo_root=ROOT
     )
-    assert policy["status"] == "unavailable"
-    assert policy["stableId"] == "E_LUNA_EXECUTION_CONTAINMENT_UNAVAILABLE"
+    assert policy["status"] == "native-required"
+    assert policy["stableId"] is None
     assert "authorizing" not in policy
     for host_observation in ({"status": "accepted"}, {"status": "rejected"}):
         with pytest.raises(TypeError):
@@ -929,8 +1462,8 @@ def test_native_luna_installed_policy_is_current() -> None:
 
     required = (
         'fallback:"none"',
-        "E_LUNA_EXECUTION_CONTAINMENT_UNAVAILABLE",
-        "future admission",
+        "native-required",
+        "E_NATIVE_V2_DISABLED",
         "no in-repository host caller",
     )
     assert all(value in section for value in required)
@@ -978,8 +1511,8 @@ def test_role_dispatch_cli_rejects_result_replay_flags(tmp_path: Path) -> None:
     )
     assert accepted.returncode == 0, accepted.stderr
     accepted_decision = json.loads(accepted.stdout)
-    assert accepted_decision["status"] == "unavailable"
-    assert accepted_decision["stableId"] == "E_LUNA_EXECUTION_CONTAINMENT_UNAVAILABLE"
+    assert accepted_decision["status"] == "native-required"
+    assert accepted_decision["stableId"] is None
     for obsolete in ("--native-result-file", "--external-result-file"):
         rejected = subprocess.run(
             [*base, obsolete, str(tmp_path / "replay.json")],

@@ -2634,9 +2634,9 @@ _ROLE_TRUST_BOUNDARY = (
 _READ_ONLY_ROLES = frozenset({
     "explorer", "analyst", "planner", "architect", "architecture-reviewer",
     "algorithm-scientist", "computational-scientist", "security-engineer",
-    "security-reviewer", "qa-engineer", "mechanical-scout", "mechanical-worker",
+    "security-reviewer", "qa-engineer", "mechanical-scout",
 })
-_BOUNDED_WRITE_ROLES = frozenset({"default", "worker", "backend-engineer", "platform-engineer", "knowledge-archivist"})
+_BOUNDED_WRITE_ROLES = frozenset({"default", "worker", "backend-engineer", "platform-engineer", "knowledge-archivist", "mechanical-worker"})
 _STOCK_NATIVE_ROLE_MIGRATION_SHA256 = {
     "worker": frozenset({
         "2d950ebfa4e9cc7293ee32cbc71ad3910fa6938a80a339bbbc3434ecc6c4d860",
@@ -2650,8 +2650,14 @@ _STOCK_NATIVE_ROLE_MIGRATION_SHA256 = {
         "aeb2800e4e498ad7d3a63951608e780eb730ef2bd744ff679fee5c697f5d837a",
         "54117decdfcf9bff576e23d31a1dc6aa2d2f4fd0d498820f9c1244b6742f78f9",
     }),
-    "mechanical-scout": frozenset({"4521ff3194ed13831214f94ad228c7aa0eba97b6d40bec56e990b3490fdcc672"}),
-    "mechanical-worker": frozenset({"8c126a95d35301bd493e3e2f89e4061781aaf28ca4444a3d4a67b1868c4c7568"}),
+    "mechanical-scout": frozenset({
+        "4521ff3194ed13831214f94ad228c7aa0eba97b6d40bec56e990b3490fdcc672",
+        "1d2d6c4fb6463710f8e6cd1bda1738f8230cd7483b9f342f7f0e500e5ac5bb67",
+    }),
+    "mechanical-worker": frozenset({
+        "8c126a95d35301bd493e3e2f89e4061781aaf28ca4444a3d4a67b1868c4c7568",
+        "ccf7633f55389ce826cd848692277b764a559ee0b7bc81402d5657b908165869",
+    }),
 }
 _STOCK_NATIVE_ROLE_REGISTRATION_PRIORS = {
     "mechanical-scout": (
@@ -2659,10 +2665,18 @@ _STOCK_NATIVE_ROLE_REGISTRATION_PRIORS = {
             "description": "Read-only deterministic mechanical scout for bounded inventories and checks.",
             "config_file": "agents/mechanical-scout.toml",
         },
+        {
+            "description": "Disabled Luna mechanical scout pending host-enforced execution containment and attestation.",
+            "config_file": "agents/mechanical-scout.toml",
+        },
     ),
     "mechanical-worker": (
         {
             "description": "Bounded-write deterministic mechanical worker for predescribed artifacts.",
+            "config_file": "agents/mechanical-worker.toml",
+        },
+        {
+            "description": "Disabled Luna mechanical worker pending host-enforced per-agent containment.",
             "config_file": "agents/mechanical-worker.toml",
         },
     ),

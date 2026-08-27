@@ -188,13 +188,14 @@
     "ambiguity": "abort",
     "fallback": "none",
     "objectiveOracle": "caller-required",
+    "defaultEffort": "high",
+    "allowedCallerEfforts": ["high", "xhigh", "max"],
     "scout": {
-      "status": "disabled-until-host-containment",
-      "stableId": "E_LUNA_EXECUTION_CONTAINMENT_UNAVAILABLE",
+      "status": "native-required-when-feature-enabled",
       "planContract": "LunaExecutionContractV1",
       "outputContract": "ScoutFactsV1",
       "readProbeOrder": "caller-specified-exact-order",
-      "targetBinding": "optional-exact-git-root",
+      "targetBinding": "required-exact-git-root",
       "allowedTools": "caller-supplied-exact-runtime-ids",
       "allowedOperations": [
         "path-kind",
@@ -209,11 +210,16 @@
       "forbiddenOutputs": ["diagnosis", "design", "selection", "recommendation", "risk", "gate"]
     },
     "worker": {
-      "status": "disabled-until-host-containment",
-      "stableId": "E_LUNA_WRITE_CONTAINMENT_UNAVAILABLE",
-      "sandboxMode": "read-only",
-      "directCodeOrPatchAuthoring": false,
-      "decisionRoute": "terra-or-sol"
+      "status": "native-required-when-feature-enabled",
+      "planContract": "LunaExecutionContractV1",
+      "sandboxMode": "workspace-write",
+      "targetBinding": "required-exact-git-root",
+      "allowedTools": "caller-supplied-exact-runtime-ids",
+      "allowedOperations": ["apply-exact-patch"],
+      "precondition": "caller-specified-exact-pre-image-sha256",
+      "postcondition": "caller-verifies-exact-post-image-sha256",
+      "forbiddenOperations": ["shell", "delete", "rename", "path-choice"],
+      "directCodeOrPatchAuthoring": false
     }
   },
   "taskRoleEligibility": {

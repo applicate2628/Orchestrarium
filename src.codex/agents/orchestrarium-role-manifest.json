@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "packRevision": "1.x-native-role-policy-v1",
-  "policySha256": "33a5eec66d760a8d7943c00985ad630be85aebca74a94d5d9cc8bf3709944d6b",
+  "policySha256": "dcab8e4da55b05475f9b9c507a3a9a97679a0c7b72006ff7ffca4b95ccd13451",
   "roles": {
     "algorithm-scientist": {
       "relativePath": "algorithm-scientist.toml",
@@ -41,11 +41,11 @@
     },
     "mechanical-scout": {
       "relativePath": "mechanical-scout.toml",
-      "sha256": "1d2d6c4fb6463710f8e6cd1bda1738f8230cd7483b9f342f7f0e500e5ac5bb67"
+      "sha256": "d384fa021005f10b4b3faf48818a4963ab314689b986a6fbed25b5ad13e66df1"
     },
     "mechanical-worker": {
       "relativePath": "mechanical-worker.toml",
-      "sha256": "ccf7633f55389ce826cd848692277b764a559ee0b7bc81402d5657b908165869"
+      "sha256": "e91942ce296a53b586737250bd10b51965663aa559908ae02ea7547454d83305"
     },
     "planner": {
       "relativePath": "planner.toml",
