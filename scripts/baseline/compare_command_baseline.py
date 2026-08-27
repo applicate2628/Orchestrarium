@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Compare one candidate command result with its immutable baseline result.
 
-Stage 0 permits an already-existing failure only when the candidate preserves
-its normalized exit code and diagnostics. Successful diagnostics are compared
-too, so dropped subchecks or new warnings cannot silently pass. Exit 0 = PASS,
-exit 1 = semantic regression, exit 2 = invalid input or evidence-write failure.
-Pure stdlib.
+Stage 0 permits an already-existing semantic validation failure only when the
+candidate preserves its declared semantic exit code and normalized diagnostics.
+Operational exits (launcher failures, timeouts, signals, or undeclared codes)
+always block. Successful diagnostics are compared too, so dropped subchecks or
+new warnings cannot silently pass. Exit 0 = PASS, exit 1 = comparison blocked,
+exit 2 = invalid input or evidence-write failure. Pure stdlib.
 """
 
 from __future__ import annotations
@@ -21,6 +22,20 @@ from pathlib import Path
 from typing import Pattern, Sequence
 
 SCHEMA_VERSION = 1
+
+
+def _semantic_failure_exit(value: str) -> int:
+    try:
+        exit_code = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            f"semantic failure exit must be an integer: {value!r}"
+        ) from exc
+    if not 1 <= exit_code <= 123:
+        raise argparse.ArgumentTypeError(
+            "semantic failure exit must be between 1 and 123"
+        )
+    return exit_code
 
 
 class CommandBaselineError(RuntimeError):
@@ -143,6 +158,7 @@ def compare(args: argparse.Namespace) -> tuple[int, dict[str, object]]:
     if args.baseline_exit < 0 or args.candidate_exit < 0:
         raise CommandBaselineError("exit codes must be non-negative")
 
+    semantic_failure_exits = sorted(set(args.semantic_failure_exit))
     patterns = _compile_patterns(args.volatile_pattern, label="volatile")
     success_patterns = _compile_patterns(args.success_pattern, label="success")
     baseline_raw = _read_log(args.baseline_log)
@@ -162,8 +178,18 @@ def compare(args: argparse.Namespace) -> tuple[int, dict[str, object]]:
 
     same_diagnostics = baseline_normalized == candidate_normalized
     same_result = args.baseline_exit == args.candidate_exit and same_diagnostics
+    allowed_result_exits = {0, *semantic_failure_exits}
+    operational_exit: dict[str, int] = {}
+    if args.baseline_exit not in allowed_result_exits:
+        operational_exit["baseline"] = args.baseline_exit
+    if args.candidate_exit not in allowed_result_exits:
+        operational_exit["candidate"] = args.candidate_exit
 
-    if args.baseline_exit == 0 and args.candidate_exit == 0:
+    if operational_exit:
+        status = "FAIL"
+        classification = "operational-exit"
+        return_code = 1
+    elif args.baseline_exit == 0 and args.candidate_exit == 0:
         if same_diagnostics:
             status = "PASS"
             classification = "preserved-success"
@@ -214,6 +240,7 @@ def compare(args: argparse.Namespace) -> tuple[int, dict[str, object]]:
         ),
         "classification": classification,
         "status": status,
+        "operationalExit": operational_exit,
         "normalization": {
             "volatilePatterns": list(args.volatile_pattern),
         },
@@ -223,6 +250,8 @@ def compare(args: argparse.Namespace) -> tuple[int, dict[str, object]]:
             "markerMustTerminateDiagnostics": True,
         },
         "policy": {
+            "semanticFailureExits": semantic_failure_exits,
+            "operationalExitsAlwaysBlock": True,
             "baselineSuccessRequiresCandidateSuccess": True,
             "historicalFailureMayResolveWithDeclaredTerminalSuccessPattern": True,
             "historicalFailureMayRemainOnlyIfNormalizedResultMatches": True,
@@ -245,6 +274,13 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--candidate-ref", required=True)
     parser.add_argument("--volatile-pattern", action="append", default=[])
     parser.add_argument("--success-pattern", action="append", default=[])
+    parser.add_argument(
+        "--semantic-failure-exit",
+        action="append",
+        type=_semantic_failure_exit,
+        required=True,
+        help="validator-declared semantic failure exit; repeat when needed",
+    )
     parser.add_argument("--output", type=Path, required=True)
     return parser.parse_args(argv)
 

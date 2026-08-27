@@ -160,7 +160,7 @@ run_isolated() {
       GEMINI_HOME="$lane_root/gemini" QWEN_CODE_HOME="$lane_root/qwen" \
       KIMI_CODE_HOME="$lane_root/kimi" TMPDIR="$lane_root/tmp" \
       GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL="$lane_root/gitconfig" \
-      PYTHONDONTWRITEBYTECODE=1 PYTHONUTF8=1 CI=1 \
+      PYTHONDONTWRITEBYTECODE=1 PYTHONUTF8=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 CI=1 \
       "$VERIFIER_PYTHON" - "$ORCHE_COMMAND_TIMEOUT_SECONDS" "$@" <<'PY'
 # BEGIN ORCHE_TIMEOUT_RUNNER
 import os
@@ -214,9 +214,11 @@ PY
 ```
 
 The ambient `PATH`, `PYTHONPATH`, `PYTHONHOME`, activated virtual environment, and user plugin
-configuration are not inherited. Every differential lane uses the same explicitly selected
-external verifier tools, a positive per-command deadline, and process-group cleanup on timeout.
-Exit `124` is reserved by this procedure for a timed-out lane and is always blocking evidence.
+configuration are not inherited. `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` prevents third-party Pytest
+entry-point plugins from the verifier installation from joining either lane. Any repository-required
+Pytest plugin must be loaded explicitly and pinned by the reviewed procedure. Every differential
+lane uses the same explicitly selected external verifier tools, a positive per-command deadline,
+and process-group cleanup on timeout. Exit `124` is reserved by this procedure for a timed-out lane and is always blocking evidence.
 
 ## Immutable Stage 0 tooling
 
@@ -329,9 +331,11 @@ test -f "$OUTPUT_ROOT/candidate.xml" || exit 2
 
 Every repository-standard validator runs in both worktrees. Successful diagnostics must match,
 and normalized logs are compared for failures **and successes**: a dropped success subcheck or
-a newly emitted warning is drift unless declared as a narrow volatile pattern. A historical
-failure may resolve only when the candidate exits zero and its normalized diagnostics contain
-the validator-specific success pattern declared below; an empty or unconditional `exit 0`
+a newly emitted warning is drift unless declared as a narrow volatile pattern. Only exit `0` and
+validator-declared semantic failure exits participate in parity comparison; timeouts, launcher
+failures, signal-derived exits, and undeclared exit codes always block even when both lanes match.
+A historical failure may resolve only when the candidate exits zero and its normalized diagnostics
+contain the validator-specific success pattern declared below; an empty or unconditional `exit 0`
 cannot silently remove validation coverage.
 
 ```bash
@@ -368,6 +372,7 @@ compare_validator() {
     --baseline-root "$BASELINE_ROOT" --candidate-root "$CANDIDATE_ROOT" \
     --baseline-ref "$BASELINE_REF" --candidate-ref "$CANDIDATE_REF" \
     --success-pattern "$success_pattern" \
+    --semantic-failure-exit 1 \
     --output "$OUTPUT_ROOT/$name-comparison.json" \
     "${volatile_args[@]}"
 }
