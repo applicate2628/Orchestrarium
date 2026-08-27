@@ -352,7 +352,7 @@ def _validate_external_role_taxonomy(source_root: Path) -> None:
     ):
         raise _fail("external role taxonomy shape")
     mapping = taxonomy["roles"]
-    if len(mapping) != 33 or any(
+    if len(mapping) != 34 or any(
         not isinstance(role, str)
         or lane not in {"consultant", "external-worker", "external-reviewer", "none"}
         for role, lane in mapping.items()
@@ -388,7 +388,7 @@ def _validate_external_role_taxonomy(source_root: Path) -> None:
     indexed_roles = re.findall(
         r"\$([a-z][a-z0-9-]+)", "\n".join(role_lines)
     )
-    if len(indexed_roles) != 33 or len(set(indexed_roles)) != 33:
+    if len(indexed_roles) != 34 or len(set(indexed_roles)) != 34:
         raise _fail("shared role index membership")
     if set(indexed_roles) != set(mapping):
         raise _fail("external role taxonomy parity")

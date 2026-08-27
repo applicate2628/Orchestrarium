@@ -138,7 +138,13 @@ def test_legacy_resolution_unchanged_and_auto_excludes_new_providers() -> None:
     assert set(RESOLVER.PROVIDER_DIRS) == {"codex", "claude", "gemini", "qwen"}
 
 
-@pytest.mark.parametrize("provider", ("kimi", "grok"))
+@pytest.mark.parametrize(
+    ("provider", "expected_status", "execution_authorized"),
+    (
+        ("kimi", "external-authorized", True),
+        ("grok", "unavailable", False),
+    ),
+)
 @pytest.mark.parametrize(
     ("task_class", "role"),
     (
@@ -147,8 +153,12 @@ def test_legacy_resolution_unchanged_and_auto_excludes_new_providers() -> None:
         ("review", "qa-engineer"),
     ),
 )
-def test_external_dispatch_admits_only_explicit_read_only_policy_lanes(
-    provider: str, task_class: str, role: str
+def test_external_dispatch_projects_provider_execution_disposition(
+    provider: str,
+    expected_status: str,
+    execution_authorized: bool,
+    task_class: str,
+    role: str,
 ) -> None:
     decision = RESOLVER.resolve_external_dispatch(
         provider, task_class, role, repo_root=ROOT
@@ -162,7 +172,7 @@ def test_external_dispatch_admits_only_explicit_read_only_policy_lanes(
 
     assert decision == {
         "schemaVersion": 1,
-        "status": "external-required",
+        "status": expected_status,
         "stableId": None,
         "provider": provider,
         "taskClass": task_class,
@@ -173,6 +183,7 @@ def test_external_dispatch_admits_only_explicit_read_only_policy_lanes(
         "nativeEffort": expected_native_effort,
         "effortMappingLoss": expected_loss,
         "finalAuthorizingRole": False,
+        "executionAuthorized": execution_authorized,
         "independentVerification": True,
         "fallback": "none",
     }
@@ -201,6 +212,7 @@ def test_external_dispatch_denies_every_unadmitted_task_or_role(
     )
     assert decision["status"] == "denied"
     assert decision["stableId"] == f"E_{provider.upper()}_DISPATCH_DENIED"
+    assert decision["executionAuthorized"] is False
     assert decision["fallback"] == "none"
 
 
@@ -210,6 +222,7 @@ def test_external_dispatch_denies_unsupported_provider_and_native_is_unchanged()
     )
     assert denied["status"] == "denied"
     assert denied["stableId"] == "E_EXTERNAL_DISPATCH_DENIED"
+    assert denied["executionAuthorized"] is False
 
     assert RESOLVER.resolve_role_dispatch(
         "mechanical-read", "mechanical-scout", "enabled", repo_root=ROOT
@@ -230,6 +243,36 @@ def test_external_dispatch_denies_unsupported_provider_and_native_is_unchanged()
     }
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("executionDisposition", "unsupported"),
+        ("availability", "unknown"),
+    ),
+)
+def test_external_dispatch_fails_closed_on_invalid_execution_realization(
+    tmp_path: Path, field: str, value: str
+) -> None:
+    policy_root = tmp_path / "policy-root"
+    policy_path = policy_root / "shared" / "role-routing-policy.v1.json"
+    policy_path.parent.mkdir(parents=True)
+    policy = json.loads(
+        (ROOT / "shared" / "role-routing-policy.v1.json").read_text(encoding="utf-8")
+    )
+    policy["providerRealizations"]["kimi"][field] = value
+    policy_path.write_text(json.dumps(policy), encoding="utf-8")
+
+    decision = RESOLVER.resolve_external_dispatch(
+        "kimi", "review", "qa-engineer", repo_root=policy_root
+    )
+
+    assert decision["status"] == "denied"
+    assert decision["stableId"] == "E_KIMI_DISPATCH_DENIED"
+    assert decision["executionAuthorized"] is False
+    assert decision["independentVerification"] is False
+    assert decision["fallback"] == "none"
+
+
 @pytest.mark.parametrize("provider", ("kimi", "grok"))
 @pytest.mark.parametrize("role", ("architecture-reviewer", "security-reviewer"))
 def test_external_dispatch_rejects_policy_declared_final_authorizers(
@@ -242,6 +285,7 @@ def test_external_dispatch_rejects_policy_declared_final_authorizers(
     assert decision["status"] == "denied"
     assert decision["stableId"] == f"E_{provider.upper()}_FINAL_OWNER_DENIED"
     assert decision["finalAuthorizingRole"] is True
+    assert decision["executionAuthorized"] is False
     assert decision["fallback"] == "none"
 
 

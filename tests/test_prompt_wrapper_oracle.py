@@ -2068,13 +2068,7 @@ def test_ledger_closes_are_rejected_before_prompt_or_provider_launch(
     assert not marker.exists()
 
 
-@pytest.mark.parametrize(
-    ("provider", "stable_id"),
-    (
-        ("kimi", "E_KIMI_READINESS_UNVERIFIED"),
-        ("grok", "E_GROK_CONTAINMENT_UNAVAILABLE"),
-    ),
-)
+@pytest.mark.parametrize(("provider", "stable_id"), (("grok", "E_EXTERNAL_DISPATCH_POLICY_DENIED"),))
 def test_unavailable_external_provider_rejects_before_prompt_consumption(
     provider: str,
     stable_id: str,

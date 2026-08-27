@@ -5,7 +5,7 @@ Rule elaboration and the glossary live under `shared/references/` (maintainer re
 
 ## Role index
 - Roadmap and orchestration: `$product-manager`, `$lead`, `$consultant`, `$knowledge-archivist`.
-- Research, design, planning, and specialist constraints: `$product-analyst`, `$analyst`, `$architect`, `$ux-designer`, `$planner`, `$algorithm-scientist`, `$computational-scientist`, `$security-engineer`, `$performance-engineer`, `$reliability-engineer`.
+- Research, design, planning, and specialist constraints: `$product-analyst`, `$explorer`, `$analyst`, `$architect`, `$ux-designer`, `$planner`, `$algorithm-scientist`, `$computational-scientist`, `$security-engineer`, `$performance-engineer`, `$reliability-engineer`.
 - Implementation: `$backend-engineer`, `$frontend-engineer`, `$qt-ui-engineer`, `$model-view-engineer`, `$data-engineer`, `$platform-engineer`, `$toolchain-engineer`, `$geometry-engineer`, `$graphics-engineer`, `$visualization-engineer`, `$external-worker`.
 - Review and verification: `$qa-engineer`, `$architecture-reviewer`, `$security-reviewer`, `$performance-reviewer`, `$accessibility-reviewer`, `$ux-reviewer`, `$ui-test-engineer`, `$external-reviewer`.
 - For approved UI implementation phases, use `$frontend-engineer` for web/React UI and `$qt-ui-engineer` only for Qt desktop UI.

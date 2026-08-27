@@ -28,7 +28,7 @@ def test_grok_wrapper_stays_thin() -> None:
     assert "subprocess" not in text
 
 
-def test_grok_unavailable_before_parse_prompt_probe_or_process(
+def test_grok_policy_unavailable_before_prompt_probe_or_process(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     owner = _load_owner()
@@ -43,8 +43,10 @@ def test_grok_unavailable_before_parse_prompt_probe_or_process(
         lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("process")),
     )
 
-    assert owner.launch("grok", ["bad", "--unknown"]) == 1
-    assert capsys.readouterr().err == "FAIL: E_GROK_CONTAINMENT_UNAVAILABLE: provider execution is unavailable\n"
+    assert owner.launch(
+        "grok", ["bad", "--task-class", "exploration", "--role", "analyst"]
+    ) == 1
+    assert capsys.readouterr().err == "FAIL: E_EXTERNAL_DISPATCH_POLICY_DENIED\n"
 
 
 def test_grok_executor_only_state_is_absent() -> None:

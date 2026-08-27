@@ -239,6 +239,8 @@
       "allowedTaskClasses": ["exploration", "planning", "review"],
       "requiredMutationClass": "read-only",
       "independentVerification": true,
+      "executionDisposition": "explicit-read-only",
+      "availability": "available",
       "effortMappingLoss": "no-native-effort-control"
     },
     "grok": {
@@ -247,6 +249,8 @@
       "allowedTaskClasses": ["exploration", "planning", "review"],
       "requiredMutationClass": "read-only",
       "independentVerification": true,
+      "executionDisposition": "classifier-only",
+      "availability": "unavailable",
       "effortMappingLoss": "none"
     }
   }

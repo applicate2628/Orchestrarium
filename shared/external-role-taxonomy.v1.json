@@ -5,6 +5,7 @@
     "lead": "none",
     "consultant": "consultant",
     "knowledge-archivist": "none",
+    "explorer": "external-worker",
     "product-analyst": "external-worker",
     "analyst": "external-worker",
     "architect": "external-worker",

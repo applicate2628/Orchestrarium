@@ -25,6 +25,16 @@ PROVIDER_DIRS = {
 }
 EXTERNAL_DISPATCH_PROVIDERS = ("kimi", "grok")
 PROVIDER_CHOICES = tuple(sorted((*PROVIDER_DIRS, *EXTERNAL_DISPATCH_PROVIDERS)))
+_EXTERNAL_EXECUTION_DISPOSITIONS = frozenset(
+    {"explicit-read-only", "classifier-only"}
+)
+_EXTERNAL_AVAILABILITIES = frozenset({"available", "unavailable"})
+_EXTERNAL_DISPOSITION_AVAILABILITY_PAIRS = frozenset(
+    {
+        ("explicit-read-only", "available"),
+        ("classifier-only", "unavailable"),
+    }
+)
 _MECHANICAL_ROLES = frozenset({"mechanical-scout", "mechanical-worker"})
 _LUNA_OPERATION_SCHEMA_V1 = {
     "path-kind": frozenset({"path"}),
@@ -563,6 +573,14 @@ def load_role_policy(repo_root: Path) -> tuple[dict[str, Any], Path]:
             or any(task not in task_classes for task in allowed)
             or realization.get("requiredMutationClass") != "read-only"
             or realization.get("independentVerification") is not True
+            or realization.get("executionDisposition")
+            not in _EXTERNAL_EXECUTION_DISPOSITIONS
+            or realization.get("availability") not in _EXTERNAL_AVAILABILITIES
+            or (
+                realization["executionDisposition"],
+                realization["availability"],
+            )
+            not in _EXTERNAL_DISPOSITION_AVAILABILITY_PAIRS
             or not isinstance(realization.get("effortMappingLoss"), str)
             or not realization["effortMappingLoss"]
         ):
@@ -859,6 +877,8 @@ def _external_dispatch_decision(
     native_effort: str | None,
     effort_mapping_loss: str | None,
     final_authorizing_role: bool,
+    execution_authorized: bool,
+    independent_verification: bool,
 ) -> dict[str, Any]:
     return {
         "schemaVersion": 1,
@@ -873,7 +893,8 @@ def _external_dispatch_decision(
         "nativeEffort": native_effort,
         "effortMappingLoss": effort_mapping_loss,
         "finalAuthorizingRole": final_authorizing_role,
-        "independentVerification": True,
+        "executionAuthorized": execution_authorized,
+        "independentVerification": independent_verification,
         "fallback": "none",
     }
 
@@ -903,6 +924,8 @@ def resolve_external_dispatch(
             native_effort=None,
             effort_mapping_loss=None,
             final_authorizing_role=False,
+            execution_authorized=False,
+            independent_verification=False,
         )
 
     stable_id = f"E_{provider_name.upper()}_DISPATCH_DENIED"
@@ -917,6 +940,7 @@ def resolve_external_dispatch(
         task = policy["taskClasses"].get(task_name)
         eligible = policy["taskRoleEligibility"].get(task_name)
         final_authorizing_role = role_name in policy["finalAuthorizingRoles"]
+        independent_verification = realization["independentVerification"] is True
         base_admitted = (
             isinstance(task, dict)
             and isinstance(eligible, list)
@@ -925,18 +949,39 @@ def resolve_external_dispatch(
             and task.get("mutationClass")
             == realization["requiredMutationClass"]
             == "read-only"
-            and realization["independentVerification"] is True
+            and independent_verification
         )
         admitted = base_admitted and not final_authorizing_role
+        execution_authorized = (
+            admitted
+            and realization["executionDisposition"] == "explicit-read-only"
+            and realization["availability"] == "available"
+        )
+        unavailable = (
+            admitted
+            and realization["executionDisposition"] == "classifier-only"
+            and realization["availability"] == "unavailable"
+        )
     except (KeyError, OSError, TypeError, ValueError):
         realization = {}
         task = None
         admitted = False
         base_admitted = False
         final_authorizing_role = False
+        execution_authorized = False
+        independent_verification = False
+        unavailable = False
 
     return _external_dispatch_decision(
-        status="external-required" if admitted else "denied",
+        status=(
+            "external-authorized"
+            if execution_authorized
+            else (
+                "unavailable"
+                if unavailable
+                else ("external-required" if admitted else "denied")
+            )
+        ),
         stable_id=(
             None
             if admitted
@@ -959,6 +1004,8 @@ def resolve_external_dispatch(
             else None
         ),
         final_authorizing_role=final_authorizing_role,
+        execution_authorized=execution_authorized,
+        independent_verification=independent_verification,
     )
 
 

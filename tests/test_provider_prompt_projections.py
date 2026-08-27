@@ -94,6 +94,17 @@ STOCK_F874_PROJECTION_SHA256 = {
     "process_supervision/process_runner.py": "8fb478d0767622ed71655242b7e7bf519ca990a487f0af93156f95075346cdb6",
     "provider-prompt-projections.v1.json": "6f9ed1cbe5e25009febd3cb07303706c8b65e3bee449348c9654aff10253f572",
 }
+STOCK_9A63_PROJECTION_SHA256 = {
+    "provider_prompt.py": "e5c57101463372e01625a4a1e882feb422a365111d016987913f34a09d6925cc",
+    "process_supervision/process_runner.py": "422d7f98c933930c3dccb3bb022839bc1c6db313811d15e16ed724c514ca4fb2",
+    "invoke-codex-prompt.py": "0b085a6fd0e28a5a486c8ef25bf52d4c69123d94cc8712d63dd30deadcc5f665",
+    "invoke-claude-prompt.py": "3250c9a85e36ab2e57a218688c5d7d3cfed59552c1f2bad7eb52f45370df80f3",
+    "invoke-kimi-prompt.py": "05679dac1daded511debf617e8f1189dd941d21a5d1c7f6e3dd3ec21d4c0bc75",
+    "invoke-grok-prompt.py": "1f0f4f6bb03d816b3f40ff56ebe71973301d2d7104ef1d7f335b1ffa0b248559",
+    "external-prompt-governance.md": "c7a59ccec7d6e46be76584a107b0a5b30b249368b4f0958cb78177962dc34b00",
+    "external-role-taxonomy.v1.json": "c26585be7117568e2e61c3904ddf7192e81eebdc3ab72b29d9cab17e3a7ab647",
+    "provider-prompt-projections.v1.json": "bdf58192e9df158e674febeee4a4e977e69792757f5fbf1a70529ab38a615973",
+}
 
 
 def _authored_transport_path(root: Path, name: str) -> Path:
@@ -970,6 +981,7 @@ def test_exact_8f92_transport_set_is_one_atomic_prior_plan(tmp_path: Path) -> No
     assert tuple(name for name, _payload in staged.pending_files) == (
         "provider_prompt.py",
         "process_supervision/process_runner.py",
+        "external-role-taxonomy.v1.json",
     )
     assert staged.manifest_pending is True
     assert {
@@ -985,12 +997,25 @@ def test_exact_8f92_transport_set_is_one_atomic_prior_plan(tmp_path: Path) -> No
         (
             "d1309ee5",
             STOCK_D130_PROJECTION_SHA256,
-            ("provider_prompt.py", "process_supervision/process_runner.py"),
+            (
+                "provider_prompt.py",
+                "process_supervision/process_runner.py",
+                "external-role-taxonomy.v1.json",
+            ),
         ),
         (
             "f87414e7",
             STOCK_F874_PROJECTION_SHA256,
-            ("provider_prompt.py", "process_supervision/process_runner.py"),
+            (
+                "provider_prompt.py",
+                "process_supervision/process_runner.py",
+                "external-role-taxonomy.v1.json",
+            ),
+        ),
+        (
+            "9a637574",
+            STOCK_9A63_PROJECTION_SHA256,
+            ("provider_prompt.py", "external-role-taxonomy.v1.json"),
         ),
     ),
 )
@@ -1035,6 +1060,7 @@ def test_exact_published_transport_set_is_one_atomic_prior_plan(
     (
         ("d1309ee5", STOCK_D130_PROJECTION_SHA256),
         ("f87414e7", STOCK_F874_PROJECTION_SHA256),
+        ("9a637574", STOCK_9A63_PROJECTION_SHA256),
     ),
 )
 def test_published_transport_prior_rejects_a_customized_member(
@@ -1069,6 +1095,7 @@ def test_published_transport_prior_rejects_a_customized_member(
     (
         ("d1309ee5", STOCK_D130_PROJECTION_SHA256),
         ("f87414e7", STOCK_F874_PROJECTION_SHA256),
+        ("9a637574", STOCK_9A63_PROJECTION_SHA256),
     ),
 )
 def test_published_transport_migration_failure_restores_bytes_and_identities(

@@ -71,6 +71,26 @@ E_EXTERNAL_PROVIDER_WINDOWS_NATIVE_ARGV_UNAVAILABLE = (
     "E_EXTERNAL_PROVIDER_WINDOWS_NATIVE_ARGV_UNAVAILABLE"
 )
 EXTERNAL_PROVIDER_NAMES = frozenset({"codex", "claude", "kimi"})
+POLICY_BOUND_EXTERNAL_PROVIDERS = frozenset({"kimi", "grok"})
+_EXTERNAL_DISPATCH_DECISION_FIELDS = frozenset(
+    {
+        "schemaVersion",
+        "status",
+        "stableId",
+        "provider",
+        "taskClass",
+        "role",
+        "requiredModelTier",
+        "requiredEffort",
+        "mutationClass",
+        "nativeEffort",
+        "effortMappingLoss",
+        "finalAuthorizingRole",
+        "executionAuthorized",
+        "independentVerification",
+        "fallback",
+    }
+)
 KIMI_WINDOWS_PROFILE_V1 = KimiWindowsProfileV1
 KIMI_EXECUTABLE_BINDING_SCHEMA_V1 = "orchestrarium.kimi-executable-binding.v1"
 KIMI_EXECUTABLE_BINDING_FILENAME_V1 = "executable-binding-v1.json"
@@ -149,7 +169,7 @@ EXTERNAL_UNAVAILABLE_IDS = {
 }
 EXTERNAL_ROLE_TAXONOMY_NAME = "external-role-taxonomy.v1.json"
 EXTERNAL_ROLE_TAXONOMY_MAX_BYTES = 64 * 1024
-EXTERNAL_ROLE_TAXONOMY_SHA256 = "c26585be7117568e2e61c3904ddf7192e81eebdc3ab72b29d9cab17e3a7ab647"
+EXTERNAL_ROLE_TAXONOMY_SHA256 = "51192eca72784dfcbc2d53596e143ea25856db9e7336031a25d89e9e4fdf85ce"
 
 
 @dataclass
@@ -177,6 +197,16 @@ class ExternalRoleProvenance:
 
     assigned_role: str
     execution_role: str
+
+
+@dataclass(frozen=True)
+class PolicyBoundLaunch:
+    control: Control
+    topic: str
+    flags: list[str]
+    model: str
+    effort: str
+    role_provenance: ExternalRoleProvenance
 
 
 @dataclass(frozen=True)
@@ -315,6 +345,8 @@ def parse_control(argv: list[str], *, external: bool = False) -> Control:
                 continue
             else:
                 parsed_value = value
+            if external and attr in {"task_class", "role"} and attr in seen_values:
+                raise ValueError(f"duplicate values for {token}")
             if attr in seen_values and seen_values[attr] != parsed_value:
                 raise ValueError(f"conflicting values for {token}")
             seen_values[attr] = parsed_value
@@ -338,6 +370,10 @@ def parse_control(argv: list[str], *, external: bool = False) -> Control:
         )
     if result.result_max_bytes > result.capture_max_bytes:
         raise ValueError("--result-max-bytes must not exceed --capture-max-bytes")
+    if external and (not result.task_class or not result.role):
+        raise ValueError(
+            "E_EXTERNAL_DISPATCH_POLICY_DENIED: --task-class and --role are required"
+        )
     return result
 
 
@@ -468,7 +504,7 @@ def _external_role_taxonomy() -> tuple[set[str], set[str], set[str], set[str]]:
         if document["schemaVersion"] != 1 or not isinstance(document["roles"], dict):
             raise ValueError("taxonomy version")
         mapping = document["roles"]
-        if len(mapping) != 33 or any(
+        if len(mapping) != 34 or any(
             not isinstance(role, str)
             or not role
             or lane not in {"consultant", "external-worker", "external-reviewer", "none"}
@@ -518,6 +554,91 @@ def external_role_provenance(control: Control, provider: str) -> ExternalRolePro
     else:
         execution = "none"
     return ExternalRoleProvenance(assigned, execution)
+
+
+def _load_external_dispatch_resolver() -> object:
+    """Load only the ordinary resolver sibling paired with this wrapper."""
+
+    resolver_path = Path(__file__).resolve().with_name("resolve-agents-mode.py")
+    try:
+        validate_no_reparse_components(resolver_path)
+        metadata = resolver_path.lstat()
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or stat.S_ISLNK(metadata.st_mode)
+            or _metadata_is_reparse(metadata)
+        ):
+            raise ValueError("resolver is not ordinary")
+        spec = importlib.util.spec_from_file_location(
+            "_orchestrarium_external_dispatch_resolver", resolver_path
+        )
+        if spec is None or spec.loader is None:
+            raise ValueError("resolver cannot load")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        try:
+            spec.loader.exec_module(module)
+        finally:
+            sys.modules.pop(spec.name, None)
+        if not callable(getattr(module, "resolve_external_dispatch", None)):
+            raise ValueError("resolver API")
+        return module
+    except Exception:
+        raise ValueError("E_EXTERNAL_DISPATCH_POLICY_DENIED") from None
+
+
+def _policy_bound_external_control(provider: str, control: Control) -> Control:
+    """Authorize one Kimi/Grok invocation from the shared policy owner only."""
+
+    if not control.task_class or not control.role:
+        raise ValueError("E_EXTERNAL_DISPATCH_POLICY_DENIED")
+    if control.ledger_role_explicit and control.ledger_role != control.role:
+        raise ValueError("E_EXTERNAL_DISPATCH_POLICY_DENIED")
+    try:
+        resolver = _load_external_dispatch_resolver()
+        decision = resolver.resolve_external_dispatch(
+            provider, control.task_class, control.role
+        )
+    except Exception:
+        raise ValueError("E_EXTERNAL_DISPATCH_POLICY_DENIED") from None
+    if (
+        not isinstance(decision, dict)
+        or set(decision) != _EXTERNAL_DISPATCH_DECISION_FIELDS
+        or decision.get("schemaVersion") != 1
+        or decision.get("provider") != provider
+        or decision.get("taskClass") != control.task_class
+        or decision.get("role") != control.role
+        or decision.get("status") != "external-authorized"
+        or decision.get("executionAuthorized") is not True
+        or decision.get("mutationClass") != "read-only"
+        or decision.get("finalAuthorizingRole") is not False
+        or decision.get("independentVerification") is not True
+        or decision.get("fallback") != "none"
+        or decision.get("stableId") is not None
+    ):
+        raise ValueError("E_EXTERNAL_DISPATCH_POLICY_DENIED")
+    return replace(control, ledger_role=control.role, ledger_role_explicit=True)
+
+
+def _prevalidate_policy_bound_external_launch(
+    provider: str, argv: list[str]
+) -> PolicyBoundLaunch:
+    control = parse_control(argv, external=True)
+    topic = validate_topic(control.topic)
+    if control.ledger_closes:
+        raise ValueError(
+            "E_EXTERNAL_CLOSES_FORBIDDEN: external provider results cannot close ledger runs"
+        )
+    control = _policy_bound_external_control(provider, control)
+    flags, model, effort = resolved_profile(provider, control.provider_flags)
+    return PolicyBoundLaunch(
+        control,
+        topic,
+        flags,
+        model,
+        effort,
+        external_role_provenance(control, provider),
+    )
 
 
 def require_transport_projection_parity() -> None:
@@ -2510,32 +2631,55 @@ def settle_initialized_setup_failure(
 def launch(provider: str, argv: list[str]) -> int:
     """Provider-launch composition root and sole owner of the injected runner."""
 
-    if provider == "kimi" and os.name != "nt":
-        return fail("E_KIMI_WINDOWS_ONLY: Kimi bundle review is Windows-only")
+    if provider in POLICY_BOUND_EXTERNAL_PROVIDERS:
+        try:
+            prevalidated = _prevalidate_policy_bound_external_launch(provider, argv)
+        except ValueError as exc:
+            return fail(str(exc))
+        if provider == "kimi" and os.name != "nt":
+            return fail("E_KIMI_WINDOWS_ONLY: Kimi bundle review is Windows-only")
+        with ProcessRunnerV1() as runner:
+            return _launch_with_runner(
+                provider, argv, runner, prevalidated=prevalidated
+            )
 
     with ProcessRunnerV1() as runner:
         return _launch_with_runner(provider, argv, runner)
 
 
 def _launch_with_runner(
-    provider: str, argv: list[str], runner: ProcessRunnerV1
+    provider: str,
+    argv: list[str],
+    runner: ProcessRunnerV1,
+    *,
+    prevalidated: PolicyBoundLaunch | None = None,
 ) -> int:
-    unavailable = EXTERNAL_UNAVAILABLE_IDS.get(provider)
-    if unavailable is not None:
-        return fail(f"{unavailable}: provider execution is unavailable")
-    try:
-        control = parse_control(argv)
-        topic = validate_topic(control.topic)
-        flags, model, effort = resolved_profile(provider, control.provider_flags)
-    except ValueError as exc:
-        return fail(str(exc))
+    if prevalidated is None:
+        unavailable = EXTERNAL_UNAVAILABLE_IDS.get(provider)
+        if unavailable is not None:
+            return fail(f"{unavailable}: provider execution is unavailable")
+        try:
+            control = parse_control(argv)
+            topic = validate_topic(control.topic)
+            flags, model, effort = resolved_profile(provider, control.provider_flags)
+        except ValueError as exc:
+            return fail(str(exc))
 
-    if control.ledger_closes:
-        return fail("E_EXTERNAL_CLOSES_FORBIDDEN: external provider results cannot close ledger runs")
-    try:
-        role_provenance = external_role_provenance(control, provider)
-    except ValueError as exc:
-        return fail(str(exc))
+        if control.ledger_closes:
+            return fail(
+                "E_EXTERNAL_CLOSES_FORBIDDEN: external provider results cannot close ledger runs"
+            )
+        try:
+            role_provenance = external_role_provenance(control, provider)
+        except ValueError as exc:
+            return fail(str(exc))
+    else:
+        control = prevalidated.control
+        topic = prevalidated.topic
+        flags = prevalidated.flags
+        model = prevalidated.model
+        effort = prevalidated.effort
+        role_provenance = prevalidated.role_provenance
 
     try:
         auth_configuration = resolve_provider_auth_configuration(provider)
