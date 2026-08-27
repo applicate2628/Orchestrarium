@@ -4,6 +4,7 @@ import importlib.util
 import sys
 import tomllib
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -12,6 +13,14 @@ ROOT = Path(__file__).resolve().parents[1]
 OWNER_PATH = ROOT / "scripts" / "provider_prompt.py"
 WRAPPER_PATH = ROOT / "scripts" / "invoke-kimi-prompt.py"
 INSTALLER_PATH = ROOT / "scripts" / "production_installer.py"
+K3_METADATA_TOML = (
+    'max_context_size = 1048576\n'
+    'capabilities = ["thinking", "always_thinking", "image_in", "video_in", "tool_use"]\n'
+    'display_name = "K3"\n'
+    'support_efforts = ["low", "high", "max"]\n'
+    'default_effort = "high"\n'
+)
+THINKING_TOML = '[thinking]\nenabled = true\neffort = "high"\n'
 
 
 def _load_owner():
@@ -101,6 +110,106 @@ def test_kimi_bundle_is_no_tools_and_no_subagents(tmp_path: Path) -> None:
     assert text == expected + "Review the sealed context."
 
 
+@pytest.mark.parametrize(
+    "verdict,expected",
+    (
+        ("PASS", ("completed", "PASS", "COMPLETE:PASS")),
+        ("REVISE", ("revise", "REVISE", "COMPLETE:REVISE")),
+        ("BLOCKED", ("blocked", "BLOCKED", "COMPLETE:BLOCKED")),
+    ),
+)
+def test_kimi_terminal_accepts_observed_decorated_final_gate(
+    tmp_path: Path, verdict: str, expected: tuple[str, str, str]
+) -> None:
+    owner = _load_owner()
+
+    terminal, result_text = owner.materialize_terminal(
+        SimpleNamespace(prompt_path=tmp_path / "result.md"),
+        "kimi",
+        0,
+        1024,
+        stdout=f"\u2022 KIMI_WRAPPER_SMOKE=PASS\n  GATE: {verdict}\n\n".encode(),
+        stderr=b"",
+    )
+
+    assert result_text.endswith(f"  GATE: {verdict}\n\n")
+    assert (terminal.status, terminal.gate, terminal.token) == expected
+
+
+def test_kimi_terminal_allows_prose_with_a_nonleading_gate_reference(
+    tmp_path: Path,
+) -> None:
+    owner = _load_owner()
+
+    terminal, _result_text = owner.materialize_terminal(
+        SimpleNamespace(prompt_path=tmp_path / "result.md"),
+        "kimi",
+        0,
+        1024,
+        stdout=b"The prior GATE: REVISE is historical prose.\n  GATE: PASS\n",
+        stderr=b"",
+    )
+
+    assert (terminal.status, terminal.gate, terminal.token) == (
+        "completed",
+        "PASS",
+        "COMPLETE:PASS",
+    )
+
+
+@pytest.mark.parametrize(
+    "stdout",
+    (
+        b"GATE: PASS\ntrailing prose\n",
+        b"  GATE: MAYBE\n  GATE: PASS\n",
+        b"    GATE: REVISE\n  GATE: PASS\n",
+        b"GATE : REVISE\n  GATE: PASS\n",
+        b"  GATE: PASS\n  GATE: PASS\n",
+        b"  GATE: PASS\n  GATE: REVISE\n",
+        b"  GATE: PASS\n  GATE: BLOCKED\n",
+        b"    GATE: PASS\n",
+    ),
+)
+def test_kimi_terminal_rejects_nonfinal_or_conflicting_decorated_gates(
+    tmp_path: Path, stdout: bytes
+) -> None:
+    owner = _load_owner()
+
+    terminal, _result_text = owner.materialize_terminal(
+        SimpleNamespace(prompt_path=tmp_path / "result.md"),
+        "kimi",
+        0,
+        1024,
+        stdout=stdout,
+        stderr=b"",
+    )
+
+    assert (terminal.status, terminal.gate, terminal.token) == (
+        "blocked",
+        "none",
+        "UNVERIFIED:no-gate-line",
+    )
+
+
+def test_generic_terminal_does_not_accept_kimi_renderer_decoration(tmp_path: Path) -> None:
+    owner = _load_owner()
+
+    terminal, _result_text = owner.materialize_terminal(
+        SimpleNamespace(prompt_path=tmp_path / "result.md"),
+        "claude",
+        0,
+        1024,
+        stdout=b"\xe2\x80\xa2 KIMI_WRAPPER_SMOKE=PASS\n  GATE: PASS\n",
+        stderr=b"",
+    )
+
+    assert (terminal.status, terminal.gate, terminal.token) == (
+        "blocked",
+        "none",
+        "UNVERIFIED:no-gate-line",
+    )
+
+
 def _write_kimi_home(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -109,6 +218,8 @@ def _write_kimi_home(
     credential: bool = True,
     provider_type: str = "kimi",
     model_value: str = "k3",
+    model_metadata: str = K3_METADATA_TOML,
+    thinking: str = THINKING_TOML,
 ) -> tuple[Path, Path]:
     user_home = tmp_path / "user"
     source = user_home / ".kimi-code"
@@ -120,7 +231,8 @@ def _write_kimi_home(
         f"type = {provider_type!r}\nbase_url = \"https://api.example.invalid\"\n"
         f"oauth = {oauth}\n\n"
         "[models.\"kimi-code/k3\"]\n"
-        f"model = {model_value!r}\nprovider = \"managed:kimi-code\"\n",
+        f"model = {model_value!r}\nprovider = \"managed:kimi-code\"\n"
+        f"{model_metadata}{thinking}",
         encoding="utf-8",
     )
     if credential:
@@ -156,6 +268,70 @@ def test_kimi_private_home_copies_only_exact_oauth_shape_and_token_needles(
     assert "USERPROFILE" not in configuration.child_environment
     assert configuration.child_environment["KIMI_CODE_HOME"] == str(private_home)
     assert configuration.child_environment["DO_NOT_TRACK"] == "1"
+
+
+def test_kimi_private_home_preserves_only_complete_allowlisted_k3_and_thinking(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    owner = _load_owner()
+    _source, run_dir = _write_kimi_home(
+        monkeypatch,
+        tmp_path,
+        model_metadata=K3_METADATA_TOML + 'unknown_model_sentinel = "must-not-copy"\n',
+        thinking=THINKING_TOML + 'unknown_thinking_sentinel = "must-not-copy"\n',
+    )
+
+    owner._kimi_sanitized_runtime_home(run_dir)
+
+    generated = tomllib.loads(
+        (run_dir / "kimi-code-home" / "config.toml").read_text(encoding="utf-8")
+    )
+    model = generated["models"]["kimi-code/k3"]
+    assert model == {
+        "model": "k3",
+        "provider": "managed:kimi-code",
+        "max_context_size": 1048576,
+        "capabilities": [
+            "thinking",
+            "always_thinking",
+            "image_in",
+            "video_in",
+            "tool_use",
+        ],
+        "display_name": "K3",
+        "support_efforts": ["low", "high", "max"],
+        "default_effort": "high",
+    }
+    assert generated["thinking"] == {"enabled": True, "effort": "high"}
+    assert "unknown_model_sentinel" not in model
+    assert "unknown_thinking_sentinel" not in generated["thinking"]
+
+
+@pytest.mark.parametrize(
+    "model_metadata,thinking",
+    (
+        (K3_METADATA_TOML.replace('default_effort = "high"\n', ""), THINKING_TOML),
+        (K3_METADATA_TOML.replace("max_context_size = 1048576", 'max_context_size = "bad"'), THINKING_TOML),
+        (K3_METADATA_TOML, '[thinking]\nenabled = true\n'),
+        (K3_METADATA_TOML, '[thinking]\nenabled = "true"\neffort = "high"\n'),
+        (K3_METADATA_TOML, '[thinking]\nenabled = true\neffort = "unsupported"\n'),
+    ),
+)
+def test_kimi_private_home_rejects_missing_or_malformed_required_k3_or_thinking(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    model_metadata: str,
+    thinking: str,
+) -> None:
+    owner = _load_owner()
+    _source, run_dir = _write_kimi_home(
+        monkeypatch, tmp_path, model_metadata=model_metadata, thinking=thinking
+    )
+
+    with pytest.raises(ValueError, match="E_KIMI_AUTH_STORAGE_INVALID"):
+        owner._kimi_sanitized_runtime_home(run_dir)
+
+    assert not (run_dir / "kimi-code-home").exists()
 
 
 def test_kimi_private_home_canonicalizes_case_equivalent_system_root(

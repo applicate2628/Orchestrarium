@@ -46,11 +46,20 @@ except ModuleNotFoundError:
     )
 
 EFFORTS = frozenset({"low", "medium", "high", "xhigh", "max"})
+KIMI_MODEL_METADATA_FIELDS = (
+    "max_context_size",
+    "capabilities",
+    "display_name",
+    "support_efforts",
+    "default_effort",
+)
 ERROR_MARKER = re.compile(
     r"^([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}"
     r"(\.[0-9]+)?Z? )?(ERROR|FATAL|API Error)"
     r"(: | [A-Za-z0-9_]+(::[A-Za-z0-9_]+)*: )"
 )
+KIMI_RENDERED_GATE = re.compile(r"^(?:\u2022 |  )?GATE: (PASS|REVISE|BLOCKED)$")
+KIMI_GATE_LIKE = re.compile(r"^[ \t]*GATE[ \t]*:")
 INVALID_SLUG = re.compile(r'[\\/:\*\?"<>\|\x00]')
 RESULT_MAX_BYTES_DEFAULT = 1024 * 1024
 RESULT_MAX_BYTES_HARD = 16 * 1024 * 1024
@@ -920,6 +929,44 @@ def _private_file(path: Path, data: bytes) -> None:
         os.fsync(stream.fileno())
 
 
+def _kimi_validated_model_projection(model: dict[str, object]) -> dict[str, object]:
+    """Copy only complete, typed K3 metadata into the private config."""
+
+    metadata = {name: model.get(name) for name in KIMI_MODEL_METADATA_FIELDS}
+    capabilities = metadata["capabilities"]
+    support_efforts = metadata["support_efforts"]
+    if (
+        not isinstance(metadata["max_context_size"], int)
+        or isinstance(metadata["max_context_size"], bool)
+        or metadata["max_context_size"] <= 0
+        or not isinstance(capabilities, list)
+        or not capabilities
+        or any(not isinstance(capability, str) or not capability for capability in capabilities)
+        or not isinstance(metadata["display_name"], str)
+        or not metadata["display_name"]
+        or not isinstance(support_efforts, list)
+        or not support_efforts
+        or any(not isinstance(effort, str) or effort not in EFFORTS for effort in support_efforts)
+        or not isinstance(metadata["default_effort"], str)
+        or metadata["default_effort"] not in EFFORTS
+    ):
+        raise ValueError("model metadata")
+    return metadata
+
+
+def _kimi_validated_thinking_projection(config: dict[str, object]) -> dict[str, object]:
+    """Copy only the typed top-level Kimi thinking controls."""
+
+    thinking = config.get("thinking")
+    if not isinstance(thinking, dict):
+        raise ValueError("thinking configuration")
+    enabled = thinking.get("enabled")
+    effort = thinking.get("effort")
+    if not isinstance(enabled, bool) or not isinstance(effort, str) or effort not in EFFORTS:
+        raise ValueError("thinking configuration")
+    return {"enabled": enabled, "effort": effort}
+
+
 def _kimi_sanitized_runtime_home(run_dir: Path) -> ProviderAuthConfiguration:
     """Copy exactly the selected Kimi OAuth record into an empty private home."""
 
@@ -944,6 +991,8 @@ def _kimi_sanitized_runtime_home(run_dir: Path) -> ProviderAuthConfiguration:
             or not isinstance(oauth_reference.get("key"), str)
         ):
             raise ValueError("configuration")
+        model_metadata = _kimi_validated_model_projection(model)
+        thinking = _kimi_validated_thinking_projection(config)
         oauth_key = oauth_reference["key"]
         if not re.fullmatch(r"oauth/[A-Za-z0-9][A-Za-z0-9._-]{0,127}", oauth_key):
             raise ValueError("credential reference")
@@ -984,6 +1033,14 @@ def _kimi_sanitized_runtime_home(run_dir: Path) -> ProviderAuthConfiguration:
             '[models."kimi-code/k3"]\n'
             'model = "k3"\n'
             'provider = "managed:kimi-code"\n'
+            f'max_context_size = {model_metadata["max_context_size"]}\n'
+            f'capabilities = {json.dumps(model_metadata["capabilities"])}\n'
+            f'display_name = {json.dumps(model_metadata["display_name"])}\n'
+            f'support_efforts = {json.dumps(model_metadata["support_efforts"])}\n'
+            f'default_effort = {json.dumps(model_metadata["default_effort"])}\n\n'
+            "[thinking]\n"
+            f'enabled = {json.dumps(thinking["enabled"])}\n'
+            f'effort = {json.dumps(thinking["effort"])}\n'
         ).encode("utf-8")
         _private_file(private_home / "config.toml", rendered)
         _private_file(credential_dir / oauth_filename, oauth_bytes)
@@ -1659,6 +1716,30 @@ def _final_nonblank_line(text: str) -> str:
     return lines[-1] if lines else ""
 
 
+def _kimi_gate_like(line: str) -> bool:
+    """Classify only a bounded renderer-decorated leading gate attempt."""
+
+    if line.startswith("\u2022 "):
+        line = line.removeprefix("\u2022 ")
+    elif line.startswith("  "):
+        line = line.removeprefix("  ")
+    return KIMI_GATE_LIKE.match(line) is not None
+
+
+def _kimi_final_gate(text: str) -> str | None:
+    """Accept only Kimi's known final-line decoration and one consistent verdict."""
+
+    lines = [line.rstrip("\r") for line in text.splitlines() if line.strip()]
+    if not lines:
+        return None
+    final = KIMI_RENDERED_GATE.fullmatch(lines[-1])
+    if final is None:
+        return None
+    gate = final.group(1)
+    gate_like = [line for line in lines if _kimi_gate_like(line)]
+    return gate if gate_like == [lines[-1]] else None
+
+
 def parse_codex_jsonl_result(data: bytes, result_max_bytes: int) -> bytes:
     if not data or not data.endswith(b"\n"):
         raise ResultMaterializationError("Codex JSONL is empty or truncated")
@@ -1891,6 +1972,20 @@ def materialize_terminal(
     elif marker_count:
         note = f"oracle: err markers present ({marker_count})"
         token = "UNVERIFIED:err-markers"
+    elif provider == "kimi":
+        kimi_gate = _kimi_final_gate(result_text)
+        if kimi_gate == "PASS":
+            status, gate, note = "completed", "PASS", "oracle: final-line Kimi GATE: PASS"
+            token = "COMPLETE:PASS"
+        elif kimi_gate == "REVISE":
+            status, gate, note = "revise", "REVISE", "oracle: final-line Kimi GATE: REVISE"
+            token = "COMPLETE:REVISE"
+        elif kimi_gate == "BLOCKED":
+            status, gate, note = "blocked", "BLOCKED", "oracle: final-line Kimi GATE: BLOCKED"
+            token = "COMPLETE:BLOCKED"
+        else:
+            note = "oracle: final line is not an anchored GATE verdict"
+            token = "UNVERIFIED:no-gate-line"
     elif final_line == "GATE: PASS":
         status, gate, note = "completed", "PASS", "oracle: final-line GATE: PASS"
         token = "COMPLETE:PASS"
