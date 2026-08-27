@@ -4,8 +4,9 @@
 Only Pytest exit 0 (tests passed) and exit 1 (tests failed) can represent valid
 test evidence. Operational exits such as interrupted, internal-error, usage-error,
 or no-tests-collected always block, even when JUnit contains failures. Retained
-known failures must preserve their normalized diagnostics. Reports are written
-atomically. Pure stdlib.
+known failures must preserve their normalized type, message, and body diagnostics.
+Lane roots and explicitly declared volatile paths are normalized before comparison.
+Reports are written atomically. Pure stdlib.
 """
 
 from __future__ import annotations
@@ -14,17 +15,19 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 import tempfile
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
+from typing import Pattern, Sequence
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 NONPASSING = {"failure", "error"}
 SKIPPED = {"skipped"}
 VALID_PYTEST_RESULT_EXITS = {0, 1}
+GIT_OBJECT_ID = re.compile(r"[0-9a-fA-F]{40}(?:[0-9a-fA-F]{24})?")
 
 
 class ComparisonError(RuntimeError):
@@ -38,6 +41,7 @@ class TestCaseResult:
     classname: str
     name: str
     file: str | None
+    outcome_type: str | None
     message: str | None
     details: str | None
 
@@ -46,21 +50,60 @@ def _normalise_path(value: str | None) -> str | None:
     return None if value is None else value.replace("\\", "/")
 
 
+def _canonical_root(value: str) -> str:
+    canonical = _normalise_path(value.rstrip("/\\"))
+    if not canonical:
+        raise ComparisonError("baseline and candidate roots must be non-empty")
+    return canonical
+
+
+def _root_variants(root: str) -> tuple[str, ...]:
+    stripped = root.rstrip("/\\")
+    variants = {
+        root,
+        stripped,
+        root.replace("\\", "/"),
+        root.replace("/", "\\"),
+        stripped.replace("\\", "/"),
+        stripped.replace("/", "\\"),
+    }
+    return tuple(sorted((value for value in variants if value), key=len, reverse=True))
+
+
+def _compile_volatile_patterns(values: Sequence[str]) -> tuple[Pattern[str], ...]:
+    patterns: list[Pattern[str]] = []
+    for value in values:
+        try:
+            pattern = re.compile(value)
+        except re.error as exc:
+            raise ComparisonError(f"invalid volatile pattern {value!r}: {exc}") from exc
+        if pattern.search("") is not None:
+            raise ComparisonError(
+                f"volatile pattern must not match empty text: {value!r}"
+            )
+        patterns.append(pattern)
+    return tuple(patterns)
+
+
 def _normalise_diagnostic(
     value: str | None,
     *,
+    root: str,
     ref: str,
+    volatile_patterns: Sequence[Pattern[str]],
 ) -> str | None:
     if value is None:
         return None
 
     text = value.replace("\r\n", "\n").replace("\r", "\n")
-    if ref:
+    for variant in _root_variants(root):
+        text = text.replace(variant, "<ROOT>")
+    if GIT_OBJECT_ID.fullmatch(ref):
         text = text.replace(ref, "<REF>")
+    for pattern in volatile_patterns:
+        text = pattern.sub("<VOLATILE>", text)
 
     lines = [line.rstrip(" \t") for line in text.split("\n")]
-    while lines and not lines[0]:
-        lines.pop(0)
     while lines and not lines[-1]:
         lines.pop()
     normalized = "\n".join(lines)
@@ -82,17 +125,29 @@ def _test_id(element: ET.Element) -> str:
     raise ComparisonError("JUnit testcase is missing classname, name, and file")
 
 
-def _status(element: ET.Element) -> tuple[str, str | None, str | None]:
+def _status(
+    element: ET.Element,
+) -> tuple[str, str | None, str | None, str | None]:
     failure = element.find("failure")
     if failure is not None:
-        return "failure", failure.get("message"), failure.text
+        return (
+            "failure",
+            failure.get("type"),
+            failure.get("message"),
+            failure.text,
+        )
     error = element.find("error")
     if error is not None:
-        return "error", error.get("message"), error.text
+        return "error", error.get("type"), error.get("message"), error.text
     skipped = element.find("skipped")
     if skipped is not None:
-        return "skipped", skipped.get("message"), skipped.text
-    return "passed", None, None
+        return (
+            "skipped",
+            skipped.get("type"),
+            skipped.get("message"),
+            skipped.text,
+        )
+    return "passed", None, None, None
 
 
 def parse_junit(path: Path) -> dict[str, TestCaseResult]:
@@ -106,13 +161,14 @@ def parse_junit(path: Path) -> dict[str, TestCaseResult]:
         test_id = _test_id(element)
         if test_id in results:
             raise ComparisonError(f"duplicate JUnit testcase ID in {path}: {test_id}")
-        status, message, details = _status(element)
+        status, outcome_type, message, details = _status(element)
         results[test_id] = TestCaseResult(
             test_id=test_id,
             status=status,
             classname=element.get("classname", ""),
             name=element.get("name", ""),
             file=_normalise_path(element.get("file")),
+            outcome_type=outcome_type,
             message=message,
             details=details,
         )
@@ -124,24 +180,56 @@ def parse_junit(path: Path) -> dict[str, TestCaseResult]:
 def _diagnostic(
     result: TestCaseResult,
     *,
+    root: str,
     ref: str,
-) -> tuple[str | None, str | None]:
+    volatile_patterns: Sequence[Pattern[str]],
+) -> tuple[str | None, str | None, str | None]:
     return (
-        _normalise_diagnostic(result.message, ref=ref),
-        _normalise_diagnostic(result.details, ref=ref),
+        _normalise_diagnostic(
+            result.outcome_type,
+            root=root,
+            ref=ref,
+            volatile_patterns=volatile_patterns,
+        ),
+        _normalise_diagnostic(
+            result.message,
+            root=root,
+            ref=ref,
+            volatile_patterns=volatile_patterns,
+        ),
+        _normalise_diagnostic(
+            result.details,
+            root=root,
+            ref=ref,
+            volatile_patterns=volatile_patterns,
+        ),
     )
+
+
+def _missing_diagnostic(diagnostic: tuple[str | None, ...]) -> bool:
+    return not any(part is not None for part in diagnostic)
 
 
 def _diagnostic_record(
     result: TestCaseResult,
     *,
+    root: str,
     ref: str,
+    volatile_patterns: Sequence[Pattern[str]],
 ) -> dict[str, object]:
-    message, details = _diagnostic(result, ref=ref)
+    outcome_type, message, details = _diagnostic(
+        result,
+        root=root,
+        ref=ref,
+        volatile_patterns=volatile_patterns,
+    )
     encoded = json.dumps(
-        [message, details], ensure_ascii=False, separators=(",", ":")
+        [outcome_type, message, details],
+        ensure_ascii=False,
+        separators=(",", ":"),
     ).encode("utf-8")
     return {
+        "type": outcome_type,
         "message": message,
         "sha256": hashlib.sha256(encoded).hexdigest(),
         "sizeBytes": len(encoded),
@@ -151,7 +239,9 @@ def _diagnostic_record(
 def _record(
     result: TestCaseResult,
     *,
+    root: str,
     ref: str,
+    volatile_patterns: Sequence[Pattern[str]],
 ) -> dict[str, object]:
     return {
         "id": result.test_id,
@@ -159,7 +249,12 @@ def _record(
         "classname": result.classname,
         "name": result.name,
         "file": result.file,
-        "diagnostic": _diagnostic_record(result, ref=ref),
+        "diagnostic": _diagnostic_record(
+            result,
+            root=root,
+            ref=ref,
+            volatile_patterns=volatile_patterns,
+        ),
     }
 
 
@@ -187,9 +282,18 @@ def compare(
     candidate_exit: int,
     baseline_ref: str,
     candidate_ref: str,
+    baseline_root: str,
+    candidate_root: str,
+    volatile_pattern_values: Sequence[str],
 ) -> dict[str, object]:
     if baseline_exit < 0 or candidate_exit < 0:
         raise ComparisonError("pytest exit codes must be non-negative")
+
+    canonical_baseline_root = _canonical_root(baseline_root)
+    canonical_candidate_root = _canonical_root(candidate_root)
+    if canonical_baseline_root == canonical_candidate_root:
+        raise ComparisonError("baseline and candidate roots must be distinct")
+    volatile_patterns = _compile_volatile_patterns(volatile_pattern_values)
 
     baseline_ids = set(baseline)
     candidate_ids = set(candidate)
@@ -225,19 +329,51 @@ def compare(
         for test_id in retained_failures
         if baseline[test_id].status != candidate[test_id].status
     )
+
+    baseline_diagnostics = {
+        test_id: _diagnostic(
+            baseline[test_id],
+            root=baseline_root,
+            ref=baseline_ref,
+            volatile_patterns=volatile_patterns,
+        )
+        for test_id in baseline_failures
+    }
+    candidate_diagnostics = {
+        test_id: _diagnostic(
+            candidate[test_id],
+            root=candidate_root,
+            ref=candidate_ref,
+            volatile_patterns=volatile_patterns,
+        )
+        for test_id in candidate_failures
+    }
+    missing_baseline_failure_diagnostics = sorted(
+        test_id
+        for test_id, diagnostic in baseline_diagnostics.items()
+        if _missing_diagnostic(diagnostic)
+    )
+    missing_candidate_failure_diagnostics = sorted(
+        test_id
+        for test_id, diagnostic in candidate_diagnostics.items()
+        if _missing_diagnostic(diagnostic)
+    )
+    missing_diagnostic_ids = set(missing_baseline_failure_diagnostics) | set(
+        missing_candidate_failure_diagnostics
+    )
     changed_known_failure_diagnostics = sorted(
         test_id
         for test_id in retained_failures
         if baseline[test_id].status == candidate[test_id].status
-        and _diagnostic(baseline[test_id], ref=baseline_ref)
-        != _diagnostic(candidate[test_id], ref=candidate_ref)
+        and test_id not in missing_diagnostic_ids
+        and baseline_diagnostics[test_id] != candidate_diagnostics[test_id]
     )
     unchanged_baseline_failures = sorted(
         test_id
         for test_id in retained_failures
         if baseline[test_id].status == candidate[test_id].status
-        and _diagnostic(baseline[test_id], ref=baseline_ref)
-        == _diagnostic(candidate[test_id], ref=candidate_ref)
+        and test_id not in missing_diagnostic_ids
+        and baseline_diagnostics[test_id] == candidate_diagnostics[test_id]
     )
 
     baseline_exit_contradiction = _exit_contradiction(
@@ -269,6 +405,8 @@ def compare(
         "maskedBaselineFailures": masked_failures,
         "passingTestRegressions": regressions,
         "changedKnownFailureKind": changed_known_failure_kind,
+        "missingBaselineFailureDiagnostics": missing_baseline_failure_diagnostics,
+        "missingCandidateFailureDiagnostics": missing_candidate_failure_diagnostics,
         "changedKnownFailureDiagnostics": changed_known_failure_diagnostics,
         "baselineExitContradiction": baseline_exit_contradiction,
         "candidateExitContradiction": candidate_exit_contradiction,
@@ -294,6 +432,14 @@ def compare(
             "skipped": sum(result.status == "skipped" for result in candidate.values()),
             "failures": len(candidate_failures),
         },
+        "normalization": {
+            "laneRoots": True,
+            "gitObjectIds": True,
+            "volatilePatterns": list(volatile_pattern_values),
+            "lineEndings": True,
+            "trailingHorizontalWhitespace": True,
+            "trailingBlankLines": True,
+        },
         "blockers": blockers,
         "observations": {
             "additionalCandidateTests": additional_candidate_tests,
@@ -302,11 +448,21 @@ def compare(
             "resolvedPytestExitCode": resolved_exit,
         },
         "baselineFailureDetails": [
-            _record(baseline[test_id], ref=baseline_ref)
+            _record(
+                baseline[test_id],
+                root=baseline_root,
+                ref=baseline_ref,
+                volatile_patterns=volatile_patterns,
+            )
             for test_id in sorted(baseline_failures)
         ],
         "candidateFailureDetails": [
-            _record(candidate[test_id], ref=candidate_ref)
+            _record(
+                candidate[test_id],
+                root=candidate_root,
+                ref=candidate_ref,
+                volatile_patterns=volatile_patterns,
+            )
             for test_id in sorted(candidate_failures)
         ],
         "verdict": verdict,
@@ -342,6 +498,9 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--candidate-exit", type=int, required=True)
     parser.add_argument("--baseline-ref", required=True)
     parser.add_argument("--candidate-ref", required=True)
+    parser.add_argument("--baseline-root", required=True)
+    parser.add_argument("--candidate-root", required=True)
+    parser.add_argument("--volatile-pattern", action="append", default=[])
     parser.add_argument("--output", type=Path, required=True)
     return parser.parse_args(argv)
 
@@ -356,6 +515,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             candidate_exit=args.candidate_exit,
             baseline_ref=args.baseline_ref,
             candidate_ref=args.candidate_ref,
+            baseline_root=args.baseline_root,
+            candidate_root=args.candidate_root,
+            volatile_pattern_values=args.volatile_pattern,
         )
         _atomic_write(args.output, _canonical_json(report).encode("utf-8"))
         print(

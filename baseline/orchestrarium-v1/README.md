@@ -25,6 +25,7 @@ set -euo pipefail
 
 BASELINE_ROOT=/absolute/path/to/baseline-worktree
 CANDIDATE_ROOT=/absolute/path/to/candidate-worktree
+REVIEWED_REF=<exact-40-character-candidate-commit-sha>
 BASELINE_ROOT="$(cd "$BASELINE_ROOT" && pwd -P)"
 CANDIDATE_ROOT="$(cd "$CANDIDATE_ROOT" && pwd -P)"
 
@@ -116,8 +117,28 @@ PIN_COMMIT="$(pin_value baseline.commitSha)"
 PIN_TREE="$(pin_value baseline.treeSha)"
 BASELINE_REF="$("$VERIFIER_GIT" -C "$BASELINE_ROOT" rev-parse HEAD)"
 BASELINE_TREE="$("$VERIFIER_GIT" -C "$BASELINE_ROOT" rev-parse 'HEAD^{tree}')"
+
+# BEGIN ORCHE_REVIEWED_CANDIDATE_GUARD
+REVIEWED_REF_INPUT="${REVIEWED_REF:?set REVIEWED_REF to the exact full candidate commit SHA under review}"
+RESOLVED_REVIEWED_REF="$("$VERIFIER_GIT" -C "$CANDIDATE_ROOT" rev-parse --verify "$REVIEWED_REF_INPUT^{commit}")" || {
+  echo "BLOCKED: REVIEWED_REF cannot be resolved in the candidate repository" >&2
+  exit 1
+}
+test "$REVIEWED_REF_INPUT" = "$RESOLVED_REVIEWED_REF" || {
+  echo "BLOCKED: REVIEWED_REF must be the exact full candidate commit SHA" >&2
+  exit 1
+}
+REVIEWED_REF="$RESOLVED_REVIEWED_REF"
 CANDIDATE_REF="$("$VERIFIER_GIT" -C "$CANDIDATE_ROOT" rev-parse HEAD)"
-REVIEWED_REF="$CANDIDATE_REF"
+test "$CANDIDATE_REF" = "$REVIEWED_REF" || {
+  echo "BLOCKED: candidate worktree HEAD does not match REVIEWED_REF" >&2
+  exit 1
+}
+test "$CANDIDATE_REF" != "$PIN_COMMIT" || {
+  echo "BLOCKED: candidate ref resolves to the pinned baseline" >&2
+  exit 1
+}
+# END ORCHE_REVIEWED_CANDIDATE_GUARD
 
 test "$BASELINE_REF" = "$PIN_COMMIT" || {
   echo "BLOCKED: baseline worktree ref does not match pinned commit" >&2
@@ -302,6 +323,10 @@ mkdir -p "$EVIDENCE_ROOT"
 Remove old XML before starting and require each current process to produce a fresh report.
 Only Pytest exit `0` (success) and `1` (test failures) are valid evidence. Operational exits
 `2`, `3`, `4`, `5`, timeout exit `124`, or unknown values block regardless of JUnit contents.
+Retained failures compare the JUnit `type`, `message`, and body/trace together. Normalization is
+limited to each lane's declared worktree root, exact Git object IDs, line endings, trailing
+horizontal whitespace, trailing blank lines, and the explicitly declared installer-regression UUID
+path below; other paths, exception types, values, and trace lines remain substantive evidence.
 
 ```bash
 rm -f "$OUTPUT_ROOT/baseline.xml" "$OUTPUT_ROOT/candidate.xml" \
@@ -334,6 +359,9 @@ test -f "$OUTPUT_ROOT/candidate.xml" || exit 2
   --candidate-exit "$candidate_exit" \
   --baseline-ref "$BASELINE_REF" \
   --candidate-ref "$CANDIDATE_REF" \
+  --baseline-root "$BASELINE_ROOT" \
+  --candidate-root "$CANDIDATE_ROOT" \
+  --volatile-pattern 'agents-mode-installer-regression[/\\][0-9a-f]{32}' \
   --output "$OUTPUT_ROOT/pytest-comparison.json"
 ```
 

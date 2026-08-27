@@ -50,7 +50,7 @@
     },
     "pytestComparator": {
       "deterministic": true,
-      "gitBlobSha": "5be8f2dd018d01f67ec1589472306e5978ff980d",
+      "gitBlobSha": "2fadfe39873a1c97241230e9012309a9f1c55a01",
       "materialization": "git-cat-file-reviewed-tree-blob",
       "path": "baseline/orchestrarium-v1/tooling/compare_pytest_baseline.py",
       "runtimeMutation": false,

@@ -31,6 +31,9 @@ def read_section(start_marker,end_marker):
 def read_guard():
     return read_section('# BEGIN ORCHE_CLEAN_WORKTREE_GUARD','# END ORCHE_CLEAN_WORKTREE_GUARD')
 
+def read_reviewed_candidate_guard():
+    return read_section('# BEGIN ORCHE_REVIEWED_CANDIDATE_GUARD','# END ORCHE_REVIEWED_CANDIDATE_GUARD')
+
 def read_timeout_runner():
     return read_section('# BEGIN ORCHE_TIMEOUT_RUNNER','# END ORCHE_TIMEOUT_RUNNER')
 
@@ -70,6 +73,21 @@ class BaselinePinTests(unittest.TestCase):
             script='VERIFIER_GIT=git\n'+read_guard()+"\nassert_clean_worktree \"$1\"\n"; r=subprocess.run(['bash','-c',script,'bash',str(repo)],text=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
             self.assertNotEqual(r.returncode,0); self.assertIn('BLOCKED: dirty worktree',r.stderr)
 
+    def test_reviewed_candidate_guard_rejects_baseline_and_mismatched_heads(self):
+        with tempfile.TemporaryDirectory() as d:
+            repo=Path(d)/'repo'; repo.mkdir(); subprocess.run(['git','init','-q'],cwd=repo,check=True); subprocess.run(['git','config','user.name','Test'],cwd=repo,check=True); subprocess.run(['git','config','user.email','t@example.invalid'],cwd=repo,check=True)
+            (repo/'tracked.txt').write_text('baseline\n'); subprocess.run(['git','add','.'],cwd=repo,check=True); subprocess.run(['git','commit','-qm','baseline'],cwd=repo,check=True); baseline=subprocess.check_output(['git','rev-parse','HEAD'],cwd=repo,text=True).strip()
+            (repo/'tracked.txt').write_text('candidate\n'); subprocess.run(['git','commit','-qam','candidate'],cwd=repo,check=True); candidate=subprocess.check_output(['git','rev-parse','HEAD'],cwd=repo,text=True).strip()
+            guard=read_reviewed_candidate_guard()
+            common=f'VERIFIER_GIT=git\nCANDIDATE_ROOT={repo!s}\nPIN_COMMIT={baseline}\n'
+            ok=subprocess.run(['bash','-c',common+f'REVIEWED_REF={candidate}\n'+guard],text=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+            self.assertEqual(ok.returncode,0,ok.stderr)
+            mismatch=subprocess.run(['bash','-c',common+f'REVIEWED_REF={baseline}\n'+guard],text=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+            self.assertNotEqual(mismatch.returncode,0); self.assertIn('candidate worktree HEAD does not match REVIEWED_REF',mismatch.stderr)
+            subprocess.run(['git','checkout','-q',baseline],cwd=repo,check=True)
+            self_compare=subprocess.run(['bash','-c',common+f'REVIEWED_REF={baseline}\n'+guard],text=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+            self.assertNotEqual(self_compare.returncode,0); self.assertIn('candidate ref resolves to the pinned baseline',self_compare.stderr)
+
     @unittest.skipIf(os.name=='nt', 'POSIX process-group timeout runner')
     def test_timeout_runner_terminates_hanging_command(self):
         runner=read_timeout_runner()
@@ -84,7 +102,7 @@ class BaselinePinTests(unittest.TestCase):
         self.assertIn('git-cat-file-reviewed-tree-blob',PIN_PATH.read_text()); self.assertIn('ls-tree "$REVIEWED_REF"',readme); self.assertNotIn('tooling.$key.owningCommit',readme)
         self.assertIn('PATH="$VERIFIER_PATH"',readme); self.assertIn('export PATH="$VERIFIER_PATH"',readme); self.assertNotIn('PATH="$PATH"',readme); self.assertIn('"$BASELINE_ROOT"/*|"$CANDIDATE_ROOT"/*',readme)
         self.assertLess(readme.index('assert_external_tool "$VERIFIER_PYTHON" || exit 1'),readme.index('pin_value()'))
-        self.assertLess(readme.index('assert_external_tool "$VERIFIER_GIT" || exit 1'),readme.index('REVIEWED_REF="$CANDIDATE_REF"'))
+        self.assertLess(readme.index('assert_external_tool "$VERIFIER_GIT" || exit 1'),readme.index('# BEGIN ORCHE_REVIEWED_CANDIDATE_GUARD'))
         self.assertIn('assert_clean_worktree "$BASELINE_ROOT" || exit 1',readme); self.assertIn('assert_clean_worktree "$CANDIDATE_ROOT" || exit 1',readme)
         self.assertIn('status --porcelain=v1 --untracked-files=all',readme); self.assertIn('ls-files --others --ignored --exclude-standard',readme); self.assertIn('BLOCKED: dirty worktree',readme)
         for spec in IGNORED_EXECUTABLE_PATHS: self.assertIn(spec,readme)
@@ -93,6 +111,11 @@ class BaselinePinTests(unittest.TestCase):
         self.assertIn('successful diagnostics',readme.lower()); self.assertIn('operational exits',readme.lower())
         self.assertIn('start_new_session=True',readme); self.assertIn('os.killpg',readme); self.assertIn('raise SystemExit(124)',readme); self.assertIn('ORCHE_COMMAND_TIMEOUT_SECONDS',readme)
         self.assertIn('--success-pattern "$success_pattern"',readme); self.assertIn('empty or unconditional `exit 0`',readme)
+        self.assertNotIn('REVIEWED_REF="$CANDIDATE_REF"',readme)
+        self.assertIn('candidate worktree HEAD does not match REVIEWED_REF',readme)
+        self.assertIn('candidate ref resolves to the pinned baseline',readme)
+        self.assertIn('--baseline-root "$BASELINE_ROOT"',readme); self.assertIn('--candidate-root "$CANDIDATE_ROOT"',readme)
+        self.assertIn("--volatile-pattern 'agents-mode-installer-regression[/\\\\][0-9a-f]{32}'",readme)
         for marker in VALIDATOR_MARKERS: self.assertIn(marker,readme)
         self.assertIn('scripts/check-publication-gate.py',readme); self.assertLess(readme.index('$knowledge-archivist'),readme.index('git push origin refs/tags/'))
 
