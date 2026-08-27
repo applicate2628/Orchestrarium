@@ -167,6 +167,9 @@ EXTERNAL_GOVERNANCE_END = b"END_ORCHESTRARIUM_EXTERNAL_GOVERNANCE_V1\n\n"
 EXTERNAL_UNAVAILABLE_IDS = {
     "grok": "E_GROK_CONTAINMENT_UNAVAILABLE",
 }
+KIMI_CHILD_NONZERO_CATEGORIES = frozenset(
+    {"rate_limit", "auth", "vendor", "invocation", "unknown"}
+)
 EXTERNAL_ROLE_TAXONOMY_NAME = "external-role-taxonomy.v1.json"
 EXTERNAL_ROLE_TAXONOMY_MAX_BYTES = 64 * 1024
 EXTERNAL_ROLE_TAXONOMY_SHA256 = "51192eca72784dfcbc2d53596e143ea25856db9e7336031a25d89e9e4fdf85ce"
@@ -1961,11 +1964,14 @@ def run_provider_process(
     return result, sink.bytes_for("stdout"), sink.bytes_for("stderr")
 
 
-def provider_stream_result(result: ProcessResultV1) -> StreamCaptureResult:
+def provider_stream_result(
+    result: ProcessResultV1, *, include_stderr: bool = True
+) -> StreamCaptureResult:
     stdout, stderr = result.stdout, result.stderr
+    stderr_digest = stderr.digest if include_stderr else hashlib.sha256(b"").hexdigest()
     digest = hashlib.sha256(
         b"provider-capture-v1\x00" + stdout.digest.encode("ascii")
-        + b"\x00" + stderr.digest.encode("ascii")
+        + b"\x00" + stderr_digest.encode("ascii")
     ).hexdigest()
     issues = list(result.cleanup_issues)
     if result.failure_id is not None:
@@ -1973,12 +1979,29 @@ def provider_stream_result(result: ProcessResultV1) -> StreamCaptureResult:
     if not result.resources_closed or not result.tree.tree_empty:
         issues.append("process-unsettled")
     return StreamCaptureResult(
-        overflow=stdout.truncated or stderr.truncated,
-        observed_bytes=stdout.observed_bytes + stderr.observed_bytes,
-        persisted_bytes=stdout.persisted_bytes + stderr.persisted_bytes,
+        overflow=stdout.truncated or (include_stderr and stderr.truncated),
+        observed_bytes=stdout.observed_bytes + (
+            stderr.observed_bytes if include_stderr else 0
+        ),
+        persisted_bytes=stdout.persisted_bytes + (
+            stderr.persisted_bytes if include_stderr else 0
+        ),
         digest=digest,
         issues=tuple(dict.fromkeys(issues)),
     )
+
+
+def empty_provider_stream_result() -> StreamCaptureResult:
+    """Return the fixed public capture projection for rejected Kimi output."""
+
+    empty_digest = hashlib.sha256(b"").hexdigest()
+    digest = hashlib.sha256(
+        b"provider-capture-v1\x00"
+        + empty_digest.encode("ascii")
+        + b"\x00"
+        + empty_digest.encode("ascii")
+    ).hexdigest()
+    return StreamCaptureResult(False, 0, 0, digest, ())
 
 
 def _sanitized_diagnostic(
@@ -2032,15 +2055,41 @@ def provider_output_safety_scan_terminal(
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         finder = getattr(module, "find_machine_paths")
-        text = (stdout + b"\n" + stderr).decode("utf-8", errors="replace")
-        if finder(text):
+        if finder(stdout.decode("utf-8", errors="replace")):
             return "E_EXTERNAL_PROVIDER_MACHINE_PATH_ECHO"
     except (OSError, ValueError, StopIteration, AttributeError, ImportError):
         return "E_EXTERNAL_PROVIDER_OUTPUT_SCAN_UNAVAILABLE"
     return None
 
 
-def credential_scan_failure_terminal(
+def classify_kimi_child_nonzero(stderr: bytes) -> str:
+    """Map one settled Kimi child refusal to its closed public category."""
+
+    try:
+        text = stderr.decode("utf-8", errors="strict")
+    except UnicodeDecodeError:
+        return "unknown"
+    if "\x00" in text:
+        return "unknown"
+    categories: set[str] = set()
+    structured_codes = {
+        "provider.rate_limit": "rate_limit",
+        "auth.login_required": "auth",
+        "provider.auth_error": "auth",
+        "provider.overloaded": "vendor",
+        "provider.connection_error": "vendor",
+    }
+    for line in text.splitlines():
+        normalized = line.strip()
+        category = structured_codes.get(normalized)
+        if category is not None:
+            categories.add(category)
+        if re.fullmatch(r"error: unknown (?:command|option)(?: [^\r\n]*)?", normalized):
+            categories.add("invocation")
+    return next(iter(categories)) if len(categories) == 1 else "unknown"
+
+
+def output_safety_scan_failure_terminal(
     lifecycle: RunCaptureLifecycle, stable_id: str
 ) -> TerminalResult:
     return TerminalResult(
@@ -2245,6 +2294,7 @@ def emit_provider_result(
     timed_out: bool,
     realization: dict[str, str] | None = None,
     role_provenance: ExternalRoleProvenance | None = None,
+    child_nonzero_category: str | None = None,
 ) -> None:
     frozen_role = role_provenance or ExternalRoleProvenance("none", "none")
     payload = {
@@ -2281,6 +2331,11 @@ def emit_provider_result(
     }
     if outcome.cleanup_diagnostic:
         payload["cleanupDiagnostic"] = outcome.cleanup_diagnostic
+    if child_nonzero_category is not None:
+        if child_nonzero_category not in KIMI_CHILD_NONZERO_CATEGORIES:
+            raise ValueError("invalid Kimi child nonzero category")
+        payload["childNonzeroCategory"] = child_nonzero_category
+        payload["primaryOutcome"]["childNonzeroCategory"] = child_nonzero_category
     if stream is not None:
         payload.update(
             {
@@ -2330,6 +2385,18 @@ def parse_provider_result(output: str) -> dict[str, object]:
         or payload.get("actualExecutionPath") != "direct-external-cli"
     ):
         raise ValueError("provider result nonauthorizing tuple mismatch")
+    child_category = payload.get("childNonzeroCategory")
+    primary = payload.get("primaryOutcome")
+    if child_category is not None:
+        if (
+            payload.get("provider") != "kimi"
+            or child_category not in KIMI_CHILD_NONZERO_CATEGORIES
+            or not isinstance(primary, dict)
+            or primary.get("childNonzeroCategory") != child_category
+        ):
+            raise ValueError("provider result Kimi child nonzero category mismatch")
+    elif isinstance(primary, dict) and "childNonzeroCategory" in primary:
+        raise ValueError("provider result Kimi child nonzero category mismatch")
     return payload
 
 
@@ -2384,7 +2451,13 @@ def record_terminal(
     result_delivered: bool,
     realization: dict[str, object] | None = None,
     runner: ProcessRunnerV1,
+    child_nonzero_category: str | None = None,
 ) -> bool:
+    category_note = (
+        f"; childNonzeroCategory={child_nonzero_category}"
+        if child_nonzero_category is not None
+        else ""
+    )
     notes = (
         f"{outcome.note}; exitCode={outcome.exit_code}; "
         f"primaryExitCode={outcome.primary_exit_code}; "
@@ -2395,7 +2468,7 @@ def record_terminal(
         f"cancelled={str(cancelled).lower()}; "
         f"timedOut={str(timed_out).lower()}; "
         f"resultDelivered={str(result_delivered).lower()}; "
-        f"stderrMarkers={outcome.stderr_marker_count}"
+        f"stderrMarkers={outcome.stderr_marker_count}{category_note}"
     )[:1024]
     args = [
         "--work-item",
@@ -2467,7 +2540,7 @@ def finalize_run(
         and raw_stdout is not None
         and raw_stderr is not None
     )
-    scan_outcome = None
+    scan_outcome: str | None = None
     if credential_needles or provider == "kimi":
         scan_outcome = (
             provider_output_safety_scan_terminal(
@@ -2478,9 +2551,29 @@ def finalize_run(
         )
     if (credential_needles or provider == "kimi") and stream is not None and stream.overflow:
         scan_outcome = "E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE"
+    child_nonzero_category = None
+    if (
+        provider == "kimi"
+        and scan_outcome is None
+        and process_result is not None
+        and process_result.target_exit_code not in (None, 0)
+        and process_result.failure_id is None
+        and not cancelled
+        and not timed_out
+        and launch_error is None
+        and (stream is None or not stream.issues)
+    ):
+        child_nonzero_category = classify_kimi_child_nonzero(raw_stderr)
+    public_stream = stream
+    if provider == "kimi":
+        public_stream = (
+            empty_provider_stream_result()
+            if scan_outcome is not None
+            else provider_stream_result(process_result, include_stderr=False)
+        )
     if scan_outcome is not None:
         result_text = ""
-        terminal = credential_scan_failure_terminal(lifecycle, scan_outcome)
+        terminal = output_safety_scan_failure_terminal(lifecycle, scan_outcome)
         outcome = settle_once(
             exit_code if exit_code != 0 else 1,
             terminal,
@@ -2558,11 +2651,12 @@ def finalize_run(
             effort,
             result_text,
             outcome,
-            stream,
+            public_stream,
             cancelled=cancelled,
             timed_out=timed_out,
             realization=realization,
             role_provenance=frozen_role,
+            child_nonzero_category=child_nonzero_category,
         )
         result_delivered = True
     except Exception as exc:
@@ -2585,6 +2679,7 @@ def finalize_run(
                 result_delivered=result_delivered,
                 realization=realization,
                 runner=runner,
+                child_nonzero_category=child_nonzero_category,
             )
         except Exception as exc:
             recorded = False

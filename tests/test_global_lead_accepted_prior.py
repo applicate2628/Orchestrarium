@@ -42,6 +42,15 @@ PRE_K3_WIRE_FIX_GLOBAL_LEAD_TREE_SHA256 = (
 PARTIAL_KIMI_LUNA_GLOBAL_LEAD_TREE_SHA256 = (
     "006161c105d8fcaaa3e9ae891e8b14e42ca170c026445062f983884a9296a3c6"
 )
+PRE_DIAGNOSTIC_GLOBAL_LEAD_TREE_SHA256 = (
+    "03a7d0587eef6c8997e1f78136510d8ca01c61e9d1d06290fe453e34dafbb435"
+)
+PRE_PUBLIC_CAPTURE_GLOBAL_LEAD_TREE_SHA256 = (
+    "793045007f143b502991ef71a3273f64aa62757115b2eed033a267c4d44bf79f"
+)
+PRE_CHILD_NONZERO_GLOBAL_LEAD_TREE_SHA256 = (
+    "0c8cf87923774de9e345a72e071600d05a19b01e588f5f7acd053a6398e2f81e"
+)
 PROVIDER_AUTH_BASELINE_STAGED_LEAD_OVERLAYS = {
     "external-dispatch.md": ("8f92dc73", "src.codex/skills/lead/external-dispatch.md"),
     "scripts/provider_prompt.py": ("8f92dc73", "scripts/provider_prompt.py"),
@@ -526,6 +535,39 @@ def test_partial_kimi_luna_global_lead_prior_is_exactly_hash_pinned() -> None:
         in installer.GLOBAL_LEAD_ACCEPTED_PRIOR_TREE_SHA256
     )
     one_byte_falsifier = "1" + PARTIAL_KIMI_LUNA_GLOBAL_LEAD_TREE_SHA256[1:]
+    assert one_byte_falsifier not in installer.GLOBAL_LEAD_ACCEPTED_PRIOR_TREE_SHA256
+
+
+def test_pre_diagnostic_global_lead_prior_is_exactly_hash_pinned() -> None:
+    installer = _load_installer()
+
+    assert (
+        PRE_DIAGNOSTIC_GLOBAL_LEAD_TREE_SHA256
+        in installer.GLOBAL_LEAD_ACCEPTED_PRIOR_TREE_SHA256
+    )
+    one_byte_falsifier = "1" + PRE_DIAGNOSTIC_GLOBAL_LEAD_TREE_SHA256[1:]
+    assert one_byte_falsifier not in installer.GLOBAL_LEAD_ACCEPTED_PRIOR_TREE_SHA256
+
+
+def test_pre_public_capture_global_lead_prior_is_exactly_hash_pinned() -> None:
+    installer = _load_installer()
+
+    assert (
+        PRE_PUBLIC_CAPTURE_GLOBAL_LEAD_TREE_SHA256
+        in installer.GLOBAL_LEAD_ACCEPTED_PRIOR_TREE_SHA256
+    )
+    one_byte_falsifier = "1" + PRE_PUBLIC_CAPTURE_GLOBAL_LEAD_TREE_SHA256[1:]
+    assert one_byte_falsifier not in installer.GLOBAL_LEAD_ACCEPTED_PRIOR_TREE_SHA256
+
+
+def test_pre_child_nonzero_global_lead_prior_is_exactly_hash_pinned() -> None:
+    installer = _load_installer()
+
+    assert (
+        PRE_CHILD_NONZERO_GLOBAL_LEAD_TREE_SHA256
+        in installer.GLOBAL_LEAD_ACCEPTED_PRIOR_TREE_SHA256
+    )
+    one_byte_falsifier = "1" + PRE_CHILD_NONZERO_GLOBAL_LEAD_TREE_SHA256[1:]
     assert one_byte_falsifier not in installer.GLOBAL_LEAD_ACCEPTED_PRIOR_TREE_SHA256
 
 

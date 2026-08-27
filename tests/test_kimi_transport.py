@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
+import json
 import sys
 import tomllib
 from pathlib import Path
@@ -155,6 +157,534 @@ def test_kimi_terminal_allows_prose_with_a_nonleading_gate_reference(
         "PASS",
         "COMPLETE:PASS",
     )
+
+
+def _kimi_process_result(
+    stdout: bytes,
+    stderr: bytes,
+    *,
+    stdout_truncated: bool = False,
+    stderr_truncated: bool = False,
+    settled: bool = True,
+    target_exit_code: int | None = None,
+    failure_id: str | None = None,
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        resources_closed=settled,
+        tree=SimpleNamespace(tree_empty=settled, direct_reaped=settled),
+        stdout=SimpleNamespace(
+            truncated=stdout_truncated,
+            observed_bytes=len(stdout),
+            persisted_bytes=len(stdout),
+            digest=hashlib.sha256(stdout).hexdigest(),
+        ),
+        stderr=SimpleNamespace(
+            truncated=stderr_truncated,
+            observed_bytes=len(stderr),
+            persisted_bytes=len(stderr),
+            digest=hashlib.sha256(stderr).hexdigest(),
+        ),
+        cleanup_issues=(),
+        failure_id=failure_id,
+        target_exit_code=target_exit_code,
+    )
+
+
+def _public_stdout_metadata(stdout: bytes) -> dict[str, object]:
+    empty_digest = hashlib.sha256(b"").hexdigest()
+    digest = hashlib.sha256(
+        b"provider-capture-v1\x00"
+        + hashlib.sha256(stdout).hexdigest().encode("ascii")
+        + b"\x00"
+        + empty_digest.encode("ascii")
+    ).hexdigest()
+    return {
+        "captureOverflow": False,
+        "captureObservedBytes": len(stdout),
+        "capturePersistedBytes": len(stdout),
+        "captureDigest": digest,
+        "captureIssueCount": 0,
+    }
+
+
+def _empty_public_metadata() -> dict[str, object]:
+    return _public_stdout_metadata(b"")
+
+
+def _finalize_kimi(
+    owner,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    *,
+    stdout: bytes,
+    stderr: bytes,
+    credential_needles: tuple[bytes, ...] = (),
+    process_result: SimpleNamespace | None = None,
+    stream: object | None = None,
+    with_ledger: bool = False,
+    exit_code: int = 0,
+    cancelled: bool = False,
+) -> tuple[int, dict[str, object], list[str], object]:
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "user"))
+    lifecycle = owner.RunCaptureLifecycle.create("kimi", "safe-public-capture")
+    lifecycle.initialize(b"fixture prompt")
+    process = process_result or _kimi_process_result(stdout, stderr)
+    capture = stream if stream is not None else owner.provider_stream_result(process)
+    ledger_calls: list[list[str]] = []
+    if with_ledger:
+        monkeypatch.setattr(
+            owner,
+            "run_ledger",
+            lambda _runner, arguments: ledger_calls.append(arguments) or True,
+        )
+        monkeypatch.setattr(
+            owner,
+            "read_back_external_terminal",
+            lambda *_args: {"eventKind": "terminal"},
+        )
+        control = owner.Control(
+            ledger="fixture-item",
+            ledger_role="architecture-reviewer",
+            ledger_role_explicit=True,
+            ledger_lane="fixture-lane",
+            ledger_artifact="design.md",
+        )
+        provenance = owner.ExternalRoleProvenance(
+            "architecture-reviewer", "external-reviewer"
+        )
+    else:
+        control = owner.Control()
+        provenance = owner.ExternalRoleProvenance("none", "external-reviewer")
+    code = owner.finalize_run(
+        control,
+        "kimi",
+        "kimi-code/k3",
+        "unsupported",
+        "fixture",
+        "launch-fixture" if with_ledger else "",
+        lifecycle,
+        exit_code,
+        capture,
+        cancelled=cancelled,
+        credential_needles=credential_needles,
+        role_provenance=provenance,
+        raw_stdout=stdout,
+        raw_stderr=stderr,
+        process_result=process_result or process,
+        runner=object() if with_ledger else None,
+    )
+    payload = owner.parse_provider_result(capsys.readouterr().out)
+    notes = (
+        ledger_calls[0][ledger_calls[0].index("--notes") + 1]
+        if ledger_calls
+        else ""
+    )
+    return code, payload, [notes], lifecycle
+
+
+def _finalize_kimi_child_nonzero(
+    owner,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    stderr: bytes,
+    *,
+    with_ledger: bool = True,
+    failure_id: str | None = None,
+    cancelled: bool = False,
+    credential_needles: tuple[bytes, ...] = (),
+) -> tuple[int, dict[str, object], list[str], object]:
+    stdout = b"  GATE: PASS\n"
+    process = _kimi_process_result(
+        stdout, stderr, target_exit_code=23, failure_id=failure_id
+    )
+    return _finalize_kimi(
+        owner,
+        tmp_path,
+        monkeypatch,
+        capsys,
+        stdout=stdout,
+        stderr=stderr,
+        process_result=process,
+        with_ledger=with_ledger,
+        exit_code=23,
+        cancelled=cancelled,
+        credential_needles=credential_needles,
+    )
+
+
+@pytest.mark.parametrize(
+    ("stderr", "category"),
+    (
+        (b"  provider.rate_limit \n", "rate_limit"),
+        (b"auth.login_required", "auth"),
+        (b"provider.auth_error", "auth"),
+        (b"provider.overloaded", "vendor"),
+        (b"provider.connection_error", "vendor"),
+        (b"error: unknown command kimi", "invocation"),
+        (b"error: unknown option --agent-file", "invocation"),
+    ),
+)
+def test_kimi_settled_child_nonzero_exposes_only_closed_category(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    stderr: bytes,
+    category: str,
+) -> None:
+    """Catches collapsed genuine Kimi child refusals after safety scanning."""
+
+    owner = _load_owner()
+    code, payload, notes, lifecycle = _finalize_kimi_child_nonzero(
+        owner, tmp_path, monkeypatch, capsys, stderr
+    )
+
+    assert code == 23
+    assert (payload["token"], payload["status"], payload["gate"]) == (
+        "FAILED:nonzero-exit",
+        "blocked",
+        "none",
+    )
+    assert payload["childNonzeroCategory"] == category
+    assert payload["primaryOutcome"]["childNonzeroCategory"] == category
+    assert f"childNonzeroCategory={category}" in notes[0]
+    assert stderr.decode("utf-8") not in json.dumps({"payload": payload, "notes": notes})
+    assert not lifecycle.run_dir.exists()
+
+
+@pytest.mark.parametrize(
+    "stderr",
+    (
+        b"provider.api_error quota login 429 401 403 server",
+        b"provider.rate_limit provider.auth_error",
+        b"evilprovider.rate_limit",
+        b"provider.rate_limit_evil",
+        b"https://example.invalid/provider.rate_limit",
+        b"prose containing provider.rate_limit",
+        b"\xffprovider.rate_limit",
+        b"provider.rate_limit\x00",
+    ),
+)
+def test_kimi_child_nonzero_refusal_text_outside_exact_patterns_is_unknown(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    stderr: bytes,
+) -> None:
+    """Catches broad text heuristics or malformed stderr classification."""
+
+    owner = _load_owner()
+    code, payload, notes, _lifecycle = _finalize_kimi_child_nonzero(
+        owner, tmp_path, monkeypatch, capsys, stderr
+    )
+
+    assert code == 23
+    assert payload["childNonzeroCategory"] == "unknown"
+    assert payload["primaryOutcome"]["childNonzeroCategory"] == "unknown"
+    assert "childNonzeroCategory=unknown" in notes[0]
+
+
+def test_kimi_same_refusal_category_has_identical_public_capture_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Catches public metadata that acts as an oracle for hidden refusal text."""
+
+    owner = _load_owner()
+    first = _finalize_kimi_child_nonzero(
+        owner,
+        tmp_path / "first",
+        monkeypatch,
+        capsys,
+        b"provider.rate_limit\nunrelated first detail",
+    )[1]
+    second = _finalize_kimi_child_nonzero(
+        owner,
+        tmp_path / "second",
+        monkeypatch,
+        capsys,
+        b"provider.rate_limit\nunrelated second detail",
+    )[1]
+    public_keys = (
+        "token",
+        "status",
+        "gate",
+        "captureOverflow",
+        "captureObservedBytes",
+        "capturePersistedBytes",
+        "captureDigest",
+        "captureIssueCount",
+        "childNonzeroCategory",
+    )
+
+    assert {key: first[key] for key in public_keys} == {
+        key: second[key] for key in public_keys
+    }
+
+
+def test_kimi_child_nonzero_precedence_leaves_category_absent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Catches refusal classification before credential, path, process, or cancel gates."""
+
+    owner = _load_owner()
+    credential = b"provider.rate_limit credential-sentinel"
+    code, payload, _notes, _lifecycle = _finalize_kimi_child_nonzero(
+        owner,
+        tmp_path / "credential",
+        monkeypatch,
+        capsys,
+        credential,
+        credential_needles=(credential,),
+    )
+    assert code == 23 and "childNonzeroCategory" not in payload
+
+    stdout_path = b"C:" + br"\Users\synthetic-stdout\private.txt\n"
+    process = _kimi_process_result(stdout_path, b"provider.rate_limit", target_exit_code=23)
+    code, payload, _notes, _lifecycle = _finalize_kimi(
+        owner,
+        tmp_path / "path",
+        monkeypatch,
+        capsys,
+        stdout=stdout_path,
+        stderr=b"provider.rate_limit",
+        process_result=process,
+        exit_code=23,
+    )
+    assert code == 23 and "childNonzeroCategory" not in payload
+
+    truncated = _kimi_process_result(
+        b"  GATE: PASS\n", b"provider.rate_limit", stdout_truncated=True, target_exit_code=23
+    )
+    code, payload, _notes, _lifecycle = _finalize_kimi(
+        owner,
+        tmp_path / "truncated",
+        monkeypatch,
+        capsys,
+        stdout=b"  GATE: PASS\n",
+        stderr=b"provider.rate_limit",
+        process_result=truncated,
+        exit_code=23,
+    )
+    assert code == 23 and "childNonzeroCategory" not in payload
+
+    code, payload, _notes, _lifecycle = _finalize_kimi_child_nonzero(
+        owner,
+        tmp_path / "failure",
+        monkeypatch,
+        capsys,
+        b"provider.rate_limit",
+        failure_id="process-supervision",
+    )
+    assert code == 23 and "childNonzeroCategory" not in payload
+
+    code, payload, _notes, _lifecycle = _finalize_kimi_child_nonzero(
+        owner,
+        tmp_path / "cancelled",
+        monkeypatch,
+        capsys,
+        b"provider.rate_limit",
+        cancelled=True,
+    )
+    assert code == 23 and "childNonzeroCategory" not in payload
+
+
+def test_kimi_exit_zero_ignores_refusal_looking_stderr(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Catches a refusal classifier that changes a successful Kimi terminal."""
+
+    owner = _load_owner()
+    code, payload, _notes, _lifecycle = _finalize_kimi(
+        owner,
+        tmp_path,
+        monkeypatch,
+        capsys,
+        stdout=b"  GATE: PASS\n",
+        stderr=b"provider.rate_limit",
+    )
+
+    assert code == 0
+    assert payload["gate"] == "PASS"
+    assert "childNonzeroCategory" not in payload
+
+
+@pytest.mark.parametrize(
+    "stderr",
+    (
+        b"C:" + br"\Users\synthetic-stderr-one\private.txt\n",
+        b"C:" + br"\Users\synthetic-stderr-two\private.txt\n",
+    ),
+)
+def test_kimi_benign_stderr_machine_path_has_stdout_only_public_capture(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    stderr: bytes,
+) -> None:
+    """Catches public Kimi metadata that commits to a benign stderr-only path."""
+
+    owner = _load_owner()
+    stdout = b"\xe2\x80\xa2 KIMI_WRAPPER_SMOKE=PASS\n  GATE: PASS\n"
+    code, payload, notes, lifecycle = _finalize_kimi(
+        owner, tmp_path, monkeypatch, capsys, stdout=stdout, stderr=stderr, with_ledger=True
+    )
+
+    assert code == 0
+    assert payload["gate"] == "PASS"
+    assert {key: payload[key] for key in _public_stdout_metadata(stdout)} == _public_stdout_metadata(stdout)
+    visible_terminal = json.dumps({"payload": payload, "notes": notes})
+    assert stderr.decode("utf-8").strip() not in visible_terminal
+    assert not lifecycle.run_dir.exists()
+
+
+def test_kimi_stdout_machine_path_blocks_with_empty_public_capture(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Catches a rejected stdout path that leaves any raw-derived capture metadata."""
+
+    owner = _load_owner()
+    stdout = b"C:" + br"\Users\synthetic-stdout\private.txt\n"
+    code, payload, notes, _lifecycle = _finalize_kimi(
+        owner, tmp_path, monkeypatch, capsys, stdout=stdout, stderr=b"", with_ledger=True
+    )
+
+    visible_terminal = json.dumps({"payload": payload, "notes": notes})
+
+    assert code == 1
+    assert payload["token"] == "UNVERIFIED:E_EXTERNAL_PROVIDER_MACHINE_PATH_ECHO"
+    assert {key: payload[key] for key in _empty_public_metadata()} == _empty_public_metadata()
+    assert stdout.decode("utf-8").strip() not in visible_terminal
+
+
+def test_kimi_stderr_credential_blocks_with_empty_public_capture(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Catches a credential scanner that stops inspecting stderr before rejection."""
+
+    owner = _load_owner()
+    credential = b"synthetic-credential-sentinel"
+    code, payload, notes, _lifecycle = _finalize_kimi(
+        owner,
+        tmp_path,
+        monkeypatch,
+        capsys,
+        stdout=b"  GATE: PASS\n",
+        stderr=b"ERROR: " + credential,
+        credential_needles=(credential,),
+        with_ledger=True,
+    )
+
+    assert code == 1
+    assert payload["token"] == "UNVERIFIED:E_EXTERNAL_PROVIDER_CREDENTIAL_ECHO"
+    assert {key: payload[key] for key in _empty_public_metadata()} == _empty_public_metadata()
+    assert credential.decode("utf-8") not in json.dumps({"payload": payload, "notes": notes})
+
+
+@pytest.mark.parametrize(
+    "process_result",
+    (
+        _kimi_process_result(b"  GATE: PASS\n", b"", stdout_truncated=True),
+        _kimi_process_result(b"  GATE: PASS\n", b"", settled=False),
+    ),
+    ids=("truncated", "unsettled"),
+)
+def test_kimi_unavailable_scan_blocks_with_empty_public_capture(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    process_result: SimpleNamespace,
+) -> None:
+    """Catches incomplete capture that would expose metadata before a failed scan."""
+
+    owner = _load_owner()
+    code, payload, _notes, _lifecycle = _finalize_kimi(
+        owner,
+        tmp_path,
+        monkeypatch,
+        capsys,
+        stdout=b"  GATE: PASS\n",
+        stderr=b"",
+        process_result=process_result,
+    )
+
+    assert code == 1
+    assert payload["token"] == "UNVERIFIED:E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE"
+    assert {key: payload[key] for key in _empty_public_metadata()} == _empty_public_metadata()
+
+
+def test_kimi_error_marker_keeps_nonpass_without_stderr_capture_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Catches an ERROR verdict that reintroduces a stderr digest or byte oracle."""
+
+    owner = _load_owner()
+    stdout = b"  GATE: PASS\n"
+    sentinel = b"stderr-only-sentinel"
+    code, payload, notes, lifecycle = _finalize_kimi(
+        owner,
+        tmp_path,
+        monkeypatch,
+        capsys,
+        stdout=stdout,
+        stderr=b"ERROR: " + sentinel,
+        with_ledger=True,
+    )
+
+    assert code == 0
+    assert payload["token"] == "UNVERIFIED:err-markers"
+    assert payload["gate"] == "none"
+    assert payload["primaryOutcome"]["token"] == "UNVERIFIED:err-markers"
+    assert {key: payload[key] for key in _public_stdout_metadata(stdout)} == _public_stdout_metadata(stdout)
+    assert sentinel.decode("utf-8") not in json.dumps({"payload": payload, "notes": notes})
+    assert not lifecycle.run_dir.exists()
+
+
+def test_generic_capture_metadata_remains_exactly_as_supplied(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Catches a Kimi-only projection that changes generic provider capture fields."""
+
+    owner = _load_owner()
+    root = (tmp_path / "claude-captures").resolve()
+    monkeypatch.setenv("CLAUDE_PROMPTS_DIR", str(root))
+    lifecycle = owner.RunCaptureLifecycle.create("claude", "generic-capture-golden")
+    lifecycle.initialize(b"fixture prompt")
+    stream = owner.StreamCaptureResult(False, 17, 13, "a" * 64, ("fixture",))
+
+    code = owner.finalize_run(
+        owner.Control(),
+        "claude",
+        "opus",
+        "xhigh",
+        "fixture",
+        "",
+        lifecycle,
+        0,
+        stream,
+        role_provenance=owner.ExternalRoleProvenance("none", "external-reviewer"),
+        raw_stdout=b"GATE: PASS\n",
+        raw_stderr=b"",
+    )
+    payload = owner.parse_provider_result(capsys.readouterr().out)
+
+    assert code == 0
+    assert {
+        "captureOverflow": payload["captureOverflow"],
+        "captureObservedBytes": payload["captureObservedBytes"],
+        "capturePersistedBytes": payload["capturePersistedBytes"],
+        "captureDigest": payload["captureDigest"],
+        "captureIssueCount": payload["captureIssueCount"],
+    } == {
+        "captureOverflow": False,
+        "captureObservedBytes": 17,
+        "capturePersistedBytes": 13,
+        "captureDigest": "a" * 64,
+        "captureIssueCount": 1,
+    }
+    assert "childNonzeroCategory" not in payload
 
 
 @pytest.mark.parametrize(
