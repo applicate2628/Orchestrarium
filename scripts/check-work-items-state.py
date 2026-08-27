@@ -140,14 +140,41 @@ def read_events(item: Path) -> list[dict[str, Any]]:
     return events
 
 
-def stale_running_errors(item: Path, now: datetime, stale_after: timedelta) -> list[str]:
+def unsettled_launch_run_ids(item: Path, events: list[dict[str, Any]], validator: Any) -> set[str]:
+    """Return valid lifecycle launches without a valid terminal settlement.
+
+    ``validate_closure`` owns the terminal-to-launch relation.  The stale check
+    consumes that reduction instead of maintaining a second interpretation of
+    ``eventKind`` and ``launchRunId``.
+    """
+    validity_errors: list[str] = []
+    event_validity = validator.derive_event_validity(events, item, validity_errors)
+    _open_revise, open_launches = validator.validate_closure(
+        events, [], event_validity=event_validity
+    )
+    return {
+        run_id
+        for event in open_launches
+        if isinstance((run_id := event.get("runId")), str)
+    }
+
+
+def stale_running_errors(
+    item: Path, now: datetime, stale_after: timedelta, validator: Any
+) -> list[str]:
     if stale_after.total_seconds() <= 0:
         return []
     errors: list[str] = []
-    for event in read_events(item):
+    events = read_events(item)
+    unsettled_launches = unsettled_launch_run_ids(item, events, validator)
+    for event in events:
         if event.get("status") != "running":
             continue
         run_id = event.get("runId", "<unknown>")
+        # V2 launch rows are stale only until their valid terminal settlement.
+        # Rows without eventKind retain the legacy stale-running behavior.
+        if event.get("eventKind") == "launch" and run_id not in unsettled_launches:
+            continue
         updated_at = event.get("updatedAt")
         if not isinstance(updated_at, str) or not updated_at.strip():
             errors.append(f"{run_id}: running event has no updatedAt for stale check")
@@ -404,7 +431,7 @@ def command_check(args: argparse.Namespace) -> int:
             strict_revise=not args.no_strict_revise,
             telemetry=telemetry,
         )
-        errors.extend(stale_running_errors(item, now, stale_after))
+        errors.extend(stale_running_errors(item, now, stale_after, validator))
         resolver = sentinel_dependency.resolve_epic_locations
         if callable(resolver):
             errors.extend(epic_link_notes(item, active_dir, resolver, is_valid_slug))
@@ -470,22 +497,8 @@ def command_check(args: argparse.Namespace) -> int:
     # v2-scoping keeps historical v1 archives quiet.
     if not args.no_strict_revise:
         for ledger in sorted(archive_dir.rglob("agent-runs.jsonl")):
-            arch_errors: list[str] = []
-            events = validator.load_jsonl(ledger, arch_errors)
-            # Canonical position-aligned validation, scoped to schemaVersion-2 events.
-            # The validator marks skipped legacy positions ineligible without adding
-            # diagnostics, preserving the archive epoch while avoiding caller drift.
-            event_validity = validator.derive_event_validity(
-                events,
-                ledger.parent,
-                arch_errors,
-                validate_schema_version=2,
-            )
-            open_revise, _open_launches = validator.validate_closure(
-                events,
-                arch_errors,
-                telemetry,
-                event_validity=event_validity,
+            arch_errors, open_revise, _open_launches = validator.validate_archived_ledger_obligations(
+                ledger.parent, telemetry=telemetry
             )
             if open_revise or arch_errors:
                 failed += 1

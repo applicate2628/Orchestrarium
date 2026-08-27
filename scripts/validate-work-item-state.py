@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 import argparse
+import base64
+import copy
 import hashlib
 import io
 import importlib.util
+import itertools
 import json
 import os
 import re
 import stat as stat_module
 import sys
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 
@@ -1065,7 +1069,76 @@ def validate_v3_event(event: dict, seen: set[str], errors: list[str]) -> bool:
     return len(errors) == error_count_on_entry
 
 
-def validate_event(event: dict, item: Path, seen: set[str], errors: list[str]) -> bool:
+@dataclass(frozen=True)
+class HistoricalArtifactAuthorization:
+    """A single raw V2 PASS position which may have a missing archived artifact."""
+
+    raw_line_ordinal: int
+    raw_line_sha256: str
+    event_sha256: str
+    run_id: str
+    artifact: str
+    artifact_revision_sha256: str
+
+
+@dataclass(frozen=True)
+class LedgerProjectionRowV1:
+    """One immutable effective-ledger row bound to its physical source row."""
+
+    event: dict
+    raw_line_ordinal: int
+    raw_line_sha256: str
+    raw_event_sha256: str
+    transformation: str = "raw"
+
+
+def _ledger_projection_rows(
+    events: list[dict], raw_metadata: list[dict[str, object]], errors: list[str]
+) -> tuple[LedgerProjectionRowV1, ...]:
+    """Bind parsed events to physical identity once, before any projection."""
+    if len(events) != len(raw_metadata):
+        _projection_fail(errors, "identity", "raw event identity cardinality differs")
+        return ()
+    rows: list[LedgerProjectionRowV1] = []
+    identities: set[tuple[int, str]] = set()
+    for position, (event, metadata) in enumerate(zip(events, raw_metadata), start=1):
+        line = metadata.get("line", position)
+        line_sha256 = metadata.get("sha256")
+        if (
+            type(line) is not int
+            or line < 1
+            or not isinstance(line_sha256, str)
+            or SHA256_RE.fullmatch(line_sha256) is None
+            or (line, line_sha256) in identities
+        ):
+            _projection_fail(errors, "topology", "duplicate or invalid raw event identity")
+            return ()
+        identities.add((line, line_sha256))
+        rows.append(
+            LedgerProjectionRowV1(
+                copy.deepcopy(event), line, line_sha256,
+                hashlib.sha256(_canonical_projection_bytes(event)).hexdigest(),
+            )
+        )
+    return tuple(rows)
+
+
+def _row_metadata(rows: tuple[LedgerProjectionRowV1, ...]) -> list[dict[str, object]]:
+    return [{"line": row.raw_line_ordinal, "sha256": row.raw_line_sha256} for row in rows]
+
+
+def _row_events(rows: tuple[LedgerProjectionRowV1, ...]) -> list[dict]:
+    return [row.event for row in rows]
+
+
+def _validate_event(
+    event: dict,
+    item: Path,
+    seen: set[str],
+    errors: list[str],
+    *,
+    historical_artifact_authorization: HistoricalArtifactAuthorization | None = None,
+) -> bool:
     if event.get("schemaVersion") == 3:
         return validate_v3_event(event, seen, errors)
     error_count_on_entry = len(errors)
@@ -1245,7 +1318,15 @@ def validate_event(event: dict, item: Path, seen: set[str], errors: list[str]) -
             fail(errors, f"{run_id}: PASS gate requires completed status")
         if not artifact:
             fail(errors, f"{run_id}: PASS gate requires artifact")
-        if artifact_path is not None and not artifact_path.exists():
+        authorized_missing = (
+            historical_artifact_authorization is not None
+            and historical_artifact_authorization.run_id == run_id
+            and historical_artifact_authorization.artifact == artifact
+            and historical_artifact_authorization.artifact_revision_sha256 == event.get("artifactRevision")
+            and historical_artifact_authorization.event_sha256
+            == hashlib.sha256(_canonical_projection_bytes(event)).hexdigest()
+        )
+        if artifact_path is not None and not artifact_path.exists() and not authorized_missing:
             fail(errors, f"{run_id}: artifact does not exist: {artifact}")
         if evidence is None:
             fail(errors, f"{run_id}: PASS gate requires evidence")
@@ -1425,6 +1506,11 @@ def validate_event(event: dict, item: Path, seen: set[str], errors: list[str]) -
     return len(errors) == error_count_on_entry
 
 
+def validate_event(event: dict, item: Path, seen: set[str], errors: list[str]) -> bool:
+    """Validate a public ledger event without any historical exception."""
+    return _validate_event(event, item, seen, errors)
+
+
 def derive_event_validity(
     events: list[dict],
     item: Path,
@@ -1447,8 +1533,53 @@ def derive_event_validity(
         ):
             event_validity.append(False)
             continue
-        event_validity.append(validate_event(event, item, seen, errors))
+        event_validity.append(
+            validate_event(event, item, seen, errors)
+        )
     return event_validity
+
+
+def derive_archived_event_validity(
+    events: list[dict],
+    item: Path,
+    errors: list[str],
+    authorizations: dict[int, HistoricalArtifactAuthorization],
+    *,
+    rows: tuple[LedgerProjectionRowV1, ...],
+) -> tuple[list[bool], list[bool]]:
+    """Return diagnostics validity plus the stricter closure-eligibility mask."""
+    if len(rows) != len(events):
+        _projection_fail(errors, "identity", "archived validity rows differ from effective events")
+        return [False] * len(events), [False] * len(events)
+    seen: set[str] = set()
+    validity: list[bool] = []
+    closure_validity: list[bool] = []
+    for position, event in enumerate(events):
+        if event.get("schemaVersion") != 2:
+            validity.append(False)
+            closure_validity.append(False)
+            continue
+        row = rows[position]
+        authorization = authorizations.get(row.raw_line_ordinal)
+        if authorization is not None:
+            unchanged_raw_position = (
+                row.transformation == "raw"
+                and row.raw_line_sha256 == authorization.raw_line_sha256
+                and row.raw_event_sha256 == authorization.event_sha256
+                and hashlib.sha256(_canonical_projection_bytes(event)).hexdigest()
+                == authorization.event_sha256
+            )
+            if not unchanged_raw_position:
+                _projection_fail(errors, "identity", "historical artifact authorization cannot apply to projected or migrated event")
+                authorization = None
+        event_is_valid = _validate_event(
+            event, item, seen, errors, historical_artifact_authorization=authorization
+        )
+        validity.append(event_is_valid)
+        # Historical artifact evidence makes this row diagnostically complete,
+        # never an authority for closure, invalidation, or terminal settlement.
+        closure_validity.append(event_is_valid and authorization is None)
+    return validity, closure_validity
 
 
 def validate_closure(
@@ -1481,6 +1612,10 @@ def validate_closure(
     # terminal references an earlier launch.
     terminals_by_launch: dict[str, str] = {}
     for pos, event in enumerate(events):
+        if event_validity is not None and (
+            len(event_validity) != len(events) or not event_validity[pos]
+        ):
+            continue
         if event.get("eventKind") != "terminal":
             continue
         rid = event.get("runId")
@@ -1496,6 +1631,11 @@ def validate_closure(
         if target[1].get("eventKind") != "launch":
             fail(errors, f"{rid}: launchRunId {launch_id} references a non-launch event")
             bump("lifecycle-nonlaunch-ref")
+            continue
+        if event_validity is not None and not event_validity[target[0]]:
+            fail(errors, f"{rid}: launchRunId {launch_id} references an invalid launch event")
+            bump("lifecycle-invalid-launch-ref")
+            continue
         if launch_id in terminals_by_launch:
             fail(errors, f"{rid}: duplicate terminal for launch {launch_id} (first: {terminals_by_launch[launch_id]})")
             bump("lifecycle-duplicate-terminal")
@@ -1504,6 +1644,13 @@ def validate_closure(
 
     discharged: dict[str, str] = {}  # target runId -> closer runId
     for pos, event in enumerate(events):
+        # A caller-provided false validity bit is a complete settlement
+        # boundary: the row keeps its per-event diagnostics but may not become
+        # a terminal, closer, or evidence authority in this reduction.
+        if event_validity is not None and (
+            len(event_validity) != len(events) or not event_validity[pos]
+        ):
+            continue
         gate = event.get("gate")
         # Privileged waiver authorization consumes explicit validation state at
         # the event's ledger position. Missing/misaligned state is invalid;
@@ -1807,6 +1954,7 @@ def migration_terminal_launch_relation_error(events: list[dict], target_pos: int
 
 LEGACY_PROJECTION_MANIFEST_DIR = "legacy-ledger-projection-manifests"
 LEGACY_PROJECTION_REGISTRY = "legacy-ledger-projections.jsonl"
+LEGACY_HISTORICAL_DISPOSITIONS = "legacy-ledger-historical-dispositions"
 LEGACY_PROJECTION_PROFILE_REGISTRY = {
     ("canonical-v0-shape", 1),
     ("attempt-pair-v0", 1),
@@ -1840,6 +1988,62 @@ def _is_link_or_reparse(path: Path) -> bool:
         getattr(info, "st_file_attributes", 0)
         & getattr(stat_module, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
     )
+
+
+def _projection_target_identity(
+    item: Path,
+    selected_ledger: Path,
+    errors: list[str],
+    *,
+    require_ledger: bool = False,
+) -> tuple[Path, str] | None:
+    """Return the one ordinary active/archive identity admissible for projection."""
+    # Do not resolve `item`: resolution would erase an in-tree symlink before
+    # the component lstat walk below can reject it.
+    lexical_item = Path(item).absolute()
+    root = next((parent.parent for parent in lexical_item.parents if parent.name == "work-items"), None)
+    if root is None:
+        _projection_fail(errors, "identity", "projection target has no repository root")
+        return None
+    try:
+        relative = lexical_item.relative_to(root)
+    except ValueError:
+        _projection_fail(errors, "identity", "projection target escapes its repository root")
+        return None
+    parts = relative.parts
+    active = len(parts) == 3 and parts[:2] == ("work-items", "active")
+    archived = (
+        len(parts) == 4
+        and parts[:2] == ("work-items", "archive")
+        and re.fullmatch(r"\d{4}-\d{2}", parts[2]) is not None
+    )
+    if not (active or archived) or not all(isinstance(part, str) and part for part in parts):
+        _projection_fail(errors, "identity", "projection target must be one active or monthly archived work-item")
+        return None
+    canonical_ledger = lexical_item / "agent-runs.jsonl"
+    if selected_ledger != canonical_ledger:
+        _projection_fail(errors, "ledger", "candidate ledger path differs from immutable live ledger identity")
+        return None
+    for index in range(1, len(parts) + 1):
+        if _is_link_or_reparse(root.joinpath(*parts[:index])):
+            _projection_fail(errors, "identity", "projection target crosses a link or reparse point")
+            return None
+    # lstat deliberately happens even for a dangling symlink.  Archive readers
+    # and writers must reject it before any content read.
+    if require_ledger and _is_link_or_reparse(canonical_ledger):
+        _projection_fail(errors, "identity", "ledger is missing, linked, or a reparse point")
+        return None
+    if not require_ledger and canonical_ledger.exists() and _is_link_or_reparse(canonical_ledger):
+        _projection_fail(errors, "identity", "ledger is a link or reparse point")
+        return None
+    return root, relative.as_posix()
+
+
+def classify_legacy_projection_target(
+    item: Path, selected_ledger: Path, errors: list[str], *, require_ledger: bool = False
+) -> tuple[Path, str] | None:
+    """Public owner seam for no-follow active/archive projection target checks."""
+    return _projection_target_identity(item, selected_ledger, errors, require_ledger=require_ledger)
 
 
 def _projection_json_object(raw: bytes, source: Path | str, errors: list[str]) -> dict | None:
@@ -1986,9 +2190,10 @@ def project_manifest_bound_legacy_ledger_projections(
     """Read verified immutable legacy rows through closed shape-only profiles."""
     counters = {"manifest-apply": 0, "manifest-revoke": 0, "manifest-projected": 0}
     errors: list[str] = []
-    root = repo_root_for(item)
-    if root is None:
+    target = _projection_target_identity(item, selected_ledger, errors)
+    if target is None:
         return events, counters, errors
+    root, _relative_item = target
     work_items = root / "work-items"
     manifests = work_items / LEGACY_PROJECTION_MANIFEST_DIR
     registry = work_items / LEGACY_PROJECTION_REGISTRY
@@ -2014,14 +2219,7 @@ def project_manifest_bound_legacy_ledger_projections(
         if not manifests.is_dir() or not registry.is_file() or _is_link_or_reparse(manifests) or _is_link_or_reparse(registry):
             _projection_fail(errors, "manifest", "projection manifest directory or registry is missing or unsafe")
             return events, counters, errors
-    canonical_ledger = item / "agent-runs.jsonl"
-    if selected_ledger != canonical_ledger:
-        _projection_fail(errors, "ledger", "candidate ledger path differs from immutable live ledger identity")
-        return events, counters, errors
     ledger = selected_ledger
-    if _is_link_or_reparse(ledger):
-        _projection_fail(errors, "identity", "ledger is a link or reparse point")
-        return events, counters, errors
     if candidate_input:
         assert manifest_blobs is not None and registry_bytes is not None
         manifest_inputs: list[tuple[str, bytes, str]] = []
@@ -2355,6 +2553,37 @@ def project_manifest_bound_legacy_ledger_projections(
     return effective, counters, errors
 
 
+def _project_manifest_rows(
+    rows: tuple[LedgerProjectionRowV1, ...],
+    item: Path,
+    selected_ledger: Path,
+    ledger_bytes: bytes,
+    *,
+    manifest_blobs: dict[str, bytes] | None = None,
+    registry_bytes: bytes | None = None,
+) -> tuple[tuple[LedgerProjectionRowV1, ...], dict[str, int], list[str]]:
+    """Apply the existing manifest owner while retaining physical row identity."""
+    events = _row_events(rows)
+    projected, counters, errors = project_manifest_bound_legacy_ledger_projections(
+        events, _row_metadata(rows), item, selected_ledger, ledger_bytes,
+        manifest_blobs=manifest_blobs, registry_bytes=registry_bytes,
+    )
+    if len(projected) != len(rows):
+        _projection_fail(errors, "identity", "manifest projection changed ledger cardinality")
+        return rows, counters, errors
+    return (
+        tuple(
+            row if event is row.event else LedgerProjectionRowV1(
+                copy.deepcopy(event), row.raw_line_ordinal, row.raw_line_sha256,
+                row.raw_event_sha256, "manifest-projected",
+            )
+            for row, event in zip(rows, projected)
+        ),
+        counters,
+        errors,
+    )
+
+
 def validate_manifest_bound_irrecoverable_disposition(
     disposition: object, archive_identity: str, archive_item: Path
 ) -> list[str]:
@@ -2411,6 +2640,387 @@ def validate_manifest_bound_irrecoverable_disposition(
             if digest_file(path) != row["sha256"]:
                 _projection_fail(errors, "digest", f"irrecoverable disposition surviving artifact is not exact: {row['path']}")
     return errors
+
+
+def archived_ledger_identity(work_item: str, ledger_sha256: str) -> str:
+    """Portable archive identity: only immutable repository-relative facts enter it."""
+    return hashlib.sha256(
+        b"orchestrarium-archive-v1\0"
+        + work_item.encode("utf-8")
+        + b"\0"
+        + ledger_sha256.encode("ascii")
+    ).hexdigest()
+
+
+def _sha256_text(value: object) -> bool:
+    return isinstance(value, str) and SHA256_RE.fullmatch(value) is not None
+
+
+_HISTORICAL_DISPOSITION_MAX_BYTES = 64 * 1024
+_HISTORICAL_RECOVERED_MAX_BYTES = 32 * 1024
+_HISTORICAL_DISPOSITION_MAX_FILES = 1024
+
+
+def historical_artifact_disposition_resource_caps() -> tuple[int, int]:
+    """Return the one validator-owned byte and entry caps for disposition storage."""
+    byte_cap = _HISTORICAL_DISPOSITION_MAX_BYTES
+    entry_cap = _HISTORICAL_DISPOSITION_MAX_FILES
+    if (
+        type(byte_cap) is not int
+        or type(entry_cap) is not int
+        or byte_cap < 1
+        or entry_cap < 1
+    ):
+        raise ValueError("historical artifact disposition resource caps are invalid")
+    return byte_cap, entry_cap
+
+
+def historical_artifact_disposition_storage_identity() -> str:
+    """Return the sole canonical, repository-relative disposition storage name."""
+    return LEGACY_HISTORICAL_DISPOSITIONS
+
+
+def historical_artifact_disposition_id(
+    archive_identity: str,
+    raw_line_ordinal: int,
+    raw_line_sha256: str,
+    event_sha256: str,
+    missing_path: str,
+    artifact_revision_sha256: str,
+) -> str:
+    """State-independent create-only identity for one historical artifact."""
+    fields = (
+        archive_identity, str(raw_line_ordinal), raw_line_sha256, event_sha256,
+        missing_path, artifact_revision_sha256,
+    )
+    return hashlib.sha256(
+        b"orchestrarium-historical-artifact-disposition-v2\0"
+        + b"\0".join(field.encode("utf-8") for field in fields)
+    ).hexdigest()
+
+
+def _historical_approval_payload(disposition: dict) -> bytes:
+    fields = (
+        "schemaVersion", "dispositionId", "archiveIdentity", "workItem", "ledgerSha256",
+        "rawLineOrdinal", "rawLineSha256", "runId", "eventSha256", "missingPath",
+        "artifactRevisionSha256", "state", "searchReceiptSha256", "approvedBy", "approvedAt",
+    )
+    return _canonical_projection_bytes({field: disposition[field] for field in fields})
+
+
+def _historical_missing_artifact_path(root: Path, work_item: str, missing_path: str) -> Path:
+    """Resolve only an archive-item-relative missing leaf through the no-follow owner."""
+    return confine_legacy_projection_path(
+        root,
+        f"{work_item}/{missing_path}",
+        prefix=("work-items", "archive"),
+        allow_missing_leaf=True,
+        failure_id="WI-LEDGER-MIGRATION-TARGET-IDENTITY",
+    )
+
+
+def _valid_historical_search_receipt(receipt: object) -> bool:
+    required = {
+        "schemaVersion", "tool", "toolVersion", "reachableRefs", "reflogs",
+        "unreachableObjects", "inventorySha256",
+    }
+    local_errors: list[str] = []
+    if not _strict_shape(receipt, required, required, local_errors, "historical search receipt"):
+        return False
+    if receipt.get("schemaVersion") != 1:
+        return False
+    if not all(
+        isinstance(receipt.get(field), str) and receipt[field].strip() and len(receipt[field]) <= 256
+        for field in ("tool", "toolVersion")
+    ) or not _sha256_text(receipt.get("inventorySha256")):
+        return False
+    for field in ("reachableRefs", "reflogs", "unreachableObjects"):
+        value = receipt.get(field)
+        if not isinstance(value, dict) or set(value) != {"status", "count"}:
+            return False
+        if value.get("status") != "complete" or type(value.get("count")) is not int or not 0 <= value["count"] <= 10_000_000:
+            return False
+    return True
+
+
+def validate_historical_artifact_disposition_v2(
+    disposition: object,
+    archive_item: Path,
+    ledger_bytes: bytes,
+    events: list[dict],
+    raw_metadata: list[dict[str, object]],
+) -> tuple[HistoricalArtifactAuthorization | None, list[str]]:
+    """Return one exact missing PASS artifact exception, never a closure authority."""
+    errors: list[str] = []
+    ledger = archive_item / "agent-runs.jsonl"
+    target = _projection_target_identity(archive_item, ledger, errors, require_ledger=True)
+    if target is None:
+        return None, errors
+    _root, work_item = target
+    if not work_item.startswith("work-items/archive/"):
+        _projection_fail(errors, "identity", "historical artifact disposition requires a monthly archive")
+        return None, errors
+    common = {
+        "schemaVersion", "dispositionId", "archiveIdentity", "workItem", "ledgerSha256",
+        "rawLineOrdinal", "rawLineSha256", "runId", "eventSha256", "missingPath",
+        "artifactRevisionSha256", "state",
+    }
+    if not isinstance(disposition, dict) or disposition.get("schemaVersion") != 2:
+        _projection_fail(errors, "manifest", "historical artifact disposition must use schemaVersion 2")
+        return None, errors
+    text_identity_fields = (
+        "dispositionId", "archiveIdentity", "workItem", "ledgerSha256", "rawLineSha256",
+        "runId", "eventSha256", "missingPath", "artifactRevisionSha256",
+    )
+    if (
+        type(disposition.get("rawLineOrdinal")) is not int
+        or disposition["rawLineOrdinal"] < 1
+        or any(not isinstance(disposition.get(field), str) for field in text_identity_fields)
+    ):
+        _projection_fail(errors, "identity", "historical artifact disposition identity fields have invalid types")
+        return None, errors
+    state = disposition.get("state")
+    recovered = {"contentBytesBase64", "contentBytesSha256"}
+    irrecoverable = {
+        "searchReceipt", "searchReceiptSha256", "approvedBy", "approvedAt",
+        "approvalStatementSha256",
+    }
+    required = common | (recovered if state == "content-recovered" else irrecoverable if state == "irrecoverable-approved" else set())
+    if not _strict_shape(disposition, required, required, errors, "historical artifact disposition"):
+        return None, errors
+    try:
+        disposition_id = confine_legacy_projection_identifier(disposition["dispositionId"])
+    except ValueError:
+        _projection_fail(errors, "identity", "historical artifact disposition id is unsafe")
+        return None, errors
+    ledger_sha256 = hashlib.sha256(ledger_bytes).hexdigest()
+    if (
+        disposition["workItem"] != work_item
+        or disposition["ledgerSha256"] != ledger_sha256
+        or disposition["archiveIdentity"] != archived_ledger_identity(work_item, ledger_sha256)
+    ):
+        _projection_fail(errors, "identity", "historical artifact disposition archive identity drift")
+    if not all(_sha256_text(disposition.get(key)) for key in ("rawLineSha256", "eventSha256", "artifactRevisionSha256")):
+        _projection_fail(errors, "digest", "historical artifact disposition hashes must be SHA-256")
+    if not isinstance(disposition.get("missingPath"), str) or not disposition["missingPath"].strip() or not _safe_repo_relative(disposition["missingPath"]):
+        _projection_fail(errors, "identity", "historical artifact disposition missing path is unsafe")
+    elif disposition.get("dispositionId") != historical_artifact_disposition_id(
+        disposition.get("archiveIdentity", ""), disposition.get("rawLineOrdinal", 0),
+        disposition.get("rawLineSha256", ""), disposition.get("eventSha256", ""),
+        disposition["missingPath"], disposition.get("artifactRevisionSha256", ""),
+    ):
+        _projection_fail(errors, "identity", "historical artifact disposition id is not deterministic")
+    candidates = [
+        (event, metadata)
+        for event, metadata in zip(events, raw_metadata)
+        if metadata.get("line") == disposition.get("rawLineOrdinal")
+    ]
+    if len(candidates) != 1:
+        _projection_fail(errors, "identity", "historical artifact disposition does not bind one raw ledger line")
+        return None, errors
+    event, metadata = candidates[0]
+    if (
+        metadata.get("sha256") != disposition.get("rawLineSha256")
+        or hashlib.sha256(_canonical_projection_bytes(event)).hexdigest() != disposition.get("eventSha256")
+        or event.get("schemaVersion") != 2
+        or event.get("status") != "completed"
+        or event.get("gate") != "PASS"
+        or event.get("runId") != disposition.get("runId")
+        or event.get("artifact") != disposition.get("missingPath")
+        or event.get("artifactRevision") != disposition.get("artifactRevisionSha256")
+    ):
+        _projection_fail(errors, "identity", "historical artifact disposition does not bind one raw V2 PASS artifact")
+        return None, errors
+    try:
+        observed_path = _historical_missing_artifact_path(_root, work_item, event["artifact"])
+    except ValueError:
+        observed_path = None
+    if observed_path is None or observed_path.exists():
+        _projection_fail(errors, "identity", "historical artifact disposition target is not an exact missing artifact")
+    if state == "content-recovered":
+        encoded = disposition.get("contentBytesBase64")
+        max_encoded = 4 * ((_HISTORICAL_RECOVERED_MAX_BYTES + 2) // 3) + 4
+        if not isinstance(encoded, str) or len(encoded) > max_encoded:
+            recovered_bytes = None
+        else:
+            try:
+                recovered_bytes = base64.b64decode(encoded, validate=True)
+            except (ValueError, TypeError):
+                recovered_bytes = None
+        if (
+            recovered_bytes is None
+            or len(recovered_bytes) > _HISTORICAL_RECOVERED_MAX_BYTES
+            or not _sha256_text(disposition.get("contentBytesSha256"))
+            or hashlib.sha256(recovered_bytes).hexdigest() != disposition.get("contentBytesSha256")
+            or disposition.get("contentBytesSha256") != disposition.get("artifactRevisionSha256")
+        ):
+            _projection_fail(errors, "digest", "content-recovered disposition bytes are not exact")
+    else:
+        receipt = disposition.get("searchReceipt")
+        if (
+            not _valid_historical_search_receipt(receipt)
+            or not _sha256_text(disposition.get("searchReceiptSha256"))
+            or disposition.get("searchReceiptSha256") != hashlib.sha256(_canonical_projection_bytes(receipt)).hexdigest()
+        ):
+            _projection_fail(errors, "manifest", "irrecoverable disposition search receipt is incomplete or drifted")
+        if (
+            not isinstance(disposition.get("approvedBy"), str)
+            or not disposition["approvedBy"].strip()
+            or len(disposition["approvedBy"]) > 256
+            or not isinstance(disposition.get("approvedAt"), str)
+            or _STRICT_UTC_RE.fullmatch(disposition["approvedAt"]) is None
+            or not _sha256_text(disposition.get("approvalStatementSha256"))
+            or disposition.get("approvalStatementSha256") != hashlib.sha256(_historical_approval_payload(disposition)).hexdigest()
+        ):
+            _projection_fail(errors, "manifest", "irrecoverable disposition approval is incomplete or drifted")
+    if errors:
+        return None, errors
+    return HistoricalArtifactAuthorization(
+        disposition["rawLineOrdinal"], disposition["rawLineSha256"], disposition["eventSha256"],
+        event["runId"], event["artifact"], disposition["artifactRevisionSha256"],
+    ), errors
+
+
+def authorized_historical_missing_artifacts(
+    archive_item: Path,
+    ledger_bytes: bytes,
+    events: list[dict],
+    raw_metadata: list[dict[str, object]],
+) -> tuple[dict[int, HistoricalArtifactAuthorization], list[str]]:
+    """Read V2 create-only dispositions; V1 files are intentionally nonauthorizing."""
+    errors: list[str] = []
+    ledger = archive_item / "agent-runs.jsonl"
+    target = _projection_target_identity(archive_item, ledger, errors, require_ledger=True)
+    if target is None:
+        return {}, errors
+    root, work_item = target
+    try:
+        directory = confine_legacy_projection_path(
+            root,
+            f"work-items/{LEGACY_HISTORICAL_DISPOSITIONS}",
+            prefix=("work-items",),
+            allow_missing_leaf=True,
+            failure_id="WI-LEDGER-MIGRATION-MANIFEST-INVALID",
+        )
+    except ValueError as exc:
+        _projection_fail(errors, "identity", f"historical artifact disposition directory is unsafe: {exc}")
+        return {}, errors
+    if not directory.exists():
+        return {}, errors
+    if not directory.is_dir() or _is_link_or_reparse(directory):
+        _projection_fail(errors, "manifest", "historical artifact disposition directory is unsafe")
+        return {}, errors
+    authorized: dict[int, HistoricalArtifactAuthorization] = {}
+    entries = list(itertools.islice(directory.iterdir(), _HISTORICAL_DISPOSITION_MAX_FILES + 1))
+    if len(entries) > _HISTORICAL_DISPOSITION_MAX_FILES:
+        _projection_fail(errors, "manifest", "historical artifact disposition directory exceeds resource cap")
+        return {}, errors
+    for path in sorted(entries):
+        if path.suffix != ".json" or _is_link_or_reparse(path) or not path.is_file():
+            _projection_fail(errors, "manifest", "historical artifact disposition path is unsafe")
+            continue
+        try:
+            if os.lstat(path).st_size > _HISTORICAL_DISPOSITION_MAX_BYTES:
+                _projection_fail(errors, "manifest", "historical artifact disposition exceeds resource cap")
+                continue
+            raw = path.read_bytes()
+        except OSError:
+            _projection_fail(errors, "manifest", "historical artifact disposition cannot be read safely")
+            continue
+        payload = _projection_json_object(raw, path, errors)
+        if payload is None:
+            continue
+        if payload.get("schemaVersion") == 1:
+            continue
+        if payload.get("schemaVersion") != 2:
+            _projection_fail(errors, "manifest", f"historical artifact disposition {path.name} has unsupported schema")
+            continue
+        disposition_id = payload.get("dispositionId")
+        try:
+            disposition_id = confine_legacy_projection_identifier(disposition_id)
+        except ValueError:
+            _projection_fail(errors, "identity", f"historical artifact disposition {path.name} id is unsafe")
+            continue
+        if path.name != f"{disposition_id}.json":
+            _projection_fail(errors, "identity", f"historical artifact disposition filename differs from dispositionId")
+            continue
+        if payload.get("workItem") != work_item:
+            continue
+        exception, disposition_errors = validate_historical_artifact_disposition_v2(
+            payload, archive_item, ledger_bytes, events, raw_metadata
+        )
+        errors.extend(disposition_errors)
+        if exception is None:
+            continue
+        if exception.raw_line_ordinal in authorized:
+            _projection_fail(errors, "topology", "more than one disposition authorizes one missing artifact")
+            continue
+        authorized[exception.raw_line_ordinal] = exception
+    return authorized, errors
+
+
+def validate_archived_ledger_obligations(
+    item: Path, telemetry: dict[str, int] | None = None
+) -> tuple[list[str], list[dict], list[dict]]:
+    """Validate one immutable monthly archive through the normal projection owners.
+
+    Historical rows not admitted through a manifest stay outside the V2 epoch.
+    This reader never writes the archive, registry, or any disposition.
+    """
+    errors: list[str] = []
+    ledger = item / "agent-runs.jsonl"
+    target = _projection_target_identity(item, ledger, errors, require_ledger=True)
+    if target is None:
+        return errors, [], []
+    _root, relative_item = target
+    if not relative_item.startswith("work-items/archive/"):
+        _projection_fail(errors, "identity", "archived obligation validation requires a monthly archive")
+        return errors, [], []
+    try:
+        ledger_bytes = ledger.read_bytes()
+    except OSError as exc:
+        fail(errors, f"cannot read ledger: {ledger}: {exc}")
+        return errors, [], []
+    raw_metadata: list[dict[str, object]] = []
+    events = load_jsonl(ledger, errors, raw_metadata, ledger_bytes)
+    rows = _ledger_projection_rows(events, raw_metadata, errors)
+    shaped_rows, projection_counters, projection_errors = _project_manifest_rows(
+        rows, item, ledger, ledger_bytes
+    )
+    errors.extend(projection_errors)
+    effective_rows, migration_counters, migration_errors = _project_migration_rows(shaped_rows, item)
+    errors.extend(migration_errors)
+    effective_events = _row_events(effective_rows)
+    historical_authorizations, disposition_errors = authorized_historical_missing_artifacts(
+        item, ledger_bytes, events, raw_metadata
+    )
+    errors.extend(disposition_errors)
+    # V1 rows that were not replaced by the manifest are historical input only.
+    event_validity, closure_validity = derive_archived_event_validity(
+        effective_events,
+        item,
+        errors,
+        historical_authorizations,
+        rows=effective_rows,
+    )
+    effective_metadata = _row_metadata(effective_rows)
+    inactive = resolve_closure_invalidations(
+        effective_events, closure_validity, effective_metadata, errors, telemetry
+    )
+    active_positions = [
+        pos
+        for pos in range(len(effective_events))
+        if pos not in inactive
+    ]
+    active_events = [effective_events[pos] for pos in active_positions]
+    active_validity = [closure_validity[pos] for pos in active_positions]
+    open_revise, open_launches = validate_closure(
+        active_events, errors, telemetry, event_validity=active_validity
+    )
+    if telemetry is not None:
+        for name, value in {**migration_counters, **projection_counters}.items():
+            telemetry[f"ledger-migration-{name}"] = value
+    return errors, open_revise, open_launches
 
 
 def validate_status(item: Path, events: list[dict], errors: list[str]) -> None:
@@ -2585,6 +3195,36 @@ def project_legacy_obligation_migrations(
     return effective, counters, errors
 
 
+def _project_migration_rows(
+    rows: tuple[LedgerProjectionRowV1, ...], item: Path
+) -> tuple[tuple[LedgerProjectionRowV1, ...], dict[str, int], list[str]]:
+    """Apply legacy migration without renumbering surviving physical sources."""
+    events = _row_events(rows)
+    effective, counters, errors = project_legacy_obligation_migrations(
+        events, _row_metadata(rows), item
+    )
+    surviving = tuple(
+        row for row in rows if row.event.get("eventKind") != LEGACY_MIGRATION_KIND
+    )
+    if len(effective) != len(surviving):
+        # A rejected control topology deliberately returns the raw event list.
+        if len(effective) == len(rows) and all(event is row.event for row, event in zip(rows, effective)):
+            return rows, counters, errors
+        _projection_fail(errors, "identity", "migration projection changed surviving row cardinality")
+        return rows, counters, errors
+    return (
+        tuple(
+            row if event is row.event else LedgerProjectionRowV1(
+                copy.deepcopy(event), row.raw_line_ordinal, row.raw_line_sha256,
+                row.raw_event_sha256, "migration-replaced",
+            )
+            for row, event in zip(surviving, effective)
+        ),
+        counters,
+        errors,
+    )
+
+
 def reduce_v3_events(events: list[dict]) -> tuple[dict | None, list[str]]:
     """Reduce only V3 control events; legacy events remain readable, non-authorizing input."""
 
@@ -2753,26 +3393,23 @@ def validate_work_item(
         events = load_jsonl(selected_ledger, errors, raw_metadata, ledger_bytes)
     else:
         events = []
-    shape_events, projection_counters, projection_errors = project_manifest_bound_legacy_ledger_projections(
-        events, raw_metadata, item, selected_ledger, ledger_bytes,
+    rows = _ledger_projection_rows(events, raw_metadata, errors)
+    shape_rows, projection_counters, projection_errors = _project_manifest_rows(
+        rows, item, selected_ledger, ledger_bytes,
         manifest_blobs=projection_manifest_blobs,
         registry_bytes=projection_registry_bytes,
     )
     errors.extend(projection_errors)
-    effective_events, migration_counters, migration_errors = project_legacy_obligation_migrations(
-        shape_events, raw_metadata, item
-    )
+    effective_rows, migration_counters, migration_errors = _project_migration_rows(shape_rows, item)
     errors.extend(migration_errors)
+    effective_events = _row_events(effective_rows)
     if ledger_path is not None and any(event.get("schemaVersion") == 3 for event in events):
         fail(errors, "legacy V1/V2 writer refuses a ledger containing schemaVersion 3")
     event_validity = derive_event_validity(effective_events, item, errors)
     _, v3_errors = reduce_v3_events(events)
     errors.extend(v3_errors)
     validate_scratch_ownership(effective_events, item, errors)
-    effective_metadata = [
-        metadata for event, metadata in zip(events, raw_metadata)
-        if event.get("eventKind") != LEGACY_MIGRATION_KIND
-    ]
+    effective_metadata = _row_metadata(effective_rows)
     inactive = resolve_closure_invalidations(effective_events, event_validity, effective_metadata, errors, telemetry)
     active_positions = [pos for pos in range(len(effective_events)) if pos not in inactive]
     active_events = [effective_events[pos] for pos in active_positions]

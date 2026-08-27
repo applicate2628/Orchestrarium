@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import io
 import os
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -62,6 +63,53 @@ TRANSPORT_CONSUMER_REQUIREMENTS = (
     "full external-nonauthorizing tuple",
     "untrusted/potentially-sensitive resultText",
 )
+
+CANONICAL_TRANSPORT_OWNER_NAMES = frozenset(
+    {"codex-dispatch-owner", "claude-dispatch-owner"}
+)
+RAW_KIMI_EXECUTABLE_PATTERNS = (
+    re.compile(
+        r"(?<![A-Za-z0-9_/-])kimi\.exe(?![A-Za-z0-9_/-])",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?<![A-Za-z0-9_/-])kimi[.,;:!?)\]]*\s+--[A-Za-z0-9]",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:run|invoke|execute)\s+[`'\"]*(?:kimi\.exe|kimi)"
+        r"(?![A-Za-z0-9_/-])",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\bkimi\s+path\s*:\s*[`'\"]*(?:kimi\.exe|kimi)"
+        r"[.,;:!?)\]]*(?=$|[\s`])",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?<![A-Za-z0-9_-])(?:(?:where|which)\s+|command\s+-v\s+)"
+        r"[`'\"]*(?:kimi\.exe|kimi)[.,;:!?)\]]*(?=$|[\s`])",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?P<ticks>`+)\s*(?:kimi\.exe|kimi)\s*(?P=ticks)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"^[ \t]*(?:(?:[-+*]|\d+[.)])[ \t]+)?"
+        r"(?:(?:[$#>]|PS(?:[ \t]+[^>\r\n]+)?>|[A-Za-z]:\\[^>\r\n]*>)[ \t]*)?"
+        r"`*(?:kimi\.exe|kimi)[.,;:!?)\]]*`*[ \t]*$",
+        re.IGNORECASE | re.MULTILINE,
+    ),
+)
+
+
+def _raw_kimi_executable_surfaces(text: str) -> tuple[str, ...]:
+    return tuple(
+        match.group(0)
+        for pattern in RAW_KIMI_EXECUTABLE_PATTERNS
+        for match in pattern.finditer(text)
+    )
 
 
 def _load_module(packed_root: Path | None = None):
@@ -160,6 +208,9 @@ def test_every_external_transport_consumer_uses_the_wrapper_owner_contract() -> 
             assert required in text, f"{name} omits {required}"
         for retired in RETIRED_TRANSPORT_RELATIONS:
             assert retired not in text, f"{name} retains {retired}"
+        if name not in CANONICAL_TRANSPORT_OWNER_NAMES:
+            raw_launches = _raw_kimi_executable_surfaces(text)
+            assert not raw_launches, f"{name} retains raw Kimi launch: {raw_launches[0]}"
 
 
 def test_transport_owners_keep_the_full_nonauthorizing_boundary_and_no_retired_fallback() -> None:
@@ -257,6 +308,29 @@ def test_wrapper_rejects_composed_overflow_before_provider_or_capture(
     assert provider_prompt.launch("codex", ["strict-file", "--prompt-file", str(task)]) == 1
 
 
+def test_claude_auth_refusal_precedes_invalid_prompt_and_provider_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Preserves the documented auth refusal before prompt capture or lookup."""
+
+    provider_prompt = _load_module()
+    monkeypatch.setattr(provider_prompt.sys, "stdin", _PipedStdin(b"\xff"))
+    monkeypatch.setattr(
+        provider_prompt,
+        "resolve_provider_auth_configuration",
+        lambda _provider: (_ for _ in ()).throw(
+            provider_prompt.ClaudeSubscriptionRefusal("subscription")
+        ),
+    )
+    monkeypatch.setattr(
+        provider_prompt,
+        "resolve_provider_command",
+        lambda _provider: pytest.fail("provider lookup reached after auth refusal"),
+    )
+
+    assert provider_prompt.launch("claude", ["auth-before-invalid-prompt"]) == 3
+
+
 def test_external_contracts_require_wrappers_and_forbid_inline_or_sidecar_prompt_routes() -> None:
     """Catches documentation that would authorize an unframed substantive provider path."""
 
@@ -278,3 +352,156 @@ def test_external_contracts_require_wrappers_and_forbid_inline_or_sidecar_prompt
         assert "claude -p --" not in text
         assert "documented provider limitations" not in text
         assert "inline prompt argv is allowed" not in text
+
+
+def test_kimi_orchestration_is_wrapper_only_and_callers_do_not_compose_provider_argv() -> None:
+    """Catches any Kimi caller regaining direct CLI, argv, or prompt ownership."""
+
+    contracts = (
+        ROOT / "shared" / "AGENTS.shared.md",
+        ROOT / "src.codex" / "skills" / "lead" / "external-dispatch.md",
+        ROOT / "src.claude" / "agents" / "contracts" / "external-dispatch.md",
+    )
+    required = (
+        "`invoke-kimi-prompt` is the only approved Kimi launch surface",
+        "The wrapper alone owns every Kimi provider argument",
+        "Callers pass the unchanged task prompt file to the wrapper",
+        "must not invoke `kimi`, `kimi.exe`, `kimi --prompt`, or compose `--auto`",
+    )
+    for contract in contracts:
+        text = contract.read_text(encoding="utf-8")
+        for statement in required:
+            assert statement in text, f"{contract} omits Kimi wrapper-only contract: {statement}"
+
+
+@pytest.mark.parametrize(
+    ("line", "rejected"),
+    (
+        pytest.param("Kimi path: `kimi`", True, id="raw-path"),
+        pytest.param("do not run `kimi --prompt`", True, id="negative-do-not"),
+        pytest.param(
+            "run `kimi --prompt` is not allowed", True, id="negative-not-allowed"
+        ),
+        pytest.param("never invoke `kimi.exe --auto`", True, id="negative-never"),
+        pytest.param("```shell\nkimi --prompt task.md\n```", True, id="fenced-command"),
+        pytest.param("where kimi", True, id="where-probe"),
+        pytest.param("which kimi.exe", True, id="which-probe"),
+        pytest.param("command -v kimi", True, id="command-v-probe"),
+        pytest.param("`kimi`", True, id="bare-code-token"),
+        pytest.param("```sh\n$ kimi --prompt task.md\n```", True, id="posix-dollar-prompt"),
+        pytest.param("```sh\n# kimi --prompt task.md\n```", True, id="posix-root-prompt"),
+        pytest.param("```sh\n> kimi --prompt task.md\n```", True, id="posix-angle-prompt"),
+        pytest.param("```powershell\nPS> kimi.exe --auto\n```", True, id="powershell-prompt"),
+        pytest.param(
+            "```powershell\nPS C:\\work> kimi.exe --auto\n```",
+            True,
+            id="powershell-location-prompt",
+        ),
+        pytest.param(
+            "```text\nC:\\work> kimi --prompt task.md\n```",
+            True,
+            id="windows-drive-prompt",
+        ),
+        pytest.param(
+            "```text\nC:\\work>kimi --prompt task.md\n```",
+            True,
+            id="windows-drive-prompt-no-space",
+        ),
+        pytest.param("+ `kimi`", True, id="plus-list"),
+        pytest.param("1. `kimi.exe --auto`", True, id="ordered-list"),
+        pytest.param("Use ``kimi`` only.", True, id="multi-backtick"),
+        pytest.param("```sh\nkimi. --prompt task.md\n```", True, id="exec-period"),
+        pytest.param("```sh\nkimi, --prompt task.md\n```", True, id="exec-comma"),
+        pytest.param("Kimi path: kimi;", True, id="path-semicolon"),
+        pytest.param("Kimi path: kimi:", True, id="path-colon"),
+        pytest.param("where kimi!", True, id="probe-exclamation"),
+        pytest.param("where kimi?", True, id="probe-question"),
+        pytest.param("which kimi.exe)", True, id="probe-paren"),
+        pytest.param("command -v kimi]", True, id="probe-bracket"),
+        pytest.param("KIMI.EXE --auto", True, id="mixed-case-exe-flag"),
+        pytest.param("Kimi --prompt", True, id="mixed-case-name-flag"),
+        pytest.param("run KIMI.EXE", True, id="mixed-case-run-exe"),
+        pytest.param("Invoke Kimi", True, id="mixed-case-invoke-name"),
+        pytest.param("Kimi path: KIMI.EXE", True, id="mixed-case-path"),
+        pytest.param("where KIMI.EXE", True, id="mixed-case-probe"),
+        pytest.param("Use ``Kimi`` only.", True, id="mixed-case-code-span"),
+        pytest.param(
+            "```powershell\nPS C:\\>KIMI.EXE\n```",
+            True,
+            id="mixed-case-powershell-drive-prompt",
+        ),
+        pytest.param("Use only `invoke-kimi-prompt`.", False, id="wrapper"),
+        pytest.param("Fixed model: `kimi-code/k3`.", False, id="model"),
+        pytest.param("Provider: Kimi.", False, id="provider-prose"),
+        pytest.param("Provider: kimi.", False, id="lowercase-provider-label"),
+        pytest.param("`externalProvider: kimi`", False, id="qualified-config"),
+        pytest.param("externalProvider=kimi", False, id="qualified-config-equals"),
+    ),
+)
+def test_kimi_consumer_raw_surface_guard_is_structural(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    line: str,
+    rejected: bool,
+) -> None:
+    """Catches consumer-owned raw executables without interpreting prose polarity."""
+
+    consumer = tmp_path / "consumer.md"
+    consumer.write_text(
+        "\n".join((*TRANSPORT_CONSUMER_REQUIREMENTS, line)),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        sys.modules[__name__], "TRANSPORT_CONSUMERS", {"synthetic": consumer}
+    )
+
+    if rejected:
+        with pytest.raises(AssertionError, match="retains raw Kimi launch"):
+            test_every_external_transport_consumer_uses_the_wrapper_owner_contract()
+    else:
+        test_every_external_transport_consumer_uses_the_wrapper_owner_contract()
+
+
+@pytest.mark.parametrize(
+    "line",
+    (
+        pytest.param(
+            "Requested provider: <internal | codex | claude | kimi | grok>",
+            id="codex-consultant-provider-enum",
+        ),
+        pytest.param(
+            "externalProvider: auto | codex | claude | kimi | grok",
+            id="claude-main-provider-config",
+        ),
+        pytest.param(
+            "externalProvider: {value}  # allowed here: auto | codex | claude | kimi | grok",
+            id="claude-consultant-config-comment",
+        ),
+        pytest.param(
+            "Requested provider: <internal | auto | codex | claude | kimi | grok>",
+            id="claude-consultant-provider-enum",
+        ),
+        pytest.param(
+            "Requested provider: `<internal | codex | claude | kimi | grok>`",
+            id="external-worker-provider-enum",
+        ),
+        pytest.param(
+            "`externalProvider: auto | codex | claude | kimi | grok`",
+            id="external-worker-provider-config",
+        ),
+        pytest.param(
+            "Codex provider universe `auto | codex | claude | kimi | grok`",
+            id="agents-mode-codex-universe",
+        ),
+        pytest.param(
+            "Claude provider universe `auto | codex | claude | kimi | grok`",
+            id="agents-mode-claude-universe",
+        ),
+        pytest.param(
+            "`externalProvider: kimi`",
+            id="agents-mode-qualified-kimi",
+        ),
+    ),
+)
+def test_lowercase_kimi_provider_labels_are_not_executable_surfaces(line: str) -> None:
+    assert _raw_kimi_executable_surfaces(line) == ()

@@ -82,7 +82,8 @@ class TestWorkflowEconomyContract(unittest.TestCase):
             "Re-review only the exact open finding and its changed delta",
             "new defect class or a material upstream revision",
             "Consultant and `$external-brigade` are off by default",
-            "Kimi/Grok remain policy classifiers/examples, unavailable and disabled in 1.x, and never selectable, execution, or provenance providers",
+            "Kimi is an explicit read-only external route for broad research and review",
+            "Grok remains an unavailable policy name in 1.x",
             "quick-fix has no pre-implementation review ceremony",
             "one canonical artifact",
             "concise root ledger",
@@ -93,6 +94,102 @@ class TestWorkflowEconomyContract(unittest.TestCase):
         ):
             with self.subTest(required=required):
                 self.assertIn(required, spine)
+
+    def test_functional_first_policy_keeps_the_approved_boundaries(self) -> None:
+        spine = self._read(SPINE)
+        for required in (
+            "freeze a Primary Acceptance Oracle (PAO) specification",
+            "every admitted acceptance criterion and external contract",
+            "exact target scenario and environment",
+            "invocation and steps",
+            "observable success and required failure semantics",
+            "safety preconditions, cleanup, evidence markers, owner",
+            "method that identifies the evaluated source, configuration, and environment snapshot",
+            "actual source, configuration, and environment snapshot",
+            "Mock or unit evidence cannot earn `Functional PASS`",
+            "PAO specification or admitted functional scope revision revises the PAO ID",
+            "invalidates the affected gates",
+            "implementation alone never revises the PAO",
+            "Functional-first boundary; not code-first",
+            "Functional correctness and a quality architecture foundation are co-primary delivery priorities",
+            "required architecture precedes implementation rather than becoming later hardening",
+            "Until `Functional PASS`",
+            "diagnostics, tests, architecture/design, and changes causally linked to the PAO",
+            "shared or external contract, ownership boundary or stable seam, state or lifecycle owner, public API or schema",
+            "proportionate architecture artifact and evidence-triggered design gate are part of functional scope",
+            "accepted requirement, a current second consumer, or verified external-contract evolution",
+            "simplest one-owner contract and stable extension seam",
+            "if no next extension is evidenced, do not optimize for one or implement hypothetical variants",
+            "minimizing total lifecycle cost across implementation, verification, rollout or rollback, coupling, and blast radius",
+            "Urgency, quick delivery, or the hardening boundary never authorizes skipping the required foundation",
+            "optional hardening, broad refactoring beyond those declared invariants, speculative edge cases, or unrelated review",
+            "local correction that preserves those contracts and owners does not acquire an architecture ceremony",
+            "Test-driven development (TDD) is allowed only for observed failure reproduction",
+            "declared acceptance conditions, verified-cause isolation, safe deterministic PAO execution, or repository-required checks",
+            "never replaces or expands the PAO",
+            "never freezes unverified or workaround output",
+            "Evidence-connected safety stop",
+            "reachable confidentiality, integrity, authentication, authorization, trust-boundary, injection, untrusted-execution, data-loss, corruption, irreversible-action, or publication risk",
+            "activate the existing risk owners",
+            "Only containment or remediation needed to resume may proceed",
+            "grants no publication authority",
+            "smallest deterministic regression guards",
+            "repository-required and likeliest adjacent checks",
+            "rerun the PAO",
+            "later relevant change invalidates the affected evidence",
+            "Hardening is work beyond the declared functional contract, its proportionate evidence-triggered required architecture and extension seams",
+            "Admit hardening separately only after `Functional PASS` and `Regression PASS`",
+            "keep it as nonblocking backlog",
+            "hypothetical variants or architecture/refactoring beyond the declared functional invariants",
+            "evidence-backed accepted extension seam is hardening",
+            "change to externally visible success or failure semantics is functional scope and restarts affected gates",
+            "QA aggregates PAO results, regression and repository-required check results, snapshot identity, unchecked surfaces",
+            "triggered-reviewer table recording each trigger rule, its evidence, and whether its reviewer was invoked",
+            "mandatory reviewer is triggered only by an existing `AGENTS.md` or repository rule or clause 4 evidence",
+            "ambiguity about whether such a trigger applies invokes that reviewer",
+            "Only those three cited bases constitute a real, gate-bearing veto under this policy",
+            "all other reviewer findings are non-veto improvements or nonblocking hardening and go to backlog",
+            "Neither the implementer nor $lead may waive or backlog a real, gate-bearing veto",
+            "Two failed corrections based on the same hypothesis or a materially equivalent approach forbid a third use of that approach",
+            "Reset diagnosis across the root, owner, siblings, and affected surface",
+            "new falsifiable approach, separately admit a prerequisite or redesign, or report a real external `BLOCKED`",
+            "new hypothesis, a material difference from both failed approaches, a falsifying probe, and `$lead` acceptance of the affected surface",
+            "Keep gate, correction-budget, and backlog history under one stable lineage",
+            "cited supersession may correct classification, seams, or acceptance without resetting the budget",
+            "Relabeling, splitting, or merging cannot erase or reset history or move an item between gate and backlog",
+            "derived work inherits that history",
+            "gate admission or exit under clauses 2, 4, 6, or 8 records one line of evidence against the frozen PAO ID",
+            "Resolve ambiguity into PAO scope or a mandatory veto",
+            "Publication safety unchanged",
+            "genuinely multi-model commission only for a final candidate cross-cutting governance or design contract",
+            "used by more than one workflow, owner, or module",
+            "ordinary local code fixes and inline corrections that preserve the accepted contract are excluded",
+            "Freeze the artifact before review",
+            "at least two demonstrably different base-model families",
+            "differences in role, prompt, effort, alias, or variant do not count as model diversity",
+            "Record each runtime provider and model identity",
+            "unavailable required diversity returns a real external `BLOCKED`",
+            "synthesis records every verdict",
+            "independently evaluate whether the proposal's premises, boundary, consequences, lifecycle cost, and coupling are sound",
+            "user or author preference verifies intent, not technical correctness",
+            "names accepted and rejected premises",
+            "materially better alternative when one exists with its trade-off and `Would-flip-if`",
+            "returns an evidence-based verdict",
+            "resolves disagreement against the PAO, mandatory vetoes, and cited evidence rather than majority vote or deference",
+            "is the sole candidate",
+            "synthesis change is re-reviewed on the exact delta by each affected commission member",
+            "Optional alternatives remain backlog and do not create another review round",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, spine)
+
+    def test_functional_first_policy_has_one_canonical_owner(self) -> None:
+        owner_marker = "**Primary acceptance oracle.**"
+        spine = self._read(SPINE)
+        self.assertEqual(spine.count(owner_marker), 1)
+        for projection in (METHODOLOGY, *PROJECTIONS):
+            with self.subTest(projection=projection):
+                self.assertNotIn(owner_marker, self._read(projection))
 
     def test_provider_projections_point_to_the_single_shared_rule(self) -> None:
         for projection in PROJECTIONS:
@@ -170,25 +267,27 @@ class TestWorkflowEconomyContract(unittest.TestCase):
         self.assertNotIn("Проза `.out` ревьюера", text)
         self.assertNotIn("обёртка `--ledger`", text)
 
-    def test_provenance_templates_exclude_unavailable_policy_classifiers(self) -> None:
+    def test_provenance_templates_keep_kimi_explicit_and_grok_unavailable(self) -> None:
         for relative in PROVENANCE_PROVIDER_TEMPLATES:
             text = self._read(relative)
-            with self.subTest(relative=relative, field="requested provider"):
-                self.assertIn(
-                    "<internal | codex | claude | gemini | qwen>",
-                    text,
-                )
+            for required in (
+                "kimi | grok>",
+                "Kimi",
+                "read-only",
+                "nonauthorizing",
+                "Grok remains unavailable",
+                "must never be selected",
+            ):
+                with self.subTest(relative=relative, required=required):
+                    self.assertIn(required, text)
             for forbidden in (
+                "<internal | codex | claude | gemini | qwen>",
                 "<internal | codex | claude | gemini | qwen | kimi | grok>",
-                "Kimi CLI",
                 "Grok CLI",
-                "external CLI (Kimi",
                 "external CLI (Grok",
             ):
                 with self.subTest(relative=relative, forbidden=forbidden):
                     self.assertNotIn(forbidden, text)
-            with self.subTest(relative=relative, boundary="disabled non-provenance"):
-                self.assertIn("never select, resolve, execute, or record either as a provenance provider", text)
 
     def test_substantive_prompt_policy_allows_only_the_fixed_synthetic_smoke_exception(self) -> None:
         reference = self._read("docs/agents-mode-reference.md")

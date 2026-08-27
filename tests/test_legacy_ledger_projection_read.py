@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import base64
 import sys
 import tempfile
 import unittest
@@ -75,6 +76,88 @@ class LegacyLedgerProjectionReadTests(unittest.TestCase):
             "startedAt": raw["started"],
             "updatedAt": raw["updated"],
         }
+
+    def _v2_archived_missing_artifact(self, root: Path, *, state: str = "content-recovered") -> tuple[Path, dict]:
+        item, ledger, _work_items = self._make_item(root, archived=True)
+        recovered = b"recovered historical artifact\n"
+        artifact_sha = digest(recovered)
+        event = {
+            "schemaVersion": 2,
+            "runId": "archive-artifact-pass-001",
+            "workItem": item.name,
+            "role": "qa-engineer",
+            "executionRole": "main",
+            "status": "completed",
+            "gate": "PASS",
+            "scope": ["archived evidence"],
+            "artifact": "missing-evidence.md",
+            "artifactRevision": artifact_sha,
+            "evidence": [{"kind": "manual-check", "ref": "historical evidence"}],
+            "startedAt": "2026-08-01T00:00:00Z",
+            "updatedAt": "2026-08-01T00:00:01Z",
+        }
+        raw = canonical_bytes(event)
+        ledger_bytes = raw + b"\n"
+        ledger.write_bytes(ledger_bytes)
+        work_item = item.relative_to(root).as_posix()
+        ledger_sha = digest(ledger_bytes)
+        disposition = {
+            "schemaVersion": 2,
+            "archiveIdentity": digest(
+                b"orchestrarium-archive-v1\0" + work_item.encode("utf-8") + b"\0" + ledger_sha.encode("ascii")
+            ),
+            "workItem": work_item,
+            "ledgerSha256": ledger_sha,
+            "rawLineOrdinal": 1,
+            "rawLineSha256": digest(raw),
+            "runId": event["runId"],
+            "eventSha256": digest(canonical_bytes(event)),
+            "missingPath": event["artifact"],
+            "artifactRevisionSha256": artifact_sha,
+            "state": state,
+        }
+        disposition["dispositionId"] = digest(
+            b"orchestrarium-historical-artifact-disposition-v2\0"
+            + b"\0".join(str(value).encode("utf-8") for value in (
+                disposition["archiveIdentity"], disposition["rawLineOrdinal"], disposition["rawLineSha256"],
+                disposition["eventSha256"], disposition["missingPath"], disposition["artifactRevisionSha256"],
+            ))
+        )
+        if state == "content-recovered":
+            disposition.update({
+                "contentBytesBase64": base64.b64encode(recovered).decode("ascii"),
+                "contentBytesSha256": artifact_sha,
+            })
+        else:
+            receipt = {
+                "schemaVersion": 1,
+                "tool": "git",
+                "toolVersion": "2.0",
+                "reachableRefs": {"status": "complete", "count": 0},
+                "reflogs": {"status": "complete", "count": 0},
+                "unreachableObjects": {"status": "complete", "count": 0},
+                "inventorySha256": digest(b"inventory"),
+            }
+            disposition.update({
+                "searchReceipt": receipt,
+                "searchReceiptSha256": digest(canonical_bytes(receipt)),
+                "approvedBy": "human-001",
+                "approvedAt": "2026-08-01T00:00:02Z",
+            })
+            disposition["approvalStatementSha256"] = digest(canonical_bytes({
+                key: disposition[key] for key in (
+                    "schemaVersion", "dispositionId", "archiveIdentity", "workItem", "ledgerSha256",
+                    "rawLineOrdinal", "rawLineSha256", "runId", "eventSha256", "missingPath",
+                    "artifactRevisionSha256", "state", "searchReceiptSha256", "approvedBy", "approvedAt",
+                )
+            }))
+        return item, disposition
+
+    @staticmethod
+    def _write_v2_disposition(root: Path, disposition: dict) -> None:
+        directory = root / "work-items" / "legacy-ledger-historical-dispositions"
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / f"{disposition['dispositionId']}.json").write_bytes(canonical_bytes(disposition))
 
     def _install_apply(
         self,
@@ -490,10 +573,41 @@ class LegacyLedgerProjectionReadTests(unittest.TestCase):
             self._install_apply(item, ledger, work_items, raw_line, self._projected_canonical(raw))
             before = {path.relative_to(item): path.read_bytes() for path in item.rglob("*") if path.is_file()}
 
-            module.validate_work_item(item)
+            errors, open_revise, open_launches = module.validate_archived_ledger_obligations(item)
 
+            self.assertEqual([], errors)
+            self.assertEqual([], open_revise)
+            self.assertEqual([], open_launches)
             after = {path.relative_to(item): path.read_bytes() for path in item.rglob("*") if path.is_file()}
             self.assertEqual(before, after)
+
+    def test_archive_obligation_epoch_ignores_unprojected_legacy_rows(self):
+        module = load_validator()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            item, ledger, _work_items = self._make_item(root, archived=True)
+            raw = {"legacy": "not admitted into the V2 epoch"}
+            ledger.write_bytes(canonical_bytes(raw) + b"\n")
+            before = ledger.read_bytes()
+
+            errors, open_revise, open_launches = module.validate_archived_ledger_obligations(item)
+
+            self.assertEqual([], errors)
+            self.assertEqual([], open_revise)
+            self.assertEqual([], open_launches)
+            self.assertEqual(before, ledger.read_bytes())
+
+    def test_archive_obligation_validator_rejects_non_monthly_archive_shape(self):
+        module = load_validator()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            item = root / "work-items" / "archive" / "legacy-item"
+            item.mkdir(parents=True)
+            (item / "agent-runs.jsonl").write_text("{}\n", encoding="utf-8")
+
+            errors, _open_revise, _open_launches = module.validate_archived_ledger_obligations(item)
+
+            self.assertTrue(any("WI-LEDGER-MIGRATION-TARGET-IDENTITY" in error for error in errors))
 
     def test_irrecoverable_disposition_requires_exact_manifest_bound_archive_path_and_unknown_digest(self):
         module = load_validator()
@@ -518,6 +632,80 @@ class LegacyLedgerProjectionReadTests(unittest.TestCase):
             wildcard = {**disposition, "missingPath": "*"}
             self.assertTrue(any("WI-LEDGER-MIGRATION-MANIFEST-INVALID" in error for error in module.validate_manifest_bound_irrecoverable_disposition(wildcard, "archive-commit-001", item)))
             self.assertTrue(any("WI-LEDGER-MIGRATION-MANIFEST-INVALID" in error for error in module.validate_manifest_bound_irrecoverable_disposition({**disposition, "archiveIdentity": ""}, "", item)))
+
+    def test_v2_recovered_disposition_authorizes_only_its_exact_raw_v2_pass_artifact(self):
+        module = load_validator()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            item, disposition = self._v2_archived_missing_artifact(root)
+            self._write_v2_disposition(root, disposition)
+
+            errors, open_revise, open_launches = module.validate_archived_ledger_obligations(item)
+
+            self.assertEqual([], errors)
+            self.assertEqual([], open_revise)
+            self.assertEqual([], open_launches)
+            self.assertEqual(
+                module.archived_ledger_identity(disposition["workItem"], disposition["ledgerSha256"]),
+                disposition["archiveIdentity"],
+            )
+
+    def test_v2_recovered_disposition_fails_closed_on_event_or_path_drift(self):
+        module = load_validator()
+        for update in (
+            {"dispositionId": "0" * 64},
+            {"eventSha256": "0" * 64},
+            {"missingPath": "other.md"},
+            {"runId": "other-run"},
+            {"contentBytesSha256": "0" * 64},
+            {"archiveIdentity": ["not-a-string"]},
+            {"rawLineSha256": ["not-a-string"]},
+        ):
+            with self.subTest(update=update), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                item, disposition = self._v2_archived_missing_artifact(root)
+                self._write_v2_disposition(root, {**disposition, **update})
+
+                errors, _open_revise, _open_launches = module.validate_archived_ledger_obligations(item)
+
+                self.assertTrue(errors)
+                self.assertTrue(any("artifact does not exist" in error for error in errors))
+
+    def test_v2_irrecoverable_disposition_requires_complete_search_and_exact_approval(self):
+        module = load_validator()
+        for update, accepted in (
+            ({}, True),
+            ({"searchReceiptSha256": "0" * 64}, False),
+            ({"approvalStatementSha256": "0" * 64}, False),
+            ({"approvedBy": "human-002"}, False),
+            ({"approvedAt": "2026-08-01T00:00:03Z"}, False),
+        ):
+            with self.subTest(update=update), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                item, disposition = self._v2_archived_missing_artifact(root, state="irrecoverable-approved")
+                self._write_v2_disposition(root, {**disposition, **update})
+
+                errors, _open_revise, _open_launches = module.validate_archived_ledger_obligations(item)
+
+                self.assertEqual(accepted, not errors)
+
+    def test_v1_disposition_is_non_authorizing_and_active_item_is_denied(self):
+        module = load_validator()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            item, disposition = self._v2_archived_missing_artifact(root)
+            directory_path = root / "work-items" / "legacy-ledger-historical-dispositions"
+            directory_path.mkdir(parents=True)
+            (directory_path / "legacy-v1.json").write_bytes(canonical_bytes({"schemaVersion": 1}))
+
+            errors, _open_revise, _open_launches = module.validate_archived_ledger_obligations(item)
+
+            self.assertTrue(any("artifact does not exist" in error for error in errors))
+            active = root / "work-items" / "active" / "legacy-item"
+            active.mkdir(parents=True)
+            (active / "agent-runs.jsonl").write_bytes((item / "agent-runs.jsonl").read_bytes())
+            active_errors, _open_revise, _open_launches = module.validate_archived_ledger_obligations(active)
+            self.assertTrue(any("requires a monthly archive" in error for error in active_errors))
 
     def test_existing_legacy_obligation_normalizations_remain_composable(self):
         module = load_validator()

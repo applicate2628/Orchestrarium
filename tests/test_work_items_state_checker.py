@@ -57,6 +57,50 @@ def load_checker_module():
     return module
 
 
+def load_validator_module():
+    spec = importlib.util.spec_from_file_location("work_item_validator_direct", VALIDATOR)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_false_event_validity_cannot_settle_revise_or_register_terminal():
+    validator = load_validator_module()
+    revise = {
+        "schemaVersion": 2, "runId": "revise-001", "role": "qa-engineer",
+        "executionRole": "internal", "gate": "REVISE", "status": "revise",
+    }
+    closer = {
+        "schemaVersion": 2, "runId": "closer-001", "role": "qa-engineer",
+        "executionRole": "internal", "gate": "PASS", "status": "completed",
+        "closesRunIds": ["revise-001"], "eventKind": "terminal", "launchRunId": "launch-001",
+    }
+    launch = {"schemaVersion": 2, "runId": "launch-001", "eventKind": "launch"}
+    errors: list[str] = []
+    open_revise, open_launches = validator.validate_closure(
+        [launch, revise, closer], errors, event_validity=[True, True, False]
+    )
+    assert [event["runId"] for event in open_revise] == ["revise-001"]
+    assert [event["runId"] for event in open_launches] == ["launch-001"]
+
+
+def test_invalid_launch_target_cannot_be_settled_by_a_valid_terminal():
+    validator = load_validator_module()
+    launch = {"schemaVersion": 2, "runId": "launch-001", "eventKind": "launch"}
+    terminal = {
+        "schemaVersion": 2, "runId": "terminal-001", "eventKind": "terminal",
+        "launchRunId": "launch-001", "status": "completed", "gate": "PASS",
+    }
+    errors: list[str] = []
+
+    _open_revise, open_launches = validator.validate_closure(
+        [launch, terminal], errors, event_validity=[False, True]
+    )
+
+    assert [event["runId"] for event in open_launches] == ["launch-001"]
+
+
 def valid_status() -> str:
     return "\n".join(
         [
@@ -751,6 +795,68 @@ def test_checker_reports_stale_running_agent_when_threshold_is_enabled(tmp_path:
     assert "stale running agent" in result.stdout
 
 
+def test_checker_stale_check_ignores_settled_launches_but_reports_unmatched_launches(
+    tmp_path: Path,
+):
+    item = write_valid_item(tmp_path, "stale-item")
+    launch_common = {
+        "schemaVersion": 2,
+        "workItem": "stale-item",
+        "role": "qa-engineer",
+        "executionRole": "internal",
+        "scope": ["tests/test_work_items_state_checker.py"],
+        "artifact": "reviews/qa.md",
+        "startedAt": "2026-05-03T08:00:00Z",
+        "updatedAt": "2026-05-03T08:00:00Z",
+        "lane": "stale-check",
+    }
+    settled_launch = {
+        **launch_common,
+        "runId": "launch-settled-001",
+        "status": "running",
+        "gate": "none",
+        "evidence": [],
+        "eventKind": "launch",
+    }
+    terminal = {
+        **launch_common,
+        "runId": "terminal-settled-001",
+        "status": "completed",
+        "gate": "PASS",
+        "evidence": [{"kind": "command", "ref": "pytest -q"}],
+        "eventKind": "terminal",
+        "launchRunId": "launch-settled-001",
+    }
+    unmatched_launch = {
+        **launch_common,
+        "runId": "launch-unmatched-001",
+        "status": "running",
+        "gate": "none",
+        "evidence": [],
+        "eventKind": "launch",
+    }
+    (item / "agent-runs.jsonl").write_text(
+        "\n".join(
+            json.dumps(event) for event in (settled_launch, terminal, unmatched_launch)
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = run_checker(
+        tmp_path,
+        "--no-strict-revise",
+        "--stale-hours",
+        "1",
+        "--now",
+        "2026-05-03T10:30:00Z",
+    )
+
+    assert result.returncode == 1, result.stdout
+    assert "launch-settled-001: stale running agent" not in result.stdout
+    assert "launch-unmatched-001: stale running agent" in result.stdout
+
+
 def test_archive_scan_propagates_security_reviewer_waiver_validity(tmp_path: Path, subtests):
     def archived_case(case_name: str, *, invalid: bool = False, legacy_waiver: bool = False):
         root = tmp_path / case_name
@@ -814,6 +920,47 @@ def test_archive_scan_propagates_security_reviewer_waiver_validity(tmp_path: Pat
         assert result.returncode == 1
         assert f"open REVISE obligation survived archival: {target_id}" in result.stdout
         assert f"{waiver_id}: field closesRunIds requires schemaVersion 2" not in result.stdout
+
+
+def test_archive_scan_keeps_skipped_legacy_positions_for_v2_closure_targets(tmp_path: Path):
+    item = tmp_path / "work-items" / "archive" / "2026-07" / "archived-legacy-target"
+    (item / "reviews").mkdir(parents=True)
+    (item / "reviews" / "security.md").write_text("PASS\n", encoding="utf-8")
+    target_id = "run-archive-legacy-target"
+    target = ledger_event(
+        schemaVersion=1,
+        runId=target_id,
+        workItem="archived-legacy-target",
+        role="security-reviewer",
+        executionRole="external-reviewer",
+        status="revise",
+        gate="REVISE",
+        artifact="reviews/security.md",
+        lane="archive-legacy-target",
+        findingClass="security",
+    )
+    closer = ledger_event(
+        schemaVersion=2,
+        runId="run-archive-v2-closer",
+        workItem="archived-legacy-target",
+        role="security-reviewer",
+        executionRole="internal",
+        status="completed",
+        gate="WAIVED:security-reviewer",
+        scope=["archive security review"],
+        artifact="reviews/security.md",
+        evidence=[{"kind": "manual-check", "ref": f"security-reviewer waives {target_id}"}],
+        closesRunIds=[target_id],
+    )
+    (item / "agent-runs.jsonl").write_text(
+        "\n".join(json.dumps(event) for event in (target, closer)) + "\n",
+        encoding="utf-8",
+    )
+
+    result = run_checker(tmp_path)
+
+    assert result.returncode == 1
+    assert "does not reference an earlier event (C1)" not in result.stdout
 
 
 def test_done_predicate_twin_not_drifted():

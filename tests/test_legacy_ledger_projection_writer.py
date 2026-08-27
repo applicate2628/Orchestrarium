@@ -3,9 +3,11 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import importlib.util
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -34,6 +36,58 @@ def canonical(value: object) -> bytes:
 
 
 class LegacyLedgerProjectionWriterTests(unittest.TestCase):
+    def _v2_archived_missing_artifact(self, root: Path) -> tuple[Path, bytes, dict]:
+        archive = root / "work-items" / "archive" / "2026-08" / "legacy-item"
+        archive.mkdir(parents=True)
+        recovered = b"recovered historical artifact\n"
+        artifact_sha = sha(recovered)
+        event = {
+            "schemaVersion": 2,
+            "runId": "archive-artifact-pass-001",
+            "workItem": "legacy-item",
+            "role": "qa-engineer",
+            "executionRole": "main",
+            "status": "completed",
+            "gate": "PASS",
+            "scope": ["archived evidence"],
+            "artifact": "missing-evidence.md",
+            "artifactRevision": artifact_sha,
+            "evidence": [{"kind": "manual-check", "ref": "historical evidence"}],
+            "startedAt": "2026-08-01T00:00:00Z",
+            "updatedAt": "2026-08-01T00:00:01Z",
+        }
+        raw = canonical(event)
+        ledger = raw + b"\n"
+        (archive / "agent-runs.jsonl").write_bytes(ledger)
+        work_item = "work-items/archive/2026-08/legacy-item"
+        ledger_sha = sha(ledger)
+        archive_identity = sha(
+            b"orchestrarium-archive-v1\0" + work_item.encode("utf-8") + b"\0" + ledger_sha.encode("ascii")
+        )
+        disposition = {
+            "schemaVersion": 2,
+            "archiveIdentity": archive_identity,
+            "workItem": work_item,
+            "ledgerSha256": ledger_sha,
+            "rawLineOrdinal": 1,
+            "rawLineSha256": sha(raw),
+            "runId": event["runId"],
+            "eventSha256": sha(canonical(event)),
+            "missingPath": event["artifact"],
+            "artifactRevisionSha256": artifact_sha,
+            "state": "content-recovered",
+            "contentBytesBase64": base64.b64encode(recovered).decode("ascii"),
+            "contentBytesSha256": artifact_sha,
+        }
+        disposition["dispositionId"] = sha(
+            b"orchestrarium-historical-artifact-disposition-v2\0"
+            + b"\0".join(str(value).encode("utf-8") for value in (
+                disposition["archiveIdentity"], disposition["rawLineOrdinal"], disposition["rawLineSha256"],
+                disposition["eventSha256"], disposition["missingPath"], disposition["artifactRevisionSha256"],
+            ))
+        )
+        return archive, ledger, disposition
+
     def _fixture(self, root: Path) -> tuple[Path, bytes, bytes]:
         item = root / "work-items" / "active" / "legacy-item"
         item.mkdir(parents=True)
@@ -376,6 +430,167 @@ class LegacyLedgerProjectionWriterTests(unittest.TestCase):
                     with self.assertRaises(module.LifecycleError) as invalid:
                         module.write_legacy_ledger_irrecoverable_disposition(root, canonical(mutation))
                     self.assertIn(invalid.exception.failure_id, {"WI-LEDGER-MIGRATION-MANIFEST-INVALID", "WI-LEDGER-MIGRATION-TARGET-DIGEST", "WI-LEDGER-MIGRATION-TARGET-IDENTITY"})
+
+    def test_v2_historical_disposition_is_create_only_and_does_not_mutate_archive(self):
+        module = load_writer()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            archive, _ledger, disposition = self._v2_archived_missing_artifact(root)
+            before = {path.relative_to(archive): path.read_bytes() for path in archive.rglob("*") if path.is_file()}
+
+            first = module.write_legacy_ledger_irrecoverable_disposition(root, canonical(disposition))
+            second = module.write_legacy_ledger_irrecoverable_disposition(root, canonical(disposition))
+
+            self.assertEqual({"schemaVersion": 2, "dispositionId": disposition["dispositionId"], "replay": False}, first)
+            self.assertEqual({"schemaVersion": 2, "dispositionId": disposition["dispositionId"], "replay": True}, second)
+            after = {path.relative_to(archive): path.read_bytes() for path in archive.rglob("*") if path.is_file()}
+            self.assertEqual(before, after)
+            with self.assertRaises(module.LifecycleError):
+                module.write_legacy_ledger_irrecoverable_disposition(
+                    root, canonical({**disposition, "missingPath": "other.md"})
+                )
+
+    def test_neutral_v2_writer_replays_and_legacy_adapter_keeps_v1_support(self):
+        module = load_writer()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _archive, _ledger, disposition = self._v2_archived_missing_artifact(root)
+            first = module.write_historical_artifact_disposition(root, canonical(disposition))
+            second = module.write_historical_artifact_disposition(root, canonical(disposition))
+            self.assertEqual(
+                {"schemaVersion": 2, "dispositionId": disposition["dispositionId"], "replay": False}, first
+            )
+            self.assertEqual({**first, "replay": True}, second)
+            with self.assertRaises(module.LifecycleError) as rejected:
+                module.write_historical_artifact_disposition(root, canonical({"schemaVersion": 1}))
+            self.assertEqual("WI-LEDGER-MIGRATION-MANIFEST-INVALID", rejected.exception.failure_id)
+
+    def test_v1_writer_reserves_the_same_entry_cap_and_replays_at_cap(self):
+        module = load_writer()
+        ledger_owner = module._load_agent_run_ledger()
+        validator = ledger_owner.load_validator()
+        original_caps = validator.historical_artifact_disposition_resource_caps
+        original_loader = ledger_owner.load_validator
+        ledger_owner.load_validator = lambda: validator
+
+        def v1_disposition(root: Path, slug: str, operation: str) -> dict:
+            archive = root / "work-items" / "archive" / "2026-08" / slug
+            archive.mkdir(parents=True)
+            closure = archive / "closure.md"
+            closure.write_text("Closed: 2026-08-01T00:00:00Z\n", encoding="utf-8")
+            (archive / "lifecycle-transition-receipt.json").write_bytes(
+                canonical({"operationId": operation})
+            )
+            return {
+                "schemaVersion": 1, "archiveIdentity": operation,
+                "workItem": f"work-items/archive/2026-08/{slug}",
+                "missingPath": ".reports/recovery-state-admission-audit.md",
+                "disposition": "irrecoverable", "expectedDigest": "unknown",
+                "searchReceipt": "search-001",
+                "survivingArtifacts": [{"path": "closure.md", "sha256": sha(closure.read_bytes())}],
+                "approvedBy": "human-001", "approvedAt": "2026-08-01T00:00:03Z",
+            }
+
+        try:
+            validator.historical_artifact_disposition_resource_caps = lambda: (64 * 1024, 2)
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                storage = root / "work-items" / validator.historical_artifact_disposition_storage_identity()
+                storage.mkdir(parents=True)
+                (storage / "occupied.json").write_bytes(b"{}")
+                first = v1_disposition(root, "legacy-cap-one", "archive-cap-one")
+                second = v1_disposition(root, "legacy-cap-two", "archive-cap-two")
+
+                created = module.write_legacy_ledger_irrecoverable_disposition(root, canonical(first))
+                self.assertFalse(created["replay"])
+                with self.assertRaises(module.LifecycleError) as capped:
+                    module.write_legacy_ledger_irrecoverable_disposition(root, canonical(second))
+                self.assertEqual("WI-LEDGER-MIGRATION-MANIFEST-INVALID", capped.exception.failure_id)
+                replayed = module.write_legacy_ledger_irrecoverable_disposition(root, canonical(first))
+                self.assertTrue(replayed["replay"])
+        finally:
+            validator.historical_artifact_disposition_resource_caps = original_caps
+            ledger_owner.load_validator = original_loader
+
+    def test_v2_writer_rejects_exact_cap_and_dangling_output_link(self):
+        module = load_writer()
+        _byte_cap, count_cap = module._load_agent_run_ledger().load_validator().historical_artifact_disposition_resource_caps()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _archive, _ledger, disposition = self._v2_archived_missing_artifact(root)
+            directory_path = root / "work-items" / "legacy-ledger-historical-dispositions"
+            directory_path.mkdir(parents=True)
+            for index in range(count_cap):
+                (directory_path / f"cap-{index:04}.json").write_text("{}", encoding="utf-8")
+            with self.assertRaises(module.LifecycleError) as capped:
+                module.write_legacy_ledger_irrecoverable_disposition(root, canonical(disposition))
+            self.assertEqual("WI-LEDGER-MIGRATION-MANIFEST-INVALID", capped.exception.failure_id)
+
+        # The reader caps every directory entry, including unsafe entries it
+        # later rejects.  The writer must reserve the same bounded namespace.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _archive, _ledger, disposition = self._v2_archived_missing_artifact(root)
+            directory_path = root / "work-items" / "legacy-ledger-historical-dispositions"
+            directory_path.mkdir(parents=True)
+            for index in range(count_cap - 1):
+                (directory_path / f"cap-{index:04}.json").write_text("{}", encoding="utf-8")
+            (directory_path / "unsafe-entry").mkdir()
+            with self.assertRaises(module.LifecycleError) as mixed_cap:
+                module.write_legacy_ledger_irrecoverable_disposition(root, canonical(disposition))
+            self.assertEqual("WI-LEDGER-MIGRATION-MANIFEST-INVALID", mixed_cap.exception.failure_id)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _archive, _ledger, disposition = self._v2_archived_missing_artifact(root)
+            directory_path = root / "work-items" / "legacy-ledger-historical-dispositions"
+            directory_path.mkdir(parents=True)
+            link = directory_path / f"{disposition['dispositionId']}.json"
+            try:
+                os.symlink("missing-disposition-target.json", link)
+            except OSError as exc:
+                self.skipTest(f"symlink fixture unavailable: {exc}")
+            with self.assertRaises(module.LifecycleError) as linked:
+                module.write_legacy_ledger_irrecoverable_disposition(root, canonical(disposition))
+            self.assertEqual("WI-LEDGER-MIGRATION-MANIFEST-INVALID", linked.exception.failure_id)
+
+    def test_v2_writer_uses_validator_owned_resource_caps_and_fails_closed_on_drift(self):
+        module = load_writer()
+        ledger_owner = module._load_agent_run_ledger()
+        validator = ledger_owner.load_validator()
+        original_caps = validator.historical_artifact_disposition_resource_caps
+        original_loader = ledger_owner.load_validator
+        ledger_owner.load_validator = lambda: validator
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                _archive, _ledger, disposition = self._v2_archived_missing_artifact(root)
+                directory_path = root / "work-items" / "legacy-ledger-historical-dispositions"
+                directory_path.mkdir(parents=True)
+                (directory_path / "occupied.json").write_text("{}", encoding="utf-8")
+                validator.historical_artifact_disposition_resource_caps = lambda: (64 * 1024, 1)
+                with self.assertRaises(module.LifecycleError) as capped:
+                    module.write_legacy_ledger_irrecoverable_disposition(root, canonical(disposition))
+                self.assertEqual("WI-LEDGER-MIGRATION-MANIFEST-INVALID", capped.exception.failure_id)
+
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                _archive, _ledger, disposition = self._v2_archived_missing_artifact(root)
+                del validator.historical_artifact_disposition_resource_caps
+                with self.assertRaises(module.LifecycleError) as missing:
+                    module.write_legacy_ledger_irrecoverable_disposition(root, canonical(disposition))
+                self.assertEqual("WI-LEDGER-MIGRATION-MANIFEST-INVALID", missing.exception.failure_id)
+                validator.historical_artifact_disposition_resource_caps = lambda: ("invalid", 1)
+                with self.assertRaises(module.LifecycleError) as invalid:
+                    module.write_legacy_ledger_irrecoverable_disposition(root, canonical(disposition))
+                self.assertEqual("WI-LEDGER-MIGRATION-MANIFEST-INVALID", invalid.exception.failure_id)
+                validator.historical_artifact_disposition_resource_caps = lambda: (64 * 1024, 0)
+                with self.assertRaises(module.LifecycleError) as nonpositive:
+                    module.write_legacy_ledger_irrecoverable_disposition(root, canonical(disposition))
+                self.assertEqual("WI-LEDGER-MIGRATION-MANIFEST-INVALID", nonpositive.exception.failure_id)
+        finally:
+            validator.historical_artifact_disposition_resource_caps = original_caps
+            ledger_owner.load_validator = original_loader
 
 
 if __name__ == "__main__":

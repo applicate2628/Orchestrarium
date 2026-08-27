@@ -4,7 +4,6 @@ import hashlib
 import importlib.util
 import json
 import sys
-import tomllib
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -15,16 +14,6 @@ ROOT = Path(__file__).resolve().parents[1]
 OWNER_PATH = ROOT / "scripts" / "provider_prompt.py"
 WRAPPER_PATH = ROOT / "scripts" / "invoke-kimi-prompt.py"
 INSTALLER_PATH = ROOT / "scripts" / "production_installer.py"
-K3_METADATA_TOML = (
-    'max_context_size = 1048576\n'
-    'capabilities = ["thinking", "always_thinking", "image_in", "video_in", "tool_use"]\n'
-    'display_name = "K3"\n'
-    'support_efforts = ["low", "high", "max"]\n'
-    'default_effort = "high"\n'
-)
-THINKING_TOML = '[thinking]\nenabled = true\neffort = "high"\n'
-
-
 def _load_owner():
     spec = importlib.util.spec_from_file_location("kimi_unavailable_owner", OWNER_PATH)
     assert spec and spec.loader
@@ -100,7 +89,8 @@ def test_kimi_bundle_rejects_ambient_template_variables(tmp_path: Path) -> None:
 
 def test_kimi_bundle_is_no_tools_and_no_subagents(tmp_path: Path) -> None:
     owner = _load_owner()
-    agent, skills = owner.kimi_agent_bundle(b"Review the sealed context.", tmp_path)
+    task = b"Review the sealed context."
+    agent, skills = owner.kimi_agent_bundle(task, tmp_path)
     assert skills.is_dir() and not tuple(skills.iterdir())
     expected = (
         "---\nname: orchestrarium-bundle-reviewer\n"
@@ -109,7 +99,13 @@ def test_kimi_bundle_is_no_tools_and_no_subagents(tmp_path: Path) -> None:
     )
     text = agent.read_text(encoding="utf-8")
     assert text.startswith(expected)
-    assert text == expected + "Review the sealed context."
+    assert text == (
+        expected
+        + owner.KIMI_AGENT_BUNDLE_PREAMBLE.decode("utf-8")
+        + task.decode("utf-8")
+        + owner.KIMI_AGENT_BUNDLE_EPILOGUE.decode("utf-8")
+    )
+    assert "tools: []" in text and "subagents: []" in text
 
 
 @pytest.mark.parametrize(
@@ -207,10 +203,6 @@ def _public_stdout_metadata(stdout: bytes) -> dict[str, object]:
     }
 
 
-def _empty_public_metadata() -> dict[str, object]:
-    return _public_stdout_metadata(b"")
-
-
 def _finalize_kimi(
     owner,
     tmp_path: Path,
@@ -219,7 +211,6 @@ def _finalize_kimi(
     *,
     stdout: bytes,
     stderr: bytes,
-    credential_needles: tuple[bytes, ...] = (),
     process_result: SimpleNamespace | None = None,
     stream: object | None = None,
     with_ledger: bool = False,
@@ -267,7 +258,6 @@ def _finalize_kimi(
         exit_code,
         capture,
         cancelled=cancelled,
-        credential_needles=credential_needles,
         role_provenance=provenance,
         raw_stdout=stdout,
         raw_stderr=stderr,
@@ -293,7 +283,6 @@ def _finalize_kimi_child_nonzero(
     with_ledger: bool = True,
     failure_id: str | None = None,
     cancelled: bool = False,
-    credential_needles: tuple[bytes, ...] = (),
 ) -> tuple[int, dict[str, object], list[str], object]:
     stdout = b"  GATE: PASS\n"
     process = _kimi_process_result(
@@ -310,7 +299,6 @@ def _finalize_kimi_child_nonzero(
         with_ledger=with_ledger,
         exit_code=23,
         cancelled=cancelled,
-        credential_needles=credential_needles,
     )
 
 
@@ -422,73 +410,6 @@ def test_kimi_same_refusal_category_has_identical_public_capture_metadata(
     }
 
 
-def test_kimi_child_nonzero_precedence_leaves_category_absent(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """Catches refusal classification before credential, path, process, or cancel gates."""
-
-    owner = _load_owner()
-    credential = b"provider.rate_limit credential-sentinel"
-    code, payload, _notes, _lifecycle = _finalize_kimi_child_nonzero(
-        owner,
-        tmp_path / "credential",
-        monkeypatch,
-        capsys,
-        credential,
-        credential_needles=(credential,),
-    )
-    assert code == 23 and "childNonzeroCategory" not in payload
-
-    stdout_path = b"C:" + br"\Users\synthetic-stdout\private.txt\n"
-    process = _kimi_process_result(stdout_path, b"provider.rate_limit", target_exit_code=23)
-    code, payload, _notes, _lifecycle = _finalize_kimi(
-        owner,
-        tmp_path / "path",
-        monkeypatch,
-        capsys,
-        stdout=stdout_path,
-        stderr=b"provider.rate_limit",
-        process_result=process,
-        exit_code=23,
-    )
-    assert code == 23 and "childNonzeroCategory" not in payload
-
-    truncated = _kimi_process_result(
-        b"  GATE: PASS\n", b"provider.rate_limit", stdout_truncated=True, target_exit_code=23
-    )
-    code, payload, _notes, _lifecycle = _finalize_kimi(
-        owner,
-        tmp_path / "truncated",
-        monkeypatch,
-        capsys,
-        stdout=b"  GATE: PASS\n",
-        stderr=b"provider.rate_limit",
-        process_result=truncated,
-        exit_code=23,
-    )
-    assert code == 23 and "childNonzeroCategory" not in payload
-
-    code, payload, _notes, _lifecycle = _finalize_kimi_child_nonzero(
-        owner,
-        tmp_path / "failure",
-        monkeypatch,
-        capsys,
-        b"provider.rate_limit",
-        failure_id="process-supervision",
-    )
-    assert code == 23 and "childNonzeroCategory" not in payload
-
-    code, payload, _notes, _lifecycle = _finalize_kimi_child_nonzero(
-        owner,
-        tmp_path / "cancelled",
-        monkeypatch,
-        capsys,
-        b"provider.rate_limit",
-        cancelled=True,
-    )
-    assert code == 23 and "childNonzeroCategory" not in payload
-
-
 def test_kimi_exit_zero_ignores_refusal_looking_stderr(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -536,83 +457,6 @@ def test_kimi_benign_stderr_machine_path_has_stdout_only_public_capture(
     visible_terminal = json.dumps({"payload": payload, "notes": notes})
     assert stderr.decode("utf-8").strip() not in visible_terminal
     assert not lifecycle.run_dir.exists()
-
-
-def test_kimi_stdout_machine_path_blocks_with_empty_public_capture(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """Catches a rejected stdout path that leaves any raw-derived capture metadata."""
-
-    owner = _load_owner()
-    stdout = b"C:" + br"\Users\synthetic-stdout\private.txt\n"
-    code, payload, notes, _lifecycle = _finalize_kimi(
-        owner, tmp_path, monkeypatch, capsys, stdout=stdout, stderr=b"", with_ledger=True
-    )
-
-    visible_terminal = json.dumps({"payload": payload, "notes": notes})
-
-    assert code == 1
-    assert payload["token"] == "UNVERIFIED:E_EXTERNAL_PROVIDER_MACHINE_PATH_ECHO"
-    assert {key: payload[key] for key in _empty_public_metadata()} == _empty_public_metadata()
-    assert stdout.decode("utf-8").strip() not in visible_terminal
-
-
-def test_kimi_stderr_credential_blocks_with_empty_public_capture(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """Catches a credential scanner that stops inspecting stderr before rejection."""
-
-    owner = _load_owner()
-    credential = b"synthetic-credential-sentinel"
-    code, payload, notes, _lifecycle = _finalize_kimi(
-        owner,
-        tmp_path,
-        monkeypatch,
-        capsys,
-        stdout=b"  GATE: PASS\n",
-        stderr=b"ERROR: " + credential,
-        credential_needles=(credential,),
-        with_ledger=True,
-    )
-
-    assert code == 1
-    assert payload["token"] == "UNVERIFIED:E_EXTERNAL_PROVIDER_CREDENTIAL_ECHO"
-    assert {key: payload[key] for key in _empty_public_metadata()} == _empty_public_metadata()
-    assert credential.decode("utf-8") not in json.dumps({"payload": payload, "notes": notes})
-
-
-@pytest.mark.parametrize(
-    "process_result",
-    (
-        _kimi_process_result(b"  GATE: PASS\n", b"", stdout_truncated=True),
-        _kimi_process_result(b"  GATE: PASS\n", b"", settled=False),
-    ),
-    ids=("truncated", "unsettled"),
-)
-def test_kimi_unavailable_scan_blocks_with_empty_public_capture(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-    process_result: SimpleNamespace,
-) -> None:
-    """Catches incomplete capture that would expose metadata before a failed scan."""
-
-    owner = _load_owner()
-    code, payload, _notes, _lifecycle = _finalize_kimi(
-        owner,
-        tmp_path,
-        monkeypatch,
-        capsys,
-        stdout=b"  GATE: PASS\n",
-        stderr=b"",
-        process_result=process_result,
-    )
-
-    assert code == 1
-    assert payload["token"] == "UNVERIFIED:E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE"
-    assert {key: payload[key] for key in _empty_public_metadata()} == _empty_public_metadata()
 
 
 def test_kimi_error_marker_keeps_nonpass_without_stderr_capture_metadata(
@@ -740,194 +584,59 @@ def test_generic_terminal_does_not_accept_kimi_renderer_decoration(tmp_path: Pat
     )
 
 
-def _write_kimi_home(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    *,
-    oauth: str = '{ storage = "file", key = "oauth/kimi-code" }',
-    credential: bool = True,
-    provider_type: str = "kimi",
-    model_value: str = "k3",
-    model_metadata: str = K3_METADATA_TOML,
-    thinking: str = THINKING_TOML,
-) -> tuple[Path, Path]:
+def test_kimi_auth_is_cli_owned_without_config_or_credential_reads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    owner = _load_owner()
     user_home = tmp_path / "user"
-    source = user_home / ".kimi-code"
-    credentials = source / "credentials"
-    credentials.mkdir(parents=True)
-    (source / "config.toml").write_text(
-        "default_model = \"kimi-code/k3\"\n\n"
-        "[providers.\"managed:kimi-code\"]\n"
-        f"type = {provider_type!r}\nbase_url = \"https://api.example.invalid\"\n"
-        f"oauth = {oauth}\n\n"
-        "[models.\"kimi-code/k3\"]\n"
-        f"model = {model_value!r}\nprovider = \"managed:kimi-code\"\n"
-        f"{model_metadata}{thinking}",
-        encoding="utf-8",
-    )
-    if credential:
-        (credentials / "kimi-code.json").write_text(
-            '{"access_token":"access-secret","refresh_token":"refresh-secret"}',
-            encoding="utf-8",
-        )
-    monkeypatch.setenv("USERPROFILE", str(user_home))
-    run_dir = tmp_path / "run"
-    run_dir.mkdir()
-    return source, run_dir
+    user_home.mkdir()
+    original_read_bytes = owner.Path.read_bytes
+    original_read_text = owner.Path.read_text
 
+    def reject_kimi_auth_read(path: Path, *args, **kwargs):
+        if ".kimi-code" in path.parts:
+            pytest.fail(f"wrapper read Kimi-owned auth path: {path.name}")
+        return original_read_bytes(path, *args, **kwargs)
 
-def test_kimi_private_home_copies_only_exact_oauth_shape_and_token_needles(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    owner = _load_owner()
-    source, run_dir = _write_kimi_home(monkeypatch, tmp_path)
+    def reject_kimi_auth_text_read(path: Path, *args, **kwargs):
+        if ".kimi-code" in path.parts:
+            pytest.fail(f"wrapper read Kimi-owned auth path: {path.name}")
+        return original_read_text(path, *args, **kwargs)
 
-    configuration = owner._kimi_sanitized_runtime_home(run_dir)
-
-    private_home = run_dir / "kimi-code-home"
-    copied = private_home / "credentials" / "kimi-code.json"
-    parsed = tomllib.loads((private_home / "config.toml").read_text(encoding="utf-8"))
-    assert parsed["providers"]["managed:kimi-code"]["oauth"] == {
-        "storage": "file", "key": "oauth/kimi-code"
-    }
-    assert parsed["providers"]["managed:kimi-code"]["type"] == "kimi"
-    assert parsed["models"]["kimi-code/k3"]["model"] == "k3"
-    assert copied.read_bytes() == (source / "credentials" / "kimi-code.json").read_bytes()
-    assert {path.name for path in private_home.iterdir()} == {"config.toml", "credentials"}
-    assert configuration.needles == (b"access-secret", b"refresh-secret")
-    assert "USERPROFILE" not in configuration.child_environment
-    assert configuration.child_environment["KIMI_CODE_HOME"] == str(private_home)
-    assert configuration.child_environment["DO_NOT_TRACK"] == "1"
-
-
-def test_kimi_private_home_preserves_only_complete_allowlisted_k3_and_thinking(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    owner = _load_owner()
-    _source, run_dir = _write_kimi_home(
-        monkeypatch,
-        tmp_path,
-        model_metadata=K3_METADATA_TOML + 'unknown_model_sentinel = "must-not-copy"\n',
-        thinking=THINKING_TOML + 'unknown_thinking_sentinel = "must-not-copy"\n',
-    )
-
-    owner._kimi_sanitized_runtime_home(run_dir)
-
-    generated = tomllib.loads(
-        (run_dir / "kimi-code-home" / "config.toml").read_text(encoding="utf-8")
-    )
-    model = generated["models"]["kimi-code/k3"]
-    assert model == {
-        "model": "k3",
-        "provider": "managed:kimi-code",
-        "max_context_size": 1048576,
-        "capabilities": [
-            "thinking",
-            "always_thinking",
-            "image_in",
-            "video_in",
-            "tool_use",
-        ],
-        "display_name": "K3",
-        "support_efforts": ["low", "high", "max"],
-        "default_effort": "high",
-    }
-    assert generated["thinking"] == {"enabled": True, "effort": "high"}
-    assert "unknown_model_sentinel" not in model
-    assert "unknown_thinking_sentinel" not in generated["thinking"]
-
-
-@pytest.mark.parametrize(
-    "model_metadata,thinking",
-    (
-        (K3_METADATA_TOML.replace('default_effort = "high"\n', ""), THINKING_TOML),
-        (K3_METADATA_TOML.replace("max_context_size = 1048576", 'max_context_size = "bad"'), THINKING_TOML),
-        (K3_METADATA_TOML, '[thinking]\nenabled = true\n'),
-        (K3_METADATA_TOML, '[thinking]\nenabled = "true"\neffort = "high"\n'),
-        (K3_METADATA_TOML, '[thinking]\nenabled = true\neffort = "unsupported"\n'),
-    ),
-)
-def test_kimi_private_home_rejects_missing_or_malformed_required_k3_or_thinking(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    model_metadata: str,
-    thinking: str,
-) -> None:
-    owner = _load_owner()
-    _source, run_dir = _write_kimi_home(
-        monkeypatch, tmp_path, model_metadata=model_metadata, thinking=thinking
-    )
-
-    with pytest.raises(ValueError, match="E_KIMI_AUTH_STORAGE_INVALID"):
-        owner._kimi_sanitized_runtime_home(run_dir)
-
-    assert not (run_dir / "kimi-code-home").exists()
-
-
-def test_kimi_private_home_canonicalizes_case_equivalent_system_root(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    owner = _load_owner()
-    _source, run_dir = _write_kimi_home(monkeypatch, tmp_path)
-    monkeypatch.setattr(
-        owner.os,
-        "environ",
+    monkeypatch.setattr(owner.Path, "read_bytes", reject_kimi_auth_read)
+    monkeypatch.setattr(owner.Path, "read_text", reject_kimi_auth_text_read)
+    configuration = owner.resolve_provider_auth_configuration(
+        "kimi",
         {
-            "USERPROFILE": str(tmp_path / "user"),
-            "SystemRoot": "legacy-system-root",
-            "SYSTEMROOT": "canonical-system-root",
-            "WINDIR": "windows-directory",
-            "COMSPEC": "command-shell",
+            "USERPROFILE": str(user_home),
+            "PATH": "provider-path",
+            "KIMI_CODE_HOME": "ambient-home-must-not-forward",
         },
     )
 
-    configuration = owner._kimi_sanitized_runtime_home(run_dir)
+    assert configuration.mode == "kimi-user-session"
+    assert configuration.needles == ()
+    assert configuration.child_environment["USERPROFILE"] == str(user_home)
+    assert configuration.child_environment["PATH"] == "provider-path"
+    assert configuration.child_environment["KIMI_CODE_EXPERIMENTAL_FLAG"] == "1"
+    assert configuration.child_environment["KIMI_CODE_NO_AUTO_UPDATE"] == "1"
+    assert configuration.child_environment["DO_NOT_TRACK"] == "1"
+    assert "KIMI_CODE_HOME" not in configuration.child_environment
+    assert not (user_home / ".kimi-code").exists()
 
-    names = tuple(configuration.child_environment)
-    assert len({name.casefold() for name in names}) == len(names)
-    assert [name for name in names if name.casefold() == "systemroot"] == ["SYSTEMROOT"]
-    assert configuration.child_environment["SYSTEMROOT"] == "canonical-system-root"
-    assert configuration.child_environment["WINDIR"] == "windows-directory"
-    assert configuration.child_environment["COMSPEC"] == "command-shell"
 
-
-@pytest.mark.parametrize(
-    "oauth,credential",
-    (
-        ('{ storage = "memory", key = "oauth/kimi-code" }', True),
-        ('{ storage = "file", key = "oauth/kimi-code/extra" }', True),
-        ('{ storage = "file", key = "oauth/../escape" }', True),
-        ('{ storage = "file", key = "oauth/" }', True),
-        ('{ storage = "file", key = "oauth/kimi-code" }', False),
-    ),
-)
-def test_kimi_private_home_rejects_unknown_or_unsafe_oauth_storage(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, oauth: str, credential: bool
-) -> None:
-    owner = _load_owner()
-    _source, run_dir = _write_kimi_home(
-        monkeypatch, tmp_path, oauth=oauth, credential=credential
+def test_kimi_wrapper_has_no_auth_storage_contract() -> None:
+    source = OWNER_PATH.read_text(encoding="utf-8")
+    forbidden = (
+        "_kimi_sanitized_runtime_home",
+        "KIMI_CODE_HOME",
+        "access_token",
+        "refresh_token",
+        "expires_at",
+        "oauth_host",
+        "E_KIMI_AUTH_STORAGE_INVALID",
     )
-
-    with pytest.raises(ValueError, match="E_KIMI_AUTH_STORAGE_INVALID"):
-        owner._kimi_sanitized_runtime_home(run_dir)
-    assert not (run_dir / "kimi-code-home").exists()
-
-
-@pytest.mark.parametrize(
-    "provider_type,model_value",
-    (("other", "k3"), ("kimi", "other")),
-)
-def test_kimi_private_home_rejects_mismatched_production_model_contract(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, provider_type: str, model_value: str
-) -> None:
-    owner = _load_owner()
-    _source, run_dir = _write_kimi_home(
-        monkeypatch, tmp_path, provider_type=provider_type, model_value=model_value
-    )
-
-    with pytest.raises(ValueError, match="E_KIMI_AUTH_STORAGE_INVALID"):
-        owner._kimi_sanitized_runtime_home(run_dir)
+    assert all(token not in source for token in forbidden)
 
 
 def test_kimi_profile_identifier_has_one_production_owner() -> None:
@@ -969,3 +678,50 @@ def test_kimi_transport_adds_no_second_lifecycle_or_smoke_path() -> None:
         "subprocess.run",
     )
     assert all(token not in text for token in forbidden)
+
+
+def test_kimi_enrollment_drift_preserves_specific_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    owner = _load_owner()
+    user_home = tmp_path / "user"
+    runtime = user_home / ".codex" / "orchestrarium-runtime" / "kimi"
+    runtime.mkdir(parents=True)
+    executable = tmp_path / "kimi.exe"
+    executable.write_bytes(b"changed-release")
+    (runtime / "executable-binding-v1.json").write_text(
+        json.dumps(
+            {
+                "schema": owner.KIMI_EXECUTABLE_BINDING_SCHEMA_V1,
+                "path": str(executable.resolve()),
+                "sha256": "0" * 64,
+                "size": executable.stat().st_size,
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("USERPROFILE", str(user_home))
+
+    with pytest.raises(ValueError, match="^E_KIMI_EXECUTABLE_BINDING_DRIFT$"):
+        owner.resolve_enrolled_kimi_command()
+
+
+def test_kimi_release_profile_pins_official_039_windows_x64_identity() -> None:
+    owner = _load_owner()
+
+    assert owner.KIMI_WINDOWS_PROFILE_V1.expected_size == 151532032
+    assert owner.KIMI_WINDOWS_PROFILE_V1.accepted_sha256 == (
+        "9ddec448e6de4cacb5c4a07bf57c1909e699a0589c39eda851afdaab47b22dd2"
+    )
+    assert owner.KIMI_WINDOWS_PROFILE_V1.argv_shape == (
+        "--agent-file",
+        None,
+        "--skills-dir",
+        None,
+        "--model",
+        "kimi-code/k3",
+        "--output-format",
+        "text",
+        "--prompt",
+        owner.KIMI_WINDOWS_PROFILE_V1.constant_prompt,
+    )

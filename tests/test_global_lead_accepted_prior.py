@@ -70,6 +70,27 @@ PARTIAL_PUSH_GATE_OVERLAY_REVISION = "128aa1572aad11665b836e121d84c04c63e35dfd"
 PARTIAL_PUSH_GATE_GLOBAL_LEAD_TREE_SHA256 = (
     "bc0e280d4319f71078daae8476015d6d80a9ce15ffe7a05ffc2c2438875bae88"
 )
+CURRENT_HYBRID_GLOBAL_LEAD_TREE_SHA256 = (
+    "a4afc1fe35ddb5b0417f3ba8c170dceeeef61e95a7eb0b4e617bd28db271a2ff"
+)
+CURRENT_HYBRID_GLOBAL_LEAD_OVERLAYS = {
+    "external-dispatch.md": (
+        "e55b2466281ecc50ad2a940a4de14a5ea90fb98c",
+        "src.codex/skills/lead/external-dispatch.md",
+    ),
+    "scripts/check-work-items-state.py": (
+        "3cef867b52e59093ec7c445fb5ae3afc560f5233",
+        "scripts/check-work-items-state.py",
+    ),
+    "scripts/mutate-work-item.py": (
+        "7872d36d1019d1ac8c2e1615a9f9dbde47395815",
+        "scripts/mutate-work-item.py",
+    ),
+    "scripts/validate-work-item-state.py": (
+        "a8abf6330912a4913edb379df1676a18409df678",
+        "scripts/validate-work-item-state.py",
+    ),
+}
 PROVIDER_AUTH_BASELINE_STAGED_LEAD_OVERLAYS = {
     "external-dispatch.md": ("8f92dc73", "src.codex/skills/lead/external-dispatch.md"),
     "scripts/provider_prompt.py": ("8f92dc73", "scripts/provider_prompt.py"),
@@ -763,6 +784,85 @@ def _seed_partial_push_gate_staged_lead(destination: Path) -> Path:
     return lead
 
 
+def _seed_current_hybrid_global_lead(installer, destination: Path) -> Path:
+    lead = _copy_current_staged_lead(installer, destination)
+    for relative, source in CURRENT_HYBRID_GLOBAL_LEAD_OVERLAYS.items():
+        (lead / relative).write_bytes(_historical_blob(*source))
+    return lead
+
+
+def test_exact_current_hybrid_global_lead_migrates_noops_and_rejects_drift(
+    tmp_path: Path,
+) -> None:
+    installer = _load_installer()
+    current = _copy_current_staged_lead(installer, tmp_path / "current" / "lead")
+    historical = _seed_current_hybrid_global_lead(
+        installer, tmp_path / "historical" / "lead"
+    )
+    current_files = _tree_bytes(current)
+    historical_files = _tree_bytes(historical)
+    assert set(historical_files) == set(current_files)
+    assert {
+        relative
+        for relative in current_files
+        if current_files[relative] != historical_files[relative]
+    } == {Path(relative) for relative in CURRENT_HYBRID_GLOBAL_LEAD_OVERLAYS}
+    for relative, source in CURRENT_HYBRID_GLOBAL_LEAD_OVERLAYS.items():
+        assert historical_files[Path(relative)] == _historical_blob(*source)
+    assert (
+        installer._tree_sha256(historical, ignore_runtime_cache=True)
+        == CURRENT_HYBRID_GLOBAL_LEAD_TREE_SHA256
+    )
+
+    target = tmp_path / "target"
+    skills_root = target / ".agents" / "skills"
+    shutil.copytree(historical, skills_root / "lead")
+    plan = installer._preflight_canonical_skills(
+        ROOT / "src.codex" / "skills", skills_root, root=ROOT
+    )
+    try:
+        lead = next(skill for skill in plan.skills if skill.name == "lead")
+        assert lead.accepted_prior == CURRENT_HYBRID_GLOBAL_LEAD_TREE_SHA256
+        owner = installer._CreateOnlyMutablePath(
+            target, installer._InstallTransaction([], enabled=False), dry_run=False
+        )
+        installer._apply_canonical_skills_plan(plan, skills_root, owner, root=ROOT)
+    finally:
+        installer._discard_canonical_skills_plan(plan)
+    assert _tree_bytes(skills_root / "lead") == current_files
+
+    before_noop = _tree_bytes(skills_root)
+    current_plan = installer._preflight_canonical_skills(
+        ROOT / "src.codex" / "skills", skills_root, root=ROOT
+    )
+    try:
+        lead = next(skill for skill in current_plan.skills if skill.name == "lead")
+        assert lead.accepted_prior is None
+        installer._apply_canonical_skills_plan(
+            current_plan, skills_root, owner, root=ROOT
+        )
+    finally:
+        installer._discard_canonical_skills_plan(current_plan)
+    assert _tree_bytes(skills_root) == before_noop
+
+    drift_root = tmp_path / "drift" / ".agents" / "skills"
+    drift = _seed_current_hybrid_global_lead(installer, drift_root / "lead")
+    with (drift / "SKILL.md").open("ab") as stream:
+        stream.write(b"x")
+    with pytest.raises(ValueError, match="E_ACCEPTED_PRIOR_COLLISION: lead"):
+        installer._preflight_canonical_skills(
+            ROOT / "src.codex" / "skills", drift_root, root=ROOT
+        )
+
+    extra_root = tmp_path / "extra" / ".agents" / "skills"
+    extra = _seed_current_hybrid_global_lead(installer, extra_root / "lead")
+    (extra / "unrecognized.txt").write_text("extra\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="E_ACCEPTED_PRIOR_COLLISION: lead"):
+        installer._preflight_canonical_skills(
+            ROOT / "src.codex" / "skills", extra_root, root=ROOT
+        )
+
+
 def test_exact_partial_push_gate_lead_migrates_rolls_back_and_rejects_drift(
     tmp_path: Path,
 ) -> None:
@@ -1292,16 +1392,25 @@ def test_non_cache_extra_inside_runtime_cache_directory_is_collision(
         )
 
 
-def test_h2_global_lead_rebaseline_diff_is_only_mutate_work_item() -> None:
+def test_h2_global_lead_rebaseline_diff_is_only_mutate_work_item(
+    tmp_path: Path,
+) -> None:
     assert set(PRE_H2_ONLY_HISTORICAL_FILES) - set(
         OBSERVED_GLOBAL_LEAD_HISTORICAL_FILES
     ) == {"scripts/mutate-work-item.py"}
-    assert hashlib.sha256(
-        _historical_blob(*PRE_H2_ONLY_HISTORICAL_FILES["scripts/mutate-work-item.py"])
-    ).hexdigest() == "f56ba552c8e7bdc8b814d29d5583d0bce38b5fc2d0581fc4097612e9dbf73da5"
-    assert hashlib.sha256(
-        (ROOT / "scripts" / "mutate-work-item.py").read_bytes()
-    ).hexdigest() == "a34e6cdd61f0fb6248177628e78304769a547c6a09941c661d4b332dc3a1d1a9"
+    historical = _historical_blob(
+        *PRE_H2_ONLY_HISTORICAL_FILES["scripts/mutate-work-item.py"]
+    )
+    assert hashlib.sha256(historical).hexdigest() == (
+        "f56ba552c8e7bdc8b814d29d5583d0bce38b5fc2d0581fc4097612e9dbf73da5"
+    )
+
+    current = _copy_current_staged_lead(
+        _load_installer(), tmp_path / "current" / "lead"
+    )
+    current_staged = (current / "scripts" / "mutate-work-item.py").read_bytes()
+    assert current_staged == (ROOT / "scripts" / "mutate-work-item.py").read_bytes()
+    assert current_staged != historical
 
 
 def _seed_exact_observed_global_lead(

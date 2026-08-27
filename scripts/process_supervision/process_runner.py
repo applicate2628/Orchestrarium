@@ -129,8 +129,8 @@ class KimiWindowsProfileV1:
     profile_id = "kimi-sealed-bundle-text-v1"
     model = "kimi-code/k3"
     constant_prompt = "Review the sealed bundle and return only the requested result."
-    accepted_sha256 = "B7E658D06176284384D1E9EB627D11E5A26627B3964BF8787F197915D1484B1E".lower()
-    expected_size = 150901248
+    accepted_sha256 = "9DDEC448E6DE4CACB5C4A07BF57C1909E699A0589C39EDA851AFDAAB47B22DD2".lower()
+    expected_size = 151532032
     argv_shape = (
         "--agent-file", None,
         "--skills-dir", None,

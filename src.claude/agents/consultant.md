@@ -160,7 +160,7 @@ Check the selected provider first:
 
 - Codex path: `which codex` on Unix, `where codex` on Windows, or `command -v codex`
 - Claude path: `claude`
-- Kimi path: `kimi`
+- Kimi path: approved `invoke-kimi-prompt` wrapper from `contracts/external-dispatch.md`; the wrapper owns all Kimi provider argv
 
 If Codex is selected:
 

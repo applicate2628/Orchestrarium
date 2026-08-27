@@ -1015,7 +1015,11 @@ def test_exact_8f92_transport_set_is_one_atomic_prior_plan(tmp_path: Path) -> No
         (
             "9a637574",
             STOCK_9A63_PROJECTION_SHA256,
-            ("provider_prompt.py", "external-role-taxonomy.v1.json"),
+            (
+                "provider_prompt.py",
+                "process_supervision/process_runner.py",
+                "external-role-taxonomy.v1.json",
+            ),
         ),
     ),
 )

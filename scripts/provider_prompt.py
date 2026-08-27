@@ -16,7 +16,6 @@ import stat
 import sys
 import tempfile
 import time
-import tomllib
 import types
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
@@ -46,13 +45,6 @@ except ModuleNotFoundError:
     )
 
 EFFORTS = frozenset({"low", "medium", "high", "xhigh", "max"})
-KIMI_MODEL_METADATA_FIELDS = (
-    "max_context_size",
-    "capabilities",
-    "display_name",
-    "support_efforts",
-    "default_effort",
-)
 ERROR_MARKER = re.compile(
     r"^([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}"
     r"(\.[0-9]+)?Z? )?(ERROR|FATAL|API Error)"
@@ -115,7 +107,6 @@ PROVIDER_AUTH_SECRET_ENV_KEYS_V1 = {
     ),
     "claude-direct": ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"),
     "claude-subscription-override": (),
-    "kimi-user-session": (),
 }
 _NONSECRET_CHILD_ENV_NAMES = (
     "COMSPEC", "SystemRoot", "SYSTEMROOT", "WINDIR", "PATH", "PATHEXT",
@@ -863,6 +854,8 @@ def resolve_enrolled_kimi_command() -> list[str]:
             raise ValueError("E_KIMI_EXECUTABLE_BINDING_DRIFT")
         return [str(path)]
     except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
+        if str(exc) == "E_KIMI_EXECUTABLE_BINDING_DRIFT":
+            raise
         raise ValueError("E_KIMI_EXECUTABLE_BINDING_INVALID") from exc
 
 
@@ -1066,8 +1059,14 @@ def resolve_provider_auth_configuration(
         ):
             child["CLAUDE_CONFIG_DIR"] = user_settings_surface.forwarded_config_dir
     elif provider == "kimi":
-        # Kimi credentials are copied only after a private per-run home exists.
-        return ProviderAuthConfiguration("kimi-user-session", {}, ())
+        child.update(
+            {
+                "KIMI_CODE_EXPERIMENTAL_FLAG": "1",
+                "KIMI_CODE_NO_AUTO_UPDATE": "1",
+                "DO_NOT_TRACK": "1",
+            }
+        )
+        return ProviderAuthConfiguration("kimi-user-session", child, ())
     else:
         raise ValueError("E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE: provider")
 
@@ -1162,151 +1161,10 @@ def secure_output_dir(provider: str) -> Path:
     return output
 
 
-def _private_file(path: Path, data: bytes) -> None:
-    descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-    with os.fdopen(descriptor, "wb") as stream:
-        stream.write(data)
-        stream.flush()
-        os.fsync(stream.fileno())
-
-
-def _kimi_validated_model_projection(model: dict[str, object]) -> dict[str, object]:
-    """Copy only complete, typed K3 metadata into the private config."""
-
-    metadata = {name: model.get(name) for name in KIMI_MODEL_METADATA_FIELDS}
-    capabilities = metadata["capabilities"]
-    support_efforts = metadata["support_efforts"]
-    if (
-        not isinstance(metadata["max_context_size"], int)
-        or isinstance(metadata["max_context_size"], bool)
-        or metadata["max_context_size"] <= 0
-        or not isinstance(capabilities, list)
-        or not capabilities
-        or any(not isinstance(capability, str) or not capability for capability in capabilities)
-        or not isinstance(metadata["display_name"], str)
-        or not metadata["display_name"]
-        or not isinstance(support_efforts, list)
-        or not support_efforts
-        or any(not isinstance(effort, str) or effort not in EFFORTS for effort in support_efforts)
-        or not isinstance(metadata["default_effort"], str)
-        or metadata["default_effort"] not in EFFORTS
-    ):
-        raise ValueError("model metadata")
-    return metadata
-
-
-def _kimi_validated_thinking_projection(config: dict[str, object]) -> dict[str, object]:
-    """Copy only the typed top-level Kimi thinking controls."""
-
-    thinking = config.get("thinking")
-    if not isinstance(thinking, dict):
-        raise ValueError("thinking configuration")
-    enabled = thinking.get("enabled")
-    effort = thinking.get("effort")
-    if not isinstance(enabled, bool) or not isinstance(effort, str) or effort not in EFFORTS:
-        raise ValueError("thinking configuration")
-    return {"enabled": enabled, "effort": effort}
-
-
-def _kimi_sanitized_runtime_home(run_dir: Path) -> ProviderAuthConfiguration:
-    """Copy exactly the selected Kimi OAuth record into an empty private home."""
-
-    source_home = Path(os.environ.get("USERPROFILE") or Path.home()) / ".kimi-code"
-    config_path = source_home / "config.toml"
-    try:
-        validate_no_reparse_components(config_path)
-        raw_config = config_path.read_bytes()
-        config = tomllib.loads(raw_config.decode("utf-8"))
-        provider = config["providers"]["managed:kimi-code"]
-        model = config["models"][KimiWindowsProfileV1.model]
-        oauth_reference = provider["oauth"]
-        if (
-            config.get("default_model") != KimiWindowsProfileV1.model
-            or not isinstance(provider, dict)
-            or not isinstance(model, dict)
-            or model.get("provider") != "managed:kimi-code"
-            or model.get("model") != "k3"
-            or provider.get("type") != "kimi"
-            or not isinstance(oauth_reference, dict)
-            or oauth_reference.get("storage") != "file"
-            or not isinstance(oauth_reference.get("key"), str)
-        ):
-            raise ValueError("configuration")
-        model_metadata = _kimi_validated_model_projection(model)
-        thinking = _kimi_validated_thinking_projection(config)
-        oauth_key = oauth_reference["key"]
-        if not re.fullmatch(r"oauth/[A-Za-z0-9][A-Za-z0-9._-]{0,127}", oauth_key):
-            raise ValueError("credential reference")
-        oauth_filename = f"{oauth_key.removeprefix('oauth/')}.json"
-        oauth_source = source_home / "credentials" / oauth_filename
-        validate_no_reparse_components(oauth_source)
-        oauth_bytes = oauth_source.read_bytes()
-        oauth = json.loads(oauth_bytes.decode("utf-8"))
-        access_token = oauth.get("access_token")
-        refresh_token = oauth.get("refresh_token")
-        if not all(isinstance(token, str) and token for token in (access_token, refresh_token)):
-            raise ValueError("OAuth token")
-        access_bytes = access_token.encode("utf-8")
-        refresh_bytes = refresh_token.encode("utf-8")
-        if b"\x00" in access_bytes or b"\x00" in refresh_bytes:
-            raise ValueError("OAuth token")
-        provider_type = provider.get("type")
-        base_url = provider.get("base_url")
-        if not isinstance(provider_type, str) or not isinstance(base_url, str):
-            raise ValueError("provider configuration")
-    except (OSError, ValueError, KeyError, TypeError, UnicodeError, tomllib.TOMLDecodeError, json.JSONDecodeError) as exc:
-        raise ValueError("E_KIMI_AUTH_STORAGE_INVALID") from exc
-
-    private_home = run_dir / "kimi-code-home"
-    credential_dir = private_home / "credentials"
-    temporary = run_dir / "kimi-tmp"
-    try:
-        private_home.mkdir(mode=0o700)
-        credential_dir.mkdir(mode=0o700)
-        temporary.mkdir(mode=0o700)
-        rendered = (
-            'default_model = "kimi-code/k3"\n\n'
-            '[providers."managed:kimi-code"]\n'
-            f'type = {json.dumps(provider_type)}\n'
-            f'base_url = {json.dumps(base_url)}\n'
-            'oauth = { storage = "file", '
-            f'key = {json.dumps(oauth_key)} }}\n\n'
-            '[models."kimi-code/k3"]\n'
-            'model = "k3"\n'
-            'provider = "managed:kimi-code"\n'
-            f'max_context_size = {model_metadata["max_context_size"]}\n'
-            f'capabilities = {json.dumps(model_metadata["capabilities"])}\n'
-            f'display_name = {json.dumps(model_metadata["display_name"])}\n'
-            f'support_efforts = {json.dumps(model_metadata["support_efforts"])}\n'
-            f'default_effort = {json.dumps(model_metadata["default_effort"])}\n\n'
-            "[thinking]\n"
-            f'enabled = {json.dumps(thinking["enabled"])}\n'
-            f'effort = {json.dumps(thinking["effort"])}\n'
-        ).encode("utf-8")
-        _private_file(private_home / "config.toml", rendered)
-        _private_file(credential_dir / oauth_filename, oauth_bytes)
-        source = os.environ
-        system_root = source.get("SYSTEMROOT") or source.get("SystemRoot")
-        child = {
-            name: source[name]
-            for name in ("WINDIR", "COMSPEC")
-            if source.get(name)
-        }
-        if system_root:
-            child["SYSTEMROOT"] = system_root
-        child.update(
-            {
-                "KIMI_CODE_HOME": str(private_home),
-                "TEMP": str(temporary),
-                "TMP": str(temporary),
-                "DO_NOT_TRACK": "1",
-            }
-        )
-        return ProviderAuthConfiguration(
-            "kimi-user-session", child, tuple(dict.fromkeys((access_bytes, refresh_bytes)))
-        )
-    except (OSError, ValueError) as exc:
-        raise ValueError("E_KIMI_RUNTIME_HOME_INVALID") from exc
+KIMI_AGENT_BUNDLE_PREAMBLE = (
+    b"The sealed bundle below contains the exact task.\n\nBEGIN SEALED BUNDLE\n"
+)
+KIMI_AGENT_BUNDLE_EPILOGUE = b"\nEND SEALED BUNDLE\n"
 
 
 def kimi_agent_bundle(body: bytes, run_dir: Path) -> tuple[Path, Path]:
@@ -1318,7 +1176,12 @@ def kimi_agent_bundle(body: bytes, run_dir: Path) -> tuple[Path, Path]:
     agent = run_dir / "kimi-agent.md"
     skills = run_dir / "kimi-empty-skills"
     skills.mkdir(mode=0o700)
-    agent.write_bytes(KimiWindowsProfileV1.agent_frontmatter + task)
+    agent.write_bytes(
+        KimiWindowsProfileV1.agent_frontmatter
+        + KIMI_AGENT_BUNDLE_PREAMBLE
+        + task
+        + KIMI_AGENT_BUNDLE_EPILOGUE
+    )
     return agent, skills
 
 
@@ -2746,7 +2609,7 @@ def finalize_run(
         and raw_stderr is not None
     )
     scan_outcome: str | None = None
-    if credential_needles or provider == "kimi":
+    if credential_needles:
         scan_outcome = (
             provider_output_safety_scan_terminal(
                 provider, credential_needles, stdout=raw_stdout, stderr=raw_stderr
@@ -2754,7 +2617,7 @@ def finalize_run(
             if raw_streams_settled
             else "E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE"
         )
-    if (credential_needles or provider == "kimi") and stream is not None and stream.overflow:
+    if credential_needles and stream is not None and stream.overflow:
         scan_outcome = "E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE"
     child_nonzero_category = None
     if (
@@ -3008,6 +2871,11 @@ def _launch_with_runner(
     except ValueError as exc:
         return fail(str(exc))
 
+    try:
+        body = assemble_external_prompt(prompt_bytes(control, external=True))
+    except ValueError as exc:
+        return fail(str(exc))
+
     query_cwd = Path.cwd().resolve()
     try:
         command = resolve_enrolled_kimi_command() if provider == "kimi" else resolve_provider_command(provider)
@@ -3048,11 +2916,6 @@ def _launch_with_runner(
         if trust_result:
             return trust_result
 
-    try:
-        body = assemble_external_prompt(prompt_bytes(control, external=True))
-    except ValueError as exc:
-        return fail(str(exc))
-
     lifecycle: RunCaptureLifecycle | None = None
     lifecycle_initialized = False
     realization: dict[str, str] | None = None
@@ -3073,15 +2936,6 @@ def _launch_with_runner(
         return fail(str(exc))
 
     assert lifecycle is not None
-
-    if provider == "kimi":
-        try:
-            auth_configuration = _kimi_sanitized_runtime_home(lifecycle.run_dir)
-        except ValueError as exc:
-            return settle_initialized_setup_failure(
-                control, provider, model, effort, slug, lifecycle, exc, realization, runner=runner,
-                role_provenance=role_provenance, provenance=provenance,
-            )
 
     launch_run_id = ""
     if control.ledger:

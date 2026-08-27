@@ -377,7 +377,6 @@ def test_policy_rejection_stops_before_kimi_prompt_auth_enrollment_run_ledger_or
         "prompt_bytes",
         "resolve_provider_auth_configuration",
         "resolve_enrolled_kimi_command",
-        "_kimi_sanitized_runtime_home",
         "ledger_helper",
         "run_ledger",
         "run_provider_process",

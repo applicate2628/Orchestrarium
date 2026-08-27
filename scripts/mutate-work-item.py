@@ -4259,7 +4259,28 @@ def reopen_item(
 
 def audit_categories(root: Path) -> tuple[str, ...]:
     work_items = _work_items_root(root)
-    allowed_roots = {"backlog", "active", "archive"}
+    try:
+        validator = _load_agent_run_ledger().load_validator()
+        historical_storage = validator.historical_artifact_disposition_storage_identity()
+        historical_storage = validator.confine_legacy_projection_identifier(
+            historical_storage, failure_id="WI-LEDGER-MIGRATION-MANIFEST-INVALID"
+        )
+    except (FileNotFoundError, ImportError, OSError):
+        # Standalone checker bundles intentionally omit the optional lifecycle
+        # writer; without its directory they retain their legacy category set.
+        historical_storage = None
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise LifecycleError(
+            "WI-LEDGER-MIGRATION-MANIFEST-INVALID",
+            "historical disposition storage identity is unavailable or invalid",
+        ) from exc
+    allowed_roots = {
+        "backlog",
+        "active",
+        "archive",
+    }
+    if historical_storage is not None:
+        allowed_roots.add(historical_storage)
     allowed_roots.update(
         category.current_root
         for category in CATEGORIES.values()
@@ -9454,7 +9475,6 @@ def run_trial(root: Path, fixture_path: Path) -> tuple[str, str]:
 LEGACY_PROJECTION_MANIFEST_DIR = "legacy-ledger-projection-manifests"
 LEGACY_PROJECTION_REGISTRY = "legacy-ledger-projections.jsonl"
 LEGACY_PROJECTION_RECEIPTS = "legacy-ledger-projection-receipts"
-LEGACY_HISTORICAL_DISPOSITIONS = "legacy-ledger-historical-dispositions"
 _PROJECTION_OPERATION_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", re.ASCII)
 
 
@@ -9483,14 +9503,33 @@ def _projection_operation(operation_id: str, recorded_at: str) -> None:
     _load_agent_run_ledger()._strict_migration_inputs(operation_id, recorded_at)
 
 
-def _projection_paths(root: Path) -> tuple[Path, Path, Path, Path]:
+def _projection_paths(root: Path) -> tuple[Path, Path, Path]:
     work_items = _work_items_root(root)
     repository = work_items.parent
     manifests = _require_lifecycle_mutation_path(repository, work_items / LEGACY_PROJECTION_MANIFEST_DIR, failure_id="WI-LEDGER-MIGRATION-MANIFEST-INVALID")
     registry = _require_lifecycle_mutation_path(repository, work_items / LEGACY_PROJECTION_REGISTRY, failure_id="WI-LEDGER-MIGRATION-COMMIT-INDETERMINATE")
     receipts = _require_lifecycle_mutation_path(repository, work_items / LEGACY_PROJECTION_RECEIPTS, failure_id="WI-LEDGER-MIGRATION-RECEIPT-MISMATCH")
-    dispositions = _require_lifecycle_mutation_path(repository, work_items / LEGACY_HISTORICAL_DISPOSITIONS, failure_id="WI-LEDGER-MIGRATION-MANIFEST-INVALID")
-    return manifests, registry, receipts, dispositions
+    return manifests, registry, receipts
+
+
+def _historical_disposition_path(root: Path, validator: object) -> Path:
+    """Resolve the validator-owned historical storage only for writer operations."""
+    try:
+        identity = validator.historical_artifact_disposition_storage_identity()
+        identity = validator.confine_legacy_projection_identifier(
+            identity, failure_id="WI-LEDGER-MIGRATION-MANIFEST-INVALID"
+        )
+    except (AttributeError, TypeError, ValueError) as exc:
+        _projection_fail(
+            "WI-LEDGER-MIGRATION-MANIFEST-INVALID",
+            "historical disposition storage identity is unavailable or invalid",
+        )
+        raise AssertionError from exc
+    work_items = _work_items_root(root)
+    return _require_lifecycle_mutation_path(
+        work_items.parent, work_items / identity,
+        failure_id="WI-LEDGER-MIGRATION-MANIFEST-INVALID",
+    )
 
 
 def _projection_manifest_blobs(root: Path, manifests: Path, manifest_id: str, supplied: bytes) -> dict[str, bytes]:
@@ -9580,9 +9619,11 @@ def _projection_entry(manifest: dict, entry_id: str, raw_ordinal: int, root: Pat
         or not isinstance(projected, dict)
     ):
         _projection_fail("WI-LEDGER-MIGRATION-MANIFEST-INVALID", "manifest entry value types are invalid")
+    validator = _load_agent_run_ledger().load_validator()
+
     def controlled_path(value: str, label: str) -> Path:
         try:
-            return _load_agent_run_ledger().load_validator().confine_legacy_projection_path(
+            return validator.confine_legacy_projection_path(
                 root, value, prefix=("work-items",), failure_id="WI-LEDGER-MIGRATION-TARGET-IDENTITY"
             )
         except ValueError as exc:
@@ -9591,15 +9632,22 @@ def _projection_entry(manifest: dict, entry_id: str, raw_ordinal: int, root: Pat
 
     item = controlled_path(entry["workItem"], "manifest work item")
     ledger = controlled_path(entry["ledgerPath"], "manifest ledger")
-    item_parts = entry["workItem"].split("/")
+    target_errors: list[str] = []
+    target = validator.classify_legacy_projection_target(
+        item, ledger, target_errors, require_ledger=True
+    )
     if (
-        len(item_parts) != 3
-        or item_parts[:2] != ["work-items", "active"]
-        or _PROJECTION_OPERATION_RE.fullmatch(item_parts[2]) is None
-        or not item.is_dir() or _lifecycle_path_has_reparse(item)
-        or ledger != item / "agent-runs.jsonl" or not ledger.is_file() or _lifecycle_path_has_reparse(ledger)
+        target is None
+        or target_errors
+        or target[1] != entry["workItem"]
+        or ledger != item / "agent-runs.jsonl"
+        or not item.is_dir()
+        or not ledger.is_file()
     ):
-        _projection_fail("WI-LEDGER-MIGRATION-TARGET-IDENTITY", "manifest target is not one safe active work-item ledger")
+        _projection_fail(
+            "WI-LEDGER-MIGRATION-TARGET-IDENTITY",
+            "; ".join(target_errors) or "manifest target is not one safe active or archive work-item ledger",
+        )
     ledger_bytes = ledger.read_bytes()
     lines = ledger_bytes.splitlines(keepends=True)
     if _sha256_bytes(ledger_bytes) != entry["ledgerSha256"]:
@@ -9655,6 +9703,34 @@ def _projection_confine_output_sink(path: Path, failure_id: str) -> tuple[Path, 
     if _lifecycle_path_has_reparse(path) or not stat.S_ISREG(info.st_mode):
         _projection_fail(failure_id, "projection output leaf is unsafe")
     return path, True
+
+
+def _reserve_historical_disposition_output(
+    dispositions: Path, target: Path, entry_cap: int
+) -> Path:
+    """Reserve one create-only historical output without consuming a replay slot."""
+    target, replay = _projection_confine_output_sink(
+        target, "WI-LEDGER-MIGRATION-MANIFEST-INVALID"
+    )
+    if replay:
+        return target
+    from itertools import islice
+    entry_count = 0
+    for candidate in islice(dispositions.iterdir(), entry_cap + 1):
+        try:
+            candidate.lstat()
+        except OSError as exc:
+            raise LifecycleError(
+                "WI-LEDGER-MIGRATION-MANIFEST-INVALID",
+                "historical disposition directory cannot be enumerated safely",
+            ) from exc
+        entry_count += 1
+    if entry_count >= entry_cap:
+        _projection_fail(
+            "WI-LEDGER-MIGRATION-MANIFEST-INVALID",
+            "historical disposition directory exceeds resource cap",
+        )
+    return target
 
 
 def _projection_create_or_exact(path: Path, data: bytes, failure_id: str) -> bool:
@@ -9775,7 +9851,7 @@ def _projection_require_replay_anchor(expected_registry_sha256: str, group_befor
 
 def _apply_legacy_ledger_projection_locked(root: Path, manifest_bytes: bytes, entry_id: str, raw_ordinal: int, expected_registry_sha256: str, operation_id: str, recorded_at: str, *, inject_failure: str | None = None) -> dict:
     _projection_operation(operation_id, recorded_at)
-    manifests_path, registry_path, receipts, _dispositions = _projection_paths(root)
+    manifests_path, registry_path, receipts = _projection_paths(root)
     manifest = _projection_object(manifest_bytes, "manifest")
     manifest_id = manifest.get("manifestId")
     if not isinstance(manifest_id, str) or _PROJECTION_OPERATION_RE.fullmatch(manifest_id) is None:
@@ -9907,7 +9983,7 @@ def _projection_cli_record_digests(value: str) -> str | list[str]:
 
 def _revoke_legacy_ledger_projection_locked(root: Path, apply_operation_id: str, apply_record_sha256: str | list[str], expected_registry_sha256: str, operation_id: str, recorded_at: str) -> dict:
     _projection_operation(operation_id, recorded_at)
-    manifests_path, registry_path, receipts, _dispositions = _projection_paths(root)
+    manifests_path, registry_path, receipts = _projection_paths(root)
     repository = Path(root).resolve()
     if repository.name == "work-items" or _lifecycle_path_has_reparse(repository / "work-items"):
         _projection_fail("WI-LEDGER-MIGRATION-TARGET-IDENTITY", "projection writer requires one ordinary repository root")
@@ -10015,14 +10091,41 @@ def revoke_legacy_ledger_projection(root: Path, apply_operation_id: str, apply_r
     return _revoke_legacy_ledger_projection_transaction(root, apply_operation_id, apply_record_sha256, expected_registry_sha256, operation_id, recorded_at)
 
 
-def _write_legacy_ledger_irrecoverable_disposition_locked(root: Path, disposition_bytes: bytes) -> dict:
-    _manifests, _registry, _receipts, dispositions = _projection_paths(root)
-    disposition = _projection_object(disposition_bytes, "irrecoverable disposition")
+def _write_historical_artifact_disposition_locked(
+    root: Path, disposition_bytes: bytes, *, allow_legacy: bool = False
+) -> dict:
+    validator = _load_agent_run_ledger().load_validator()
+    dispositions = _historical_disposition_path(root, validator)
+    try:
+        disposition_cap, disposition_count_cap = validator.historical_artifact_disposition_resource_caps()
+    except (AttributeError, TypeError, ValueError) as exc:
+        _projection_fail(
+            "WI-LEDGER-MIGRATION-MANIFEST-INVALID",
+            "historical disposition resource policy is unavailable or invalid",
+        )
+        raise AssertionError from exc
+    if (
+        type(disposition_cap) is not int
+        or type(disposition_count_cap) is not int
+        or disposition_cap < 1
+        or disposition_count_cap < 1
+    ):
+        _projection_fail(
+            "WI-LEDGER-MIGRATION-MANIFEST-INVALID",
+            "historical disposition resource policy is unavailable or invalid",
+        )
+    if len(disposition_bytes) > disposition_cap:
+        _projection_fail("WI-LEDGER-MIGRATION-MANIFEST-INVALID", "historical disposition exceeds resource cap")
+    disposition = _projection_object(disposition_bytes, "historical disposition")
+    if not allow_legacy and disposition.get("schemaVersion") != 2:
+        _projection_fail(
+            "WI-LEDGER-MIGRATION-MANIFEST-INVALID",
+            "neutral historical disposition requires schemaVersion 2",
+        )
     work_item = disposition.get("workItem")
     archive_identity = disposition.get("archiveIdentity")
     if not isinstance(work_item, str) or not isinstance(archive_identity, str):
-        _projection_fail("WI-LEDGER-MIGRATION-MANIFEST-INVALID", "irrecoverable disposition lacks exact identity")
-    validator = _load_agent_run_ledger().load_validator()
+        _projection_fail("WI-LEDGER-MIGRATION-MANIFEST-INVALID", "historical disposition lacks exact identity")
     repository = Path(root).resolve()
     try:
         validator.confine_legacy_projection_identifier(
@@ -10033,8 +10136,46 @@ def _write_legacy_ledger_irrecoverable_disposition_locked(root: Path, dispositio
             failure_id="WI-LEDGER-MIGRATION-TARGET-IDENTITY",
         )
     except ValueError as exc:
-        _projection_fail("WI-LEDGER-MIGRATION-TARGET-IDENTITY", f"irrecoverable disposition target is unsafe: {exc}")
+        _projection_fail("WI-LEDGER-MIGRATION-TARGET-IDENTITY", f"historical artifact disposition target is unsafe: {exc}")
         raise AssertionError from exc
+    if disposition.get("schemaVersion") == 2:
+        ledger = archive / "agent-runs.jsonl"
+        target_errors: list[str] = []
+        classified = validator.classify_legacy_projection_target(
+            archive, ledger, target_errors, require_ledger=True
+        )
+        if classified is None or target_errors:
+            _projection_fail(
+                "WI-LEDGER-MIGRATION-TARGET-IDENTITY",
+                "; ".join(target_errors) or "archive ledger target is unsafe",
+            )
+        try:
+            ledger_bytes = ledger.read_bytes()
+        except OSError as exc:
+            raise LifecycleError("WI-LEDGER-MIGRATION-TARGET-IDENTITY", "archive ledger is unavailable") from exc
+        raw_metadata: list[dict[str, object]] = []
+        ledger_errors: list[str] = []
+        events = validator.load_jsonl(ledger, ledger_errors, raw_metadata, ledger_bytes)
+        exception, errors = validator.validate_historical_artifact_disposition_v2(
+            disposition, archive, ledger_bytes, events, raw_metadata
+        )
+        if ledger_errors or errors or exception is None:
+            _projection_fail(
+                "WI-LEDGER-MIGRATION-MANIFEST-INVALID",
+                "; ".join([*ledger_errors, *errors]) or "historical disposition does not authorize one missing artifact",
+            )
+        try:
+            disposition_id = validator.confine_legacy_projection_identifier(
+                disposition.get("dispositionId"), failure_id="WI-LEDGER-MIGRATION-TARGET-IDENTITY"
+            )
+        except ValueError as exc:
+            _projection_fail("WI-LEDGER-MIGRATION-TARGET-IDENTITY", f"disposition output identifier is unsafe: {exc}")
+            raise AssertionError from exc
+        target = _reserve_historical_disposition_output(
+            dispositions, dispositions / f"{disposition_id}.json", disposition_count_cap
+        )
+        replay = _projection_create_or_exact(target, disposition_bytes, "WI-LEDGER-MIGRATION-MANIFEST-INVALID")
+        return {"schemaVersion": 2, "dispositionId": disposition_id, "replay": replay}
     errors = validator.validate_manifest_bound_irrecoverable_disposition(disposition, archive_identity, archive)
     if errors:
         _projection_fail("WI-LEDGER-MIGRATION-MANIFEST-INVALID", "; ".join(errors))
@@ -10060,12 +10201,33 @@ def _write_legacy_ledger_irrecoverable_disposition_locked(root: Path, dispositio
     except ValueError as exc:
         _projection_fail("WI-LEDGER-MIGRATION-TARGET-IDENTITY", f"disposition output identifier is unsafe: {exc}")
         raise AssertionError from exc
-    target = dispositions / f"{archive_identity}.json"
+    target = _reserve_historical_disposition_output(
+        dispositions, dispositions / f"{archive_identity}.json", disposition_count_cap
+    )
     replay = _projection_create_or_exact(target, disposition_bytes, "WI-LEDGER-MIGRATION-MANIFEST-INVALID")
     return {"schemaVersion": 1, "archiveIdentity": archive_identity, "replay": replay}
 
 
-_write_legacy_ledger_irrecoverable_disposition_transaction = _lifecycle_participant(_write_legacy_ledger_irrecoverable_disposition_locked)
+_write_historical_artifact_disposition_transaction = _lifecycle_participant(
+    _write_historical_artifact_disposition_locked
+)
+
+
+def write_historical_artifact_disposition(root: Path, disposition_bytes: bytes) -> dict:
+    """Write/replay one neutral V2 historical disposition."""
+    return _write_historical_artifact_disposition_transaction(root, disposition_bytes)
+
+
+def _write_legacy_ledger_irrecoverable_disposition_locked(root: Path, disposition_bytes: bytes) -> dict:
+    """Compatibility adapter for the legacy V1/V2 command and Python surface."""
+    return _write_historical_artifact_disposition_locked(
+        root, disposition_bytes, allow_legacy=True
+    )
+
+
+_write_legacy_ledger_irrecoverable_disposition_transaction = _lifecycle_participant(
+    _write_legacy_ledger_irrecoverable_disposition_locked
+)
 
 
 def write_legacy_ledger_irrecoverable_disposition(root: Path, disposition_bytes: bytes) -> dict:
@@ -10263,6 +10425,9 @@ def build_parser() -> argparse.ArgumentParser:
     projection_disposition = sub.add_parser("write-legacy-ledger-irrecoverable-disposition")
     _add_root(projection_disposition)
     projection_disposition.add_argument("--disposition-file", required=True)
+    historical_disposition = sub.add_parser("write-historical-artifact-disposition")
+    _add_root(historical_disposition)
+    historical_disposition.add_argument("--disposition-file", required=True)
     archive_successor = sub.add_parser("archive-with-successor")
     _add_root(archive_successor)
     archive_successor.add_argument("--slug", required=True)
@@ -10570,6 +10735,11 @@ def main(argv: list[str]) -> int:
             print(json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
         elif args.command == "write-legacy-ledger-irrecoverable-disposition":
             result = write_legacy_ledger_irrecoverable_disposition(
+                root, _read_arg_file(args.disposition_file),
+            )
+            print(json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+        elif args.command == "write-historical-artifact-disposition":
+            result = write_historical_artifact_disposition(
                 root, _read_arg_file(args.disposition_file),
             )
             print(json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
