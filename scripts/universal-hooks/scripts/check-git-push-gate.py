@@ -359,6 +359,8 @@ from urllib.parse import quote, unquote_to_bytes, urlsplit
 
 from hook_common import (
     CURRENT_TURN_BYTE_CAP,
+    HISTORY_STATUS_FOUND,
+    HISTORY_STATUS_LIMIT,
     NO_OBSERVED_FAILURE,
     STATUS_FOUND,
     extract_model_shell_command_occurrences,
@@ -1314,6 +1316,78 @@ def _derive_pr_grant(entries: list[dict]) -> tuple[str, ActivePrGrant | None]:
         if text.startswith(PR_RESERVED_PREFIXES):
             state, grant = "malformed", None
     return state, grant
+
+
+def _read_stable_transcript_suffix(transcript_path: str) -> tuple[list[dict], str]:
+    """Read one stable complete-record suffix under the history reader's caps."""
+    if not transcript_path:
+        return [], "absent"
+    path = Path(transcript_path)
+    try:
+        with path.open("rb") as stream:
+            before = os.fstat(stream.fileno())
+            eof = before.st_size
+            if eof > TRANSCRIPT_HISTORY_BYTE_CAP:
+                stream.seek(eof - TRANSCRIPT_HISTORY_BYTE_CAP)
+                raw = stream.read(TRANSCRIPT_HISTORY_BYTE_CAP)
+                if len(raw) != TRANSCRIPT_HISTORY_BYTE_CAP:
+                    return [], "unreadable"
+                sentinel, payload = raw[:1], raw[1:]
+                if sentinel != b"\n":
+                    newline = payload.find(b"\n")
+                    if newline < 0:
+                        return [], "limit"
+                    payload = payload[newline + 1 :]
+            else:
+                stream.seek(0)
+                payload = stream.read(eof)
+                if len(payload) != eof:
+                    return [], "unreadable"
+            after = os.fstat(stream.fileno())
+            current = path.stat()
+    except Exception:
+        return [], "unreadable"
+
+    identity_before = (
+        before.st_dev,
+        before.st_ino,
+        before.st_size,
+        before.st_mtime_ns,
+    )
+    if identity_before != (
+        after.st_dev,
+        after.st_ino,
+        after.st_size,
+        after.st_mtime_ns,
+    ) or identity_before != (
+        current.st_dev,
+        current.st_ino,
+        current.st_size,
+        current.st_mtime_ns,
+    ):
+        return [], "unreadable"
+
+    raw_lines = payload.split(b"\n")
+    ended_with_newline = payload.endswith(b"\n")
+    if ended_with_newline:
+        raw_lines.pop()
+    entries: list[dict] = []
+    for index, raw_line in enumerate(raw_lines):
+        if not raw_line.strip():
+            continue
+        line_size = len(raw_line) + (1 if ended_with_newline or index < len(raw_lines) - 1 else 0)
+        if line_size > TRANSCRIPT_HISTORY_LINE_BYTE_CAP:
+            return [], "limit"
+        if len(entries) >= TRANSCRIPT_HISTORY_RECORD_CAP:
+            return [], "limit"
+        try:
+            entry = json.loads(raw_line.decode("utf-8", errors="strict"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return [], "invalid"
+        if not isinstance(entry, dict):
+            return [], "invalid"
+        entries.append(entry)
+    return entries, "found"
 
 
 def _is_within(path: Path, parent: Path) -> bool:
@@ -2642,7 +2716,12 @@ def evaluate_heavy(preflight: PreflightResult) -> bool:
         record_cap=TRANSCRIPT_HISTORY_RECORD_CAP,
         line_byte_cap=TRANSCRIPT_HISTORY_LINE_BYTE_CAP,
     )
-    if history_status != "found":
+    suffix_recovery = history_status == HISTORY_STATUS_LIMIT
+    if suffix_recovery:
+        history_entries, history_status = _read_stable_transcript_suffix(
+            preflight.transcript_path
+        )
+    if history_status != HISTORY_STATUS_FOUND:
         raise PrRouteDenied("PRG-TRANSCRIPT-UNAVAILABLE")
     pr_state, pr_grant = _derive_pr_grant(history_entries)
     if pr_state == "malformed":
@@ -2651,6 +2730,8 @@ def evaluate_heavy(preflight: PreflightResult) -> bool:
         return _evaluate_active_pr_route(
             pr_grant, preflight.command, preflight.dialect, preflight.parsed
         )
+    if suffix_recovery:
+        raise PrRouteDenied("PRG-TRANSCRIPT-UNAVAILABLE")
     grammar = preflight.generic_decision
     if preflight.push_instruction:
         if grammar.status != "PGG-ADMISSIBLE" or grammar.binding is None:
