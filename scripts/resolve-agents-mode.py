@@ -21,9 +21,8 @@ from typing import Any
 PROVIDER_DIRS = {
     "codex": ".agents",
     "claude": ".claude",
-    "gemini": ".gemini",
-    "qwen": ".qwen",
 }
+REMOVED_EXTERNAL_PROVIDERS = frozenset({"gemini", "qwen"})
 EXTERNAL_DISPATCH_PROVIDERS = ("kimi", "grok")
 PROVIDER_CHOICES = tuple(sorted((*PROVIDER_DIRS, *EXTERNAL_DISPATCH_PROVIDERS)))
 _EXTERNAL_EXECUTION_DISPOSITIONS = frozenset(
@@ -1503,6 +1502,13 @@ def layer_paths(provider: str, project_root: Path, home: Path) -> list[tuple[str
 
 
 def resolve(provider: str, project_root: Path, home: Path, repo_root: Path) -> dict[str, Any]:
+    if provider in REMOVED_EXTERNAL_PROVIDERS:
+        raise ValueError(
+            "E_EXTERNAL_PROVIDER_REMOVED: "
+            f"provider '{provider}' was removed; choose codex, claude, or explicit kimi"
+        )
+    if provider not in PROVIDER_DIRS:
+        raise ValueError(f"unsupported agents-mode provider: {provider}")
     values: dict[str, Any] = {}
     sources: dict[str, dict[str, str]] = {}
     reserve_resolver_layers: list[tuple[str, Any]] = []
@@ -1546,7 +1552,7 @@ def resolve(provider: str, project_root: Path, home: Path, repo_root: Path) -> d
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--provider", choices=PROVIDER_CHOICES, required=True)
+    parser.add_argument("--provider", required=True)
     parser.add_argument("--project-root", default=".")
     parser.add_argument("--home", default=str(Path.home()))
     parser.add_argument("--repo-root", default=str(Path(__file__).resolve().parents[1]))
@@ -1557,6 +1563,17 @@ def main() -> int:
     parser.add_argument("--feature-state", choices=("enabled", "disabled"))
     parser.add_argument("--json", action="store_true", help="emit JSON output")
     args = parser.parse_args()
+
+    if args.provider in REMOVED_EXTERNAL_PROVIDERS:
+        parser.error(
+            "E_EXTERNAL_PROVIDER_REMOVED: "
+            f"provider '{args.provider}' was removed; choose codex, claude, or explicit kimi"
+        )
+    if args.provider not in PROVIDER_CHOICES:
+        parser.error(
+            f"unsupported provider '{args.provider}'; expected one of "
+            + ", ".join(PROVIDER_CHOICES)
+        )
 
     resolver_path = Path(os.path.abspath(__file__))
     repo_root = Path(args.repo_root).resolve()

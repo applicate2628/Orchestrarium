@@ -61,10 +61,10 @@ def _load_validator_declaration(path: Path):
 
 def test_installed_validator_scope_excludes_source_only_maintainer_checks() -> None:
     source_only_prefixes = (
+        "@ROOT/README.md",
+        "@ROOT/shared/schemas/agent-runs.schema.json",
         "@ROOT/shared/references/",
         "@ROOT/references-",
-        "@ROOT/src.gemini/",
-        "@ROOT/src.qwen/",
         "@ROOT/install.",
         "@ROOT/INSTALL.md",
         "@ROOT/RELEASE_NOTES.md",
@@ -82,6 +82,14 @@ def test_installed_validator_scope_excludes_source_only_maintainer_checks() -> N
                 str(value).startswith("src.claude/skills/lead/")
                 for value in action
             ), declaration
+    codex = _load_validator_declaration(VALIDATOR_DECLARATIONS[0])
+    installed_actions = next(actions for scope, actions in codex.ACTIONS if scope == "installed")
+    installed_schema = "@SCRIPTS/../shared/schemas/agent-runs.schema.json"
+    for marker in ("agent-runs.schema.json", '"executionRole"', '"evidence"'):
+        assert any(
+            action[:3] == ("check_contains", installed_schema, marker)
+            for action in installed_actions
+        )
 
 POSITIVE_SCENARIOS = {
     "APAT-P01-SEMANTIC-BOUNDARY": "route-architect:consider-AP1:no-deployment-inference",

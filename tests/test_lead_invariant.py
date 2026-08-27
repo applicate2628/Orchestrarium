@@ -34,7 +34,7 @@ The allow-list is CATEGORY-SCOPED (see _ALLOW_GROUP_EXCUSES): it may excuse a
 duality/field hit, but dispatch:* polarity is always decided around the exact
 forbidden occurrence. A refusal elsewhere on the line can never neutralize it.
 
-Scope: src.claude, src.codex, src.gemini, src.qwen, shared, docs. NOT work-items /
+Scope: src.claude, src.codex, shared, docs. NOT work-items /
 .scratch / changelogs / dated-plan snapshots (those legitimately record superseded
 relations).
 """
@@ -52,7 +52,7 @@ ROOT = Path(__file__).resolve().parents[1]
 # Shipped-pack trees only. work-items/, .scratch/, changelogs, and dated-plan
 # snapshots are excluded (see _is_excluded) because recording a superseded
 # relation there is legitimate provenance, not a live split.
-SCAN_DIRS = ("src.claude", "src.codex", "src.gemini", "src.qwen", "shared", "docs")
+SCAN_DIRS = ("src.claude", "src.codex", "shared", "docs")
 
 TEXT_SUFFIXES = {".md", ".sh", ".ps1", ".py", ".yaml", ".yml", ".toml", ".json", ".txt"}
 

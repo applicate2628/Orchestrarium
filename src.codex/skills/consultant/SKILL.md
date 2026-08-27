@@ -128,10 +128,10 @@ Do not invoke for:
 - Every consultant memo must include a provenance header:
   - **Execution role:** `consultant`
   - **Assigned / replaced internal role:** `none`
-  - **Requested provider:** <internal | codex | claude | gemini | qwen>
-  - **Resolved provider:** <Codex CLI | Claude CLI | Gemini CLI | Qwen Code | none>
+  - **Requested provider:** <internal | codex | claude | kimi | grok>
+  - **Resolved provider:** <Codex CLI | Claude CLI | Kimi Code | none>
   - **Requested consultant mode:** <external | internal | disabled>
-  - **Actual execution path:** <internal consultant | external CLI (Codex CLI) | external CLI (Claude CLI) | external CLI (Gemini CLI) | external CLI (Qwen Code) | role-play (violation)>
+  - **Actual execution path:** <internal consultant | external CLI (Codex CLI) | external CLI (Claude CLI) | canonical Kimi wrapper | role unavailable | role-play (violation)>
   - **Model / profile used:** <actual profile or model when known | runtime default | unspecified by runtime>
   - **Prompt form:** <blind-options | critique-of-choice | not-applicable: reason>
   - **Inputs consumed:** <artifacts/files used, such as canonical brief, design decision id, or diff range>
@@ -162,8 +162,7 @@ Check the selected provider first:
 
 - Codex path: `codex`
 - Claude path: `claude` (macOS/Linux) or `claude.exe` / `claude.cmd` (Windows)
-- Gemini path: `gemini`
-- Qwen path: `qwen`
+- Kimi path: the approved canonical `invoke-kimi-prompt` wrapper after explicit Windows enrollment
 
 If `.agents/.agents-mode.yaml` selects Claude and contains `externalClaudeProfile`, map it as follows:
 
@@ -181,8 +180,6 @@ Honor `externalCodexProfile` and `externalModelMode` before provider-specific tr
 - `externalCodexProfile: gpt-5.6-sol-max` → request model `gpt-5.6-sol` with `model_reasoning_effort = "max"` when Codex is selected or `auto` resolves to Codex, for higher-complexity/hard lanes (NOT `gpt-5.6-sol-ultra`, which spawns subagents and must never be shipped on a subagent lane).
 - `externalCodexProfile: gpt-5.6-terra` → select the balanced Codex model tier (a distinct model; `model_reasoning_effort = "high"`, so this is a model choice, not merely an effort downgrade) when Codex is selected or `auto` resolves to Codex; record unavailable or deviated if that model cannot be verified against the installed runtime. The consultant lane itself always uses `gpt-5.6-sol-xhigh`, so this branch only applies to operator-set callers, not to consultant memo dispatch.
 - `externalCodexProfile: gpt-5.6-sol-xhigh` → shipped as the default and used unconditionally by the consultant lane; explicitly request model `gpt-5.6-sol` with `model_reasoning_effort = "xhigh"` via `-c model_reasoning_effort=xhigh` regardless of `externalModelMode`, symmetric to `externalClaudeProfile: opus-xhigh`.
-- Gemini and Qwen routes stay manual demonstration or compatibility paths only. Both are `WEAK MODEL / NOT RECOMMENDED` example-only routes, and this pack does not add shared production fallback keys for them.
-
 Use the approved `invoke-claude-prompt` wrapper for substantive Claude consultation; do not substitute raw `claude -p` recipes.
 
 Reserve advisory candidate:
@@ -193,11 +190,9 @@ Reserve advisory candidate:
 
 **Rules:**
 - If `externalClaudeProfile` is present, use it instead of improvising a different Claude model or effort level.
-- If `externalProvider: gemini` or `externalProvider: qwen` is selected, keep the route explicit. Gemini and Qwen are `WEAK MODEL / NOT RECOMMENDED` example-only routes, and neither route should be described as shipped production `auto`.
 - If the requested Claude profile is unavailable because of auth, client support, or non-limit CLI failures, treat that as external-provider unavailability and return an unavailable memo.
 - If the requested primary Claude profile fails on the plain Claude CLI path, do not silently convert that same run to the wrapper. Advisory lanes may later collect `reserve` as a separate profile candidate when enabled; otherwise return an unavailable memo.
 - If an advisory route resolves to `reserve` and that wrapper is unavailable, disclose a dependency/config failure instead of pretending the advisory path was complete.
-- If an example-only Gemini or Qwen route fails, disclose provider failure explicitly instead of inventing a hidden production fallback or silently switching providers.
 - Route every substantive task through the approved thin `invoke-<provider>-prompt` wrapper, which owns file/stdin prompt delivery and the governance capsule; raw provider CLI prompt routes are unsupported. Inline argv is only for a fixed synthetic non-substantive smoke token, never a provider limitation or real task.
 - **Never invoke a non-interactive Claude review with `--permission-mode plan`.** Plan mode makes Claude research and then present a plan for approval (ExitPlanMode) instead of emitting the verdict; under `claude -p` there is no approver, so the captured stdout is only the final handoff / "waiting for your direction" turn and the actual review never lands in the file. Use `--permission-mode bypassPermissions` exactly as the examples above show; if you want a read-only reviewer, constrain it with `--tools "Read,Grep,Glob"`, not with plan mode. The mode is not a safety lever here — the tool set and the prompt are.
 - Do not use TTY when a non-interactive invocation is available.

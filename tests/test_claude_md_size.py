@@ -33,8 +33,8 @@ EXPECTED_PAYLOADS: dict[str, tuple[int, str]] = {
         "488c41acb051ccf6100422b28b3d4ded846e8d9cdd88fb937fb9b383f8d70319",
     ),
     "hook-behavior-contracts": (
-        17_038,
-        "5419e8b9c76f10964a3410a1a287b7b3638d07d1ccf727ce5f9e1f7c895923a9",
+        17_113,
+        "1257c115a1fd1f60683f83fc8cd60f4ef38df20defaeca4652d108365d2f462f",
     ),
     # Payload pins force deliberate review of current hook behavior, placement,
     # and installer truth before a canonical-reference edit can pass.
@@ -88,8 +88,7 @@ EXPECTED_MANIFEST: dict[str, tuple[str, ...]] = {
     ),
     "delegation and recovery teeth": (
         "/agents-init-project",
-        "externalProvider: auto | codex | claude | gemini | qwen | kimi | grok",
-        "Gemini and Qwen are `WEAK MODEL / NOT RECOMMENDED`",
+        "externalProvider: auto | codex | claude | kimi | grok",
         "never a provider entry inside `externalPriorityProfiles`",
         "Every specialist invocation MUST use the Agent tool",
         "Lead is never spawned as a subagent",
@@ -159,12 +158,12 @@ def test_live_claude_md_passes_at_post_extraction_cap_and_reports_exact_counts()
     result = _run()
     assert result.returncode == 0, result.stdout + result.stderr
     for expected in (
-            "Code points: 36565",
-            "UTF-8 bytes: 36745",
-            "Binding size: 36745",
+            "Code points: 36558",
+            "UTF-8 bytes: 36738",
+            "Binding size: 36738",
         "Size cap: 36771",
         "Warning threshold: 36521",
-        "Manifest: 47/47",
+        "Manifest: 46/46",
         "RESULT: PASS",
     ):
         assert expected in result.stdout, result.stdout
@@ -173,7 +172,7 @@ def test_live_claude_md_passes_at_post_extraction_cap_and_reports_exact_counts()
 def test_tiny_size_cap_fails_closed() -> None:
     result = _run("--size-cap", "1000")
     assert result.returncode == 1, result.stdout + result.stderr
-    assert "FAIL: Claude Markdown binding size 36745 > size cap 1000" in result.stdout
+    assert "FAIL: Claude Markdown binding size 36738 > size cap 1000" in result.stdout
     assert "RESULT: FAIL" in result.stdout
 
 
@@ -235,7 +234,7 @@ def test_manifest_matches_the_complete_lose_nothing_contract() -> None:
 def test_unchanged_copy_passes_and_every_manifest_token_removal_fails(tmp_path: Path) -> None:
     manifest = _production_manifest()
     tokens = [token for group in manifest.values() for token in group]
-    assert len(tokens) == 47
+    assert len(tokens) == 46
     assert len(tokens) == len(set(tokens)), "manifest tokens must be unique"
 
     source = CLAUDE_MD.read_text(encoding="utf-8", errors="strict")

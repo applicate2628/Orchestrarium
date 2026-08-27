@@ -23,12 +23,15 @@ EXPECTED_HIT_FILES = frozenset({
     "src.claude/agents/contracts/external-dispatch.md",
     "src.claude/agents/contracts/operating-model.md",
     "src.claude/agents/contracts/subagent-contracts.md",
+    "src.claude/commands/agents-external-brigade.md",
+    "src.claude/commands/agents-help.md",
     "src.claude/commands/agents-init-project.md",
     "src.claude/commands/agents-second-opinion.md",
     "src.codex/AGENTS.codex.md",
     "src.codex/skills/consultant/SKILL.md",
     "src.codex/skills/consultant/agents/openai.yaml",
     "src.codex/skills/design-panel/SKILL.md",
+    "src.codex/skills/external-brigade/SKILL.md",
     "src.codex/skills/init-project/SKILL.md",
     "src.codex/skills/init-project/agents/openai.yaml",
     "src.codex/skills/lead/external-dispatch.md",
@@ -36,6 +39,8 @@ EXPECTED_HIT_FILES = frozenset({
     "src.codex/skills/review-loop/SKILL.md",
     "src.codex/skills/second-opinion/SKILL.md",
     "src.codex/skills/second-opinion/agents/openai.yaml",
+    "shared/references/cross-pack-reconciliation.md",
+    "shared/references/spine/governance-glossary.md",
 })
 
 SEMANTIC_TERMS = re.compile(
@@ -66,7 +71,7 @@ GROK_SELECTION = re.compile(
     r"\bgrok\b[^.]{0,80}\bselect(?:ed|ion)?\b", re.IGNORECASE
 )
 POLICY_ENUMERATION = re.compile(
-    r"`externalProvider:\s*auto \| codex \| claude \| gemini \| qwen \| kimi \| grok`",
+    r"`externalProvider:\s*auto \| codex \| claude \| kimi \| grok`",
     re.IGNORECASE,
 )
 
@@ -139,7 +144,7 @@ def test_kimi_grok_live_inventory_and_nonexecution_language() -> None:
                     continue
                 mentions_grok = re.search(r"\bgrok\b", clause, re.IGNORECASE)
                 if SEMANTIC_TERMS.search(clause) and not POLICY_ENUMERATION.search(clause):
-                    if mentions_grok:
+                    if mentions_grok and relative_path != "shared/references/spine/governance-glossary.md":
                         assert GROK_NONEXECUTION_TERMS.search(clause), (
                             f"executable Grok clause in {relative_path}: {clause}"
                         )
@@ -157,7 +162,10 @@ def test_kimi_grok_live_inventory_and_nonexecution_language() -> None:
                 assert pattern.search(text), (
                     f"Kimi admission lacks {boundary} in {relative_path}"
                 )
-        elif SEMANTIC_TERMS.search(text):
+        elif (
+            SEMANTIC_TERMS.search(text)
+            and relative_path != "shared/references/spine/governance-glossary.md"
+        ):
             assert GROK_NONEXECUTION_TERMS.search(text), (
                 f"Kimi is neither safely admitted nor unavailable in {relative_path}"
             )

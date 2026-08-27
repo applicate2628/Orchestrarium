@@ -15,16 +15,6 @@ import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-EXCLUDED_PS1 = {
-    "scripts/install-gemini.ps1",
-    "scripts/install-qwen.ps1",
-    "src.gemini/scripts/validate-pack.ps1",
-    "src.qwen/scripts/validate-pack.ps1",
-}
-EXAMPLE_SHELL_ENTRYPOINTS = {
-    "scripts/install-gemini.sh",
-    "scripts/install-qwen.sh",
-}
 DEPRECATED_EXAMPLE_COMPATIBILITY_SHELL_ENTRYPOINTS = frozenset(
     {"scripts/universal-hooks/scripts/mcp-usage-reminder.sh"}
 )
@@ -101,15 +91,15 @@ exit 0
 """
 
 
-def test_only_deprecated_example_powershell_files_remain() -> None:
+def test_no_powershell_implementation_files_remain() -> None:
     relative_paths = (path.relative_to(ROOT) for path in ROOT.rglob("*.ps1"))
     actual = {
         path.as_posix() for path in relative_paths if ".scratch" not in path.parts
     }
-    assert actual == EXCLUDED_PS1
+    assert actual == set()
 
 
-def test_python_ownership_policy_is_repo_local_and_excludes_example_packs() -> None:
+def test_python_ownership_policy_is_repo_local() -> None:
     agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
     hygiene = (
         ROOT / "shared" / "references" / "repository-source-hygiene.md"
@@ -121,10 +111,7 @@ def test_python_ownership_policy_is_repo_local_and_excludes_example_packs() -> N
         assert "thin unconditional launcher" in text
         assert "rollback copy" in text
         assert "not shared installed governance for arbitrary target projects" in text or "not a rule installed into arbitrary target repositories" in text
-        assert "deprecated Gemini/Qwen example packs remain outside" in text
-
     assert "Python as the sole owner of executable script logic" in release_notes
-    assert "deprecated Gemini/Qwen example packs remain unchanged" in release_notes
 
 
 def _production_shell_entrypoints(root: Path = ROOT) -> frozenset[str]:
@@ -133,8 +120,6 @@ def _production_shell_entrypoints(root: Path = ROOT) -> frozenset[str]:
         for path in root.rglob("*.sh")
         if ".scratch" not in (relative := path.relative_to(root)).parts
         and ".git" not in relative.parts
-        and relative.parts[0] not in {"src.gemini", "src.qwen"}
-        and relative.as_posix() not in EXAMPLE_SHELL_ENTRYPOINTS
         and relative.as_posix()
         not in DEPRECATED_EXAMPLE_COMPATIBILITY_SHELL_ENTRYPOINTS
     )

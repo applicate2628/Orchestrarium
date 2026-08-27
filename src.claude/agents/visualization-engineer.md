@@ -39,7 +39,7 @@ description: "Visualization engineer: implement scientific/data visuals."
 - Zoom, pan, brush, and selection across linked views use one canonical state owner, and changed surfaces verify convergence after each interaction.
 - New or changed categorical encodings use an established colorblind-safe palette or record a deuteranopia simulation check.
 - Escalate conflicts between domain truth and visual design instead of silently biasing the visualization.
-- Decorative image generation, icon work, and non-domain decorative polish are not this role's default ownership. When the lane is primarily visual styling rather than truthful scientific or data representation, the orchestrator may use an explicit example-only provider route such as Qwen, or the weaker/not-recommended Gemini path.
+- Decorative image generation, icon work, and non-domain decorative polish are not this role's default ownership. Route primarily visual-styling work to its actual owner instead of forcing visualization-engineer ownership.
 - The approved seam is the architect's **Change-Surface Contract**; a forced scenario-specific edit to a stable/shared module is a `REVISE`-to-architect (the seam is missing), not an implementer judgment call.
 
 ## Adjacent findings protocol

@@ -17,8 +17,6 @@ PRESET_DOCS = Path("docs/agents-mode-reference.md")
 INIT_SURFACES = {
     "codex": Path("src.codex/skills/init-project/SKILL.md"),
     "claude": Path("src.claude/commands/agents-init-project.md"),
-    "gemini": Path("src.gemini/skills/init-project/SKILL.md"),
-    "qwen": Path("src.qwen/skills/init-project/SKILL.md"),
 }
 
 
@@ -617,23 +615,7 @@ def validate_manual_reference_surfaces(root: Path) -> None:
         root / "src.codex" / "skills" / "lead" / "external-dispatch.md",
         root / "src.codex" / "skills" / "lead" / "subagent-contracts.md",
         root / "src.claude" / "agents" / "consultant.md",
-        root / "src.gemini" / "skills" / "lead" / "external-dispatch.md",
-        root / "src.gemini" / "skills" / "lead" / "subagent-contracts.md",
-        root / "src.qwen" / "skills" / "lead" / "subagent-contracts.md",
     ]
-
-    if "| Gemini CLI | `disabled` | `auto` | `auto`" not in reference:
-        raise ContractError(
-            "agents-mode reference must keep Gemini first-write defaults on shared auto defaults"
-        )
-    if "| Qwen Code | `disabled` | `auto` | `auto`" not in reference:
-        raise ContractError(
-            "agents-mode reference must keep Qwen first-write defaults on shared auto defaults"
-        )
-    if "explicit `gemini` only" in reference or "explicit `qwen` only" in reference:
-        raise ContractError(
-            "agents-mode reference must not present example providers as first-write defaults"
-        )
 
     if "externalPriorityProfile: balanced | quality-first | <custom>" not in external_worker:
         raise ContractError(
@@ -673,7 +655,7 @@ def validate_manual_reference_surfaces(root: Path) -> None:
 # The first cut hardcoded the `gpt-5.\d+-` namespace, so the guard would have
 # silently no-oped at exactly the moment a family rename swept the copies; the
 # shape is now generalized from whatever values the schema carries.
-_ENUM_SCAN_ROOTS = ("docs", "shared", "src.claude", "src.codex", "src.gemini", "src.qwen")
+_ENUM_SCAN_ROOTS = ("docs", "shared", "src.claude", "src.codex")
 _ENUM_SCAN_TOP = ("README.md", "INSTALL.md")
 _ENUM_SCAN_EXTS = (".md", ".json", ".yaml", ".yml", ".toml", ".sh", ".ps1")
 # Changelog / release-note / history stems are EXEMPT: recording a superseded

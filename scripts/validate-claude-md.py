@@ -79,8 +79,7 @@ STRUCTURAL_ENFORCEMENT_TEETH = (
 
 DELEGATION_AND_RECOVERY_TEETH = (
     "/agents-init-project",
-    "externalProvider: auto | codex | claude | gemini | qwen | kimi | grok",
-    "Gemini and Qwen are `WEAK MODEL / NOT RECOMMENDED`",
+    "externalProvider: auto | codex | claude | kimi | grok",
     "never a provider entry inside `externalPriorityProfiles`",
     "Every specialist invocation MUST use the Agent tool",
     "Lead is never spawned as a subagent",

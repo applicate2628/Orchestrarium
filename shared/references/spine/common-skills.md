@@ -9,7 +9,6 @@ Two archetypes:
 Discovery, invocation, and installed layout:
 - Codex installs them under `skills/<name>/` next to role skills. Every skill in this tree carries `agents/openai.yaml` so Codex can uniformly register `$<name>` as a spawnable subagent; the archetype distinction is informational on this side. Knowledge-style skills typically use the subagent prompt to load the workflow body, while delegate-style skills also produce a self-contained findings artifact.
 - Claude installs them under `.claude/skills/<name>/` so the `Skill` tool can invoke them. Delegate-style additionally installs a thin wrapper at `.claude/agents/<name>.md` so the main conversation can spawn a fresh-context subagent via the Agent tool; knowledge-style ships only the `Skill`-tool form. Both archetypes remain reachable by every role with `Skill` tool access.
-- Gemini and Qwen install them under their installed extension root's `skills/<name>/` directory (for example `.gemini/extensions/orchestrarium-gemini/skills/<name>/`, not the source-tree `src.gemini/skills/`) and rely on each runtime's native skill resolver; subagent-style fresh-context delegation is not modeled there.
 
 Common-skill index (installed names):
 - `$windows-gui-manual-testing` — delegate-style. Windows desktop GUI manual visual verification with screenshots, video frames, or live inspection across toolkit/runtime variants; owns screen capture when no recording exists, hard crop validation, and structural-vs-cosmetic classification of UI issues. Returns an evidence-backed findings package.

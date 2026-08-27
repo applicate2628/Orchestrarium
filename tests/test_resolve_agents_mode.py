@@ -195,7 +195,7 @@ class ResolveAgentsModeTest(unittest.TestCase):
             defaults_only = self._resolve("claude", base / "project", home)
             self.assertEqual(defaults_only["reserveResolverTrust"], "not-executable")
 
-    def test_example_providers_use_shared_global_as_demo_fallback_without_becoming_auto_production(self) -> None:
+    def test_removed_providers_fail_with_migration_diagnostic(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
             project = base / "project"
@@ -212,16 +212,26 @@ class ResolveAgentsModeTest(unittest.TestCase):
 
             for provider in ("gemini", "qwen"):
                 with self.subTest(provider=provider):
-                    resolved = self._resolve(provider, project, home)
-                    self.assertEqual(resolved["values"]["mcpMode"], "force")
-                    self.assertEqual(resolved["sources"]["mcpMode"]["rank"], "shared-global")
-                    self.assertEqual(resolved["values"]["externalProvider"], "auto")
-                    self.assertNotIn(
-                        provider,
-                        resolved["values"]["externalPriorityProfiles"]["balanced"][
-                            "worker.default-implementation"
+                    result = subprocess.run(
+                        [
+                            sys.executable,
+                            str(ROOT / "scripts" / "resolve-agents-mode.py"),
+                            "--provider",
+                            provider,
+                            "--project-root",
+                            str(project),
+                            "--home",
+                            str(home),
+                            "--repo-root",
+                            str(ROOT),
+                            "--json",
                         ],
+                        text=True,
+                        capture_output=True,
                     )
+                    self.assertEqual(result.returncode, 2)
+                    self.assertIn("E_EXTERNAL_PROVIDER_REMOVED", result.stderr)
+                    self.assertIn(provider, result.stderr)
 
 
 if __name__ == "__main__":

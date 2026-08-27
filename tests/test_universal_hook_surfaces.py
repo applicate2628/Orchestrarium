@@ -54,9 +54,6 @@ RUNTIME_HOOK_NAMES = universal_hooks_manifest.canon_names(ROOT, "hooks")
 PACK_ONLY_SCRIPTS = universal_hooks_manifest.PACK_ONLY_SCRIPTS
 PACK_ONLY_HOOKS = universal_hooks_manifest.PACK_ONLY_HOOKS
 MIRROR_EXCLUSIONS = universal_hooks_manifest.MIRROR_EXCLUSIONS
-DEPRECATED_EXAMPLE_COMPATIBILITY_LAUNCHERS = {"mcp-usage-reminder.sh"}
-
-
 class UniversalHookSurfaceTest(unittest.TestCase):
     def test_mcp_policy_is_mirrored_support_and_never_a_registered_stem(self) -> None:
         relative = Path("scripts/mcp_continuity_policy.py")
@@ -288,56 +285,6 @@ class UniversalHookSurfaceTest(unittest.TestCase):
             self.fail(f"scripts/sync-universal-hooks.py failed to import: {exc!r}")
         finally:
             sys.modules.pop(spec.name, None)
-
-    def test_gemini_qwen_installers_copy_universal_hook_helpers(self) -> None:
-        required_fragments = (
-            "scripts/universal-hooks/scripts",
-            "scripts/universal-hooks/hooks",
-            "check-bugfix-discipline.py",
-            "mcp-usage-reminder.sh",
-            "check-machine-local-path.py",
-            "check-no-trash-in-repo.py",
-        )
-
-        for rel in (
-            "scripts/install-gemini.sh",
-            "scripts/install-gemini.ps1",
-            "scripts/install-qwen.sh",
-            "scripts/install-qwen.ps1",
-        ):
-            text = (ROOT / rel).read_text(encoding="utf-8")
-            with self.subTest(installer=rel):
-                for fragment in required_fragments:
-                    self.assertIn(fragment, text)
-
-    def test_deprecated_examples_have_only_the_required_universal_compatibility_launcher(
-        self,
-    ) -> None:
-        universal_scripts = ROOT / "scripts" / "universal-hooks" / "scripts"
-        compatibility_launchers = {
-            path.name
-            for path in universal_scripts.glob("*.sh")
-            if path.name != "check-publication-safety.sh"
-        }
-        self.assertEqual(
-            compatibility_launchers,
-            DEPRECATED_EXAMPLE_COMPATIBILITY_LAUNCHERS,
-        )
-        for name in DEPRECATED_EXAMPLE_COMPATIBILITY_LAUNCHERS:
-            self.assertTrue((universal_scripts / name).with_suffix(".py").is_file())
-
-    def test_docs_do_not_describe_gemini_qwen_hooks_as_absent(self) -> None:
-        docs = [
-            ROOT / "INSTALL.md",
-            ROOT / "src.gemini" / "skills" / "lead" / "subagent-contracts.md",
-            ROOT / "src.qwen" / "skills" / "lead" / "subagent-contracts.md",
-        ]
-        for path in docs:
-            text = path.read_text(encoding="utf-8")
-            with self.subTest(path=path):
-                self.assertNotIn("do not auto-install the production Codex/Claude helper or hook surfaces", text)
-                self.assertIn("universal hook/helper", text)
-
 
 if __name__ == "__main__":
     unittest.main()

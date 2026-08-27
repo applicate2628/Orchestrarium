@@ -99,7 +99,7 @@ INSTALLER_CASES = [
 ]
 
 PRODUCTION_PROVIDER_NAMES = frozenset({"codex", "claude"})
-EXAMPLE_PROVIDER_NAMES = frozenset({"gemini", "qwen"})
+EXAMPLE_PROVIDER_NAMES: frozenset[str] = frozenset()
 EXPLICIT_ONLY_PROVIDER_NAMES = frozenset({"kimi", "grok"})
 
 
@@ -108,10 +108,6 @@ def validate_production_provider_partition() -> None:
     if actual != PRODUCTION_PROVIDER_NAMES:
         raise InstallerRegressionError(
             "production installer regression must cover exactly codex and claude"
-        )
-    if actual & EXAMPLE_PROVIDER_NAMES:
-        raise InstallerRegressionError(
-            "example providers must not be treated as production installer cases"
         )
 
 

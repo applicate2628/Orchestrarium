@@ -29,13 +29,12 @@ description: "External worker: run eligible worker roles externally."
 - Resolve config, provider, model/profile, workdir, fallback, and transport under the shared external-dispatch contract; do not reproduce its resolution logic here.
 - Luna mechanical dispatch is native-only. External-worker never realizes or falls back for it; the native caller consumes `RoleDispatchPolicyV1` from the installed `AGENTS.md`.
 - Do not honor `reserve` for worker-side lanes. It is a supplemental read-only candidate only in `advisory.*` and `review.*` profile orders after primary `claude`/`codex`, and `reserveResolver` must not turn it into a worker transport, primary-Claude retry, or implementation/editing fallback.
-- Explicit Gemini and Qwen routes remain manual `WEAK MODEL / NOT RECOMMENDED` example-only paths.
-- If a repository wants an example-only provider demonstration, use a scalar explicit provider override instead of broadening shipped or repo-local `auto` profiles.
+- Keep explicit-only and unavailable providers out of shipped and repo-local `auto` profiles.
 - Never select `gpt-5.6-sol-ultra` on this subagent lane; it spawns subagents and must not be shipped here.
 - Use file-based prompt delivery for substantive task prompts through the approved thin wrapper: write the prompt to a temporary prompt file and feed it through stdin or the provider's supported file-input mechanism; direct prompt argv is only for a fixed synthetic non-substantive smoke token. If the wrapper is unavailable, fail or reroute honestly.
 - If the selected Claude CLI path fails for a worker artifact, do not convert that same primary `claude` run to the secret-backed wrapper. Treat Claude as unavailable or reroute honestly.
 - This adapter is a direct external launch contract. Do not spawn it as an internal specialist or helper; the orchestrator must launch the selected external provider directly or fail closed.
-- A spawned internal subagent is still internal even if the prompt tells it to use Gemini Pro, Claude, or Codex. That is a routing violation, not a valid external-worker execution path.
+- A spawned internal subagent is still internal even if the prompt assigns it an external-provider label. That is a routing violation, not a valid external-worker execution path.
 - Do not silently fall back to an internal implementer or to `$consultant`.
 - Apply the availability-probe evidence and route-change rule owned by `../lead/external-dispatch.md`; do not define a local variant.
 - Multiple simultaneous instances of this adapter may target the same provider when each instance owns a different admitted artifact or disjoint slice and the provider runtime supports concurrent non-interactive execution.

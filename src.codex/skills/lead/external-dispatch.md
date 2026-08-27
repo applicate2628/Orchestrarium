@@ -20,7 +20,7 @@ parallelMode: auto  # allowed: manual | auto | force; default: auto
 mcpMode: auto  # allowed: auto | force; default: auto
 preferExternalWorker: true  # allowed: false | true; default: false
 preferExternalReviewer: true  # allowed: false | true; default: false
-externalProvider: auto  # allowed here: auto | codex | claude | gemini | qwen | kimi | grok; default: auto; kimi is explicit read-only/nonauthorizing; grok is unavailable in 1.x; gemini/qwen are explicit example-only and not recommended for shipped auto
+externalProvider: auto  # allowed here: auto | codex | claude | kimi | grok; default: auto; kimi is explicit read-only/nonauthorizing; grok is unavailable in 1.x
 externalPriorityProfile: balanced  # allowed: balanced | quality-first | <repo-local production profile>; default: balanced
 reserveResolver: claude-sonnet  # allowed: disabled | claude-sonnet | claude-wrapper | wrapper:<command>; default: claude-sonnet
 externalPriorityProfiles: {}  # allowed: structured profile map
@@ -38,9 +38,10 @@ externalClaudeProfile: opus-xhigh  # allowed: sonnet-high | opus-xhigh | opus-ma
 - `mcpMode: auto` lets the agent decide when available MCP tools are appropriate; `force` makes relevant MCP usage a standing explicit instruction.
 - `preferExternalWorker` routes eligible worker-side roles through `$external-worker` by default.
 - `preferExternalReviewer` routes eligible reviewer/QA roles through `$external-reviewer` by default.
-- `externalProvider` uses the shared provider universe `auto | codex | claude | gemini | qwen | kimi | grok`.
-- `externalProvider: auto` resolves by lane type through the active production priority profile and opinion-count policy below instead of by host-pack identity. Ordinary `auto` must not silently self-bounce into the current host line's own provider and must not select example-only or explicit-only providers.
-- `externalPriorityProfile` chooses which named production routing profile to apply when `externalProvider: auto` is in effect. `balanced` is the quiet default, and `quality-first` is the shipped alternate for maximum result quality. Repo-local custom profiles must keep example-only and explicit-only providers out of production `auto`.
+- `externalProvider` uses the shared provider universe `auto | codex | claude | kimi | grok`.
+- `externalProvider: auto` resolves by lane type through the active production priority profile and opinion-count policy below instead of by host-pack identity. Ordinary `auto` must not silently self-bounce into the current host line's own provider and must not select explicit-only or unavailable providers.
+- Legacy `externalProvider: gemini` and `externalProvider: qwen` values are removed and fail closed with `E_EXTERNAL_PROVIDER_REMOVED`; they never authorize a launch.
+- `externalPriorityProfile` chooses which named production routing profile to apply when `externalProvider: auto` is in effect. `balanced` is the quiet default, and `quality-first` is the shipped alternate for maximum result quality. Repo-local custom profiles must keep explicit-only and unavailable providers out of production `auto`.
 - `reserveResolver` binds the symbolic `reserve` candidate to one concrete read-only resolver: `disabled`, `claude-sonnet`, `claude-wrapper`, or `wrapper:<command>`. `wrapper:<command>` is a PATH-resolved command or repo-relative wrapper path, not an argv prompt channel.
 - **Layer-provenance trust gate for executable-bearing values (binding).** `wrapper:<command>` names an arbitrary executable, and the highest-precedence project-local `.agents/.agents-mode.yaml` can arrive inside a cloned repository — an untrusted source that must never silently select code the agent then executes. An executable-bearing value is honored without further confirmation only when a user-global layer (`~/.codex/.agents-mode.yaml`, legacy `~/.codex/.agents-mode`, or `~/.agents-mode.yaml`) defines it or defines the identical value. A project-local `wrapper:<command>` absent from every user-global layer resolves as `reserveResolverTrust: project-UNCONFIRMED` (the machine-readable flag emitted by `scripts/resolve-agents-mode.py`, the executable reference in the source repository) and MUST NOT be launched until the user explicitly confirms it on first use. Record the approval durably by writing the approved value into a user-global layer — that write is what flips subsequent resolutions to `reserveResolverTrust: user-global`. "Approved" wrapper anywhere in this pack's guidance means exactly this mechanism: defined or confirmed at a user-global layer, never a repo-supplied value alone.
 - `externalPriorityProfiles` stores the ordered provider lists for each named profile. The shipped profiles live in the structured block below.
@@ -70,10 +71,10 @@ externalClaudeProfile: opus-xhigh  # allowed: sonnet-high | opus-xhigh | opus-ma
 - `$external-worker` and `$external-reviewer` are bidirectional external adapters, not new narrow professions.
 - `externalProvider: auto` resolves by lane type through the active production profile and opinion-count policy below instead of by host-pack identity.
 - When the resolved provider is Codex, honor `externalCodexWorkdirMode`; when it is Claude, honor `externalClaudeWorkdirMode`.
-- Explicit user override or documented repo-local heuristics may still choose an explicit example-only provider route such as Qwen, or the weaker/not-recommended Gemini path, for demonstration or compatibility work. Shipped production `auto` does not do that.
+- Explicit user override may choose Kimi only for a policy-admitted read-only, independently verified, nonauthorizing lane. Grok remains unavailable and must not be launched or probed in 1.x.
 - Explicit `externalProvider: codex` is a self-provider override only. Ordinary `auto` must not silently self-bounce into the current host line's own provider (the host-line-relative self-bounce rule).
 - `externalCodexProfile: default` means Codex inherits `externalModelMode`. `externalCodexProfile: gpt-5.6-sol-max` requests model `gpt-5.6-sol` with `model_reasoning_effort = "max"` for higher-complexity/hard lanes. `externalCodexProfile: gpt-5.6-terra` selects the balanced Codex model tier (a distinct model, `model_reasoning_effort = "high"`, not an effort downgrade) and must record unavailable or deviated if that model cannot be verified against the installed runtime. `externalCodexProfile: gpt-5.6-sol-xhigh` (shipped as default) requests model `gpt-5.6-sol` with `model_reasoning_effort = "xhigh"` regardless of `externalModelMode`; this is the best-effort sibling of Claude's `opus-xhigh` and is what consultant lane invocations always use.
-- `externalModelMode: pinned-top-pro` maps the strongest documented production-provider path as follows when `externalCodexProfile` stays `default`: Codex uses model `gpt-5.6-sol` with `model_reasoning_effort = "xhigh"` through a supported Codex config/profile path; only an explicitly configured repo-local fully autonomous low-reasoning worker lane may retry once on `gpt-5.6-terra` after usage-limit or quota exhaustion on the primary path; Claude uses `opus-max` on the primary `claude` candidate instead of downgrading to `sonnet-high`. `reserve` is a separate symbolic advisory/review candidate after primary `claude`/`codex`, never a retry or transport swap for the primary `claude` candidate. Example-only Gemini and Qwen routes stay explicit/manual and do not add separate production fallback keys to this schema.
+- `externalModelMode: pinned-top-pro` maps the strongest documented production-provider path as follows when `externalCodexProfile` stays `default`: Codex uses model `gpt-5.6-sol` with `model_reasoning_effort = "xhigh"` through a supported Codex config/profile path; only an explicitly configured repo-local fully autonomous low-reasoning worker lane may retry once on `gpt-5.6-terra` after usage-limit or quota exhaustion on the primary path; Claude uses `opus-max` on the primary `claude` candidate instead of downgrading to `sonnet-high`. `reserve` is a separate symbolic advisory/review candidate after primary `claude`/`codex`, never a retry or transport swap for the primary `claude` candidate.
 - Do not silently downgrade below `gpt-5.6-terra` on the Codex line.
 - Use `gpt-5.6-terra` as the balanced cheaper-than-flagship Codex reasoning lane when full `gpt-5.6-sol` depth is not required. It is a genuine reasoning model, review-gated like any external lane.
 - Treat `reserve` differently from primary production providers: it is a supplemental advisory/review candidate only. It never grants permission to run implementation, worker-side execution, or editing work through the resolved transport.
@@ -87,7 +88,7 @@ externalClaudeProfile: opus-xhigh  # allowed: sonnet-high | opus-xhigh | opus-ma
 - For wide release or parity audits, split the admitted scope by repo, file set, or lane instead of launching one mega neutral-dir prompt across the whole pack family.
 - When the resolved provider is Claude and `externalClaudeProfile` is present, honor that profile instead of the shared model policy.
 - Provider-backed consultant execution in `external` mode plus `$external-worker` and `$external-reviewer` must use direct external launch from the orchestrating runtime or an approved transport wrapper script. Do not proxy them through an internal agent/helper/subagent host.
-- A spawned internal subagent is still an internal execution path even if the prompt assigns it a provider label such as Gemini Pro. That shape does not satisfy `$external-worker` or `$external-reviewer`.
+- A spawned internal subagent is still an internal execution path even if the prompt assigns it an external-provider label. That shape does not satisfy `$external-worker` or `$external-reviewer`.
 - The external adapter may be selected by the preference flags or by explicit user / lead override.
 - `parallelMode` is the general orchestrator rule for whether independent helper lanes should be parallelized by judgment at all; external adapter fan-out is one overlay on top of that rule.
 - Multiple external adapters may run in parallel when their scopes are independent, `parallelMode` permits ordinary parallel fan-out, and the selected provider runtimes support concurrent non-interactive execution.
@@ -197,7 +198,7 @@ Resolve external dispatch in this order: `role eligibility -> provider selection
 Rules:
 
 - An explicit request for `external` does not create a new adapter type.
-- Unsupported external role requests must stop with an unsupported-route explanation and an honest reroute suggestion instead of probing Codex, Claude, Gemini, or Qwen availability as if a missing adapter might exist.
+- Unsupported external role requests must stop with an unsupported-route explanation and an honest reroute suggestion instead of probing provider availability as if a missing adapter might exist.
 - Worker-side specialist lanes such as `analyst`, `architect`, `planner`, `algorithm-scientist`, `computational-scientist`, `security-engineer`, `performance-engineer`, and `reliability-engineer` remain eligible for `$external-worker` when routing selects external substitution. Do not remap `$knowledge-archivist`; its current taxonomy disposition is `none`.
 - Before honoring `reserve`, classify the selected lane name. Only `advisory.*` and `review.*` profile lanes may retain `reserve`; worker, implementation, repository-hygiene, installer, publication, or other lanes must strip or ignore it.
 
@@ -232,10 +233,10 @@ Every external or consultant memo/report should record one explicit execution re
 
 - `Execution role: <consultant | external-worker | external-reviewer>`
 - `Assigned / replaced internal role: <eligible internal role label | none>`
-- `Requested provider: <internal | codex | claude | gemini | qwen | kimi>`
-- `Resolved provider: <Codex CLI | Claude CLI | Gemini CLI | Qwen Code | Kimi Code | none>`
+- `Requested provider: <internal | codex | claude | kimi | grok>`
+- `Resolved provider: <Codex CLI | Claude CLI | Kimi Code | none>`
 - `Requested consultant mode: <external | internal | disabled>` when consultant routing is relevant; otherwise `not-applicable`
-- `Actual execution path: <internal consultant | external CLI (Codex CLI) | external CLI (Claude CLI) | external CLI (Gemini CLI) | external CLI (Qwen Code) | canonical Kimi wrapper | role unavailable>`
+- `Actual execution path: <internal consultant | external CLI (Codex CLI) | external CLI (Claude CLI) | canonical Kimi wrapper | role unavailable>`
 - `Model / profile used: <actual profile or model when known | runtime default | unspecified by runtime>`
 - `Launch flags: <exact argv model / effort / sandbox flags>`
 - `Run record: <started and finished timestamps or duration; wrapper exit; terminal ledger runId when tracked>`
@@ -264,4 +265,3 @@ Rules:
 - `QA`: Quality Assurance; verification work for tests, regressions, and acceptance criteria.
 - `12 + 1`: twelve external routing lines plus one owner/control line from the release-backed RF12 interpretation.
 - `stdin`: standard input stream for a process.
-- `WEAK MODEL / NOT RECOMMENDED`: repository classification for example-only providers excluded from production `auto` routing.

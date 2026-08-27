@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "purpose": "phase-0 pre-mutation boundary for digest-bound legacy obligation migration",
+  "allowedProductionFiles": [
+    {"path":"shared/schemas/agent-runs.schema.json","bytes":10837,"sha256":"238cbe4438553f82d0d02c6427b22093f6b5dc9ead1a3eee4494610cc45c6d1c"},
+    {"path":"scripts/validate-work-item-state.py","bytes":70825,"sha256":"0d2a88557f90a4ede7ff95019d32162be1bb594727cb0081173727b9685665ca"}
+  ],
+  "allowedExistingTestExpectations": [
+    {"path":"tests/test_work_item_state_validator.py","bytes":40346,"sha256":"1f2cf5f21344a638d0066c5b23512758a1bd3f0b3bc7ac292afaef60da0e4863"}
+  ],
+  "protectedDirtySiblings": [
+    {"path":"scripts/agent-run-ledger.py","bytes":25174,"sha256":"f5139a83f1289746ca82650ab0b7687c705abf912764f34ecaebcffb7f1cafdb"},
+    {"path":"scripts/mutate-work-item.py","bytes":350100,"sha256":"b6159d4b101fea6a9908745fded6e2170284bc51fe38dae4d810bfd62927890f"},
+    {"path":"scripts/check-agent-run-ledger-contract.py","bytes":16192,"sha256":"5165aa6878e9f627d5fe5fe98715a61c876707c052f3bd8ab1c0eaef0086d85c"},
+    {"path":"tests/test_agent_run_ledger.py","bytes":34228,"sha256":"7cebe7df40ddc36b0670e446afdee5d4e20de90bac8ca08c08a2bf94938a0826"},
+    {"path":"tests/test_mutate_work_item.py","bytes":301071,"sha256":"966a82c5e3f3ecf4602991b90dd6b53b874537e2a42769e00b58e33a151ebf4d"},
+    {"path":"docs/work-item-execution-tracking.md","bytes":12280,"sha256":"96de739194ca029753ba3acf2c1ceb8162ba2556cf26d51b9698746d4b2e78c8"}
+  ],
+  "gitDiffNumstat": [
+    "7\t1\tINSTALL.md", "3\t1\tREADME.md", "24\t0\tRELEASE_NOTES.md", "16\t0\tdocs/work-item-execution-tracking.md", "6\t1\treferences-claude/claude-md-structural-enforcement.md", "9\t2\treferences-claude/ru/claude-md-structural-enforcement.md", "101\t0\tscripts/agent-run-ledger.py", "198\t0\tscripts/check-agent-run-ledger-contract.py", "2719\t15\tscripts/mutate-work-item.py", "33\t1\tscripts/production_installer.py", "34\t28\tscripts/skill_pack_validator_runtime.py", "82\t2258\tscripts/universal-hooks/scripts/check-git-push-gate.py", "154\t0\tscripts/validate-claude-md.py", "248\t6\tscripts/validate-work-item-state.py", "10\t0\tshared/references/README.md", "1\t1\tshared/references/subagent-operating-model.md", "97\t25\tshared/schemas/agent-runs.schema.json", "77\t0\ttests/test_agent_run_ledger.py", "2011\t10\ttests/test_mutate_work_item.py", "170\t0\ttests/test_review_verdict_closure.py", "367\t1\ttests/test_work_item_state_validator.py"
+  ]
+}

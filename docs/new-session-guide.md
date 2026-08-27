@@ -6,7 +6,7 @@ Use this guide at the start of a new Orchestrarium maintenance session. Its purp
 
 | Rule | Operational meaning |
 |---|---|
-| This repository is the source of truth | Fix Orchestrarium source first: `shared/`, `src.codex/`, `src.claude/`, `src.gemini/`, `src.qwen/`, `scripts/`, `docs/`, and root docs. |
+| This repository is the source of truth | Fix Orchestrarium source first: `shared/`, `src.codex/`, `src.claude/`, `scripts/`, `docs/`, and root docs. |
 | Installed copies are runtime outputs | `~/.codex/`, `~/.claude/`, project `.agents/`, and project `.claude/` are installed/runtime surfaces. Patch them only after the source owner is updated, and only when current sessions need the behavior before reinstall. |
 | Do not treat stale installs as canon | A broken or stale global/local install can explain a symptom, but the durable fix belongs in the owning source file unless the problem is purely local state. |
 | Do not create source from runtime guesses | Before adding a new path or mechanism, identify the owning source surface and installer propagation path. |
@@ -20,7 +20,6 @@ Use this guide at the start of a new Orchestrarium maintenance session. Its purp
    - shared governance or cross-provider behavior -> `shared/AGENTS.shared.md` and `shared/references/`
    - Codex runtime pack -> `src.codex/`
    - Claude Code runtime pack -> `src.claude/`
-   - example provider parity -> `src.gemini/` and `src.qwen/`
    - operator docs -> `docs/`, `README.md`, `INSTALL.md`
    - release-relevant tracked change -> `RELEASE_NOTES.md`
 4. For a user-reported defect, capture the concrete symptom, the source `file:line`, and the hypothesis chain before the first edit.
@@ -41,7 +40,7 @@ Use this guide at the start of a new Orchestrarium maintenance session. Its purp
 | Claude roles | `src.claude/agents/<role>.md` (except the five curated role-skills `lead`, `product-manager`, `analyst`, `architect`, `planner` — canonical contracts in `src.claude/skills/<role>/SKILL.md`; `agents/lead.md` activates `/lead` with main-agent `initialPrompt` and rejects stale dispatch, while the other four `agents/<role>.md` are thin delegate wrappers) |
 | Claude slash commands | `src.claude/commands/agents-*.md` |
 | Claude common skills | `src.claude/skills/<name>/SKILL.md` |
-| Provider-specific addenda | `references-codex/`, `references-claude/`, `references-gemini/`, `references-qwen/` |
+| Provider-specific addenda | `references-codex/`, `references-claude/` |
 | Agents-mode schema and defaults | `shared/agents-mode.schema.json`, `shared/agents-mode.presets.json`, `shared/agents-mode.defaults.yaml` |
 | Installers | root `install.*`, `scripts/install-*.{sh,ps1}` |
 | Release log | `RELEASE_NOTES.md` |
@@ -81,8 +80,6 @@ Run the smallest useful check first, then the affected pack checks.
 | Shared spine | `python scripts\validate-agents-spine.py --spine shared\AGENTS.shared.md` |
 | Codex pack | `bash src.codex/skills/lead/scripts/validate-skill-pack.sh` |
 | Claude pack | `bash src.claude/agents/scripts/validate-skill-pack.sh` |
-| Gemini example pack | `bash src.gemini/scripts/validate-pack.sh` |
-| Qwen example pack | `bash src.qwen/scripts/validate-pack.sh` |
 | Agents-mode docs/schema | `python scripts\sync-agents-mode-docs.py --root . --check` |
 | universal-hooks canon vs. mirrors (run before reporting any change to a mirrored script/hook) | `python scripts\sync-universal-hooks.py --check` |
 | Installer behavior | `python scripts\validate-agents-mode-installers.py --root .` |

@@ -27,7 +27,7 @@ Platform variants (`.sh`/`.ps1`/`.py`) той же команды с тем же
 
 - `src.codex/skills/lead/scripts/` — Codex pack: тот же entity-type co-location pattern (минус prompt-invocation wrappers, которые Claude-side only).
 
-- `scripts/` (repo root) — co-locates installer scripts (`install-{claude,codex,gemini,qwen}.{sh,ps1}`, `install-hypothesis-hook.py`), agents-mode helpers (`normalize-agents-mode.py`, `sync-agents-mode-docs.py`, `validate-agents-mode-{contract,installers}.py`), work-item helpers (`agent-run-ledger.*`, `check-agent-run-ledger-contract.py`, `check-work-items-state.*`, `validate-work-item-state.*`), и publication gate (`check-publication-gate.{sh,ps1}`).
+- `scripts/` (repo root) — co-locates production installer entrypoints (`install-{claude,codex}.py` и thin `.sh` launchers, а также `install-hypothesis-hook.py`), agents-mode helpers (`normalize-agents-mode.py`, `sync-agents-mode-docs.py`, `validate-agents-mode-{contract,installers}.py`), work-item helpers (`agent-run-ledger.*`, `check-agent-run-ledger-contract.py`, `check-work-items-state.*`, `validate-work-item-state.*`) и publication gate (`check-publication-gate.py` плюс thin `.sh` launcher).
 
 **Rationale.** Эти directories ship как flat units в user projects через `scripts/install-{claude,codex}.{sh,ps1}`. Install scripts hardcode source-tree paths и destination-tree paths. User documentation, hooks.json command paths, settings.json command paths, и operator memory "где что лежит" — всё указывает на эти paths. Split directories в per-entity-type subdirectories вынудил бы:
 

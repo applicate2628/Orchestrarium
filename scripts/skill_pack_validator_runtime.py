@@ -642,7 +642,7 @@ class Validator:
                 print(result.stderr.rstrip())
             self.fail(label)
 
-    def check_normalizer_strips_example_auto_providers(self, label: str) -> None:
+    def check_normalizer_rejects_removed_providers(self, label: str) -> None:
         if not self.layout.dev_repo:
             self.warn(f"{label} (dev repo normalizer unavailable in installed layout)")
             return
@@ -926,7 +926,7 @@ def skill_frontmatter_valid(path: Path, expected_name: str) -> bool:
     return name == expected_name and bool(description)
 
 
-def installer_default_is_production_pair(root: Path) -> bool:
+def installer_choices_are_supported_production_packs(root: Path) -> bool:
     path = root / "install.py"
     if not path.is_file():
         return False
@@ -934,12 +934,17 @@ def installer_default_is_production_pair(root: Path) -> bool:
     match = re.search(r"^    actions = \{\n(?P<body>.*?)^    \}", text, re.MULTILINE | re.DOTALL)
     if not match:
         return False
-    body = match.group("body")
-    line = next((item for item in body.splitlines() if item.lstrip().startswith('"3":')), "")
+    action_lines = tuple(
+        line.strip() for line in match.group("body").splitlines() if line.strip()
+    )
     return (
-        '"3": (("production", "codex"), ("production", "claude"))' in line
-        and "gemini" not in line
-        and "qwen" not in line
+        action_lines
+        == (
+            '"1": ("codex",),',
+            '"2": ("claude",),',
+            '"3": ("codex", "claude"),',
+        )
+        and 'input("Select 1, 2, or 3 [default: 3]: ").strip() or "3"' in text
     )
 
 
@@ -1039,8 +1044,6 @@ def _direct(
                 layout.root / name
                 for name in (
                     "references-claude",
-                    "references-gemini",
-                    "references-qwen",
                 )
             )
         for passed, message in validate_ru_mirror_policy(
@@ -1266,9 +1269,9 @@ def _direct(
     if kind == "installer_default":
         _verdict(
             validator,
-            installer_default_is_production_pair(layout.root),
-            "root Python installer default dispatch is Codex plus Claude only",
-            "root Python installer default dispatch must be Codex plus Claude only",
+            installer_choices_are_supported_production_packs(layout.root),
+            "root Python installer offers only Codex, Claude, and the default production pair",
+            "root Python installer choices must be Codex, Claude, and the default production pair",
         )
         return
     if kind == "agents_contract":
@@ -1364,7 +1367,7 @@ def _planned_validator_child_deadlines(
             "check_arch_layering_slices",
         }:
             count += 1
-        elif operation == "check_normalizer_strips_example_auto_providers":
+        elif operation == "check_normalizer_rejects_removed_providers":
             count += 3
         elif operation == "direct" and len(action) >= 2 and action[1] == "agents_contract":
             count += 1

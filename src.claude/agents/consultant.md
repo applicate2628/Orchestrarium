@@ -94,7 +94,7 @@ parallelMode: {value}  # allowed: manual | auto | force; default: auto
 mcpMode: {value}  # allowed: auto | force; default: auto
 preferExternalWorker: {value}  # allowed: false | true; default: false
 preferExternalReviewer: {value}  # allowed: false | true; default: false
-externalProvider: {value}  # allowed here: auto | codex | claude | gemini | qwen | kimi | grok; default: auto; kimi/grok are policy-only, unavailable, and disabled in 1.x; gemini/qwen are explicit example-only and not recommended
+externalProvider: {value}  # allowed here: auto | codex | claude | kimi | grok; default: auto; kimi is explicit read-only/nonauthorizing; grok is unavailable in 1.x
 externalPriorityProfile: {value}  # allowed: balanced | quality-first | <repo-local production profile>; default: balanced
 reserveResolver: {value}  # allowed: disabled | claude-sonnet | claude-wrapper | wrapper:<command>; default: claude-sonnet
 externalPriorityProfiles: {...}  # structured profile map; default seed ships balanced and quality-first
@@ -103,7 +103,7 @@ externalModelMode: {value}  # allowed: runtime-default | pinned-top-pro; default
 externalCodexProfile: {value}  # allowed: default | gpt-5.6-sol-xhigh | gpt-5.6-sol-max | gpt-5.6-terra; default: gpt-5.6-sol-xhigh
 ```
 
-`consultantMode` continues to govern consultant behavior. `reserve` is a symbolic supplemental advisory/review profile candidate that may be reached after primary `claude`/`codex`; it is independent of primary `claude` and is not a retry, fallback, or transport swap for a failed Claude CLI run. `reserveResolver` binds that symbolic candidate to `claude-sonnet`, `claude-wrapper`, `wrapper:<command>`, or `disabled`; `wrapper:<command>` must be a PATH-resolved command or repo-relative wrapper path. `delegationMode: manual` keeps explicit user-request behavior, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation a standing instruction whenever a matching specialist and viable tool path exist. `parallelMode: manual` keeps ordinary fan-out explicit-only, `auto` leaves safe parallelism enabled by routing judgment, and `force` makes safe parallel launch a standing instruction whenever scopes are independent and the merge cost is justified. `mcpMode: auto` lets the agent decide when available MCP tools are appropriate, while `force` makes relevant MCP usage a standing explicit instruction. The two preference flags are for the external dispatch contract, `externalProvider: auto` resolves by the active named production priority profile instead of a host-line default, and `externalCodexProfile: default` inherits `externalModelMode` when Codex is selected or auto-resolved. Shipped `auto` stays on the Codex/Claude pair. Explicit `gemini`/`qwen` remain `WEAK MODEL / NOT RECOMMENDED` example-only paths; Kimi/Grok are policy classifier names only, with unavailable and disabled transports in 1.x. `externalClaudeProfile` remains Codex-line only. These keys must be preserved by any command that updates this file.
+`consultantMode` continues to govern consultant behavior. `reserve` is a symbolic supplemental advisory/review profile candidate that may be reached after primary `claude`/`codex`; it is independent of primary `claude` and is not a retry, fallback, or transport swap for a failed Claude CLI run. `reserveResolver` binds that symbolic candidate to `claude-sonnet`, `claude-wrapper`, `wrapper:<command>`, or `disabled`; `wrapper:<command>` must be a PATH-resolved command or repo-relative wrapper path. `delegationMode: manual` keeps explicit user-request behavior, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation a standing instruction whenever a matching specialist and viable tool path exist. `parallelMode: manual` keeps ordinary fan-out explicit-only, `auto` leaves safe parallelism enabled by routing judgment, and `force` makes safe parallel launch a standing instruction whenever scopes are independent and the merge cost is justified. `mcpMode: auto` lets the agent decide when available MCP tools are appropriate, while `force` makes relevant MCP usage a standing explicit instruction. The two preference flags are for the external dispatch contract, `externalProvider: auto` resolves by the active named production priority profile instead of a host-line default, and `externalCodexProfile: default` inherits `externalModelMode` when Codex is selected or auto-resolved. Shipped `auto` stays on the Codex/Claude pair. Kimi is explicit-only for policy-admitted read-only research/review, independently verified and nonauthorizing; Grok remains unavailable in 1.x. `externalClaudeProfile` remains Codex-line only. These keys must be preserved by any command that updates this file.
 
 Read and normalize `.claude/.agents-mode.yaml` before routing. Comment-free, partial, or older-layout files are legacy input that must be rewritten to the current canonical format before the flags are trusted.
 If local `.claude/.agents-mode.yaml` is missing, read local legacy `.claude/.agents-mode` as compatibility input only; if both local files are missing, fall back through pack-local global `~/.claude/.agents-mode.yaml`, pack-local global legacy `~/.claude/.agents-mode`, then the shared cross-pack global `~/.agents-mode.yaml` (alongside `~/.claude.json`), before applying built-in defaults. Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale. Normalize whichever file supplied the effective config into the canonical `.yaml` path in the same scope and do not recreate any legacy file.
@@ -116,8 +116,8 @@ For the full `value | meaning` tables, see `docs/agents-mode-reference.md` in th
 - Every consultant memo must include a provenance header:
   - **Execution role:** `consultant`
   - **Assigned / replaced internal role:** `none`
-  - **Requested provider:** <internal | auto | codex | claude | gemini | qwen | kimi | grok>
-  - **Resolved provider:** a concrete Codex, Claude, Gemini, or Qwen CLI route, or `none`
+  - **Requested provider:** <internal | auto | codex | claude | kimi | grok>
+  - **Resolved provider:** a concrete Codex, Claude, or Kimi CLI route, or `none`
   - **Requested consultant mode:** <external | internal | disabled>
   - **Actual execution path:** <internal consultant | external CLI (provider name) | role-play (violation)>
   - **Model / profile used:** <actual profile or model when known | runtime default | unspecified by runtime>
@@ -160,8 +160,7 @@ Check the selected provider first:
 
 - Codex path: `which codex` on Unix, `where codex` on Windows, or `command -v codex`
 - Claude path: `claude`
-- Gemini path: `gemini`
-- Qwen path: `qwen`
+- Kimi path: `kimi`
 
 If Codex is selected:
 
@@ -196,15 +195,14 @@ If the advisory profile resolves to primary Claude, run the approved `invoke-cla
 - If the approved Claude wrapper fails, do not silently change providers or bypass it with a raw CLI path.
 - If the advisory profile later resolves to `reserve`, bind it through `reserveResolver` after primary `claude`/`codex`.
 - If `reserve` is unavailable or fails, return an unavailable memo and keep routing honest.
-- Do not silently downgrade from a selected Claude path to Codex or Gemini.
+- Do not silently downgrade from a selected Claude path to Codex.
 
-If Gemini or Qwen is selected explicitly, keep it explicit and example-only.
+If Kimi is selected explicitly, keep it read-only and nonauthorizing.
 
-- Gemini remains `WEAK MODEL / NOT RECOMMENDED`.
-- Qwen remains an explicit native `WEAK MODEL / NOT RECOMMENDED` example-only path.
-- Use the native CLI surface without inventing separate shared production fallback keys in this pack.
-- Do not silently downgrade from a selected example-only path back to Codex or Claude.
-- Route every substantive task through the approved `invoke-codex-prompt` or `invoke-claude-prompt` wrapper, which owns file/stdin prompt delivery and the governance capsule; raw provider CLI prompt routes are unsupported. Inline argv is only for a fixed synthetic non-substantive smoke token, never a provider limitation or real task.
+- Use only the approved Kimi transport from the shared external-dispatch contract with fixed `kimi-code/k3`, file-based prompt delivery, no tools or subagents, and independent verification.
+- If Kimi is unavailable or fails, return an unavailable memo; do not silently downgrade to Codex or Claude.
+- Grok remains unavailable in 1.x and must not be selected, launched, or probed.
+- Route every substantive task through the approved provider prompt wrapper named by the shared external-dispatch contract, which owns file/stdin prompt delivery and the governance capsule; raw provider CLI prompt routes are unsupported. Inline argv is only for a fixed synthetic non-substantive smoke token, never a provider limitation or real task.
 - **Never invoke a non-interactive Claude review with `--permission-mode plan`.** Plan mode makes Claude research and then present a plan for approval (ExitPlanMode) instead of emitting the verdict; under `claude -p` there is no approver, so `resultText` contains only the final handoff / "waiting for your direction" turn and the actual review never lands. Use `--permission-mode bypassPermissions` exactly as the examples above show; if you want a read-only reviewer, constrain it with `--tools "Read,Grep,Glob"`, not with plan mode. The mode is not a safety lever here — the tool set and the prompt are.
 
 ### No implicit fallback

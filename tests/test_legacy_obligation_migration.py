@@ -840,6 +840,7 @@ def test_checker_enforces_migration_schema_runbook_fixture_and_pointer_parity(tm
         "README.md",
         "INSTALL.md",
         "shared/references/subagent-operating-model.md",
+        "tests/fixtures/legacy-obligation-migration/baseline.json",
         "tests/fixtures/agent-run-ledger/legacy-obligation-migration-v2/agent-runs.jsonl",
         "tests/fixtures/agent-run-ledger/legacy-obligation-migration-v2/expected.json",
     )
@@ -943,11 +944,11 @@ def test_path_scoped_diff_guard_excludes_protected_surfaces(tmp_path: Path) -> N
         "baseline-manifest": 1,
         "protected-hashes": 1,
         "fixture-files": 4,
-        "migration-specific-paths": 5,
+        "migration-specific-paths": 6,
     }
 
     copied_files = (
-        ".scratch/legacy-obligation-migration/baseline.json",
+        "tests/fixtures/legacy-obligation-migration/baseline.json",
         "README.md",
         "INSTALL.md",
         "docs/work-item-execution-tracking.md",

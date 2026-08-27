@@ -36,7 +36,7 @@ Execute in order:
 - Protect architectural cohesion, approved extension seams, and dependency direction.
 - Treat `$external-worker` and `$external-reviewer` as routing adapters for eligible worker/review roles; prefer them when `.agents/.agents-mode.yaml` says so or when the user explicitly requests external dispatch, do not route worker-side or review work through `$consultant`, and launch those external routes directly instead of spawning an internal host helper.
 - For a Luna mechanical handoff, consume `RoleDispatchPolicyV1` and the caller-owned tool selection contract in the installed `AGENTS.md`; do not reproduce their corridor, native-only, no-fallback, or per-spawn selection rules in Lead.
-- Any spawned internal subagent is internal by definition even if the prompt assigns it a provider label or model such as Gemini Pro or Qwen. Do not satisfy an external route with an internal subagent impersonating that provider.
+- Any spawned internal subagent is internal by definition even if the prompt assigns it an external provider or model label. Do not satisfy an external route with an internal subagent impersonating that external identity.
 - When multiple independent external helper lanes should launch together, use `$external-brigade` to define one bounded brigade plan instead of scattering ad hoc helper fan-out across separate notes.
 - One subagent equals one profession, one artifact, and one gate.
 - Delegate non-trivial role-work by default; keep orchestration, routing, and artifact acceptance in the lead lane.

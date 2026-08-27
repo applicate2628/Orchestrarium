@@ -1,6 +1,6 @@
 # Installation
 
-This monorepo ships a Python-owned root installer (`install.py`) plus the thin POSIX launcher `install.sh`. They separate the production Codex/Claude path from deprecated Gemini/Qwen compatibility examples retained pending the `npm-skillpack-distribution` epic, then forward arguments to the matching pack-specific installers in the `scripts/` directory.
+This monorepo ships a Python-owned root installer (`install.py`) plus the thin POSIX launcher `install.sh`. They offer the supported Codex and Claude Code packs, then forward arguments to the matching pack-specific installers in the `scripts/` directory.
 
 The Codex installer materializes all 17 manifest native-role TOMLs through the create-only role path and registers each exact name/description/file mapping in `.codex/config.toml`; this includes the Luna corridor roles. Luna has zero decision authority: when its feature is enabled and the caller supplies a valid exact plan, `resolve_role_dispatch` returns `native-required`; disabled state returns `E_NATIVE_V2_DISABLED`. It requires exact `gpt-5.6-luna` with `high` as the default and minimum, allowing only `high`, `xhigh`, or `max`; host rejection is the nonauthorizing `E_LUNA_UNAVAILABLE` handoff. Hash-pinned prior working or currently-disabled stock role payloads are the sole current-role upgrade exception; customized payloads fail closed. An exact pre-existing role or config mapping is retained, while a differing user-owned payload or same-name mapping is preserved and makes the install fail. These roles are native shared-policy corridors, not agents-mode or external-provider settings. Dispatch callers consume the policy-only `resolve_role_dispatch` contract before considering native launch; host outcomes are not replayed and no fallback exists.
 
@@ -36,12 +36,9 @@ Production installs:
   1) Codex pack
   2) Claude Code
   3) Codex + Claude (default production install)
-Deprecated example integrations (retained pending npm-skillpack):
-  4) Gemini CLI (DEPRECATED / WEAK MODEL / NOT RECOMMENDED)
-  5) Qwen (DEPRECATED / WEAK MODEL / NOT RECOMMENDED)
 ```
 
-Pressing Enter selects the default production install, `Codex + Claude`. Gemini and Qwen are deprecated compatibility choices, never part of the default root install, and must not receive feature/parity work before the npm-skillpack epic resolves their future.
+Pressing Enter selects the default production install, `Codex + Claude`.
 
 Maintainer note for this monorepo: `Orchestrarium/` is the installer/source tree, not automatically a repo-local installed Codex runtime. When you are editing this repository itself, a missing local `.agents/` tree can be perfectly valid if you are using the global install under `~/.codex/`. If you want this repository to behave as a repo-local install target, create that state intentionally through `scripts/install-codex.*` or the root router instead of hand-writing `.agents/` files.
 
@@ -94,14 +91,12 @@ Notes:
 - For this installer monorepo itself, the absence of project-local `.agents/.agents-mode.yaml` inside `Orchestrarium/` is not automatically a bug when the maintainer is working against the global install. Ordinary reads should fall back to `~/.codex/.agents-mode.yaml` before treating the state as missing.
 - First-time creation should write the full default shape with inline comments listing allowed values for each key.
 - Decision-driving reads should resolve through the Codex read order (highest to lowest precedence, per-key): `.agents/.agents-mode.yaml`, local legacy `.agents/.agents-mode`, pack-local global `~/.codex/.agents-mode.yaml`, pack-local global legacy `~/.codex/.agents-mode`, shared cross-pack global `~/.agents-mode.yaml`, built-in defaults. Normalize whichever file supplied the effective config to the current canonical format in the same scope and never recreate any legacy file or synthesize a local override on read alone.
-- `consultantMode` still controls `$consultant`; `delegationMode: manual` keeps explicit-permission behavior, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation an explicit standing instruction whenever a matching specialist and viable tool path exist; `parallelMode: manual` keeps parallel fan-out explicit-by-request, `auto` leaves safe parallelism enabled by routing judgment for any independent internal or external lanes, and `force` makes safe parallel launch a standing instruction whenever scopes are independent and the merge cost is justified; `mcpMode: auto` lets the agent decide when MCP is appropriate while `force` makes MCP usage an explicit standing instruction; the two `preferExternal*` flags let routing prefer `$external-worker` and `$external-reviewer`; `externalProvider` accepts `auto | codex | claude | gemini | qwen | kimi | grok`, while shipped `auto` stays Codex/Claude only; Kimi is explicit-only, policy-admitted read-only exploration, research, planning, or review through the fixed `kimi-code/k3` no-tools/no-subagents wrapper, independently verified and nonauthorizing; Grok remains unavailable in 1.x; `externalPriorityProfile` selects the active named provider-order profile for `auto`; `reserveResolver` binds the symbolic `reserve` slot to a concrete read-only resolver; `externalPriorityProfiles` stores the switchable per-lane provider orders; and `externalOpinionCounts` raises specific lanes above the default single-opinion behavior when one external opinion is not enough. Those counts stay lane-local distinct-opinion requirements; `parallelMode` remains the general helper fan-out rule, while bounded same-provider external helper fan-out is handled through the dedicated brigade surfaces.
 - `externalProvider: auto` is lane-driven rather than host-pack-driven. It resolves through the active production priority profile documented in [`docs/agents-mode-reference.md`](docs/agents-mode-reference.md), stays on the Codex/Claude pair, and must not silently self-bounce into the same provider line. The shipped production profiles are `balanced` for the quiet default and `quality-first` for maximum result quality.
 - The external-prompt governance capsule is canon at `shared/external-prompt-governance.md` and is projected to installed wrapper directories as `scripts/external-prompt-governance.md`; do not replace that projection with a raw provider-prompt policy copy.
 - `externalModelMode` is the shared production model policy: `runtime-default` leaves the resolved provider on its runtime default model/profile, while `pinned-top-pro` starts on the strongest documented provider-native model/profile and allows one named same-provider fallback on retryable provider exhaustion.
 - `externalCodexProfile` is the Codex-specific external profile override with four values: `default` inherits `externalModelMode` after provider resolution, including under `externalProvider: auto`; `gpt-5.6-sol-xhigh` (shipped as the default, symmetric to Claude's `opus-xhigh`) pins model `gpt-5.6-sol` with `model_reasoning_effort = "xhigh"` regardless of `externalModelMode`; `gpt-5.6-sol-max` requests model `gpt-5.6-sol` with `model_reasoning_effort = "max"` for higher-complexity/hard lanes (NOT `gpt-5.6-sol-ultra`, which spawns subagents and must never be shipped on a subagent lane); and `gpt-5.6-terra` selects the balanced Codex model (a distinct model, `model_reasoning_effort = "high"`, not an effort suffix) — a genuine cheaper-and-faster-than-`gpt-5.6-sol-xhigh` reasoning lane, verified against the installed runtime before use and review-gated like any external lane; it replaces the former `gpt-5.5-fast` and `gpt-5.3-codex-spark` values.
 - `reserve` is the advisory/review-only supplemental profile candidate after primary `claude`/`codex`. It is symbolic rather than a scalar provider key: `reserveResolver: claude-sonnet | claude-wrapper | wrapper:<command> | disabled` binds it to a concrete read-only resolver. Use `wrapper:<command>` for a PATH-resolved command or repo-relative wrapper path, and keep it out of implementation/editing fallback.
 - `externalClaudeProfile` is Codex-line only and selects or overrides the Claude CLI execution profile: `sonnet-high` maps to Sonnet with `--effort high`, `opus-xhigh` (the shipped default) maps to Opus with `--effort xhigh`, `opus-max` maps to Opus with `--effort max` (max-depth escalation for especially hard tasks at caller discretion), and `fable-xhigh` maps to Fable with `--effort xhigh` (the current Claude flagship-family best-effort tier; the `fable` flagship alias as of 2026-07). New Codex installs seed `opus-xhigh` by default unless a preset or explicit operator choice overrides it.
-- The current Gemini and Qwen full-mirror packs are `DEPRECATED / WEAK MODEL / NOT RECOMMENDED`. They remain selectable only for demonstration, compatibility, and inspection, never participate in production `auto` profiles, and must not receive feature/parity work before the npm-skillpack epic resolves their future.
 - Full mode tables live in [`docs/agents-mode-reference.md`](docs/agents-mode-reference.md).
 - After first-time Codex project install, run `$init-project` in Codex to write `## Project policies` to the root `AGENTS.md` and review or update the installed default `.agents/.agents-mode.yaml`.
 - If a repo-local lane policy explicitly asks for consultant input at closeout, it follows the configured `consultantMode`. `consultantMode: disabled` waives consultant closeout instead of blocking the batch, and any requested consultant sweep stays advisory-only rather than replacing review or human gates.
@@ -127,7 +122,6 @@ Notes:
 - The canonical Claude-line operator file is `.claude/.agents-mode.yaml` for project installs and `~/.claude/.agents-mode.yaml` for global installs.
 - First-time creation should write the full default shape with inline comments listing allowed values for each key.
 - Decision-driving reads should resolve through the Claude read order (highest to lowest precedence, per-key): `.claude/.agents-mode.yaml`, local legacy `.claude/.agents-mode`, pack-local global `~/.claude/.agents-mode.yaml`, pack-local global legacy `~/.claude/.agents-mode`, shared cross-pack global `~/.agents-mode.yaml`, built-in defaults. Normalize whichever file supplied the effective config to the current canonical format in the same scope and never recreate any legacy file or synthesize a local override on read alone.
-- `consultantMode` still controls `$consultant`; `delegationMode: manual` keeps explicit-permission behavior, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation an explicit standing instruction whenever a matching specialist and viable tool path exist; `parallelMode: manual` keeps parallel fan-out explicit-by-request, `auto` leaves safe parallelism enabled by routing judgment for any independent internal or external lanes, and `force` makes safe parallel launch a standing instruction whenever scopes are independent and the merge cost is justified; `mcpMode: auto` lets the agent decide when MCP is appropriate while `force` makes MCP usage an explicit standing instruction; the two `preferExternal*` flags let routing prefer `$external-worker` and `$external-reviewer`; `externalProvider` accepts `auto | codex | claude | gemini | qwen | kimi | grok`, while shipped `auto` stays Codex/Claude only; Kimi is explicit-only, policy-admitted read-only exploration, research, planning, or review through the fixed `kimi-code/k3` no-tools/no-subagents wrapper, independently verified and nonauthorizing; Grok remains unavailable in 1.x; and the switchable `externalPriorityProfile` / `reserveResolver` / `externalPriorityProfiles` / `externalOpinionCounts` block keeps production auto-routing on Codex plus Claude instead of hidden host-line defaults. Shipped profiles are `balanced` and `quality-first`. Those counts stay distinct-opinion requirements for one lane, while brigade surfaces cover parallel external helper multiplicity on top of the general `parallelMode` rule.
 - On a Claude install, `delegationMode: force` writes `settings.json.agent: "lead"` only when that scalar is absent. An existing `lead` remains unchanged; an explicit non-Lead scalar remains unchanged and emits `WARN: Claude main agent preserved; force lead binding not installed`. `auto`, `manual`, and unresolved mode preserve the scalar. Managed/project settings and explicit `--agent` are higher-precedence Claude choices and are never rewritten; use a new session or explicit `--agent lead` for an existing session created under another selection.
 - Explicit self-provider selection is override-only; ordinary `auto` must not silently resolve back into the same host line.
 - `reserveResolver` controls the concrete reserve path. `claude-wrapper` resolves to the Python-owned Claude-line transport `.claude/agents/scripts/invoke-claude-api.py` (also exposed through its thin POSIX launcher), which reads repo-local `.claude/SECRET.md` first and then `~/.claude/SECRET.md`, exports the declared `ANTHROPIC_*` environment, and then runs plain `claude`; `wrapper:<command>` may point to another approved PATH-resolved or repo-relative read-only wrapper — "approved" means exactly the layer-provenance trust gate: the value is defined (or identically confirmed) at a user-global config layer (`~/.claude/.agents-mode.yaml`, its legacy sibling, or `~/.agents-mode.yaml`); a `wrapper:<command>` supplied only by a project-local `.agents-mode.yaml` (which a cloned repository can ship) resolves as `reserveResolverTrust: project-UNCONFIRMED` per `scripts/resolve-agents-mode.py` and must not be launched before explicit first-use user confirmation, recorded durably by writing the approved value into a user-global layer. `externalClaudeProfile` stays Codex-line only for primary Claude CLI runs.
@@ -142,46 +136,9 @@ Notes:
 - The design-panel technique installs as `~/.claude/agents/contracts/design-panel.md` + `~/.claude/commands/agents-design-panel.md` (global) or the `<project>/.claude/` equivalents (project), source `src.claude/agents/contracts/design-panel.md` + `src.claude/commands/agents-design-panel.md`. No dedicated panel-state validator is installed; the pack validator checks only file presence and invariant markers (`DP1`-`DP8`).
 - Validation commands: `python src.claude/agents/scripts/validate-skill-pack.py` or its POSIX launcher `bash src.claude/agents/scripts/validate-skill-pack.sh`.
 
-## Deprecated Gemini CLI compatibility example
-
-Use `scripts/install-gemini.sh` or `scripts/install-gemini.ps1` when you want the Gemini pack directly.
-
-| Command | Result |
-| --- | --- |
-| `bash scripts/install-gemini.sh --global` | Installs into `~/.gemini/` by seeding `GEMINI.md`, `AGENTS.md`, `~/.gemini/.agents-mode.yaml`, and the official extension package at `~/.gemini/extensions/orchestrarium-gemini/` |
-| `bash scripts/install-gemini.sh --target /path/to/project` | Installs into the target project's `GEMINI.md`, root `AGENTS.md` when absent, `.gemini/.agents-mode.yaml`, and `.gemini/extensions/orchestrarium-gemini/` |
-| `.\scripts\install-gemini.ps1 -Global` | Installs into `~/.gemini/` by seeding `GEMINI.md`, `AGENTS.md`, `~/.gemini/.agents-mode.yaml`, and the official extension package at `~/.gemini/extensions/orchestrarium-gemini/` |
-| `.\scripts\install-gemini.ps1 -Target "D:\path\to\project"` | Installs into the target project's `GEMINI.md`, root `AGENTS.md` when absent, `.gemini/.agents-mode.yaml`, and `.gemini/extensions/orchestrarium-gemini/` |
-
-Notes:
-
-- Repository classification: `WEAK MODEL / NOT RECOMMENDED`. Gemini stays installable here as an explicit example or compatibility path, while shipped production `externalProvider: auto` routing stays on the Codex/Claude pair.
-- Project-level Gemini installs preserve any user-owned content outside the managed Orchestrarium block inside `GEMINI.md`.
-- User-side `@...` imports that live in the installed `GEMINI.md` import block alongside `@./AGENTS.md` are preserved across reinstalls.
-- Gemini installs materialize the shared-governance layer as `AGENTS.md`; `GEMINI.md` loads it through the official `@./AGENTS.md` import. Project installs preserve an existing root `AGENTS.md` instead of overwriting it.
-- Gemini installs materialize the official Gemini extension package under `.gemini/extensions/orchestrarium-gemini/` for project installs and `~/.gemini/extensions/orchestrarium-gemini/` for global installs. That extension is the canonical installed Gemini payload and carries `gemini-extension.json`, `README.md`, `GEMINI.md`, `AGENTS.md`, `skills/`, and `commands/`.
-- To avoid precedence conflicts and noisy loader warnings, Orchestrarium does not mirror the same pack into top-level `.gemini/skills/`, `.gemini/agents/`, or `.gemini/commands/`. Those Gemini-native user/workspace tiers remain available for deliberate user overrides only.
-- Reinstall cleans legacy Orchestrarium-owned duplicates from `.gemini/skills/`, `.gemini/agents/`, and `.gemini/commands/` when they would shadow the installed extension payload.
-- Gemini runtime config and MCP wiring remain owned by `.gemini/settings.json` and `gemini-extension.json`; servers such as Serena, Fetch, or Context7 do not belong inside `AGENTS.md`.
-- The Orchestrarium routing overlay file is `.gemini/.agents-mode.yaml` for project installs and `~/.gemini/.agents-mode.yaml` for global installs.
-- Decision-driving reads should prefer `.gemini/.agents-mode.yaml`, then local legacy `.gemini/.agents-mode`, then `~/.gemini/.agents-mode.yaml`, then global legacy `~/.gemini/.agents-mode`, then the shared cross-pack global `~/.agents-mode.yaml`; normalize whichever file supplied the effective config to the current canonical format in the same scope and never recreate any legacy file or synthesize a local override on read alone.
-- After first-time Gemini project install, run Gemini CLI `/init` if you want Gemini to create or refresh the user-owned portion of `GEMINI.md`, and then use the Orchestrarium Gemini `init-project` helper to review or update the installed default `.gemini/.agents-mode.yaml` when you want project-specific routing choices. Keep that overlay on the example path; it is not part of the shipped production root schema.
-- Validation commands: `bash src.gemini/scripts/validate-pack.sh` or `.\src.gemini\scripts\validate-pack.ps1`.
-
-## Deprecated Qwen compatibility example
-
-`src.qwen/` is the native Qwen example line in this monorepo.
-
-- Repository classification: `WEAK MODEL / NOT RECOMMENDED`. Qwen is installable for explicit example, inspection, or compatibility use, while shipped production `externalProvider: auto` routing stays on the Codex/Claude pair.
-- The root router currently exposes Qwen because matching root `scripts/install-qwen.sh` and `scripts/install-qwen.ps1` entrypoints are present in this checkout.
-- If a future checkout lacks those root entrypoints, fall back to the Qwen source tree directly: `src.qwen/QWEN.md`, `src.qwen/README.md`, and `src.qwen/scripts/validate-pack.sh` or `.\src.qwen\scripts\validate-pack.ps1`.
-- Decision-driving reads should prefer `.qwen/.agents-mode.yaml`, then local legacy `.qwen/.agents-mode`, then `~/.qwen/.agents-mode.yaml`, then global legacy `~/.qwen/.agents-mode`, then the shared cross-pack global `~/.agents-mode.yaml`; normalize whichever file supplied the effective config to the current canonical format in the same scope and never recreate any legacy file or synthesize a local override on read alone.
-
 ## Multi-pack setup
 
-To install any combination of packs into the same target project, either choose one explicit router option at a time or run the pack-specific installers with the same target arguments.
-
-The current root router defaults to the production Codex/Claude pair and exposes Gemini and Qwen only as deprecated compatibility choices. It does not provide an "all available root installs" default because deprecated providers must not be installed by default. Their future removal, archival, or generation belongs to the npm-skillpack epic.
+To install both supported packs into the same target project, select the default `Codex + Claude` router option or run the two pack-specific installers with the same target arguments.
 
 Expected default project-level result:
 
@@ -204,18 +161,13 @@ project/
     skills/                ← inline /lead orchestration skill + common skills reachable from main conv and subagents
 ```
 
-Explicit Gemini or Qwen example installs add their provider-native files and extension directories on top of that production baseline. Their common-skill payload is materialized under `.gemini/extensions/orchestrarium-gemini/skills/` and the equivalent Qwen extension path.
-
 Reference directories are development-only and are not installed:
 
 - `shared/references/`
 - `docs/`
 - `references-codex/`
 - `references-claude/`
-- `references-gemini/`
-- `references-qwen/`
 
-That split is intentional. `shared/references/` holds the canonical shared design cores, `docs/` is the common branch-level docs surface, and `references-codex/`, `references-claude/`, `references-gemini/`, and `references-qwen/` keep only pack-local addenda or compatibility pointers. `subagent-operating-model` is the main example: the installed packs keep their runtime docs, but the monorepo now keeps one shared blueprint core plus one addendum per pack instead of near-duplicate full reference copies.
 
 ## Post-install customization
 
@@ -303,7 +255,6 @@ The git-push marker now registers `check-git-push-gate-runner.py`, a minimal cac
 
 - Claude Code installer merges the hook entry into `~/.claude/settings.json` (`--global`) or `<project>/.claude/settings.json` (`--target`).
 - Codex CLI installer merges the hook entry into `~/.codex/hooks.json` (`--global`) or `<project>/.codex/hooks.json` (`--target`).
-- Gemini and Qwen example installers copy the same universal hook/helper scripts into their installed extension roots (`<install-root>/extensions/<pack>/scripts/` and `hooks/`). If the provider runtime exposes compatible native hook wiring, those scripts are the canonical backstop payload; otherwise they remain installed helper surfaces for manual or wrapper-driven checks instead of disappearing from the pack.
 - Compatible non-Codex/Claude wrappers can use `scripts/install-hypothesis-hook.py --platform generic` to emit the provider-neutral exec-form JSON entry; runtimes with a different native schema should adapt from the installed universal hook/helper payload rather than forking the hook logic.
 
 Opt out at install time with:
@@ -351,29 +302,7 @@ Entries are identified independently by script marker: `check-bugfix-discipline`
 
 **Cross-platform hook command shape.** The only supported hook runtime registers the absolute interpreter reported by `sys.executable` followed by the absolute `.py` target path. The same direct-Python target resolution is used on Windows and POSIX; only the provider schema differs (Claude Code uses `command` plus `args`, while Codex stores one shell-form command string). Windows Codex commands deliberately leave both absolute paths unquoted, the form verified under both `cmd.exe` and PowerShell; a single-quoted command word is not portable to `cmd.exe`. Retained `.sh` files are manual launchers for non-hook commands only.
 
-Gemini and Qwen remain example-only provider lines, but the universal hook/helper payload is still installed with them. The Bootstrap text rule in the merged `AGENTS.md` remains binding on all platforms regardless of whether a provider runtime can auto-trigger the installed scripts.
-
 When both packs are installed, keep shared project policies aligned across both files. The repository's dev overlays, `AGENTS.md` and `CLAUDE.md`, are for maintaining this monorepo and are not copied into target projects by the install scripts.
-
-## Gemini example source tree in the monorepo
-
-The monorepo still keeps the full Gemini line as a validated example source tree in addition to the root-router example path:
-
-- runtime entrypoint: `src.gemini/GEMINI.md`
-- shared-governance source: `shared/AGENTS.shared.md`
-- branch-level docs entrypoint: `docs/README.md`
-- built-in initialization: Gemini CLI `/init` writes or tailors the project `GEMINI.md`
-- expertise layer: `src.gemini/skills/<name>/SKILL.md`
-- repo-local team templates: `src.gemini/skills/lead/team-templates/*.json`
-- custom commands: `src.gemini/commands/**/*.toml`
-- official runtime config: project `.gemini/settings.json`
-- Orchestrarium operator overlay: project `.gemini/.agents-mode.yaml`
-- installed extension manifest source: `src.gemini/extension/gemini-extension.json`
-- provider-local reference tree: `references-gemini/`
-- validation commands: `bash src.gemini/scripts/validate-pack.sh` or `.\src.gemini\scripts\validate-pack.ps1`
-- Orchestrarium overlay bootstrap: `src.gemini/commands/agents/init-project.toml` and `src.gemini/skills/init-project/SKILL.md`
-
-It intentionally keeps the full Gemini payload in `src.gemini/` while materializing the installed runtime as one official extension package plus the adjacent Gemini-native context files and `.agents-mode.yaml` overlay. Use Gemini's built-in `/init` for the official `GEMINI.md` bootstrap first. Orchestrarium install seeds `.gemini/.agents-mode.yaml` with the current default overlay in either the project target or `~/.gemini/`, and it materializes the canonical runtime payload under `.gemini/extensions/orchestrarium-gemini/` or `~/.gemini/extensions/orchestrarium-gemini/`; use the Orchestrarium Gemini init helper to review or update that installed default rather than replacing Gemini's official `.gemini/settings.json`. Top-level `.gemini/skills/`, `.gemini/agents/`, and `.gemini/commands/` stay reserved for deliberate user overrides and are not used as a second mirrored install target, because Gemini gives user/workspace tiers precedence over extension content. MCP wiring for servers such as Serena, Fetch, or Context7 remains a `settings.json` or `gemini-extension.json` concern. In the root integration contract, Gemini stays an explicit example path: shipped production `externalProvider: auto` routing remains on the Codex/Claude pair, while any broader Gemini routing behavior belongs to provider-local example documentation instead of the root production schema. Full operator semantics, including task continuity and continue-by-default execution expectations, live in [`docs/agents-mode-reference.md`](docs/agents-mode-reference.md).
 
 ## Terms and Abbreviations
 
@@ -386,16 +315,13 @@ It intentionally keeps the full Gemini payload in `src.gemini/` while materializ
 - `Codex`: OpenAI Codex runtime and production provider line.
 - `externalProvider: auto`: production routing mode that stays on the Codex/Claude pair in shipped defaults.
 - `evidence`: concrete verification data such as a command result, artifact path, review result, log summary, or observed output supporting a gate.
-- `Gemini`: Google Gemini CLI provider line, installable here only as an explicit example or compatibility path.
 - `global install`: install into a user-level provider runtime root such as `~/.codex/` or `~/.claude/`.
 - `JSON`: JavaScript Object Notation; structured data format used here for machine-readable contract files.
 - `JSONL`: JSON Lines; one JSON object per line, used here for append-only execution events.
 - `ledger`: append-only record of agent runs, gates, artifacts, and evidence for a work item.
 - `MCP`: Model Context Protocol; provider/runtime mechanism for tool and resource servers.
 - `power-mode`: init-time preset for hardest tasks where maximum useful result matters more than latency; starts from the `quality-first` provider-order profile.
-- `Qwen`: Qwen provider line, installable here only as an explicit example or compatibility path.
 - `runtime`: installed provider-facing files and directories read by the provider tool.
 - `schema`: structured contract describing allowed keys, values, defaults, provider sets, and routing shapes.
 - `stdin`: standard input stream used by CLIs and wrappers.
 - `status.md`: human-readable recovery summary for the active work item.
-- `WEAK MODEL / NOT RECOMMENDED`: repository classification for example-only provider integrations that are excluded from default installs and production `auto` routing.

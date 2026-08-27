@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Extract a single-provider standalone tree from the monorepo into a directory.
 
-The published provider branches (claude, codex, gemini, qwen) are single-provider
+The published provider branches (claude and codex) are single-provider
 standalone distributions of the monorepo. They drifted because the extraction was
 manual. This script makes the transform reproducible.
 
@@ -39,7 +39,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-PROVIDERS = ("claude", "codex", "gemini", "qwen")
+PROVIDERS = ("claude", "codex")
 
 SHARED_PREFIXES = ("shared/", "scripts/")
 SHARED_FILES = ("LICENSE", ".gitignore")

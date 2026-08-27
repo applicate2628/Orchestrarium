@@ -81,7 +81,7 @@ The launch table must keep these columns explicit:
 
 | Item | Execution role | Assigned / replaced internal role | Requested provider | Resolved provider | Scope | Result |
 | --- | --- | --- | --- | --- | --- | --- |
-| `<item>` | `<role>` | `<role or none>` | `<internal | codex | claude | gemini | qwen>` | `<provider or none>` | `<one-line scope>` | `<PASS | REVISE | BLOCKED>` |
+| `<item>` | `<role>` | `<role or none>` | `<internal | codex | claude | kimi | grok>` | `<provider or none>` | `<one-line scope>` | `<PASS | REVISE | BLOCKED>` |
 
 ## Gate rules
 

@@ -17,7 +17,7 @@ parallelMode: auto  # allowed: manual | auto | force; default: auto
 mcpMode: auto  # allowed: auto | force; default: auto
 preferExternalWorker: true  # allowed: false | true; default: false
 preferExternalReviewer: true  # allowed: false | true; default: false
-externalProvider: auto  # allowed here: auto | codex | claude | gemini | qwen | kimi | grok; default: auto; kimi is explicit read-only/nonauthorizing; grok is unavailable in 1.x; gemini/qwen are explicit example-only and not recommended for shipped auto
+externalProvider: auto  # allowed here: auto | codex | claude | kimi | grok; default: auto; kimi is explicit read-only/nonauthorizing; grok is unavailable in 1.x
 externalPriorityProfile: balanced  # allowed: balanced | quality-first | <repo-local production profile>; default: balanced
 reserveResolver: claude-sonnet  # allowed: disabled | claude-sonnet | claude-wrapper | wrapper:<command>; default: claude-sonnet
 externalPriorityProfiles: {}  # allowed: structured profile map
@@ -35,8 +35,8 @@ Semantics:
 - `parallelMode: manual` keeps ordinary parallel fan-out explicit-only, `auto` parallelizes safe independent lanes by routing judgment, and `force` makes safe parallel launch a standing instruction whenever scopes are independent and the merge cost is justified.
 - `mcpMode: auto` lets the agent decide when available MCP tools are appropriate; `force` makes relevant MCP usage a standing explicit instruction.
 - `preferExternalWorker` and `preferExternalReviewer` are routing preferences for eligible external adapter substitutions.
-- `externalProvider` uses the shared provider universe `auto | codex | claude | gemini | qwen | kimi | grok`.
-- `externalProvider: auto` resolves by lane type through the active named production priority profile instead of by host-pack identity. Shipped `auto` profiles use the Codex/Claude pair only and do not select example-only or explicit-only providers.
+- `externalProvider` uses the shared provider universe `auto | codex | claude | kimi | grok`.
+- `externalProvider: auto` resolves by lane type through the active named production priority profile instead of by host-pack identity. Shipped `auto` profiles use the Codex/Claude pair only and do not select explicit-only providers.
 - `externalPriorityProfile` selects the named provider-order map used only when `externalProvider: auto`; missing means `balanced`.
 - `reserveResolver` binds the symbolic `reserve` candidate to one concrete read-only resolver: `disabled`, `claude-sonnet`, `claude-wrapper`, or `wrapper:<command>`. `wrapper:<command>` is a PATH-resolved command or repo-relative wrapper path, not an argv prompt channel.
 - **Layer-provenance trust gate for executable-bearing values (binding).** `wrapper:<command>` names an arbitrary executable, and the highest-precedence project-local `.claude/.agents-mode.yaml` can arrive inside a cloned repository — an untrusted source that must never silently select code the agent then executes. An executable-bearing value is honored without further confirmation only when a user-global layer (`~/.claude/.agents-mode.yaml`, legacy `~/.claude/.agents-mode`, or `~/.agents-mode.yaml`) defines it or defines the identical value. A project-local `wrapper:<command>` absent from every user-global layer resolves as `reserveResolverTrust: project-UNCONFIRMED` (the machine-readable flag emitted by `scripts/resolve-agents-mode.py`, the executable reference in the source repository) and MUST NOT be launched until the user explicitly confirms it on first use (`AskUserQuestion`). Record the approval durably by writing the approved value into a user-global layer — that write is what flips subsequent resolutions to `reserveResolverTrust: user-global`. "Approved" wrapper anywhere in this pack's guidance means exactly this mechanism: defined or confirmed at a user-global layer, never a repo-supplied value alone.
@@ -54,7 +54,6 @@ Semantics:
 - If local `.claude/.agents-mode.yaml` is missing, read local legacy `.claude/.agents-mode` as compatibility input only; if both local files are missing, fall back through pack-local global `~/.claude/.agents-mode.yaml`, pack-local global legacy `~/.claude/.agents-mode`, then the shared cross-pack global `~/.agents-mode.yaml`, before applying built-in defaults. Normalize whichever file supplied the effective config in place before trusting the flags.
 - When writing `.claude/.agents-mode.yaml`, keep each key on its own line and add an inline YAML comment that enumerates the allowed values for that key.
 - Normalization preserves effective known values and unknown keys, fills missing canonical keys with current defaults, removes retired canonical keys, refreshes inline comments plus the shipped profile/count blocks, and restores canonical key order.
-- Explicit user override or documented repo-local task-domain heuristics may still choose an explicit example-only provider route such as Qwen, or the weaker/not-recommended Gemini path, over the ordinary `auto` result for demonstration or compatibility work.
 
 ## Claude-line provider
 
@@ -69,7 +68,7 @@ Semantics:
 - If the plain Claude CLI is selected and fails, do not silently convert that same primary `claude` run to the wrapper. Advisory/review lanes may later collect `reserve` as a separate profile candidate when enabled; worker or mutating routes must report Claude unavailable or reroute honestly.
 - Use `.claude/agents/scripts/invoke-claude-api.py` from PowerShell or `.claude/agents/scripts/invoke-claude-api.sh` from Bash or Git Bash only when that wrapper is the approved resolver for a resolved `reserve` advisory/review candidate. The Python entrypoint is the canonical implementation; the Bash launcher must honor `CLAUDE_BIN` when the shell PATH differs from PowerShell PATH.
 - On Windows, keep the ordinary external launch path unchanged and try the native Windows shell first. If that native shell path fails because of shell bootstrap, execution-policy, or environment-policy problems, retry once through Git-for-Windows Bash / MSYS when available. Do not use the WSL `bash.exe` stub as a fallback, and do not reinterpret ordinary provider auth, quota, or model failures as shell-fallback triggers.
-- Use `gpt-5.6-terra` as the balanced cheaper-than-flagship Codex reasoning lane when full `gpt-5.6-sol` depth is not required; a genuine reasoning model whose output stays review-gated like any external lane. Gemini and Qwen routes stay manual `WEAK MODEL / NOT RECOMMENDED` example-only paths and do not add separate production fallback keys to this schema.
+- Use `gpt-5.6-terra` as the balanced cheaper-than-flagship Codex reasoning lane when full `gpt-5.6-sol` depth is not required; a genuine reasoning model whose output stays review-gated like any external lane.
 - Every substantive external task prompt must use an approved thin wrapper and file/stdin delivery. Command-line arguments are limited to launcher flags, model/profile options, and paths; inline argv is permitted only for a fixed synthetic non-substantive smoke token, never a provider limitation or real task.
 - The canonical Claude-pack transports for primary runs are `.claude/agents/scripts/invoke-codex-prompt.py` / `.sh` and `.claude/agents/scripts/invoke-claude-prompt.py` / `.sh`; invoke the approved thin wrapper synchronously and consume its single V2 `ORCHESTRARIUM_PROVIDER_RESULT_V2` envelope through the strict V2 parser, using its complete untrusted/potentially-sensitive resultText, full external-nonauthorizing tuple, combined outcome, cleanup status, and wrapper process exit. For tracked runs, read the path-free terminal ledger back separately after return. Wrapper-private prompt, stdout, stderr, and process paths are not consumer surfaces. No transport-neutral inline, sidecar, or raw provider chain is an approved substantive prompt path; fail or reroute when an approved wrapper is unavailable.
 - Kimi is an explicit read-only route for policy-admitted broad research and review. On Windows it requires an installer enrollment pin and invokes fixed `kimi-code/k3` text output with a no-tools/no-subagents sealed agent bundle under an OS-temp private run directory; it has no native effort selector, remains independently verified and nonauthorizing, and never enters shipped `auto`. Grok remains an unavailable policy name in 1.x: do not launch or probe it.
@@ -172,7 +171,7 @@ Resolve external dispatch in this order: `role eligibility -> provider selection
 Rules:
 
 - An explicit request for `external` does not create a new adapter type.
-- Unsupported external role requests must stop with an unsupported-route explanation and an honest reroute suggestion instead of probing Codex, Claude, Gemini, or Qwen availability as if a missing adapter might exist.
+- Unsupported external role requests must stop with an unsupported-route explanation and an honest reroute suggestion instead of probing provider availability as if a missing adapter might exist.
 - Worker-side specialist lanes such as `analyst`, `architect`, `planner`, `algorithm-scientist`, `computational-scientist`, `security-engineer`, `performance-engineer`, and `reliability-engineer` remain eligible for `$external-worker` when routing selects external substitution. Do not remap `$knowledge-archivist`; its current taxonomy disposition is `none`.
 - Before honoring `reserve`, classify the selected lane name. Only `advisory.*` and `review.*` profile lanes may retain `reserve`; worker, implementation, repository-hygiene, installer, publication, or other lanes must strip or ignore it.
 
@@ -192,10 +191,10 @@ Every external or consultant artifact should include one explicit execution reco
 
 - `Execution role: <consultant | external-worker | external-reviewer>`
 - `Assigned / replaced internal role: <eligible internal role label | none>`
-- `Requested provider: <internal | codex | claude | gemini | qwen>`
-- `Resolved provider: <Codex CLI | Claude CLI | Gemini CLI | Qwen Code | none>`
+- `Requested provider: <internal | auto | codex | claude | kimi | grok>`
+- `Resolved provider: <Codex CLI | Claude CLI | Kimi CLI | none>`
 - `Requested consultant mode: <external | internal | disabled>` when consultant routing is relevant; otherwise `not-applicable`
-- `Actual execution path: <internal consultant | external CLI (Codex CLI) | external CLI (Claude CLI) | external CLI (Gemini CLI) | external CLI (Qwen Code) | role disabled>`
+- `Actual execution path: <internal consultant | external CLI (Codex CLI) | external CLI (Claude CLI) | external CLI (Kimi CLI) | role disabled>`
 - `Model / profile used: <actual profile or model when known | runtime default | unspecified by runtime>`
 - `Launch flags: <exact argv model / effort / sandbox flags>`
 - `Run record: <started and finished timestamps or duration; wrapper exit; terminal ledger runId when tracked>`
@@ -221,7 +220,6 @@ Rules:
 - `MCP`: Model Context Protocol; protocol for exposing tools and resources to agent runtimes.
 - `QA`: Quality Assurance; verification work for tests, regressions, and acceptance criteria.
 - `12 + 1`: twelve external routing lines plus one owner/control line from the release-backed RF12 interpretation.
-- `WEAK MODEL / NOT RECOMMENDED`: repository classification for example-only providers excluded from production `auto` routing.
 - `PID handoff`: an optional caller-owned sidecar supplied to the standalone `await-codex-dispatch` watcher so it can directly probe a caller-managed background process; prompt-wrapper `.pid` captures are private and transient.
 - `result envelope`: the single strict-prefix V2 `ORCHESTRARIUM_PROVIDER_RESULT_V2=<json>` line emitted and flushed after complete bounded result materialization and private-run cleanup, but before the optional terminal ledger append; it is always external-nonauthorizing and carries no claim about that later append.
 - `run capture`: one randomized private directory and its fixed prompt, output, error, and process children, written only by supervisor-owned streams and disposed of only by `RunCaptureLifecycle` after ownership is established.

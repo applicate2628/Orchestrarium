@@ -1,7 +1,7 @@
 """Unit tests for the provider-branch extractor's transform logic.
 
 These exercise the pure functions (no git, deterministic). The end-to-end transform
-is validated empirically (0 DROPPED files across all 4 provider branches); these
+is validated empirically for both production provider branches; these
 tests guard the inclusion/curation/skill-generation rules against regression.
 """
 import importlib.util
@@ -37,7 +37,7 @@ def test_claude_includes_pack_paths():
 def test_claude_excludes_other_providers_merged_root_and_maintainer_only_files():
     for p in (
         "src.codex/skills/lead/SKILL.md",
-        "src.gemini/agents/lead.md",
+        "src.retired-provider/agents/lead.md",
         "references-codex/README.md",
         "AGENTS.md",
         "CLAUDE.md",
@@ -90,6 +90,10 @@ def test_codex_provider_scopes_correctly():
     assert not inc("src.claude/agents/lead.md", "codex")
     assert not inc("references-claude/README.md", "codex")
     assert inc("shared/AGENTS.shared.md", "codex")  # shared stays for every provider
+
+
+def test_removed_providers_are_not_selectable():
+    assert mod.PROVIDERS == ("claude", "codex")
 
 
 # --- skill generation (claude) ----------------------------------------------

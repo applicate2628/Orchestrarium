@@ -468,7 +468,7 @@ def check_legacy_migration_contract(root: Path) -> dict[str, int]:
 
 def check_legacy_migration_diff_guard(root: Path) -> dict[str, int]:
     """Reconcile the Phase 0 byte boundary without blaming admitted later phases."""
-    baseline_path = root / ".scratch" / "legacy-obligation-migration" / "baseline.json"
+    baseline_path = root / "tests" / "fixtures" / "legacy-obligation-migration" / "baseline.json"
     baseline_bytes = baseline_path.read_bytes()
     require(
         hashlib.sha256(baseline_bytes).hexdigest() == MIGRATION_BASELINE_SHA256,
@@ -508,7 +508,10 @@ def check_legacy_migration_diff_guard(root: Path) -> dict[str, int]:
         fixture_files == ["agent-runs.jsonl", "expected.json", "implementation.md", "status.md"],
         "migration fixture path set drifted",
     )
-    migration_paths = [root / "tests" / "test_legacy_obligation_migration.py"] + [
+    migration_paths = [
+        root / "tests" / "test_legacy_obligation_migration.py",
+        baseline_path,
+    ] + [
         fixture / name for name in fixture_files
     ]
     require(all(path.is_file() for path in migration_paths), "migration-specific path is missing")
