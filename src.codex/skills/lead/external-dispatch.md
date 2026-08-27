@@ -180,7 +180,7 @@ Rules:
 - `$consultant` stays advisory-only and continues to use the `consultantMode` field.
 - `$external-worker` covers the full worker-side lane.
 - `$external-reviewer` covers review and QA on the reviewer side.
-- If the external CLI is unavailable for either external role, that role is disabled at the role level and the orchestrator may reroute to another eligible internal specialist.
+- If the external CLI is unavailable for either external role, report that role unavailable; do not silently substitute an internal specialist.
 - There is no internal fallback inside the external role itself.
 
 ## Eligibility gate
@@ -232,10 +232,10 @@ Every external or consultant memo/report should record one explicit execution re
 
 - `Execution role: <consultant | external-worker | external-reviewer>`
 - `Assigned / replaced internal role: <eligible internal role label | none>`
-- `Requested provider: <internal | codex | claude | gemini | qwen>`
-- `Resolved provider: <Codex CLI | Claude CLI | Gemini CLI | Qwen Code | none>`
+- `Requested provider: <internal | codex | claude | gemini | qwen | kimi>`
+- `Resolved provider: <Codex CLI | Claude CLI | Gemini CLI | Qwen Code | Kimi Code | none>`
 - `Requested consultant mode: <external | internal | disabled>` when consultant routing is relevant; otherwise `not-applicable`
-- `Actual execution path: <internal consultant | external CLI (Codex CLI) | external CLI (Claude CLI) | external CLI (Gemini CLI) | external CLI (Qwen Code) | role disabled>`
+- `Actual execution path: <internal consultant | external CLI (Codex CLI) | external CLI (Claude CLI) | external CLI (Gemini CLI) | external CLI (Qwen Code) | canonical Kimi wrapper | role unavailable>`
 - `Model / profile used: <actual profile or model when known | runtime default | unspecified by runtime>`
 - `Launch flags: <exact argv model / effort / sandbox flags>`
 - `Run record: <started and finished timestamps or duration; wrapper exit; terminal ledger runId when tracked>`
@@ -243,7 +243,7 @@ Every external or consultant memo/report should record one explicit execution re
 
 Rules:
 
-- Kimi may be selected only for policy-admitted read-only research/review and must be recorded truthfully as a nonauthorizing provider with independent verification; Grok remains unavailable and must never be selected, executed, or recorded as a realized provider in 1.x.
+- Kimi may be selected only for policy-admitted read-only exploration, research, planning, or review through the canonical fixed `kimi-code/k3` no-tools/no-subagents wrapper, and must be recorded truthfully as nonauthorizing with independent verification; it never enters `auto`. Grok remains unavailable and must never be selected, executed, or recorded as a realized provider in 1.x.
 - Before declaring a route unavailable, run `command -v` or `Get-Command` for the resolved CLI in the current session and record the availability-probe output in the execution artifact; a route change requires the probe result plus a populated `Deviation reason`. A missing approved prompt wrapper is a direct dependency failure; an older failed run does not prove the CLI is unavailable.
 - Keep `Execution role` and `Assigned / replaced internal role` on separate lines. Do not merge them into one ambiguous label.
 - `Requested provider: internal` means no explicit external provider was requested by the caller and routing/default resolution picked the provider. It must not be rendered as `auto` in the artifact.

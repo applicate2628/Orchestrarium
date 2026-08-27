@@ -111,7 +111,7 @@ Routing conventions (not persisted as keys):
       - `externalClaudeWorkdirMode: neutral`
       - `externalModelMode: runtime-default`
       - `externalCodexProfile: gpt-5.6-sol-xhigh`
-    - `externalProvider: auto` resolves by lane type through the active named production priority profile rather than a Claude-line default provider. Shipped `auto` stays on the Codex/Claude pair. Gemini/Qwen are explicit `WEAK MODEL / NOT RECOMMENDED` example-only paths; Kimi/Grok are policy classifiers only, with transports unavailable and disabled in 1.x.
+    - `externalProvider: auto` resolves by lane type through the active named production priority profile rather than a Claude-line default provider. Shipped `auto` stays on the Codex/Claude pair. Gemini/Qwen are explicit `WEAK MODEL / NOT RECOMMENDED` example-only paths; Kimi is explicit-only, policy-admitted read-only exploration, research, planning, or review through fixed `kimi-code/k3` with no tools or subagents, independently verified and nonauthorizing, while Grok remains unavailable in 1.x.
     - Accept shorthand answers such as `force`, `external reviewer only`, or `defaults for the rest`.
 
 6. **Confirm choices.**
