@@ -1,14 +1,22 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 import json, subprocess, sys, tempfile, unittest
+from html import escape
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]; SCRIPT=ROOT/'scripts'/'baseline'/'compare_pytest_baseline.py'
 
 def junit(cases):
     nodes=[]
-    for cls,name,status in cases:
-        child={'failure':'<failure message="failed">trace</failure>','error':'<error message="errored">trace</error>','skipped':'<skipped message="skip" />'}.get(status,'')
-        nodes.append(f'<testcase classname="{cls}" name="{name}" file="tests/test_x.py">{child}</testcase>')
+    for case in cases:
+        cls,name,status,*diagnostic = case
+        default_message={'failure':'failed','error':'errored','skipped':'skip'}.get(status)
+        message=diagnostic[0] if diagnostic else default_message
+        details=diagnostic[1] if len(diagnostic)>1 else ('trace' if status in {'failure','error'} else '')
+        if status in {'failure','error','skipped'}:
+            child=f'<{status} message="{escape(message or "", quote=True)}">{escape(details or "")}</{status}>'
+        else:
+            child=''
+        nodes.append(f'<testcase classname="{escape(cls, quote=True)}" name="{escape(name, quote=True)}" file="tests/test_x.py">{child}</testcase>')
     return f'<testsuites><testsuite tests="{len(cases)}">{"".join(nodes)}</testsuite></testsuites>'
 
 class PytestBaselineComparatorTests(unittest.TestCase):
@@ -27,6 +35,22 @@ class PytestBaselineComparatorTests(unittest.TestCase):
         r,p=self.run_compare([('S','p','passed'),('S','k','failure'),('S','r','error')],
             [('S','p','passed'),('S','k','failure'),('S','r','passed'),('S','n','passed')],baseline_exit=1,candidate_exit=1)
         self.assertEqual(r.returncode,0,r.stderr); self.assertEqual(p['verdict'],'PASS')
+
+    def test_blocks_changed_known_failure_diagnostics(self):
+        r,p=self.run_compare(
+            [('S','k','failure','failed','AssertionError: expected 1, got 2')],
+            [('S','k','failure','failed','RuntimeError: database unavailable')],
+            baseline_exit=1,candidate_exit=1)
+        self.assertEqual(r.returncode,1,r.stderr)
+        self.assertEqual(p['blockers']['changedKnownFailureDiagnostics'],['S::k'])
+
+    def test_normalises_refs_and_line_endings_in_failure_diagnostics(self):
+        r,p=self.run_compare(
+            [('S','k','failure','failed at baseline','\r\ntrace baseline  \r\n')],
+            [('S','k','failure','failed at candidate','\ntrace candidate\n')],
+            baseline_exit=1,candidate_exit=1)
+        self.assertEqual(r.returncode,0,r.stderr)
+        self.assertEqual(p['blockers']['changedKnownFailureDiagnostics'],[])
 
     def test_blocks_new_failure(self):
         r,p=self.run_compare([('S','p','passed')],[('S','p','failure')],candidate_exit=1)

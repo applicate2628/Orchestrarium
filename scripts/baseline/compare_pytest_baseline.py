@@ -3,13 +3,15 @@
 
 Only Pytest exit 0 (tests passed) and exit 1 (tests failed) can represent valid
 test evidence. Operational exits such as interrupted, internal-error, usage-error,
-or no-tests-collected always block, even when JUnit contains failures. Reports are
-written atomically. Pure stdlib.
+or no-tests-collected always block, even when JUnit contains failures. Retained
+known failures must preserve their normalized diagnostics. Reports are written
+atomically. Pure stdlib.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -37,10 +39,32 @@ class TestCaseResult:
     name: str
     file: str | None
     message: str | None
+    details: str | None
 
 
 def _normalise_path(value: str | None) -> str | None:
     return None if value is None else value.replace("\\", "/")
+
+
+def _normalise_diagnostic(
+    value: str | None,
+    *,
+    ref: str,
+) -> str | None:
+    if value is None:
+        return None
+
+    text = value.replace("\r\n", "\n").replace("\r", "\n")
+    if ref:
+        text = text.replace(ref, "<REF>")
+
+    lines = [line.rstrip(" \t") for line in text.split("\n")]
+    while lines and not lines[0]:
+        lines.pop(0)
+    while lines and not lines[-1]:
+        lines.pop()
+    normalized = "\n".join(lines)
+    return normalized or None
 
 
 def _test_id(element: ET.Element) -> str:
@@ -58,17 +82,17 @@ def _test_id(element: ET.Element) -> str:
     raise ComparisonError("JUnit testcase is missing classname, name, and file")
 
 
-def _status(element: ET.Element) -> tuple[str, str | None]:
+def _status(element: ET.Element) -> tuple[str, str | None, str | None]:
     failure = element.find("failure")
     if failure is not None:
-        return "failure", failure.get("message") or (failure.text or "").strip() or None
+        return "failure", failure.get("message"), failure.text
     error = element.find("error")
     if error is not None:
-        return "error", error.get("message") or (error.text or "").strip() or None
+        return "error", error.get("message"), error.text
     skipped = element.find("skipped")
     if skipped is not None:
-        return "skipped", skipped.get("message") or (skipped.text or "").strip() or None
-    return "passed", None
+        return "skipped", skipped.get("message"), skipped.text
+    return "passed", None, None
 
 
 def parse_junit(path: Path) -> dict[str, TestCaseResult]:
@@ -82,7 +106,7 @@ def parse_junit(path: Path) -> dict[str, TestCaseResult]:
         test_id = _test_id(element)
         if test_id in results:
             raise ComparisonError(f"duplicate JUnit testcase ID in {path}: {test_id}")
-        status, message = _status(element)
+        status, message, details = _status(element)
         results[test_id] = TestCaseResult(
             test_id=test_id,
             status=status,
@@ -90,20 +114,52 @@ def parse_junit(path: Path) -> dict[str, TestCaseResult]:
             name=element.get("name", ""),
             file=_normalise_path(element.get("file")),
             message=message,
+            details=details,
         )
     if not results:
         raise ComparisonError(f"JUnit file contains no testcases: {path}")
     return results
 
 
-def _record(result: TestCaseResult) -> dict[str, object]:
+def _diagnostic(
+    result: TestCaseResult,
+    *,
+    ref: str,
+) -> tuple[str | None, str | None]:
+    return (
+        _normalise_diagnostic(result.message, ref=ref),
+        _normalise_diagnostic(result.details, ref=ref),
+    )
+
+
+def _diagnostic_record(
+    result: TestCaseResult,
+    *,
+    ref: str,
+) -> dict[str, object]:
+    message, details = _diagnostic(result, ref=ref)
+    encoded = json.dumps(
+        [message, details], ensure_ascii=False, separators=(",", ":")
+    ).encode("utf-8")
+    return {
+        "message": message,
+        "sha256": hashlib.sha256(encoded).hexdigest(),
+        "sizeBytes": len(encoded),
+    }
+
+
+def _record(
+    result: TestCaseResult,
+    *,
+    ref: str,
+) -> dict[str, object]:
     return {
         "id": result.test_id,
         "status": result.status,
         "classname": result.classname,
         "name": result.name,
         "file": result.file,
-        "message": result.message,
+        "diagnostic": _diagnostic_record(result, ref=ref),
     }
 
 
@@ -163,10 +219,25 @@ def compare(
         if baseline[test_id].status == "passed"
         and candidate[test_id].status != "passed"
     )
+    retained_failures = baseline_failures & candidate_failures
     changed_known_failure_kind = sorted(
         test_id
-        for test_id in baseline_failures & candidate_failures
+        for test_id in retained_failures
         if baseline[test_id].status != candidate[test_id].status
+    )
+    changed_known_failure_diagnostics = sorted(
+        test_id
+        for test_id in retained_failures
+        if baseline[test_id].status == candidate[test_id].status
+        and _diagnostic(baseline[test_id], ref=baseline_ref)
+        != _diagnostic(candidate[test_id], ref=candidate_ref)
+    )
+    unchanged_baseline_failures = sorted(
+        test_id
+        for test_id in retained_failures
+        if baseline[test_id].status == candidate[test_id].status
+        and _diagnostic(baseline[test_id], ref=baseline_ref)
+        == _diagnostic(candidate[test_id], ref=candidate_ref)
     )
 
     baseline_exit_contradiction = _exit_contradiction(
@@ -198,6 +269,7 @@ def compare(
         "maskedBaselineFailures": masked_failures,
         "passingTestRegressions": regressions,
         "changedKnownFailureKind": changed_known_failure_kind,
+        "changedKnownFailureDiagnostics": changed_known_failure_diagnostics,
         "baselineExitContradiction": baseline_exit_contradiction,
         "candidateExitContradiction": candidate_exit_contradiction,
         "pytestExitCodeRegression": pytest_exit_code_regression,
@@ -226,14 +298,16 @@ def compare(
         "observations": {
             "additionalCandidateTests": additional_candidate_tests,
             "resolvedBaselineFailures": resolved_failures,
-            "unchangedBaselineFailures": sorted(baseline_failures & candidate_failures),
+            "unchangedBaselineFailures": unchanged_baseline_failures,
             "resolvedPytestExitCode": resolved_exit,
         },
         "baselineFailureDetails": [
-            _record(baseline[test_id]) for test_id in sorted(baseline_failures)
+            _record(baseline[test_id], ref=baseline_ref)
+            for test_id in sorted(baseline_failures)
         ],
         "candidateFailureDetails": [
-            _record(candidate[test_id]) for test_id in sorted(candidate_failures)
+            _record(candidate[test_id], ref=candidate_ref)
+            for test_id in sorted(candidate_failures)
         ],
         "verdict": verdict,
     }
