@@ -39,6 +39,9 @@ PRE_K3_WIRE_FIX_GLOBAL_LEAD_REVISION = "dfd43c4534ba1cc7be89ccbcce2bc4595f052fa0
 PRE_K3_WIRE_FIX_GLOBAL_LEAD_TREE_SHA256 = (
     "dd652b00b68a51273470ad4d3924454255d9ab5260da743fa2aa6bf2a7396627"
 )
+PARTIAL_KIMI_LUNA_GLOBAL_LEAD_TREE_SHA256 = (
+    "006161c105d8fcaaa3e9ae891e8b14e42ca170c026445062f983884a9296a3c6"
+)
 PROVIDER_AUTH_BASELINE_STAGED_LEAD_OVERLAYS = {
     "external-dispatch.md": ("8f92dc73", "src.codex/skills/lead/external-dispatch.md"),
     "scripts/provider_prompt.py": ("8f92dc73", "scripts/provider_prompt.py"),
@@ -513,6 +516,17 @@ def _copy_current_staged_lead(installer, destination: Path) -> Path:
     finally:
         shutil.rmtree(stage.path, ignore_errors=True)
     return destination
+
+
+def test_partial_kimi_luna_global_lead_prior_is_exactly_hash_pinned() -> None:
+    installer = _load_installer()
+
+    assert (
+        PARTIAL_KIMI_LUNA_GLOBAL_LEAD_TREE_SHA256
+        in installer.GLOBAL_LEAD_ACCEPTED_PRIOR_TREE_SHA256
+    )
+    one_byte_falsifier = "1" + PARTIAL_KIMI_LUNA_GLOBAL_LEAD_TREE_SHA256[1:]
+    assert one_byte_falsifier not in installer.GLOBAL_LEAD_ACCEPTED_PRIOR_TREE_SHA256
 
 
 def _seed_pre_range_v3_staged_lead(installer, destination: Path) -> Path:

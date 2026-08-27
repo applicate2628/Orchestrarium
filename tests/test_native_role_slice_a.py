@@ -246,6 +246,10 @@ INTERMEDIATE_MIGRATABLE_ROLE_SHA256 = {
     "security-engineer": "54117decdfcf9bff576e23d31a1dc6aa2d2f4fd0d498820f9c1244b6742f78f9",
     "worker": "960f0c617b4b5856585fa3f3afac7e0ef9fb99bfc1977b74fe6dd99626b2a57d",
 }
+PARTIAL_KIMI_LUNA_MIGRATABLE_ROLE_SHA256 = {
+    "mechanical-scout": "7d9c28aeb4471ea63fe733dde320fec3bfa60dcb11cb85404ff2aed2fc6658b5",
+    "mechanical-worker": "6ab77b24305af7c7b8bf8b8661b2abe1a4fa628974eee9da096419deebea39b8",
+}
 LEGACY_MIGRATABLE_REGISTRATIONS = {
     "mechanical-scout": {
         "description": "Read-only deterministic mechanical scout for bounded inventories and checks.",
@@ -2117,6 +2121,14 @@ def test_exact_currently_disabled_luna_role_prior_is_admitted(
     assert parsed["sandbox_mode"] == (
         "read-only" if name == "mechanical-scout" else "workspace-write"
     )
+
+
+def test_partial_kimi_luna_role_priors_are_exactly_hash_pinned() -> None:
+    for name, expected_digest in PARTIAL_KIMI_LUNA_MIGRATABLE_ROLE_SHA256.items():
+        accepted = installer._STOCK_NATIVE_ROLE_MIGRATION_SHA256[name]
+        assert expected_digest in accepted
+        one_byte_falsifier = "0" + expected_digest[1:]
+        assert one_byte_falsifier not in accepted
 
 
 def test_currently_disabled_luna_role_and_registration_priors_migrate_together(
