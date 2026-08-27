@@ -166,6 +166,9 @@ E7_CANONICAL_SKILL_TREE_SHA256 = {
 STOCK_8521_CANONICAL_SKILL_TREE_SHA256 = {
     "consultant": "57da94b645283cc695ff8f82a108a6f490f0036a564be76c22f663ba6afa3a38",
     "design-panel": "ac107c9d6c4a3833d0af90756c8b560f7ca4c4dfcc3d14d6a14faae1530f859f",
+    "external-brigade": "7a931c84bc3b72a85afcee813e9bb4705923301b6644892dcd291ffacb837113",
+    "external-reviewer": "9bd5a9811b6573a6d6697f627caee4ebe975460de0118e22bd9e8cd7bb76e0c5",
+    "external-worker": "170628e06c5866ddc9d9e4d5aaabbb1422f57ab067ce0085bd99960f34d53c3c",
     "init-project": "4f0a5fdb8af605dc10cb2044f33db3339b410feaf23764cc395f9c3feaaf6353",
     "review-loop": "2d78f499bf7b4bb2e6dafdf0ef875f2d9d39448c28df6f3835bc8153fba02ce0",
     "second-opinion": "f9a2114c8baead9ec8a259288ff74e157af60864c9f3d70ba0bcc52154b2b4b6",
@@ -177,6 +180,23 @@ STOCK_7872_CANONICAL_SKILL_TREE_SHA256 = {
     "manual-repo-transfer": "03c0c2fd12a8273f8325fb145dc2b8e9e97502e497649fc2d474988a9f95070b",
     "review-loop": "d956cf70db42a7c936d21984fe6aeb83748de02c544eec56ca54971629f85f7e",
     "second-opinion": "b82628910567799a6f03962f3ec0289cb47b4607093c074466b1a2656b53f432",
+}
+STOCK_CONSULTANT_ACCEPTED_PRIOR_TREE_SHA256 = frozenset(
+    {"33998c6a60b442c09957d3edef914daa02d718eafa5f881473ce017fb29a4bd9"}
+)
+ADDITIONAL_STOCK_SKILL_ACCEPTED_PRIOR_TREE_SHA256 = {
+    "graphics-engineer": frozenset(
+        {"e4b1294c4f2de8e31f0083500c7a7335a2abece08f801bb4e60e715eed3e081d"}
+    ),
+    "init-project": frozenset(
+        {"c079a182db6139257be2b7b138c6a4b28aa730747c1988d54132f8b07504dd1c"}
+    ),
+    "second-opinion": frozenset(
+        {"fe989a918e11ff8066a0c8af54f73ba7bbf763719ea3b604ed147b79bec684d6"}
+    ),
+    "visualization-engineer": frozenset(
+        {"56218f313e0ee24fc973eae8792bac0cddfd17ccab390fffb028d787cd0286f0"}
+    ),
 }
 GLOBAL_LEAD_ACCEPTED_PRIOR_TREE_SHA256 = frozenset(
     {
@@ -194,6 +214,7 @@ GLOBAL_LEAD_ACCEPTED_PRIOR_TREE_SHA256 = frozenset(
         "793045007f143b502991ef71a3273f64aa62757115b2eed033a267c4d44bf79f",
         "0c8cf87923774de9e345a72e071600d05a19b01e588f5f7acd053a6398e2f81e",
         "03a7d0587eef6c8997e1f78136510d8ca01c61e9d1d06290fe453e34dafbb435",
+        "bc0e280d4319f71078daae8476015d6d80a9ce15ffe7a05ffc2c2438875bae88",
     }
 )
 RUNTIME_RESOURCES = (
@@ -3212,6 +3233,14 @@ def _preflight_canonical_skills(
                     prior,
                     stock_8521_prior,
                     stock_7872_prior,
+                    *(
+                        STOCK_CONSULTANT_ACCEPTED_PRIOR_TREE_SHA256
+                        if skill.name == "consultant"
+                        else ()
+                    ),
+                    *ADDITIONAL_STOCK_SKILL_ACCEPTED_PRIOR_TREE_SHA256.get(
+                        skill.name, ()
+                    ),
                     *(
                         GLOBAL_LEAD_ACCEPTED_PRIOR_TREE_SHA256
                         if skill.name == "lead"

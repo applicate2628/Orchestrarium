@@ -39,6 +39,10 @@ PRE_K3_WIRE_FIX_GLOBAL_LEAD_REVISION = "dfd43c4534ba1cc7be89ccbcce2bc4595f052fa0
 PRE_K3_WIRE_FIX_GLOBAL_LEAD_TREE_SHA256 = (
     "dd652b00b68a51273470ad4d3924454255d9ab5260da743fa2aa6bf2a7396627"
 )
+STOCK_CONSULTANT_REVISION = "e55b2466281ecc50ad2a940a4de14a5ea90fb98c^"
+STOCK_CONSULTANT_TREE_SHA256 = (
+    "33998c6a60b442c09957d3edef914daa02d718eafa5f881473ce017fb29a4bd9"
+)
 PARTIAL_KIMI_LUNA_GLOBAL_LEAD_TREE_SHA256 = (
     "006161c105d8fcaaa3e9ae891e8b14e42ca170c026445062f983884a9296a3c6"
 )
@@ -50,6 +54,13 @@ PRE_PUBLIC_CAPTURE_GLOBAL_LEAD_TREE_SHA256 = (
 )
 PRE_CHILD_NONZERO_GLOBAL_LEAD_TREE_SHA256 = (
     "0c8cf87923774de9e345a72e071600d05a19b01e588f5f7acd053a6398e2f81e"
+)
+PARTIAL_PUSH_GATE_GLOBAL_LEAD_REVISION = (
+    "06b1838500fa9c656e13565698f517e5f9ce4eca"
+)
+PARTIAL_PUSH_GATE_OVERLAY_REVISION = "128aa1572aad11665b836e121d84c04c63e35dfd"
+PARTIAL_PUSH_GATE_GLOBAL_LEAD_TREE_SHA256 = (
+    "bc0e280d4319f71078daae8476015d6d80a9ce15ffe7a05ffc2c2438875bae88"
 )
 PROVIDER_AUTH_BASELINE_STAGED_LEAD_OVERLAYS = {
     "external-dispatch.md": ("8f92dc73", "src.codex/skills/lead/external-dispatch.md"),
@@ -208,6 +219,9 @@ PRE_REBASE_STAGED_LEAD_OVERLAYS = {
 STOCK_8521_CANONICAL_SKILL_TREE_SHA256 = {
     "consultant": "57da94b645283cc695ff8f82a108a6f490f0036a564be76c22f663ba6afa3a38",
     "design-panel": "ac107c9d6c4a3833d0af90756c8b560f7ca4c4dfcc3d14d6a14faae1530f859f",
+    "external-brigade": "7a931c84bc3b72a85afcee813e9bb4705923301b6644892dcd291ffacb837113",
+    "external-reviewer": "9bd5a9811b6573a6d6697f627caee4ebe975460de0118e22bd9e8cd7bb76e0c5",
+    "external-worker": "170628e06c5866ddc9d9e4d5aaabbb1422f57ab067ce0085bd99960f34d53c3c",
     "init-project": "4f0a5fdb8af605dc10cb2044f33db3339b410feaf23764cc395f9c3feaaf6353",
     "lead": "b7d78ee5082cce97e0cb2fcb59ee2e5712617b43212a1c6c3199370797f9aa21",
     "review-loop": "2d78f499bf7b4bb2e6dafdf0ef875f2d9d39448c28df6f3835bc8153fba02ce0",
@@ -220,6 +234,24 @@ STOCK_7872_CANONICAL_SKILL_TREE_SHA256 = {
     "manual-repo-transfer": "03c0c2fd12a8273f8325fb145dc2b8e9e97502e497649fc2d474988a9f95070b",
     "review-loop": "d956cf70db42a7c936d21984fe6aeb83748de02c544eec56ca54971629f85f7e",
     "second-opinion": "b82628910567799a6f03962f3ec0289cb47b4607093c074466b1a2656b53f432",
+}
+ADDITIONAL_STOCK_SKILL_PRIORS = {
+    "graphics-engineer": (
+        "65efb6b679d2808c5cdd3f95774a82942c65ad35",
+        "e4b1294c4f2de8e31f0083500c7a7335a2abece08f801bb4e60e715eed3e081d",
+    ),
+    "init-project": (
+        "9831fe66b157020f90f888ec8c878887135aa776",
+        "c079a182db6139257be2b7b138c6a4b28aa730747c1988d54132f8b07504dd1c",
+    ),
+    "second-opinion": (
+        "0274b69a25e1b36f83da4c21f630d222d627c4ee",
+        "fe989a918e11ff8066a0c8af54f73ba7bbf763719ea3b604ed147b79bec684d6",
+    ),
+    "visualization-engineer": (
+        "65efb6b679d2808c5cdd3f95774a82942c65ad35",
+        "56218f313e0ee24fc973eae8792bac0cddfd17ccab390fffb028d787cd0286f0",
+    ),
 }
 
 
@@ -448,6 +480,181 @@ def _extract_7872_skill(name: str, destination: Path) -> Path:
     return destination / "src.codex" / "skills" / name
 
 
+def _extract_additional_stock_skill(
+    name: str, revision: str, destination: Path
+) -> Path:
+    archive = subprocess.run(
+        [
+            "git",
+            "archive",
+            "--format=tar",
+            revision,
+            f"src.codex/skills/{name}",
+        ],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+    ).stdout
+    with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as package:
+        package.extractall(destination, filter="data")
+    return destination / "src.codex" / "skills" / name
+
+
+def _extract_stock_consultant(destination: Path) -> Path:
+    archive = subprocess.run(
+        [
+            "git",
+            "archive",
+            "--format=tar",
+            STOCK_CONSULTANT_REVISION,
+            "src.codex/skills/consultant",
+        ],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+    ).stdout
+    with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as package:
+        package.extractall(destination, filter="data")
+    return destination / "src.codex" / "skills" / "consultant"
+
+
+def _tree_bytes(root: Path) -> dict[Path, bytes]:
+    return {
+        path.relative_to(root): path.read_bytes()
+        for path in root.rglob("*")
+        if path.is_file()
+    }
+
+
+def test_exact_stock_consultant_is_accepted_and_replaced_byte_for_byte(
+    tmp_path: Path,
+) -> None:
+    installer = _load_installer()
+    historical = _extract_stock_consultant(tmp_path / "historical")
+    assert installer._tree_sha256(historical) == STOCK_CONSULTANT_TREE_SHA256
+
+    target = tmp_path / "target"
+    skills_root = target / ".agents" / "skills"
+    skills_root.mkdir(parents=True)
+    installed = skills_root / "consultant"
+    shutil.copytree(historical, installed)
+    plan = installer._preflight_canonical_skills(
+        ROOT / "src.codex" / "skills", skills_root, root=ROOT
+    )
+    try:
+        selected = next(skill for skill in plan.skills if skill.name == "consultant")
+        assert selected.accepted_prior == STOCK_CONSULTANT_TREE_SHA256
+        owner = installer._CreateOnlyMutablePath(
+            target, installer._InstallTransaction([], enabled=False), dry_run=False
+        )
+        installer._apply_canonical_skills_plan(plan, skills_root, owner, root=ROOT)
+        assert _tree_bytes(installed) == _tree_bytes(
+            ROOT / "src.codex" / "skills" / "consultant"
+        )
+    finally:
+        installer._discard_canonical_skills_plan(plan)
+
+
+def test_stock_consultant_one_byte_drift_is_rejected(tmp_path: Path) -> None:
+    installer = _load_installer()
+    historical = _extract_stock_consultant(tmp_path / "historical")
+    skills_root = tmp_path / "target" / ".agents" / "skills"
+    skills_root.mkdir(parents=True)
+    installed = skills_root / "consultant"
+    shutil.copytree(historical, installed)
+    with (installed / "SKILL.md").open("ab") as stream:
+        stream.write(b"x")
+
+    with pytest.raises(ValueError, match="E_ACCEPTED_PRIOR_COLLISION: consultant"):
+        installer._preflight_canonical_skills(
+            ROOT / "src.codex" / "skills", skills_root, root=ROOT
+        )
+
+
+def test_stock_consultant_prior_is_rejected_for_another_skill(
+    tmp_path: Path,
+) -> None:
+    installer = _load_installer()
+    historical = _extract_stock_consultant(tmp_path / "historical")
+    skills_root = tmp_path / "target" / ".agents" / "skills"
+    skills_root.mkdir(parents=True)
+    shutil.copytree(historical, skills_root / "design-panel")
+
+    with pytest.raises(ValueError, match="E_ACCEPTED_PRIOR_COLLISION: design-panel"):
+        installer._preflight_canonical_skills(
+            ROOT / "src.codex" / "skills", skills_root, root=ROOT
+        )
+
+
+def test_stock_consultant_transaction_abort_restores_prior(tmp_path: Path) -> None:
+    installer = _load_installer()
+    historical = _extract_stock_consultant(tmp_path / "historical")
+    target = tmp_path / "target"
+    skills_root = target / ".agents" / "skills"
+    skills_root.mkdir(parents=True)
+    installed = skills_root / "consultant"
+    shutil.copytree(historical, installed)
+    prior_bytes = _tree_bytes(installed)
+    plan = installer._preflight_canonical_skills(
+        ROOT / "src.codex" / "skills", skills_root, root=ROOT
+    )
+    try:
+        with pytest.raises(RuntimeError, match="forced consultant rollback"):
+            transaction = installer._InstallTransaction([installed], enabled=True)
+            with transaction:
+                owner = installer._CreateOnlyMutablePath(
+                    target, transaction, dry_run=False
+                )
+                installer._apply_canonical_skills_plan(
+                    plan, skills_root, owner, root=ROOT
+                )
+                raise RuntimeError("forced consultant rollback")
+    finally:
+        installer._discard_canonical_skills_plan(plan)
+
+    assert _tree_bytes(installed) == prior_bytes
+    assert {path.name for path in skills_root.iterdir()} == {"consultant"}
+
+
+def test_stock_consultant_second_preflight_is_noop(tmp_path: Path) -> None:
+    installer = _load_installer()
+    historical = _extract_stock_consultant(tmp_path / "historical")
+    target = tmp_path / "target"
+    skills_root = target / ".agents" / "skills"
+    skills_root.mkdir(parents=True)
+    shutil.copytree(historical, skills_root / "consultant")
+    owner = installer._CreateOnlyMutablePath(
+        target, installer._InstallTransaction([], enabled=False), dry_run=False
+    )
+
+    first_plan = installer._preflight_canonical_skills(
+        ROOT / "src.codex" / "skills", skills_root, root=ROOT
+    )
+    try:
+        installer._apply_canonical_skills_plan(
+            first_plan, skills_root, owner, root=ROOT
+        )
+    finally:
+        installer._discard_canonical_skills_plan(first_plan)
+
+    before = _tree_bytes(skills_root)
+    second_plan = installer._preflight_canonical_skills(
+        ROOT / "src.codex" / "skills", skills_root, root=ROOT
+    )
+    try:
+        selected = next(
+            skill for skill in second_plan.skills if skill.name == "consultant"
+        )
+        assert selected.accepted_prior is None
+        installer._apply_canonical_skills_plan(
+            second_plan, skills_root, owner, root=ROOT
+        )
+    finally:
+        installer._discard_canonical_skills_plan(second_plan)
+
+    assert _tree_bytes(skills_root) == before
+
+
 def _assert_exact_stock_skill_is_accepted_and_drift_refused(
     installer,
     tmp_path: Path,
@@ -525,6 +732,119 @@ def _copy_current_staged_lead(installer, destination: Path) -> Path:
     finally:
         shutil.rmtree(stage.path, ignore_errors=True)
     return destination
+
+
+def _seed_partial_push_gate_staged_lead(destination: Path) -> Path:
+    lead = _seed_revision_staged_lead(
+        PARTIAL_PUSH_GATE_GLOBAL_LEAD_REVISION, destination
+    )
+    (lead / "scripts" / "check-git-push-gate.py").write_bytes(
+        _historical_blob(
+            PARTIAL_PUSH_GATE_OVERLAY_REVISION,
+            "scripts/universal-hooks/scripts/check-git-push-gate.py",
+        )
+    )
+    return lead
+
+
+def test_exact_partial_push_gate_lead_migrates_rolls_back_and_rejects_drift(
+    tmp_path: Path,
+) -> None:
+    installer = _load_installer()
+    baseline = _seed_revision_staged_lead(
+        PARTIAL_PUSH_GATE_GLOBAL_LEAD_REVISION,
+        tmp_path / "baseline" / "lead",
+    )
+    historical = _seed_partial_push_gate_staged_lead(
+        tmp_path / "historical" / "lead"
+    )
+    baseline_files = _tree_bytes(baseline)
+    historical_files = _tree_bytes(historical)
+    overlay = Path("scripts/check-git-push-gate.py")
+    assert len(baseline_files) == len(historical_files) == 55
+    assert {
+        relative
+        for relative in baseline_files
+        if baseline_files[relative] != historical_files[relative]
+    } == {overlay}
+    assert historical_files[overlay] == _historical_blob(
+        PARTIAL_PUSH_GATE_OVERLAY_REVISION,
+        "scripts/universal-hooks/scripts/check-git-push-gate.py",
+    )
+    assert (
+        installer._tree_sha256(historical, ignore_runtime_cache=True)
+        == PARTIAL_PUSH_GATE_GLOBAL_LEAD_TREE_SHA256
+    )
+
+    target = tmp_path / "target"
+    skills_root = target / ".agents" / "skills"
+    shutil.copytree(historical, skills_root / "lead")
+    plan = installer._preflight_canonical_skills(
+        ROOT / "src.codex" / "skills", skills_root, root=ROOT
+    )
+    try:
+        lead = next(skill for skill in plan.skills if skill.name == "lead")
+        assert lead.accepted_prior == PARTIAL_PUSH_GATE_GLOBAL_LEAD_TREE_SHA256
+        owner = installer._CreateOnlyMutablePath(
+            target, installer._InstallTransaction([], enabled=False), dry_run=False
+        )
+        installer._apply_canonical_skills_plan(plan, skills_root, owner, root=ROOT)
+    finally:
+        installer._discard_canonical_skills_plan(plan)
+
+    current = _copy_current_staged_lead(installer, tmp_path / "current" / "lead")
+    assert _tree_bytes(skills_root / "lead") == _tree_bytes(current)
+    before_noop = _tree_bytes(skills_root)
+    current_plan = installer._preflight_canonical_skills(
+        ROOT / "src.codex" / "skills", skills_root, root=ROOT
+    )
+    try:
+        lead = next(skill for skill in current_plan.skills if skill.name == "lead")
+        assert lead.accepted_prior is None
+        installer._apply_canonical_skills_plan(
+            current_plan, skills_root, owner, root=ROOT
+        )
+    finally:
+        installer._discard_canonical_skills_plan(current_plan)
+    assert _tree_bytes(skills_root) == before_noop
+
+    drift_root = tmp_path / "drift" / ".agents" / "skills"
+    shutil.copytree(historical, drift_root / "lead")
+    with (drift_root / "lead" / "SKILL.md").open("ab") as stream:
+        stream.write(b"x")
+    with pytest.raises(ValueError, match="E_ACCEPTED_PRIOR_COLLISION: lead"):
+        installer._preflight_canonical_skills(
+            ROOT / "src.codex" / "skills", drift_root, root=ROOT
+        )
+
+    rollback_target = tmp_path / "rollback"
+    rollback_skills = rollback_target / ".agents" / "skills"
+    rollback_lead = rollback_skills / "lead"
+    shutil.copytree(historical, rollback_lead)
+    prior_bytes = _tree_bytes(rollback_lead)
+    rollback_plan = installer._preflight_canonical_skills(
+        ROOT / "src.codex" / "skills", rollback_skills, root=ROOT
+    )
+    try:
+        with pytest.raises(RuntimeError, match="forced Lead rollback"):
+            transaction = installer._InstallTransaction(
+                [rollback_lead], enabled=True
+            )
+            with transaction:
+                rollback_owner = installer._CreateOnlyMutablePath(
+                    rollback_target, transaction, dry_run=False
+                )
+                installer._apply_canonical_skills_plan(
+                    rollback_plan,
+                    rollback_skills,
+                    rollback_owner,
+                    root=ROOT,
+                )
+                raise RuntimeError("forced Lead rollback")
+    finally:
+        installer._discard_canonical_skills_plan(rollback_plan)
+    assert _tree_bytes(rollback_lead) == prior_bytes
+    assert {path.name for path in rollback_skills.iterdir()} == {"lead"}
 
 
 def test_partial_kimi_luna_global_lead_prior_is_exactly_hash_pinned() -> None:
@@ -831,6 +1151,27 @@ def test_exact_7872_stock_skill_is_accepted_and_drift_refused(
 
     installer = _load_installer()
     historical = _extract_7872_skill(name, tmp_path / "historical")
+    _assert_exact_stock_skill_is_accepted_and_drift_refused(
+        installer, tmp_path, name, expected_prior, historical
+    )
+
+
+@pytest.mark.parametrize(
+    ("name", "revision", "expected_prior"),
+    tuple(
+        (name, revision, digest)
+        for name, (revision, digest) in ADDITIONAL_STOCK_SKILL_PRIORS.items()
+    ),
+)
+def test_exact_additional_stock_skill_is_accepted_and_drift_refused(
+    tmp_path: Path, name: str, revision: str, expected_prior: str
+) -> None:
+    """Only each exact named shipped stock tree may upgrade to the current skill."""
+
+    installer = _load_installer()
+    historical = _extract_additional_stock_skill(
+        name, revision, tmp_path / "historical"
+    )
     _assert_exact_stock_skill_is_accepted_and_drift_refused(
         installer, tmp_path, name, expected_prior, historical
     )
