@@ -2747,9 +2747,12 @@ def test_projection_migration_cleanup_failure_restores_snapshot_members(
     assert expected is not None
 
     original_cleanup = installer._remove_readonly_tree
+    cleanup_failed = False
 
     def fail_cleanup(path: Path) -> None:
-        if path == tombstone:
+        nonlocal cleanup_failed
+        if path == tombstone and not cleanup_failed:
+            cleanup_failed = True
             raise OSError("forced cleanup failure")
         original_cleanup(path)
 

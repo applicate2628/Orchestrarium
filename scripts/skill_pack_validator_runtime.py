@@ -223,6 +223,17 @@ def detect_layout(script: Path, provider: str, requested_root: Path | None = Non
                     scripts=dev_scripts,
                     agents_text=_assembled_codex_agents(root),
                 )
+            if (root / ".agents/skills").is_dir() and (root / ".codex/AGENTS.md").is_file():
+                return Layout(
+                    root=root,
+                    provider=provider,
+                    dev_repo=False,
+                    standalone=True,
+                    pack=root / ".codex",
+                    skills=root / ".agents/skills",
+                    scripts=root / ".agents/skills/lead/scripts",
+                    agents_text=_read(root / ".codex/AGENTS.md"),
+                )
             if (root / ".codex/skills").is_dir() and (root / ".codex/AGENTS.md").is_file():
                 return Layout(
                     root=root,
@@ -336,6 +347,10 @@ class Validator:
             if self.layout.dev_repo:
                 return str(self.layout.root / "scripts" / "skill_pack_validator_runtime.py")
             return str(self.layout.scripts / "skill_pack_validator_runtime.py")
+        if self.layout.provider == "codex":
+            for prefix in ("@ROOT/src.codex/skills/", "src.codex/skills/"):
+                if value.startswith(prefix):
+                    return str(self.layout.skills / value.removeprefix(prefix))
         provider_prefixes = (
             ("@ROOT/src.codex/", "codex"),
             ("src.codex/", "codex"),

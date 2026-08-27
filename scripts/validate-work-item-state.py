@@ -28,6 +28,7 @@ CLOSURE_GATES = {"PASS", USER_WAIVER_GATE, SECURITY_REVIEWER_WAIVER_GATE}
 # --- v2 REVISE-closure vocabulary (decision 2026-07-16-review-verdict-closure, minimal slice) ---
 EVENT_KINDS = {"launch", "terminal", "standalone", "closure-invalidation", "legacy-obligation-migration"}
 EFFORT_ORDER = ["low", "medium", "high", "xhigh", "max"]  # ordered, ascending strength
+DECLARED_EFFORTS = frozenset((*EFFORT_ORDER, "unsupported"))
 FINDING_CLASSES = {"publication-safety", "security", "correctness", "performance", "other", "legacy-unclassified"}
 PROTECTED_CLASSES = {"publication-safety", "security", "legacy-unclassified"}  # non-user-waivable (spine: $security-reviewer only)
 LEGACY_MIGRATION_KIND = "legacy-obligation-migration"
@@ -69,6 +70,7 @@ V2_ONLY_FIELDS = {
     "artifactIdentity",
     "externalDispatchId",
     "externalEvidenceRunId",
+    "effortMappingLoss",
     "closerRunId",
     "targetTuple",
 }
@@ -143,6 +145,7 @@ ALLOWED_FIELDS = {
     "artifactIdentity",
     "externalDispatchId",
     "externalEvidenceRunId",
+    "effortMappingLoss",
     "closerRunId",
     "targetTuple",
 }
@@ -1266,7 +1269,7 @@ def validate_event(event: dict, item: Path, seen: set[str], errors: list[str]) -
     terminal_class = event.get("terminalClass")
     typed_terminal_fields = {
         "terminalClass", "authorizing", "actualExecutionPath", "artifactIdentity",
-        "externalDispatchId", "externalEvidenceRunId", "closerRunId", "targetTuple",
+        "externalDispatchId", "externalEvidenceRunId", "effortMappingLoss", "closerRunId", "targetTuple",
     }
     if terminal_class is not None and terminal_class not in {
         "external-nonauthorizing", "internal-authorizing",
@@ -1293,7 +1296,7 @@ def validate_event(event: dict, item: Path, seen: set[str], errors: list[str]) -
             if event.get("closesRunIds") != []:
                 fail(errors, f"{run_id}: external terminal requires empty closesRunIds")
             provider = event.get("provider")
-            extended = {"externalDispatchId", "externalEvidenceRunId"}
+            extended = {"externalDispatchId", "externalEvidenceRunId", "effortMappingLoss"}
             if provider in {"codex", "claude"}:
                 for key in sorted(extended & set(event)):
                     fail(errors, f"{run_id}: {provider} external terminal forbids {key}")
@@ -1358,7 +1361,7 @@ def validate_event(event: dict, item: Path, seen: set[str], errors: list[str]) -
         for key in sorted(typed_terminal_fields & set(event)):
             fail(errors, f"{run_id}: {key} requires terminalClass")
 
-    for key in ("artifactIdentity", "externalDispatchId", "externalEvidenceRunId", "closerRunId"):
+    for key in ("artifactIdentity", "externalDispatchId", "externalEvidenceRunId", "effortMappingLoss", "closerRunId"):
         if key in event and (not isinstance(event.get(key), str) or not event[key].strip()):
             fail(errors, f"{run_id}: {key} must be a non-empty string")
     if "targetTuple" in event:
@@ -1389,7 +1392,7 @@ def validate_event(event: dict, item: Path, seen: set[str], errors: list[str]) -
     for key in ("artifactRevision", "lane"):
         if key in event and (not isinstance(event.get(key), str) or not event[key].strip()):
             fail(errors, f"{run_id}: {key} must be a non-empty string")
-    if "effort" in event and event.get("effort") not in EFFORT_ORDER:
+    if "effort" in event and event.get("effort") not in DECLARED_EFFORTS:
         fail(errors, f"{run_id}: invalid effort {event.get('effort')!r}")
     if "findingClass" in event and event.get("findingClass") not in FINDING_CLASSES:
         fail(errors, f"{run_id}: invalid findingClass {event.get('findingClass')!r}")

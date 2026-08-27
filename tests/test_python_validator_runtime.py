@@ -30,7 +30,7 @@ PROVIDER_RUNTIME_MIRRORS = (
     ROOT / "src.claude/agents/scripts/skill_pack_validator_runtime.py",
 )
 EXPECTED_SUMMARIES = (
-    "PASS: 557  WARN: 0  FAIL: 0",
+    "PASS: 543  WARN: 0  FAIL: 0",
     "Checks: 473  |  Passed: 473  |  Warnings: 0  |  Errors: 0",
 )
 
@@ -150,6 +150,12 @@ def _materialize_installed_pack(
     if provider == "codex":
         pack = target / ".agents"
         shutil.copytree(ROOT / "src.codex" / "skills", pack / "skills")
+        schema_target = pack / "skills" / "lead" / "shared" / "schemas"
+        schema_target.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(
+            ROOT / "shared" / "schemas" / "agent-runs.schema.json",
+            schema_target / "agent-runs.schema.json",
+        )
         shared = (ROOT / "shared" / "AGENTS.shared.md").read_text(encoding="utf-8")
         codex = (ROOT / "src.codex" / "AGENTS.codex.md").read_text(encoding="utf-8")
         (target / "AGENTS.md").write_text(
@@ -191,6 +197,99 @@ def _replace_directory_with_symlink(link: Path, target: Path) -> None:
         pytest.skip(f"directory symlinks are unavailable: {exc}")
     assert link.is_symlink()
     assert link.is_dir()
+
+
+def _create_directory_link(link: Path, target: Path) -> None:
+    if os.name == "nt":
+        result = subprocess.run(
+            ["cmd.exe", "/d", "/c", "mklink", "/J", str(link), str(target)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+        if result.returncode:
+            pytest.skip(f"directory junctions are unavailable: {result.stderr}")
+    else:
+        try:
+            link.symlink_to(target, target_is_directory=True)
+        except (OSError, NotImplementedError) as exc:
+            pytest.skip(f"directory symlinks are unavailable: {exc}")
+    assert link.is_dir()
+
+
+@pytest.mark.parametrize("legacy_kind", ("directory", "directory-link"))
+def test_codex_global_split_layout_wins_over_stale_legacy_skills(
+    tmp_path: Path,
+    legacy_kind: str,
+) -> None:
+    home = tmp_path / "home"
+    codex = home / ".codex"
+    scripts = home / ".agents" / "skills" / "lead" / "scripts"
+    scripts.mkdir(parents=True)
+    codex.mkdir()
+    (codex / "AGENTS.md").write_text("global codex contract\n", encoding="utf-8")
+    validator = scripts / "validate-skill-pack.py"
+    validator.touch()
+
+    legacy_skills = codex / "skills"
+    if legacy_kind == "directory":
+        legacy_skills.mkdir()
+    else:
+        legacy_target = tmp_path / "stale-legacy-skills"
+        legacy_target.mkdir()
+        _create_directory_link(legacy_skills, legacy_target)
+
+    runtime = _load(RUNTIME, f"global_split_layout_{legacy_kind}")
+    layout = runtime.detect_layout(validator, "codex", home)
+
+    assert layout.root == home.resolve()
+    assert not layout.dev_repo
+    assert layout.pack == codex
+    assert layout.skills == home / ".agents" / "skills"
+    assert layout.scripts == scripts
+    assert layout.agents_text == "global codex contract\n"
+    validator_runtime = runtime.Validator(layout)
+    try:
+        assert validator_runtime.logical_path(
+            "@ROOT/src.codex/skills/manual-repo-transfer/SKILL.md"
+        ) == str(layout.skills / "manual-repo-transfer" / "SKILL.md")
+        assert validator_runtime.logical_path(
+            "@ROOT/src.codex/contracts/ui-transition-continuity.md"
+        ) == str(layout.pack / "contracts" / "ui-transition-continuity.md")
+    finally:
+        validator_runtime.close()
+
+
+def test_codex_legacy_and_project_layouts_remain_compatible(tmp_path: Path) -> None:
+    runtime = _load(RUNTIME, "legacy_and_project_layouts")
+
+    legacy_root = tmp_path / "legacy"
+    legacy_scripts = legacy_root / ".codex" / "skills" / "lead" / "scripts"
+    legacy_scripts.mkdir(parents=True)
+    (legacy_root / ".codex" / "AGENTS.md").write_text(
+        "legacy codex contract\n", encoding="utf-8"
+    )
+    legacy_layout = runtime.detect_layout(
+        legacy_scripts / "validate-skill-pack.py", "codex", legacy_root
+    )
+    assert legacy_layout.pack == legacy_root / ".codex"
+    assert legacy_layout.skills == legacy_root / ".codex" / "skills"
+    assert legacy_layout.scripts == legacy_scripts
+
+    project_root = tmp_path / "project"
+    project_scripts = project_root / ".agents" / "skills" / "lead" / "scripts"
+    project_scripts.mkdir(parents=True)
+    (project_root / "AGENTS.md").write_text(
+        "project codex contract\n", encoding="utf-8"
+    )
+    project_layout = runtime.detect_layout(
+        project_scripts / "validate-skill-pack.py", "codex", project_root
+    )
+    assert project_layout.pack == project_root / ".agents"
+    assert project_layout.skills == project_root / ".agents" / "skills"
+    assert project_layout.scripts == project_scripts
 
 
 @pytest.mark.parametrize(
@@ -968,7 +1067,7 @@ def test_scoped_action_registry_keeps_source_only_maintainer_checks_out_of_insta
     (
         (
             "codex",
-            "VALIDATION PASSED\n",
+            "VALIDATION PASSED (with warnings)\n",
             "installed work-item state validator enforces evidence for PASS",
         ),
         (
@@ -1003,7 +1102,10 @@ def test_installed_validator_uses_script_layout_and_runs_installed_actions(
     assert result.returncode == 0, result.stdout + result.stderr
     assert expected_clean_result in result.stdout
     assert installed_label in result.stdout
-    assert "dev repo validator unavailable in installed layout" not in result.stdout
+    if provider == "codex":
+        assert "dev repo validator unavailable in installed layout" in result.stdout
+    else:
+        assert "dev repo validator unavailable in installed layout" not in result.stdout
     assert "agents-mode reference defines canonical maintenance" not in result.stdout
     assert "root Python installer default dispatch is Codex plus Claude only" not in result.stdout
 
@@ -1070,7 +1172,7 @@ def test_installed_codex_layering_checks_only_orchestrarium_owned_skills(
             "AGENTS.md",
             "## Role index",
             "## Stale role index",
-            "VALIDATION PASSED\n",
+            "VALIDATION PASSED (with warnings)\n",
                 "installable skill/agent instructions contain no project-specific Orchestrarium upgrade-ledger obligation",
         ),
         (

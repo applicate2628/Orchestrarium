@@ -31,6 +31,10 @@ PRE_RANGE_V3_GLOBAL_LEAD_TREE_SHA256 = (
 PROVIDER_AUTH_BASELINE_GLOBAL_LEAD_TREE_SHA256 = (
     "f03d3b74d68c032ec5c1539ce7936065d5083624b702ec4403fa7e2cc509adc7"
 )
+PROVIDER_AUTH_BASELINE_GLOBAL_LEAD_REVISION = (
+    "d1309ee50598fad1dd1f218d2fab9fd2b1c04a21"
+)
+PRE_RANGE_V3_GLOBAL_LEAD_REVISION = "8f92dc73d7156888944d50fa37a5b2d921c77fb1"
 PRE_KIMI_GLOBAL_LEAD_REVISION = "7872d36d1019d1ac8c2e1615a9f9dbde47395815"
 PRE_KIMI_GLOBAL_LEAD_TREE_SHA256 = (
     "565f305b4498f045e7fb40821e5ba30902ca56b0a532d299a96d6c8a1e595d50"
@@ -38,6 +42,10 @@ PRE_KIMI_GLOBAL_LEAD_TREE_SHA256 = (
 PRE_K3_WIRE_FIX_GLOBAL_LEAD_REVISION = "dfd43c4534ba1cc7be89ccbcce2bc4595f052fa0"
 PRE_K3_WIRE_FIX_GLOBAL_LEAD_TREE_SHA256 = (
     "dd652b00b68a51273470ad4d3924454255d9ab5260da743fa2aa6bf2a7396627"
+)
+STOCK_77EC_GLOBAL_LEAD_REVISION = "77ec0c8ec7a2c86450f5dcaca8796fcfab12d1ac"
+STOCK_77EC_GLOBAL_LEAD_TREE_SHA256 = (
+    "68619d80e3dc7283aec38399961d7cb2267292f01d9975a61f4b9ac59418d12d"
 )
 STOCK_CONSULTANT_REVISION = "e55b2466281ecc50ad2a940a4de14a5ea90fb98c^"
 STOCK_CONSULTANT_TREE_SHA256 = (
@@ -379,6 +387,12 @@ def _seed_revision_staged_lead(revision: str, destination: Path) -> Path:
     return destination
 
 
+def _replace_with_revision_staged_lead(revision: str, destination: Path) -> Path:
+    if destination.exists():
+        shutil.rmtree(destination)
+    return _seed_revision_staged_lead(revision, destination)
+
+
 def _historical_blob(revision: str, source: str) -> bytes:
     return subprocess.run(
         ["git", "show", f"{revision}:{source}"],
@@ -417,6 +431,8 @@ def _pre_rebase_fixture_payloads() -> dict[str, bytes]:
 def _remove_historical_members(lead: Path, relatives: tuple[str, ...]) -> None:
     for relative in relatives:
         target = lead / relative
+        if not target.exists():
+            continue
         target.unlink()
         parent = target.parent
         while parent != lead and not any(parent.iterdir()):
@@ -891,15 +907,19 @@ def test_pre_child_nonzero_global_lead_prior_is_exactly_hash_pinned() -> None:
     assert one_byte_falsifier not in installer.GLOBAL_LEAD_ACCEPTED_PRIOR_TREE_SHA256
 
 
-def _seed_pre_range_v3_staged_lead(installer, destination: Path) -> Path:
-    lead = _copy_current_staged_lead(installer, destination)
+def _seed_pre_range_v3_staged_lead(destination: Path) -> Path:
+    lead = _replace_with_revision_staged_lead(
+        PRE_RANGE_V3_GLOBAL_LEAD_REVISION, destination
+    )
     for relative, source in PRE_RANGE_V3_STAGED_LEAD_OVERLAYS.items():
         (lead / relative).write_bytes(_historical_blob(*source))
     return lead
 
 
-def _seed_provider_auth_baseline_staged_lead(installer, destination: Path) -> Path:
-    lead = _copy_current_staged_lead(installer, destination)
+def _seed_provider_auth_baseline_staged_lead(destination: Path) -> Path:
+    lead = _replace_with_revision_staged_lead(
+        PROVIDER_AUTH_BASELINE_GLOBAL_LEAD_REVISION, destination
+    )
     for relative, source in PROVIDER_AUTH_BASELINE_STAGED_LEAD_OVERLAYS.items():
         (lead / relative).write_bytes(_historical_blob(*source))
     return lead
@@ -910,9 +930,7 @@ def test_exact_provider_auth_baseline_lead_is_accepted_and_drift_refused(
 ) -> None:
     installer = _load_installer()
     skills_root = tmp_path / ".agents" / "skills"
-    historical = _seed_provider_auth_baseline_staged_lead(
-        installer, skills_root / "lead"
-    )
+    historical = _seed_provider_auth_baseline_staged_lead(skills_root / "lead")
     assert installer._tree_sha256(
         historical, ignore_runtime_cache=True
     ) == PROVIDER_AUTH_BASELINE_GLOBAL_LEAD_TREE_SHA256
@@ -926,7 +944,7 @@ def test_exact_provider_auth_baseline_lead_is_accepted_and_drift_refused(
     finally:
         installer._discard_canonical_skills_plan(plan)
 
-    _seed_provider_auth_baseline_staged_lead(installer, skills_root / "lead")
+    _seed_provider_auth_baseline_staged_lead(skills_root / "lead")
     with (skills_root / "lead" / "SKILL.md").open("ab") as stream:
         stream.write(b"customized\n")
     with pytest.raises(ValueError, match="E_ACCEPTED_PRIOR_COLLISION: lead"):
@@ -943,8 +961,9 @@ def test_exact_provider_auth_baseline_lead_is_accepted_and_drift_refused(
             PRE_K3_WIRE_FIX_GLOBAL_LEAD_REVISION,
             PRE_K3_WIRE_FIX_GLOBAL_LEAD_TREE_SHA256,
         ),
+        (STOCK_77EC_GLOBAL_LEAD_REVISION, STOCK_77EC_GLOBAL_LEAD_TREE_SHA256),
     ),
-    ids=("pre-kimi", "pre-k3-wire-fix"),
+    ids=("pre-kimi", "pre-k3-wire-fix", "stock-77ec"),
 )
 def test_exact_shipped_global_lead_is_accepted_and_one_byte_drift_refused(
     tmp_path: Path,
@@ -994,7 +1013,7 @@ def test_exact_pre_range_v3_lead_is_accepted_and_customized_tree_refused(
 ) -> None:
     installer = _load_installer()
     skills_root = tmp_path / ".agents" / "skills"
-    historical = _seed_pre_range_v3_staged_lead(installer, skills_root / "lead")
+    historical = _seed_pre_range_v3_staged_lead(skills_root / "lead")
     assert installer._tree_sha256(
         historical, ignore_runtime_cache=True
     ) == PRE_RANGE_V3_GLOBAL_LEAD_TREE_SHA256
@@ -1008,7 +1027,7 @@ def test_exact_pre_range_v3_lead_is_accepted_and_customized_tree_refused(
     finally:
         installer._discard_canonical_skills_plan(plan)
 
-    _seed_pre_range_v3_staged_lead(installer, skills_root / "lead")
+    _seed_pre_range_v3_staged_lead(skills_root / "lead")
     with (skills_root / "lead" / "SKILL.md").open("ab") as stream:
         stream.write(b"customized\n")
     with pytest.raises(ValueError, match="E_ACCEPTED_PRIOR_COLLISION: lead"):
@@ -1017,8 +1036,10 @@ def test_exact_pre_range_v3_lead_is_accepted_and_customized_tree_refused(
         )
 
 
-def _seed_pre_rebase_staged_lead(installer, destination: Path) -> Path:
-    lead = _copy_current_staged_lead(installer, destination)
+def _seed_pre_rebase_staged_lead(destination: Path) -> Path:
+    lead = _replace_with_revision_staged_lead(
+        PRE_KIMI_GLOBAL_LEAD_REVISION, destination
+    )
     for relative, payload in PRE_REBASE_STAGED_LEAD_OVERLAYS.items():
         (lead / relative).write_bytes(payload)
     for relative, payload in _pre_rebase_fixture_payloads().items():
@@ -1035,9 +1056,7 @@ def test_exact_pre_rebase_staged_lead_is_accepted_and_current_is_noop(
     """The observed staged Lead tree upgrades exactly once, without a no-op rewrite."""
 
     installer = _load_installer()
-    historical = _seed_pre_rebase_staged_lead(
-        installer, tmp_path / "historical"
-    )
+    historical = _seed_pre_rebase_staged_lead(tmp_path / "historical")
     assert (
         installer._tree_sha256(historical, ignore_runtime_cache=True)
         == PRE_REBASE_GLOBAL_LEAD_TREE_SHA256
@@ -1086,9 +1105,7 @@ def test_pre_rebase_staged_lead_drift_is_rejected_before_transaction(
     """One-byte Lead drift cannot enter the global rollback transaction."""
 
     installer = _load_installer()
-    historical = _seed_pre_rebase_staged_lead(
-        installer, tmp_path / "historical"
-    )
+    historical = _seed_pre_rebase_staged_lead(tmp_path / "historical")
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("USERPROFILE", str(home))
@@ -1294,7 +1311,7 @@ def _seed_exact_observed_global_lead(
     historical_files: dict[str, bytes | tuple[str, str]],
 ) -> Path:
     lead = skills_root / "lead"
-    _copy_current_staged_lead(installer, lead)
+    _replace_with_revision_staged_lead(PRE_KIMI_GLOBAL_LEAD_REVISION, lead)
     for relative, historical_file in historical_files.items():
         payload = (
             historical_file

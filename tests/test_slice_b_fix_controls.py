@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from dataclasses import replace
+import io
 import importlib.util
+import json
 import sys
 from pathlib import Path
 import inspect
@@ -23,6 +26,222 @@ class _NoopRunner:
 
     def __exit__(self, *_args):
         return False
+
+
+def _execution_provenance() -> object:
+    return OWNER.ExecutionProvenance(
+        work_item="item-frozen",
+        assigned_internal_role="qa-engineer",
+        provider="kimi",
+        model="kimi-code/k3",
+        effort="unsupported",
+        artifact_identity="sha256:" + "a" * 64,
+        external_dispatch_id="dispatch-frozen",
+        external_evidence_run_id="evidence-frozen",
+        effort_mapping_loss="no-native-effort-control",
+    )
+
+
+def _terminal_outcome() -> object:
+    return OWNER.FinalOutcome(
+        0,
+        "COMPLETE:EXTERNAL_NONAUTHORIZING",
+        "completed",
+        "PASS",
+        "fixture",
+        0,
+        "COMPLETE:PASS",
+        "completed",
+        "PASS",
+        "fixture",
+        "complete",
+        0,
+        "",
+        False,
+        0,
+    )
+
+
+def _external_terminal_row(provenance: object) -> dict[str, object]:
+    return {
+        "schemaVersion": 2,
+        "runId": provenance.external_evidence_run_id,
+        "eventKind": "terminal",
+        "launchRunId": provenance.external_dispatch_id,
+        "terminalClass": "external-nonauthorizing",
+        "authorizing": False,
+        "closesRunIds": [],
+        **provenance.terminal_projection(),
+    }
+
+
+@pytest.mark.parametrize("field", tuple(OWNER.ExecutionProvenance.__dataclass_fields__))
+def test_execution_provenance_drift_is_rejected_before_envelope_or_ledger_sink(
+    field: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    expected = _execution_provenance()
+    changed = replace(expected, **{field: f"changed-{field}"})
+    output = io.StringIO()
+    monkeypatch.setattr(OWNER.sys, "stdout", output)
+    ledger_calls: list[list[str]] = []
+    monkeypatch.setattr(
+        OWNER,
+        "run_ledger",
+        lambda _runner, args: ledger_calls.append(args) or True,
+    )
+
+    with pytest.raises(ValueError, match="E_EXTERNAL_PROVENANCE_MISMATCH"):
+        OWNER.emit_provider_result(
+            "kimi",
+            "kimi-code/k3",
+            "unsupported",
+            "fixture",
+            _terminal_outcome(),
+            cancelled=False,
+            timed_out=False,
+            provenance=changed,
+            expected_provenance=expected,
+        )
+    assert output.getvalue() == ""
+
+    with pytest.raises(ValueError, match="E_EXTERNAL_PROVENANCE_MISMATCH"):
+        OWNER.record_terminal(
+            OWNER.Control(ledger="mutable-item", ledger_artifact="mutable-artifact"),
+            "kimi",
+            "kimi-code/k3",
+            "unsupported",
+            "mutable-topic",
+            "mutable-launch",
+            _terminal_outcome(),
+            cancelled=False,
+            timed_out=False,
+            result_delivered=True,
+            runner=object(),
+            role_provenance=OWNER.ExternalRoleProvenance(
+                "qa-engineer", "external-reviewer"
+            ),
+            provenance=changed,
+            expected_provenance=expected,
+        )
+    assert ledger_calls == []
+
+
+def test_execution_provenance_has_identical_envelope_and_ledger_projection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    provenance = _execution_provenance()
+    output = io.StringIO()
+    monkeypatch.setattr(OWNER.sys, "stdout", output)
+    OWNER.emit_provider_result(
+        "kimi",
+        "kimi-code/k3",
+        "unsupported",
+        "fixture",
+        _terminal_outcome(),
+        cancelled=False,
+        timed_out=False,
+        provenance=provenance,
+        expected_provenance=provenance,
+        role_provenance=OWNER.ExternalRoleProvenance(
+            "qa-engineer", "external-reviewer"
+        ),
+    )
+    envelope = OWNER.parse_provider_result(output.getvalue())
+    assert {key: envelope[key] for key in provenance.payload()} == provenance.payload()
+
+    ledger = tmp_path / "item-frozen"
+    ledger_args: list[list[str]] = []
+
+    def persist_terminal(_runner: object, args: list[str]) -> bool:
+        ledger_args.append(args)
+        values = {
+            args[index]: args[index + 1]
+            for index in range(len(args) - 1)
+            if isinstance(args[index], str) and args[index].startswith("--")
+        }
+        terminal = {
+            "schemaVersion": 2,
+            "runId": values["--run-id"],
+            "eventKind": "terminal",
+            "launchRunId": values["--launch-run-id"],
+            "terminalClass": values["--terminal-class"],
+            "authorizing": values["--authorizing"] == "true",
+            "closesRunIds": [],
+            "workItem": values["--work-item-name"],
+            "assignedRole": values["--assigned-role"],
+            "provider": values["--provider"],
+            "model": values["--model"],
+            "effort": values["--effort"],
+            "artifactIdentity": values["--artifact-identity"],
+            "externalDispatchId": values["--external-dispatch-id"],
+            "externalEvidenceRunId": values["--external-evidence-run-id"],
+            "effortMappingLoss": values["--effort-mapping-loss"],
+            "actualExecutionPath": values["--actual-execution-path"],
+        }
+        ledger.mkdir()
+        (ledger / "agent-runs.jsonl").write_text(
+            json.dumps(terminal) + "\n", encoding="utf-8"
+        )
+        return True
+
+    monkeypatch.setattr(OWNER, "run_ledger", persist_terminal)
+    assert OWNER.record_terminal(
+        OWNER.Control(ledger=ledger, ledger_artifact="mutable-artifact"),
+        "kimi",
+        "kimi-code/k3",
+        "unsupported",
+        "mutable-topic",
+        provenance.external_dispatch_id,
+        _terminal_outcome(),
+        cancelled=False,
+        timed_out=False,
+        result_delivered=True,
+        runner=object(),
+        role_provenance=OWNER.ExternalRoleProvenance(
+            "qa-engineer", "external-reviewer"
+        ),
+        provenance=provenance,
+        expected_provenance=provenance,
+    )
+    args = ledger_args[0]
+    values = {
+        args[index]: args[index + 1]
+        for index in range(len(args) - 1)
+        if isinstance(args[index], str) and args[index].startswith("--")
+    }
+    assert values["--work-item-name"] == provenance.work_item
+    assert values["--run-id"] == provenance.external_evidence_run_id
+    assert values["--artifact-identity"] == provenance.artifact_identity
+    assert values["--external-dispatch-id"] == provenance.external_dispatch_id
+    assert values["--external-evidence-run-id"] == provenance.external_evidence_run_id
+    assert values["--effort-mapping-loss"] == provenance.effort_mapping_loss
+    persisted = json.loads((ledger / "agent-runs.jsonl").read_text(encoding="utf-8"))
+    assert {
+        key: persisted[key] for key in provenance.terminal_projection()
+    } == provenance.terminal_projection()
+
+
+@pytest.mark.parametrize("field", tuple(_execution_provenance().terminal_projection()))
+def test_external_terminal_readback_rejects_each_post_append_provenance_mutation(
+    field: str, tmp_path: Path
+) -> None:
+    provenance = _execution_provenance()
+    ledger = tmp_path / "item-frozen"
+    ledger.mkdir()
+    ledger_path = ledger / "agent-runs.jsonl"
+    terminal = _external_terminal_row(provenance)
+    ledger_path.write_text(json.dumps(terminal) + "\n", encoding="utf-8")
+
+    control = OWNER.Control(ledger=ledger)
+    assert OWNER.read_back_external_terminal(
+        control, provenance.provider, provenance.external_dispatch_id, provenance
+    ) == terminal
+
+    terminal[field] = f"mutated-{field}"
+    ledger_path.write_text(json.dumps(terminal) + "\n", encoding="utf-8")
+    assert OWNER.read_back_external_terminal(
+        control, provenance.provider, provenance.external_dispatch_id, provenance
+    ) is None
 
 
 def test_unavailable_providers_ship_no_unreachable_executor_surface() -> None:

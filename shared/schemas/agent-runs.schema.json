@@ -84,6 +84,7 @@
     "artifactIdentity": { "type": "string", "minLength": 1 },
     "externalDispatchId": { "type": "string", "minLength": 1 },
     "externalEvidenceRunId": { "type": "string", "minLength": 1 },
+    "effortMappingLoss": { "type": "string", "minLength": 1 },
     "closerRunId": { "type": "string", "minLength": 1 },
     "targetTuple": {
       "type": "object",
@@ -139,8 +140,8 @@
       "$comment": "Review angle label (e.g. 'architecture-adversarial'). Closure requires lane equality when both sides carry it; new review events SHOULD carry it."
     },
     "effort": {
-      "enum": ["low", "medium", "high", "xhigh", "max"],
-      "$comment": "Typed declared reasoning-effort tier. When both a REVISE and its closer declare effort and share a provider, the closer's tier must be >= the target's."
+      "enum": ["low", "medium", "high", "xhigh", "max", "unsupported"],
+      "$comment": "Typed declared reasoning-effort tier. unsupported records an external provider with no native effort control and is not an ordered tier. When both a REVISE and its closer declare ordered effort and share a provider, the closer's tier must be >= the target's."
     },
     "findingClass": {
       "enum": ["publication-safety", "security", "correctness", "performance", "other", "legacy-unclassified"],

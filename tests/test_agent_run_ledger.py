@@ -171,6 +171,57 @@ def test_append_records_event_and_validator_passes(tmp_path: Path):
     assert event["evidence"][0]["kind"] == "command"
 
 
+def test_kimi_unsupported_effort_is_durable_and_validator_accepted(tmp_path: Path):
+    item = prepare_valid_work_item(tmp_path)
+    common = (
+        "--role", "qa-engineer",
+        "--execution-role", "external-reviewer",
+        "--assigned-role", "qa-engineer",
+        "--provider", "kimi",
+        "--model", "kimi-code/k3",
+        "--effort", "unsupported",
+        "--status", "completed",
+        "--gate", "PASS",
+        "--scope", "provider provenance fixture",
+        "--artifact", "reviews/qa.md",
+        "--evidence", "command:provider-provenance-fixture",
+        "--started-at", "2026-08-27T10:00:00Z",
+        "--updated-at", "2026-08-27T10:00:00Z",
+    )
+    launch = run_ledger(
+        item,
+        "append",
+        "--run-id", "dispatch-kimi-unsupported",
+        "--event-kind", "launch",
+        *common,
+    )
+    assert launch.returncode == 0, launch.stderr
+    terminal = run_ledger(
+        item,
+        "append",
+        "--run-id", "evidence-kimi-unsupported",
+        "--event-kind", "terminal",
+        "--launch-run-id", "dispatch-kimi-unsupported",
+        "--terminal-class", "external-nonauthorizing",
+        "--authorizing", "false",
+        "--actual-execution-path", "direct-external-cli",
+        "--artifact-identity", "sha256:" + "a" * 64,
+        "--external-dispatch-id", "dispatch-kimi-unsupported",
+        "--external-evidence-run-id", "evidence-kimi-unsupported",
+        "--effort-mapping-loss", "no-native-effort-control",
+        "--evidence", "command:provider-result-envelope-flushed",
+        *common,
+    )
+    assert terminal.returncode == 0, terminal.stderr
+    validator = run_validator(item)
+    assert validator.returncode == 0, validator.stderr
+    events = [
+        json.loads(line)
+        for line in (item / "agent-runs.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert [event["effort"] for event in events] == ["unsupported", "unsupported"]
+
+
 def test_staged_init_and_append_preserve_status_bytes(tmp_path: Path):
     item = tmp_path / "work-items" / "active" / "staged-ledger"
     (item / "reviews").mkdir(parents=True)
@@ -962,6 +1013,7 @@ def test_append_persists_typed_external_nonauthorizing_terminal(tmp_path: Path):
         "--artifact-identity", "sha256:" + "a" * 64,
         "--external-dispatch-id", "dispatch-external-001",
         "--external-evidence-run-id", "run-external-evidence-001",
+        "--effort-mapping-loss", "no-native-effort-control",
         "--started-at", "2026-08-24T10:00:00Z",
         "--updated-at", "2026-08-24T10:00:00Z",
     )
@@ -975,6 +1027,7 @@ def test_append_persists_typed_external_nonauthorizing_terminal(tmp_path: Path):
     assert event["artifactIdentity"] == "sha256:" + "a" * 64
     assert event["externalDispatchId"] == "dispatch-external-001"
     assert event["externalEvidenceRunId"] == "run-external-evidence-001"
+    assert event["effortMappingLoss"] == "no-native-effort-control"
     validated = run_validator(item)
     assert validated.returncode == 0, validated.stdout
 
@@ -1038,6 +1091,7 @@ def test_internal_final_closer_binds_one_external_evidence_tuple(tmp_path: Path)
             "actualExecutionPath": "direct-external-cli", "artifactIdentity": "sha256:" + "b" * 64,
             "externalDispatchId": "dispatch-external-002",
             "externalEvidenceRunId": "run-external-evidence-002", "closesRunIds": [],
+            "effortMappingLoss": "no-native-effort-control",
             "evidence": [{"kind": "artifact", "ref": "reviews/qa.md"}],
             "startedAt": "2026-08-24T10:01:00Z", "updatedAt": "2026-08-24T10:01:00Z",
         },

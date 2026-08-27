@@ -203,6 +203,70 @@ class ExternalRoleProvenance:
 
 
 @dataclass(frozen=True)
+class ExecutionProvenance:
+    """One immutable external execution identity, owned at policy admission."""
+
+    work_item: str
+    assigned_internal_role: str
+    provider: str
+    model: str
+    effort: str
+    artifact_identity: str
+    external_dispatch_id: str
+    external_evidence_run_id: str
+    effort_mapping_loss: str
+    actual_execution_path: str = "direct-external-cli"
+
+    def __post_init__(self) -> None:
+        if any(
+            not isinstance(value, str) or not value
+            for value in (
+                self.work_item,
+                self.assigned_internal_role,
+                self.provider,
+                self.model,
+                self.effort,
+                self.artifact_identity,
+                self.external_dispatch_id,
+                self.external_evidence_run_id,
+                self.effort_mapping_loss,
+                self.actual_execution_path,
+            )
+        ):
+            raise ValueError("E_EXTERNAL_PROVENANCE_INVALID")
+
+    def payload(self) -> dict[str, str]:
+        return {
+            "workItem": self.work_item,
+            "assignedInternalRole": self.assigned_internal_role,
+            "provider": self.provider,
+            "model": self.model,
+            "effort": self.effort,
+            "artifactIdentity": self.artifact_identity,
+            "externalDispatchId": self.external_dispatch_id,
+            "externalEvidenceRunId": self.external_evidence_run_id,
+            "effortMappingLoss": self.effort_mapping_loss,
+            "actualExecutionPath": self.actual_execution_path,
+        }
+
+    def terminal_projection(self) -> dict[str, str]:
+        """Exact immutable provenance fields persisted by an external terminal."""
+
+        return {
+            "workItem": self.work_item,
+            "assignedRole": self.assigned_internal_role,
+            "provider": self.provider,
+            "model": self.model,
+            "effort": self.effort,
+            "artifactIdentity": self.artifact_identity,
+            "externalDispatchId": self.external_dispatch_id,
+            "externalEvidenceRunId": self.external_evidence_run_id,
+            "effortMappingLoss": self.effort_mapping_loss,
+            "actualExecutionPath": self.actual_execution_path,
+        }
+
+
+@dataclass(frozen=True)
 class PolicyBoundLaunch:
     control: Control
     topic: str
@@ -210,6 +274,7 @@ class PolicyBoundLaunch:
     model: str
     effort: str
     role_provenance: ExternalRoleProvenance
+    provenance: ExecutionProvenance
 
 
 @dataclass(frozen=True)
@@ -590,7 +655,9 @@ def _load_external_dispatch_resolver() -> object:
         raise ValueError("E_EXTERNAL_DISPATCH_POLICY_DENIED") from None
 
 
-def _policy_bound_external_control(provider: str, control: Control) -> Control:
+def _policy_bound_external_control(
+    provider: str, control: Control
+) -> tuple[Control, dict[str, object]]:
     """Authorize one Kimi/Grok invocation from the shared policy owner only."""
 
     if not control.task_class or not control.role:
@@ -620,7 +687,47 @@ def _policy_bound_external_control(provider: str, control: Control) -> Control:
         or decision.get("stableId") is not None
     ):
         raise ValueError("E_EXTERNAL_DISPATCH_POLICY_DENIED")
-    return replace(control, ledger_role=control.role, ledger_role_explicit=True)
+    return replace(control, ledger_role=control.role, ledger_role_explicit=True), decision
+
+
+def external_execution_provenance(
+    control: Control,
+    *,
+    topic: str,
+    provider: str,
+    model: str,
+    effort: str,
+    role_provenance: ExternalRoleProvenance,
+    dispatch_decision: dict[str, object],
+) -> ExecutionProvenance:
+    """Freeze every external provenance field before prompt/capture side effects."""
+
+    mapping_loss = dispatch_decision.get("effortMappingLoss")
+    if not isinstance(mapping_loss, str) or not mapping_loss:
+        raise ValueError("E_EXTERNAL_PROVENANCE_INVALID")
+    dispatch_id = f"dispatch-{secrets.token_hex(16)}"
+    evidence_id = f"evidence-{secrets.token_hex(16)}"
+    return ExecutionProvenance(
+        work_item=(Path(control.ledger).name if control.ledger else f"untracked:{topic}"),
+        assigned_internal_role=role_provenance.assigned_role,
+        provider=provider,
+        model=model,
+        effort=effort,
+        artifact_identity=control.ledger_artifact or f"topic:{topic}",
+        external_dispatch_id=dispatch_id,
+        external_evidence_run_id=evidence_id,
+        effort_mapping_loss=mapping_loss,
+    )
+
+
+def require_exact_execution_provenance(
+    expected: ExecutionProvenance, supplied: ExecutionProvenance
+) -> ExecutionProvenance:
+    """Reject any full-field provenance drift before an external terminal sink."""
+
+    if expected.payload() != supplied.payload():
+        raise ValueError("E_EXTERNAL_PROVENANCE_MISMATCH")
+    return expected
 
 
 def _prevalidate_policy_bound_external_launch(
@@ -632,15 +739,25 @@ def _prevalidate_policy_bound_external_launch(
         raise ValueError(
             "E_EXTERNAL_CLOSES_FORBIDDEN: external provider results cannot close ledger runs"
         )
-    control = _policy_bound_external_control(provider, control)
+    control, decision = _policy_bound_external_control(provider, control)
     flags, model, effort = resolved_profile(provider, control.provider_flags)
+    role_provenance = external_role_provenance(control, provider)
     return PolicyBoundLaunch(
         control,
         topic,
         flags,
         model,
         effort,
-        external_role_provenance(control, provider),
+        role_provenance,
+        external_execution_provenance(
+            control,
+            topic=topic,
+            provider=provider,
+            model=model,
+            effort=effort,
+            role_provenance=role_provenance,
+            dispatch_decision=decision,
+        ),
     )
 
 
@@ -1786,11 +1903,24 @@ def ledger_common(
     model: str,
     effort: str,
     slug: str,
+    *,
+    role_provenance: ExternalRoleProvenance | None = None,
+    provenance: ExecutionProvenance | None = None,
 ) -> list[str]:
     external = provider in EXTERNAL_PROVIDER_NAMES
-    provenance = external_role_provenance(control, provider) if external else None
-    execution_role = provenance.execution_role if provenance is not None else "external-reviewer"
-    ledger_effort = "high" if effort == "unsupported" else effort
+    frozen_role = role_provenance or (
+        external_role_provenance(control, provider) if external else None
+    )
+    if provenance is not None:
+        if (
+            provider != provenance.provider
+            or model != provenance.model
+            or effort != provenance.effort
+            or frozen_role is None
+            or frozen_role.assigned_role != provenance.assigned_internal_role
+        ):
+            raise ValueError("E_EXTERNAL_PROVENANCE_MISMATCH")
+    execution_role = frozen_role.execution_role if frozen_role is not None else "external-reviewer"
     values = [
         "--role",
         execution_role if external else (control.ledger_role or "none"),
@@ -1803,14 +1933,14 @@ def ledger_common(
         "--model",
         model,
         "--effort",
-        ledger_effort,
+        effort,
     ]
     if control.ledger_lane:
         values += ["--lane", control.ledger_lane]
     if control.ledger_artifact:
         values += ["--artifact", control.ledger_artifact]
     if external:
-        values += ["--assigned-role", provenance.assigned_role]
+        values += ["--assigned-role", frozen_role.assigned_role]
     return values
 
 
@@ -1821,6 +1951,9 @@ def external_terminal_ledger_args(
     effort: str,
     slug: str,
     realization: dict[str, object] | None,
+    *,
+    provenance: ExecutionProvenance | None = None,
+    expected_provenance: ExecutionProvenance | None = None,
 ) -> list[str]:
     common = [
         "--terminal-class", "external-nonauthorizing",
@@ -1829,10 +1962,21 @@ def external_terminal_ledger_args(
     ]
     if realization is not None:
         raise ValueError("E_EXTERNAL_LEDGER_UNVERIFIED: unexpected provider realization")
-    values = list(common)
-    if control.ledger_artifact:
-        values += ["--artifact-identity", control.ledger_artifact]
-    return values
+    if provenance is None:
+        values = list(common)
+        if control.ledger_artifact:
+            values += ["--artifact-identity", control.ledger_artifact]
+        return values
+    provenance = require_exact_execution_provenance(
+        expected_provenance or provenance, provenance
+    )
+    return [
+        *common,
+        "--artifact-identity", provenance.artifact_identity,
+        "--external-dispatch-id", provenance.external_dispatch_id,
+        "--external-evidence-run-id", provenance.external_evidence_run_id,
+        "--effort-mapping-loss", provenance.effort_mapping_loss,
+    ]
 
 
 def _final_nonblank_line(text: str) -> str:
@@ -2294,8 +2438,14 @@ def emit_provider_result(
     timed_out: bool,
     realization: dict[str, str] | None = None,
     role_provenance: ExternalRoleProvenance | None = None,
+    provenance: ExecutionProvenance | None = None,
+    expected_provenance: ExecutionProvenance | None = None,
     child_nonzero_category: str | None = None,
 ) -> None:
+    if provenance is not None:
+        provenance = require_exact_execution_provenance(
+            expected_provenance or provenance, provenance
+        )
     frozen_role = role_provenance or ExternalRoleProvenance("none", "none")
     payload = {
         "schema": "orchestrarium.provider-result.v2",
@@ -2325,10 +2475,16 @@ def emit_provider_result(
         "closesRunIds": [],
         "independentVerificationRequired": True,
         "terminalClass": "external-nonauthorizing",
-        "actualExecutionPath": "direct-external-cli",
+        "actualExecutionPath": (
+            provenance.actual_execution_path
+            if provenance is not None
+            else "direct-external-cli"
+        ),
         "assignedRole": frozen_role.assigned_role,
         "executionRole": frozen_role.execution_role,
     }
+    if provenance is not None:
+        payload.update(provenance.payload())
     if outcome.cleanup_diagnostic:
         payload["cleanupDiagnostic"] = outcome.cleanup_diagnostic
     if child_nonzero_category is not None:
@@ -2401,7 +2557,10 @@ def parse_provider_result(output: str) -> dict[str, object]:
 
 
 def read_back_external_terminal(
-    control: Control, provider: str, launch_run_id: str
+    control: Control,
+    provider: str,
+    launch_run_id: str,
+    expected_provenance: ExecutionProvenance | None = None,
 ) -> dict[str, object] | None:
     """Bind tracked evidence to the durable terminal row, never to a slug-derived id."""
 
@@ -2434,6 +2593,15 @@ def read_back_external_terminal(
         or terminal.get("closesRunIds") != []
     ):
         return None
+    if expected_provenance is not None:
+        expected = expected_provenance.terminal_projection()
+        if any(terminal.get(key) != value for key, value in expected.items()):
+            return None
+        if (
+            terminal.get("runId") != expected_provenance.external_evidence_run_id
+            or terminal.get("launchRunId") != expected_provenance.external_dispatch_id
+        ):
+            return None
     return terminal
 
 
@@ -2451,8 +2619,15 @@ def record_terminal(
     result_delivered: bool,
     realization: dict[str, object] | None = None,
     runner: ProcessRunnerV1,
+    role_provenance: ExternalRoleProvenance | None = None,
+    provenance: ExecutionProvenance | None = None,
+    expected_provenance: ExecutionProvenance | None = None,
     child_nonzero_category: str | None = None,
 ) -> bool:
+    if provenance is not None:
+        provenance = require_exact_execution_provenance(
+            expected_provenance or provenance, provenance
+        )
     category_note = (
         f"; childNonzeroCategory={child_nonzero_category}"
         if child_nonzero_category is not None
@@ -2474,6 +2649,16 @@ def record_terminal(
         "--work-item",
         control.ledger or "",
         "append",
+        *(
+            ["--run-id", provenance.external_evidence_run_id]
+            if provenance is not None
+            else []
+        ),
+        *(
+            ["--work-item-name", provenance.work_item]
+            if provenance is not None
+            else []
+        ),
         "--status",
         outcome.status,
         "--gate",
@@ -2490,13 +2675,30 @@ def record_terminal(
         ),
         "--notes",
         notes,
-        *ledger_common(control, provider, model, effort, slug),
+        *ledger_common(
+            control,
+            provider,
+            model,
+            effort,
+            slug,
+            role_provenance=role_provenance,
+            provenance=provenance,
+        ),
     ]
     args += external_terminal_ledger_args(
-        control, provider, model, effort, slug, realization
+        control,
+        provider,
+        model,
+        effort,
+        slug,
+        realization,
+        provenance=provenance,
+        expected_provenance=expected_provenance,
     )
     recorded = runner is not None and run_ledger(runner, args)
-    if recorded and read_back_external_terminal(control, provider, launch_run_id) is None:
+    if recorded and read_back_external_terminal(
+        control, provider, launch_run_id, provenance
+    ) is None:
         recorded = False
     if not recorded:
         print(
@@ -2524,11 +2726,14 @@ def finalize_run(
     realization: dict[str, object] | None = None,
     credential_needles: tuple[bytes, ...] = (),
     role_provenance: ExternalRoleProvenance | None = None,
+    provenance: ExecutionProvenance | None = None,
     raw_stdout: bytes | None = None,
     raw_stderr: bytes | None = None,
     process_result: ProcessResultV1 | None = None,
     runner: ProcessRunnerV1 | None = None,
 ) -> int:
+    if provenance is not None:
+        provenance = require_exact_execution_provenance(provenance, provenance)
     frozen_role = role_provenance or external_role_provenance(control, provider)
     raw_streams_settled = (
         process_result is not None
@@ -2656,6 +2861,8 @@ def finalize_run(
             timed_out=timed_out,
             realization=realization,
             role_provenance=frozen_role,
+            provenance=provenance,
+            expected_provenance=provenance,
             child_nonzero_category=child_nonzero_category,
         )
         result_delivered = True
@@ -2679,6 +2886,9 @@ def finalize_run(
                 result_delivered=result_delivered,
                 realization=realization,
                 runner=runner,
+                role_provenance=frozen_role,
+                provenance=provenance,
+                expected_provenance=provenance,
                 child_nonzero_category=child_nonzero_category,
             )
         except Exception as exc:
@@ -2705,6 +2915,8 @@ def settle_initialized_setup_failure(
     realization: dict[str, object] | None,
     *,
     runner: ProcessRunnerV1 | None = None,
+    role_provenance: ExternalRoleProvenance | None = None,
+    provenance: ExecutionProvenance | None = None,
 ) -> int:
     """Settle an unlaunched run without fabricating a durable ledger relation."""
 
@@ -2720,6 +2932,8 @@ def settle_initialized_setup_failure(
         launch_error=type(failure).__name__,
         realization=realization,
         runner=runner,
+        role_provenance=role_provenance,
+        provenance=provenance,
     )
 
 
@@ -2768,6 +2982,7 @@ def _launch_with_runner(
             role_provenance = external_role_provenance(control, provider)
         except ValueError as exc:
             return fail(str(exc))
+        provenance: ExecutionProvenance | None = None
     else:
         control = prevalidated.control
         topic = prevalidated.topic
@@ -2775,6 +2990,7 @@ def _launch_with_runner(
         model = prevalidated.model
         effort = prevalidated.effort
         role_provenance = prevalidated.role_provenance
+        provenance = prevalidated.provenance
 
     try:
         auth_configuration = resolve_provider_auth_configuration(provider)
@@ -2864,6 +3080,7 @@ def _launch_with_runner(
         except ValueError as exc:
             return settle_initialized_setup_failure(
                 control, provider, model, effort, slug, lifecycle, exc, realization, runner=runner,
+                role_provenance=role_provenance, provenance=provenance,
             )
 
     launch_run_id = ""
@@ -2872,9 +3089,12 @@ def _launch_with_runner(
             return settle_initialized_setup_failure(
                 control, provider, model, effort, slug, lifecycle,
                 RuntimeError("ledger helper unavailable"), realization, runner=runner,
+                role_provenance=role_provenance, provenance=provenance,
             )
         launch_run_id = (
-            datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            provenance.external_dispatch_id
+            if provenance is not None
+            else datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
             + f"-launch-{slug}"
         )
         launch_args = [
@@ -2883,6 +3103,11 @@ def _launch_with_runner(
             "append",
             "--run-id",
             launch_run_id,
+            *(
+                ["--work-item-name", provenance.work_item]
+                if provenance is not None
+                else []
+            ),
             "--status",
             "running",
             "--gate",
@@ -2891,12 +3116,21 @@ def _launch_with_runner(
             "launch",
             "--notes",
             "wrapper-dispatched; terminal result is returned by the provider envelope",
-            *ledger_common(control, provider, model, effort, slug),
+            *ledger_common(
+                control,
+                provider,
+                model,
+                effort,
+                slug,
+                role_provenance=role_provenance,
+                provenance=provenance,
+            ),
         ]
         if not run_ledger(runner, launch_args):
             return settle_initialized_setup_failure(
                 control, provider, model, effort, slug, lifecycle,
                 RuntimeError("launch ledger append failed"), realization, runner=runner,
+                role_provenance=role_provenance, provenance=provenance,
             )
 
     kimi_agent: Path | None = None
@@ -2907,6 +3141,7 @@ def _launch_with_runner(
         except (OSError, ValueError) as exc:
             return settle_initialized_setup_failure(
                 control, provider, model, effort, slug, lifecycle, exc, realization, runner=runner,
+                role_provenance=role_provenance, provenance=provenance,
             )
     provider_args = (
         [
@@ -2984,6 +3219,7 @@ def _launch_with_runner(
         realization=realization,
         credential_needles=auth_configuration.needles,
         role_provenance=role_provenance,
+        provenance=provenance,
         raw_stdout=raw_stdout,
         raw_stderr=raw_stderr,
         process_result=process_result,
