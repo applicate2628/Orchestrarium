@@ -1413,7 +1413,11 @@ class _CreateOnlyMutablePath:
         staged = Path(tempfile.mkdtemp(prefix=f".{target.name}.upgrade.", dir=target.parent))
         try:
             _remove_readonly_tree(staged)
-            shutil.copytree(source, staged, symlinks=True)
+            _copy_tree(
+                source,
+                staged,
+                ignore_runtime_cache=ignore_runtime_cache,
+            )
             if digest(staged) != current_digest:
                 raise ValueError("E_MUTABLE_PATH_POSTCONDITION")
             _remove_readonly_tree(target)
@@ -1449,7 +1453,11 @@ class _CreateOnlyMutablePath:
         staged = Path(tempfile.mkdtemp(prefix=f".{target.name}.", dir=target.parent))
         try:
             _remove_readonly_tree(staged)
-            shutil.copytree(source, staged, symlinks=True)
+            _copy_tree(
+                source,
+                staged,
+                ignore_runtime_cache=ignore_runtime_cache,
+            )
             if _tree_sha256(staged, ignore_runtime_cache=ignore_runtime_cache) != expected:
                 raise ValueError("E_MUTABLE_PATH_POSTCONDITION")
             self._final_absence(target)
@@ -2533,6 +2541,69 @@ def _load_json_object(path: Path, failure_id: str) -> dict[str, Any]:
     return value
 
 
+def _is_ordinary_runtime_cache_file(
+    relative_path: Path, metadata: os.stat_result
+) -> bool:
+    return (
+        stat.S_ISREG(metadata.st_mode)
+        and not _is_reparse_metadata(metadata)
+        and relative_path.suffix.casefold() == ".pyc"
+        and "__pycache__" in relative_path.parts[:-1]
+    )
+
+
+def _copy_tree(
+    source: Path,
+    destination: Path,
+    *,
+    ignore_runtime_cache: bool = False,
+) -> None:
+    if not ignore_runtime_cache:
+        shutil.copytree(source, destination, symlinks=True)
+        return
+
+    source = Path(os.path.abspath(source))
+
+    def ignore_cache_files(directory: str, names: list[str]) -> tuple[str, ...]:
+        directory_path = Path(directory)
+        ignored: list[str] = []
+        for name in names:
+            item = directory_path / name
+            try:
+                metadata = item.lstat()
+                relative_path = item.relative_to(source)
+            except (OSError, ValueError):
+                continue
+            if _is_ordinary_runtime_cache_file(relative_path, metadata):
+                ignored.append(name)
+        return tuple(ignored)
+
+    shutil.copytree(
+        source,
+        destination,
+        symlinks=True,
+        ignore=ignore_cache_files,
+    )
+    for item in sorted(
+        destination.rglob("__pycache__"),
+        key=lambda value: len(value.parts),
+        reverse=True,
+    ):
+        try:
+            metadata = item.lstat()
+        except OSError:
+            continue
+        if (
+            stat.S_ISDIR(metadata.st_mode)
+            and not stat.S_ISLNK(metadata.st_mode)
+            and not _is_reparse_metadata(metadata)
+        ):
+            try:
+                item.rmdir()
+            except OSError:
+                pass
+
+
 def _tree_sha256(path: Path, *, ignore_runtime_cache: bool = False) -> str | None:
     path = Path(os.path.abspath(path))
     try:
@@ -2561,11 +2632,8 @@ def _tree_sha256(path: Path, *, ignore_runtime_cache: bool = False) -> str | Non
         relative_path = item.relative_to(path)
         if ignore_runtime_cache and stat.S_ISDIR(metadata.st_mode) and item.name == "__pycache__":
             continue
-        if (
-            ignore_runtime_cache
-            and stat.S_ISREG(metadata.st_mode)
-            and item.suffix.casefold() == ".pyc"
-            and "__pycache__" in relative_path.parts[:-1]
+        if ignore_runtime_cache and _is_ordinary_runtime_cache_file(
+            relative_path, metadata
         ):
             continue
         relative = _relative_posix(item, path).encode("utf-8")

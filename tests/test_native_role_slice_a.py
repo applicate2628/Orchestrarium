@@ -2810,6 +2810,84 @@ def test_tree_sha256_rejects_cache_symlink_before_ignoring_bytecode(
     assert installer._tree_sha256(tree, ignore_runtime_cache=True) is None
 
 
+def test_create_tree_omits_runtime_cache_from_fresh_materialization(
+    tmp_path: Path,
+) -> None:
+    anchor = tmp_path / "global-home"
+    source = tmp_path / "canonical-skills" / "lead"
+    cache = source / "scripts" / "__pycache__"
+    anchor.mkdir()
+    cache.mkdir(parents=True)
+    (source / "SKILL.md").write_text("canonical\n", encoding="utf-8")
+    (source / "standalone.pyc").write_bytes(b"tracked standalone bytecode")
+    (cache / "validator.pyc").write_bytes(b"runtime cache")
+
+    owner = installer._CreateOnlyMutablePath(
+        anchor, installer._InstallTransaction([], enabled=False), dry_run=False
+    )
+    target = owner.create_tree(
+        Path(".agents/skills/lead"), source, ignore_runtime_cache=True
+    )
+
+    assert (target / "SKILL.md").read_text(encoding="utf-8") == "canonical\n"
+    assert (target / "standalone.pyc").read_bytes() == b"tracked standalone bytecode"
+    assert not (target / "scripts" / "__pycache__").exists()
+
+
+def test_replace_exact_tree_omits_runtime_cache_from_source_materialization(
+    tmp_path: Path,
+) -> None:
+    anchor = tmp_path / "global-home"
+    target = anchor / ".agents" / "skills" / "lead"
+    source = tmp_path / "canonical-skills" / "lead"
+    cache = source / "scripts" / "__pycache__"
+    target.mkdir(parents=True)
+    cache.mkdir(parents=True)
+    (target / "SKILL.md").write_text("accepted prior\n", encoding="utf-8")
+    (source / "SKILL.md").write_text("canonical\n", encoding="utf-8")
+    (cache / "validator.pyc").write_bytes(b"runtime cache")
+    expected = installer._tree_sha256(target, ignore_runtime_cache=True)
+    assert expected is not None
+
+    owner = installer._CreateOnlyMutablePath(
+        anchor, installer._InstallTransaction([], enabled=False), dry_run=False
+    )
+    installed = owner.replace_exact_tree(
+        Path(".agents/skills/lead"),
+        expected,
+        source,
+        ignore_runtime_cache=True,
+    )
+
+    assert (installed / "SKILL.md").read_text(encoding="utf-8") == "canonical\n"
+    assert not (installed / "scripts" / "__pycache__").exists()
+
+
+def test_create_tree_runtime_cache_mode_keeps_noncache_collision_strict(
+    tmp_path: Path,
+) -> None:
+    anchor = tmp_path / "global-home"
+    source = tmp_path / "canonical-skills" / "lead"
+    target = anchor / ".agents" / "skills" / "lead"
+    cache = target / "scripts" / "__pycache__"
+    source.mkdir(parents=True)
+    cache.mkdir(parents=True)
+    (source / "SKILL.md").write_text("canonical\n", encoding="utf-8")
+    (target / "SKILL.md").write_text("canonical\n", encoding="utf-8")
+    note = cache / "note.txt"
+    note.write_bytes(b"operator-owned non-cache bytes")
+
+    owner = installer._CreateOnlyMutablePath(
+        anchor, installer._InstallTransaction([], enabled=False), dry_run=False
+    )
+    with pytest.raises(ValueError, match="^E_CREATE_ONLY_COLLISION"):
+        owner.create_tree(
+            Path(".agents/skills/lead"), source, ignore_runtime_cache=True
+        )
+
+    assert note.read_bytes() == b"operator-owned non-cache bytes"
+
+
 def test_current_claude_projection_plan_is_identity_noop(tmp_path: Path) -> None:
     anchor = tmp_path / "global-home"
     canonical_root = tmp_path / "canonical-skills"
