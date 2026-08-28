@@ -1073,10 +1073,14 @@ def test_exact_provider_auth_baseline_lead_is_accepted_and_drift_refused(
             "9339bcf29f1864789c7a133260a2a2a2abeb3060",
             "c3508f94d6830da703a5519fbe28bf7011f2a8850e67b5ed5a49c47465283295",
         ),
+        (
+            "6dbf861a4c119f59c52813a02758f14ea9050aa7",
+            "9b11e845e746adeb81e56243169ade9e48aaf2adc349b40073beb21b5b596c30",
+        ),
     ),
     ids=(
         "pre-kimi", "pre-k3-wire-fix", "stock-77ec", "stock-3dad",
-        "stock-fa5d", "stock-9339",
+        "stock-fa5d", "stock-9339", "stock-6dbf",
     ),
 )
 def test_exact_shipped_global_lead_is_accepted_and_one_byte_drift_refused(
