@@ -54,12 +54,13 @@ def test_role_migration_and_luna_docs_have_no_stale_create_only_contract() -> No
     )
 
     for source in (codex_readme, root_readme, install):
-        assert "five hash-pinned stock role payload upgrades" in source
+        assert "prior working or currently-disabled stock" in source
         assert "customized payloads fail closed" in source
-        assert "E_LUNA_EXECUTION_CONTAINMENT_UNAVAILABLE" in source
-        assert "E_LUNA_WRITE_CONTAINMENT_UNAVAILABLE" in source
-    assert "LunaExecutionContractV1" in codex_readme
-    assert "ScoutFactsV1" in codex_readme
+        assert "native-required" in source
+        assert "E_NATIVE_V2_DISABLED" in source
+        assert "E_LUNA_UNAVAILABLE" in source
+        assert "E_LUNA_EXECUTION_CONTAINMENT_UNAVAILABLE" not in source
+        assert "E_LUNA_WRITE_CONTAINMENT_UNAVAILABLE" not in source
     assert "bounded-write `mechanical-worker`" not in codex_readme
     assert "only three hash-pinned old roles migrate" not in migration_test
 
