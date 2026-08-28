@@ -717,6 +717,7 @@ class LiteralPushCommand(NamedTuple):
     remote: str
     refspec: str
     target: PushTarget
+    repository_root: str | None = None
 
 
 
@@ -1398,13 +1399,13 @@ def _is_within(path: Path, parent: Path) -> bool:
         return False
 
 
-def _resolve_executable(name: str) -> str | None:
+def _resolve_executable(name: str, repository_root: str) -> str | None:
     candidate = shutil.which(name)
     if not candidate:
         return None
     try:
         resolved = Path(candidate).resolve(strict=True)
-        workspace = Path.cwd().resolve(strict=True)
+        workspace = Path(repository_root).resolve(strict=True)
     except Exception:
         return None
     if not resolved.is_file() or _is_within(resolved, workspace):
@@ -1429,6 +1430,7 @@ def _pr_command_dialect(resolved_dialect: str) -> str:
     )) and resolved_dialect == "posix":
         return resolved_dialect
     if source.endswith((
+        "/.agents/skills/lead/scripts/check-git-push-gate.py",
         "/.codex/skills/lead/scripts/check-git-push-gate.py",
         "/src.codex/skills/lead/scripts/check-git-push-gate.py",
     )):
@@ -1447,28 +1449,24 @@ def _portable_pr_head_ref(value: str) -> bool:
     return PR_HEAD_REF_REGEX.fullmatch(value) is not None
 
 
-def _parse_pr_literal_command(
-    parsed: ShellParseResult,
-    resolved_git: str,
-    dialect: str,
+def _parse_pr_literal_shape(
+    parsed: ShellParseResult, dialect: str
 ) -> LiteralPushCommand:
     if parsed.dialect != dialect or parsed.strict_projection.status != "canonical":
         raise PrRouteDenied("PRG-COMMAND-SHAPE")
     if dialect not in ("posix", "powershell"):
         raise PrRouteDenied("PRG-COMMAND-SHAPE")
     decoded = list(parsed.strict_projection.argv)
-    executable, subcommand, remote, refspec = decoded
-    if subcommand != "push" or executable != resolved_git or not Path(executable).is_absolute():
+    if len(decoded) == 4:
+        executable, subcommand, remote, refspec = decoded
+        repository_root = None
+    elif len(decoded) == 6 and decoded[1] == "-C":
+        executable, _option, repository_root, subcommand, remote, refspec = decoded
+        if not Path(repository_root).is_absolute():
+            raise PrRouteDenied("PRG-COMMAND-SHAPE")
+    else:
         raise PrRouteDenied("PRG-COMMAND-SHAPE")
-    try:
-        executable_path = Path(executable).resolve(strict=True)
-        resolved_path = Path(resolved_git).resolve(strict=True)
-        same_identity = executable_path.is_file() and resolved_path.is_file() and os.path.samefile(
-            executable_path, resolved_path
-        )
-    except Exception:
-        same_identity = False
-    if not same_identity:
+    if subcommand != "push" or not Path(executable).is_absolute():
         raise PrRouteDenied("PRG-COMMAND-SHAPE")
     if not REMOTE_NAME_REGEX.fullmatch(remote):
         raise PrRouteDenied("PRG-COMMAND-SHAPE")
@@ -1479,10 +1477,40 @@ def _parse_pr_literal_command(
     if not _portable_pr_head_ref(head_ref):
         raise PrRouteDenied("PRG-COMMAND-SHAPE")
     target = PushTarget(remote, f"refs/heads/{head_ref}", head_ref)
-    return LiteralPushCommand(dialect, executable, remote, refspec, target)
+    return LiteralPushCommand(
+        dialect, executable, remote, refspec, target, repository_root
+    )
 
 
-def _run_process(argv: list[str], timeout: float) -> ProcessResult | None:
+def _bind_pr_literal_executable(
+    literal: LiteralPushCommand, resolved_git: str
+) -> LiteralPushCommand:
+    try:
+        executable_path = Path(literal.executable).resolve(strict=True)
+        resolved_path = Path(resolved_git).resolve(strict=True)
+        same_identity = executable_path.is_file() and resolved_path.is_file() and os.path.samefile(
+            executable_path, resolved_path
+        )
+    except Exception:
+        same_identity = False
+    if not same_identity:
+        raise PrRouteDenied("PRG-COMMAND-SHAPE")
+    return literal
+
+
+def _parse_pr_literal_command(
+    parsed: ShellParseResult,
+    resolved_git: str,
+    dialect: str,
+) -> LiteralPushCommand:
+    return _bind_pr_literal_executable(
+        _parse_pr_literal_shape(parsed, dialect), resolved_git
+    )
+
+
+def _run_process(
+    argv: list[str], timeout: float, repository_workdir: str
+) -> ProcessResult | None:
     env = os.environ.copy()
     env.pop("GH_REPO", None)
     env["GH_PROMPT_DISABLED"] = "1"
@@ -1494,6 +1522,7 @@ def _run_process(argv: list[str], timeout: float) -> ProcessResult | None:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             env=env,
+            cwd=repository_workdir,
         )
     except OSError:
         return None
@@ -1565,9 +1594,12 @@ exec(compile(sources["classifier"],classifier["__file__"],"exec"),classifier,cla
 finder=classifier.get("find_machine_paths")
 if not callable(finder):
     raise RuntimeError("classifier contract")
+if len(sys.argv)<3 or sys.argv[1]!="--gate-git-executable":
+    raise RuntimeError("git executable contract")
+git_executable=sys.argv[2]
 scanner_path="<closure>/check-publication-safety.py"
-scanner={"__name__":"__main__","__file__":scanner_path,"__package__":None,"__cached__":None,"__injected_find_machine_paths__":finder}
-sys.argv=[scanner_path,*sys.argv[1:]]
+scanner={"__name__":"__main__","__file__":scanner_path,"__package__":None,"__cached__":None,"__injected_find_machine_paths__":finder,"__injected_git_executable__":git_executable}
+sys.argv=[scanner_path,*sys.argv[3:]]
 exec(compile(sources["scanner"],scanner_path,"exec"),scanner,scanner)
 '''
 
@@ -2132,13 +2164,14 @@ class ChildSupervisor:
 
 
 def _run_snapshot_child(
-    pending: PendingScanInvocation, payload: bytes,
+    pending: PendingScanInvocation, payload: bytes, repository_workdir: str,
 ) -> tuple[LaunchedScanInvocation, tuple[TrustedExecutionRecord, ...]]:
     prefix = "PGG" if pending.binding.route == "generic" else "PRG"
     try:
         process = subprocess.Popen(
             list(pending.exact_argv), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, shell=False,
+            cwd=repository_workdir,
         )
     except OSError:
         raise PrRouteDenied(prefix + "-SCAN-EXECUTION") from None
@@ -2227,14 +2260,18 @@ def _run_snapshot_child(
     return launched, (execution,)
 
 
-def _refresh_scan_binding(binding: PushScanBinding) -> PushScanBinding:
+def _refresh_scan_binding(
+    binding: PushScanBinding, repository_workdir: str, git_exe: str
+) -> PushScanBinding:
     if binding.route == "generic":
         return _resolve_generic_scan_binding(
-            binding.remote, binding.destination, binding.source_oid
+            binding.remote, binding.destination, binding.source_oid,
+            repository_workdir, git_exe,
         )
     head_proc = subprocess.run(
-        ["git", "rev-parse", "--verify", "HEAD^{commit}"],
+        [git_exe, "rev-parse", "--verify", "HEAD^{commit}"],
         capture_output=True, text=True, encoding="utf-8", errors="strict",
+        cwd=repository_workdir,
     )
     rows = head_proc.stdout.splitlines()
     if head_proc.returncode or len(rows) != 1 or not OID_REGEX.fullmatch(rows[0]):
@@ -2243,7 +2280,9 @@ def _refresh_scan_binding(binding: PushScanBinding) -> PushScanBinding:
     return PushScanBinding("strict", binding.remote, binding.destination, head, head)
 
 
-def _run_authoritative_scan(binding: PushScanBinding) -> ConsumedAuthoritativeEvidence:
+def _run_authoritative_scan(
+    binding: PushScanBinding, repository_workdir: str, git_exe: str
+) -> ConsumedAuthoritativeEvidence:
     prefix = "PGG" if binding.route == "generic" else "PRG"
     fds: tuple[int, ...] = ()
     try:
@@ -2259,6 +2298,7 @@ def _run_authoritative_scan(binding: PushScanBinding) -> ConsumedAuthoritativeEv
     attempt_id = secrets.token_hex(16)
     argv = (
         interpreter_before.absolute_resolved_path, "-I", "-c", _SCAN_BOOTSTRAP,
+        "--gate-git-executable", git_exe,
         "--range", binding.remote, binding.destination,
     )
     pending = PendingScanInvocation(
@@ -2266,7 +2306,9 @@ def _run_authoritative_scan(binding: PushScanBinding) -> ConsumedAuthoritativeEv
         interpreter_before, argv, object(),
     )
     try:
-        launched, records = _run_snapshot_child(pending, _closure_payload(closure_before))
+        launched, records = _run_snapshot_child(
+            pending, _closure_payload(closure_before), repository_workdir
+        )
         try:
             closure_after = _recheck_source_closure(fds, closure_before)
             interpreter_after = _interpreter_identity()
@@ -2280,7 +2322,9 @@ def _run_authoritative_scan(binding: PushScanBinding) -> ConsumedAuthoritativeEv
             provenance_verdict="trusted",
         ) for record in records)
         try:
-            binding_after = _refresh_scan_binding(binding)
+            binding_after = _refresh_scan_binding(
+                binding, repository_workdir, git_exe
+            )
         except PrRouteDenied:
             raise
         except Exception:
@@ -2306,19 +2350,58 @@ def _run_text(
     argv: list[str],
     deadline: float,
     failure_id: str,
+    repository_workdir: str,
     *,
     accepted_codes: tuple[int, ...] = (0,),
 ) -> tuple[int, str]:
     remaining = deadline - time.monotonic()
     if remaining <= 0:
         raise PrRouteDenied(failure_id)
-    result = _run_process(argv, min(PROCESS_TIMEOUT_SECONDS, remaining))
+    result = _run_process(argv, remaining, repository_workdir)
     if result is None or result.returncode not in accepted_codes:
         raise PrRouteDenied(failure_id)
     try:
         return result.returncode, result.stdout.decode("utf-8", errors="strict")
     except UnicodeDecodeError:
         raise PrRouteDenied(failure_id) from None
+
+
+def _normalize_repository_workdir(repository_workdir: str) -> str:
+    if type(repository_workdir) is not str or not repository_workdir:
+        raise PrRouteDenied("PRG-WORKDIR-INVALID")
+    try:
+        selected = Path(repository_workdir).resolve(strict=True)
+    except (OSError, RuntimeError):
+        raise PrRouteDenied("PRG-WORKDIR-INVALID") from None
+    if not selected.is_dir() or str(selected) != repository_workdir:
+        raise PrRouteDenied("PRG-WORKDIR-INVALID")
+    return repository_workdir
+
+
+def _prove_repository_root(repository_workdir: str, git_exe: str) -> str:
+    selected = Path(repository_workdir)
+    _, top_text = _run_text(
+        [git_exe, "rev-parse", "--show-toplevel"],
+        time.monotonic() + PROCESS_TIMEOUT_SECONDS,
+        "PRG-WORKDIR-INVALID",
+        repository_workdir,
+    )
+    rows = top_text.splitlines()
+    if len(rows) != 1:
+        raise PrRouteDenied("PRG-WORKDIR-INVALID")
+    try:
+        top = Path(rows[0]).resolve(strict=True)
+    except (OSError, RuntimeError):
+        raise PrRouteDenied("PRG-WORKDIR-INVALID") from None
+    if top != selected:
+        raise PrRouteDenied("PRG-WORKDIR-INVALID")
+    return repository_workdir
+
+
+def _validate_repository_workdir(repository_workdir: str, git_exe: str) -> str:
+    return _prove_repository_root(
+        _normalize_repository_workdir(repository_workdir), git_exe
+    )
 
 
 def _strict_json(text: str, expected_type: type, failure_id: str):
@@ -2411,10 +2494,12 @@ def _repo_record(value: object, expected: str, failure_id: str) -> tuple[str, st
     return repo_id, default_name
 
 
-def _verify_pr_oracle(grant: ActivePrGrant, literal: LiteralPushCommand) -> tuple[PushTarget, str]:
+def _verify_pr_oracle(
+    grant: ActivePrGrant, literal: LiteralPushCommand, repository_workdir: str
+) -> tuple[PushTarget, str]:
     deadline = time.monotonic() + ORACLE_TIMEOUT_SECONDS
     git_exe = literal.executable
-    gh_exe = _resolve_executable("gh")
+    gh_exe = _resolve_executable("gh", repository_workdir)
     if gh_exe is None:
         raise PrRouteDenied("PRG-PR-UNAVAILABLE")
     target = literal.target
@@ -2427,6 +2512,7 @@ def _verify_pr_oracle(grant: ActivePrGrant, literal: LiteralPushCommand) -> tupl
         [gh_exe, "pr", "view", grant.url, "--json", fields],
         deadline,
         "PRG-PR-UNAVAILABLE",
+        repository_workdir,
     )
     pr = _strict_json(pr_text, dict, "PRG-PR-UNAVAILABLE")
     if pr.get("number") != grant.number or pr.get("url") != grant.url:
@@ -2460,11 +2546,13 @@ def _verify_pr_oracle(grant: ActivePrGrant, literal: LiteralPushCommand) -> tupl
         [gh_exe, "repo", "view", f"{grant.owner}/{grant.repo}", "--json", repo_fields],
         deadline,
         "PRG-PR-UNAVAILABLE",
+        repository_workdir,
     )
     _, head_repo_text = _run_text(
         [gh_exe, "repo", "view", head_name, "--json", repo_fields],
         deadline,
         "PRG-PR-UNAVAILABLE",
+        repository_workdir,
     )
     base_record = _strict_json(base_repo_text, dict, "PRG-PR-UNAVAILABLE")
     head_record = _strict_json(head_repo_text, dict, "PRG-PR-UNAVAILABLE")
@@ -2474,7 +2562,8 @@ def _verify_pr_oracle(grant: ActivePrGrant, literal: LiteralPushCommand) -> tupl
         raise PrRouteDenied("PRG-BINDING-DRIFT")
 
     _, ref_check = _run_text(
-        [git_exe, "check-ref-format", "--branch", head_ref], deadline, "PRG-DESTINATION-UNSAFE"
+        [git_exe, "check-ref-format", "--branch", head_ref], deadline,
+        "PRG-DESTINATION-UNSAFE", repository_workdir,
     )
     if ref_check.strip() != head_ref:
         raise PrRouteDenied("PRG-DESTINATION-UNSAFE")
@@ -2486,6 +2575,7 @@ def _verify_pr_oracle(grant: ActivePrGrant, literal: LiteralPushCommand) -> tupl
         [gh_exe, "api", "--hostname", "github.com", f"repos/{head_name}/branches/{encoded_ref}"],
         deadline,
         "PRG-PR-UNAVAILABLE",
+        repository_workdir,
     )
     branch = _strict_json(branch_text, dict, "PRG-PR-UNAVAILABLE")
     if branch.get("name") != head_ref or branch.get("protected") is not False:
@@ -2494,6 +2584,7 @@ def _verify_pr_oracle(grant: ActivePrGrant, literal: LiteralPushCommand) -> tupl
         [gh_exe, "api", "--hostname", "github.com", f"repos/{head_name}/rules/branches/{encoded_ref}"],
         deadline,
         "PRG-PR-UNAVAILABLE",
+        repository_workdir,
     )
     rules = _strict_json(rules_text, list, "PRG-PR-UNAVAILABLE")
     if rules:
@@ -2503,6 +2594,7 @@ def _verify_pr_oracle(grant: ActivePrGrant, literal: LiteralPushCommand) -> tupl
         [git_exe, "remote", "get-url", "--push", "--all", target.remote],
         deadline,
         "PRG-REMOTE-MISMATCH",
+        repository_workdir,
     )
     urls = expanded_urls.splitlines()
     if len(urls) != 1 or not urls[0]:
@@ -2516,6 +2608,7 @@ def _verify_pr_oracle(grant: ActivePrGrant, literal: LiteralPushCommand) -> tupl
         [git_exe, "config", "--get-all", config_key],
         deadline,
         "PRG-REMOTE-MISMATCH",
+        repository_workdir,
         accepted_codes=(0, 1),
     )
     if code == 1:
@@ -2523,6 +2616,7 @@ def _verify_pr_oracle(grant: ActivePrGrant, literal: LiteralPushCommand) -> tupl
             [git_exe, "config", "--get-all", f"remote.{target.remote}.url"],
             deadline,
             "PRG-REMOTE-MISMATCH",
+            repository_workdir,
         )
     raw_urls = raw_pushurl.splitlines()
     if len(raw_urls) != 1 or raw_urls[0] != urls[0]:
@@ -2532,6 +2626,7 @@ def _verify_pr_oracle(grant: ActivePrGrant, literal: LiteralPushCommand) -> tupl
         [git_exe, "ls-remote", "--heads", target.remote, target.destination],
         deadline,
         "PRG-BRANCH-DRIFT",
+        repository_workdir,
     )
     remote_rows = remote_head_text.splitlines()
     if len(remote_rows) != 1:
@@ -2543,7 +2638,8 @@ def _verify_pr_oracle(grant: ActivePrGrant, literal: LiteralPushCommand) -> tupl
         raise PrRouteDenied("PRG-BRANCH-DRIFT")
 
     _, local_head_text = _run_text(
-        [git_exe, "rev-parse", "--verify", "HEAD"], deadline, "PRG-RECEIPT-MISMATCH"
+        [git_exe, "rev-parse", "--verify", "HEAD"], deadline,
+        "PRG-RECEIPT-MISMATCH", repository_workdir,
     )
     local_head_rows = local_head_text.splitlines()
     if len(local_head_rows) != 1 or not OID_REGEX.fullmatch(local_head_rows[0]):
@@ -2644,27 +2740,31 @@ def _correlate_publication_safety_observations(
 
 
 def _resolve_generic_scan_binding(
-    remote: str, destination: str, source: str
+    remote: str, destination: str, source: str, repository_workdir: str,
+    git_exe: str,
 ) -> PushScanBinding:
     if not source:
         raise PrRouteDenied("PGG-RANGE-TIP-BINDING")
     source_proc = subprocess.run(
-        ["git", "rev-parse", "--verify", source],
+        [git_exe, "rev-parse", "--verify", source],
         capture_output=True, text=True, encoding="utf-8", errors="strict",
+        cwd=repository_workdir,
     )
     source_rows = source_proc.stdout.splitlines()
     if source_proc.returncode or len(source_rows) != 1 or not OID_REGEX.fullmatch(source_rows[0]):
         raise PrRouteDenied("PGG-RANGE-TIP-BINDING")
     source_oid = source_rows[0].lower()
     type_proc = subprocess.run(
-        ["git", "cat-file", "-t", source_oid],
+        [git_exe, "cat-file", "-t", source_oid],
         capture_output=True, text=True, encoding="utf-8", errors="strict",
+        cwd=repository_workdir,
     )
     if type_proc.returncode or type_proc.stdout.strip() != "commit":
         raise PrRouteDenied("PGG-RANGE-TIP-BINDING")
     head_proc = subprocess.run(
-        ["git", "rev-parse", "--verify", "HEAD^{commit}"],
+        [git_exe, "rev-parse", "--verify", "HEAD^{commit}"],
         capture_output=True, text=True, encoding="utf-8", errors="strict",
+        cwd=repository_workdir,
     )
     head_rows = head_proc.stdout.splitlines()
     if head_proc.returncode or len(head_rows) != 1 or not OID_REGEX.fullmatch(head_rows[0]):
@@ -2679,6 +2779,8 @@ def _evaluate_active_pr_route(
     command: str,
     dialect: str,
     parsed: ShellParseResult,
+    repository_workdir: str,
+    repository_workdir_source: str,
 ) -> bool:
     try:
         effective = parsed.effective_publications
@@ -2689,15 +2791,36 @@ def _evaluate_active_pr_route(
         ):
             raise PrRouteDenied("PRG-COMMAND-SHAPE")
         dialect = _pr_command_dialect(dialect)
-        git_exe = _resolve_executable("git")
+        literal = _parse_pr_literal_shape(parsed, dialect)
+        if literal.repository_root is None:
+            repository_workdir = _normalize_repository_workdir(
+                repository_workdir
+            )
+        else:
+            command_root = _normalize_repository_workdir(
+                literal.repository_root
+            )
+            if repository_workdir_source == "tool":
+                tool_root = _normalize_repository_workdir(repository_workdir)
+                if tool_root != command_root:
+                    raise PrRouteDenied("PRG-WORKDIR-INVALID")
+            elif repository_workdir_source != "envelope":
+                raise PrRouteDenied("PRG-WORKDIR-INVALID")
+            repository_workdir = command_root
+        git_exe = _resolve_executable("git", repository_workdir)
         if git_exe is None:
             raise PrRouteDenied("PRG-REMOTE-MISMATCH")
-        literal = _parse_pr_literal_command(parsed, git_exe, dialect)
-        target, local_head = _verify_pr_oracle(grant, literal)
+        literal = _bind_pr_literal_executable(literal, git_exe)
+        repository_workdir = _prove_repository_root(
+            repository_workdir, git_exe
+        )
+        target, local_head = _verify_pr_oracle(
+            grant, literal, repository_workdir
+        )
         binding = PushScanBinding(
             "strict", target.remote, target.destination, local_head, local_head
         )
-        _run_authoritative_scan(binding)
+        _run_authoritative_scan(binding, repository_workdir, git_exe)
         return True
     except PrRouteDenied:
         raise
@@ -2728,7 +2851,8 @@ def evaluate_heavy(preflight: PreflightResult) -> bool:
         raise PrRouteDenied("PRG-AUTH-MALFORMED")
     if pr_state == "active" and pr_grant is not None:
         return _evaluate_active_pr_route(
-            pr_grant, preflight.command, preflight.dialect, preflight.parsed
+            pr_grant, preflight.command, preflight.dialect, preflight.parsed,
+            preflight.repository_workdir, preflight.repository_workdir_source,
         )
     if suffix_recovery:
         raise PrRouteDenied("PRG-TRANSCRIPT-UNAVAILABLE")
@@ -2737,8 +2861,19 @@ def evaluate_heavy(preflight: PreflightResult) -> bool:
         if grammar.status != "PGG-ADMISSIBLE" or grammar.binding is None:
             raise PrRouteDenied(grammar.status)
         remote, destination, source = grammar.binding
-        binding = _resolve_generic_scan_binding(remote, destination, source)
-        _run_authoritative_scan(binding)
+        repository_workdir = _normalize_repository_workdir(
+            preflight.repository_workdir
+        )
+        git_exe = _resolve_executable("git", repository_workdir)
+        if git_exe is None:
+            raise PrRouteDenied("PRG-WORKDIR-INVALID")
+        repository_workdir = _prove_repository_root(
+            repository_workdir, git_exe
+        )
+        binding = _resolve_generic_scan_binding(
+            remote, destination, source, repository_workdir, git_exe
+        )
+        _run_authoritative_scan(binding, repository_workdir, git_exe)
         return True
     return False
 
@@ -2786,12 +2921,13 @@ def compose_gate_result(preflight: PreflightResult) -> int:
         **SCAN_DENIAL_REASONS,
         "PRG-AUTH-MALFORMED": "Use the exact version-1 PR approval or revocation line in a genuine user message.",
         "PRG-TRANSCRIPT-UNAVAILABLE": "Retry from a readable current session transcript; summaries cannot authorize publication.",
-        "PRG-COMMAND-SHAPE": "Use exactly one ordinary `git push <remote> HEAD:refs/heads/<current-head-ref>` command.",
+        "PRG-COMMAND-SHAPE": "Use one exact absolute Git literal: `git push <remote> HEAD:refs/heads/<head>` or `git -C <absolute-root> push <remote> HEAD:refs/heads/<head>`.",
         "PRG-PR-UNAVAILABLE": "Restore authenticated GitHub state access, then retry so the pull request can be checked afresh.",
         "PRG-PR-STATE": "The pull request is not open; obtain a new grant only for an open pull request.",
         "PRG-BINDING-DRIFT": "Refresh the pull-request binding and retry with a current exact grant if needed.",
         "PRG-DESTINATION-UNSAFE": "Choose the current unprotected non-default pull-request head branch.",
         "PRG-REMOTE-MISMATCH": "Use one direct GitHub remote for the current pull-request head repository.",
+        "PRG-WORKDIR-INVALID": "Use one explicit absolute repository root for the current push tool call.",
         "PRG-BRANCH-DRIFT": "Refresh remote branch state, then retry the same push for a fresh gate-owned check.",
         "PRG-RECEIPT-MISSING": "Retry the push so the gate owns a fresh non-empty publication-safety check.",
         "PRG-RECEIPT-MISMATCH": "Correct the remote, destination, current HEAD, and tip binding, then retry the same push.",

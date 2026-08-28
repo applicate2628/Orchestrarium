@@ -76,7 +76,8 @@ PREFLIGHT_REASON_PRESENT_FIELDS = {
     "PFP-DENY-INTERNAL": frozenset(),
     "PFP-HEAVY": frozenset((
         "command", "dialect", "transcript_path", "parsed",
-        "current_turn_status", "generic_decision",
+        "current_turn_status", "generic_decision", "repository_workdir",
+        "repository_workdir_source",
     )),
 }
 
@@ -177,7 +178,10 @@ def test_r4_deep_contract_rejects_all_top_level_and_nested_mutations() -> None:
     allow = module.build_preflight({"agent_id": "subagent"})
     assert module.validate_preflight_result(allow) is allow
     parsed_result = module.build_preflight(
-        {"tool_name": "Bash", "tool_input": {"command": "git push origin main"}}
+        {
+            "tool_name": "Bash", "cwd": str(ROOT),
+            "tool_input": {"command": "git push origin main"},
+        }
     )
     parsed = parsed_result.parsed
     assert parsed is not None
@@ -189,6 +193,8 @@ def test_r4_deep_contract_rejects_all_top_level_and_nested_mutations() -> None:
         current_turn_status="found",
         generic_decision=module.classify_generic_push(parsed),
         failure_id=None,
+        repository_workdir=str(ROOT.resolve()),
+        repository_workdir_source="envelope",
     )
     assert module.validate_preflight_result(rich_result) is rich_result
     seen = set()
@@ -238,6 +244,7 @@ def _builder_positive_results(module, tmp_path: Path):
         module.build_preflight({"tool_name": "Bash", "tool_input": {"command": "git push origin main"}}),
         module.build_preflight({
             "tool_name": "Bash",
+            "cwd": str(ROOT),
             "tool_input": {"command": "git push origin main"},
             "transcript_path": str(transcript),
         }),
@@ -293,6 +300,8 @@ def test_r5_preflight_reason_branches_are_exhaustive_and_coherent(tmp_path: Path
         "current_turn_status": rich.current_turn_status,
         "generic_decision": rich.generic_decision,
         "failure_id": deny.failure_id,
+        "repository_workdir": rich.repository_workdir,
+        "repository_workdir_source": rich.repository_workdir_source,
     }
     defaults = {
         "command": None,
@@ -302,6 +311,8 @@ def test_r5_preflight_reason_branches_are_exhaustive_and_coherent(tmp_path: Path
         "current_turn_status": None,
         "generic_decision": None,
         "failure_id": None,
+        "repository_workdir": "",
+        "repository_workdir_source": "",
     }
     for reason_id, result in by_reason.items():
         assert module.validate_preflight_result(result) is result
@@ -515,6 +526,7 @@ def _former_envelope(row_id: str, tmp_path: Path):
     )
     return {
         "tool_name": "Bash",
+        "cwd": str(ROOT),
         "tool_input": {"command": command},
         "transcript_path": str(transcript),
     }
@@ -699,6 +711,8 @@ def test_a3_preflight_contract_and_old_owner_are_red_until_relocated() -> None:
         "generic_decision",
         "push_instruction",
         "failure_id",
+        "repository_workdir",
+        "repository_workdir_source",
     )
     for target in TARGETS:
         assert target.preflight_path.is_file(), f"A3-PREFLIGHT-MISSING:{target.label}"

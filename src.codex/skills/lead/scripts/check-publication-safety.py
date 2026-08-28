@@ -17,6 +17,8 @@ from pathlib import Path
 from typing import Callable, Iterable
 from urllib.parse import quote
 
+_GIT_EXECUTABLE = globals().get("__injected_git_executable__", "git")
+
 
 _SCANNER_EXEMPT_PATHS = frozenset({
     "scripts/universal-hooks/scripts/check-publication-safety.py",
@@ -390,7 +392,7 @@ def _run_git(
     args: list[str], *, text: bool = False, timeout: float | None = None
 ) -> subprocess.CompletedProcess:
     return subprocess.run(
-        ["git", *args],
+        [_GIT_EXECUTABLE, *args],
         capture_output=True,
         text=text,
         encoding="utf-8" if text else None,
@@ -699,7 +701,7 @@ async def _range_selection(
         return _refusal("PS-MSG-RANGE", "head")
     commit_ids = await _read_git_oid_lines_bounded(
         (
-            "git", "rev-list", "--topo-order", tip,
+            _GIT_EXECUTABLE, "rev-list", "--topo-order", tip,
             "--not", f"--remotes={remote}",
         ),
         count_cap=_MAX_COMMITS,
@@ -711,7 +713,7 @@ async def _range_selection(
         return commit_ids
     object_ids = await _read_git_oid_lines_bounded(
         (
-            "git", "rev-list", "--objects", "--no-object-names", tip,
+            _GIT_EXECUTABLE, "rev-list", "--objects", "--no-object-names", tip,
             "--not", f"--remotes={remote}",
         ),
         count_cap=_MAX_OBJECTS,
@@ -790,7 +792,7 @@ class _AsyncGitObjectReader:
     def __init__(
         self,
         *,
-        argv: tuple[str, ...] = ("git", "cat-file", "--batch"),
+        argv: tuple[str, ...] = (_GIT_EXECUTABLE, "cat-file", "--batch"),
         request_timeout: float = _OBJECT_REQUEST_TIMEOUT_SECONDS,
         settle_timeout: float = OBJECT_REAP_ATTEMPT_SECONDS,
     ) -> None:

@@ -47,6 +47,7 @@ import os
 import re
 import secrets
 import shlex
+import shutil
 import stat
 import subprocess
 import sys
@@ -1500,7 +1501,11 @@ def run_hook(
     transcript: bool = True,
     tool_name: str = "Bash",
 ) -> subprocess.CompletedProcess:
-    envelope: dict = {"tool_name": tool_name, "tool_input": {"command": command}}
+    envelope: dict = {
+        "tool_name": tool_name,
+        "cwd": str(REPO_ROOT),
+        "tool_input": {"command": command},
+    }
     transcript_owner = (
         synthetic_transcript(entries) if transcript else contextlib.nullcontext(None)
     )
@@ -1511,7 +1516,7 @@ def run_hook(
             envelope["agent_id"] = agent_id
         module = _load_gate_module(script, f"run_hook_{script.parent.parent.name}_{time.monotonic_ns()}")
 
-        def authoritative(binding):
+        def authoritative(binding, _repository_workdir, _git_exe):
             if binding.route == "strict":
                 receipt = module.RangeReceiptV3(
                     1, "a" * 64, 1, "b" * 64, 0, "c" * 64,
@@ -3418,7 +3423,8 @@ class TestR10WrapperGrammarInProcess(unittest.TestCase):
                 self.module.PrRouteDenied, "PRG-COMMAND-SHAPE"
             ):
                 self.module._evaluate_active_pr_route(
-                    grant, "eval git push origin main", "Bash", parsed
+                    grant, "eval git push origin main", "Bash", parsed,
+                    str(REPO_ROOT), "tool",
                 )
         executable.assert_not_called()
         pr_oracle.assert_not_called()
@@ -3718,6 +3724,243 @@ class TestCanonicalPublicationCommandGrammar(unittest.TestCase):
                     parsed = module._a3_preflight.parse_shell_command(command, dialect)
                     self.assertEqual(parsed.strict_projection.status, "canonical")
                     self.assertEqual(parsed.strict_projection.argv, argv)
+
+    def test_windows_bash_label_recovers_only_exact_powershell_literal(self) -> None:
+        argv = (
+            r"C:\Program Files\Git\cmd\git.exe",
+            "push",
+            "origin",
+            "HEAD:refs/heads/feature",
+        )
+        for script, module in self._modules("windows_bash_label_recovery"):
+            exact = module._a3_preflight._serialize_powershell_literal(argv)
+            near_match = exact.replace("'push'", "push")
+            with self.subTest(script=script):
+                with synthetic_transcript([user("push now")]) as transcript_path, \
+                     mock.patch.object(
+                         module._a3_preflight,
+                         "_host_command_dialect",
+                         return_value="powershell",
+                         create=True,
+                     ):
+                    recovered = module._a3_preflight.build_preflight({
+                        "tool_name": "Bash",
+                        "cwd": str(REPO_ROOT.parent),
+                        "tool_input": {
+                            "command": exact,
+                            "workdir": str(REPO_ROOT),
+                        },
+                        "transcript_path": str(transcript_path),
+                    })
+                    not_recovered = module._a3_preflight.build_preflight({
+                        "tool_name": "Bash",
+                        "cwd": str(REPO_ROOT.parent),
+                        "tool_input": {
+                            "command": near_match,
+                            "workdir": str(REPO_ROOT),
+                        },
+                        "transcript_path": str(transcript_path),
+                    })
+                    simple = module._a3_preflight.build_preflight({
+                        "tool_name": "Bash",
+                        "cwd": str(REPO_ROOT.parent),
+                        "tool_input": {
+                            "command": "git push origin main",
+                            "workdir": str(REPO_ROOT),
+                        },
+                        "transcript_path": str(transcript_path),
+                    })
+                self.assertEqual(recovered.dialect, "powershell")
+                self.assertEqual(recovered.parsed.strict_projection.status, "canonical")
+                self.assertEqual(
+                    [record.kind for record in recovered.parsed.effective_publications.records],
+                    ["DIRECT"],
+                )
+                self.assertEqual(not_recovered.dialect, "posix")
+                self.assertNotEqual(not_recovered.parsed.strict_projection.status, "canonical")
+                self.assertEqual(simple.dialect, "posix")
+
+    def test_installed_codex_agents_lead_path_accepts_host_dialect(self) -> None:
+        expected = "powershell" if os.name == "nt" else "posix"
+        for script, module in self._modules("installed_agents_lead_path"):
+            with tempfile.TemporaryDirectory() as directory:
+                installed = (
+                    Path(directory)
+                    / ".agents"
+                    / "skills"
+                    / "lead"
+                    / "scripts"
+                    / "check-git-push-gate.py"
+                )
+                installed.parent.mkdir(parents=True)
+                installed.write_text("# installed path probe\n", encoding="utf-8")
+                with mock.patch.object(module, "__file__", str(installed)):
+                    self.assertEqual(module._pr_command_dialect(expected), expected)
+
+    def test_pr_oracle_child_receives_remaining_aggregate_budget(self) -> None:
+        for script, module in self._modules("oracle_remaining_budget"):
+            result = mock.Mock(returncode=0, stdout=b"ok")
+            with self.subTest(script=script), \
+                 mock.patch.object(module.time, "monotonic", return_value=100.0), \
+                 mock.patch.object(module, "_run_process", return_value=result) as run_process:
+                self.assertEqual(
+                    module._run_text(
+                        ["git", "ls-remote"], 112.5, "PRG-BRANCH-DRIFT",
+                        str(REPO_ROOT.resolve()),
+                    ),
+                    (0, "ok"),
+                )
+                run_process.assert_called_once_with(
+                    ["git", "ls-remote"], 12.5, str(REPO_ROOT.resolve())
+                )
+
+    def test_pr_oracle_child_denies_when_aggregate_budget_is_exhausted(self) -> None:
+        for script, module in self._modules("oracle_exhausted_budget"):
+            with self.subTest(script=script), \
+                 mock.patch.object(module.time, "monotonic", return_value=100.0), \
+                 mock.patch.object(module, "_run_process") as run_process:
+                with self.assertRaises(module.PrRouteDenied) as caught:
+                    module._run_text(
+                        ["git", "ls-remote"], 100.0, "PRG-BRANCH-DRIFT",
+                        str(REPO_ROOT.resolve()),
+                    )
+                self.assertEqual(caught.exception.failure_id, "PRG-BRANCH-DRIFT")
+                run_process.assert_not_called()
+
+    def test_exec_command_prefers_absolute_tool_workdir_without_parent_fallback(self) -> None:
+        argv = (
+            str(Path(shutil.which("git") or "").resolve(strict=True)),
+            "push", "origin", "HEAD:refs/heads/feature",
+        )
+        for script, module in self._modules("exec_workdir_binding"):
+            command = (
+                module._a3_preflight._serialize_powershell_literal(argv)
+                if os.name == "nt"
+                else shlex.join(argv)
+            )
+            with synthetic_transcript([user("push now")]) as transcript_path:
+                base = {
+                    "tool_name": "exec_command",
+                    "cwd": str(REPO_ROOT.parent),
+                    "transcript_path": str(transcript_path),
+                }
+                selected = module._a3_preflight.build_preflight({
+                    **base,
+                    "tool_input": {"command": command, "workdir": str(REPO_ROOT)},
+                })
+                fallback = module._a3_preflight.build_preflight({
+                    **base,
+                    "cwd": str(REPO_ROOT),
+                    "tool_input": {"command": command},
+                })
+                relative = module._a3_preflight.build_preflight({
+                    **base,
+                    "tool_input": {"command": command, "workdir": "."},
+                })
+                file_path = module._a3_preflight.build_preflight({
+                    **base,
+                    "tool_input": {"command": command, "workdir": str(Path(__file__))},
+                })
+            self.assertEqual(selected.repository_workdir, str(REPO_ROOT.resolve()))
+            self.assertEqual(fallback.repository_workdir, str(REPO_ROOT.resolve()))
+            self.assertEqual(relative.reason_id, "PFP-DENY-KNOWN")
+            self.assertEqual(relative.failure_id, "PRG-WORKDIR-INVALID")
+            self.assertEqual(file_path.reason_id, "PFP-HEAVY")
+            self.assertEqual(file_path.repository_workdir, str(Path(__file__)))
+
+    def test_repository_workdir_proof_uses_exact_selected_cwd_and_rejects_nonrepo(self) -> None:
+        git_exe = str(Path(shutil.which("git") or "").resolve(strict=True))
+        for script, module in self._modules("repository_workdir_proof"):
+            with self.subTest(script=script):
+                self.assertEqual(
+                    module._validate_repository_workdir(str(REPO_ROOT.resolve()), git_exe),
+                    str(REPO_ROOT.resolve()),
+                )
+                with tempfile.TemporaryDirectory() as directory, self.assertRaises(
+                    module.PrRouteDenied
+                ) as caught:
+                    module._validate_repository_workdir(directory, git_exe)
+                self.assertEqual(caught.exception.failure_id, "PRG-WORKDIR-INVALID")
+                with self.assertRaises(module.PrRouteDenied):
+                    module._normalize_repository_workdir(str(Path(__file__)))
+
+    def test_active_pr_route_threads_selected_workdir_to_oracle_and_scanner(self) -> None:
+        git_exe = str(Path(shutil.which("git") or "").resolve(strict=True))
+        workdir = str(REPO_ROOT.resolve())
+        for script, module in self._modules("active_pr_workdir_threading"):
+            dialect = "powershell" if os.name == "nt" else "posix"
+            argv = (git_exe, "push", "origin", "HEAD:refs/heads/feature")
+            command = (
+                module._a3_preflight._serialize_powershell_literal(argv)
+                if dialect == "powershell"
+                else shlex.join(argv)
+            )
+            parsed = module._a3_preflight.parse_shell_command(command, dialect)
+            grant = module.ActivePrGrant(
+                "https://github.com/acme/project/pull/7", "acme", "project", 7
+            )
+            target = module.PushTarget("origin", "refs/heads/feature", "feature")
+            with self.subTest(script=script), \
+                 mock.patch.object(module, "_PR_COMMAND_DIALECT_TEST_OVERRIDE", dialect), \
+                 mock.patch.object(module, "_normalize_repository_workdir", return_value=workdir) as normalize, \
+                 mock.patch.object(module, "_resolve_executable", return_value=git_exe), \
+                 mock.patch.object(module, "_prove_repository_root", return_value=workdir) as prove, \
+                 mock.patch.object(module, "_verify_pr_oracle", return_value=(target, "1" * 40)) as oracle, \
+                 mock.patch.object(module, "_run_authoritative_scan") as scanner:
+                self.assertTrue(module._evaluate_active_pr_route(
+                    grant, command, dialect, parsed, workdir, "tool"
+                ))
+            normalize.assert_called_once_with(workdir)
+            prove.assert_called_once_with(workdir, git_exe)
+            self.assertEqual(oracle.call_args.args[2], workdir)
+            self.assertEqual(scanner.call_args.args[1], workdir)
+            self.assertEqual(scanner.call_args.args[2], git_exe)
+
+    def test_preflight_defers_workdir_filesystem_resolution_until_grammar_admission(self) -> None:
+        absolute_missing = str(REPO_ROOT / "missing-workdir")
+        for script, module in self._modules("deferred_workdir_resolution"):
+            with synthetic_transcript([user("push now")]) as transcript_path, \
+                 mock.patch.object(module._a3_preflight.Path, "resolve") as resolve:
+                result = module._a3_preflight.build_preflight({
+                    "tool_name": "Bash",
+                    "cwd": str(REPO_ROOT.parent),
+                    "tool_input": {
+                        "command": "git push --force origin HEAD:refs/heads/feature",
+                        "workdir": absolute_missing,
+                    },
+                    "transcript_path": str(transcript_path),
+                })
+            resolve.assert_not_called()
+            self.assertEqual(result.reason_id, "PFP-HEAVY")
+            self.assertEqual(result.repository_workdir, absolute_missing)
+            parsed = module._a3_preflight.parse_shell_command(
+                "git push --force origin HEAD:refs/heads/feature", "posix"
+            )
+            grant = module.ActivePrGrant(
+                "https://github.com/acme/project/pull/7", "acme", "project", 7
+            )
+            with mock.patch.object(module, "_PR_COMMAND_DIALECT_TEST_OVERRIDE", "posix"), \
+                 mock.patch.object(module, "_normalize_repository_workdir") as normalize, \
+                 self.assertRaises(module.PrRouteDenied) as caught:
+                module._evaluate_active_pr_route(
+                    grant, "git push --force origin HEAD:refs/heads/feature",
+                    "posix", parsed, absolute_missing, "envelope",
+                )
+            self.assertEqual(caught.exception.failure_id, "PRG-COMMAND-SHAPE")
+            normalize.assert_not_called()
+
+    def test_selected_root_excludes_forged_path_executables(self) -> None:
+        for script, module in self._modules("selected_root_executable_exclusion"):
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory).resolve()
+                forged = root / ("git.exe" if os.name == "nt" else "git")
+                forged.write_bytes(b"forged\n")
+                if os.name != "nt":
+                    forged.chmod(0o700)
+                with self.subTest(script=script), mock.patch.object(
+                    module.shutil, "which", return_value=str(forged)
+                ):
+                    self.assertIsNone(module._resolve_executable("git", str(root)))
 
     def test_transcript_consumers_reuse_parsed_entry_identity(self) -> None:
         entries = [
@@ -4354,8 +4597,16 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
             return "Bash"
         return "PowerShell" if os.name == "nt" else "Bash"
 
-    def _literal_command(self, script: Path, *, remote: str = "origin", head_ref: str = "feature") -> str:
-        argv = (self.OWNED_GIT_IDENTITY, "push", remote, f"HEAD:refs/heads/{head_ref}")
+    def _literal_command(
+        self, script: Path, *, remote: str = "origin", head_ref: str = "feature",
+        repository_root: str | None = None,
+    ) -> str:
+        argv = (
+            (self.OWNED_GIT_IDENTITY, "-C", repository_root, "push", remote,
+             f"HEAD:refs/heads/{head_ref}")
+            if repository_root is not None
+            else (self.OWNED_GIT_IDENTITY, "push", remote, f"HEAD:refs/heads/{head_ref}")
+        )
         if self._tool_name(script) == "PowerShell":
             return "& " + " ".join("'" + word.replace("'", "''") + "'" for word in argv)
         return shlex.join(argv)
@@ -4392,9 +4643,12 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
                 value = value.encode("utf-8")
             return module.ProcessResult(code, value, stderr)
 
-        def run(argv, _timeout):
+        def run(argv, _timeout, repository_workdir):
+            self.assertEqual(repository_workdir, str(REPO_ROOT.resolve()))
             observed.append(list(argv))
             args = argv[1:]
+            if args == ["rev-parse", "--show-toplevel"]:
+                return result(0, str(REPO_ROOT.resolve()) + "\n")
             if changes.get("provider_timeout") and args[:2] == ["pr", "view"]:
                 return None
             if changes.get("provider_failure") and args[:2] == ["pr", "view"]:
@@ -4453,17 +4707,23 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
         *,
         tool_name: str | None = None,
         history_byte_cap: int | None = None,
+        omit_tool_workdir: bool = False,
+        tool_workdir: str | None = None,
         **oracle_changes,
     ):
         module = _load_gate_module(script, f"pr_grant_{script.parent.parent.name}_{id(entries)}")
         observed: list[list[str]] = []
-        resolver = lambda name: self.OWNED_GIT_IDENTITY if name == "git" else self.OWNED_GH_IDENTITY
+        resolver = lambda name, _root: (
+            self.OWNED_GIT_IDENTITY if name == "git" else self.OWNED_GH_IDENTITY
+        )
         stdout = io.StringIO()
         dialect_override = None
         if script == CANONICAL_HOOK:
             dialect_override = "powershell" if (tool_name or self._tool_name(script)) == "PowerShell" else "posix"
 
-        def authoritative(binding):
+        def authoritative(binding, repository_workdir, git_exe):
+            self.assertEqual(repository_workdir, str(REPO_ROOT.resolve()))
+            self.assertEqual(git_exe, self.OWNED_GIT_IDENTITY)
             receipt = module.RangeReceiptV3(
                 1, "a" * 64, 1, "b" * 64, 0, "c" * 64,
                 0, 0, 0, 0, "d" * 64, 0, "e" * 64,
@@ -4474,15 +4734,27 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
                 module.PublicationSafetyObservation("valid-v3", receipt), "fixture-consume",
             )
 
+        def generic_binding(remote, destination, source, repository_workdir, git_exe):
+            self.assertEqual(repository_workdir, str(REPO_ROOT.resolve()))
+            self.assertEqual(git_exe, self.OWNED_GIT_IDENTITY)
+            return module.PushScanBinding(
+                "generic", remote, destination, self.LOCAL_TIP, self.LOCAL_TIP
+            )
+
         with synthetic_transcript(entries) as transcript_path:
+            tool_input = {"command": command}
+            if not omit_tool_workdir:
+                tool_input["workdir"] = tool_workdir or str(REPO_ROOT)
             envelope = {
                 "tool_name": tool_name or self._tool_name(script),
-                "tool_input": {"command": command},
+                "cwd": str(REPO_ROOT.parent),
+                "tool_input": tool_input,
                 "transcript_path": str(transcript_path),
             }
             with mock.patch.object(module._a3_preflight, "read_stdin_utf8", return_value=json.dumps(envelope)), \
                  mock.patch.object(module, "_resolve_executable", side_effect=resolver), \
                  mock.patch.object(module, "_run_process", side_effect=self._oracle(module, observed, **oracle_changes)), \
+                 mock.patch.object(module, "_resolve_generic_scan_binding", side_effect=generic_binding), \
                  mock.patch.object(module, "_run_authoritative_scan", side_effect=authoritative), \
                  mock.patch.object(module, "TRANSCRIPT_HISTORY_BYTE_CAP", history_byte_cap or module.TRANSCRIPT_HISTORY_BYTE_CAP), \
                  mock.patch.object(module, "_PR_COMMAND_DIALECT_TEST_OVERRIDE", dialect_override), \
@@ -4490,6 +4762,46 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
                 rc = module.main()
         self.assertEqual(rc, 0)
         return stdout.getvalue(), observed
+
+    def test_pr_literal_minus_c_recovers_dropped_tool_workdir_fail_closed(self) -> None:
+        entries = [user(self.GRANT), user("push now")]
+        for script in HOOKS:
+            exact = self._literal_command(
+                script, repository_root=str(REPO_ROOT.resolve())
+            )
+            stdout, observed = self._run_module(
+                script, entries, exact, omit_tool_workdir=True
+            )
+            self.assertFalse(denies_text(stdout), stdout)
+            self.assertTrue(any(argv[1:3] == ["pr", "view"] for argv in observed))
+
+            module = _load_gate_module(script, f"minus_c_negative_{script.parent.parent.name}")
+            argv = (
+                self.OWNED_GIT_IDENTITY, "-C", str(REPO_ROOT.resolve()),
+                "push", "origin", "HEAD:refs/heads/feature",
+            )
+            serialize = (
+                module._a3_preflight._serialize_powershell_literal
+                if self._tool_name(script) == "PowerShell"
+                else shlex.join
+            )
+            cases = (
+                serialize((self.OWNED_GIT_IDENTITY, "-C", "relative", "push", "origin", "HEAD:refs/heads/feature")),
+                serialize((self.OWNED_GIT_IDENTITY, "-C", "push", "origin", "HEAD:refs/heads/feature")),
+                serialize((self.OWNED_GIT_IDENTITY, "-C", str(REPO_ROOT), "-C", str(REPO_ROOT), "push", "origin", "HEAD:refs/heads/feature")),
+                " " + serialize(argv),
+            )
+            for command in cases:
+                denied, calls = self._run_module(
+                    script, entries, command, omit_tool_workdir=True
+                )
+                self.assertIn("PRG-COMMAND-SHAPE", denied, command)
+                self.assertEqual(calls, [], command)
+            conflict, calls = self._run_module(
+                script, entries, exact, tool_workdir=str(REPO_ROOT.parent)
+            )
+            self.assertIn("PRG-WORKDIR-INVALID", conflict)
+            self.assertEqual(calls, [])
 
     def test_legacy_approve_publication_precedes_pr_route(self) -> None:
         for script in HOOKS:
@@ -4517,7 +4829,10 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
                 "git push origin HEAD:claude",
             )
             self.assertFalse(denies_text(stdout))
-            self.assertEqual(observed, [])
+            self.assertEqual(
+                [argv[1:] for argv in observed],
+                [["rev-parse", "--show-toplevel"]],
+            )
 
     def test_pr_grant_survives_more_than_100_transcript_entries(self) -> None:
         entries = [user(self.GRANT)] + [assistant(f"review step {i}") for i in range(150)]
@@ -6470,14 +6785,21 @@ class TestPublicationSafetyTrustedScanR2(unittest.TestCase):
                 check=True, capture_output=True, text=True, encoding="utf-8",
             ).stdout.strip()
             previous = Path.cwd()
-            try:
-                os.chdir(repo)
-                binding = module.PushScanBinding(
-                    "generic", "origin", "refs/heads/main", head, head
+            binding = module.PushScanBinding(
+                "generic", "origin", "refs/heads/main", head, head
+            )
+            git_exe = str(Path(shutil.which("git") or "").resolve(strict=True))
+            forged_bin = root / "forged-bin"
+            forged_bin.mkdir()
+            forged = forged_bin / ("git.exe" if os.name == "nt" else "git")
+            forged.write_bytes(b"forged\n")
+            if os.name != "nt":
+                forged.chmod(0o700)
+            with mock.patch.dict(os.environ, {"PATH": str(forged_bin)}):
+                observation = module._run_authoritative_scan(
+                    binding, str(repo.resolve()), git_exe
                 )
-                observation = module._run_authoritative_scan(binding)
-            finally:
-                os.chdir(previous)
+            self.assertEqual(Path.cwd(), previous)
         self.assertEqual(type(observation).__name__, "ConsumedAuthoritativeEvidence")
         self.assertEqual(observation.parsed_outcome.kind, "valid-v3")
         self.assertEqual(observation.parsed_outcome.receipt.commits, 1)

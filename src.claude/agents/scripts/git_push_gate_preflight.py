@@ -7,6 +7,7 @@ import os
 import re
 import shlex
 import types
+from pathlib import Path
 from typing import NamedTuple, get_args, get_origin, get_type_hints
 
 from hook_common import (
@@ -1220,7 +1221,7 @@ def _strict_literal_projection(
         return StrictLiteralProjection("noncanonical", ())
     record = commands[0]
     argv = record.tokens
-    if len(argv) != 4:
+    if len(argv) not in (4, 6):
         return StrictLiteralProjection("noncanonical", ())
     if dialect == "posix" and shlex.join(argv) == command:
         return StrictLiteralProjection("canonical", argv)
@@ -2170,8 +2171,62 @@ def parse_transcript_command(
     )
     return _parse_shell_command_identity(command_text, resolution.dialect, identity)
 
-def _serialize_powershell_literal(argv: tuple[str, str, str, str]) -> str:
+def _serialize_powershell_literal(argv: tuple[str, ...]) -> str:
     return "& " + " ".join("'" + word.replace("'", "''") + "'" for word in argv)
+
+
+def _host_command_dialect() -> str:
+    return "powershell" if os.name == "nt" else "posix"
+
+
+def _is_exact_direct_literal(command: str, parsed: ShellParseResult) -> bool:
+    effective = parsed.effective_publications
+    if (
+        parsed.dialect not in ("posix", "powershell")
+        or parsed.strict_projection.status != "canonical"
+        or not effective.exact_complete
+        or len(effective.records) != 1
+        or effective.records[0].kind != "DIRECT"
+        or effective.records[0].certainty != "exact"
+    ):
+        return False
+    serialized = (
+        shlex.join(parsed.strict_projection.argv)
+        if parsed.dialect == "posix"
+        else _serialize_powershell_literal(parsed.strict_projection.argv)
+    )
+    return serialized == command
+
+
+def _recover_mislabeled_command_dialect(
+    command: str,
+    resolution: CommandDialectResolution,
+    parsed: ShellParseResult,
+) -> tuple[CommandDialectResolution, ShellParseResult]:
+    """Recover only one exact host-shell literal from a supported wrong label."""
+    host_dialect = _host_command_dialect()
+    primary_publications = parsed.effective_publications.records
+    if (
+        not resolution.exact
+        or resolution.dialect not in ("posix", "powershell")
+        or resolution.dialect == host_dialect
+        or host_dialect != "powershell"
+        or not command.startswith("& '")
+        or parsed.strict_projection.status == "canonical"
+        or len(primary_publications) != 1
+        or primary_publications[0].kind != "DIRECT"
+        or primary_publications[0].certainty != "exact"
+    ):
+        return resolution, parsed
+    candidates: list[tuple[str, ShellParseResult]] = []
+    for dialect in ("posix", "powershell"):
+        candidate = parsed if dialect == resolution.dialect else parse_shell_command(command, dialect)
+        if _is_exact_direct_literal(command, candidate):
+            candidates.append((dialect, candidate))
+    if len(candidates) != 1 or candidates[0][0] != host_dialect:
+        return resolution, parsed
+    dialect, candidate = candidates[0]
+    return CommandDialectResolution(dialect, True), candidate
 
 def _has_solitary_direct_dry_credit(parsed: ShellParseResult) -> bool:
     """Return true only for one exact root-level positive long-form dry push."""
@@ -2201,6 +2256,18 @@ def _has_solitary_direct_dry_credit(parsed: ShellParseResult) -> bool:
     )
 
 
+def _has_malformed_minus_c_push_candidate(parsed: ShellParseResult) -> bool:
+    if len(parsed.commands) != 1:
+        return False
+    tokens = parsed.commands[0].tokens
+    return (
+        len(tokens) >= 3
+        and _normalized_command_word(tokens[0]) == "git"
+        and "-C" in tokens[1:]
+        and "push" in tokens[2:]
+    )
+
+
 class PreflightResult(NamedTuple):
     outcome: str
     reason_id: str
@@ -2213,6 +2280,8 @@ class PreflightResult(NamedTuple):
     generic_decision: GenericPushDecision | None
     push_instruction: bool
     failure_id: str | None
+    repository_workdir: str = ""
+    repository_workdir_source: str = ""
 
 
 _OUTCOMES = frozenset(("ALLOW_FINAL", "DEFER"))
@@ -2236,6 +2305,7 @@ _GENERIC_STATUSES = frozenset((
 ))
 _PREFLIGHT_FAILURE_IDS = frozenset((
     "PGG-PARSE-UNCERTAIN", "PRG-TRANSCRIPT-UNAVAILABLE",
+    "PRG-WORKDIR-INVALID",
 ))
 _PREFLIGHT_BRANCHES = {
     "PFP-ALLOW-SUBAGENT": ("ALLOW_FINAL", "NONE", frozenset(), None),
@@ -2273,7 +2343,8 @@ _PREFLIGHT_BRANCHES = {
         "DEFER", "EVALUATE_HEAVY",
         frozenset((
             "command", "dialect", "transcript_path", "parsed",
-            "current_turn_status", "generic_decision",
+            "current_turn_status", "generic_decision", "repository_workdir",
+            "repository_workdir_source",
         )),
         None,
     ),
@@ -2286,7 +2357,20 @@ _PREFLIGHT_OPTIONAL_DEFAULTS = {
     "current_turn_status": None,
     "generic_decision": None,
     "failure_id": None,
+    "repository_workdir": "",
+    "repository_workdir_source": "",
 }
+
+
+def _repository_workdir(envelope: dict, tool_input: dict) -> tuple[str, str]:
+    explicit = "workdir" in tool_input
+    raw = tool_input["workdir"] if explicit else envelope.get("cwd")
+    if type(raw) is not str or not raw or "\x00" in raw:
+        raise PrRouteDenied("PRG-WORKDIR-INVALID")
+    candidate = Path(raw)
+    if not candidate.is_absolute():
+        raise PrRouteDenied("PRG-WORKDIR-INVALID")
+    return raw, "tool" if explicit else "envelope"
 
 
 def _validate_declared_value(value: object, annotation: object, path: str) -> None:
@@ -2394,6 +2478,8 @@ def validate_preflight_result(result: object) -> PreflightResult:
             raise ValueError("inconsistent generic decision binding")
     if result.failure_id is not None and result.failure_id not in _PREFLIGHT_FAILURE_IDS:
         raise ValueError("invalid preflight failure identifier")
+    if result.repository_workdir_source not in ("", "tool", "envelope"):
+        raise ValueError("invalid repository workdir source")
     branch = _PREFLIGHT_BRANCHES[result.reason_id]
     expected_outcome, expected_continuation, present_fields, expected_failure = branch
     if (result.outcome, result.continuation) != (
@@ -2433,10 +2519,14 @@ def _result(
     generic_decision: GenericPushDecision | None = None,
     push_instruction: bool = False,
     failure_id: str | None = None,
+    repository_workdir: str = "",
+    repository_workdir_source: str = "",
 ) -> PreflightResult:
     return validate_preflight_result(PreflightResult(
         outcome, reason_id, continuation, command, dialect, transcript_path,
         parsed, current_turn_status, generic_decision, push_instruction, failure_id,
+        repository_workdir,
+        repository_workdir_source,
     ))
 
 
@@ -2452,13 +2542,21 @@ def build_preflight(envelope: dict) -> PreflightResult:
             return _result("ALLOW_FINAL", "PFP-ALLOW-NO-COMMAND", "NONE")
         resolution = resolve_command_dialect(envelope.get("tool_name"))
         parsed = parse_shell_command(command, resolution.dialect)
+        resolution, parsed = _recover_mislabeled_command_dialect(
+            command, resolution, parsed
+        )
         pushes = find_git_push_records(parsed)
-        if not pushes and parsed.effective_publications.exact_complete:
+        minus_c_candidate = _has_malformed_minus_c_push_candidate(parsed)
+        if (
+            not pushes
+            and not minus_c_candidate
+            and parsed.effective_publications.exact_complete
+        ):
             return _result(
                 "ALLOW_FINAL", "PFP-ALLOW-NON-PUSH", "NONE",
                 command=command, dialect=resolution.dialect, parsed=parsed,
             )
-        if not pushes:
+        if not pushes and not minus_c_candidate:
             return _result(
                 "DEFER", "PFP-DENY-PARSE", "RENDER_DENY",
                 command=command, dialect=resolution.dialect, parsed=parsed,
@@ -2494,12 +2592,16 @@ def build_preflight(envelope: dict) -> PreflightResult:
                 current_turn_status=status, generic_decision=grammar,
                 push_instruction=instruction,
             )
+        repository_workdir, repository_workdir_source = _repository_workdir(
+            envelope, tool_input
+        )
         return _result(
             "DEFER", "PFP-HEAVY", "EVALUATE_HEAVY",
             command=command, dialect=resolution.dialect,
             transcript_path=transcript_path, parsed=parsed,
             current_turn_status=status, generic_decision=grammar,
-            push_instruction=instruction,
+            push_instruction=instruction, repository_workdir=repository_workdir,
+            repository_workdir_source=repository_workdir_source,
         )
     except PrRouteDenied as exc:
         return _result(
