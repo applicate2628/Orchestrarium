@@ -588,6 +588,9 @@ def test_fast_oversized_git_status_cannot_be_consumed_as_complete(
             result = process_runner._result_from_parts(
                 request,
                 time.monotonic(),
+                executable_identity_sha256=(
+                    _validated_cwd.executable_identity_sha256
+                ),
                 backend="controlled-fast-git-v1",
                 capture=capture,
                 stdin_state={"written": 0, "complete": True},

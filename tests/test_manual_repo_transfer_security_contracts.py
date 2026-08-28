@@ -6,6 +6,7 @@ The tests use only temporary repositories and the public command-line
 interface.
 """
 
+import ast
 import contextlib
 import hashlib
 import importlib.util
@@ -18,6 +19,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 import zipfile
 from pathlib import Path
@@ -39,6 +41,37 @@ def load_transfer_module():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def process_is_alive(pid: int) -> bool:
+    if os.name == "nt":
+        import ctypes
+
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        handle = kernel.OpenProcess(0x1000, False, pid)
+        if not handle:
+            return False
+        try:
+            code = ctypes.c_ulong()
+            return bool(kernel.GetExitCodeProcess(handle, ctypes.byref(code))) and (
+                code.value == 259
+            )
+        finally:
+            kernel.CloseHandle(handle)
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+
+
+def wait_process_gone(pid: int, timeout: float = 5.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if not process_is_alive(pid):
+            return True
+        time.sleep(0.02)
+    return not process_is_alive(pid)
 
 
 def canonical_json(value: object) -> bytes:
@@ -64,6 +97,16 @@ def run_cli(*args: object) -> subprocess.CompletedProcess[str]:
     )
 
 
+def bounded_git_result(
+    executable_identity_sha256: str,
+    *,
+    stdout: bytes,
+) -> subprocess.CompletedProcess[bytes]:
+    completed = subprocess.CompletedProcess([], 0, stdout=stdout, stderr=b"")
+    completed.executable_identity_sha256 = executable_identity_sha256
+    return completed
+
+
 def path_covers(parent: str, child: str) -> bool:
     return child == parent or child.startswith(parent + "/")
 
@@ -84,6 +127,280 @@ def directory_alias(alias: Path, target: Path) -> None:
 
 
 class IoBoundaryTests(unittest.TestCase):
+    def test_transfer_helper_delegates_process_ownership_to_process_runner(self) -> None:
+        tree = ast.parse(SCRIPT.read_text(encoding="utf-8"))
+        direct_popen_calls = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "subprocess"
+            and node.func.attr == "Popen"
+        ]
+        self.assertEqual([], direct_popen_calls)
+
+    def test_bound_git_process_rejects_runner_executable_identity_mismatch(self) -> None:
+        module = load_transfer_module()
+        repository = module.BoundRepository(
+            Path.cwd(), GIT_EXECUTABLE, "1" * 64, (1,)
+        )
+        observed = SimpleNamespace(
+            args=[str(GIT_EXECUTABLE)],
+            returncode=0,
+            stdout=b"",
+            stderr=b"",
+            executable_identity_sha256="2" * 64,
+        )
+        with (
+            mock.patch.object(module, "require_current_git_binding"),
+            mock.patch.object(module, "run_bounded_process", return_value=observed),
+            self.assertRaisesRegex(
+                module.ContractError, r"^TRANSFER-GIT-BINDING-DRIFT$"
+            ),
+        ):
+            module.run_bound_git_process(
+                repository, [str(GIT_EXECUTABLE), "rev-parse", "--show-toplevel"]
+            )
+
+    def test_force_is_admitted_only_for_inventory_and_bundle(self) -> None:
+        module = load_transfer_module()
+        parser = module.make_parser()
+        inventory = parser.parse_args(
+            [
+                "inventory",
+                "--repo",
+                "repo",
+                "--git-executable",
+                str(GIT_EXECUTABLE),
+                "--output",
+                "inventory.json",
+                "--force",
+            ]
+        )
+        bundle = parser.parse_args(
+            [
+                "bundle",
+                "--repo",
+                "repo",
+                "--git-executable",
+                str(GIT_EXECUTABLE),
+                "--inventory",
+                "inventory.json",
+                "--selection",
+                "selection.json",
+                "--output",
+                "bundle.zip",
+                "--force",
+            ]
+        )
+        self.assertTrue(inventory.force)
+        self.assertTrue(bundle.force)
+        for command in ("verify", "cleanup"):
+            with self.subTest(command=command), self.assertRaises(SystemExit):
+                parser.parse_args([command, "--force"])
+
+    def test_inventory_existing_output_without_force_is_preserved(self) -> None:
+        module = load_transfer_module()
+        inventory = {"entries": []}
+        with tempfile.TemporaryDirectory(prefix="repo-transfer-output-exists-") as temp:
+            root = Path(temp) / "repo"
+            root.mkdir()
+            output = Path(temp) / "inventory.json"
+            original = b"operator-owned\n"
+            output.write_bytes(original)
+            stderr = io.StringIO()
+            with (
+                mock.patch.object(
+                    module,
+                    "bind_repository",
+                    return_value=module.BoundRepository(
+                        root, GIT_EXECUTABLE, "0" * 64
+                    ),
+                ),
+                mock.patch.object(module, "build_inventory", return_value=inventory),
+                contextlib.redirect_stderr(stderr),
+            ):
+                result = module.main(
+                    [
+                        "inventory",
+                        "--repo",
+                        str(root),
+                        "--git-executable",
+                        str(GIT_EXECUTABLE),
+                        "--output",
+                        str(output),
+                    ]
+                )
+            self.assertEqual(2, result)
+            self.assertEqual("TRANSFER-OUTPUT-EXISTS", stderr.getvalue().strip())
+            self.assertEqual(original, output.read_bytes())
+
+    def test_inventory_force_atomically_replaces_unchanged_regular_output(self) -> None:
+        module = load_transfer_module()
+        inventory = {"entries": []}
+        with tempfile.TemporaryDirectory(prefix="repo-transfer-output-force-") as temp:
+            root = Path(temp) / "repo"
+            root.mkdir()
+            output = Path(temp) / "inventory.json"
+            output.write_bytes(b"replace-me\n")
+            real_replace = os.replace
+            with (
+                mock.patch.object(
+                    module,
+                    "bind_repository",
+                    return_value=module.BoundRepository(
+                        root, GIT_EXECUTABLE, "0" * 64
+                    ),
+                ),
+                mock.patch.object(module, "build_inventory", return_value=inventory),
+                mock.patch.object(
+                    module.os, "replace", wraps=real_replace
+                ) as replace_mock,
+            ):
+                result = module.main(
+                    [
+                        "inventory",
+                        "--repo",
+                        str(root),
+                        "--git-executable",
+                        str(GIT_EXECUTABLE),
+                        "--output",
+                        str(output),
+                        "--force",
+                    ]
+                )
+            self.assertEqual(0, result)
+            self.assertEqual(module.canonical_json(inventory) + b"\n", output.read_bytes())
+            self.assertEqual(1, replace_mock.call_count)
+            replaced_source, replaced_destination = replace_mock.call_args.args
+            self.assertEqual(output, Path(replaced_destination))
+            self.assertNotEqual(output, Path(replaced_source))
+            self.assertEqual([], list(output.parent.glob(f".{output.name}.*.tmp")))
+
+    def test_force_rejects_type_and_identity_drift_without_clobber(self) -> None:
+        module = load_transfer_module()
+        with tempfile.TemporaryDirectory(prefix="repo-transfer-output-drift-") as temp:
+            root = Path(temp) / "repo"
+            root.mkdir()
+            directory = Path(temp) / "directory-output"
+            directory.mkdir()
+            with self.assertRaisesRegex(
+                module.ContractError, r"^TRANSFER-OUTPUT-TYPE-INVALID$"
+            ):
+                module.bind_output(directory, root, force=True)
+
+            repository_parent = root / "must-not-be-created"
+            with self.assertRaisesRegex(
+                module.ContractError, r"^TRANSFER-OUTPUT-PATH-INVALID$"
+            ):
+                module.bind_output(
+                    repository_parent / "inventory.json", root, force=True
+                )
+            self.assertFalse(repository_parent.exists())
+
+            ordinary_parent = Path(temp) / "ordinary-parent"
+            ordinary_parent.mkdir()
+            linked_parent = Path(temp) / "linked-parent"
+            directory_alias(linked_parent, ordinary_parent)
+            with self.assertRaisesRegex(
+                module.ContractError, r"^TRANSFER-OUTPUT-PATH-INVALID$"
+            ):
+                module.bind_output(linked_parent / "inventory.json", root, force=True)
+
+            output = Path(temp) / "inventory.json"
+            output.write_bytes(b"bound\n")
+            binding = module.bind_output(output, root, force=True)
+            replacement = Path(temp) / "replacement"
+            replacement.write_bytes(b"raced\n")
+            os.replace(replacement, output)
+            with self.assertRaisesRegex(
+                module.ContractError, r"^TRANSFER-OUTPUT-IDENTITY-DRIFT$"
+            ):
+                module.publish_output_bytes(binding, b"new\n")
+            self.assertEqual(b"raced\n", output.read_bytes())
+            self.assertEqual([], list(output.parent.glob(f".{output.name}.*.tmp")))
+
+            type_raced = Path(temp) / "type-raced.json"
+            type_raced.write_bytes(b"bound\n")
+            type_binding = module.bind_output(type_raced, root, force=True)
+            type_raced.unlink()
+            type_raced.mkdir()
+            with self.assertRaisesRegex(
+                module.ContractError, r"^TRANSFER-OUTPUT-IDENTITY-DRIFT$"
+            ):
+                module.publish_output_bytes(type_binding, b"new\n")
+            self.assertTrue(type_raced.is_dir())
+
+            bound_parent = Path(temp) / "bound-parent"
+            bound_parent.mkdir()
+            parent_output = bound_parent / "inventory.json"
+            parent_output.write_bytes(b"bound\n")
+            parent_binding = module.bind_output(parent_output, root, force=True)
+            displaced_parent = Path(temp) / "displaced-parent"
+            bound_parent.rename(displaced_parent)
+            bound_parent.mkdir()
+            parent_output.write_bytes(b"raced-parent\n")
+            with self.assertRaisesRegex(
+                module.ContractError, r"^TRANSFER-OUTPUT-IDENTITY-DRIFT$"
+            ):
+                module.publish_output_bytes(parent_binding, b"new\n")
+            self.assertEqual(b"raced-parent\n", parent_output.read_bytes())
+
+    def test_default_publish_race_is_no_clobber(self) -> None:
+        module = load_transfer_module()
+        with tempfile.TemporaryDirectory(prefix="repo-transfer-output-race-") as temp:
+            root = Path(temp) / "repo"
+            root.mkdir()
+            output = Path(temp) / "inventory.json"
+            binding = module.bind_output(output, root, force=False)
+            output.write_bytes(b"raced\n")
+            with self.assertRaisesRegex(
+                module.ContractError, r"^TRANSFER-OUTPUT-EXISTS$"
+            ):
+                module.publish_output_bytes(binding, b"new\n")
+            self.assertEqual(b"raced\n", output.read_bytes())
+            self.assertEqual([], list(output.parent.glob(f".{output.name}.*.tmp")))
+
+    def test_default_publish_uses_one_atomic_no_replace_link(self) -> None:
+        module = load_transfer_module()
+        with tempfile.TemporaryDirectory(prefix="repo-transfer-output-link-") as temp:
+            root = Path(temp) / "repo"
+            root.mkdir()
+            output = Path(temp) / "inventory.json"
+            binding = module.bind_output(output, root, force=False)
+            real_link = os.link
+            real_replace = os.replace
+            with (
+                mock.patch.object(module.os, "link", wraps=real_link) as link_mock,
+                mock.patch.object(
+                    module.os, "replace", wraps=real_replace
+                ) as replace_mock,
+            ):
+                module.publish_output_bytes(binding, b"new\n")
+            self.assertEqual(b"new\n", output.read_bytes())
+            self.assertEqual(1, link_mock.call_count)
+            _source, destination = link_mock.call_args.args
+            self.assertEqual(output, Path(destination))
+            self.assertEqual(0, replace_mock.call_count)
+            self.assertEqual([], list(output.parent.glob(f".{output.name}.*.tmp")))
+
+    def test_force_success_replay_cleans_temporary_files(self) -> None:
+        module = load_transfer_module()
+        with tempfile.TemporaryDirectory(prefix="repo-transfer-force-replay-") as temp:
+            root = Path(temp) / "repo"
+            root.mkdir()
+            output = Path(temp) / "inventory.json"
+            output.write_bytes(b"initial\n")
+
+            for payload in (b"first\n", b"second\n"):
+                binding = module.bind_output(output, root, force=True)
+                module.publish_output_bytes(binding, payload)
+                self.assertEqual(payload, output.read_bytes())
+                self.assertEqual(
+                    [], list(output.parent.glob(f".{output.name}.*.tmp"))
+                )
+
     def test_special_entry_modes_fail_before_hashing(self) -> None:
         module = load_transfer_module()
         empty_git_result = subprocess.CompletedProcess([], 0, stdout=b"", stderr=b"")
@@ -253,10 +570,11 @@ class IoBoundaryTests(unittest.TestCase):
     def test_bounded_subprocess_refuses_cap_plus_one_without_subprocess_run_capture(self) -> None:
         module = load_transfer_module()
         command = [
-            sys.executable,
-            "-B",
-            "-c",
-            "import sys; sys.stdout.buffer.write(b'x' * 65)",
+            str(GIT_EXECUTABLE),
+            "rev-parse",
+            "--sq-quote",
+            "--",
+            "x" * 65,
         ]
         with mock.patch.object(module, "MAX_JSON_BYTES", 64), mock.patch.object(
             module.subprocess,
@@ -264,27 +582,73 @@ class IoBoundaryTests(unittest.TestCase):
             side_effect=AssertionError("subprocess.run capture is forbidden"),
         ):
             with self.assertRaisesRegex(module.ContractError, "git output exceeds JSON limit"):
-                module.run_bounded_process(command, None, {})
+                module.run_bounded_process(
+                    command, SCRIPT.parents[4], module.sanitized_git_environment()
+                )
 
     def test_bounded_subprocess_reaps_timed_out_child_as_contract_error(self) -> None:
         module = load_transfer_module()
-        spawned: list[subprocess.Popen[bytes]] = []
-        original_popen = subprocess.Popen
+        with tempfile.TemporaryDirectory(prefix="repo-transfer-git-timeout-") as temp:
+            root = Path(temp)
+            repository = root / "repo"
+            repository.mkdir()
+            subprocess.run(
+                [str(GIT_EXECUTABLE), "init", "-q", str(repository)], check=True
+            )
+            sleeper = root / "sleep.py"
+            sleeper.write_text("import time\ntime.sleep(30)\n", encoding="utf-8")
+            alias = f'!"{sys.executable}" "{sleeper}"'
+            command = [str(GIT_EXECUTABLE), "-c", f"alias.pause={alias}", "pause"]
+            with mock.patch.object(module, "GIT_COMMAND_TIMEOUT_SECONDS", 0.1):
+                with self.assertRaisesRegex(module.ContractError, "git command timed out"):
+                    module.run_bounded_process(
+                        command, repository, module.sanitized_git_environment()
+                    )
 
-        def remember_popen(*args: object, **kwargs: object) -> subprocess.Popen[bytes]:
-            process = original_popen(*args, **kwargs)
-            spawned.append(process)
-            return process
-
-        command = [sys.executable, "-B", "-c", "import time; time.sleep(1)"]
-        with (
-            mock.patch.object(module, "GIT_COMMAND_TIMEOUT_SECONDS", 0.01),
-            mock.patch.object(module.subprocess, "Popen", side_effect=remember_popen),
-        ):
-            with self.assertRaisesRegex(module.ContractError, "git command timed out"):
-                module.run_bounded_process(command, None, {})
-        self.assertEqual(1, len(spawned))
-        self.assertIsNotNone(spawned[0].poll())
+    def test_parent_exit_with_pipe_inheriting_descendant_settles_before_return(self) -> None:
+        module = load_transfer_module()
+        descendant_pid: int | None = None
+        with tempfile.TemporaryDirectory(prefix="repo-transfer-git-descendant-") as temp:
+            root = Path(temp)
+            repository = root / "repo"
+            repository.mkdir()
+            subprocess.run(
+                [str(GIT_EXECUTABLE), "init", "-q", str(repository)], check=True
+            )
+            marker = root / "descendant.pid"
+            parent = root / "spawn_descendant.py"
+            parent.write_text(
+                "from pathlib import Path\n"
+                "import subprocess, sys\n"
+                "child = subprocess.Popen(\n"
+                "    [sys.executable, '-c', 'import time; time.sleep(30)'],\n"
+                "    close_fds=False,\n"
+                ")\n"
+                "Path(sys.argv[1]).write_text(str(child.pid), encoding='ascii')\n",
+                encoding="utf-8",
+            )
+            alias = f'!"{sys.executable}" "{parent}"'
+            command = [
+                str(GIT_EXECUTABLE),
+                "-c",
+                f"alias.spawn-descendant={alias}",
+                "spawn-descendant",
+                str(marker),
+            ]
+            try:
+                with self.assertRaises(module.ContractError):
+                    module.run_bounded_process(
+                        command, repository, module.sanitized_git_environment()
+                    )
+                self.assertTrue(marker.is_file(), "descendant did not publish its PID")
+                descendant_pid = int(marker.read_text(encoding="ascii"))
+                self.assertTrue(
+                    wait_process_gone(descendant_pid),
+                    "pipe-inheriting descendant survived transfer runner return",
+                )
+            finally:
+                if descendant_pid is not None and process_is_alive(descendant_pid):
+                    os.kill(descendant_pid, 15)
 
     def test_inventory_producer_refuses_overlimit_before_publishing_output(self) -> None:
         module = load_transfer_module()
@@ -392,7 +756,14 @@ class SecurityContractTests(unittest.TestCase):
         self.temp.cleanup()
 
     def inventory(self) -> dict:
-        result = run_cli("inventory", "--repo", self.repo, "--output", self.inventory_path)
+        result = run_cli(
+            "inventory",
+            "--repo",
+            self.repo,
+            "--output",
+            self.inventory_path,
+            "--force",
+        )
         self.assertEqual(0, result.returncode, result.stderr)
         return json.loads(self.inventory_path.read_text(encoding="utf-8"))
 
@@ -465,6 +836,7 @@ class SecurityContractTests(unittest.TestCase):
             self.selection_path,
             "--output",
             self.bundle_path,
+            "--force",
         )
 
     def test_alias_cannot_hide_repository_contained_git(self) -> None:
@@ -493,8 +865,11 @@ class SecurityContractTests(unittest.TestCase):
         directory_alias(alias, self.repo)
         subdirectory = alias / ".scratch"
         launched = mock.Mock(
-            return_value=subprocess.CompletedProcess(
-                [], 0, stdout=os.fsencode(self.repo) + b"\n", stderr=b""
+            return_value=bounded_git_result(
+                module._load_process_runner().resolve_executable_identity(
+                    GIT_EXECUTABLE
+                ),
+                stdout=os.fsencode(self.repo) + b"\n",
             )
         )
 
@@ -509,8 +884,11 @@ class SecurityContractTests(unittest.TestCase):
         different_root = self.root / "different-repository"
         different_root.mkdir()
         launched = mock.Mock(
-            return_value=subprocess.CompletedProcess(
-                [], 0, stdout=os.fsencode(different_root) + b"\n", stderr=b""
+            return_value=bounded_git_result(
+                module._load_process_runner().resolve_executable_identity(
+                    GIT_EXECUTABLE
+                ),
+                stdout=os.fsencode(different_root) + b"\n",
             )
         )
 
@@ -526,8 +904,9 @@ class SecurityContractTests(unittest.TestCase):
         fake_git.write_bytes(b"git-binding-v1")
         fake_git.chmod(0o755)
         launched = mock.Mock(
-            return_value=subprocess.CompletedProcess(
-                [], 0, stdout=os.fsencode(self.repo) + b"\n", stderr=b""
+            return_value=bounded_git_result(
+                module._load_process_runner().resolve_executable_identity(fake_git),
+                stdout=os.fsencode(self.repo) + b"\n",
             )
         )
 

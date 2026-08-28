@@ -17,6 +17,7 @@ Transfer Git history when it exists plus a verified local-state overlay. Size, a
 - Before the first process launch, the helper resolves a repository alias or subdirectory to the nearest physical root with a strict ordinary `.git` directory or gitfile marker, then binds one physically canonical, reparse-free Git executable outside that root by identity and SHA-256. It discards the alias for process working directories, requires Git's reported top-level to match, and rechecks the executable around later Git launches. Failures use `TRANSFER-REPOSITORY-BOUNDARY-INVALID`, `TRANSFER-GIT-BINDING-INVALID`, `TRANSFER-GIT-ROOT-MISMATCH`, or `TRANSFER-GIT-BINDING-DRIFT`; a same-user replacement after the final pre-open check remains outside this guarantee.
 - UTF-8 `surrogateescape` path bytes round-trip in canonical JSON by escaping only `U+DC80..U+DCFF`; ordinary Unicode keeps the existing Version 1 bytes and digests, while every other lone surrogate fails as `TRANSFER-PATH-ENCODING-INVALID`. Such paths are hostile metadata-only entries requiring one exact external receipt; payload, deletion, ancestor inclusion, or ZIP placement fails as `TRANSFER-HOSTILE-PATH-EXTERNAL-REQUIRED`.
 - The helper verifies and previews; only a repository/lifecycle owner applies an authorized deletion plan.
+- `inventory` and `bundle` refuse an existing output by default; only their explicit `--force` replaces one output. The helper binds the ordinary parent and, when present, the exact ordinary output identity before generation. After the completed temporary is flushed and synchronized, an absent output is published by one atomic no-replace link, while a forced existing output is published by rechecking that same parent and exact ordinary identity immediately before one `os.replace`. Raced outputs, links, reparse points, directories, unsafe ancestors, and identity drift fail closed. A same-user substitution after the final identity check is outside the 1.x guarantee. `verify` and `cleanup` never accept `--force`.
 - Any Git, lifecycle, recovery, or tool-state mutation invalidates the inventory. Rebuild.
 
 ## Workflow
@@ -26,7 +27,7 @@ Transfer Git history when it exists plus a verified local-state overlay. Size, a
 3. Generate an inventory outside the worktree:
 
    ```text
-   python <skill>/scripts/repo_transfer.py inventory --repo <repo> --git-executable <absolute-git-executable> --output <inventory.json>
+   python <skill>/scripts/repo_transfer.py inventory --repo <repo> --git-executable <absolute-git-executable> --output <inventory.json> [--force]
    ```
 
 4. Create a selection using [the manifest schema](references/manifest-schema.md). Assign every required entry exactly one disposition:
@@ -42,7 +43,7 @@ Transfer Git history when it exists plus a verified local-state overlay. Size, a
 6. Build and source-verify the overlay:
 
    ```text
-   python <skill>/scripts/repo_transfer.py bundle --repo <repo> --git-executable <absolute-git-executable> --inventory <inventory.json> --selection <selection.json> --output <transfer.zip>
+   python <skill>/scripts/repo_transfer.py bundle --repo <repo> --git-executable <absolute-git-executable> --inventory <inventory.json> --selection <selection.json> --output <transfer.zip> [--force]
    python <skill>/scripts/repo_transfer.py verify --bundle <transfer.zip> --git-executable <absolute-git-executable> --inventory <inventory.json> --selection <selection.json> --source <repo>
    ```
 

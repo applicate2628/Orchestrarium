@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import math
 import os
@@ -14,7 +15,6 @@ import struct
 import subprocess
 import sys
 import tempfile
-import threading
 import unicodedata
 import zipfile
 from pathlib import Path, PurePosixPath
@@ -55,6 +55,14 @@ TRANSFER_GIT_ROOT_MISMATCH = "TRANSFER-GIT-ROOT-MISMATCH"
 TRANSFER_GIT_BINDING_DRIFT = "TRANSFER-GIT-BINDING-DRIFT"
 TRANSFER_PATH_ENCODING_INVALID = "TRANSFER-PATH-ENCODING-INVALID"
 TRANSFER_HOSTILE_PATH_EXTERNAL_REQUIRED = "TRANSFER-HOSTILE-PATH-EXTERNAL-REQUIRED"
+TRANSFER_OUTPUT_EXISTS = "TRANSFER-OUTPUT-EXISTS"
+TRANSFER_OUTPUT_TYPE_INVALID = "TRANSFER-OUTPUT-TYPE-INVALID"
+TRANSFER_OUTPUT_PATH_INVALID = "TRANSFER-OUTPUT-PATH-INVALID"
+TRANSFER_OUTPUT_IDENTITY_DRIFT = "TRANSFER-OUTPUT-IDENTITY-DRIFT"
+TRANSFER_OUTPUT_PUBLISH_FAILED = "TRANSFER-OUTPUT-PUBLISH-FAILED"
+
+
+_PROCESS_RUNNER_MODULE: Any | None = None
 
 
 class ContractError(Exception):
@@ -68,11 +76,27 @@ class BoundRepository:
         git_executable: Path,
         git_executable_sha256: str,
         git_executable_identity: tuple[int, ...] | None = None,
+        git_executable_content_sha256: str | None = None,
     ) -> None:
         self.root = root
         self.git_executable = git_executable
         self.git_executable_sha256 = git_executable_sha256
         self.git_executable_identity = git_executable_identity
+        self.git_executable_content_sha256 = (
+            git_executable_content_sha256 or git_executable_sha256
+        )
+
+
+class OutputBinding:
+    def __init__(
+        self,
+        path: Path,
+        parent_identity: tuple[int, ...],
+        destination_identity: tuple[int, ...] | None,
+    ) -> None:
+        self.path = path
+        self.parent_identity = parent_identity
+        self.destination_identity = destination_identity
 
 
 def conditional_utf8(fragment: str) -> bytes:
@@ -137,10 +161,36 @@ def stream_digest(stream: Any) -> tuple[int, str]:
 
 
 def sanitized_git_environment() -> dict[str, str]:
-    environment = os.environ.copy()
-    for key in list(environment):
-        if key.startswith("GIT_"):
-            environment.pop(key)
+    admitted = {
+        "ALL_PROXY",
+        "COMSPEC",
+        "HOME",
+        "HOMEDRIVE",
+        "HOMEPATH",
+        "HTTPS_PROXY",
+        "HTTP_PROXY",
+        "LANG",
+        "LC_ALL",
+        "NO_PROXY",
+        "PATH",
+        "PATHEXT",
+        "SSH_AUTH_SOCK",
+        "SSL_CERT_DIR",
+        "SSL_CERT_FILE",
+        "SYSTEMROOT",
+        "TEMP",
+        "TMP",
+        "TMPDIR",
+        "USERPROFILE",
+        "WINDIR",
+    }
+    environment: dict[str, str] = {}
+    seen: set[str] = set()
+    for key, value in sorted(os.environ.items(), key=lambda item: item[0].casefold()):
+        canonical = key.upper()
+        if canonical in admitted and canonical not in seen:
+            environment[canonical if os.name == "nt" else key] = value
+            seen.add(canonical)
     environment["GIT_CONFIG_NOSYSTEM"] = "1"
     environment["GIT_CONFIG_GLOBAL"] = os.devnull
     return environment
@@ -150,71 +200,97 @@ def base_git_configuration() -> list[str]:
     return ["-c", "core.fsmonitor=false", "-c", "diff.external="]
 
 
-def _drain_stream_bounded(stream: Any, limit: int) -> tuple[bytes, bool, Exception | None]:
-    captured = bytearray(limit + 1)
-    size = 0
-    overflow = False
+def _process_runner_projection() -> tuple[Path, Path]:
+    skill = Path(__file__).resolve().parent.parent
+    skills = skill.parent
+    if skill.name != "manual-repo-transfer" or skills.name != "skills":
+        raise ContractError("repository transfer process runner is unavailable")
+    if skills.parent.name == "src.codex":
+        root = skills.parent.parent
+        runner = root / "scripts" / "process_supervision" / "process_runner.py"
+        manifest = root / "shared" / "provider-prompt-projections.v1.json"
+    else:
+        lead = skills / "lead"
+        runner = lead / "scripts" / "process_supervision" / "process_runner.py"
+        manifest = lead / "shared" / "provider-prompt-projections.v1.json"
+    return runner, manifest
+
+
+def _load_process_runner() -> Any:
+    global _PROCESS_RUNNER_MODULE
+    if _PROCESS_RUNNER_MODULE is not None:
+        return _PROCESS_RUNNER_MODULE
+    runner, manifest = _process_runner_projection()
     try:
-        for chunk in iter(lambda: stream.read(64 * 1024), b""):
-            remaining = len(captured) - size
-            if remaining:
-                copied = min(remaining, len(chunk))
-                captured[size:size + copied] = chunk[:copied]
-                size += copied
-            if size > limit or len(chunk) > remaining:
-                overflow = True
-    except Exception as error:
-        return b"", False, error
-    return bytes(captured[:size]), overflow, None
+        record = json.loads(manifest.read_text(encoding="utf-8"))["files"][
+            "process_supervision/process_runner.py"
+        ]
+        if (
+            record.get("destination")
+            != "scripts/process_supervision/process_runner.py"
+            or sha256_file(runner) != record.get("sha256")
+        ):
+            raise ContractError("repository transfer process runner projection drift")
+        name = "_orchestrarium_repository_transfer_process_runner"
+        spec = importlib.util.spec_from_file_location(name, runner)
+        if spec is None or spec.loader is None:
+            raise ContractError("repository transfer process runner is unavailable")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        try:
+            spec.loader.exec_module(module)
+        except BaseException:
+            sys.modules.pop(name, None)
+            raise
+        _PROCESS_RUNNER_MODULE = module
+        return module
+    except ContractError:
+        raise
+    except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+        raise ContractError("repository transfer process runner is unavailable") from error
 
 
 def run_bounded_process(command: list[str], repository: Path | None, environment: dict[str, str]) -> subprocess.CompletedProcess[bytes]:
+    owner: Any | None = None
     try:
-        process = subprocess.Popen(
-            command,
-            cwd=repository,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            env=environment,
+        runner_module = _load_process_runner()
+        owner = runner_module.ProcessRunnerV1()
+        request, sink = owner.build_repository_transfer_git_request(
+            argv=tuple(command),
+            resolved_executable=Path(command[0]),
+            cwd=str(repository),
+            environment=tuple(
+                runner_module.EnvironmentRowV1(name, value)
+                for name, value in sorted(
+                    environment.items(), key=lambda item: item[0].casefold()
+                )
+            ),
+            deadline_seconds=GIT_COMMAND_TIMEOUT_SECONDS,
+            capture_limit_bytes=MAX_JSON_BYTES,
         )
-    except OSError as error:
+        result = owner.run(request)
+        stdout = sink.bytes_for("stdout")
+        stderr = sink.bytes_for("stderr")
+    except ContractError:
+        raise
+    except (OSError, TypeError, ValueError) as error:
         raise ContractError("not a git repository") from error
-    assert process.stdout is not None and process.stderr is not None
-    captures: list[tuple[bytes, bool, Exception | None] | None] = [None, None]
-
-    def drain(index: int, stream: Any) -> None:
-        captures[index] = _drain_stream_bounded(stream, MAX_JSON_BYTES)
-
-    stdout_thread = threading.Thread(target=drain, args=(0, process.stdout))
-    stderr_thread = threading.Thread(target=drain, args=(1, process.stderr))
-    stdout_thread.start()
-    stderr_thread.start()
-    timed_out = False
-    try:
-        return_code = process.wait(timeout=GIT_COMMAND_TIMEOUT_SECONDS)
-    except subprocess.TimeoutExpired:
-        timed_out = True
-        process.kill()
-        return_code = process.wait()
     finally:
-        if process.poll() is None:
-            process.kill()
-            process.wait()
-        stdout_thread.join()
-        stderr_thread.join()
-        process.stdout.close()
-        process.stderr.close()
-    stdout_capture, stderr_capture = captures
-    assert stdout_capture is not None and stderr_capture is not None
-    stdout, stdout_overflow, stdout_error = stdout_capture
-    stderr, stderr_overflow, stderr_error = stderr_capture
-    if stdout_error is not None or stderr_error is not None:
-        raise ContractError("git output capture failed")
-    if timed_out:
+        if owner is not None:
+            owner.close()
+    if result.failure_id == "PSV1-DEADLINE" or result.timed_out:
         raise ContractError("git command timed out")
-    if stdout_overflow or stderr_overflow:
+    if result.failure_id == "PSV1-CAPTURE-LIMIT":
         raise ContractError("git output exceeds JSON limit")
-    return subprocess.CompletedProcess(command, return_code, stdout, stderr)
+    if result.failure_id == "PSV1-CAPTURE-IO":
+        raise ContractError("git output capture failed")
+    if result.failure_id is not None or not result.tree.tree_empty or not result.resources_closed:
+        raise ContractError("not a git repository")
+    completed = subprocess.CompletedProcess(
+        command, result.target_exit_code or 0, stdout, stderr
+    )
+    completed.executable_identity_sha256 = result.executable_identity_sha256
+    return completed
 
 
 def local_filter_drivers(repository: BoundRepository) -> list[str]:
@@ -318,7 +394,9 @@ def git_file_identity(path: Path) -> tuple[int, ...]:
     )
 
 
-def bind_git_executable(git_executable: Path, root: Path) -> tuple[Path, tuple[int, ...], str]:
+def bind_git_executable(
+    git_executable: Path, root: Path
+) -> tuple[Path, tuple[int, ...], str, str]:
     try:
         if not git_executable.is_absolute():
             raise ContractError(TRANSFER_GIT_BINDING_INVALID)
@@ -330,24 +408,28 @@ def bind_git_executable(git_executable: Path, root: Path) -> tuple[Path, tuple[i
         if not stat.S_ISREG(metadata.st_mode) or path_is_within(physical, root):
             raise ContractError(TRANSFER_GIT_BINDING_INVALID)
         identity = git_file_identity(physical)
-        digest = sha256_file(physical)
+        content_digest = sha256_file(physical)
+        runner_digest = _load_process_runner().resolve_executable_identity(physical)
         if git_file_identity(physical) != identity:
             raise ContractError(TRANSFER_GIT_BINDING_INVALID)
-        return physical, identity, digest
+        return physical, identity, runner_digest, content_digest
     except ContractError:
         raise
-    except (OSError, ValueError) as error:
+    except (OSError, ValueError, RuntimeError) as error:
         raise ContractError(TRANSFER_GIT_BINDING_INVALID) from error
 
 
 def require_current_git_binding(repository: BoundRepository) -> None:
     try:
-        executable, identity, digest = bind_git_executable(repository.git_executable, repository.root)
+        executable, identity, runner_digest, content_digest = bind_git_executable(
+            repository.git_executable, repository.root
+        )
         if (
             executable != repository.git_executable
             or repository.git_executable_identity is None
             or identity != repository.git_executable_identity
-            or digest != repository.git_executable_sha256
+            or runner_digest != repository.git_executable_sha256
+            or content_digest != repository.git_executable_content_sha256
         ):
             raise ContractError(TRANSFER_GIT_BINDING_DRIFT)
     except ContractError as error:
@@ -359,14 +441,23 @@ def require_current_git_binding(repository: BoundRepository) -> None:
 def run_bound_git_process(repository: BoundRepository, command: list[str]) -> subprocess.CompletedProcess[bytes]:
     require_current_git_binding(repository)
     result = run_bounded_process(command, repository.root, sanitized_git_environment())
+    if (
+        getattr(result, "executable_identity_sha256", None)
+        != repository.git_executable_sha256
+    ):
+        raise ContractError(TRANSFER_GIT_BINDING_DRIFT)
     require_current_git_binding(repository)
     return result
 
 
 def bind_repository(repository: Path, git_executable: Path) -> BoundRepository:
     root = physical_repository_root(repository)
-    executable, identity, digest = bind_git_executable(git_executable, root)
-    bound = BoundRepository(root, executable, digest, identity)
+    executable, identity, runner_digest, content_digest = bind_git_executable(
+        git_executable, root
+    )
+    bound = BoundRepository(
+        root, executable, runner_digest, identity, content_digest
+    )
     result = run_bound_git_process(
         bound,
         [str(executable), *base_git_configuration(), "rev-parse", "--show-toplevel"],
@@ -382,13 +473,174 @@ def bind_repository(repository: Path, git_executable: Path) -> BoundRepository:
     return bound
 
 
-def require_outside_repository(path: Path, root: Path, label: str) -> Path:
-    resolved = path.resolve()
+def _output_identity(path: Path) -> tuple[int, ...]:
+    metadata = path.lstat()
+    return (
+        metadata.st_dev,
+        metadata.st_ino,
+        metadata.st_mode,
+        metadata.st_size,
+        metadata.st_mtime_ns,
+        metadata.st_ctime_ns,
+        getattr(metadata, "st_file_attributes", 0),
+    )
+
+
+def _directory_identity(path: Path) -> tuple[int, ...]:
+    metadata = path.lstat()
+    return (
+        metadata.st_dev,
+        metadata.st_ino,
+        metadata.st_mode,
+        getattr(metadata, "st_file_attributes", 0),
+    )
+
+
+def _require_ordinary_directory(path: Path) -> tuple[int, ...]:
     try:
-        resolved.relative_to(root)
-    except ValueError:
-        return resolved
-    raise ContractError(f"{label} must be outside repository")
+        metadata = path.lstat()
+    except OSError as error:
+        raise ContractError(TRANSFER_OUTPUT_PATH_INVALID) from error
+    if (
+        not stat.S_ISDIR(metadata.st_mode)
+        or stat.S_ISLNK(metadata.st_mode)
+        or bool(getattr(metadata, "st_file_attributes", 0) & 0x400)
+    ):
+        raise ContractError(TRANSFER_OUTPUT_PATH_INVALID)
+    return _directory_identity(path)
+
+
+def _prepare_output_parent(parent: Path) -> tuple[int, ...]:
+    absolute = Path(os.path.abspath(parent))
+    missing: list[Path] = []
+    cursor = absolute
+    while not os.path.lexists(cursor):
+        missing.append(cursor)
+        if cursor.parent == cursor:
+            raise ContractError(TRANSFER_OUTPUT_PATH_INVALID)
+        cursor = cursor.parent
+    chain = tuple(reversed((cursor, *cursor.parents)))
+    for component in chain:
+        _require_ordinary_directory(component)
+    for component in reversed(missing):
+        try:
+            component.mkdir()
+        except FileExistsError:
+            pass
+        except OSError as error:
+            raise ContractError(TRANSFER_OUTPUT_PATH_INVALID) from error
+        _require_ordinary_directory(component)
+    return _require_ordinary_directory(absolute)
+
+
+def bind_output(path: Path, root: Path, *, force: bool) -> OutputBinding:
+    try:
+        output = Path(os.path.abspath(path))
+        if path_is_within(output, root):
+            raise ContractError(TRANSFER_OUTPUT_PATH_INVALID)
+        parent_identity = _prepare_output_parent(output.parent)
+        physical_parent = Path(os.path.realpath(output.parent))
+        if path_is_within(physical_parent, root):
+            raise ContractError(TRANSFER_OUTPUT_PATH_INVALID)
+        destination_identity: tuple[int, ...] | None = None
+        if os.path.lexists(output):
+            metadata = output.lstat()
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or stat.S_ISLNK(metadata.st_mode)
+                or bool(getattr(metadata, "st_file_attributes", 0) & 0x400)
+            ):
+                raise ContractError(TRANSFER_OUTPUT_TYPE_INVALID)
+            destination_identity = _output_identity(output)
+            if not force:
+                raise ContractError(TRANSFER_OUTPUT_EXISTS)
+        return OutputBinding(output, parent_identity, destination_identity)
+    except ContractError:
+        raise
+    except (OSError, RuntimeError, ValueError) as error:
+        raise ContractError(TRANSFER_OUTPUT_PATH_INVALID) from error
+
+
+def _new_output_temporary(binding: OutputBinding) -> tuple[int, Path]:
+    if _require_ordinary_directory(binding.path.parent) != binding.parent_identity:
+        raise ContractError(TRANSFER_OUTPUT_IDENTITY_DRIFT)
+    try:
+        descriptor, name = tempfile.mkstemp(
+            prefix=f".{binding.path.name}.", suffix=".tmp", dir=binding.path.parent
+        )
+        return descriptor, Path(name)
+    except OSError as error:
+        raise ContractError(TRANSFER_OUTPUT_PUBLISH_FAILED) from error
+
+
+def _fsync_output_parent(parent: Path) -> None:
+    if os.name == "nt":
+        return
+    descriptor = os.open(parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def publish_output(binding: OutputBinding, temporary: Path) -> None:
+    try:
+        if _require_ordinary_directory(binding.path.parent) != binding.parent_identity:
+            raise ContractError(TRANSFER_OUTPUT_IDENTITY_DRIFT)
+        if binding.destination_identity is None:
+            if os.path.lexists(binding.path):
+                metadata = binding.path.lstat()
+                if not stat.S_ISREG(metadata.st_mode) or is_reparse_point(binding.path):
+                    raise ContractError(TRANSFER_OUTPUT_TYPE_INVALID)
+                raise ContractError(TRANSFER_OUTPUT_EXISTS)
+            try:
+                os.link(temporary, binding.path)
+            except FileExistsError as error:
+                raise ContractError(TRANSFER_OUTPUT_EXISTS) from error
+            except OSError as error:
+                raise ContractError(TRANSFER_OUTPUT_PUBLISH_FAILED) from error
+            temporary.unlink()
+        else:
+            if not os.path.lexists(binding.path):
+                raise ContractError(TRANSFER_OUTPUT_IDENTITY_DRIFT)
+            metadata = binding.path.lstat()
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or stat.S_ISLNK(metadata.st_mode)
+                or bool(getattr(metadata, "st_file_attributes", 0) & 0x400)
+                or _output_identity(binding.path) != binding.destination_identity
+            ):
+                raise ContractError(TRANSFER_OUTPUT_IDENTITY_DRIFT)
+            os.replace(temporary, binding.path)
+        metadata = binding.path.lstat()
+        if not stat.S_ISREG(metadata.st_mode) or is_reparse_point(binding.path):
+            raise ContractError(TRANSFER_OUTPUT_PUBLISH_FAILED)
+        if _require_ordinary_directory(binding.path.parent) != binding.parent_identity:
+            raise ContractError(TRANSFER_OUTPUT_IDENTITY_DRIFT)
+        _fsync_output_parent(binding.path.parent)
+    except OSError as error:
+        raise ContractError(TRANSFER_OUTPUT_PUBLISH_FAILED) from error
+
+
+def publish_output_bytes(binding: OutputBinding, payload: bytes) -> None:
+    descriptor, temporary = _new_output_temporary(binding)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        publish_output(binding, temporary)
+    except BaseException:
+        try:
+            os.close(descriptor)
+        except OSError:
+            pass
+        raise
+    finally:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def is_reparse_point(path: Path) -> bool:
@@ -655,7 +907,7 @@ def build_inventory(repository: BoundRepository) -> dict[str, Any]:
         if entry["path"] in colliding_paths:
             entry.update(metadataOnly=True, hostile=True)
     entries.sort(key=lambda entry: entry["path"])
-    repository_data = {"historyState": history_state, "head": head, "remotes": remotes, "remoteEvidence": evidence, "gitExecutable": {"path": str(repository.git_executable), "sha256": repository.git_executable_sha256}, "gitMetadataHashes": metadata_hashes}
+    repository_data = {"historyState": history_state, "head": head, "remotes": remotes, "remoteEvidence": evidence, "gitExecutable": {"path": str(repository.git_executable), "sha256": repository.git_executable_content_sha256}, "gitMetadataHashes": metadata_hashes}
     snapshot = {"entries": entries, "repository": repository_data}
     return {"schemaVersion": SCHEMA_VERSION, "repository": repository_data, "entries": entries, "snapshot": {"digest": sha256_bytes(canonical_json(snapshot))}}
 
@@ -941,9 +1193,9 @@ def write_file_member(archive: zipfile.ZipFile, name: str, source: Path, expecte
         raise ContractError("inventory drift")
 
 
-def bundle(repository: BoundRepository, inventory_path: Path, selection_path: Path, output: Path) -> None:
+def bundle(repository: BoundRepository, inventory_path: Path, selection_path: Path, output: Path, *, force: bool = False) -> None:
     root = repository.root
-    output = require_outside_repository(output, root, "bundle output")
+    output_binding = bind_output(output, root, force=force)
     inventory = read_json(inventory_path, "inventory")
     selection = read_json(selection_path, "selection")
     validate_inventory(inventory)
@@ -955,11 +1207,10 @@ def bundle(repository: BoundRepository, inventory_path: Path, selection_path: Pa
     declared_sizes = [entry["size"] for entry in payload.values()] + [len(data) for data in metadata.values()] + [len(manifest_bytes)]
     if len(declared_sizes) > MAX_ARCHIVE_ENTRIES or any(size > MAX_ARCHIVE_ENTRY_BYTES for size in declared_sizes) or sum(declared_sizes) > MAX_ARCHIVE_UNCOMPRESSED_BYTES:
         raise ContractError("archive resource limit")
-    output.parent.mkdir(parents=True, exist_ok=True)
     temporary: Path | None = None
     try:
-        with tempfile.NamedTemporaryFile(dir=output.parent, delete=False) as stream:
-            temporary = Path(stream.name)
+        descriptor, temporary = _new_output_temporary(output_binding)
+        os.close(descriptor)
         with zipfile.ZipFile(temporary, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
             for name, entry in sorted(payload.items()):
                 write_file_member(archive, name, root.joinpath(*PurePosixPath(name).parts), entry)
@@ -967,7 +1218,10 @@ def bundle(repository: BoundRepository, inventory_path: Path, selection_path: Pa
                 archive.writestr(deterministic_zip_info(name), data, compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
             archive.writestr(deterministic_zip_info(MANIFEST_PATH), manifest_bytes, compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
             enforce_archive_infos(archive.infolist())
-        temporary.replace(output)
+        with temporary.open("r+b") as stream:
+            stream.flush()
+            os.fsync(stream.fileno())
+        publish_output(output_binding, temporary)
     finally:
         if temporary and temporary.exists():
             temporary.unlink()
@@ -1271,12 +1525,14 @@ def make_parser() -> argparse.ArgumentParser:
     inventory.add_argument("--repo", type=Path, required=True)
     inventory.add_argument("--git-executable", type=Path, required=True)
     inventory.add_argument("--output", type=Path, required=True)
+    inventory.add_argument("--force", action="store_true")
     bundle_parser = commands.add_parser("bundle")
     bundle_parser.add_argument("--repo", type=Path, required=True)
     bundle_parser.add_argument("--git-executable", type=Path, required=True)
     bundle_parser.add_argument("--inventory", type=Path, required=True)
     bundle_parser.add_argument("--selection", type=Path, required=True)
     bundle_parser.add_argument("--output", type=Path, required=True)
+    bundle_parser.add_argument("--force", action="store_true")
     verify_parser = commands.add_parser("verify")
     verify_parser.add_argument("--bundle", type=Path, required=True)
     verify_parser.add_argument("--git-executable", type=Path)
@@ -1298,12 +1554,17 @@ def main(arguments: list[str] | None = None) -> int:
     try:
         if args.command == "inventory":
             repository = bind_repository(args.repo, args.git_executable)
-            output = require_outside_repository(args.output, repository.root, "inventory output")
-            output.parent.mkdir(parents=True, exist_ok=True)
+            output = bind_output(args.output, repository.root, force=args.force)
             inventory_bytes = capped_canonical_json(build_inventory(repository), "inventory output exceeds JSON limit", final_newline=True)
-            output.write_bytes(inventory_bytes)
+            publish_output_bytes(output, inventory_bytes)
         elif args.command == "bundle":
-            bundle(bind_repository(args.repo, args.git_executable), args.inventory, args.selection, args.output)
+            bundle(
+                bind_repository(args.repo, args.git_executable),
+                args.inventory,
+                args.selection,
+                args.output,
+                force=args.force,
+            )
         elif args.command == "verify":
             result = verify(args.bundle, args.inventory, args.selection, args.source, args.git_executable)
             print(json.dumps(result, sort_keys=True))

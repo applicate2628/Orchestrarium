@@ -120,6 +120,7 @@ _WINDOWS_ARGV_PROFILES = frozenset(
         "python-hook-health-v1",
         "python-validator-json-echo-v1",
         "git-rev-parse-sq-quote-v1",
+        "repository-transfer-git-v1",
     }
 )
 
@@ -219,6 +220,11 @@ class CapturePolicyV1:
     prefix_limit_per_stream: int
     tail_limit_per_stream: int
     chunk_size: int
+
+
+@dataclass(frozen=True)
+class RepositoryTransferCapturePolicyV1(CapturePolicyV1):
+    per_stream_persisted_limit: int
 
 
 @dataclass(frozen=True)
@@ -501,6 +507,7 @@ class CwdIdentityV1:
 class ValidatedCwdV1:
     canonical_absolute: str
     identity: CwdIdentityV1
+    executable_identity_sha256: str
 
 
 @dataclass(frozen=True)
@@ -1056,6 +1063,11 @@ class BoundedCaptureV1:
                 and stream == "stdout"
             )
             remaining = self.policy.aggregate_persisted_limit - self._persisted
+            per_stream_limit = getattr(
+                self.policy, "per_stream_persisted_limit", None
+            )
+            if per_stream_limit is not None:
+                remaining = min(remaining, per_stream_limit - target.persisted)
             accepted = data if hook_stdout else data[: max(0, remaining)]
             if accepted:
                 try:
@@ -1744,6 +1756,10 @@ class WindowsArgvAdmissionOwnerV1:
             probe_kind, requested, observed = self._git_probe(
                 lifecycle, request, executable
             )
+        elif profile_id == "repository-transfer-git-v1":
+            probe_kind, requested, observed = self._git_probe(
+                lifecycle, request, executable
+            )
         elif profile_id == KimiWindowsProfileV1.profile_id:
             if _windows_argv_roundtrip(request.argv) != request.argv:
                 raise ProcessSupervisionError(
@@ -1913,6 +1929,7 @@ class WindowsCreateOwnerV1:
 
 def validate_capture_policy(policy: CapturePolicyV1) -> None:
     token = policy.policy_id
+    transfer_limit = getattr(policy, "per_stream_persisted_limit", None)
     if (
         not isinstance(token, str)
         or not token
@@ -1922,6 +1939,15 @@ def validate_capture_policy(policy: CapturePolicyV1) -> None:
         or not 0 <= policy.prefix_limit_per_stream <= policy.aggregate_persisted_limit
         or not 0 <= policy.tail_limit_per_stream <= policy.aggregate_persisted_limit
         or not 1 <= policy.chunk_size <= 64 * 1024
+        or (
+            isinstance(policy, RepositoryTransferCapturePolicyV1)
+            and (
+                not isinstance(transfer_limit, int)
+                or not 0 < transfer_limit <= policy.aggregate_persisted_limit
+                or policy.prefix_limit_per_stream != transfer_limit
+                or policy.tail_limit_per_stream != 0
+            )
+        )
     ):
         raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
 
@@ -1985,7 +2011,7 @@ def validate_process_request(request: ProcessRequestV1) -> ValidatedCwdV1:
             raise ProcessSupervisionError("PSV1-EXECUTABLE-UNRESOLVED", "request-validation")
     except (OSError, ValueError) as exc:
         raise ProcessSupervisionError("PSV1-EXECUTABLE-UNRESOLVED", "request-validation") from exc
-    identity = resolve_executable_identity(executable)
+    executable_identity = resolve_executable_identity(executable)
     suffix = executable.suffix.casefold()
     basename = executable.name.casefold()
     if os.name == "nt":
@@ -2036,21 +2062,29 @@ def validate_process_request(request: ProcessRequestV1) -> ValidatedCwdV1:
     if not isinstance(request.cwd, str):
         raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
     canonical = os.path.abspath(request.cwd)
-    identity = bind_cwd_identity(canonical)
-    return ValidatedCwdV1(canonical, identity)
+    cwd_identity = bind_cwd_identity(canonical)
+    return ValidatedCwdV1(canonical, cwd_identity, executable_identity)
 
 
 def _empty_stream() -> StreamObservationV1:
     return StreamObservationV1(0, 0, False, b"", b"", hashlib.sha256().hexdigest(), None)
 
 
-def _request_failure(request: ProcessRequestV1, error: ProcessSupervisionError, started: float) -> ProcessResultV1:
+def _request_failure(
+    request: ProcessRequestV1,
+    error: ProcessSupervisionError,
+    started: float,
+    *,
+    executable_identity_sha256: str | None = None,
+) -> ProcessResultV1:
     argv = request.argv if isinstance(request, ProcessRequestV1) else ()
     executable = os.fspath(request.resolved_executable) if isinstance(request, ProcessRequestV1) else ""
-    try:
-        executable_identity = resolve_executable_identity(Path(executable)) if executable else hashlib.sha256(b"").hexdigest()
-    except ProcessSupervisionError:
-        executable_identity = hashlib.sha256(b"").hexdigest()
+    executable_identity = executable_identity_sha256
+    if executable_identity is None:
+        try:
+            executable_identity = resolve_executable_identity(Path(executable)) if executable else hashlib.sha256(b"").hexdigest()
+        except ProcessSupervisionError:
+            executable_identity = hashlib.sha256(b"").hexdigest()
     return ProcessResultV1(
         1,
         SETTLED_EVENT_ID,
@@ -2400,6 +2434,7 @@ def _result_from_parts(
     request: ProcessRequestV1,
     started: float,
     *,
+    executable_identity_sha256: str,
     backend: str,
     capture: BoundedCaptureV1,
     stdin_state: Mapping[str, object],
@@ -2440,7 +2475,7 @@ def _result_from_parts(
         stage,
         failure_id,
         os.fspath(request.resolved_executable),
-        resolve_executable_identity(request.resolved_executable),
+        executable_identity_sha256,
         _json_argv_sha256(request.argv),
         len(request.argv),
         exit_code,
@@ -2944,7 +2979,9 @@ class _WindowsBackendV1:
         if settlement == "AMBIGUOUS" and direct_reaped and ownership_confirmed and not failure_id:
             failure_id, stage = "PSV1-TREE-SETTLEMENT", "tree-settlement"
         return _result_from_parts(
-            request, started, backend="windows-job-v1", capture=capture,
+            request, started,
+            executable_identity_sha256=validated_cwd.executable_identity_sha256,
+            backend="windows-job-v1", capture=capture,
             stdin_state=stdin_state, exit_code=exit_code, failure_id=failure_id,
             stage=stage, timed_out=timed_out, cancelled=cancelled,
             ownership_confirmed=ownership_confirmed, settlement_state=settlement,
@@ -3223,10 +3260,6 @@ class _PosixBackendV1:
                 time.sleep(ENGINE_POLL_INTERVAL_SECONDS)
             if not abandon_unsafe:
                 exit_code = proc.wait(timeout=request.settle_policy.timeout_seconds)
-            for thread in readers:
-                thread.join(request.settle_policy.timeout_seconds)
-            if writer:
-                writer.join(request.settle_policy.timeout_seconds)
             decisions = []
             for _ in range(2):
                 decisions.append(observe_group(leader_reaped=proc.poll() is not None))
@@ -3236,13 +3269,20 @@ class _PosixBackendV1:
                 os.killpg(pgid, signal.SIGKILL)
                 if failure_id is None:
                     failure_id, stage = "PSV1-TREE-SETTLEMENT", "tree-settlement"
-                decisions = [
-                    observe_group(leader_reaped=True),
-                    observe_group(leader_reaped=True),
-                ]
-                settlement = decisions[-1].state
+                settle_until = time.monotonic() + request.settle_policy.timeout_seconds
+                while True:
+                    decision = observe_group(leader_reaped=True)
+                    decisions.append(decision)
+                    settlement = decision.state
+                    if settlement == "EMPTY" or time.monotonic() >= settle_until:
+                        break
+                    time.sleep(ENGINE_POLL_INTERVAL_SECONDS)
             if settlement == "AMBIGUOUS" and failure_id is None:
                 failure_id, stage = "PSV1-POSIX-SETTLEMENT-AMBIGUOUS", "tree-settlement"
+            for thread in readers:
+                thread.join(request.settle_policy.timeout_seconds)
+            if writer:
+                writer.join(request.settle_policy.timeout_seconds)
         except ProcessSupervisionError as exc:
             failure_id, stage = exc.failure_id, exc.terminal_stage
             if proc is not None and proc.poll() is None:
@@ -3266,7 +3306,9 @@ class _PosixBackendV1:
         )
         issues.extend(finalization.cleanup_issues)
         return _result_from_parts(
-            request, started, backend="posix-group-oracle-v1", capture=capture,
+            request, started,
+            executable_identity_sha256=validated_cwd.executable_identity_sha256,
+            backend="posix-group-oracle-v1", capture=capture,
             stdin_state=stdin_state, exit_code=exit_code, failure_id=failure_id,
             stage=stage, timed_out=timed_out, cancelled=cancelled,
             ownership_confirmed=proc is not None, settlement_state=settlement,
@@ -3307,6 +3349,69 @@ class ProcessRunnerV1:
         return CaptureSinkBindingV1(
             "bounded-memory-v1", BoundedMemoryCaptureSinkV1(), _SINK_BINDING_SEAL
         )
+
+    def build_repository_transfer_git_request(
+        self,
+        *,
+        argv: tuple[str, ...],
+        resolved_executable: Path,
+        cwd: str,
+        environment: tuple[EnvironmentRowV1, ...],
+        deadline_seconds: float = 60.0,
+        capture_limit_bytes: int,
+    ) -> tuple[ProcessRequestV1, CaptureSinkBindingV1]:
+        """Build the sealed request used by the repository-transfer Git adapter."""
+
+        executable = Path(resolved_executable)
+        canonical_cwd = os.path.abspath(cwd)
+        try:
+            if (
+                executable.name.casefold() not in {"git", "git.exe"}
+                or not executable.is_absolute()
+                or not argv
+                or Path(argv[0]).resolve(strict=True) != executable.resolve(strict=True)
+                or Path(os.path.realpath(canonical_cwd)) != Path(canonical_cwd)
+                or not Path(canonical_cwd).is_dir()
+                or not isinstance(deadline_seconds, (int, float))
+                or not 0 < deadline_seconds <= 60.0
+                or not isinstance(capture_limit_bytes, int)
+                or not 0 < capture_limit_bytes <= MAX_CAPTURE_BYTES // 2
+            ):
+                raise ProcessSupervisionError(
+                    "PSV1-REQUEST-INVALID", "request-validation"
+                )
+            bind_cwd_identity(canonical_cwd)
+        except ProcessSupervisionError:
+            raise
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise ProcessSupervisionError(
+                "PSV1-REQUEST-INVALID", "request-validation"
+            ) from exc
+        sink = self.mint_memory_capture_sink()
+        request = ProcessRequestV1(
+            schema_version=1,
+            argv=argv,
+            resolved_executable=executable,
+            cwd=canonical_cwd,
+            environment=environment,
+            stdin_bytes=None,
+            deadline_monotonic=time.monotonic() + float(deadline_seconds),
+            capture_policy=RepositoryTransferCapturePolicyV1(
+                "repository-transfer-git-v1",
+                capture_limit_bytes * 2,
+                capture_limit_bytes,
+                0,
+                64 * 1024,
+                capture_limit_bytes,
+            ),
+            capture_sink_binding=sink,
+            settle_policy=SettlePolicyV1(5.0),
+            windows_argv_profile_id=(
+                "repository-transfer-git-v1" if os.name == "nt" else None
+            ),
+            policy_id="repository-transfer-git-v1",
+        )
+        return request, sink
 
     def build_hook_health_request(
         self,
@@ -3383,7 +3488,11 @@ class ProcessRunnerV1:
             lambda _remaining: request.capture_sink_binding.close(),
         )
         canonical = os.path.abspath(request.cwd)
-        validated_cwd = ValidatedCwdV1(canonical, bind_cwd_identity(canonical))
+        validated_cwd = ValidatedCwdV1(
+            canonical,
+            bind_cwd_identity(canonical),
+            resolve_executable_identity(request.resolved_executable),
+        )
         result = _WindowsBackendV1(
             self.windows_inheritance_coordinator,
             self.windows_argv_admission_owner,
@@ -3471,6 +3580,7 @@ class ProcessRunnerV1:
                 owned_lifecycle = self._begin_lifecycle()
             except ProcessSupervisionError as exc:
                 return _request_failure(request, exc, started)
+        validated_cwd: ValidatedCwdV1 | None = None
         try:
             validated_cwd = validate_process_request(request)
             if os.name == "nt":
@@ -3488,6 +3598,11 @@ class ProcessRunnerV1:
             )
             result = dataclasses.replace(
                 exc.result,
+                executable_identity_sha256=(
+                    validated_cwd.executable_identity_sha256
+                    if validated_cwd is not None
+                    else exc.result.executable_identity_sha256
+                ),
                 run_token_sha256=owned_lifecycle.token.sha256,
                 cleanup_issues=tuple(
                     dict.fromkeys(
@@ -3504,7 +3619,16 @@ class ProcessRunnerV1:
             self._release_lifecycle(owned_lifecycle)
             return result
         except ProcessSupervisionError as exc:
-            result = _request_failure(request, exc, started)
+            result = _request_failure(
+                request,
+                exc,
+                started,
+                executable_identity_sha256=(
+                    validated_cwd.executable_identity_sha256
+                    if validated_cwd is not None
+                    else None
+                ),
+            )
             owned_lifecycle.finalize_once(time.monotonic() + RUNNER_CLOSE_TIMEOUT_SECONDS)
             self._release_lifecycle(owned_lifecycle)
             return dataclasses.replace(
@@ -3522,6 +3646,7 @@ class ProcessRunnerV1:
                 request,
                 ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation"),
                 started,
+                executable_identity_sha256=validated_cwd.executable_identity_sha256,
             )
             owned_lifecycle.finalize_once(
                 time.monotonic() + RUNNER_CLOSE_TIMEOUT_SECONDS
@@ -3558,7 +3683,12 @@ class ProcessRunnerV1:
                     request, owned_lifecycle, validated_cwd
                 )
         except ProcessSupervisionError as exc:
-            result = _request_failure(request, exc, started)
+            result = _request_failure(
+                request,
+                exc,
+                started,
+                executable_identity_sha256=validated_cwd.executable_identity_sha256,
+            )
             if exc.failure_id == "PSV1-CANCELLED":
                 result = dataclasses.replace(result, cancelled=True)
         except (OSError, TimeoutError, subprocess.TimeoutExpired):
@@ -3566,6 +3696,7 @@ class ProcessRunnerV1:
                 request,
                 ProcessSupervisionError("PSV1-INTERNAL", "execution"),
                 started,
+                executable_identity_sha256=validated_cwd.executable_identity_sha256,
             )
         except BaseException:
             owned_lifecycle.finalize_once(
@@ -4400,6 +4531,7 @@ __all__ = [
     "ProcessResultV1",
     "ProcessRunnerV1",
     "ProcessSupervisionError",
+    "RepositoryTransferCapturePolicyV1",
     "SettlePolicyV1",
     "RunLifecycleV1",
     "RunnerCloseResultV1",

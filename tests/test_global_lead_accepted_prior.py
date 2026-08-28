@@ -1123,11 +1123,15 @@ def test_exact_provider_auth_baseline_lead_is_accepted_and_drift_refused(
             "6aa0e234e43f639a70f6f46311ab535e49039ad4",
             "52f2c3d21a5d83bc36fccafe7599ca089006fc4d1b93237ab606dd1e7390422a",
         ),
+        (
+            "2dbf91b3e96e9dbf2bf785d16bf6964faf766d46",
+            "d6cf6e5cd2a1cdb08346d396b60fcd905d36bf2533b96508f942f684b52b0255",
+        ),
     ),
     ids=(
         "pre-kimi", "pre-k3-wire-fix", "stock-77ec", "stock-3dad",
         "stock-fa5d", "stock-9339", "stock-6dbf", "stock-947", "stock-00dd",
-        "stock-5b", "stock-4c", "stock-6aa",
+        "stock-5b", "stock-4c", "stock-6aa", "stock-2db",
     ),
 )
 def test_exact_shipped_global_lead_is_accepted_and_one_byte_drift_refused(
@@ -1377,10 +1381,28 @@ def test_exact_947_manual_transfer_is_accepted_and_drift_refused(
     )
 
 
+def test_exact_2db_manual_transfer_is_accepted_and_drift_refused(
+    tmp_path: Path,
+) -> None:
+    installer = _load_installer()
+    historical = _extract_additional_stock_skill(
+        "manual-repo-transfer",
+        "2dbf91b3e96e9dbf2bf785d16bf6964faf766d46",
+        tmp_path / "historical",
+    )
+    _assert_exact_stock_skill_is_accepted_and_drift_refused(
+        installer,
+        tmp_path,
+        "manual-repo-transfer",
+        "e0d160e3f216d79fe2aa221b6ed8d4d4b63dd06882d4ea69feb46cdccab1afcc",
+        historical,
+    )
+
+
 def _copy_manual_transfer_with_runtime_cache(source: Path, destination: Path) -> Path:
     shutil.copytree(source, destination)
     cache = destination / "scripts" / "__pycache__"
-    cache.mkdir()
+    cache.mkdir(exist_ok=True)
     (cache / "repo_transfer.cpython-314.pyc").write_bytes(b"synthetic runtime cache")
     return destination
 

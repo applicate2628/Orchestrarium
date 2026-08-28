@@ -294,6 +294,29 @@ class RepoTransferTests(unittest.TestCase):
         self.assertIn("tracked.txt", names)
         self.assertNotIn("node_modules/cache.bin", names)
 
+    def test_bundle_force_is_explicit_and_replaces_only_a_bound_regular_file(self) -> None:
+        inventory = self.inventory()
+        self.write_selection(inventory)
+        arguments = (
+            "bundle",
+            "--repo",
+            self.repo,
+            "--inventory",
+            self.inventory_path,
+            "--selection",
+            self.selection,
+            "--output",
+            self.bundle,
+        )
+        run(*arguments)
+        self.bundle.write_bytes(b"operator-owned\n")
+        refused = run(*arguments, expect=2)
+        self.assertEqual("TRANSFER-OUTPUT-EXISTS", refused.stderr.strip())
+        self.assertEqual(b"operator-owned\n", self.bundle.read_bytes())
+        run(*arguments, "--force")
+        with zipfile.ZipFile(self.bundle) as archive:
+            self.assertIn("_repo-transfer/manifest.json", archive.namelist())
+
     def test_receiver_archive_verify_does_not_require_git(self) -> None:
         inventory = self.inventory()
         self.write_selection(inventory)

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import concurrent.futures
+import dataclasses
 import hashlib
 import importlib.util
 import json
 import os
+import shutil
 import struct
 import subprocess
 import sys
@@ -216,6 +219,148 @@ def test_hook_health_capability_rejects_repaired_spool_binding(tmp_path: Path) -
         assert spool_b.read() == b""
 
 
+def test_repository_transfer_git_request_uses_the_sealed_profile(tmp_path: Path) -> None:
+    runner = _load_runner()
+    git = Path(shutil.which("git") or "").resolve()
+    assert git.is_file()
+    owner = runner.ProcessRunnerV1()
+    request, sink = owner.build_repository_transfer_git_request(
+        argv=(str(git), "rev-parse", "--show-toplevel"),
+        resolved_executable=git,
+        cwd=str(tmp_path),
+        environment=(),
+        capture_limit_bytes=8 * 1024 * 1024,
+    )
+    assert request.policy_id == "repository-transfer-git-v1"
+    assert request.capture_policy.policy_id == "repository-transfer-git-v1"
+    assert request.capture_policy.aggregate_persisted_limit == 16 * 1024 * 1024
+    assert request.capture_policy.per_stream_persisted_limit == 8 * 1024 * 1024
+    assert request.windows_argv_profile_id == (
+        "repository-transfer-git-v1" if os.name == "nt" else None
+    )
+    assert request.capture_sink_binding is sink
+    with pytest.raises(runner.ProcessSupervisionError, match="PSV1-REQUEST-INVALID"):
+        owner.build_repository_transfer_git_request(
+            argv=(sys.executable, "-c", "pass"),
+            resolved_executable=Path(sys.executable),
+            cwd=str(tmp_path),
+            environment=(),
+            capture_limit_bytes=8 * 1024 * 1024,
+        )
+    owner.close()
+
+
+@pytest.mark.skipif(
+    os.name == "nt" or not sys.platform.startswith("linux"),
+    reason="Linux process-group oracle required",
+)
+def test_posix_parent_exit_settles_descendant_before_reader_join(
+    tmp_path: Path,
+) -> None:
+    """Catches pipe readers being joined before the owned group is terminated."""
+
+    runner = _load_runner()
+    marker = tmp_path / "descendant.pid"
+    parent = tmp_path / "spawn_descendant.py"
+    parent.write_text(
+        "from pathlib import Path\n"
+        "import subprocess, sys\n"
+        "child = subprocess.Popen(\n"
+        "    [sys.executable, '-c', 'import time; time.sleep(30)'],\n"
+        "    stdin=subprocess.DEVNULL, stdout=sys.stdout, stderr=sys.stderr,\n"
+        "    close_fds=False,\n"
+        ")\n"
+        "Path(sys.argv[1]).write_text(str(child.pid), encoding='ascii')\n",
+        encoding="utf-8",
+    )
+    python = str(Path(sys.executable).resolve())
+    request = _request(
+        runner,
+        (python, str(parent), str(marker)),
+        deadline=5.0,
+    )
+    request = dataclasses.replace(
+        request,
+        cwd=str(tmp_path),
+        settle_policy=runner.SettlePolicyV1(timeout_seconds=2.0),
+    )
+    owner = runner.ProcessRunnerV1()
+    descendant_pid: int | None = None
+    started = time.monotonic()
+    try:
+        result = owner.run(request)
+        elapsed = time.monotonic() - started
+        assert marker.is_file(), f"descendant PID was not published: {result!r}"
+        descendant_pid = int(marker.read_text(encoding="ascii"))
+        assert elapsed < 3.0, "reader joins consumed settlement time before kill"
+        assert result.failure_id == "PSV1-TREE-SETTLEMENT"
+        assert result.tree.ownership_confirmed is True
+        assert result.tree.direct_reaped is True
+        assert result.resources_closed is True
+        deadline = time.monotonic() + 3.0
+        while time.monotonic() < deadline:
+            try:
+                os.kill(descendant_pid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.02)
+        else:
+            pytest.fail("pipe-inheriting descendant survived runner return")
+    finally:
+        owner.close()
+        if descendant_pid is not None:
+            try:
+                os.kill(descendant_pid, 9)
+            except ProcessLookupError:
+                pass
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX executable replacement contract")
+def test_result_keeps_prelaunch_executable_identity_after_path_replacement(
+    tmp_path: Path,
+) -> None:
+    runner = _load_runner()
+    executable = tmp_path / "python-copy"
+    replacement = tmp_path / "replacement"
+    shutil.copy2(Path(sys.executable).resolve(), executable)
+    shutil.copy2(Path(sys.executable).resolve(), replacement)
+    replacement.write_bytes(replacement.read_bytes() + b"replacement")
+    executable.chmod(0o755)
+    replacement.chmod(0o755)
+    marker = tmp_path / "ready"
+    expected_identity = runner.resolve_executable_identity(executable)
+    owner = runner.ProcessRunnerV1()
+    request = runner.ProcessRequestV1(
+        schema_version=1,
+        argv=(
+            str(executable),
+            "-c",
+            (
+                "from pathlib import Path; import time; "
+                f"Path({str(marker)!r}).write_text('ready'); time.sleep(0.5)"
+            ),
+        ),
+        resolved_executable=executable,
+        cwd=str(tmp_path),
+        environment=(),
+        stdin_bytes=None,
+        deadline_monotonic=time.monotonic() + 5.0,
+        capture_policy=_policy(runner),
+        capture_sink_binding=owner.mint_memory_capture_sink(),
+        settle_policy=runner.SettlePolicyV1(1.0),
+    )
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(owner.run, request)
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline and not marker.exists():
+            time.sleep(0.01)
+        assert marker.is_file()
+        os.replace(replacement, executable)
+        result = future.result(timeout=4.0)
+    assert result.executable_identity_sha256 == expected_identity
+    assert runner.resolve_executable_identity(executable) != expected_identity
+
+
 def test_windows_abi_layout_matches_pointer_width() -> None:
     """Catches pointer truncation or a wrong STARTUPINFOEX/PROCESS_INFORMATION layout."""
     runner = _load_runner()
@@ -326,6 +471,9 @@ def test_result_freeze_rejects_capture_crossed_after_child_exit() -> None:
     result = runner._result_from_parts(
         request,
         time.monotonic(),
+        executable_identity_sha256=runner.resolve_executable_identity(
+            request.resolved_executable
+        ),
         backend="controlled-post-exit-v1",
         capture=capture,
         stdin_state={"written": 0, "complete": True},

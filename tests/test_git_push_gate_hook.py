@@ -3561,6 +3561,9 @@ class TestOracleFailClosed(unittest.TestCase):
             "test_empty_stdin_fails_open",
             "test_non_bash_tool_input_fails_open",
         }
+        # Test-only setup owner: creates an isolated Git root for direct
+        # process-bound probes and cannot execute a caller-controlled command.
+        safe_test_setup_owners = {"temporary_repository_workdir"}
         gated_external_owners = {
             "test_publication_gate_single_identity_shell_matrix",
             "test_powershell_open_token_lf_crlf_target_oracle",
@@ -3598,6 +3601,22 @@ class TestOracleFailClosed(unittest.TestCase):
                     and executable.value.id == "sys"
                     and executable.attr == "executable",
                     owner.name,
+                )
+                continue
+            if owner.name in safe_test_setup_owners:
+                argv = call.args[0]
+                self.assertIsInstance(argv, ast.List)
+                self.assertEqual(
+                    [item.value for item in argv.elts[:3]], ["git", "init", "-q"]
+                )
+                self.assertEqual(len(argv.elts), 4)
+                self.assertTrue(
+                    any(
+                        keyword.arg == "check"
+                        and isinstance(keyword.value, ast.Constant)
+                        and keyword.value.value is True
+                        for keyword in call.keywords
+                    )
                 )
                 continue
             self.assertIn(owner.name, gated_external_owners)
@@ -6873,6 +6892,7 @@ class TestPublicationSafetyTrustedScanR2(unittest.TestCase):
              ):
             envelope = {
                 "tool_name": "Bash",
+                "cwd": str(REPO_ROOT),
                 "tool_input": {"command": "git push origin main"},
                 "transcript_path": str(transcript_path),
             }
