@@ -659,7 +659,8 @@ class PendingScanInvocation:
                     mismatch = "PGG-RANGE-BINDING" if prefix == "PGG" else "PRG-RECEIPT-MISMATCH"
                     raise PrRouteDenied(mismatch)
                 if (
-                    receipt.tip != self.binding.source_oid
+                    receipt.source != self.binding.source_oid
+                    or receipt.tip != self.binding.source_oid
                     or self.binding.source_oid != self.binding.head_oid
                 ):
                     mismatch = "PGG-RANGE-TIP-BINDING" if prefix == "PGG" else "PRG-RECEIPT-MISMATCH"
@@ -794,6 +795,7 @@ class RangeReceiptV3(NamedTuple):
     path_set: str
     remote: str
     destination: str
+    source: str
     tip: str
 
 
@@ -1033,7 +1035,8 @@ SCAN_CLEAN_RANGE_V3_REGEX = re.compile(
     r"subject-set=(?P<subject_set>[0-9a-f]{64}), paths=(?P<paths>0|[1-9]\d*), "
     r"path-set=(?P<path_set>[0-9a-f]{64}), history=complete, "
     r"remote=(?P<remote>[A-Za-z0-9._~%-]+), "
-    r"dst=(?P<dst>[A-Za-z0-9._~%-]+), tip=(?P<tip>[0-9a-f]{40})\)$",
+    r"dst=(?P<dst>[A-Za-z0-9._~%-]+), "
+    r"src=(?P<src>[A-Za-z0-9._~%-]+), tip=(?P<tip>[0-9a-f]{40})\)$",
     re.MULTILINE,
 )
 SCAN_CLEAN_PATH_REGEX = re.compile(
@@ -1075,7 +1078,8 @@ def parse_publication_safety_observation(text: str) -> PublicationSafetyObservat
         match = v3_matches[0]
         remote = _decode_canonical_receipt_token(match.group("remote"))
         destination = _decode_canonical_receipt_token(match.group("dst"))
-        if remote is None or destination is None:
+        source = _decode_canonical_receipt_token(match.group("src"))
+        if remote is None or destination is None or source is None:
             return PublicationSafetyObservation("malformed", None)
         counts = {
             name: int(match.group(name))
@@ -1120,6 +1124,7 @@ def parse_publication_safety_observation(text: str) -> PublicationSafetyObservat
                 match.group("path_set"),
                 remote,
                 destination,
+                source,
                 match.group("tip"),
             ),
         )
@@ -2300,6 +2305,7 @@ def _run_authoritative_scan(
         interpreter_before.absolute_resolved_path, "-I", "-c", _SCAN_BOOTSTRAP,
         "--gate-git-executable", git_exe,
         "--range", binding.remote, binding.destination,
+        "--range-source", binding.source_oid,
     )
     pending = PendingScanInvocation(
         invocation_id, attempt_id, binding, closure_before,

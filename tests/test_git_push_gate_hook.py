@@ -1521,7 +1521,8 @@ def run_hook(
                 receipt = module.RangeReceiptV3(
                     1, "a" * 64, 1, "b" * 64, 0, "c" * 64,
                     0, 0, 0, 0, "d" * 64, 0, "e" * 64,
-                    binding.remote, binding.destination, binding.source_oid,
+                    binding.remote, binding.destination,
+                    binding.source_oid, binding.source_oid,
                 )
                 return module.AuthoritativeScanObservation(
                     "test-owned", binding,
@@ -1566,7 +1567,11 @@ def _fixture_authoritative_observation(module, entries, binding):
         if (receipt.remote, receipt.destination) != (binding.remote, binding.destination):
             failure = "PGG-RANGE-BINDING" if prefix == "PGG" else "PRG-RECEIPT-MISMATCH"
             raise module.PrRouteDenied(failure)
-        if receipt.tip != binding.source_oid or binding.source_oid != binding.head_oid:
+        if (
+            receipt.source != binding.source_oid
+            or receipt.tip != binding.source_oid
+            or binding.source_oid != binding.head_oid
+        ):
             failure = "PGG-RANGE-TIP-BINDING" if prefix == "PGG" else "PRG-RECEIPT-MISMATCH"
             raise module.PrRouteDenied(failure)
         parsed_outcome = observation
@@ -1834,6 +1839,7 @@ def range_receipt_v3(
     commits: int = 1,
     remote: str = "origin",
     dst: str = "claude",
+    src: str | None = None,
     tip: str = RANGE_TIP,
     digest: str = "a" * 64,
 ) -> str:
@@ -1847,7 +1853,8 @@ def range_receipt_v3(
         f"blob-set={'c' * 64}, blob-bytes={files}, text={files}, binary=0, "
         f"subjects={files}, subject-set={'d' * 64}, paths={files}, "
         f"path-set={'e' * 64}, history=complete, "
-        f"remote={quote(remote, safe='-._~')}, dst={quote(dst, safe='-._~')}, tip={tip})"
+        f"remote={quote(remote, safe='-._~')}, dst={quote(dst, safe='-._~')}, "
+        f"src={quote(src or tip, safe='-._~')}, tip={tip})"
     )
 
 
@@ -4621,9 +4628,12 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
                 tool_id=call_id,
             ),
             tool_result(
-                "publication-safety: clean (range, receipt=v2, files=2, commits=1, "
-                f"commit-set={'a' * 64}, messages=complete, remote=origin, "
-                f"dst={quote(destination, safe='-._~')}, tip={self.LOCAL_TIP})",
+                range_receipt_v3(
+                    files=2,
+                    dst=destination,
+                    src=self.LOCAL_TIP,
+                    tip=self.LOCAL_TIP,
+                ),
                 tool_id=call_id,
             ),
         ]
@@ -4728,7 +4738,8 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
             receipt = module.RangeReceiptV3(
                 1, "a" * 64, 1, "b" * 64, 0, "c" * 64,
                 0, 0, 0, 0, "d" * 64, 0, "e" * 64,
-                binding.remote, binding.destination, binding.source_oid,
+                binding.remote, binding.destination,
+                binding.source_oid, binding.source_oid,
             )
             return module.AuthoritativeScanObservation(
                 "test-owned", binding,
@@ -5498,7 +5509,7 @@ class TestCrashWhileDecidingFallsThroughToDeny(unittest.TestCase):
         with synthetic_transcript([user("finish the fix and commit")]) as transcript_path:
             envelope = {
                 "tool_name": "Bash",
-                "tool_input": {"command": "git push origin main"},
+                "tool_input": {"command": "git push origin HEAD:refs/heads/main"},
                 "transcript_path": str(transcript_path),
             }
             for idx, script in enumerate(HOOKS):
@@ -6522,6 +6533,7 @@ class TestPublicationSafetyRangeReceiptV3(unittest.TestCase):
         digest: str = "a" * 64,
         remote: str = "origin",
         dst: str = "claude",
+        src: str | None = None,
         tip: str | None = None,
     ) -> str:
         if commits == 0:
@@ -6535,6 +6547,7 @@ class TestPublicationSafetyRangeReceiptV3(unittest.TestCase):
             f"subjects={files}, subject-set={'d' * 64}, paths={files}, "
             f"path-set={'e' * 64}, history=complete, "
             f"remote={quote(remote, safe='-._~')}, dst={quote(dst, safe='-._~')}, "
+            f"src={quote(src or tip or self._head(), safe='-._~')}, "
             f"tip={tip or self._head()})"
         )
 
@@ -6576,6 +6589,7 @@ class TestPublicationSafetyRangeReceiptV3(unittest.TestCase):
         self.assertEqual(valid.receipt.paths, 2)
         self.assertEqual(valid.receipt.remote, "origin")
         self.assertEqual(valid.receipt.destination, "claude")
+        self.assertEqual(valid.receipt.source, self._head())
         rows = (
             ("publication-safety: clean (tracked, examined 1 file)", "legacy-nonauthorizing"),
             (f"publication-safety: clean (range, examined 1 file, remote origin, dst claude, tip {self._head()})", "legacy-nonauthorizing"),
@@ -6610,6 +6624,7 @@ class TestPublicationSafetyRangeReceiptV3(unittest.TestCase):
         rows = (
             (self._receipt(remote="upstream"), "git push origin HEAD:claude", "upstream", "claude", "PGG-RANGE-BINDING"),
             (self._receipt(dst="main"), "git push origin HEAD:claude", "origin", "main", "PGG-RANGE-BINDING"),
+            (self._receipt(src="9" * 40), "git push origin HEAD:claude", "origin", "claude", "PGG-RANGE-TIP-BINDING"),
             (self._receipt(remote="upstream"), "git push origin HEAD:claude", "origin", "claude", "PGG-RANGE-RECEIPT-VERSION"),
             (self._receipt(tip="9" * 40), "git push origin HEAD:claude", "origin", "claude", "PGG-RANGE-TIP-BINDING"),
             (self._receipt(), "git push origin HEAD~1:claude", "origin", "claude", "PGG-RANGE-TIP-BINDING"),
@@ -6804,6 +6819,19 @@ class TestPublicationSafetyTrustedScanR2(unittest.TestCase):
         self.assertEqual(type(observation).__name__, "ConsumedAuthoritativeEvidence")
         self.assertEqual(observation.parsed_outcome.kind, "valid-v3")
         self.assertEqual(observation.parsed_outcome.receipt.commits, 1)
+        self.assertEqual(
+            observation.parsed_outcome.receipt.destination,
+            "refs/heads/main",
+        )
+        self.assertEqual(observation.parsed_outcome.receipt.source, head)
+        self.assertEqual(observation.parsed_outcome.receipt.tip, head)
+        range_tip_index = observation.execution.launched.exact_argv.index(
+            "--range-source"
+        )
+        self.assertEqual(
+            observation.execution.launched.exact_argv[range_tip_index + 1],
+            head,
+        )
         self.assertTrue(observation.consumption_id)
         self.assertEqual(observation.execution.pending.state, module.PendingState.CONSUMED)
 
@@ -6833,7 +6861,7 @@ class TestPublicationSafetyTrustedScanR2(unittest.TestCase):
              ):
             envelope = {
                 "tool_name": "Bash",
-                "tool_input": {"command": "git push origin HEAD:refs/heads/main"},
+                "tool_input": {"command": "git push origin main"},
                 "transcript_path": str(transcript_path),
             }
             decision = module._a3_preflight.build_preflight(envelope)
@@ -7032,7 +7060,7 @@ class TestPublicationSafetyTrustedScanR3(unittest.TestCase):
             module.RangeReceiptV3(
                 1, "a" * 64, 1, "b" * 64, 0, "c" * 64,
                 0, 0, 0, 0, "d" * 64, 0, "e" * 64,
-                "origin", "refs/heads/main", "1" * 40,
+                "origin", "refs/heads/main", "1" * 40, "1" * 40,
             ),
         )
         fd = os.open(os.devnull, os.O_RDONLY)

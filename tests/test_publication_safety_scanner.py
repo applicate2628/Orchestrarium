@@ -679,7 +679,11 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
         origin = td / "origin.git"
         repo = td / "repo"
         subprocess.run([git, "init", "-q", "--bare", str(origin)], check=True, capture_output=True)
-        subprocess.run([git, "init", "-q", str(repo)], check=True, capture_output=True)
+        subprocess.run(
+            [git, "init", "-q", "-b", "claude", str(repo)],
+            check=True,
+            capture_output=True,
+        )
         subprocess.run([git, "-C", str(repo), "config", "user.email", "t@t"], check=True, capture_output=True)
         subprocess.run([git, "-C", str(repo), "config", "user.name", "t"], check=True, capture_output=True)
         subprocess.run(
@@ -691,6 +695,11 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
         subprocess.run(
             [git, "-C", str(repo), "push", "-q", "origin", "HEAD:refs/heads/main"],
             check=True, capture_output=True,
+        )
+        subprocess.run(
+            [git, "-C", str(repo), "branch", "main", "HEAD"],
+            check=True,
+            capture_output=True,
         )
         return repo
 
@@ -739,7 +748,8 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
                         rf"object-set=[0-9a-f]{{64}}, blobs=1, blob-set=[0-9a-f]{{64}}, "
                         rf"blob-bytes={expected_blob_bytes}, text=1, binary=0, subjects=1, "
                         rf"subject-set=[0-9a-f]{{64}}, paths=1, path-set=[0-9a-f]{{64}}, "
-                        rf"history=complete, remote=origin, dst=claude, tip={tip}\)\n?$",
+                        rf"history=complete, remote=origin, dst=claude, "
+                        rf"src=claude, tip={tip}\)\n?$",
                     )
 
     def test_range_mode_empty_range_reports_zero_and_is_not_creditable(self) -> None:
@@ -831,7 +841,9 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
             origin = root / "origin.git"
             repo = root / "repo"
             subprocess.run([_git(), "init", "-q", "--bare", str(origin)], check=True)
-            subprocess.run([_git(), "init", "-q", str(repo)], check=True)
+            subprocess.run(
+                [_git(), "init", "-q", "-b", "claude", str(repo)], check=True
+            )
             subprocess.run([_git(), "-C", str(repo), "config", "user.email", "t@t"], check=True)
             subprocess.run([_git(), "-C", str(repo), "config", "user.name", "t"], check=True)
             subprocess.run([_git(), "-C", str(repo), "remote", "add", "origin", str(origin)], check=True)
@@ -1136,7 +1148,7 @@ class TestPublicationSafetyScannerV3(unittest.TestCase):
         origin = root / "origin.git"
         repo = root / "repo"
         subprocess.run([_git(), "init", "-q", "--bare", str(origin)], check=True)
-        subprocess.run([_git(), "init", "-q", str(repo)], check=True)
+        subprocess.run([_git(), "init", "-q", "-b", "main", str(repo)], check=True)
         self._git_run(repo, "config", "user.email", "t@t")
         self._git_run(repo, "config", "user.name", "t")
         self._git_run(repo, "remote", "add", "origin", str(origin))
@@ -1336,19 +1348,189 @@ class TestPublicationSafetyScannerV3(unittest.TestCase):
     def test_range_tip_changed(self) -> None:
         module = _load_canonical_scanner("_scanner_v3_tip")
         self.assertTrue(hasattr(module, "_confirm_tip"))
-        refusal = module._confirm_tip("1" * 40, lambda: "2" * 40)
+        refusal = module._confirm_tip(
+            "1" * 40, lambda _timeout=None: "2" * 40
+        )
         self.assertEqual(refusal.failure_id, "PS-MSG-TIP-CHANGED")
+
+    def test_range_destination_selects_named_commit_and_truthful_receipt(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = self._init_range_repo(Path(td))
+            original_branch = self._git_run(
+                repo, "branch", "--show-current"
+            ).stdout.strip()
+            self._git_run(repo, "switch", "-q", "-c", "candidate")
+            candidate_tip = self._commit(
+                repo, "candidate-only.txt", "clean candidate", "candidate"
+            )
+            self._git_run(repo, "switch", "-q", original_branch)
+            self._commit(
+                repo,
+                "head-only.txt",
+                _join("to", "ken", " = ", "A1B2C3D4E5F6G7H8IJK"),
+                "unrelated head",
+            )
+
+            symbolic = self._run_range(repo, dst="candidate")
+            full_sha = self._run_range(repo, dst=candidate_tip)
+
+            self.assertEqual(symbolic.returncode, 0, symbolic.stderr)
+            self.assertEqual(full_sha.returncode, 0, full_sha.stderr)
+            self.assertIn("commits=1", symbolic.stdout)
+            self.assertIn("paths=1", symbolic.stdout)
+            self.assertIn(
+                f"dst=candidate, src=candidate, tip={candidate_tip})",
+                symbolic.stdout,
+            )
+            for field in (
+                "commit-set", "object-set", "blob-set", "blob-bytes",
+                "subject-set", "path-set", "tip",
+            ):
+                symbolic_value = symbolic.stdout.split(f"{field}=", 1)[1].split(",", 1)[0].rstrip(")\n")
+                full_sha_value = full_sha.stdout.split(f"{field}=", 1)[1].split(",", 1)[0].rstrip(")\n")
+                self.assertEqual(symbolic_value, full_sha_value, field)
+
+    def test_range_destination_content_cannot_be_laundered_by_clean_head(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = self._init_range_repo(Path(td))
+            original_branch = self._git_run(
+                repo, "branch", "--show-current"
+            ).stdout.strip()
+            self._git_run(repo, "switch", "-q", "-c", "candidate")
+            self._commit(
+                repo,
+                "candidate-only.txt",
+                _join("to", "ken", " = ", "A1B2C3D4E5F6G7H8IJK"),
+                "candidate",
+            )
+            self._git_run(repo, "switch", "-q", original_branch)
+            self._commit(repo, "head-only.txt", "clean head", "unrelated head")
+
+            proc = self._run_range(repo, dst="candidate")
+
+            self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+            self.assertIn("PS-FINDING-CONTENT", proc.stderr)
+            self.assertNotIn("publication-safety: clean", proc.stdout + proc.stderr)
+
+    def test_range_source_override_is_explicit_and_truthful_in_receipt(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = self._init_range_repo(Path(td))
+            original_branch = self._git_run(
+                repo, "branch", "--show-current"
+            ).stdout.strip()
+            self._git_run(repo, "switch", "-q", "-c", "candidate")
+            self._commit(repo, "candidate.txt", "clean candidate", "candidate")
+            self._git_run(repo, "switch", "-q", original_branch)
+            source_tip = self._commit(repo, "source.txt", "clean source", "source")
+
+            proc = subprocess.run(
+                [
+                    sys.executable, str(CANONICAL_SCANNER),
+                    "--range", "origin", "candidate",
+                    "--range-source", source_tip,
+                ],
+                cwd=repo,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn(
+                f"dst=candidate, src={source_tip}, tip={source_tip})",
+                proc.stdout,
+            )
+
+    def test_range_destination_refuses_missing_and_noncommit_objects(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = self._init_range_repo(Path(td))
+            blob = self._git_run(repo, "rev-parse", "HEAD:seed.txt").stdout.strip()
+            self._git_run(repo, "update-ref", "refs/tags/blob-only", blob)
+
+            for destination in ("missing", "refs/tags/blob-only"):
+                with self.subTest(destination=destination):
+                    proc = self._run_range(repo, dst=destination)
+                    self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+                    self.assertIn("id=PS-MSG-RANGE", proc.stderr)
+                    self.assertNotIn("publication-safety: clean", proc.stdout + proc.stderr)
+
+    def test_range_destination_drift_refuses_after_real_acquisition(self) -> None:
+        module = _load_canonical_scanner("_scanner_v3_destination_drift")
+        with tempfile.TemporaryDirectory() as td:
+            repo = self._init_range_repo(Path(td))
+            original_branch = self._git_run(
+                repo, "branch", "--show-current"
+            ).stdout.strip()
+            self._git_run(repo, "switch", "-q", "-c", "candidate")
+            self._commit(repo, "candidate-only.txt", "clean candidate", "candidate")
+            self._git_run(repo, "switch", "-q", original_branch)
+            replacement_tip = self._commit(
+                repo, "replacement.txt", "clean replacement", "replacement"
+            )
+            moved = False
+
+            def move_destination(_event, _oid) -> None:
+                nonlocal moved
+                if not moved:
+                    self._git_run(
+                        repo, "update-ref", "refs/heads/candidate", replacement_tip
+                    )
+                    moved = True
+
+            with contextlib.chdir(repo):
+                outcome = asyncio.run(module._scan_range_async(
+                    "origin", "candidate", lambda _line: [],
+                    coverage_observer=move_destination,
+                ))
+
+            self.assertTrue(moved)
+            self.assertEqual(outcome.kind, "refusal")
+            self.assertEqual(outcome.refusal.failure_id, "PS-MSG-TIP-CHANGED")
+
+    def test_range_destination_ignores_unrelated_head_drift(self) -> None:
+        module = _load_canonical_scanner("_scanner_v3_unrelated_head")
+        with tempfile.TemporaryDirectory() as td:
+            repo = self._init_range_repo(Path(td))
+            original_branch = self._git_run(
+                repo, "branch", "--show-current"
+            ).stdout.strip()
+            self._git_run(repo, "switch", "-q", "-c", "candidate")
+            candidate_tip = self._commit(
+                repo, "candidate-only.txt", "clean candidate", "candidate"
+            )
+            self._git_run(repo, "switch", "-q", original_branch)
+            self._commit(repo, "head-only.txt", "clean head", "unrelated head")
+            moved = False
+
+            def move_head(_event, _oid) -> None:
+                nonlocal moved
+                if not moved:
+                    self._git_run(
+                        repo, "symbolic-ref", "HEAD", "refs/heads/candidate"
+                    )
+                    moved = True
+
+            with contextlib.chdir(repo):
+                outcome = asyncio.run(module._scan_range_async(
+                    "origin", "candidate", lambda _line: [],
+                    coverage_observer=move_head,
+                ))
+
+            self.assertTrue(moved)
+            self.assertEqual(outcome.kind, "clean", outcome.refusal)
+            self.assertEqual(outcome.selection.tip, candidate_tip)
 
     def test_receipt_v3_canonicalization(self) -> None:
         module = _load_canonical_scanner("_scanner_v3_receipt")
         rows = ["2" * 40, "1" * 40]
         selection = module.RangeSelection(
-            "origin one", "refs/heads/topic", "2" * 40,
+            "origin one", "refs/heads/topic", "refs/heads/topic", "2" * 40,
             tuple(rows), tuple(rows),
         )
         history = _empty_history_proof(module, selection)
         line = module._serialize_range_receipt_v3(
-            history, selection.remote, selection.destination, selection.tip
+            history, selection.remote, selection.destination,
+            selection.source, selection.tip,
         )
         self.assertEqual(
             line,
@@ -1358,7 +1540,8 @@ class TestPublicationSafetyScannerV3(unittest.TestCase):
             f"blob-set={history.blob_set}, blob-bytes=0, text=0, binary=0, "
             f"subjects=0, subject-set={history.subject_set}, paths=0, "
             f"path-set={history.path_set}, history=complete, "
-            "remote=origin%20one, dst=refs%2Fheads%2Ftopic, tip=" + "2" * 40 + ")",
+            "remote=origin%20one, dst=refs%2Fheads%2Ftopic, "
+            "src=refs%2Fheads%2Ftopic, tip=" + "2" * 40 + ")",
         )
         self.assertFalse(hasattr(module, "_serialize_range_receipt_v2"))
 
@@ -1562,7 +1745,8 @@ class TestPublicationSafetyScannerR2Contract(unittest.TestCase):
         oid = "1" * 40
         other = "2" * 40
         selection = module.RangeSelection(
-            "origin", "refs/heads/main", oid, (oid,), (oid,)
+            "origin", "refs/heads/main", "refs/heads/main", oid,
+            (oid,), (oid,)
         )
         originals = (module._range_selection, module._acquire_history)
 
@@ -1644,10 +1828,14 @@ class TestPublicationSafetyScannerR2Contract(unittest.TestCase):
             for row, expected_failure in rows.items():
                 with self.subTest(row=row):
                     reader = FakeReader(row)
-                    resolver = (lambda: other) if row == "tip-drift" else (lambda: oid)
+                    resolver = (
+                        (lambda _timeout=None: other)
+                        if row == "tip-drift"
+                        else (lambda _timeout=None: oid)
+                    )
                     outcome = await module._scan_range_async(
                         "origin", "refs/heads/main", lambda _line: [],
-                        head_resolver=resolver,
+                        tip_resolver=resolver,
                         reader_factory=lambda: reader,
                     )
                     self.assertEqual(outcome.kind, "refusal")
@@ -1663,7 +1851,7 @@ class TestPublicationSafetyScannerR2Contract(unittest.TestCase):
                     reader = FakeReader(row)
                     outcome = await module._scan_range_async(
                         "origin", "refs/heads/main", finder,
-                        head_resolver=lambda: oid,
+                        tip_resolver=lambda _timeout=None: oid,
                         reader_factory=lambda: reader,
                     )
                     self.assertEqual(outcome.kind, expected_kind)
@@ -1673,7 +1861,7 @@ class TestPublicationSafetyScannerR2Contract(unittest.TestCase):
             reader = FakeReader("cleanup-refusal")
             outcome = await module._scan_range_async(
                 "origin", "refs/heads/main", lambda _line: [],
-                head_resolver=lambda: oid,
+                tip_resolver=lambda _timeout=None: oid,
                 reader_factory=lambda: reader,
             )
             self.assertEqual(outcome.kind, "refusal")
@@ -1739,7 +1927,8 @@ class TestPublicationSafetyScannerR3Contract(unittest.TestCase):
 
         oid = "1" * 40
         selection = module.RangeSelection(
-            "origin", "refs/heads/main", "2" * 40, (oid,), (oid,)
+            "origin", "refs/heads/main", "refs/heads/main", "2" * 40,
+            (oid,), (oid,)
         )
 
         class Reader:
@@ -1790,6 +1979,7 @@ class TestPublicationSafetyScannerR3Contract(unittest.TestCase):
             module._range_selection = mock.AsyncMock(return_value=module.RangeSelection(
                 selection.remote,
                 selection.destination,
+                selection.source,
                 selection.tip,
                 expected,
                 expected,
@@ -1983,7 +2173,8 @@ class TestPublicationSafetyScannerR4Contract(unittest.TestCase):
             module._confirm_tip, module._content_hits,
         )
         module._range_selection = mock.AsyncMock(return_value=module.RangeSelection(
-            "origin", "refs/heads/main", "4" * 40, expected, expected
+            "origin", "refs/heads/main", "refs/heads/main", "4" * 40,
+            expected, expected
         ))
         module._confirm_tip = lambda *_args: None
         module._content_hits = lambda *_args, **_kwargs: []
@@ -2006,7 +2197,7 @@ class TestPublicationSafetyScannerR4Contract(unittest.TestCase):
 
         def run(transform, selection_oids=expected):
             module._range_selection = mock.AsyncMock(return_value=module.RangeSelection(
-                "origin", "refs/heads/main", "4" * 40,
+                "origin", "refs/heads/main", "refs/heads/main", "4" * 40,
                 selection_oids, selection_oids,
             ))
             outcome = asyncio.run(module._scan_range_async(
@@ -2267,7 +2458,8 @@ class TestPublicationSafetyScannerR5Proof(unittest.TestCase):
         module = self._module("coverage_redaction")
         oid = "1" * 40
         selection = module.RangeSelection(
-            "origin", "refs/heads/main", "2" * 40, (oid,), (oid,)
+            "origin", "refs/heads/main", "refs/heads/main", "2" * 40,
+            (oid,), (oid,)
         )
 
         class Reader:

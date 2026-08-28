@@ -125,9 +125,17 @@ _REFUSAL_PHASES = {
 
 
 @dataclass(frozen=True)
+class RangeRequest:
+    remote: str
+    destination: str
+    source: str
+
+
+@dataclass(frozen=True)
 class RangeSelection:
     remote: str
     destination: str
+    source: str
     tip: str
     expected_oids: tuple[str, ...]
     object_oids: tuple[str, ...] = ()
@@ -355,6 +363,7 @@ class RangeReceiptV3:
     path_set: str
     remote: str
     destination: str
+    source: str
     tip: str
 
 
@@ -557,16 +566,30 @@ def _remaining_seconds(deadline: float) -> float:
     return remaining
 
 
-def _resolve_head(timeout: float | None = None) -> str:
+def _resolve_commit(revision: str, timeout: float | None = None) -> str:
+    if not revision:
+        raise ValueError("revision")
     proc = _run_git(
-        ["rev-parse", "--verify", "HEAD^{commit}"], text=True, timeout=timeout
+        [
+            "rev-parse", "--verify", "--end-of-options",
+            f"{revision}^{{commit}}",
+        ],
+        text=True,
+        timeout=timeout,
     )
     if proc.returncode:
-        raise ValueError("head")
-    oid = proc.stdout.strip().lower()
+        raise ValueError("revision")
+    rows = proc.stdout.splitlines()
+    if len(rows) != 1:
+        raise ValueError("revision")
+    oid = rows[0].lower()
     if not _OID_RE.fullmatch(oid):
-        raise ValueError("head")
+        raise ValueError("revision")
     return oid
+
+
+def _resolve_head(timeout: float | None = None) -> str:
+    return _resolve_commit("HEAD", timeout)
 
 
 async def _read_git_oid_lines_bounded(
@@ -680,8 +703,20 @@ async def _read_git_oid_lines_bounded(
     return tuple(rows)
 
 
+def _range_request(
+    remote: str, destination: str, source: str | None
+) -> RangeRequest | Refusal:
+    if not destination:
+        return _refusal("PS-MSG-RANGE", "destination")
+    effective_source = destination if source is None else source
+    if not effective_source:
+        return _refusal("PS-MSG-RANGE", "source")
+    return RangeRequest(remote, destination, effective_source)
+
+
 async def _range_selection(
-    remote: str, destination: str, deadline: float | None = None
+    request: RangeRequest,
+    deadline: float | None = None,
 ) -> RangeSelection | Refusal:
     deadline = deadline if deadline is not None else time.monotonic() + _SCAN_DEADLINE_SECONDS
     try:
@@ -691,18 +726,16 @@ async def _range_selection(
     except subprocess.TimeoutExpired:
         return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
     configured = [line for line in remotes.stdout.splitlines() if line]
-    if remotes.returncode or remote not in configured:
+    if remotes.returncode or request.remote not in configured:
         return _refusal("PS-MSG-RANGE", "remote")
-    if not destination:
-        return _refusal("PS-MSG-RANGE", "destination")
     try:
-        tip = _resolve_head(_remaining_seconds(deadline))
+        tip = _resolve_commit(request.source, _remaining_seconds(deadline))
     except (OSError, ValueError, subprocess.TimeoutExpired):
-        return _refusal("PS-MSG-RANGE", "head")
+        return _refusal("PS-MSG-RANGE", "destination")
     commit_ids = await _read_git_oid_lines_bounded(
         (
             _GIT_EXECUTABLE, "rev-list", "--topo-order", tip,
-            "--not", f"--remotes={remote}",
+            "--not", f"--remotes={request.remote}",
         ),
         count_cap=_MAX_COMMITS,
         byte_cap=_MAX_COMMIT_LIST_BYTES,
@@ -714,7 +747,7 @@ async def _range_selection(
     object_ids = await _read_git_oid_lines_bounded(
         (
             _GIT_EXECUTABLE, "rev-list", "--objects", "--no-object-names", tip,
-            "--not", f"--remotes={remote}",
+            "--not", f"--remotes={request.remote}",
         ),
         count_cap=_MAX_OBJECTS,
         byte_cap=_MAX_OBJECT_LIST_BYTES,
@@ -729,8 +762,9 @@ async def _range_selection(
     if any(oid not in object_set for oid in commit_ids):
         return _refusal("PS-MSG-COVERAGE", "commit-object-set")
     return RangeSelection(
-        remote,
-        destination,
+        request.remote,
+        request.destination,
+        request.source,
         tip,
         commit_ids,
         object_ids,
@@ -1179,17 +1213,15 @@ def _path_set_digest(paths: Iterable[tuple[str, bytes]]) -> str:
 
 def _confirm_tip(
     initial_tip: str,
-    resolver: Callable[[], str] = _resolve_head,
+    resolver: Callable[[float | None], str],
     timeout: float | None = None,
 ) -> Refusal | None:
     try:
-        final_tip = (
-            resolver(timeout).lower() if resolver is _resolve_head else resolver().lower()
-        )
+        final_tip = resolver(timeout).lower()
     except Exception:
-        return _refusal("PS-MSG-TIP-CHANGED", "head")
+        return _refusal("PS-MSG-TIP-CHANGED", "destination")
     if final_tip != initial_tip:
-        return _refusal("PS-MSG-TIP-CHANGED", "head")
+        return _refusal("PS-MSG-TIP-CHANGED", "destination")
     return None
 
 
@@ -1531,14 +1563,18 @@ async def _scan_range_async(
     destination: str,
     find_machine_paths,
     *,
-    head_resolver: Callable[[], str] = _resolve_head,
+    source_revision: str | None = None,
+    tip_resolver: Callable[[float | None], str] | None = None,
     reader_factory: Callable[[], _AsyncGitObjectReader] = _AsyncGitObjectReader,
     coverage_observer: Callable[[CoverageEvent, str], None] | None = None,
     coverage_fault: CoverageFaultPort | None = None,
     scan_timeout: float = _SCAN_DEADLINE_SECONDS,
 ) -> ScanOutcome:
     wall_deadline = time.monotonic() + scan_timeout
-    selection = await _range_selection(remote, destination, wall_deadline)
+    request = _range_request(remote, destination, source_revision)
+    if isinstance(request, Refusal):
+        return ScanOutcome("refusal", "range", refusal=request)
+    selection = await _range_selection(request, wall_deadline)
     if isinstance(selection, Refusal):
         return ScanOutcome("refusal", "range", refusal=selection)
     if not selection.expected_oids:
@@ -1580,9 +1616,12 @@ async def _scan_range_async(
                     )
                 else:
                     history, coverage, findings = acquisition
+                    resolver = tip_resolver or (
+                        lambda timeout=None: _resolve_commit(request.source, timeout)
+                    )
                     drift = _confirm_tip(
                         selection.tip,
-                        head_resolver,
+                        resolver,
                         max(0.001, wall_deadline - time.monotonic()),
                     )
                     if drift is not None:
@@ -1641,11 +1680,16 @@ def _scan_range(
     destination: str,
     find_machine_paths,
     *,
-    head_resolver: Callable[[], str] = _resolve_head,
+    source_revision: str | None = None,
+    tip_resolver: Callable[[float | None], str] | None = None,
 ) -> ScanOutcome:
     try:
         return asyncio.run(_scan_range_async(
-            remote, destination, find_machine_paths, head_resolver=head_resolver
+            remote,
+            destination,
+            find_machine_paths,
+            source_revision=source_revision,
+            tip_resolver=tip_resolver,
         ))
     except KeyboardInterrupt:
         return ScanOutcome(
@@ -1669,6 +1713,7 @@ def _serialize_range_receipt_v3(
     history: HistoryProof,
     remote: str,
     destination: str,
+    source: str,
     tip: str,
 ) -> str:
     if not history.commit_ids or not history.object_ids:
@@ -1695,6 +1740,7 @@ def _serialize_range_receipt_v3(
         history.path_set,
         _encode_receipt_token(remote),
         _encode_receipt_token(destination),
+        _encode_receipt_token(source),
         tip,
     )
     return (
@@ -1707,7 +1753,8 @@ def _serialize_range_receipt_v3(
         f"binary={receipt.binary}, subjects={receipt.subjects}, "
         f"subject-set={receipt.subject_set}, paths={receipt.paths}, "
         f"path-set={receipt.path_set}, history=complete, "
-        f"remote={receipt.remote}, dst={receipt.destination}, tip={receipt.tip})"
+        f"remote={receipt.remote}, dst={receipt.destination}, "
+        f"src={receipt.source}, tip={receipt.tip})"
     )
 
 
@@ -1734,6 +1781,7 @@ def _parser() -> argparse.ArgumentParser:
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--path")
     group.add_argument("--range", nargs=2, metavar=("REMOTE", "DST"))
+    parser.add_argument("--range-source", metavar="REVISION")
     parser.add_argument("legacy_path", nargs="?")
     return parser
 
@@ -1830,6 +1878,7 @@ def _format_outcome(outcome: ScanOutcome) -> tuple[str, str, int]:
                     history,
                     selection.remote,
                     selection.destination,
+                    selection.source,
                     selection.tip,
                 ),
                 "",
@@ -1862,6 +1911,8 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     if args.legacy_path and (args.path or args.range):
         _parser().error("unexpected extra path argument")
+    if args.range_source is not None and not args.range:
+        _parser().error("--range-source requires --range")
     script = Path(__file__).resolve()
     try:
         repo_root = _repo_root()
@@ -1869,7 +1920,12 @@ def main(argv: list[str] | None = None) -> int:
         find_machine_paths = _path_finder(script)
         if args.range:
             remote, dst = args.range
-            return _emit_outcome(_scan_range(remote, dst, find_machine_paths))
+            return _emit_outcome(_scan_range(
+                remote,
+                dst,
+                find_machine_paths,
+                source_revision=args.range_source,
+            ))
         elif args.path or args.legacy_path:
             mode = "path"
             paths, blobs = _path_files(args.path or args.legacy_path)
