@@ -192,7 +192,10 @@ ADDITIONAL_STOCK_SKILL_ACCEPTED_PRIOR_TREE_SHA256 = {
         {"c079a182db6139257be2b7b138c6a4b28aa730747c1988d54132f8b07504dd1c"}
     ),
     "manual-repo-transfer": frozenset(
-        {"45fc1efc9f0558664afb1f386c5fc7ac2692a607fb8c7be6265b2cfc4d10029b"}
+        {
+            "45fc1efc9f0558664afb1f386c5fc7ac2692a607fb8c7be6265b2cfc4d10029b",
+            "b73cde79962de55bd2cd52bc35f0b450d26cff78abb21b9a496bf38be686a9f3",
+        }
     ),
     "second-opinion": frozenset(
         {"fe989a918e11ff8066a0c8af54f73ba7bbf763719ea3b604ed147b79bec684d6"}
@@ -224,6 +227,7 @@ GLOBAL_LEAD_ACCEPTED_PRIOR_TREE_SHA256 = frozenset(
         "d73912c5e01c693fa8f6c0c3aa071e51f595f3d88e6a81aa7aa8abfa8995bfda",
         "c3508f94d6830da703a5519fbe28bf7011f2a8850e67b5ed5a49c47465283295",
         "9b11e845e746adeb81e56243169ade9e48aaf2adc349b40073beb21b5b596c30",
+        "a90c1989a0c136c55af71b68c62fad6a2cc239162a953d45643dfee903795560",
     }
 )
 RUNTIME_RESOURCES = (

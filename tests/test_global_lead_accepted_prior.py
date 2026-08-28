@@ -1081,10 +1081,14 @@ def test_exact_provider_auth_baseline_lead_is_accepted_and_drift_refused(
             "6dbf861a4c119f59c52813a02758f14ea9050aa7",
             "9b11e845e746adeb81e56243169ade9e48aaf2adc349b40073beb21b5b596c30",
         ),
+        (
+            "94715eed9e0563a38d83572f4b6d525d2f9172d9",
+            "a90c1989a0c136c55af71b68c62fad6a2cc239162a953d45643dfee903795560",
+        ),
     ),
     ids=(
         "pre-kimi", "pre-k3-wire-fix", "stock-77ec", "stock-3dad",
-        "stock-fa5d", "stock-9339", "stock-6dbf",
+        "stock-fa5d", "stock-9339", "stock-6dbf", "stock-947",
     ),
 )
 def test_exact_shipped_global_lead_is_accepted_and_one_byte_drift_refused(
@@ -1313,6 +1317,24 @@ def test_exact_additional_stock_skill_is_accepted_and_drift_refused(
     )
     _assert_exact_stock_skill_is_accepted_and_drift_refused(
         installer, tmp_path, name, expected_prior, historical
+    )
+
+
+def test_exact_947_manual_transfer_is_accepted_and_drift_refused(
+    tmp_path: Path,
+) -> None:
+    installer = _load_installer()
+    historical = _extract_additional_stock_skill(
+        "manual-repo-transfer",
+        "94715eed9e0563a38d83572f4b6d525d2f9172d9",
+        tmp_path / "historical",
+    )
+    _assert_exact_stock_skill_is_accepted_and_drift_refused(
+        installer,
+        tmp_path,
+        "manual-repo-transfer",
+        "b73cde79962de55bd2cd52bc35f0b450d26cff78abb21b9a496bf38be686a9f3",
+        historical,
     )
 
 
