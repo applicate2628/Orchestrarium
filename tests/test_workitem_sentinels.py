@@ -712,13 +712,12 @@ class TestT3SubagentSkip(unittest.TestCase):
 
 class TestG6SignalBudget(unittest.TestCase):
     """DI-6: zero output on a healthy repository. Run over Orchestrarium's
-    OWN real work-items/ tree (T-13: the current mixed tracked/read-model plus
-    gitignored task-memory layout) and a VFEM-shaped
+    OWN real local-only work-items/ task-memory tree and a VFEM-shaped
     unhealthy fixture (T-1)."""
 
     def test_zero_findings_on_orchestrarium_own_tree(self) -> None:
         ctx = sentinels.build_context(str(REPO_ROOT))
-        self.assertEqual(ctx["legs"], "both", "Orchestrarium's current work-items/ has tracked canon plus disk-only task memory")
+        self.assertEqual(ctx["legs"], "disk", "Orchestrarium's work-items/ is local-only task memory")
         findings = sentinels.evaluate_all(ctx)
         self.assertEqual(
             findings, [],
