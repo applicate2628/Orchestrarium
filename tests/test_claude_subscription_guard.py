@@ -103,20 +103,22 @@ def test_subscription_only_fails_before_prompt_persistence(tmp_path: Path) -> No
 
 
 @pytest.mark.parametrize(
-    "signal",
+    ("signal", "expected_returncode"),
     (
-        {"ANTHROPIC_" + "API_KEY": "synthetic"},
-        {"ANTHROPIC_" + "AUTH_TOKEN": "synthetic"},
-        {"CLAUDE_CODE_USE_BEDROCK": "1"},
-        {"CLAUDE_CODE_USE_VERTEX": "true"},
-        {"ORCHESTRARIUM_ALLOW_SUBSCRIPTION_CLAUDE": "1"},
+        ({"ANTHROPIC_" + "API_KEY": "synthetic"}, 0),
+        ({"ANTHROPIC_" + "AUTH_TOKEN": "synthetic"}, 0),
+        ({"CLAUDE_CODE_USE_BEDROCK": "1"}, 1),
+        ({"CLAUDE_CODE_USE_VERTEX": "true"}, 1),
+        ({"ORCHESTRARIUM_ALLOW_SUBSCRIPTION_CLAUDE": "1"}, 1),
     ),
 )
-def test_commercial_or_explicit_override_signals_launch(
-    tmp_path: Path, signal: dict[str, str]
+def test_only_exact_environment_credentials_authorize_nonopaque_launch(
+    tmp_path: Path, signal: dict[str, str], expected_returncode: int
 ) -> None:
     result = _run(tmp_path, signal)
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == expected_returncode, result.stderr
+    if expected_returncode:
+        assert "E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE" in result.stderr
 
 
 def test_api_key_helper_is_refused_without_running_helper_or_leaking_child_output(
@@ -195,7 +197,7 @@ def test_project_api_key_helper_claim_does_not_authorize_automated_launch(
     assert not (tmp_path / "artifacts").exists()
 
 
-def test_vertex_child_consumes_complete_stdin_before_terminal_pass(tmp_path: Path) -> None:
+def test_vertex_auth_refusal_precedes_large_prompt_capture(tmp_path: Path) -> None:
     child = (
         "import sys\n"
         "payload=sys.stdin.buffer.read()\n"
@@ -205,8 +207,12 @@ def test_vertex_child_consumes_complete_stdin_before_terminal_pass(tmp_path: Pat
     for index in range(3):
         result = _run(
             tmp_path / str(index),
-            {"CLAUDE_CODE_USE_VERTEX": "true"},
+            {
+                "CLAUDE_CODE_USE_VERTEX": "true",
+            },
             child_source=child,
             prompt_bytes=b"x" * (15 * 1024 * 1024),
         )
-        assert result.returncode == 0, result.stderr
+        assert result.returncode == 1, result.stderr
+        assert "E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE" in result.stderr
+        assert not (tmp_path / str(index) / "artifacts").exists()

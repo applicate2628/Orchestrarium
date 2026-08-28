@@ -580,7 +580,9 @@ def test_fast_oversized_git_status_cannot_be_consumed_as_complete(
     observed = []
 
     def backend_factory(_runner, _lifecycle):
-        def backend(request, _owned_lifecycle, _validated_cwd):
+        def backend(
+            request, _owned_lifecycle, _validated_cwd, _launch_owner
+        ):
             capture = process_runner.BoundedCaptureV1(
                 request.capture_policy, request.capture_sink_binding
             )

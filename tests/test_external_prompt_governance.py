@@ -289,7 +289,11 @@ def test_wrapper_rejects_bounded_strict_stdin_before_provider_or_capture(
         provider_prompt,
         "resolve_provider_auth_configuration",
         lambda _provider: calls.append("auth-configuration")
-        or SimpleNamespace(child_environment={}, needles=()),
+        or SimpleNamespace(
+            child_environment={},
+            needles=(),
+            output_scan_disposition="environment-exact",
+        ),
     )
     monkeypatch.setattr(
         provider_prompt.RunCaptureLifecycle,
@@ -332,7 +336,11 @@ def test_wrapper_rejects_composed_overflow_before_provider_or_capture(
         provider_prompt,
         "resolve_provider_auth_configuration",
         lambda _provider: calls.append("auth-configuration")
-        or SimpleNamespace(child_environment={}, needles=()),
+        or SimpleNamespace(
+            child_environment={},
+            needles=(),
+            output_scan_disposition="environment-exact",
+        ),
     )
     monkeypatch.setattr(
         provider_prompt.RunCaptureLifecycle,

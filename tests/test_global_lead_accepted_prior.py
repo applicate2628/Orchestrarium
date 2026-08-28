@@ -83,6 +83,12 @@ PRE_ZOMBIE_CENSUS_GLOBAL_LEAD_REVISION = (
 PRE_ZOMBIE_CENSUS_GLOBAL_LEAD_TREE_SHA256 = (
     "0da7db4510b37eac407ad9577ff171fbaa86985e30a53f341b00f05aeb433975"
 )
+PRE_COMBINED_HOTFIX_GLOBAL_LEAD_REVISION = (
+    "1a56f81fb364b02e0b5e8318343133f077cbb0af"
+)
+PRE_COMBINED_HOTFIX_GLOBAL_LEAD_TREE_SHA256 = (
+    "1e4bdc38283d81f2901a3b089c13fc9a0d10946605b1900ae15006cd42534dc6"
+)
 CURRENT_HYBRID_GLOBAL_LEAD_OVERLAYS = {
     "external-dispatch.md": (
         "e55b2466281ecc50ad2a940a4de14a5ea90fb98c",
@@ -892,17 +898,30 @@ def test_exact_current_hybrid_global_lead_migrates_noops_and_rejects_drift(
         )
 
 
-def test_exact_pre_zombie_census_lead_migrates_and_rejects_drift(
-    tmp_path: Path,
+@pytest.mark.parametrize(
+    ("revision", "expected_digest"),
+    (
+        (
+            PRE_ZOMBIE_CENSUS_GLOBAL_LEAD_REVISION,
+            PRE_ZOMBIE_CENSUS_GLOBAL_LEAD_TREE_SHA256,
+        ),
+        (
+            PRE_COMBINED_HOTFIX_GLOBAL_LEAD_REVISION,
+            PRE_COMBINED_HOTFIX_GLOBAL_LEAD_TREE_SHA256,
+        ),
+    ),
+)
+def test_exact_immediate_stock_lead_migrates_and_rejects_drift(
+    tmp_path: Path, revision: str, expected_digest: str,
 ) -> None:
     installer = _load_installer()
     skills_root = tmp_path / "accepted" / ".agents" / "skills"
     historical = _seed_revision_staged_lead(
-        PRE_ZOMBIE_CENSUS_GLOBAL_LEAD_REVISION, skills_root / "lead"
+        revision, skills_root / "lead"
     )
     assert (
         installer._tree_sha256(historical, ignore_runtime_cache=True)
-        == PRE_ZOMBIE_CENSUS_GLOBAL_LEAD_TREE_SHA256
+        == expected_digest
     )
 
     plan = installer._preflight_canonical_skills(
@@ -910,13 +929,13 @@ def test_exact_pre_zombie_census_lead_migrates_and_rejects_drift(
     )
     try:
         lead = next(skill for skill in plan.skills if skill.name == "lead")
-        assert lead.accepted_prior == PRE_ZOMBIE_CENSUS_GLOBAL_LEAD_TREE_SHA256
+        assert lead.accepted_prior == expected_digest
     finally:
         installer._discard_canonical_skills_plan(plan)
 
     drift_root = tmp_path / "drift" / ".agents" / "skills"
     drift = _seed_revision_staged_lead(
-        PRE_ZOMBIE_CENSUS_GLOBAL_LEAD_REVISION, drift_root / "lead"
+        revision, drift_root / "lead"
     )
     with (drift / "scripts" / "process_supervision" / "process_runner.py").open(
         "ab"

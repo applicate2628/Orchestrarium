@@ -259,7 +259,7 @@ def test_cwd_must_be_string_and_backend_receives_validated_canonical_value() -> 
     observed = []
 
     def factory(_owner, _lifecycle):
-        def backend(request, lifecycle, validated_cwd):
+        def backend(request, lifecycle, validated_cwd, _launch_owner):
             observed.append((request.cwd, validated_cwd))
             raise module.ProcessSupervisionError("PSV1-CANCELLED", "cancellation")
 

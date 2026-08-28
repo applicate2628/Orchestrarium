@@ -36,12 +36,26 @@ def _request(
     profile_id: str,
     *,
     cwd: Path = ROOT,
+    expected_executable_binding=None,
 ):
     executable = Path(argv[0]).resolve()
     rows = tuple(
         module.EnvironmentRowV1(name, os.environ[name])
         for name in ("PATH", "SYSTEMROOT", "TEMP", "TMP")
         if name in os.environ
+    )
+    optional = (
+        {"expected_executable_binding": expected_executable_binding}
+        if expected_executable_binding is not None
+        else {
+            "expected_executable_binding": module.ExecutableBindingV1(
+                str(executable),
+                executable.stat().st_size,
+                __import__("hashlib").sha256(executable.read_bytes()).hexdigest(),
+            )
+        }
+        if profile_id == module.KimiWindowsProfileV1.profile_id
+        else {}
     )
     return module.ProcessRequestV1(
         schema_version=1,
@@ -57,14 +71,22 @@ def _request(
         capture_sink_binding=owner.mint_memory_capture_sink(),
         settle_policy=module.SettlePolicyV1(5.0),
         windows_argv_profile_id=profile_id,
+        **optional,
     )
 
 
 def _admit(module, owner, request):
     lifecycle = owner._begin_lifecycle()
     try:
-        admission = owner.windows_argv_admission_owner.admit(lifecycle, request)
-        return lifecycle, admission
+        launch_owner = module._acquire_executable_launch_owner(
+            request.resolved_executable,
+            lifecycle,
+            windows_api=owner._windows_api,
+        )
+        admission = owner.windows_argv_admission_owner.admit(
+            lifecycle, request, launch_owner
+        )
+        return lifecycle, admission, launch_owner
     except BaseException:
         lifecycle.finalize_once(time.monotonic() + 1.0)
         owner._release_lifecycle(lifecycle)
@@ -93,6 +115,96 @@ def _kimi_argv(module, executable: Path, prompt_file: Path) -> tuple[str, ...]:
         str(executable.resolve()),
         *module.KimiWindowsProfileV1.build_args(prompt_file, skills),
     )
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows Kimi release-pin contract")
+def test_kimi_executable_binding_accepts_current_and_rollback_release_identities(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = _load_runner()
+    current = b"synthetic-current-kimi"
+    rollback = b"synthetic-rollback-kimi"
+    monkeypatch.setattr(module.KimiWindowsProfileV1, "expected_size", len(current))
+    monkeypatch.setattr(
+        module.KimiWindowsProfileV1,
+        "accepted_sha256",
+        __import__("hashlib").sha256(current).hexdigest(),
+    )
+    monkeypatch.setattr(
+        module.KimiWindowsProfileV1,
+        "accepted_rollback_bindings",
+        ((len(rollback), __import__("hashlib").sha256(rollback).hexdigest()),),
+    )
+
+    current_executable = tmp_path / "current" / "kimi.exe"
+    current_executable.parent.mkdir()
+    current_executable.write_bytes(current)
+    rollback_executable = tmp_path / "rollback" / "kimi.exe"
+    rollback_executable.parent.mkdir()
+    rollback_executable.write_bytes(rollback)
+
+    owner = module.ProcessRunnerV1()
+    try:
+        for executable, payload in (
+            (current_executable, current),
+            (rollback_executable, rollback),
+        ):
+            request = _request(
+                module,
+                owner,
+                _kimi_argv(module, executable, executable.parent / "prompt.md"),
+                module.KimiWindowsProfileV1.profile_id,
+                cwd=executable.parent,
+            )
+            lifecycle, admission, _launch_owner = _admit(module, owner, request)
+            try:
+                assert admission.executable_binding is not None
+                assert admission.executable_binding.sha256 == (
+                    __import__("hashlib").sha256(payload).hexdigest()
+                )
+            finally:
+                _release(owner, lifecycle)
+    finally:
+        owner.close()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows Kimi release-pin contract")
+def test_kimi_admission_rejects_another_accepted_release_when_pin_differs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = _load_runner()
+    owner = module.ProcessRunnerV1()
+    current = b"synthetic-current-kimi"
+    rollback = b"synthetic-rollback-kimi"
+    current_digest = __import__("hashlib").sha256(current).hexdigest()
+    rollback_digest = __import__("hashlib").sha256(rollback).hexdigest()
+    monkeypatch.setattr(module.KimiWindowsProfileV1, "expected_size", len(current))
+    monkeypatch.setattr(module.KimiWindowsProfileV1, "accepted_sha256", current_digest)
+    monkeypatch.setattr(
+        module.KimiWindowsProfileV1,
+        "accepted_rollback_bindings",
+        ((len(rollback), rollback_digest),),
+    )
+    executable = tmp_path / "kimi.exe"
+    executable.write_bytes(rollback)
+    prompt = tmp_path / "prompt.md"
+    expected = module.ExecutableBindingV1(
+        str(executable.resolve()), len(current), current_digest
+    )
+    request = _request(
+        module,
+        owner,
+        _kimi_argv(module, executable, prompt),
+        module.KimiWindowsProfileV1.profile_id,
+        cwd=tmp_path,
+        expected_executable_binding=expected,
+    )
+    try:
+        with pytest.raises(module.ProcessSupervisionError) as caught:
+            _admit(module, owner, request)
+        assert caught.value.failure_id == "PSV1-EXECUTABLE-UNRESOLVED"
+    finally:
+        owner.close()
 
 
 def test_request_contract_removes_adapter_authored_attestation_fields() -> None:
@@ -140,14 +252,16 @@ def test_kimi_profile_accepts_only_fixed_transport_and_binds_prompt_file(tmp_pat
         cwd=neutral,
     )
 
-    lifecycle, admission = _admit(module, owner, request)
+    lifecycle, admission, launch_owner = _admit(module, owner, request)
     try:
         assert admission.profile_id == "kimi-sealed-bundle-text-v1"
         assert admission.probe_kind == "kimi-sealed-bundle-v1"
         assert admission.prompt_file_canonical == str(prompt.resolve())
         assert admission.prompt_file_identity
         assert admission.prompt_file_sha256
-        owner.windows_argv_admission_owner.consume(lifecycle, request, admission)
+        owner.windows_argv_admission_owner.consume(
+            lifecycle, request, admission, launch_owner
+        )
     finally:
         _release(owner, lifecycle)
 
@@ -181,8 +295,13 @@ def test_kimi_profile_rejects_argv_variants_without_probe(tmp_path: Path, mutate
     )
     lifecycle = owner._begin_lifecycle()
     try:
+        launch_owner = module._acquire_executable_launch_owner(
+            request.resolved_executable, lifecycle, windows_api=owner._windows_api
+        )
         with pytest.raises(module.ProcessSupervisionError) as caught:
-            owner.windows_argv_admission_owner.admit(lifecycle, request)
+            owner.windows_argv_admission_owner.admit(
+                lifecycle, request, launch_owner
+            )
         assert caught.value.failure_id == "PSV1-ARGV-CODEC-UNSUPPORTED"
     finally:
         _release(owner, lifecycle)
@@ -210,8 +329,13 @@ def test_kimi_profile_rejects_marker_only_fake_release(tmp_path: Path) -> None:
     )
     lifecycle = owner._begin_lifecycle()
     try:
+        launch_owner = module._acquire_executable_launch_owner(
+            request.resolved_executable, lifecycle, windows_api=owner._windows_api
+        )
         with pytest.raises(module.ProcessSupervisionError) as caught:
-            owner.windows_argv_admission_owner.admit(lifecycle, request)
+            owner.windows_argv_admission_owner.admit(
+                lifecycle, request, launch_owner
+            )
         assert caught.value.failure_id == "PSV1-EXECUTABLE-UNRESOLVED"
     finally:
         _release(owner, lifecycle)
@@ -239,11 +363,13 @@ def test_kimi_profile_rejects_prompt_mutation_between_admit_and_consume(tmp_path
         "kimi-sealed-bundle-text-v1",
         cwd=neutral,
     )
-    lifecycle, admission = _admit(module, owner, request)
+    lifecycle, admission, launch_owner = _admit(module, owner, request)
     try:
         prompt.write_text("changed\nGATE: PASS\n", encoding="utf-8")
         with pytest.raises(module.ProcessSupervisionError) as caught:
-            owner.windows_argv_admission_owner.consume(lifecycle, request, admission)
+            owner.windows_argv_admission_owner.consume(
+                lifecycle, request, admission, launch_owner
+            )
         assert caught.value.failure_id == "PSV1-ARGV-ATTESTATION"
     finally:
         _release(owner, lifecycle)
@@ -268,7 +394,7 @@ def test_python_profile_uses_real_child_json_argv_echo() -> None:
     )
     request = _request(module, owner, argv, "python-validator-json-echo-v1")
 
-    lifecycle, admission = _admit(module, owner, request)
+    lifecycle, admission, _launch_owner = _admit(module, owner, request)
     try:
         assert admission.profile_id == "python-validator-json-echo-v1"
         assert admission.probe_kind == "python-json-argv-echo-v1"
@@ -302,7 +428,7 @@ def test_git_profile_uses_real_rev_parse_sq_quote_probe() -> None:
     )
     request = _request(module, owner, argv, "git-rev-parse-sq-quote-v1")
 
-    lifecycle, admission = _admit(module, owner, request)
+    lifecycle, admission, _launch_owner = _admit(module, owner, request)
     try:
         assert admission.profile_id == "git-rev-parse-sq-quote-v1"
         assert admission.probe_kind == "git-rev-parse-sq-quote-v1"
@@ -340,8 +466,13 @@ def test_unavailable_profiles_deny_without_probe(
     )
     lifecycle = owner._begin_lifecycle()
     try:
+        launch_owner = module._acquire_executable_launch_owner(
+            request.resolved_executable, lifecycle, windows_api=owner._windows_api
+        )
         with pytest.raises(module.ProcessSupervisionError) as caught:
-            owner.windows_argv_admission_owner.admit(lifecycle, request)
+            owner.windows_argv_admission_owner.admit(
+                lifecycle, request, launch_owner
+            )
         assert caught.value.failure_id == "PSV1-ARGV-CODEC-UNSUPPORTED"
         assert calls == []
     finally:
@@ -360,12 +491,13 @@ def test_create_owner_rejects_forged_stale_cross_run_and_mismatched_admissions()
         (str(Path(sys.executable).resolve()), str(CHILD), "identity"),
         "python-validator-json-echo-v1",
     )
-    lifecycle, admission = _admit(module, owner, request)
+    lifecycle, admission, launch_owner = _admit(module, owner, request)
     calls = []
     create_owner = module.WindowsCreateOwnerV1(
         owner.windows_argv_admission_owner,
         request,
         lambda: calls.append("create") or "created",
+        launch_owner,
     )
     mutations = (
         (
@@ -446,7 +578,7 @@ def test_probe_preserves_original_task_deadline(monkeypatch: pytest.MonkeyPatch)
     original_deadline = request.deadline_monotonic
     observed: list[float] = []
 
-    def backend(task_request, _lifecycle, _validated_cwd):
+    def backend(task_request, _lifecycle, _validated_cwd, _launch_owner):
         observed.append(task_request.deadline_monotonic)
         return module._request_failure(
             task_request,

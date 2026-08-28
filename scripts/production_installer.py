@@ -24,9 +24,9 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from provider_prompt import enroll_kimi_executable
+    from provider_prompt import enroll_kimi_executable, replace_kimi_enrollment
 except ModuleNotFoundError:
-    from scripts.provider_prompt import enroll_kimi_executable
+    from scripts.provider_prompt import enroll_kimi_executable, replace_kimi_enrollment
 
 
 CODEX_BEGIN = "<!-- BEGIN ORCHESTRARIUM CODEX PACK -->"
@@ -146,6 +146,17 @@ STOCK_448E_CLAUDE_TRANSPORT_PROJECTION_SHA256 = (
     ("external-role-taxonomy.v1.json", "51192eca72784dfcbc2d53596e143ea25856db9e7336031a25d89e9e4fdf85ce"),
     (TRANSPORT_PROJECTION_MANIFEST, "67073df8687839a0013e59398501a40c39069b6f9bd4dfd34bceac8f825d8945"),
 )
+STOCK_1A56_CLAUDE_TRANSPORT_PROJECTION_SHA256 = (
+    ("provider_prompt.py", "9c8f7d378468d3cf673e9c7bf4d5e359188adb36d22b226a1f44a6218b28d02b"),
+    ("process_supervision/process_runner.py", "c80ddd084f59d1b7e4fde11174fde5e30c5e685d3a2453ca0fd3d25e83736cb6"),
+    ("invoke-codex-prompt.py", "0b085a6fd0e28a5a486c8ef25bf52d4c69123d94cc8712d63dd30deadcc5f665"),
+    ("invoke-claude-prompt.py", "3250c9a85e36ab2e57a218688c5d7d3cfed59552c1f2bad7eb52f45370df80f3"),
+    ("invoke-kimi-prompt.py", "480af94ce089d5a6340e92d00239a5762c9c1374375a8c12c921afdcfcaa6e47"),
+    ("invoke-grok-prompt.py", "1f0f4f6bb03d816b3f40ff56ebe71973301d2d7104ef1d7f335b1ffa0b248559"),
+    ("external-prompt-governance.md", "c7a59ccec7d6e46be76584a107b0a5b30b249368b4f0958cb78177962dc34b00"),
+    ("external-role-taxonomy.v1.json", "51192eca72784dfcbc2d53596e143ea25856db9e7336031a25d89e9e4fdf85ce"),
+    (TRANSPORT_PROJECTION_MANIFEST, "fb49afa295e6badc834c869e57e0745c699bd65333dc301025194ef5c5a2b921"),
+)
 ACCEPTED_CLAUDE_TRANSPORT_PROJECTION_PRIORS = {
     "8521b638": STOCK_8521_CLAUDE_TRANSPORT_PROJECTION_SHA256,
     "7872d36d": STOCK_7872_CLAUDE_TRANSPORT_PROJECTION_SHA256,
@@ -154,6 +165,7 @@ ACCEPTED_CLAUDE_TRANSPORT_PROJECTION_PRIORS = {
     "f87414e7": STOCK_F874_CLAUDE_TRANSPORT_PROJECTION_SHA256,
     "9a637574": STOCK_9A63_CLAUDE_TRANSPORT_PROJECTION_SHA256,
     "448e8c5a": STOCK_448E_CLAUDE_TRANSPORT_PROJECTION_SHA256,
+    "1a56f81f": STOCK_1A56_CLAUDE_TRANSPORT_PROJECTION_SHA256,
 }
 E7_LEGACY_PROVIDER_PROMPT_SHA256 = (
     "825bc6db49408c5975627fba95c95ca479fe45c508e5be71d06c5e6f6c4b8121"
@@ -248,6 +260,7 @@ GLOBAL_LEAD_ACCEPTED_PRIOR_TREE_SHA256 = frozenset(
         "52f2c3d21a5d83bc36fccafe7599ca089006fc4d1b93237ab606dd1e7390422a",
         "d6cf6e5cd2a1cdb08346d396b60fcd905d36bf2533b96508f942f684b52b0255",
         "0da7db4510b37eac407ad9577ff171fbaa86985e30a53f341b00f05aeb433975",
+        "1e4bdc38283d81f2901a3b089c13fc9a0d10946605b1900ae15006cd42534dc6",
     }
 )
 RUNTIME_RESOURCES = (
@@ -385,7 +398,9 @@ def _parser(provider: str) -> argparse.ArgumentParser:
     parser.add_argument("--dry-run", "-DryRun", action="store_true")
     parser.add_argument("--allow-unsafe-target", "-AllowUnsafeTarget", action="store_true")
     parser.add_argument("--no-hypothesis-hook", "-NoHypothesisHook", action="store_true")
-    parser.add_argument("--enroll-kimi", action="store_true")
+    kimi_maintenance = parser.add_mutually_exclusive_group()
+    kimi_maintenance.add_argument("--enroll-kimi", action="store_true")
+    kimi_maintenance.add_argument("--replace-kimi-enrollment", action="store_true")
     return parser
 
 
@@ -393,6 +408,12 @@ def _enroll_kimi_executable(home: Path, runtime_root: Path, *, dry_run: bool) ->
     """Delegate installer enrollment to the provider binding owner."""
 
     enroll_kimi_executable(home, runtime_root, dry_run=dry_run)
+
+
+def _replace_kimi_enrollment(home: Path, runtime_root: Path, *, dry_run: bool) -> None:
+    """Delegate explicit replacement to the provider binding owner."""
+
+    replace_kimi_enrollment(home, runtime_root, dry_run=dry_run)
 
 
 def _repo_root(script: Path) -> Path:
@@ -4570,8 +4591,12 @@ def install(provider: str, argv: list[str] | None = None) -> int:
     source = root / f"src.{provider}"
     try:
         mode, target, project = _target(provider, args)
-        if args.enroll_kimi and (provider != "codex" or mode != "global"):
-            raise ValueError("E_KIMI_ENROLLMENT_SCOPE: --enroll-kimi requires global Codex install")
+        if (
+            args.enroll_kimi or args.replace_kimi_enrollment
+        ) and (provider != "codex" or mode != "global"):
+            raise ValueError(
+                "E_KIMI_ENROLLMENT_SCOPE: Kimi enrollment maintenance requires global Codex install"
+            )
         canonical_agents_root = (
             target.parent / ".agents" if mode == "global" else project / ".agents"
         )
@@ -4765,7 +4790,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
             ),
             kimi_runtime_binding=(
                 target / "orchestrarium-runtime" / "kimi" / "executable-binding-v1.json"
-                if args.enroll_kimi
+                if args.enroll_kimi or args.replace_kimi_enrollment
                 else None
             ),
         )
@@ -5019,7 +5044,14 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                 args.dry_run,
             )
             if args.dry_run:
-                if args.enroll_kimi:
+                if args.replace_kimi_enrollment:
+                    assert home is not None
+                    _replace_kimi_enrollment(
+                        home,
+                        target / "orchestrarium-runtime" / "kimi",
+                        dry_run=True,
+                    )
+                elif args.enroll_kimi:
                     assert home is not None
                     _enroll_kimi_executable(
                         home,
@@ -5078,7 +5110,14 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                     "verify",
                     "documentation or agents-mode output missing",
                 )
-            if args.enroll_kimi:
+            if args.replace_kimi_enrollment:
+                assert home is not None
+                _replace_kimi_enrollment(
+                    home,
+                    target / "orchestrarium-runtime" / "kimi",
+                    dry_run=False,
+                )
+            elif args.enroll_kimi:
                 assert home is not None
                 _enroll_kimi_executable(
                     home,

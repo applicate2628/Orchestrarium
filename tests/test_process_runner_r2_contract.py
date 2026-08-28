@@ -178,7 +178,12 @@ def test_duplicate_request_id_and_close_complete_without_reentering_runner_lock(
     backend_calls = 0
 
     def factory(_owner, _lifecycle=None):
-        def backend(_request, _supplied_lifecycle=None, _validated_cwd=None):
+        def backend(
+            _request,
+            _supplied_lifecycle=None,
+            _validated_cwd=None,
+            _launch_owner=None,
+        ):
             nonlocal backend_calls
             backend_calls += 1
             raise runner.ProcessSupervisionError("PSV1-CANCELLED", "cancellation")
@@ -255,7 +260,12 @@ def test_expected_oserror_returns_typed_result_after_one_lifecycle_finalizer() -
     observed = []
 
     def factory(_owner, lifecycle=None):
-        def backend(_request, supplied_lifecycle=None, _validated_cwd=None):
+        def backend(
+            _request,
+            supplied_lifecycle=None,
+            _validated_cwd=None,
+            _launch_owner=None,
+        ):
             active = supplied_lifecycle or lifecycle
             assert active is not None
             active.register_resource("probe", lambda _remaining: observed.append("closed"))
@@ -287,7 +297,12 @@ def test_unexpected_baseexception_is_reraised_exactly_after_one_finalizer(
     observed = []
 
     def factory(_owner, lifecycle=None):
-        def backend(_request, supplied_lifecycle=None, _validated_cwd=None):
+        def backend(
+            _request,
+            supplied_lifecycle=None,
+            _validated_cwd=None,
+            _launch_owner=None,
+        ):
             active = supplied_lifecycle or lifecycle
             assert active is not None
             active.register_resource("probe", lambda _remaining: observed.append("closed"))

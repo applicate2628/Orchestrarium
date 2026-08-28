@@ -106,6 +106,8 @@ Production installs:
 
 Pressing Enter selects the default production install, `Codex + Claude`. The router then forwards the same arguments to the selected provider-specific installer in `scripts/`. Use `scripts/install-codex.*` or `scripts/install-claude.*` directly when you want deterministic automation on one line.
 
+Windows Kimi executable enrollment is global-Codex maintenance. Ordinary `--enroll-kimi` remains create-only and refuses any different existing pin. After Kimi Code CLI updates from the accepted rollback release `0.39.0` to the current exact `0.39.1` release, run the provider-specific installer with `--global --replace-kimi-enrollment`; the action validates the fixed executable, atomically rotates only an accepted rollback pin, and never launches Kimi. The installed `invoke-kimi-prompt.py` wrapper exposes the same positive replacement flag for maintenance without a pack reinstall. Launch admission carries the exact enrolled size and SHA-256, so swapping to another accepted release without rotating the pin fails before provider execution. Both launch paths keep `KIMI_CODE_NO_AUTO_UPDATE=1` in the Kimi child environment.
+
 Important: operator preferences live in per-provider `agents-mode` files; both production provider lines may read the lower `~/.agents-mode.yaml` cross-pack global overlay below their pack-local globals.
 
 - Codex reads `.agents/.agents-mode.yaml`.

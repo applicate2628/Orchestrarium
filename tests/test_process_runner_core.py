@@ -61,7 +61,7 @@ def _request(runner, argv: tuple[str, ...], *, stdin: bytes | None = None, limit
     executable = Path(sys.executable).resolve()
     return runner.ProcessRequestV1(
         schema_version=1,
-        argv=argv,
+        argv=(str(executable), *argv[1:]),
         resolved_executable=executable,
         cwd=str(ROOT),
         environment=tuple(

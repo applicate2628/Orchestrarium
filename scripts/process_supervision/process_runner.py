@@ -131,8 +131,14 @@ class KimiWindowsProfileV1:
     profile_id = "kimi-sealed-bundle-text-v1"
     model = "kimi-code/k3"
     constant_prompt = "Review the sealed bundle and return only the requested result."
-    accepted_sha256 = "9DDEC448E6DE4CACB5C4A07BF57C1909E699A0589C39EDA851AFDAAB47B22DD2".lower()
-    expected_size = 151532032
+    accepted_sha256 = "CE3A74EAD55994EB1350CC45A1D0D9BF083158F2BBA4DA49A5EE6168A1830338".lower()
+    expected_size = 151652352
+    accepted_rollback_bindings = (
+        (
+            151532032,
+            "9DDEC448E6DE4CACB5C4A07BF57C1909E699A0589C39EDA851AFDAAB47B22DD2".lower(),
+        ),
+    )
     argv_shape = (
         "--agent-file", None,
         "--skills-dir", None,
@@ -163,6 +169,22 @@ class KimiWindowsProfileV1:
             expected is None or actual == expected
             for actual, expected in zip(values, cls.argv_shape, strict=True)
         )
+
+
+def kimi_release_bindings(
+    profile: type[KimiWindowsProfileV1] | object = KimiWindowsProfileV1,
+) -> tuple[tuple[int, str], ...]:
+    """Return the current release first, followed by accepted rollback identities."""
+
+    current = (
+        int(getattr(profile, "expected_size")),
+        str(getattr(profile, "accepted_sha256")).lower(),
+    )
+    rollback = tuple(
+        (int(size), str(digest).lower())
+        for size, digest in getattr(profile, "accepted_rollback_bindings", ())
+    )
+    return (current, *rollback)
 
 
 _WINDOWS_ARGV_PROFILES = _WINDOWS_ARGV_PROFILES | frozenset(
@@ -262,11 +284,35 @@ class WindowsArgvAdmissionV1:
 
 @dataclass(frozen=True)
 class ExecutableBindingV1:
-    """The exact release binding carried from Kimi admission to creation."""
+    """Immutable evidence for the exact object admitted to OS process creation."""
 
     path: str
     size: int
     sha256: str
+    device: int = 0
+    inode: int = 0
+    mode: int = 0
+    mtime_ns: int = 0
+
+
+def _expected_executable_binding_matches(
+    expected: object, live: ExecutableBindingV1
+) -> bool:
+    """Compare the enrolled portable pin with the live OS-object evidence."""
+
+    if type(expected) is not ExecutableBindingV1:
+        return False
+    try:
+        expected_path = Path(expected.path)
+        return (
+            expected_path.is_absolute()
+            and os.path.normcase(os.path.abspath(expected_path))
+            == os.path.normcase(live.path)
+            and expected.size == live.size
+            and hmac.compare_digest(expected.sha256, live.sha256)
+        )
+    except (OSError, TypeError, ValueError):
+        return False
 
 
 @dataclass(frozen=True)
@@ -276,6 +322,7 @@ class WindowsInternalProbeAdmissionV1:
     profile_id: str
     purpose: str
     request_sha256: str
+    resolved_executable_identity: str
     expires_at_monotonic: float
     _seal: object = field(repr=False, compare=False)
 
@@ -433,8 +480,14 @@ class HookHealthCapabilityV1:
         with self._lock:
             return self._consumed
 
-    def consume(self, request: "ProcessRequestV1") -> None:
-        actual = _hook_health_request_sha256(request)
+    def consume(
+        self,
+        request: "ProcessRequestV1",
+        executable_identity_sha256: str | None = None,
+    ) -> None:
+        actual = _hook_health_request_sha256(
+            request, executable_identity_sha256
+        )
         binding = request.capture_sink_binding
         if (
             type(binding) is not CaptureSinkBindingV1
@@ -527,6 +580,7 @@ class ProcessRequestV1:
     windows_argv_profile_id: str | None = None
     request_id: str | None = None
     policy_id: str | None = None
+    expected_executable_binding: ExecutableBindingV1 | None = None
 
 
 def _hook_script_binding(path: Path) -> dict[str, object]:
@@ -544,14 +598,19 @@ def _hook_script_binding(path: Path) -> dict[str, object]:
     }
 
 
-def _hook_health_request_sha256(request: ProcessRequestV1) -> str:
+def _hook_health_request_sha256(
+    request: ProcessRequestV1,
+    executable_identity_sha256: str | None = None,
+) -> str:
     if len(request.argv) < 2:
         raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
     payload = {
         "schemaVersion": request.schema_version,
         "argv": list(request.argv),
-        "resolvedExecutableIdentity": resolve_executable_identity(
-            request.resolved_executable
+        "resolvedExecutableIdentity": (
+            executable_identity_sha256
+            if executable_identity_sha256 is not None
+            else resolve_executable_identity(request.resolved_executable)
         ),
         "cwd": os.path.abspath(request.cwd),
         "environment": [
@@ -1318,50 +1377,6 @@ def _stream_executable_binding(path: Path) -> tuple[str, str]:
         ) from exc
 
 
-def _validate_kimi_executable_binding(path: Path) -> ExecutableBindingV1:
-    """Read the enrolled executable once and accept only the observed release."""
-
-    try:
-        absolute = Path(path)
-        if not absolute.is_absolute() or absolute.name.casefold() != "kimi.exe":
-            raise OSError("Kimi executable path")
-        normalized = Path(os.path.abspath(absolute))
-        if os.path.normcase(str(normalized)) != os.path.normcase(str(absolute)):
-            raise OSError("Kimi executable path normalization")
-        for component in reversed((absolute, *absolute.parents)):
-            metadata = component.lstat()
-            if stat.S_ISLNK(metadata.st_mode) or _is_reparse(metadata):
-                raise OSError("Kimi executable reparse")
-        before = absolute.lstat()
-        if not stat.S_ISREG(before.st_mode) or before.st_size != KimiWindowsProfileV1.expected_size:
-            raise OSError("Kimi executable size")
-        digest = hashlib.sha256()
-        with absolute.open("rb") as stream:
-            while chunk := stream.read(1024 * 1024):
-                digest.update(chunk)
-        after = absolute.lstat()
-        if (
-            before.st_dev,
-            before.st_ino,
-            before.st_size,
-            before.st_mtime_ns,
-        ) != (
-            after.st_dev,
-            after.st_ino,
-            after.st_size,
-            after.st_mtime_ns,
-        ):
-            raise OSError("Kimi executable drift")
-        actual = digest.hexdigest()
-        if not hmac.compare_digest(actual, KimiWindowsProfileV1.accepted_sha256):
-            raise OSError("Kimi executable digest")
-        return ExecutableBindingV1(str(absolute), before.st_size, actual)
-    except (OSError, ValueError, UnicodeError) as exc:
-        raise ProcessSupervisionError(
-            "PSV1-EXECUTABLE-UNRESOLVED", "request-validation"
-        ) from exc
-
-
 def resolve_executable_identity(path: Path) -> str:
     return _stream_executable_binding(path)[0]
 
@@ -1495,15 +1510,20 @@ def _probe_environment_rows(
 
 
 def _internal_probe_request_sha256(
-    request: ProcessRequestV1, profile_id: str, purpose: str
+    request: ProcessRequestV1,
+    profile_id: str,
+    purpose: str,
+    executable_identity_sha256: str | None = None,
 ) -> str:
     payload = {
         "schemaVersion": request.schema_version,
         "profileId": profile_id,
         "purpose": purpose,
         "argv": list(request.argv),
-        "resolvedExecutableIdentity": resolve_executable_identity(
-            request.resolved_executable
+        "resolvedExecutableIdentity": (
+            executable_identity_sha256
+            if executable_identity_sha256 is not None
+            else resolve_executable_identity(request.resolved_executable)
         ),
         "cwd": request.cwd,
         "environment": [
@@ -1550,6 +1570,7 @@ class WindowsArgvAdmissionOwnerV1:
         profile_id: str,
         purpose: str,
         argv: tuple[str, ...],
+        executable_identity_sha256: str,
     ) -> tuple[ProcessRequestV1, WindowsInternalProbeAdmissionV1]:
         if lifecycle.cancelled or request.deadline_monotonic <= time.monotonic():
             raise ProcessSupervisionError("PSV1-DEADLINE", "deadline")
@@ -1581,7 +1602,13 @@ class WindowsArgvAdmissionOwnerV1:
             lifecycle.token.sha256,
             profile_id,
             purpose,
-            _internal_probe_request_sha256(probe_request, profile_id, purpose),
+            _internal_probe_request_sha256(
+                probe_request,
+                profile_id,
+                purpose,
+                executable_identity_sha256,
+            ),
+            executable_identity_sha256,
             request.deadline_monotonic,
             _WINDOWS_INTERNAL_PROBE_ADMISSION_SEAL,
         )
@@ -1614,8 +1641,11 @@ class WindowsArgvAdmissionOwnerV1:
         lifecycle: RunLifecycleV1,
         request: ProcessRequestV1,
         executable: Path,
+        executable_launch_owner: "_ExecutableLaunchOwnerV1",
     ) -> tuple[str, str, str]:
-        if executable.resolve() != Path(sys.executable).resolve():
+        if os.path.normcase(os.path.abspath(executable)) != os.path.normcase(
+            os.path.abspath(sys.executable)
+        ):
             raise ProcessSupervisionError(
                 "PSV1-ARGV-ATTESTATION", "request-validation"
             )
@@ -1637,8 +1667,16 @@ class WindowsArgvAdmissionOwnerV1:
             profile_id="python-validator-json-echo-v1",
             purpose="python-json-argv-echo-v1",
             argv=probe,
+            executable_identity_sha256=executable_launch_owner.identity_sha256,
         )
-        stdout = self._execute_probe(lifecycle, probe_request, admission)
+        try:
+            stdout = self._execute_probe(lifecycle, probe_request, admission)
+        except BaseException:
+            lifecycle.close_resource(
+                executable_launch_owner.resource_name,
+                time.monotonic() + RUNNER_CLOSE_TIMEOUT_SECONDS,
+            )
+            raise
         try:
             observed_tail = json.loads(stdout.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -1665,6 +1703,7 @@ class WindowsArgvAdmissionOwnerV1:
         lifecycle: RunLifecycleV1,
         request: ProcessRequestV1,
         executable: Path,
+        executable_launch_owner: "_ExecutableLaunchOwnerV1",
     ) -> tuple[str, str, str]:
         if executable.name.casefold() not in {"git", "git.exe"}:
             raise ProcessSupervisionError(
@@ -1688,8 +1727,16 @@ class WindowsArgvAdmissionOwnerV1:
             profile_id="git-rev-parse-sq-quote-v1",
             purpose="git-rev-parse-sq-quote-v1",
             argv=probe,
+            executable_identity_sha256=executable_launch_owner.identity_sha256,
         )
-        stdout = self._execute_probe(lifecycle, probe_request, admission)
+        try:
+            stdout = self._execute_probe(lifecycle, probe_request, admission)
+        except BaseException:
+            lifecycle.close_resource(
+                executable_launch_owner.resource_name,
+                time.monotonic() + RUNNER_CLOSE_TIMEOUT_SECONDS,
+            )
+            raise
         try:
             parsed = tuple(shlex.split(stdout.decode("utf-8"), posix=True))
         except (UnicodeDecodeError, ValueError) as exc:
@@ -1709,7 +1756,10 @@ class WindowsArgvAdmissionOwnerV1:
         )
 
     def admit(
-        self, lifecycle: RunLifecycleV1, request: ProcessRequestV1
+        self,
+        lifecycle: RunLifecycleV1,
+        request: ProcessRequestV1,
+        executable_launch_owner: "_ExecutableLaunchOwnerV1",
     ) -> WindowsArgvAdmissionV1:
         profile_id = request.windows_argv_profile_id
         if profile_id not in _WINDOWS_ARGV_PROFILES:
@@ -1717,6 +1767,7 @@ class WindowsArgvAdmissionOwnerV1:
                 "PSV1-ARGV-CODEC-UNSUPPORTED", "request-validation"
             )
         executable = Path(request.resolved_executable)
+        launch_owner = executable_launch_owner
         prompt_binding: tuple[str, str, str] | None = None
         executable_binding: ExecutableBindingV1 | None = None
         if profile_id == KimiWindowsProfileV1.profile_id:
@@ -1727,13 +1778,27 @@ class WindowsArgvAdmissionOwnerV1:
                 raise ProcessSupervisionError(
                     "PSV1-EXECUTABLE-UNRESOLVED", "request-validation"
                 )
-            executable_binding = _validate_kimi_executable_binding(executable)
+            executable_binding = launch_owner.binding
+            if (
+                not any(
+                    executable_binding.size == size
+                    and hmac.compare_digest(executable_binding.sha256, digest)
+                    for size, digest in kimi_release_bindings()
+                )
+                or not _expected_executable_binding_matches(
+                    request.expected_executable_binding, executable_binding
+                )
+            ):
+                raise ProcessSupervisionError(
+                    "PSV1-EXECUTABLE-UNRESOLVED", "request-validation"
+                )
             identity = executable_binding.sha256
             version = hashlib.sha256(
                 f"kimi-release:{executable_binding.size}:{identity}".encode("ascii")
             ).hexdigest()
         else:
-            identity, version = _stream_executable_binding(executable)
+            identity = launch_owner.identity_sha256
+            version = launch_owner.version_sha256
         if profile_id == "python-hook-health-v1":
             if (
                 executable.resolve() != Path(sys.executable).resolve()
@@ -1746,19 +1811,19 @@ class WindowsArgvAdmissionOwnerV1:
                     "PSV1-ARGV-CODEC-UNSUPPORTED", "request-validation"
                 )
             probe_kind, requested, observed = self._python_probe(
-                lifecycle, request, executable
+                lifecycle, request, executable, launch_owner
             )
         elif profile_id == "python-validator-json-echo-v1":
             probe_kind, requested, observed = self._python_probe(
-                lifecycle, request, executable
+                lifecycle, request, executable, launch_owner
             )
         elif profile_id == "git-rev-parse-sq-quote-v1":
             probe_kind, requested, observed = self._git_probe(
-                lifecycle, request, executable
+                lifecycle, request, executable, launch_owner
             )
         elif profile_id == "repository-transfer-git-v1":
             probe_kind, requested, observed = self._git_probe(
-                lifecycle, request, executable
+                lifecycle, request, executable, launch_owner
             )
         elif profile_id == KimiWindowsProfileV1.profile_id:
             if _windows_argv_roundtrip(request.argv) != request.argv:
@@ -1801,10 +1866,19 @@ class WindowsArgvAdmissionOwnerV1:
         lifecycle: RunLifecycleV1,
         request: ProcessRequestV1,
         admission: WindowsArgvAdmissionV1,
+        launch_owner: "_ExecutableLaunchOwnerV1",
     ) -> None:
         executable = Path(request.resolved_executable)
+        if (
+            launch_owner._closed
+            or os.path.normcase(str(launch_owner.path))
+            != os.path.normcase(os.path.abspath(executable))
+        ):
+            raise ProcessSupervisionError(
+                "PSV1-ARGV-ATTESTATION", "request-validation"
+            )
         executable_binding = (
-            _validate_kimi_executable_binding(executable)
+            launch_owner.binding
             if admission.profile_id == KimiWindowsProfileV1.profile_id
             else None
         )
@@ -1814,7 +1888,8 @@ class WindowsArgvAdmissionOwnerV1:
                 f"kimi-release:{executable_binding.size}:{identity}".encode("ascii")
             ).hexdigest()
         else:
-            identity, version = _stream_executable_binding(executable)
+            identity = launch_owner.identity_sha256
+            version = launch_owner.version_sha256
         prompt_binding = (
             _kimi_bundle_file_binding(request, failure_id="PSV1-ARGV-ATTESTATION")
             if admission.profile_id == KimiWindowsProfileV1.profile_id
@@ -1831,6 +1906,13 @@ class WindowsArgvAdmissionOwnerV1:
             and admission.resolved_executable_identity == identity
             and admission.resolved_executable_version == version
             and admission.executable_binding == executable_binding
+            and (
+                _expected_executable_binding_matches(
+                    request.expected_executable_binding, executable_binding
+                )
+                if executable_binding is not None
+                else request.expected_executable_binding is None
+            )
             and admission.actual_argv_sha256 == _json_argv_sha256(request.argv)
             and admission.actual_argv_shape_sha256 == _argv_shape_sha256(request.argv)
             and admission.probe_requested_argv_sha256
@@ -1861,6 +1943,7 @@ class WindowsArgvAdmissionOwnerV1:
         lifecycle: RunLifecycleV1,
         request: ProcessRequestV1,
         admission: WindowsInternalProbeAdmissionV1,
+        executable_launch_owner: "_ExecutableLaunchOwnerV1",
     ) -> None:
         valid_profiles = {
             "python-validator-json-echo-v1": "python-json-argv-echo-v1",
@@ -1874,8 +1957,14 @@ class WindowsArgvAdmissionOwnerV1:
             and valid_profiles.get(admission.profile_id) == admission.purpose
             and admission.request_sha256
             == _internal_probe_request_sha256(
-                request, admission.profile_id, admission.purpose
+                request,
+                admission.profile_id,
+                admission.purpose,
+                executable_launch_owner.identity_sha256,
             )
+            and admission.resolved_executable_identity
+            == executable_launch_owner.identity_sha256
+            and not executable_launch_owner._closed
             and admission.expires_at_monotonic == request.deadline_monotonic
             and admission.expires_at_monotonic > time.monotonic()
             and request.stdin_bytes is None
@@ -1902,18 +1991,21 @@ class WindowsCreateOwnerV1:
         admission_owner: WindowsArgvAdmissionOwnerV1,
         request: ProcessRequestV1,
         create_process: Callable[[], object],
+        executable_launch_owner: "_ExecutableLaunchOwnerV1",
     ) -> None:
         self._admission_owner = admission_owner
         self._request = request
         self._create_process = create_process
+        self._executable_launch_owner = executable_launch_owner
 
     def create_internal_probe(
         self,
         lifecycle: RunLifecycleV1,
         admission: WindowsInternalProbeAdmissionV1,
+        executable_launch_owner: "_ExecutableLaunchOwnerV1",
     ) -> object:
         self._admission_owner._consume_internal(
-            lifecycle, self._request, admission
+            lifecycle, self._request, admission, executable_launch_owner
         )
         return self._create_process()
 
@@ -1923,7 +2015,12 @@ class WindowsCreateOwnerV1:
         request: ProcessRequestV1,
         admission: WindowsArgvAdmissionV1,
     ) -> object:
-        self._admission_owner.consume(lifecycle, request, admission)
+        self._admission_owner.consume(
+            lifecycle,
+            request,
+            admission,
+            self._executable_launch_owner,
+        )
         return self._create_process()
 
 
@@ -1987,7 +2084,9 @@ def _validate_environment(rows: Sequence[EnvironmentRowV1]) -> None:
         raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
 
 
-def validate_process_request(request: ProcessRequestV1) -> ValidatedCwdV1:
+def _validate_request_shape_before_executable_acquisition(
+    request: ProcessRequestV1,
+) -> None:
     if not isinstance(request, ProcessRequestV1) or request.schema_version != 1:
         raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
     if not 1 <= len(request.argv) <= MAX_ARGV_COUNT:
@@ -2002,16 +2101,51 @@ def validate_process_request(request: ProcessRequestV1) -> ValidatedCwdV1:
         aggregate += len(encoded) + 1
     if aggregate > MAX_ARGV_BYTES:
         raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
+
+
+def validate_process_request(
+    request: ProcessRequestV1,
+    executable_launch_owner: "_ExecutableLaunchOwnerV1 | None" = None,
+    *,
+    argv_executable_prevalidated: bool = False,
+) -> ValidatedCwdV1:
+    _validate_request_shape_before_executable_acquisition(request)
     executable = Path(request.resolved_executable)
     if not executable.is_absolute():
         raise ProcessSupervisionError("PSV1-EXECUTABLE-UNRESOLVED", "request-validation")
     try:
         argv_executable = Path(request.argv[0])
-        if not argv_executable.is_absolute() or argv_executable.resolve() != executable.resolve():
+        if (
+            not argv_executable.is_absolute()
+            or (
+                not argv_executable_prevalidated
+                and argv_executable.resolve() != executable.resolve()
+            )
+            or (
+                executable_launch_owner is not None
+                and os.path.normcase(str(executable_launch_owner.path))
+                != os.path.normcase(os.path.abspath(executable))
+            )
+        ):
             raise ProcessSupervisionError("PSV1-EXECUTABLE-UNRESOLVED", "request-validation")
     except (OSError, ValueError) as exc:
         raise ProcessSupervisionError("PSV1-EXECUTABLE-UNRESOLVED", "request-validation") from exc
-    executable_identity = resolve_executable_identity(executable)
+    expected_binding = request.expected_executable_binding
+    if expected_binding is not None and (
+        request.windows_argv_profile_id != KimiWindowsProfileV1.profile_id
+        or executable_launch_owner is None
+        or not _expected_executable_binding_matches(
+            expected_binding, executable_launch_owner.binding
+        )
+    ):
+        raise ProcessSupervisionError(
+            "PSV1-EXECUTABLE-UNRESOLVED", "request-validation"
+        )
+    executable_identity = (
+        executable_launch_owner.identity_sha256
+        if executable_launch_owner is not None
+        else resolve_executable_identity(executable)
+    )
     suffix = executable.suffix.casefold()
     basename = executable.name.casefold()
     if os.name == "nt":
@@ -2051,7 +2185,14 @@ def validate_process_request(request: ProcessRequestV1) -> ValidatedCwdV1:
         is HookHealthCapabilityV1
     )
     if hook_binding:
-        binding._hook_health_capability.consume(request)
+        binding._hook_health_capability.consume(
+            request,
+            (
+                executable_launch_owner.identity_sha256
+                if executable_launch_owner is not None
+                else None
+            ),
+        )
     if not memory_binding and not hook_binding:
         raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
     if (
@@ -2081,10 +2222,7 @@ def _request_failure(
     executable = os.fspath(request.resolved_executable) if isinstance(request, ProcessRequestV1) else ""
     executable_identity = executable_identity_sha256
     if executable_identity is None:
-        try:
-            executable_identity = resolve_executable_identity(Path(executable)) if executable else hashlib.sha256(b"").hexdigest()
-        except ProcessSupervisionError:
-            executable_identity = hashlib.sha256(b"").hexdigest()
+        executable_identity = hashlib.sha256(b"").hexdigest()
     return ProcessResultV1(
         1,
         SETTLED_EVENT_ID,
@@ -2170,6 +2308,20 @@ if os.name == "nt":
             ("dwThreadId", wintypes.DWORD),
         ]
 
+    class BY_HANDLE_FILE_INFORMATION(ctypes.Structure):
+        _fields_ = [
+            ("dwFileAttributes", wintypes.DWORD),
+            ("ftCreationTime", wintypes.FILETIME),
+            ("ftLastAccessTime", wintypes.FILETIME),
+            ("ftLastWriteTime", wintypes.FILETIME),
+            ("dwVolumeSerialNumber", wintypes.DWORD),
+            ("nFileSizeHigh", wintypes.DWORD),
+            ("nFileSizeLow", wintypes.DWORD),
+            ("nNumberOfLinks", wintypes.DWORD),
+            ("nFileIndexHigh", wintypes.DWORD),
+            ("nFileIndexLow", wintypes.DWORD),
+        ]
+
     class JOBOBJECT_BASIC_LIMIT_INFORMATION(ctypes.Structure):
         _fields_ = [
             ("PerProcessUserTimeLimit", ctypes.c_longlong),
@@ -2237,6 +2389,17 @@ class _WindowsKernelV1:
     PROC_THREAD_ATTRIBUTE_HANDLE_LIST = 0x00020002
     PROC_THREAD_ATTRIBUTE_JOB_LIST = 0x0002000D
     STILL_ACTIVE = 259
+    GENERIC_READ = 0x80000000
+    FILE_READ_ATTRIBUTES = 0x00000080
+    FILE_SHARE_READ = 0x00000001
+    FILE_SHARE_WRITE = 0x00000002
+    OPEN_EXISTING = 3
+    FILE_ATTRIBUTE_NORMAL = 0x00000080
+    FILE_ATTRIBUTE_DIRECTORY = 0x00000010
+    FILE_ATTRIBUTE_REPARSE_POINT = 0x00000400
+    FILE_FLAG_BACKUP_SEMANTICS = 0x02000000
+    FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000
+    INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
 
     def __init__(self) -> None:
         self.k32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -2264,6 +2427,10 @@ class _WindowsKernelV1:
         k.DeleteProcThreadAttributeList.restype = None
         k.CreateProcessW.argtypes = [wintypes.LPCWSTR, wintypes.LPWSTR, ctypes.c_void_p, ctypes.c_void_p, wintypes.BOOL, wintypes.DWORD, ctypes.c_void_p, wintypes.LPCWSTR, ctypes.POINTER(STARTUPINFOW), ctypes.POINTER(PROCESS_INFORMATION)]
         k.CreateProcessW.restype = wintypes.BOOL
+        k.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+        k.CreateFileW.restype = wintypes.HANDLE
+        k.GetFileInformationByHandle.argtypes = [wintypes.HANDLE, ctypes.POINTER(BY_HANDLE_FILE_INFORMATION)]
+        k.GetFileInformationByHandle.restype = wintypes.BOOL
         k.IsProcessInJob.argtypes = [wintypes.HANDLE, wintypes.HANDLE, ctypes.POINTER(wintypes.BOOL)]
         k.IsProcessInJob.restype = wintypes.BOOL
         k.ResumeThread.argtypes = [wintypes.HANDLE]
@@ -2277,6 +2444,297 @@ class _WindowsKernelV1:
 
     def close(self, handle: int | None) -> bool:
         return not handle or bool(self.k32.CloseHandle(handle))
+
+    def open_guarded_path(self, path: Path, *, directory: bool) -> int:
+        desired = self.FILE_READ_ATTRIBUTES if directory else self.GENERIC_READ
+        share = self.FILE_SHARE_READ | (self.FILE_SHARE_WRITE if directory else 0)
+        flags = self.FILE_FLAG_OPEN_REPARSE_POINT | (
+            self.FILE_FLAG_BACKUP_SEMANTICS if directory else self.FILE_ATTRIBUTE_NORMAL
+        )
+        handle = self.k32.CreateFileW(
+            str(path), desired, share, None, self.OPEN_EXISTING, flags, None
+        )
+        if not handle or handle == self.INVALID_HANDLE_VALUE:
+            raise ctypes.WinError(ctypes.get_last_error())
+        return int(handle)
+
+    def guarded_path_information(self, handle: int) -> "BY_HANDLE_FILE_INFORMATION":
+        info = BY_HANDLE_FILE_INFORMATION()
+        if not self.k32.GetFileInformationByHandle(handle, ctypes.byref(info)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        return info
+
+
+def _set_posix_read_lease(descriptor: int) -> None:
+    import fcntl
+
+    fcntl.fcntl(descriptor, fcntl.F_SETOWN, os.getpid())
+    if hasattr(fcntl, "F_SETSIG") and hasattr(signal, "SIGURG"):
+        fcntl.fcntl(descriptor, fcntl.F_SETSIG, signal.SIGURG)
+    fcntl.fcntl(descriptor, fcntl.F_SETLEASE, fcntl.F_RDLCK)
+
+
+def _posix_fd_effectively_writable(descriptor: int) -> bool:
+    """Ask Linux effective-access policy about the already-open executable."""
+
+    try:
+        libc = ctypes.CDLL(None, use_errno=True)
+        faccessat = libc.faccessat
+        faccessat.argtypes = [
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_int,
+            ctypes.c_int,
+        ]
+        faccessat.restype = ctypes.c_int
+        ctypes.set_errno(0)
+        result = faccessat(descriptor, b"", os.W_OK, 0x1000 | 0x0200)
+        if result == 0:
+            return True
+        error = ctypes.get_errno()
+        if error in {errno.EACCES, errno.EPERM, errno.EROFS}:
+            return False
+        raise OSError(error or errno.EIO, "effective descriptor access unavailable")
+    except (AttributeError, TypeError):
+        return True
+
+
+def _release_posix_read_lease(descriptor: int) -> None:
+    import fcntl
+
+    fcntl.fcntl(descriptor, fcntl.F_SETLEASE, fcntl.F_UNLCK)
+
+
+def _stream_open_executable_binding(
+    path: Path, descriptor: int
+) -> tuple[ExecutableBindingV1, str, str]:
+    try:
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode):
+            raise OSError("not ordinary executable")
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        content_digest = hashlib.sha256()
+        identity_digest = hashlib.sha256()
+        while True:
+            chunk = os.read(descriptor, 1024 * 1024)
+            if not chunk:
+                break
+            content_digest.update(chunk)
+            identity_digest.update(chunk)
+        after = os.fstat(descriptor)
+        before_key = (
+            before.st_dev,
+            before.st_ino,
+            before.st_mode,
+            before.st_size,
+            before.st_mtime_ns,
+        )
+        after_key = (
+            after.st_dev,
+            after.st_ino,
+            after.st_mode,
+            after.st_size,
+            after.st_mtime_ns,
+        )
+        if before_key != after_key:
+            raise OSError("executable changed while hashing")
+        identity_digest.update(
+            struct.pack(
+                ">QQ",
+                before.st_size & ((1 << 64) - 1),
+                before.st_mtime_ns & ((1 << 64) - 1),
+            )
+        )
+        identity = identity_digest.hexdigest()
+        absolute = Path(path)
+        if os.path.normcase(str(absolute)) == os.path.normcase(
+            os.path.abspath(sys.executable)
+        ):
+            version_source = (
+                f"python:{sys.version_info.major}.{sys.version_info.minor}."
+                f"{sys.version_info.micro}:{identity}"
+            )
+        else:
+            version_source = f"native:{identity}"
+        binding = ExecutableBindingV1(
+            str(absolute),
+            before.st_size,
+            content_digest.hexdigest(),
+            before.st_dev,
+            before.st_ino,
+            before.st_mode,
+            before.st_mtime_ns,
+        )
+        return binding, identity, hashlib.sha256(version_source.encode("ascii")).hexdigest()
+    except (OSError, ValueError, OverflowError, UnicodeError) as exc:
+        raise ProcessSupervisionError(
+            "PSV1-EXECUTABLE-UNRESOLVED", "request-validation"
+        ) from exc
+
+
+class _ExecutableLaunchOwnerV1:
+    """Own the admitted executable object and every guard until OS creation."""
+
+    def __init__(
+        self,
+        *,
+        path: Path,
+        resource_name: str,
+        descriptor: int = -1,
+        parent_handles: tuple[int, ...] = (),
+        windows_api: _WindowsKernelV1 | None = None,
+        lease_held: bool = False,
+        binding: ExecutableBindingV1 | None = None,
+        identity_sha256: str = "",
+        version_sha256: str = "",
+    ) -> None:
+        self.path = path
+        self.descriptor = descriptor
+        self.parent_handles = list(parent_handles)
+        self.leaf_handle: int | None = None
+        self.windows_api = windows_api
+        self.lease_held = lease_held
+        self.binding = binding
+        self.identity_sha256 = identity_sha256
+        self.version_sha256 = version_sha256
+        self.resource_name = resource_name
+        self._closed = False
+        self._lock = threading.Lock()
+
+    @property
+    def posix_exec_path(self) -> str:
+        if os.name == "nt" or self._closed:
+            raise ProcessSupervisionError(
+                "PSV1-EXECUTABLE-UNRESOLVED", "process-create"
+            )
+        return f"/proc/self/fd/{self.descriptor}"
+
+    def close(self, _remaining: float = 0.0) -> None:
+        with self._lock:
+            if self._closed:
+                return
+            errors: list[BaseException] = []
+            if self.lease_held and os.name != "nt":
+                try:
+                    _release_posix_read_lease(self.descriptor)
+                    self.lease_held = False
+                except BaseException as exc:
+                    errors.append(exc)
+            if not self.lease_held and self.descriptor >= 0:
+                descriptor = self.descriptor
+                self.descriptor = -1
+                try:
+                    os.close(descriptor)
+                except BaseException as exc:
+                    errors.append(exc)
+            if self.windows_api is not None:
+                if self.leaf_handle is not None:
+                    if self.windows_api.close(self.leaf_handle):
+                        self.leaf_handle = None
+                    else:
+                        errors.append(OSError("CloseHandle failed"))
+                for index in range(len(self.parent_handles) - 1, -1, -1):
+                    handle = self.parent_handles[index]
+                    if self.windows_api.close(handle):
+                        self.parent_handles.pop(index)
+                    else:
+                        errors.append(OSError("CloseHandle failed"))
+            self._closed = (
+                not self.lease_held
+                and self.descriptor < 0
+                and self.leaf_handle is None
+                and not self.parent_handles
+            )
+            if errors:
+                raise OSError("executable launch owner cleanup failed") from errors[0]
+
+
+def _acquire_executable_launch_owner(
+    path: Path,
+    lifecycle: RunLifecycleV1,
+    *,
+    windows_api: _WindowsKernelV1 | None = None,
+    resource_name: str = "executable-launch:task",
+) -> _ExecutableLaunchOwnerV1:
+    absolute = Path(os.path.abspath(path))
+    if not Path(path).is_absolute() or os.path.normcase(str(absolute)) != os.path.normcase(
+        str(path)
+    ):
+        raise ProcessSupervisionError(
+            "PSV1-EXECUTABLE-UNRESOLVED", "request-validation"
+        )
+    owner = _ExecutableLaunchOwnerV1(
+        path=absolute,
+        resource_name=resource_name,
+        windows_api=windows_api,
+    )
+    lifecycle.register_resource(resource_name, owner.close)
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            api = windows_api or _WindowsKernelV1()
+            owner.windows_api = api
+            for component in reversed((absolute.parent, *absolute.parent.parents)):
+                metadata = component.lstat()
+                if stat.S_ISLNK(metadata.st_mode) or _is_reparse(metadata):
+                    raise OSError("executable parent reparse")
+                handle = api.open_guarded_path(component, directory=True)
+                owner.parent_handles.append(handle)
+                info = api.guarded_path_information(handle)
+                if (
+                    not info.dwFileAttributes & api.FILE_ATTRIBUTE_DIRECTORY
+                    or info.dwFileAttributes & api.FILE_ATTRIBUTE_REPARSE_POINT
+                ):
+                    raise OSError("executable parent identity")
+            leaf = absolute.lstat()
+            if stat.S_ISLNK(leaf.st_mode) or _is_reparse(leaf):
+                raise OSError("executable reparse")
+            owner.leaf_handle = api.open_guarded_path(absolute, directory=False)
+            info = api.guarded_path_information(owner.leaf_handle)
+            if (
+                info.dwFileAttributes & api.FILE_ATTRIBUTE_DIRECTORY
+                or info.dwFileAttributes & api.FILE_ATTRIBUTE_REPARSE_POINT
+            ):
+                raise OSError("executable identity")
+            descriptor = msvcrt.open_osfhandle(
+                owner.leaf_handle, os.O_RDONLY | getattr(os, "O_BINARY", 0)
+            )
+            owner.descriptor = descriptor
+            owner.leaf_handle = None
+        else:
+            for component in reversed((absolute, *absolute.parents)):
+                metadata = component.lstat()
+                if stat.S_ISLNK(metadata.st_mode):
+                    raise OSError("executable path symlink")
+            owner.descriptor = os.open(
+                absolute,
+                os.O_RDONLY
+                | getattr(os, "O_NOFOLLOW", 0)
+                | getattr(os, "O_CLOEXEC", 0),
+            )
+            live_metadata = os.fstat(owner.descriptor)
+            if (
+                live_metadata.st_uid == os.geteuid()
+                or _posix_fd_effectively_writable(owner.descriptor)
+            ):
+                _set_posix_read_lease(owner.descriptor)
+                owner.lease_held = True
+        binding, identity, version = _stream_open_executable_binding(
+            absolute, owner.descriptor
+        )
+        owner.binding = binding
+        owner.identity_sha256 = identity
+        owner.version_sha256 = version
+        return owner
+    except BaseException as exc:
+        if isinstance(exc, ProcessSupervisionError):
+            raise
+        if isinstance(exc, (OSError, ValueError, OverflowError, UnicodeError)):
+            raise ProcessSupervisionError(
+                "PSV1-EXECUTABLE-UNRESOLVED", "request-validation"
+            ) from exc
+        raise
 
 
 def _environment_mapping(request: ProcessRequestV1) -> dict[str, str]:
@@ -2521,6 +2979,7 @@ class _WindowsBackendV1:
         request: ProcessRequestV1,
         lifecycle: RunLifecycleV1,
         validated_cwd: ValidatedCwdV1,
+        executable_launch_owner: "_ExecutableLaunchOwnerV1",
         admission: WindowsArgvAdmissionV1 | None = None,
         internal_probe_admission: WindowsInternalProbeAdmissionV1 | None = None,
     ) -> ProcessResultV1:
@@ -2742,10 +3201,13 @@ class _WindowsBackendV1:
                             self.api.CREATE_SUSPENDED | self.api.CREATE_UNICODE_ENVIRONMENT | self.api.EXTENDED_STARTUPINFO_PRESENT,
                             environment, validated_cwd.canonical_absolute, ctypes.byref(startup.StartupInfo), ctypes.byref(info),
                         ),
+                        executable_launch_owner,
                     )
                     created = (
                         create_owner.create_internal_probe(
-                            lifecycle, internal_probe_admission
+                            lifecycle,
+                            internal_probe_admission,
+                            executable_launch_owner,
                         )
                         if internal_probe_admission is not None
                         else create_owner.create_task(
@@ -2757,6 +3219,13 @@ class _WindowsBackendV1:
                     register_handle("process", info.hProcess)
                     register_handle("thread", info.hThread)
                     process_created = True
+                    if not lifecycle.close_resource(
+                        executable_launch_owner.resource_name,
+                        time.monotonic() + RUNNER_CLOSE_TIMEOUT_SECONDS,
+                    ):
+                        raise ProcessSupervisionError(
+                            "PSV1-RESOURCE-CLOSE", "resource-cleanup"
+                        )
                 finally:
                     restoration_ok = True
                     for name in enabled:
@@ -3074,14 +3543,9 @@ class _PosixBackendV1:
         request: ProcessRequestV1,
         lifecycle: RunLifecycleV1,
         validated_cwd: ValidatedCwdV1,
+        executable_launch_owner: _ExecutableLaunchOwnerV1,
     ) -> ProcessResultV1:
         started = time.monotonic()
-        if not sys.platform.startswith("linux") or not Path("/proc/self/stat").is_file():
-            return _request_failure(
-                request,
-                ProcessSupervisionError("PSV1-POSIX-ORACLE-UNAVAILABLE", "request-validation"),
-                started,
-            )
         capture = BoundedCaptureV1(
             request.capture_policy, request.capture_sink_binding
         )
@@ -3162,7 +3626,7 @@ class _PosixBackendV1:
         try:
             proc = subprocess.Popen(
                 request.argv,
-                executable=os.fspath(request.resolved_executable),
+                executable=executable_launch_owner.posix_exec_path,
                 cwd=validated_cwd.canonical_absolute,
                 env=_environment_mapping(request),
                 stdin=subprocess.PIPE,
@@ -3170,6 +3634,7 @@ class _PosixBackendV1:
                 stderr=subprocess.PIPE,
                 shell=False,
                 close_fds=True,
+                pass_fds=(executable_launch_owner.descriptor,),
                 start_new_session=True,
             )
             assert proc.stdout and proc.stderr and proc.stdin
@@ -3493,11 +3958,19 @@ class ProcessRunnerV1:
             sink_resource,
             lambda _remaining: request.capture_sink_binding.close(),
         )
+        executable_launch_owner = _acquire_executable_launch_owner(
+            request.resolved_executable,
+            lifecycle,
+            windows_api=self._windows_api,
+            resource_name=(
+                f"executable-launch:probe:{admission.purpose}"
+            ),
+        )
         canonical = os.path.abspath(request.cwd)
         validated_cwd = ValidatedCwdV1(
             canonical,
             bind_cwd_identity(canonical),
-            resolve_executable_identity(request.resolved_executable),
+            executable_launch_owner.identity_sha256,
         )
         result = _WindowsBackendV1(
             self.windows_inheritance_coordinator,
@@ -3507,6 +3980,7 @@ class ProcessRunnerV1:
             request,
             lifecycle,
             validated_cwd,
+            executable_launch_owner,
             internal_probe_admission=admission,
         )
         sink_closed = lifecycle.close_resource(
@@ -3587,11 +4061,50 @@ class ProcessRunnerV1:
             except ProcessSupervisionError as exc:
                 return _request_failure(request, exc, started)
         validated_cwd: ValidatedCwdV1 | None = None
+        executable_launch_owner: _ExecutableLaunchOwnerV1 | None = None
         try:
-            validated_cwd = validate_process_request(request)
+            if not isinstance(request, ProcessRequestV1):
+                raise ProcessSupervisionError(
+                    "PSV1-REQUEST-INVALID", "request-validation"
+                )
+            _validate_request_shape_before_executable_acquisition(request)
+            if os.name != "nt" and (
+                not sys.platform.startswith("linux")
+                or not Path("/proc/self/stat").is_file()
+            ):
+                validated_cwd = validate_process_request(request)
+                raise ProcessSupervisionError(
+                    "PSV1-POSIX-ORACLE-UNAVAILABLE", "request-validation"
+                )
+            try:
+                argv_executable = Path(request.argv[0])
+                request_executable = Path(request.resolved_executable)
+                if (
+                    not argv_executable.is_absolute()
+                    or not request_executable.is_absolute()
+                    or os.path.normcase(os.path.abspath(argv_executable))
+                    != os.path.normcase(os.path.abspath(request_executable))
+                ):
+                    raise ProcessSupervisionError(
+                        "PSV1-EXECUTABLE-UNRESOLVED", "request-validation"
+                    )
+            except (IndexError, OSError, ValueError) as exc:
+                raise ProcessSupervisionError(
+                    "PSV1-EXECUTABLE-UNRESOLVED", "request-validation"
+                ) from exc
+            executable_launch_owner = _acquire_executable_launch_owner(
+                request.resolved_executable,
+                owned_lifecycle,
+                windows_api=self._windows_api,
+            )
+            validated_cwd = validate_process_request(
+                request,
+                executable_launch_owner,
+                argv_executable_prevalidated=True,
+            )
             if os.name == "nt":
                 admission = self.windows_argv_admission_owner.admit(
-                    owned_lifecycle, request
+                    owned_lifecycle, request, executable_launch_owner
                 )
             else:
                 admission = None
@@ -3635,7 +4148,23 @@ class ProcessRunnerV1:
                     else None
                 ),
             )
-            owned_lifecycle.finalize_once(time.monotonic() + RUNNER_CLOSE_TIMEOUT_SECONDS)
+            observation = owned_lifecycle.finalize_once(
+                time.monotonic() + RUNNER_CLOSE_TIMEOUT_SECONDS
+            )
+            result = dataclasses.replace(
+                result,
+                cleanup_issues=tuple(
+                    dict.fromkeys(
+                        (*result.cleanup_issues, *observation.cleanup_issues)
+                    )
+                ),
+                resources_closed=(
+                    result.resources_closed and observation.resources_closed
+                ),
+                cleanup_uncertain=(
+                    result.cleanup_uncertain or not observation.resources_closed
+                ),
+            )
             self._release_lifecycle(owned_lifecycle)
             return dataclasses.replace(
                 result, run_token_sha256=owned_lifecycle.token.sha256
@@ -3676,17 +4205,34 @@ class ProcessRunnerV1:
                 raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
             if self._backend_factory is not None:
                 backend = self._backend_factory(self, owned_lifecycle)
-                result = backend(request, owned_lifecycle, validated_cwd)
+                assert executable_launch_owner is not None
+                result = backend(
+                    request,
+                    owned_lifecycle,
+                    validated_cwd,
+                    executable_launch_owner,
+                )
             elif os.name == "nt":
                 assert admission is not None
+                assert executable_launch_owner is not None
                 result = _WindowsBackendV1(
                     self.windows_inheritance_coordinator,
                     self.windows_argv_admission_owner,
                     self._windows_api,
-                ).run(request, owned_lifecycle, validated_cwd, admission)
+                ).run(
+                    request,
+                    owned_lifecycle,
+                    validated_cwd,
+                    executable_launch_owner,
+                    admission,
+                )
             else:
+                assert executable_launch_owner is not None
                 result = _PosixBackendV1().run(
-                    request, owned_lifecycle, validated_cwd
+                    request,
+                    owned_lifecycle,
+                    validated_cwd,
+                    executable_launch_owner,
                 )
         except ProcessSupervisionError as exc:
             result = _request_failure(
@@ -4545,6 +5091,7 @@ __all__ = [
     "WindowsArgvAdmissionOwnerV1",
     "WindowsArgvAdmissionV1",
     "KimiWindowsProfileV1",
+    "kimi_release_bindings",
     "WindowsCreateOwnerV1",
     "WindowsInheritanceCoordinatorV1",
     "ValidatedCwdV1",

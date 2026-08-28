@@ -255,6 +255,182 @@ def test_external_terminal_readback_rejects_each_post_append_provenance_mutation
     ) is None
 
 
+class _ReadlineOnlyStream:
+    """Virtual text stream that rejects whole-file and iterator consumption."""
+
+    def __init__(self, content: str) -> None:
+        self._content = content
+        self._offset = 0
+        self.readline_sizes: list[int] = []
+
+    @property
+    def eof(self) -> bool:
+        return self._offset == len(self._content)
+
+    def __enter__(self) -> _ReadlineOnlyStream:
+        return self
+
+    def __exit__(self, *_args: object) -> bool:
+        return False
+
+    def read(self, *_args: object) -> str:
+        pytest.fail("whole-file read reached")
+
+    def read_text(self, *_args: object) -> str:
+        pytest.fail("Path.read_text reached")
+
+    def readlines(self, *_args: object) -> list[str]:
+        pytest.fail("whole-file readlines reached")
+
+    def __iter__(self) -> object:
+        pytest.fail("stream iteration reached")
+
+    def readline(self, size: int = -1) -> str:
+        assert size > 0, "readline must have a bound"
+        self.readline_sizes.append(size)
+        if self._offset == len(self._content):
+            return ""
+        stop = min(self._offset + size, len(self._content))
+        newline = self._content.find("\n", self._offset, stop)
+        if newline >= 0:
+            stop = newline + 1
+        value = self._content[self._offset:stop]
+        self._offset = stop
+        return value
+
+
+class _ReadlineOnlyLedgerPath:
+    def __init__(self, stream: _ReadlineOnlyStream) -> None:
+        self._stream = stream
+
+    def __truediv__(self, child: str) -> _ReadlineOnlyLedgerPath:
+        assert child == "agent-runs.jsonl"
+        return self
+
+    def open(self, *_args: object, **_kwargs: object) -> _ReadlineOnlyStream:
+        return self._stream
+
+
+def _readback_from_virtual_stream(
+    content: str,
+    provenance: object,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    max_line_chars: int,
+    max_events: int,
+) -> tuple[dict[str, object] | None, _ReadlineOnlyStream]:
+    stream = _ReadlineOnlyStream(content)
+    monkeypatch.setattr(OWNER, "Path", lambda _value: _ReadlineOnlyLedgerPath(stream))
+    monkeypatch.setattr(
+        OWNER,
+        "_agent_run_jsonl_limits",
+        lambda: (max_line_chars, max_events),
+    )
+    result = OWNER.read_back_external_terminal(
+        OWNER.Control(ledger="virtual-ledger"),
+        provenance.provider,
+        provenance.external_dispatch_id,
+        provenance,
+    )
+    return result, stream
+
+
+def test_external_terminal_readback_streams_one_target_to_eof(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provenance = _execution_provenance()
+    terminal = _external_terminal_row(provenance)
+    other = {"eventKind": "launch", "launchRunId": "other"}
+    limit = len(json.dumps(terminal)) + 16
+    result, stream = _readback_from_virtual_stream(
+        "\n".join((json.dumps(other), json.dumps(terminal), json.dumps(other))) + "\n",
+        provenance,
+        monkeypatch,
+        max_line_chars=limit,
+        max_events=8,
+    )
+    assert result == terminal
+    assert stream.eof
+    assert stream.readline_sizes and set(stream.readline_sizes) == {limit + 2}
+
+
+def test_external_terminal_readback_limits_match_canonical_schema() -> None:
+    schema = json.loads(
+        (ROOT / "shared" / "schemas" / "agent-runs.schema.json").read_text(
+            encoding="utf-8"
+        )
+    )["x-orchestrarium-jsonl"]
+    assert OWNER._agent_run_jsonl_limits() == (
+        schema["maxLineChars"],
+        schema["maxEvents"],
+    )
+
+
+@pytest.mark.parametrize(
+    ("rows", "trailing_newline"),
+    (
+        (lambda terminal, _limit: (json.dumps(terminal), json.dumps(terminal)), True),
+        (lambda terminal, _limit: ("{malformed", json.dumps(terminal)), True),
+        (lambda terminal, _limit: (json.dumps(terminal), "{malformed"), True),
+        (lambda terminal, limit: ("x" * (limit + 1), json.dumps(terminal)), True),
+        (lambda terminal, _limit: (json.dumps(terminal), '{"truncated":'), False),
+    ),
+    ids=("duplicate", "malformed-before", "malformed-after", "overlong", "truncated-json"),
+)
+def test_external_terminal_readback_stream_rejects_invalid_ledger_to_eof(
+    rows: object, trailing_newline: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    provenance = _execution_provenance()
+    terminal = _external_terminal_row(provenance)
+    limit = len(json.dumps(terminal)) + 16
+    content = "\n".join(rows(terminal, limit)) + ("\n" if trailing_newline else "")
+    result, stream = _readback_from_virtual_stream(
+        content,
+        provenance,
+        monkeypatch,
+        max_line_chars=limit,
+        max_events=8,
+    )
+    assert result is None
+    assert stream.eof
+
+
+def test_external_terminal_readback_stream_rejects_event_overflow_to_eof(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provenance = _execution_provenance()
+    terminal = _external_terminal_row(provenance)
+    other = {"eventKind": "launch", "launchRunId": "other"}
+    limit = len(json.dumps(terminal)) + 16
+    result, stream = _readback_from_virtual_stream(
+        "\n".join((json.dumps(other), json.dumps(other), json.dumps(terminal))) + "\n",
+        provenance,
+        monkeypatch,
+        max_line_chars=limit,
+        max_events=2,
+    )
+    assert result is None
+    assert stream.eof
+
+
+def test_external_terminal_readback_counts_malformed_records_toward_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provenance = _execution_provenance()
+    terminal = _external_terminal_row(provenance)
+    limit = len(json.dumps(terminal)) + 16
+    result, stream = _readback_from_virtual_stream(
+        "{bad-1\n{bad-2\n{bad-3\n" + json.dumps(terminal) + "\n",
+        provenance,
+        monkeypatch,
+        max_line_chars=limit,
+        max_events=2,
+    )
+    assert result is None
+    assert not stream.eof
+    assert len(stream.readline_sizes) == 3
+
+
 def test_unavailable_providers_ship_no_unreachable_executor_surface() -> None:
     launch_source = inspect.getsource(OWNER.launch)
     forbidden_runtime_branches = (

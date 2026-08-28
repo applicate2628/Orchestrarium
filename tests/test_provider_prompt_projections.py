@@ -116,6 +116,11 @@ STOCK_448E_PROJECTION_SHA256 = {
     "external-role-taxonomy.v1.json": "51192eca72784dfcbc2d53596e143ea25856db9e7336031a25d89e9e4fdf85ce",
     "provider-prompt-projections.v1.json": "67073df8687839a0013e59398501a40c39069b6f9bd4dfd34bceac8f825d8945",
 }
+STOCK_1A56_PROJECTION_SHA256 = {
+    **STOCK_448E_PROJECTION_SHA256,
+    "process_supervision/process_runner.py": "c80ddd084f59d1b7e4fde11174fde5e30c5e685d3a2453ca0fd3d25e83736cb6",
+    "provider-prompt-projections.v1.json": "fb49afa295e6badc834c869e57e0745c699bd65333dc301025194ef5c5a2b921",
+}
 
 
 def _authored_transport_path(root: Path, name: str) -> Path:
@@ -1039,7 +1044,18 @@ def test_exact_8f92_transport_set_is_one_atomic_prior_plan(tmp_path: Path) -> No
         (
             "448e8c5a",
             STOCK_448E_PROJECTION_SHA256,
-            ("process_supervision/process_runner.py",),
+            (
+                "provider_prompt.py",
+                "process_supervision/process_runner.py",
+            ),
+        ),
+        (
+            "1a56f81f",
+            STOCK_1A56_PROJECTION_SHA256,
+            (
+                "provider_prompt.py",
+                "process_supervision/process_runner.py",
+            ),
         ),
     ),
 )
@@ -1085,6 +1101,7 @@ def test_exact_published_transport_set_is_one_atomic_prior_plan(
         ("d1309ee5", STOCK_D130_PROJECTION_SHA256),
         ("f87414e7", STOCK_F874_PROJECTION_SHA256),
         ("9a637574", STOCK_9A63_PROJECTION_SHA256),
+        ("1a56f81f", STOCK_1A56_PROJECTION_SHA256),
     ),
 )
 def test_published_transport_prior_rejects_a_customized_member(
@@ -1114,14 +1131,21 @@ def test_published_transport_prior_rejects_a_customized_member(
         )
 
 
-def test_immediate_448e_prior_rejects_same_size_one_byte_member_flip(
-    tmp_path: Path,
+@pytest.mark.parametrize(
+    ("commit", "expected"),
+    (
+        ("448e8c5a", STOCK_448E_PROJECTION_SHA256),
+        ("1a56f81f", STOCK_1A56_PROJECTION_SHA256),
+    ),
+)
+def test_immediate_prior_rejects_same_size_one_byte_member_flip(
+    tmp_path: Path, commit: str, expected: dict[str, str],
 ) -> None:
     installer = _load_installer()
     source, canonical, paths = _current_canonical_with_historical_projection(
         tmp_path,
-        "448e8c5a",
-        STOCK_448E_PROJECTION_SHA256,
+        commit,
+        expected,
     )
     projection = tmp_path / "claude" / "agents" / "scripts"
     path = paths["provider_prompt.py"]
@@ -1150,6 +1174,7 @@ def test_immediate_448e_prior_rejects_same_size_one_byte_member_flip(
         ("f87414e7", STOCK_F874_PROJECTION_SHA256),
         ("9a637574", STOCK_9A63_PROJECTION_SHA256),
         ("448e8c5a", STOCK_448E_PROJECTION_SHA256),
+        ("1a56f81f", STOCK_1A56_PROJECTION_SHA256),
     ),
 )
 def test_published_transport_migration_failure_restores_bytes_and_identities(
@@ -1247,16 +1272,16 @@ def test_immediate_448e_prior_applies_only_changed_transport_members_and_manifes
 
     assert owner.calls == [
         (
+            "scripts/provider_prompt.py",
+            STOCK_448E_PROJECTION_SHA256["provider_prompt.py"],
+        ),
+        (
             "scripts/process_supervision/process_runner.py",
-            STOCK_448E_PROJECTION_SHA256[
-                "process_supervision/process_runner.py"
-            ],
+            STOCK_448E_PROJECTION_SHA256["process_supervision/process_runner.py"],
         ),
         (
             "shared/provider-prompt-projections.v1.json",
-            STOCK_448E_PROJECTION_SHA256[
-                "provider-prompt-projections.v1.json"
-            ],
+            STOCK_448E_PROJECTION_SHA256["provider-prompt-projections.v1.json"],
         ),
     ]
 

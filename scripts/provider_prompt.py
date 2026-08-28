@@ -25,22 +25,26 @@ try:
     from process_supervision.process_runner import (
         CapturePolicyV1,
         EnvironmentRowV1,
+        ExecutableBindingV1,
         KimiWindowsProfileV1,
         ProcessRequestV1,
         ProcessResultV1,
         ProcessRunnerV1,
         SettlePolicyV1,
+        kimi_release_bindings,
         resolve_executable_identity,
     )
 except ModuleNotFoundError:
     from scripts.process_supervision.process_runner import (
         CapturePolicyV1,
         EnvironmentRowV1,
+        ExecutableBindingV1,
         KimiWindowsProfileV1,
         ProcessRequestV1,
         ProcessResultV1,
         ProcessRunnerV1,
         SettlePolicyV1,
+        kimi_release_bindings,
         resolve_executable_identity,
     )
 
@@ -95,6 +99,7 @@ _EXTERNAL_DISPATCH_DECISION_FIELDS = frozenset(
 KIMI_WINDOWS_PROFILE_V1 = KimiWindowsProfileV1
 KIMI_EXECUTABLE_BINDING_SCHEMA_V1 = "orchestrarium.kimi-executable-binding.v1"
 KIMI_EXECUTABLE_BINDING_FILENAME_V1 = "executable-binding-v1.json"
+KIMI_EXECUTABLE_REPLACEMENT_LOCK_FILENAME_V1 = ".kimi-binding.replace.lock"
 SETTINGS_SNAPSHOT_MAX_BYTES = 1024 * 1024
 CLEANUP_ISSUE_LIMIT = 32
 CLEANUP_ISSUE_TOKEN_MAX = 64
@@ -117,6 +122,9 @@ PROVIDER_AUTH_SECRET_ENV_KEYS_V1 = {
     "claude-direct": ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"),
     "claude-subscription-override": (),
 }
+AUTH_OUTPUT_SCAN_ENVIRONMENT_EXACT = "environment-exact"
+AUTH_OUTPUT_SCAN_CREDENTIAL_FILE_UNSCANNABLE = "credential-file-unscannable"
+AUTH_OUTPUT_SCAN_OPAQUE_PROVIDER_SESSION = "opaque-provider-session"
 _NONSECRET_CHILD_ENV_NAMES = (
     "COMSPEC", "SystemRoot", "SYSTEMROOT", "WINDIR", "PATH", "PATHEXT",
     "TEMP", "TMP", "TMPDIR", "USERPROFILE", "LOCALAPPDATA", "APPDATA",
@@ -177,6 +185,8 @@ EXTERNAL_ROLE_TAXONOMY_SHA256 = "51192eca72784dfcbc2d53596e143ea25856db9e7336031
 LAUNCH_FLAGS_MAX_COUNT = 64
 LAUNCH_FLAGS_MAX_TOKEN_BYTES = 2048
 LAUNCH_FLAGS_MAX_TOTAL_BYTES = 16 * 1024
+AGENT_RUN_MAX_LINE_CHARS = 128 * 1024
+AGENT_RUN_MAX_EVENTS = 4096
 _MODEL_TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$", re.ASCII)
 _CLAUDE_TOOL_LIST = re.compile(
     r"^[A-Za-z][A-Za-z0-9_*:-]*(?:,[A-Za-z][A-Za-z0-9_*:-]*)*$",
@@ -366,6 +376,7 @@ class ProviderAuthConfiguration:
     mode: str
     child_environment: dict[str, str]
     needles: tuple[bytes, ...]
+    output_scan_disposition: str
 
 
 @dataclass(frozen=True)
@@ -1041,15 +1052,18 @@ def _fixed_kimi_executable(home: Path) -> Path:
     return absolute_home / ".kimi-code" / "bin" / "kimi.exe"
 
 
-def _observe_kimi_executable(path: Path, failure_id: str) -> dict[str, object]:
+def _observe_kimi_executable(
+    path: Path, failure_id: str, *, require_current: bool = False
+) -> dict[str, object]:
     try:
+        accepted_bindings = kimi_release_bindings(KimiWindowsProfileV1)
         validate_no_reparse_components(path)
         before = path.lstat()
         if (
             not stat.S_ISREG(before.st_mode)
             or stat.S_ISLNK(before.st_mode)
             or _metadata_is_reparse(before)
-            or before.st_size != KimiWindowsProfileV1.expected_size
+            or before.st_size not in {size for size, _digest in accepted_bindings}
         ):
             raise OSError("Kimi executable metadata")
         digest = hashlib.sha256()
@@ -1079,10 +1093,18 @@ def _observe_kimi_executable(path: Path, failure_id: str) -> dict[str, object]:
         ):
             raise OSError("Kimi executable drift")
         observed_sha256 = digest.hexdigest()
-        if not secrets.compare_digest(
-            observed_sha256, KimiWindowsProfileV1.accepted_sha256
+        observed_binding = (before.st_size, observed_sha256)
+        if not any(
+            observed_binding[0] == size
+            and secrets.compare_digest(observed_binding[1], accepted)
+            for size, accepted in accepted_bindings
         ):
             raise OSError("Kimi executable digest")
+        if require_current and not (
+            observed_binding[0] == accepted_bindings[0][0]
+            and secrets.compare_digest(observed_binding[1], accepted_bindings[0][1])
+        ):
+            raise OSError("Kimi executable is not the current release")
         return {
             "schema": KIMI_EXECUTABLE_BINDING_SCHEMA_V1,
             "path": str(path),
@@ -1158,27 +1180,221 @@ def enroll_kimi_executable(
         raise ValueError("E_KIMI_ENROLLMENT_POSTCONDITION")
 
 
-def resolve_enrolled_kimi_command() -> list[str]:
+def _validated_kimi_binding_values(
+    data: object, fixed_executable: Path
+) -> tuple[int, str]:
+    if not isinstance(data, dict):
+        raise ValueError("E_KIMI_EXECUTABLE_BINDING_DRIFT")
+    path = Path(data["path"])
+    size = int(data["size"])
+    digest = str(data["sha256"]).lower()
+    accepted = kimi_release_bindings(KimiWindowsProfileV1)
+    if (
+        data.get("schema") != KIMI_EXECUTABLE_BINDING_SCHEMA_V1
+        or not path.is_absolute()
+        or Path(os.path.abspath(path)) != path
+        or path != fixed_executable
+        or path.name.casefold() != "kimi.exe"
+        or not any(
+            size == accepted_size
+            and secrets.compare_digest(digest, accepted_digest)
+            for accepted_size, accepted_digest in accepted
+        )
+    ):
+        raise ValueError("E_KIMI_EXECUTABLE_BINDING_DRIFT")
+    return size, digest
+
+
+def _read_kimi_binding_snapshot(
+    pin: Path,
+    fixed_executable: Path,
+    *,
+    validation_failure_id: str = "E_KIMI_ENROLLMENT_INVALID: existing pin",
+) -> tuple[bytes, tuple[int, int, int, int], tuple[int, str]]:
+    """Read one ordinary pin through an identity-bound handle."""
+
+    try:
+        validate_no_reparse_components(pin)
+        before = pin.lstat()
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or stat.S_ISLNK(before.st_mode)
+            or _metadata_is_reparse(before)
+            or before.st_size > 4096
+        ):
+            raise OSError("Kimi binding metadata")
+        flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(pin, flags)
+        with os.fdopen(descriptor, "rb") as stream:
+            opened = os.fstat(stream.fileno())
+            if (opened.st_dev, opened.st_ino, opened.st_size) != (
+                before.st_dev,
+                before.st_ino,
+                before.st_size,
+            ):
+                raise OSError("Kimi binding identity")
+            payload = stream.read(4097)
+        after = pin.lstat()
+        identity = (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
+        if identity != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns):
+            raise OSError("Kimi binding drift")
+        data = json.loads(payload.decode("utf-8"))
+    except (OSError, ValueError, KeyError, TypeError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError("E_KIMI_ENROLLMENT_INVALID: existing pin") from exc
+    try:
+        size, digest = _validated_kimi_binding_values(data, fixed_executable)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError(validation_failure_id) from exc
+    return payload, identity, (size, digest)
+
+
+def _write_kimi_binding_temporary(parent: Path, prefix: str, payload: bytes) -> Path:
+    descriptor, temporary_name = tempfile.mkstemp(prefix=prefix, suffix=".tmp", dir=parent)
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
+    return temporary
+
+
+def replace_kimi_enrollment(
+    home: Path, runtime_root: Path, *, dry_run: bool
+) -> None:
+    """Atomically rotate one accepted rollback pin to the current release."""
+
+    executable = _fixed_kimi_executable(home)
+    observed = _observe_kimi_executable(
+        executable,
+        "E_KIMI_ENROLLMENT_INVALID: current release binding",
+        require_current=True,
+    )
+    root = Path(os.path.abspath(runtime_root))
+    pin = root / KIMI_EXECUTABLE_BINDING_FILENAME_V1
+    if not runtime_root.is_absolute() or pin.parent != runtime_root:
+        raise ValueError("E_KIMI_ENROLLMENT_INVALID: pin root")
+    payload = json.dumps(observed, sort_keys=True, separators=(",", ":")).encode("utf-8") + b"\n"
+    existing, existing_identity, existing_binding = _read_kimi_binding_snapshot(
+        pin, executable
+    )
+    accepted = kimi_release_bindings(KimiWindowsProfileV1)
+    if existing == payload:
+        print("  Kimi executable enrollment is current and left byte-exact")
+        return
+    if not any(
+        existing_binding[0] == size
+        and secrets.compare_digest(existing_binding[1], digest)
+        for size, digest in accepted[1:]
+    ):
+        raise ValueError("E_KIMI_ENROLLMENT_DRIFT: replacement requires accepted rollback pin")
+    if dry_run:
+        print("  [dry-run] Kimi executable enrollment would rotate rollback pin to current release")
+        return
+
+    lock = root / KIMI_EXECUTABLE_REPLACEMENT_LOCK_FILENAME_V1
+    lock_descriptor: int | None = None
+    lock_identity: tuple[int, int] | None = None
+    candidate: Path | None = None
+    backup: Path | None = None
+    replaced = False
+    try:
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+        try:
+            lock_descriptor = os.open(lock, flags, 0o600)
+        except FileExistsError as exc:
+            raise ValueError("E_KIMI_ENROLLMENT_BUSY") from exc
+        with os.fdopen(lock_descriptor, "wb") as stream:
+            lock_descriptor = None
+            stream.write(b"orchestrarium-kimi-enrollment-replacement-v1\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+            locked = os.fstat(stream.fileno())
+            lock_identity = (locked.st_dev, locked.st_ino)
+
+        current, current_identity, current_binding = _read_kimi_binding_snapshot(
+            pin, executable
+        )
+        if (
+            current != existing
+            or current_identity != existing_identity
+            or current_binding != existing_binding
+        ):
+            raise ValueError("E_KIMI_ENROLLMENT_DRIFT: pin changed during replacement")
+        reobserved = _observe_kimi_executable(
+            executable,
+            "E_KIMI_ENROLLMENT_INVALID: current release changed during replacement",
+            require_current=True,
+        )
+        if reobserved != observed:
+            raise ValueError("E_KIMI_ENROLLMENT_DRIFT: executable changed during replacement")
+        candidate = _write_kimi_binding_temporary(root, ".kimi-binding.candidate.", payload)
+        backup = _write_kimi_binding_temporary(root, ".kimi-binding.rollback.", existing)
+        os.replace(candidate, pin)
+        candidate = None
+        replaced = True
+        committed, _identity, committed_binding = _read_kimi_binding_snapshot(pin, executable)
+        if committed != payload or committed_binding != accepted[0]:
+            raise OSError("Kimi replacement postcondition")
+        committed_executable = _observe_kimi_executable(
+            executable,
+            "E_KIMI_ENROLLMENT_INVALID: current release changed after replacement",
+            require_current=True,
+        )
+        if committed_executable != observed:
+            raise OSError("Kimi replacement executable postcondition")
+        current_lock = lock.lstat()
+        if (current_lock.st_dev, current_lock.st_ino) != lock_identity:
+            raise OSError("Kimi replacement lock identity")
+        lock.unlink()
+        lock_identity = None
+    except (OSError, TypeError, UnicodeError, ValueError) as exc:
+        if not replaced and isinstance(exc, ValueError):
+            raise
+        if replaced and backup is not None:
+            try:
+                os.replace(backup, pin)
+                backup = None
+                restored, _identity, restored_binding = _read_kimi_binding_snapshot(
+                    pin, executable
+                )
+                if restored != existing or restored_binding != existing_binding:
+                    raise OSError("Kimi rollback postcondition")
+            except (OSError, ValueError, TypeError, UnicodeError) as rollback_exc:
+                raise ValueError("E_KIMI_ENROLLMENT_ROLLBACK_FAILED") from rollback_exc
+        raise ValueError("E_KIMI_ENROLLMENT_REPLACE_FAILED") from exc
+    finally:
+        if lock_descriptor is not None:
+            os.close(lock_descriptor)
+        if candidate is not None:
+            candidate.unlink(missing_ok=True)
+        if backup is not None:
+            backup.unlink(missing_ok=True)
+        if lock_identity is not None:
+            try:
+                current_lock = lock.lstat()
+                if (current_lock.st_dev, current_lock.st_ino) == lock_identity:
+                    lock.unlink()
+            except OSError:
+                pass
+
+
+def _resolve_enrolled_kimi_launch() -> tuple[list[str], ExecutableBindingV1]:
     try:
         binding_path = _kimi_binding_path()
-        validate_no_reparse_components(binding_path)
-        data = json.loads(binding_path.read_text(encoding="utf-8"))
-        path = Path(data["path"])
         fixed_path = _fixed_kimi_executable(_kimi_user_home())
-        digest = str(data["sha256"]).lower()
-        size = int(data["size"])
-        if (
-            data.get("schema") != KIMI_EXECUTABLE_BINDING_SCHEMA_V1
-            or not path.is_absolute()
-            or Path(os.path.abspath(path)) != path
-            or path != fixed_path
-            or path.name.casefold() != "kimi.exe"
-            or size != KimiWindowsProfileV1.expected_size
-            or digest != KimiWindowsProfileV1.accepted_sha256
-            or path.stat().st_size != size
-        ):
+        _payload, _identity, (size, digest) = _read_kimi_binding_snapshot(
+            binding_path,
+            fixed_path,
+            validation_failure_id="E_KIMI_EXECUTABLE_BINDING_DRIFT",
+        )
+        if fixed_path.stat().st_size != size:
             raise ValueError("E_KIMI_EXECUTABLE_BINDING_DRIFT")
-        return [str(path)]
+        binding = ExecutableBindingV1(str(fixed_path), size, digest)
+        return [str(fixed_path)], binding
     except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
         if str(exc) == "E_KIMI_EXECUTABLE_BINDING_DRIFT":
             raise
@@ -1187,11 +1403,21 @@ def resolve_enrolled_kimi_command() -> list[str]:
         ) from exc
 
 
+def resolve_enrolled_kimi_command() -> list[str]:
+    command, _binding = _resolve_enrolled_kimi_launch()
+    return command
+
+
 def verify_kimi_enrollment() -> list[str]:
-    command = resolve_enrolled_kimi_command()
-    _observe_kimi_executable(
+    command, expected = _resolve_enrolled_kimi_launch()
+    observed = _observe_kimi_executable(
         Path(command[0]), "E_KIMI_EXECUTABLE_BINDING_DRIFT"
     )
+    if (
+        observed["size"] != expected.size
+        or not secrets.compare_digest(str(observed["sha256"]), expected.sha256)
+    ):
+        raise ValueError("E_KIMI_EXECUTABLE_BINDING_DRIFT")
     return command
 
 
@@ -1402,7 +1628,12 @@ def resolve_provider_auth_configuration(
                 "DO_NOT_TRACK": "1",
             }
         )
-        return ProviderAuthConfiguration("kimi-user-session", child, ())
+        return ProviderAuthConfiguration(
+            "kimi-user-session",
+            child,
+            (),
+            AUTH_OUTPUT_SCAN_OPAQUE_PROVIDER_SESSION,
+        )
     else:
         raise ValueError("E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE: provider")
 
@@ -1431,7 +1662,14 @@ def resolve_provider_auth_configuration(
         key for key in credential_keys if key in child
     }:
         raise ValueError("E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE: child environment")
-    return ProviderAuthConfiguration(mode, child, tuple(needles))
+    disposition = (
+        AUTH_OUTPUT_SCAN_CREDENTIAL_FILE_UNSCANNABLE
+        if mode == "codex-auth-file"
+        or mode in {"claude-bedrock", "claude-vertex"}
+        or not needles
+        else AUTH_OUTPUT_SCAN_ENVIRONMENT_EXACT
+    )
+    return ProviderAuthConfiguration(mode, child, tuple(needles), disposition)
 
 
 def claude_commercial_auth_present() -> bool:
@@ -2276,7 +2514,9 @@ def provider_windows_argv_profile_id(
     """Select one sealed runner profile without constructing observed evidence."""
     if os.name != "nt":
         return None
-    if executable.resolve() == Path(sys.executable).resolve():
+    if os.path.normcase(os.path.abspath(executable)) == os.path.normcase(
+        os.path.abspath(sys.executable)
+    ):
         return "python-validator-json-echo-v1"
     if provider == "kimi" and executable.name.casefold() == "kimi.exe":
         return KIMI_WINDOWS_PROFILE_V1.profile_id
@@ -2298,10 +2538,12 @@ def run_provider_process(
     body: bytes | None,
     control: Control,
     provider: str | None = None,
+    *,
+    expected_executable_binding: ExecutableBindingV1 | None = None,
 ) -> tuple[ProcessResultV1, bytes, bytes]:
     """Run one provider through the sole process/tree/I-O lifecycle owner."""
 
-    executable = Path(command[0]).resolve(strict=True)
+    executable = Path(os.path.abspath(command[0]))
     argv = (str(executable), *command[1:], *provider_args)
     sink = runner.mint_memory_capture_sink()
     request = ProcessRequestV1(
@@ -2320,6 +2562,7 @@ def run_provider_process(
         windows_argv_profile_id=provider_windows_argv_profile_id(
             provider or "python-support", executable
         ),
+        expected_executable_binding=expected_executable_binding,
     )
     result = runner.run(request)
     return result, sink.bytes_for("stdout"), sink.bytes_for("stderr")
@@ -2796,6 +3039,12 @@ def parse_provider_result(output: str) -> dict[str, object]:
     return payload
 
 
+def _agent_run_jsonl_limits() -> tuple[int, int]:
+    """Return compiled protocol limits; source tests bind them to the schema owner."""
+
+    return AGENT_RUN_MAX_LINE_CHARS, AGENT_RUN_MAX_EVENTS
+
+
 def read_back_external_terminal(
     control: Control,
     provider: str,
@@ -2806,25 +3055,53 @@ def read_back_external_terminal(
 
     if not control.ledger or not launch_run_id:
         return None
+    terminal: dict[str, object] | None = None
+    matches = 0
+    events = 0
+    invalid = False
     try:
-        rows = [
-            json.loads(line)
-            for line in (Path(control.ledger) / "agent-runs.jsonl").read_text(
-                encoding="utf-8"
-            ).splitlines()
-            if line.strip()
-        ]
-    except (OSError, json.JSONDecodeError):
+        max_line_chars, max_events = _agent_run_jsonl_limits()
+        with (Path(control.ledger) / "agent-runs.jsonl").open(
+            "r", encoding="utf-8", newline=""
+        ) as stream:
+            while True:
+                raw = stream.readline(max_line_chars + 2)
+                if raw == "":
+                    break
+                complete_line = raw.endswith("\n")
+                line = raw.rstrip("\r\n")
+                if len(line) > max_line_chars or (
+                    not complete_line and len(raw) > max_line_chars
+                ):
+                    events += 1
+                    if events > max_events:
+                        return None
+                    invalid = True
+                    while raw and not raw.endswith("\n"):
+                        raw = stream.readline(max_line_chars + 2)
+                    continue
+                if not line.strip():
+                    continue
+                events += 1
+                if events > max_events:
+                    return None
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    invalid = True
+                    continue
+                if (
+                    isinstance(row, dict)
+                    and row.get("eventKind") == "terminal"
+                    and row.get("launchRunId") == launch_run_id
+                ):
+                    matches += 1
+                    if matches == 1:
+                        terminal = row
+    except (OSError, KeyError, TypeError, ValueError):
         return None
-    matches = [
-        row for row in rows
-        if isinstance(row, dict)
-        and row.get("eventKind") == "terminal"
-        and row.get("launchRunId") == launch_run_id
-    ]
-    if len(matches) != 1:
+    if invalid or matches != 1 or terminal is None:
         return None
-    terminal = matches[0]
     if (
         not isinstance(terminal.get("runId"), str)
         or terminal.get("provider") != provider
@@ -2967,6 +3244,7 @@ def finalize_run(
     launch_error: str | None = None,
     realization: dict[str, object] | None = None,
     credential_needles: tuple[bytes, ...] = (),
+    auth_output_scan_disposition: str | None = None,
     role_provenance: ExternalRoleProvenance | None = None,
     provenance: ExecutionProvenance | None = None,
     raw_stdout: bytes | None = None,
@@ -2989,13 +3267,25 @@ def finalize_run(
         and raw_stderr is not None
     )
     scan_outcome: str | None = None
-    scan_required = provider == "kimi" or bool(credential_needles)
+    credential_coverage_unavailable = (
+        provider != "kimi"
+        and process_result is not None
+        and (
+            auth_output_scan_disposition != AUTH_OUTPUT_SCAN_ENVIRONMENT_EXACT
+            or not credential_needles
+        )
+    )
+    scan_required = (
+        provider == "kimi" or credential_coverage_unavailable or bool(credential_needles)
+    )
     scan_unavailable = (
         "E_EXTERNAL_PROVIDER_OUTPUT_SCAN_UNAVAILABLE"
         if provider == "kimi"
         else "E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE"
     )
-    if scan_required:
+    if credential_coverage_unavailable:
+        scan_outcome = "E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE"
+    elif scan_required:
         scan_outcome = (
             provider_output_safety_scan_terminal(
                 provider, credential_needles, stdout=raw_stdout, stderr=raw_stderr
@@ -3212,7 +3502,11 @@ def launch(provider: str, argv: list[str]) -> int:
 def kimi_main(argv: list[str]) -> int:
     """Route Kimi maintenance modes locally; all other arguments remain launches."""
 
-    maintenance_flags = {"--enroll-executable", "--verify-enrollment"}
+    maintenance_flags = {
+        "--enroll-executable",
+        "--replace-kimi-enrollment",
+        "--verify-enrollment",
+    }
     selected = maintenance_flags.intersection(argv)
     if not selected:
         return launch("kimi", argv)
@@ -3223,6 +3517,14 @@ def kimi_main(argv: list[str]) -> int:
         except ValueError as exc:
             return fail(str(exc))
         print("KIMI-EXECUTABLE-ENROLLMENT: PASS")
+        return 0
+    if argv == ["--replace-kimi-enrollment"]:
+        try:
+            home = _kimi_user_home()
+            replace_kimi_enrollment(home, _kimi_runtime_root(), dry_run=False)
+        except ValueError as exc:
+            return fail(str(exc))
+        print("KIMI-EXECUTABLE-REPLACEMENT: PASS")
         return 0
     if argv == ["--verify-enrollment"]:
         try:
@@ -3238,13 +3540,15 @@ def _requires_early_native_windows_refusal(provider: str) -> bool:
     return os.name == "nt" and provider in {"codex", "claude"}
 
 
-def _resolve_launch_provider_command(provider: str, query_cwd: Path) -> list[str]:
+def _resolve_launch_provider_command(
+    provider: str, query_cwd: Path
+) -> tuple[list[str], ExecutableBindingV1 | None]:
     if provider == "kimi":
-        return resolve_enrolled_kimi_command()
+        return _resolve_enrolled_kimi_launch()
     resolution = resolve_provider_command(provider)
     if resolution is not None:
         _reject_repository_path_discovery(resolution, query_cwd)
-        return list(resolution.command)
+        return list(resolution.command), None
     key = {"codex": "CODEX_BIN", "claude": "CLAUDE_BIN"}.get(
         provider, "PROVIDER_BIN"
     )
@@ -3294,7 +3598,9 @@ def _launch_with_runner(
 
     try:
         query_cwd = Path.cwd().resolve(strict=True)
-        command = _resolve_launch_provider_command(provider, query_cwd)
+        command, expected_executable_binding = _resolve_launch_provider_command(
+            provider, query_cwd
+        )
     except (OSError, ValueError) as exc:
         return fail(str(exc))
 
@@ -3329,6 +3635,15 @@ def _launch_with_runner(
         return 3
     except ValueError as exc:
         return fail(str(exc))
+    if (
+        provider != "kimi"
+        and (
+            auth_configuration.output_scan_disposition
+            != AUTH_OUTPUT_SCAN_ENVIRONMENT_EXACT
+            or not auth_configuration.needles
+        )
+    ):
+        return fail("E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE")
 
     try:
         body = assemble_external_prompt(prompt_bytes(control, external=True))
@@ -3478,6 +3793,7 @@ def _launch_with_runner(
             None if provider == "kimi" else body,
             control,
             provider,
+            expected_executable_binding=expected_executable_binding,
         )
         stream_result = provider_stream_result(process_result)
         if process_result.target_exit_code is not None:
@@ -3517,6 +3833,7 @@ def _launch_with_runner(
         launch_error=launch_error,
         realization=realization,
         credential_needles=auth_configuration.needles,
+        auth_output_scan_disposition=auth_configuration.output_scan_disposition,
         role_provenance=role_provenance,
         provenance=provenance,
         raw_stdout=raw_stdout,

@@ -200,6 +200,7 @@ def _run_transport(
     env[OUTPUT_ENV[provider]] = str(output_root)
     if provider == "codex":
         env["CODEX_HOME"] = str(prepare_codex_home(tmp_path))
+        env["OPENAI_API_KEY"] = "fake-commercial-credential"
     elif not environment or not (
         environment.get("CLAUDE_CODE_USE_BEDROCK")
         or environment.get("CLAUDE_CODE_USE_VERTEX")
@@ -549,6 +550,46 @@ def test_provider_adapter_uses_settled_canonical_runner_result(tmp_path: Path) -
     assert owner.provider_stream_result(result).issues == ()
 
 
+def test_provider_adapter_passes_absolute_lexical_executable_without_resolve(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    observed = []
+
+    class Sink:
+        def bytes_for(self, _stream: str) -> bytes:
+            return b""
+
+    class Runner:
+        def mint_memory_capture_sink(self):
+            return Sink()
+
+        def run(self, request):
+            observed.append(request)
+            return object()
+
+    monkeypatch.setattr(
+        owner.Path,
+        "resolve",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("provider adapter must not resolve executable paths")
+        ),
+    )
+    command = [os.path.abspath(sys.executable), "-c", "pass"]
+
+    owner.run_provider_process(
+        Runner(),
+        command,
+        [],
+        {},
+        tmp_path,
+        None,
+        owner.Control(timeout_secs=1, capture_max_bytes=1024),
+    )
+
+    assert observed[0].resolved_executable == Path(command[0])
+    assert observed[0].argv[0] == command[0]
+
+
 def test_provider_adapter_preserves_capture_policy_bounds() -> None:
     assert owner.provider_capture_policy(owner.CAPTURE_MAX_BYTES_DEFAULT).aggregate_persisted_limit == 16 * 1024 * 1024
     assert owner.provider_capture_policy(owner.CAPTURE_MAX_BYTES_HARD).aggregate_persisted_limit == 256 * 1024 * 1024
@@ -891,7 +932,11 @@ def test_provider_launch_injects_one_runner_through_trust_ledger_and_child(
     monkeypatch.setattr(
         owner,
         "run_provider_process",
-        lambda supplied, *_args: (observed.append(id(supplied)) or base, raw_stdout, raw_stderr),
+        lambda supplied, *_args, **_kwargs: (
+            observed.append(id(supplied)) or base,
+            raw_stdout,
+            raw_stderr,
+        ),
     )
     monkeypatch.setenv("CODEX_BIN", str(fake))
     monkeypatch.setenv("CODEX_HOME", str(home))
@@ -1086,7 +1131,11 @@ def test_windows_native_provider_refuses_before_prompt_capture_or_launch(
         "resolve_provider_auth_configuration",
         lambda *_args, **_kwargs: (
             calls.append("auth")
-            or SimpleNamespace(child_environment={}, needles=())
+            or SimpleNamespace(
+                child_environment={},
+                needles=(),
+                output_scan_disposition="environment-exact",
+            )
         ),
     )
     monkeypatch.setattr(
@@ -1139,7 +1188,9 @@ def test_live_windows_native_provider_resolver_returns_typed_denial(
         owner,
         "resolve_provider_auth_configuration",
         lambda *_args, **_kwargs: SimpleNamespace(
-            child_environment={}, needles=()
+            child_environment={},
+            needles=(),
+            output_scan_disposition="environment-exact",
         ),
     )
     monkeypatch.setattr(
@@ -1187,7 +1238,11 @@ def test_path_discovered_provider_inside_physical_repository_is_rejected_before_
         owner,
         "resolve_provider_auth_configuration",
         lambda *_args: calls.append("auth")
-        or SimpleNamespace(child_environment={}, needles=()),
+        or SimpleNamespace(
+            child_environment={},
+            needles=(),
+            output_scan_disposition="environment-exact",
+        ),
     )
     monkeypatch.setattr(
         owner,
@@ -1884,22 +1939,6 @@ def test_real_transport_emits_one_envelope_then_path_free_terminal_ledger(
     (
         ("codex", {"OPENAI_API_KEY": "codex-secret-001"}, "OPENAI_API_KEY"),
         ("claude", {"ANTHROPIC_" "API_KEY": "claude-secret-001"}, "ANTHROPIC_API_KEY"),
-        (
-            "claude",
-            {
-                "CLAUDE_CODE_USE_BEDROCK": "true",
-                "AWS_SESSION_TOKEN": "bedrock-secret-001",
-            },
-            "AWS_SESSION_TOKEN",
-        ),
-        (
-            "claude",
-            {
-                "CLAUDE_CODE_USE_VERTEX": "true",
-                "GOOGLE_OAUTH_ACCESS_TOKEN": "vertex-secret-001",
-            },
-            "GOOGLE_OAUTH_ACCESS_TOKEN",
-        ),
     ),
 )
 @pytest.mark.parametrize("stream_name", ("stdout", "stderr"))
@@ -1977,6 +2016,235 @@ def test_invalid_credential_needle_fails_before_prompt_consumption(
     assert code != 0
     assert "E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE" in capsys.readouterr().err
     assert prompt_reads == []
+
+
+@pytest.mark.parametrize(
+    ("provider", "environment", "expected_disposition", "expected_needles"),
+    (
+        ("codex", {}, "credential-file-unscannable", ()),
+        (
+            "codex",
+            {"OPENAI_API_KEY": "codex-secret-001"},
+            "environment-exact",
+            (b"codex-secret-001",),
+        ),
+        (
+            "claude",
+            {
+                "CLAUDE_CODE_USE_BEDROCK": "true",
+                "AWS_SESSION_TOKEN": "bedrock-secret-001",
+            },
+            "credential-file-unscannable",
+            (b"bedrock-secret-001",),
+        ),
+        (
+            "claude",
+            {
+                "CLAUDE_CODE_USE_VERTEX": "true",
+                "GOOGLE_OAUTH_ACCESS_TOKEN": "vertex-secret-001",
+            },
+            "credential-file-unscannable",
+            (b"vertex-secret-001",),
+        ),
+        ("kimi", {}, "opaque-provider-session", ()),
+    ),
+)
+def test_auth_output_scan_disposition_is_explicit_not_inferred_from_needles(
+    provider: str,
+    environment: dict[str, str],
+    expected_disposition: str,
+    expected_needles: tuple[bytes, ...],
+) -> None:
+    resolved = owner.resolve_provider_auth_configuration(provider, environment)
+
+    assert resolved.output_scan_disposition == expected_disposition
+    assert resolved.needles == expected_needles
+
+
+@pytest.mark.parametrize("mode", ("bedrock-profile", "bedrock-file", "vertex-file", "vertex-directory"))
+def test_cloud_auth_source_controls_are_unscannable_even_with_exact_environment_needle(
+    tmp_path: Path, mode: str
+) -> None:
+    credential_file = tmp_path / "synthetic-credential"
+    credential_file.write_text("synthetic fixture only\n", encoding="utf-8")
+    credential_directory = tmp_path / "synthetic-credential-directory"
+    credential_directory.mkdir()
+    environments = {
+        "bedrock-profile": {
+            "CLAUDE_CODE_USE_BEDROCK": "true",
+            "AWS_PROFILE": "synthetic-profile",
+            "AWS_SESSION_TOKEN": "bedrock-secret-001",
+        },
+        "bedrock-file": {
+            "CLAUDE_CODE_USE_BEDROCK": "true",
+            "AWS_SHARED_CREDENTIALS_FILE": str(credential_file),
+            "AWS_SESSION_TOKEN": "bedrock-secret-001",
+        },
+        "vertex-file": {
+            "CLAUDE_CODE_USE_VERTEX": "true",
+            "GOOGLE_APPLICATION_CREDENTIALS": str(credential_file),
+            "GOOGLE_OAUTH_ACCESS_TOKEN": "vertex-secret-001",
+        },
+        "vertex-directory": {
+            "CLAUDE_CODE_USE_VERTEX": "true",
+            "CLOUDSDK_CONFIG": str(credential_directory),
+            "GOOGLE_OAUTH_ACCESS_TOKEN": "vertex-secret-001",
+        },
+    }
+
+    resolved = owner.resolve_provider_auth_configuration("claude", environments[mode])
+
+    assert resolved.output_scan_disposition == "credential-file-unscannable"
+    assert resolved.needles
+
+
+@pytest.mark.parametrize(
+    ("provider", "environment"),
+    (
+        ("codex", {}),
+        (
+            "claude",
+            {
+                "CLAUDE_CODE_USE_BEDROCK": "true",
+                "AWS_SESSION_TOKEN": "bedrock-secret-001",
+            },
+        ),
+        (
+            "claude",
+            {
+                "CLAUDE_CODE_USE_BEDROCK": "true",
+                "AWS_ACCESS_KEY_ID": "bedrock-access-key-001",
+                "AWS_SECRET_ACCESS_KEY": "bedrock-secret-key-001",
+                "AWS_SESSION_TOKEN": "bedrock-session-token-001",
+                "AWS_REGION": "us-east-1",
+            },
+        ),
+        (
+            "claude",
+            {
+                "CLAUDE_CODE_USE_VERTEX": "true",
+                "GOOGLE_OAUTH_ACCESS_TOKEN": "vertex-secret-001",
+            },
+        ),
+        (
+            "claude",
+            {
+                "CLAUDE_CODE_USE_VERTEX": "true",
+                "GOOGLE_API_KEY": "vertex-api-key-001",
+                "GOOGLE_OAUTH_ACCESS_TOKEN": "vertex-oauth-token-001",
+                "CLOUDSDK_AUTH_ACCESS_TOKEN": "vertex-cloudsdk-token-001",
+                "GOOGLE_CLOUD_PROJECT": "synthetic-project",
+            },
+        ),
+    ),
+)
+def test_unscannable_auth_refuses_before_prompt_lifecycle_ledger_or_provider_launch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    provider: str,
+    environment: dict[str, str],
+) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr(owner.os, "environ", environment)
+    monkeypatch.setattr(
+        owner,
+        "resolve_provider_command",
+        lambda _provider: calls.append("binary")
+        or _resolved_command(sys.executable, str(MODULE)),
+    )
+    original_auth = owner.resolve_provider_auth_configuration
+    monkeypatch.setattr(
+        owner,
+        "resolve_provider_auth_configuration",
+        lambda selected: calls.append("auth") or original_auth(selected),
+    )
+    monkeypatch.setattr(
+        owner,
+        "prompt_bytes",
+        lambda *_args, **_kwargs: calls.append("prompt") or b"task",
+    )
+    monkeypatch.setattr(
+        owner.RunCaptureLifecycle,
+        "create",
+        lambda *_args, **_kwargs: calls.append("lifecycle"),
+    )
+    monkeypatch.setattr(
+        owner,
+        "run_ledger",
+        lambda *_args, **_kwargs: calls.append("ledger") or True,
+    )
+    monkeypatch.setattr(
+        owner,
+        "run_provider_process",
+        lambda *_args, **_kwargs: calls.append("provider"),
+    )
+
+    code = owner.launch(provider, ["credential-scan-fixture"])
+
+    assert code != 0
+    assert "E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE" in capsys.readouterr().err
+    assert calls == ["binary", "auth"]
+
+
+@pytest.mark.parametrize(
+    ("disposition", "needles"),
+    (
+        (None, ()),
+        ("credential-file-unscannable", ()),
+        ("environment-exact", ()),
+    ),
+)
+def test_finalizer_refuses_nonopaque_launch_without_exact_nonempty_credential_coverage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    disposition: str | None,
+    needles: tuple[bytes, ...],
+) -> None:
+    child = tmp_path / "synthetic-provider.py"
+    child.write_text(
+        "import sys\nsys.stdin.buffer.read()\nsys.stdout.buffer.write(b'GATE: PASS\\n')\n",
+        encoding="utf-8",
+    )
+    environment = {"PATH": os.environ["PATH"]}
+    for name in ("SYSTEMROOT", "WINDIR"):
+        if name in os.environ:
+            environment[name] = os.environ[name]
+    process_result, raw_stdout, raw_stderr = owner.run_provider_process(
+        owner.ProcessRunnerV1(),
+        [sys.executable, str(child)],
+        [],
+        environment,
+        ROOT,
+        b"synthetic task",
+        owner.Control(timeout_secs=5, capture_max_bytes=1024),
+        "claude",
+    )
+    lifecycle = _lifecycle(tmp_path, monkeypatch)
+    stream = io.StringIO()
+    monkeypatch.setattr(owner.sys, "stdout", stream)
+
+    code = owner.finalize_run(
+        owner.Control(),
+        "claude",
+        "opus",
+        "xhigh",
+        "fixture",
+        "",
+        lifecycle,
+        0,
+        owner.provider_stream_result(process_result),
+        credential_needles=needles,
+        auth_output_scan_disposition=disposition,
+        raw_stdout=raw_stdout,
+        raw_stderr=raw_stderr,
+        process_result=process_result,
+    )
+
+    assert code != 0
+    payload = owner.parse_provider_result(stream.getvalue())
+    assert payload["token"] == "UNVERIFIED:E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE"
+    assert payload["resultText"] == ""
 
 
 @pytest.mark.parametrize("blocked_flag", ("--setting-sources", "--settings"))
