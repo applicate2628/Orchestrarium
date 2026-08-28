@@ -1528,6 +1528,34 @@ def test_envelope_contains_no_prompt_raw_stderr_or_capture_paths(
     assert str(lifecycle.root) not in encoded
 
 
+def test_finalizer_counts_fatal_stderr_markers_after_first_64_kib(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lifecycle = _lifecycle(tmp_path, monkeypatch)
+    stream = io.StringIO()
+    monkeypatch.setattr(owner.sys, "stdout", stream)
+    stderr = (b"x" * (64 * 1024)) + b"\nFATAL: first\nAPI Error: second\n"
+
+    code = owner.finalize_run(
+        owner.Control(),
+        "claude",
+        "opus",
+        "xhigh",
+        "fixture",
+        "",
+        lifecycle,
+        0,
+        raw_stdout=b"GATE: PASS\n",
+        raw_stderr=stderr,
+    )
+
+    payload = owner.parse_provider_result(stream.getvalue())
+    assert code == 0
+    assert payload["token"] == "UNVERIFIED:err-markers"
+    assert payload["gate"] == "none"
+    assert payload["stderrMarkerCount"] == 2
+
+
 def test_no_dead_verdict_artifact_or_writer_remains(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

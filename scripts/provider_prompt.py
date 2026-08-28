@@ -57,7 +57,6 @@ RESULT_MAX_BYTES_DEFAULT = 1024 * 1024
 RESULT_MAX_BYTES_HARD = 16 * 1024 * 1024
 CAPTURE_MAX_BYTES_DEFAULT = 16 * 1024 * 1024
 CAPTURE_MAX_BYTES_HARD = 256 * 1024 * 1024
-STDERR_SCAN_MAX_BYTES = 64 * 1024
 RESULT_PREFIX = "ORCHESTRARIUM_PROVIDER_RESULT_V2="
 E_EXTERNAL_PROVIDER_WINDOWS_NATIVE_ARGV_UNAVAILABLE = (
     "E_EXTERNAL_PROVIDER_WINDOWS_NATIVE_ARGV_UNAVAILABLE"
@@ -2280,9 +2279,7 @@ def materialize_terminal(
                 f"provider result exceeds configured maximum of {result_max_bytes} bytes"
             )
         result_bytes = captured_stdout
-    stderr_bytes = (
-        stderr if stderr is not None else getattr(lifecycle, "_test_stderr", b"")
-    )[:STDERR_SCAN_MAX_BYTES]
+    stderr_bytes = stderr if stderr is not None else getattr(lifecycle, "_test_stderr", b"")
     result_text = result_bytes.decode("utf-8", errors="replace")
     stderr_text = stderr_bytes.decode("utf-8", errors="replace")
     marker_count = sum(
