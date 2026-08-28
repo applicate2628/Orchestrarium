@@ -494,7 +494,6 @@ def test_authorized_kimi_policy_matrix_binds_policy_role_to_provenance_before_ru
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[tuple[str, str, str]] = []
-    observed: list[object] = []
 
     def resolve(selected_provider: str, selected_task: str, selected_role: str):
         calls.append((selected_provider, selected_task, selected_role))
@@ -506,20 +505,48 @@ def test_authorized_kimi_policy_matrix_binds_policy_role_to_provenance_before_ru
         lambda: SimpleNamespace(resolve_external_dispatch=resolve),
         raising=False,
     )
-    monkeypatch.setattr(OWNER, "ProcessRunnerV1", _NoopRunner)
+    prevalidated = OWNER._prevalidate_policy_bound_external_launch(
+        "kimi", ["policy-positive", "--task-class", task_class, "--role", role]
+    )
+
+    assert calls == [("kimi", task_class, role)]
+    assert prevalidated.control.ledger_role == role
+    assert prevalidated.role_provenance.assigned_role == role
+    assert prevalidated.role_provenance.execution_role == execution_role
+
+
+def test_kimi_launch_rejects_non_windows_before_runner(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    module_os = OWNER.os
+
+    class NonWindowsPlatform:
+        name = "posix"
+
+        def __getattr__(self, name: str) -> object:
+            return getattr(module_os, name)
+
+    monkeypatch.setattr(OWNER, "os", NonWindowsPlatform())
+    monkeypatch.setattr(
+        OWNER,
+        "_load_external_dispatch_resolver",
+        lambda: SimpleNamespace(
+            resolve_external_dispatch=lambda *_args: _accepted_kimi_decision(
+                "review", "qa-engineer"
+            )
+        ),
+        raising=False,
+    )
     monkeypatch.setattr(
         OWNER,
         "_launch_with_runner",
-        lambda *_args, prevalidated=None: observed.append(prevalidated) or 0,
+        lambda *_args, **_kwargs: pytest.fail("runner reached"),
     )
 
     assert OWNER.launch(
-        "kimi", ["policy-positive", "--task-class", task_class, "--role", role]
-    ) == 0
-    assert calls == [("kimi", task_class, role)]
-    assert observed[0].control.ledger_role == role
-    assert observed[0].role_provenance.assigned_role == role
-    assert observed[0].role_provenance.execution_role == execution_role
+        "kimi", ["non-windows", "--task-class", "review", "--role", "qa-engineer"]
+    ) == 1
+    assert "E_KIMI_WINDOWS_ONLY" in capsys.readouterr().err
 
 
 def test_installed_kimi_grok_contract_splits_admitted_and_unavailable_routes() -> None:
