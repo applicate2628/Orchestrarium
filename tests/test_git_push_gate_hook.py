@@ -1694,6 +1694,7 @@ def _heavy_preflight(module):
         "DEFER", "PFP-HEAVY", "EVALUATE_HEAVY",
         "git push origin main", "posix", "fixture-transcript.jsonl",
         parsed, "found", owner.classify_generic_push(parsed), False, None,
+        str(REPO_ROOT.resolve()), "tool",
     ))
 
 
@@ -6996,7 +6997,9 @@ class TestPublicationSafetyTrustedScanR3(unittest.TestCase):
                             module, binding,
                             (sys.executable, "-u", "-c", "import time; time.sleep(60)"),
                         )
-                        module._run_snapshot_child(pending, b"")
+                        module._run_snapshot_child(
+                            pending, b"", str(REPO_ROOT.resolve())
+                        )
                     except Exception as exc:
                         caught = exc
                 self.assertEqual(len(children), 1)
