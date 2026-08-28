@@ -7034,7 +7034,10 @@ class TestPublicationSafetyTrustedScanR3(unittest.TestCase):
         )
         fd = os.open(os.devnull, os.O_RDONLY)
 
-        def swapped_result(pending, _payload):
+        repository_workdir = str(REPO_ROOT.resolve())
+        git_exe = str(Path(shutil.which("git") or "").resolve(strict=True))
+
+        def swapped_result(pending, _payload, _repository_workdir):
             wrong = module.PendingScanInvocation(
                 "swapped", pending.attempt_id, pending.binding, pending.closure,
                 pending.interpreter_identity, pending.exact_argv, object(),
@@ -7063,7 +7066,7 @@ class TestPublicationSafetyTrustedScanR3(unittest.TestCase):
             module, "parse_publication_safety_observation", return_value=valid
         ) as parser:
             with self.assertRaises(module.PrRouteDenied) as caught:
-                module._run_authoritative_scan(binding)
+                module._run_authoritative_scan(binding, repository_workdir, git_exe)
         self.assertEqual(caught.exception.failure_id, "PGG-SCAN-CORRELATION")
         parser.assert_not_called()
 
