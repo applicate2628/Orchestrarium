@@ -26,11 +26,6 @@
     "status": "human-gate-pending"
   },
   "status": "baseline-identity-and-reviewed-tooling-pinned",
-  "toolingAnchor": {
-    "kind": "reviewed-tree-frozen-paths",
-    "pathPrefix": "baseline/orchestrarium-v1/tooling/",
-    "requiresOwningCommitLookup": false
-  },
   "tooling": {
     "commandComparator": {
       "deterministic": true,
@@ -42,10 +37,12 @@
     },
     "inventoryGenerator": {
       "deterministic": true,
-      "gitBlobSha": "563760d3a494dcd761c7d0d91b84769e03c5354e",
+      "gitBlobSha": "fd86f898cca303ed293a5c699edb25df7be21988",
       "materialization": "git-cat-file-reviewed-tree-blob",
       "path": "baseline/orchestrarium-v1/tooling/build_inventory.py",
       "runtimeMutation": false,
+      "sourceGitBlobSha": "563760d3a494dcd761c7d0d91b84769e03c5354e",
+      "sourceMaterialization": "embedded-reviewed-source-blob",
       "sourcePath": "scripts/baseline/build_inventory.py"
     },
     "pytestComparator": {
@@ -64,5 +61,10 @@
       "runtimeMutation": false,
       "sourcePath": "scripts/baseline/build_target_effect_baseline.py"
     }
+  },
+  "toolingAnchor": {
+    "kind": "reviewed-tree-frozen-paths",
+    "pathPrefix": "baseline/orchestrarium-v1/tooling/",
+    "requiresOwningCommitLookup": false
   }
 }
