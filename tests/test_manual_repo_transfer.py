@@ -36,6 +36,20 @@ def run(
     return result
 
 
+def run_without_git(
+    *args: object,
+    expect: int = 0,
+) -> subprocess.CompletedProcess[str]:
+    command = [sys.executable, str(SCRIPT), *(str(arg) for arg in args)]
+    result = subprocess.run(command, text=True, capture_output=True)
+    if result.returncode != expect:
+        raise AssertionError(
+            f"expected exit {expect}, got {result.returncode}\n"
+            f"command: {command}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        )
+    return result
+
+
 def git(repo: Path, *args: str) -> str:
     result = subprocess.run(
         ["git", *args], cwd=repo, text=True, capture_output=True, check=True
@@ -279,6 +293,73 @@ class RepoTransferTests(unittest.TestCase):
         self.assertIn("_repo-transfer/manifest.json", names)
         self.assertIn("tracked.txt", names)
         self.assertNotIn("node_modules/cache.bin", names)
+
+    def test_receiver_archive_verify_does_not_require_git(self) -> None:
+        inventory = self.inventory()
+        self.write_selection(inventory)
+        run(
+            "bundle",
+            "--repo",
+            self.repo,
+            "--inventory",
+            self.inventory_path,
+            "--selection",
+            self.selection,
+            "--output",
+            self.bundle,
+        )
+
+        verified = json.loads(
+            run_without_git("verify", "--bundle", self.bundle).stdout
+        )
+
+        self.assertTrue(verified["verified"])
+        self.assertEqual("archive-integrity", verified["verificationMode"])
+
+    def test_source_verify_modes_without_git_are_refused_by_mode_validation(self) -> None:
+        inventory = self.inventory()
+        self.write_selection(inventory)
+        run(
+            "bundle",
+            "--repo",
+            self.repo,
+            "--inventory",
+            self.inventory_path,
+            "--selection",
+            self.selection,
+            "--output",
+            self.bundle,
+        )
+
+        refused = run_without_git(
+            "verify",
+            "--bundle",
+            self.bundle,
+            "--source",
+            self.repo,
+            expect=2,
+        )
+
+        self.assertIn(
+            "git executable is required with a source repository",
+            refused.stderr,
+        )
+        trusted_refused = run_without_git(
+            "verify",
+            "--bundle",
+            self.bundle,
+            "--inventory",
+            self.inventory_path,
+            "--selection",
+            self.selection,
+            "--source",
+            self.repo,
+            expect=2,
+        )
+        self.assertIn(
+            "git executable is required with a source repository",
+            trusted_refused.stderr,
+        )
 
     def test_bundle_refuses_source_drift_after_inventory(self) -> None:
         inventory = self.inventory()

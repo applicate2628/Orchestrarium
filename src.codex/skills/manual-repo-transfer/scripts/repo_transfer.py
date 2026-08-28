@@ -1279,7 +1279,7 @@ def make_parser() -> argparse.ArgumentParser:
     bundle_parser.add_argument("--output", type=Path, required=True)
     verify_parser = commands.add_parser("verify")
     verify_parser.add_argument("--bundle", type=Path, required=True)
-    verify_parser.add_argument("--git-executable", type=Path, required=True)
+    verify_parser.add_argument("--git-executable", type=Path)
     verify_parser.add_argument("--inventory", type=Path)
     verify_parser.add_argument("--selection", type=Path)
     verify_parser.add_argument("--source", type=Path)
