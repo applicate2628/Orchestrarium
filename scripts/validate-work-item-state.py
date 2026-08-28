@@ -75,6 +75,7 @@ V2_ONLY_FIELDS = {
     "externalDispatchId",
     "externalEvidenceRunId",
     "effortMappingLoss",
+    "launchFlags",
     "closerRunId",
     "targetTuple",
 }
@@ -150,12 +151,27 @@ ALLOWED_FIELDS = {
     "externalDispatchId",
     "externalEvidenceRunId",
     "effortMappingLoss",
+    "launchFlags",
     "closerRunId",
     "targetTuple",
 }
 EVIDENCE_ALLOWED_FIELDS = {"kind", "ref", "result"}
 AGENT_RUN_SCHEMA_PATH = Path(__file__).resolve().parents[1] / "shared" / "schemas" / "agent-runs.schema.json"
 AGENT_RUN_SCHEMA = json.loads(AGENT_RUN_SCHEMA_PATH.read_text(encoding="utf-8"))
+_LAUNCH_FLAGS_SCHEMA = AGENT_RUN_SCHEMA["properties"]["launchFlags"]
+LAUNCH_FLAGS_MAX_COUNT = _LAUNCH_FLAGS_SCHEMA["maxItems"]
+LAUNCH_FLAGS_MAX_TOKEN_BYTES = 2048
+LAUNCH_FLAGS_MAX_TOTAL_BYTES = 16 * 1024
+_MODEL_TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$", re.ASCII)
+_CLAUDE_TOOL_LIST = re.compile(
+    r"^[A-Za-z][A-Za-z0-9_*:-]*(?:,[A-Za-z][A-Za-z0-9_*:-]*)*$",
+    re.ASCII,
+)
+_CODEX_SANDBOXES = frozenset({"read-only", "workspace-write", "danger-full-access"})
+_CLAUDE_IO_FORMATS = frozenset({"text", "json", "stream-json"})
+_CLAUDE_PERMISSION_MODES = frozenset(
+    {"default", "acceptEdits", "plan", "dontAsk", "bypassPermissions"}
+)
 V3_EVENT_TYPES = set(AGENT_RUN_SCHEMA["properties"]["eventType"]["enum"])
 _SCRATCH_SCHEMA = AGENT_RUN_SCHEMA["properties"]["scratchEvidence"]
 _SCRATCH_ITEM_SCHEMA = _SCRATCH_SCHEMA["items"]
@@ -204,6 +220,107 @@ _SOLUTION_ATTEMPT_OWNER = None
 
 def fail(errors: list[str], message: str) -> None:
     errors.append(message)
+
+
+def validate_launch_profile(
+    provider: object, flags: object
+) -> tuple[tuple[str, ...], str, str]:
+    """Validate persisted flags independently at the corruptible ledger boundary."""
+
+    if (
+        not isinstance(flags, list)
+        or len(flags) > LAUNCH_FLAGS_MAX_COUNT
+        or provider not in {"codex", "claude", "kimi"}
+    ):
+        raise ValueError("invalid launch flags")
+    frozen: list[str] = []
+    total = 0
+    for token in flags:
+        if not isinstance(token, str) or "\x00" in token or "\r" in token or "\n" in token:
+            raise ValueError("invalid launch flags")
+        encoded = token.encode("utf-8", errors="strict")
+        total += len(encoded)
+        if len(encoded) > LAUNCH_FLAGS_MAX_TOKEN_BYTES or total > LAUNCH_FLAGS_MAX_TOTAL_BYTES:
+            raise ValueError("invalid launch flags")
+        frozen.append(token)
+    exact = tuple(frozen)
+    if provider == "kimi":
+        if exact:
+            raise ValueError("invalid launch flags")
+        return exact, "kimi-code/k3", "unsupported"
+
+    model = ""
+    effort = ""
+    index = 0
+    while index < len(exact):
+        token = exact[index]
+        if provider == "codex":
+            if token == "--model" and index + 1 < len(exact):
+                value = exact[index + 1]
+                if _MODEL_TOKEN.fullmatch(value) is None:
+                    raise ValueError("invalid launch flags")
+                model = value
+                index += 2
+                continue
+            if token == "-c" and index + 1 < len(exact):
+                matched = re.fullmatch(
+                    r'model_reasoning_effort="?(low|medium|high|xhigh|max)"?',
+                    exact[index + 1],
+                )
+                if matched is None:
+                    raise ValueError("invalid launch flags")
+                effort = matched.group(1)
+                index += 2
+                continue
+            if token == "--sandbox" and index + 1 < len(exact):
+                if exact[index + 1] not in _CODEX_SANDBOXES:
+                    raise ValueError("invalid launch flags")
+                index += 2
+                continue
+            raise ValueError("invalid launch flags")
+
+        if token == "-p":
+            index += 1
+            continue
+        if token == "--model" and index + 1 < len(exact):
+            value = exact[index + 1]
+            if _MODEL_TOKEN.fullmatch(value) is None:
+                raise ValueError("invalid launch flags")
+            model = value
+            index += 2
+            continue
+        if token == "--effort" and index + 1 < len(exact):
+            value = exact[index + 1]
+            if value not in EFFORT_ORDER:
+                raise ValueError("invalid launch flags")
+            effort = value
+            index += 2
+            continue
+        if token in {"--input-format", "--output-format"} and index + 1 < len(exact):
+            if exact[index + 1] not in _CLAUDE_IO_FORMATS:
+                raise ValueError("invalid launch flags")
+            index += 2
+            continue
+        if token == "--permission-mode" and index + 1 < len(exact):
+            if exact[index + 1] not in _CLAUDE_PERMISSION_MODES:
+                raise ValueError("invalid launch flags")
+            index += 2
+            continue
+        if token in {
+            "--tools", "--allowedTools", "--allowed-tools",
+            "--disallowedTools", "--disallowed-tools",
+        } and index + 1 < len(exact):
+            if _CLAUDE_TOOL_LIST.fullmatch(exact[index + 1]) is None:
+                raise ValueError("invalid launch flags")
+            index += 2
+            continue
+        if token == "--setting-sources" and index + 1 < len(exact):
+            if exact[index + 1] != "user":
+                raise ValueError("invalid launch flags")
+            index += 2
+            continue
+        raise ValueError("invalid launch flags")
+    return exact, model, effort
 
 
 def load_lifecycle_owner():
@@ -1445,6 +1562,23 @@ def _validate_event(
     for key in ("artifactIdentity", "externalDispatchId", "externalEvidenceRunId", "effortMappingLoss", "closerRunId"):
         if key in event and (not isinstance(event.get(key), str) or not event[key].strip()):
             fail(errors, f"{run_id}: {key} must be a non-empty string")
+    if "launchFlags" in event:
+        launch_flags = event.get("launchFlags")
+        try:
+            frozen_flags, derived_model, derived_effort = validate_launch_profile(
+                event.get("provider"), launch_flags
+            )
+        except (UnicodeEncodeError, ValueError):
+            fail(errors, f"{run_id}: launchFlags must be one bounded safe argv string array")
+        else:
+            if launch_flags != list(frozen_flags):
+                fail(errors, f"{run_id}: launchFlags must preserve exact token order")
+            if event.get("model") != derived_model or event.get("effort") != derived_effort:
+                fail(errors, f"{run_id}: launchFlags must bind the declared model and effort")
+        if event_kind not in {"launch", "terminal"} or event.get("provider") not in {
+            "codex", "claude", "kimi"
+        }:
+            fail(errors, f"{run_id}: launchFlags require an external launch/terminal event")
     if "targetTuple" in event:
         target_tuple = event.get("targetTuple")
         wanted = {"workItem", "assignedInternalRole", "artifactIdentity"}
@@ -1636,6 +1770,12 @@ def validate_closure(
             fail(errors, f"{rid}: launchRunId {launch_id} references an invalid launch event")
             bump("lifecycle-invalid-launch-ref")
             continue
+        launch_flags = target[1].get("launchFlags")
+        terminal_flags = event.get("launchFlags")
+        if launch_flags is not None or terminal_flags is not None:
+            if launch_flags is None or terminal_flags is None or launch_flags != terminal_flags:
+                fail(errors, f"{rid}: launchFlags must equal the referenced launch binding")
+                bump("lifecycle-launch-flags-mismatch")
         if launch_id in terminals_by_launch:
             fail(errors, f"{rid}: duplicate terminal for launch {launch_id} (first: {terminals_by_launch[launch_id]})")
             bump("lifecycle-duplicate-terminal")

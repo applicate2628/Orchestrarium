@@ -73,6 +73,19 @@ def parse_scratch_evidence_json(value: str, validator: Any) -> dict[str, Any]:
     )
 
 
+def parse_launch_flags_json(value: str, validator: Any) -> list[str]:
+    raw = value.encode("utf-8", errors="strict")
+    if len(raw) > validator.LAUNCH_FLAGS_MAX_TOTAL_BYTES:
+        raise ValueError("--launch-flags-json exceeds byte limit")
+    try:
+        decoded = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise ValueError("--launch-flags-json must be valid JSON") from exc
+    if not isinstance(decoded, list):
+        raise ValueError("--launch-flags-json must be a JSON array")
+    return decoded
+
+
 def ensure_status_sections(item: Path, args: argparse.Namespace, validator: Any) -> list[str]:
     status_path = item / "status.md"
     if status_path.exists():
@@ -144,6 +157,7 @@ def build_event(args: argparse.Namespace, validator: Any | None = None) -> dict[
             getattr(args, "external_dispatch_id", None),
             getattr(args, "external_evidence_run_id", None),
             getattr(args, "effort_mapping_loss", None),
+            getattr(args, "launch_flags_json", None),
             getattr(args, "closer_run_id", None),
             getattr(args, "target_tuple_json", None),
         )
@@ -189,6 +203,10 @@ def build_event(args: argparse.Namespace, validator: Any | None = None) -> dict[
             event[key] = value
     if getattr(args, "authorizing", None) is not None:
         event["authorizing"] = args.authorizing == "true"
+    if getattr(args, "launch_flags_json", None) is not None:
+        event["launchFlags"] = parse_launch_flags_json(
+            args.launch_flags_json, validator
+        )
     if getattr(args, "target_tuple_json", None) is not None:
         event["targetTuple"] = validator.decode_json_object(
             args.target_tuple_json,
@@ -849,6 +867,7 @@ def build_parser() -> argparse.ArgumentParser:
     append.add_argument("--external-dispatch-id", help="Frozen external dispatch identity.")
     append.add_argument("--external-evidence-run-id", help="External evidence run consumed by an internal closer.")
     append.add_argument("--effort-mapping-loss", help="Frozen external provider effort-mapping disposition.")
+    append.add_argument("--launch-flags-json", help="Exact resolved provider argv flags as a JSON array of strings.")
     append.add_argument("--closer-run-id", help="Distinct internal closer run identity.")
     append.add_argument("--target-tuple-json", help="Exact external target tuple as a JSON object.")
     append.set_defaults(func=command_append)

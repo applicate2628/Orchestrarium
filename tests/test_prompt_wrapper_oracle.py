@@ -1503,6 +1503,74 @@ def test_result_text_is_untrusted_json_data_and_parser_is_exact_prefix_single_ob
             owner.parse_provider_result(malformed)
 
 
+def test_v2_result_parser_accepts_legacy_absence_and_rejects_unsafe_launch_flags(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stream = io.StringIO()
+    monkeypatch.setattr(owner.sys, "stdout", stream)
+    owner.emit_provider_result(
+        "codex",
+        "gpt-5.6-sol",
+        "xhigh",
+        "GATE: PASS\n",
+        _outcome(),
+        cancelled=False,
+        timed_out=False,
+    )
+    legacy = owner.parse_provider_result(stream.getvalue())
+    assert "launchFlags" not in legacy
+
+    legacy["launchFlags"] = ["--api-key=secret"]
+    encoded = owner.RESULT_PREFIX + json.dumps(
+        legacy, ensure_ascii=True, separators=(",", ":")
+    ) + "\n"
+    with pytest.raises(ValueError, match="launchFlags mismatch"):
+        owner.parse_provider_result(encoded)
+
+
+@pytest.mark.parametrize(
+    "changes",
+    (
+        {
+            "provider": "codex",
+            "model": "gpt-5.6-sol",
+            "effort": "high",
+            "launchFlags": [
+                "--model", "gpt-5.6-sol", "-c", "model_reasoning_effort=max",
+            ],
+        },
+        {
+            "provider": "kimi",
+            "model": "kimi-code/k3",
+            "effort": "unsupported",
+            "launchFlags": ["--model", "other"],
+        },
+    ),
+)
+def test_v2_result_parser_rejects_launch_flags_profile_drift(
+    changes: dict[str, object], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stream = io.StringIO()
+    monkeypatch.setattr(owner.sys, "stdout", stream)
+    owner.emit_provider_result(
+        "codex",
+        "gpt-5.6-sol",
+        "xhigh",
+        "GATE: PASS\n",
+        _outcome(),
+        cancelled=False,
+        timed_out=False,
+    )
+    payload = owner.parse_provider_result(stream.getvalue())
+    payload.update(changes)
+    encoded = owner.RESULT_PREFIX + json.dumps(
+        payload, ensure_ascii=True, separators=(",", ":")
+    ) + "\n"
+
+    with pytest.raises(ValueError, match="launchFlags mismatch"):
+        owner.parse_provider_result(encoded)
+
+
 def test_envelope_contains_no_prompt_raw_stderr_or_capture_paths(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

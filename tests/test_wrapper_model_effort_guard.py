@@ -422,6 +422,8 @@ def test_full_profile_override_reaches_fake_provider_byte_for_byte(
             "sonnet",
             "--effort",
             "high",
+            "--allowedTools",
+            "Read,Grep",
         ]
     )
     result, capture, _ = _run_transport(tmp_path, provider, ["--", *override])
@@ -495,3 +497,129 @@ def test_launch_and_terminal_ledger_events_record_resolved_profile(
         expected,
         expected,
     ]
+    expected_flags = (
+        override
+        if provider == "codex"
+        else [*override, "--setting-sources", "user"]
+    )
+    assert [event["launchFlags"] for event in selected] == [
+        expected_flags,
+        expected_flags,
+    ]
+    assert provider_prompt.parse_provider_result(result.stdout)["launchFlags"] == expected_flags
+
+
+def test_equal_model_effort_with_different_sandbox_flags_remain_distinguishable(
+    tmp_path: Path,
+) -> None:
+    common = [
+        "--model",
+        "gpt-5.6-sol",
+        "-c",
+        "model_reasoning_effort=max",
+        "--sandbox",
+    ]
+    observed: list[tuple[list[str], list[str]]] = []
+    for label, sandbox in (("readonly", "read-only"), ("workspace", "workspace-write")):
+        case_root = tmp_path / label
+        case_root.mkdir()
+        result, _, item = _run_transport(
+            case_root,
+            "codex",
+            ["--", *common, sandbox],
+            ledger=True,
+        )
+        assert result.returncode == 0, result.stderr
+        assert item is not None
+        payload = provider_prompt.parse_provider_result(result.stdout)
+        terminal = [
+            json.loads(line)
+            for line in (item / "agent-runs.jsonl").read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ][-1]
+        observed.append((payload["launchFlags"], terminal["launchFlags"]))
+
+    readonly = [*common, "read-only"]
+    workspace = [*common, "workspace-write"]
+    assert observed == [(readonly, readonly), (workspace, workspace)]
+    assert observed[0] != observed[1]
+
+
+@pytest.mark.parametrize(
+    "unsafe_flags",
+    (
+        ["--model", "gpt-5.6-sol", "-c", "model_reasoning_effort=max", "--prompt", "secret body"],
+        ["--model", "gpt-5.6-sol", "-c", "model_reasoning_effort=max", "--api-key=secret"],
+        ["--model", "gpt-5.6-sol", "-c", "model_reasoning_effort=max", "-c", "api_key=secret"],
+    ),
+)
+def test_resolved_profile_rejects_prompt_or_secret_bearing_launch_flags(
+    unsafe_flags: list[str],
+) -> None:
+    with pytest.raises(ValueError, match="E_EXTERNAL_LAUNCH_FLAGS_UNSAFE"):
+        provider_prompt.resolved_profile("codex", unsafe_flags)
+
+
+def test_resolved_profile_accepts_documented_nonsecret_claude_io_flags() -> None:
+    flags = [
+        "-p",
+        "--input-format",
+        "stream-json",
+        "--output-format",
+        "stream-json",
+        "--model",
+        "opus",
+        "--effort",
+        "xhigh",
+        "--permission-mode",
+        "bypassPermissions",
+        "--tools",
+        "Read,Grep,Glob",
+        "--allowedTools",
+        "Read,Grep",
+    ]
+
+    resolved, model, effort = provider_prompt.resolved_profile("claude", flags)
+
+    assert resolved == [*flags, "--setting-sources", "user"]
+    assert (model, effort) == ("opus", "xhigh")
+
+
+@pytest.mark.parametrize(
+    ("provider", "flags"),
+    (
+        (
+            "claude",
+            [
+                "-p", "--output-format", "text", "--model", "opus",
+                "--effort", "xhigh", "SECRET PROMPT BODY",
+            ],
+        ),
+        (
+            "codex",
+            [
+                "--model", "gpt-5.6-sol", "-c", "model_reasoning_effort=max",
+                "-c", 'mcp_servers.demo.env={OPENAI_API_KEY="secret"}',
+            ],
+        ),
+        (
+            "codex",
+            [
+                "--model", "gpt-5.6-sol", "-c", "model_reasoning_effort=max",
+                "--add-dir", "C:\\Users\\<you>\\repo",
+            ],
+        ),
+        (
+            "claude",
+            [
+                "-p", "--output-format", "text", "--model", "opus",
+                "--effort", "xhigh", "--mcp-config", '{"TOKEN":"secret"}',
+            ],
+        ),
+    ),
+)
+def test_resolved_profile_rejects_unpersistable_provider_arguments(
+    provider: str, flags: list[str]
+) -> None:
+    with pytest.raises(ValueError, match="E_EXTERNAL_LAUNCH_FLAGS_UNSAFE"):
+        provider_prompt.resolved_profile(provider, flags)

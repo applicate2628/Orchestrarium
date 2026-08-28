@@ -35,6 +35,7 @@ def _execution_provenance() -> object:
         provider="kimi",
         model="kimi-code/k3",
         effort="unsupported",
+        launch_flags=(),
         artifact_identity="sha256:" + "a" * 64,
         external_dispatch_id="dispatch-frozen",
         external_evidence_run_id="evidence-frozen",
@@ -80,7 +81,16 @@ def test_execution_provenance_drift_is_rejected_before_envelope_or_ledger_sink(
     field: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     expected = _execution_provenance()
-    changed = replace(expected, **{field: f"changed-{field}"})
+    changed_value = (
+        ("--model", "changed")
+        if field == "launch_flags"
+        else f"changed-{field}"
+    )
+    if field in {"provider", "model", "effort", "launch_flags"}:
+        with pytest.raises(ValueError, match="E_EXTERNAL_PROVENANCE_INVALID"):
+            replace(expected, **{field: changed_value})
+        return
+    changed = replace(expected, **{field: changed_value})
     output = io.StringIO()
     monkeypatch.setattr(OWNER.sys, "stdout", output)
     ledger_calls: list[list[str]] = []
@@ -172,6 +182,7 @@ def test_execution_provenance_has_identical_envelope_and_ledger_projection(
             "provider": values["--provider"],
             "model": values["--model"],
             "effort": values["--effort"],
+            "launchFlags": json.loads(values["--launch-flags-json"]),
             "artifactIdentity": values["--artifact-identity"],
             "externalDispatchId": values["--external-dispatch-id"],
             "externalEvidenceRunId": values["--external-evidence-run-id"],

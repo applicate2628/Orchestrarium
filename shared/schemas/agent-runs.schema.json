@@ -56,6 +56,12 @@
     "assignedRole": { "type": "string" },
     "provider": { "type": "string" },
     "model": { "type": "string" },
+    "launchFlags": {
+      "type": "array",
+      "maxItems": 64,
+      "$comment": "Exact resolved provider argv flags. Optional for backward-compatible V2 reads; current external wrapper launch and terminal events persist it.",
+      "items": { "type": "string", "maxLength": 2048, "pattern": "^[^\\u0000\\r\\n]*$" }
+    },
     "status": { "enum": ["planned", "running", "completed", "revise", "blocked", "cancelled"] },
     "gate": {
       "oneOf": [

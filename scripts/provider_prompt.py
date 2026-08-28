@@ -163,6 +163,19 @@ KIMI_CHILD_NONZERO_CATEGORIES = frozenset(
 EXTERNAL_ROLE_TAXONOMY_NAME = "external-role-taxonomy.v1.json"
 EXTERNAL_ROLE_TAXONOMY_MAX_BYTES = 64 * 1024
 EXTERNAL_ROLE_TAXONOMY_SHA256 = "51192eca72784dfcbc2d53596e143ea25856db9e7336031a25d89e9e4fdf85ce"
+LAUNCH_FLAGS_MAX_COUNT = 64
+LAUNCH_FLAGS_MAX_TOKEN_BYTES = 2048
+LAUNCH_FLAGS_MAX_TOTAL_BYTES = 16 * 1024
+_MODEL_TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$", re.ASCII)
+_CLAUDE_TOOL_LIST = re.compile(
+    r"^[A-Za-z][A-Za-z0-9_*:-]*(?:,[A-Za-z][A-Za-z0-9_*:-]*)*$",
+    re.ASCII,
+)
+_CODEX_SANDBOXES = frozenset({"read-only", "workspace-write", "danger-full-access"})
+_CLAUDE_IO_FORMATS = frozenset({"text", "json", "stream-json"})
+_CLAUDE_PERMISSION_MODES = frozenset(
+    {"default", "acceptEdits", "plan", "dontAsk", "bypassPermissions"}
+)
 
 
 @dataclass
@@ -201,6 +214,7 @@ class ExecutionProvenance:
     provider: str
     model: str
     effort: str
+    launch_flags: tuple[str, ...]
     artifact_identity: str
     external_dispatch_id: str
     external_evidence_run_id: str
@@ -224,14 +238,27 @@ class ExecutionProvenance:
             )
         ):
             raise ValueError("E_EXTERNAL_PROVENANCE_INVALID")
+        try:
+            frozen, model, effort = normalize_launch_profile(
+                self.provider, self.launch_flags
+            )
+        except ValueError as exc:
+            raise ValueError("E_EXTERNAL_PROVENANCE_INVALID") from exc
+        if (
+            frozen != self.launch_flags
+            or model != self.model
+            or effort != self.effort
+        ):
+            raise ValueError("E_EXTERNAL_PROVENANCE_INVALID")
 
-    def payload(self) -> dict[str, str]:
+    def payload(self) -> dict[str, object]:
         return {
             "workItem": self.work_item,
             "assignedInternalRole": self.assigned_internal_role,
             "provider": self.provider,
             "model": self.model,
             "effort": self.effort,
+            "launchFlags": list(self.launch_flags),
             "artifactIdentity": self.artifact_identity,
             "externalDispatchId": self.external_dispatch_id,
             "externalEvidenceRunId": self.external_evidence_run_id,
@@ -239,7 +266,7 @@ class ExecutionProvenance:
             "actualExecutionPath": self.actual_execution_path,
         }
 
-    def terminal_projection(self) -> dict[str, str]:
+    def terminal_projection(self) -> dict[str, object]:
         """Exact immutable provenance fields persisted by an external terminal."""
 
         return {
@@ -248,6 +275,7 @@ class ExecutionProvenance:
             "provider": self.provider,
             "model": self.model,
             "effort": self.effort,
+            "launchFlags": list(self.launch_flags),
             "artifactIdentity": self.artifact_identity,
             "externalDispatchId": self.external_dispatch_id,
             "externalEvidenceRunId": self.external_evidence_run_id,
@@ -260,7 +288,7 @@ class ExecutionProvenance:
 class PolicyBoundLaunch:
     control: Control
     topic: str
-    flags: list[str]
+    flags: tuple[str, ...]
     model: str
     effort: str
     role_provenance: ExternalRoleProvenance
@@ -449,6 +477,115 @@ def validate_topic(topic: str | None) -> str:
     return topic
 
 
+def _bounded_launch_flag_tokens(flags: object) -> tuple[str, ...]:
+    """Freeze one bounded argv vector before provider grammar validation."""
+
+    if not isinstance(flags, (list, tuple)) or len(flags) > LAUNCH_FLAGS_MAX_COUNT:
+        raise ValueError("E_EXTERNAL_LAUNCH_FLAGS_INVALID")
+    frozen: list[str] = []
+    total = 0
+    for token in flags:
+        if not isinstance(token, str) or "\x00" in token or "\r" in token or "\n" in token:
+            raise ValueError("E_EXTERNAL_LAUNCH_FLAGS_INVALID")
+        encoded = token.encode("utf-8", errors="strict")
+        total += len(encoded)
+        if len(encoded) > LAUNCH_FLAGS_MAX_TOKEN_BYTES or total > LAUNCH_FLAGS_MAX_TOTAL_BYTES:
+            raise ValueError("E_EXTERNAL_LAUNCH_FLAGS_INVALID")
+        frozen.append(token)
+    return tuple(frozen)
+
+
+def normalize_launch_profile(
+    provider: str, flags: object
+) -> tuple[tuple[str, ...], str, str]:
+    """Validate the closed non-sensitive flag grammar and derive its profile."""
+
+    frozen = _bounded_launch_flag_tokens(flags)
+    if provider == "kimi":
+        if frozen:
+            raise ValueError("E_EXTERNAL_LAUNCH_FLAGS_UNSAFE")
+        return frozen, "kimi-code/k3", "unsupported"
+    if provider not in {"codex", "claude"}:
+        raise ValueError("E_EXTERNAL_LAUNCH_FLAGS_INVALID")
+
+    model = ""
+    effort = ""
+    index = 0
+    while index < len(frozen):
+        token = frozen[index]
+        if provider == "codex":
+            if token == "--model" and index + 1 < len(frozen):
+                value = frozen[index + 1]
+                if _MODEL_TOKEN.fullmatch(value) is None:
+                    raise ValueError("E_EXTERNAL_LAUNCH_FLAGS_UNSAFE")
+                model = value
+                index += 2
+                continue
+            if token == "-c" and index + 1 < len(frozen):
+                matched = re.fullmatch(
+                    r'model_reasoning_effort="?(low|medium|high|xhigh|max)"?',
+                    frozen[index + 1],
+                )
+                if matched is None:
+                    raise ValueError("E_EXTERNAL_LAUNCH_FLAGS_UNSAFE")
+                effort = matched.group(1)
+                index += 2
+                continue
+            if token == "--sandbox" and index + 1 < len(frozen):
+                if frozen[index + 1] not in _CODEX_SANDBOXES:
+                    raise ValueError("E_EXTERNAL_LAUNCH_FLAGS_UNSAFE")
+                index += 2
+                continue
+            raise ValueError("E_EXTERNAL_LAUNCH_FLAGS_UNSAFE")
+
+        if token == "-p":
+            index += 1
+            continue
+        if token == "--model" and index + 1 < len(frozen):
+            value = frozen[index + 1]
+            if _MODEL_TOKEN.fullmatch(value) is None:
+                raise ValueError("E_EXTERNAL_LAUNCH_FLAGS_UNSAFE")
+            model = value
+            index += 2
+            continue
+        if token == "--effort" and index + 1 < len(frozen):
+            value = frozen[index + 1]
+            if value not in EFFORTS:
+                raise ValueError("E_EXTERNAL_LAUNCH_FLAGS_UNSAFE")
+            effort = value
+            index += 2
+            continue
+        if token in {"--input-format", "--output-format"} and index + 1 < len(frozen):
+            if frozen[index + 1] not in _CLAUDE_IO_FORMATS:
+                raise ValueError("E_EXTERNAL_LAUNCH_FLAGS_UNSAFE")
+            index += 2
+            continue
+        if token == "--permission-mode" and index + 1 < len(frozen):
+            if frozen[index + 1] not in _CLAUDE_PERMISSION_MODES:
+                raise ValueError("E_EXTERNAL_LAUNCH_FLAGS_UNSAFE")
+            index += 2
+            continue
+        if token in {
+            "--tools", "--allowedTools", "--allowed-tools",
+            "--disallowedTools", "--disallowed-tools",
+        } and index + 1 < len(frozen):
+            if _CLAUDE_TOOL_LIST.fullmatch(frozen[index + 1]) is None:
+                raise ValueError("E_EXTERNAL_LAUNCH_FLAGS_UNSAFE")
+            index += 2
+            continue
+        if token == "--setting-sources" and index + 1 < len(frozen):
+            if frozen[index + 1] != "user":
+                raise ValueError("E_EXTERNAL_LAUNCH_FLAGS_UNSAFE")
+            index += 2
+            continue
+        raise ValueError("E_EXTERNAL_LAUNCH_FLAGS_UNSAFE")
+    return frozen, model, effort
+
+
+def normalize_launch_flags(provider: str, flags: object) -> tuple[str, ...]:
+    return normalize_launch_profile(provider, flags)[0]
+
+
 def resolved_profile(provider: str, flags: list[str]) -> tuple[list[str], str, str]:
     if provider == "kimi":
         if flags:
@@ -479,21 +616,12 @@ def resolved_profile(provider: str, flags: list[str]) -> tuple[list[str], str, s
         raise ValueError(
             "E_EXTERNAL_PROVIDER_SETTINGS_OVERRIDE: automated Claude settings are fixed"
         )
-    model = ""
-    effort = ""
-    for index, token in enumerate(flags):
-        following = flags[index + 1] if index + 1 < len(flags) else ""
-        if token == "--model" and following and not following.startswith("-"):
-            model = following
-        if provider == "codex" and token == "-c":
-            matched = re.fullmatch(
-                r'model_reasoning_effort="?(low|medium|high|xhigh|max)"?',
-                following,
-            )
-            if matched:
-                effort = matched.group(1)
-        elif provider == "claude" and token == "--effort" and following in EFFORTS:
-            effort = following
+    if provider == "claude":
+        flags = [*flags, "--setting-sources", "user"]
+    try:
+        frozen, model, effort = normalize_launch_profile(provider, flags)
+    except ValueError:
+        raise
     if not model or not effort:
         example = (
             "--model gpt-5.6-sol -c model_reasoning_effort=xhigh"
@@ -504,9 +632,7 @@ def resolved_profile(provider: str, flags: list[str]) -> tuple[list[str], str, s
             f"A12 violation - resolved {provider} flags carry no explicit model "
             f"and/or effort. Pass the FULL per-profile flag set, e.g.: {example}"
         )
-    if provider == "claude":
-        flags = [*flags, "--setting-sources", "user"]
-    return flags, model, effort
+    return list(frozen), model, effort
 
 
 def _lexically_within(path: Path, root: Path) -> bool:
@@ -687,6 +813,7 @@ def external_execution_provenance(
     provider: str,
     model: str,
     effort: str,
+    launch_flags: tuple[str, ...],
     role_provenance: ExternalRoleProvenance,
     dispatch_decision: dict[str, object],
 ) -> ExecutionProvenance:
@@ -703,6 +830,7 @@ def external_execution_provenance(
         provider=provider,
         model=model,
         effort=effort,
+        launch_flags=launch_flags,
         artifact_identity=control.ledger_artifact or f"topic:{topic}",
         external_dispatch_id=dispatch_id,
         external_evidence_run_id=evidence_id,
@@ -735,7 +863,7 @@ def _prevalidate_policy_bound_external_launch(
     return PolicyBoundLaunch(
         control,
         topic,
-        flags,
+        tuple(flags),
         model,
         effort,
         role_provenance,
@@ -745,6 +873,7 @@ def _prevalidate_policy_bound_external_launch(
             provider=provider,
             model=model,
             effort=effort,
+            launch_flags=tuple(flags),
             role_provenance=role_provenance,
             dispatch_decision=decision,
         ),
@@ -1918,18 +2047,22 @@ def ledger_common(
     *,
     role_provenance: ExternalRoleProvenance | None = None,
     provenance: ExecutionProvenance | None = None,
+    launch_flags: tuple[str, ...] | list[str] | None = None,
 ) -> list[str]:
     external = provider in EXTERNAL_PROVIDER_NAMES
     frozen_role = role_provenance or (
         external_role_provenance(control, provider) if external else None
     )
     if provenance is not None:
+        if launch_flags is None:
+            launch_flags = provenance.launch_flags
         if (
             provider != provenance.provider
             or model != provenance.model
             or effort != provenance.effort
             or frozen_role is None
             or frozen_role.assigned_role != provenance.assigned_internal_role
+            or normalize_launch_flags(provider, launch_flags) != provenance.launch_flags
         ):
             raise ValueError("E_EXTERNAL_PROVENANCE_MISMATCH")
     execution_role = frozen_role.execution_role if frozen_role is not None else "external-reviewer"
@@ -1953,6 +2086,15 @@ def ledger_common(
         values += ["--artifact", control.ledger_artifact]
     if external:
         values += ["--assigned-role", frozen_role.assigned_role]
+        if launch_flags is not None:
+            values += [
+                "--launch-flags-json",
+                json.dumps(
+                    list(normalize_launch_flags(provider, launch_flags)),
+                    ensure_ascii=True,
+                    separators=(",", ":"),
+                ),
+            ]
     return values
 
 
@@ -2451,12 +2593,22 @@ def emit_provider_result(
     provenance: ExecutionProvenance | None = None,
     expected_provenance: ExecutionProvenance | None = None,
     child_nonzero_category: str | None = None,
+    launch_flags: tuple[str, ...] | list[str] | None = None,
 ) -> None:
     if provenance is not None:
         provenance = require_exact_execution_provenance(
             expected_provenance or provenance, provenance
         )
     frozen_role = role_provenance or ExternalRoleProvenance("none", "none")
+    frozen_launch_flags = (
+        normalize_launch_flags(provider, launch_flags)
+        if launch_flags is not None
+        else provenance.launch_flags
+        if provenance is not None
+        else None
+    )
+    if provenance is not None and frozen_launch_flags != provenance.launch_flags:
+        raise ValueError("E_EXTERNAL_PROVENANCE_MISMATCH")
     payload = {
         "schema": "orchestrarium.provider-result.v2",
         "provider": provider,
@@ -2495,6 +2647,8 @@ def emit_provider_result(
     }
     if provenance is not None:
         payload.update(provenance.payload())
+    elif frozen_launch_flags is not None:
+        payload["launchFlags"] = list(frozen_launch_flags)
     if outcome.cleanup_diagnostic:
         payload["cleanupDiagnostic"] = outcome.cleanup_diagnostic
     if child_nonzero_category is not None:
@@ -2551,6 +2705,19 @@ def parse_provider_result(output: str) -> dict[str, object]:
         or payload.get("actualExecutionPath") != "direct-external-cli"
     ):
         raise ValueError("provider result nonauthorizing tuple mismatch")
+    if "launchFlags" in payload:
+        try:
+            frozen, derived_model, derived_effort = normalize_launch_profile(
+                str(payload.get("provider", "")), payload["launchFlags"]
+            )
+        except ValueError as exc:
+            raise ValueError("provider result launchFlags mismatch") from exc
+        if (
+            payload["launchFlags"] != list(frozen)
+            or payload.get("model") != derived_model
+            or payload.get("effort") != derived_effort
+        ):
+            raise ValueError("provider result launchFlags mismatch")
     child_category = payload.get("childNonzeroCategory")
     primary = payload.get("primaryOutcome")
     if child_category is not None:
@@ -2633,6 +2800,7 @@ def record_terminal(
     provenance: ExecutionProvenance | None = None,
     expected_provenance: ExecutionProvenance | None = None,
     child_nonzero_category: str | None = None,
+    launch_flags: tuple[str, ...] | list[str] | None = None,
 ) -> bool:
     if provenance is not None:
         provenance = require_exact_execution_provenance(
@@ -2693,6 +2861,7 @@ def record_terminal(
             slug,
             role_provenance=role_provenance,
             provenance=provenance,
+            launch_flags=launch_flags,
         ),
     ]
     args += external_terminal_ledger_args(
@@ -2741,6 +2910,7 @@ def finalize_run(
     raw_stderr: bytes | None = None,
     process_result: ProcessResultV1 | None = None,
     runner: ProcessRunnerV1 | None = None,
+    launch_flags: tuple[str, ...] | list[str] | None = None,
 ) -> int:
     if provenance is not None:
         provenance = require_exact_execution_provenance(provenance, provenance)
@@ -2880,6 +3050,7 @@ def finalize_run(
             provenance=provenance,
             expected_provenance=provenance,
             child_nonzero_category=child_nonzero_category,
+            launch_flags=launch_flags,
         )
         result_delivered = True
     except Exception as exc:
@@ -2906,6 +3077,7 @@ def finalize_run(
                 provenance=provenance,
                 expected_provenance=provenance,
                 child_nonzero_category=child_nonzero_category,
+                launch_flags=launch_flags,
             )
         except Exception as exc:
             recorded = False
@@ -2933,6 +3105,7 @@ def settle_initialized_setup_failure(
     runner: ProcessRunnerV1 | None = None,
     role_provenance: ExternalRoleProvenance | None = None,
     provenance: ExecutionProvenance | None = None,
+    launch_flags: tuple[str, ...] | list[str] | None = None,
 ) -> int:
     """Settle an unlaunched run without fabricating a durable ledger relation."""
 
@@ -2950,6 +3123,7 @@ def settle_initialized_setup_failure(
         runner=runner,
         role_provenance=role_provenance,
         provenance=provenance,
+        launch_flags=launch_flags,
     )
 
 
@@ -3045,14 +3219,16 @@ def _launch_with_runner(
         except ValueError as exc:
             return fail(str(exc))
         provenance: ExecutionProvenance | None = None
+        launch_flags = tuple(flags)
     else:
         control = prevalidated.control
         topic = prevalidated.topic
-        flags = prevalidated.flags
+        flags = list(prevalidated.flags)
         model = prevalidated.model
         effort = prevalidated.effort
         role_provenance = prevalidated.role_provenance
         provenance = prevalidated.provenance
+        launch_flags = provenance.launch_flags
 
     try:
         auth_configuration = resolve_provider_auth_configuration(provider)
@@ -3143,6 +3319,7 @@ def _launch_with_runner(
                 control, provider, model, effort, slug, lifecycle,
                 RuntimeError("ledger helper unavailable"), realization, runner=runner,
                 role_provenance=role_provenance, provenance=provenance,
+                launch_flags=launch_flags,
             )
         launch_run_id = (
             provenance.external_dispatch_id
@@ -3177,6 +3354,7 @@ def _launch_with_runner(
                 slug,
                 role_provenance=role_provenance,
                 provenance=provenance,
+                launch_flags=launch_flags,
             ),
         ]
         if not run_ledger(runner, launch_args):
@@ -3184,6 +3362,7 @@ def _launch_with_runner(
                 control, provider, model, effort, slug, lifecycle,
                 RuntimeError("launch ledger append failed"), realization, runner=runner,
                 role_provenance=role_provenance, provenance=provenance,
+                launch_flags=launch_flags,
             )
 
     kimi_agent: Path | None = None
@@ -3195,6 +3374,7 @@ def _launch_with_runner(
             return settle_initialized_setup_failure(
                 control, provider, model, effort, slug, lifecycle, exc, realization, runner=runner,
                 role_provenance=role_provenance, provenance=provenance,
+                launch_flags=launch_flags,
             )
     provider_args = (
         [
@@ -3277,4 +3457,5 @@ def _launch_with_runner(
         raw_stderr=raw_stderr,
         process_result=process_result,
         runner=runner,
+        launch_flags=launch_flags,
     )

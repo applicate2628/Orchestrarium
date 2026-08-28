@@ -1069,6 +1069,80 @@ def test_append_accepts_codex_external_terminal_without_extended_provenance_ids(
     assert validated.returncode == 0, validated.stdout
 
 
+@pytest.mark.parametrize(
+    "encoded",
+    (
+        "{\"not\":\"an-array\"}",
+        "[\"--model\", 7]",
+        "[\"--prompt\", \"secret body\"]",
+        "[\"--api-key=secret\"]",
+    ),
+)
+def test_append_rejects_malformed_or_unsafe_launch_flag_binding(
+    tmp_path: Path, encoded: str
+) -> None:
+    item = prepare_valid_work_item(tmp_path)
+    result = run_ledger(
+        item,
+        "append",
+        "--run-id", "run-launch-flags-invalid-001",
+        "--role", "external-reviewer",
+        "--execution-role", "external-reviewer",
+        "--assigned-role", "qa-engineer",
+        "--provider", "codex",
+        "--model", "gpt-5.6-sol",
+        "--effort", "high",
+        "--status", "running",
+        "--gate", "none",
+        "--scope", "provider evidence",
+        "--event-kind", "launch",
+        "--launch-flags-json", encoded,
+    )
+
+    assert result.returncode != 0
+    ledger = item / "agent-runs.jsonl"
+    assert not ledger.exists() or ledger.read_text(encoding="utf-8") == ""
+
+
+def test_terminal_launch_flags_must_match_the_referenced_launch(tmp_path: Path) -> None:
+    item = prepare_valid_work_item(tmp_path)
+    common = [
+        "--work-item", str(item), "append", "--role", "external-reviewer",
+        "--execution-role", "external-reviewer", "--assigned-role", "qa-engineer",
+        "--provider", "codex", "--model", "gpt-5.6-sol", "--effort", "high",
+        "--scope", "provider evidence", "--artifact", "reviews/qa.md",
+    ]
+    base_flags = [
+        "--model", "gpt-5.6-sol", "-c", "model_reasoning_effort=high", "--sandbox",
+    ]
+    launch = run_ledger(
+        item,
+        *common,
+        "--run-id", "run-flags-launch-001", "--status", "running", "--gate", "none",
+        "--event-kind", "launch", "--launch-flags-json",
+        json.dumps([*base_flags, "read-only"]),
+    )
+    terminal = run_ledger(
+        item,
+        *common,
+        "--run-id", "run-flags-terminal-001", "--status", "completed", "--gate", "PASS",
+        "--event-kind", "terminal", "--launch-run-id", "run-flags-launch-001",
+        "--terminal-class", "external-nonauthorizing", "--authorizing", "false",
+        "--actual-execution-path", "direct-external-cli",
+        "--artifact-identity", "sha256:" + "d" * 64,
+        "--evidence", "artifact:reviews/qa.md", "--launch-flags-json",
+        json.dumps([*base_flags, "workspace-write"]),
+    )
+
+    assert launch.returncode == 0, launch.stderr
+    assert terminal.returncode != 0
+    events = [
+        json.loads(line)
+        for line in (item / "agent-runs.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert [event["runId"] for event in events] == ["run-flags-launch-001"]
+
+
 def test_internal_final_closer_binds_one_external_evidence_tuple(tmp_path: Path):
     """Only a distinct internal final reviewer can discharge the matching gate."""
 
