@@ -49,6 +49,12 @@ MAX_JSON_BYTES = 8 * 1024 * 1024
 MAX_JSON_DEPTH = 64
 MAX_ARCHIVE_CENTRAL_DIRECTORY_BYTES = 8 * 1024 * 1024
 GIT_COMMAND_TIMEOUT_SECONDS = 60
+TRANSFER_REPOSITORY_BOUNDARY_INVALID = "TRANSFER-REPOSITORY-BOUNDARY-INVALID"
+TRANSFER_GIT_BINDING_INVALID = "TRANSFER-GIT-BINDING-INVALID"
+TRANSFER_GIT_ROOT_MISMATCH = "TRANSFER-GIT-ROOT-MISMATCH"
+TRANSFER_GIT_BINDING_DRIFT = "TRANSFER-GIT-BINDING-DRIFT"
+TRANSFER_PATH_ENCODING_INVALID = "TRANSFER-PATH-ENCODING-INVALID"
+TRANSFER_HOSTILE_PATH_EXTERNAL_REQUIRED = "TRANSFER-HOSTILE-PATH-EXTERNAL-REQUIRED"
 
 
 class ContractError(Exception):
@@ -56,22 +62,52 @@ class ContractError(Exception):
 
 
 class BoundRepository:
-    def __init__(self, root: Path, git_executable: Path, git_executable_sha256: str) -> None:
+    def __init__(
+        self,
+        root: Path,
+        git_executable: Path,
+        git_executable_sha256: str,
+        git_executable_identity: tuple[int, ...] | None = None,
+    ) -> None:
         self.root = root
         self.git_executable = git_executable
         self.git_executable_sha256 = git_executable_sha256
+        self.git_executable_identity = git_executable_identity
+
+
+def conditional_utf8(fragment: str) -> bytes:
+    encoded = bytearray()
+    ordinary: list[str] = []
+    for character in fragment:
+        codepoint = ord(character)
+        if 0xDC80 <= codepoint <= 0xDCFF:
+            if ordinary:
+                encoded.extend("".join(ordinary).encode("utf-8"))
+                ordinary.clear()
+            encoded.extend(f"\\u{codepoint:04x}".encode("ascii"))
+        elif 0xD800 <= codepoint <= 0xDFFF:
+            raise ContractError(TRANSFER_PATH_ENCODING_INVALID)
+        else:
+            ordinary.append(character)
+    if ordinary:
+        encoded.extend("".join(ordinary).encode("utf-8"))
+    return bytes(encoded)
+
+
+def canonical_json_chunks(value: Any) -> Iterable[bytes]:
+    encoder = json.JSONEncoder(sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
+    for fragment in encoder.iterencode(value):
+        yield conditional_utf8(fragment)
 
 
 def canonical_json(value: Any) -> bytes:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode("utf-8")
+    return b"".join(canonical_json_chunks(value))
 
 
 def capped_canonical_json(value: Any, error_message: str, *, final_newline: bool = False) -> bytes:
     suffix = b"\n" if final_newline else b""
     encoded = bytearray()
-    encoder = json.JSONEncoder(sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
-    for fragment in encoder.iterencode(value):
-        chunk = fragment.encode("utf-8")
+    for chunk in canonical_json_chunks(value):
         if len(encoded) + len(chunk) + len(suffix) > MAX_JSON_BYTES:
             raise ContractError(error_message)
         encoded.extend(chunk)
@@ -181,9 +217,9 @@ def run_bounded_process(command: list[str], repository: Path | None, environment
     return subprocess.CompletedProcess(command, return_code, stdout, stderr)
 
 
-def local_filter_drivers(repository: Path, git_executable: Path) -> list[str]:
+def local_filter_drivers(repository: BoundRepository) -> list[str]:
     command = [
-        str(git_executable),
+        str(repository.git_executable),
         *base_git_configuration(),
         "config",
         "--includes",
@@ -191,7 +227,7 @@ def local_filter_drivers(repository: Path, git_executable: Path) -> list[str]:
         "--get-regexp",
         "^filter\\.",
     ]
-    result = run_bounded_process(command, repository, sanitized_git_environment())
+    result = run_bound_git_process(repository, command)
     if result.returncode not in {0, 1}:
         raise ContractError(result.stderr.decode("utf-8", "replace").strip() or "not a git repository")
     drivers: set[str] = set()
@@ -202,56 +238,148 @@ def local_filter_drivers(repository: Path, git_executable: Path) -> list[str]:
     return sorted(drivers)
 
 
-def run_git(repository: Path, git_executable: Path, *arguments: str, check: bool = True) -> subprocess.CompletedProcess[bytes]:
+def run_git(repository: BoundRepository, *arguments: str, check: bool = True) -> subprocess.CompletedProcess[bytes]:
     filter_configuration: list[str] = []
-    for driver in local_filter_drivers(repository, git_executable):
+    for driver in local_filter_drivers(repository):
         for setting, value in (("clean", ""), ("smudge", ""), ("process", ""), ("required", "false")):
             filter_configuration.extend(["-c", f"filter.{driver}.{setting}={value}"])
-    command = [str(git_executable), *base_git_configuration(), *filter_configuration, *arguments]
-    result = run_bounded_process(command, repository, sanitized_git_environment())
+    command = [str(repository.git_executable), *base_git_configuration(), *filter_configuration, *arguments]
+    result = run_bound_git_process(repository, command)
     if check and result.returncode:
         message = result.stderr.decode("utf-8", "replace").strip() or "not a git repository"
         raise ContractError(message)
     return result
 
 
-def ordinary_absolute_file(path: Path, label: str) -> Path:
-    if not path.is_absolute():
-        raise ContractError(f"{label} must be an absolute path")
-    absolute = Path(os.path.abspath(path))
-    if not absolute.is_file():
-        raise ContractError(f"{label} must be an ordinary file")
-    if is_reparse_point(absolute):
-        raise ContractError(f"{label} must not be a reparse point")
-    return absolute
+def path_key(path: Path) -> str:
+    return os.path.normcase(os.path.normpath(str(path)))
 
 
-def require_git_executable(git_executable: Path, untrusted_root: Path) -> Path:
-    executable = ordinary_absolute_file(git_executable, "git executable")
-    root = Path(os.path.abspath(untrusted_root))
+def path_is_within(path: Path, root: Path) -> bool:
     try:
-        executable.relative_to(root)
+        return os.path.commonpath((path_key(path), path_key(root))) == path_key(root)
     except ValueError:
-        return executable
-    raise ContractError("git executable must be outside the repository")
+        return False
+
+
+def valid_git_marker(root: Path) -> bool:
+    marker = root / ".git"
+    if not os.path.lexists(marker) or is_reparse_point(marker):
+        return False
+    try:
+        metadata = marker.lstat()
+        if stat.S_ISDIR(metadata.st_mode):
+            return True
+        if not stat.S_ISREG(metadata.st_mode):
+            return False
+        data = marker.read_bytes()
+        match = re.fullmatch(rb"gitdir: ([^\x00\r\n]+)\r?\n?", data)
+        if match is None:
+            return False
+        git_directory = Path(os.fsdecode(match.group(1)))
+        if not git_directory.is_absolute():
+            git_directory = root / git_directory
+        physical = Path(os.path.realpath(git_directory))
+        return physical.is_dir() and not is_reparse_point(physical)
+    except (OSError, ValueError):
+        return False
+
+
+def physical_repository_root(repository: Path) -> Path:
+    try:
+        start = Path(os.path.realpath(Path(os.path.abspath(repository))))
+        if not start.is_dir():
+            raise ContractError(TRANSFER_REPOSITORY_BOUNDARY_INVALID)
+        current = start
+        while True:
+            marker = current / ".git"
+            if os.path.lexists(marker):
+                if not valid_git_marker(current):
+                    raise ContractError(TRANSFER_REPOSITORY_BOUNDARY_INVALID)
+                return current
+            if current.parent == current:
+                raise ContractError(TRANSFER_REPOSITORY_BOUNDARY_INVALID)
+            current = current.parent
+    except ContractError:
+        raise
+    except (OSError, ValueError) as error:
+        raise ContractError(TRANSFER_REPOSITORY_BOUNDARY_INVALID) from error
+
+
+def git_file_identity(path: Path) -> tuple[int, ...]:
+    metadata = path.stat()
+    return (
+        metadata.st_dev,
+        metadata.st_ino,
+        metadata.st_size,
+        metadata.st_mtime_ns,
+        metadata.st_ctime_ns,
+        getattr(metadata, "st_file_attributes", 0),
+    )
+
+
+def bind_git_executable(git_executable: Path, root: Path) -> tuple[Path, tuple[int, ...], str]:
+    try:
+        if not git_executable.is_absolute():
+            raise ContractError(TRANSFER_GIT_BINDING_INVALID)
+        absolute = Path(os.path.abspath(git_executable))
+        physical = Path(os.path.realpath(absolute))
+        if path_key(absolute) != path_key(physical) or is_reparse_point(absolute):
+            raise ContractError(TRANSFER_GIT_BINDING_INVALID)
+        metadata = physical.lstat()
+        if not stat.S_ISREG(metadata.st_mode) or path_is_within(physical, root):
+            raise ContractError(TRANSFER_GIT_BINDING_INVALID)
+        identity = git_file_identity(physical)
+        digest = sha256_file(physical)
+        if git_file_identity(physical) != identity:
+            raise ContractError(TRANSFER_GIT_BINDING_INVALID)
+        return physical, identity, digest
+    except ContractError:
+        raise
+    except (OSError, ValueError) as error:
+        raise ContractError(TRANSFER_GIT_BINDING_INVALID) from error
+
+
+def require_current_git_binding(repository: BoundRepository) -> None:
+    try:
+        executable, identity, digest = bind_git_executable(repository.git_executable, repository.root)
+        if (
+            executable != repository.git_executable
+            or repository.git_executable_identity is None
+            or identity != repository.git_executable_identity
+            or digest != repository.git_executable_sha256
+        ):
+            raise ContractError(TRANSFER_GIT_BINDING_DRIFT)
+    except ContractError as error:
+        if str(error) == TRANSFER_GIT_BINDING_DRIFT:
+            raise
+        raise ContractError(TRANSFER_GIT_BINDING_DRIFT) from error
+
+
+def run_bound_git_process(repository: BoundRepository, command: list[str]) -> subprocess.CompletedProcess[bytes]:
+    require_current_git_binding(repository)
+    result = run_bounded_process(command, repository.root, sanitized_git_environment())
+    require_current_git_binding(repository)
+    return result
 
 
 def bind_repository(repository: Path, git_executable: Path) -> BoundRepository:
-    untrusted_root = Path(os.path.abspath(repository))
-    executable = require_git_executable(git_executable, untrusted_root)
+    root = physical_repository_root(repository)
+    executable, identity, digest = bind_git_executable(git_executable, root)
+    bound = BoundRepository(root, executable, digest, identity)
+    result = run_bound_git_process(
+        bound,
+        [str(executable), *base_git_configuration(), "rev-parse", "--show-toplevel"],
+    )
+    if result.returncode:
+        raise ContractError(TRANSFER_REPOSITORY_BOUNDARY_INVALID)
     try:
-        result = run_bounded_process(
-            [str(executable), *base_git_configuration(), "rev-parse", "--show-toplevel"],
-            untrusted_root,
-            sanitized_git_environment(),
-        )
-        if result.returncode:
-            raise ContractError(result.stderr.decode("utf-8", "replace").strip() or "not a git repository")
-        root = Path(result.stdout.decode("utf-8").strip()).resolve()
-        require_git_executable(executable, root)
-        return BoundRepository(root, executable, sha256_file(executable))
+        reported_root = Path(os.path.realpath(Path(result.stdout.decode("utf-8", "surrogateescape").strip())))
     except (OSError, ValueError, UnicodeError) as error:
-        raise ContractError("not a git repository") from error
+        raise ContractError(TRANSFER_GIT_ROOT_MISMATCH) from error
+    if path_key(reported_root) != path_key(root):
+        raise ContractError(TRANSFER_GIT_ROOT_MISMATCH)
+    return bound
 
 
 def require_outside_repository(path: Path, root: Path, label: str) -> Path:
@@ -289,6 +417,8 @@ def link_metadata(path: Path) -> tuple[str, str]:
 
 
 def portable_path_issue(path: str) -> str | None:
+    if path_has_surrogateescape(path):
+        return "non-UTF-8 path encoding"
     portable = PurePosixPath(path)
     if not path or portable.is_absolute():
         return "path traversal"
@@ -306,6 +436,17 @@ def portable_path_issue(path: str) -> str | None:
         if any(ord(character) < 32 or character in '<>:"|?*' for character in segment):
             return "portable hostile segment"
     return None
+
+
+def path_has_surrogateescape(path: str) -> bool:
+    found = False
+    for character in path:
+        codepoint = ord(character)
+        if 0xDC80 <= codepoint <= 0xDCFF:
+            found = True
+        elif 0xD800 <= codepoint <= 0xDFFF:
+            raise ContractError(TRANSFER_PATH_ENCODING_INVALID)
+    return found
 
 
 def portable_path_key(path: str) -> str:
@@ -372,18 +513,18 @@ def nul_delimited_paths(result: subprocess.CompletedProcess[bytes]) -> set[str]:
     return {item.decode("utf-8", "surrogateescape") for item in result.stdout.split(b"\0") if item}
 
 
-def repository_history(root: Path, git_executable: Path) -> tuple[str, str | None]:
-    resolved = run_git(root, git_executable, "rev-parse", "--verify", "--quiet", "HEAD", check=False)
+def repository_history(repository: BoundRepository) -> tuple[str, str | None]:
+    resolved = run_git(repository, "rev-parse", "--verify", "--quiet", "HEAD", check=False)
     if resolved.returncode == 0:
         head = resolved.stdout.decode("utf-8").strip()
         if not head:
             raise ContractError("invalid HEAD state")
         return "committed", head
-    symbolic = run_git(root, git_executable, "symbolic-ref", "--quiet", "HEAD", check=False)
+    symbolic = run_git(repository, "symbolic-ref", "--quiet", "HEAD", check=False)
     if symbolic.returncode != 0 or not symbolic.stdout.strip():
         raise ContractError("invalid HEAD state")
     current_ref = symbolic.stdout.decode("utf-8").strip()
-    existing_ref = run_git(root, git_executable, "show-ref", "--verify", "--quiet", current_ref, check=False)
+    existing_ref = run_git(repository, "show-ref", "--verify", "--quiet", current_ref, check=False)
     if existing_ref.returncode == 1:
         return "unborn", None
     raise ContractError("invalid HEAD state")
@@ -403,16 +544,16 @@ def document_history_state(repository: Any) -> str:
     raise ContractError("invalid repository history state")
 
 
-def remote_evidence(root: Path, git_executable: Path, head: str | None) -> tuple[list[dict[str, str]], dict[str, dict[str, Any]]]:
+def remote_evidence(repository: BoundRepository, head: str | None) -> tuple[list[dict[str, str]], dict[str, dict[str, Any]]]:
     remotes: list[dict[str, str]] = []
     evidence: dict[str, dict[str, Any]] = {}
-    for name in run_git(root, git_executable, "remote").stdout.decode("utf-8").splitlines():
-        raw_url = run_git(root, git_executable, "remote", "get-url", name, check=False).stdout.decode("utf-8", "replace").strip()
+    for name in run_git(repository, "remote").stdout.decode("utf-8").splitlines():
+        raw_url = run_git(repository, "remote", "get-url", name, check=False).stdout.decode("utf-8", "replace").strip()
         reachable = False
-        references = run_git(root, git_executable, "for-each-ref", "--format=%(refname)", f"refs/remotes/{name}/").stdout.decode("utf-8").splitlines()
+        references = run_git(repository, "for-each-ref", "--format=%(refname)", f"refs/remotes/{name}/").stdout.decode("utf-8").splitlines()
         if head is not None:
             for reference in references:
-                if run_git(root, git_executable, "merge-base", "--is-ancestor", head, reference, check=False).returncode == 0:
+                if run_git(repository, "merge-base", "--is-ancestor", head, reference, check=False).returncode == 0:
                     reachable = True
                     break
         remotes.append({"name": name, "url": safe_remote_url(raw_url)})
@@ -424,14 +565,14 @@ def literal_pathspecs(paths: list[str]) -> list[str]:
     return [f":(literal){path}" for path in paths]
 
 
-def git_metadata(root: Path, git_executable: Path, paths: list[str] | None = None) -> dict[str, bytes]:
+def git_metadata(repository: BoundRepository, paths: list[str] | None = None) -> dict[str, bytes]:
     if paths == []:
         return {name: b"" for name in METADATA_NAMES}
     suffix = [] if paths is None else ["--", *literal_pathspecs(paths)]
     return {
-        METADATA_NAMES[0]: run_git(root, git_executable, "status", "--no-renames", "--porcelain=v1", "-z", "--untracked-files=all", *suffix).stdout,
-        METADATA_NAMES[1]: run_git(root, git_executable, "diff", "--no-renames", "--cached", "--binary", "--no-ext-diff", "--no-textconv", *suffix).stdout,
-        METADATA_NAMES[2]: run_git(root, git_executable, "diff", "--no-renames", "--binary", "--no-ext-diff", "--no-textconv", *suffix).stdout,
+        METADATA_NAMES[0]: run_git(repository, "status", "--no-renames", "--porcelain=v1", "-z", "--untracked-files=all", *suffix).stdout,
+        METADATA_NAMES[1]: run_git(repository, "diff", "--no-renames", "--cached", "--binary", "--no-ext-diff", "--no-textconv", *suffix).stdout,
+        METADATA_NAMES[2]: run_git(repository, "diff", "--no-renames", "--binary", "--no-ext-diff", "--no-textconv", *suffix).stdout,
     }
 
 
@@ -476,22 +617,21 @@ def walk_repository(root: Path) -> Iterable[tuple[str, Path, str]]:
 
 def build_inventory(repository: BoundRepository) -> dict[str, Any]:
     root = repository.root
-    git_executable = repository.git_executable
-    history_state, head = repository_history(root, git_executable)
-    index_tracked = nul_delimited_paths(run_git(root, git_executable, "ls-files", "-z"))
-    head_tracked = set() if head is None else nul_delimited_paths(run_git(root, git_executable, "ls-tree", "-r", "-z", "--name-only", head))
+    history_state, head = repository_history(repository)
+    index_tracked = nul_delimited_paths(run_git(repository, "ls-files", "-z"))
+    head_tracked = set() if head is None else nul_delimited_paths(run_git(repository, "ls-tree", "-r", "-z", "--name-only", head))
     tracked = index_tracked | head_tracked
-    ignored = nul_delimited_paths(run_git(root, git_executable, "ls-files", "--others", "--ignored", "--exclude-standard", "-z"))
-    dirty = nul_delimited_paths(run_git(root, git_executable, "diff", "--no-renames", "--cached", "--name-only", "-z"))
-    dirty |= nul_delimited_paths(run_git(root, git_executable, "diff", "--no-renames", "--name-only", "-z"))
+    ignored = nul_delimited_paths(run_git(repository, "ls-files", "--others", "--ignored", "--exclude-standard", "-z"))
+    dirty = nul_delimited_paths(run_git(repository, "diff", "--no-renames", "--cached", "--name-only", "-z"))
+    dirty |= nul_delimited_paths(run_git(repository, "diff", "--no-renames", "--name-only", "-z"))
     flagged_tracked = {
         item[2:].decode("utf-8", "surrogateescape")
-        for item in run_git(root, git_executable, "ls-files", "-v", "-z").stdout.split(b"\0")
+        for item in run_git(repository, "ls-files", "-v", "-z").stdout.split(b"\0")
         if len(item) > 2 and item[1:2] == b" " and (item[:1].islower() or item[:1].upper() == b"S")
     }
     dirty |= flagged_tracked
-    remotes, evidence = remote_evidence(root, git_executable, head)
-    metadata_hashes = {name: sha256_bytes(data) for name, data in git_metadata(root, git_executable).items()}
+    remotes, evidence = remote_evidence(repository, head)
+    metadata_hashes = {name: sha256_bytes(data) for name, data in git_metadata(repository).items()}
     entries: list[dict[str, Any]] = []
     for relative, path, entry_type in walk_repository(root):
         git_class = "tracked" if relative in tracked else "ignored" if relative in ignored else "untracked"
@@ -515,7 +655,7 @@ def build_inventory(repository: BoundRepository) -> dict[str, Any]:
         if entry["path"] in colliding_paths:
             entry.update(metadataOnly=True, hostile=True)
     entries.sort(key=lambda entry: entry["path"])
-    repository_data = {"historyState": history_state, "head": head, "remotes": remotes, "remoteEvidence": evidence, "gitExecutable": {"path": str(git_executable), "sha256": repository.git_executable_sha256}, "gitMetadataHashes": metadata_hashes}
+    repository_data = {"historyState": history_state, "head": head, "remotes": remotes, "remoteEvidence": evidence, "gitExecutable": {"path": str(repository.git_executable), "sha256": repository.git_executable_sha256}, "gitMetadataHashes": metadata_hashes}
     snapshot = {"entries": entries, "repository": repository_data}
     return {"schemaVersion": SCHEMA_VERSION, "repository": repository_data, "entries": entries, "snapshot": {"digest": sha256_bytes(canonical_json(snapshot))}}
 
@@ -606,6 +746,10 @@ def validate_inventory(inventory: dict[str, Any]) -> None:
     for entry in entries:
         if not isinstance(entry, dict) or not isinstance(entry.get("path"), str) or not isinstance(entry.get("dirtyTracked"), bool):
             raise ContractError("invalid inventory snapshot")
+        if path_has_surrogateescape(entry["path"]) and (
+            entry.get("hostile") is not True or entry.get("metadataOnly") is not True
+        ):
+            raise ContractError("invalid inventory snapshot")
         if entry.get("entryType") not in {"file", "reparse", "deleted"} or entry.get("gitClass") not in {"tracked", "untracked", "ignored"}:
             raise ContractError("invalid inventory snapshot")
         if entry["entryType"] == "file" and (not isinstance(entry.get("size"), int) or entry["size"] < 0 or not is_sha256(entry.get("sha256"))):
@@ -615,6 +759,7 @@ def validate_inventory(inventory: dict[str, Any]) -> None:
 def selection_path(root: Path, value: Any) -> str:
     if not isinstance(value, str) or not value:
         raise ContractError("selection path is invalid")
+    path_has_surrogateescape(value)
     portable = PurePosixPath(value)
     segments = value.split("/")
     if (
@@ -673,6 +818,13 @@ def validate_selection(root: Path, inventory: dict[str, Any], selection: dict[st
         entries = [entry for entry in inventory["entries"] if covers(path, entry["path"])]
         if not entries:
             raise ContractError(f"selection path is absent from inventory: {path}")
+        surrogate_entries = [entry for entry in entries if path_has_surrogateescape(entry["path"])]
+        if surrogate_entries and (
+            disposition != "external"
+            or len(entries) != 1
+            or entries[0]["path"] != path
+        ):
+            raise ContractError(TRANSFER_HOSTILE_PATH_EXTERNAL_REQUIRED)
         if portable_path_issue(path) is not None and (
             disposition != "external" or len(entries) != 1 or entries[0]["path"] != path
         ):
@@ -707,6 +859,8 @@ def validate_selection(root: Path, inventory: dict[str, Any], selection: dict[st
         covered_rows = [row for row in normalized if covers(row["path"], entry["path"])]
         if entry.get("metadataOnly") or entry.get("hostile"):
             if len(covered_rows) != 1 or covered_rows[0]["disposition"] != "external":
+                if path_has_surrogateescape(entry["path"]):
+                    raise ContractError(TRANSFER_HOSTILE_PATH_EXTERNAL_REQUIRED)
                 raise ContractError("reparse entries require external disposition; reparse or hostile entries require external disposition")
     return normalized
 
@@ -720,11 +874,14 @@ def included_entries(inventory: dict[str, Any], rows: list[dict[str, Any]]) -> l
     return [entry for entry in inventory["entries"] if any(row["disposition"] == "include" and covers(row["path"], entry["path"]) for row in rows)]
 
 
-def expected_material(root: Path, git_executable: Path, inventory: dict[str, Any], rows: list[dict[str, Any]]) -> tuple[dict[str, dict[str, Any]], dict[str, bytes]]:
+def expected_material(repository: BoundRepository, inventory: dict[str, Any], rows: list[dict[str, Any]]) -> tuple[dict[str, dict[str, Any]], dict[str, bytes]]:
+    root = repository.root
     payload: dict[str, dict[str, Any]] = {}
     metadata_paths: list[str] = []
     for entry in included_entries(inventory, rows):
         if entry.get("metadataOnly") or entry.get("hostile"):
+            if path_has_surrogateescape(entry["path"]):
+                raise ContractError(TRANSFER_HOSTILE_PATH_EXTERNAL_REQUIRED)
             raise ContractError("reparse entries require external disposition")
         metadata_paths.append(entry["path"])
         if entry["entryType"] == "deleted":
@@ -735,7 +892,7 @@ def expected_material(root: Path, git_executable: Path, inventory: dict[str, Any
         if source.stat().st_size != entry["size"] or sha256_file(source) != entry["sha256"]:
             raise ContractError("inventory drift")
         payload[entry["path"]] = entry
-    return payload, git_metadata(root, git_executable, sorted(metadata_paths))
+    return payload, git_metadata(repository, sorted(metadata_paths))
 
 
 def expected_deletions(inventory: dict[str, Any], rows: list[dict[str, Any]]) -> list[dict[str, str]]:
@@ -792,7 +949,7 @@ def bundle(repository: BoundRepository, inventory_path: Path, selection_path: Pa
     validate_inventory(inventory)
     rows = validate_selection(root, inventory, selection)
     require_current_inventory(repository, inventory)
-    payload, metadata = expected_material(root, repository.git_executable, inventory, rows)
+    payload, metadata = expected_material(repository, inventory, rows)
     manifest = {"schemaVersion": SCHEMA_VERSION, "inventoryDigest": inventory["snapshot"]["digest"], "selectionDigest": sha256_bytes(canonical_json(selection)), "repository": {"historyState": document_history_state(inventory["repository"]), "head": inventory["repository"]["head"], "gitExecutable": inventory["repository"]["gitExecutable"]}, "payload": [{"path": name, "size": entry["size"], "sha256": entry["sha256"]} for name, entry in sorted(payload.items())], "metadata": [{"path": name, "size": len(data), "sha256": sha256_bytes(data)} for name, data in sorted(metadata.items())], "deletions": expected_deletions(inventory, rows)}
     manifest_bytes = capped_canonical_json(manifest, "archive resource limit")
     declared_sizes = [entry["size"] for entry in payload.values()] + [len(data) for data in metadata.values()] + [len(manifest_bytes)]
@@ -817,6 +974,8 @@ def bundle(repository: BoundRepository, inventory_path: Path, selection_path: Pa
 
 
 def validate_archive_name(name: str) -> str:
+    if path_has_surrogateescape(name):
+        raise ContractError(TRANSFER_HOSTILE_PATH_EXTERNAL_REQUIRED)
     portable = PurePosixPath(name)
     if name in {"", "."} or name.endswith("/") or name != portable.as_posix() or portable_path_issue(name):
         raise ContractError("unsafe archive entry")
@@ -1031,7 +1190,7 @@ def require_current_delete_entries(repository: BoundRepository, inventory: dict[
 
 
 def verify_trusted_material(archive: zipfile.ZipFile, manifest: dict[str, Any], archive_payload: set[str], archive_metadata: set[str], repository: BoundRepository, inventory: dict[str, Any], selection: dict[str, Any], rows: list[dict[str, Any]]) -> None:
-    payload, metadata = expected_material(repository.root, repository.git_executable, inventory, rows)
+    payload, metadata = expected_material(repository, inventory, rows)
     if (
         manifest.get("inventoryDigest") != inventory["snapshot"]["digest"]
         or manifest.get("selectionDigest") != sha256_bytes(canonical_json(selection))

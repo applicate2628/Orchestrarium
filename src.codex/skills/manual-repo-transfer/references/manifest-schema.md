@@ -47,6 +47,10 @@ HTTP, HTTPS, SSH, and SCP-style remote credentials are removed from generated in
 
 `gitExecutable` records the caller-selected absolute ordinary Git executable and its SHA-256 digest. The helper rejects relative, missing, reparse, and repository-contained executable paths; it never resolves Git through PATH or an environment override.
 
+Before any child process, an alias or subdirectory resolves to the nearest physical root with a strict ordinary `.git` directory or gitfile marker. Git must be physically canonical, reparse-free, and outside that root; its identity and SHA-256 are checked around launches, and its reported top-level must match. Stable failures are `TRANSFER-REPOSITORY-BOUNDARY-INVALID`, `TRANSFER-GIT-BINDING-INVALID`, `TRANSFER-GIT-ROOT-MISMATCH`, and `TRANSFER-GIT-BINDING-DRIFT`. A same-user replacement after the final pre-open check remains outside the contract.
+
+UTF-8 `surrogateescape` path bytes use JSON escapes only for `U+DC80..U+DCFF`; ordinary Unicode retains Version 1 canonical bytes and digests, while other lone surrogates fail as `TRANSFER-PATH-ENCODING-INVALID`. These paths are always hostile and metadata-only, require one exact `external` receipt, and cannot be included, deleted, covered by an included ancestor, or emitted to ZIP; violations fail as `TRANSFER-HOSTILE-PATH-EXTERNAL-REQUIRED`.
+
 ## Selection
 
 Paths are repository-relative POSIX paths. Absolute paths, backslashes, `.git`, `..`, missing paths, duplicates, and any ancestor/descendant overlap are invalid. A hostile inventory name may be referenced only as its exact `external` identity; it may not be selected for `include` or `delete`. One Unicode NFKC-normalized, case-folded path tree governs inventory, selection, ZIP payload, and declared deletions; it rejects portable-equal and file/descendant conflicts across and within those categories. Mixed-case or canonically equivalent forms of `.git` are rejected. The helper's `_repo-transfer` archive namespace is reserved under the same identity and must use `external`.

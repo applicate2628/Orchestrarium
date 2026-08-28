@@ -68,6 +68,21 @@ def path_covers(parent: str, child: str) -> bool:
     return child == parent or child.startswith(parent + "/")
 
 
+def directory_alias(alias: Path, target: Path) -> None:
+    if os.name == "nt":
+        created = subprocess.run(
+            ["cmd.exe", "/d", "/c", "mklink", "/J", str(alias), str(target)],
+            text=True,
+            capture_output=True,
+        )
+        if created.returncode:
+            raise unittest.SkipTest(
+                f"Windows junction unavailable: {created.stderr or created.stdout}"
+            )
+        return
+    alias.symlink_to(target, target_is_directory=True)
+
+
 class IoBoundaryTests(unittest.TestCase):
     def test_special_entry_modes_fail_before_hashing(self) -> None:
         module = load_transfer_module()
@@ -452,6 +467,193 @@ class SecurityContractTests(unittest.TestCase):
             self.bundle_path,
         )
 
+    def test_alias_cannot_hide_repository_contained_git(self) -> None:
+        module = load_transfer_module()
+        alias = self.root / "repo-alias"
+        directory_alias(alias, self.repo)
+        contained_git = self.repo / "contained-git"
+        contained_git.write_bytes(b"not an external Git executable")
+        contained_git.chmod(0o755)
+        launched = mock.Mock(
+            return_value=subprocess.CompletedProcess(
+                [], 0, stdout=os.fsencode(self.repo) + b"\n", stderr=b""
+            )
+        )
+
+        with mock.patch.object(module, "run_bounded_process", launched):
+            with self.assertRaisesRegex(
+                module.ContractError, r"^TRANSFER-GIT-BINDING-INVALID$"
+            ):
+                module.bind_repository(alias / ".scratch", contained_git)
+        launched.assert_not_called()
+
+    def test_alias_and_subdirectory_bind_same_physical_root(self) -> None:
+        module = load_transfer_module()
+        alias = self.root / "repo-alias"
+        directory_alias(alias, self.repo)
+        subdirectory = alias / ".scratch"
+        launched = mock.Mock(
+            return_value=subprocess.CompletedProcess(
+                [], 0, stdout=os.fsencode(self.repo) + b"\n", stderr=b""
+            )
+        )
+
+        with mock.patch.object(module, "run_bounded_process", launched):
+            repository = module.bind_repository(subdirectory, GIT_EXECUTABLE)
+
+        self.assertEqual(self.repo.resolve(), repository.root)
+        self.assertEqual(self.repo.resolve(), launched.call_args.args[1])
+
+    def test_git_root_mismatch_fails(self) -> None:
+        module = load_transfer_module()
+        different_root = self.root / "different-repository"
+        different_root.mkdir()
+        launched = mock.Mock(
+            return_value=subprocess.CompletedProcess(
+                [], 0, stdout=os.fsencode(different_root) + b"\n", stderr=b""
+            )
+        )
+
+        with mock.patch.object(module, "run_bounded_process", launched):
+            with self.assertRaisesRegex(
+                module.ContractError, r"^TRANSFER-GIT-ROOT-MISMATCH$"
+            ):
+                module.bind_repository(self.repo, GIT_EXECUTABLE)
+
+    def test_bound_git_drift_fails_before_next_launch(self) -> None:
+        module = load_transfer_module()
+        fake_git = self.root / "bound-git"
+        fake_git.write_bytes(b"git-binding-v1")
+        fake_git.chmod(0o755)
+        launched = mock.Mock(
+            return_value=subprocess.CompletedProcess(
+                [], 0, stdout=os.fsencode(self.repo) + b"\n", stderr=b""
+            )
+        )
+
+        with mock.patch.object(module, "run_bounded_process", launched):
+            repository = module.bind_repository(self.repo, fake_git)
+            fake_git.write_bytes(b"git-binding-v2")
+            with self.assertRaisesRegex(
+                module.ContractError, r"^TRANSFER-GIT-BINDING-DRIFT$"
+            ):
+                module.run_git(repository, "status", "--short")
+        self.assertEqual(1, launched.call_count)
+
+    @unittest.skipIf(os.name == "nt", "POSIX raw byte filename contract")
+    def test_non_utf8_inventory_path_roundtrips(self) -> None:
+        raw_relative = b"bad-\xff.txt"
+        raw_path = os.fsencode(self.repo) + b"/" + raw_relative
+        descriptor = os.open(raw_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        try:
+            os.write(descriptor, b"non-UTF-8 filename bytes\n")
+        finally:
+            os.close(descriptor)
+
+        inventory = self.inventory()
+        decoded_relative = os.fsdecode(raw_relative)
+        entry = next(item for item in inventory["entries"] if item["path"] == decoded_relative)
+        self.assertTrue(entry["hostile"])
+        self.assertTrue(entry["metadataOnly"])
+        raw_inventory = self.inventory_path.read_bytes()
+        self.assertIn(b"bad-\\udcff.txt", raw_inventory)
+        self.assertNotIn(raw_relative, raw_inventory)
+
+    @unittest.skipIf(os.name == "nt", "POSIX raw byte filename contract")
+    def test_non_utf8_path_requires_exact_external_receipt(self) -> None:
+        module = load_transfer_module()
+        raw_directory = self.repo / "raw-names"
+        raw_directory.mkdir()
+        raw_relative = b"raw-names/bad-\xff.txt"
+        raw_path = os.fsencode(self.repo) + b"/" + raw_relative
+        descriptor = os.open(raw_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        try:
+            os.write(descriptor, b"external-only filename bytes\n")
+        finally:
+            os.close(descriptor)
+
+        inventory = self.inventory()
+        decoded_relative = os.fsdecode(raw_relative)
+        entry = next(item for item in inventory["entries"] if item["path"] == decoded_relative)
+        receipt_digest = sha256(
+            json.dumps(
+                [entry], sort_keys=True, separators=(",", ":"), ensure_ascii=True
+            ).encode("ascii")
+        )
+        valid = self.selection(inventory)
+        valid["items"].append(
+            {
+                "path": decoded_relative,
+                "disposition": "external",
+                "reason": "non-UTF-8 path stored outside ZIP",
+                "receipt": {
+                    "artifact": "vault:raw-name",
+                    "setSha256": receipt_digest,
+                },
+            }
+        )
+        self.write_selection(valid)
+        self.assertEqual(0, self.bundle().returncode)
+
+        for path, disposition in (
+            (decoded_relative, "include"),
+            (decoded_relative, "delete"),
+            ("raw-names", "include"),
+        ):
+            with self.subTest(path=path, disposition=disposition):
+                invalid = json.loads(json.dumps(valid))
+                invalid["items"][-1] = {
+                    "path": path,
+                    "disposition": disposition,
+                    "reason": "must remain external-only",
+                }
+                if disposition == "delete":
+                    invalid["items"][-1]["proof"] = {
+                        "kind": "regenerate",
+                        "command": "recreate raw name",
+                        "setSha256": receipt_digest,
+                    }
+                self.write_selection(invalid)
+                self.assert_contract_error(
+                    self.bundle(), "TRANSFER-HOSTILE-PATH-EXTERNAL-REQUIRED"
+                )
+        with self.assertRaisesRegex(
+            module.ContractError, r"^TRANSFER-HOSTILE-PATH-EXTERNAL-REQUIRED$"
+        ):
+            module.validate_archive_name(decoded_relative)
+
+    def test_surrogateescape_canonical_and_capped_json_match(self) -> None:
+        module = load_transfer_module()
+        value = {"label": "caf\u00e9", "path": "bad-\udcff.txt"}
+        expected = b'{"label":"caf\xc3\xa9","path":"bad-\\udcff.txt"}'
+        try:
+            actual = module.canonical_json(value)
+            capped = module.capped_canonical_json(value, "too large")
+        except UnicodeError as error:
+            self.fail(f"surrogateescape JSON was not encoded conditionally: {error}")
+        self.assertEqual(expected, actual)
+        self.assertEqual(expected, capped)
+
+    def test_non_surrogateescape_lone_surrogate_is_rejected(self) -> None:
+        module = load_transfer_module()
+        for invalid in ("\ud800", "\udc7f", "\udfff"):
+            with self.subTest(codepoint=f"U+{ord(invalid):04X}"):
+                with self.assertRaisesRegex(
+                    module.ContractError, r"^TRANSFER-PATH-ENCODING-INVALID$"
+                ):
+                    module.canonical_json({"path": invalid})
+                with self.assertRaisesRegex(
+                    module.ContractError, r"^TRANSFER-PATH-ENCODING-INVALID$"
+                ):
+                    module.capped_canonical_json({"path": invalid}, "too large")
+
+    def test_valid_unicode_v1_canonical_bytes_golden(self) -> None:
+        module = load_transfer_module()
+        value = {"\u043a\u043b\u044e\u0447": "\u0437\u043d\u0430\u0447\u0435\u043d\u0438\u0435", "latin": "caf\u00e9", "emoji": "\U0001f642"}
+        expected = '{"emoji":"\U0001f642","latin":"caf\u00e9","\u043a\u043b\u044e\u0447":"\u0437\u043d\u0430\u0447\u0435\u043d\u0438\u0435"}'.encode("utf-8")
+        self.assertEqual(expected, module.canonical_json(value))
+        self.assertEqual(expected, module.capped_canonical_json(value, "too large"))
+
     def test_inventory_scandir_failure_is_stable_and_writes_no_output(self) -> None:
         module = load_transfer_module()
         blocked = self.repo / "blocked-subtree"
@@ -696,14 +898,16 @@ class SecurityContractTests(unittest.TestCase):
         missing = self.root / "missing-git.exe"
         in_repository = self.repo / "git.exe"
         in_repository.write_text("impostor\n", encoding="utf-8")
-        with self.assertRaisesRegex(module.ContractError, "absolute"):
-            module.bind_repository(self.repo, Path("git"))
-        with self.assertRaisesRegex(module.ContractError, "ordinary file"):
-            module.bind_repository(self.repo, missing)
-        with self.assertRaisesRegex(module.ContractError, "outside the repository"):
-            module.bind_repository(self.repo, in_repository)
+        for executable in (Path("git"), missing, in_repository):
+            with self.subTest(executable=executable):
+                with self.assertRaisesRegex(
+                    module.ContractError, r"^TRANSFER-GIT-BINDING-INVALID$"
+                ):
+                    module.bind_repository(self.repo, executable)
         with mock.patch.object(module, "is_reparse_point", side_effect=lambda path: path == GIT_EXECUTABLE):
-            with self.assertRaisesRegex(module.ContractError, "reparse point"):
+            with self.assertRaisesRegex(
+                module.ContractError, r"^TRANSFER-GIT-BINDING-INVALID$"
+            ):
                 module.bind_repository(self.repo, GIT_EXECUTABLE)
 
     def test_external_receipt_binds_exact_covered_entry_set(self) -> None:
@@ -1567,7 +1771,10 @@ class SecurityContractTests(unittest.TestCase):
         invalid.write_bytes(b"not a zip")
         self.assert_contract_error(run_cli("verify", "--bundle", invalid), "invalid bundle")
         self.assert_contract_error(run_cli("verify", "--bundle", self.root), "invalid bundle")
-        self.assert_contract_error(run_cli("inventory", "--repo", self.root / "missing", "--output", self.root / "out.json"), "not a git repository")
+        self.assert_contract_error(
+            run_cli("inventory", "--repo", self.root / "missing", "--output", self.root / "out.json"),
+            "TRANSFER-REPOSITORY-BOUNDARY-INVALID",
+        )
         bad_inventory = self.root / "bad-inventory.json"
         bad_selection = self.root / "bad-selection.json"
         bad_inventory.write_text(
