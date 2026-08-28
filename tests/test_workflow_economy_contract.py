@@ -73,6 +73,13 @@ class TestWorkflowEconomyContract(unittest.TestCase):
         self.assertTrue(path.is_file(), f"workflow-economy owner missing: {relative}")
         return path.read_text(encoding="utf-8")
 
+    def test_role_index_and_reference_provenance_remain_truthful(self) -> None:
+        spine = self._read(SPINE)
+        self.assertIn("Roadmap/orchestration:", spine)
+        self.assertNotIn("\nRoadmap:", spine)
+        self.assertIn("Source-only/maintainer-only, NOT installed: `shared/references/`", spine)
+        self.assertIn("these rules are self-sufficient", spine)
+
     def test_canonical_rule_keeps_evidence_gates_and_minimizes_ceremony(self) -> None:
         spine = self._read(SPINE)
         for required in (
