@@ -217,6 +217,53 @@ class LegacyLedgerProjectionReadTests(unittest.TestCase):
         }
         (work_items / "legacy-ledger-projections.jsonl").write_bytes(canonical_bytes(record) + b"\n")
 
+    def test_rootless_baseline_without_projection_inputs_is_unchanged(self):
+        module = load_validator()
+        with tempfile.TemporaryDirectory() as directory:
+            item = Path(directory) / "rootless-item"
+            events = [{"schemaVersion": 3, "runId": "baseline-run"}]
+
+            projected, counters, errors = module.project_manifest_bound_legacy_ledger_projections(
+                events,
+                [],
+                item,
+                item / "agent-runs.jsonl",
+                b"",
+            )
+
+            self.assertIs(events, projected)
+            self.assertEqual(
+                {"manifest-apply": 0, "manifest-revoke": 0, "manifest-projected": 0},
+                counters,
+            )
+            self.assertEqual([], errors)
+
+    def test_rootless_explicit_projection_inputs_retain_strict_target_identity(self):
+        module = load_validator()
+        with tempfile.TemporaryDirectory() as directory:
+            item = Path(directory) / "rootless-item"
+            events = [{"schemaVersion": 3, "runId": "candidate-run"}]
+
+            projected, counters, errors = module.project_manifest_bound_legacy_ledger_projections(
+                events,
+                [],
+                item,
+                item / "agent-runs.jsonl",
+                b"",
+                manifest_blobs={},
+                registry_bytes=b"",
+            )
+
+            self.assertIs(events, projected)
+            self.assertEqual(
+                {"manifest-apply": 0, "manifest-revoke": 0, "manifest-projected": 0},
+                counters,
+            )
+            self.assertEqual(
+                ["WI-LEDGER-MIGRATION-TARGET-IDENTITY: projection target has no repository root"],
+                errors,
+            )
+
     def test_canonical_apply_projects_before_strict_validation_without_changing_raw_bytes(self):
         module = load_validator()
         with tempfile.TemporaryDirectory() as directory:

@@ -2195,6 +2195,9 @@ def project_manifest_bound_legacy_ledger_projections(
     """Read verified immutable legacy rows through closed shape-only profiles."""
     counters = {"manifest-apply": 0, "manifest-revoke": 0, "manifest-projected": 0}
     errors: list[str] = []
+    candidate_input = manifest_blobs is not None or registry_bytes is not None
+    if not candidate_input and repo_root_for(item) is None:
+        return events, counters, errors
     target = _projection_target_identity(item, selected_ledger, errors)
     if target is None:
         return events, counters, errors
@@ -2202,7 +2205,6 @@ def project_manifest_bound_legacy_ledger_projections(
     work_items = root / "work-items"
     manifests = work_items / LEGACY_PROJECTION_MANIFEST_DIR
     registry = work_items / LEGACY_PROJECTION_REGISTRY
-    candidate_input = manifest_blobs is not None or registry_bytes is not None
     if candidate_input and (manifest_blobs is None or registry_bytes is None):
         _projection_fail(errors, "manifest", "candidate projection requires both manifest blobs and registry bytes")
         return events, counters, errors
