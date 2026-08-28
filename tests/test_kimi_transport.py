@@ -486,6 +486,69 @@ def test_kimi_exit_zero_ignores_refusal_looking_stderr(
     assert "childNonzeroCategory" not in payload
 
 
+def test_kimi_empty_credential_needles_block_machine_path_before_result_materialization(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Catches Kimi output scanning being incorrectly gated on credential needles."""
+
+    owner = _load_owner()
+    machine_path = b"C:" + br"\Users\private-machine\secret.txt"
+    stdout = machine_path + b"\n  GATE: PASS\n"
+
+    code, payload, _notes, lifecycle = _finalize_kimi(
+        owner, tmp_path, monkeypatch, capsys, stdout=stdout, stderr=b""
+    )
+
+    assert code != 0
+    assert payload["token"] == "UNVERIFIED:E_EXTERNAL_PROVIDER_MACHINE_PATH_ECHO"
+    assert payload["resultText"] == ""
+    assert machine_path.decode("ascii") not in json.dumps(payload)
+    assert not lifecycle.run_dir.exists()
+
+
+def test_kimi_empty_credential_needles_allow_safe_settled_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Catches the Kimi output scan rejecting a settled output with no unsafe path."""
+
+    owner = _load_owner()
+    stdout = b"review complete\n  GATE: PASS\n"
+
+    code, payload, _notes, lifecycle = _finalize_kimi(
+        owner, tmp_path, monkeypatch, capsys, stdout=stdout, stderr=b""
+    )
+
+    assert code == 0
+    assert payload["gate"] == "PASS"
+    assert payload["resultText"] == stdout.decode("ascii")
+    assert not lifecycle.run_dir.exists()
+
+
+def test_kimi_empty_credential_needles_fail_closed_when_raw_streams_are_unsettled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Catches Kimi materialization before both complete raw streams are settled."""
+
+    owner = _load_owner()
+    stdout = b"review complete\n  GATE: PASS\n"
+    process = _kimi_process_result(stdout, b"", settled=False)
+
+    code, payload, _notes, lifecycle = _finalize_kimi(
+        owner,
+        tmp_path,
+        monkeypatch,
+        capsys,
+        stdout=stdout,
+        stderr=b"",
+        process_result=process,
+    )
+
+    assert code != 0
+    assert payload["token"] == "UNVERIFIED:E_EXTERNAL_PROVIDER_OUTPUT_SCAN_UNAVAILABLE"
+    assert payload["resultText"] == ""
+    assert not lifecycle.run_dir.exists()
+
+
 @pytest.mark.parametrize(
     "stderr",
     (

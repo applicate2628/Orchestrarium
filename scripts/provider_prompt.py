@@ -2759,16 +2759,22 @@ def finalize_run(
         and raw_stderr is not None
     )
     scan_outcome: str | None = None
-    if credential_needles:
+    scan_required = provider == "kimi" or bool(credential_needles)
+    scan_unavailable = (
+        "E_EXTERNAL_PROVIDER_OUTPUT_SCAN_UNAVAILABLE"
+        if provider == "kimi"
+        else "E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE"
+    )
+    if scan_required:
         scan_outcome = (
             provider_output_safety_scan_terminal(
                 provider, credential_needles, stdout=raw_stdout, stderr=raw_stderr
             )
             if raw_streams_settled
-            else "E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE"
+            else scan_unavailable
         )
-    if credential_needles and stream is not None and stream.overflow:
-        scan_outcome = "E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE"
+    if scan_required and stream is not None and stream.overflow:
+        scan_outcome = scan_unavailable
     child_nonzero_category = None
     if (
         provider == "kimi"
