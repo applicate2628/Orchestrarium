@@ -7,6 +7,7 @@ import re
 import shutil
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -253,6 +254,14 @@ class _PipedStdin:
         return False
 
 
+def _safe_provider_resolution(provider_prompt, calls: list[str]):
+    target = Path(provider_prompt.__file__).resolve()
+    calls.append("binary-preflight")
+    return provider_prompt.ResolvedProviderCommand(
+        (sys.executable, str(target)), target, "explicit-absolute-binding"
+    )
+
+
 @pytest.mark.parametrize(
     ("name", "payload"),
     (
@@ -266,6 +275,7 @@ def test_wrapper_rejects_bounded_strict_stdin_before_provider_or_capture(
     """Catches stdin bypassing the strict bounded task snapshot before any launch side effect."""
 
     provider_prompt = _load_module()
+    calls: list[str] = []
     monkeypatch.setattr(
         provider_prompt, "_requires_early_native_windows_refusal", lambda _provider: False
     )
@@ -273,15 +283,27 @@ def test_wrapper_rejects_bounded_strict_stdin_before_provider_or_capture(
     monkeypatch.setattr(
         provider_prompt,
         "resolve_provider_command",
-        lambda _provider: pytest.fail(f"provider probe reached for {name}"),
+        lambda _provider: _safe_provider_resolution(provider_prompt, calls),
+    )
+    monkeypatch.setattr(
+        provider_prompt,
+        "resolve_provider_auth_configuration",
+        lambda _provider: calls.append("auth-configuration")
+        or SimpleNamespace(child_environment={}, needles=()),
     )
     monkeypatch.setattr(
         provider_prompt.RunCaptureLifecycle,
         "create",
         lambda *_args: pytest.fail(f"capture allocation reached for {name}"),
     )
+    monkeypatch.setattr(
+        provider_prompt,
+        "run_provider_process",
+        lambda *_args, **_kwargs: pytest.fail(f"child launch reached for {name}"),
+    )
 
     assert provider_prompt.launch("codex", ["strict-stdin"]) == 1
+    assert calls == ["binary-preflight", "auth-configuration"]
 
 
 def test_wrapper_rejects_composed_overflow_before_provider_or_capture(
@@ -290,6 +312,7 @@ def test_wrapper_rejects_composed_overflow_before_provider_or_capture(
     """Catches a wrapper that validates task bytes but not capsule-plus-frame bytes."""
 
     provider_prompt = _load_module(tmp_path)
+    calls: list[str] = []
     monkeypatch.setattr(
         provider_prompt, "_requires_early_native_windows_refusal", lambda _provider: False
     )
@@ -303,38 +326,72 @@ def test_wrapper_rejects_composed_overflow_before_provider_or_capture(
     monkeypatch.setattr(
         provider_prompt,
         "resolve_provider_command",
-        lambda _provider: pytest.fail("provider probe reached for composed overflow"),
+        lambda _provider: _safe_provider_resolution(provider_prompt, calls),
+    )
+    monkeypatch.setattr(
+        provider_prompt,
+        "resolve_provider_auth_configuration",
+        lambda _provider: calls.append("auth-configuration")
+        or SimpleNamespace(child_environment={}, needles=()),
     )
     monkeypatch.setattr(
         provider_prompt.RunCaptureLifecycle,
         "create",
         lambda *_args: pytest.fail("capture allocation reached for composed overflow"),
     )
+    monkeypatch.setattr(
+        provider_prompt,
+        "run_provider_process",
+        lambda *_args, **_kwargs: pytest.fail(
+            "child launch reached for composed overflow"
+        ),
+    )
 
     assert provider_prompt.launch("codex", ["strict-file", "--prompt-file", str(task)]) == 1
+    assert calls == ["binary-preflight", "auth-configuration"]
 
 
-def test_claude_auth_refusal_precedes_invalid_prompt_and_provider_lookup(
+def test_claude_auth_refusal_follows_provider_preflight_and_precedes_invalid_prompt(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Preserves the documented auth refusal before prompt capture or lookup."""
+    """Binary provenance is checked before auth refusal, with prompt still unread."""
 
     provider_prompt = _load_module()
+    calls: list[str] = []
     monkeypatch.setattr(provider_prompt.sys, "stdin", _PipedStdin(b"\xff"))
     monkeypatch.setattr(
         provider_prompt,
         "resolve_provider_auth_configuration",
-        lambda _provider: (_ for _ in ()).throw(
-            provider_prompt.ClaudeSubscriptionRefusal("subscription")
-        ),
+        lambda _provider: (
+            calls.append("auth-refusal"),
+            (_ for _ in ()).throw(
+                provider_prompt.ClaudeSubscriptionRefusal("subscription")
+            ),
+        )[-1],
     )
     monkeypatch.setattr(
         provider_prompt,
         "resolve_provider_command",
-        lambda _provider: pytest.fail("provider lookup reached after auth refusal"),
+        lambda _provider: _safe_provider_resolution(provider_prompt, calls),
+    )
+    monkeypatch.setattr(
+        provider_prompt,
+        "prompt_bytes",
+        lambda *_args, **_kwargs: pytest.fail("prompt reached after auth refusal"),
+    )
+    monkeypatch.setattr(
+        provider_prompt.RunCaptureLifecycle,
+        "create",
+        lambda *_args, **_kwargs: pytest.fail("capture reached after auth refusal"),
+    )
+    monkeypatch.setattr(
+        provider_prompt,
+        "run_provider_process",
+        lambda *_args, **_kwargs: pytest.fail("child reached after auth refusal"),
     )
 
     assert provider_prompt.launch("claude", ["auth-before-invalid-prompt"]) == 3
+    assert calls == ["binary-preflight", "auth-refusal"]
 
 
 def test_external_contracts_require_wrappers_and_forbid_inline_or_sidecar_prompt_routes() -> None:

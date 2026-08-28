@@ -18,6 +18,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -229,6 +230,7 @@ GLOBAL_LEAD_ACCEPTED_PRIOR_TREE_SHA256 = frozenset(
         "9b11e845e746adeb81e56243169ade9e48aaf2adc349b40073beb21b5b596c30",
         "a90c1989a0c136c55af71b68c62fad6a2cc239162a953d45643dfee903795560",
         "2600ed4cdcdcf64767ad8486225a8bd4687c8ca3618344f7e4bbb709587f30ef",
+        "3ca341a8c4ec35a7cbcd7920d6f5be7c1888b1d143393b544643fb005c97dab4",
     }
 )
 RUNTIME_RESOURCES = (
@@ -3985,6 +3987,8 @@ _HOOK_HEALTH_FAILURE_BYTES = 4096
 _HOOK_HEALTH_FAILURE_PROBE_BYTES = _HOOK_HEALTH_FAILURE_BYTES + 1
 _HOOK_HEALTH_CAUSE_BYTES = 2048
 _HOOK_HEALTH_CHUNK_BYTES = 65_536
+_HOOK_HEALTH_DEADLINE_SECONDS = 60.0
+_HOOK_HEALTH_SETTLEMENT_RESERVE_SECONDS = 5.0
 _HOOK_HEALTH_IDS = frozenset(
     {"E_HOOK_INVENTORY_TARGET_INVALID", "E_HOOK_HEALTH_FAILED"}
 )
@@ -4054,16 +4058,17 @@ def _parse_hook_health_failure_envelope(payload: bytes) -> _InstallFailure:
     return _InstallFailure(stable_id, context, cause)
 
 
-def _terminate_and_reap(process: subprocess.Popen) -> None:
+def _terminate_and_reap(process: subprocess.Popen, deadline: float) -> None:
+    remaining = lambda: max(0.0, deadline - time.monotonic())
     if process.poll() is not None:
-        process.wait()
+        process.wait(timeout=remaining())
         return
     process.terminate()
     try:
-        process.wait(timeout=1.0)
+        process.wait(timeout=min(1.0, remaining()))
     except subprocess.TimeoutExpired:
         process.kill()
-        process.wait()
+        process.wait(timeout=remaining())
 
 
 def _write_parent_stdout(payload: bytes) -> None:
@@ -4081,6 +4086,7 @@ def _run_hook_health_bounded(
 ) -> subprocess.CompletedProcess:
     """Run one health child with a bounded failure wire and spooled success."""
 
+    deadline = time.monotonic() + _HOOK_HEALTH_DEADLINE_SECONDS
     env = os.environ.copy()
     env["PYTHONIOENCODING"] = "utf-8"
     spool = None
@@ -4092,6 +4098,19 @@ def _run_hook_health_bounded(
     stop_reader = threading.Event()
     stderr_probe = bytearray()
     stdout_size = 0
+    deadline_exceeded = False
+    process_cleanup_attempted = False
+
+    def terminate_process_once() -> None:
+        nonlocal process_cleanup_attempted
+        if (
+            process is None
+            or process_cleanup_attempted
+            or process.poll() is not None
+        ):
+            return
+        process_cleanup_attempted = True
+        _terminate_and_reap(process, deadline)
 
     try:
         spool = tempfile.NamedTemporaryFile(
@@ -4149,20 +4168,42 @@ def _run_hook_health_bounded(
                 record_reader_failure(exc)
 
         threads = [
-            threading.Thread(target=drain_stdout, name="hook-health-stdout"),
-            threading.Thread(target=drain_stderr, name="hook-health-stderr"),
+            threading.Thread(
+                target=drain_stdout,
+                name="hook-health-stdout",
+                daemon=True,
+            ),
+            threading.Thread(
+                target=drain_stderr,
+                name="hook-health-stderr",
+                daemon=True,
+            ),
         ]
         for thread in threads:
             thread.start()
 
-        while process.poll() is None and not stop_reader.wait(0.01):
-            pass
+        while process.poll() is None:
+            remaining = deadline - time.monotonic()
+            poll_window = remaining - _HOOK_HEALTH_SETTLEMENT_RESERVE_SECONDS
+            if poll_window <= 0.0:
+                deadline_exceeded = True
+                break
+            poll_interval = min(0.01, poll_window)
+            if stop_reader.wait(poll_interval):
+                break
+            if poll_interval == poll_window:
+                deadline_exceeded = True
+                break
         if process.poll() is None:
-            _terminate_and_reap(process)
+            terminate_process_once()
         else:
-            process.wait()
+            process.wait(timeout=max(0.0, deadline - time.monotonic()))
         for thread in threads:
-            thread.join()
+            thread.join(timeout=max(0.0, deadline - time.monotonic()))
+        if any(thread.is_alive() for thread in threads):
+            raise _hook_health_failure("health child reader deadline exceeded")
+        if deadline_exceeded:
+            raise _hook_health_failure("health child deadline exceeded")
         if reader_failures:
             raise _hook_health_failure(reader_failures[0])
         if len(stderr_probe) >= _HOOK_HEALTH_FAILURE_PROBE_BYTES:
@@ -4186,25 +4227,25 @@ def _run_hook_health_bounded(
         if stdout_size != 0:
             raise _hook_health_failure("failed health child wrote stdout")
         raise _parse_hook_health_failure_envelope(bytes(stderr_probe))
-    except (KeyboardInterrupt, SystemExit):
-        if process is not None and process.poll() is None:
-            _terminate_and_reap(process)
+    except (KeyboardInterrupt, SystemExit) as interruption:
+        try:
+            terminate_process_once()
+        except BaseException as cleanup_exc:
+            raise _hook_health_failure(cleanup_exc) from interruption
         raise
     except _InstallFailure:
         raise
     except BaseException as exc:
-        if process is not None and process.poll() is None:
-            _terminate_and_reap(process)
+        try:
+            terminate_process_once()
+        except BaseException as cleanup_exc:
+            raise _hook_health_failure(cleanup_exc) from exc
         raise _hook_health_failure(exc) from exc
     finally:
-        if process is not None and process.poll() is None:
-            try:
-                _terminate_and_reap(process)
-            except BaseException:
-                pass
-        for thread in threads:
-            if thread.is_alive():
-                thread.join(timeout=1.0)
+        try:
+            terminate_process_once()
+        except BaseException:
+            pass
         if process is not None:
             for pipe in (process.stdout, process.stderr):
                 if pipe is not None:
@@ -4212,6 +4253,9 @@ def _run_hook_health_bounded(
                         pipe.close()
                     except BaseException:
                         pass
+        for thread in threads:
+            if thread.is_alive():
+                thread.join(timeout=max(0.0, deadline - time.monotonic()))
         if spool is not None:
             try:
                 spool.close()

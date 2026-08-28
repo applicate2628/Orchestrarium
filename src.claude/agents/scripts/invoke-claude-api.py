@@ -9,6 +9,7 @@ import re
 import shutil
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -73,17 +74,42 @@ def extract_secret_object(path: Path) -> dict[str, Any]:
     return environment
 
 
-def resolve_claude_command() -> list[str] | None:
+E_EXTERNAL_PROVIDER_REPOSITORY_EXECUTABLE = "E_EXTERNAL_PROVIDER_REPOSITORY_EXECUTABLE"
+
+
+@dataclass(frozen=True)
+class ResolvedClaudeCommand:
+    command: tuple[str, ...]
+    target: Path
+    provenance: str
+    path_discovered_targets: tuple[Path, ...]
+
+
+def resolve_claude_command() -> ResolvedClaudeCommand | None:
+    # This standalone installed wrapper cannot import the independently
+    # projected provider_prompt.py owner. Keep this small contract aligned.
     requested = os.environ.get("CLAUDE_BIN")
     names = [requested] if requested else ["claude", "claude.exe", "claude.cmd"]
     for name in names:
         if not name:
             continue
         candidate = Path(name).expanduser()
-        resolved = str(candidate.resolve()) if candidate.is_file() else shutil.which(name)
-        if not resolved:
+        provenance = (
+            "explicit-absolute-binding"
+            if requested is not None and candidate.is_absolute()
+            else "path-discovery"
+        )
+        discovered = candidate if provenance == "explicit-absolute-binding" else shutil.which(name)
+        if not discovered:
             continue
-        suffix = Path(resolved).suffix.lower()
+        try:
+            target = Path(discovered).resolve(strict=True)
+        except OSError:
+            continue
+        if not target.is_file():
+            continue
+        path_discovered_targets = (target,) if provenance == "path-discovery" else ()
+        suffix = target.suffix.lower()
         if suffix == ".ps1":
             powershell = (
                 shutil.which("pwsh")
@@ -93,16 +119,54 @@ def resolve_claude_command() -> list[str] | None:
             )
             if not powershell:
                 return None
-            return [
-                powershell,
+            try:
+                powershell_target = Path(powershell).resolve(strict=True)
+            except OSError:
+                return None
+            if not powershell_target.is_file():
+                return None
+            command = (
+                str(powershell_target),
                 "-NoProfile",
                 "-ExecutionPolicy",
                 "Bypass",
                 "-File",
-                resolved,
-            ]
-        return [resolved]
+                str(target),
+            )
+            path_discovered_targets += (powershell_target,)
+        elif suffix == ".py":
+            command = (sys.executable, str(target))
+        else:
+            command = (str(target),)
+        return ResolvedClaudeCommand(
+            command, target, provenance, path_discovered_targets
+        )
     return None
+
+
+def _physical_repository_root(query_cwd: Path) -> Path | None:
+    physical_cwd = query_cwd.resolve(strict=True)
+    for candidate in (physical_cwd, *physical_cwd.parents):
+        if os.path.lexists(candidate / ".git"):
+            return candidate
+    return None
+
+
+def _reject_repository_path_discovery(
+    resolution: ResolvedClaudeCommand, query_cwd: Path
+) -> None:
+    repository_root = _physical_repository_root(query_cwd)
+    if repository_root is None:
+        return
+    for target in resolution.path_discovered_targets:
+        try:
+            target.relative_to(repository_root)
+        except ValueError:
+            continue
+        raise ValueError(
+            f"{E_EXTERNAL_PROVIDER_REPOSITORY_EXECUTABLE}: "
+            "PATH-discovered provider executable is inside the active repository"
+        )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -133,6 +197,22 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     try:
+        query_cwd = Path.cwd().resolve(strict=True)
+        resolution = resolve_claude_command()
+        if resolution is None:
+            label = os.environ.get("CLAUDE_BIN") or "claude"
+            print(
+                f"FAIL: Claude executable '{label}' is not available. Set CLAUDE_BIN "
+                "to an executable or absolute path if it is not on the active shell PATH.",
+                file=sys.stderr,
+            )
+            return 1
+        _reject_repository_path_discovery(resolution, query_cwd)
+    except (OSError, ValueError) as exc:
+        print(f"FAIL: {exc}", file=sys.stderr)
+        return 1
+
+    try:
         secret_env = extract_secret_object(secret_path)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
@@ -148,22 +228,14 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
-    command = resolve_claude_command()
-    if command is None:
-        label = os.environ.get("CLAUDE_BIN") or "claude"
-        print(
-            f"FAIL: Claude executable '{label}' is not available. Set CLAUDE_BIN "
-            "to an executable or absolute path if it is not on the active shell PATH.",
-            file=sys.stderr,
-        )
-        return 1
-
     environment = os.environ.copy()
     for key, value in secret_env.items():
         if str(key).strip():
             environment[str(key)] = "" if value is None else str(value)
     try:
-        return subprocess.run(command + forwarded, env=environment, check=False).returncode
+        return subprocess.run(
+            list(resolution.command) + forwarded, env=environment, check=False
+        ).returncode
     except OSError as exc:
         print(f"FAIL: Claude launch failed: {exc}", file=sys.stderr)
         return 1

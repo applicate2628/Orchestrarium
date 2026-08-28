@@ -157,6 +157,7 @@ EXTERNAL_GOVERNANCE_END = b"END_ORCHESTRARIUM_EXTERNAL_GOVERNANCE_V1\n\n"
 EXTERNAL_UNAVAILABLE_IDS = {
     "grok": "E_GROK_CONTAINMENT_UNAVAILABLE",
 }
+E_EXTERNAL_PROVIDER_REPOSITORY_EXECUTABLE = "E_EXTERNAL_PROVIDER_REPOSITORY_EXECUTABLE"
 KIMI_CHILD_NONZERO_CATEGORIES = frozenset(
     {"rate_limit", "auth", "vendor", "invocation", "unknown"}
 )
@@ -195,6 +196,13 @@ class Control:
     role: str | None = None
     live_root: Path | None = None
     provider_flags: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class ResolvedProviderCommand:
+    command: tuple[str, ...]
+    target: Path
+    provenance: str
 
 
 @dataclass(frozen=True)
@@ -913,20 +921,28 @@ def require_transport_projection_parity() -> None:
         raise ValueError(detail) from exc
 
 
-def _command_from_path(path: str) -> list[str] | None:
+def _command_from_path(path: str, provenance: str) -> ResolvedProviderCommand | None:
     candidate = Path(path).expanduser()
-    resolved = str(candidate.resolve()) if candidate.is_file() else shutil.which(path)
-    if not resolved:
+    discovered = candidate if provenance == "explicit-absolute-binding" else shutil.which(path)
+    if not discovered:
         return None
-    suffix = Path(resolved).suffix.lower()
+    try:
+        target = Path(discovered).resolve(strict=True)
+    except OSError:
+        return None
+    if not target.is_file():
+        return None
+    suffix = target.suffix.lower()
     if suffix == ".py":
-        return [sys.executable, resolved]
-    if suffix in {".ps1", ".cmd", ".bat", ".sh"}:
+        command = (sys.executable, str(target))
+    elif suffix in {".ps1", ".cmd", ".bat", ".sh"}:
         return None
-    return [resolved]
+    else:
+        command = (str(target),)
+    return ResolvedProviderCommand(command, target, provenance)
 
 
-def resolve_provider_command(provider: str) -> list[str] | None:
+def resolve_provider_command(provider: str) -> ResolvedProviderCommand | None:
     # Kimi is bound only by an explicit installer enrollment receipt.  It must
     # never inherit a caller's PATH or KIMI_BIN selection.
     if provider == "kimi":
@@ -941,10 +957,42 @@ def resolve_provider_command(provider: str) -> list[str] | None:
     names = [requested] if requested else [provider, f"{provider}.exe", f"{provider}.cmd"]
     for name in names:
         if name:
-            command = _command_from_path(name)
+            requested_path = Path(name).expanduser()
+            provenance = (
+                "explicit-absolute-binding"
+                if requested is not None and requested_path.is_absolute()
+                else "path-discovery"
+            )
+            command = _command_from_path(name, provenance)
             if command:
                 return command
     return None
+
+
+def _physical_repository_root(query_cwd: Path) -> Path | None:
+    physical_cwd = query_cwd.resolve(strict=True)
+    for candidate in (physical_cwd, *physical_cwd.parents):
+        if os.path.lexists(candidate / ".git"):
+            return candidate
+    return None
+
+
+def _reject_repository_path_discovery(
+    resolution: ResolvedProviderCommand, query_cwd: Path
+) -> None:
+    if resolution.provenance != "path-discovery":
+        return
+    repository_root = _physical_repository_root(query_cwd)
+    if repository_root is None:
+        return
+    try:
+        resolution.target.relative_to(repository_root)
+    except ValueError:
+        return
+    raise ValueError(
+        f"{E_EXTERNAL_PROVIDER_REPOSITORY_EXECUTABLE}: "
+        "PATH-discovered provider executable is inside the active repository"
+    )
 
 
 def _kimi_binding_path() -> Path:
@@ -3175,14 +3223,13 @@ def _requires_early_native_windows_refusal(provider: str) -> bool:
     return os.name == "nt" and provider in {"codex", "claude"}
 
 
-def _resolve_launch_provider_command(provider: str) -> list[str]:
-    command = (
-        resolve_enrolled_kimi_command()
-        if provider == "kimi"
-        else resolve_provider_command(provider)
-    )
-    if command is not None:
-        return command
+def _resolve_launch_provider_command(provider: str, query_cwd: Path) -> list[str]:
+    if provider == "kimi":
+        return resolve_enrolled_kimi_command()
+    resolution = resolve_provider_command(provider)
+    if resolution is not None:
+        _reject_repository_path_discovery(resolution, query_cwd)
+        return list(resolution.command)
     key = {"codex": "CODEX_BIN", "claude": "CLAUDE_BIN"}.get(
         provider, "PROVIDER_BIN"
     )
@@ -3231,28 +3278,12 @@ def _launch_with_runner(
         launch_flags = provenance.launch_flags
 
     try:
-        auth_configuration = resolve_provider_auth_configuration(provider)
-    except ClaudeSubscriptionRefusal:
-        print(
-            "WARNING: Refusing automated Claude launch.\n"
-            "Automated `claude -p` under a subscription is not permitted.\n"
-            "Anthropic policy: https://code.claude.com/docs/en/legal-and-compliance\n\n"
-            "Use commercial authentication (ANTHROPIC_API_KEY, "
-            "ANTHROPIC_AUTH_TOKEN, Amazon Bedrock, or Google "
-            "Vertex AI), or explicitly set ORCHESTRARIUM_ALLOW_SUBSCRIPTION_CLAUDE=1.",
-            file=sys.stderr,
-        )
-        return 3
-    except ValueError as exc:
+        query_cwd = Path.cwd().resolve(strict=True)
+        command = _resolve_launch_provider_command(provider, query_cwd)
+    except (OSError, ValueError) as exc:
         return fail(str(exc))
 
-    query_cwd = Path.cwd().resolve()
-    command: list[str] | None = None
     if _requires_early_native_windows_refusal(provider):
-        try:
-            command = _resolve_launch_provider_command(provider)
-        except ValueError as exc:
-            return fail(str(exc))
         executable = Path(command[0])
         try:
             identity_available = (
@@ -3269,15 +3300,25 @@ def _launch_with_runner(
             )
 
     try:
-        body = assemble_external_prompt(prompt_bytes(control, external=True))
+        auth_configuration = resolve_provider_auth_configuration(provider)
+    except ClaudeSubscriptionRefusal:
+        print(
+            "WARNING: Refusing automated Claude launch.\n"
+            "Automated `claude -p` under a subscription is not permitted.\n"
+            "Anthropic policy: https://code.claude.com/docs/en/legal-and-compliance\n\n"
+            "Use commercial authentication (ANTHROPIC_API_KEY, "
+            "ANTHROPIC_AUTH_TOKEN, Amazon Bedrock, or Google "
+            "Vertex AI), or explicitly set ORCHESTRARIUM_ALLOW_SUBSCRIPTION_CLAUDE=1.",
+            file=sys.stderr,
+        )
+        return 3
     except ValueError as exc:
         return fail(str(exc))
 
-    if command is None:
-        try:
-            command = _resolve_launch_provider_command(provider)
-        except ValueError as exc:
-            return fail(str(exc))
+    try:
+        body = assemble_external_prompt(prompt_bytes(control, external=True))
+    except ValueError as exc:
+        return fail(str(exc))
 
     if provider == "codex":
         if not Path(command[0]).is_absolute() or not Path(command[0]).is_file():

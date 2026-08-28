@@ -1321,6 +1321,31 @@ def test_install_transaction_excludes_dry_run_and_committed_success_from_rollbac
     assert backup_paths and all(not path.exists() for path in backup_paths)
 
 
+def test_hook_health_deadline_failure_rolls_back_before_transaction_settles(
+    tmp_path: Path,
+) -> None:
+    """A typed hook-health deadline restores the transaction's prior bytes."""
+
+    target = tmp_path / "hooks.json"
+    before = b'{"hooks":"before"}\n'
+    target.write_bytes(before)
+
+    with pytest.raises(production_installer._InstallFailure) as failure:
+        transaction = production_installer._InstallTransaction(
+            [target], enabled=True
+        )
+        with transaction:
+            target.write_bytes(b'{"hooks":"mutated"}\n')
+            raise production_installer._hook_health_failure(
+                "hook health child deadline exceeded"
+            )
+
+    assert failure.value.stable_id == "E_HOOK_HEALTH_FAILED"
+    assert failure.value.context == "health"
+    assert "deadline" in str(failure.value.cause)
+    assert target.read_bytes() == before
+
+
 @pytest.mark.parametrize("stable_id", _VERIFY_FAILURE_IDS)
 def test_every_precommit_verification_path_enters_rollback_with_typed_cause(
     tmp_path: Path,

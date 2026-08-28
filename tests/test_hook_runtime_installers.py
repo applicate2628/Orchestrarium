@@ -288,6 +288,287 @@ def _health_envelope(
     )
 
 
+def test_hook_health_silent_child_deadline_bounds_poll_reap_and_readers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A silent health child consumes one clock budget through full settlement."""
+
+    deadline_seconds = 0.04
+    settlement_reserve_seconds = 0.01
+
+    class FakeMonotonic:
+        def __init__(self) -> None:
+            self.value = 0.0
+
+        def __call__(self) -> float:
+            return self.value
+
+        def advance(self, seconds: float) -> None:
+            self.value += max(0.0, seconds)
+
+    clock = FakeMonotonic()
+
+    class FakeEvent:
+        def __init__(self) -> None:
+            self._set = False
+
+        def set(self) -> None:
+            self._set = True
+
+        def wait(self, timeout: float | None = None) -> bool:
+            if timeout is not None:
+                clock.advance(timeout)
+            return self._set
+
+    thread_join_timeouts: list[float | None] = []
+
+    class FakeThread:
+        def __init__(self, **_kwargs) -> None:
+            self._alive = False
+
+        def start(self) -> None:
+            self._alive = True
+
+        def join(self, timeout: float | None = None) -> None:
+            thread_join_timeouts.append(timeout)
+            self._alive = False
+
+        def is_alive(self) -> bool:
+            return self._alive
+
+    class SilentProcess(_BoundedHealthProcess):
+        def __init__(self) -> None:
+            super().__init__(returncode=None, ignore_terminate=True)
+            self.poll_calls = 0
+
+        def poll(self):
+            self.poll_calls += 1
+            if self.poll_calls > 12:
+                raise AssertionError("hook-health deadline was not observed")
+            return self.returncode
+
+        def wait(self, timeout: float | None = None) -> int:
+            self.wait_calls.append(timeout)
+            if self.returncode is None:
+                if timeout is not None:
+                    clock.advance(timeout)
+                    raise subprocess.TimeoutExpired("health", timeout)
+                self.returncode = 1
+            return self.returncode
+
+    process = SilentProcess()
+    real_lock = PRODUCTION_INSTALLER.threading.Lock
+    monkeypatch.setattr(
+        PRODUCTION_INSTALLER,
+        "threading",
+        SimpleNamespace(
+            Event=FakeEvent,
+            Lock=real_lock,
+            Thread=FakeThread,
+        ),
+    )
+    monkeypatch.setattr(
+        PRODUCTION_INSTALLER,
+        "time",
+        SimpleNamespace(monotonic=clock),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        PRODUCTION_INSTALLER,
+        "_HOOK_HEALTH_DEADLINE_SECONDS",
+        deadline_seconds,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        PRODUCTION_INSTALLER,
+        "_HOOK_HEALTH_SETTLEMENT_RESERVE_SECONDS",
+        settlement_reserve_seconds,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        PRODUCTION_INSTALLER.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: process,
+    )
+
+    with pytest.raises(PRODUCTION_INSTALLER._InstallFailure) as failure:
+        PRODUCTION_INSTALLER._run_hook_health_bounded(["health.py"], tmp_path)
+
+    assert failure.value.stable_id == "E_HOOK_HEALTH_FAILED"
+    assert "deadline" in str(failure.value.cause)
+    assert process.terminated and process.killed and process.returncode is not None
+    assert process.wait_calls and all(timeout is not None for timeout in process.wait_calls)
+    assert thread_join_timeouts and all(
+        timeout is not None for timeout in thread_join_timeouts
+    )
+    assert process.stdout.closed and process.stderr.closed
+    assert clock.value <= deadline_seconds
+
+
+def test_hook_health_stubborn_post_kill_timeout_stays_typed_and_single_attempt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unreaped child cannot escape raw or trigger recursive cleanup."""
+
+    class StubbornProcess(_BoundedHealthProcess):
+        def __init__(self) -> None:
+            super().__init__(
+                stderr=b"x" * 4097,
+                returncode=None,
+                ignore_terminate=True,
+            )
+            self.terminate_calls = 0
+            self.kill_calls = 0
+
+        def terminate(self) -> None:
+            self.terminate_calls += 1
+            self.terminated = True
+
+        def kill(self) -> None:
+            self.kill_calls += 1
+            self.killed = True
+
+        def wait(self, timeout: float | None = None) -> int:
+            self.wait_calls.append(timeout)
+            raise subprocess.TimeoutExpired("health", timeout)
+
+    process = StubbornProcess()
+    monkeypatch.setattr(
+        PRODUCTION_INSTALLER.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: process,
+    )
+
+    with pytest.raises(PRODUCTION_INSTALLER._InstallFailure) as failure:
+        PRODUCTION_INSTALLER._run_hook_health_bounded(["health.py"], tmp_path)
+
+    assert failure.value.stable_id == "E_HOOK_HEALTH_FAILED"
+    assert isinstance(failure.value.cause, subprocess.TimeoutExpired)
+    assert process.terminate_calls == 1
+    assert process.kill_calls == 1
+    assert process.wait_calls and all(timeout is not None for timeout in process.wait_calls)
+    assert process.stdout.closed and process.stderr.closed
+
+
+@pytest.mark.parametrize(
+    "interruption_type",
+    (KeyboardInterrupt, SystemExit),
+    ids=("keyboard-interrupt", "system-exit"),
+)
+def test_hook_health_interruption_cleanup_timeout_is_typed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    interruption_type: type[BaseException],
+) -> None:
+    """Failed interruption cleanup is typed and chained from the interruption."""
+
+    class InterruptingStubbornProcess(_BoundedHealthProcess):
+        def __init__(self) -> None:
+            super().__init__(returncode=None, ignore_terminate=True)
+            self.poll_calls = 0
+            self.terminate_calls = 0
+            self.kill_calls = 0
+
+        def poll(self):
+            self.poll_calls += 1
+            if self.poll_calls == 2:
+                raise interruption_type()
+            return self.returncode
+
+        def terminate(self) -> None:
+            self.terminate_calls += 1
+            self.terminated = True
+
+        def kill(self) -> None:
+            self.kill_calls += 1
+            self.killed = True
+
+        def wait(self, timeout: float | None = None) -> int:
+            self.wait_calls.append(timeout)
+            raise subprocess.TimeoutExpired("health", timeout)
+
+    process = InterruptingStubbornProcess()
+    monkeypatch.setattr(
+        PRODUCTION_INSTALLER.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: process,
+    )
+
+    with pytest.raises(PRODUCTION_INSTALLER._InstallFailure) as failure:
+        PRODUCTION_INSTALLER._run_hook_health_bounded(["health.py"], tmp_path)
+
+    assert failure.value.stable_id == "E_HOOK_HEALTH_FAILED"
+    assert isinstance(failure.value.cause, subprocess.TimeoutExpired)
+    assert isinstance(failure.value.__cause__, interruption_type)
+    assert process.terminate_calls == 1
+    assert process.kill_calls == 1
+    assert process.wait_calls and all(timeout is not None for timeout in process.wait_calls)
+    assert process.stdout.closed and process.stderr.closed
+
+
+def test_hook_health_blocked_readers_close_before_final_bounded_join(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Blocked readers fail typed, close their pipes, and cannot strand exit."""
+
+    process = _BoundedHealthProcess(returncode=0)
+    events: list[tuple[str, str, float | None, bool]] = []
+    readers = []
+
+    class BlockedReader:
+        def __init__(
+            self,
+            *,
+            name: str,
+            daemon: bool = False,
+            **_kwargs,
+        ) -> None:
+            self.name = name
+            self.daemon = daemon
+            self.pipe = process.stdout if name.endswith("stdout") else process.stderr
+            self._alive = False
+            readers.append(self)
+
+        def start(self) -> None:
+            self._alive = True
+
+        def join(self, timeout: float | None = None) -> None:
+            events.append(("join", self.name, timeout, self.pipe.closed))
+            if self.pipe.closed:
+                self._alive = False
+
+        def is_alive(self) -> bool:
+            return self._alive
+
+    monkeypatch.setattr(
+        PRODUCTION_INSTALLER,
+        "threading",
+        SimpleNamespace(
+            Event=PRODUCTION_INSTALLER.threading.Event,
+            Lock=PRODUCTION_INSTALLER.threading.Lock,
+            Thread=BlockedReader,
+        ),
+    )
+    monkeypatch.setattr(
+        PRODUCTION_INSTALLER.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: process,
+    )
+
+    with pytest.raises(PRODUCTION_INSTALLER._InstallFailure) as failure:
+        PRODUCTION_INSTALLER._run_hook_health_bounded(["health.py"], tmp_path)
+
+    assert failure.value.stable_id == "E_HOOK_HEALTH_FAILED"
+    assert "reader" in str(failure.value.cause)
+    assert readers and all(reader.daemon for reader in readers)
+    assert process.stdout.closed and process.stderr.closed
+    assert all(not reader.is_alive() for reader in readers)
+    for reader in readers:
+        joins = [event for event in events if event[1] == reader.name]
+        assert joins and all(event[2] is not None for event in joins)
+        assert joins[-1][3], "final bounded join must observe the pipe already closed"
+
+
 def test_hook_health_processes_use_bounded_owner_only() -> None:
     """F5: the two health branches never route through generic _run."""
 
@@ -431,7 +712,10 @@ def test_hook_health_failure_byte_4097_terminates_kills_and_reaps(
         runner(["health.py"], tmp_path)
     assert failure.value.stable_id == "E_HOOK_HEALTH_FAILED"
     assert process.terminated and process.killed
-    assert process.wait_calls == [1.0, None]
+    assert len(process.wait_calls) == 2
+    assert process.wait_calls[0] == 1.0
+    assert process.wait_calls[1] is not None
+    assert 0.0 <= process.wait_calls[1] <= PRODUCTION_INSTALLER._HOOK_HEALTH_DEADLINE_SECONDS
     assert process.stdout.closed and process.stderr.closed
 
 

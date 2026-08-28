@@ -37,6 +37,13 @@ sys.modules[spec.name] = owner
 spec.loader.exec_module(owner)
 
 
+def _resolved_command(*command: str):
+    target = Path(command[-1] if Path(command[-1]).suffix.lower() == ".py" else command[0])
+    return owner.ResolvedProviderCommand(
+        tuple(command), target.resolve(), "explicit-absolute-binding"
+    )
+
+
 def _projected_entrypoint(tmp_path: Path, provider: str) -> Path:
     scripts = tmp_path / "claude-projection" / "agents" / "scripts"
     scripts.mkdir(parents=True, exist_ok=True)
@@ -650,7 +657,11 @@ def test_provider_adapter_injected_cancellation_emits_nonpass_terminal(
     item = _make_work_item(tmp_path, "injected-cancellation")
     monkeypatch.setenv("CLAUDE_PROMPTS_DIR", str(output_root))
     monkeypatch.setenv("ANTHROPIC_API_KEY", "fixture-commercial-credential")
-    monkeypatch.setattr(owner, "resolve_provider_command", lambda _provider: [sys.executable, str(child)])
+    monkeypatch.setattr(
+        owner,
+        "resolve_provider_command",
+        lambda _provider: _resolved_command(sys.executable, str(child)),
+    )
     monkeypatch.setattr(
         owner,
         "run_provider_process",
@@ -715,7 +726,9 @@ def test_provider_launch_exception_without_settled_streams_emits_and_records_una
     monkeypatch.setattr(
         owner,
         "resolve_provider_command",
-        lambda _provider: [sys.executable, str(tmp_path / "unused-provider.py")],
+        lambda _provider: _resolved_command(
+            sys.executable, str(tmp_path / "unused-provider.py")
+        ),
     )
     monkeypatch.setattr(owner, "run_provider_process", raise_from_provider)
     monkeypatch.setattr(owner, "record_terminal", record_after_envelope)
@@ -960,7 +973,7 @@ def test_windows_native_provider_refuses_before_prompt_capture_or_launch(
     capsys: pytest.CaptureFixture[str],
     provider: str,
 ) -> None:
-    """Native Windows providers resolve auth, then fail before prompt/capture/child work."""
+    """Native Windows providers fail before auth, prompt, capture, or child work."""
 
     executable = tmp_path / f"{provider}.exe"
     executable.write_bytes(b"native-provider-fixture")
@@ -969,7 +982,8 @@ def test_windows_native_provider_refuses_before_prompt_capture_or_launch(
     monkeypatch.setattr(
         owner,
         "resolve_provider_command",
-        lambda selected: calls.append(f"resolve:{selected}") or [str(executable)],
+        lambda selected: calls.append(f"resolve:{selected}")
+        or _resolved_command(str(executable)),
     )
     monkeypatch.setattr(
         owner,
@@ -1005,7 +1019,7 @@ def test_windows_native_provider_refuses_before_prompt_capture_or_launch(
 
     assert code != 0
     assert owner.E_EXTERNAL_PROVIDER_WINDOWS_NATIVE_ARGV_UNAVAILABLE in capsys.readouterr().err
-    assert calls == ["auth", f"resolve:{provider}"]
+    assert calls == [f"resolve:{provider}"]
     assert not marker.exists()
 
 
@@ -1018,8 +1032,12 @@ def test_live_windows_native_provider_resolver_returns_typed_denial(
 ) -> None:
     """The installed native resolver path remains a zero-prompt typed denial."""
 
-    command = owner.resolve_provider_command(provider)
-    if command is None or len(command) != 1 or Path(command[0]).suffix.casefold() != ".exe":
+    resolution = owner.resolve_provider_command(provider)
+    if (
+        resolution is None
+        or len(resolution.command) != 1
+        or Path(resolution.command[0]).suffix.casefold() != ".exe"
+    ):
         pytest.skip(f"{provider} native executable is unavailable")
     monkeypatch.setattr(
         owner,
@@ -1043,6 +1061,94 @@ def test_live_windows_native_provider_resolver_returns_typed_denial(
 
     assert code != 0
     assert owner.E_EXTERNAL_PROVIDER_WINDOWS_NATIVE_ARGV_UNAVAILABLE in capsys.readouterr().err
+
+
+def test_path_discovered_provider_inside_physical_repository_is_rejected_before_sensitive_work(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    repository = tmp_path / "repository"
+    (repository / ".git").mkdir(parents=True)
+    nested = repository / "nested" / "cwd"
+    nested.mkdir(parents=True)
+    provider = repository / "repo-bin" / "claude.PY"
+    provider.parent.mkdir()
+    provider.write_text("raise SystemExit(0)\n", encoding="utf-8")
+    relative_provider = os.path.relpath(provider, nested)
+    calls: list[str] = []
+
+    monkeypatch.chdir(nested)
+    monkeypatch.setenv("CLAUDE_BIN", "claude")
+    monkeypatch.setenv("PATH", "")
+    monkeypatch.setenv("PATHEXT", ".PY")
+    monkeypatch.setattr(
+        owner.shutil,
+        "which",
+        lambda name: relative_provider if name == "claude" else None,
+    )
+    monkeypatch.setattr(
+        owner,
+        "resolve_provider_auth_configuration",
+        lambda *_args: calls.append("auth")
+        or SimpleNamespace(child_environment={}, needles=()),
+    )
+    monkeypatch.setattr(
+        owner,
+        "prompt_bytes",
+        lambda *_args, **_kwargs: calls.append("prompt") or b"task",
+    )
+
+    def capture(*_args, **_kwargs):
+        calls.append("capture")
+        raise ValueError("capture sentinel")
+
+    monkeypatch.setattr(owner.RunCaptureLifecycle, "create", capture)
+
+    assert owner.launch("claude", ["hostile-provider"]) == 1
+    assert "E_EXTERNAL_PROVIDER_REPOSITORY_EXECUTABLE" in capsys.readouterr().err
+    assert calls == []
+
+
+@pytest.mark.parametrize(("provider", "environment_key"), tuple(BIN_ENV.items()))
+def test_absolute_provider_binding_inside_repository_keeps_explicit_provenance(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    provider: str,
+    environment_key: str,
+) -> None:
+    repository = tmp_path / "repository"
+    (repository / ".git").mkdir(parents=True)
+    executable = repository / f"{provider}.py"
+    executable.write_text("raise SystemExit(0)\n", encoding="utf-8")
+    monkeypatch.setenv(environment_key, str(executable.resolve()))
+
+    resolution = owner.resolve_provider_command(provider)
+
+    assert resolution is not None
+    assert getattr(resolution, "provenance", None) == "explicit-absolute-binding"
+    assert getattr(resolution, "target", None) == executable.resolve()
+
+
+def test_path_discovered_provider_outside_repository_remains_accepted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository = tmp_path / "repository"
+    (repository / ".git").mkdir(parents=True)
+    nested = repository / "nested"
+    nested.mkdir()
+    external = tmp_path / "external" / "claude.py"
+    external.parent.mkdir()
+    external.write_text("raise SystemExit(0)\n", encoding="utf-8")
+    monkeypatch.chdir(nested)
+    monkeypatch.setenv("CLAUDE_BIN", "claude")
+    monkeypatch.setattr(owner.shutil, "which", lambda _name: str(external))
+
+    resolution = owner.resolve_provider_command("claude")
+
+    assert resolution is not None
+    assert getattr(resolution, "provenance", None) == "path-discovery"
+    assert getattr(resolution, "target", None) == external.resolve()
 
 
 @pytest.mark.parametrize(
@@ -1771,7 +1877,11 @@ def test_invalid_credential_needle_fails_before_prompt_consumption(
             "ANTHROPIC_" "API_KEY": invalid_secret,
         },
     )
-    monkeypatch.setattr(owner, "resolve_provider_command", lambda _provider: None)
+    monkeypatch.setattr(
+        owner,
+        "resolve_provider_command",
+        lambda _provider: _resolved_command(sys.executable, str(MODULE)),
+    )
     monkeypatch.setattr(
         owner,
         "prompt_bytes",
@@ -2117,6 +2227,12 @@ def test_subscription_only_claude_refusal_precedes_s1_inventory_and_all_launch_s
     monkeypatch.setattr(owner.os, "environ", {"HOME": ""})
     monkeypatch.setattr(
         owner,
+        "resolve_provider_command",
+        lambda _provider: calls.append("binary")
+        or _resolved_command(sys.executable, str(MODULE)),
+    )
+    monkeypatch.setattr(
+        owner,
         "resolve_provider_auth_configuration",
         lambda *_args, **_kwargs: (
             calls.append("credential-registry"),
@@ -2143,7 +2259,7 @@ def test_subscription_only_claude_refusal_precedes_s1_inventory_and_all_launch_s
 
     assert code == 3
     assert "commercial authentication" in capsys.readouterr().err
-    assert calls == ["credential-registry"]
+    assert calls == ["binary", "credential-registry"]
 
 
 @pytest.mark.parametrize("provider", ("codex", "claude"))
@@ -2190,7 +2306,11 @@ def test_launch_fails_closed_when_private_run_directory_cannot_be_created(
 ) -> None:
     monkeypatch.setenv("CLAUDE_PROMPTS_DIR", str((tmp_path / "captures").resolve()))
     monkeypatch.setenv("ANTHROPIC_API_KEY", "fixture")
-    monkeypatch.setattr(owner, "resolve_provider_command", lambda _provider: [sys.executable])
+    monkeypatch.setattr(
+        owner,
+        "resolve_provider_command",
+        lambda _provider: _resolved_command(sys.executable, str(MODULE)),
+    )
     monkeypatch.setattr(
         owner.tempfile,
         "mkdtemp",
