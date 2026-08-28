@@ -6,6 +6,7 @@ import importlib.util
 import io
 import json
 import shutil
+import stat
 import subprocess
 import sys
 import tarfile
@@ -570,6 +571,24 @@ def _tree_bytes(root: Path) -> dict[Path, bytes]:
     }
 
 
+def _runtime_cache_insensitive_tree_bytes(root: Path) -> dict[Path, bytes]:
+    files: dict[Path, bytes] = {}
+    for path in root.rglob("*"):
+        if not path.is_file():
+            continue
+        relative = path.relative_to(root)
+        metadata = path.lstat()
+        if (
+            stat.S_ISREG(metadata.st_mode)
+            and not path.is_symlink()
+            and relative.suffix.casefold() == ".pyc"
+            and "__pycache__" in relative.parts[:-1]
+        ):
+            continue
+        files[relative] = path.read_bytes()
+    return files
+
+
 def test_exact_stock_consultant_is_accepted_and_replaced_byte_for_byte(
     tmp_path: Path,
 ) -> None:
@@ -808,7 +827,6 @@ def test_exact_current_hybrid_global_lead_migrates_noops_and_rejects_drift(
     historical = _seed_current_hybrid_global_lead(
         installer, tmp_path / "historical" / "lead"
     )
-    current_files = _tree_bytes(current)
     historical_files = _tree_bytes(historical)
     for relative, source in CURRENT_HYBRID_GLOBAL_LEAD_OVERLAYS.items():
         assert historical_files[Path(relative)] == _historical_blob(*source)
@@ -832,7 +850,9 @@ def test_exact_current_hybrid_global_lead_migrates_noops_and_rejects_drift(
         installer._apply_canonical_skills_plan(plan, skills_root, owner, root=ROOT)
     finally:
         installer._discard_canonical_skills_plan(plan)
-    assert _tree_bytes(skills_root / "lead") == current_files
+    assert _runtime_cache_insensitive_tree_bytes(
+        skills_root / "lead"
+    ) == _runtime_cache_insensitive_tree_bytes(current)
 
     before_noop = _tree_bytes(skills_root)
     current_plan = installer._preflight_canonical_skills(
@@ -912,7 +932,9 @@ def test_exact_partial_push_gate_lead_migrates_rolls_back_and_rejects_drift(
         installer._discard_canonical_skills_plan(plan)
 
     current = _copy_current_staged_lead(installer, tmp_path / "current" / "lead")
-    assert _tree_bytes(skills_root / "lead") == _tree_bytes(current)
+    assert _runtime_cache_insensitive_tree_bytes(
+        skills_root / "lead"
+    ) == _runtime_cache_insensitive_tree_bytes(current)
     before_noop = _tree_bytes(skills_root)
     current_plan = installer._preflight_canonical_skills(
         ROOT / "src.codex" / "skills", skills_root, root=ROOT
