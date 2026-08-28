@@ -5,16 +5,16 @@ Stage 0 freezes accepted behavior before Orche 2.0 changes.
 ## Immutable source
 
 - Repository: `applicate2628/Orchestrarium`
-- Branch: `main`
+- Source branch: `main`
 - Commit: `ce2052fb773576fd6e3206c2a7e21e01852d556b`
 - Tree: `04dccf4575f17c9c5533474d2e0fd1503bfeceb7`
 - Intended signed tag: `orchestrarium-v1-parity-baseline`
 
-The pin is independent of other development branches.
+The pin is independent of every pull-request branch.
 
 ## Trusted local verifier
 
-Set two clean worktrees and the exact full candidate commit under review. The verifier tools must be external to both worktrees.
+Use two clean worktrees and an exact full candidate commit. All verifier executables must be outside both worktrees.
 
 ```bash
 set -euo pipefail
@@ -91,8 +91,18 @@ mkdir -p "$TOOL_ROOT" "$EVIDENCE_ROOT" "$OUTPUT_ROOT/runs"
 ORCHE_COMMAND_TIMEOUT_SECONDS="${ORCHE_COMMAND_TIMEOUT_SECONDS:-900}"
 test "$ORCHE_COMMAND_TIMEOUT_SECONDS" -gt 0 2>/dev/null || { echo "BLOCKED: ORCHE_COMMAND_TIMEOUT_SECONDS must be a positive integer" >&2; exit 1; }
 run_isolated() {
-  lane="$1"; repo="$2"; shift 2; lane_root="$OUTPUT_ROOT/runs/$lane"; rm -rf "$lane_root"; mkdir -p "$lane_root/home" "$lane_root/tmp"; : > "$lane_root/gitconfig"
-  (cd "$repo" && env -i PATH="$VERIFIER_PATH" HOME="$lane_root/home" USERPROFILE="$lane_root/home" TMPDIR="$lane_root/tmp" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL="$lane_root/gitconfig" PYTHONDONTWRITEBYTECODE=1 PYTHONUTF8=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 CI=1 "$VERIFIER_PYTHON" - "$ORCHE_COMMAND_TIMEOUT_SECONDS" "$@" <<'PY'
+  lane="$1"; repo="$2"; shift 2; lane_root="$OUTPUT_ROOT/runs/$lane"; rm -rf "$lane_root"
+  mkdir -p "$lane_root/home" "$lane_root/tmp" "$lane_root/appdata" "$lane_root/localappdata" \
+    "$lane_root/xdg-config" "$lane_root/xdg-cache" "$lane_root/xdg-data" "$lane_root/xdg-state" \
+    "$lane_root/codex" "$lane_root/claude" "$lane_root/gemini" "$lane_root/qwen" "$lane_root/kimi"
+  : > "$lane_root/gitconfig"
+  (cd "$repo" && env -i PATH="$VERIFIER_PATH" LANG="${LANG:-C}" LC_ALL="${LC_ALL:-C}" \
+    HOME="$lane_root/home" USERPROFILE="$lane_root/home" APPDATA="$lane_root/appdata" LOCALAPPDATA="$lane_root/localappdata" \
+    XDG_CONFIG_HOME="$lane_root/xdg-config" XDG_CACHE_HOME="$lane_root/xdg-cache" XDG_DATA_HOME="$lane_root/xdg-data" XDG_STATE_HOME="$lane_root/xdg-state" \
+    CODEX_HOME="$lane_root/codex" CLAUDE_CONFIG_DIR="$lane_root/claude" GEMINI_HOME="$lane_root/gemini" QWEN_CODE_HOME="$lane_root/qwen" KIMI_CODE_HOME="$lane_root/kimi" \
+    TMPDIR="$lane_root/tmp" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL="$lane_root/gitconfig" \
+    PYTHONDONTWRITEBYTECODE=1 PYTHONUTF8=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 CI=1 \
+    "$VERIFIER_PYTHON" - "$ORCHE_COMMAND_TIMEOUT_SECONDS" "$@" <<'PY'
 # BEGIN ORCHE_TIMEOUT_RUNNER
 import os,shlex,signal,subprocess,sys
 timeout=float(sys.argv[1]); command=sys.argv[2:]
@@ -122,11 +132,11 @@ PY
 }
 ```
 
-## Frozen tooling and evidence
+The active guard intentionally omits the historical cache-directory exclusion. Ignored Python bytecode is scanned positively. The isolated lanes do not inherit `PYTHONPATH`, `PYTHONHOME`, virtual-environment state, user plugins, application homes, or Git configuration.
 
-The historical exclusion `:(exclude,glob)**/__pycache__/**` is intentionally not part of the executable-input pathspec; ignored Python bytecode is scanned positively.
+## Frozen tooling and focused tests
 
-`baseline-pin.json` binds every frozen path to a Git blob identifier and the `git-cat-file-reviewed-tree-blob` materialization method. Generated manifests identify the frozen inventory generator by its stable path and self-computed blob identifier; `sourcePath` records the separate mutable development provenance.
+`baseline-pin.json` binds every frozen path to a Git blob and `git-cat-file-reviewed-tree-blob` materialization. Generated manifests identify the frozen inventory generator by stable path and self-computed blob; `sourcePath` records separate mutable development provenance.
 
 ```bash
 materialize_tool() {
@@ -141,47 +151,94 @@ materialize_tool inventoryGenerator "$TOOL_ROOT/build_inventory.py" || exit 1
 materialize_tool targetEffectGenerator "$TOOL_ROOT/build_target_effect_baseline.py" || exit 1
 materialize_tool pytestComparator "$TOOL_ROOT/compare_pytest_baseline.py" || exit 1
 materialize_tool commandComparator "$TOOL_ROOT/compare_command_baseline.py" || exit 1
+run_isolated focused-pin "$CANDIDATE_ROOT" "$VERIFIER_PYTHON" tests/test_orche_baseline_pin.py
+run_isolated focused-pytest "$CANDIDATE_ROOT" "$VERIFIER_PYTHON" tests/test_orche_pytest_baseline.py
+run_isolated focused-inventory "$CANDIDATE_ROOT" "$VERIFIER_PYTHON" tests/test_orche_baseline_inventory.py
+run_isolated focused-target-effect "$CANDIDATE_ROOT" "$VERIFIER_PYTHON" tests/test_orche_target_effect_baseline.py
+run_isolated focused-command "$CANDIDATE_ROOT" "$VERIFIER_PYTHON" tests/test_orche_command_baseline.py
+run_isolated focused-verifier-isolation "$CANDIDATE_ROOT" "$VERIFIER_PYTHON" tests/test_orche_verifier_isolation.py
+run_isolated focused-review-regressions "$CANDIDATE_ROOT" "$VERIFIER_PYTHON" tests/test_orche_review_regressions.py
 ```
 
-Stage 0 intentionally does **not** use GitHub Actions. Evidence remains under `.scratch/` and is not committed. Generate it with the materialized tools, then compare both clean worktrees.
+Stage 0 intentionally does **not** use GitHub Actions. Evidence remains uncommitted under `.scratch/`.
 
 ```bash
 rm -rf "$EVIDENCE_ROOT"; mkdir -p "$EVIDENCE_ROOT"
 "$VERIFIER_PYTHON" "$TOOL_ROOT/build_inventory.py" --repo-root "$CANDIDATE_ROOT" --repository applicate2628/Orchestrarium --ref "$PIN_COMMIT" --output-dir "$EVIDENCE_ROOT"
 "$VERIFIER_PYTHON" "$TOOL_ROOT/build_target_effect_baseline.py" --inventory "$EVIDENCE_ROOT/capability-inventory.json" --output "$EVIDENCE_ROOT/target-effect-baseline.json"
-"$VERIFIER_PYTHON" "$TOOL_ROOT/compare_pytest_baseline.py" --baseline-junit "$OUTPUT_ROOT/baseline.xml" --candidate-junit "$OUTPUT_ROOT/candidate.xml" --baseline-exit "$baseline_exit" --candidate-exit "$candidate_exit" --baseline-ref "$BASELINE_REF" --candidate-ref "$CANDIDATE_REF" --baseline-root "$BASELINE_ROOT" --candidate-root "$CANDIDATE_ROOT" --volatile-pattern 'agents-mode-installer-regression[/\\][0-9a-f]{32}' --output "$OUTPUT_ROOT/pytest-comparison.json"
 ```
 
-Only Pytest exits `0` and `1` are comparable; operational exits and timeout `124` block. Successful diagnostics are compared as well as failures. A validator failure may resolve only with its specific terminal success marker; an empty or unconditional `exit 0` is not evidence.
+## Pytest differential
+
+Only Pytest exits `0` and `1` are comparable; operational exits, timeout `124`, missing fresh JUnit XML, and inconsistent exit/report states block. Successful diagnostics are compared as well as failures.
+
+```bash
+rm -f "$OUTPUT_ROOT/baseline.xml" "$OUTPUT_ROOT/candidate.xml" "$OUTPUT_ROOT/pytest-comparison.json"
+set +e
+run_isolated pytest-baseline "$BASELINE_ROOT" "$VERIFIER_PYTHON" -m pytest --junitxml="$OUTPUT_ROOT/baseline.xml"; baseline_exit=$?
+set -e
+test "$baseline_exit" -ne 124 || { echo "BLOCKED: baseline Pytest lane timed out" >&2; exit 2; }
+set +e
+run_isolated pytest-candidate "$CANDIDATE_ROOT" "$VERIFIER_PYTHON" -m pytest --junitxml="$OUTPUT_ROOT/candidate.xml"; candidate_exit=$?
+set -e
+test "$candidate_exit" -ne 124 || { echo "BLOCKED: candidate Pytest lane timed out" >&2; exit 2; }
+test -f "$OUTPUT_ROOT/baseline.xml" || exit 2
+test -f "$OUTPUT_ROOT/candidate.xml" || exit 2
+"$VERIFIER_PYTHON" "$TOOL_ROOT/compare_pytest_baseline.py" \
+  --baseline-junit "$OUTPUT_ROOT/baseline.xml" --candidate-junit "$OUTPUT_ROOT/candidate.xml" \
+  --baseline-exit "$baseline_exit" --candidate-exit "$candidate_exit" \
+  --baseline-ref "$BASELINE_REF" --candidate-ref "$CANDIDATE_REF" \
+  --baseline-root "$BASELINE_ROOT" --candidate-root "$CANDIDATE_ROOT" \
+  --volatile-pattern 'agents-mode-installer-regression[/\\][0-9a-f]{32}' \
+  --output "$OUTPUT_ROOT/pytest-comparison.json"
+```
+
+## Validator command differential
+
+Successful diagnostics and failure diagnostics are both compared. Operational exits always block. A historical failure resolves only when the candidate emits the validator-specific terminal marker; an empty or unconditional `exit 0` is not evidence.
 
 ```bash
 compare_validator() {
   name="$1"; success_pattern="$2"; shift 2
-  "$VERIFIER_PYTHON" "$TOOL_ROOT/compare_command_baseline.py" --name "$name" --baseline-exit "$baseline_exit" --candidate-exit "$candidate_exit" --baseline-log "$OUTPUT_ROOT/$name-baseline.log" --candidate-log "$OUTPUT_ROOT/$name-candidate.log" --baseline-root "$BASELINE_ROOT" --candidate-root "$CANDIDATE_ROOT" --baseline-ref "$BASELINE_REF" --candidate-ref "$CANDIDATE_REF" --success-pattern "$success_pattern" --semantic-failure-exit 1 --output "$OUTPUT_ROOT/$name-comparison.json"
+  baseline_log="$OUTPUT_ROOT/$name-baseline.log"; candidate_log="$OUTPUT_ROOT/$name-candidate.log"
+  set +e; run_isolated "$name-baseline" "$BASELINE_ROOT" "$@" >"$baseline_log" 2>&1; baseline_exit=$?; set -e
+  test "$baseline_exit" -ne 124 || { echo "BLOCKED: baseline validator timed out: $name" >&2; return 2; }
+  set +e; run_isolated "$name-candidate" "$CANDIDATE_ROOT" "$@" >"$candidate_log" 2>&1; candidate_exit=$?; set -e
+  test "$candidate_exit" -ne 124 || { echo "BLOCKED: candidate validator timed out: $name" >&2; return 2; }
+  volatile_args=(); test "$name" != agents-mode-installers || volatile_args=(--volatile-pattern 'agents-mode-installer-regression[/\\][0-9a-f]{32}')
+  "$VERIFIER_PYTHON" "$TOOL_ROOT/compare_command_baseline.py" --name "$name" \
+    --baseline-exit "$baseline_exit" --candidate-exit "$candidate_exit" \
+    --baseline-log "$baseline_log" --candidate-log "$candidate_log" \
+    --baseline-root "$BASELINE_ROOT" --candidate-root "$CANDIDATE_ROOT" \
+    --baseline-ref "$BASELINE_REF" --candidate-ref "$CANDIDATE_REF" \
+    --success-pattern "$success_pattern" --semantic-failure-exit 1 \
+    --output "$OUTPUT_ROOT/$name-comparison.json" "${volatile_args[@]}"
 }
 compare_validator agents-spine '(?m)^RESULT: PASS$' "$VERIFIER_PYTHON" scripts/validate-agents-spine.py --spine shared/AGENTS.shared.md
-compare_validator codex-pack PASS "$VERIFIER_BASH" src.codex/skills/lead/scripts/validate-skill-pack.sh
-compare_validator claude-pack PASS "$VERIFIER_BASH" src.claude/agents/scripts/validate-skill-pack.sh
-compare_validator gemini-pack PASS "$VERIFIER_BASH" src.gemini/scripts/validate-pack.sh
-compare_validator qwen-pack PASS "$VERIFIER_BASH" src.qwen/scripts/validate-pack.sh
-compare_validator agents-mode-docs PASS "$VERIFIER_PYTHON" scripts/sync-agents-mode-docs.py --root . --check
-compare_validator universal-hooks PASS "$VERIFIER_PYTHON" scripts/sync-universal-hooks.py --check
-compare_validator agents-mode-installers PASS "$VERIFIER_PYTHON" scripts/validate-agents-mode-installers.py --root .
+compare_validator codex-pack '(?m)^VALIDATION PASSED(?: \(with warnings\))?$' "$VERIFIER_BASH" src.codex/skills/lead/scripts/validate-skill-pack.sh
+compare_validator claude-pack '(?m)^\s*RESULT: PASS(?: with warnings)?$' "$VERIFIER_BASH" src.claude/agents/scripts/validate-skill-pack.sh
+compare_validator gemini-pack '(?m)^PASS: Gemini .+ tree present at .+$' "$VERIFIER_BASH" src.gemini/scripts/validate-pack.sh
+compare_validator qwen-pack '(?m)^PASS: Qwen .+ tree present at .+$' "$VERIFIER_BASH" src.qwen/scripts/validate-pack.sh
+compare_validator agents-mode-docs '(?m)^PASS: agents-mode docs are synced$' "$VERIFIER_PYTHON" scripts/sync-agents-mode-docs.py --root . --check
+compare_validator universal-hooks '(?m)^PASS: universal-hooks\b.*$' "$VERIFIER_PYTHON" scripts/sync-universal-hooks.py --check
+compare_validator agents-mode-installers '(?m)^PASS: agents-mode installer regression validated$' "$VERIFIER_PYTHON" scripts/validate-agents-mode-installers.py --root .
 ```
 
 ## Publication gate
 
-A distinct human `$knowledge-archivist` must approve after `python scripts/check-publication-gate.py`, staged-diff checks, and leak review. Only then may the owner create and verify the signed tag and run `git push origin refs/tags/orchestrarium-v1-parity-baseline:refs/tags/orchestrarium-v1-parity-baseline`.
+A distinct human `$knowledge-archivist` must approve after `$lead` runs `python scripts/check-publication-gate.py`, `git diff --cached --check`, and leak review. Only then may the owner create and verify the signed tag and run `git push origin refs/tags/orchestrarium-v1-parity-baseline:refs/tags/orchestrarium-v1-parity-baseline`.
 
 ## Terms and Abbreviations
 
 - **Bash:** Bourne Again Shell.
 - **CLI:** Command-Line Interface.
+- **GPG:** GNU Privacy Guard.
 - **Git blob:** immutable Git file-content object.
 - **JUnit XML:** machine-readable test report.
 - **PATH:** executable search list.
 - **POSIX:** Portable Operating System Interface.
 - **Pytest:** Python test runner.
-- **SHA:** Secure Hash Algorithm.
+- **SHA-256:** Secure Hash Algorithm 256-bit.
+- **SSH:** Secure Shell.
 - **UUID:** Universally Unique Identifier.
 - **V1:** Version 1.
