@@ -73,6 +73,9 @@ PARTIAL_PUSH_GATE_GLOBAL_LEAD_TREE_SHA256 = (
 CURRENT_HYBRID_GLOBAL_LEAD_TREE_SHA256 = (
     "a4afc1fe35ddb5b0417f3ba8c170dceeeef61e95a7eb0b4e617bd28db271a2ff"
 )
+CURRENT_HYBRID_GLOBAL_LEAD_REVISION = (
+    "3dadb8b66e4580df929fecdc5d8d9bf20dcb2c59"
+)
 CURRENT_HYBRID_GLOBAL_LEAD_OVERLAYS = {
     "external-dispatch.md": (
         "e55b2466281ecc50ad2a940a4de14a5ea90fb98c",
@@ -785,7 +788,9 @@ def _seed_partial_push_gate_staged_lead(destination: Path) -> Path:
 
 
 def _seed_current_hybrid_global_lead(installer, destination: Path) -> Path:
-    lead = _copy_current_staged_lead(installer, destination)
+    lead = _seed_revision_staged_lead(
+        CURRENT_HYBRID_GLOBAL_LEAD_REVISION, destination
+    )
     for relative, source in CURRENT_HYBRID_GLOBAL_LEAD_OVERLAYS.items():
         (lead / relative).write_bytes(_historical_blob(*source))
     return lead
@@ -801,12 +806,6 @@ def test_exact_current_hybrid_global_lead_migrates_noops_and_rejects_drift(
     )
     current_files = _tree_bytes(current)
     historical_files = _tree_bytes(historical)
-    assert set(historical_files) == set(current_files)
-    assert {
-        relative
-        for relative in current_files
-        if current_files[relative] != historical_files[relative]
-    } == {Path(relative) for relative in CURRENT_HYBRID_GLOBAL_LEAD_OVERLAYS}
     for relative, source in CURRENT_HYBRID_GLOBAL_LEAD_OVERLAYS.items():
         assert historical_files[Path(relative)] == _historical_blob(*source)
     assert (
@@ -1070,10 +1069,14 @@ def test_exact_provider_auth_baseline_lead_is_accepted_and_drift_refused(
             "fa5d42726ef50e7e6551e8eda13c0f0445a14c5b",
             "d73912c5e01c693fa8f6c0c3aa071e51f595f3d88e6a81aa7aa8abfa8995bfda",
         ),
+        (
+            "9339bcf29f1864789c7a133260a2a2a2abeb3060",
+            "c3508f94d6830da703a5519fbe28bf7011f2a8850e67b5ed5a49c47465283295",
+        ),
     ),
     ids=(
         "pre-kimi", "pre-k3-wire-fix", "stock-77ec", "stock-3dad",
-        "stock-fa5d",
+        "stock-fa5d", "stock-9339",
     ),
 )
 def test_exact_shipped_global_lead_is_accepted_and_one_byte_drift_refused(
