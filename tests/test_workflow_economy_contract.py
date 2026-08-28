@@ -102,16 +102,23 @@ class TestWorkflowEconomyContract(unittest.TestCase):
         for required in (
             "**Functional-first delivery (binding).**",
             "shared/references/spine/functional-first-delivery.md",
-            "**Primary acceptance oracle.**",
-            "**Functional-first boundary; not code-first.**",
-            "**Bounded test-driven development.**",
-            "**Evidence-connected safety stop.**",
-            "**Regression gate.**",
-            "**Hardening boundary.**",
-            "**One final QA package.**",
-            "**Correction budget and stable lineage.**",
+            ": detail; spine wins",
+            "criteria/contracts; scenario/env/steps; success/failure; safety/cleanup; evidence/owner; source/config/env",
+            "actual=`Functional PASS`; scope=>new ID/gates; implementation cannot revise",
+            "Variation (requirement/second-consumer/evolution)=>one-owner stable/local seam; else no hypothetical",
+            "Needed designs/lifecycle; urgency no bypass; local correction=no ceremony",
+            "confidentiality/integrity/authentication/authorization/trust/injection/untrusted-execution/data-loss/corruption/irreversible/publication=>fail closed",
+            "containment/remediation only; no publication authority",
+            "Hardening post Functional+Regression PASS only, else nonveto; visible success/failure=>functional/restart",
+            "ambiguity=>reviewer; else nonveto; no implementer/$lead waiver",
+            "new=hypothesis+material difference+falsifier+`$lead` acceptance",
+            "supersession/relabel/split/merge/derived never reset lineage/budget/gate-backlog",
             "**Publication safety unchanged.**",
-            "**Multi-model commission.**",
+            ">=2 base-model families",
+            "runtime IDs; unavailable=`BLOCKED`",
+            "Independent premise/boundary/consequence/lifecycle/coupling",
+            "sole=PAO/veto/evidence",
+            "delta=>members re-review",
         ):
             with self.subTest(anchor=required):
                 self.assertIn(required, spine)
@@ -202,13 +209,14 @@ class TestWorkflowEconomyContract(unittest.TestCase):
                 self.assertIn(required, extract)
 
     def test_functional_first_policy_has_one_canonical_owner(self) -> None:
-        owner_marker = (
-            "**Primary acceptance oracle.** Before implementation, freeze a "
-            "Primary Acceptance Oracle (PAO) specification"
-        )
+        owner_marker = "**Functional-first delivery (binding).**"
+        spine = self._read(SPINE)
         extract = self._read(FUNCTIONAL_FIRST_EXTRACT)
-        self.assertEqual(extract.count(owner_marker), 1)
-        for projection in (SPINE, METHODOLOGY, *PROJECTIONS):
+        self.assertEqual(spine.count(owner_marker), 1)
+        self.assertNotIn(owner_marker, extract)
+        self.assertIn("nonbinding elaboration", extract)
+        self.assertIn("spine is the self-sufficient,\ncanonical binding owner", extract)
+        for projection in (METHODOLOGY, *PROJECTIONS):
             with self.subTest(projection=projection):
                 self.assertNotIn(owner_marker, self._read(projection))
 

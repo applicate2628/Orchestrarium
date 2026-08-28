@@ -1,10 +1,10 @@
 # Functional-first delivery — full reference
 
-This is the detailed operational contract for the binding functional-first
-delivery anchors in `shared/AGENTS.shared.md`. The spine is self-sufficient and
-binding; this extract preserves the full acceptance, architecture, safety,
-quality, correction-lineage, and commission detail without becoming a second
-policy owner.
+This is a nonbinding elaboration and detail snapshot for the functional-first
+delivery anchors in `shared/AGENTS.shared.md`. The spine is the self-sufficient,
+canonical binding owner and wins on any disagreement; this extract preserves
+the full acceptance, architecture, safety, quality, correction-lineage, and
+commission detail without creating a second policy owner.
 
 1. **Primary acceptance oracle.** Before implementation, freeze a Primary Acceptance Oracle (PAO) specification covering every admitted acceptance criterion and external contract and naming, for each, the exact target scenario and environment, invocation and steps, observable success and required failure semantics, safety preconditions, cleanup, evidence markers, owner, and method that identifies the evaluated source, configuration, and environment snapshot. Every PAO execution records the actual source, configuration, and environment snapshot. Mock or unit evidence cannot earn `Functional PASS`. A PAO specification or admitted functional scope revision revises the PAO ID and invalidates the affected gates; implementation alone never revises the PAO.
 
