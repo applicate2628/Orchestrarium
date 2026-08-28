@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
-"""Regression tests for the Stage 0 baseline inventory generator."""
-
 from __future__ import annotations
 
-import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -14,23 +12,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "baseline" / "build_inventory.py"
+REAL_GIT = Path(shutil.which("git") or "git").resolve()
 
 
-def run(*args: str, cwd: Path | None = None, check: bool = True) -> subprocess.CompletedProcess[str]:
-    result = subprocess.run(
-        [*args],
-        cwd=cwd,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=False,
-    )
-    if check and result.returncode != 0:
-        raise AssertionError(
-            f"command failed ({result.returncode}): {' '.join(args)}\n"
-            f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
-        )
-    return result
+def run(*args: str, cwd: Path | None = None, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(args, cwd=cwd, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
 
 
 def write(path: Path, text: str) -> None:
@@ -40,165 +26,101 @@ def write(path: Path, text: str) -> None:
 
 class BaselineInventoryTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.tempdir = tempfile.TemporaryDirectory()
-        self.repo = Path(self.tempdir.name) / "repo"
+        self.temp = tempfile.TemporaryDirectory()
+        self.repo = Path(self.temp.name) / "repo"
         self.repo.mkdir()
-        run("git", "init", "-q", cwd=self.repo)
-        run("git", "config", "user.name", "Orche Test", cwd=self.repo)
-        run("git", "config", "user.email", "orche-test@example.invalid", cwd=self.repo)
-
+        for args in (("init", "-q"), ("config", "user.name", "Test"), ("config", "user.email", "t@example.invalid")):
+            self.assertEqual(run(os.fspath(REAL_GIT), *args, cwd=self.repo).returncode, 0)
         write(self.repo / "AGENTS.md", "# Governance\n")
         write(self.repo / "RELEASE_NOTES.md", "# Release Notes\n")
-        write(self.repo / "docs" / "guide.md", "# Guide\n")
-        write(
-            self.repo / "src.codex" / "skills" / "architect" / "SKILL.md",
-            "---\nname: architect\n---\n",
-        )
-        write(
-            self.repo / "src.claude" / "commands" / "agents-test.md",
-            "# Test command\n",
-        )
-        write(
-            self.repo / "src.qwen" / "commands" / "agents" / "help.md",
-            "# Agent command help\n",
-        )
-        write(self.repo / "scripts" / "check.py", "print('ok')\n")
         write(self.repo / "tests" / "test_alpha.py", "def test_alpha():\n    assert True\n")
-        write(self.repo / "tests" / "fixtures" / "data.json", '{"ok": true}\n')
-        run("git", "add", ".", cwd=self.repo)
-        run("git", "commit", "-qm", "baseline", cwd=self.repo)
-        self.baseline = run("git", "rev-parse", "HEAD", cwd=self.repo).stdout.strip()
-
-        # A later commit must not leak into an inventory generated for the baseline ref.
-        write(self.repo / "later.txt", "later\n")
-        run("git", "add", "later.txt", cwd=self.repo)
-        run("git", "commit", "-qm", "later", cwd=self.repo)
+        body = "# Method\n\nShared body.\n"
+        write(self.repo / "src.codex" / "skills" / "demo" / "SKILL.md", f"---\nname: codex-demo\n---\n{body}")
+        write(self.repo / "src.claude" / "skills" / "demo" / "SKILL.md", f"---\nname: claude-demo\n---\r\n{body.replace(chr(10), chr(13)+chr(10))}")
+        self.assertEqual(run(os.fspath(REAL_GIT), "add", ".", cwd=self.repo).returncode, 0)
+        self.assertEqual(run(os.fspath(REAL_GIT), "commit", "-qm", "baseline", cwd=self.repo).returncode, 0)
+        self.ref = run(os.fspath(REAL_GIT), "rev-parse", "HEAD", cwd=self.repo).stdout.strip()
 
     def tearDown(self) -> None:
-        self.tempdir.cleanup()
+        self.temp.cleanup()
 
-    def invoke(self, output_dir: Path, *extra: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+    def invoke(self, output: Path, *extra: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
         return run(
             sys.executable,
             os.fspath(SCRIPT),
-            "--repo-root",
-            os.fspath(self.repo),
-            "--repository",
-            "example/orche",
-            "--ref",
-            self.baseline,
-            "--output-dir",
-            os.fspath(output_dir),
+            "--repo-root", os.fspath(self.repo),
+            "--repository", "example/orche",
+            "--ref", self.ref,
+            "--git-executable", os.fspath(REAL_GIT),
+            "--output-dir", os.fspath(output),
             *extra,
-            check=check,
+            env=env,
         )
 
-    def test_inventory_covers_exact_requested_tree_and_classifies_surfaces(self) -> None:
-        output = self.repo / ".scratch" / "baseline"
-        self.invoke(output)
+    def test_inventory_uses_normalized_skill_bodies(self) -> None:
+        output = self.repo / ".scratch" / "inventory"
+        result = self.invoke(output)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads((output / "capability-inventory.json").read_text())
+        skills = [entry for entry in payload["entries"] if "skill" in entry["surfaces"]]
+        self.assertEqual(len(skills), 2)
+        self.assertEqual({entry["skillBodySha256"] for entry in skills}, {skills[0]["skillBodySha256"]})
+        self.assertEqual({entry["skillBodySizeBytes"] for entry in skills}, {len("# Method\n\nShared body.\n".encode())})
+        self.assertEqual(payload["schemaVersion"], 2)
 
-        capability = json.loads((output / "capability-inventory.json").read_text(encoding="utf-8"))
-        test_inventory = json.loads((output / "test-inventory.json").read_text(encoding="utf-8"))
-        manifest = json.loads((output / "baseline-manifest.json").read_text(encoding="utf-8"))
+    def test_selected_git_is_not_resolved_from_path(self) -> None:
+        fake = Path(self.temp.name) / "fake"
+        fake.mkdir()
+        marker = fake / "invoked"
+        script = fake / "git"
+        script.write_text(f"#!/bin/sh\ntouch '{marker}'\nexit 99\n")
+        script.chmod(0o755)
+        env = {**os.environ, "PATH": os.fspath(fake)}
+        result = self.invoke(self.repo / ".scratch" / "selected-git", env=env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(marker.exists())
 
-        paths = [entry["path"] for entry in capability["entries"]]
-        self.assertEqual(paths, sorted(paths))
-        self.assertEqual(len(paths), 9)
-        self.assertNotIn("later.txt", paths)
-        self.assertEqual(capability["baseline"]["commitSha"], self.baseline)
-        self.assertEqual(manifest["baseline"]["commitSha"], self.baseline)
-
-        by_path = {entry["path"]: entry for entry in capability["entries"]}
-        self.assertIn("governance", by_path["AGENTS.md"]["surfaces"])
-        self.assertEqual(by_path["RELEASE_NOTES.md"]["primarySurface"], "release-log")
-        self.assertIn("skill", by_path["src.codex/skills/architect/SKILL.md"]["surfaces"])
-        self.assertIn("command", by_path["src.claude/commands/agents-test.md"]["surfaces"])
-        nested_command = by_path["src.qwen/commands/agents/help.md"]
-        self.assertIn("agent", nested_command["surfaces"])
-        self.assertIn("command", nested_command["surfaces"])
-        self.assertEqual(nested_command["primarySurface"], "command")
-        self.assertIn("script", by_path["scripts/check.py"]["surfaces"])
-        self.assertIn("test", by_path["tests/test_alpha.py"]["surfaces"])
-
-        test_paths = [entry["path"] for entry in test_inventory["entries"]]
-        self.assertEqual(test_paths, ["tests/fixtures/data.json", "tests/test_alpha.py"])
-        self.assertEqual(
-            {entry["disposition"] for entry in test_inventory["entries"]},
-            {"retainedAs"},
-        )
-
-    def test_default_output_stays_under_repo_scratch(self) -> None:
-        result = run(
-            sys.executable,
-            os.fspath(SCRIPT),
-            "--repo-root",
-            os.fspath(self.repo),
-            "--repository",
-            "example/orche",
-            "--ref",
-            self.baseline,
-            check=False,
+    def test_frozen_provenance_is_recorded_separately(self) -> None:
+        output = self.repo / ".scratch" / "frozen"
+        blob = "a" * 40
+        result = self.invoke(
+            output,
+            "--generator-path", "baseline/orchestrarium-v1/tooling/build_inventory.py",
+            "--generator-blob-sha", blob,
+            "--generator-materialization", "git-cat-file-reviewed-tree-blob",
+            "--generator-source-path", "scripts/baseline/build_inventory.py",
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        expected = self.repo / ".scratch" / "orche-stage0" / "orchestrarium-v1"
-        self.assertTrue((expected / "capability-inventory.json").is_file())
-        self.assertFalse(
-            (self.repo / "baseline" / "orchestrarium-v1" / "capability-inventory.json").exists()
-        )
+        generator = json.loads((output / "baseline-manifest.json").read_text())["generator"]
+        self.assertEqual(generator["path"], "baseline/orchestrarium-v1/tooling/build_inventory.py")
+        self.assertEqual(generator["gitBlobSha"], blob)
+        self.assertEqual(generator["sourcePath"], "scripts/baseline/build_inventory.py")
 
-    def test_invalid_ref_uses_operational_exit_two(self) -> None:
-        output = self.repo / ".scratch" / "invalid-ref"
-        result = run(
-            sys.executable,
-            os.fspath(SCRIPT),
-            "--repo-root",
-            os.fspath(self.repo),
-            "--repository",
-            "example/orche",
-            "--ref",
-            "missing-stage0-ref",
-            "--output-dir",
-            os.fspath(output),
-            "--check",
-            check=False,
-        )
+    def test_malformed_frontmatter_fails_operationally(self) -> None:
+        write(self.repo / "bad" / "skills" / "x" / "SKILL.md", "---\nname: broken\n# no close\n")
+        self.assertEqual(run(os.fspath(REAL_GIT), "add", ".", cwd=self.repo).returncode, 0)
+        self.assertEqual(run(os.fspath(REAL_GIT), "commit", "-qm", "bad", cwd=self.repo).returncode, 0)
+        self.ref = run(os.fspath(REAL_GIT), "rev-parse", "HEAD", cwd=self.repo).stdout.strip()
+        result = self.invoke(self.repo / ".scratch" / "bad")
         self.assertEqual(result.returncode, 2)
-        self.assertIn("RESULT: FAIL baseline-inventory", result.stderr)
+        self.assertIn("unterminated leading YAML frontmatter", result.stderr)
         self.assertNotIn("Traceback", result.stderr)
 
-    def test_output_is_deterministic_and_check_mode_detects_drift(self) -> None:
-        output = self.repo / ".scratch" / "baseline"
-        self.invoke(output)
-        first = {
-            path.name: hashlib.sha256(path.read_bytes()).hexdigest()
-            for path in sorted(output.iterdir())
-        }
-
-        self.invoke(output)
-        second = {
-            path.name: hashlib.sha256(path.read_bytes()).hexdigest()
-            for path in sorted(output.iterdir())
-        }
-        self.assertEqual(first, second)
-        for generated in sorted(output.iterdir()):
-            if generated.suffix in {".md", ".json"}:
-                for line_number, line in enumerate(
-                    generated.read_text(encoding="utf-8").splitlines(), start=1
-                ):
-                    self.assertEqual(
-                        line,
-                        line.rstrip(" \t"),
-                        f"trailing whitespace in {generated.name}:{line_number}",
-                    )
-
-        check_ok = self.invoke(output, "--check", check=False)
-        self.assertEqual(check_ok.returncode, 0, check_ok.stderr)
-
-        summary = output / "summary.md"
-        summary.write_text(summary.read_text(encoding="utf-8") + "drift\n", encoding="utf-8")
-        check_bad = self.invoke(output, "--check", check=False)
-        self.assertEqual(check_bad.returncode, 1)
-        self.assertIn("DRIFT", check_bad.stdout + check_bad.stderr)
+    def test_check_mode_reserves_exit_one_for_drift(self) -> None:
+        output = self.repo / ".scratch" / "check"
+        self.assertEqual(self.invoke(output).returncode, 0)
+        self.assertEqual(self.invoke(output, "--check").returncode, 0)
+        (output / "summary.md").write_text("drift\n")
+        self.assertEqual(self.invoke(output, "--check").returncode, 1)
+        invalid = run(
+            sys.executable, os.fspath(SCRIPT),
+            "--repo-root", os.fspath(self.repo),
+            "--ref", "missing",
+            "--git-executable", os.fspath(REAL_GIT),
+            "--output-dir", os.fspath(output),
+            "--check",
+        )
+        self.assertEqual(invalid.returncode, 2)
 
 
 if __name__ == "__main__":

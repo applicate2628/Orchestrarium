@@ -1,19 +1,22 @@
 #!/usr/bin/env python3
 """Build deterministic Stage 0 target-effect metrics from capability inventory."""
-
 from __future__ import annotations
 
 import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 import tempfile
 from collections import Counter
 from pathlib import Path, PurePosixPath
 from typing import Mapping, Sequence
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+INVENTORY_SCHEMA_VERSION = 2
+SKILL_BODY_NORMALIZATION = "utf8-strict+lf+leading-yaml-frontmatter-stripped-v1"
+SHA256 = re.compile(r"[0-9a-f]{64}")
 
 
 class TargetEffectError(RuntimeError):
@@ -35,7 +38,7 @@ def _load_inventory(path: Path) -> dict[str, object]:
         raise TargetEffectError(f"cannot read capability inventory {path}: {exc}") from exc
     if not isinstance(payload, dict):
         raise TargetEffectError("capability inventory top level must be an object")
-    if payload.get("schemaVersion") != 1:
+    if payload.get("schemaVersion") != INVENTORY_SCHEMA_VERSION:
         raise TargetEffectError(
             f"unsupported capability inventory schemaVersion: {payload.get('schemaVersion')!r}"
         )
@@ -44,8 +47,8 @@ def _load_inventory(path: Path) -> dict[str, object]:
     if not isinstance(entries, list) or not isinstance(baseline, dict):
         raise TargetEffectError("capability inventory lacks entries or baseline")
     declared_digest = payload.get("inventorySha256")
-    if not isinstance(declared_digest, str):
-        raise TargetEffectError("capability inventory lacks inventorySha256")
+    if not isinstance(declared_digest, str) or not SHA256.fullmatch(declared_digest):
+        raise TargetEffectError("capability inventory lacks a valid inventorySha256")
     semantic_payload = dict(payload)
     semantic_payload.pop("inventorySha256", None)
     computed_digest = _sha256_bytes(_canonical_json(semantic_payload).encode("utf-8"))
@@ -78,6 +81,29 @@ def _entry_surfaces(entry: Mapping[str, object]) -> list[str]:
     return value
 
 
+def _content_digest(entry: Mapping[str, object]) -> str:
+    value = entry.get("contentSha256")
+    if not isinstance(value, str) or not SHA256.fullmatch(value):
+        raise TargetEffectError(f"invalid contentSha256 for {_entry_path(entry)!r}")
+    return value
+
+
+def _skill_body(entry: Mapping[str, object]) -> tuple[str, int]:
+    path = _entry_path(entry)
+    normalization = entry.get("skillBodyNormalization")
+    digest = entry.get("skillBodySha256")
+    size = entry.get("skillBodySizeBytes")
+    if normalization != SKILL_BODY_NORMALIZATION:
+        raise TargetEffectError(
+            f"invalid skillBodyNormalization for {path!r}: {normalization!r}"
+        )
+    if not isinstance(digest, str) or not SHA256.fullmatch(digest):
+        raise TargetEffectError(f"invalid skillBodySha256 for {path!r}")
+    if not isinstance(size, int) or size < 0:
+        raise TargetEffectError(f"invalid skillBodySizeBytes for {path!r}: {size!r}")
+    return digest, size
+
+
 def _is_instruction_entrypoint(path_text: str) -> bool:
     path = PurePosixPath(path_text)
     if path.name.lower() not in {
@@ -94,16 +120,10 @@ def _is_instruction_entrypoint(path_text: str) -> bool:
         for part in path.parts[:-1]
     ):
         return False
-    return (
-        len(path.parts) == 1
-        or path.parts[0] == "shared"
-        or path.parts[0].startswith("src.")
-    )
+    return len(path.parts) == 1 or path.parts[0] == "shared" or path.parts[0].startswith("src.")
 
 
-def _is_manual_reconciliation_artifact(
-    path_text: str, surfaces: Sequence[str]
-) -> bool:
+def _is_manual_reconciliation_artifact(path_text: str, surfaces: Sequence[str]) -> bool:
     return (
         "reconciliation" in path_text.lower()
         and "documentation" in surfaces
@@ -113,31 +133,30 @@ def _is_manual_reconciliation_artifact(
 
 def build_payload(inventory_path: Path) -> dict[str, object]:
     inventory = _load_inventory(inventory_path)
-    entries = inventory["entries"]
-    assert isinstance(entries, list)
-    typed_entries: list[Mapping[str, object]] = []
-    for raw_entry in entries:
-        if not isinstance(raw_entry, dict):
+    raw_entries = inventory["entries"]
+    assert isinstance(raw_entries, list)
+    entries: list[Mapping[str, object]] = []
+    for raw in raw_entries:
+        if not isinstance(raw, dict):
             raise TargetEffectError("capability inventory contains a non-object entry")
-        typed_entries.append(raw_entry)
+        entries.append(raw)
 
     baseline = inventory["baseline"]
     assert isinstance(baseline, dict)
     providers: dict[str, dict[str, int]] = {}
-    skill_digests: list[str] = []
+    skill_body_digests: list[str] = []
+    skill_body_sizes: list[int] = []
     instruction_entrypoints: list[dict[str, object]] = []
     legacy_settings: list[dict[str, object]] = []
     reconciliation_artifacts: list[dict[str, object]] = []
     tracked_bytes = 0
     surface_counts: Counter[str] = Counter()
 
-    for entry in typed_entries:
+    for entry in entries:
         path = _entry_path(entry)
         size = _entry_size(entry)
         surfaces = _entry_surfaces(entry)
-        digest = entry.get("contentSha256")
-        if not isinstance(digest, str):
-            raise TargetEffectError(f"invalid contentSha256 for {path!r}")
+        digest = _content_digest(entry)
         tracked_bytes += size
         surface_counts.update(surfaces)
         for surface in surfaces:
@@ -157,7 +176,9 @@ def build_payload(inventory_path: Path) -> dict[str, object]:
             if "skill" in surfaces:
                 metrics["skillBodies"] += 1
         if "skill" in surfaces:
-            skill_digests.append(digest)
+            body_digest, body_size = _skill_body(entry)
+            skill_body_digests.append(body_digest)
+            skill_body_sizes.append(body_size)
         if _is_instruction_entrypoint(path):
             instruction_entrypoints.append(
                 {"contentSha256": digest, "path": path, "sizeBytes": size}
@@ -171,11 +192,10 @@ def build_payload(inventory_path: Path) -> dict[str, object]:
                 {"contentSha256": digest, "path": path, "sizeBytes": size}
             )
 
-    skill_digest_counts = Counter(skill_digests)
-    duplicate_bodies = sum(count - 1 for count in skill_digest_counts.values() if count > 1)
-    test_entries = [entry for entry in typed_entries if "test" in _entry_surfaces(entry)]
+    skill_counts = Counter(skill_body_digests)
+    duplicate_bodies = sum(count - 1 for count in skill_counts.values() if count > 1)
+    test_entries = [entry for entry in entries if "test" in _entry_surfaces(entry)]
     inventory_bytes = inventory_path.read_bytes()
-
     return {
         "schemaVersion": SCHEMA_VERSION,
         "status": "BASELINE_MEASURED_WITH_RUNTIME_GAPS",
@@ -188,25 +208,22 @@ def build_payload(inventory_path: Path) -> dict[str, object]:
             "deterministic": True,
             "inputInventoryFileSha256": _sha256_bytes(inventory_bytes),
             "inputInventorySemanticSha256": inventory.get("inventorySha256"),
-            "method": "tracked-git-leaf-metadata",
+            "method": "tracked-git-leaf-metadata+normalized-skill-bodies",
             "rawSourceBodiesStored": False,
+            "skillBodyNormalization": SKILL_BODY_NORMALIZATION,
         },
         "repositoryShape": {
             "trackedBytes": tracked_bytes,
-            "trackedLeafEntries": len(typed_entries),
+            "trackedLeafEntries": len(entries),
             "testBytes": sum(_entry_size(entry) for entry in test_entries),
             "testEntries": len(test_entries),
             "providerPackCount": len(providers),
             "providerPacks": {key: providers[key] for key in sorted(providers)},
             "skillBodies": {
-                "bytes": sum(
-                    _entry_size(entry)
-                    for entry in typed_entries
-                    if "skill" in _entry_surfaces(entry)
-                ),
+                "bytes": sum(skill_body_sizes),
                 "duplicateBodiesByDigest": duplicate_bodies,
-                "total": len(skill_digests),
-                "uniqueContentDigests": len(skill_digest_counts),
+                "total": len(skill_body_digests),
+                "uniqueBodyDigests": len(skill_counts),
             },
             "instructionEntrypoints": sorted(
                 instruction_entrypoints, key=lambda item: str(item["path"])
@@ -270,7 +287,7 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    args = parse_args(argv or sys.argv[1:])
+    args = parse_args(sys.argv[1:] if argv is None else argv)
     try:
         expected = _canonical_json(build_payload(args.inventory)).encode("utf-8")
         if args.check:

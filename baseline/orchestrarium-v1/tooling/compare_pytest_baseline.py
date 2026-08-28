@@ -1,538 +1,135 @@
 #!/usr/bin/env python3
-"""Compare candidate pytest JUnit results against an immutable baseline run.
-
-Only Pytest exit 0 (tests passed) and exit 1 (tests failed) can represent valid
-test evidence. Operational exits such as interrupted, internal-error, usage-error,
-or no-tests-collected always block, even when JUnit contains failures. Retained
-known failures must preserve their normalized type, message, and body diagnostics.
-Lane roots and explicitly declared volatile paths are normalized before comparison.
-Reports are written atomically. Pure stdlib.
-"""
-
+"""Compare Pytest/JUnit and retained test-source evidence against Stage 0."""
 from __future__ import annotations
-
-import argparse
-import hashlib
-import json
-import os
-import re
-import sys
-import tempfile
+import argparse, hashlib, json, os, re, sys, tempfile
 import xml.etree.ElementTree as ET
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Pattern, Sequence
 
-SCHEMA_VERSION = 2
-NONPASSING = {"failure", "error"}
-SKIPPED = {"skipped"}
-VALID_PYTEST_RESULT_EXITS = {0, 1}
-GIT_OBJECT_ID = re.compile(r"[0-9a-fA-F]{40}(?:[0-9a-fA-F]{24})?")
+OBJ=re.compile(r"(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})\Z"); SHA=re.compile(r"[0-9a-f]{64}\Z")
+HEX=set("0123456789abcdefABCDEF"); PATHCH=set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
+class Error(RuntimeError): pass
 
+def canon(v): return json.dumps(v,ensure_ascii=False,indent=2,sort_keys=True)+"\n"
+def ref(v,n):
+    if not OBJ.fullmatch(v): raise Error(f"{n} ref must be an exact 40- or 64-character hexadecimal object ID")
+    return v.lower()
+def root(v,n):
+    v=v.rstrip("/\\")
+    if not v: raise Error(f"{n} root must be non-empty")
+    return v
+def bounded(s,old,new,chars):
+    out=[]; i=0
+    while True:
+        p=s.find(old,i)
+        if p<0: out.append(s[i:]); return "".join(out)
+        e=p+len(old); a=s[p-1] if p else ""; b=s[e] if e<len(s) else ""
+        if (not a or a not in chars) and (not b or b not in chars): out += [s[i:p],new]; i=e
+        else: out.append(s[i:e]); i=e
+def patterns(values):
+    out=[]
+    for v in values:
+        try: p=re.compile(v)
+        except re.error as e: raise Error(f"invalid volatile pattern {v!r}: {e}") from e
+        if p.search("") is not None: raise Error(f"volatile pattern must not match empty text: {v!r}")
+        out.append(p)
+    return out
+def norm(v,work,lane,oid,pats):
+    if v is None: return None
+    s=v.replace("\r\n","\n").replace("\r","\n")
+    for rpl,tag in ((lane,"<LANE_ROOT>"),(work,"<WORKTREE_ROOT>")):
+        for q in sorted({rpl,rpl.replace('\\','/'),rpl.replace('/','\\')},key=len,reverse=True): s=bounded(s,q,tag,PATHCH)
+    s=bounded(s,oid,"<REF>",HEX)
+    for p in pats: s=p.sub("<VOLATILE>",s)
+    lines=[x.rstrip(" \t") for x in s.split("\n")]
+    while lines and not lines[-1]: lines.pop()
+    return "\n".join(lines) or None
 
-class ComparisonError(RuntimeError):
-    """Stable user-facing comparator error."""
+def junit(path):
+    try: tree=ET.parse(path).getroot()
+    except (OSError,ET.ParseError) as e: raise Error(f"cannot parse JUnit file {path}: {e}") from e
+    out={}
+    for x in tree.iter("testcase"):
+        c=x.get("classname","").strip(); n=x.get("name","").strip(); f=(x.get("file") or "").replace('\\','/')
+        tid=f"{c}::{n}" if c and n else f"{f}::{n}" if f and n else n or f
+        if not tid or tid in out: raise Error(f"invalid or duplicate JUnit testcase ID: {tid!r}")
+        st="passed"; typ=msg=body=None
+        for k in ("failure","error","skipped"):
+            y=x.find(k)
+            if y is not None: st=k; typ=y.get("type"); msg=y.get("message"); body=y.text; break
+        out[tid]={"status":st,"type":typ,"message":msg,"body":body,"file":f or None,"class":c,"name":n}
+    if not out: raise Error(f"JUnit file contains no testcases: {path}")
+    return out
 
+def inventory(path,expected,label):
+    try: p=json.loads(path.read_text(encoding="utf-8"))
+    except (OSError,json.JSONDecodeError) as e: raise Error(f"cannot read {label} test inventory {path}: {e}") from e
+    if not isinstance(p,dict) or p.get("schemaVersion")!=2: raise Error(f"invalid {label} test inventory schema")
+    d=p.get("inventorySha256"); q=dict(p); q.pop("inventorySha256",None)
+    if not isinstance(d,str) or not SHA.fullmatch(d) or hashlib.sha256(canon(q).encode()).hexdigest()!=d: raise Error(f"{label} test inventory inventorySha256 mismatch")
+    b=p.get("baseline"); es=p.get("entries")
+    if not isinstance(b,dict) or b.get("commitSha")!=expected: raise Error(f"{label} test inventory commit mismatch: expected={expected}, actual={None if not isinstance(b,dict) else b.get('commitSha')!r}")
+    if not isinstance(es,list): raise Error(f"invalid {label} test inventory entries")
+    out={}
+    for e in es:
+        if not isinstance(e,dict): raise Error(f"invalid {label} test inventory entry")
+        name=e.get("path"); dig=e.get("contentSha256"); kind=e.get("kind")
+        if not isinstance(name,str) or not name.startswith("tests/") or kind not in {"test-file","test-support"} or not isinstance(dig,str) or not SHA.fullmatch(dig) or name in out: raise Error(f"invalid {label} test inventory entry: {name!r}")
+        out[name]=dig
+    return out
 
-@dataclass(frozen=True)
-class TestCaseResult:
-    test_id: str
-    status: str
-    classname: str
-    name: str
-    file: str | None
-    outcome_type: str | None
-    message: str | None
-    details: str | None
-
-
-def _normalise_path(value: str | None) -> str | None:
-    return None if value is None else value.replace("\\", "/")
-
-
-def _canonical_root(value: str) -> str:
-    canonical = _normalise_path(value.rstrip("/\\"))
-    if not canonical:
-        raise ComparisonError("baseline and candidate roots must be non-empty")
-    return canonical
-
-
-def _root_variants(root: str) -> tuple[str, ...]:
-    stripped = root.rstrip("/\\")
-    variants = {
-        root,
-        stripped,
-        root.replace("\\", "/"),
-        root.replace("/", "\\"),
-        stripped.replace("\\", "/"),
-        stripped.replace("/", "\\"),
-    }
-    return tuple(sorted((value for value in variants if value), key=len, reverse=True))
-
-
-def _compile_volatile_patterns(values: Sequence[str]) -> tuple[Pattern[str], ...]:
-    patterns: list[Pattern[str]] = []
-    for value in values:
-        try:
-            pattern = re.compile(value)
-        except re.error as exc:
-            raise ComparisonError(f"invalid volatile pattern {value!r}: {exc}") from exc
-        if pattern.search("") is not None:
-            raise ComparisonError(
-                f"volatile pattern must not match empty text: {value!r}"
-            )
-        patterns.append(pattern)
-    return tuple(patterns)
-
-
-def _normalise_diagnostic(
-    value: str | None,
-    *,
-    root: str,
-    ref: str,
-    volatile_patterns: Sequence[Pattern[str]],
-) -> str | None:
-    if value is None:
-        return None
-
-    text = value.replace("\r\n", "\n").replace("\r", "\n")
-    for variant in _root_variants(root):
-        text = text.replace(variant, "<ROOT>")
-    if GIT_OBJECT_ID.fullmatch(ref):
-        text = text.replace(ref, "<REF>")
-    for pattern in volatile_patterns:
-        text = pattern.sub("<VOLATILE>", text)
-
-    lines = [line.rstrip(" \t") for line in text.split("\n")]
-    while lines and not lines[-1]:
-        lines.pop()
-    normalized = "\n".join(lines)
-    return normalized or None
-
-
-def _test_id(element: ET.Element) -> str:
-    classname = element.get("classname", "").strip()
-    name = element.get("name", "").strip()
-    file_name = _normalise_path(element.get("file"))
-    if classname and name:
-        return f"{classname}::{name}"
-    if file_name and name:
-        return f"{file_name}::{name}"
-    if name:
-        return name
-    if file_name:
-        return file_name
-    raise ComparisonError("JUnit testcase is missing classname, name, and file")
-
-
-def _status(
-    element: ET.Element,
-) -> tuple[str, str | None, str | None, str | None]:
-    failure = element.find("failure")
-    if failure is not None:
-        return (
-            "failure",
-            failure.get("type"),
-            failure.get("message"),
-            failure.text,
-        )
-    error = element.find("error")
-    if error is not None:
-        return "error", error.get("type"), error.get("message"), error.text
-    skipped = element.find("skipped")
-    if skipped is not None:
-        return (
-            "skipped",
-            skipped.get("type"),
-            skipped.get("message"),
-            skipped.text,
-        )
-    return "passed", None, None, None
-
-
-def parse_junit(path: Path) -> dict[str, TestCaseResult]:
+def diag(x,work,lane,oid,pats): return tuple(norm(x[k],work,lane,oid,pats) for k in ("type","message","body"))
+def contradiction(code,n):
+    if code not in {0,1}: return [{"exitCode":code,"junitFailureCount":n,"reason":"operational-pytest-exit"}]
+    return [{"exitCode":code,"junitFailureCount":n}] if (code==0)!=(n==0) else []
+def atomic(path,data):
+    path.parent.mkdir(parents=True,exist_ok=True); fd,tmp=tempfile.mkstemp(prefix=f".{path.name}.",dir=path.parent)
     try:
-        root = ET.parse(path).getroot()
-    except (OSError, ET.ParseError) as exc:
-        raise ComparisonError(f"cannot parse JUnit file {path}: {exc}") from exc
-
-    results: dict[str, TestCaseResult] = {}
-    for element in root.iter("testcase"):
-        test_id = _test_id(element)
-        if test_id in results:
-            raise ComparisonError(f"duplicate JUnit testcase ID in {path}: {test_id}")
-        status, outcome_type, message, details = _status(element)
-        results[test_id] = TestCaseResult(
-            test_id=test_id,
-            status=status,
-            classname=element.get("classname", ""),
-            name=element.get("name", ""),
-            file=_normalise_path(element.get("file")),
-            outcome_type=outcome_type,
-            message=message,
-            details=details,
-        )
-    if not results:
-        raise ComparisonError(f"JUnit file contains no testcases: {path}")
-    return results
-
-
-def _diagnostic(
-    result: TestCaseResult,
-    *,
-    root: str,
-    ref: str,
-    volatile_patterns: Sequence[Pattern[str]],
-) -> tuple[str | None, str | None, str | None]:
-    return (
-        _normalise_diagnostic(
-            result.outcome_type,
-            root=root,
-            ref=ref,
-            volatile_patterns=volatile_patterns,
-        ),
-        _normalise_diagnostic(
-            result.message,
-            root=root,
-            ref=ref,
-            volatile_patterns=volatile_patterns,
-        ),
-        _normalise_diagnostic(
-            result.details,
-            root=root,
-            ref=ref,
-            volatile_patterns=volatile_patterns,
-        ),
-    )
-
-
-def _missing_diagnostic(diagnostic: tuple[str | None, ...]) -> bool:
-    return not any(part is not None for part in diagnostic)
-
-
-def _diagnostic_record(
-    result: TestCaseResult,
-    *,
-    root: str,
-    ref: str,
-    volatile_patterns: Sequence[Pattern[str]],
-) -> dict[str, object]:
-    outcome_type, message, details = _diagnostic(
-        result,
-        root=root,
-        ref=ref,
-        volatile_patterns=volatile_patterns,
-    )
-    encoded = json.dumps(
-        [outcome_type, message, details],
-        ensure_ascii=False,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return {
-        "type": outcome_type,
-        "message": message,
-        "sha256": hashlib.sha256(encoded).hexdigest(),
-        "sizeBytes": len(encoded),
-    }
-
-
-def _record(
-    result: TestCaseResult,
-    *,
-    root: str,
-    ref: str,
-    volatile_patterns: Sequence[Pattern[str]],
-) -> dict[str, object]:
-    return {
-        "id": result.test_id,
-        "status": result.status,
-        "classname": result.classname,
-        "name": result.name,
-        "file": result.file,
-        "diagnostic": _diagnostic_record(
-            result,
-            root=root,
-            ref=ref,
-            volatile_patterns=volatile_patterns,
-        ),
-    }
-
-
-def _exit_contradiction(exit_code: int, failure_count: int) -> list[dict[str, object]]:
-    if exit_code not in VALID_PYTEST_RESULT_EXITS:
-        return [
-            {
-                "exitCode": exit_code,
-                "junitFailureCount": failure_count,
-                "reason": "operational-pytest-exit",
-            }
-        ]
-    if (exit_code == 0 and failure_count > 0) or (
-        exit_code == 1 and failure_count == 0
-    ):
-        return [{"exitCode": exit_code, "junitFailureCount": failure_count}]
-    return []
-
-
-def compare(
-    baseline: dict[str, TestCaseResult],
-    candidate: dict[str, TestCaseResult],
-    *,
-    baseline_exit: int,
-    candidate_exit: int,
-    baseline_ref: str,
-    candidate_ref: str,
-    baseline_root: str,
-    candidate_root: str,
-    volatile_pattern_values: Sequence[str],
-) -> dict[str, object]:
-    if baseline_exit < 0 or candidate_exit < 0:
-        raise ComparisonError("pytest exit codes must be non-negative")
-
-    canonical_baseline_root = _canonical_root(baseline_root)
-    canonical_candidate_root = _canonical_root(candidate_root)
-    if canonical_baseline_root == canonical_candidate_root:
-        raise ComparisonError("baseline and candidate roots must be distinct")
-    volatile_patterns = _compile_volatile_patterns(volatile_pattern_values)
-
-    baseline_ids = set(baseline)
-    candidate_ids = set(candidate)
-    baseline_failures = {
-        test_id for test_id, result in baseline.items() if result.status in NONPASSING
-    }
-    candidate_failures = {
-        test_id for test_id, result in candidate.items() if result.status in NONPASSING
-    }
-
-    missing_baseline_tests = sorted(baseline_ids - candidate_ids)
-    additional_candidate_tests = sorted(candidate_ids - baseline_ids)
-    new_failures = sorted(candidate_failures - baseline_failures)
-    resolved_failures = sorted(
-        test_id
-        for test_id in baseline_failures
-        if test_id in candidate and candidate[test_id].status == "passed"
-    )
-    masked_failures = sorted(
-        test_id
-        for test_id in baseline_failures
-        if test_id in candidate and candidate[test_id].status in SKIPPED
-    )
-    regressions = sorted(
-        test_id
-        for test_id in baseline_ids & candidate_ids
-        if baseline[test_id].status == "passed"
-        and candidate[test_id].status != "passed"
-    )
-    retained_failures = baseline_failures & candidate_failures
-    changed_known_failure_kind = sorted(
-        test_id
-        for test_id in retained_failures
-        if baseline[test_id].status != candidate[test_id].status
-    )
-
-    baseline_diagnostics = {
-        test_id: _diagnostic(
-            baseline[test_id],
-            root=baseline_root,
-            ref=baseline_ref,
-            volatile_patterns=volatile_patterns,
-        )
-        for test_id in baseline_failures
-    }
-    candidate_diagnostics = {
-        test_id: _diagnostic(
-            candidate[test_id],
-            root=candidate_root,
-            ref=candidate_ref,
-            volatile_patterns=volatile_patterns,
-        )
-        for test_id in candidate_failures
-    }
-    missing_baseline_failure_diagnostics = sorted(
-        test_id
-        for test_id, diagnostic in baseline_diagnostics.items()
-        if _missing_diagnostic(diagnostic)
-    )
-    missing_candidate_failure_diagnostics = sorted(
-        test_id
-        for test_id, diagnostic in candidate_diagnostics.items()
-        if _missing_diagnostic(diagnostic)
-    )
-    missing_diagnostic_ids = set(missing_baseline_failure_diagnostics) | set(
-        missing_candidate_failure_diagnostics
-    )
-    changed_known_failure_diagnostics = sorted(
-        test_id
-        for test_id in retained_failures
-        if baseline[test_id].status == candidate[test_id].status
-        and test_id not in missing_diagnostic_ids
-        and baseline_diagnostics[test_id] != candidate_diagnostics[test_id]
-    )
-    unchanged_baseline_failures = sorted(
-        test_id
-        for test_id in retained_failures
-        if baseline[test_id].status == candidate[test_id].status
-        and test_id not in missing_diagnostic_ids
-        and baseline_diagnostics[test_id] == candidate_diagnostics[test_id]
-    )
-
-    baseline_exit_contradiction = _exit_contradiction(
-        baseline_exit, len(baseline_failures)
-    )
-    candidate_exit_contradiction = _exit_contradiction(
-        candidate_exit, len(candidate_failures)
-    )
-    resolved_exit = (
-        baseline_exit == 1
-        and candidate_exit == 0
-        and not candidate_failures
-        and not baseline_exit_contradiction
-    )
-    pytest_exit_code_regression = (
-        []
-        if candidate_exit == baseline_exit or resolved_exit
-        else [
-            {
-                "baselineExitCode": baseline_exit,
-                "candidateExitCode": candidate_exit,
-            }
-        ]
-    )
-
-    blockers = {
-        "newFailures": new_failures,
-        "missingBaselineTests": missing_baseline_tests,
-        "maskedBaselineFailures": masked_failures,
-        "passingTestRegressions": regressions,
-        "changedKnownFailureKind": changed_known_failure_kind,
-        "missingBaselineFailureDiagnostics": missing_baseline_failure_diagnostics,
-        "missingCandidateFailureDiagnostics": missing_candidate_failure_diagnostics,
-        "changedKnownFailureDiagnostics": changed_known_failure_diagnostics,
-        "baselineExitContradiction": baseline_exit_contradiction,
-        "candidateExitContradiction": candidate_exit_contradiction,
-        "pytestExitCodeRegression": pytest_exit_code_regression,
-    }
-    verdict = "PASS" if all(not values for values in blockers.values()) else "BLOCKED"
-
-    return {
-        "schemaVersion": SCHEMA_VERSION,
-        "baseline": {
-            "exitCode": baseline_exit,
-            "ref": baseline_ref,
-            "total": len(baseline),
-            "passed": sum(result.status == "passed" for result in baseline.values()),
-            "skipped": sum(result.status == "skipped" for result in baseline.values()),
-            "failures": len(baseline_failures),
-        },
-        "candidate": {
-            "exitCode": candidate_exit,
-            "ref": candidate_ref,
-            "total": len(candidate),
-            "passed": sum(result.status == "passed" for result in candidate.values()),
-            "skipped": sum(result.status == "skipped" for result in candidate.values()),
-            "failures": len(candidate_failures),
-        },
-        "normalization": {
-            "laneRoots": True,
-            "gitObjectIds": True,
-            "volatilePatterns": list(volatile_pattern_values),
-            "lineEndings": True,
-            "trailingHorizontalWhitespace": True,
-            "trailingBlankLines": True,
-        },
-        "blockers": blockers,
-        "observations": {
-            "additionalCandidateTests": additional_candidate_tests,
-            "resolvedBaselineFailures": resolved_failures,
-            "unchangedBaselineFailures": unchanged_baseline_failures,
-            "resolvedPytestExitCode": resolved_exit,
-        },
-        "baselineFailureDetails": [
-            _record(
-                baseline[test_id],
-                root=baseline_root,
-                ref=baseline_ref,
-                volatile_patterns=volatile_patterns,
-            )
-            for test_id in sorted(baseline_failures)
-        ],
-        "candidateFailureDetails": [
-            _record(
-                candidate[test_id],
-                root=candidate_root,
-                ref=candidate_ref,
-                volatile_patterns=volatile_patterns,
-            )
-            for test_id in sorted(candidate_failures)
-        ],
-        "verdict": verdict,
-    }
-
-
-def _canonical_json(value: object) -> str:
-    return json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
-
-
-def _atomic_write(path: Path, content: bytes) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary_name = tempfile.mkstemp(
-        prefix=f".{path.name}.", dir=path.parent
-    )
-    temporary = Path(temporary_name)
-    try:
-        with os.fdopen(descriptor, "wb") as handle:
-            handle.write(content)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, path)
+        with os.fdopen(fd,"wb") as h: h.write(data); h.flush(); os.fsync(h.fileno())
+        os.replace(tmp,path)
     finally:
-        if temporary.exists():
-            temporary.unlink()
+        try: os.unlink(tmp)
+        except FileNotFoundError: pass
 
+def compare(a):
+    br=ref(a.baseline_ref,"baseline"); cr=ref(a.candidate_ref,"candidate")
+    roots=[root(a.baseline_root,"baseline worktree"),root(a.candidate_root,"candidate worktree"),root(a.baseline_lane_root,"baseline lane"),root(a.candidate_lane_root,"candidate lane")]
+    if len({x.replace('\\','/') for x in roots})!=4: raise Error("worktree and isolated lane roots must all be distinct")
+    pats=patterns(a.volatile_pattern); b=junit(a.baseline_junit); c=junit(a.candidate_junit)
+    bi=inventory(a.baseline_test_inventory,br,"baseline"); ci=inventory(a.candidate_test_inventory,cr,"candidate")
+    bids=set(b); cids=set(c); bf={i for i in b if b[i]["status"] in {"failure","error"}}; cf={i for i in c if c[i]["status"] in {"failure","error"}}
+    bs={i for i in b if b[i]["status"]=="skipped"}; cs={i for i in c if c[i]["status"]=="skipped"}
+    bd={i:diag(b[i],roots[0],roots[2],br,pats) for i in bf}; cd={i:diag(c[i],roots[1],roots[3],cr,pats) for i in cf}
+    sd1={i:diag(b[i],roots[0],roots[2],br,pats) for i in bs&cs}; sd2={i:diag(c[i],roots[1],roots[3],cr,pats) for i in bs&cs}
+    missbd=sorted(i for i,v in bd.items() if not any(x is not None for x in v)); misscd=sorted(i for i,v in cd.items() if not any(x is not None for x in v))
+    missbs=sorted(i for i,v in sd1.items() if not any(x is not None for x in v)); misscs=sorted(i for i,v in sd2.items() if not any(x is not None for x in v))
+    blockers={
+      "newFailures":sorted(cf-bf),"missingBaselineTests":sorted(bids-cids),
+      "maskedBaselineFailures":sorted(i for i in bf if i in c and c[i]["status"]=="skipped"),
+      "passingTestRegressions":sorted(i for i in bids&cids if b[i]["status"]=="passed" and c[i]["status"]!="passed"),
+      "changedKnownFailureKind":sorted(i for i in bf&cf if b[i]["status"]!=c[i]["status"]),
+      "missingBaselineFailureDiagnostics":missbd,"missingCandidateFailureDiagnostics":misscd,
+      "changedKnownFailureDiagnostics":sorted(i for i in bf&cf if b[i]["status"]==c[i]["status"] and i not in set(missbd+misscd) and bd[i]!=cd[i]),
+      "missingBaselineSkipDiagnostics":missbs,"missingCandidateSkipDiagnostics":misscs,
+      "changedRetainedSkipDiagnostics":sorted(i for i in bs&cs if i not in set(missbs+misscs) and sd1[i]!=sd2[i]),
+      "baselineSkipsNoLongerSkipped":sorted(i for i in bs if i in c and c[i]["status"]!="skipped"),
+      "missingBaselineTestFiles":sorted(set(bi)-set(ci)),
+      "changedBaselineTestFiles":sorted(i for i in set(bi)&set(ci) if bi[i]!=ci[i]),
+      "baselineExitContradiction":contradiction(a.baseline_exit,len(bf)),
+      "candidateExitContradiction":contradiction(a.candidate_exit,len(cf)),
+    }
+    resolved=a.baseline_exit==1 and a.candidate_exit==0 and not cf and not blockers["baselineExitContradiction"]
+    blockers["pytestExitCodeRegression"]=[] if a.candidate_exit==a.baseline_exit or resolved else [{"baselineExitCode":a.baseline_exit,"candidateExitCode":a.candidate_exit}]
+    verdict="PASS" if all(not v for v in blockers.values()) else "BLOCKED"
+    return {"schemaVersion":3,"baseline":{"exitCode":a.baseline_exit,"ref":br,"failures":len(bf),"total":len(b)},"candidate":{"exitCode":a.candidate_exit,"ref":cr,"failures":len(cf),"total":len(c)},"blockers":blockers,"observations":{"additionalCandidateTests":sorted(cids-bids),"additionalCandidateTestFiles":sorted(set(ci)-set(bi)),"resolvedBaselineFailures":sorted(i for i in bf if i in c and c[i]["status"]=="passed")},"verdict":verdict}
 
-def parse_args(argv: Sequence[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--baseline-junit", type=Path, required=True)
-    parser.add_argument("--candidate-junit", type=Path, required=True)
-    parser.add_argument("--baseline-exit", type=int, required=True)
-    parser.add_argument("--candidate-exit", type=int, required=True)
-    parser.add_argument("--baseline-ref", required=True)
-    parser.add_argument("--candidate-ref", required=True)
-    parser.add_argument("--baseline-root", required=True)
-    parser.add_argument("--candidate-root", required=True)
-    parser.add_argument("--volatile-pattern", action="append", default=[])
-    parser.add_argument("--output", type=Path, required=True)
-    return parser.parse_args(argv)
-
-
-def main(argv: Sequence[str] | None = None) -> int:
-    args = parse_args(argv or sys.argv[1:])
-    try:
-        report = compare(
-            parse_junit(args.baseline_junit),
-            parse_junit(args.candidate_junit),
-            baseline_exit=args.baseline_exit,
-            candidate_exit=args.candidate_exit,
-            baseline_ref=args.baseline_ref,
-            candidate_ref=args.candidate_ref,
-            baseline_root=args.baseline_root,
-            candidate_root=args.candidate_root,
-            volatile_pattern_values=args.volatile_pattern,
-        )
-        _atomic_write(args.output, _canonical_json(report).encode("utf-8"))
-        print(
-            "RESULT: "
-            f"{report['verdict']} pytest-baseline "
-            f"baseline_failures={report['baseline']['failures']} "
-            f"candidate_failures={report['candidate']['failures']} "
-            f"new_failures={len(report['blockers']['newFailures'])} "
-            f"missing={len(report['blockers']['missingBaselineTests'])}"
-        )
-        return 0 if report["verdict"] == "PASS" else 1
-    except (ComparisonError, OSError, ValueError) as exc:
-        print(f"RESULT: FAIL pytest-baseline: {exc}", file=sys.stderr)
-        return 2
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+def args(v):
+    p=argparse.ArgumentParser(description=__doc__)
+    for n in ("baseline-junit","candidate-junit","baseline-test-inventory","candidate-test-inventory","output"): p.add_argument("--"+n,type=Path,required=True)
+    for n in ("baseline-exit","candidate-exit"): p.add_argument("--"+n,type=int,required=True)
+    for n in ("baseline-ref","candidate-ref","baseline-root","candidate-root","baseline-lane-root","candidate-lane-root"): p.add_argument("--"+n,required=True)
+    p.add_argument("--volatile-pattern",action="append",default=[]); return p.parse_args(v)
+def main(v=None):
+    a=args(sys.argv[1:] if v is None else v)
+    try: r=compare(a); atomic(a.output,canon(r).encode()); print(f"RESULT: {r['verdict']} pytest-baseline baseline_failures={r['baseline']['failures']} candidate_failures={r['candidate']['failures']}"); return 0 if r["verdict"]=="PASS" else 1
+    except (Error,OSError,ValueError) as e: print(f"RESULT: FAIL pytest-baseline: {e}",file=sys.stderr); return 2
+if __name__=="__main__": raise SystemExit(main())

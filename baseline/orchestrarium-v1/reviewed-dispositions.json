@@ -1,0 +1,255 @@
+{
+  "baselineRef": "ce2052fb773576fd6e3206c2a7e21e01852d556b",
+  "entries": [
+    {
+      "change": "modified",
+      "contractIds": [
+        "ORCHE-IMPL-000.BASELINE-WORKFLOW"
+      ],
+      "path": ".gitignore",
+      "reason": "Ignore local-only Stage 0 evidence and transient review workflows."
+    },
+    {
+      "change": "modified",
+      "contractIds": [
+        "ORCHE-IMPL-000.BASELINE-WORKFLOW"
+      ],
+      "path": "RELEASE_NOTES.md",
+      "reason": "Record the dated Stage 0 developer verification workflow without changing runtime behavior."
+    },
+    {
+      "change": "added",
+      "contractIds": [
+        "ORCHE-IMPL-000.PARITY-EVIDENCE"
+      ],
+      "path": "baseline/orchestrarium-v1/README.md",
+      "reason": "Add reviewed Stage 0 parity evidence, tooling, documentation, or regression coverage."
+    },
+    {
+      "change": "added",
+      "contractIds": [
+        "ORCHE-IMPL-000.PARITY-EVIDENCE"
+      ],
+      "path": "baseline/orchestrarium-v1/baseline-pin.json",
+      "reason": "Add reviewed Stage 0 parity evidence, tooling, documentation, or regression coverage."
+    },
+    {
+      "change": "added",
+      "contractIds": [
+        "ORCHE-IMPL-000.PARITY-EVIDENCE"
+      ],
+      "path": "baseline/orchestrarium-v1/reviewed-dispositions.json",
+      "reason": "Add reviewed Stage 0 parity evidence, tooling, documentation, or regression coverage."
+    },
+    {
+      "change": "added",
+      "contractIds": [
+        "ORCHE-IMPL-000.PARITY-EVIDENCE"
+      ],
+      "path": "baseline/orchestrarium-v1/tooling/build_inventory.py",
+      "reason": "Add reviewed Stage 0 parity evidence, tooling, documentation, or regression coverage."
+    },
+    {
+      "change": "added",
+      "contractIds": [
+        "ORCHE-IMPL-000.PARITY-EVIDENCE"
+      ],
+      "path": "baseline/orchestrarium-v1/tooling/build_target_effect_baseline.py",
+      "reason": "Add reviewed Stage 0 parity evidence, tooling, documentation, or regression coverage."
+    },
+    {
+      "change": "added",
+      "contractIds": [
+        "ORCHE-IMPL-000.PARITY-EVIDENCE"
+      ],
+      "path": "baseline/orchestrarium-v1/tooling/compare_capability_baseline.py",
+      "reason": "Add reviewed Stage 0 parity evidence, tooling, documentation, or regression coverage."
+    },
+    {
+      "change": "added",
+      "contractIds": [
+        "ORCHE-IMPL-000.PARITY-EVIDENCE"
+      ],
+      "path": "baseline/orchestrarium-v1/tooling/compare_command_baseline.py",
+      "reason": "Add reviewed Stage 0 parity evidence, tooling, documentation, or regression coverage."
+    },
+    {
+      "change": "added",
+      "contractIds": [
+        "ORCHE-IMPL-000.PARITY-EVIDENCE"
+      ],
+      "path": "baseline/orchestrarium-v1/tooling/compare_pytest_baseline.py",
+      "reason": "Add reviewed Stage 0 parity evidence, tooling, documentation, or regression coverage."
+    },
+    {
+      "change": "added",
+      "contractIds": [
+        "ORCHE-IMPL-000.PARITY-EVIDENCE"
+      ],
+      "path": "baseline/orchestrarium-v1/tooling/stage0_evidence.py",
+      "reason": "Add reviewed modular Stage 0 evidence helpers while keeping execution isolated from ambient import paths."
+    },
+    {
+      "change": "added",
+      "contractIds": [
+        "ORCHE-IMPL-000.PARITY-EVIDENCE"
+      ],
+      "path": "baseline/orchestrarium-v1/tooling/stage0_orchestrator.py",
+      "reason": "Add reviewed modular Stage 0 verifier implementation while keeping execution isolated from ambient import paths."
+    },
+    {
+      "change": "added",
+      "contractIds": [
+        "ORCHE-IMPL-000.PARITY-EVIDENCE"
+      ],
+      "path": "baseline/orchestrarium-v1/tooling/stage0_runtime.py",
+      "reason": "Add reviewed modular Stage 0 verifier implementation while keeping execution isolated from ambient import paths."
+    },
+    {
+      "change": "added",
+      "contractIds": [
+        "ORCHE-IMPL-000.PARITY-EVIDENCE"
+      ],
+      "path": "baseline/orchestrarium-v1/tooling/verify_stage0.py",
+      "reason": "Add reviewed Stage 0 parity evidence, tooling, documentation, or regression coverage."
+    },
+    {
+      "change": "added",
+      "contractIds": [
+        "ORCHE-IMPL-000.PARITY-EVIDENCE"
+      ],
+      "path": "scripts/baseline/build_inventory.py",
+      "reason": "Add reviewed Stage 0 parity evidence, tooling, documentation, or regression coverage."
+    },
+    {
+      "change": "added",
+      "contractIds": [
+        "ORCHE-IMPL-000.PARITY-EVIDENCE"
+      ],
+      "path": "scripts/baseline/build_target_effect_baseline.py",
+      "reason": "Add reviewed Stage 0 parity evidence, tooling, documentation, or regression coverage."
+    },
+    {
+      "change": "added",
+      "contractIds": [
+        "ORCHE-IMPL-000.PARITY-EVIDENCE"
+      ],
+      "path": "scripts/baseline/compare_capability_baseline.py",
+      "reason": "Add reviewed Stage 0 parity evidence, tooling, documentation, or regression coverage."
+    },
+    {
+      "change": "added",
+      "contractIds": [
+        "ORCHE-IMPL-000.PARITY-EVIDENCE"
+      ],
+      "path": "scripts/baseline/compare_command_baseline.py",
+      "reason": "Add reviewed Stage 0 parity evidence, tooling, documentation, or regression coverage."
+    },
+    {
+      "change": "added",
+      "contractIds": [
+        "ORCHE-IMPL-000.PARITY-EVIDENCE"
+      ],
+      "path": "scripts/baseline/compare_pytest_baseline.py",
+      "reason": "Add reviewed Stage 0 parity evidence, tooling, documentation, or regression coverage."
+    },
+    {
+      "change": "added",
+      "contractIds": [
+        "ORCHE-IMPL-000.PARITY-EVIDENCE"
+      ],
+      "path": "scripts/baseline/stage0_evidence.py",
+      "reason": "Add reviewed modular Stage 0 evidence helpers while keeping execution isolated from ambient import paths."
+    },
+    {
+      "change": "added",
+      "contractIds": [
+        "ORCHE-IMPL-000.PARITY-EVIDENCE"
+      ],
+      "path": "scripts/baseline/stage0_orchestrator.py",
+      "reason": "Add reviewed modular Stage 0 verifier implementation while keeping execution isolated from ambient import paths."
+    },
+    {
+      "change": "added",
+      "contractIds": [
+        "ORCHE-IMPL-000.PARITY-EVIDENCE"
+      ],
+      "path": "scripts/baseline/stage0_runtime.py",
+      "reason": "Add reviewed modular Stage 0 verifier implementation while keeping execution isolated from ambient import paths."
+    },
+    {
+      "change": "added",
+      "contractIds": [
+        "ORCHE-IMPL-000.PARITY-EVIDENCE"
+      ],
+      "path": "scripts/baseline/verify_stage0.py",
+      "reason": "Add reviewed Stage 0 parity evidence, tooling, documentation, or regression coverage."
+    },
+    {
+      "change": "added",
+      "contractIds": [
+        "ORCHE-IMPL-000.REGRESSION-COVERAGE"
+      ],
+      "path": "tests/test_orche_baseline_inventory.py",
+      "reason": "Add reviewed Stage 0 parity evidence, tooling, documentation, or regression coverage."
+    },
+    {
+      "change": "added",
+      "contractIds": [
+        "ORCHE-IMPL-000.REGRESSION-COVERAGE"
+      ],
+      "path": "tests/test_orche_baseline_pin.py",
+      "reason": "Add reviewed Stage 0 parity evidence, tooling, documentation, or regression coverage."
+    },
+    {
+      "change": "added",
+      "contractIds": [
+        "ORCHE-IMPL-000.REGRESSION-COVERAGE"
+      ],
+      "path": "tests/test_orche_capability_baseline.py",
+      "reason": "Add reviewed Stage 0 parity evidence, tooling, documentation, or regression coverage."
+    },
+    {
+      "change": "added",
+      "contractIds": [
+        "ORCHE-IMPL-000.REGRESSION-COVERAGE"
+      ],
+      "path": "tests/test_orche_command_baseline.py",
+      "reason": "Add reviewed Stage 0 parity evidence, tooling, documentation, or regression coverage."
+    },
+    {
+      "change": "added",
+      "contractIds": [
+        "ORCHE-IMPL-000.REGRESSION-COVERAGE"
+      ],
+      "path": "tests/test_orche_pytest_baseline.py",
+      "reason": "Add reviewed Stage 0 parity evidence, tooling, documentation, or regression coverage."
+    },
+    {
+      "change": "added",
+      "contractIds": [
+        "ORCHE-IMPL-000.REGRESSION-COVERAGE"
+      ],
+      "path": "tests/test_orche_review_regressions.py",
+      "reason": "Add reviewed Stage 0 parity evidence, tooling, documentation, or regression coverage."
+    },
+    {
+      "change": "added",
+      "contractIds": [
+        "ORCHE-IMPL-000.REGRESSION-COVERAGE"
+      ],
+      "path": "tests/test_orche_target_effect_baseline.py",
+      "reason": "Add reviewed Stage 0 parity evidence, tooling, documentation, or regression coverage."
+    },
+    {
+      "change": "added",
+      "contractIds": [
+        "ORCHE-IMPL-000.REGRESSION-COVERAGE"
+      ],
+      "path": "tests/test_orche_verifier_isolation.py",
+      "reason": "Add reviewed Stage 0 parity evidence, tooling, documentation, or regression coverage."
+    }
+  ],
+  "schemaVersion": 1,
+  "scope": "ORCHE-IMPL-000"
+}
