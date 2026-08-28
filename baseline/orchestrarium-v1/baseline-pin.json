@@ -68,7 +68,7 @@
     },
     "stage0Orchestrator": {
       "deterministic": true,
-      "gitBlobSha": "edab3e966e5f46981287e27f3fec55ed3f32b5cd",
+      "gitBlobSha": "09bff01c3c1b37f51fa4f74438b05f6603177650",
       "materialization": "git-cat-file-reviewed-tree-blob",
       "path": "baseline/orchestrarium-v1/tooling/stage0_orchestrator.py",
       "runtimeMutation": false,
