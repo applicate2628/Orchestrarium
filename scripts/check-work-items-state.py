@@ -492,10 +492,10 @@ def command_check(args: argparse.Namespace) -> int:
                     f"{type(exc).__name__}: {exc}"
                 )
 
-    # Archival must not launder open obligations (decision item 3; fable impl gate
-    # REVISE-1): an archived item's ledger is still scanned for open v2 REVISEs.
-    # v2-scoping keeps historical v1 archives quiet.
-    if not args.no_strict_revise:
+    # The default periodic audit prevents archival laundering. Publication uses
+    # --active-only because local historical hygiene is not part of a tracked
+    # delta's current-task gate; lifecycle close already validates its own move.
+    if not args.no_strict_revise and not args.active_only:
         for ledger in sorted(archive_dir.rglob("agent-runs.jsonl")):
             arch_errors, open_revise, _open_launches = validator.validate_archived_ledger_obligations(
                 ledger.parent, telemetry=telemetry
@@ -531,8 +531,16 @@ def command_check(args: argparse.Namespace) -> int:
         return 1
 
     if not items:
+        if args.active_only:
+            print(
+                f"RESULT: PASS (no active work-items: {active_dir}; "
+                "archive obligation scan skipped)"
+            )
+            return 0
         print(f"RESULT: PASS (no active work-items: {active_dir}; archive scan clean)")
         return 0
+    if args.active_only:
+        print("info: publication scope active-only; archive obligation scan skipped")
     print(
         f"RESULT: PASS - valid state only, NOT completion: {len(items)} active work-item(s) "
         f"STILL OPEN (see 'STILL OPEN' list above; a done-claim must reconcile each one's Next action)"
@@ -560,6 +568,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-strict-revise",
         action="store_true",
         help="Do not FAIL on open v2 REVISE obligations (triage sessions only; the default is strict per decision 2026-07-16-review-verdict-closure).",
+    )
+    parser.add_argument(
+        "--active-only",
+        action="store_true",
+        help=(
+            "Validate current active items without the periodic archived-ledger "
+            "obligation scan. Intended for the repository publication gate; the "
+            "default remains the full active+archive audit."
+        ),
     )
     parser.add_argument(
         "--max-age-days",

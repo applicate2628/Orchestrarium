@@ -922,6 +922,49 @@ def test_archive_scan_propagates_security_reviewer_waiver_validity(tmp_path: Pat
         assert f"{waiver_id}: field closesRunIds requires schemaVersion 2" not in result.stdout
 
 
+def test_active_only_keeps_periodic_archive_failures_out_of_publication_scope(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "work-items" / "active").mkdir(parents=True)
+    item_name = "archived-open-revise"
+    item = tmp_path / "work-items" / "archive" / "2026-07" / item_name
+    (item / "reviews").mkdir(parents=True)
+    (item / "reviews" / "qa.md").write_text("REVISE\n", encoding="utf-8")
+    revise = ledger_event(
+        schemaVersion=2,
+        runId="run-archived-open-revise-001",
+        workItem=item_name,
+        role="qa-engineer",
+        executionRole="internal",
+        status="revise",
+        gate="REVISE",
+        artifact="reviews/qa.md",
+        lane="archived-review",
+        findingClass="correctness",
+    )
+    (item / "agent-runs.jsonl").write_text(
+        json.dumps(revise) + "\n", encoding="utf-8"
+    )
+
+    periodic = run_checker(tmp_path)
+    publication = run_checker(tmp_path, "--active-only")
+
+    assert periodic.returncode == 1
+    assert "open REVISE obligation survived archival" in periodic.stdout
+    assert publication.returncode == 0, publication.stdout
+    assert "(ARCHIVED)" not in publication.stdout
+    assert "archive obligation scan skipped" in publication.stdout
+
+
+def test_publication_gate_requests_active_only_work_item_scope() -> None:
+    source = (ROOT / "scripts" / "check-publication-gate.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert '"--active-only"' in source
+    assert "run: python scripts/check-work-items-state.py --active-only" in source
+
+
 def test_archive_scan_keeps_skipped_legacy_positions_for_v2_closure_targets(tmp_path: Path):
     item = tmp_path / "work-items" / "archive" / "2026-07" / "archived-legacy-target"
     (item / "reviews").mkdir(parents=True)
