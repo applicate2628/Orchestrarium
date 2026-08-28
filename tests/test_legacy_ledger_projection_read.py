@@ -233,6 +233,33 @@ class LegacyLedgerProjectionReadTests(unittest.TestCase):
             self.assertEqual([], errors)
             self.assertEqual(before, ledger.read_bytes())
 
+    def test_transactional_ledger_candidate_uses_live_identity_and_candidate_digest(self):
+        """The manifest path stays canonical while validation reads candidate bytes."""
+        module = load_validator()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            item, ledger, work_items = self._make_item(root)
+            raw = self._canonical_raw()
+            candidate_bytes = canonical_bytes(raw) + b"\n"
+            self._install_apply(
+                item,
+                ledger,
+                work_items,
+                candidate_bytes,
+                self._projected_canonical(raw),
+            )
+            ledger.write_bytes(canonical_bytes(raw) + b"\r\n")
+            candidate = item / "agent-runs.jsonl.tmp"
+            candidate.write_bytes(candidate_bytes)
+
+            errors = module.validate_work_item(
+                item,
+                ledger_path=candidate,
+                validate_status_file=False,
+            )
+
+            self.assertEqual([], errors)
+
     def test_unknown_or_drifted_profile_is_rejected_without_falling_back_to_legacy_shape(self):
         module = load_validator()
         with tempfile.TemporaryDirectory() as directory:
@@ -280,7 +307,7 @@ class LegacyLedgerProjectionReadTests(unittest.TestCase):
             self.assertTrue(any("WI-LEDGER-MIGRATION-LEDGER-DRIFT" in error for error in errors))
             self.assertTrue(any("WI-LEDGER-MIGRATION-TARGET-DIGEST" in error for error in errors))
 
-    def test_candidate_ledger_drift_is_rejected_from_the_selected_candidate_without_reopening_live_bytes(self):
+    def test_arbitrary_sibling_and_external_ledger_candidates_are_rejected(self):
         module = load_validator()
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -288,14 +315,22 @@ class LegacyLedgerProjectionReadTests(unittest.TestCase):
             raw = self._canonical_raw()
             raw_line = canonical_bytes(raw) + b"\n"
             self._install_apply(item, ledger, work_items, raw_line, self._projected_canonical(raw))
-            candidate = root / "candidate-agent-runs.jsonl"
-            candidate.write_bytes(canonical_bytes(raw) + b"\r\n")
-            ledger.unlink()
+            for candidate in (
+                item / "candidate-agent-runs.jsonl",
+                root / "candidate-agent-runs.jsonl",
+            ):
+                with self.subTest(candidate=candidate):
+                    candidate.write_bytes(raw_line)
 
-            errors = module.validate_work_item(item, ledger_path=candidate, validate_status_file=False)
+                    errors = module.validate_work_item(
+                        item,
+                        ledger_path=candidate,
+                        validate_status_file=False,
+                    )
 
-            self.assertTrue(any("WI-LEDGER-MIGRATION-LEDGER-DRIFT" in error for error in errors))
-            self.assertFalse(any("missing ledger" in error for error in errors))
+                    self.assertTrue(
+                        any("WI-LEDGER-MIGRATION-LEDGER-DRIFT" in error for error in errors)
+                    )
 
     def test_in_memory_projection_candidate_validates_without_live_files_or_tree_mutation(self):
         module = load_validator()

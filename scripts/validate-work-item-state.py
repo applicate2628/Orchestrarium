@@ -2021,7 +2021,9 @@ def _projection_target_identity(
         _projection_fail(errors, "identity", "projection target must be one active or monthly archived work-item")
         return None
     canonical_ledger = lexical_item / "agent-runs.jsonl"
-    if selected_ledger != canonical_ledger:
+    transactional_ledger = canonical_ledger.with_suffix(".jsonl.tmp")
+    selected_ledger = Path(selected_ledger).absolute()
+    if selected_ledger not in {canonical_ledger, transactional_ledger}:
         _projection_fail(errors, "ledger", "candidate ledger path differs from immutable live ledger identity")
         return None
     for index in range(1, len(parts) + 1):
@@ -2035,6 +2037,9 @@ def _projection_target_identity(
         return None
     if not require_ledger and canonical_ledger.exists() and _is_link_or_reparse(canonical_ledger):
         _projection_fail(errors, "identity", "ledger is a link or reparse point")
+        return None
+    if selected_ledger == transactional_ledger and _is_link_or_reparse(transactional_ledger):
+        _projection_fail(errors, "identity", "transactional ledger is missing, linked, or a reparse point")
         return None
     return root, relative.as_posix()
 
@@ -2193,7 +2198,7 @@ def project_manifest_bound_legacy_ledger_projections(
     target = _projection_target_identity(item, selected_ledger, errors)
     if target is None:
         return events, counters, errors
-    root, _relative_item = target
+    root, relative_item = target
     work_items = root / "work-items"
     manifests = work_items / LEGACY_PROJECTION_MANIFEST_DIR
     registry = work_items / LEGACY_PROJECTION_REGISTRY
@@ -2219,7 +2224,7 @@ def project_manifest_bound_legacy_ledger_projections(
         if not manifests.is_dir() or not registry.is_file() or _is_link_or_reparse(manifests) or _is_link_or_reparse(registry):
             _projection_fail(errors, "manifest", "projection manifest directory or registry is missing or unsafe")
             return events, counters, errors
-    ledger = selected_ledger
+    ledger = root.joinpath(*PurePosixPath(relative_item).parts, "agent-runs.jsonl")
     if candidate_input:
         assert manifest_blobs is not None and registry_bytes is not None
         manifest_inputs: list[tuple[str, bytes, str]] = []
