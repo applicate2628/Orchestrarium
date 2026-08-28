@@ -137,6 +137,153 @@ def _bootstrap(owner, capsule: dict | None = None) -> dict:
     return result["state"]
 
 
+_DELETE = object()
+
+
+def _mutate_state_path(state: dict, path: tuple[str, ...], value: object) -> None:
+    owner = state
+    for key in path[:-1]:
+        owner = owner[key]
+    if value is _DELETE:
+        owner.pop(path[-1])
+    else:
+        owner[path[-1]] = value
+
+
+@pytest.mark.parametrize(
+    ("name", "path", "value"),
+    [
+        ("unknown-state-key", ("unexpected",), True),
+        ("empty-operations", ("operations",), {}),
+        ("head-not-in-operations", ("head",), "f" * 64),
+        ("malformed-capsule", ("capsule",), {}),
+        ("capsule-digest-mismatch", ("capsuleDigest",), "f" * 64),
+        ("declaration-set-mismatch", ("declarationSetId",), "other-declaration"),
+        ("missing-object-projection", ("objects", "object-two"), _DELETE),
+        ("malformed-object-record", ("objects", "object-one"), "not-an-object"),
+        ("changed-object-record", ("objects", "object-one", "guardIds"), ["required-oracle"]),
+        ("malformed-attempt-record", ("attempts", "attempt-one"), "not-an-attempt"),
+        ("attempt-dangling-object", ("attempts", "attempt-one", "decisionObjectId"), "object-missing"),
+        ("attempt-undeclared-class", ("attempts", "attempt-one", "solutionClassId"), "class-two"),
+        ("attempt-scalar-surfaces", ("attempts", "attempt-one", "mutationSurfaces"), "scripts/example.py"),
+        ("attempt-undeclared-surface", ("attempts", "attempt-one", "mutationSurfaces"), ["docs/example.md"]),
+        ("missing-active-object", ("activeAttemptByObject", "object-two"), _DELETE),
+        ("active-dangling-attempt", ("activeAttemptByObject", "object-one"), "attempt-missing"),
+        ("active-attempt-wrong-object", ("activeAttemptByObject", "object-one"), "attempt-two"),
+        ("missing-rejected-class", ("rejectedAttempts", "class-two"), _DELETE),
+        ("scalar-rejected-bucket", ("rejectedAttempts", "class-one"), "attempt-one"),
+        ("dangling-rejected-id", ("rejectedAttempts", "class-one"), ["attempt-missing"]),
+        ("rejected-attempt-wrong-class", ("rejectedAttempts", "class-one"), ["attempt-two"]),
+        ("missing-review-bucket", ("reviewRunIdsByAttempt", "attempt-two"), _DELETE),
+        ("scalar-review-bucket", ("reviewRunIdsByAttempt", "attempt-one"), "review-run-0001"),
+        ("dangling-review-bucket", ("reviewRunIdsByAttempt", "attempt-missing"), []),
+        ("invalid-review-id", ("reviewRunIdsByAttempt", "attempt-one"), ["bad review id"]),
+        ("duplicate-review-id", ("reviewRunIdsByAttempt", "attempt-one"), ["review-one", "review-one"]),
+        ("undeclared-rejected-class", ("rejectedClasses",), ["class-missing"]),
+        ("duplicate-rejected-class", ("rejectedClasses",), ["class-one", "class-one"]),
+        ("scalar-frontier-bucket", ("reassessmentFrontier", "object-one"), "attempt-one"),
+        ("dangling-frontier-object", ("reassessmentFrontier", "object-missing"), []),
+        ("dangling-frontier-attempt", ("reassessmentFrontier", "object-one"), ["attempt-missing"]),
+        ("frontier-attempt-wrong-object", ("reassessmentFrontier", "object-one"), ["attempt-two"]),
+        ("terminal-outcome-before-terminal", ("terminalOutcome",), "pass"),
+        ("terminal-without-outcome", ("launchState",), "TERMINAL"),
+    ],
+    ids=lambda row: row if isinstance(row, str) else None,
+)
+def test_malformed_derived_state_fails_closed_without_exception(
+    name: str,
+    path: tuple[str, ...],
+    value: object,
+) -> None:
+    owner = _owner()
+    state = _bootstrap(owner, _capsule(two_objects=True))
+    event = _event(
+        state,
+        "launch-claimed",
+        {"outcome": "claim"},
+        operation="launch-claim-0002",
+        fingerprint_char="2",
+    )
+    _mutate_state_path(state, path, value)
+    before = copy.deepcopy(state)
+
+    result = owner.reduce_solution_attempt(state, event)
+
+    assert result == {
+        "result": "SOL-E001-STATE-INVALID",
+        "changed": False,
+        "state": before,
+    }, name
+    assert state == before
+
+
+def test_generated_transition_chain_remains_valid() -> None:
+    owner = _owner()
+    state = _bootstrap(owner)
+    transitions = [
+        (
+            "revise-binding",
+            {
+                "attemptId": "attempt-one",
+                "reviewRunId": "review-run-0001",
+                "disposition": "bounded-correction",
+            },
+        ),
+        (
+            "attempt-admission",
+            {
+                "decisionObjectId": "object-one",
+                "solutionClassId": "class-one",
+                "attemptId": "attempt-two",
+                "mutationSurfaces": ["scripts/example.py"],
+            },
+        ),
+        (
+            "revise-binding",
+            {
+                "attemptId": "attempt-two",
+                "reviewRunId": "review-run-0002",
+                "disposition": "bounded-correction",
+            },
+        ),
+        (
+            "reassessment",
+            {
+                "decisionObjectId": "object-one",
+                "rejectedAttemptIds": ["attempt-one", "attempt-two"],
+                "decision": "retain-class",
+                "reviewRunId": "review-run-0003",
+            },
+        ),
+        ("launch-claimed", {"outcome": "claim"}),
+        ("spawn-boundary", {"outcome": "spawn-boundary"}),
+        ("launch-started", {"outcome": "authenticated-start"}),
+        ("launch-terminal", {"outcome": "pass"}),
+        (
+            "process-reaped",
+            {
+                "outcome": "resources-absent",
+                "processTreeAbsent": True,
+                "finalSnapshot": "e" * 64,
+            },
+        ),
+    ]
+    for index, (event_type, payload) in enumerate(transitions, start=2):
+        event = _event(
+            state,
+            event_type,
+            payload,
+            operation=f"transition-{index:04d}",
+            fingerprint_char=f"{index:x}"[-1],
+        )
+        result = owner.reduce_solution_attempt(state, event)
+        assert result["result"] == "SOL-OK", (event_type, result)
+        assert result["changed"] is True
+        state = result["state"]
+    assert state["launchState"] == "REAPED"
+    assert state["terminalOutcome"] == "pass"
+
+
 def test_claim_coverage_is_exact() -> None:
     rows = _json(CLAIMS)
     ids = [row["claimId"] for row in rows]

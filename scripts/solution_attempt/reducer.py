@@ -74,6 +74,23 @@ _EVENT_KEYS = {
     "eventType",
     "payload",
 }
+_STATE_KEYS = {
+    "head",
+    "operations",
+    "declarationSetId",
+    "capsuleDigest",
+    "capsule",
+    "objects",
+    "attempts",
+    "activeAttemptByObject",
+    "rejectedAttempts",
+    "reviewRunIdsByAttempt",
+    "rejectedClasses",
+    "reassessmentFrontier",
+    "launchState",
+    "terminalOutcome",
+}
+_ATTEMPT_KEYS = {"decisionObjectId", "solutionClassId", "mutationSurfaces"}
 _RESERVED_WINDOWS_NAMES = {
     "CON",
     "PRN",
@@ -102,6 +119,7 @@ _STARTED_OUTCOMES = {
     "timed-out",
     "orphaned-after-start",
 }
+_TERMINAL_OUTCOMES = _PRE_SPAWN_OUTCOMES | _PRE_AUTH_OUTCOMES | _STARTED_OUTCOMES
 
 
 class _DuplicateKey(ValueError):
@@ -275,28 +293,144 @@ def _unchanged(state: dict | None, result: str) -> dict:
     return {"result": result, "changed": False, "state": copy.deepcopy(state)}
 
 
+def _capsule_bytes(capsule: dict) -> bytes:
+    return json.dumps(
+        capsule,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+
+
+def _is_unique_id_list(value: object) -> bool:
+    return (
+        isinstance(value, list)
+        and all(_is_id(item) for item in value)
+        and len(value) == len(set(value))
+    )
+
+
 def _state_shape_valid(state: object) -> bool:
-    if not isinstance(state, dict) or not _is_digest(state.get("head")):
+    if not isinstance(state, dict) or set(state) != _STATE_KEYS:
         return False
-    operations = state.get("operations")
-    if not isinstance(operations, dict) or any(
+    head = state["head"]
+    if not _is_digest(head):
+        return False
+    operations = state["operations"]
+    if not isinstance(operations, dict) or not operations or any(
         not _is_id(operation_id) or not _is_digest(fingerprint)
         for operation_id, fingerprint in operations.items()
+    ) or head not in operations.values():
+        return False
+
+    decoded = decode_capsule(state["capsule"])
+    if decoded["result"] != OK:
+        return False
+    capsule = decoded["capsule"]
+    if (
+        state["declarationSetId"] != capsule["declarationSetId"]
+        or state["capsuleDigest"] != hashlib.sha256(_capsule_bytes(capsule)).hexdigest()
     ):
         return False
-    required_mappings = {
-        "objects",
-        "attempts",
-        "activeAttemptByObject",
-        "rejectedAttempts",
-        "reviewRunIdsByAttempt",
-        "reassessmentFrontier",
+
+    expected_objects = {
+        entry["decisionObjectId"]: entry
+        for entry in capsule["objects"]
     }
-    if any(not isinstance(state.get(key), dict) for key in required_mappings):
+    objects = state["objects"]
+    if not isinstance(objects, dict) or objects != expected_objects:
         return False
-    if not isinstance(state.get("rejectedClasses"), list):
+
+    declared_classes: set[str] = set()
+    initial_attempts: dict[str, dict] = {}
+    for object_id, declaration in expected_objects.items():
+        declared_classes.update(declaration["solutionClasses"])
+        initial_attempts[declaration["initialAttemptId"]] = {
+            "decisionObjectId": object_id,
+            "solutionClassId": declaration["initialClassId"],
+            "mutationSurfaces": declaration["mutationSurfaces"],
+        }
+
+    attempts = state["attempts"]
+    if not isinstance(attempts, dict) or not attempts:
         return False
-    if state.get("launchState") not in {
+    for attempt_id, attempt in attempts.items():
+        if not _is_id(attempt_id) or not isinstance(attempt, dict) or set(attempt) != _ATTEMPT_KEYS:
+            return False
+        object_id = attempt["decisionObjectId"]
+        declaration = expected_objects.get(object_id)
+        surfaces = attempt["mutationSurfaces"]
+        if (
+            declaration is None
+            or attempt["solutionClassId"] not in declaration["solutionClasses"]
+            or not isinstance(surfaces, list)
+            or not surfaces
+            or any(not isinstance(surface, str) for surface in surfaces)
+            or len(surfaces) != len(set(surfaces))
+            or set(surfaces) - set(declaration["mutationSurfaces"])
+        ):
+            return False
+    if any(attempts.get(attempt_id) != projection for attempt_id, projection in initial_attempts.items()):
+        return False
+
+    active = state["activeAttemptByObject"]
+    if not isinstance(active, dict) or set(active) != set(expected_objects):
+        return False
+    for object_id, attempt_id in active.items():
+        attempt = attempts.get(attempt_id)
+        if not _is_id(attempt_id) or attempt is None or attempt["decisionObjectId"] != object_id:
+            return False
+
+    rejected_attempts = state["rejectedAttempts"]
+    if not isinstance(rejected_attempts, dict) or set(rejected_attempts) != declared_classes:
+        return False
+    for class_id, rejected_ids in rejected_attempts.items():
+        if not _is_unique_id_list(rejected_ids):
+            return False
+        if any(
+            rejected_id not in attempts
+            or attempts[rejected_id]["solutionClassId"] != class_id
+            for rejected_id in rejected_ids
+        ):
+            return False
+
+    reviews = state["reviewRunIdsByAttempt"]
+    if not isinstance(reviews, dict) or set(reviews) != set(attempts):
+        return False
+    if any(not _is_unique_id_list(review_ids) for review_ids in reviews.values()):
+        return False
+
+    rejected_classes = state["rejectedClasses"]
+    if (
+        not _is_unique_id_list(rejected_classes)
+        or any(class_id not in declared_classes for class_id in rejected_classes)
+    ):
+        return False
+
+    frontier = state["reassessmentFrontier"]
+    if not isinstance(frontier, dict) or any(object_id not in expected_objects for object_id in frontier):
+        return False
+    for object_id, rejected_ids in frontier.items():
+        if not _is_unique_id_list(rejected_ids) or not rejected_ids:
+            return False
+        first_attempt = attempts.get(rejected_ids[0])
+        if first_attempt is None or first_attempt["decisionObjectId"] != object_id:
+            return False
+        class_id = first_attempt["solutionClassId"]
+        if rejected_ids != rejected_attempts[class_id]:
+            return False
+        for attempt_id in rejected_ids:
+            attempt = attempts.get(attempt_id)
+            if (
+                attempt is None
+                or attempt["decisionObjectId"] != object_id
+                or attempt["solutionClassId"] != class_id
+            ):
+                return False
+
+    launch_state = state["launchState"]
+    terminal = state["terminalOutcome"]
+    if launch_state not in {
         None,
         "CLAIMED_NO_SPAWN",
         "SPAWNED_UNCONFIRMED",
@@ -305,8 +439,9 @@ def _state_shape_valid(state: object) -> bool:
         "REAPED",
     }:
         return False
-    terminal = state.get("terminalOutcome")
-    return terminal is None or isinstance(terminal, str)
+    if launch_state in {"TERMINAL", "REAPED"}:
+        return terminal in _TERMINAL_OUTCOMES
+    return terminal is None
 
 
 def _commit(state: dict, event: dict, result: str = OK) -> dict:
@@ -333,17 +468,11 @@ def _bootstrap_state(event: dict) -> dict:
         active[object_id] = initial_attempt
         for class_id in entry["solutionClasses"]:
             rejected[class_id] = []
-    capsule_bytes = json.dumps(
-        capsule,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-    ).encode("utf-8")
     return {
         "head": event["fingerprint"],
         "operations": {event["operationId"]: event["fingerprint"]},
         "declarationSetId": capsule["declarationSetId"],
-        "capsuleDigest": hashlib.sha256(capsule_bytes).hexdigest(),
+        "capsuleDigest": hashlib.sha256(_capsule_bytes(capsule)).hexdigest(),
         "capsule": capsule,
         "objects": objects,
         "attempts": attempts,
