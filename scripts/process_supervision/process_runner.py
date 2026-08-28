@@ -117,6 +117,7 @@ _WINDOWS_SHELL_HOSTS = frozenset(
 _POSIX_SHELL_HOSTS = frozenset({"sh", "bash", "dash", "zsh", "fish", "ksh", "csh"})
 _WINDOWS_ARGV_PROFILES = frozenset(
     {
+        "python-hook-health-v1",
         "python-validator-json-echo-v1",
         "git-rev-parse-sq-quote-v1",
     }
@@ -317,14 +318,159 @@ class BoundedMemoryCaptureSinkV1:
             return hashlib.sha256(bytes(self._streams[stream])).hexdigest()
 
 
+HOOK_HEALTH_STDERR_LIMIT_BYTES = 4097
+
+
+class HookHealthSpoolCaptureSinkV1:
+    """Exact hook-health sink: unbounded stdout spool plus bounded stderr wire."""
+
+    def __init__(self, stdout_spool: Any) -> None:
+        self._stdout_spool = stdout_spool
+        self._stderr = bytearray()
+        self._digests = {
+            "stdout": hashlib.sha256(),
+            "stderr": hashlib.sha256(),
+        }
+        self._closed = False
+        self._lock = threading.Lock()
+        self._capability: HookHealthCapabilityV1 | None = None
+
+    def _bind_capability(
+        self, capability: "HookHealthCapabilityV1", seal: object
+    ) -> None:
+        if seal is not _HOOK_HEALTH_CAPABILITY_SEAL or self._capability is not None:
+            raise ProcessSupervisionError(
+                "PSV1-REQUEST-INVALID", "request-validation"
+            )
+        self._capability = capability
+
+    def write(self, stream: str, data: bytes) -> int:
+        capability = self._capability
+        if capability is None:
+            raise OSError("hook-health capability unavailable")
+        capability.verify_sink(self, require_consumed=True)
+        with self._lock:
+            if self._closed or stream not in self._digests:
+                raise OSError("sink unavailable")
+            if stream == "stdout":
+                written = self._stdout_spool.write(data)
+                if written != len(data):
+                    raise OSError("short stdout spool write")
+            else:
+                if len(self._stderr) + len(data) > HOOK_HEALTH_STDERR_LIMIT_BYTES:
+                    raise OSError("stderr probe exceeded sink contract")
+                self._stderr.extend(data)
+                written = len(data)
+            self._digests[stream].update(data)
+            return written
+
+    def close(self) -> None:
+        with self._lock:
+            if not self._closed:
+                self._stdout_spool.flush()
+                self._closed = True
+
+    def bytes_for(self, stream: str) -> bytes:
+        with self._lock:
+            if stream != "stderr":
+                raise ValueError("hook-health stdout is spool-backed")
+            return bytes(self._stderr)
+
+    def reference_digest(self, stream: str) -> str | None:
+        with self._lock:
+            return self._digests[stream].hexdigest()
+
+
 _SINK_BINDING_SEAL = object()
+_HOOK_HEALTH_CAPABILITY_SEAL = object()
+
+
+def _hook_spool_identity(spool: Any) -> tuple[object, ...]:
+    descriptor = spool.fileno()
+    metadata = os.fstat(descriptor)
+    if not stat.S_ISREG(metadata.st_mode):
+        raise ProcessSupervisionError(
+            "PSV1-REQUEST-INVALID", "request-validation"
+        )
+    return (
+        os.path.normcase(os.path.abspath(os.fspath(spool.name))),
+        descriptor,
+        metadata.st_dev,
+        metadata.st_ino,
+        metadata.st_mode,
+        getattr(metadata, "st_file_attributes", 0),
+    )
+
+
+class HookHealthCapabilityV1:
+    """One-use exact-request authority for the hook-health spool corridor."""
+
+    def __init__(
+        self,
+        request_sha256: str,
+        sink: HookHealthSpoolCaptureSinkV1,
+        spool_identity: tuple[object, ...],
+        seal: object,
+    ) -> None:
+        if seal is not _HOOK_HEALTH_CAPABILITY_SEAL:
+            raise ProcessSupervisionError(
+                "PSV1-REQUEST-INVALID", "request-validation"
+            )
+        self._request_sha256 = request_sha256
+        self._sink = sink
+        self._spool_identity = spool_identity
+        self._consumed = False
+        self._lock = threading.Lock()
+
+    @property
+    def consumed(self) -> bool:
+        with self._lock:
+            return self._consumed
+
+    def consume(self, request: "ProcessRequestV1") -> None:
+        actual = _hook_health_request_sha256(request)
+        binding = request.capture_sink_binding
+        if (
+            type(binding) is not CaptureSinkBindingV1
+            or binding._sink is not self._sink
+            or _hook_spool_identity(self._sink._stdout_spool)
+            != self._spool_identity
+        ):
+            raise ProcessSupervisionError(
+                "PSV1-REQUEST-INVALID", "request-validation"
+            )
+        with self._lock:
+            if self._consumed or not hmac.compare_digest(
+                self._request_sha256, actual
+            ):
+                raise ProcessSupervisionError(
+                    "PSV1-REQUEST-INVALID", "request-validation"
+                )
+            self._consumed = True
+
+    def verify_sink(
+        self,
+        sink: HookHealthSpoolCaptureSinkV1,
+        *,
+        require_consumed: bool,
+    ) -> None:
+        with self._lock:
+            valid = (
+                sink is self._sink
+                and (self._consumed or not require_consumed)
+                and _hook_spool_identity(sink._stdout_spool)
+                == self._spool_identity
+            )
+        if not valid:
+            raise OSError("hook-health sink capability mismatch")
 
 
 @dataclass(frozen=True)
 class CaptureSinkBindingV1:
     _sink_id: str
-    _sink: BoundedMemoryCaptureSinkV1
+    _sink: BoundedMemoryCaptureSinkV1 | HookHealthSpoolCaptureSinkV1
     _seal: object
+    _hook_health_capability: HookHealthCapabilityV1 | None = None
 
     def write(self, stream: str, data: bytes) -> int:
         return self._sink.write(stream, data)
@@ -374,6 +520,49 @@ class ProcessRequestV1:
     windows_argv_profile_id: str | None = None
     request_id: str | None = None
     policy_id: str | None = None
+
+
+def _hook_script_binding(path: Path) -> dict[str, object]:
+    resolved = path.resolve(strict=True)
+    metadata = resolved.stat()
+    content = resolved.read_bytes()
+    return {
+        "path": os.path.normcase(str(resolved)),
+        "device": metadata.st_dev,
+        "inode": metadata.st_ino,
+        "mode": metadata.st_mode,
+        "attributes": getattr(metadata, "st_file_attributes", 0),
+        "size": metadata.st_size,
+        "sha256": hashlib.sha256(content).hexdigest(),
+    }
+
+
+def _hook_health_request_sha256(request: ProcessRequestV1) -> str:
+    if len(request.argv) < 2:
+        raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
+    payload = {
+        "schemaVersion": request.schema_version,
+        "argv": list(request.argv),
+        "resolvedExecutableIdentity": resolve_executable_identity(
+            request.resolved_executable
+        ),
+        "cwd": os.path.abspath(request.cwd),
+        "environment": [
+            {"name": row.name, "value": row.value} for row in request.environment
+        ],
+        "stdin": request.stdin_bytes,
+        "deadlineMonotonicHex": request.deadline_monotonic.hex(),
+        "capturePolicy": dataclasses.asdict(request.capture_policy),
+        "settlePolicy": dataclasses.asdict(request.settle_policy),
+        "windowsArgvProfileId": request.windows_argv_profile_id,
+        "requestId": request.request_id,
+        "policyId": request.policy_id,
+        "hookScript": _hook_script_binding(Path(request.argv[1])),
+    }
+    encoded = json.dumps(
+        payload, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -859,8 +1048,15 @@ class BoundedCaptureV1:
         with self._lock:
             target = self._streams[stream]
             target.observe(data)
+            hook_stdout = (
+                type(self.sink) is CaptureSinkBindingV1
+                and self.sink._sink_id == "hook-health-spool-v1"
+                and self.sink._hook_health_capability is not None
+                and self.sink._hook_health_capability.consumed
+                and stream == "stdout"
+            )
             remaining = self.policy.aggregate_persisted_limit - self._persisted
-            accepted = data[: max(0, remaining)]
+            accepted = data if hook_stdout else data[: max(0, remaining)]
             if accepted:
                 try:
                     if self.sink is not None:
@@ -871,7 +1067,8 @@ class BoundedCaptureV1:
                     self._io_failed = True
                     return
                 target.persist(accepted)
-                self._persisted += len(accepted)
+                if not hook_stdout:
+                    self._persisted += len(accepted)
             if len(accepted) != len(data):
                 target.truncated = True
                 self._limit_crossed = True
@@ -1525,7 +1722,21 @@ class WindowsArgvAdmissionOwnerV1:
             ).hexdigest()
         else:
             identity, version = _stream_executable_binding(executable)
-        if profile_id == "python-validator-json-echo-v1":
+        if profile_id == "python-hook-health-v1":
+            if (
+                executable.resolve() != Path(sys.executable).resolve()
+                or len(request.argv) < 2
+                or not Path(request.argv[1]).is_absolute()
+                or Path(request.argv[1]).name != "check-hook-health.py"
+                or not Path(request.argv[1]).is_file()
+            ):
+                raise ProcessSupervisionError(
+                    "PSV1-ARGV-CODEC-UNSUPPORTED", "request-validation"
+                )
+            probe_kind, requested, observed = self._python_probe(
+                lifecycle, request, executable
+            )
+        elif profile_id == "python-validator-json-echo-v1":
             probe_kind, requested, observed = self._python_probe(
                 lifecycle, request, executable
             )
@@ -1715,6 +1926,16 @@ def validate_capture_policy(policy: CapturePolicyV1) -> None:
         raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
 
 
+def hook_health_capture_policy() -> CapturePolicyV1:
+    return CapturePolicyV1(
+        "hook-health-spool-v1",
+        HOOK_HEALTH_STDERR_LIMIT_BYTES,
+        0,
+        0,
+        64 * 1024,
+    )
+
+
 def _validate_environment(rows: Sequence[EnvironmentRowV1]) -> None:
     if len(rows) > MAX_ENVIRONMENT_COUNT:
         raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
@@ -1788,12 +2009,24 @@ def validate_process_request(request: ProcessRequestV1) -> ValidatedCwdV1:
         raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
     validate_capture_policy(request.capture_policy)
     binding = request.capture_sink_binding
-    if (
-        type(binding) is not CaptureSinkBindingV1
-        or getattr(binding, "_seal", None) is not _SINK_BINDING_SEAL
-        or getattr(binding, "_sink_id", None) != "bounded-memory-v1"
-        or type(getattr(binding, "_sink", None)) is not BoundedMemoryCaptureSinkV1
-    ):
+    memory_binding = (
+        type(binding) is CaptureSinkBindingV1
+        and getattr(binding, "_seal", None) is _SINK_BINDING_SEAL
+        and getattr(binding, "_sink_id", None) == "bounded-memory-v1"
+        and type(getattr(binding, "_sink", None)) is BoundedMemoryCaptureSinkV1
+    )
+    hook_binding = (
+        type(binding) is CaptureSinkBindingV1
+        and getattr(binding, "_seal", None) is _SINK_BINDING_SEAL
+        and getattr(binding, "_sink_id", None) == "hook-health-spool-v1"
+        and type(getattr(binding, "_sink", None)) is HookHealthSpoolCaptureSinkV1
+        and request.capture_policy == hook_health_capture_policy()
+        and type(getattr(binding, "_hook_health_capability", None))
+        is HookHealthCapabilityV1
+    )
+    if hook_binding:
+        binding._hook_health_capability.consume(request)
+    if not memory_binding and not hook_binding:
         raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
     if (
         not isinstance(request.settle_policy, SettlePolicyV1)
@@ -3075,6 +3308,65 @@ class ProcessRunnerV1:
             "bounded-memory-v1", BoundedMemoryCaptureSinkV1(), _SINK_BINDING_SEAL
         )
 
+    def build_hook_health_request(
+        self,
+        *,
+        argv: tuple[str, ...],
+        resolved_executable: Path,
+        cwd: str,
+        environment: tuple[EnvironmentRowV1, ...],
+        deadline_monotonic: float,
+        settle_timeout_seconds: float,
+        stdout_spool: Any,
+        trusted_script: Path,
+    ) -> ProcessRequestV1:
+        if len(argv) < 2:
+            raise ProcessSupervisionError(
+                "PSV1-REQUEST-INVALID", "request-validation"
+            )
+        candidate_binding = _hook_script_binding(Path(argv[1]))
+        trusted_binding = _hook_script_binding(trusted_script)
+        if not hmac.compare_digest(
+            str(candidate_binding["sha256"]), str(trusted_binding["sha256"])
+        ):
+            raise ProcessSupervisionError(
+                "PSV1-REQUEST-INVALID", "request-validation"
+            )
+        binding = CaptureSinkBindingV1(
+            "hook-health-spool-v1",
+            HookHealthSpoolCaptureSinkV1(stdout_spool),
+            _SINK_BINDING_SEAL,
+        )
+        request = ProcessRequestV1(
+            schema_version=1,
+            argv=argv,
+            resolved_executable=resolved_executable,
+            cwd=cwd,
+            environment=environment,
+            stdin_bytes=None,
+            deadline_monotonic=deadline_monotonic,
+            capture_policy=hook_health_capture_policy(),
+            capture_sink_binding=binding,
+            settle_policy=SettlePolicyV1(settle_timeout_seconds),
+            windows_argv_profile_id=(
+                "python-hook-health-v1" if os.name == "nt" else None
+            ),
+            policy_id="hook-health-v1",
+        )
+        sink = binding._sink
+        assert type(sink) is HookHealthSpoolCaptureSinkV1
+        capability = HookHealthCapabilityV1(
+            _hook_health_request_sha256(request),
+            sink,
+            _hook_spool_identity(stdout_spool),
+            _HOOK_HEALTH_CAPABILITY_SEAL,
+        )
+        sink._bind_capability(capability, _HOOK_HEALTH_CAPABILITY_SEAL)
+        binding = dataclasses.replace(
+            binding, _hook_health_capability=capability
+        )
+        return dataclasses.replace(request, capture_sink_binding=binding)
+
     def _run_internal_windows_probe(
         self,
         lifecycle: RunLifecycleV1,
@@ -4097,6 +4389,8 @@ __all__ = [
     "DecodedRequestBundleV1",
     "EnvironmentRowV1",
     "FinalizerV1",
+    "HOOK_HEALTH_STDERR_LIMIT_BYTES",
+    "HookHealthSpoolCaptureSinkV1",
     "MemoryCaptureSinkV1",
     "PosixGroupSettlementOracleV1",
     "PosixIdentityLedgerV1",
@@ -4124,6 +4418,7 @@ __all__ = [
     "encode_capability_binding",
     "encode_request_bundle",
     "get_process_start_marker",
+    "hook_health_capture_policy",
     "resolve_executable_identity",
     "resolve_executable_version",
     "safe_serialize_result",

@@ -15,6 +15,12 @@ ROOT = Path(__file__).resolve().parents[1]
 OWNER_PATH = ROOT / "scripts" / "provider_prompt.py"
 WRAPPER_PATH = ROOT / "scripts" / "invoke-kimi-prompt.py"
 INSTALLER_PATH = ROOT / "scripts" / "production_installer.py"
+EXPECTED_KIMI_TERMINAL_INSTRUCTION = (
+    b"Your final nonblank line must be exactly one of: GATE: PASS, "
+    b"GATE: REVISE, GATE: BLOCKED. Do not emit any other gate-like line.\n"
+)
+
+
 def _load_owner():
     spec = importlib.util.spec_from_file_location("kimi_unavailable_owner", OWNER_PATH)
     assert spec and spec.loader
@@ -127,6 +133,44 @@ def test_kimi_file_reference_argv_is_exact(tmp_path: Path) -> None:
     ]
 
 
+def test_kimi_file_reference_request_has_no_stdin(tmp_path: Path) -> None:
+    owner = _load_owner()
+    agent = tmp_path / "agent.md"
+    skills = tmp_path / "empty-skills"
+    executable = Path(sys.executable).resolve()
+    agent.write_text("fixture\n", encoding="utf-8")
+    skills.mkdir()
+    observed: list[object] = []
+
+    class Sink:
+        def bytes_for(self, _stream: str) -> bytes:
+            return b""
+
+    class Runner:
+        def mint_memory_capture_sink(self) -> Sink:
+            return Sink()
+
+        def run(self, request):
+            observed.append(request)
+            return object()
+
+    provider_args = owner.kimi_provider_args(agent, skills)
+    owner.run_provider_process(
+        Runner(),
+        [str(executable)],
+        provider_args,
+        {},
+        tmp_path,
+        None,
+        owner.Control(),
+        "kimi",
+    )
+
+    request = observed[0]
+    assert request.argv == (str(executable), *provider_args)
+    assert request.stdin_bytes is None
+
+
 def test_kimi_command_resolution_ignores_ambient_binary_override(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -140,28 +184,117 @@ def test_kimi_command_resolution_ignores_ambient_binary_override(
 def test_kimi_bundle_rejects_ambient_template_variables(tmp_path: Path) -> None:
     owner = _load_owner()
     with pytest.raises(ValueError, match="E_KIMI_BUNDLE_TEMPLATE_INVALID"):
-        owner.kimi_agent_bundle(b"Review ${cwd}", tmp_path)
+        owner.prepare_kimi_agent_payload(b"Review ${cwd}")
 
 
 def test_kimi_bundle_is_no_tools_and_no_subagents(tmp_path: Path) -> None:
     owner = _load_owner()
-    task = b"Review the sealed context."
-    agent, skills = owner.kimi_agent_bundle(task, tmp_path)
+    caller = b"Review the sealed context in natural language."
+    generic = owner.assemble_external_prompt(caller)
+    prepared = owner.prepare_kimi_agent_payload(generic)
+    agent, skills = owner.materialize_kimi_agent_payload(prepared, tmp_path)
     assert skills.is_dir() and not tuple(skills.iterdir())
     expected = (
         "---\nname: orchestrarium-bundle-reviewer\n"
         "description: Reviews only the context bundled in this file\n"
         "tools: []\nsubagents: []\n---\n\n"
     )
-    text = agent.read_text(encoding="utf-8")
-    assert text.startswith(expected)
-    assert text == (
-        expected
-        + owner.KIMI_AGENT_BUNDLE_PREAMBLE.decode("utf-8")
-        + task.decode("utf-8")
-        + owner.KIMI_AGENT_BUNDLE_EPILOGUE.decode("utf-8")
+    payload = agent.read_bytes()[len(owner.KimiWindowsProfileV1.agent_frontmatter) :]
+    sealed, instruction = payload.split(owner.KIMI_AGENT_BUNDLE_EPILOGUE, 1)
+    assert sealed == owner.KIMI_AGENT_BUNDLE_PREAMBLE + generic
+    assert instruction == EXPECTED_KIMI_TERMINAL_INSTRUCTION
+    assert payload.count(owner.KIMI_AGENT_BUNDLE_EPILOGUE) == 1
+    assert payload.count(EXPECTED_KIMI_TERMINAL_INSTRUCTION) == 1
+    assert agent.read_text(encoding="utf-8").startswith(expected)
+    assert generic == (
+        owner.EXTERNAL_GOVERNANCE_BEGIN
+        + owner.external_governance_capsule_snapshot()
+        + owner.EXTERNAL_GOVERNANCE_END
+        + caller
     )
-    assert "tools: []" in text and "subagents: []" in text
+    assert b"GATE:" not in caller
+
+
+def test_kimi_terminal_instruction_and_renderer_share_one_closed_verdict_owner() -> None:
+    owner = _load_owner()
+    verdicts = getattr(owner, "KIMI_TERMINAL_VERDICTS", ())
+    instruction = getattr(owner, "KIMI_AGENT_TERMINAL_INSTRUCTION", b"")
+
+    assert verdicts == ("PASS", "REVISE", "BLOCKED")
+    assert instruction == EXPECTED_KIMI_TERMINAL_INSTRUCTION
+    for verdict in verdicts:
+        form = f"GATE: {verdict}"
+        assert instruction.count(form.encode()) == 1
+        for decoration in ("", "  ", "\u2022 "):
+            match = owner.KIMI_RENDERED_GATE.fullmatch(decoration + form)
+            assert match is not None and match.group(1) == verdict
+
+
+def test_codex_and_claude_generic_prompt_composition_remains_byte_identical() -> None:
+    owner = _load_owner()
+    caller = b"generic caller bytes"
+    expected = (
+        owner.EXTERNAL_GOVERNANCE_BEGIN
+        + owner.external_governance_capsule_snapshot()
+        + owner.EXTERNAL_GOVERNANCE_END
+        + caller
+    )
+
+    assert tuple(owner.assemble_external_prompt(caller) for _provider in ("codex", "claude")) == (
+        expected,
+        expected,
+    )
+
+
+def test_kimi_payload_validation_precedes_capture_and_launch_ledger(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    owner = _load_owner()
+    provenance = owner.ExecutionProvenance(
+        work_item="fixture",
+        assigned_internal_role="qa-engineer",
+        provider="kimi",
+        model="kimi-code/k3",
+        effort="unsupported",
+        launch_flags=(),
+        artifact_identity="fixture",
+        external_dispatch_id="dispatch-fixture",
+        external_evidence_run_id="evidence-fixture",
+        effort_mapping_loss="no-native-effort-control",
+    )
+    prevalidated = owner.PolicyBoundLaunch(
+        owner.Control(ledger="fixture-item"),
+        "fixture",
+        (),
+        "kimi-code/k3",
+        "unsupported",
+        owner.ExternalRoleProvenance("qa-engineer", "external-reviewer"),
+        provenance,
+    )
+    monkeypatch.setattr(owner, "resolve_enrolled_kimi_command", lambda: [sys.executable])
+    monkeypatch.setattr(owner, "prompt_bytes", lambda *_args, **_kwargs: b"Review ${cwd}")
+    monkeypatch.setattr(
+        owner,
+        "resolve_provider_auth_configuration",
+        lambda _provider: SimpleNamespace(child_environment={}, needles=()),
+    )
+    monkeypatch.setattr(
+        owner.RunCaptureLifecycle,
+        "create",
+        lambda *_args, **_kwargs: pytest.fail("capture reached before Kimi validation"),
+    )
+    monkeypatch.setattr(
+        owner,
+        "run_ledger",
+        lambda *_args, **_kwargs: pytest.fail("launch ledger reached before Kimi validation"),
+    )
+
+    assert owner._launch_with_runner(
+        "kimi", [], SimpleNamespace(), prevalidated=prevalidated
+    ) == 1
+    assert "E_KIMI_BUNDLE_TEMPLATE_INVALID" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize(
@@ -327,6 +460,32 @@ def _finalize_kimi(
         else ""
     )
     return code, payload, [notes], lifecycle
+
+
+@pytest.mark.parametrize("verdict", ("PASS", "REVISE", "BLOCKED"))
+def test_valid_kimi_verdicts_remain_external_nonauthorizing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    verdict: str,
+) -> None:
+    owner = _load_owner()
+    code, payload, _notes, lifecycle = _finalize_kimi(
+        owner,
+        tmp_path,
+        monkeypatch,
+        capsys,
+        stdout=f"GATE: {verdict}\n".encode(),
+        stderr=b"",
+        with_ledger=True,
+    )
+
+    assert code == 0
+    assert payload["gate"] == verdict
+    assert payload["authorizing"] is False
+    assert payload["closesRunIds"] == []
+    assert payload["terminalClass"] == "external-nonauthorizing"
+    assert not lifecycle.run_dir.exists()
 
 
 def _finalize_kimi_child_nonzero(
@@ -653,6 +812,7 @@ def test_generic_capture_metadata_remains_exactly_as_supplied(
 @pytest.mark.parametrize(
     "stdout",
     (
+        b"natural language without a gate\n",
         b"GATE: PASS\ntrailing prose\n",
         b"  GATE: MAYBE\n  GATE: PASS\n",
         b"    GATE: REVISE\n  GATE: PASS\n",

@@ -50,7 +50,17 @@ ERROR_MARKER = re.compile(
     r"(\.[0-9]+)?Z? )?(ERROR|FATAL|API Error)"
     r"(: | [A-Za-z0-9_]+(::[A-Za-z0-9_]+)*: )"
 )
-KIMI_RENDERED_GATE = re.compile(r"^(?:\u2022 |  )?GATE: (PASS|REVISE|BLOCKED)$")
+KIMI_TERMINAL_VERDICTS = ("PASS", "REVISE", "BLOCKED")
+KIMI_GATE_PREFIX = "GATE: "
+_KIMI_TERMINAL_PATTERN = "|".join(re.escape(verdict) for verdict in KIMI_TERMINAL_VERDICTS)
+KIMI_RENDERED_GATE = re.compile(
+    rf"^(?:\u2022 |  )?{re.escape(KIMI_GATE_PREFIX)}({_KIMI_TERMINAL_PATTERN})$"
+)
+KIMI_AGENT_TERMINAL_INSTRUCTION = (
+    "Your final nonblank line must be exactly one of: "
+    + ", ".join(KIMI_GATE_PREFIX + verdict for verdict in KIMI_TERMINAL_VERDICTS)
+    + ". Do not emit any other gate-like line.\n"
+).encode("utf-8")
 KIMI_GATE_LIKE = re.compile(r"^[ \t]*GATE[ \t]*:")
 INVALID_SLUG = re.compile(r'[\\/:\*\?"<>\|\x00]')
 RESULT_MAX_BYTES_DEFAULT = 1024 * 1024
@@ -1493,21 +1503,26 @@ KIMI_AGENT_BUNDLE_PREAMBLE = (
 KIMI_AGENT_BUNDLE_EPILOGUE = b"\nEND SEALED BUNDLE\n"
 
 
-def kimi_agent_bundle(body: bytes, run_dir: Path) -> tuple[Path, Path]:
-    """Materialize the only Kimi input: a no-tools, no-subagent agent bundle."""
-
+def prepare_kimi_agent_payload(body: bytes) -> bytes:
+    """Validate and compose the complete Kimi agent before any launch side effect."""
     if b"${" in body:
         raise ValueError("E_KIMI_BUNDLE_TEMPLATE_INVALID")
     task = _bounded_strict_utf8_snapshot(body, "Kimi bundle")
-    agent = run_dir / "kimi-agent.md"
-    skills = run_dir / "kimi-empty-skills"
-    skills.mkdir(mode=0o700)
-    agent.write_bytes(
+    return (
         KimiWindowsProfileV1.agent_frontmatter
         + KIMI_AGENT_BUNDLE_PREAMBLE
         + task
         + KIMI_AGENT_BUNDLE_EPILOGUE
+        + KIMI_AGENT_TERMINAL_INSTRUCTION
     )
+
+
+def materialize_kimi_agent_payload(payload: bytes, run_dir: Path) -> tuple[Path, Path]:
+    """Materialize one already-validated no-tools, no-subagent Kimi agent."""
+    agent = run_dir / "kimi-agent.md"
+    skills = run_dir / "kimi-empty-skills"
+    skills.mkdir(mode=0o700)
+    agent.write_bytes(payload)
     return agent, skills
 
 
@@ -3320,6 +3335,13 @@ def _launch_with_runner(
     except ValueError as exc:
         return fail(str(exc))
 
+    kimi_agent_payload: bytes | None = None
+    if provider == "kimi":
+        try:
+            kimi_agent_payload = prepare_kimi_agent_payload(body)
+        except ValueError as exc:
+            return fail(str(exc))
+
     if provider == "codex":
         if not Path(command[0]).is_absolute() or not Path(command[0]).is_file():
             return fail("resolved Codex executable is not an absolute regular file")
@@ -3410,7 +3432,10 @@ def _launch_with_runner(
     kimi_skills: Path | None = None
     if provider == "kimi":
         try:
-            kimi_agent, kimi_skills = kimi_agent_bundle(body, lifecycle.run_dir)
+            assert kimi_agent_payload is not None
+            kimi_agent, kimi_skills = materialize_kimi_agent_payload(
+                kimi_agent_payload, lifecycle.run_dir
+            )
         except (OSError, ValueError) as exc:
             return settle_initialized_setup_failure(
                 control, provider, model, effort, slug, lifecycle, exc, realization, runner=runner,

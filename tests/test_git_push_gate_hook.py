@@ -97,6 +97,14 @@ def pr_literal_command_workspace():
             assert not owned_path.exists()
 
 
+@contextlib.contextmanager
+def temporary_repository_workdir():
+    with tempfile.TemporaryDirectory(prefix="push-gate-process-bounds-") as directory:
+        root = Path(directory).resolve()
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        yield str(root)
+
+
 class OraclePreparation(NamedTuple):
     status: str
     failure_id: str | None
@@ -5214,28 +5222,32 @@ class TestPrProviderProcessBounds(unittest.TestCase):
     """The direct-argv provider runner is finite in time and captured bytes."""
 
     def test_provider_output_over_cap_fails_closed(self) -> None:
-        for idx, script in enumerate(HOOKS):
-            module = _load_gate_module(script, f"push_gate_output_cap_{idx}")
-            result = module._run_process(
-                [
-                    sys.executable,
-                    "-c",
-                    f"import sys; sys.stdout.buffer.write(b'x' * {module.PROCESS_OUTPUT_BYTE_CAP + 1})",
-                ],
-                2.0,
-            )
-            self.assertIsNone(result, script)
+        with temporary_repository_workdir() as repository_workdir:
+            for idx, script in enumerate(HOOKS):
+                module = _load_gate_module(script, f"push_gate_output_cap_{idx}")
+                result = module._run_process(
+                    [
+                        sys.executable,
+                        "-c",
+                        f"import sys; sys.stdout.buffer.write(b'x' * {module.PROCESS_OUTPUT_BYTE_CAP + 1})",
+                    ],
+                    2.0,
+                    repository_workdir,
+                )
+                self.assertIsNone(result, script)
 
     def test_provider_timeout_kills_and_reaps(self) -> None:
-        for idx, script in enumerate(HOOKS):
-            module = _load_gate_module(script, f"push_gate_timeout_{idx}")
-            started = time.monotonic()
-            result = module._run_process(
-                [sys.executable, "-c", "import time; time.sleep(10)"],
-                0.05,
-            )
-            self.assertIsNone(result, script)
-            self.assertLess(time.monotonic() - started, 2.0, script)
+        with temporary_repository_workdir() as repository_workdir:
+            for idx, script in enumerate(HOOKS):
+                module = _load_gate_module(script, f"push_gate_timeout_{idx}")
+                started = time.monotonic()
+                result = module._run_process(
+                    [sys.executable, "-c", "import time; time.sleep(10)"],
+                    0.05,
+                    repository_workdir,
+                )
+                self.assertIsNone(result, script)
+                self.assertLess(time.monotonic() - started, 2.0, script)
 
 
 class TestGitPushGateResultStatus(unittest.TestCase):
@@ -6903,30 +6915,35 @@ class TestPublicationSafetyTrustedScanR2(unittest.TestCase):
         before = {thread.ident for thread in threading.enumerate()}
         original_timeout = module.SCAN_TIMEOUT_SECONDS
         original_cap = module.SCAN_OUTPUT_BYTE_CAP
-        try:
-            module.SCAN_TIMEOUT_SECONDS = 0.1
-            pending = self._pending(
-                module, binding,
-                (sys.executable, "-c", "import time; time.sleep(60)"),
-            )
-            _invocation, timed_rows = module._run_snapshot_child(pending, b"")
-            timed = timed_rows[0]
-            self.assertFalse(timed.bounded_completion)
-            self.assertTrue(timed.settlement.complete)
+        with temporary_repository_workdir() as repository_workdir:
+            try:
+                module.SCAN_TIMEOUT_SECONDS = 0.1
+                pending = self._pending(
+                    module, binding,
+                    (sys.executable, "-c", "import time; time.sleep(60)"),
+                )
+                _invocation, timed_rows = module._run_snapshot_child(
+                    pending, b"", repository_workdir
+                )
+                timed = timed_rows[0]
+                self.assertFalse(timed.bounded_completion)
+                self.assertTrue(timed.settlement.complete)
 
-            module.SCAN_TIMEOUT_SECONDS = 2.0
-            module.SCAN_OUTPUT_BYTE_CAP = 128
-            pending = self._pending(
-                module, binding,
-                (sys.executable, "-c", "import sys; sys.stdout.write('x'*4096)"),
-            )
-            _invocation, overflow_rows = module._run_snapshot_child(pending, b"")
-            overflow = overflow_rows[0]
-            self.assertFalse(overflow.bounded_completion)
-            self.assertTrue(overflow.settlement.complete)
-        finally:
-            module.SCAN_TIMEOUT_SECONDS = original_timeout
-            module.SCAN_OUTPUT_BYTE_CAP = original_cap
+                module.SCAN_TIMEOUT_SECONDS = 2.0
+                module.SCAN_OUTPUT_BYTE_CAP = 128
+                pending = self._pending(
+                    module, binding,
+                    (sys.executable, "-c", "import sys; sys.stdout.write('x'*4096)"),
+                )
+                _invocation, overflow_rows = module._run_snapshot_child(
+                    pending, b"", repository_workdir
+                )
+                overflow = overflow_rows[0]
+                self.assertFalse(overflow.bounded_completion)
+                self.assertTrue(overflow.settlement.complete)
+            finally:
+                module.SCAN_TIMEOUT_SECONDS = original_timeout
+                module.SCAN_OUTPUT_BYTE_CAP = original_cap
         after = [
             thread for thread in threading.enumerate()
             if thread.ident not in before and thread.is_alive()

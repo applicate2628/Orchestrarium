@@ -245,6 +245,16 @@ def _ledger_events(item: Path) -> list[dict]:
     ]
 
 
+class _RmtreeFailure:
+    avoids_symlink_attacks = shutil.rmtree.avoids_symlink_attacks
+
+    def __init__(self, message: str) -> None:
+        self.message = message
+
+    def __call__(self, _path: Path) -> None:
+        raise PermissionError(self.message)
+
+
 def _lifecycle(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1273,9 +1283,7 @@ def test_tombstone_delete_failure_is_visible_and_preserves_recovery(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     lifecycle = _lifecycle(tmp_path, monkeypatch)
-    monkeypatch.setattr(
-        owner.shutil, "rmtree", lambda _path: (_ for _ in ()).throw(PermissionError("denied"))
-    )
+    monkeypatch.setattr(owner.shutil, "rmtree", _RmtreeFailure("denied"))
     cleanup = lifecycle.cleanup()
     assert not cleanup.clean
     assert cleanup.recovery_retained
@@ -1292,9 +1300,7 @@ def test_primary_purge_failure_scrubs_prompt_and_provider_canaries_before_retent
     lifecycle = _lifecycle(tmp_path, monkeypatch)
     _write_result(lifecycle, b"RAW_PROVIDER_CANARY")
     lifecycle.prompt_path.write_bytes(b"RAW_PROMPT_CANARY")
-    monkeypatch.setattr(
-        owner.shutil, "rmtree", lambda _path: (_ for _ in ()).throw(PermissionError("primary"))
-    )
+    monkeypatch.setattr(owner.shutil, "rmtree", _RmtreeFailure("primary"))
     cleanup = lifecycle.cleanup()
     retained = list(lifecycle.root.rglob("*"))
     assert not cleanup.clean and cleanup.recovery_retained
@@ -1325,9 +1331,7 @@ def test_tombstone_scan_rejects_link_content(
 
 def test_secondary_purge_failure_is_never_reported_clean(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     lifecycle = _lifecycle(tmp_path, monkeypatch)
-    monkeypatch.setattr(
-        owner.shutil, "rmtree", lambda _path: (_ for _ in ()).throw(PermissionError("primary"))
-    )
+    monkeypatch.setattr(owner.shutil, "rmtree", _RmtreeFailure("primary"))
     monkeypatch.setattr(
         lifecycle, "_purge_tombstone", lambda _path: (_ for _ in ()).throw(PermissionError("purge"))
     )
@@ -1343,9 +1347,7 @@ def test_per_file_scrub_failure_still_attempts_all_and_purges_canaries(
     lifecycle = _lifecycle(tmp_path, monkeypatch)
     _write_result(lifecycle, b"RAW_PROVIDER_CANARY")
     lifecycle.prompt_path.write_bytes(b"RAW_PROMPT_CANARY")
-    monkeypatch.setattr(
-        owner.shutil, "rmtree", lambda _path: (_ for _ in ()).throw(PermissionError("primary"))
-    )
+    monkeypatch.setattr(owner.shutil, "rmtree", _RmtreeFailure("primary"))
     original = lifecycle._scrub_regular_payload
     calls: list[str] = []
 
@@ -1371,9 +1373,7 @@ def test_scrub_failure_falls_back_to_individual_unlink_before_retention(
     lifecycle = _lifecycle(tmp_path, monkeypatch)
     _write_result(lifecycle, b"RAW_PROVIDER_CANARY")
     lifecycle.prompt_path.write_bytes(b"RAW_PROMPT_CANARY")
-    monkeypatch.setattr(
-        owner.shutil, "rmtree", lambda _path: (_ for _ in ()).throw(PermissionError("primary"))
-    )
+    monkeypatch.setattr(owner.shutil, "rmtree", _RmtreeFailure("primary"))
     original_purge = lifecycle._purge_tombstone
     purge_calls = 0
 
@@ -1401,9 +1401,7 @@ def test_scrub_failure_falls_back_to_individual_unlink_before_retention(
 def test_triple_cleanup_denial_is_nonclean_and_retained(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     lifecycle = _lifecycle(tmp_path, monkeypatch)
     lifecycle.prompt_path.write_bytes(b"RAW_PROMPT_CANARY")
-    monkeypatch.setattr(
-        owner.shutil, "rmtree", lambda _path: (_ for _ in ()).throw(PermissionError("primary"))
-    )
+    monkeypatch.setattr(owner.shutil, "rmtree", _RmtreeFailure("primary"))
     monkeypatch.setattr(
         lifecycle, "_purge_tombstone", lambda _path: (_ for _ in ()).throw(PermissionError("purge"))
     )
@@ -1429,7 +1427,7 @@ def test_recovery_write_failure_after_successful_purge_returns_bounded_cleanup_r
     monkeypatch.setattr(
         owner.shutil,
         "rmtree",
-        lambda _path: (_ for _ in ()).throw(PermissionError("primary")),
+        _RmtreeFailure("primary"),
     )
     monkeypatch.setattr(
         lifecycle,

@@ -77,6 +77,145 @@ def _request(runner, argv: tuple[str, ...], *, stdin: bytes | None = None, limit
     )
 
 
+def test_hook_health_spool_sink_is_unbounded_only_for_stdout(tmp_path: Path) -> None:
+    runner = _load_runner()
+    spool_path = tmp_path / "health.stdout"
+    stdout = b"S" * (runner.HOOK_HEALTH_STDERR_LIMIT_BYTES * 2)
+    stderr = b"E" * (runner.HOOK_HEALTH_STDERR_LIMIT_BYTES + 1)
+    script = tmp_path / "check-hook-health.py"
+    script.write_text("raise SystemExit(0)\n", encoding="utf-8")
+    with spool_path.open("w+b") as spool:
+        owner = runner.ProcessRunnerV1()
+        request = owner.build_hook_health_request(
+            argv=(str(Path(sys.executable).resolve()), str(script)),
+            resolved_executable=Path(sys.executable).resolve(),
+            cwd=str(tmp_path),
+            environment=(),
+            deadline_monotonic=time.monotonic() + 10.0,
+            settle_timeout_seconds=1.0,
+            stdout_spool=spool,
+            trusted_script=script,
+        )
+        runner.validate_process_request(request)
+        binding = request.capture_sink_binding
+        capture = runner.BoundedCaptureV1(
+            runner.hook_health_capture_policy(), binding
+        )
+        capture.feed("stdout", stdout)
+        assert capture.limit_crossed is False
+        capture.feed("stderr", stderr)
+        assert capture.limit_crossed is True
+        binding.close()
+        spool.seek(0)
+        assert spool.read() == stdout
+        assert binding.bytes_for("stderr") == stderr[
+            : runner.HOOK_HEALTH_STDERR_LIMIT_BYTES
+        ]
+
+
+def _hook_health_request(runner, tmp_path: Path, spool):
+    script = tmp_path / "check-hook-health.py"
+    script.write_text("raise SystemExit(0)\n", encoding="utf-8")
+    owner = runner.ProcessRunnerV1()
+    request = owner.build_hook_health_request(
+        argv=(str(Path(sys.executable).resolve()), str(script)),
+        resolved_executable=Path(sys.executable).resolve(),
+        cwd=str(tmp_path),
+        environment=(),
+        deadline_monotonic=time.monotonic() + 10.0,
+        settle_timeout_seconds=1.0,
+        stdout_spool=spool,
+        trusted_script=script,
+    )
+    return owner, request, script
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ("generic-profile", "posix-non-hook-request"),
+)
+def test_hook_health_spool_capability_rejects_request_mutation(
+    tmp_path: Path, mutation: str
+) -> None:
+    runner = _load_runner()
+    with (tmp_path / "stdout.spool").open("w+b") as spool:
+        _owner, request, _script = _hook_health_request(runner, tmp_path, spool)
+        if mutation == "generic-profile":
+            request = runner.dataclasses.replace(
+                request,
+                windows_argv_profile_id="python-validator-json-echo-v1",
+            )
+        else:
+            request = runner.dataclasses.replace(
+                request,
+                argv=(*request.argv, "--not-hook-health"),
+            )
+        with pytest.raises(runner.ProcessSupervisionError) as failure:
+            runner.validate_process_request(request)
+        assert failure.value.failure_id == "PSV1-REQUEST-INVALID"
+
+
+def test_hook_health_factory_rejects_untrusted_same_basename(tmp_path: Path) -> None:
+    runner = _load_runner()
+    trusted = tmp_path / "trusted" / "check-hook-health.py"
+    candidate = tmp_path / "candidate" / "check-hook-health.py"
+    trusted.parent.mkdir()
+    candidate.parent.mkdir()
+    trusted.write_text("raise SystemExit(0)\n", encoding="utf-8")
+    candidate.write_text("raise SystemExit(1)\n", encoding="utf-8")
+    with (tmp_path / "stdout.spool").open("w+b") as spool:
+        with pytest.raises(runner.ProcessSupervisionError):
+            runner.ProcessRunnerV1().build_hook_health_request(
+                argv=(str(Path(sys.executable).resolve()), str(candidate)),
+                resolved_executable=Path(sys.executable).resolve(),
+                cwd=str(tmp_path),
+                environment=(),
+                deadline_monotonic=time.monotonic() + 10.0,
+                settle_timeout_seconds=1.0,
+                stdout_spool=spool,
+                trusted_script=trusted,
+            )
+
+
+def test_hook_health_spool_capability_rejects_replay_and_script_drift(
+    tmp_path: Path,
+) -> None:
+    runner = _load_runner()
+    with (tmp_path / "stdout.spool").open("w+b") as spool:
+        _owner, request, script = _hook_health_request(runner, tmp_path, spool)
+        runner.validate_process_request(request)
+        with pytest.raises(runner.ProcessSupervisionError):
+            runner.validate_process_request(request)
+
+    with (tmp_path / "drift.stdout.spool").open("w+b") as spool:
+        _owner, request, script = _hook_health_request(runner, tmp_path, spool)
+        script.write_text("raise SystemExit(7)\n", encoding="utf-8")
+        with pytest.raises(runner.ProcessSupervisionError):
+            runner.validate_process_request(request)
+
+
+def test_hook_health_capability_rejects_repaired_spool_binding(tmp_path: Path) -> None:
+    runner = _load_runner()
+    spool_a_path = tmp_path / "a.spool"
+    spool_b_path = tmp_path / "b.spool"
+    with spool_a_path.open("w+b") as spool_a, spool_b_path.open("w+b") as spool_b:
+        _owner, request, _script = _hook_health_request(runner, tmp_path, spool_a)
+        replacement_sink = runner.HookHealthSpoolCaptureSinkV1(spool_b)
+        replacement_binding = runner.dataclasses.replace(
+            request.capture_sink_binding,
+            _sink=replacement_sink,
+        )
+        replacement = runner.dataclasses.replace(
+            request,
+            capture_sink_binding=replacement_binding,
+        )
+        with pytest.raises(runner.ProcessSupervisionError) as failure:
+            runner.validate_process_request(replacement)
+        assert failure.value.failure_id == "PSV1-REQUEST-INVALID"
+        spool_b.seek(0)
+        assert spool_b.read() == b""
+
+
 def test_windows_abi_layout_matches_pointer_width() -> None:
     """Catches pointer truncation or a wrong STARTUPINFOEX/PROCESS_INFORMATION layout."""
     runner = _load_runner()

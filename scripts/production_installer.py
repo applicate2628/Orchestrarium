@@ -231,6 +231,7 @@ GLOBAL_LEAD_ACCEPTED_PRIOR_TREE_SHA256 = frozenset(
         "a90c1989a0c136c55af71b68c62fad6a2cc239162a953d45643dfee903795560",
         "2600ed4cdcdcf64767ad8486225a8bd4687c8ca3618344f7e4bbb709587f30ef",
         "3ca341a8c4ec35a7cbcd7920d6f5be7c1888b1d143393b544643fb005c97dab4",
+        "3067dcada53a7b090fa9a66594e3b4d3266d98f9ffe322c36c001c077bcfa0c0",
     }
 )
 RUNTIME_RESOURCES = (
@@ -4058,19 +4059,6 @@ def _parse_hook_health_failure_envelope(payload: bytes) -> _InstallFailure:
     return _InstallFailure(stable_id, context, cause)
 
 
-def _terminate_and_reap(process: subprocess.Popen, deadline: float) -> None:
-    remaining = lambda: max(0.0, deadline - time.monotonic())
-    if process.poll() is not None:
-        process.wait(timeout=remaining())
-        return
-    process.terminate()
-    try:
-        process.wait(timeout=min(1.0, remaining()))
-    except subprocess.TimeoutExpired:
-        process.kill()
-        process.wait(timeout=remaining())
-
-
 def _write_parent_stdout(payload: bytes) -> None:
     binary = getattr(sys.stdout, "buffer", None)
     if binary is None:
@@ -4082,35 +4070,14 @@ def _write_parent_stdout(payload: bytes) -> None:
 
 
 def _run_hook_health_bounded(
-    arguments: list[str], cwd: Path
+    arguments: list[str], cwd: Path, trusted_script: Path
 ) -> subprocess.CompletedProcess:
-    """Run one health child with a bounded failure wire and spooled success."""
+    """Run hook health through the repository's sole process-tree owner."""
 
-    deadline = time.monotonic() + _HOOK_HEALTH_DEADLINE_SECONDS
     env = os.environ.copy()
     env["PYTHONIOENCODING"] = "utf-8"
     spool = None
     spool_path: Path | None = None
-    process: subprocess.Popen | None = None
-    threads: list[threading.Thread] = []
-    reader_failures: list[BaseException] = []
-    reader_lock = threading.Lock()
-    stop_reader = threading.Event()
-    stderr_probe = bytearray()
-    stdout_size = 0
-    deadline_exceeded = False
-    process_cleanup_attempted = False
-
-    def terminate_process_once() -> None:
-        nonlocal process_cleanup_attempted
-        if (
-            process is None
-            or process_cleanup_attempted
-            or process.poll() is not None
-        ):
-            return
-        process_cleanup_attempted = True
-        _terminate_and_reap(process, deadline)
 
     try:
         spool = tempfile.NamedTemporaryFile(
@@ -4120,96 +4087,58 @@ def _run_hook_health_bounded(
             delete=False,
         )
         spool_path = Path(spool.name)
-        process = subprocess.Popen(
-            [sys.executable, *arguments],
-            cwd=cwd,
-            env=env,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=False,
-            bufsize=0,
+        runner_module = _load_module_from_path(
+            "orchestrarium_hook_health_process_runner",
+            Path(__file__).resolve().parent
+            / "process_supervision"
+            / "process_runner.py",
         )
-        assert process.stdout is not None and process.stderr is not None
-
-        def record_reader_failure(exc: BaseException) -> None:
-            with reader_lock:
-                reader_failures.append(exc)
-            stop_reader.set()
-
-        def drain_stdout() -> None:
-            nonlocal stdout_size
-            try:
-                while True:
-                    chunk = process.stdout.read(_HOOK_HEALTH_CHUNK_BYTES)
-                    if not chunk:
-                        return
-                    if len(chunk) > _HOOK_HEALTH_CHUNK_BYTES:
-                        raise OSError("stdout reader exceeded chunk contract")
-                    spool.write(chunk)
-                    stdout_size += len(chunk)
-            except BaseException as exc:
-                record_reader_failure(exc)
-
-        def drain_stderr() -> None:
-            try:
-                while len(stderr_probe) < _HOOK_HEALTH_FAILURE_PROBE_BYTES:
-                    remaining = _HOOK_HEALTH_FAILURE_PROBE_BYTES - len(stderr_probe)
-                    chunk = process.stderr.read(
-                        min(_HOOK_HEALTH_CHUNK_BYTES, remaining)
-                    )
-                    if not chunk:
-                        return
-                    stderr_probe.extend(chunk)
-                    if len(stderr_probe) >= _HOOK_HEALTH_FAILURE_PROBE_BYTES:
-                        stop_reader.set()
-                        return
-            except BaseException as exc:
-                record_reader_failure(exc)
-
-        threads = [
-            threading.Thread(
-                target=drain_stdout,
-                name="hook-health-stdout",
-                daemon=True,
-            ),
-            threading.Thread(
-                target=drain_stderr,
-                name="hook-health-stderr",
-                daemon=True,
-            ),
-        ]
-        for thread in threads:
-            thread.start()
-
-        while process.poll() is None:
-            remaining = deadline - time.monotonic()
-            poll_window = remaining - _HOOK_HEALTH_SETTLEMENT_RESERVE_SECONDS
-            if poll_window <= 0.0:
-                deadline_exceeded = True
-                break
-            poll_interval = min(0.01, poll_window)
-            if stop_reader.wait(poll_interval):
-                break
-            if poll_interval == poll_window:
-                deadline_exceeded = True
-                break
-        if process.poll() is None:
-            terminate_process_once()
-        else:
-            process.wait(timeout=max(0.0, deadline - time.monotonic()))
-        for thread in threads:
-            thread.join(timeout=max(0.0, deadline - time.monotonic()))
-        if any(thread.is_alive() for thread in threads):
-            raise _hook_health_failure("health child reader deadline exceeded")
-        if deadline_exceeded:
-            raise _hook_health_failure("health child deadline exceeded")
-        if reader_failures:
-            raise _hook_health_failure(reader_failures[0])
+        deadline = time.monotonic() + _HOOK_HEALTH_DEADLINE_SECONDS
+        executable = Path(sys.executable).resolve(strict=True)
+        health_environment_keys = {
+            "COMSPEC",
+            "HOME",
+            "LANG",
+            "LC_ALL",
+            "PATH",
+            "PATHEXT",
+            "PYTHONIOENCODING",
+            "SYSTEMROOT",
+            "TEMP",
+            "TMP",
+            "TMPDIR",
+            "USERPROFILE",
+            "WINDIR",
+        }
+        with runner_module.ProcessRunnerV1() as owner:
+            request = owner.build_hook_health_request(
+                argv=(str(executable), *arguments),
+                resolved_executable=executable,
+                cwd=str(cwd.resolve()),
+                environment=tuple(
+                    runner_module.EnvironmentRowV1(name, value)
+                    for name, value in sorted(env.items())
+                    if name.upper() in health_environment_keys
+                ),
+                deadline_monotonic=(
+                    deadline - _HOOK_HEALTH_SETTLEMENT_RESERVE_SECONDS
+                ),
+                settle_timeout_seconds=_HOOK_HEALTH_SETTLEMENT_RESERVE_SECONDS,
+                stdout_spool=spool,
+                trusted_script=trusted_script,
+            )
+            capture = request.capture_sink_binding
+            result = owner.run(request)
+        stderr_probe = capture.bytes_for("stderr")
+        stdout_size = result.stdout.persisted_bytes
         if len(stderr_probe) >= _HOOK_HEALTH_FAILURE_PROBE_BYTES:
             raise _hook_health_failure("failure stderr exceeded 4096 bytes")
-        returncode = process.returncode
-        if returncode == 0:
+        if (
+            result.outcome == "success"
+            and result.target_exit_code == 0
+            and result.tree.tree_empty
+            and result.resources_closed
+        ):
             if stderr_probe:
                 raise _hook_health_failure("successful health child wrote stderr")
             spool.flush()
@@ -4224,38 +4153,22 @@ def _run_hook_health_bounded(
             return subprocess.CompletedProcess(
                 [sys.executable, *arguments], 0, None, None
             )
-        if stdout_size != 0:
+        if result.failure_id is not None:
+            raise _hook_health_failure(result.failure_id)
+        if result.target_exit_code not in (None, 0) and stdout_size != 0:
             raise _hook_health_failure("failed health child wrote stdout")
-        raise _parse_hook_health_failure_envelope(bytes(stderr_probe))
-    except (KeyboardInterrupt, SystemExit) as interruption:
-        try:
-            terminate_process_once()
-        except BaseException as cleanup_exc:
-            raise _hook_health_failure(cleanup_exc) from interruption
+        if result.target_exit_code not in (None, 0):
+            raise _parse_hook_health_failure_envelope(stderr_probe)
+        raise _hook_health_failure(
+            result.failure_id or result.terminal_stage or "process supervision failed"
+        )
+    except (KeyboardInterrupt, SystemExit):
         raise
     except _InstallFailure:
         raise
     except BaseException as exc:
-        try:
-            terminate_process_once()
-        except BaseException as cleanup_exc:
-            raise _hook_health_failure(cleanup_exc) from exc
         raise _hook_health_failure(exc) from exc
     finally:
-        try:
-            terminate_process_once()
-        except BaseException:
-            pass
-        if process is not None:
-            for pipe in (process.stdout, process.stderr):
-                if pipe is not None:
-                    try:
-                        pipe.close()
-                    except BaseException:
-                        pass
-        for thread in threads:
-            if thread.is_alive():
-                thread.join(timeout=max(0.0, deadline - time.monotonic()))
         if spool is not None:
             try:
                 spool.close()
@@ -4529,6 +4442,7 @@ def _install_hooks(
     health = _run_hook_health_bounded(
         health_arguments,
         root,
+        root / "scripts" / "check-hook-health.py",
     )
     if health.returncode:
         raise RuntimeError("hook target verification failed")
@@ -4561,6 +4475,7 @@ def _install_hooks(
                 ],
             ],
             root,
+            root / "scripts" / "check-hook-health.py",
         )
         if installed_health.returncode:
             raise RuntimeError("post-reclaim installed hook verification failed")
