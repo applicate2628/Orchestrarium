@@ -77,6 +77,12 @@ CURRENT_HYBRID_GLOBAL_LEAD_TREE_SHA256 = (
 CURRENT_HYBRID_GLOBAL_LEAD_REVISION = (
     "3dadb8b66e4580df929fecdc5d8d9bf20dcb2c59"
 )
+PRE_ZOMBIE_CENSUS_GLOBAL_LEAD_REVISION = (
+    "448e8c5ac3ba587d6b828ded30db131eece167ac"
+)
+PRE_ZOMBIE_CENSUS_GLOBAL_LEAD_TREE_SHA256 = (
+    "0da7db4510b37eac407ad9577ff171fbaa86985e30a53f341b00f05aeb433975"
+)
 CURRENT_HYBRID_GLOBAL_LEAD_OVERLAYS = {
     "external-dispatch.md": (
         "e55b2466281ecc50ad2a940a4de14a5ea90fb98c",
@@ -883,6 +889,42 @@ def test_exact_current_hybrid_global_lead_migrates_noops_and_rejects_drift(
     with pytest.raises(ValueError, match="E_ACCEPTED_PRIOR_COLLISION: lead"):
         installer._preflight_canonical_skills(
             ROOT / "src.codex" / "skills", extra_root, root=ROOT
+        )
+
+
+def test_exact_pre_zombie_census_lead_migrates_and_rejects_drift(
+    tmp_path: Path,
+) -> None:
+    installer = _load_installer()
+    skills_root = tmp_path / "accepted" / ".agents" / "skills"
+    historical = _seed_revision_staged_lead(
+        PRE_ZOMBIE_CENSUS_GLOBAL_LEAD_REVISION, skills_root / "lead"
+    )
+    assert (
+        installer._tree_sha256(historical, ignore_runtime_cache=True)
+        == PRE_ZOMBIE_CENSUS_GLOBAL_LEAD_TREE_SHA256
+    )
+
+    plan = installer._preflight_canonical_skills(
+        ROOT / "src.codex" / "skills", skills_root, root=ROOT
+    )
+    try:
+        lead = next(skill for skill in plan.skills if skill.name == "lead")
+        assert lead.accepted_prior == PRE_ZOMBIE_CENSUS_GLOBAL_LEAD_TREE_SHA256
+    finally:
+        installer._discard_canonical_skills_plan(plan)
+
+    drift_root = tmp_path / "drift" / ".agents" / "skills"
+    drift = _seed_revision_staged_lead(
+        PRE_ZOMBIE_CENSUS_GLOBAL_LEAD_REVISION, drift_root / "lead"
+    )
+    with (drift / "scripts" / "process_supervision" / "process_runner.py").open(
+        "ab"
+    ) as stream:
+        stream.write(b"x")
+    with pytest.raises(ValueError, match="E_ACCEPTED_PRIOR_COLLISION: lead"):
+        installer._preflight_canonical_skills(
+            ROOT / "src.codex" / "skills", drift_root, root=ROOT
         )
 
 

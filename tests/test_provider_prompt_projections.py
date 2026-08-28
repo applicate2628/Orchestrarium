@@ -105,6 +105,17 @@ STOCK_9A63_PROJECTION_SHA256 = {
     "external-role-taxonomy.v1.json": "c26585be7117568e2e61c3904ddf7192e81eebdc3ab72b29d9cab17e3a7ab647",
     "provider-prompt-projections.v1.json": "bdf58192e9df158e674febeee4a4e977e69792757f5fbf1a70529ab38a615973",
 }
+STOCK_448E_PROJECTION_SHA256 = {
+    "provider_prompt.py": "9c8f7d378468d3cf673e9c7bf4d5e359188adb36d22b226a1f44a6218b28d02b",
+    "process_supervision/process_runner.py": "e2b79588cf633ddfb6322e8fb1ddd61ae905938a046a43ebdcb3a6f5901a347d",
+    "invoke-codex-prompt.py": "0b085a6fd0e28a5a486c8ef25bf52d4c69123d94cc8712d63dd30deadcc5f665",
+    "invoke-claude-prompt.py": "3250c9a85e36ab2e57a218688c5d7d3cfed59552c1f2bad7eb52f45370df80f3",
+    "invoke-kimi-prompt.py": "480af94ce089d5a6340e92d00239a5762c9c1374375a8c12c921afdcfcaa6e47",
+    "invoke-grok-prompt.py": "1f0f4f6bb03d816b3f40ff56ebe71973301d2d7104ef1d7f335b1ffa0b248559",
+    "external-prompt-governance.md": "c7a59ccec7d6e46be76584a107b0a5b30b249368b4f0958cb78177962dc34b00",
+    "external-role-taxonomy.v1.json": "51192eca72784dfcbc2d53596e143ea25856db9e7336031a25d89e9e4fdf85ce",
+    "provider-prompt-projections.v1.json": "67073df8687839a0013e59398501a40c39069b6f9bd4dfd34bceac8f825d8945",
+}
 
 
 def _authored_transport_path(root: Path, name: str) -> Path:
@@ -1025,6 +1036,11 @@ def test_exact_8f92_transport_set_is_one_atomic_prior_plan(tmp_path: Path) -> No
                     "external-role-taxonomy.v1.json",
             ),
         ),
+        (
+            "448e8c5a",
+            STOCK_448E_PROJECTION_SHA256,
+            ("process_supervision/process_runner.py",),
+        ),
     ),
 )
 def test_exact_published_transport_set_is_one_atomic_prior_plan(
@@ -1098,12 +1114,42 @@ def test_published_transport_prior_rejects_a_customized_member(
         )
 
 
+def test_immediate_448e_prior_rejects_same_size_one_byte_member_flip(
+    tmp_path: Path,
+) -> None:
+    installer = _load_installer()
+    source, canonical, paths = _current_canonical_with_historical_projection(
+        tmp_path,
+        "448e8c5a",
+        STOCK_448E_PROJECTION_SHA256,
+    )
+    projection = tmp_path / "claude" / "agents" / "scripts"
+    path = paths["provider_prompt.py"]
+    original = path.read_bytes()
+    changed = bytearray(original)
+    changed[len(changed) // 2] ^= 0x01
+    assert len(changed) == len(original)
+    assert bytes(changed) != original
+    path.write_bytes(changed)
+
+    with pytest.raises(
+        ValueError,
+        match="E_TRANSPORT_PROJECTION_PARITY: atomic projection state",
+    ):
+        installer._stage_claude_transport_projection(
+            source,
+            canonical,
+            projection,
+        )
+
+
 @pytest.mark.parametrize(
     ("commit", "expected"),
     (
         ("d1309ee5", STOCK_D130_PROJECTION_SHA256),
         ("f87414e7", STOCK_F874_PROJECTION_SHA256),
         ("9a637574", STOCK_9A63_PROJECTION_SHA256),
+        ("448e8c5a", STOCK_448E_PROJECTION_SHA256),
     ),
 )
 def test_published_transport_migration_failure_restores_bytes_and_identities(
@@ -1161,6 +1207,58 @@ def test_published_transport_migration_failure_restores_bytes_and_identities(
     } == before
     assert _tree_bytes(projection.parent) == before_tree
     assert not tuple(projection.parent.rglob("*.prior"))
+
+
+def test_immediate_448e_prior_applies_only_changed_transport_members_and_manifest(
+    tmp_path: Path,
+) -> None:
+    installer = _load_installer()
+    source, canonical, _paths = _current_canonical_with_historical_projection(
+        tmp_path,
+        "448e8c5a",
+        STOCK_448E_PROJECTION_SHA256,
+    )
+    projection = tmp_path / "claude" / "agents" / "scripts"
+    staged = installer._stage_claude_transport_projection(
+        source,
+        canonical,
+        projection,
+    )
+
+    class MigrationSpy:
+        anchor = projection.parent
+
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, str]] = []
+
+        def migrate_exact_file(
+            self, relative: Path, expected_digest: str, _payload: bytes
+        ) -> None:
+            self.calls.append((relative.as_posix(), expected_digest))
+
+        def create_file(self, *_args, **_kwargs) -> None:
+            raise AssertionError("immediate prior attempted create-only publication")
+
+        def replace_exact_file(self, *_args, **_kwargs) -> None:
+            raise AssertionError("immediate prior attempted legacy replacement")
+
+    owner = MigrationSpy()
+    installer._apply_claude_transport_projection(staged, projection, owner)
+
+    assert owner.calls == [
+        (
+            "scripts/process_supervision/process_runner.py",
+            STOCK_448E_PROJECTION_SHA256[
+                "process_supervision/process_runner.py"
+            ],
+        ),
+        (
+            "shared/provider-prompt-projections.v1.json",
+            STOCK_448E_PROJECTION_SHA256[
+                "provider-prompt-projections.v1.json"
+            ],
+        ),
+    ]
 
 
 @pytest.mark.parametrize("name", tuple(STOCK_8F92_PROJECTION_SHA256))
