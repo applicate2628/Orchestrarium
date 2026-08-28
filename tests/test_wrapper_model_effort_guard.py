@@ -334,7 +334,10 @@ def test_effort_enum_is_shared_with_ledger_contract() -> None:
     effort_action = next(
         action for action in append_parser._actions if action.dest == "effort"
     )
-    assert provider_prompt.EFFORTS == frozenset(effort_action.choices)
+    assert frozenset(effort_action.choices) == provider_prompt.EFFORTS | {
+        "unsupported"
+    }
+    assert "unsupported" not in provider_prompt.EFFORTS
 
 
 def test_control_flags_before_topic_are_not_forwarded() -> None:

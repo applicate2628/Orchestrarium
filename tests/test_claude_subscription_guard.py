@@ -195,18 +195,18 @@ def test_project_api_key_helper_claim_does_not_authorize_automated_launch(
     assert not (tmp_path / "artifacts").exists()
 
 
-def test_vertex_closed_stdin_after_terminal_is_deterministically_benign(tmp_path: Path) -> None:
+def test_vertex_child_consumes_complete_stdin_before_terminal_pass(tmp_path: Path) -> None:
     child = (
-        "import os,sys,time\n"
+        "import sys\n"
+        "payload=sys.stdin.buffer.read()\n"
+        "assert payload\n"
         "sys.stdout.write('GATE: PASS\\n');sys.stdout.flush()\n"
-        "os.close(0)\n"
-        "time.sleep(0.2)\n"
     )
     for index in range(3):
         result = _run(
             tmp_path / str(index),
             {"CLAUDE_CODE_USE_VERTEX": "true"},
             child_source=child,
-                prompt_bytes=b"x" * (15 * 1024 * 1024),
+            prompt_bytes=b"x" * (15 * 1024 * 1024),
         )
         assert result.returncode == 0, result.stderr
