@@ -78,7 +78,7 @@ def main() -> int:
     elif args.mode == "grandchild-retains-pipe":
         if args.marker is None:
             return 2
-        subprocess.Popen(
+        grandchild = subprocess.Popen(
             [
                 sys.executable,
                 __file__,
@@ -86,7 +86,7 @@ def main() -> int:
                 "--marker",
                 args.marker,
                 "--token",
-                args.token or "grandchild",
+                args.token or "PID",
                 "--sleep",
                 str(max(args.sleep, 30.0)),
             ],
@@ -95,6 +95,7 @@ def main() -> int:
             stderr=sys.stderr,
             close_fds=False,
         )
+        _publish_marker_atomic(args.marker, str(grandchild.pid))
     elif args.mode == "tree-hold-writer":
         if args.marker is None:
             return 2

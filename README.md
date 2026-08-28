@@ -188,6 +188,7 @@ Currently shipped:
 - `$bug-hunting` — knowledge-style; systematic runtime-bug investigation via diagnostic logging.
 - `$mathtype-book-page` — knowledge-style; bring translated technical-book DOCX pages to accepted MathType format.
 - `$manual-repo-transfer` — knowledge-style; inventory local state, create and validate a selected transfer bundle, and emit preview-only cleanup evidence.
+- `$github-pr-review-bot` — knowledge-style; drive a GitHub pull-request review loop with the Codex review bot to a terminal result on the current remote head.
 - `$explain-simply` — knowledge-style; reader-tailored plain-language explanations for concepts, code paths, results, decisions, and learner notes.
 - `$vak-dissertation-review` — knowledge-style; review of a Russian dissertation (диссертация) and autoreferat for a кандидат/доктор наук defense — нормоконтроль, novelty, ВАК compliance, borrowings, references, ВАК-list publications.
 

@@ -3015,6 +3015,7 @@ def _linux_identity_census(
     total = 0
     count = 0
     members: list[PosixProcessIdentityV1] = []
+    zombie_members = 0
     try:
         for entry in (entries() if entries is not None else Path("/proc").iterdir()):
             if clock() >= local_deadline:
@@ -3031,6 +3032,9 @@ def _linux_identity_census(
             close = raw.rfind(b")")
             fields = raw[close + 2 :].split()
             if len(fields) > 19 and int(fields[2]) == pgid and int(fields[3]) == sid:
+                if fields[0] == b"Z":
+                    zombie_members += 1
+                    continue
                 members.append(
                     PosixProcessIdentityV1(
                         int(entry.name),
@@ -3055,6 +3059,8 @@ def _linux_identity_census(
             killpg_state = "esrch"
         except PermissionError:
             killpg_state = "eperm"
+        if killpg_state == "present" and zombie_members and not members:
+            killpg_state = "esrch"
         if clock() >= local_deadline:
             return False, (), "timeout"
         return True, tuple(sorted(members, key=lambda item: item.pid)), killpg_state

@@ -9,7 +9,7 @@
     },
     "process_supervision/process_runner.py": {
       "source": "scripts/process_supervision/process_runner.py",
-      "sha256": "e2b79588cf633ddfb6322e8fb1ddd61ae905938a046a43ebdcb3a6f5901a347d",
+      "sha256": "c80ddd084f59d1b7e4fde11174fde5e30c5e685d3a2453ca0fd3d25e83736cb6",
       "destination": "scripts/process_supervision/process_runner.py"
     },
     "invoke-codex-prompt.py": {

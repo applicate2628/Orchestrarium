@@ -5,6 +5,7 @@ import importlib.util
 import io
 import json
 import os
+import signal
 import shutil
 import subprocess
 import sys
@@ -559,17 +560,102 @@ def test_provider_adapter_settles_retained_pipe_descendant(tmp_path: Path) -> No
         if name in os.environ:
             environment[name] = os.environ[name]
 
-    result, _stdout, _stderr = owner.run_provider_process(
-        owner.ProcessRunnerV1(),
-        [sys.executable, str(ROOT / "tests" / "fixtures" / "process_supervision" / "child_helper.py")],
-        ["grandchild-retains-pipe", "--marker", str(tmp_path / "grandchild")],
-        environment,
-        ROOT,
-        b"",
-        owner.Control(timeout_secs=5, capture_max_bytes=1024),
-    )
+    marker = tmp_path / "grandchild"
+    subreaper = None
+    prior_subreaper = None
+    descendant_pid = None
+    if sys.platform.startswith("linux"):
+        import ctypes
+
+        pr_set_child_subreaper = 36
+        pr_get_child_subreaper = 37
+        subreaper = ctypes.CDLL(None, use_errno=True)
+        subreaper.prctl.argtypes = (
+            ctypes.c_int,
+            ctypes.c_ulong,
+            ctypes.c_ulong,
+            ctypes.c_ulong,
+            ctypes.c_ulong,
+        )
+        subreaper.prctl.restype = ctypes.c_int
+        prior_subreaper_value = ctypes.c_int()
+        assert (
+            subreaper.prctl(
+                pr_get_child_subreaper,
+                ctypes.addressof(prior_subreaper_value),
+                0,
+                0,
+                0,
+            )
+            == 0
+        )
+        prior_subreaper = prior_subreaper_value.value
+        assert prior_subreaper in (0, 1)
+
+    try:
+        if subreaper is not None:
+            assert subreaper.prctl(pr_set_child_subreaper, 1, 0, 0, 0) == 0
+        result, _stdout, _stderr = owner.run_provider_process(
+            owner.ProcessRunnerV1(),
+            [sys.executable, str(ROOT / "tests" / "fixtures" / "process_supervision" / "child_helper.py")],
+            [
+                "grandchild-retains-pipe",
+                "--marker",
+                str(marker),
+            ],
+            environment,
+            tmp_path,
+            b"",
+            owner.Control(timeout_secs=5, capture_max_bytes=1024),
+        )
+        if subreaper is not None:
+            assert marker.is_file(), (
+                result.failure_id,
+                result.terminal_stage,
+                result.argv_count,
+            )
+            descendant_pid = int(marker.read_text(encoding="ascii"))
+    finally:
+        try:
+            if descendant_pid is None and subreaper is not None and marker.is_file():
+                descendant_pid = int(marker.read_text(encoding="ascii"))
+            if descendant_pid is not None:
+                try:
+                    os.kill(descendant_pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                try:
+                    os.waitpid(descendant_pid, 0)
+                except ChildProcessError:
+                    pass
+        finally:
+            if subreaper is not None:
+                assert prior_subreaper is not None
+                assert (
+                    subreaper.prctl(
+                        pr_set_child_subreaper,
+                        prior_subreaper,
+                        0,
+                        0,
+                        0,
+                    )
+                    == 0
+                )
+                restored_subreaper = ctypes.c_int()
+                assert (
+                    subreaper.prctl(
+                        pr_get_child_subreaper,
+                        ctypes.addressof(restored_subreaper),
+                        0,
+                        0,
+                        0,
+                    )
+                    == 0
+                )
+                assert restored_subreaper.value == prior_subreaper
 
     assert result.event_id == "process.supervision.settled.v1"
+    assert result.tree.backend in {"posix-group-oracle-v1", "windows-job-v1"}
     assert result.tree.tree_empty and result.tree.direct_reaped
     assert result.resources_closed
 

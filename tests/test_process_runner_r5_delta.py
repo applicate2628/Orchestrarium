@@ -206,3 +206,50 @@ def test_linux_census_checks_deadline_after_iteration_before_killpg_probe() -> N
     assert members == ()
     assert state == "timeout"
     assert probes == []
+
+
+def _write_linux_stat(
+    root: Path, pid: int, state: str, *, pgid: int = 100, sid: int = 100
+) -> Path:
+    entry = root / str(pid)
+    entry.mkdir()
+    fields = [state, "1", str(pgid), str(sid), *("0" for _ in range(15)), str(pid * 10)]
+    (entry / "stat").write_text(
+        f"{pid} (fixture-{pid}) {' '.join(fields)}\n", encoding="ascii"
+    )
+    return entry
+
+
+def test_linux_census_excludes_zombies_from_live_group_state(tmp_path: Path) -> None:
+    module = _runner()
+    zombie = _write_linux_stat(tmp_path, 101, "Z")
+
+    complete, members, state = module._linux_identity_census(
+        100,
+        100,
+        1,
+        entries=lambda: (zombie,),
+        killpg_probe=lambda *_args: None,
+    )
+
+    assert complete is True
+    assert members == ()
+    assert state == "esrch"
+
+
+def test_linux_census_keeps_running_and_stopped_group_members(tmp_path: Path) -> None:
+    module = _runner()
+    running = _write_linux_stat(tmp_path, 102, "R")
+    stopped = _write_linux_stat(tmp_path, 103, "T")
+
+    complete, members, state = module._linux_identity_census(
+        100,
+        100,
+        1,
+        entries=lambda: (stopped, running),
+        killpg_probe=lambda *_args: None,
+    )
+
+    assert complete is True
+    assert [member.pid for member in members] == [102, 103]
+    assert state == "present"
