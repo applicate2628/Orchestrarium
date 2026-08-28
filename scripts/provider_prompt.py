@@ -2997,6 +2997,27 @@ def kimi_main(argv: list[str]) -> int:
     return fail("E_KIMI_MAINTENANCE_ARGUMENTS_INVALID")
 
 
+def _requires_early_native_windows_refusal(provider: str) -> bool:
+    return os.name == "nt" and provider in {"codex", "claude"}
+
+
+def _resolve_launch_provider_command(provider: str) -> list[str]:
+    command = (
+        resolve_enrolled_kimi_command()
+        if provider == "kimi"
+        else resolve_provider_command(provider)
+    )
+    if command is not None:
+        return command
+    key = {"codex": "CODEX_BIN", "claude": "CLAUDE_BIN"}.get(
+        provider, "PROVIDER_BIN"
+    )
+    raise ValueError(
+        f"{provider} binary '{os.environ.get(key) or provider}' not found on PATH. "
+        f"Set {key} if installed elsewhere."
+    )
+
+
 def _launch_with_runner(
     provider: str,
     argv: list[str],
@@ -3049,25 +3070,13 @@ def _launch_with_runner(
     except ValueError as exc:
         return fail(str(exc))
 
-    try:
-        body = assemble_external_prompt(prompt_bytes(control, external=True))
-    except ValueError as exc:
-        return fail(str(exc))
-
     query_cwd = Path.cwd().resolve()
-    try:
-        command = resolve_enrolled_kimi_command() if provider == "kimi" else resolve_provider_command(provider)
-    except ValueError as exc:
-        return fail(str(exc))
-    if command is None:
-        key = {"codex": "CODEX_BIN", "claude": "CLAUDE_BIN"}.get(
-            provider, "PROVIDER_BIN"
-        )
-        return fail(
-            f"{provider} binary '{os.environ.get(key) or provider}' not found on PATH. "
-            f"Set {key} if installed elsewhere."
-        )
-    if os.name == "nt" and provider in {"codex", "claude"}:
+    command: list[str] | None = None
+    if _requires_early_native_windows_refusal(provider):
+        try:
+            command = _resolve_launch_provider_command(provider)
+        except ValueError as exc:
+            return fail(str(exc))
         executable = Path(command[0])
         try:
             identity_available = (
@@ -3082,6 +3091,18 @@ def _launch_with_runner(
                 f"{E_EXTERNAL_PROVIDER_WINDOWS_NATIVE_ARGV_UNAVAILABLE}: "
                 f"native {provider} argv observation is unavailable on Windows"
             )
+
+    try:
+        body = assemble_external_prompt(prompt_bytes(control, external=True))
+    except ValueError as exc:
+        return fail(str(exc))
+
+    if command is None:
+        try:
+            command = _resolve_launch_provider_command(provider)
+        except ValueError as exc:
+            return fail(str(exc))
+
     if provider == "codex":
         if not Path(command[0]).is_absolute() or not Path(command[0]).is_file():
             return fail("resolved Codex executable is not an absolute regular file")

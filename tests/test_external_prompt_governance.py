@@ -266,6 +266,9 @@ def test_wrapper_rejects_bounded_strict_stdin_before_provider_or_capture(
     """Catches stdin bypassing the strict bounded task snapshot before any launch side effect."""
 
     provider_prompt = _load_module()
+    monkeypatch.setattr(
+        provider_prompt, "_requires_early_native_windows_refusal", lambda _provider: False
+    )
     monkeypatch.setattr(provider_prompt.sys, "stdin", _PipedStdin(payload))
     monkeypatch.setattr(
         provider_prompt,
@@ -287,6 +290,9 @@ def test_wrapper_rejects_composed_overflow_before_provider_or_capture(
     """Catches a wrapper that validates task bytes but not capsule-plus-frame bytes."""
 
     provider_prompt = _load_module(tmp_path)
+    monkeypatch.setattr(
+        provider_prompt, "_requires_early_native_windows_refusal", lambda _provider: False
+    )
     task = tmp_path / "task.md"
     overhead = (
         len(provider_prompt.EXTERNAL_GOVERNANCE_BEGIN)

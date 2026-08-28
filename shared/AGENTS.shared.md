@@ -3,7 +3,11 @@ Platform-neutral governance, merged with platform policy into `AGENTS.md`.
 Source-only/maintainer-only, NOT installed: `shared/references/` elaboration/glossary; these rules are self-sufficient.
 
 ## Role index
-Roadmap/orchestration: `$product-manager`, `$lead`, `$consultant`, `$knowledge-archivist`; research/design: `$product-analyst`, `$analyst`, `$architect`, `$ux-designer`, `$planner`, `$algorithm-scientist`, `$computational-scientist`, `$security-engineer`, `$performance-engineer`, `$reliability-engineer`; implementation: `$backend-engineer`, `$frontend-engineer`, `$qt-ui-engineer`, `$model-view-engineer`, `$data-engineer`, `$platform-engineer`, `$toolchain-engineer`, `$geometry-engineer`, `$graphics-engineer`, `$visualization-engineer`, `$external-worker`; review: `$qa-engineer`, `$architecture-reviewer`, `$security-reviewer`, `$performance-reviewer`, `$accessibility-reviewer`, `$ux-reviewer`, `$ui-test-engineer`, `$external-reviewer`. Approved web UI uses `$frontend-engineer`; Qt desktop uses `$qt-ui-engineer`.
+- Roadmap and orchestration: `$product-manager`, `$lead`, `$consultant`, `$knowledge-archivist`.
+- Research, design, planning, and specialist constraints: `$product-analyst`, `$analyst`, `$architect`, `$ux-designer`, `$planner`, `$algorithm-scientist`, `$computational-scientist`, `$security-engineer`, `$performance-engineer`, `$reliability-engineer`.
+- Implementation: `$backend-engineer`, `$frontend-engineer`, `$qt-ui-engineer`, `$model-view-engineer`, `$data-engineer`, `$platform-engineer`, `$toolchain-engineer`, `$geometry-engineer`, `$graphics-engineer`, `$visualization-engineer`, `$external-worker`.
+- Review and verification: `$qa-engineer`, `$architecture-reviewer`, `$security-reviewer`, `$performance-reviewer`, `$accessibility-reviewer`, `$ux-reviewer`, `$ui-test-engineer`, `$external-reviewer`.
+- For approved UI implementation phases, use `$frontend-engineer` for web/React UI and `$qt-ui-engineer` only for Qt desktop UI.
 
 ## Common skills
 Common skills: any role or the main conversation invokes on match; they are not roles and do not own delivery. Knowledge-style loads context; delegate-style may spawn one artifact, also invocable inline: `$windows-gui-manual-testing`, `$analyzing-video-bugs`, `$bug-hunting`, `$mathtype-book-page`, `$manual-repo-transfer`, `$explain-simply`, `$vak-dissertation-review`.

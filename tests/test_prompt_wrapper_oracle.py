@@ -960,7 +960,7 @@ def test_windows_native_provider_refuses_before_prompt_capture_or_launch(
     capsys: pytest.CaptureFixture[str],
     provider: str,
 ) -> None:
-    """Native Windows providers fail typed before prompt/auth/capture/child work."""
+    """Native Windows providers resolve auth, then fail before prompt/capture/child work."""
 
     executable = tmp_path / f"{provider}.exe"
     executable.write_bytes(b"native-provider-fixture")
