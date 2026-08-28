@@ -724,6 +724,7 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
                 with tempfile.TemporaryDirectory() as td:
                     repo = self._init_range_repo(Path(td))
                     self._commit_file(repo, "b.txt", "clean content, nothing machine-local here")
+                    expected_blob_bytes = len((repo / "b.txt").read_bytes())
                     git = _git()
                     tip = subprocess.run(
                         [git, "-C", str(repo), "rev-parse", "HEAD"],
@@ -736,7 +737,7 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
                         rf"^publication-safety: clean \(range, receipt=v3, commits=1, "
                         rf"commit-set=[0-9a-f]{{64}}, messages=complete, objects=3, "
                         rf"object-set=[0-9a-f]{{64}}, blobs=1, blob-set=[0-9a-f]{{64}}, "
-                        rf"blob-bytes=43, text=1, binary=0, subjects=1, "
+                        rf"blob-bytes={expected_blob_bytes}, text=1, binary=0, subjects=1, "
                         rf"subject-set=[0-9a-f]{{64}}, paths=1, path-set=[0-9a-f]{{64}}, "
                         rf"history=complete, remote=origin, dst=claude, tip={tip}\)\n?$",
                     )
@@ -881,12 +882,13 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
             repo = self._init_range_repo(Path(td))
             for name in ("a.txt", "b.txt"):
                 (repo / name).write_text("shared clean\n", encoding="utf-8")
+            expected_blob_bytes = len((repo / "a.txt").read_bytes())
             subprocess.run([_git(), "-C", str(repo), "add", "a.txt", "b.txt"], check=True)
             subprocess.run([_git(), "-C", str(repo), "commit", "-q", "-m", "shared clean blob"], check=True)
             rc, out, err = self._run_range(CANONICAL_SCANNER, repo, "origin", "claude")
             self.assertEqual(rc, 0, err)
             self.assertIn("blobs=1", out)
-            self.assertIn("blob-bytes=14", out)
+            self.assertIn(f"blob-bytes={expected_blob_bytes}", out)
             self.assertIn("text=1, binary=0", out)
             self.assertIn("subjects=2", out)
             self.assertIn("paths=2", out)
@@ -905,14 +907,17 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
     def test_range_mode_receipt_records_explicit_text_and_binary_disposition(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = self._init_range_repo(Path(td))
-            (repo / "text.txt").write_text("clean text\n", encoding="utf-8")
-            (repo / "binary.bin").write_bytes(b"\0\xff\x01")
+            text_fixture = repo / "text.txt"
+            binary_fixture = repo / "binary.bin"
+            text_fixture.write_text("clean text\n", encoding="utf-8")
+            binary_fixture.write_bytes(b"\0\xff\x01")
+            expected_blob_bytes = len(text_fixture.read_bytes()) + len(binary_fixture.read_bytes())
             subprocess.run([_git(), "-C", str(repo), "add", "text.txt", "binary.bin"], check=True)
             subprocess.run([_git(), "-C", str(repo), "commit", "-q", "-m", "mixed blobs"], check=True)
             rc, out, err = self._run_range(CANONICAL_SCANNER, repo, "origin", "claude")
             self.assertEqual(rc, 0, err)
             self.assertIn("blobs=2", out)
-            self.assertIn("blob-bytes=15", out)
+            self.assertIn(f"blob-bytes={expected_blob_bytes}", out)
             self.assertIn("text=1, binary=1", out)
 
     def test_range_mode_binary_blob_with_secret_marker_blocks_and_redacts(self) -> None:
