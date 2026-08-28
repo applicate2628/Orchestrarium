@@ -191,6 +191,9 @@ ADDITIONAL_STOCK_SKILL_ACCEPTED_PRIOR_TREE_SHA256 = {
     "init-project": frozenset(
         {"c079a182db6139257be2b7b138c6a4b28aa730747c1988d54132f8b07504dd1c"}
     ),
+    "manual-repo-transfer": frozenset(
+        {"45fc1efc9f0558664afb1f386c5fc7ac2692a607fb8c7be6265b2cfc4d10029b"}
+    ),
     "second-opinion": frozenset(
         {"fe989a918e11ff8066a0c8af54f73ba7bbf763719ea3b604ed147b79bec684d6"}
     ),
