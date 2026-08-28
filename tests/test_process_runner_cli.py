@@ -34,7 +34,7 @@ def _header(runner, nonce: bytes, argv: tuple[str, ...], stdin: bytes, *, reques
         "parentPid": os.getpid(),
         "parentStartMarker": runner.get_process_start_marker(os.getpid()),
         "capabilitySha256": "0" * 64,
-        "argv": list(argv),
+        "argv": [str(executable), *argv[1:]],
         "windowsArgvProfileId": (
             "python-validator-json-echo-v1" if os.name == "nt" else None
         ),
