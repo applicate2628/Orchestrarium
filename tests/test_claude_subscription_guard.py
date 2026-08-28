@@ -8,11 +8,13 @@ import sys
 from pathlib import Path
 
 import pytest
+from tests.fixtures.provider_prompt_projection import (
+    materialize_provider_prompt_runtime,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
 WRAPPER = ROOT / "src.claude/agents/scripts/invoke-claude-prompt.py"
-OWNER = ROOT / "scripts/provider_prompt.py"
 
 
 def _projected_wrapper(tmp_path: Path) -> Path:
@@ -23,7 +25,7 @@ def _projected_wrapper(tmp_path: Path) -> Path:
     (projection_shared / "provider-prompt-projections.v1.json").write_bytes(
         (ROOT / "shared" / "provider-prompt-projections.v1.json").read_bytes()
     )
-    (scripts / "provider_prompt.py").write_bytes(OWNER.read_bytes())
+    materialize_provider_prompt_runtime(ROOT, scripts)
     (scripts / "external-prompt-governance.md").write_bytes(
         (ROOT / "shared" / "external-prompt-governance.md").read_bytes()
     )

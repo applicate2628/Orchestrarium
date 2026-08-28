@@ -15,6 +15,9 @@ from tests.fixtures.codex_hook_fixture import (
     FAKE_CODEX_HOOKS_HOST,
     prepare_codex_home,
 )
+from tests.fixtures.provider_prompt_projection import (
+    materialize_provider_prompt_runtime,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -36,7 +39,7 @@ spec.loader.exec_module(provider_prompt)
 def _projected_entrypoint(tmp_path: Path, provider: str) -> Path:
     scripts = tmp_path / "claude-projection" / "agents" / "scripts"
     scripts.mkdir(parents=True, exist_ok=True)
-    (scripts / "provider_prompt.py").write_bytes(MODULE.read_bytes())
+    materialize_provider_prompt_runtime(ROOT, scripts)
     (scripts / "resolve-agents-mode.py").write_bytes(
         (ROOT / "scripts" / "resolve-agents-mode.py").read_bytes()
     )
@@ -183,7 +186,7 @@ def test_root_thin_wrapper_delivers_one_governance_frame_then_exact_task_bytes(
     runtime_scripts.mkdir(parents=True)
     entrypoint = runtime_scripts / f"invoke-{provider}-prompt.py"
     shutil.copyfile(ROOT / "scripts" / entrypoint.name, entrypoint)
-    shutil.copyfile(ROOT / "scripts" / "provider_prompt.py", runtime_scripts / "provider_prompt.py")
+    materialize_provider_prompt_runtime(ROOT, runtime_scripts)
     shutil.copyfile(
         ROOT / "scripts" / "resolve-agents-mode.py",
         runtime_scripts / "resolve-agents-mode.py",

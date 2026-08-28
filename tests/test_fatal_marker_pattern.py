@@ -14,6 +14,9 @@ from tests.fixtures.codex_hook_fixture import (
     FAKE_CODEX_HOOKS_HOST,
     prepare_codex_home,
 )
+from tests.fixtures.provider_prompt_projection import (
+    materialize_provider_prompt_runtime,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -45,7 +48,7 @@ def _projected_codex_entrypoint(tmp_path: Path) -> Path:
     (policy_shared / "role-routing-policy.v1.json").write_bytes(
         (ROOT / "shared" / "role-routing-policy.v1.json").read_bytes()
     )
-    (scripts / "provider_prompt.py").write_bytes(SOURCE.read_bytes())
+    materialize_provider_prompt_runtime(ROOT, scripts)
     (scripts / "resolve-agents-mode.py").write_bytes(
         (ROOT / "scripts" / "resolve-agents-mode.py").read_bytes()
     )

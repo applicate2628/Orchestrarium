@@ -14,6 +14,9 @@ from tests.fixtures.codex_hook_fixture import (
     FAKE_CODEX_HOOKS_HOST,
     prepare_codex_home,
 )
+from tests.fixtures.provider_prompt_projection import (
+    materialize_provider_prompt_runtime,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -273,7 +276,7 @@ def test_python_prompt_owner_returns_complete_result_and_reclaims_artifacts(
     projection.mkdir(parents=True)
     projected_entrypoint = projection / entrypoint.name
     shutil.copyfile(entrypoint, projected_entrypoint)
-    shutil.copyfile(ROOT / "scripts" / "provider_prompt.py", projection / "provider_prompt.py")
+    materialize_provider_prompt_runtime(ROOT, projection)
     projection_shared = projection.parents[1] / "shared"
     projection_shared.mkdir()
     shutil.copyfile(
