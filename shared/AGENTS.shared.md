@@ -10,7 +10,7 @@ Source-only/maintainer-only, NOT installed: `shared/references/` elaboration/glo
 - For approved UI implementation phases, use `$frontend-engineer` for web/React UI and `$qt-ui-engineer` only for Qt desktop UI.
 
 ## Common skills
-Common skills: any role or the main conversation invokes on match; they are not roles and do not own delivery. Knowledge-style loads context; delegate-style may spawn one artifact, also invocable inline. Set: `$windows-gui-manual-testing`, `$analyzing-video-bugs`, `$bug-hunting`, `$mathtype-book-page`, `$manual-repo-transfer`, `$explain-simply`, `$vak-dissertation-review`.
+Common skills: any role or the main conversation invokes on match; they are not roles and do not own delivery. Knowledge-style loads context; delegate-style may spawn one artifact, also invocable inline. Set: `$windows-gui-manual-testing`, `$analyzing-video-bugs`, `$bug-hunting`, `$mathtype-book-page`, `$manual-repo-transfer`, `$github-pr-review-bot`, `$explain-simply`, `$vak-dissertation-review`.
 
 ## Policy boundaries
 Global: short/testable/cross-repo costly-mistake rules. Repo-local: compatibility, contracts, migration, rollout, toolchains, canonical paths, truth, portability. Specialists own domain heuristics; do not globalize catalogs, unenforceable/tool-enforced rules, or slogans.

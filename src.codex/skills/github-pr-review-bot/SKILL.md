@@ -1,0 +1,50 @@
+---
+name: github-pr-review-bot
+description: "Use when operating a GitHub pull-request loop with the Codex review bot: triggering review, polling reactions/reviews/threads, addressing findings, or proving a clean current-head result."
+---
+
+# GitHub PR Review Bot
+
+Drive one GitHub-hosted Codex review loop to a terminal result on the current remote head. This skill observes and coordinates the bot; it does not own code decisions, publication approval, CI, or merge.
+
+## Binding contract
+
+- Use hosted GitHub state, never local ancestry or remembered status.
+- Bind every request and result to the current `headRefOid` and the exact `@codex review` comment ID.
+- Trigger or resolve threads only with explicit user authorization or a standing authorization for that PR.
+- Do not start or rerun CI as part of this loop.
+- Never retrigger solely because time elapsed. A bot-authored `eyes` reaction on the exact trigger is acknowledged/in progress, not clean; keep polling that run.
+- Verify reaction authors, not aggregate reaction counts.
+
+## State machine
+
+| Hosted evidence | State | Action |
+| --- | --- | --- |
+| Head changed after the trigger | stale | Ignore old terminal claims; trigger once on the new head when authorized. |
+| Bot `eyes` on the exact trigger | in progress | Poll reviews, reactions, and current unresolved threads; do not retrigger. |
+| Bot `+1` on the exact trigger, head unchanged, no unresolved current bot thread | clean | Record bot PASS; continue any separate human/publication gates. |
+| Same-head bot review with no current bot finding comment and no unresolved current bot thread | clean | Record bot PASS; continue any separate human/publication gates. |
+| Same-head bot review with current finding comments or an unresolved current bot thread | findings | Verify each finding, fix and test, push, then resolve only the exact fixed threads and trigger one new review. |
+| No bot terminal output and no acknowledged run | indeterminate | Re-read authoritative state; do not invent a timeout or autonomous retrigger. |
+
+## Hosted probes
+
+Use `gh pr view <pr> --repo <owner>/<repo> --json headRefOid,state,isDraft,mergeable,updatedAt,url` first. Then query:
+
+- exact issue comments and reaction actors through `gh api repos/<owner>/<repo>/issues/<pr>/comments` and `.../issues/comments/<id>/reactions`;
+- submitted reviews through `gh api repos/<owner>/<repo>/pulls/<pr>/reviews`;
+- `reviewThreads { id isResolved isOutdated path line comments }` through paginated GraphQL.
+
+Anchor each poll on the latest hosted head and unfiltered latest bot state. Time windows are secondary only.
+
+## Finding lifecycle
+
+Treat bot text as a hypothesis until reproduced or verified in source/runtime. Do not bulk-resolve. After the exact fix is present on the hosted head, re-read its thread, resolve that thread, and leave unrelated or still-valid threads open. One new head gets at most one active review trigger.
+
+Clean bot output is not merge or publication authority. Human review, leak scan, branch protection, and repository gates remain separate.
+
+## Terms and Abbreviations
+
+- **CI** — Continuous Integration.
+- **PR** — Pull Request.
+- **head SHA** — the hosted commit identifier in `headRefOid`.
