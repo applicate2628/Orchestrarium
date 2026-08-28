@@ -6,6 +6,7 @@ import unittest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SPINE = "shared/AGENTS.shared.md"
+FUNCTIONAL_FIRST_EXTRACT = "shared/references/spine/functional-first-delivery.md"
 METHODOLOGY = "shared/references/subagent-operating-model.md"
 PROJECTIONS = (
     "src.codex/skills/lead/operating-model.md",
@@ -97,6 +98,23 @@ class TestWorkflowEconomyContract(unittest.TestCase):
 
     def test_functional_first_policy_keeps_the_approved_boundaries(self) -> None:
         spine = self._read(SPINE)
+        extract = self._read(FUNCTIONAL_FIRST_EXTRACT)
+        for required in (
+            "**Functional-first delivery (binding).**",
+            "shared/references/spine/functional-first-delivery.md",
+            "**Primary acceptance oracle.**",
+            "**Functional-first boundary; not code-first.**",
+            "**Bounded test-driven development.**",
+            "**Evidence-connected safety stop.**",
+            "**Regression gate.**",
+            "**Hardening boundary.**",
+            "**One final QA package.**",
+            "**Correction budget and stable lineage.**",
+            "**Publication safety unchanged.**",
+            "**Multi-model commission.**",
+        ):
+            with self.subTest(anchor=required):
+                self.assertIn(required, spine)
         for required in (
             "freeze a Primary Acceptance Oracle (PAO) specification",
             "every admitted acceptance criterion and external contract",
@@ -181,13 +199,16 @@ class TestWorkflowEconomyContract(unittest.TestCase):
             "Optional alternatives remain backlog and do not create another review round",
         ):
             with self.subTest(required=required):
-                self.assertIn(required, spine)
+                self.assertIn(required, extract)
 
     def test_functional_first_policy_has_one_canonical_owner(self) -> None:
-        owner_marker = "**Primary acceptance oracle.**"
-        spine = self._read(SPINE)
-        self.assertEqual(spine.count(owner_marker), 1)
-        for projection in (METHODOLOGY, *PROJECTIONS):
+        owner_marker = (
+            "**Primary acceptance oracle.** Before implementation, freeze a "
+            "Primary Acceptance Oracle (PAO) specification"
+        )
+        extract = self._read(FUNCTIONAL_FIRST_EXTRACT)
+        self.assertEqual(extract.count(owner_marker), 1)
+        for projection in (SPINE, METHODOLOGY, *PROJECTIONS):
             with self.subTest(projection=projection):
                 self.assertNotIn(owner_marker, self._read(projection))
 
