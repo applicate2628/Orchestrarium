@@ -25,7 +25,22 @@ TOOLS = VERIFIER.ExternalTools(Path(sys.executable).resolve(), REAL_GIT, REAL_BA
 
 
 def run(*args: str, cwd: Path) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(args, cwd=cwd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+    return subprocess.run(
+        args,
+        cwd=cwd,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+
+
+def process_is_live(pid: int) -> bool:
+    try:
+        raw = Path(f"/proc/{pid}/stat").read_text()
+        return raw.split()[2] != "Z"
+    except (OSError, IndexError):
+        return False
 
 
 class VerifierIsolationTests(unittest.TestCase):
@@ -35,11 +50,134 @@ class VerifierIsolationTests(unittest.TestCase):
                 tools=TOOLS,
                 lane_root=Path(temp) / "lane",
             )
-        for forbidden in ("PYTHONPATH", "PYTHONHOME", "GIT_DIR", "GIT_WORK_TREE", "VIRTUAL_ENV"):
+        for forbidden in (
+            "PYTHONPATH",
+            "PYTHONHOME",
+            "GIT_DIR",
+            "GIT_WORK_TREE",
+            "VIRTUAL_ENV",
+        ):
             self.assertNotIn(forbidden, env)
         self.assertEqual(env["PYTEST_DISABLE_PLUGIN_AUTOLOAD"], "1")
         self.assertEqual(env["PYTHONSAFEPATH"], "1")
         self.assertEqual(env["GIT_CONFIG_NOSYSTEM"], "1")
+        self.assertEqual(env["GIT_NO_REPLACE_OBJECTS"], "1")
+
+    def test_repository_environment_restores_only_the_reviewed_import_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            repo = root / "repo"
+            package = repo / "tests"
+            package.mkdir(parents=True)
+            (package / "__init__.py").write_text("")
+            (package / "marker.py").write_text("VALUE = 42\n")
+            env = VERIFIER.build_repository_env(
+                tools=TOOLS,
+                lane_root=root / "lane",
+                repo_root=repo,
+            )
+            self.assertEqual(env["PYTHONSAFEPATH"], "1")
+            self.assertEqual(env["PYTHONPATH"], str(repo.resolve()))
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-c",
+                    "from tests.marker import VALUE; print(VALUE)",
+                ],
+                cwd=root,
+                env=env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "42")
+
+    def test_trusted_git_ignores_replacement_objects(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp) / "repo"
+            repo.mkdir()
+            for args in (
+                ("init", "-q"),
+                ("config", "user.name", "Test"),
+                ("config", "user.email", "t@example.invalid"),
+            ):
+                self.assertEqual(run(str(REAL_GIT), *args, cwd=repo).returncode, 0)
+            payload = repo / "payload.txt"
+            payload.write_text("original\n")
+            self.assertEqual(run(str(REAL_GIT), "add", ".", cwd=repo).returncode, 0)
+            self.assertEqual(
+                run(str(REAL_GIT), "commit", "-qm", "original", cwd=repo).returncode,
+                0,
+            )
+            original = run(str(REAL_GIT), "rev-parse", "HEAD", cwd=repo).stdout.strip()
+            payload.write_text("replacement\n")
+            self.assertEqual(
+                run(str(REAL_GIT), "commit", "-qam", "replacement", cwd=repo).returncode,
+                0,
+            )
+            replacement = run(
+                str(REAL_GIT), "rev-parse", "HEAD", cwd=repo
+            ).stdout.strip()
+            self.assertEqual(
+                run(str(REAL_GIT), "replace", original, replacement, cwd=repo).returncode,
+                0,
+            )
+            self.assertEqual(
+                run(str(REAL_GIT), "show", f"{original}:payload.txt", cwd=repo).stdout,
+                "replacement\n",
+            )
+            with tempfile.TemporaryDirectory() as env_temp:
+                env = VERIFIER.build_sanitized_env(
+                    tools=TOOLS, lane_root=Path(env_temp) / "lane"
+                )
+                trusted = VERIFIER._run_git(
+                    TOOLS,
+                    env,
+                    repo,
+                    "show",
+                    f"{original}:payload.txt",
+                )
+        self.assertEqual(trusted, "original\n")
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux process containment")
+    def test_descendant_that_calls_setsid_is_reaped_before_return(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            ready = root / "ready"
+            child_pid_path = root / "child.pid"
+            delayed_sentinel = root / "escaped-write"
+            child = (
+                "import os,pathlib,time; os.setsid(); "
+                f"pathlib.Path({str(child_pid_path)!r}).write_text(str(os.getpid())); "
+                f"pathlib.Path({str(ready)!r}).write_text('ready'); "
+                "time.sleep(0.8); "
+                f"pathlib.Path({str(delayed_sentinel)!r}).write_text('escaped'); "
+                "time.sleep(30)"
+            )
+            parent = (
+                "import pathlib,subprocess,sys,time; "
+                f"subprocess.Popen([sys.executable,'-c',{child!r}]); "
+                f"ready=pathlib.Path({str(ready)!r});\n"
+                "while not ready.exists(): time.sleep(0.01)"
+            )
+            result = VERIFIER.run_isolated(
+                [sys.executable, "-c", parent],
+                cwd=root,
+                env={**os.environ},
+                log_path=root / "run.log",
+                timeout_seconds=10,
+            )
+            self.assertEqual(result.exit_code, 0)
+            child_pid = int(child_pid_path.read_text())
+            for _ in range(100):
+                if not process_is_live(child_pid):
+                    break
+                time.sleep(0.03)
+            self.assertFalse(process_is_live(child_pid), f"child {child_pid} survived")
+            time.sleep(1.0)
+            self.assertFalse(delayed_sentinel.exists())
 
     @unittest.skipIf(os.name != "posix", "POSIX executable symlink contract")
     def test_external_executable_symlink_to_candidate_bytes_is_rejected(self) -> None:
@@ -47,7 +185,8 @@ class VerifierIsolationTests(unittest.TestCase):
             root = Path(temp)
             candidate = root / "candidate"
             baseline = root / "baseline"
-            candidate.mkdir(); baseline.mkdir()
+            candidate.mkdir()
+            baseline.mkdir()
             target = candidate / "python"
             target.write_text("#!/bin/sh\nexit 0\n")
             target.chmod(0o755)
@@ -60,7 +199,7 @@ class VerifierIsolationTests(unittest.TestCase):
                     worktrees=(baseline.resolve(), candidate.resolve()),
                 )
 
-    @unittest.skipIf(os.name != "posix", "POSIX process-group contract")
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux process containment")
     def test_process_group_is_reaped_after_parent_exits_zero(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -79,23 +218,13 @@ class VerifierIsolationTests(unittest.TestCase):
             )
             self.assertEqual(result.exit_code, 0)
             child_pid = int(pid_file.read_text())
-            terminated = False
             for _ in range(40):
-                stat_path = Path(f"/proc/{child_pid}/stat")
-                if not stat_path.exists():
-                    terminated = True
-                    break
-                try:
-                    state = stat_path.read_text().split()[2]
-                except (OSError, IndexError):
-                    terminated = True
-                    break
-                if state == "Z":
-                    terminated = True
+                if not process_is_live(child_pid):
                     break
                 time.sleep(0.05)
-            self.assertTrue(terminated, f"background child {child_pid} survived")
+            self.assertFalse(process_is_live(child_pid), f"child {child_pid} survived")
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux process containment")
     def test_missing_executable_maps_to_operational_exit(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -115,7 +244,8 @@ class VerifierIsolationTests(unittest.TestCase):
             root = Path(temp)
             candidate = root / "candidate"
             external = root / "external"
-            candidate.mkdir(); external.mkdir()
+            candidate.mkdir()
+            external.mkdir()
             sentinel = external / "sentinel"
             sentinel.write_text("keep")
             (candidate / ".scratch").symlink_to(external, target_is_directory=True)
@@ -136,23 +266,41 @@ class VerifierIsolationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             repo = Path(temp) / "repo"
             repo.mkdir()
-            for args in (("init", "-q"), ("config", "user.name", "Test"), ("config", "user.email", "t@example.invalid")):
+            for args in (
+                ("init", "-q"),
+                ("config", "user.name", "Test"),
+                ("config", "user.email", "t@example.invalid"),
+            ):
                 self.assertEqual(run(str(REAL_GIT), *args, cwd=repo).returncode, 0)
             (repo / ".gitignore").write_text("__pycache__/\n")
             module = repo / "module.py"
             module.write_text("VALUE = 1\n")
             self.assertEqual(run(str(REAL_GIT), "add", ".", cwd=repo).returncode, 0)
-            self.assertEqual(run(str(REAL_GIT), "commit", "-qm", "base", cwd=repo).returncode, 0)
+            self.assertEqual(
+                run(str(REAL_GIT), "commit", "-qm", "base", cwd=repo).returncode,
+                0,
+            )
             ref = run(str(REAL_GIT), "rev-parse", "HEAD", cwd=repo).stdout.strip()
             with tempfile.TemporaryDirectory() as env_temp:
-                env = VERIFIER.build_sanitized_env(tools=TOOLS, lane_root=Path(env_temp) / "lane")
+                env = VERIFIER.build_sanitized_env(
+                    tools=TOOLS, lane_root=Path(env_temp) / "lane"
+                )
                 py_compile.compile(str(module), doraise=True)
                 with self.assertRaisesRegex(VERIFIER.VerificationError, "bytecode"):
                     VERIFIER.assert_clean_worktree(
                         repo.resolve(), expected_ref=ref, tools=TOOLS, env=env
                     )
                 shutil.rmtree(repo / "__pycache__")
-                self.assertEqual(run(str(REAL_GIT), "update-index", "--assume-unchanged", "module.py", cwd=repo).returncode, 0)
+                self.assertEqual(
+                    run(
+                        str(REAL_GIT),
+                        "update-index",
+                        "--assume-unchanged",
+                        "module.py",
+                        cwd=repo,
+                    ).returncode,
+                    0,
+                )
                 module.write_text("VALUE = 2\n")
                 with self.assertRaisesRegex(VERIFIER.VerificationError, "index flags"):
                     VERIFIER.assert_clean_worktree(
@@ -173,7 +321,9 @@ class VerifierIsolationTests(unittest.TestCase):
                 exclude=(current_log,),
             )
             report.write_text("forged\n")
-            with self.assertRaisesRegex(VERIFIER.VerificationError, "trusted evidence"):
+            with self.assertRaisesRegex(
+                VERIFIER.VerificationError, "trusted evidence"
+            ):
                 VERIFIER._verify_protected_digests(snapshot)
 
     def test_report_copy_excludes_tool_and_lane_state(self) -> None:

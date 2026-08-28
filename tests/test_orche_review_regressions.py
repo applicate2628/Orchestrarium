@@ -41,6 +41,17 @@ class ReviewRegressionTests(unittest.TestCase):
         self.assertIn("unique output directory", text)
         self.assertTrue(text.rstrip().endswith("V1:** Version 1, the accepted legacy behavior frozen before Orche 2.0 migration."))
 
+    def test_trusted_contract_disables_replacements_and_contains_detached_children(self) -> None:
+        text = README.read_text(encoding="utf-8")
+        self.assertIn("GIT_NO_REPLACE_OBJECTS=1", text)
+        self.assertIn("--no-replace-objects", text)
+        self.assertIn("Linux child subreaper", text)
+        self.assertIn("setsid()", text)
+        self.assertIn("/proc", text)
+        self.assertIn("PYTHONSAFEPATH=1", text)
+        self.assertIn("PYTHONPATH", text)
+        self.assertIn("Operational validator exits are therefore propagated as exit `2`", text)
+
     def test_focused_suite_list_covers_every_stage0_regression_module(self) -> None:
         path = ROOT / "scripts" / "baseline" / "verify_stage0.py"
         spec = importlib.util.spec_from_file_location("stage0_verifier_review", path)
@@ -49,10 +60,7 @@ class ReviewRegressionTests(unittest.TestCase):
         import sys
         sys.modules[spec.name] = module
         spec.loader.exec_module(module)
-        expected = {
-            f"tests/{item.name}"
-            for item in (ROOT / "tests").glob("test_orche_*.py")
-        }
+        expected = {f"tests/{item.name}" for item in (ROOT / "tests").glob("test_orche_*.py")}
         self.assertEqual(set(module.FOCUSED_TESTS), expected)
 
     def test_pin_and_dispositions_are_committed_sources_not_generated_evidence(self) -> None:

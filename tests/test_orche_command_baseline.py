@@ -37,46 +37,72 @@ class CommandComparatorTests(unittest.TestCase):
         volatile: str | None = None,
     ) -> subprocess.CompletedProcess[str]:
         args = [
-            sys.executable, str(SCRIPT),
-            "--name", "demo",
-            "--baseline-exit", str(baseline_exit),
-            "--candidate-exit", str(candidate_exit),
-            "--baseline-log", str(self.baseline),
-            "--candidate-log", str(self.candidate),
-            "--baseline-root", "/work/lane-old",
-            "--candidate-root", "/work/lane-new",
-            "--baseline-ref", baseline_ref,
-            "--candidate-ref", candidate_ref,
-            "--success-pattern", success,
-            "--semantic-failure-exit", "1",
-            "--output", str(self.output),
+            sys.executable,
+            str(SCRIPT),
+            "--name",
+            "demo",
+            "--baseline-exit",
+            str(baseline_exit),
+            "--candidate-exit",
+            str(candidate_exit),
+            "--baseline-log",
+            str(self.baseline),
+            "--candidate-log",
+            str(self.candidate),
+            "--baseline-root",
+            "/work/lane-old",
+            "--candidate-root",
+            "/work/lane-new",
+            "--baseline-ref",
+            baseline_ref,
+            "--candidate-ref",
+            candidate_ref,
+            "--success-pattern",
+            success,
+            "--semantic-failure-exit",
+            "1",
+            "--output",
+            str(self.output),
         ]
         if failure is not None:
             args.extend(("--failure-pattern", failure))
         if volatile is not None:
             args.extend(("--volatile-pattern", volatile))
-        return subprocess.run(args, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+        return subprocess.run(
+            args,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
 
     def test_preserved_success_compares_normalized_diagnostics(self) -> None:
         self.baseline.write_text(f"root=/work/lane-old ref={A}\nRESULT: PASS\n")
         self.candidate.write_text(f"root=/work/lane-new ref={B}\r\nRESULT: PASS\r\n")
         result = self.invoke()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(json.loads(self.output.read_text())["classification"], "preserved-success")
+        self.assertEqual(
+            json.loads(self.output.read_text())["classification"], "preserved-success"
+        )
 
     def test_semantic_exit_requires_terminal_failure_marker(self) -> None:
         self.baseline.write_text("Traceback: runtime failure\n")
         self.candidate.write_text("Traceback: runtime failure\n")
         result = self.invoke(baseline_exit=1, candidate_exit=1)
         self.assertEqual(result.returncode, 1)
-        self.assertEqual(json.loads(self.output.read_text())["classification"], "unverified-semantic-failure")
+        self.assertEqual(
+            json.loads(self.output.read_text())["classification"],
+            "unverified-semantic-failure",
+        )
 
     def test_verified_semantic_failure_may_be_preserved(self) -> None:
         self.baseline.write_text("diagnostic\nRESULT: FAIL\n")
         self.candidate.write_text("diagnostic\r\nRESULT: FAIL\r\n")
         result = self.invoke(baseline_exit=1, candidate_exit=1)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(json.loads(self.output.read_text())["classification"], "preserved-failure")
+        self.assertEqual(
+            json.loads(self.output.read_text())["classification"], "preserved-failure"
+        )
 
     def test_failure_marker_must_terminate_diagnostics(self) -> None:
         self.baseline.write_text("RESULT: FAIL\nafter\n")
@@ -103,19 +129,23 @@ class CommandComparatorTests(unittest.TestCase):
         self.candidate.write_text(f"/work/lane-new-backup {B}f\nRESULT: PASS\n")
         result = self.invoke()
         self.assertEqual(result.returncode, 1)
-        self.assertEqual(json.loads(self.output.read_text())["classification"], "drifted-success")
+        self.assertEqual(
+            json.loads(self.output.read_text())["classification"], "drifted-success"
+        )
 
     def test_declared_volatile_value_only_is_normalized(self) -> None:
         self.baseline.write_text("run=token-111\nRESULT: PASS\n")
         self.candidate.write_text("run=token-222\nRESULT: PASS\n")
         self.assertEqual(self.invoke(volatile=r"token-[0-9]+").returncode, 0)
 
-    def test_operational_exit_always_blocks(self) -> None:
+    def test_operational_exit_uses_invalid_evidence_exit_two(self) -> None:
         self.baseline.write_text("same\n")
         self.candidate.write_text("same\n")
         result = self.invoke(baseline_exit=127, candidate_exit=127)
-        self.assertEqual(result.returncode, 1)
-        self.assertEqual(json.loads(self.output.read_text())["classification"], "operational-exit")
+        self.assertEqual(result.returncode, 2)
+        report = json.loads(self.output.read_text())
+        self.assertEqual(report["classification"], "operational-exit")
+        self.assertTrue(report["policy"]["operationalExitsUseInvalidEvidenceExitTwo"])
 
 
 if __name__ == "__main__":

@@ -38,10 +38,12 @@ The verifier performs the operational work rather than duplicating security-sens
 
 - resolves exact external Python, Git, and Bash executables outside both tested worktrees;
 - removes ambient Python, Git, virtual-environment, and provider-home state;
+- disables Git replacement objects through both `GIT_NO_REPLACE_OBJECTS=1` and `git --no-replace-objects` before resolving any reviewed identity or object bytes;
 - rejects staged, unstaged, untracked, ignored executable/test/configuration inputs, importable bytecode, and hidden Git index flags;
 - keeps frozen tools and baseline evidence in a unique trusted directory outside both worktrees;
 - rematerializes and verifies a frozen tool immediately before every execution;
-- bounds every lane, launches a new process session, and terminates the complete process group after every direct-process outcome;
+- requires Linux, enables a child subreaper, and sweeps all adopted descendants from `/proc`, so a child cannot escape cleanup by calling `setsid()` or double-forking;
+- preserves `PYTHONSAFEPATH=1` while explicitly exposing only the already verified lane worktree as `PYTHONPATH` to repository tests and validators;
 - inventories both the pinned baseline and exact reviewed candidate commit;
 - requires an exact reviewed disposition for every added, modified, or removed tracked path;
 - compares Pytest exits, JUnit Extensible Markup Language diagnostics, retained skip reasons, and baseline test/support source digests;
@@ -51,7 +53,7 @@ The verifier performs the operational work rather than duplicating security-sens
 
 ## Canonical invocation
 
-Run with Bash. Supply two clean worktrees, the exact full candidate commit, and canonical non-symlink executable paths. The bootstrap sanitizes the environment before reading the pin or resolving Git objects, verifies the frozen verifier blob in the reviewed tree, and invokes it with Python isolated mode.
+Run on Linux with Bash. Supply two clean worktrees, the exact full candidate commit, and canonical non-symlink executable paths. The bootstrap sanitizes the environment before reading the pin or resolving Git objects, disables Git replacement objects, verifies the frozen verifier blob in the reviewed tree, and invokes it with Python isolated mode.
 
 ```bash
 set -euo pipefail
@@ -115,7 +117,8 @@ BOOTSTRAP_ROOT="$(
 trusted_git() {
   env -i PATH="$VERIFIER_PATH" HOME="$BOOTSTRAP_ROOT" TMPDIR="$BOOTSTRAP_ROOT" \
     GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL="$BOOTSTRAP_ROOT/gitconfig" \
-    "$VERIFIER_GIT" "$@"
+    GIT_NO_REPLACE_OBJECTS=1 \
+    "$VERIFIER_GIT" --no-replace-objects "$@"
 }
 trusted_python() {
   env -i PATH="$VERIFIER_PATH" HOME="$BOOTSTRAP_ROOT" TMPDIR="$BOOTSTRAP_ROOT" \
@@ -166,7 +169,7 @@ trusted_python "$BOOTSTRAP_ROOT/verify_stage0.py" \
   --verifier-bash "$VERIFIER_BASH"
 ```
 
-The bootstrap uses `git cat-file blob` to materialize the reviewed verifier wrapper and its three reviewed modules, verifies every blob, and executes the wrapper with `python -I`. The bootstrap directory contains no repository code except those verified frozen verifier blobs. The verifier produces a unique output directory under `.scratch/orche-stage0/reviewed-runs/`; that copied directory is never used as input evidence.
+The bootstrap uses `git cat-file blob` to materialize the reviewed verifier wrapper and its three reviewed modules, verifies every blob, and executes the wrapper with `python -I`. The bootstrap directory contains no repository code except those verified frozen verifier blobs. Repository tests and validators receive only their verified worktree through an explicit per-lane `PYTHONPATH`; frozen verifier tools never inherit it. The verifier produces a unique output directory under `.scratch/orche-stage0/reviewed-runs/`; that copied directory is never used as input evidence.
 
 ## Evidence and acceptance
 
@@ -179,7 +182,7 @@ Stage 0 is intentionally local-only and does not add a GitHub Actions workflow. 
 - baseline/candidate logs and comparison reports for every repository-standard validator;
 - a machine-readable summary bound to both exact commit identifiers.
 
-Exit `0` is accepted evidence. Exit `1` means semantic parity is `BLOCKED`. Exit `2` means the evidence is operationally invalid and must not be interpreted as parity drift.
+Exit `0` is accepted evidence. Exit `1` means semantic parity is `BLOCKED`. Exit `2` means the evidence is operationally invalid and must not be interpreted as parity drift. Operational validator exits are therefore propagated as exit `2`, not collapsed into semantic exit `1`.
 
 ## Publication gate
 
@@ -199,9 +202,11 @@ Only the repository owner may then create, verify, and push the signed tag. Unti
 - **CLI:** Command-Line Interface, a program operated through terminal commands.
 - **Git blob:** an immutable Git object containing one file's bytes.
 - **JUnit XML:** JUnit Extensible Markup Language, the machine-readable Pytest result format.
+- **Linux child subreaper:** a Linux process that adopts orphaned descendants so they remain controllable even after `setsid()` or a double fork.
 - **PATH:** the operating-system executable search path.
-- **POSIX:** Portable Operating System Interface, the process/session model required by the verifier.
+- **POSIX:** Portable Operating System Interface, the process/session model on which the Linux verifier builds.
 - **PR:** Pull Request, a proposed repository change submitted for review.
+- **`/proc`:** the Linux process-information filesystem used to identify and reap every lane descendant.
 - **Pytest:** the Python test runner used by the repository suite.
 - **SHA:** Secure Hash Algorithm, the identifier family used for Git objects and evidence digests.
 - **Skill:** a repository instruction package whose methodology body is compared independently of provider frontmatter.
