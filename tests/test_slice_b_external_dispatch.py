@@ -108,14 +108,12 @@ def test_legacy_resolution_unchanged_and_auto_excludes_new_providers() -> None:
     scalar = {record["name"]: record for record in schema["scalarKeys"]}
 
     assert schema["productionAutoProviders"] == ["codex", "claude"]
-    assert schema["exampleOnlyProviders"] == ["gemini", "qwen"]
+    assert schema["exampleOnlyProviders"] == []
     assert schema["explicitOnlyProviders"] == ["kimi", "grok"]
     assert scalar["externalProvider"]["allowed"] == [
         "auto",
         "codex",
         "claude",
-        "gemini",
-        "qwen",
         "kimi",
         "grok",
     ]
@@ -135,7 +133,8 @@ def test_legacy_resolution_unchanged_and_auto_excludes_new_providers() -> None:
     )
     assert "kimi" not in json.dumps(schema["priorityProfiles"])
     assert "grok" not in json.dumps(schema["priorityProfiles"])
-    assert set(RESOLVER.PROVIDER_DIRS) == {"codex", "claude", "gemini", "qwen"}
+    assert set(RESOLVER.PROVIDER_DIRS) == {"codex", "claude"}
+    assert RESOLVER.REMOVED_EXTERNAL_PROVIDERS == {"gemini", "qwen"}
 
 
 @pytest.mark.parametrize(
