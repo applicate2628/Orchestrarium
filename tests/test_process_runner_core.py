@@ -16,6 +16,11 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER_PATH = ROOT / "scripts" / "process_supervision" / "process_runner.py"
 CHILD = ROOT / "tests" / "fixtures" / "process_supervision" / "child_helper.py"
+PUBLIC_PROCESS_SUPERVISION_DOCS = (
+    ROOT / "README.md",
+    ROOT / "INSTALL.md",
+    ROOT / "RELEASE_NOTES.md",
+)
 
 
 def _load_runner():
@@ -27,6 +32,16 @@ def _load_runner():
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def test_public_provider_launch_contract_is_linux_only() -> None:
+    """Catches public docs widening the Linux backend to generic POSIX hosts."""
+
+    for path in PUBLIC_PROCESS_SUPERVISION_DOCS:
+        text = path.read_text(encoding="utf-8")
+        assert "Linux Codex and Claude launches are active" in text
+        assert "no macOS/Darwin backend is shipped" in text
+        assert "POSIX Codex and Claude launches are active" not in text
 
 
 def _policy(runner, *, limit: int = 1024 * 1024):
