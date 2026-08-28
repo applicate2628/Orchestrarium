@@ -75,7 +75,14 @@ class TestWorkflowEconomyContract(unittest.TestCase):
 
     def test_role_index_and_reference_provenance_remain_truthful(self) -> None:
         spine = self._read(SPINE)
-        self.assertIn("Roadmap/orchestration:", spine)
+        for heading in (
+            "- Roadmap and orchestration:",
+            "- Research, design, planning, and specialist constraints:",
+            "- Implementation:",
+            "- Review and verification:",
+        ):
+            with self.subTest(heading=heading):
+                self.assertEqual(spine.count(heading), 1)
         self.assertNotIn("\nRoadmap:", spine)
         self.assertIn("Source-only/maintainer-only, NOT installed: `shared/references/`", spine)
         self.assertIn("these rules are self-sufficient", spine)
