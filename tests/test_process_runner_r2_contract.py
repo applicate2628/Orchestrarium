@@ -170,6 +170,85 @@ def test_runner_close_cancels_and_settles_active_real_run() -> None:
     assert refused.failure_id == "PSV1-RUNNER-CLOSED"
 
 
+def test_duplicate_request_id_and_close_complete_without_reentering_runner_lock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Duplicate rejection and runner close must not deadlock on the request lock."""
+    runner = _load_runner()
+    backend_calls = 0
+
+    def factory(_owner, _lifecycle=None):
+        def backend(_request, _supplied_lifecycle=None, _validated_cwd=None):
+            nonlocal backend_calls
+            backend_calls += 1
+            raise runner.ProcessSupervisionError("PSV1-CANCELLED", "cancellation")
+
+        return backend
+
+    owner = runner.ProcessRunnerV1(backend_factory=factory)
+    if os.name == "nt":
+        monkeypatch.setattr(
+            owner.windows_argv_admission_owner,
+            "admit",
+            lambda *_args, **_kwargs: None,
+        )
+    request_id = "d" * 32
+    first = dataclasses.replace(
+        _request(runner, (sys.executable, str(CHILD), "identity")),
+        request_id=request_id,
+    )
+    first_result = owner.run(first)
+    assert first_result.failure_id == "PSV1-CANCELLED"
+    assert backend_calls == 1
+
+    release_started = threading.Event()
+    original_release = owner._release_lifecycle
+
+    def observed_release(lifecycle) -> None:
+        release_started.set()
+        original_release(lifecycle)
+
+    monkeypatch.setattr(owner, "_release_lifecycle", observed_release)
+    duplicate = dataclasses.replace(
+        _request(runner, (sys.executable, str(CHILD), "identity")),
+        request_id=request_id,
+    )
+    duplicate_result = []
+    duplicate_done = threading.Event()
+
+    def run_duplicate() -> None:
+        try:
+            duplicate_result.append(owner.run(duplicate))
+        finally:
+            duplicate_done.set()
+
+    duplicate_thread = threading.Thread(target=run_duplicate, daemon=True)
+    duplicate_thread.start()
+    assert release_started.wait(1.0), "duplicate path did not reach lifecycle release"
+
+    close_result = []
+    close_done = threading.Event()
+
+    def close_owner() -> None:
+        try:
+            close_result.append(owner.close())
+        finally:
+            close_done.set()
+
+    close_thread = threading.Thread(target=close_owner, daemon=True)
+    close_thread.start()
+    assert duplicate_done.wait(1.0), "duplicate request deadlocked during lifecycle release"
+    assert close_done.wait(1.0), "runner close deadlocked behind duplicate request"
+    duplicate_thread.join(timeout=0.1)
+    close_thread.join(timeout=0.1)
+
+    assert duplicate_result[0].failure_id == "PSV1-REQUEST-INVALID"
+    assert duplicate_result[0].terminal_stage == "request-validation"
+    assert close_result[0].outcome == "closed"
+    assert close_result[0].unsettled_run_token_sha256 == ()
+    assert backend_calls == 1
+
+
 def test_expected_oserror_returns_typed_result_after_one_lifecycle_finalizer() -> None:
     """Expected OS failures are returned and cannot bypass or duplicate cleanup."""
     runner = _load_runner()

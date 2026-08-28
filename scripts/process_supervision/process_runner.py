@@ -3218,22 +3218,26 @@ class ProcessRunnerV1:
             return dataclasses.replace(
                 result, run_token_sha256=owned_lifecycle.token.sha256
             )
+        duplicate_request_id = False
         with self._lock:
             if request.request_id is not None:
                 if request.request_id in self._consumed_request_ids:
-                    result = _request_failure(
-                        request,
-                        ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation"),
-                        started,
-                    )
-                    owned_lifecycle.finalize_once(
-                        time.monotonic() + RUNNER_CLOSE_TIMEOUT_SECONDS
-                    )
-                    self._release_lifecycle(owned_lifecycle)
-                    return dataclasses.replace(
-                        result, run_token_sha256=owned_lifecycle.token.sha256
-                    )
-                self._consumed_request_ids.add(request.request_id)
+                    duplicate_request_id = True
+                else:
+                    self._consumed_request_ids.add(request.request_id)
+        if duplicate_request_id:
+            result = _request_failure(
+                request,
+                ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation"),
+                started,
+            )
+            owned_lifecycle.finalize_once(
+                time.monotonic() + RUNNER_CLOSE_TIMEOUT_SECONDS
+            )
+            self._release_lifecycle(owned_lifecycle)
+            return dataclasses.replace(
+                result, run_token_sha256=owned_lifecycle.token.sha256
+            )
         try:
             owned_lifecycle.register_resource(
                 "capture-sink",
