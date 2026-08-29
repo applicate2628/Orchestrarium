@@ -130,6 +130,9 @@ def args(v):
     p.add_argument("--volatile-pattern",action="append",default=[]); return p.parse_args(v)
 def main(v=None):
     a=args(sys.argv[1:] if v is None else v)
-    try: r=compare(a); atomic(a.output,canon(r).encode()); print(f"RESULT: {r['verdict']} pytest-baseline baseline_failures={r['baseline']['failures']} candidate_failures={r['candidate']['failures']}"); return 0 if r["verdict"]=="PASS" else 1
+    try:
+        r=compare(a); atomic(a.output,canon(r).encode()); print(f"RESULT: {r['verdict']} pytest-baseline baseline_failures={r['baseline']['failures']} candidate_failures={r['candidate']['failures']}")
+        if a.baseline_exit not in {0,1} or a.candidate_exit not in {0,1}: return 2
+        return 0 if r["verdict"]=="PASS" else 1
     except (Error,OSError,ValueError) as e: print(f"RESULT: FAIL pytest-baseline: {e}",file=sys.stderr); return 2
 if __name__=="__main__": raise SystemExit(main())

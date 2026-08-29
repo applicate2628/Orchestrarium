@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import contextlib
 import ctypes
 import threading
+from dataclasses import dataclass
+from types import MappingProxyType
 
 from stage0_runtime import *
 
@@ -17,8 +20,95 @@ _PROCESS_QUIET_POLLS = 8
 ProcessRecord = tuple[int, str, int]
 
 
+@dataclass(frozen=True)
+class VerificationWorkspace:
+    trusted_root: Path
+    lane_root: Path
+
+
+@dataclass(frozen=True)
+class TrustedTreeEntry:
+    kind: str
+    device: int
+    inode: int
+    mode: int
+    uid: int
+    gid: int
+    nlink: int | None = None
+    size: int | None = None
+    mtime_ns: int | None = None
+    ctime_ns: int | None = None
+    sha256: str | None = None
+
+
+@dataclass(frozen=True)
+class TrustedTreeSnapshot:
+    root: Path
+    excluded: frozenset[str]
+    entries: Mapping[str, TrustedTreeEntry]
+
+
+@dataclass(frozen=True)
+class PreparedFileIdentity:
+    path: Path
+    device: int
+    inode: int
+    mode: int
+
+
+def _remove_private_temp_root(path: Path) -> None:
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError:
+        return
+    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+        path.unlink(missing_ok=True)
+        return
+    shutil.rmtree(path)
+
+
+def _private_temp_parent() -> Path:
+    parent = Path("/tmp")
+    try:
+        metadata = parent.lstat()
+    except OSError as exc:
+        raise VerificationError(f"cannot inspect private temporary parent {parent}: {exc}") from exc
+    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+        raise VerificationError(f"private temporary parent must be a real directory: {parent}")
+    return parent.resolve(strict=True)
+
+
+@contextlib.contextmanager
+def verification_workspace(*, preserve_failed: bool = False):
+    private_parent = _private_temp_parent()
+    trusted_root = Path(
+        tempfile.mkdtemp(prefix="orche-stage0-trusted-", dir=private_parent)
+    ).resolve()
+    lane_root = Path(
+        tempfile.mkdtemp(prefix="orche-stage0-lanes-", dir=private_parent)
+    ).resolve()
+    os.chmod(trusted_root, 0o700)
+    os.chmod(lane_root, 0o700)
+    workspace = VerificationWorkspace(trusted_root=trusted_root, lane_root=lane_root)
+    try:
+        yield workspace
+    except BaseException:
+        if preserve_failed:
+            print(
+                "RECOVERY: failed Stage 0 trusted state preserved at "
+                f"{trusted_root}; lane state at {lane_root}",
+                file=sys.stderr,
+            )
+        else:
+            _remove_private_temp_root(trusted_root)
+            _remove_private_temp_root(lane_root)
+        raise
+    else:
+        _remove_private_temp_root(trusted_root)
+        _remove_private_temp_root(lane_root)
+
+
 def _enable_child_subreaper() -> None:
-    """Make the verifier adopt orphaned descendants, including new sessions."""
     global _SUBREAPER_ENABLED
     if _SUBREAPER_ENABLED:
         return
@@ -50,7 +140,6 @@ def _enable_child_subreaper() -> None:
 
 
 def _proc_table() -> dict[int, ProcessRecord]:
-    """Return PID -> (parent PID, state, start time) from Linux /proc."""
     table: dict[int, ProcessRecord] = {}
     try:
         entries = list(Path("/proc").iterdir())
@@ -100,7 +189,6 @@ def _is_preexisting_child(
 def _lane_processes(
     table: Mapping[int, ProcessRecord], preexisting: Mapping[int, int]
 ) -> dict[int, ProcessRecord]:
-    """Find all new descendants now owned by the verifier subreaper."""
     verifier_pid = os.getpid()
     children: dict[int, set[int]] = {}
     for pid, (parent_pid, _state, _start_time) in table.items():
@@ -151,7 +239,6 @@ def _reap_new_direct_children(preexisting: Mapping[int, int]) -> None:
 
 
 def _cleanup_lane_descendants(preexisting: Mapping[int, int]) -> None:
-    """Terminate and reap every descendant, even after setsid/double-fork."""
     term_deadline = time.monotonic() + _PROCESS_TERM_GRACE_SECONDS
     deadline = time.monotonic() + _PROCESS_CLEANUP_TIMEOUT_SECONDS
     quiet_polls = 0
@@ -207,6 +294,48 @@ def _terminate_process_group(process: subprocess.Popen[bytes]) -> None:
         pass
 
 
+def _fresh_regular_file(path: Path) -> tuple[object, PreparedFileIdentity]:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags, 0o600)
+    except OSError as exc:
+        raise VerificationError(f"cannot create fresh trusted file {path}: {exc}") from exc
+    metadata = os.fstat(descriptor)
+    if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+        os.close(descriptor)
+        raise VerificationError(f"fresh trusted file is not a private regular file: {path}")
+    return os.fdopen(descriptor, "wb"), PreparedFileIdentity(
+        path=path,
+        device=metadata.st_dev,
+        inode=metadata.st_ino,
+        mode=metadata.st_mode,
+    )
+
+
+def _verify_prepared_file(identity: PreparedFileIdentity, *, require_nonempty: bool = False) -> None:
+    try:
+        metadata = identity.path.lstat()
+    except OSError as exc:
+        raise VerificationError(f"trusted output disappeared: {identity.path}: {exc}") from exc
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_nlink != 1
+        or metadata.st_dev != identity.device
+        or metadata.st_ino != identity.inode
+        or stat.S_IFMT(metadata.st_mode) != stat.S_IFMT(identity.mode)
+    ):
+        raise VerificationError(f"trusted output path was replaced or linked: {identity.path}")
+    if require_nonempty and metadata.st_size == 0:
+        raise VerificationError(f"trusted output is empty: {identity.path}")
+
+
+def prepare_trusted_output(path: Path) -> PreparedFileIdentity:
+    handle, identity = _fresh_regular_file(path)
+    handle.close()
+    return identity
+
+
 def run_isolated(
     command: Sequence[str],
     *,
@@ -214,6 +343,7 @@ def run_isolated(
     env: Mapping[str, str],
     log_path: Path,
     timeout_seconds: float,
+    tools: ExternalTools | None,
 ) -> CommandResult:
     if timeout_seconds <= 0:
         raise VerificationError("timeout must be positive")
@@ -222,9 +352,11 @@ def run_isolated(
     try:
         _enable_child_subreaper()
         preexisting = _direct_child_snapshot(_proc_table())
-        log_path.parent.mkdir(parents=True, exist_ok=True)
         cleanup_error: VerificationError | None = None
-        with log_path.open("wb") as log:
+        log, log_identity = _fresh_regular_file(log_path)
+        with log:
+            if tools is not None:
+                tools.verify(command[0])
             try:
                 process = subprocess.Popen(
                     list(command),
@@ -239,43 +371,217 @@ def run_isolated(
                 log.write(f"BLOCKED: command executable not found: {exc}\n".encode())
                 log.flush()
                 os.fsync(log.fileno())
-                return CommandResult(127, log_path, launch_error=str(exc))
+                result = CommandResult(127, log_path, launch_error=str(exc))
             except OSError as exc:
                 log.write(f"BLOCKED: command launch failed: {exc}\n".encode())
                 log.flush()
                 os.fsync(log.fileno())
-                return CommandResult(126, log_path, launch_error=str(exc))
-
-            timed_out = False
-            try:
+                result = CommandResult(126, log_path, launch_error=str(exc))
+            else:
+                timed_out = False
                 try:
-                    return_code = process.wait(timeout=timeout_seconds)
-                except subprocess.TimeoutExpired:
-                    timed_out = True
-                    return_code = 124
-                    log.write(
-                        f"BLOCKED: command timed out after {timeout_seconds:g}s\n".encode()
-                    )
-            finally:
-                _terminate_process_group(process)
-                if process.poll() is None:
                     try:
-                        process.wait(timeout=2)
+                        return_code = process.wait(timeout=timeout_seconds)
                     except subprocess.TimeoutExpired:
-                        process.kill()
-                        process.wait()
-                try:
-                    _cleanup_lane_descendants(preexisting)
-                except VerificationError as exc:
-                    cleanup_error = exc
-                    log.write(f"BLOCKED: {exc}\n".encode())
-            log.flush()
-            os.fsync(log.fileno())
+                        timed_out = True
+                        return_code = 124
+                        log.write(
+                            f"BLOCKED: command timed out after {timeout_seconds:g}s\n".encode()
+                        )
+                finally:
+                    _terminate_process_group(process)
+                    if process.poll() is None:
+                        try:
+                            process.wait(timeout=2)
+                        except subprocess.TimeoutExpired:
+                            process.kill()
+                            process.wait()
+                    try:
+                        _cleanup_lane_descendants(preexisting)
+                    except VerificationError as exc:
+                        cleanup_error = exc
+                        log.write(f"BLOCKED: {exc}\n".encode())
+                log.flush()
+                os.fsync(log.fileno())
+                result = CommandResult(return_code, log_path, timed_out=timed_out)
+        _verify_prepared_file(log_identity)
         if cleanup_error is not None:
             raise cleanup_error
-        return CommandResult(return_code, log_path, timed_out=timed_out)
+        return result
     finally:
         _LANE_LOCK.release()
+
+
+def _lexical_relative(root: Path, path: Path) -> str:
+    absolute = Path(os.path.abspath(os.fspath(path)))
+    try:
+        relative = absolute.relative_to(root)
+    except ValueError as exc:
+        raise VerificationError(f"trusted-tree exclusion escapes root: {path}") from exc
+    if not relative.parts:
+        raise VerificationError("trusted-tree root itself cannot be excluded")
+    return relative.as_posix()
+
+
+def _hash_regular_no_follow(path: Path, metadata: os.stat_result) -> str:
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise VerificationError(f"cannot open trusted regular file {path}: {exc}") from exc
+    try:
+        before = os.fstat(descriptor)
+        digest = hashlib.sha256()
+        while True:
+            block = os.read(descriptor, 1024 * 1024)
+            if not block:
+                break
+            digest.update(block)
+        after = os.fstat(descriptor)
+    finally:
+        os.close(descriptor)
+    stable = lambda st: (
+        st.st_dev,
+        st.st_ino,
+        st.st_mode,
+        st.st_uid,
+        st.st_gid,
+        st.st_nlink,
+        st.st_size,
+        st.st_mtime_ns,
+        st.st_ctime_ns,
+    )
+    if stable(metadata) != stable(before) or stable(before) != stable(after):
+        raise VerificationError(f"trusted regular file changed while hashing: {path}")
+    return digest.hexdigest()
+
+
+def _scan_trusted_tree(root: Path, excluded: frozenset[str]) -> dict[str, TrustedTreeEntry]:
+    try:
+        root_metadata = root.lstat()
+    except OSError as exc:
+        raise VerificationError(f"cannot inspect trusted root {root}: {exc}") from exc
+    if stat.S_ISLNK(root_metadata.st_mode) or not stat.S_ISDIR(root_metadata.st_mode):
+        raise VerificationError(f"trusted root is not a real directory: {root}")
+    entries: dict[str, TrustedTreeEntry] = {
+        ".": TrustedTreeEntry(
+            kind="directory",
+            device=root_metadata.st_dev,
+            inode=root_metadata.st_ino,
+            mode=root_metadata.st_mode,
+            uid=root_metadata.st_uid,
+            gid=root_metadata.st_gid,
+        )
+    }
+
+    def visit(directory: Path) -> None:
+        try:
+            with os.scandir(directory) as iterator:
+                children = sorted(iterator, key=lambda item: item.name)
+        except OSError as exc:
+            raise VerificationError(f"cannot scan trusted directory {directory}: {exc}") from exc
+        for child in children:
+            path = Path(child.path)
+            relative = path.relative_to(root).as_posix()
+            if relative in excluded:
+                continue
+            try:
+                metadata = child.stat(follow_symlinks=False)
+            except OSError as exc:
+                raise VerificationError(f"cannot inspect trusted entry {path}: {exc}") from exc
+            if stat.S_ISLNK(metadata.st_mode):
+                raise VerificationError(f"symlink is forbidden in trusted tree: {path}")
+            if stat.S_ISDIR(metadata.st_mode):
+                entries[relative] = TrustedTreeEntry(
+                    kind="directory",
+                    device=metadata.st_dev,
+                    inode=metadata.st_ino,
+                    mode=metadata.st_mode,
+                    uid=metadata.st_uid,
+                    gid=metadata.st_gid,
+                )
+                visit(path)
+            elif stat.S_ISREG(metadata.st_mode):
+                if metadata.st_nlink != 1:
+                    raise VerificationError(f"hard-linked file is forbidden in trusted tree: {path}")
+                entries[relative] = TrustedTreeEntry(
+                    kind="file",
+                    device=metadata.st_dev,
+                    inode=metadata.st_ino,
+                    mode=metadata.st_mode,
+                    uid=metadata.st_uid,
+                    gid=metadata.st_gid,
+                    nlink=metadata.st_nlink,
+                    size=metadata.st_size,
+                    mtime_ns=metadata.st_mtime_ns,
+                    ctime_ns=metadata.st_ctime_ns,
+                    sha256=_hash_regular_no_follow(path, metadata),
+                )
+            else:
+                raise VerificationError(f"unsupported entry type in trusted tree: {path}")
+
+    visit(root)
+    return entries
+
+
+def _trusted_evidence_snapshot(
+    trusted_root: Path, *, exclude: Iterable[Path] = ()
+) -> TrustedTreeSnapshot:
+    root = trusted_root.resolve(strict=True)
+    excluded = frozenset(_lexical_relative(root, path) for path in exclude)
+    return TrustedTreeSnapshot(
+        root=root,
+        excluded=excluded,
+        entries=MappingProxyType(_scan_trusted_tree(root, excluded)),
+    )
+
+
+def _verify_protected_digests(expected: TrustedTreeSnapshot) -> None:
+    actual = _scan_trusted_tree(expected.root, expected.excluded)
+    before = dict(expected.entries)
+    if actual == before:
+        return
+    before_keys = set(before)
+    actual_keys = set(actual)
+    added = sorted(actual_keys - before_keys)
+    removed = sorted(before_keys - actual_keys)
+    changed = sorted(
+        path for path in before_keys & actual_keys if before[path] != actual[path]
+    )
+    raise VerificationError(
+        "untrusted lane changed trusted-tree membership or identity: "
+        f"added={added}, removed={removed}, changed={changed}"
+    )
+
+
+def run_repository_lane(
+    command: Sequence[str],
+    *,
+    cwd: Path,
+    env: Mapping[str, str],
+    log_path: Path,
+    timeout_seconds: float,
+    tools: ExternalTools,
+    trusted_root: Path,
+    mutable_paths: Iterable[Path] = (),
+) -> CommandResult:
+    allowed = tuple({log_path, *mutable_paths})
+    snapshot = _trusted_evidence_snapshot(trusted_root, exclude=allowed)
+    result = run_isolated(
+        command,
+        cwd=cwd,
+        env=env,
+        log_path=log_path,
+        timeout_seconds=timeout_seconds,
+        tools=tools,
+    )
+    tools.verify_all()
+    for path in allowed:
+        metadata = path.lstat()
+        if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+            raise VerificationError(f"mutable trusted output is not a private regular file: {path}")
+    _verify_protected_digests(snapshot)
+    return result
 
 
 def _safe_component(path: Path) -> None:
@@ -321,9 +627,7 @@ def load_pin_from_commit(
 ) -> dict[str, object]:
     try:
         payload = json.loads(
-            _git_show_bytes(
-                tools, env, candidate_root, reviewed_ref, PIN_PATH
-            ).decode("utf-8")
+            _git_show_bytes(tools, env, candidate_root, reviewed_ref, PIN_PATH).decode("utf-8")
         )
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise VerificationError(f"cannot parse reviewed baseline pin: {exc}") from exc
@@ -423,34 +727,6 @@ def materialize_tool(
     return destination, record
 
 
-def _protected_digests(paths: Iterable[Path]) -> dict[Path, str]:
-    return {path: sha256_file(path) for path in paths if path.is_file()}
-
-
-def _verify_protected_digests(expected: Mapping[Path, str]) -> None:
-    for path, digest in expected.items():
-        if not path.is_file() or sha256_file(path) != digest:
-            raise VerificationError(f"candidate lane modified trusted evidence: {path}")
-
-
-def _trusted_evidence_snapshot(
-    trusted_root: Path, *, exclude: Iterable[Path] = ()
-) -> dict[Path, str]:
-    excluded = {path.resolve(strict=False) for path in exclude}
-    candidates: list[Path] = []
-    for name in ("summary.json", "reviewed-dispositions.json"):
-        candidates.append(trusted_root / name)
-    for directory_name in ("evidence", "reports", "logs"):
-        directory = trusted_root / directory_name
-        if directory.is_dir():
-            candidates.extend(directory.rglob("*"))
-    return {
-        path: sha256_file(path)
-        for path in candidates
-        if path.is_file() and path.resolve(strict=False) not in excluded
-    }
-
-
 def _invoke_frozen(
     name: str,
     arguments: Sequence[str],
@@ -484,10 +760,19 @@ def _invoke_frozen(
         env=env,
         log_path=log_path,
         timeout_seconds=timeout_seconds,
+        tools=tools,
     )
     if not script.is_file() or sha256_file(script) != expected_script_sha256:
         raise VerificationError(f"materialized tool changed during execution: {script}")
     return result, record
+
+
+def _log_excerpt(path: Path, limit: int = 4000) -> str:
+    try:
+        text = path.read_bytes().decode("utf-8", errors="replace")
+    except OSError:
+        return ""
+    return text[-limit:].strip()
 
 
 def _require_result(
@@ -495,10 +780,12 @@ def _require_result(
 ) -> None:
     if result.exit_code == 0:
         return
+    excerpt = _log_excerpt(result.log_path)
+    suffix = f"\n{excerpt}" if excerpt else ""
     if semantic and result.exit_code == 1:
-        raise VerificationBlocked(f"{label} blocked; see {result.log_path}")
+        raise VerificationBlocked(f"{label} blocked by semantic evidence{suffix}")
     raise VerificationError(
-        f"{label} failed operationally with exit {result.exit_code}; see {result.log_path}"
+        f"{label} failed operationally with exit {result.exit_code}{suffix}"
     )
 
 
@@ -524,7 +811,7 @@ def _write_summary(
                 "baselineRef": baseline_ref,
                 "candidateRef": candidate_ref,
                 "message": message,
-                "trustedEvidenceRoot": os.fspath(trusted_root),
+                "trustedEvidenceLifecycle": "removed-after-copy",
             }
         ),
         encoding="utf-8",
@@ -533,20 +820,18 @@ def _write_summary(
 
 
 def _copy_reports(trusted_root: Path, output: Path) -> None:
-    sources: list[Path] = []
-    for name in ("summary.json", "reviewed-dispositions.json"):
-        source = trusted_root / name
-        if source.is_file():
-            sources.append(source)
-    for directory_name in ("evidence", "reports", "logs"):
-        directory = trusted_root / directory_name
-        if directory.is_dir():
-            sources.extend(path for path in directory.rglob("*") if path.is_file())
-    for source in sorted(set(sources)):
-        relative = source.relative_to(trusted_root)
+    snapshot = _trusted_evidence_snapshot(trusted_root)
+    allowed_prefixes = ("evidence/", "reports/", "logs/")
+    allowed_exact = {"summary.json", "reviewed-dispositions.json"}
+    for relative, entry in sorted(snapshot.entries.items()):
+        if relative == "." or entry.kind != "file":
+            continue
+        if relative not in allowed_exact and not relative.startswith(allowed_prefixes):
+            continue
+        source = trusted_root / relative
         destination = output / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, destination)
+        shutil.copy2(source, destination, follow_symlinks=False)
 
 
 __all__ = [name for name in globals() if not name.startswith("__")]

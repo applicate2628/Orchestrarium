@@ -26,9 +26,18 @@ TOOLS = {
 
 
 def git(*args: str) -> str:
-    result = subprocess.run(["git", *args], cwd=ROOT, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+    result = subprocess.run(
+        ["git", *args],
+        cwd=ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
     if result.returncode != 0:
-        raise AssertionError(f"git {' '.join(args)} failed\n{result.stdout}\n{result.stderr}")
+        raise AssertionError(
+            f"git {' '.join(args)} failed\n{result.stdout}\n{result.stderr}"
+        )
     return result.stdout.strip()
 
 
@@ -39,45 +48,75 @@ class BaselinePinTests(unittest.TestCase):
         self.assertEqual(payload["baseline"]["commitSha"], EXPECTED_COMMIT)
         self.assertEqual(payload["baseline"]["treeSha"], EXPECTED_TREE)
         self.assertEqual(set(payload["tooling"]), set(TOOLS))
-        self.assertEqual(payload["toolingAnchor"]["kind"], "reviewed-tree-frozen-paths")
+        self.assertEqual(
+            payload["toolingAnchor"]["kind"], "reviewed-tree-frozen-paths"
+        )
         for key, name in TOOLS.items():
             record = payload["tooling"][key]
             frozen = BASELINE / "tooling" / name
             source = ROOT / "scripts" / "baseline" / name
             self.assertEqual(frozen.read_bytes(), source.read_bytes(), name)
-            self.assertEqual(record["path"], f"baseline/orchestrarium-v1/tooling/{name}")
+            self.assertEqual(
+                record["path"], f"baseline/orchestrarium-v1/tooling/{name}"
+            )
             self.assertEqual(record["sourcePath"], f"scripts/baseline/{name}")
-            self.assertEqual(record["materialization"], "git-cat-file-reviewed-tree-blob")
-            self.assertEqual(git("hash-object", str(frozen.relative_to(ROOT))), record["gitBlobSha"])
+            self.assertEqual(
+                record["materialization"], "git-cat-file-reviewed-tree-blob"
+            )
+            self.assertEqual(
+                git("hash-object", str(frozen.relative_to(ROOT))),
+                record["gitBlobSha"],
+            )
 
     def test_local_only_evidence_has_one_machine_readable_output_root(self) -> None:
         payload = json.loads(PIN.read_text(encoding="utf-8"))
         evidence = payload["evidence"]
         self.assertEqual(evidence["verificationMode"], "local-only")
         self.assertFalse(evidence["commitGeneratedOutputs"])
-        self.assertEqual(evidence["generatedOutputDirectory"], ".scratch/orche-stage0/reviewed-runs")
-        self.assertIn("reports/capability-comparison.json", evidence["requiredGeneratedOutputs"])
-        self.assertIn("reports/pytest-comparison.json", evidence["requiredGeneratedOutputs"])
+        self.assertEqual(
+            evidence["generatedOutputDirectory"],
+            ".scratch/orche-stage0/reviewed-runs",
+        )
+        self.assertIn(
+            "reports/capability-comparison.json",
+            evidence["requiredGeneratedOutputs"],
+        )
+        self.assertIn(
+            "reports/pytest-comparison.json", evidence["requiredGeneratedOutputs"]
+        )
 
-    def test_readme_bootstrap_is_sanitized_and_delegates_to_frozen_verifier(self) -> None:
+    def test_readme_bootstrap_and_runtime_contract_are_hardened(self) -> None:
         text = README.read_text(encoding="utf-8")
-        self.assertIn("set -euo pipefail", text)
-        self.assertIn("env -i", text)
-        self.assertIn("python -I", text)
-        self.assertIn("git cat-file blob", text)
-        self.assertIn("materialize_bootstrap_tool stage0Runtime stage0_runtime.py", text)
-        self.assertIn("materialize_bootstrap_tool stage0Evidence stage0_evidence.py", text)
-        self.assertIn("materialize_bootstrap_tool stage0Orchestrator stage0_orchestrator.py", text)
-        self.assertIn("materialize_bootstrap_tool stage0Verifier verify_stage0.py", text)
-        self.assertIn("assert_canonical_external", text)
-        self.assertNotIn("PATH=\"$PATH\"", text)
+        for marker in (
+            "set -euo pipefail",
+            "env -i",
+            "python -I",
+            "git cat-file blob",
+            "materialize_bootstrap_tool stage0Runtime stage0_runtime.py",
+            "materialize_bootstrap_tool stage0Evidence stage0_evidence.py",
+            "materialize_bootstrap_tool stage0Orchestrator stage0_orchestrator.py",
+            "materialize_bootstrap_tool stage0Verifier verify_stage0.py",
+            "assert_canonical_external",
+            "GIT_NO_REPLACE_OBJECTS=1",
+            "--no-replace-objects",
+            "--preserve-failed-evidence",
+            "trap cleanup_bootstrap EXIT",
+            "complete trusted-tree membership",
+            "Git mode, and Git object type",
+            "## Terms and Abbreviations",
+        ):
+            self.assertIn(marker, text)
+        self.assertNotIn('PATH="$PATH"', text)
         self.assertNotIn("rm -rf", text)
-        self.assertIn("unique output directory", text)
-        self.assertIn("## Terms and Abbreviations", text)
-        self.assertLess(text.index("assert_canonical_external \"$VERIFIER_PYTHON\""), text.index("PIN_JSON="))
+        self.assertLess(
+            text.index('assert_canonical_external "$VERIFIER_PYTHON"'),
+            text.index("PIN_JSON="),
+        )
 
     def test_dispositions_are_exact_and_scoped(self) -> None:
-        dispositions = json.loads((BASELINE / "reviewed-dispositions.json").read_text())
+        dispositions = json.loads(
+            (BASELINE / "reviewed-dispositions.json").read_text()
+        )
         self.assertEqual(dispositions["scope"], "ORCHE-IMPL-000")
         self.assertEqual(dispositions["baselineRef"], EXPECTED_COMMIT)
         paths = [entry["path"] for entry in dispositions["entries"]]
@@ -92,7 +131,9 @@ class BaselinePinTests(unittest.TestCase):
 
     def test_no_stage0_github_actions_workflow_is_tracked(self) -> None:
         tracked = set(git("ls-files").splitlines())
-        self.assertFalse(any(path.startswith(".github/workflows/orche-stage0") for path in tracked))
+        self.assertFalse(
+            any(path.startswith(".github/workflows/orche-stage0") for path in tracked)
+        )
         self.assertFalse(any("_orche_pr2_" in path for path in tracked))
 
 

@@ -5,7 +5,34 @@ from stage0_runtime import *
 from stage0_evidence import *
 
 
-def run_verification(args: argparse.Namespace) -> tuple[int, Path, str]:
+def _assert_both_worktrees_clean(
+    *,
+    baseline_root: Path,
+    baseline_ref: str,
+    baseline_tree: str,
+    candidate_root: Path,
+    candidate_ref: str,
+    tools: ExternalTools,
+    env: Mapping[str, str],
+) -> None:
+    assert_clean_worktree(
+        baseline_root,
+        expected_ref=baseline_ref,
+        expected_tree=baseline_tree,
+        tools=tools,
+        env=env,
+    )
+    assert_clean_worktree(
+        candidate_root,
+        expected_ref=candidate_ref,
+        tools=tools,
+        env=env,
+    )
+
+
+def _run_verification(
+    args: argparse.Namespace, workspace: VerificationWorkspace
+) -> tuple[int, Path, str]:
     if not sys.platform.startswith("linux"):
         raise VerificationError(
             "Stage 0 verifier requires Linux child-subreaper and /proc containment"
@@ -15,28 +42,20 @@ def run_verification(args: argparse.Namespace) -> tuple[int, Path, str]:
     if baseline_root == candidate_root:
         raise VerificationError("baseline and candidate worktrees must be distinct")
     reviewed_ref = exact_ref(args.reviewed_ref, label="reviewed ref")
-    trusted_root = Path(tempfile.mkdtemp(prefix="orche-stage0-trusted-")).resolve()
-    os.chmod(trusted_root, 0o700)
-    if _inside(trusted_root, baseline_root) or _inside(trusted_root, candidate_root):
-        raise VerificationError("trusted evidence root must be outside both worktrees")
+    trusted_root = workspace.trusted_root
+    lane_root_base = workspace.lane_root
+    for private_root in (trusted_root, lane_root_base):
+        if _inside(private_root, baseline_root) or _inside(private_root, candidate_root):
+            raise VerificationError(
+                f"private verifier root must be outside both worktrees: {private_root}"
+            )
 
     tools = ExternalTools(
-        python=resolve_external_executable(
-            args.verifier_python,
-            label="Python",
-            worktrees=(baseline_root, candidate_root),
-        ),
-        git=resolve_external_executable(
-            args.verifier_git,
-            label="Git",
-            worktrees=(baseline_root, candidate_root),
-        ),
-        bash=resolve_external_executable(
-            args.verifier_bash,
-            label="Bash",
-            worktrees=(baseline_root, candidate_root),
-        ),
+        python=args.verifier_python,
+        git=args.verifier_git,
+        bash=args.verifier_bash,
     )
+    tools.assert_outside((baseline_root, candidate_root))
     trusted_env = build_sanitized_env(
         tools=tools, lane_root=trusted_root / "trusted-environment"
     )
@@ -58,16 +77,12 @@ def run_verification(args: argparse.Namespace) -> tuple[int, Path, str]:
     if reviewed_ref == baseline_ref:
         raise VerificationError("candidate ref resolves to the pinned baseline")
 
-    assert_clean_worktree(
-        baseline_root,
-        expected_ref=baseline_ref,
-        expected_tree=baseline_tree,
-        tools=tools,
-        env=trusted_env,
-    )
-    assert_clean_worktree(
-        candidate_root,
-        expected_ref=reviewed_ref,
+    _assert_both_worktrees_clean(
+        baseline_root=baseline_root,
+        baseline_ref=baseline_ref,
+        baseline_tree=baseline_tree,
+        candidate_root=candidate_root,
+        candidate_ref=reviewed_ref,
         tools=tools,
         env=trusted_env,
     )
@@ -181,33 +196,37 @@ def run_verification(args: argparse.Namespace) -> tuple[int, Path, str]:
     _require_result(result, label="capability comparison", semantic=True)
 
     for index, relative in enumerate(FOCUSED_TESTS):
-        lane_root = trusted_root / "lanes" / f"focused-{index:02d}"
-        repository_env = build_repository_env(
-            tools=tools, lane_root=lane_root, repo_root=candidate_root
-        )
         focused_log = logs / f"focused-{index:02d}.log"
-        protected = _trusted_evidence_snapshot(trusted_root, exclude=(focused_log,))
-        result = run_isolated(
+        result = run_repository_lane(
             [os.fspath(tools.python), relative],
             cwd=candidate_root,
-            env=repository_env,
+            env=build_repository_env(
+                tools=tools,
+                lane_root=lane_root_base / f"focused-{index:02d}",
+                repo_root=candidate_root,
+            ),
             log_path=focused_log,
             timeout_seconds=args.timeout_seconds,
+            tools=tools,
+            trusted_root=trusted_root,
         )
         _require_result(result, label=f"focused suite {relative}")
-        _verify_protected_digests(protected)
-        assert_clean_worktree(
-            candidate_root,
-            expected_ref=reviewed_ref,
+        _assert_both_worktrees_clean(
+            baseline_root=baseline_root,
+            baseline_ref=baseline_ref,
+            baseline_tree=baseline_tree,
+            candidate_root=candidate_root,
+            candidate_ref=reviewed_ref,
             tools=tools,
             env=trusted_env,
         )
 
-    baseline_lane_root = trusted_root / "lanes" / "pytest-baseline"
-    candidate_lane_root = trusted_root / "lanes" / "pytest-candidate"
+    baseline_lane_root = lane_root_base / "pytest-baseline"
+    candidate_lane_root = lane_root_base / "pytest-candidate"
     baseline_xml = baseline_evidence / "pytest.xml"
     candidate_xml = candidate_evidence / "pytest.xml"
-    baseline_result = run_isolated(
+    baseline_xml_identity = prepare_trusted_output(baseline_xml)
+    baseline_result = run_repository_lane(
         [
             os.fspath(tools.python),
             "-m",
@@ -220,14 +239,16 @@ def run_verification(args: argparse.Namespace) -> tuple[int, Path, str]:
         ),
         log_path=logs / "pytest-baseline.log",
         timeout_seconds=args.timeout_seconds,
+        tools=tools,
+        trusted_root=trusted_root,
+        mutable_paths=(baseline_xml,),
     )
-    if baseline_result.exit_code == 124 or not baseline_xml.is_file():
-        raise VerificationError("baseline Pytest did not produce fresh JUnit evidence")
+    _verify_prepared_file(baseline_xml_identity, require_nonempty=True)
+    if baseline_result.exit_code == 124:
+        raise VerificationError("baseline Pytest timed out")
 
-    protected = _trusted_evidence_snapshot(
-        trusted_root, exclude=(candidate_xml, logs / "pytest-candidate.log")
-    )
-    candidate_result = run_isolated(
+    candidate_xml_identity = prepare_trusted_output(candidate_xml)
+    candidate_result = run_repository_lane(
         [
             os.fspath(tools.python),
             "-m",
@@ -240,20 +261,19 @@ def run_verification(args: argparse.Namespace) -> tuple[int, Path, str]:
         ),
         log_path=logs / "pytest-candidate.log",
         timeout_seconds=args.timeout_seconds,
-    )
-    if candidate_result.exit_code == 124 or not candidate_xml.is_file():
-        raise VerificationError("candidate Pytest did not produce fresh JUnit evidence")
-    _verify_protected_digests(protected)
-    assert_clean_worktree(
-        baseline_root,
-        expected_ref=baseline_ref,
-        expected_tree=baseline_tree,
         tools=tools,
-        env=trusted_env,
+        trusted_root=trusted_root,
+        mutable_paths=(candidate_xml,),
     )
-    assert_clean_worktree(
-        candidate_root,
-        expected_ref=reviewed_ref,
+    _verify_prepared_file(candidate_xml_identity, require_nonempty=True)
+    if candidate_result.exit_code == 124:
+        raise VerificationError("candidate Pytest timed out")
+    _assert_both_worktrees_clean(
+        baseline_root=baseline_root,
+        baseline_ref=baseline_ref,
+        baseline_tree=baseline_tree,
+        candidate_root=candidate_root,
+        candidate_ref=reviewed_ref,
         tools=tools,
         env=trusted_env,
     )
@@ -306,42 +326,38 @@ def run_verification(args: argparse.Namespace) -> tuple[int, Path, str]:
     for spec in VALIDATORS:
         baseline_log = logs / f"{spec.name}-baseline.log"
         candidate_log = logs / f"{spec.name}-candidate.log"
-        baseline_validator = run_isolated(
+        baseline_validator = run_repository_lane(
             _validator_command(spec, tools),
             cwd=baseline_root,
             env=build_repository_env(
                 tools=tools,
-                lane_root=trusted_root / "lanes" / f"{spec.name}-baseline",
+                lane_root=lane_root_base / f"{spec.name}-baseline",
                 repo_root=baseline_root,
             ),
             log_path=baseline_log,
             timeout_seconds=args.timeout_seconds,
+            tools=tools,
+            trusted_root=trusted_root,
         )
-        protected = _trusted_evidence_snapshot(
-            trusted_root, exclude=(candidate_log,)
-        )
-        candidate_validator = run_isolated(
+        candidate_validator = run_repository_lane(
             _validator_command(spec, tools),
             cwd=candidate_root,
             env=build_repository_env(
                 tools=tools,
-                lane_root=trusted_root / "lanes" / f"{spec.name}-candidate",
+                lane_root=lane_root_base / f"{spec.name}-candidate",
                 repo_root=candidate_root,
             ),
             log_path=candidate_log,
             timeout_seconds=args.timeout_seconds,
-        )
-        _verify_protected_digests(protected)
-        assert_clean_worktree(
-            baseline_root,
-            expected_ref=baseline_ref,
-            expected_tree=baseline_tree,
             tools=tools,
-            env=trusted_env,
+            trusted_root=trusted_root,
         )
-        assert_clean_worktree(
-            candidate_root,
-            expected_ref=reviewed_ref,
+        _assert_both_worktrees_clean(
+            baseline_root=baseline_root,
+            baseline_ref=baseline_ref,
+            baseline_tree=baseline_tree,
+            candidate_root=candidate_root,
+            candidate_ref=reviewed_ref,
             tools=tools,
             env=trusted_env,
         )
@@ -398,16 +414,12 @@ def run_verification(args: argparse.Namespace) -> tuple[int, Path, str]:
                 f"validator comparator did not produce a fresh report: {spec.name}"
             )
 
-    assert_clean_worktree(
-        baseline_root,
-        expected_ref=baseline_ref,
-        expected_tree=baseline_tree,
-        tools=tools,
-        env=trusted_env,
-    )
-    assert_clean_worktree(
-        candidate_root,
-        expected_ref=reviewed_ref,
+    _assert_both_worktrees_clean(
+        baseline_root=baseline_root,
+        baseline_ref=baseline_ref,
+        baseline_tree=baseline_tree,
+        candidate_root=candidate_root,
+        candidate_ref=reviewed_ref,
         tools=tools,
         env=trusted_env,
     )
@@ -422,7 +434,15 @@ def run_verification(args: argparse.Namespace) -> tuple[int, Path, str]:
     )
     output = safe_create_output_directory(candidate_root, reviewed_ref)
     _copy_reports(trusted_root, output)
-    return 0, output, summary.read_text(encoding="utf-8")
+    summary_text = summary.read_text(encoding="utf-8")
+    return 0, output, summary_text
+
+
+def run_verification(args: argparse.Namespace) -> tuple[int, Path, str]:
+    with verification_workspace(
+        preserve_failed=getattr(args, "preserve_failed_evidence", False)
+    ) as workspace:
+        return _run_verification(args, workspace)
 
 
 def parse_args(argv: Sequence[str]) -> argparse.Namespace:
@@ -434,6 +454,11 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--verifier-git", type=Path, required=True)
     parser.add_argument("--verifier-bash", type=Path, required=True)
     parser.add_argument("--timeout-seconds", type=float, default=900.0)
+    parser.add_argument(
+        "--preserve-failed-evidence",
+        action="store_true",
+        help="preserve the external trusted/lane roots only after a failed run",
+    )
     return parser.parse_args(argv)
 
 

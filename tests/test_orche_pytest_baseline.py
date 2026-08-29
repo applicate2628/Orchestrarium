@@ -39,7 +39,12 @@ def write_inventory(path: Path, ref: str, mapping: dict[str, str]) -> None:
         "schemaVersion": 2,
         "baseline": {"commitSha": ref, "repository": "x/y", "treeSha": "d" * 40},
         "entries": entries,
-        "summary": {"retainedAs": len(entries), "testFiles": len(entries), "testSupportFiles": 0, "total": len(entries)},
+        "summary": {
+            "retainedAs": len(entries),
+            "testFiles": len(entries),
+            "testSupportFiles": 0,
+            "total": len(entries),
+        },
     }
     payload["inventorySha256"] = hashlib.sha256(canonical(payload).encode()).hexdigest()
     path.write_text(canonical(payload))
@@ -48,7 +53,13 @@ def write_inventory(path: Path, ref: str, mapping: dict[str, str]) -> None:
 def write_junit(path: Path, cases: list[dict[str, str | None]]) -> None:
     suite = ET.Element("testsuite")
     for case in cases:
-        node = ET.SubElement(suite, "testcase", classname="demo", name=str(case["name"]), file=f"tests/{case['name']}.py")
+        node = ET.SubElement(
+            suite,
+            "testcase",
+            classname="demo",
+            name=str(case["name"]),
+            file=f"tests/{case['name']}.py",
+        )
         status = case.get("status")
         if status in {"failure", "error", "skipped"}:
             child = ET.SubElement(node, str(status))
@@ -89,24 +100,44 @@ class PytestComparatorTests(unittest.TestCase):
         volatile: str | None = None,
     ) -> subprocess.CompletedProcess[str]:
         args = [
-            sys.executable, str(SCRIPT),
-            "--baseline-junit", str(self.baseline_junit),
-            "--candidate-junit", str(self.candidate_junit),
-            "--baseline-exit", str(baseline_exit),
-            "--candidate-exit", str(candidate_exit),
-            "--baseline-ref", baseline_ref,
-            "--candidate-ref", candidate_ref,
-            "--baseline-root", baseline_root,
-            "--candidate-root", candidate_root,
-            "--baseline-lane-root", baseline_lane,
-            "--candidate-lane-root", candidate_lane,
-            "--baseline-test-inventory", str(self.baseline_inventory),
-            "--candidate-test-inventory", str(self.candidate_inventory),
-            "--output", str(self.output),
+            sys.executable,
+            str(SCRIPT),
+            "--baseline-junit",
+            str(self.baseline_junit),
+            "--candidate-junit",
+            str(self.candidate_junit),
+            "--baseline-exit",
+            str(baseline_exit),
+            "--candidate-exit",
+            str(candidate_exit),
+            "--baseline-ref",
+            baseline_ref,
+            "--candidate-ref",
+            candidate_ref,
+            "--baseline-root",
+            baseline_root,
+            "--candidate-root",
+            candidate_root,
+            "--baseline-lane-root",
+            baseline_lane,
+            "--candidate-lane-root",
+            candidate_lane,
+            "--baseline-test-inventory",
+            str(self.baseline_inventory),
+            "--candidate-test-inventory",
+            str(self.candidate_inventory),
+            "--output",
+            str(self.output),
         ]
         if volatile:
             args.extend(("--volatile-pattern", volatile))
-        return subprocess.run(args, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+        return subprocess.run(
+            args,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
 
     def test_preserved_passing_tests_and_additional_candidate_tests_pass(self) -> None:
         cases = [{"name": "existing", "status": "passed"}]
@@ -121,7 +152,10 @@ class PytestComparatorTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         report = json.loads(self.output.read_text())
         self.assertEqual(report["observations"]["additionalCandidateTests"], ["demo::new"])
-        self.assertEqual(report["observations"]["additionalCandidateTestFiles"], ["tests/test_new.py"])
+        self.assertEqual(
+            report["observations"]["additionalCandidateTestFiles"],
+            ["tests/test_new.py"],
+        )
 
     def test_changed_or_missing_baseline_test_source_blocks(self) -> None:
         cases = [{"name": "existing", "status": "passed"}]
@@ -130,27 +164,87 @@ class PytestComparatorTests(unittest.TestCase):
         write_inventory(self.candidate_inventory, B, {"tests/test_existing.py": "9" * 64})
         result = self.invoke()
         self.assertEqual(result.returncode, 1)
-        self.assertEqual(json.loads(self.output.read_text())["blockers"]["changedBaselineTestFiles"], ["tests/test_existing.py"])
+        self.assertEqual(
+            json.loads(self.output.read_text())["blockers"]["changedBaselineTestFiles"],
+            ["tests/test_existing.py"],
+        )
         write_inventory(self.candidate_inventory, B, {})
         result = self.invoke()
         self.assertEqual(result.returncode, 1)
-        self.assertEqual(json.loads(self.output.read_text())["blockers"]["missingBaselineTestFiles"], ["tests/test_existing.py"])
+        self.assertEqual(
+            json.loads(self.output.read_text())["blockers"]["missingBaselineTestFiles"],
+            ["tests/test_existing.py"],
+        )
 
     def test_retained_skip_reason_and_body_are_preserved(self) -> None:
-        write_junit(self.baseline_junit, [{"name": "existing", "status": "skipped", "type": "pytest.skip", "message": "requires Windows", "details": "reason\n"}])
-        write_junit(self.candidate_junit, [{"name": "existing", "status": "skipped", "type": "pytest.skip", "message": "feature removed", "details": "reason\n"}])
+        write_junit(
+            self.baseline_junit,
+            [
+                {
+                    "name": "existing",
+                    "status": "skipped",
+                    "type": "pytest.skip",
+                    "message": "requires Windows",
+                    "details": "reason\n",
+                }
+            ],
+        )
+        write_junit(
+            self.candidate_junit,
+            [
+                {
+                    "name": "existing",
+                    "status": "skipped",
+                    "type": "pytest.skip",
+                    "message": "feature removed",
+                    "details": "reason\n",
+                }
+            ],
+        )
         result = self.invoke()
         self.assertEqual(result.returncode, 1)
-        self.assertEqual(json.loads(self.output.read_text())["blockers"]["changedRetainedSkipDiagnostics"], ["demo::existing"])
+        self.assertEqual(
+            json.loads(self.output.read_text())["blockers"]["changedRetainedSkipDiagnostics"],
+            ["demo::existing"],
+        )
 
     def test_skip_line_endings_only_are_normalized(self) -> None:
-        write_junit(self.baseline_junit, [{"name": "existing", "status": "skipped", "type": "pytest.skip", "message": "same", "details": "one\r\ntwo\r\n"}])
-        write_junit(self.candidate_junit, [{"name": "existing", "status": "skipped", "type": "pytest.skip", "message": "same", "details": "one\ntwo\n"}])
+        write_junit(
+            self.baseline_junit,
+            [
+                {
+                    "name": "existing",
+                    "status": "skipped",
+                    "type": "pytest.skip",
+                    "message": "same",
+                    "details": "one\r\ntwo\r\n",
+                }
+            ],
+        )
+        write_junit(
+            self.candidate_junit,
+            [
+                {
+                    "name": "existing",
+                    "status": "skipped",
+                    "type": "pytest.skip",
+                    "message": "same",
+                    "details": "one\ntwo\n",
+                }
+            ],
+        )
         self.assertEqual(self.invoke().returncode, 0)
 
     def test_empty_skip_diagnostics_block(self) -> None:
-        write_junit(self.baseline_junit, [{"name": "existing", "status": "skipped", "type": None, "message": None, "details": None}])
-        write_junit(self.candidate_junit, [{"name": "existing", "status": "skipped", "type": None, "message": None, "details": None}])
+        case = {
+            "name": "existing",
+            "status": "skipped",
+            "type": None,
+            "message": None,
+            "details": None,
+        }
+        write_junit(self.baseline_junit, [case])
+        write_junit(self.candidate_junit, [case])
         result = self.invoke()
         self.assertEqual(result.returncode, 1)
         blockers = json.loads(self.output.read_text())["blockers"]
@@ -158,24 +252,71 @@ class PytestComparatorTests(unittest.TestCase):
         self.assertEqual(blockers["missingCandidateSkipDiagnostics"], ["demo::existing"])
 
     def test_worktree_and_isolated_lane_roots_are_normalized(self) -> None:
-        write_junit(self.baseline_junit, [{"name": "existing", "status": "failure", "type": "AssertionError", "message": "/work/base /trusted/pytest-base/tmp " + A, "details": "same"}])
-        write_junit(self.candidate_junit, [{"name": "existing", "status": "failure", "type": "AssertionError", "message": "/work/candidate /trusted/pytest-candidate/tmp " + B, "details": "same"}])
+        write_junit(
+            self.baseline_junit,
+            [
+                {
+                    "name": "existing",
+                    "status": "failure",
+                    "type": "AssertionError",
+                    "message": "/work/base /trusted/pytest-base/tmp " + A,
+                    "details": "same",
+                }
+            ],
+        )
+        write_junit(
+            self.candidate_junit,
+            [
+                {
+                    "name": "existing",
+                    "status": "failure",
+                    "type": "AssertionError",
+                    "message": "/work/candidate /trusted/pytest-candidate/tmp " + B,
+                    "details": "same",
+                }
+            ],
+        )
         self.assertEqual(self.invoke(baseline_exit=1, candidate_exit=1).returncode, 0)
 
     def test_sibling_prefixes_are_not_erased(self) -> None:
-        write_junit(self.baseline_junit, [{"name": "existing", "status": "failure", "type": "AssertionError", "message": "/trusted/pytest-base-backup", "details": "same"}])
-        write_junit(self.candidate_junit, [{"name": "existing", "status": "failure", "type": "AssertionError", "message": "/trusted/pytest-candidate-backup", "details": "same"}])
+        write_junit(
+            self.baseline_junit,
+            [
+                {
+                    "name": "existing",
+                    "status": "failure",
+                    "type": "AssertionError",
+                    "message": "/trusted/pytest-base-backup",
+                    "details": "same",
+                }
+            ],
+        )
+        write_junit(
+            self.candidate_junit,
+            [
+                {
+                    "name": "existing",
+                    "status": "failure",
+                    "type": "AssertionError",
+                    "message": "/trusted/pytest-candidate-backup",
+                    "details": "same",
+                }
+            ],
+        )
         result = self.invoke(baseline_exit=1, candidate_exit=1)
         self.assertEqual(result.returncode, 1)
-        self.assertEqual(json.loads(self.output.read_text())["blockers"]["changedKnownFailureDiagnostics"], ["demo::existing"])
+        self.assertEqual(
+            json.loads(self.output.read_text())["blockers"]["changedKnownFailureDiagnostics"],
+            ["demo::existing"],
+        )
 
-    def test_invalid_refs_and_operational_exits_block(self) -> None:
+    def test_invalid_refs_and_operational_exits_are_invalid_evidence(self) -> None:
         cases = [{"name": "existing", "status": "passed"}]
         write_junit(self.baseline_junit, cases)
         write_junit(self.candidate_junit, cases)
         self.assertEqual(self.invoke(baseline_ref="old", candidate_ref="new").returncode, 2)
         result = self.invoke(baseline_exit=3, candidate_exit=3)
-        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.returncode, 2)
         blockers = json.loads(self.output.read_text())["blockers"]
         self.assertTrue(blockers["baselineExitContradiction"])
         self.assertTrue(blockers["candidateExitContradiction"])

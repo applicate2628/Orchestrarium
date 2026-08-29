@@ -24,11 +24,11 @@
     "required": true,
     "status": "human-gate-pending"
   },
-  "status": "baseline-identity-modular-reviewed-tooling-and-complete-differential-pinned",
+  "status": "baseline-identity-complete-trusted-tree-and-differential-pinned",
   "tooling": {
     "capabilityComparator": {
       "deterministic": true,
-      "gitBlobSha": "8674e10bafa8806964163ac7c5107869d1b05882",
+      "gitBlobSha": "48b294a1b10d48e91b24a176f954c9cffb665d6f",
       "materialization": "git-cat-file-reviewed-tree-blob",
       "path": "baseline/orchestrarium-v1/tooling/compare_capability_baseline.py",
       "runtimeMutation": false,
@@ -36,7 +36,7 @@
     },
     "commandComparator": {
       "deterministic": true,
-      "gitBlobSha": "4e4c9df09f76db57fccfb0dbf07e4e296ebcff86",
+      "gitBlobSha": "0d590e564ef80401f85234728bbc429bd9caf985",
       "materialization": "git-cat-file-reviewed-tree-blob",
       "path": "baseline/orchestrarium-v1/tooling/compare_command_baseline.py",
       "runtimeMutation": false,
@@ -52,7 +52,7 @@
     },
     "pytestComparator": {
       "deterministic": true,
-      "gitBlobSha": "6d884b8b9cc9c92d61a561ad37c394e9bda79008",
+      "gitBlobSha": "208d3f9502def1cdff2279b2c83ee220269a0bfa",
       "materialization": "git-cat-file-reviewed-tree-blob",
       "path": "baseline/orchestrarium-v1/tooling/compare_pytest_baseline.py",
       "runtimeMutation": false,
@@ -60,7 +60,7 @@
     },
     "stage0Evidence": {
       "deterministic": true,
-      "gitBlobSha": "b9387296a4ff3e5452863e1b074457022a2965f5",
+      "gitBlobSha": "6bc2a0321bdc64a4bb8934212da1230ad7fc66eb",
       "materialization": "git-cat-file-reviewed-tree-blob",
       "path": "baseline/orchestrarium-v1/tooling/stage0_evidence.py",
       "runtimeMutation": false,
@@ -68,7 +68,7 @@
     },
     "stage0Orchestrator": {
       "deterministic": true,
-      "gitBlobSha": "346bfa780a322ac7f472f9680201d872752cb83d",
+      "gitBlobSha": "0dd34294ff18202f60c59fd123061024ebba57ee",
       "materialization": "git-cat-file-reviewed-tree-blob",
       "path": "baseline/orchestrarium-v1/tooling/stage0_orchestrator.py",
       "runtimeMutation": false,
@@ -76,7 +76,7 @@
     },
     "stage0Runtime": {
       "deterministic": true,
-      "gitBlobSha": "a4ffa51b8e7653fe515a09ac8eb9c267e9e990c1",
+      "gitBlobSha": "2e4a6b7e9422467cf0320563b798e8e82d677722",
       "materialization": "git-cat-file-reviewed-tree-blob",
       "path": "baseline/orchestrarium-v1/tooling/stage0_runtime.py",
       "runtimeMutation": false,

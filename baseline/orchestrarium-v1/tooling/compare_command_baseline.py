@@ -56,21 +56,15 @@ def _read_log(path: Path) -> bytes:
         raise CommandBaselineError(f"cannot read command log {path}: {exc}") from exc
 
 
-def _compile_patterns(
-    values: Sequence[str], *, label: str
-) -> tuple[Pattern[str], ...]:
+def _compile_patterns(values: Sequence[str], *, label: str) -> tuple[Pattern[str], ...]:
     compiled: list[Pattern[str]] = []
     for value in values:
         try:
             pattern = re.compile(value)
         except re.error as exc:
-            raise CommandBaselineError(
-                f"invalid {label} pattern {value!r}: {exc}"
-            ) from exc
+            raise CommandBaselineError(f"invalid {label} pattern {value!r}: {exc}") from exc
         if pattern.search("") is not None:
-            raise CommandBaselineError(
-                f"{label} pattern must not match empty text: {value!r}"
-            )
+            raise CommandBaselineError(f"{label} pattern must not match empty text: {value!r}")
         compiled.append(pattern)
     return tuple(compiled)
 
@@ -95,9 +89,7 @@ def _root_variants(root: str) -> tuple[str, ...]:
     return tuple(sorted((item for item in variants if item), key=len, reverse=True))
 
 
-def _replace_bounded(
-    text: str, needle: str, replacement: str, *, hex_token: bool
-) -> str:
+def _replace_bounded(text: str, needle: str, replacement: str, *, hex_token: bool) -> str:
     if not needle:
         return text
     result: list[str] = []
@@ -111,13 +103,9 @@ def _replace_bounded(
         before = text[index - 1] if index else ""
         after = text[end] if end < len(text) else ""
         if hex_token:
-            bounded = (not before or before not in HEX) and (
-                not after or after not in HEX
-            )
+            bounded = (not before or before not in HEX) and (not after or after not in HEX)
         else:
-            bounded = (not before or before not in PATH_WORD) and (
-                not after or after not in PATH_WORD
-            )
+            bounded = (not before or before not in PATH_WORD) and (not after or after not in PATH_WORD)
         if bounded:
             result.append(text[cursor:index])
             result.append(replacement)
@@ -128,13 +116,7 @@ def _replace_bounded(
     return "".join(result)
 
 
-def _normalized_text(
-    data: bytes,
-    *,
-    root: str,
-    ref: str,
-    volatile_patterns: Sequence[Pattern[str]],
-) -> bytes:
+def _normalized_text(data: bytes, *, root: str, ref: str, volatile_patterns: Sequence[Pattern[str]]) -> bytes:
     text = data.decode("utf-8", errors="surrogateescape")
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     for variant in _root_variants(root):
@@ -164,9 +146,7 @@ def _has_terminal_marker(text: str, patterns: Sequence[Pattern[str]]) -> bool:
 
 def _atomic_write(path: Path, content: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary_name = tempfile.mkstemp(
-        prefix=f".{path.name}.", dir=path.parent
-    )
+    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     temporary = Path(temporary_name)
     try:
         with os.fdopen(descriptor, "wb") as handle:
@@ -206,16 +186,10 @@ def compare(args: argparse.Namespace) -> tuple[int, dict[str, object]]:
     baseline_raw = _read_log(args.baseline_log)
     candidate_raw = _read_log(args.candidate_log)
     baseline_normalized = _normalized_text(
-        baseline_raw,
-        root=baseline_root,
-        ref=baseline_ref,
-        volatile_patterns=volatile_patterns,
+        baseline_raw, root=baseline_root, ref=baseline_ref, volatile_patterns=volatile_patterns
     )
     candidate_normalized = _normalized_text(
-        candidate_raw,
-        root=candidate_root,
-        ref=candidate_ref,
-        volatile_patterns=volatile_patterns,
+        candidate_raw, root=candidate_root, ref=candidate_ref, volatile_patterns=volatile_patterns
     )
     baseline_text = baseline_normalized.decode("utf-8", errors="surrogateescape")
     candidate_text = candidate_normalized.decode("utf-8", errors="surrogateescape")
@@ -227,6 +201,14 @@ def compare(args: argparse.Namespace) -> tuple[int, dict[str, object]]:
     if args.candidate_exit not in allowed_result_exits:
         operational_exit["candidate"] = args.candidate_exit
 
+    baseline_success_verified = (
+        args.baseline_exit == 0
+        and _has_terminal_marker(baseline_text, success_patterns)
+    )
+    candidate_success_verified = (
+        args.candidate_exit == 0
+        and _has_terminal_marker(candidate_text, success_patterns)
+    )
     baseline_failure_verified = (
         args.baseline_exit in semantic_failure_exits
         and _has_terminal_marker(baseline_text, failure_patterns)
@@ -236,9 +218,25 @@ def compare(args: argparse.Namespace) -> tuple[int, dict[str, object]]:
         and _has_terminal_marker(candidate_text, failure_patterns)
     )
 
+    missing_success_marker = (
+        (args.baseline_exit == 0 and not baseline_success_verified)
+        or (args.candidate_exit == 0 and not candidate_success_verified)
+    )
+    missing_failure_marker = (
+        (args.baseline_exit in semantic_failure_exits and not baseline_failure_verified)
+        or (args.candidate_exit in semantic_failure_exits and not candidate_failure_verified)
+    )
+
     if operational_exit:
-        # Operationally invalid evidence must never be reported as semantic drift.
         status, classification, return_code = "FAIL", "operational-exit", 2
+    elif missing_success_marker:
+        status, classification, return_code = "FAIL", "unverified-success", 2
+    elif missing_failure_marker:
+        status, classification, return_code = (
+            "FAIL",
+            "unverified-semantic-failure",
+            2,
+        )
     elif args.baseline_exit == 0 and args.candidate_exit == 0:
         if same_diagnostics:
             status, classification, return_code = "PASS", "preserved-success", 0
@@ -247,22 +245,7 @@ def compare(args: argparse.Namespace) -> tuple[int, dict[str, object]]:
     elif args.baseline_exit == 0:
         status, classification, return_code = "FAIL", "new-failure", 1
     elif args.candidate_exit == 0:
-        if not baseline_failure_verified:
-            status, classification, return_code = (
-                "FAIL",
-                "unverified-semantic-failure",
-                1,
-            )
-        elif _has_terminal_marker(candidate_text, success_patterns):
-            status, classification, return_code = "PASS", "resolved-failure", 0
-        else:
-            status, classification, return_code = "FAIL", "unverified-resolution", 1
-    elif not baseline_failure_verified or not candidate_failure_verified:
-        status, classification, return_code = (
-            "FAIL",
-            "unverified-semantic-failure",
-            1,
-        )
+        status, classification, return_code = "PASS", "resolved-failure", 0
     elif args.baseline_exit == args.candidate_exit and same_diagnostics:
         status, classification, return_code = "PASS", "preserved-failure", 0
     else:
@@ -273,12 +256,8 @@ def compare(args: argparse.Namespace) -> tuple[int, dict[str, object]]:
         "name": args.name,
         "baselineRef": baseline_ref,
         "candidateRef": candidate_ref,
-        "baseline": _result_record(
-            baseline_raw, baseline_normalized, args.baseline_exit
-        ),
-        "candidate": _result_record(
-            candidate_raw, candidate_normalized, args.candidate_exit
-        ),
+        "baseline": _result_record(baseline_raw, baseline_normalized, args.baseline_exit),
+        "candidate": _result_record(candidate_raw, candidate_normalized, args.candidate_exit),
         "classification": classification,
         "status": status,
         "operationalExit": operational_exit,
@@ -289,7 +268,9 @@ def compare(args: argparse.Namespace) -> tuple[int, dict[str, object]]:
         },
         "successVerification": {
             "patterns": list(args.success_pattern),
-            "requiredForResolvedFailure": True,
+            "baselineVerified": baseline_success_verified,
+            "candidateVerified": candidate_success_verified,
+            "requiredForEverySuccessfulLane": True,
             "markerMustTerminateDiagnostics": True,
         },
         "failureVerification": {
@@ -306,6 +287,8 @@ def compare(args: argparse.Namespace) -> tuple[int, dict[str, object]]:
             "baselineSuccessRequiresCandidateSuccess": True,
             "historicalFailureMayResolveWithDeclaredTerminalSuccessPattern": True,
             "historicalFailureMayRemainOnlyWithTerminalFailureMarker": True,
+            "everySuccessfulLaneRequiresTerminalSuccessMarker": True,
+            "missingTerminalMarkersUseInvalidEvidenceExitTwo": True,
             "successfulDiagnosticsMustMatch": True,
         },
     }
@@ -327,10 +310,7 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--success-pattern", action="append", default=[])
     parser.add_argument("--failure-pattern", action="append", default=[])
     parser.add_argument(
-        "--semantic-failure-exit",
-        action="append",
-        type=_semantic_failure_exit,
-        required=True,
+        "--semantic-failure-exit", action="append", type=_semantic_failure_exit, required=True
     )
     parser.add_argument("--output", type=Path, required=True)
     return parser.parse_args(argv)

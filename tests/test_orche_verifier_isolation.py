@@ -62,6 +62,7 @@ class VerifierIsolationTests(unittest.TestCase):
         self.assertEqual(env["PYTHONSAFEPATH"], "1")
         self.assertEqual(env["GIT_CONFIG_NOSYSTEM"], "1")
         self.assertEqual(env["GIT_NO_REPLACE_OBJECTS"], "1")
+        self.assertEqual(env["GIT_OPTIONAL_LOCKS"], "0")
 
     def test_repository_environment_restores_only_the_reviewed_import_root(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -80,7 +81,7 @@ class VerifierIsolationTests(unittest.TestCase):
             self.assertEqual(env["PYTHONPATH"], str(repo.resolve()))
             result = subprocess.run(
                 [
-                    sys.executable,
+                    str(TOOLS.python),
                     "-c",
                     "from tests.marker import VALUE; print(VALUE)",
                 ],
@@ -141,6 +142,119 @@ class VerifierIsolationTests(unittest.TestCase):
                 )
         self.assertEqual(trusted, "original\n")
 
+    def test_selected_executable_is_reverified_before_every_launch(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            fake_git = root / "git"
+            marker = root / "owned"
+            fake_git.write_text(f"#!/bin/sh\nexec {REAL_GIT} \"$@\"\n")
+            fake_git.chmod(0o755)
+            tools = VERIFIER.ExternalTools(TOOLS.python, fake_git.resolve(), TOOLS.bash)
+            repo = root / "repo"
+            repo.mkdir()
+            self.assertEqual(run(str(REAL_GIT), "init", "-q", cwd=repo).returncode, 0)
+            env = VERIFIER.build_sanitized_env(tools=tools, lane_root=root / "lane")
+            VERIFIER._run_git(tools, env, repo, "rev-parse", "--git-dir")
+            fake_git.write_text(
+                f"#!/bin/sh\necho owned > {marker}\nexec {REAL_GIT} \"$@\"\n"
+            )
+            fake_git.chmod(0o755)
+            with self.assertRaisesRegex(
+                VERIFIER.VerificationError, "changed after preflight"
+            ):
+                VERIFIER._run_git(tools, env, repo, "rev-parse", "--git-dir")
+            self.assertFalse(marker.exists())
+
+    def test_unsafe_local_git_configuration_is_rejected_even_when_overridden(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            repo = root / "repo"
+            repo.mkdir()
+            for args in (
+                ("init", "-q"),
+                ("config", "user.name", "Test"),
+                ("config", "user.email", "t@example.invalid"),
+            ):
+                self.assertEqual(run(str(REAL_GIT), *args, cwd=repo).returncode, 0)
+            (repo / "tracked.txt").write_text("clean\n")
+            self.assertEqual(run(str(REAL_GIT), "add", ".", cwd=repo).returncode, 0)
+            self.assertEqual(run(str(REAL_GIT), "commit", "-qm", "base", cwd=repo).returncode, 0)
+            self.assertEqual(
+                run(str(REAL_GIT), "config", "include.path", str(root / "hostile.cfg"), cwd=repo).returncode,
+                0,
+            )
+            ref = run(str(REAL_GIT), "rev-parse", "HEAD", cwd=repo).stdout.strip()
+            with tempfile.TemporaryDirectory() as env_temp:
+                env = VERIFIER.build_sanitized_env(
+                    tools=TOOLS, lane_root=Path(env_temp) / "lane"
+                )
+                with self.assertRaisesRegex(VERIFIER.VerificationError, "unsafe repository-local"):
+                    VERIFIER.assert_clean_worktree(
+                        repo, expected_ref=ref, tools=TOOLS, env=env
+                    )
+
+    def test_local_core_worktree_cannot_redirect_physical_cleanliness(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            repo = root / "repo"
+            external = root / "external"
+            repo.mkdir()
+            external.mkdir()
+            for args in (
+                ("init", "-q"),
+                ("config", "user.name", "Test"),
+                ("config", "user.email", "t@example.invalid"),
+            ):
+                self.assertEqual(run(str(REAL_GIT), *args, cwd=repo).returncode, 0)
+            tracked = repo / "tracked.txt"
+            tracked.write_text("clean\n")
+            self.assertEqual(run(str(REAL_GIT), "add", ".", cwd=repo).returncode, 0)
+            self.assertEqual(run(str(REAL_GIT), "commit", "-qm", "base", cwd=repo).returncode, 0)
+            shutil.copy2(tracked, external / tracked.name)
+            self.assertEqual(
+                run(str(REAL_GIT), "config", "core.worktree", str(external), cwd=repo).returncode,
+                0,
+            )
+            tracked.write_text("dirty\n")
+            ref = run(str(REAL_GIT), "rev-parse", "HEAD", cwd=repo).stdout.strip()
+            with tempfile.TemporaryDirectory() as env_temp:
+                env = VERIFIER.build_sanitized_env(
+                    tools=TOOLS, lane_root=Path(env_temp) / "lane"
+                )
+                with self.assertRaisesRegex(VERIFIER.VerificationError, "unsafe repository-local|dirty worktree"):
+                    VERIFIER.assert_clean_worktree(
+                        repo, expected_ref=ref, tools=TOOLS, env=env
+                    )
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux process containment")
+    def test_repository_lane_rechecks_all_selected_tools_after_child_exit(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            fake_bash = root / "bash"
+            fake_bash.write_text(f"#!/bin/sh\nexec {REAL_BASH} \"$@\"\n")
+            fake_bash.chmod(0o755)
+            tools = VERIFIER.ExternalTools(TOOLS.python, TOOLS.git, fake_bash.resolve())
+            trusted = root / "trusted"
+            trusted.mkdir()
+            (trusted / "reports").mkdir()
+            lane = root / "lane"
+            env = VERIFIER.build_repository_env(tools=tools, lane_root=lane, repo_root=root)
+            code = (
+                "import pathlib; "
+                f"p=pathlib.Path({str(fake_bash)!r}); "
+                "p.write_text('#!/bin/sh\\nexit 0\\n'); p.chmod(0o755)"
+            )
+            with self.assertRaisesRegex(VERIFIER.VerificationError, "changed after preflight"):
+                VERIFIER.run_repository_lane(
+                    [str(tools.python), "-c", code],
+                    cwd=root,
+                    env=env,
+                    log_path=trusted / "logs" / "lane.log",
+                    timeout_seconds=10,
+                    tools=tools,
+                    trusted_root=trusted,
+                )
+
     @unittest.skipUnless(sys.platform.startswith("linux"), "Linux process containment")
     def test_descendant_that_calls_setsid_is_reaped_before_return(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -163,11 +277,12 @@ class VerifierIsolationTests(unittest.TestCase):
                 "while not ready.exists(): time.sleep(0.01)"
             )
             result = VERIFIER.run_isolated(
-                [sys.executable, "-c", parent],
+                [str(TOOLS.python), "-c", parent],
                 cwd=root,
                 env={**os.environ},
                 log_path=root / "run.log",
                 timeout_seconds=10,
+                tools=TOOLS,
             )
             self.assertEqual(result.exit_code, 0)
             child_pid = int(child_pid_path.read_text())
@@ -178,6 +293,20 @@ class VerifierIsolationTests(unittest.TestCase):
             self.assertFalse(process_is_live(child_pid), f"child {child_pid} survived")
             time.sleep(1.0)
             self.assertFalse(delayed_sentinel.exists())
+
+    def test_external_tool_set_is_rejected_when_any_captured_identity_is_inside_worktree(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            candidate = root / "candidate"
+            baseline = root / "baseline"
+            candidate.mkdir()
+            baseline.mkdir()
+            fake_python = candidate / "python"
+            fake_python.write_text("#!/bin/sh\nexit 0\n")
+            fake_python.chmod(0o755)
+            tools = VERIFIER.ExternalTools(fake_python, REAL_GIT, REAL_BASH)
+            with self.assertRaisesRegex(VERIFIER.VerificationError, "inside tested worktree"):
+                tools.assert_outside((baseline.resolve(), candidate.resolve()))
 
     @unittest.skipIf(os.name != "posix", "POSIX executable symlink contract")
     def test_external_executable_symlink_to_candidate_bytes_is_rejected(self) -> None:
@@ -210,11 +339,12 @@ class VerifierIsolationTests(unittest.TestCase):
                 f"pathlib.Path({str(pid_file)!r}).write_text(str(p.pid))"
             )
             result = VERIFIER.run_isolated(
-                [sys.executable, "-c", code],
+                [str(TOOLS.python), "-c", code],
                 cwd=root,
                 env={**os.environ},
                 log_path=root / "run.log",
                 timeout_seconds=10,
+                tools=TOOLS,
             )
             self.assertEqual(result.exit_code, 0)
             child_pid = int(pid_file.read_text())
@@ -234,9 +364,32 @@ class VerifierIsolationTests(unittest.TestCase):
                 env={"PATH": "/usr/bin:/bin"},
                 log_path=root / "missing.log",
                 timeout_seconds=1,
+                tools=None,
             )
             self.assertEqual(result.exit_code, 127)
             self.assertIn("command executable not found", result.log_path.read_text())
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux process containment")
+    def test_lane_cannot_replace_parent_owned_log_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            log_path = root / "run.log"
+            external = root / "external"
+            external.write_text("external")
+            code = (
+                "import os,pathlib; "
+                f"p=pathlib.Path({str(log_path)!r}); p.unlink(); p.symlink_to({str(external)!r})"
+            )
+            with self.assertRaisesRegex(VERIFIER.VerificationError, "replaced or linked"):
+                VERIFIER.run_isolated(
+                    [str(TOOLS.python), "-c", code],
+                    cwd=root,
+                    env={**os.environ},
+                    log_path=log_path,
+                    timeout_seconds=10,
+                    tools=TOOLS,
+                )
+            self.assertEqual(external.read_text(), "external")
 
     @unittest.skipIf(os.name != "posix", "symlink output contract")
     def test_symlinked_scratch_is_rejected_without_deleting_external_sentinel(self) -> None:
@@ -307,6 +460,26 @@ class VerifierIsolationTests(unittest.TestCase):
                         repo.resolve(), expected_ref=ref, tools=TOOLS, env=env
                     )
 
+    def test_trusted_snapshot_rejects_new_entries_symlinks_and_hardlinks(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            trusted = Path(temp) / "trusted"
+            report = trusted / "reports" / "accepted.json"
+            report.parent.mkdir(parents=True)
+            report.write_text("accepted\n")
+            snapshot = VERIFIER._trusted_evidence_snapshot(trusted)
+            (trusted / "summary.json").symlink_to(report)
+            with self.assertRaisesRegex(VERIFIER.VerificationError, "symlink"):
+                VERIFIER._verify_protected_digests(snapshot)
+            (trusted / "summary.json").unlink()
+            snapshot = VERIFIER._trusted_evidence_snapshot(trusted)
+            (trusted / "unexpected.json").write_text("new")
+            with self.assertRaisesRegex(VERIFIER.VerificationError, "added"):
+                VERIFIER._verify_protected_digests(snapshot)
+            (trusted / "unexpected.json").unlink()
+            os.link(report, trusted / "hardlink.json")
+            with self.assertRaisesRegex(VERIFIER.VerificationError, "hard-linked"):
+                VERIFIER._trusted_evidence_snapshot(trusted)
+
     def test_candidate_lane_cannot_mutate_previously_accepted_trusted_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             trusted = Path(temp) / "trusted"
@@ -322,9 +495,54 @@ class VerifierIsolationTests(unittest.TestCase):
             )
             report.write_text("forged\n")
             with self.assertRaisesRegex(
-                VERIFIER.VerificationError, "trusted evidence"
+                VERIFIER.VerificationError, "trusted-tree"
             ):
                 VERIFIER._verify_protected_digests(snapshot)
+
+    def test_verification_workspace_cleans_success_and_failure_by_default(self) -> None:
+        success_paths: tuple[Path, Path]
+        with VERIFIER.verification_workspace() as workspace:
+            success_paths = (workspace.trusted_root, workspace.lane_root)
+            self.assertTrue(all(path.is_dir() for path in success_paths))
+        self.assertTrue(all(not path.exists() for path in success_paths))
+
+        failure_paths: tuple[Path, Path] | None = None
+        with self.assertRaisesRegex(RuntimeError, "boom"):
+            with VERIFIER.verification_workspace() as workspace:
+                failure_paths = (workspace.trusted_root, workspace.lane_root)
+                raise RuntimeError("boom")
+        assert failure_paths is not None
+        self.assertTrue(all(not path.exists() for path in failure_paths))
+
+    def test_verification_workspace_does_not_live_under_bootstrap_tmpdir(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            bootstrap = Path(temp) / "bootstrap"
+            bootstrap.mkdir()
+            previous = os.environ.get("TMPDIR")
+            os.environ["TMPDIR"] = str(bootstrap)
+            try:
+                with VERIFIER.verification_workspace() as workspace:
+                    self.assertFalse(workspace.trusted_root.is_relative_to(bootstrap))
+                    self.assertFalse(workspace.lane_root.is_relative_to(bootstrap))
+            finally:
+                if previous is None:
+                    os.environ.pop("TMPDIR", None)
+                else:
+                    os.environ["TMPDIR"] = previous
+
+    def test_failed_workspace_is_preserved_only_when_explicitly_requested(self) -> None:
+        paths: tuple[Path, Path] | None = None
+        try:
+            with self.assertRaisesRegex(RuntimeError, "boom"):
+                with VERIFIER.verification_workspace(preserve_failed=True) as workspace:
+                    paths = (workspace.trusted_root, workspace.lane_root)
+                    raise RuntimeError("boom")
+            assert paths is not None
+            self.assertTrue(all(path.is_dir() for path in paths))
+        finally:
+            if paths is not None:
+                for path in paths:
+                    VERIFIER._remove_private_temp_root(path)
 
     def test_report_copy_excludes_tool_and_lane_state(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -338,7 +556,6 @@ class VerifierIsolationTests(unittest.TestCase):
                 "reports/result.json",
                 "logs/run.log",
                 "tools/0001-tool.py",
-                "lanes/focused/home/state.txt",
                 "trusted-environment/gitconfig",
             ):
                 path = trusted / relative
@@ -356,7 +573,6 @@ class VerifierIsolationTests(unittest.TestCase):
                 self.assertTrue((output / relative).is_file(), relative)
             for relative in (
                 "tools/0001-tool.py",
-                "lanes/focused/home/state.txt",
                 "trusted-environment/gitconfig",
             ):
                 self.assertFalse((output / relative).exists(), relative)

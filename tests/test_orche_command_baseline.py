@@ -76,20 +76,31 @@ class CommandComparatorTests(unittest.TestCase):
             check=False,
         )
 
-    def test_preserved_success_compares_normalized_diagnostics(self) -> None:
+    def test_preserved_success_requires_markers_and_compares_diagnostics(self) -> None:
         self.baseline.write_text(f"root=/work/lane-old ref={A}\nRESULT: PASS\n")
         self.candidate.write_text(f"root=/work/lane-new ref={B}\r\nRESULT: PASS\r\n")
         result = self.invoke()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(
-            json.loads(self.output.read_text())["classification"], "preserved-success"
-        )
+        report = json.loads(self.output.read_text())
+        self.assertEqual(report["classification"], "preserved-success")
+        self.assertTrue(report["successVerification"]["baselineVerified"])
+        self.assertTrue(report["successVerification"]["candidateVerified"])
+
+    def test_marker_free_zero_zero_is_invalid_evidence(self) -> None:
+        self.baseline.write_text("same\n")
+        self.candidate.write_text("same\n")
+        result = self.invoke()
+        self.assertEqual(result.returncode, 2)
+        report = json.loads(self.output.read_text())
+        self.assertEqual(report["classification"], "unverified-success")
+        self.assertFalse(report["successVerification"]["baselineVerified"])
+        self.assertFalse(report["successVerification"]["candidateVerified"])
 
     def test_semantic_exit_requires_terminal_failure_marker(self) -> None:
         self.baseline.write_text("Traceback: runtime failure\n")
         self.candidate.write_text("Traceback: runtime failure\n")
         result = self.invoke(baseline_exit=1, candidate_exit=1)
-        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.returncode, 2)
         self.assertEqual(
             json.loads(self.output.read_text())["classification"],
             "unverified-semantic-failure",
@@ -108,14 +119,14 @@ class CommandComparatorTests(unittest.TestCase):
         self.baseline.write_text("RESULT: FAIL\nafter\n")
         self.candidate.write_text("RESULT: FAIL\nafter\n")
         result = self.invoke(baseline_exit=1, candidate_exit=1)
-        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.returncode, 2)
 
     def test_resolved_failure_requires_terminal_success_marker(self) -> None:
         self.baseline.write_text("RESULT: FAIL\n")
         self.candidate.write_text("RESULT: PASS\n")
         self.assertEqual(self.invoke(baseline_exit=1, candidate_exit=0).returncode, 0)
         self.candidate.write_text("RESULT: PASS\nwarning after\n")
-        self.assertEqual(self.invoke(baseline_exit=1, candidate_exit=0).returncode, 1)
+        self.assertEqual(self.invoke(baseline_exit=1, candidate_exit=0).returncode, 2)
 
     def test_refs_must_be_exact_object_ids(self) -> None:
         self.baseline.write_text("RESULT: PASS\n")

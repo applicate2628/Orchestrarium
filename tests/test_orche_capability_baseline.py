@@ -19,14 +19,35 @@ def canonical(value: object) -> str:
     return json.dumps(value, indent=2, sort_keys=True) + "\n"
 
 
-def write_inventory(path: Path, ref: str, mapping: dict[str, str]) -> None:
-    entries = [
-        {"path": key, "contentSha256": value, "sizeBytes": 1, "surfaces": ["repository-content"]}
-        for key, value in sorted(mapping.items())
-    ]
+def write_inventory(
+    path: Path,
+    ref: str,
+    mapping: dict[str, str | tuple[str, str, str]],
+) -> None:
+    entries = []
+    for key, value in sorted(mapping.items()):
+        if isinstance(value, tuple):
+            digest, mode, object_type = value
+        else:
+            digest, mode, object_type = value, "100644", "blob"
+        entries.append(
+            {
+                "path": key,
+                "contentSha256": digest,
+                "mode": mode,
+                "objectType": object_type,
+                "sizeBytes": 1,
+                "surfaces": ["repository-content"],
+            }
+        )
     payload: dict[str, object] = {
         "schemaVersion": 2,
-        "baseline": {"commitSha": ref, "repository": "x/y", "requestedRef": ref, "treeSha": "c" * 40},
+        "baseline": {
+            "commitSha": ref,
+            "repository": "x/y",
+            "requestedRef": ref,
+            "treeSha": "c" * 40,
+        },
         "entries": entries,
         "summary": {"surfaceCounts": {}, "trackedLeafEntries": len(entries)},
     }
@@ -40,7 +61,12 @@ def write_dispositions(path: Path, entries: list[tuple[str, str]]) -> None:
         "scope": "ORCHE-IMPL-000",
         "baselineRef": A,
         "entries": [
-            {"path": item, "change": change, "reason": "reviewed", "contractIds": ["ORCHE-IMPL-000.TEST"]}
+            {
+                "path": item,
+                "change": change,
+                "reason": "reviewed",
+                "contractIds": ["ORCHE-IMPL-000.TEST"],
+            }
             for item, change in entries
         ],
     }
@@ -62,24 +88,71 @@ class CapabilityComparatorTests(unittest.TestCase):
     def invoke(self) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [
-                sys.executable, str(SCRIPT),
-                "--baseline-inventory", str(self.baseline),
-                "--candidate-inventory", str(self.candidate),
-                "--baseline-ref", A,
-                "--candidate-ref", B,
-                "--dispositions", str(self.dispositions),
-                "--output", str(self.output),
+                sys.executable,
+                str(SCRIPT),
+                "--baseline-inventory",
+                str(self.baseline),
+                "--candidate-inventory",
+                str(self.candidate),
+                "--baseline-ref",
+                A,
+                "--candidate-ref",
+                B,
+                "--dispositions",
+                str(self.dispositions),
+                "--output",
+                str(self.output),
             ],
-            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
         )
 
     def test_all_changes_require_exact_reviewed_dispositions(self) -> None:
-        write_inventory(self.baseline, A, {"same": "1" * 64, "changed": "2" * 64, "removed": "3" * 64})
-        write_inventory(self.candidate, B, {"same": "1" * 64, "changed": "4" * 64, "added": "5" * 64})
-        write_dispositions(self.dispositions, [("changed", "modified"), ("removed", "removed"), ("added", "added")])
+        write_inventory(
+            self.baseline,
+            A,
+            {"same": "1" * 64, "changed": "2" * 64, "removed": "3" * 64},
+        )
+        write_inventory(
+            self.candidate,
+            B,
+            {"same": "1" * 64, "changed": "4" * 64, "added": "5" * 64},
+        )
+        write_dispositions(
+            self.dispositions,
+            [("changed", "modified"), ("removed", "removed"), ("added", "added")],
+        )
         result = self.invoke()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(self.output.read_text())["verdict"], "PASS")
+
+    def test_content_mode_and_object_type_are_all_capability_identity(self) -> None:
+        cases = (
+            (("1" * 64, "100644", "blob"), ("2" * 64, "100644", "blob")),
+            (("1" * 64, "100644", "blob"), ("1" * 64, "100755", "blob")),
+            (("1" * 64, "100644", "blob"), ("1" * 64, "120000", "blob")),
+        )
+        for baseline_record, candidate_record in cases:
+            with self.subTest(candidate=candidate_record):
+                write_inventory(self.baseline, A, {"x": baseline_record})
+                write_inventory(self.candidate, B, {"x": candidate_record})
+                write_dispositions(self.dispositions, [])
+                result = self.invoke()
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertEqual(
+                    json.loads(self.output.read_text())["blockers"]["missingDispositions"],
+                    ["x"],
+                )
+
+    def test_invalid_mode_object_type_combination_is_invalid_evidence(self) -> None:
+        write_inventory(self.baseline, A, {"x": ("1" * 64, "100644", "commit")})
+        write_inventory(self.candidate, B, {"x": "1" * 64})
+        write_dispositions(self.dispositions, [])
+        result = self.invoke()
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("objectType", result.stderr)
 
     def test_unreviewed_change_blocks(self) -> None:
         write_inventory(self.baseline, A, {"x": "1" * 64})
@@ -87,7 +160,10 @@ class CapabilityComparatorTests(unittest.TestCase):
         write_dispositions(self.dispositions, [])
         result = self.invoke()
         self.assertEqual(result.returncode, 1)
-        self.assertEqual(json.loads(self.output.read_text())["blockers"]["missingDispositions"], ["x"])
+        self.assertEqual(
+            json.loads(self.output.read_text())["blockers"]["missingDispositions"],
+            ["x"],
+        )
 
     def test_stale_or_wrong_disposition_blocks(self) -> None:
         write_inventory(self.baseline, A, {"x": "1" * 64})
