@@ -1318,7 +1318,7 @@ ACTIONS = (
         _DECLARED_ACTIONS[42:114]
         + _DECLARED_ACTIONS[269:273]
         + _DECLARED_ACTIONS[274:279]
-        + _DECLARED_ACTIONS[280:284]
+        + _DECLARED_ACTIONS[280:286]
         + _DECLARED_ACTIONS[293:308]
         # Declaration 308 reads the source-only root README, absent when installed.
         + _DECLARED_ACTIONS[308:309]
@@ -1334,7 +1334,7 @@ ACTIONS = (
         _DECLARED_ACTIONS[256:269]
         + _DECLARED_ACTIONS[273:274]
         + _DECLARED_ACTIONS[279:280]
-        + _DECLARED_ACTIONS[284:293],
+        + _DECLARED_ACTIONS[286:293],
     ),
     ("installed", _INSTALLED_ACTIONS),
 )
