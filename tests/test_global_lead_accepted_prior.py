@@ -89,6 +89,12 @@ PRE_COMBINED_HOTFIX_GLOBAL_LEAD_REVISION = (
 PRE_COMBINED_HOTFIX_GLOBAL_LEAD_TREE_SHA256 = (
     "1e4bdc38283d81f2901a3b089c13fc9a0d10946605b1900ae15006cd42534dc6"
 )
+PRE_FINAL_REVIEW_GLOBAL_LEAD_REVISION = (
+    "7192c9144435e7a6b326446a4c7e678d98a2d875"
+)
+PRE_FINAL_REVIEW_GLOBAL_LEAD_TREE_SHA256 = (
+    "1f870106837564449117d07d4e51734a0a5afc3a79eb9c2e953916c64eb34afd"
+)
 CURRENT_HYBRID_GLOBAL_LEAD_OVERLAYS = {
     "external-dispatch.md": (
         "e55b2466281ecc50ad2a940a4de14a5ea90fb98c",
@@ -117,6 +123,9 @@ PROVIDER_AUTH_BASELINE_STAGED_LEAD_OVERLAYS = {
 }
 PRE_REBASE_FIXTURE_ROOT = (
     ROOT / "tests" / "fixtures" / "global-lead-priors" / "pre-rebase"
+)
+ADDITIONAL_STOCK_SKILL_FIXTURE_ROOT = (
+    ROOT / "tests" / "fixtures" / "canonical-skill-priors"
 )
 # Exact bytes for the two staged destinations changed after the accepted
 # historical trees were observed. Base64 preserves their final-newline state.
@@ -443,17 +452,19 @@ def _historical_blob(revision: str, source: str) -> bytes:
     ).stdout
 
 
-def _pre_rebase_fixture_payloads() -> dict[str, bytes]:
-    manifest_path = PRE_REBASE_FIXTURE_ROOT / "manifest.json"
+def _fixture_payloads(
+    fixture_root: Path, *, expected_baseline: str
+) -> dict[str, bytes]:
+    manifest_path = fixture_root / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert set(manifest) == {"schemaVersion", "baseline", "files"}
     assert manifest["schemaVersion"] == 1
-    assert manifest["baseline"] == "7872d36d"
+    assert manifest["baseline"] == expected_baseline
     files = manifest["files"]
     assert isinstance(files, dict) and files
     fixture_files = {
-        path.relative_to(PRE_REBASE_FIXTURE_ROOT).as_posix()
-        for path in PRE_REBASE_FIXTURE_ROOT.rglob("*")
+        path.relative_to(fixture_root).as_posix()
+        for path in fixture_root.rglob("*")
         if path.is_file() and path != manifest_path
     }
     assert fixture_files == set(files)
@@ -463,10 +474,14 @@ def _pre_rebase_fixture_payloads() -> dict[str, bytes]:
         fixture_relative = Path(relative)
         assert not fixture_relative.is_absolute()
         assert ".." not in fixture_relative.parts
-        payload = (PRE_REBASE_FIXTURE_ROOT / fixture_relative).read_bytes()
+        payload = (fixture_root / fixture_relative).read_bytes()
         assert hashlib.sha256(payload).hexdigest() == expected_sha256
         payloads[relative] = payload
     return payloads
+
+
+def _pre_rebase_fixture_payloads() -> dict[str, bytes]:
+    return _fixture_payloads(PRE_REBASE_FIXTURE_ROOT, expected_baseline="7872d36d")
 
 
 def _remove_historical_members(lead: Path, relatives: tuple[str, ...]) -> None:
@@ -540,6 +555,31 @@ def _extract_7872_skill(name: str, destination: Path) -> Path:
 def _extract_additional_stock_skill(
     name: str, revision: str, destination: Path
 ) -> Path:
+    fixture_root = ADDITIONAL_STOCK_SKILL_FIXTURE_ROOT / revision
+    if fixture_root.is_dir():
+        payloads = _fixture_payloads(fixture_root, expected_baseline=revision)
+        fixture_names = {Path(relative).parts[0] for relative in payloads}
+        expected_names = {
+            skill_name
+            for skill_name, (skill_revision, _digest) in (
+                ADDITIONAL_STOCK_SKILL_PRIORS.items()
+            )
+            if skill_revision == revision
+        }
+        assert fixture_names == expected_names
+        target = destination / name
+        selected = {
+            Path(relative).relative_to(name): payload
+            for relative, payload in payloads.items()
+            if Path(relative).parts[0] == name
+        }
+        assert selected
+        for relative, payload in selected.items():
+            path = target / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(payload)
+        return target
+
     archive = subprocess.run(
         [
             "git",
@@ -908,6 +948,10 @@ def test_exact_current_hybrid_global_lead_migrates_noops_and_rejects_drift(
         (
             PRE_COMBINED_HOTFIX_GLOBAL_LEAD_REVISION,
             PRE_COMBINED_HOTFIX_GLOBAL_LEAD_TREE_SHA256,
+        ),
+        (
+            PRE_FINAL_REVIEW_GLOBAL_LEAD_REVISION,
+            PRE_FINAL_REVIEW_GLOBAL_LEAD_TREE_SHA256,
         ),
     ),
 )
@@ -1422,6 +1466,34 @@ def test_exact_additional_stock_skill_is_accepted_and_drift_refused(
     _assert_exact_stock_skill_is_accepted_and_drift_refused(
         installer, tmp_path, name, expected_prior, historical
     )
+
+
+@pytest.mark.parametrize(
+    ("name", "revision", "expected_prior"),
+    tuple(
+        (name, revision, digest)
+        for name, (revision, digest) in ADDITIONAL_STOCK_SKILL_PRIORS.items()
+        if revision == "65efb6b679d2808c5cdd3f95774a82942c65ad35"
+    ),
+)
+def test_65ef_additional_stock_skill_fixture_survives_missing_git_history(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    name: str,
+    revision: str,
+    expected_prior: str,
+) -> None:
+    """The bounded 65ef stock fixture works in a source archive or shallow clone."""
+
+    def reject_git_history(*_args, **_kwargs):
+        raise AssertionError("historical Git objects are unavailable")
+
+    monkeypatch.setattr(subprocess, "run", reject_git_history)
+    historical = _extract_additional_stock_skill(
+        name, revision, tmp_path / "historical"
+    )
+    installer = _load_installer()
+    assert installer._tree_sha256(historical) == expected_prior
 
 
 def test_exact_947_manual_transfer_is_accepted_and_drift_refused(

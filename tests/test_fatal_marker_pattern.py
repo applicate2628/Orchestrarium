@@ -158,6 +158,7 @@ def _run_transport(tmp_path: Path, err_line: str) -> dict:
     env["CODEX_BIN"] = str(fake)
     env["CODEX_PROMPTS_DIR"] = str(tmp_path / "outputs")
     env["CODEX_HOME"] = str(prepare_codex_home(tmp_path))
+    env["OPENAI_API_KEY"] = "fake-commercial-credential"
     result = subprocess.run(
         [
             sys.executable,

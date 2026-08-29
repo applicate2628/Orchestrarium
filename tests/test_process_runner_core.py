@@ -80,6 +80,59 @@ def _request(runner, argv: tuple[str, ...], *, stdin: bytes | None = None, limit
     )
 
 
+def _linux_pid_state_and_start_marker(pid: int) -> tuple[str, str] | None:
+    """Return the currently bound Linux PID identity, or None after exit."""
+
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return None
+    try:
+        raw = Path(f"/proc/{pid}/stat").read_text(encoding="ascii")
+    except OSError:
+        return None
+    close = raw.rfind(")")
+    fields = raw[close + 2 :].split()
+    if len(fields) < 20:
+        pytest.fail(f"unparseable /proc stat for descendant PID {pid}")
+    return fields[0], fields[19]
+
+
+def _descendant_is_terminated(pid: int, start_marker: str) -> bool:
+    """Accept only exit, PID reuse, or the Linux zombie terminal state."""
+
+    observation = _linux_pid_state_and_start_marker(pid)
+    return (
+        observation is None
+        or observation[1] != start_marker
+        or observation[0] == "Z"
+    )
+
+
+def _kill_descendant_if_same_live_identity(pid: int, start_marker: str) -> None:
+    """Avoid signalling a PID that has been reused after the test's child exited."""
+
+    observation = _linux_pid_state_and_start_marker(pid)
+    if (
+        observation is not None
+        and observation[1] == start_marker
+        and observation[0] != "Z"
+    ):
+        os.kill(pid, 9)
+
+
+@pytest.mark.parametrize("state", ("R", "S", "T"))
+def test_descendant_oracle_rejects_live_states(monkeypatch, state: str) -> None:
+    """A zombie-only terminal exception must not hide live descendants."""
+
+    monkeypatch.setattr(
+        sys.modules[__name__],
+        "_linux_pid_state_and_start_marker",
+        lambda _pid: (state, "start"),
+    )
+    assert _descendant_is_terminated(12345, "start") is False
+
+
 def test_hook_health_spool_sink_is_unbounded_only_for_stdout(tmp_path: Path) -> None:
     runner = _load_runner()
     spool_path = tmp_path / "health.stdout"
@@ -264,13 +317,18 @@ def test_posix_parent_exit_settles_descendant_before_reader_join(
     parent = tmp_path / "spawn_descendant.py"
     parent.write_text(
         "from pathlib import Path\n"
-        "import subprocess, sys\n"
+        "import json, subprocess, sys\n"
         "child = subprocess.Popen(\n"
         "    [sys.executable, '-c', 'import time; time.sleep(30)'],\n"
         "    stdin=subprocess.DEVNULL, stdout=sys.stdout, stderr=sys.stderr,\n"
         "    close_fds=False,\n"
         ")\n"
-        "Path(sys.argv[1]).write_text(str(child.pid), encoding='ascii')\n",
+        "raw = Path(f'/proc/{child.pid}/stat').read_text(encoding='ascii')\n"
+        "fields = raw[raw.rfind(')') + 2:].split()\n"
+        "Path(sys.argv[1]).write_text(\n"
+        "    json.dumps({'pid': child.pid, 'start_marker': fields[19]}),\n"
+        "    encoding='utf-8',\n"
+        ")\n",
         encoding="utf-8",
     )
     python = str(Path(sys.executable).resolve())
@@ -286,12 +344,15 @@ def test_posix_parent_exit_settles_descendant_before_reader_join(
     )
     owner = runner.ProcessRunnerV1()
     descendant_pid: int | None = None
+    descendant_start_marker: str | None = None
     started = time.monotonic()
     try:
         result = owner.run(request)
         elapsed = time.monotonic() - started
         assert marker.is_file(), f"descendant PID was not published: {result!r}"
-        descendant_pid = int(marker.read_text(encoding="ascii"))
+        descendant = json.loads(marker.read_text(encoding="utf-8"))
+        descendant_pid = int(descendant["pid"])
+        descendant_start_marker = str(descendant["start_marker"])
         assert elapsed < 3.0, "reader joins consumed settlement time before kill"
         assert result.failure_id == "PSV1-TREE-SETTLEMENT"
         assert result.tree.ownership_confirmed is True
@@ -299,20 +360,51 @@ def test_posix_parent_exit_settles_descendant_before_reader_join(
         assert result.resources_closed is True
         deadline = time.monotonic() + 3.0
         while time.monotonic() < deadline:
-            try:
-                os.kill(descendant_pid, 0)
-            except ProcessLookupError:
+            if _descendant_is_terminated(
+                descendant_pid, descendant_start_marker
+            ):
                 break
             time.sleep(0.02)
         else:
             pytest.fail("pipe-inheriting descendant survived runner return")
     finally:
         owner.close()
-        if descendant_pid is not None:
-            try:
-                os.kill(descendant_pid, 9)
-            except ProcessLookupError:
-                pass
+        if descendant_pid is not None and descendant_start_marker is not None:
+            _kill_descendant_if_same_live_identity(
+                descendant_pid, descendant_start_marker
+            )
+
+
+@pytest.mark.skipif(
+    os.name == "nt" or not sys.platform.startswith("linux"),
+    reason="Linux /proc zombie state required",
+)
+def test_linux_descendant_oracle_accepts_zombie_not_live_or_reused_pid() -> None:
+    """Catches kill(pid, 0) treating a zombie as a surviving descendant."""
+
+    live = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    zombie = subprocess.Popen([sys.executable, "-c", "pass"])
+    try:
+        live_identity = _linux_pid_state_and_start_marker(live.pid)
+        assert live_identity is not None
+        assert live_identity[0] != "Z"
+        assert _descendant_is_terminated(live.pid, live_identity[1]) is False
+        assert _descendant_is_terminated(live.pid, f"reused:{live_identity[1]}") is True
+
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            zombie_identity = _linux_pid_state_and_start_marker(zombie.pid)
+            if zombie_identity is not None and zombie_identity[0] == "Z":
+                break
+            time.sleep(0.01)
+        else:
+            pytest.fail("fixture child did not become a Linux zombie")
+        assert _descendant_is_terminated(zombie.pid, zombie_identity[1]) is True
+    finally:
+        if live.poll() is None:
+            live.kill()
+        live.wait()
+        zombie.wait()
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX executable replacement contract")

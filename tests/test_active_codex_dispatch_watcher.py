@@ -314,6 +314,7 @@ def test_python_prompt_owner_returns_complete_result_and_reclaims_artifacts(
     env[output_env] = str(tmp_path / f"{provider}-artifacts")
     if provider == "codex":
         env["CODEX_HOME"] = str(prepare_codex_home(tmp_path))
+        env["OPENAI_API_KEY"] = "fake-commercial-credential"
         helper = Path(env["CODEX_HOME"]) / "skills" / "lead" / "scripts" / "check-hook-health.py"
         helper.parent.mkdir(parents=True)
         shutil.copyfile(ROOT / "scripts" / helper.name, helper)

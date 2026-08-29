@@ -126,7 +126,11 @@ class ReviseCapContractsTest(unittest.TestCase):
                 for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
                     if GENERIC_CAP_LINE.search(line):
                         matches.append(f"{relative}:{number}")
-        self.assertEqual(matches, [f"{GENERIC_OWNER}:39"])
+        self.assertEqual(
+            [Path(match.rsplit(":", maxsplit=1)[0]) for match in matches],
+            [GENERIC_OWNER],
+            "the generic REVISE cap's numeric spelling must appear only in its shared owner",
+        )
 
     def test_retired_ambiguous_cap_owner_is_absent(self) -> None:
         module = _review_loop_state_module()

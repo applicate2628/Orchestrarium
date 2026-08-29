@@ -139,6 +139,7 @@ def _run_transport(
     env["FAKE_ARGV_CAPTURE"] = str(capture)
     if provider == "codex":
         env["CODEX_HOME"] = str(prepare_codex_home(tmp_path))
+        env["OPENAI_API_KEY"] = "fake-commercial-credential"
     else:
         env["ANTHROPIC_API_KEY"] = "fake-commercial-credential"
     item = _make_work_item(tmp_path, provider) if ledger else None
@@ -225,6 +226,7 @@ def test_root_thin_wrapper_delivers_one_governance_frame_then_exact_task_bytes(
     env[OUTPUT_ENV[provider]] = str(tmp_path / "outputs")
     if provider == "codex":
         env["CODEX_HOME"] = str(prepare_codex_home(tmp_path))
+        env["OPENAI_API_KEY"] = "fake-commercial-credential"
     else:
         env["ANTHROPIC_API_KEY"] = "fake-commercial-credential"
 

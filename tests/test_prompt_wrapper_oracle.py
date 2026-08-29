@@ -1302,6 +1302,100 @@ def test_path_discovered_provider_outside_repository_remains_accepted(
     assert getattr(resolution, "target", None) == external.resolve()
 
 
+@pytest.mark.parametrize(("provider", "environment_key"), tuple(BIN_ENV.items()))
+@pytest.mark.parametrize("discovered", (False, True), ids=("explicit", "path"))
+def test_python_provider_binding_resolves_interpreter_before_process_runner(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    provider: str,
+    environment_key: str,
+    discovered: bool,
+) -> None:
+    provider_script = tmp_path / f"{provider}.py"
+    provider_script.write_text("raise SystemExit(0)\n", encoding="utf-8")
+    physical_interpreter = Path(sys.executable).resolve(strict=True)
+    interpreter_link = tmp_path / (
+        "python-link.exe" if os.name == "nt" else "python-link"
+    )
+    try:
+        interpreter_link.symlink_to(physical_interpreter)
+    except OSError as exc:
+        pytest.skip(f"interpreter symlink unavailable: {exc}")
+    monkeypatch.setattr(owner.sys, "executable", str(interpreter_link))
+    if discovered:
+        monkeypatch.setenv(environment_key, provider)
+        monkeypatch.setattr(
+            owner.shutil,
+            "which",
+            lambda name: str(provider_script) if name == provider else None,
+        )
+    else:
+        monkeypatch.setenv(environment_key, str(provider_script.resolve()))
+
+    resolution = owner.resolve_provider_command(provider)
+
+    assert resolution is not None
+    monkeypatch.setattr(owner.sys, "executable", str(physical_interpreter))
+    environment = {"PATH": os.environ["PATH"]}
+    for name in ("SYSTEMROOT", "WINDIR"):
+        if name in os.environ:
+            environment[name] = os.environ[name]
+    result, _stdout, _stderr = owner.run_provider_process(
+        owner.ProcessRunnerV1(),
+        list(resolution.command),
+        [],
+        environment,
+        tmp_path,
+        b"",
+        owner.Control(timeout_secs=5, capture_max_bytes=1024),
+    )
+
+    assert result.outcome == "success", (
+        result.failure_id,
+        result.terminal_stage,
+    )
+    assert resolution.command[0] == str(physical_interpreter)
+
+
+@pytest.mark.parametrize("discovered", (False, True), ids=("explicit", "path"))
+def test_python_provider_binding_rejects_repository_controlled_interpreter(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    discovered: bool,
+) -> None:
+    repository = tmp_path / "repository"
+    (repository / ".git").mkdir(parents=True)
+    nested = repository / "nested"
+    nested.mkdir()
+    interpreter = repository / (
+        "python.exe" if os.name == "nt" else "python"
+    )
+    shutil.copy2(Path(sys.executable).resolve(strict=True), interpreter)
+    provider_script = tmp_path / "external" / "codex.py"
+    provider_script.parent.mkdir()
+    provider_script.write_text("raise SystemExit(0)\n", encoding="utf-8")
+    monkeypatch.setattr(owner.sys, "executable", str(interpreter))
+    monkeypatch.chdir(nested)
+    if discovered:
+        monkeypatch.setenv("CODEX_BIN", "codex")
+        monkeypatch.setattr(
+            owner.shutil,
+            "which",
+            lambda name: str(provider_script) if name == "codex" else None,
+        )
+    else:
+        monkeypatch.setenv("CODEX_BIN", str(provider_script))
+
+    resolution = owner.resolve_provider_command("codex")
+
+    assert resolution is not None
+    with pytest.raises(
+        ValueError,
+        match=owner.E_EXTERNAL_PROVIDER_REPOSITORY_EXECUTABLE,
+    ):
+        owner._reject_repository_path_discovery(resolution, nested)
+
+
 @pytest.mark.parametrize(
     "ledger_role",
     (

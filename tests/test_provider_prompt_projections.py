@@ -121,6 +121,17 @@ STOCK_1A56_PROJECTION_SHA256 = {
     "process_supervision/process_runner.py": "c80ddd084f59d1b7e4fde11174fde5e30c5e685d3a2453ca0fd3d25e83736cb6",
     "provider-prompt-projections.v1.json": "fb49afa295e6badc834c869e57e0745c699bd65333dc301025194ef5c5a2b921",
 }
+STOCK_7192_PROJECTION_SHA256 = {
+    "provider_prompt.py": "70ae0b7c32c7983d4618517a4a803eb16279c33fed2bb4628e149cb3ea722cd2",
+    "process_supervision/process_runner.py": "dd6bafd681a93de2e6dcbaf616fce65e7496483da0fd39ebd3528e1714d425fa",
+    "invoke-codex-prompt.py": "0b085a6fd0e28a5a486c8ef25bf52d4c69123d94cc8712d63dd30deadcc5f665",
+    "invoke-claude-prompt.py": "3250c9a85e36ab2e57a218688c5d7d3cfed59552c1f2bad7eb52f45370df80f3",
+    "invoke-kimi-prompt.py": "480af94ce089d5a6340e92d00239a5762c9c1374375a8c12c921afdcfcaa6e47",
+    "invoke-grok-prompt.py": "1f0f4f6bb03d816b3f40ff56ebe71973301d2d7104ef1d7f335b1ffa0b248559",
+    "external-prompt-governance.md": "c7a59ccec7d6e46be76584a107b0a5b30b249368b4f0958cb78177962dc34b00",
+    "external-role-taxonomy.v1.json": "51192eca72784dfcbc2d53596e143ea25856db9e7336031a25d89e9e4fdf85ce",
+    "provider-prompt-projections.v1.json": "e662e19e632b8f1e63e76feceb472dda344259b2eb8bc656a76afbb273d70cfb",
+}
 
 
 def _authored_transport_path(root: Path, name: str) -> Path:
@@ -1057,6 +1068,11 @@ def test_exact_8f92_transport_set_is_one_atomic_prior_plan(tmp_path: Path) -> No
                 "process_supervision/process_runner.py",
             ),
         ),
+        (
+            "7192c914",
+            STOCK_7192_PROJECTION_SHA256,
+            ("provider_prompt.py",),
+        ),
     ),
 )
 def test_exact_published_transport_set_is_one_atomic_prior_plan(
@@ -1102,6 +1118,7 @@ def test_exact_published_transport_set_is_one_atomic_prior_plan(
         ("f87414e7", STOCK_F874_PROJECTION_SHA256),
         ("9a637574", STOCK_9A63_PROJECTION_SHA256),
         ("1a56f81f", STOCK_1A56_PROJECTION_SHA256),
+        ("7192c914", STOCK_7192_PROJECTION_SHA256),
     ),
 )
 def test_published_transport_prior_rejects_a_customized_member(
@@ -1136,6 +1153,7 @@ def test_published_transport_prior_rejects_a_customized_member(
     (
         ("448e8c5a", STOCK_448E_PROJECTION_SHA256),
         ("1a56f81f", STOCK_1A56_PROJECTION_SHA256),
+        ("7192c914", STOCK_7192_PROJECTION_SHA256),
     ),
 )
 def test_immediate_prior_rejects_same_size_one_byte_member_flip(
@@ -1175,6 +1193,7 @@ def test_immediate_prior_rejects_same_size_one_byte_member_flip(
         ("9a637574", STOCK_9A63_PROJECTION_SHA256),
         ("448e8c5a", STOCK_448E_PROJECTION_SHA256),
         ("1a56f81f", STOCK_1A56_PROJECTION_SHA256),
+        ("7192c914", STOCK_7192_PROJECTION_SHA256),
     ),
 )
 def test_published_transport_migration_failure_restores_bytes_and_identities(

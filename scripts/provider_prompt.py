@@ -955,7 +955,11 @@ def _command_from_path(path: str, provenance: str) -> ResolvedProviderCommand | 
         return None
     suffix = target.suffix.lower()
     if suffix == ".py":
-        command = (sys.executable, str(target))
+        try:
+            interpreter = Path(sys.executable).expanduser().resolve(strict=True)
+        except OSError:
+            return None
+        command = (str(interpreter), str(target))
     elif suffix in {".ps1", ".cmd", ".bat", ".sh"}:
         return None
     else:
@@ -1001,10 +1005,21 @@ def _physical_repository_root(query_cwd: Path) -> Path | None:
 def _reject_repository_path_discovery(
     resolution: ResolvedProviderCommand, query_cwd: Path
 ) -> None:
-    if resolution.provenance != "path-discovery":
-        return
     repository_root = _physical_repository_root(query_cwd)
     if repository_root is None:
+        return
+    if len(resolution.command) > 1:
+        interpreter = Path(resolution.command[0])
+        try:
+            interpreter.relative_to(repository_root)
+        except ValueError:
+            pass
+        else:
+            raise ValueError(
+                f"{E_EXTERNAL_PROVIDER_REPOSITORY_EXECUTABLE}: "
+                "provider interpreter is inside the active repository"
+            )
+    if resolution.provenance != "path-discovery":
         return
     try:
         resolution.target.relative_to(repository_root)
