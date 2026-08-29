@@ -11,6 +11,8 @@ Drive one GitHub-hosted Codex review loop to a terminal result on the current re
 
 - Use hosted GitHub state, never local ancestry or remembered status.
 - Bind every request and result to the current `headRefOid` and the exact `@codex review` comment ID.
+- For the current head, select the newest exact `@codex review` comment by `created_at` and stable comment ID. A later exact trigger supersedes every earlier same-head run; never classify the earlier run while that newer trigger exists.
+- Accept a reaction only when it is bot-authored and attached to that newest exact trigger. Accept a review, finding comment, or review thread only when it is bound to the current head and strictly later than that trigger. An earlier same-head review or reaction can never produce `clean`.
 - Trigger or resolve threads only with explicit user authorization or a standing authorization for that PR.
 - Do not start or rerun CI as part of this loop.
 - Never retrigger solely because time elapsed. A bot-authored `eyes` reaction on the exact trigger is acknowledged/in progress, not clean; keep polling that run.
@@ -21,10 +23,10 @@ Drive one GitHub-hosted Codex review loop to a terminal result on the current re
 | Hosted evidence | State | Action |
 | --- | --- | --- |
 | Head changed after the trigger | stale | Ignore old terminal claims; trigger once on the new head when authorized. |
-| Bot `eyes` on the exact trigger | in progress | Poll reviews, reactions, and current unresolved threads; do not retrigger. |
-| Bot `+1` on the exact trigger, head unchanged, no unresolved current bot thread | clean | Record bot PASS; continue any separate human/publication gates. |
-| Same-head bot review with no current bot finding comment and no unresolved current bot thread | clean | Record bot PASS; continue any separate human/publication gates. |
-| Same-head bot review with current finding comments or an unresolved current bot thread | findings | Verify each finding, fix and test, push, then resolve only the exact fixed threads and trigger one new review. |
+| Current bot finding comment or unresolved current bot thread strictly after the newest exact trigger | findings | Findings take precedence over reactions and reviews. Verify each finding, fix and test, push, then resolve only the exact fixed threads and trigger one new review. |
+| Bot `+1` on the newest exact trigger, head unchanged, no current finding comment, and no unresolved current bot thread | clean | Record bot PASS; continue any separate human/publication gates. |
+| Bot `eyes` on the newest exact trigger, with no later terminal evidence or current finding | in progress | Poll reviews, reactions, and current unresolved threads; do not retrigger. |
+| Current-head bot review strictly after the newest exact trigger, with no current finding comment and no unresolved current bot thread | clean | Record bot PASS; continue any separate human/publication gates. |
 | No bot terminal output and no acknowledged run | indeterminate | Re-read authoritative state; do not invent a timeout or autonomous retrigger. |
 
 ## Hosted probes

@@ -13,7 +13,7 @@ Warning: Orchestrarium is optimized for maximum execution effectiveness and low 
 
 New maintenance sessions should start with [`docs/new-session-guide.md`](docs/new-session-guide.md). It records the source-first rule for this monorepo: tracked Orchestrarium source is canon, while `~/.codex/`, `~/.claude/`, project `.agents/`, and project `.claude/` are installed runtime outputs that should not be patched as the durable fix before the source owner is updated.
 
-For an offline machine move, `$manual-repo-transfer` inventories dirty, ignored, recovery, and local-runtime state; it builds and validates a selected transfer bundle and emits cleanup previews only. Do the actual transfer only after the current tasks and pull-request gates pass.
+For repository cleanup or transfer preparation, `$repo-cleanup` classifies current state, routes separately authorized work to existing owners, and rechecks a transient report. After cleanup passes, `$manual-repo-transfer` owns final inventory, bundle creation, and trusted verification; its deletion output remains preview-only. Do the actual transfer only after the current tasks and pull-request gates pass.
 
 ## WARNING: Claude external authentication
 
@@ -189,6 +189,7 @@ Currently shipped:
 - `$analyzing-video-bugs` — knowledge-style; frame extraction, scene-change detection, and dense sampling for any UI/animation/layout bug video.
 - `$bug-hunting` — knowledge-style; systematic runtime-bug investigation via diagnostic logging.
 - `$mathtype-book-page` — knowledge-style; bring translated technical-book DOCX pages to accepted MathType format.
+- `$repo-cleanup` — knowledge-style coordinator; classify repository residue, route separately authorized owner work, recheck fresh evidence, and prepare transfer without becoming a mutation engine.
 - `$manual-repo-transfer` — knowledge-style; inventory local state, create and validate a selected transfer bundle, and emit preview-only cleanup evidence.
 - `$github-pr-review-bot` — knowledge-style; drive a GitHub pull-request review loop with the Codex review bot to a terminal result on the current remote head.
 - `$explain-simply` — knowledge-style; reader-tailored plain-language explanations for concepts, code paths, results, decisions, and learner notes.

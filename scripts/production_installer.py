@@ -233,6 +233,7 @@ ADDITIONAL_STOCK_SKILL_ACCEPTED_PRIOR_TREE_SHA256 = {
             "45fc1efc9f0558664afb1f386c5fc7ac2692a607fb8c7be6265b2cfc4d10029b",
             "b73cde79962de55bd2cd52bc35f0b450d26cff78abb21b9a496bf38be686a9f3",
             "e0d160e3f216d79fe2aa221b6ed8d4d4b63dd06882d4ea69feb46cdccab1afcc",
+            "cdc90d427cc593ee7b7212dd0ddeacbb13dc7474525b493bd8950318bbc3d92f",
         }
     ),
     "second-opinion": frozenset(
@@ -274,6 +275,7 @@ GLOBAL_LEAD_ACCEPTED_PRIOR_TREE_SHA256 = frozenset(
         "0da7db4510b37eac407ad9577ff171fbaa86985e30a53f341b00f05aeb433975",
         "1e4bdc38283d81f2901a3b089c13fc9a0d10946605b1900ae15006cd42534dc6",
         "1f870106837564449117d07d4e51734a0a5afc3a79eb9c2e953916c64eb34afd",
+        "87df0dfbef0bf1ae336ef5b26fa60e3a155e7519d2d7494818ce592a37b52a32",
     }
 )
 RUNTIME_RESOURCES = (

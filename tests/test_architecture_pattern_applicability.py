@@ -83,6 +83,12 @@ def test_installed_validator_scope_excludes_source_only_maintainer_checks() -> N
                 for value in action
             ), declaration
     codex = _load_validator_declaration(VALIDATOR_DECLARATIONS[0])
+    codex_all_actions = next(actions for scope, actions in codex.ACTIONS if scope == "all")
+    assert not any(
+        str(value).startswith("@ROOT/scripts/validate-work-item-state")
+        for action in codex_all_actions
+        for value in action
+    )
     installed_actions = next(actions for scope, actions in codex.ACTIONS if scope == "installed")
     installed_schema = "@SCRIPTS/../shared/schemas/agent-runs.schema.json"
     for marker in ("agent-runs.schema.json", '"executionRole"', '"evidence"'):

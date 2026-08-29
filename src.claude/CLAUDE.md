@@ -175,7 +175,7 @@ When the Claude Code superpowers plugin is installed alongside this pack, the tw
 
 1. Evaluate the shared `quick-fix` predicate before invoking a process skill. If it passes, select `quick-fix` directly; no brainstorming, writing-plan, consultant, or review prelude is admitted.
 2. Only after `quick-fix` admission fails, invoke an applicable process skill — brainstorming for new or unclear creative work, systematic-debugging when a runtime cause is unknown, writing-plans when the selected route needs a plan, requesting-code-review before merge — then select the heavier template.
-3. Subagents themselves may invoke common-skills (`$bug-hunting`, `$analyzing-video-bugs`, `$windows-gui-manual-testing`, `$mathtype-book-page`, `$manual-repo-transfer`, `$github-pr-review-bot`, `$explain-simply`, `$vak-dissertation-review`) via the `Skill` tool inside their own context. Subagents typically cannot spawn other subagents — common-skills are the canonical way roles share methodology across the delegation tree.
+3. Subagents themselves may invoke common-skills (`$bug-hunting`, `$analyzing-video-bugs`, `$windows-gui-manual-testing`, `$mathtype-book-page`, `$repo-cleanup`, `$manual-repo-transfer`, `$github-pr-review-bot`, `$explain-simply`, `$vak-dissertation-review`) via the `Skill` tool inside their own context. Subagents typically cannot spawn other subagents — common-skills are the canonical way roles share methodology across the delegation tree.
 
 **Resolving apparent overlaps:**
 

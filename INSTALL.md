@@ -153,7 +153,7 @@ project/
     hooks.json             ← hook entries (PreToolUse + Stop + SessionStart) merged here
   .agents/
     .agents-mode.yaml
-    skills/                ← role skills + common skills (e.g. windows-gui-manual-testing/, mathtype-book-page/, explain-simply/)
+    skills/                ← role skills + common skills (e.g. repo-cleanup/, windows-gui-manual-testing/, mathtype-book-page/)
   .claude/
     .agents-mode.yaml
     AGENTS.md
@@ -161,7 +161,7 @@ project/
     settings.json          ← hook entries plus conditional force-mode `agent: lead` default merged here
     agents/                ← leaf-role subagents + dual-safe Lead main-agent definition + delegate-style common-skill wrappers
     commands/
-    skills/                ← inline /lead orchestration skill + common skills reachable from main conv and subagents
+    skills/                ← inline /lead orchestration skill + common skills such as repo-cleanup/ reachable from main conv and subagents
 ```
 
 Reference directories are development-only and are not installed:

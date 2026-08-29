@@ -191,7 +191,7 @@ def run_installer(root: Path, case: InstallerCase, target_rel: Path) -> None:
 def run_python_codex_global_installer(root: Path, userprofile: Path) -> None:
     env = os.environ.copy()
     env["USERPROFILE"] = str(userprofile)
-    env.setdefault("HOME", str(userprofile))
+    env["HOME"] = str(userprofile)
     command = [
         sys.executable,
         str(root / "scripts" / "install-codex.py"),

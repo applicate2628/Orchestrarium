@@ -20,6 +20,10 @@ Transfer Git history when it exists plus a verified local-state overlay. Size, a
 - `inventory` and `bundle` refuse an existing output by default; only their explicit `--force` replaces one output. The helper binds the ordinary parent and, when present, the exact ordinary output identity before generation. After the completed temporary is flushed and synchronized, an absent output is published by one atomic no-replace link, while a forced existing output is published by rechecking that same parent and exact ordinary identity immediately before one `os.replace`. Raced outputs, links, reparse points, directories, unsafe ancestors, and identity drift fail closed. A same-user substitution after the final identity check is outside the 1.x guarantee. `verify` and `cleanup` never accept `--force`.
 - Any Git, lifecycle, recovery, or tool-state mutation invalidates the inventory. Rebuild.
 
+## Receiving from repository cleanup
+
+When `$repo-cleanup` transfer mode invokes this skill, accept only a current-invocation `RepoCleanupReportV1` with `PASS`, bound to the same physical repository identity and `HEAD`/unborn state. Then own exactly `cleanup PASS -> final inventory -> bundle -> trusted verify -> post-transfer classification`. This skill does not run cleanup again, and the cleanup report does not authorize bundle creation, copying, deletion, wipe, or publication. A direct explicit `$manual-repo-transfer` request without cleanup intent continues to enter this skill directly.
+
 ## Workflow
 
 1. Read repository governance and validation docs. Inventory dot-directories, ignored/untracked state, and self-ignored workspaces. A clean `git status` is insufficient. Query owning tools through API/MCP; validate stored config/memory against the active project. Use [local-state categories](references/manifest-schema.md#local-state-categories).
