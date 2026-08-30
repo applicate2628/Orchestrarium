@@ -290,6 +290,14 @@ STOCK_7872_CANONICAL_SKILL_TREE_SHA256 = {
     "second-opinion": "b82628910567799a6f03962f3ec0289cb47b4607093c074466b1a2656b53f432",
 }
 ADDITIONAL_STOCK_SKILL_PRIORS = {
+    "architect": (
+        "4e193102e852b25437b3244a4896b31a5e8fc6c5",
+        "51612976f7fde46e3046222d607435b2fba5ef27ede636a06a80cb86c6fc7f5e",
+    ),
+    "architecture-reviewer": (
+        "4e193102e852b25437b3244a4896b31a5e8fc6c5",
+        "19b179fe14a2bb6135e46dd7435265e7483d0bf6d5ec97b55520e39f3cbb1b4d",
+    ),
     "graphics-engineer": (
         "65efb6b679d2808c5cdd3f95774a82942c65ad35",
         "e4b1294c4f2de8e31f0083500c7a7335a2abece08f801bb4e60e715eed3e081d",
@@ -305,6 +313,10 @@ ADDITIONAL_STOCK_SKILL_PRIORS = {
     "second-opinion": (
         "0274b69a25e1b36f83da4c21f630d222d627c4ee",
         "fe989a918e11ff8066a0c8af54f73ba7bbf763719ea3b604ed147b79bec684d6",
+    ),
+    "toolchain-engineer": (
+        "4e193102e852b25437b3244a4896b31a5e8fc6c5",
+        "51cf24ae0699a6bb379ee6bbf7b51e2a982cba12aaeab2dc76e57d4b4ccf2a74",
     ),
     "review-loop": (
         "01a7eb0ded829233c21c588f1234f62b31308f35",
@@ -1477,17 +1489,17 @@ def test_exact_additional_stock_skill_is_accepted_and_drift_refused(
     tuple(
         (name, revision, digest)
         for name, (revision, digest) in ADDITIONAL_STOCK_SKILL_PRIORS.items()
-        if revision == "65efb6b679d2808c5cdd3f95774a82942c65ad35"
+        if (ADDITIONAL_STOCK_SKILL_FIXTURE_ROOT / revision).is_dir()
     ),
 )
-def test_65ef_additional_stock_skill_fixture_survives_missing_git_history(
+def test_additional_stock_skill_fixture_survives_missing_git_history(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     name: str,
     revision: str,
     expected_prior: str,
 ) -> None:
-    """The bounded 65ef stock fixture works in a source archive or shallow clone."""
+    """Each bounded stock fixture works in a source archive or shallow clone."""
 
     def reject_git_history(*_args, **_kwargs):
         raise AssertionError("historical Git objects are unavailable")

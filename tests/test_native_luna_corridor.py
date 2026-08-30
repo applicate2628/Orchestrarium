@@ -363,6 +363,112 @@ def test_luna_execution_plan_rejects_choices_forbidden_operations_and_stale_root
     )
 
 
+@pytest.mark.parametrize("target_kind", ("file", "directory", "missing"))
+def test_luna_path_kind_accepts_existing_or_missing_leaf_facts(
+    tmp_path: Path,
+    target_kind: str,
+) -> None:
+    """Catches path-kind requiring an existing leaf despite its missing fact value."""
+
+    resolver = _resolver_module()
+    exact_root = tmp_path / "exact-root"
+    parent = exact_root / "parent"
+    parent.mkdir(parents=True)
+    target = parent / target_kind
+    if target_kind == "file":
+        target.write_text("present\n", encoding="utf-8")
+    elif target_kind == "directory":
+        target.mkdir()
+
+    plan = _luna_plan(exact_root=exact_root)
+    plan["operations"] = [
+        {
+            "ordinal": 0,
+            "op": "path-kind",
+            "args": {"path": f"parent/{target_kind}"},
+        }
+    ]
+    facts = _luna_facts()
+    facts["facts"] = [
+        {
+            "ordinal": 0,
+            "op": "path-kind",
+            "execution": "ok",
+            "value": target_kind,
+            "errorId": None,
+        }
+    ]
+
+    assert resolver.validate_luna_execution_plan(
+        plan, observed_git_root=exact_root
+    )["valid"] is True
+    assert resolver.validate_scout_facts(
+        plan,
+        facts,
+        observed_tools=["filesystem.read"],
+        consumer_purpose="facts-only",
+        observed_git_root=exact_root,
+    )["valid"] is True
+
+
+def test_luna_path_kind_missing_leaf_preserves_path_and_parent_guards(
+    tmp_path: Path,
+) -> None:
+    """Catches a missing-leaf exception that relaxes parents, paths, or other ops."""
+
+    resolver = _resolver_module()
+    exact_root = tmp_path / "exact-root"
+    ordinary_parent = exact_root / "ordinary-parent"
+    ordinary_parent.mkdir(parents=True)
+
+    def one_operation(op: str, path: str) -> dict:
+        plan = _luna_plan(exact_root=exact_root)
+        plan["operations"] = [
+            {"ordinal": 0, "op": op, "args": {"path": path}}
+        ]
+        return plan
+
+    missing_parent = one_operation("path-kind", "missing-parent/leaf")
+    assert resolver.validate_luna_execution_plan(
+        missing_parent, observed_git_root=exact_root
+    )["stableId"] == "E_LUNA_PRECONDITION_FAILED"
+
+    hostile = one_operation("path-kind", "../escape")
+    assert resolver.validate_luna_execution_plan(
+        hostile, observed_git_root=exact_root
+    )["stableId"] == "E_LUNA_PLAN_INVALID"
+
+    other_operation = one_operation("file-size", "ordinary-parent/missing")
+    assert resolver.validate_luna_execution_plan(
+        other_operation, observed_git_root=exact_root
+    )["stableId"] == "E_LUNA_PRECONDITION_FAILED"
+
+    original_lstat = resolver.os.lstat
+
+    class ReparseMetadata:
+        def __init__(self, metadata: os.stat_result) -> None:
+            self.__dict__.update(
+                st_mode=metadata.st_mode,
+                st_dev=metadata.st_dev,
+                st_ino=metadata.st_ino,
+                st_size=metadata.st_size,
+                st_mtime_ns=metadata.st_mtime_ns,
+                st_ctime_ns=metadata.st_ctime_ns,
+                st_file_attributes=0x400,
+            )
+
+    def reparsed_lstat(path: object, *args: object, **kwargs: object) -> object:
+        metadata = original_lstat(path, *args, **kwargs)
+        return ReparseMetadata(metadata) if Path(path) == ordinary_parent else metadata
+
+    reparsed_parent = one_operation("path-kind", "ordinary-parent/missing")
+    with pytest.MonkeyPatch.context() as patcher:
+        patcher.setattr(resolver.os, "lstat", reparsed_lstat)
+        assert resolver.validate_luna_execution_plan(
+            reparsed_parent, observed_git_root=exact_root
+        )["stableId"] == "E_LUNA_PRECONDITION_FAILED"
+
+
 def test_luna_directory_chain_tolerates_unrelated_sibling_churn(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -937,6 +1043,51 @@ def test_luna_scout_facts_require_exact_plan_ordinals_and_attested_tools() -> No
             "stableId"
         ]
         == "E_LUNA_EXECUTION_ATTESTATION_UNAVAILABLE"
+    )
+
+
+def test_luna_scout_read_lines_cannot_exceed_the_requested_count(
+    tmp_path: Path,
+) -> None:
+    """Catches a read-lines fact returning lines outside the caller-authorized count."""
+
+    resolver = _resolver_module()
+    exact_root = tmp_path / "exact-root"
+    exact_root.mkdir()
+    (exact_root / "one-line.txt").write_text("one\n", encoding="utf-8")
+
+    def validate(*, count: int, value: list[str]) -> dict:
+        plan = _luna_plan(exact_root=exact_root)
+        plan["operations"] = [
+            {
+                "ordinal": 0,
+                "op": "read-lines",
+                "args": {"path": "one-line.txt", "start": 0, "count": count},
+            }
+        ]
+        facts = _luna_facts()
+        facts["facts"] = [
+            {
+                "ordinal": 0,
+                "op": "read-lines",
+                "execution": "ok",
+                "value": value,
+                "errorId": None,
+            }
+        ]
+        return resolver.validate_scout_facts(
+            plan,
+            facts,
+            observed_tools=["filesystem.read"],
+            consumer_purpose="facts-only",
+            observed_git_root=exact_root,
+        )
+
+    assert validate(count=1, value=["one"])["valid"] is True
+    assert validate(count=3, value=["one"])["valid"] is True
+    assert (
+        validate(count=1, value=["one", "two", "three"])["stableId"]
+        == "E_LUNA_AUTHORITY_VIOLATION"
     )
 
 

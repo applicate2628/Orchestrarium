@@ -251,8 +251,13 @@ def _git(
         sink.bytes_for("stderr"),
     )
     if check and result.returncode != 0:
+        supervision_detail = (
+            f"process supervision {supervision.failure_id}"
+            if supervision.failure_id is not None
+            else "target process failed"
+        )
         raise RuntimeError(
-            f"git {' '.join(args)} failed: "
+            f"git {' '.join(args)} failed ({supervision_detail}): "
             + result.stderr.decode("utf-8", errors="replace")[:2048]
         )
     return result

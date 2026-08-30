@@ -234,6 +234,12 @@ STOCK_CONSULTANT_ACCEPTED_PRIOR_TREE_SHA256 = frozenset(
     {"33998c6a60b442c09957d3edef914daa02d718eafa5f881473ce017fb29a4bd9"}
 )
 ADDITIONAL_STOCK_SKILL_ACCEPTED_PRIOR_TREE_SHA256 = {
+    "architect": frozenset(
+        {"51612976f7fde46e3046222d607435b2fba5ef27ede636a06a80cb86c6fc7f5e"}
+    ),
+    "architecture-reviewer": frozenset(
+        {"19b179fe14a2bb6135e46dd7435265e7483d0bf6d5ec97b55520e39f3cbb1b4d"}
+    ),
     "graphics-engineer": frozenset(
         {"e4b1294c4f2de8e31f0083500c7a7335a2abece08f801bb4e60e715eed3e081d"}
     ),
@@ -250,6 +256,9 @@ ADDITIONAL_STOCK_SKILL_ACCEPTED_PRIOR_TREE_SHA256 = {
     ),
     "second-opinion": frozenset(
         {"fe989a918e11ff8066a0c8af54f73ba7bbf763719ea3b604ed147b79bec684d6"}
+    ),
+    "toolchain-engineer": frozenset(
+        {"51cf24ae0699a6bb379ee6bbf7b51e2a982cba12aaeab2dc76e57d4b4ccf2a74"}
     ),
     "review-loop": frozenset(
         {"3e7be1c11624a0fb7beae1c286dd09a3abb4c6b1fb70d138c9bfdc77c1d8df8a"}

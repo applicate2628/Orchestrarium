@@ -121,6 +121,7 @@ def test_capture_tail_is_compact_bytes_and_diagnostic_storage_is_bounded() -> No
     assert not hasattr(capture, "total_write_bytes")
 
 
+@pytest.mark.skipif(os.name != "nt", reason="production backend execution is Windows-only")
 def test_run_tokens_are_non_recyclable_and_safe_results_expose_only_digest() -> None:
     """Repeated calls cannot use recyclable request object addresses as identities."""
     runner = _load_runner()
@@ -170,6 +171,7 @@ def test_runner_close_cancels_and_settles_active_real_run() -> None:
     assert refused.failure_id == "PSV1-RUNNER-CLOSED"
 
 
+@pytest.mark.skipif(os.name != "nt", reason="production backend execution is Windows-only")
 def test_duplicate_request_id_and_close_complete_without_reentering_runner_lock(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -254,6 +256,7 @@ def test_duplicate_request_id_and_close_complete_without_reentering_runner_lock(
     assert backend_calls == 1
 
 
+@pytest.mark.skipif(os.name != "nt", reason="production backend execution is Windows-only")
 def test_expected_oserror_returns_typed_result_after_one_lifecycle_finalizer() -> None:
     """Expected OS failures are returned and cannot bypass or duplicate cleanup."""
     runner = _load_runner()
@@ -281,6 +284,7 @@ def test_expected_oserror_returns_typed_result_after_one_lifecycle_finalizer() -
     assert observed == ["closed"]
 
 
+@pytest.mark.skipif(os.name != "nt", reason="production backend execution is Windows-only")
 @pytest.mark.parametrize(
     "exception",
     (
@@ -343,25 +347,6 @@ def test_real_backend_closes_sealed_capture_sink() -> None:
     assert request.capture_sink_binding._sink._closed is True
 
 
-def test_posix_identity_reuse_and_reappearance_are_ambiguous_and_never_signal_safe() -> None:
-    """PID reuse or a group reappearing after empty cannot authorize killpg."""
-    runner = _load_runner()
-    leader = runner.PosixProcessIdentityV1(100, "start-a", 100, 100, 1, 1)
-    member = runner.PosixProcessIdentityV1(101, "start-b", 100, 100, 1, 1)
-    ledger = runner.PosixIdentityLedgerV1(leader)
-    first = ledger.observe(1, (leader, member), "present", leader_reaped=False)
-    assert first.state == "NONEMPTY" and first.signal_safe is True
-    reused = runner.PosixProcessIdentityV1(101, "start-reused", 100, 100, 2, 2)
-    contradiction = ledger.observe(2, (leader, reused), "present", leader_reaped=False)
-    assert contradiction.state == "AMBIGUOUS"
-    assert contradiction.signal_safe is False
-
-    ledger = runner.PosixIdentityLedgerV1(leader)
-    ledger.observe(1, (leader,), "present", leader_reaped=False)
-    ledger.observe(2, (), "esrch", leader_reaped=True)
-    reappeared = ledger.observe(3, (member,), "present", leader_reaped=True)
-    assert reappeared.state == "AMBIGUOUS"
-    assert reappeared.signal_safe is False
 
 
 @pytest.mark.skipif(os.name == "nt", reason="Windows generic CLI unavailable")

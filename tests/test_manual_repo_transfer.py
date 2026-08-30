@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import types
 import unittest
 import zipfile
 from pathlib import Path
@@ -121,6 +122,42 @@ class RepoTransferTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.temp.cleanup()
+
+    def test_process_supervision_failure_preserves_typed_failure_id(self) -> None:
+        module = load_transfer_module()
+
+        class Sink:
+            def bytes_for(self, _stream: str) -> bytes:
+                return b""
+
+        result = types.SimpleNamespace(
+            failure_id="PSV1-POSIX-ORACLE-UNAVAILABLE",
+            timed_out=False,
+            tree=types.SimpleNamespace(tree_empty=False),
+            resources_closed=True,
+        )
+
+        class Owner:
+            def build_repository_transfer_git_request(self, **_kwargs):
+                return object(), Sink()
+
+            def run(self, _request):
+                return result
+
+            def close(self):
+                return None
+
+        module._PROCESS_RUNNER_MODULE = types.SimpleNamespace(
+            ProcessRunnerV1=Owner,
+            EnvironmentRowV1=lambda name, value: (name, value),
+        )
+
+        with self.assertRaisesRegex(
+            module.ContractError, r"PSV1-POSIX-ORACLE-UNAVAILABLE"
+        ):
+            module.run_bounded_process(
+                [str(GIT_EXECUTABLE), "status"], self.repo, {}
+            )
 
     def inventory(self) -> dict:
         run("inventory", "--repo", self.repo, "--output", self.inventory_path)

@@ -20,7 +20,6 @@ import os
 import re
 import secrets
 import shlex
-import signal
 import stat
 import struct
 import subprocess
@@ -79,7 +78,6 @@ FAILURE_IDS = frozenset(
         "PSV1-CANCELLED",
         "PSV1-TREE-SETTLEMENT",
         "PSV1-POSIX-ORACLE-UNAVAILABLE",
-        "PSV1-POSIX-SETTLEMENT-AMBIGUOUS",
         "PSV1-WORKER-LIMIT",
         "PSV1-RUNNER-CLOSED",
         "PSV1-RUNNER-CLOSE-INCOMPLETE",
@@ -892,144 +890,6 @@ class FinalizerV1:
         return self._lifecycle.finalize_once(time.monotonic() + 5.0)
 
 
-@dataclass(frozen=True)
-class PosixProcessIdentityV1:
-    pid: int
-    start_identity: str
-    pgid: int
-    sid: int
-    first_observed_census: int
-    last_observed_census: int
-
-
-@dataclass(frozen=True)
-class PosixOracleDecisionV1:
-    state: str
-    signal_safe: bool
-
-
-class PosixIdentityLedgerV1:
-    """Append-only exact-identity history used before any POSIX signal."""
-
-    def __init__(self, leader: PosixProcessIdentityV1) -> None:
-        self._leader = leader
-        self._enrolled: dict[int, str] = {leader.pid: leader.start_identity}
-        self._ever_seen: set[tuple[int, str]] = {(leader.pid, leader.start_identity)}
-        self._missing: set[tuple[int, str]] = set()
-        self._enrollment_open = True
-        self._ever_empty = False
-        self._ambiguous = False
-        self._poisoned = False
-        self._poison_causes: list[str] = []
-        self._empty_streak = 0
-        self._last_census_index = 0
-
-    @property
-    def poisoned(self) -> bool:
-        return self._poisoned
-
-    @property
-    def next_census_index(self) -> int:
-        return self._last_census_index + 1
-
-    def poison(self, cause: str) -> None:
-        self._poisoned = True
-        self._ambiguous = True
-        self._enrollment_open = False
-        if cause not in self._poison_causes:
-            self._poison_causes.append(cause)
-
-    def observe(
-        self,
-        census_index: int,
-        members: Sequence[PosixProcessIdentityV1],
-        killpg_state: str,
-        *,
-        leader_reaped: bool,
-    ) -> PosixOracleDecisionV1:
-        self._last_census_index = max(self._last_census_index, census_index)
-        if self._poisoned:
-            return PosixOracleDecisionV1("AMBIGUOUS", False)
-        current = {(item.pid, item.start_identity) for item in members}
-        if killpg_state not in {"present", "esrch", "eperm"}:
-            self._ambiguous = True
-        if killpg_state == "eperm":
-            self.poison("permission")
-            return PosixOracleDecisionV1("AMBIGUOUS", False)
-        for item in members:
-            prior = self._enrolled.get(item.pid)
-            if prior is not None and prior != item.start_identity:
-                self._ambiguous = True
-            exact = (item.pid, item.start_identity)
-            if exact in self._missing or (not self._enrollment_open and exact not in self._ever_seen):
-                self._ambiguous = True
-            if self._enrollment_open:
-                self._enrolled.setdefault(item.pid, item.start_identity)
-                self._ever_seen.add(exact)
-        for exact in self._ever_seen - current:
-            self._missing.add(exact)
-        if leader_reaped or not current or killpg_state != "present":
-            self._enrollment_open = False
-        if (not current and killpg_state != "esrch") or (current and killpg_state == "esrch"):
-            self._ambiguous = True
-        if self._ever_empty and current:
-            self._ambiguous = True
-        if not current and killpg_state == "esrch":
-            self._ever_empty = True
-            self._empty_streak += 1
-        else:
-            self._empty_streak = 0
-        if self._ambiguous:
-            return PosixOracleDecisionV1("AMBIGUOUS", False)
-        if current:
-            safe = all(self._enrolled.get(pid) == start for pid, start in current)
-            return PosixOracleDecisionV1("NONEMPTY", safe)
-        if leader_reaped and self._empty_streak >= 2:
-            return PosixOracleDecisionV1("EMPTY", False)
-        return PosixOracleDecisionV1("AMBIGUOUS", False)
-
-
-class PosixGroupSettlementOracleV1(PosixIdentityLedgerV1):
-    """Named tri-state owner backed by the append-only identity ledger."""
-
-
-def _terminate_posix_group_fresh(
-    ledger: PosixIdentityLedgerV1,
-    *,
-    deadline: float,
-    census: Callable[
-        [float], tuple[bool, tuple[PosixProcessIdentityV1, ...], str]
-    ],
-    signal_group: Callable[[], None],
-    clock: Callable[[], float] = time.monotonic,
-) -> PosixOracleDecisionV1:
-    if clock() >= deadline:
-        ledger.poison("timeout")
-        return PosixOracleDecisionV1("AMBIGUOUS", False)
-    complete, members, killpg_state = census(deadline)
-    if clock() >= deadline:
-        ledger.poison("timeout")
-        return PosixOracleDecisionV1("AMBIGUOUS", False)
-    if not complete:
-        ledger.poison(killpg_state)
-        return PosixOracleDecisionV1("AMBIGUOUS", False)
-    decision = ledger.observe(
-        ledger.next_census_index,
-        members,
-        killpg_state,
-        leader_reaped=False,
-    )
-    if decision.state != "NONEMPTY" or not decision.signal_safe:
-        return PosixOracleDecisionV1("AMBIGUOUS", False)
-    try:
-        signal_group()
-    except PermissionError:
-        ledger.poison("permission")
-        return PosixOracleDecisionV1("AMBIGUOUS", False)
-    except OSError:
-        ledger.poison("signal")
-        return PosixOracleDecisionV1("AMBIGUOUS", False)
-    return decision
 
 
 class _StreamAccumulatorV1:
@@ -2212,6 +2072,11 @@ def _request_failure(
     executable_identity = executable_identity_sha256
     if executable_identity is None:
         executable_identity = hashlib.sha256(b"").hexdigest()
+    tree = (
+        TreeObservationV1("none", False, "AMBIGUOUS", False, True, True, True)
+        if error.failure_id == "PSV1-POSIX-ORACLE-UNAVAILABLE"
+        else TreeObservationV1("none", False, "EMPTY", True, True, True, True)
+    )
     return ProcessResultV1(
         1,
         SETTLED_EVENT_ID,
@@ -2230,7 +2095,7 @@ def _request_failure(
         StdinObservationV1(len(request.stdin_bytes or b""), 0, not request.stdin_bytes),
         _empty_stream(),
         _empty_stream(),
-        TreeObservationV1("none", False, "EMPTY", True, True, True, True),
+        tree,
         True,
         False,
         (),
@@ -2454,46 +2319,6 @@ class _WindowsKernelV1:
         return info
 
 
-def _set_posix_read_lease(descriptor: int) -> None:
-    import fcntl
-
-    fcntl.fcntl(descriptor, fcntl.F_SETOWN, os.getpid())
-    if hasattr(fcntl, "F_SETSIG") and hasattr(signal, "SIGURG"):
-        fcntl.fcntl(descriptor, fcntl.F_SETSIG, signal.SIGURG)
-    fcntl.fcntl(descriptor, fcntl.F_SETLEASE, fcntl.F_RDLCK)
-
-
-def _posix_fd_effectively_writable(descriptor: int) -> bool:
-    """Ask Linux effective-access policy about the already-open executable."""
-
-    try:
-        libc = ctypes.CDLL(None, use_errno=True)
-        faccessat = libc.faccessat
-        faccessat.argtypes = [
-            ctypes.c_int,
-            ctypes.c_char_p,
-            ctypes.c_int,
-            ctypes.c_int,
-        ]
-        faccessat.restype = ctypes.c_int
-        ctypes.set_errno(0)
-        result = faccessat(descriptor, b"", os.W_OK, 0x1000 | 0x0200)
-        if result == 0:
-            return True
-        error = ctypes.get_errno()
-        if error in {errno.EACCES, errno.EPERM, errno.EROFS}:
-            return False
-        raise OSError(error or errno.EIO, "effective descriptor access unavailable")
-    except (AttributeError, TypeError):
-        return True
-
-
-def _release_posix_read_lease(descriptor: int) -> None:
-    import fcntl
-
-    fcntl.fcntl(descriptor, fcntl.F_SETLEASE, fcntl.F_UNLCK)
-
-
 def _stream_open_executable_binding(
     path: Path, descriptor: int
 ) -> tuple[ExecutableBindingV1, str, str]:
@@ -2572,7 +2397,6 @@ class _ExecutableLaunchOwnerV1:
         descriptor: int = -1,
         parent_handles: tuple[int, ...] = (),
         windows_api: _WindowsKernelV1 | None = None,
-        lease_held: bool = False,
         binding: ExecutableBindingV1 | None = None,
         identity_sha256: str = "",
         version_sha256: str = "",
@@ -2582,7 +2406,6 @@ class _ExecutableLaunchOwnerV1:
         self.parent_handles = list(parent_handles)
         self.leaf_handle: int | None = None
         self.windows_api = windows_api
-        self.lease_held = lease_held
         self.binding = binding
         self.identity_sha256 = identity_sha256
         self.version_sha256 = version_sha256
@@ -2590,26 +2413,12 @@ class _ExecutableLaunchOwnerV1:
         self._closed = False
         self._lock = threading.Lock()
 
-    @property
-    def posix_exec_path(self) -> str:
-        if os.name == "nt" or self._closed:
-            raise ProcessSupervisionError(
-                "PSV1-EXECUTABLE-UNRESOLVED", "process-create"
-            )
-        return f"/proc/self/fd/{self.descriptor}"
-
     def close(self, _remaining: float = 0.0) -> None:
         with self._lock:
             if self._closed:
                 return
             errors: list[BaseException] = []
-            if self.lease_held and os.name != "nt":
-                try:
-                    _release_posix_read_lease(self.descriptor)
-                    self.lease_held = False
-                except BaseException as exc:
-                    errors.append(exc)
-            if not self.lease_held and self.descriptor >= 0:
+            if self.descriptor >= 0:
                 descriptor = self.descriptor
                 self.descriptor = -1
                 try:
@@ -2629,8 +2438,7 @@ class _ExecutableLaunchOwnerV1:
                     else:
                         errors.append(OSError("CloseHandle failed"))
             self._closed = (
-                not self.lease_held
-                and self.descriptor < 0
+                self.descriptor < 0
                 and self.leaf_handle is None
                 and not self.parent_handles
             )
@@ -2692,23 +2500,9 @@ def _acquire_executable_launch_owner(
             owner.descriptor = descriptor
             owner.leaf_handle = None
         else:
-            for component in reversed((absolute, *absolute.parents)):
-                metadata = component.lstat()
-                if stat.S_ISLNK(metadata.st_mode):
-                    raise OSError("executable path symlink")
-            owner.descriptor = os.open(
-                absolute,
-                os.O_RDONLY
-                | getattr(os, "O_NOFOLLOW", 0)
-                | getattr(os, "O_CLOEXEC", 0),
+            raise ProcessSupervisionError(
+                "PSV1-POSIX-ORACLE-UNAVAILABLE", "request-validation"
             )
-            live_metadata = os.fstat(owner.descriptor)
-            if (
-                live_metadata.st_uid == os.geteuid()
-                or _posix_fd_effectively_writable(owner.descriptor)
-            ):
-                _set_posix_read_lease(owner.descriptor)
-                owner.lease_held = True
         binding, identity, version = _stream_open_executable_binding(
             absolute, owner.descriptor
         )
@@ -2777,39 +2571,6 @@ def _convert_windows_handle_to_fd(
         lifecycle.mark_resource_uncertain(resource_name)
         raise
     return descriptor
-
-
-def _dup_owned_fd(
-    source_fd: int,
-    lifecycle: RunLifecycleV1,
-    resource_name: str,
-    *,
-    after_register: Callable[[int], None] | None = None,
-) -> int:
-    descriptor = os.dup(source_fd)
-    lifecycle.register_resource(
-        resource_name, lambda _remaining: os.close(descriptor)
-    )
-    lifecycle.transfer_resource(
-        resource_name,
-        lambda _remaining: os.close(descriptor),
-        state="FD_OWNED",
-    )
-    if after_register is not None:
-        after_register(descriptor)
-    return descriptor
-
-
-def _register_posix_popen_streams(
-    process: object, lifecycle: RunLifecycleV1
-) -> None:
-    for name in ("stdin", "stdout", "stderr"):
-        stream = getattr(process, name)
-        lifecycle.register_resource(
-            f"posix-popen:{name}",
-            lambda _remaining, stream=stream: stream.close(),
-        )
-
 
 def _windows_environment_block(request: ProcessRequestV1) -> ctypes.Array[Any]:
     rows = sorted(request.environment, key=lambda row: row.name.casefold())
@@ -3456,337 +3217,6 @@ def _linux_proc_identity(pid: int) -> tuple[int, int, int]:
     return int(fields[2]), int(fields[3]), int(fields[19])
 
 
-def _linux_identity_census(
-    pgid: int,
-    sid: int,
-    census_index: int,
-    *,
-    max_processes: int = 65_536,
-    max_bytes: int = 8 * 1024 * 1024,
-    deadline: float | None = None,
-    clock: Callable[[], float] = time.monotonic,
-    entries: Callable[[], Iterable[Path]] | None = None,
-    killpg_probe: Callable[[int, int], None] | None = None,
-) -> tuple[bool, tuple[PosixProcessIdentityV1, ...], str]:
-    now = clock()
-    local_deadline = min(now + 0.25, deadline if deadline is not None else now + 0.25)
-    try:
-        while True:
-            total = 0
-            count = 0
-            members: list[PosixProcessIdentityV1] = []
-            zombie_members = 0
-            for entry in (entries() if entries is not None else Path("/proc").iterdir()):
-                if clock() >= local_deadline:
-                    return False, (), "timeout"
-                if not entry.name.isdigit():
-                    continue
-                count += 1
-                if count > max_processes:
-                    return False, (), "unknown"
-                try:
-                    raw = (entry / "stat").read_bytes()
-                except FileNotFoundError:
-                    continue
-                total += len(raw)
-                if total > max_bytes:
-                    return False, (), "unknown"
-                close = raw.rfind(b")")
-                fields = raw[close + 2 :].split()
-                if len(fields) > 19 and int(fields[2]) == pgid and int(fields[3]) == sid:
-                    if fields[0] == b"Z":
-                        zombie_members += 1
-                        continue
-                    members.append(
-                        PosixProcessIdentityV1(
-                            int(entry.name),
-                            fields[19].decode("ascii"),
-                            pgid,
-                            sid,
-                            census_index,
-                            census_index,
-                        )
-                    )
-            if clock() >= local_deadline:
-                return False, (), "timeout"
-            if clock() >= local_deadline:
-                return False, (), "timeout"
-            try:
-                probe = killpg_probe or getattr(os, "killpg", None)
-                if probe is None:
-                    return False, (), "unsupported"
-                probe(pgid, 0)
-                killpg_state = "present"
-            except ProcessLookupError:
-                killpg_state = "esrch"
-            except PermissionError:
-                killpg_state = "eperm"
-            if killpg_state == "present" and zombie_members and not members:
-                killpg_state = "esrch"
-            if clock() >= local_deadline:
-                return False, (), "timeout"
-            if killpg_state == "esrch" and members:
-                continue
-            return True, tuple(sorted(members, key=lambda item: item.pid)), killpg_state
-    except (OSError, ValueError, IndexError):
-        return False, (), "unknown"
-
-
-class _PosixBackendV1:
-    def run(
-        self,
-        request: ProcessRequestV1,
-        lifecycle: RunLifecycleV1,
-        validated_cwd: ValidatedCwdV1,
-        executable_launch_owner: _ExecutableLaunchOwnerV1,
-    ) -> ProcessResultV1:
-        started = time.monotonic()
-        capture = BoundedCaptureV1(
-            request.capture_policy, request.capture_sink_binding
-        )
-        issues: list[str] = []
-        stdin_state: dict[str, object] = {"written": 0, "complete": not request.stdin_bytes}
-        failure_id: str | None = None
-        stage = "completed"
-        timed_out = cancelled = False
-        exit_code: int | None = None
-        proc: subprocess.Popen[bytes] | None = None
-        readers: list[threading.Thread] = []
-        writer: threading.Thread | None = None
-        settlement = "AMBIGUOUS"
-        pgid: int | None = None
-        signal_safe = False
-        ledger: PosixIdentityLedgerV1 | None = None
-        census_index = 0
-        abandon_unsafe = False
-
-        def observe_group(*, leader_reaped: bool) -> PosixOracleDecisionV1:
-            nonlocal census_index, signal_safe
-            if pgid is None or ledger is None:
-                signal_safe = False
-                return PosixOracleDecisionV1("AMBIGUOUS", False)
-            census_index += 1
-            complete, members, killpg_state = _linux_identity_census(
-                pgid,
-                pgid,
-                census_index,
-                deadline=time.monotonic() + 0.25,
-            )
-            if not complete:
-                ledger.poison(killpg_state)
-                signal_safe = False
-                return PosixOracleDecisionV1("AMBIGUOUS", False)
-            decision = ledger.observe(
-                census_index,
-                members,
-                killpg_state,
-                leader_reaped=leader_reaped,
-            )
-            signal_safe = decision.signal_safe
-            return decision
-
-        def cleanup_posix_backend(remaining: float) -> None:
-            before = len(issues)
-            deadline = time.monotonic() + remaining
-            if proc is not None and proc.poll() is None:
-                if pgid is not None and ledger is not None:
-                    decision = _terminate_posix_group_fresh(
-                        ledger,
-                        deadline=deadline,
-                        census=lambda census_deadline: _linux_identity_census(
-                            pgid,
-                            pgid,
-                            ledger.next_census_index,
-                            deadline=census_deadline,
-                        ),
-                        signal_group=lambda: os.killpg(pgid, signal.SIGKILL),
-                    )
-                    if decision.state != "NONEMPTY" or not decision.signal_safe:
-                        issues.append("PSV1-RUNNER-CLOSE-INCOMPLETE")
-                else:
-                    issues.append("PSV1-RUNNER-CLOSE-INCOMPLETE")
-            if proc is not None and proc.poll() is None:
-                try:
-                    proc.wait(timeout=max(0.0, deadline - time.monotonic()))
-                except (OSError, subprocess.TimeoutExpired):
-                    issues.append("PSV1-RUNNER-CLOSE-INCOMPLETE")
-            for thread in (*readers, *((writer,) if writer else ())):
-                thread.join(max(0.0, deadline - time.monotonic()))
-                if thread.is_alive():
-                    issues.append("PSV1-RESOURCE-CLOSE")
-            if len(issues) != before:
-                raise OSError("posix backend cleanup incomplete")
-
-        lifecycle.register_resource("posix-backend", cleanup_posix_backend)
-        try:
-            proc = subprocess.Popen(
-                request.argv,
-                executable=executable_launch_owner.posix_exec_path,
-                cwd=validated_cwd.canonical_absolute,
-                env=_environment_mapping(request),
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                shell=False,
-                close_fds=True,
-                pass_fds=(executable_launch_owner.descriptor,),
-                start_new_session=True,
-            )
-            assert proc.stdout and proc.stderr and proc.stdin
-            _register_posix_popen_streams(proc, lifecycle)
-            pgid, sid, leader_start = _linux_proc_identity(proc.pid)
-            if pgid != proc.pid or sid != proc.pid:
-                raise ProcessSupervisionError("PSV1-TREE-VERIFICATION", "tree-verification")
-            leader = PosixProcessIdentityV1(
-                proc.pid, str(leader_start), pgid, sid, 0, 0
-            )
-            ledger = PosixGroupSettlementOracleV1(leader)
-            first = observe_group(leader_reaped=proc.poll() is not None)
-            if first.state == "AMBIGUOUS" and proc.poll() is not None:
-                first = observe_group(leader_reaped=True)
-            if first.state == "AMBIGUOUS" or (
-                first.state == "NONEMPTY" and not first.signal_safe
-            ):
-                raise ProcessSupervisionError(
-                    "PSV1-POSIX-SETTLEMENT-AMBIGUOUS", "tree-settlement"
-                )
-            for pipe, name in ((proc.stdout, "stdout"), (proc.stderr, "stderr")):
-                resource_name = f"posix-fd:{name}"
-                fd = _dup_owned_fd(
-                    pipe.fileno(), lifecycle, resource_name
-                )
-                if not lifecycle.close_resource(
-                    f"posix-popen:{name}",
-                    time.monotonic() + RUNNER_CLOSE_TIMEOUT_SECONDS,
-                ):
-                    raise ProcessSupervisionError(
-                        "PSV1-DESCRIPTOR-OWNERSHIP", "handle-preparation"
-                    )
-                lifecycle.register_worker(name)
-                thread = threading.Thread(
-                    target=_reader_fd,
-                    args=(
-                        fd,
-                        name,
-                        capture,
-                        request.capture_policy.chunk_size,
-                        issues,
-                        lifecycle,
-                        resource_name,
-                    ),
-                    daemon=True,
-                )
-                thread.start()
-                readers.append(thread)
-            stdin_resource = "posix-fd:stdin"
-            stdin_fd = _dup_owned_fd(
-                proc.stdin.fileno(), lifecycle, stdin_resource
-            )
-            if not lifecycle.close_resource(
-                "posix-popen:stdin",
-                time.monotonic() + RUNNER_CLOSE_TIMEOUT_SECONDS,
-            ):
-                raise ProcessSupervisionError(
-                    "PSV1-DESCRIPTOR-OWNERSHIP", "handle-preparation"
-                )
-            lifecycle.register_worker("stdin")
-            writer = threading.Thread(
-                target=_writer_fd,
-                args=(
-                    stdin_fd,
-                    request.stdin_bytes or b"",
-                    stdin_state,
-                    issues,
-                    lifecycle,
-                    stdin_resource,
-                ),
-                daemon=True,
-            )
-            writer.start()
-            while proc.poll() is None:
-                if capture.limit_crossed:
-                    failure_id, stage = "PSV1-CAPTURE-LIMIT", "capture-limit"
-                elif capture.io_failed:
-                    failure_id, stage = "PSV1-CAPTURE-IO", "execution"
-                elif stdin_state.get("failure"):
-                    failure_id, stage = str(stdin_state["failure"]), "stdin-delivery"
-                elif lifecycle.cancelled or (
-                    request.cancellation_probe is not None
-                    and request.cancellation_probe()
-                ):
-                    failure_id, stage, cancelled = "PSV1-CANCELLED", "cancellation", True
-                elif time.monotonic() >= request.deadline_monotonic:
-                    failure_id, stage, timed_out = "PSV1-DEADLINE", "deadline", True
-                if failure_id:
-                    decision = observe_group(leader_reaped=False)
-                    if decision.state == "NONEMPTY" and decision.signal_safe:
-                        os.killpg(pgid, signal.SIGKILL)
-                    else:
-                        failure_id = "PSV1-POSIX-SETTLEMENT-AMBIGUOUS"
-                        stage = "tree-settlement"
-                        settlement = "AMBIGUOUS"
-                        abandon_unsafe = True
-                        break
-                time.sleep(ENGINE_POLL_INTERVAL_SECONDS)
-            if not abandon_unsafe:
-                exit_code = proc.wait(timeout=request.settle_policy.timeout_seconds)
-            decisions = []
-            for _ in range(2):
-                decisions.append(observe_group(leader_reaped=proc.poll() is not None))
-                time.sleep(ENGINE_POLL_INTERVAL_SECONDS)
-            settlement = decisions[-1].state
-            if settlement == "NONEMPTY" and decisions[-1].signal_safe:
-                os.killpg(pgid, signal.SIGKILL)
-                if failure_id is None:
-                    failure_id, stage = "PSV1-TREE-SETTLEMENT", "tree-settlement"
-                settle_until = time.monotonic() + request.settle_policy.timeout_seconds
-                while True:
-                    decision = observe_group(leader_reaped=True)
-                    decisions.append(decision)
-                    settlement = decision.state
-                    if settlement == "EMPTY" or time.monotonic() >= settle_until:
-                        break
-                    time.sleep(ENGINE_POLL_INTERVAL_SECONDS)
-            if settlement == "AMBIGUOUS" and failure_id is None:
-                failure_id, stage = "PSV1-POSIX-SETTLEMENT-AMBIGUOUS", "tree-settlement"
-            for thread in readers:
-                thread.join(request.settle_policy.timeout_seconds)
-            if writer:
-                writer.join(request.settle_policy.timeout_seconds)
-        except ProcessSupervisionError as exc:
-            failure_id, stage = exc.failure_id, exc.terminal_stage
-            if proc is not None and proc.poll() is None:
-                try:
-                    decision = observe_group(leader_reaped=False)
-                    if decision.state == "NONEMPTY" and decision.signal_safe:
-                        os.killpg(proc.pid, signal.SIGKILL)
-                        proc.wait(timeout=request.settle_policy.timeout_seconds)
-                    else:
-                        failure_id, stage = (
-                            "PSV1-POSIX-SETTLEMENT-AMBIGUOUS",
-                            "tree-settlement",
-                        )
-                except (OSError, subprocess.TimeoutExpired):
-                    failure_id, stage = (
-                        "PSV1-POSIX-SETTLEMENT-AMBIGUOUS",
-                        "tree-settlement",
-                    )
-        finalization = lifecycle.finalize_once(
-            time.monotonic() + request.settle_policy.timeout_seconds
-        )
-        issues.extend(finalization.cleanup_issues)
-        return _result_from_parts(
-            request, started,
-            executable_identity_sha256=validated_cwd.executable_identity_sha256,
-            backend="posix-group-oracle-v1", capture=capture,
-            stdin_state=stdin_state, exit_code=exit_code, failure_id=failure_id,
-            stage=stage, timed_out=timed_out, cancelled=cancelled,
-            ownership_confirmed=proc is not None, settlement_state=settlement,
-            direct_reaped=proc is None or proc.poll() is not None,
-            primary_thread_closed=True, job_handle_closed=True,
-            resources_closed=not issues and all(not thread.is_alive() for thread in readers) and (writer is None or not writer.is_alive()),
-            poisoned=False, cleanup_issues=issues,
-        )
 
 
 class ProcessRunnerV1:
@@ -4067,11 +3497,7 @@ class ProcessRunnerV1:
                     "PSV1-REQUEST-INVALID", "request-validation"
                 )
             _validate_request_shape_before_executable_acquisition(request)
-            if os.name != "nt" and (
-                not sys.platform.startswith("linux")
-                or not Path("/proc/self/stat").is_file()
-            ):
-                validated_cwd = validate_process_request(request)
+            if os.name != "nt":
                 raise ProcessSupervisionError(
                     "PSV1-POSIX-ORACLE-UNAVAILABLE", "request-validation"
                 )
@@ -4211,7 +3637,7 @@ class ProcessRunnerV1:
                     validated_cwd,
                     executable_launch_owner,
                 )
-            elif os.name == "nt":
+            else:
                 assert admission is not None
                 assert executable_launch_owner is not None
                 result = _WindowsBackendV1(
@@ -4224,14 +3650,6 @@ class ProcessRunnerV1:
                     validated_cwd,
                     executable_launch_owner,
                     admission,
-                )
-            else:
-                assert executable_launch_owner is not None
-                result = _PosixBackendV1().run(
-                    request,
-                    owned_lifecycle,
-                    validated_cwd,
-                    executable_launch_owner,
                 )
         except ProcessSupervisionError as exc:
             result = _request_failure(
@@ -5074,10 +4492,6 @@ __all__ = [
     "HOOK_HEALTH_STDERR_LIMIT_BYTES",
     "HookHealthSpoolCaptureSinkV1",
     "MemoryCaptureSinkV1",
-    "PosixGroupSettlementOracleV1",
-    "PosixIdentityLedgerV1",
-    "PosixOracleDecisionV1",
-    "PosixProcessIdentityV1",
     "ProcessRequestV1",
     "ProcessResultV1",
     "ProcessRunnerV1",

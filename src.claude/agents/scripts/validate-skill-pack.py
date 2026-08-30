@@ -445,6 +445,10 @@ _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
   '8f8c4dfb9ac60ed814d7c7c5203c849835d99f12c0edf9ff4f633a3bac6b3b76',
   'src.claude/skills/github-pr-review-bot/SKILL.md'),
  ('check_common_skill_body_pin',
+  'generalize-from-instance',
+  '7233fcd0d38ccb87e2b95d5f95af3811aa5224e873591eaefd397d3c20b9fea4',
+  'src.claude/skills/generalize-from-instance/SKILL.md'),
+ ('check_common_skill_body_pin',
   'manual-repo-transfer',
   '2ca88a24317c81cc18c5f2cc6125895d06ae790a19195ce4a3359428b2c51ea0',
   'src.claude/skills/manual-repo-transfer/SKILL.md'),
@@ -1308,7 +1312,7 @@ def _is_source_only_maintainer_action(action: tuple[str, ...]) -> bool:
 
 _ALL_ACTIONS = (
     _DECLARED_ACTIONS[0:42]
-    + _DECLARED_ACTIONS[114:256]
+    + _DECLARED_ACTIONS[114:257]
     + _APAT_ACTIONS
 )
 
@@ -1324,12 +1328,12 @@ ACTIONS = (
     (
         "dev_repo",
         _DECLARED_ACTIONS[42:114]
-        + _DECLARED_ACTIONS[269:273]
-        + _DECLARED_ACTIONS[274:279]
-        + _DECLARED_ACTIONS[280:286]
-        + _DECLARED_ACTIONS[293:308]
-        # Declaration 308 reads the source-only root README, absent when installed.
-        + _DECLARED_ACTIONS[308:309]
+        + _DECLARED_ACTIONS[270:274]
+        + _DECLARED_ACTIONS[275:280]
+        + _DECLARED_ACTIONS[281:287]
+        + _DECLARED_ACTIONS[294:309]
+        # Declaration 309 reads the source-only root README, absent when installed.
+        + _DECLARED_ACTIONS[309:310]
         + tuple(
             action for action in _ALL_ACTIONS
             if _is_source_only_maintainer_action(action)
@@ -1339,10 +1343,10 @@ ACTIONS = (
     ),
     (
         "dev_repo_nonstandalone",
-        _DECLARED_ACTIONS[256:269]
-        + _DECLARED_ACTIONS[273:274]
-        + _DECLARED_ACTIONS[279:280]
-        + _DECLARED_ACTIONS[286:293],
+        _DECLARED_ACTIONS[257:270]
+        + _DECLARED_ACTIONS[274:275]
+        + _DECLARED_ACTIONS[280:281]
+        + _DECLARED_ACTIONS[287:294],
     ),
     ("installed", _INSTALLED_ACTIONS),
 )

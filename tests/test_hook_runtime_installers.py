@@ -203,6 +203,31 @@ def _bypass_is_evidence_only(line: str) -> bool:
     )
 
 
+@pytest.mark.parametrize("encoding", ("cp1251", "utf-8"))
+def test_installer_help_renders_under_supported_windows_encodings(
+    encoding: str,
+) -> None:
+    env = os.environ.copy()
+    env["PYTHONIOENCODING"] = encoding
+    completed = subprocess.run(
+        [sys.executable, "-B", str(HELPER_PATH), "--help"],
+        cwd=ROOT,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    stdout = completed.stdout.decode(encoding)
+    stderr = completed.stderr.decode(encoding)
+
+    assert completed.returncode == 0, stderr
+    assert "Supported targets:" in stdout
+    assert "--platform claude" in stdout
+    assert "--platform codex" in stdout
+    assert "--platform generic" in stdout
+    assert stderr == ""
+
+
 def test_python_production_installer_owns_ordered_hook_transaction() -> None:
     source = inspect.getsource(PRODUCTION_INSTALLER._install_hooks)
     preflight = source.index("--test-transaction-preflight")

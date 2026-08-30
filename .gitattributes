@@ -6,3 +6,6 @@
 # LF -> 39,891. eol=lf prevents an editor/tool from silently re-introducing CRLF.
 shared/AGENTS.shared.md text eol=lf
 shared/references/spine/*.md text eol=lf
+
+# Historical accepted-prior fixtures preserve their source blob bytes, including CRLF.
+tests/fixtures/canonical-skill-priors/**/agents/openai.yaml whitespace=cr-at-eol

@@ -1,18 +1,9 @@
 ---
 name: architect
-description: "Architect: design architecture and contracts from research."
+description: "Architecture design: contracts, seams, tradeoffs, risks."
 ---
 
 # Architect
-
-## Inline adoption vs dispatch
-
-This skill runs two ways:
-
-- **Inline** (`Skill` tool, `/architect`): loads this contract into the CURRENT conversation, preserving accumulated context. It runs in-session — it does NOT claim isolation or independence from the conversation that invoked it. Use it for the seam and blast-radius decisions the quick-fix/fast-lane flow already makes inline today, now with the Change-Surface Contract and claims discipline instead of an ad hoc call. Model-initiated inline adoption is permitted for this bounded decision only when announced in-chat before executing and scoped to that one decision (CLAUDE.md curated inline role-skills exception).
-- **Dispatched** (`Agent` tool, `subagent_type: architect`): the fresh-context delegate wrapper at `.claude/agents/architect.md` loads this same skill inside an isolated subagent context, for a non-trivial design.
-
-Adopting this role inline approves nothing — the `architecture-reviewer` independent gate remains a separate dispatch regardless of invocation mode.
 
 ## Core stance
 
@@ -28,17 +19,6 @@ Adopting this role inline approves nothing — the `architecture-reviewer` indep
 - Challenge gaps in the research artifact instead of filling them with speculation.
 - Spot-check that the accepted research memo's load-bearing `file:line` citations still match the current tree before designing. A moved or materially changed citation is `REVISE`-to-analyst, not permission to redo the research silently.
 - Make the intended change surface, approved extension seams, and protected surfaces explicit before handing work to the planner.
-
-<!-- CABI-EXTERNAL-ADAPTER:BEGIN -->
-## External C ABI boundary
-
-When the design introduces a replaceable binary adapter, or its producer and consumer may be independently built, upgraded, or distributed, use this self-contained minimum contract: expose one versioned neutral function table through one entry point; use fixed-width scalar types with size and version fields; represent bulk data as pointer, count, and stride validated before use; define allocation and free ownership; require context-bearing callbacks and ensure no exceptions cross the ABI; return stable status values with explicit error retrieval; drain before unload, after handles and callbacks stop; and test both compatibility directions plus negative matrix cells. The design package hands off exactly two named fields:
-
-- **C ABI Boundary Contract:** applicability decision, neutral interface owner, version negotiation, data/ownership/lifetime rules, failure behavior, and protected surfaces.
-- **Repository-local concretization:** supported matrix, language baselines, toolchain selection, export/calling-convention mechanism, version window, layout/symbol oracles, compatibility evidence, and lifecycle/unload policy.
-
-If the trigger does not apply, record the evidence that the boundary remains inside one controlled build graph and is not independently replaceable or distributed.
-<!-- CABI-EXTERNAL-ADAPTER:END -->
 
 ## Return exactly one artifact
 
@@ -64,7 +44,7 @@ If the trigger does not apply, record the evidence that the boundary remains ins
 - Prefer the smallest durable design that satisfies the validated requirements.
 - Prefer additive extension at approved seams over cross-cutting edits to unrelated modules.
 - Document rejected options when they materially affect future work. Each rejected alternative names its decisive rejection driver and traces it to a research-memo fact or named constraint; an unverifiable driver is `ASSUMPTION (UNVERIFIED)` with the probe that would resolve it.
-- When the design makes a cross-cutting or long-lived architecture decision (one that outlives this work-item or constrains others), file it in the `work-items/decisions/` registry as `status: proposed` (lead skill `skills/lead/SKILL.md` `## Decisions`) and REFERENCE it by id from this design package, rather than burying it in a `design.md` that will be archived with the item. Promotion `proposed -> accepted` is the `$architecture-reviewer` gate's call, not yours.
+- When the design makes a cross-cutting or long-lived architecture decision (one that outlives this work-item or constrains others), file it in the `work-items/decisions/` registry as `status: proposed` (lead skill `## Decisions`) and REFERENCE it by id from this design package, rather than burying it in a `design.md` that will be archived with the item. Promotion `proposed -> accepted` is the `$architecture-reviewer` gate's call, not yours.
 - Name the modules or contracts that should remain untouched if the design is followed correctly.
 - Keep the package structured so the planner and reviewers can translate it without reinterpretation.
 - Treat changes to core or shared modules as exceptional and justify why a more local seam is insufficient.
@@ -96,7 +76,7 @@ Design as single-owner layers composed by thin assemblies, not per-feature silos
 
 When scope investigation reveals issues outside the admitted scope:
 
-1. File the issue in `work-items/bugs/` using the bug registry format, with `context: adjacent-finding` and `status: open`
+1. File the issue in the configured bug registry path, if the repository uses one, using the bug registry format from `qa-engineer/SKILL.md`, with `context: adjacent-finding` and `status: open`.
 2. Mention it in the current artifact under an "Adjacent findings" section.
 3. Do NOT include it in the current design — scope expansion is the orchestrator's decision.
 4. If the adjacent issue blocks the current task, return `BLOCKED:prerequisite` instead of working around it.

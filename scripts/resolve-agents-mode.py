@@ -369,6 +369,7 @@ def _luna_existing_target(
     value: Any,
     *,
     leaf_kind: str,
+    allow_missing_leaf: bool = False,
 ) -> tuple[Path, Any] | None:
     if not _valid_relative_probe_path(value):
         return None
@@ -388,7 +389,21 @@ def _luna_existing_target(
     for component in components:
         cursor = cursor / component
         target_chain.append(cursor)
-    return _luna_stable_ordinary_chain(target_chain, leaf_kind=leaf_kind)
+    existing = _luna_stable_ordinary_chain(target_chain, leaf_kind=leaf_kind)
+    if existing is not None or not allow_missing_leaf:
+        return existing
+    parent_chain = target_chain[:-1]
+    if _luna_stable_ordinary_chain(parent_chain, leaf_kind="directory") is None:
+        return None
+    try:
+        os.lstat(candidate)
+    except FileNotFoundError:
+        if _luna_stable_ordinary_chain(parent_chain, leaf_kind="directory") is None:
+            return None
+        return candidate, None
+    except OSError:
+        return None
+    return None
 
 
 def _luna_existing_file_sha256(path: Path, expected_metadata: Any) -> str | None:
@@ -469,6 +484,7 @@ def _validate_luna_operation(
             exact_root,
             args["path"],
             leaf_kind=leaf_kind,
+            allow_missing_leaf=op == "path-kind",
         ) is None:
             return "E_LUNA_PRECONDITION_FAILED"
     if op == "read-lines" and (
@@ -724,6 +740,11 @@ def validate_scout_facts(
                 operation["op"], fact["value"]
             ):
                 return _luna_validation_result("E_LUNA_FACTS_INVALID")
+            if (
+                operation["op"] == "read-lines"
+                and len(fact["value"]) > operation["args"]["count"]
+            ):
+                return _luna_validation_result("E_LUNA_AUTHORITY_VIOLATION")
         elif (
             fact["execution"] != "error"
             or fact["value"] is not None

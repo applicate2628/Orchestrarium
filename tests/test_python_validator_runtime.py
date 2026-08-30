@@ -1067,7 +1067,7 @@ def test_scoped_action_registry_keeps_source_only_maintainer_checks_out_of_insta
     (
         (
             "codex",
-            "VALIDATION PASSED (with warnings)\n",
+            "VALIDATION PASSED\n",
             "installed work-item state validator enforces evidence for PASS",
         ),
         (
@@ -1102,10 +1102,7 @@ def test_installed_validator_uses_script_layout_and_runs_installed_actions(
     assert result.returncode == 0, result.stdout + result.stderr
     assert expected_clean_result in result.stdout
     assert installed_label in result.stdout
-    if provider == "codex":
-        assert "dev repo validator unavailable in installed layout" in result.stdout
-    else:
-        assert "dev repo validator unavailable in installed layout" not in result.stdout
+    assert "dev repo validator unavailable in installed layout" not in result.stdout
     assert "agents-mode reference defines canonical maintenance" not in result.stdout
     assert "root Python installer default dispatch is Codex plus Claude only" not in result.stdout
 
@@ -1172,7 +1169,7 @@ def test_installed_codex_layering_checks_only_orchestrarium_owned_skills(
             "AGENTS.md",
             "## Role index",
             "## Stale role index",
-            "VALIDATION PASSED (with warnings)\n",
+            "VALIDATION PASSED\n",
                 "installable skill/agent instructions contain no project-specific Orchestrarium upgrade-ledger obligation",
         ),
         (

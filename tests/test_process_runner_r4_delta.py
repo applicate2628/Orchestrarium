@@ -74,29 +74,6 @@ def test_fd_close_failure_is_not_retried_or_marked_closed() -> None:
     assert first.resources_closed is second.resources_closed is False
 
 
-def test_posix_dup_is_registered_before_post_dup_failure() -> None:
-    module = _runner()
-    lifecycle = module.RunLifecycleV1(module.RunTokenV1(b"d" * 16, 1))
-    source_read, source_write = os.pipe()
-    duplicates = []
-    try:
-        with pytest.raises(RuntimeError, match="after-dup"):
-            module._dup_owned_fd(
-                source_read,
-                lifecycle,
-                "stdout-read",
-                after_register=lambda descriptor: (
-                    duplicates.append(descriptor),
-                    (_ for _ in ()).throw(RuntimeError("after-dup")),
-                )[-1],
-            )
-        observation = lifecycle.finalize_once(time.monotonic() + 1.0)
-        assert observation.resources_closed is True
-        with pytest.raises(OSError):
-            os.fstat(duplicates[0])
-    finally:
-        os.close(source_read)
-        os.close(source_write)
 
 
 def test_tombstone_close_failure_blocks_execution_and_is_typed(
@@ -124,21 +101,6 @@ def test_tombstone_close_failure_blocks_execution_and_is_typed(
     assert lifecycle.resource_state("cli-tombstone-descriptor") == "CLOSE_UNCERTAIN"
 
 
-def test_posix_finalizer_requires_fresh_safe_census_before_signal() -> None:
-    module = _runner()
-    leader = module.PosixProcessIdentityV1(100, "start", 100, 100, 1, 1)
-    ledger = module.PosixGroupSettlementOracleV1(leader)
-    assert ledger.observe(1, (leader,), "present", leader_reaped=False).signal_safe
-    signals = []
-    result = module._terminate_posix_group_fresh(
-        ledger,
-        deadline=time.monotonic() + 1.0,
-        census=lambda _deadline: (False, (), "timeout"),
-        signal_group=lambda: signals.append("signal"),
-    )
-    assert result.state == "AMBIGUOUS"
-    assert ledger.poisoned is True
-    assert signals == []
 
 
 @pytest.mark.parametrize("cwd", (123, ["path"], {"path": "value"}, b"bytes"))

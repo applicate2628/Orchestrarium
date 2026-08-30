@@ -11,6 +11,8 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 LIVE_PACKS = ("src.claude", "src.codex")
+GENERALIZE_SKILL = "generalize-from-instance"
+GENERALIZE_BODY_SHA256 = "7233fcd0d38ccb87e2b95d5f95af3811aa5224e873591eaefd397d3c20b9fea4"
 
 
 def _runtime():
@@ -106,6 +108,38 @@ def _add_live_name(root: Path, name: str) -> None:
 def test_live_common_skill_bodies_are_byte_identical() -> None:
     hashes = _live_common_skill_hashes()
     assert tuple(hashes) == _common_skills()
+
+
+def test_generalize_from_instance_is_registered_on_every_common_surface() -> None:
+    assert GENERALIZE_SKILL in _common_skills()
+
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    install = (ROOT / "INSTALL.md").read_text(encoding="utf-8")
+    claude_md = (ROOT / "src.claude/CLAUDE.md").read_text(encoding="utf-8")
+    token = f"`${GENERALIZE_SKILL}`"
+    assert token in readme
+    assert token in install
+    assert token in claude_md
+
+
+def test_generalize_from_instance_bodies_match_the_source_pin() -> None:
+    digest = _runtime().common_skill_body_sha256
+    bodies = {
+        pack: _skill(ROOT, pack, GENERALIZE_SKILL).read_bytes()
+        for pack in LIVE_PACKS
+    }
+    assert len(set(bodies.values())) == 1
+    assert {digest(body) for body in bodies.values()} == {GENERALIZE_BODY_SHA256}
+
+
+def test_generalize_from_instance_has_no_private_case_or_absolute_path_anchor() -> None:
+    body = _skill(ROOT, "src.codex", GENERALIZE_SKILL).read_text(encoding="utf-8")
+    assert "vfem" not in body.casefold()
+    private_absolute_paths = re.findall(
+        r"(?im)(?:\b[a-z]:[\\/]|/(?:home|users)/[^/\s]+/)",
+        body,
+    )
+    assert not private_absolute_paths
 
 
 def test_live_add_changes_only_live_membership(tmp_path: Path) -> None:

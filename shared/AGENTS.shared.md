@@ -10,15 +10,15 @@ Source-only/maintainer-only, NOT installed: `shared/references/`; these rules ar
 - Approved UI: `$frontend-engineer` for web/React; `$qt-ui-engineer` only for Qt desktop.
 
 ## Common skills
-Common skills: any role or the main conversation uses on match; they are not roles and do not own delivery. Delegate-style may spawn one artifact; also invocable inline. Set: `$windows-gui-manual-testing`, `$analyzing-video-bugs`, `$bug-hunting`, `$mathtype-book-page`, `$repo-cleanup`, `$manual-repo-transfer`, `$github-pr-review-bot`, `$explain-simply`, `$vak-dissertation-review`, `$vcpkg-ports-updater`, `$vcpkg-builder`.
+Common skills: any role or the main conversation uses on match; they are not roles and do not own delivery. Delegate-style may spawn one artifact; also invocable inline. Set: `$windows-gui-manual-testing`, `$analyzing-video-bugs`, `$bug-hunting`, `$mathtype-book-page`, `$repo-cleanup`, `$manual-repo-transfer`, `$github-pr-review-bot`, `$explain-simply`, `$vak-dissertation-review`, `$vcpkg-ports-updater`, `$vcpkg-builder`, `$generalize-from-instance`.
 
-**No-self-residue.** Before `PASS`/handoff/commit/push/transfer, settle residue; preserve user/ambiguous state. `$repo-cleanup` is read-only; Lead gates its report. [Details](references/repository-cleanup.md).
+**No-self-residue.** Settle residue before `PASS`/handoff/commit/push/transfer; preserve user/ambiguous state. `$repo-cleanup` stays read-only and Lead-gated. [Details](references/repository-cleanup.md).
 
 ## Policy boundaries
 Global: short/testable. Repo-local: contracts/toolchains/portability. Specialists own domain heuristics.
 
 ## Artifact persistence
-Storage: `work-items/` canonical; `.reports/YYYY-MM/` optional standalone summary; `.plans/YYYY-MM/` optional explicitly requested standalone plan.
+Storage: canonical `work-items/`; optional `.reports/YYYY-MM/` standalone summary; explicitly requested `.plans/YYYY-MM/` plan.
 
 ### Physical lifecycle V1
 Physical location alone owns V1 lifecycle: current records stay in their category root; terminal records live only in `archive/YYYY-MM/`, with the month from recorded strict UTC `YYYY-MM-DDTHH:MM:SSZ`, never inferred. `status.md` owns active recovery, `closure.md` final outcome, and README/index are derived views. Before a work-item closes, `bug-dispositions.json` must enumerate exactly every current bug whose parsed `context` equals the item slug and declare each as `terminalize` or `preserve-current`. Only the lifecycle owner applies those dispositions, archives the item, writes `bug-dispositions-receipt.json`, and refreshes README as one rollback-safe transaction; an active manifest is pending close. It also fails closed on missing admission, terminal evidence, unique location, or logical-link inventory. An archive identity is immutable: reopen via an explicit successor, never reverse move. Historical archives without the newer bug manifest remain compatible; never backfill or guess.

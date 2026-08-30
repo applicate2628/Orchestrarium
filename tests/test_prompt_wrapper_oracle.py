@@ -1287,6 +1287,7 @@ def test_provider_adapter_preserves_capture_policy_bounds() -> None:
     assert owner.provider_capture_policy(owner.CAPTURE_MAX_BYTES_HARD).aggregate_persisted_limit == 256 * 1024 * 1024
 
 
+@pytest.mark.skipif(os.name != "nt", reason="POSIX production dispatch fails closed before launch")
 def test_provider_adapter_settles_retained_pipe_descendant(tmp_path: Path) -> None:
     environment = {"PATH": os.environ["PATH"]}
     for name in ("SYSTEMROOT", "WINDIR"):
@@ -1391,7 +1392,7 @@ def test_provider_adapter_settles_retained_pipe_descendant(tmp_path: Path) -> No
                 assert restored_subreaper.value == prior_subreaper
 
     assert result.event_id == "process.supervision.settled.v1"
-    assert result.tree.backend in {"posix-group-oracle-v1", "windows-job-v1"}
+    assert result.tree.backend == "windows-job-v1"
     assert result.tree.tree_empty and result.tree.direct_reaped
     assert result.resources_closed
 

@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import time
+import types
 from pathlib import Path
 
 import pytest
@@ -119,6 +120,27 @@ def test_platform_python_commands_canonicalize_absolute_executable_alias(
         assert actual_argv[0] == str(canonical_python)
 
 
+def test_git_mapping_preserves_process_supervision_failure_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = _load()
+    supervision = types.SimpleNamespace(
+        target_exit_code=None,
+        failure_id="PSV1-POSIX-ORACLE-UNAVAILABLE",
+        tree=types.SimpleNamespace(tree_empty=False),
+        resources_closed=True,
+    )
+    sink = types.SimpleNamespace(bytes_for=lambda _stream: b"")
+    monkeypatch.setattr(
+        module,
+        "_run_process",
+        lambda *_args, **_kwargs: (("git", "status"), {}, sink, supervision),
+    )
+
+    with pytest.raises(RuntimeError, match=r"PSV1-POSIX-ORACLE-UNAVAILABLE"):
+        module._git(object(), tmp_path, "status")
+
+
 def _process_running(pid: int) -> bool:
     """Use an operating-system process oracle instead of task-list text."""
 
@@ -174,7 +196,7 @@ def _receipt_v2(module, **changes):
         "stderrPersistedBytes": 0,
         "stderrTruncated": False,
         "stderrSha256": hashlib.sha256(b"").hexdigest(),
-        "treeBackend": "windows-job-v1" if os.name == "nt" else "posix-group-oracle-v1",
+        "treeBackend": "windows-job-v1",
         "ownershipConfirmed": True,
         "settlementState": "EMPTY",
         "treeEmpty": True,

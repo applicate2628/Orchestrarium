@@ -396,7 +396,9 @@ def run_bounded_process(command: list[str], repository: Path | None, environment
         raise ContractError("git output exceeds JSON limit")
     if result.failure_id == "PSV1-CAPTURE-IO":
         raise ContractError("git output capture failed")
-    if result.failure_id is not None or not result.tree.tree_empty or not result.resources_closed:
+    if result.failure_id is not None:
+        raise ContractError(f"git process supervision failed: {result.failure_id}")
+    if not result.tree.tree_empty or not result.resources_closed:
         raise ContractError("not a git repository")
     completed = subprocess.CompletedProcess(
         command, result.target_exit_code or 0, stdout, stderr

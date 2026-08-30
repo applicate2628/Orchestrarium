@@ -9,6 +9,8 @@ The transform (verified empirically against the published branches, 2026-06-13):
   - INCLUDE from the source ref (default the monorepo HEAD), per provider:
       src.<provider>/**, references-<provider>/**, shared/**, scripts/**, LICENSE,
       .gitignore, and an ALLOWLIST of self-contained pack docs (DOCS_ALLOW_FROM_MAIN).
+      The Claude distribution also carries src.codex/skills/** and its canonical
+      role manifest because the shared production installer reads those payloads.
   - CLAUDE ONLY: also GENERATE src.claude/skills/agents-X/SKILL.md from each
       src.claude/commands/agents-X.md (a deterministic frontmatter wrapper; the
       standalone Claude pack ships both the command and an auto-discoverable skill).
@@ -43,6 +45,8 @@ PROVIDERS = ("claude", "codex")
 
 SHARED_PREFIXES = ("shared/", "scripts/")
 SHARED_FILES = ("LICENSE", ".gitignore")
+CLAUDE_CANONICAL_SKILLS_PREFIX = "src.codex/skills/"
+CLAUDE_CANONICAL_ROLE_MANIFEST = "src.codex/agents/orchestrarium-role-manifest.json"
 MAINTAINER_ONLY_FILES = frozenset({
     "shared/references/cross-pack-reconciliation.md",
 })
@@ -185,6 +189,10 @@ def include_from_main(path: str, provider: str) -> bool:
     if path in MAINTAINER_ONLY_FILES:
         return False
     if path.startswith((f"src.{provider}/", f"references-{provider}/", *SHARED_PREFIXES)):
+        return True
+    if provider == "claude" and path.startswith(CLAUDE_CANONICAL_SKILLS_PREFIX):
+        return True
+    if provider == "claude" and path == CLAUDE_CANONICAL_ROLE_MANIFEST:
         return True
     if path in SHARED_FILES:
         return True

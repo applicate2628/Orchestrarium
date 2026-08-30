@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import dataclasses
-import errno
 import hashlib
 import importlib.util
 import os
 import shutil
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -52,133 +50,12 @@ def _script(path: Path, marker: str) -> Path:
     return path
 
 
-@pytest.mark.skipif(os.name == "nt", reason="Linux descriptor-bound exec contract")
-def test_posix_precreate_path_swap_executes_admitted_open_file(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Replacing the pathname immediately before Popen cannot replace the child image."""
-    module = _load_runner()
-    owner = module.ProcessRunnerV1()
-    executable = _script(tmp_path / "tool", "admitted")
-    replacement = _script(tmp_path / "replacement", "swapped")
-    original_popen = module.subprocess.Popen
-    swapped = False
-
-    def swap_then_popen(*args, **kwargs):
-        nonlocal swapped
-        if not swapped:
-            os.replace(replacement, executable)
-            swapped = True
-        return original_popen(*args, **kwargs)
-
-    monkeypatch.setattr(module.subprocess, "Popen", swap_then_popen)
-    request = _request(module, owner, executable, tmp_path)
-    result = owner.run(request)
-
-    assert result.outcome == "success"
-    assert request.capture_sink_binding.bytes_for("stdout") == b"admitted"
-    assert "printf swapped" in executable.read_text(encoding="utf-8")
 
 
-@pytest.mark.skipif(os.name == "nt", reason="Linux lease contract")
-def test_posix_same_user_writable_executable_requires_read_lease(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A same-user writer cannot open the admitted inode before confirmed exec."""
-    module = _load_runner()
-    owner = module.ProcessRunnerV1()
-    executable = _script(tmp_path / "tool", "lease-ok")
-    original_popen = module.subprocess.Popen
-    writer_errno: list[int | None] = []
-
-    def contend_then_popen(*args, **kwargs):
-        probe = original_popen(
-            [
-                sys.executable,
-                "-c",
-                (
-                    "import errno,os,sys;"
-                    "p=sys.argv[1];"
-                    "\ntry: fd=os.open(p,os.O_WRONLY|os.O_NONBLOCK)"
-                    "\nexcept OSError as e: print(e.errno)"
-                    "\nelse: os.close(fd); print('OPENED')"
-                ),
-                str(executable),
-            ],
-            stdout=subprocess.PIPE,
-            text=True,
-        )
-        output = probe.communicate(timeout=2.0)[0].strip()
-        writer_errno.append(None if output == "OPENED" else int(output))
-        return original_popen(*args, **kwargs)
-
-    monkeypatch.setattr(module.subprocess, "Popen", contend_then_popen)
-    result = owner.run(_request(module, owner, executable, tmp_path))
-
-    assert result.outcome == "success"
-    assert writer_errno == [errno.EAGAIN]
 
 
-@pytest.mark.skipif(os.name == "nt", reason="Linux lease lifetime contract")
-def test_posix_executable_lease_is_not_closed_while_child_is_running(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Interpreted executables retain their content lease through child exit."""
-
-    module = _load_runner()
-    owner = module.ProcessRunnerV1()
-    executable = _script(tmp_path / "tool", "lease-lifetime")
-    process: list[subprocess.Popen[bytes]] = []
-    early_close: list[bool] = []
-    original_popen = module.subprocess.Popen
-    original_close = module.RunLifecycleV1.close_resource
-
-    def observe_popen(*args, **kwargs):
-        child = original_popen(*args, **kwargs)
-        process.append(child)
-        return child
-
-    def observe_close(lifecycle, name, deadline):
-        if name.startswith("executable-launch:") and process:
-            early_close.append(process[0].poll() is None)
-        return original_close(lifecycle, name, deadline)
-
-    monkeypatch.setattr(module.subprocess, "Popen", observe_popen)
-    monkeypatch.setattr(module.RunLifecycleV1, "close_resource", observe_close)
-
-    result = owner.run(_request(module, owner, executable, tmp_path))
-
-    assert result.outcome == "success"
-    assert early_close and not any(early_close)
 
 
-@pytest.mark.skipif(os.name == "nt", reason="Linux lease contract")
-def test_posix_lease_failure_creates_no_child(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Same-user-writable executables fail closed when the kernel lease is unavailable."""
-    module = _load_runner()
-    owner = module.ProcessRunnerV1()
-    executable = _script(tmp_path / "tool", "unreachable")
-    popen_calls: list[object] = []
-
-    monkeypatch.setattr(
-        module,
-        "_set_posix_read_lease",
-        lambda _fd: (_ for _ in ()).throw(OSError(errno.EINVAL, "lease unavailable")),
-        raising=False,
-    )
-    def forbidden_popen(*args, **kwargs):
-        popen_calls.append((args, kwargs))
-        raise AssertionError("child created before mandatory lease")
-
-    monkeypatch.setattr(module.subprocess, "Popen", forbidden_popen)
-
-    result = owner.run(_request(module, owner, executable, tmp_path))
-
-    assert result.failure_id == "PSV1-EXECUTABLE-UNRESOLVED"
-    assert result.terminal_stage == "request-validation"
-    assert popen_calls == []
 
 
 @pytest.mark.skipif(os.name != "nt", reason="real Windows share-mode lock contract")
@@ -255,6 +132,7 @@ def test_registration_failure_closes_launch_object_and_preserves_typed_error(
     assert replacement.is_file()
 
 
+@pytest.mark.skipif(os.name != "nt", reason="executable acquisition is Windows-only")
 def test_hash_read_failure_releases_pre_registration_launch_guards(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -335,6 +213,7 @@ def test_hash_failure_cleanup_uncertainty_is_visible_and_owner_retryable(
     assert replacement.is_file()
 
 
+@pytest.mark.skipif(os.name != "nt", reason="production ProcessRunner execution is Windows-only")
 def test_backend_factory_receives_live_launch_owner(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -409,101 +288,10 @@ def test_non_linux_posix_refuses_before_launch_owner_acquisition(
     assert acquired == []
 
 
-@pytest.mark.skipif(os.name == "nt", reason="Linux effective-access lease contract")
-@pytest.mark.parametrize("mode", (0o700, 0o470, 0o407))
-def test_effectively_writable_owner_group_or_world_result_requires_lease(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: int
-) -> None:
-    """Every effective-writable classification reaches the same mandatory lease gate."""
-    module = _load_runner()
-    executable = _script(tmp_path / "tool", "effective")
-    executable.chmod(mode)
-    lifecycle = module.RunLifecycleV1(
-        module.RunTokenV1(bytes([mode & 0xFF]) * 16, 1)
-    )
-    leased: list[int] = []
-    monkeypatch.setattr(
-        module, "_posix_fd_effectively_writable", lambda _fd: True
-    )
-    monkeypatch.setattr(
-        module, "_set_posix_read_lease", lambda descriptor: leased.append(descriptor)
-    )
-
-    launch = module._acquire_executable_launch_owner(executable, lifecycle)
-
-    assert leased == [launch.descriptor]
-    assert launch.lease_held is True
-    lifecycle.finalize_once(time.monotonic() + 1.0)
 
 
-@pytest.mark.skipif(os.name == "nt", reason="Linux effective-access lease contract")
-def test_fd_effective_access_uses_empty_path_for_acl_without_path_race(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """ACL/effective access is queried against the live descriptor, never its pathname."""
-    module = _load_runner()
-    executable = _script(tmp_path / "tool", "acl")
-    descriptor = os.open(executable, os.O_RDONLY | os.O_NOFOLLOW)
-    calls: list[tuple[int, bytes, int, int]] = []
-
-    class Call:
-        argtypes = None
-        restype = None
-
-        def __call__(self, fd, path, mode, flags):
-            calls.append((fd, path, mode, flags))
-            return 0
-
-    class LibC:
-        faccessat = Call()
-
-    monkeypatch.setattr(module.ctypes, "CDLL", lambda *_args, **_kwargs: LibC())
-    try:
-        assert module._posix_fd_effectively_writable(descriptor) is True
-    finally:
-        os.close(descriptor)
-
-    assert calls == [(descriptor, b"", os.W_OK, 0x1200)]
 
 
-@pytest.mark.skipif(os.name == "nt", reason="POSIX lease retry contract")
-def test_close_retries_after_first_lease_release_failure(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    module = _load_runner()
-    executable = _script(tmp_path / "tool", "retry")
-    descriptor = os.open(executable, os.O_RDONLY | os.O_NOFOLLOW)
-    calls = 0
-
-    def release(_descriptor: int) -> None:
-        nonlocal calls
-        calls += 1
-        if calls == 1:
-            raise OSError("injected lease release failure")
-
-    monkeypatch.setattr(module, "_release_posix_read_lease", release)
-    launch = module._ExecutableLaunchOwnerV1(
-        path=executable,
-        descriptor=descriptor,
-        parent_handles=(),
-        windows_api=None,
-        lease_held=True,
-        binding=module.ExecutableBindingV1(str(executable), 0, "0" * 64),
-        identity_sha256="0" * 64,
-        version_sha256="0" * 64,
-        resource_name="test",
-    )
-
-    with pytest.raises(OSError):
-        launch.close()
-    assert launch._closed is False
-    assert launch.lease_held is True
-    assert launch.descriptor == descriptor
-
-    launch.close()
-    assert launch._closed is True
-    assert launch.lease_held is False
-    assert launch.descriptor == -1
 
 
 def test_close_retries_only_remaining_late_parent_handle_failure(
@@ -532,7 +320,6 @@ def test_close_retries_only_remaining_late_parent_handle_failure(
         descriptor=descriptor,
         parent_handles=(11, 22),
         windows_api=api,
-        lease_held=False,
         binding=module.ExecutableBindingV1(str(executable), 0, "0" * 64),
         identity_sha256="0" * 64,
         version_sha256="0" * 64,
@@ -549,30 +336,6 @@ def test_close_retries_only_remaining_late_parent_handle_failure(
     assert launch._closed is True
     assert launch.parent_handles == []
     assert api.calls == [22, 11, 11]
-
-
-@pytest.mark.skipif(os.name == "nt", reason="POSIX owner chmod-race lease contract")
-def test_owner_nonwritable_inode_still_requires_lease_before_hash(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    module = _load_runner()
-    executable = _script(tmp_path / "tool", "owner")
-    executable.chmod(0o500)
-    lifecycle = module.RunLifecycleV1(module.RunTokenV1(b"n" * 16, 1))
-    leased: list[int] = []
-    monkeypatch.setattr(
-        module, "_posix_fd_effectively_writable", lambda _fd: False
-    )
-    monkeypatch.setattr(
-        module, "_set_posix_read_lease", lambda descriptor: leased.append(descriptor)
-    )
-    monkeypatch.setattr(module, "_release_posix_read_lease", lambda _fd: None)
-
-    launch = module._acquire_executable_launch_owner(executable, lifecycle)
-
-    assert leased == [launch.descriptor]
-    assert launch.lease_held is True
-    lifecycle.finalize_once(time.monotonic() + 1.0)
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX descriptor reuse contract")
@@ -612,7 +375,6 @@ def test_close_error_never_retries_reused_fd_and_settles_other_resources(
         descriptor=descriptor,
         parent_handles=(11,),
         windows_api=Api(),
-        lease_held=False,
         binding=module.ExecutableBindingV1(str(executable), 0, "0" * 64),
         identity_sha256="0" * 64,
         version_sha256="0" * 64,

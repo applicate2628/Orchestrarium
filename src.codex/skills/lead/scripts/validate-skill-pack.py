@@ -641,6 +641,7 @@ _DECLARED_ACTIONS = (('direct', 'file', '@AGENTS'),
   'external-reviewer',
   'external-worker',
   'frontend-engineer',
+  'generalize-from-instance',
   'geometry-engineer',
   'graphics-engineer',
   'init-project',
@@ -691,6 +692,7 @@ _DECLARED_ACTIONS = (('direct', 'file', '@AGENTS'),
   'external-reviewer',
   'external-worker',
   'frontend-engineer',
+  'generalize-from-instance',
   'geometry-engineer',
   'graphics-engineer',
   'init-project',
@@ -739,6 +741,10 @@ _DECLARED_ACTIONS = (('direct', 'file', '@AGENTS'),
   'github-pr-review-bot',
   '8f8c4dfb9ac60ed814d7c7c5203c849835d99f12c0edf9ff4f633a3bac6b3b76',
   '@ROOT/src.codex/skills/github-pr-review-bot/SKILL.md'),
+ ('check_common_skill_body_pin',
+  'generalize-from-instance',
+  '7233fcd0d38ccb87e2b95d5f95af3811aa5224e873591eaefd397d3c20b9fea4',
+  '@ROOT/src.codex/skills/generalize-from-instance/SKILL.md'),
  ('check_common_skill_body_pin',
   'manual-repo-transfer',
   '2ca88a24317c81cc18c5f2cc6125895d06ae790a19195ce4a3359428b2c51ea0',
@@ -1620,10 +1626,10 @@ def _is_source_only_maintainer_action(action: tuple[str, ...]) -> bool:
 # assertion may never leak into the installed-pack action set as an index moves.
 _ALL_ACTIONS = (
     _DECLARED_ACTIONS[0:35]
-    + _DECLARED_ACTIONS[142:304]
-    + _DECLARED_ACTIONS[322:329]
-    # Include declaration 372 so its @ROOT/docs prefix routes it to dev_repo.
-    + _DECLARED_ACTIONS[366:373]
+    + _DECLARED_ACTIONS[142:305]
+    + _DECLARED_ACTIONS[323:330]
+    # Include declaration 373 so its @ROOT/docs prefix routes it to dev_repo.
+    + _DECLARED_ACTIONS[367:374]
     + _APAT_ACTIONS
 )
 
@@ -1641,10 +1647,10 @@ ACTIONS = (
         + _DECLARED_ACTIONS[58:76]
         + _DECLARED_ACTIONS[86:122]
         + _DECLARED_ACTIONS[129:142]
-        + _DECLARED_ACTIONS[318:321]
-        + _DECLARED_ACTIONS[329:334]
-        + _DECLARED_ACTIONS[335:342]
-        + _DECLARED_ACTIONS[351:366]
+        + _DECLARED_ACTIONS[319:322]
+        + _DECLARED_ACTIONS[330:335]
+        + _DECLARED_ACTIONS[336:343]
+        + _DECLARED_ACTIONS[352:367]
         + tuple(
             action for action in _ALL_ACTIONS
             if _is_source_only_maintainer_action(action)
@@ -1658,10 +1664,10 @@ ACTIONS = (
         _DECLARED_ACTIONS[51:58]
         + _DECLARED_ACTIONS[76:86]
         + _DECLARED_ACTIONS[122:129]
-        + _DECLARED_ACTIONS[304:318]
-        + _DECLARED_ACTIONS[321:322]
-        + _DECLARED_ACTIONS[334:335]
-        + _DECLARED_ACTIONS[342:351],
+        + _DECLARED_ACTIONS[305:319]
+        + _DECLARED_ACTIONS[322:323]
+        + _DECLARED_ACTIONS[335:336]
+        + _DECLARED_ACTIONS[343:352],
     ),
     ("installed", _INSTALLED_ACTIONS),
 )

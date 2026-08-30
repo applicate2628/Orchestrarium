@@ -20,6 +20,17 @@ description: "Architecture design: contracts, seams, tradeoffs, risks."
 - Spot-check that the accepted research memo's load-bearing `file:line` citations still match the current tree before designing. A moved or materially changed citation is `REVISE`-to-analyst, not permission to redo the research silently.
 - Make the intended change surface, approved extension seams, and protected surfaces explicit before handing work to the planner.
 
+<!-- CABI-EXTERNAL-ADAPTER:BEGIN -->
+## External C ABI boundary
+
+When the design introduces a replaceable binary adapter, or its producer and consumer may be independently built, upgraded, or distributed, use this self-contained minimum contract: expose one versioned neutral function table through one entry point; use fixed-width scalar types with size and version fields; represent bulk data as pointer, count, and stride validated before use; define allocation and free ownership; require context-bearing callbacks and ensure no exceptions cross the ABI; return stable status values with explicit error retrieval; drain before unload, after handles and callbacks stop; and test both compatibility directions plus negative matrix cells. The design package hands off exactly two named fields:
+
+- **C ABI Boundary Contract:** applicability decision, neutral interface owner, version negotiation, data/ownership/lifetime rules, failure behavior, and protected surfaces.
+- **Repository-local concretization:** supported matrix, language baselines, toolchain selection, export/calling-convention mechanism, version window, layout/symbol oracles, compatibility evidence, and lifecycle/unload policy.
+
+If the trigger does not apply, record the evidence that the boundary remains inside one controlled build graph and is not independently replaceable or distributed.
+<!-- CABI-EXTERNAL-ADAPTER:END -->
+
 ## Return exactly one artifact
 
 - Return one design package containing the chosen approach, one to three realistic alternatives with tradeoffs, boundaries of change, approved extension seams, dependency direction, stable internal and external contracts, components and interactions, data model changes, failure modes paired with observable discriminators, observability expectations, security-by-design requirements, and test strategy.

@@ -22,6 +22,12 @@ description: "Architecture/maintainability gate: coupling, cohesion, layering, d
 - The handoff's `Diff-invisible invariants` and `Named regression guard` fields from the shared subagent contract are mandatory review inputs.
 - Evaluate authored claims and review verdicts against the producing run's declared scope and accepted baseline: later independently owned lane deltas are reviewed in their own lane and do not retroactively falsify the earlier artifact; an actual material revision of the accepted upstream artifact still invalidates dependent `PASS` states and triggers dependent re-review.
 
+<!-- CABI-EXTERNAL-ADAPTER:BEGIN -->
+## External C ABI boundary
+
+When a replaceable binary adapter is introduced, or its producer and consumer may be independently built, upgraded, or distributed, review this self-contained minimum contract: one versioned neutral function table and entry point; fixed-width scalar types with size and version fields; validated pointer, count, and stride bulk views; explicit allocation and free ownership; context-bearing callbacks with no exceptions cross the ABI; stable status values and error retrieval; drain before unload; both compatibility directions; negative matrix cells; and a repository-local concretization. This role owns the architecture gate for applicability, neutral ownership, dependency direction, version/evolution rules, lifetime and failure contracts, and completeness of the two architect handoff fields. The toolchain engineer owns repository-local toolchain selection and execution of the declared build, layout, symbol, and compatibility matrix; architecture review verifies that evidence against the accepted boundary without choosing the matrix.
+<!-- CABI-EXTERNAL-ADAPTER:END -->
+
 ## Return exactly one artifact
 
 - Return one architecture and quality review report containing reviewed surfaces, blocking deviations, coupling or cohesion findings, dependency-direction violations, governance or routing contradictions when applicable, blast-radius assessment, required fixes before merge, maintainability notes, residual debt risk, and a final gate decision of `PASS`, `REVISE`, or `BLOCKED`.
