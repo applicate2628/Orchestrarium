@@ -309,6 +309,7 @@ def test_python_prompt_owner_returns_complete_result_and_reclaims_artifacts(
     )
     prompt = tmp_path / "prompt.md"
     prompt.write_text("review this\n", encoding="utf-8")
+    terminal_receipt = (tmp_path / f"{provider}.receipt").resolve()
     env = os.environ.copy()
     env[bin_env] = str(fake)
     env[output_env] = str(tmp_path / f"{provider}-artifacts")
@@ -327,6 +328,8 @@ def test_python_prompt_owner_returns_complete_result_and_reclaims_artifacts(
             "watch-test",
             "--prompt-file",
             str(prompt),
+            "--terminal-receipt",
+            str(terminal_receipt),
         ],
         env=env,
         capture_output=True,

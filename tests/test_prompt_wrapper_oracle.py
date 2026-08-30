@@ -7,6 +7,7 @@ import json
 import os
 import signal
 import shutil
+import stat
 import subprocess
 import sys
 import threading
@@ -14,7 +15,7 @@ import ast
 from dataclasses import replace
 from types import SimpleNamespace
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pytest
 from tests.fixtures.codex_hook_fixture import prepare_codex_home
@@ -36,6 +37,207 @@ assert spec and spec.loader
 owner = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = owner
 spec.loader.exec_module(owner)
+
+
+class _FakePosixReceiptOS:
+    """Minimal descriptor-bound POSIX namespace for receipt race tests."""
+
+    O_RDONLY = 0x01
+    O_RDWR = 0x02
+    O_CREAT = 0x04
+    O_EXCL = 0x08
+    O_NOFOLLOW = 0x10
+    O_DIRECTORY = 0x20
+    SEEK_SET = 0
+    name = "posix"
+
+    class Node:
+        def __init__(self, mode: int, inode: int, uid: int) -> None:
+            self.mode = mode
+            self.inode = inode
+            self.uid = uid
+            self.children: dict[str, _FakePosixReceiptOS.Node] = {}
+            self.data = bytearray()
+
+    def __init__(self, *, failure_stage: str | None = None) -> None:
+        self._next_inode = 2
+        self._next_fd = 10
+        self._handles: dict[int, _FakePosixReceiptOS.Node] = {}
+        self._positions: dict[int, int] = {}
+        self._failure_stage = failure_stage
+        self._failed = False
+        self.before_failure = None
+        self.named_stat_failures = 0
+        self.file_fstat_failures = 0
+        self.file_fstat_calls = 0
+        self.closed: list[int] = []
+        self.directory_fsyncs = 0
+        self.on_file_fsync = None
+        self.on_file_read = None
+        self.root = self.Node(stat.S_IFDIR | 0o755, 1, 0)
+        self.supports_dir_fd = {self.open, self.stat, self.unlink}
+        self.supports_follow_symlinks = {self.stat}
+
+    def _new_node(self, mode: int, uid: int = 1000) -> "_FakePosixReceiptOS.Node":
+        node = self.Node(mode, self._next_inode, uid)
+        self._next_inode += 1
+        return node
+
+    def _node(self, absolute: str) -> "_FakePosixReceiptOS.Node":
+        node = self.root
+        for component in PurePosixPath(absolute).parts[1:]:
+            node = node.children[component]
+        return node
+
+    def mkdir(self, absolute: str, mode: int, uid: int = 1000) -> None:
+        node = self.root
+        for component in PurePosixPath(absolute).parts[1:-1]:
+            node = node.children.setdefault(
+                component, self._new_node(stat.S_IFDIR | 0o755, uid)
+            )
+        node.children[PurePosixPath(absolute).name] = self._new_node(
+            stat.S_IFDIR | mode, uid
+        )
+
+    def replace_directory(self, absolute: str, *, mode: int = 0o700) -> None:
+        parent = self._node(str(PurePosixPath(absolute).parent))
+        parent.children[PurePosixPath(absolute).name] = self._new_node(
+            stat.S_IFDIR | mode
+        )
+
+    def replace_leaf(self, absolute: str, data: bytes) -> None:
+        parent = self._node(str(PurePosixPath(absolute).parent))
+        node = self._new_node(stat.S_IFREG | 0o600)
+        node.data.extend(data)
+        parent.children[PurePosixPath(absolute).name] = node
+
+    def chmod_path(self, absolute: str, mode: int) -> None:
+        node = self._node(absolute)
+        file_type = stat.S_IFDIR if stat.S_ISDIR(node.mode) else stat.S_IFREG
+        node.mode = file_type | mode
+
+    def chown_path(self, absolute: str, uid: int) -> None:
+        self._node(absolute).uid = uid
+
+    def exists(self, absolute: str) -> bool:
+        try:
+            self._node(absolute)
+        except KeyError:
+            return False
+        return True
+
+    def bytes_at(self, absolute: str) -> bytes:
+        return bytes(self._node(absolute).data)
+
+    def _metadata(self, node: "_FakePosixReceiptOS.Node") -> SimpleNamespace:
+        return SimpleNamespace(st_mode=node.mode, st_dev=7, st_ino=node.inode, st_uid=node.uid)
+
+    def _handle(self, node: "_FakePosixReceiptOS.Node") -> int:
+        descriptor = self._next_fd
+        self._next_fd += 1
+        self._handles[descriptor] = node
+        self._positions[descriptor] = 0
+        return descriptor
+
+    def open(self, name, flags: int, mode: int = 0o777, *, dir_fd: int | None = None) -> int:
+        if dir_fd is None:
+            if str(name) != "/":
+                raise FileNotFoundError(name)
+            node = self.root
+        else:
+            parent = self._handles[dir_fd]
+            key = str(name)
+            node = parent.children.get(key)
+            if flags & self.O_CREAT:
+                if node is not None and flags & self.O_EXCL:
+                    raise FileExistsError(key)
+                if node is None:
+                    node = self._new_node(stat.S_IFREG | mode)
+                    parent.children[key] = node
+            if node is None:
+                raise FileNotFoundError(key)
+        if flags & self.O_DIRECTORY and not stat.S_ISDIR(node.mode):
+            raise NotADirectoryError(str(name))
+        return self._handle(node)
+
+    def close(self, descriptor: int) -> None:
+        self.closed.append(descriptor)
+        self._handles.pop(descriptor, None)
+        self._positions.pop(descriptor, None)
+
+    def _maybe_fail(self, stage: str, descriptor: int) -> None:
+        node = self._handles[descriptor]
+        if (
+            self._failure_stage == stage
+            and not self._failed
+            and stat.S_ISREG(node.mode)
+        ):
+            self._failed = True
+            if self.before_failure is not None:
+                action, self.before_failure = self.before_failure, None
+                action()
+            raise OSError(f"injected {stage}")
+
+    def set_inheritable(self, descriptor: int, _inheritable: bool) -> None:
+        self._maybe_fail("set_inheritable", descriptor)
+
+    def fchmod(self, descriptor: int, mode: int) -> None:
+        self._maybe_fail("fchmod", descriptor)
+        node = self._handles[descriptor]
+        node.mode = stat.S_IFREG | mode
+
+    def fstat(self, descriptor: int) -> SimpleNamespace:
+        if stat.S_ISREG(self._handles[descriptor].mode):
+            self.file_fstat_calls += 1
+            if self.file_fstat_failures:
+                self.file_fstat_failures -= 1
+                raise OSError("injected descriptor fstat")
+        self._maybe_fail("fstat", descriptor)
+        return self._metadata(self._handles[descriptor])
+
+    def stat(self, name, *, dir_fd: int, follow_symlinks: bool = False) -> SimpleNamespace:
+        assert follow_symlinks is False
+        if self.named_stat_failures:
+            self.named_stat_failures -= 1
+            raise OSError("injected named stat")
+        return self._metadata(self._handles[dir_fd].children[str(name)])
+
+    def unlink(self, name, *, dir_fd: int) -> None:
+        del self._handles[dir_fd].children[str(name)]
+
+    def geteuid(self) -> int:
+        return 1000
+
+    def write(self, descriptor: int, data) -> int:
+        node = self._handles[descriptor]
+        payload = bytes(data)
+        position = self._positions[descriptor]
+        node.data[position : position + len(payload)] = payload
+        self._positions[descriptor] += len(payload)
+        return len(payload)
+
+    def fsync(self, descriptor: int) -> None:
+        node = self._handles[descriptor]
+        if stat.S_ISDIR(node.mode):
+            self.directory_fsyncs += 1
+        if stat.S_ISREG(node.mode) and self.on_file_fsync is not None:
+            action, self.on_file_fsync = self.on_file_fsync, None
+            action()
+
+    def lseek(self, descriptor: int, offset: int, whence: int) -> int:
+        assert whence == self.SEEK_SET
+        self._positions[descriptor] = offset
+        return offset
+
+    def read(self, descriptor: int, size: int) -> bytes:
+        if self.on_file_read is not None:
+            action, self.on_file_read = self.on_file_read, None
+            action()
+        node = self._handles[descriptor]
+        position = self._positions[descriptor]
+        payload = bytes(node.data[position : position + size])
+        self._positions[descriptor] += len(payload)
+        return payload
 
 
 def _resolved_command(*command: str):
@@ -400,6 +602,301 @@ def test_terminal_receipt_reservation_is_exclusive_and_commits_exact_line(
     assert receipt_path.read_bytes() == line
     if os.name != "nt":
         assert stat.S_IMODE(receipt_path.stat().st_mode) == 0o600
+
+
+def _fake_posix_receipt_namespace(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    parent_mode: int = 0o700,
+    failure_stage: str | None = None,
+) -> tuple[_FakePosixReceiptOS, PurePosixPath]:
+    fake = _FakePosixReceiptOS(failure_stage=failure_stage)
+    fake.mkdir("/tmp", 0o1777, uid=0)
+    fake.mkdir("/tmp/private", 0o700)
+    fake.mkdir("/tmp/private/receipts", parent_mode)
+    monkeypatch.setattr(owner, "os", fake)
+    return fake, PurePosixPath("/tmp/private/receipts/terminal.receipt")
+
+
+@pytest.mark.parametrize("failure_stage", ("set_inheritable", "fchmod", "fstat"))
+def test_posix_receipt_post_create_failure_unlinks_exact_leaf_and_allows_retry(
+    monkeypatch: pytest.MonkeyPatch,
+    failure_stage: str,
+) -> None:
+    fake, receipt_path = _fake_posix_receipt_namespace(
+        monkeypatch, failure_stage=failure_stage
+    )
+
+    with pytest.raises(OSError, match=f"injected {failure_stage}"):
+        owner.TerminalReceiptV1._reserve_posix(receipt_path)
+
+    assert not fake.exists(str(receipt_path))
+    retry = owner.TerminalReceiptV1._reserve_posix(receipt_path)
+    retry.close()
+
+
+def test_posix_receipt_first_named_stat_failure_removes_exact_created_leaf(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake, receipt_path = _fake_posix_receipt_namespace(monkeypatch)
+    fake.named_stat_failures = 1
+
+    with pytest.raises(OSError, match="injected named stat"):
+        owner.TerminalReceiptV1._reserve_posix(receipt_path)
+
+    assert not fake.exists(str(receipt_path))
+    assert fake._handles == {}
+    assert fake.directory_fsyncs == 1
+
+
+def test_posix_receipt_cleanup_preserves_raced_replacement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake, receipt_path = _fake_posix_receipt_namespace(
+        monkeypatch, failure_stage="set_inheritable"
+    )
+    attacker = b"ATTACKER_TERMINAL_BYTES\n"
+    fake.before_failure = lambda: fake.replace_leaf(str(receipt_path), attacker)
+
+    with pytest.raises(
+        ValueError, match="E_EXTERNAL_TERMINAL_RECEIPT_CLEANUP_UNVERIFIED"
+    ):
+        owner.TerminalReceiptV1._reserve_posix(receipt_path)
+
+    assert fake.bytes_at(str(receipt_path)) == attacker
+    assert fake._handles == {}
+
+
+def test_posix_receipt_cleanup_retries_descriptor_identity_before_unlink(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake, receipt_path = _fake_posix_receipt_namespace(monkeypatch)
+    fake.file_fstat_failures = 1
+
+    with pytest.raises(OSError, match="injected descriptor fstat"):
+        owner.TerminalReceiptV1._reserve_posix(receipt_path)
+
+    assert fake.file_fstat_calls >= 2
+    assert not fake.exists(str(receipt_path))
+    assert fake.directory_fsyncs == 1
+    assert fake._handles == {}
+
+
+def test_posix_receipt_cleanup_never_unlinks_when_identity_unverifiable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake, receipt_path = _fake_posix_receipt_namespace(monkeypatch)
+    fake.file_fstat_failures = 3
+
+    with pytest.raises(
+        ValueError, match="E_EXTERNAL_TERMINAL_RECEIPT_CLEANUP_UNVERIFIED"
+    ):
+        owner.TerminalReceiptV1._reserve_posix(receipt_path)
+
+    assert fake.exists(str(receipt_path))
+    assert fake.directory_fsyncs == 0
+    assert fake._handles == {}
+
+
+@pytest.mark.parametrize("parent_mode", (0o770, 0o702))
+def test_posix_receipt_rejects_group_or_other_writable_final_parent(
+    monkeypatch: pytest.MonkeyPatch,
+    parent_mode: int,
+) -> None:
+    fake, receipt_path = _fake_posix_receipt_namespace(
+        monkeypatch, parent_mode=parent_mode
+    )
+
+    with pytest.raises(OSError, match="private owner-controlled namespace"):
+        owner.TerminalReceiptV1._reserve_posix(receipt_path)
+
+    assert not fake.exists(str(receipt_path))
+
+
+def test_posix_receipt_namespace_accepts_root_sticky_tmp_to_private_user_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _fake, receipt_path = _fake_posix_receipt_namespace(monkeypatch)
+
+    receipt = owner.TerminalReceiptV1._reserve_posix(receipt_path)
+    receipt.close()
+
+
+def test_posix_receipt_namespace_accepts_root_system_prefix_and_user_parent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _FakePosixReceiptOS()
+    fake.mkdir("/system", 0o555, uid=0)
+    fake.mkdir("/system/users", 0o555, uid=0)
+    fake.mkdir("/system/users/current", 0o700)
+    fake.mkdir("/system/users/current/receipts", 0o700)
+    monkeypatch.setattr(owner, "os", fake)
+    receipt_path = PurePosixPath("/system/users/current/receipts/terminal.receipt")
+
+    receipt = owner.TerminalReceiptV1._reserve_posix(receipt_path)
+    receipt.close()
+
+
+@pytest.mark.parametrize("foreign_mode", (0o555, 0o755))
+def test_posix_receipt_namespace_rejects_foreign_owned_ancestor_even_when_not_shared_writable(
+    monkeypatch: pytest.MonkeyPatch,
+    foreign_mode: int,
+) -> None:
+    fake = _FakePosixReceiptOS()
+    fake.mkdir("/system", 0o555, uid=0)
+    fake.mkdir("/system/foreign", foreign_mode, uid=2000)
+    fake.mkdir("/system/foreign/receipts", 0o700)
+    monkeypatch.setattr(owner, "os", fake)
+    receipt_path = PurePosixPath("/system/foreign/receipts/terminal.receipt")
+
+    with pytest.raises(OSError, match="private owner-controlled namespace"):
+        owner.TerminalReceiptV1._reserve_posix(receipt_path)
+
+    assert not fake.exists(str(receipt_path))
+
+
+@pytest.mark.parametrize(
+    "transition",
+    ("nonsticky-root", "sticky-to-foreign", "sticky-to-writable-user", "direct-tmp"),
+)
+def test_posix_receipt_namespace_rejects_untrusted_shared_transition(
+    monkeypatch: pytest.MonkeyPatch,
+    transition: str,
+) -> None:
+    fake = _FakePosixReceiptOS()
+    if transition == "nonsticky-root":
+        fake.root.mode = stat.S_IFDIR | 0o777
+        fake.mkdir("/private", 0o700)
+        fake.mkdir("/private/receipts", 0o700)
+        receipt_path = PurePosixPath("/private/receipts/terminal.receipt")
+    elif transition == "sticky-to-foreign":
+        fake.root.mode = stat.S_IFDIR | 0o1777
+        fake.mkdir("/foreign", 0o700, uid=2000)
+        fake.mkdir("/foreign/receipts", 0o700)
+        receipt_path = PurePosixPath("/foreign/receipts/terminal.receipt")
+    elif transition == "sticky-to-writable-user":
+        fake.root.mode = stat.S_IFDIR | 0o1777
+        fake.mkdir("/private", 0o775)
+        fake.mkdir("/private/receipts", 0o700)
+        receipt_path = PurePosixPath("/private/receipts/terminal.receipt")
+    else:
+        fake.mkdir("/tmp", 0o1777, uid=0)
+        receipt_path = PurePosixPath("/tmp/terminal.receipt")
+    monkeypatch.setattr(owner, "os", fake)
+
+    with pytest.raises(OSError, match="private owner-controlled namespace"):
+        owner.TerminalReceiptV1._reserve_posix(receipt_path)
+
+    assert not fake.exists(str(receipt_path))
+
+
+@pytest.mark.parametrize("drift", ("owner", "mode"))
+def test_posix_receipt_namespace_revalidation_rejects_owner_or_mode_drift(
+    monkeypatch: pytest.MonkeyPatch,
+    drift: str,
+) -> None:
+    fake, receipt_path = _fake_posix_receipt_namespace(monkeypatch)
+    receipt = owner.TerminalReceiptV1._reserve_posix(receipt_path)
+    if drift == "owner":
+        fake.chown_path("/tmp/private", 2000)
+    else:
+        fake.chmod_path("/tmp/private/receipts", 0o777)
+
+    try:
+        with pytest.raises(OSError, match="private owner-controlled namespace"):
+            receipt.commit(b'ORCHESTRARIUM_PROVIDER_RESULT_V2={"fixture":true}\n')
+        assert receipt.committed is False
+    finally:
+        receipt.close()
+
+
+def test_posix_receipt_rejects_nonsticky_writable_ancestor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _FakePosixReceiptOS()
+    fake.mkdir("/shared", 0o777, uid=0)
+    fake.mkdir("/shared/private", 0o700)
+    fake.mkdir("/shared/private/receipts", 0o700)
+    monkeypatch.setattr(owner, "os", fake)
+    receipt_path = PurePosixPath("/shared/private/receipts/terminal.receipt")
+
+    with pytest.raises(OSError, match="private owner-controlled namespace"):
+        owner.TerminalReceiptV1._reserve_posix(receipt_path)
+
+    assert not fake.exists(str(receipt_path))
+
+
+def test_posix_receipt_rejects_sticky_ancestor_controlled_by_another_principal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _FakePosixReceiptOS()
+    fake.mkdir("/shared", 0o1777, uid=2000)
+    fake.mkdir("/shared/private", 0o700)
+    fake.mkdir("/shared/private/receipts", 0o700)
+    monkeypatch.setattr(owner, "os", fake)
+    receipt_path = PurePosixPath("/shared/private/receipts/terminal.receipt")
+
+    with pytest.raises(OSError, match="private owner-controlled namespace"):
+        owner.TerminalReceiptV1._reserve_posix(receipt_path)
+
+    assert not fake.exists(str(receipt_path))
+
+
+def test_posix_receipt_revalidates_parent_authority_before_commit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake, receipt_path = _fake_posix_receipt_namespace(monkeypatch)
+    receipt = owner.TerminalReceiptV1._reserve_posix(receipt_path)
+    fake.chmod_path("/tmp/private/receipts", 0o777)
+
+    try:
+        with pytest.raises(OSError, match="private owner-controlled namespace"):
+            receipt.commit(b'ORCHESTRARIUM_PROVIDER_RESULT_V2={"fixture":true}\n')
+        assert receipt.committed is False
+    finally:
+        receipt.close()
+
+
+@pytest.mark.parametrize("replacement", ("ancestor", "final-parent", "leaf"))
+def test_posix_receipt_revalidates_declared_path_before_commit(
+    monkeypatch: pytest.MonkeyPatch,
+    replacement: str,
+) -> None:
+    fake, receipt_path = _fake_posix_receipt_namespace(monkeypatch)
+    receipt = owner.TerminalReceiptV1._reserve_posix(receipt_path)
+    attacker = b"ATTACKER_TERMINAL_BYTES\n"
+    if replacement == "ancestor":
+        fake.replace_directory("/tmp/private")
+    elif replacement == "final-parent":
+        fake.replace_directory("/tmp/private/receipts")
+    else:
+        fake.replace_leaf(str(receipt_path), attacker)
+
+    try:
+        with pytest.raises(OSError, match="namespace identity changed"):
+            receipt.commit(b'ORCHESTRARIUM_PROVIDER_RESULT_V2={"fixture":true}\n')
+        assert receipt.committed is False
+        if replacement == "leaf":
+            assert fake.bytes_at(str(receipt_path)) == attacker
+    finally:
+        receipt.close()
+
+
+def test_posix_receipt_revalidates_leaf_after_descriptor_readback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake, receipt_path = _fake_posix_receipt_namespace(monkeypatch)
+    receipt = owner.TerminalReceiptV1._reserve_posix(receipt_path)
+    attacker = b"ATTACKER_TERMINAL_BYTES\n"
+    fake.on_file_read = lambda: fake.replace_leaf(str(receipt_path), attacker)
+
+    try:
+        with pytest.raises(OSError, match="namespace identity changed"):
+            receipt.commit(b'ORCHESTRARIUM_PROVIDER_RESULT_V2={"fixture":true}\n')
+        assert receipt.committed is False
+        assert fake.bytes_at(str(receipt_path)) == attacker
+    finally:
+        receipt.close()
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows receipt path binding")
@@ -1679,7 +2176,19 @@ def test_post_reservation_command_resolution_failure_commits_one_minimal_termina
     assert dynamic_detail not in receipt
 
 
-@pytest.mark.parametrize("stage", ("initialize", "ledger_common", "kimi_argv"))
+@pytest.mark.parametrize(
+    "stage",
+    (
+        "initialize",
+        "ledger_common",
+        pytest.param(
+            "kimi_argv",
+            marks=pytest.mark.skipif(
+                os.name != "nt", reason="Kimi bundle review is Windows-only"
+            ),
+        ),
+    ),
+)
 def test_post_reservation_injected_stage_exception_finalizes_owned_run_once(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

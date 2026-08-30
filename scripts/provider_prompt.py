@@ -404,6 +404,8 @@ class TerminalReceiptV1:
     parent_handle: int
     windows: bool
     ancestor_handles: tuple[int, ...] = ()
+    ancestor_identities: tuple[tuple[int, int], ...] = ()
+    leaf_identity: tuple[int, int] | None = None
     committed: bool = False
 
     @staticmethod
@@ -442,24 +444,123 @@ class TerminalReceiptV1:
             raise ValueError("E_EXTERNAL_TERMINAL_RECEIPT_UNAVAILABLE") from exc
 
     @classmethod
+    def _validate_posix_namespace_authority(cls, chain: list[object]) -> None:
+        if not chain:
+            raise OSError("terminal receipt requires a private owner-controlled namespace")
+        effective_uid = os.geteuid()
+        for index, metadata in enumerate(chain):
+            if metadata.st_uid not in {0, effective_uid}:
+                raise OSError(
+                    "terminal receipt requires a private owner-controlled namespace"
+                )
+            mode = stat.S_IMODE(metadata.st_mode)
+            writable_by_another_principal = bool(mode & (stat.S_IWGRP | stat.S_IWOTH))
+            if not writable_by_another_principal:
+                continue
+            next_is_private_caller_boundary = (
+                index + 1 < len(chain)
+                and chain[index + 1].st_uid == effective_uid
+                and not stat.S_IMODE(chain[index + 1].st_mode)
+                & (stat.S_IWGRP | stat.S_IWOTH)
+            )
+            if (
+                metadata.st_uid != 0
+                or not mode & stat.S_ISVTX
+                or not next_is_private_caller_boundary
+            ):
+                raise OSError(
+                    "terminal receipt requires a private owner-controlled namespace"
+                )
+        parent = chain[-1]
+        if (
+            parent.st_uid != effective_uid
+            or stat.S_IMODE(parent.st_mode) & (stat.S_IWGRP | stat.S_IWOTH)
+        ):
+            raise OSError("terminal receipt requires a private owner-controlled namespace")
+
+    @classmethod
+    def _cleanup_posix_provisional_leaf(
+        cls,
+        parent: int,
+        name: str,
+        descriptor: int,
+        descriptor_identity: tuple[int, int] | None,
+    ) -> None:
+        identity = descriptor_identity
+        last_identity_error: OSError | None = None
+        if identity is None:
+            for _attempt in range(2):
+                try:
+                    metadata = os.fstat(descriptor)
+                    if not stat.S_ISREG(metadata.st_mode):
+                        raise OSError("terminal receipt provisional leaf type")
+                    identity = (metadata.st_dev, metadata.st_ino)
+                    break
+                except OSError as exc:
+                    last_identity_error = exc
+        if identity is None:
+            raise ValueError(
+                "E_EXTERNAL_TERMINAL_RECEIPT_CLEANUP_UNVERIFIED"
+            ) from last_identity_error
+        try:
+            current = os.stat(name, dir_fd=parent, follow_symlinks=False)
+        except FileNotFoundError:
+            return
+        except OSError as exc:
+            raise ValueError(
+                "E_EXTERNAL_TERMINAL_RECEIPT_CLEANUP_UNVERIFIED"
+            ) from exc
+        if (current.st_dev, current.st_ino) != identity:
+            raise ValueError("E_EXTERNAL_TERMINAL_RECEIPT_CLEANUP_UNVERIFIED")
+        try:
+            os.unlink(name, dir_fd=parent)
+            os.fsync(parent)
+        except OSError as exc:
+            raise ValueError(
+                "E_EXTERNAL_TERMINAL_RECEIPT_CLEANUP_UNVERIFIED"
+            ) from exc
+
+    @classmethod
     def _reserve_posix(cls, path: Path) -> "TerminalReceiptV1":
         nofollow = getattr(os, "O_NOFOLLOW", None)
         directory = getattr(os, "O_DIRECTORY", None)
-        if nofollow is None or directory is None or os.open not in os.supports_dir_fd:
+        required_dir_fd = (os.open, os.stat, os.unlink)
+        if (
+            nofollow is None
+            or directory is None
+            or not all(operation in os.supports_dir_fd for operation in required_dir_fd)
+            or os.stat not in os.supports_follow_symlinks
+            or not hasattr(os, "geteuid")
+        ):
             raise ValueError("E_EXTERNAL_TERMINAL_RECEIPT_UNSUPPORTED")
         parts = path.parts
-        parent = os.open(parts[0], os.O_RDONLY | directory | nofollow)
+        held = [os.open(parts[0], os.O_RDONLY | directory | nofollow)]
+        identities: list[tuple[int, int]] = []
+        descriptor = -1
+        leaf_identity: tuple[int, int] | None = None
+        chain_metadata: list[object] = []
         try:
+            root_metadata = os.fstat(held[0])
+            if not stat.S_ISDIR(root_metadata.st_mode):
+                raise OSError("terminal receipt root type")
+            identities.append((root_metadata.st_dev, root_metadata.st_ino))
+            chain_metadata.append(root_metadata)
             for component in parts[1:-1]:
                 if component in {"", ".", ".."}:
                     raise ValueError("E_EXTERNAL_TERMINAL_RECEIPT_PATH_INVALID")
                 next_parent = os.open(
                     component,
                     os.O_RDONLY | directory | nofollow,
-                    dir_fd=parent,
+                    dir_fd=held[-1],
                 )
-                os.close(parent)
-                parent = next_parent
+                held.append(next_parent)
+                metadata = os.fstat(next_parent)
+                if not stat.S_ISDIR(metadata.st_mode):
+                    raise OSError("terminal receipt ancestor type")
+                identities.append((metadata.st_dev, metadata.st_ino))
+                chain_metadata.append(metadata)
+            parent = held[-1]
+            cls._validate_posix_namespace_authority(chain_metadata)
             descriptor = os.open(
                 parts[-1],
                 os.O_CREAT | os.O_EXCL | os.O_RDWR | nofollow,
@@ -467,18 +568,112 @@ class TerminalReceiptV1:
                 dir_fd=parent,
             )
             try:
+                descriptor_metadata = os.fstat(descriptor)
+                if not stat.S_ISREG(descriptor_metadata.st_mode):
+                    raise OSError("terminal receipt provisional leaf type")
+                leaf_identity = (
+                    descriptor_metadata.st_dev,
+                    descriptor_metadata.st_ino,
+                )
+                named_metadata = os.stat(
+                    parts[-1], dir_fd=parent, follow_symlinks=False
+                )
+                if (named_metadata.st_dev, named_metadata.st_ino) != leaf_identity:
+                    raise OSError("terminal receipt provisional leaf identity")
                 os.set_inheritable(descriptor, False)
                 os.fchmod(descriptor, 0o600)
                 metadata = os.fstat(descriptor)
-                if not stat.S_ISREG(metadata.st_mode) or stat.S_IMODE(metadata.st_mode) != 0o600:
+                if (
+                    not stat.S_ISREG(metadata.st_mode)
+                    or stat.S_IMODE(metadata.st_mode) != 0o600
+                    or (metadata.st_dev, metadata.st_ino) != leaf_identity
+                ):
                     raise OSError("terminal receipt permissions")
-            except BaseException:
-                os.close(descriptor)
+            except BaseException as setup_error:
+                cleanup_error: ValueError | None = None
+                try:
+                    cls._cleanup_posix_provisional_leaf(
+                        parent,
+                        parts[-1],
+                        descriptor,
+                        leaf_identity,
+                    )
+                except ValueError as exc:
+                    cleanup_error = exc
+                finally:
+                    os.close(descriptor)
+                    descriptor = -1
+                if cleanup_error is not None:
+                    raise cleanup_error from setup_error
                 raise
-            return cls(path, descriptor, parent, False)
+            return cls(
+                path,
+                descriptor,
+                parent,
+                False,
+                ancestor_handles=tuple(held),
+                ancestor_identities=tuple(identities),
+                leaf_identity=leaf_identity,
+            )
         except BaseException:
-            os.close(parent)
+            if descriptor >= 0:
+                os.close(descriptor)
+            for handle in reversed(held):
+                os.close(handle)
             raise
+
+    def _revalidate_posix_namespace(self) -> None:
+        nofollow = os.O_NOFOLLOW
+        directory = os.O_DIRECTORY
+        parts = self.path.parts
+        reopened = [os.open(parts[0], os.O_RDONLY | directory | nofollow)]
+        leaf = -1
+        current_chain: list[object] = []
+        try:
+            for component in parts[1:-1]:
+                reopened.append(
+                    os.open(
+                        component,
+                        os.O_RDONLY | directory | nofollow,
+                        dir_fd=reopened[-1],
+                    )
+                )
+            if len(reopened) != len(self.ancestor_handles):
+                raise OSError("terminal receipt namespace identity changed")
+            for current, held, expected in zip(
+                reopened, self.ancestor_handles, self.ancestor_identities
+            ):
+                current_metadata = os.fstat(current)
+                held_metadata = os.fstat(held)
+                current_chain.append(current_metadata)
+                current_identity = (current_metadata.st_dev, current_metadata.st_ino)
+                held_identity = (held_metadata.st_dev, held_metadata.st_ino)
+                if (
+                    not stat.S_ISDIR(current_metadata.st_mode)
+                    or current_identity != expected
+                    or held_identity != expected
+                ):
+                    raise OSError("terminal receipt namespace identity changed")
+            self._validate_posix_namespace_authority(current_chain)
+            leaf = os.open(parts[-1], os.O_RDONLY | nofollow, dir_fd=reopened[-1])
+            current_leaf = os.fstat(leaf)
+            held_leaf = os.fstat(self.file_handle)
+            current_identity = (current_leaf.st_dev, current_leaf.st_ino)
+            held_identity = (held_leaf.st_dev, held_leaf.st_ino)
+            if (
+                self.leaf_identity is None
+                or not stat.S_ISREG(current_leaf.st_mode)
+                or current_identity != self.leaf_identity
+                or held_identity != self.leaf_identity
+            ):
+                raise OSError("terminal receipt namespace identity changed")
+        except (FileNotFoundError, NotADirectoryError) as exc:
+            raise OSError("terminal receipt namespace identity changed") from exc
+        finally:
+            if leaf >= 0:
+                os.close(leaf)
+            for handle in reversed(reopened):
+                os.close(handle)
 
     @staticmethod
     def _windows_file_information(handle: int):
@@ -889,6 +1084,7 @@ class TerminalReceiptV1:
         self.committed = True
 
     def _commit_posix(self, line: bytes) -> None:
+        self._revalidate_posix_namespace()
         view = memoryview(line)
         while view:
             written = os.write(self.file_handle, view)
@@ -897,6 +1093,7 @@ class TerminalReceiptV1:
             view = view[written:]
         os.fsync(self.file_handle)
         os.fsync(self.parent_handle)
+        self._revalidate_posix_namespace()
         os.lseek(self.file_handle, 0, os.SEEK_SET)
         readback = bytearray()
         while len(readback) <= len(line):
@@ -906,6 +1103,7 @@ class TerminalReceiptV1:
             readback.extend(chunk)
         if bytes(readback) != line:
             raise OSError("terminal receipt exact readback")
+        self._revalidate_posix_namespace()
 
     def _commit_windows(self, line: bytes) -> None:
         import ctypes
@@ -960,7 +1158,9 @@ class TerminalReceiptV1:
                 kernel32.CloseHandle(wintypes.HANDLE(handle))
         else:
             os.close(self.file_handle)
-            os.close(self.parent_handle)
+            handles = self.ancestor_handles or (self.parent_handle,)
+            for handle in reversed(handles):
+                os.close(handle)
         self.file_handle = -1
         self.parent_handle = -1
 

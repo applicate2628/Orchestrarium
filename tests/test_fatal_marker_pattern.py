@@ -154,6 +154,7 @@ def _run_transport(tmp_path: Path, err_line: str) -> dict:
     item = _make_work_item(tmp_path, "fatal-marker-fixture")
     prompt = tmp_path / "prompt.md"
     prompt.write_text("fixture prompt\n", encoding="utf-8")
+    terminal_receipt = (tmp_path / "terminal.receipt").resolve()
     env = os.environ.copy()
     env["CODEX_BIN"] = str(fake)
     env["CODEX_PROMPTS_DIR"] = str(tmp_path / "outputs")
@@ -166,6 +167,8 @@ def _run_transport(tmp_path: Path, err_line: str) -> dict:
             "fatal-marker-fixture",
             "--prompt-file",
             str(prompt),
+            "--terminal-receipt",
+            str(terminal_receipt),
             "--ledger",
             str(item),
             "--ledger-role",

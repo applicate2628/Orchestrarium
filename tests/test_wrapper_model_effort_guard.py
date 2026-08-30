@@ -133,6 +133,7 @@ def _run_transport(
     fake, capture = _make_fake_provider(tmp_path, provider)
     prompt = tmp_path / f"{provider}.md"
     prompt.write_text("fixture prompt\n", encoding="utf-8")
+    terminal_receipt = (tmp_path / f"{provider}.receipt").resolve()
     env = os.environ.copy()
     env[BIN_ENV[provider]] = str(fake)
     env[OUTPUT_ENV[provider]] = str(tmp_path / f"{provider}-outputs")
@@ -164,6 +165,8 @@ def _run_transport(
             "model-effort-fixture",
             "--prompt-file",
             str(prompt),
+            "--terminal-receipt",
+            str(terminal_receipt),
             *ledger_args,
             *extra,
         ],
@@ -219,6 +222,8 @@ def test_root_thin_wrapper_delivers_one_governance_frame_then_exact_task_bytes(
     prompt = tmp_path / "task.md"
     task = b"root-wrapper task\n"
     prompt.write_bytes(task)
+    projected_receipt = (tmp_path / "projected.receipt").resolve()
+    root_receipt = (tmp_path / "root.receipt").resolve()
     stdin_capture = tmp_path / "provider-stdin.bin"
     fake, _argv = _make_fake_provider(tmp_path, provider, stdin_capture=stdin_capture)
     env = os.environ.copy()
@@ -237,6 +242,8 @@ def test_root_thin_wrapper_delivers_one_governance_frame_then_exact_task_bytes(
             "root-wrapper-fixture",
             "--prompt-file",
             str(prompt),
+            "--terminal-receipt",
+            str(projected_receipt),
         ],
         cwd=ROOT,
         env=env,
@@ -266,6 +273,8 @@ def test_root_thin_wrapper_delivers_one_governance_frame_then_exact_task_bytes(
             "root-wrapper-fixture",
             "--prompt-file",
             str(prompt),
+            "--terminal-receipt",
+            str(root_receipt),
         ],
         cwd=ROOT,
         env=env,

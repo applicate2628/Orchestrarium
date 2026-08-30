@@ -54,6 +54,7 @@ def _run(
     fake.write_text(child_source or "print('GATE: PASS')\n", encoding="utf-8")
     prompt = tmp_path / "prompt.md"
     prompt.write_bytes(prompt_bytes if prompt_bytes is not None else b"review\n")
+    terminal_receipt = (tmp_path / "terminal.receipt").resolve()
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
     env = {
@@ -85,6 +86,8 @@ def _run(
             "auth-test",
             "--prompt-file",
             str(prompt),
+            "--terminal-receipt",
+            str(terminal_receipt),
         ],
         cwd=tmp_path,
         env=env,
