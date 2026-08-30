@@ -3481,58 +3481,64 @@ def _linux_identity_census(
 ) -> tuple[bool, tuple[PosixProcessIdentityV1, ...], str]:
     now = clock()
     local_deadline = min(now + 0.25, deadline if deadline is not None else now + 0.25)
-    total = 0
-    count = 0
-    members: list[PosixProcessIdentityV1] = []
-    zombie_members = 0
     try:
-        for entry in (entries() if entries is not None else Path("/proc").iterdir()):
+        while True:
+            total = 0
+            count = 0
+            members: list[PosixProcessIdentityV1] = []
+            zombie_members = 0
+            for entry in (entries() if entries is not None else Path("/proc").iterdir()):
+                if clock() >= local_deadline:
+                    return False, (), "timeout"
+                if not entry.name.isdigit():
+                    continue
+                count += 1
+                if count > max_processes:
+                    return False, (), "unknown"
+                try:
+                    raw = (entry / "stat").read_bytes()
+                except FileNotFoundError:
+                    continue
+                total += len(raw)
+                if total > max_bytes:
+                    return False, (), "unknown"
+                close = raw.rfind(b")")
+                fields = raw[close + 2 :].split()
+                if len(fields) > 19 and int(fields[2]) == pgid and int(fields[3]) == sid:
+                    if fields[0] == b"Z":
+                        zombie_members += 1
+                        continue
+                    members.append(
+                        PosixProcessIdentityV1(
+                            int(entry.name),
+                            fields[19].decode("ascii"),
+                            pgid,
+                            sid,
+                            census_index,
+                            census_index,
+                        )
+                    )
             if clock() >= local_deadline:
                 return False, (), "timeout"
-            if not entry.name.isdigit():
+            if clock() >= local_deadline:
+                return False, (), "timeout"
+            try:
+                probe = killpg_probe or getattr(os, "killpg", None)
+                if probe is None:
+                    return False, (), "unsupported"
+                probe(pgid, 0)
+                killpg_state = "present"
+            except ProcessLookupError:
+                killpg_state = "esrch"
+            except PermissionError:
+                killpg_state = "eperm"
+            if killpg_state == "present" and zombie_members and not members:
+                killpg_state = "esrch"
+            if clock() >= local_deadline:
+                return False, (), "timeout"
+            if killpg_state == "esrch" and members:
                 continue
-            count += 1
-            if count > max_processes:
-                return False, (), "unknown"
-            raw = (entry / "stat").read_bytes()
-            total += len(raw)
-            if total > max_bytes:
-                return False, (), "unknown"
-            close = raw.rfind(b")")
-            fields = raw[close + 2 :].split()
-            if len(fields) > 19 and int(fields[2]) == pgid and int(fields[3]) == sid:
-                if fields[0] == b"Z":
-                    zombie_members += 1
-                    continue
-                members.append(
-                    PosixProcessIdentityV1(
-                        int(entry.name),
-                        fields[19].decode("ascii"),
-                        pgid,
-                        sid,
-                        census_index,
-                        census_index,
-                    )
-                )
-        if clock() >= local_deadline:
-            return False, (), "timeout"
-        if clock() >= local_deadline:
-            return False, (), "timeout"
-        try:
-            probe = killpg_probe or getattr(os, "killpg", None)
-            if probe is None:
-                return False, (), "unsupported"
-            probe(pgid, 0)
-            killpg_state = "present"
-        except ProcessLookupError:
-            killpg_state = "esrch"
-        except PermissionError:
-            killpg_state = "eperm"
-        if killpg_state == "present" and zombie_members and not members:
-            killpg_state = "esrch"
-        if clock() >= local_deadline:
-            return False, (), "timeout"
-        return True, tuple(sorted(members, key=lambda item: item.pid)), killpg_state
+            return True, tuple(sorted(members, key=lambda item: item.pid)), killpg_state
     except (OSError, ValueError, IndexError):
         return False, (), "unknown"
 
@@ -3646,8 +3652,12 @@ class _PosixBackendV1:
                 proc.pid, str(leader_start), pgid, sid, 0, 0
             )
             ledger = PosixGroupSettlementOracleV1(leader)
-            first = observe_group(leader_reaped=False)
-            if first.state != "NONEMPTY" or not first.signal_safe:
+            first = observe_group(leader_reaped=proc.poll() is not None)
+            if first.state == "AMBIGUOUS" and proc.poll() is not None:
+                first = observe_group(leader_reaped=True)
+            if first.state == "AMBIGUOUS" or (
+                first.state == "NONEMPTY" and not first.signal_safe
+            ):
                 raise ProcessSupervisionError(
                     "PSV1-POSIX-SETTLEMENT-AMBIGUOUS", "tree-settlement"
                 )

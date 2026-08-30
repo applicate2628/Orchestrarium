@@ -253,3 +253,120 @@ def test_linux_census_keeps_running_and_stopped_group_members(tmp_path: Path) ->
     assert complete is True
     assert [member.pid for member in members] == [102, 103]
     assert state == "present"
+
+
+def test_linux_census_recensuses_member_that_exits_before_esrch_probe(
+    tmp_path: Path,
+) -> None:
+    """Catches a stale live snapshot becoming a permanent ledger contradiction."""
+
+    module = _runner()
+    short_lived = _write_linux_stat(tmp_path, 104, "R")
+    passes = iter(((short_lived,), ()))
+    census_calls: list[str] = []
+
+    def entries():
+        census_calls.append("census")
+        return next(passes)
+
+    def vanished_group(*_args):
+        raise ProcessLookupError
+
+    complete, members, state = module._linux_identity_census(
+        100,
+        100,
+        1,
+        entries=entries,
+        killpg_probe=vanished_group,
+    )
+
+    assert complete is True
+    assert members == ()
+    assert state == "esrch"
+    assert census_calls == ["census", "census"]
+
+
+def test_linux_census_recovers_same_live_identity_after_transient_esrch(
+    tmp_path: Path,
+) -> None:
+    """Catches an ESRCH retry dropping a member that is still live and signalable."""
+
+    module = _runner()
+    member = _write_linux_stat(tmp_path, 105, "S")
+    probes = iter(("esrch", "present"))
+
+    def probe(*_args):
+        if next(probes) == "esrch":
+            raise ProcessLookupError
+
+    complete, members, state = module._linux_identity_census(
+        100,
+        100,
+        1,
+        entries=lambda: (member,),
+        killpg_probe=probe,
+    )
+
+    assert complete is True
+    assert [item.pid for item in members] == [105]
+    assert state == "present"
+
+
+def test_linux_census_repeated_esrch_churn_stays_within_original_deadline(
+    tmp_path: Path,
+) -> None:
+    """Catches unbounded re-census when a live snapshot repeatedly disappears."""
+
+    module = _runner()
+    member = _write_linux_stat(tmp_path, 106, "R")
+    now = [0.0]
+    census_count = [0]
+
+    def clock() -> float:
+        current = now[0]
+        now[0] += 0.01
+        return current
+
+    def entries():
+        census_count[0] += 1
+        return (member,)
+
+    def vanished_group(*_args):
+        raise ProcessLookupError
+
+    complete, members, state = module._linux_identity_census(
+        100,
+        100,
+        1,
+        deadline=0.08,
+        clock=clock,
+        entries=entries,
+        killpg_probe=vanished_group,
+    )
+
+    assert complete is False
+    assert members == ()
+    assert state == "timeout"
+    assert census_count[0] > 1
+
+
+def test_linux_census_ignores_proc_entry_removed_during_scan(tmp_path: Path) -> None:
+    """Catches unrelated short-lived processes poisoning the whole group census."""
+
+    module = _runner()
+    vanished_entry = tmp_path / "107"
+
+    def vanished_group(*_args):
+        raise ProcessLookupError
+
+    complete, members, state = module._linux_identity_census(
+        100,
+        100,
+        1,
+        entries=lambda: (vanished_entry,),
+        killpg_probe=vanished_group,
+    )
+
+    assert complete is True
+    assert members == ()
+    assert state == "esrch"

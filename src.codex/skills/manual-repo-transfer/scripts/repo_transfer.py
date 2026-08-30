@@ -823,36 +823,77 @@ def portable_path_parts(path: str) -> tuple[str, ...]:
     return tuple(portable_segment_key(part) for part in PurePosixPath(unicodedata.normalize("NFKC", path)).parts)
 
 
-def portable_path_covers(parent: tuple[str, ...], child: tuple[str, ...]) -> bool:
-    return len(parent) <= len(child) and child[:len(parent)] == parent
-
-
 class PortablePathTree:
     def __init__(self) -> None:
-        self._root: dict[str, Any] = {"terminal": False, "children": {}}
+        self._root = self._new_node()
+
+    @staticmethod
+    def _new_node() -> dict[str, Any]:
+        return {
+            "terminal": False,
+            "terminalCount": 0,
+            "paths": set(),
+            "children": {},
+        }
 
     def add(self, path: str) -> bool:
         node = self._root
         for part in portable_path_parts(path):
             if node["terminal"]:
                 return False
-            node = node["children"].setdefault(part, {"terminal": False, "children": {}})
+            node = node["children"].setdefault(part, self._new_node())
         if node["terminal"] or node["children"]:
             return False
         node["terminal"] = True
         return True
 
+    def record(self, path: str) -> None:
+        node = self._root
+        for part in portable_path_parts(path):
+            node = node["children"].setdefault(part, self._new_node())
+        node["terminal"] = True
+        node["terminalCount"] += 1
+        node["paths"].add(path)
+
+    def conflicts(self) -> set[str]:
+        conflicts: set[str] = set()
+        subtree_terminals: dict[int, bool] = {}
+        stack: list[tuple[dict[str, Any], bool, bool]] = [
+            (self._root, False, False)
+        ]
+        while stack:
+            node, ancestor_is_terminal, expanded = stack.pop()
+            current_is_terminal = bool(node["terminal"])
+            children = tuple(node["children"].values())
+            if not expanded:
+                stack.append((node, ancestor_is_terminal, True))
+                child_ancestor = ancestor_is_terminal or current_is_terminal
+                for child in reversed(children):
+                    stack.append((child, child_ancestor, False))
+                continue
+            descendant_is_terminal = False
+            for child in children:
+                descendant_is_terminal = (
+                    subtree_terminals.pop(id(child)) or descendant_is_terminal
+                )
+            if current_is_terminal and (
+                ancestor_is_terminal
+                or descendant_is_terminal
+                or node["terminalCount"] > 1
+                or len(node["paths"]) > 1
+            ):
+                conflicts.update(node["paths"])
+            subtree_terminals[id(node)] = (
+                current_is_terminal or descendant_is_terminal
+            )
+        return conflicts
+
 
 def portable_path_conflicts(paths: Iterable[str]) -> set[str]:
-    ordered = sorted((portable_path_parts(path), path) for path in paths)
-    conflicts: set[str] = set()
-    previous_parts: tuple[str, ...] | None = None
-    previous_path: str | None = None
-    for parts, path in ordered:
-        if previous_parts is not None and portable_path_covers(previous_parts, parts):
-            conflicts.update((previous_path, path))
-        previous_parts, previous_path = parts, path
-    return conflicts
+    tree = PortablePathTree()
+    for path in paths:
+        tree.record(path)
+    return tree.conflicts()
 
 
 def is_transfer_path(path: str) -> bool:
@@ -1234,7 +1275,6 @@ def included_entries(inventory: dict[str, Any], rows: list[dict[str, Any]]) -> l
 
 
 def expected_material(repository: BoundRepository, inventory: dict[str, Any], rows: list[dict[str, Any]]) -> tuple[dict[str, dict[str, Any]], dict[str, bytes]]:
-    root = repository.root
     payload: dict[str, dict[str, Any]] = {}
     metadata_paths: list[str] = []
     for entry in included_entries(inventory, rows):
@@ -1245,11 +1285,6 @@ def expected_material(repository: BoundRepository, inventory: dict[str, Any], ro
         metadata_paths.append(entry["path"])
         if entry["entryType"] == "deleted":
             continue
-        source = root.joinpath(*PurePosixPath(entry["path"]).parts)
-        if is_reparse_point(source) or not source.is_file():
-            raise ContractError("inventory drift")
-        if source.stat().st_size != entry["size"] or sha256_file(source) != entry["sha256"]:
-            raise ContractError("inventory drift")
         payload[entry["path"]] = entry
     return payload, git_metadata(repository, sorted(metadata_paths))
 
@@ -1288,14 +1323,23 @@ def enforce_archive_infos(infos: Iterable[zipfile.ZipInfo]) -> None:
             raise ContractError("archive resource limit")
 
 
-def write_file_member(archive: zipfile.ZipFile, name: str, source: Path, expected: dict[str, Any]) -> None:
-    with source.open("rb") as input_stream, archive.open(deterministic_zip_info(name), "w") as output_stream:
+def write_file_member(
+    archive: zipfile.ZipFile,
+    name: str,
+    input_session: "BoundPayloadInputSession",
+    expected: dict[str, Any],
+) -> None:
+    if input_session.raw_stream is None or input_session.eof != expected["size"]:
+        raise ContractError("inventory drift")
+    input_session.require_stable()
+    with archive.open(deterministic_zip_info(name), "w") as output_stream:
         digest = hashlib.sha256()
         size = 0
-        for chunk in iter(lambda: input_stream.read(1024 * 1024), b""):
+        for chunk in iter(lambda: input_session.raw_stream.read(1024 * 1024), b""):
             size += len(chunk)
             digest.update(chunk)
             output_stream.write(chunk)
+    input_session.require_stable()
     if size != expected["size"] or digest.hexdigest() != expected["sha256"]:
         raise ContractError("inventory drift")
 
@@ -1320,7 +1364,9 @@ def bundle(repository: BoundRepository, inventory_path: Path, selection_path: Pa
         os.close(descriptor)
         with zipfile.ZipFile(temporary, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
             for name, entry in sorted(payload.items()):
-                write_file_member(archive, name, root.joinpath(*PurePosixPath(name).parts), entry)
+                source = root.joinpath(*PurePosixPath(name).parts)
+                with BoundPayloadInputSession(source) as input_session:
+                    write_file_member(archive, name, input_session, entry)
             for name, data in sorted(metadata.items()):
                 archive.writestr(deterministic_zip_info(name), data, compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
             archive.writestr(deterministic_zip_info(MANIFEST_PATH), manifest_bytes, compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
@@ -1410,6 +1456,14 @@ _INPUT_FILE_OPTIONS = _OrdinaryFileOptions(
         binding=TRANSFER_INPUT_BINDING_INVALID,
         drift=TRANSFER_INPUT_IDENTITY_DRIFT,
         close=TRANSFER_INPUT_CLOSE_FAILED,
+    ),
+    posix_nonblocking=True,
+)
+_PAYLOAD_FILE_OPTIONS = _OrdinaryFileOptions(
+    errors=_OrdinaryFileErrors(
+        binding="inventory drift",
+        drift="inventory drift",
+        close="inventory drift",
     ),
     posix_nonblocking=True,
 )
@@ -2086,6 +2140,21 @@ class BoundOrdinaryInputSession(_BoundOrdinaryFileCore):
     def __enter__(self) -> "BoundOrdinaryInputSession":
         if self.raw_stream is None or self.closed:
             raise ContractError(TRANSFER_INPUT_BINDING_INVALID)
+        return self
+
+    def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> None:
+        self.close(validate=True)
+
+
+class BoundPayloadInputSession(_BoundOrdinaryFileCore):
+    """One selected payload leaf held from classification through ZIP emission."""
+
+    def __init__(self, input_path: Path) -> None:
+        super().__init__(input_path, _PAYLOAD_FILE_OPTIONS)
+
+    def __enter__(self) -> "BoundPayloadInputSession":
+        if self.raw_stream is None or self.closed:
+            raise ContractError("inventory drift")
         return self
 
     def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> None:

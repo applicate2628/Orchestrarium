@@ -15,6 +15,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import stat
 import struct
 import subprocess
@@ -44,7 +45,19 @@ def load_transfer_module():
     return module
 
 
-def process_is_alive(pid: int) -> bool:
+def _linux_process_state_and_start_identity(pid: int) -> tuple[str, str] | None:
+    try:
+        raw = Path(f"/proc/{pid}/stat").read_text(encoding="ascii")
+    except OSError:
+        return None
+    close = raw.rfind(")")
+    fields = raw[close + 2 :].split()
+    if len(fields) < 20:
+        return None
+    return fields[0], fields[19]
+
+
+def process_is_original_live(pid: int, start_identity: str | None) -> bool:
     if os.name == "nt":
         import ctypes
 
@@ -59,6 +72,14 @@ def process_is_alive(pid: int) -> bool:
             )
         finally:
             kernel.CloseHandle(handle)
+    if sys.platform.startswith("linux"):
+        observation = _linux_process_state_and_start_identity(pid)
+        return bool(
+            start_identity is not None
+            and observation is not None
+            and observation[1] == start_identity
+            and observation[0] != "Z"
+        )
     try:
         os.kill(pid, 0)
         return True
@@ -66,13 +87,17 @@ def process_is_alive(pid: int) -> bool:
         return False
 
 
-def wait_process_gone(pid: int, timeout: float = 5.0) -> bool:
+def wait_process_gone(
+    pid: int,
+    start_identity: str | None,
+    timeout: float = 5.0,
+) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if not process_is_alive(pid):
+        if not process_is_original_live(pid, start_identity):
             return True
         time.sleep(0.02)
-    return not process_is_alive(pid)
+    return not process_is_original_live(pid, start_identity)
 
 
 def canonical_json(value: object) -> bytes:
@@ -883,9 +908,36 @@ class IoBoundaryTests(unittest.TestCase):
                         command, repository, module.sanitized_git_environment()
                     )
 
+    @unittest.skipUnless(
+        sys.platform.startswith("linux"),
+        "Linux /proc process identity contract",
+    )
+    def test_descendant_oracle_distinguishes_live_zombie_and_pid_reuse(self) -> None:
+        with mock.patch(
+            f"{__name__}._linux_process_state_and_start_identity",
+            return_value=("S", "original"),
+        ):
+            self.assertTrue(process_is_original_live(12345, "original"))
+        with mock.patch(
+            f"{__name__}._linux_process_state_and_start_identity",
+            return_value=("Z", "original"),
+        ):
+            self.assertFalse(process_is_original_live(12345, "original"))
+        with mock.patch(
+            f"{__name__}._linux_process_state_and_start_identity",
+            return_value=("S", "reused"),
+        ):
+            self.assertFalse(process_is_original_live(12345, "original"))
+        with mock.patch(
+            f"{__name__}._linux_process_state_and_start_identity",
+            return_value=None,
+        ):
+            self.assertFalse(process_is_original_live(12345, "original"))
+
     def test_parent_exit_with_pipe_inheriting_descendant_settles_before_return(self) -> None:
         module = load_transfer_module()
         descendant_pid: int | None = None
+        descendant_start_identity: str | None = None
         with tempfile.TemporaryDirectory(prefix="repo-transfer-git-descendant-") as temp:
             root = Path(temp)
             repository = root / "repo"
@@ -897,12 +949,19 @@ class IoBoundaryTests(unittest.TestCase):
             parent = root / "spawn_descendant.py"
             parent.write_text(
                 "from pathlib import Path\n"
-                "import subprocess, sys\n"
+                "import json, subprocess, sys\n"
                 "child = subprocess.Popen(\n"
                 "    [sys.executable, '-c', 'import time; time.sleep(30)'],\n"
                 "    close_fds=False,\n"
                 ")\n"
-                "Path(sys.argv[1]).write_text(str(child.pid), encoding='ascii')\n",
+                "start_identity = None\n"
+                "if sys.platform.startswith('linux'):\n"
+                "    raw = Path(f'/proc/{child.pid}/stat').read_text(encoding='ascii')\n"
+                "    start_identity = raw[raw.rfind(')') + 2:].split()[19]\n"
+                "Path(sys.argv[1]).write_text(\n"
+                "    json.dumps({'pid': child.pid, 'startIdentity': start_identity}),\n"
+                "    encoding='utf-8',\n"
+                ")\n",
                 encoding="utf-8",
             )
             alias = f'!"{sys.executable}" "{parent}"'
@@ -919,13 +978,20 @@ class IoBoundaryTests(unittest.TestCase):
                         command, repository, module.sanitized_git_environment()
                     )
                 self.assertTrue(marker.is_file(), "descendant did not publish its PID")
-                descendant_pid = int(marker.read_text(encoding="ascii"))
+                descendant = json.loads(marker.read_text(encoding="utf-8"))
+                descendant_pid = int(descendant["pid"])
+                descendant_start_identity = descendant["startIdentity"]
+                if sys.platform.startswith("linux"):
+                    self.assertIsInstance(descendant_start_identity, str)
                 self.assertTrue(
-                    wait_process_gone(descendant_pid),
+                    wait_process_gone(descendant_pid, descendant_start_identity),
                     "pipe-inheriting descendant survived transfer runner return",
                 )
             finally:
-                if descendant_pid is not None and process_is_alive(descendant_pid):
+                if descendant_pid is not None and process_is_original_live(
+                    descendant_pid,
+                    descendant_start_identity,
+                ):
                     os.kill(descendant_pid, 15)
 
     def test_inventory_producer_refuses_overlimit_before_publishing_output(self) -> None:
@@ -3109,6 +3175,154 @@ class SecurityContractTests(unittest.TestCase):
                 forged = self.root / f"portable-{name}.zip"
                 self.rewrite_bundle_manifest(self.bundle_path, forged, mutate)
                 self.assert_contract_error(run_cli("verify", "--bundle", forged), "invalid manifest entry category")
+
+    def test_portable_conflicts_mark_every_participant_across_sibling_branches(self) -> None:
+        module = load_transfer_module()
+        cases = (
+            (
+                ("A", "a/b", "a/c"),
+                {"A", "a/b", "a/c"},
+            ),
+            (
+                ("Root", "root/Child", "ROOT/child/grand", "root/sibling"),
+                {"Root", "root/Child", "ROOT/child/grand", "root/sibling"},
+            ),
+            (
+                ("Foo", "foo", "benign/left", "benign/right"),
+                {"Foo", "foo"},
+            ),
+            (
+                ("benign/left", "benign/right", "other/path"),
+                set(),
+            ),
+        )
+        for paths, expected in cases:
+            with self.subTest(paths=paths):
+                self.assertEqual(expected, module.portable_path_conflicts(paths))
+
+    def test_portable_conflicts_handle_deep_paths_without_python_recursion(self) -> None:
+        module = load_transfer_module()
+        ancestor = "/".join(f"level-{index}" for index in range(1100))
+        paths = (ancestor, f"{ancestor}/left", f"{ancestor}/right")
+        self.assertEqual(set(paths), module.portable_path_conflicts(paths))
+
+    @unittest.skipIf(os.name == "nt", "case-sensitive source inventory contract")
+    def test_inventory_marks_every_multi_sibling_portable_collision_hostile(self) -> None:
+        module = load_transfer_module()
+        (self.repo / "A").write_bytes(b"ancestor")
+        (self.repo / "a").mkdir()
+        (self.repo / "a" / "b").write_bytes(b"left")
+        (self.repo / "a" / "c").write_bytes(b"right")
+        repository = SimpleNamespace(
+            root=self.repo,
+            git_executable=Path("/usr/bin/git"),
+            git_executable_content_sha256="0" * 64,
+        )
+        empty_result = subprocess.CompletedProcess([], 0, stdout=b"", stderr=b"")
+        with (
+            mock.patch.object(module, "repository_history", return_value=("committed", "0" * 40)),
+            mock.patch.object(module, "run_git", return_value=empty_result),
+            mock.patch.object(module, "remote_evidence", return_value=([], {})),
+            mock.patch.object(
+                module,
+                "git_metadata",
+                return_value={name: b"" for name in module.METADATA_NAMES},
+            ),
+        ):
+            inventory = module.build_inventory(repository)
+        entries = {
+            entry["path"]: entry
+            for entry in inventory["entries"]
+            if entry["path"] in {"A", "a/b", "a/c"}
+        }
+        self.assertEqual({"A", "a/b", "a/c"}, set(entries))
+        for entry in entries.values():
+            self.assertTrue(entry.get("hostile"))
+            self.assertTrue(entry.get("metadataOnly"))
+
+    @unittest.skipIf(os.name == "nt", "POSIX nonblocking payload binding contract")
+    def test_payload_binding_rejects_special_files_without_blocking_or_following(self) -> None:
+        module = load_transfer_module()
+        ordinary = self.root / "ordinary-payload.bin"
+        ordinary.write_bytes(b"payload")
+        with module.BoundPayloadInputSession(ordinary) as session:
+            self.assertEqual(len(b"payload"), session.eof)
+
+        hostile: list[Path] = []
+        fifo = self.root / "payload.fifo"
+        os.mkfifo(fifo)
+        hostile.append(fifo)
+        directory = self.root / "payload-directory"
+        directory.mkdir()
+        hostile.append(directory)
+        link = self.root / "payload-link"
+        link.symlink_to(ordinary)
+        hostile.append(link)
+        socket_path = self.root / "payload.socket"
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
+            listener.bind(str(socket_path))
+            hostile.append(socket_path)
+            for path in hostile:
+                started = time.monotonic()
+                with self.subTest(path=path), self.assertRaisesRegex(
+                    module.ContractError, "inventory drift"
+                ):
+                    module.BoundPayloadInputSession(path)
+                self.assertLess(time.monotonic() - started, 1.0)
+
+    @unittest.skipUnless(os.name == "nt", "Windows payload namespace contract")
+    def test_windows_payload_binding_rejects_ads_before_createfile(self) -> None:
+        module = load_transfer_module()
+        with mock.patch.object(module, "_windows_open_ordinary_path") as create_file:
+            for path in (
+                "payload.bin:stream",
+                "payload.bin::$DATA",
+                "C:payload.bin",
+                "NUL",
+            ):
+                with self.subTest(path=path), self.assertRaisesRegex(
+                    module.ContractError, "inventory drift"
+                ):
+                    module.BoundPayloadInputSession(path)
+        self.assertEqual(0, create_file.call_count)
+
+        directory = self.root / "payload-directory"
+        directory.mkdir()
+        with self.assertRaisesRegex(module.ContractError, "inventory drift"):
+            module.BoundPayloadInputSession(directory)
+        ordinary = self.root / "payload-target.bin"
+        ordinary.write_bytes(b"payload")
+        link = self.root / "payload-reparse.bin"
+        try:
+            link.symlink_to(ordinary)
+        except OSError as error:
+            self.skipTest(f"file symlink unavailable: {error}")
+        with self.assertRaisesRegex(module.ContractError, "inventory drift"):
+            module.BoundPayloadInputSession(link)
+
+    def test_payload_zip_stream_uses_the_already_bound_descriptor(self) -> None:
+        module = load_transfer_module()
+        source = self.root / "bound-payload.bin"
+        payload = b"bound payload bytes"
+        source.write_bytes(payload)
+        expected = {"size": len(payload), "sha256": sha256(payload)}
+        captured = io.BytesIO()
+
+        class RecordingArchive:
+            @contextlib.contextmanager
+            def open(self, _info, _mode):
+                yield captured
+
+        with module.BoundPayloadInputSession(source) as session:
+            with mock.patch.object(
+                Path,
+                "open",
+                side_effect=AssertionError("payload pathname must not reopen"),
+            ):
+                module.write_file_member(
+                    RecordingArchive(), "bound-payload.bin", session, expected
+                )
+        self.assertEqual(payload, captured.getvalue())
 
     def test_internal_manifest_requires_all_typed_binding_fields(self) -> None:
         inventory = self.inventory()

@@ -1420,8 +1420,18 @@ def test_canonical_lead_stage_excludes_ordinary_runtime_cache(
 
     import shutil
 
+    canonical_source_lead = ROOT / "src.codex" / "skills" / "lead"
+    source_inventory = _no_follow_inventory(canonical_source_lead)
+    source_manifest = installer._stage_tree_manifest(
+        canonical_source_lead, ignore_runtime_cache=True
+    )
     source_lead = tmp_path / "source-lead"
-    shutil.copytree(ROOT / "src.codex" / "skills" / "lead", source_lead)
+    shutil.copytree(
+        canonical_source_lead,
+        source_lead,
+        ignore=shutil.ignore_patterns("__pycache__"),
+    )
+    assert not (source_lead / "scripts" / "__pycache__").exists()
     baseline = installer._stage_canonical_lead_tree(
         ROOT,
         source_lead,
@@ -1458,6 +1468,11 @@ def test_canonical_lead_stage_excludes_ordinary_runtime_cache(
         assert cached_file.read_bytes() == source_cache_bytes
     finally:
         shutil.rmtree(stage.path, ignore_errors=True)
+    assert _no_follow_inventory(canonical_source_lead) == source_inventory
+    assert (
+        installer._stage_tree_manifest(canonical_source_lead, ignore_runtime_cache=True)
+        == source_manifest
+    )
 
 
 def test_explicit_empty_runtime_destination_plan_performs_zero_copies(
