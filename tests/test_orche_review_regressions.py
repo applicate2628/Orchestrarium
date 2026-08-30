@@ -62,6 +62,10 @@ class ReviewRegressionTests(unittest.TestCase):
         self.assertIn("unique output directory", text)
         self.assertIn("removed after a successful run", text)
         self.assertIn("trap cleanup_bootstrap EXIT", text)
+        self.assertLess(
+            text.index("trap cleanup_bootstrap EXIT"),
+            text.index(': > "$BOOTSTRAP_ROOT/gitconfig"'),
+        )
         self.assertIn("--preserve-failed-evidence", text)
         self.assertIn("## Terms and Abbreviations", text)
         self.assertTrue(
