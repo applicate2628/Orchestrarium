@@ -1,0 +1,25 @@
+name: Internal PR2 export r5
+
+on:
+  push:
+    branches:
+      - orche/internal-pr2-export-20260830-r5
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Create exact Git bundle
+        run: git bundle create orchestrarium.bundle HEAD
+      - uses: actions/upload-artifact@v4
+        with:
+          name: orchestrarium-pr2-e348-r5
+          path: orchestrarium.bundle
+          if-no-files-found: error
+          retention-days: 1
