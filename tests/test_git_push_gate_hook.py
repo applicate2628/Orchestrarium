@@ -4668,6 +4668,7 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
     def _oracle(self, module, observed: list[list[str]], **changes):
         head_ref = changes.get("head_ref", "feature")
         head_repo = changes.get("head_repo", "alice/project")
+        pr_number = changes.get("pr_number", 7)
         head_owner, head_repo_name = head_repo.split("/", 1)
         protected = changes.get("protected", False)
         remote_url = changes.get("remote_url", f"git@github.com:{head_repo}.git")
@@ -4695,8 +4696,8 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
                 if "pr_raw" in changes:
                     return result(0, changes["pr_raw"])
                 return result(0, {
-                    "id": "PR_node_7", "number": 7,
-                    "url": "https://github.com/acme/project/pull/7",
+                    "id": f"PR_node_{pr_number}", "number": pr_number,
+                    "url": f"https://github.com/acme/project/pull/{pr_number}",
                     "state": state, "closed": closed, "mergedAt": None,
                     "baseRefName": "main", "baseRefOid": "3" * 40,
                     "headRefName": head_ref, "headRefOid": self.REMOTE_OID,
@@ -4801,6 +4802,49 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
                 rc = module.main()
         self.assertEqual(rc, 0)
         return stdout.getvalue(), observed
+
+    def test_pr_grant_accepts_number_shorthand_and_binds_canonical_identity(self) -> None:
+        grant = "[approve-pr-publication:v1 pr=3]"
+        for script in (CANONICAL_HOOK, *HOOKS):
+            with self.subTest(script=script):
+                stdout, observed = self._run_module(
+                    script, [user(grant)], self._literal_command(script), pr_number=3
+                )
+                self.assertFalse(denies_text(stdout), stdout)
+                self.assertTrue(
+                    any(argv[1:4] == ["pr", "view", "3"] for argv in observed)
+                )
+                self.assertTrue(
+                    any(
+                        argv[1:4] == ["repo", "view", "acme/project"]
+                        for argv in observed
+                    )
+                )
+
+    def test_pr_grant_accepts_equal_markdown_link(self) -> None:
+        url = "https://github.com/acme/project/pull/7"
+        grant = f"[approve-pr-publication:v1 pr=[{url}]({url})]"
+        for script in (CANONICAL_HOOK, *HOOKS):
+            with self.subTest(script=script):
+                stdout, observed = self._run_module(
+                    script, [user(grant)], self._literal_command(script)
+                )
+                self.assertFalse(denies_text(stdout), stdout)
+                self.assertTrue(
+                    any(argv[1:4] == ["pr", "view", url] for argv in observed)
+                )
+
+    def test_pr_grant_rejects_mismatched_markdown_link(self) -> None:
+        label = "https://github.com/acme/project/pull/7"
+        destination = "https://github.com/acme/project/pull/8"
+        grant = f"[approve-pr-publication:v1 pr=[{label}]({destination})]"
+        for script in (CANONICAL_HOOK, *HOOKS):
+            with self.subTest(script=script):
+                stdout, observed = self._run_module(
+                    script, [user(grant)], self._literal_command(script)
+                )
+                self.assertIn("PRG-AUTH-MALFORMED", stdout)
+                self.assertEqual(observed, [])
 
     def test_pr_literal_minus_c_recovers_dropped_tool_workdir_fail_closed(self) -> None:
         entries = [user(self.GRANT), user("push now")]

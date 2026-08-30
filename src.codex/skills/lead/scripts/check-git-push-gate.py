@@ -392,11 +392,16 @@ from git_push_gate_preflight import (
 # (see the consultant continuation-prompt untrusted-data rule), so unlike
 # [skip-bugfix-discipline] this marker never counts from the model's own reply.
 
-PR_GRANT_REGEX = re.compile(
-    r"^\[approve-pr-publication:v1 pr=(?P<url>https://github\.com/"
+PR_GRANT_PREFIX = "[approve-pr-publication:v1 pr="
+PR_GRANT_NUMBER_REGEX = re.compile(r"^[1-9][0-9]*$")
+PR_GRANT_MARKDOWN_REGEX = re.compile(
+    r"^\[(?P<label>[^\]]+)\]\((?P<destination>[^)]+)\)$"
+)
+PR_URL_REGEX = re.compile(
+    r"^(?P<url>https://github\.com/"
     r"(?P<owner>[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,98}[A-Za-z0-9])?)/"
     r"(?P<repo>[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,98}[A-Za-z0-9])?)/pull/"
-    r"(?P<number>[1-9][0-9]*))\]$"
+    r"(?P<number>[1-9][0-9]*))$"
 )
 PR_REVOKE_MARKER = "[revoke-pr-publication:v1]"
 PR_RESERVED_PREFIXES = ("[approve-pr-publication:", "[revoke-pr-publication:")
@@ -1295,6 +1300,29 @@ def _mask_attached_io_numbers(command: str) -> str:
 
 
 
+def _parse_pr_grant(text: str) -> ActivePrGrant | None:
+    if not text.startswith(PR_GRANT_PREFIX) or not text.endswith("]"):
+        return None
+    target = text[len(PR_GRANT_PREFIX):-1]
+    if PR_GRANT_NUMBER_REGEX.fullmatch(target):
+        return ActivePrGrant(target, "", "", int(target))
+    markdown = PR_GRANT_MARKDOWN_REGEX.fullmatch(target)
+    if markdown:
+        if markdown.group("label") != markdown.group("destination"):
+            return None
+        target = markdown.group("label")
+    match = PR_URL_REGEX.fullmatch(target)
+    if not match:
+        return None
+    owner = match.group("owner")
+    repo = match.group("repo")
+    if owner in (".", "..") or repo in (".", ".."):
+        return None
+    return ActivePrGrant(
+        match.group("url"), owner, repo, int(match.group("number"))
+    )
+
+
 def _derive_pr_grant(entries: list[dict]) -> tuple[str, ActivePrGrant | None]:
     state = "absent"
     grant: ActivePrGrant | None = None
@@ -1307,17 +1335,9 @@ def _derive_pr_grant(entries: list[dict]) -> tuple[str, ActivePrGrant | None]:
         if text == PR_REVOKE_MARKER:
             state, grant = "revoked", None
             continue
-        match = PR_GRANT_REGEX.fullmatch(text)
-        if match:
-            owner = match.group("owner")
-            repo = match.group("repo")
-            if owner in (".", "..") or repo in (".", ".."):
-                state, grant = "malformed", None
-            else:
-                state = "active"
-                grant = ActivePrGrant(
-                    match.group("url"), owner, repo, int(match.group("number"))
-                )
+        parsed_grant = _parse_pr_grant(text)
+        if parsed_grant is not None:
+            state, grant = "active", parsed_grant
             continue
         if text.startswith(PR_RESERVED_PREFIXES):
             state, grant = "malformed", None
@@ -2521,8 +2541,14 @@ def _verify_pr_oracle(
         repository_workdir,
     )
     pr = _strict_json(pr_text, dict, "PRG-PR-UNAVAILABLE")
-    if pr.get("number") != grant.number or pr.get("url") != grant.url:
+    pr_url = pr.get("url")
+    url_match = PR_URL_REGEX.fullmatch(pr_url) if isinstance(pr_url, str) else None
+    if url_match is None or pr.get("number") != grant.number:
         raise PrRouteDenied("PRG-BINDING-DRIFT")
+    if grant.owner and pr_url != grant.url:
+        raise PrRouteDenied("PRG-BINDING-DRIFT")
+    owner = url_match.group("owner")
+    repo = url_match.group("repo")
     pr_id = _required_text(pr.get("id"), "PRG-BINDING-DRIFT", cap=256)
     if not NODE_ID_REGEX.fullmatch(pr_id):
         raise PrRouteDenied("PRG-BINDING-DRIFT")
@@ -2549,7 +2575,7 @@ def _verify_pr_oracle(
 
     repo_fields = "id,nameWithOwner,defaultBranchRef,url"
     _, base_repo_text = _run_text(
-        [gh_exe, "repo", "view", f"{grant.owner}/{grant.repo}", "--json", repo_fields],
+        [gh_exe, "repo", "view", f"{owner}/{repo}", "--json", repo_fields],
         deadline,
         "PRG-PR-UNAVAILABLE",
         repository_workdir,
@@ -2562,7 +2588,7 @@ def _verify_pr_oracle(
     )
     base_record = _strict_json(base_repo_text, dict, "PRG-PR-UNAVAILABLE")
     head_record = _strict_json(head_repo_text, dict, "PRG-PR-UNAVAILABLE")
-    _, base_default = _repo_record(base_record, f"{grant.owner}/{grant.repo}", "PRG-BINDING-DRIFT")
+    _, base_default = _repo_record(base_record, f"{owner}/{repo}", "PRG-BINDING-DRIFT")
     current_head_repo_id, head_default = _repo_record(head_record, head_name, "PRG-BINDING-DRIFT")
     if current_head_repo_id != head_repo_id:
         raise PrRouteDenied("PRG-BINDING-DRIFT")
