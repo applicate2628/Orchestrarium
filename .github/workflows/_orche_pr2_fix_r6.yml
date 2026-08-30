@@ -41,7 +41,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cat helper/.orche-payload/pr2-r6/chunk-* | base64 -d > "$RUNNER_TEMP/pr2-r6.patch.gz"
+          tr -d '\r\n\t ' < helper/.orche-payload/pr2-r6/chunk-00 | base64 --ignore-garbage -d > "$RUNNER_TEMP/pr2-r6.patch.gz"
           echo '8ab6d575d6c8bc4143ffdc23f4cd1af7071c18b6e98f4ff6eafe6289b886ac86  '"$RUNNER_TEMP/pr2-r6.patch.gz" | sha256sum -c -
           gzip -dc "$RUNNER_TEMP/pr2-r6.patch.gz" > "$RUNNER_TEMP/pr2-r6.patch"
 
