@@ -1,4 +1,4 @@
-name: Internal PR2 export r5
+name: Internal PR2 fix publisher r5
 
 on:
   push:
@@ -6,20 +6,127 @@ on:
       - orche/internal-pr2-export-20260830-r5
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  export:
+  verify-and-publish:
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout helper payload
+        uses: actions/checkout@v4
         with:
+          ref: orche/internal-pr2-export-20260830-r5
+          path: helper
+          fetch-depth: 1
+
+      - name: Checkout pull-request branch
+        uses: actions/checkout@v4
+        with:
+          ref: orche/impl-000-baseline
+          path: repo
           fetch-depth: 0
-      - name: Create exact Git bundle
-        run: git bundle create orchestrarium.bundle HEAD
-      - uses: actions/upload-artifact@v4
-        with:
-          name: orchestrarium-pr2-e348-r5
-          path: orchestrarium.bundle
-          if-no-files-found: error
-          retention-days: 1
+          persist-credentials: true
+
+      - name: Install test dependencies
+        run: python3 -m pip install --disable-pip-version-check pytest PyYAML
+
+      - name: Verify payload and apply to exact reviewed head
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat helper/.orche-payload/r5/chunk-* | base64 -d > /tmp/orche-r5.patch.gz
+          echo '141e3d72dbbd554d908e53d1dbc8e2caf69df8e3de2128301c9874828c86969d  /tmp/orche-r5.patch.gz' | sha256sum -c -
+          gzip -dc /tmp/orche-r5.patch.gz > /tmp/orche-r5.patch
+          cd repo
+          git checkout -B orche/impl-000-baseline origin/orche/impl-000-baseline
+          test "$(git rev-parse HEAD)" = e348ed7760fbb34536d2421148b545f69b67d54a
+          test -z "$(git status --porcelain=v1)"
+          git apply --check /tmp/orche-r5.patch
+          git apply /tmp/orche-r5.patch
+          git diff --check
+
+      - name: Run focused Stage 0 regression suites
+        shell: bash
+        working-directory: repo
+        run: |
+          set -euo pipefail
+          export PYTHONDONTWRITEBYTECODE=1
+          for test_file in \
+            tests/test_orche_baseline_pin.py \
+            tests/test_orche_pytest_baseline.py \
+            tests/test_orche_baseline_inventory.py \
+            tests/test_orche_target_effect_baseline.py \
+            tests/test_orche_command_baseline.py \
+            tests/test_orche_capability_baseline.py \
+            tests/test_orche_verifier_isolation.py \
+            tests/test_orche_review_regressions.py
+          do
+            python3 "$test_file"
+          done
+
+      - name: Run repository-standard validation and self-review checks
+        shell: bash
+        working-directory: repo
+        run: |
+          set -euo pipefail
+          export PYTHONDONTWRITEBYTECODE=1
+          python3 scripts/validate-agents-spine.py --spine shared/AGENTS.shared.md
+          python3 scripts/sync-agents-mode-docs.py --root . --check
+          python3 scripts/sync-universal-hooks.py --check
+          bash src.codex/skills/lead/scripts/validate-skill-pack.sh
+          mapfile -t changed_python < <(git diff --name-only -- '*.py')
+          python3 -m py_compile "${changed_python[@]}"
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+          import re
+          import subprocess
+          import tempfile
+
+          root = Path('.')
+          readme = (root / 'baseline/orchestrarium-v1/README.md').read_text(encoding='utf-8')
+          block = re.search(r'```bash\n(.*?)\n```', readme, re.S)
+          assert block is not None
+          with tempfile.NamedTemporaryFile('w', suffix='.sh', delete=False) as handle:
+              handle.write(block.group(1) + '\n')
+              bootstrap = handle.name
+          result = subprocess.run(['bash', '-n', bootstrap], capture_output=True, text=True)
+          assert result.returncode == 0, result.stderr
+
+          pin = json.loads((root / 'baseline/orchestrarium-v1/baseline-pin.json').read_text(encoding='utf-8'))
+          for name, record in pin['tooling'].items():
+              frozen = root / record['path']
+              mutable = root / record['sourcePath']
+              assert frozen.read_bytes() == mutable.read_bytes(), name
+              actual = subprocess.run(
+                  ['git', 'hash-object', str(frozen)],
+                  check=True,
+                  capture_output=True,
+                  text=True,
+              ).stdout.strip()
+              assert actual == record['gitBlobSha'], (name, actual, record['gitBlobSha'])
+          print('README bootstrap, frozen parity, and pinned blobs: PASS')
+          PY
+          find . -type d -name __pycache__ -prune -exec rm -rf {} +
+          rm -rf .pytest_cache .scratch
+          git diff --check
+
+      - name: Stage, run publication gate, and publish
+        shell: bash
+        working-directory: repo
+        run: |
+          set -euo pipefail
+          git add -A
+          git diff --cached --check
+          test "$(git write-tree)" = 4492aa4679da15cd07d90a0675f146abfe5f97ea
+          python3 scripts/check-work-items-state.py
+          python3 scripts/check-publication-gate.py
+          git config user.name applicate2628
+          git config user.email dima_den@inbox.ru
+          git commit -m 'fix(stage0): make reviewed evidence parent-owned'
+          git push origin HEAD:orche/impl-000-baseline
+          {
+            echo "PUBLISHED_SHA=$(git rev-parse HEAD)"
+            echo "PUBLISHED_TREE=$(git rev-parse HEAD^{tree})"
+          } >> "$GITHUB_STEP_SUMMARY"
