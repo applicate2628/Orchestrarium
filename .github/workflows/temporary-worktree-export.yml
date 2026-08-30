@@ -1,0 +1,30 @@
+name: Temporary Orchestrarium worktree export
+
+on:
+  push:
+    branches:
+      - orche/tmp-stage0-review-fix-20260831
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the temporary branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Package the checked-out worktree
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar --exclude=.git -czf /tmp/orchestrarium-worktree.tar.gz .
+      - name: Upload worktree archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: orchestrarium-worktree
+          path: /tmp/orchestrarium-worktree.tar.gz
+          if-no-files-found: error
+          retention-days: 1
