@@ -48,10 +48,10 @@ The verifier performs the operational work rather than duplicating security-sens
 - rematerializes and verifies a frozen tool immediately before every execution;
 - requires Linux, enables a child subreaper, and sweeps all adopted descendants from `/proc`, so a child cannot escape cleanup by calling `setsid()` or double-forking;
 - preserves `PYTHONSAFEPATH=1` while explicitly exposing only the already verified lane worktree as `PYTHONPATH` to repository tests and validators;
-- inventories both the pinned baseline and exact reviewed candidate commit;
+- inventories both the pinned baseline and exact reviewed candidate commit; arbitrary Git path bytes use reversible ASCII `git-path-percent-v1` encoding so generated JSON never contains surrogate code points;
 - treats path, content digest, Git mode, and Git object type as capability identity, so executable-bit and symbolic-link changes cannot disappear behind unchanged file bytes;
 - requires an exact reviewed disposition for every added, modified, or removed tracked path;
-- compares Pytest exits, JUnit Extensible Markup Language diagnostics, retained skip reasons, and baseline test/support source digests;
+- verifies baseline test/support source digests before execution, runs each retained baseline test file with candidate `conftest.py` discovery disabled and without any `--junitxml` argument, then has the trusted parent synthesize the accepted file-level JUnit Extensible Markup Language report only after the test process and descendants are gone;
 - runs all repository-standard validators in both worktrees and requires validator-specific terminal success or failure markers even when both commands exit zero;
 - rechecks both baseline and candidate worktrees after every untrusted repository-code stage, including each candidate-focused test suite;
 - snapshots the complete trusted-tree membership and identity before each untrusted lane, forbids new entries, removals, replacements, symbolic links, hard links, or special files, and verifies the exact tree afterward;
@@ -79,19 +79,19 @@ assert_canonical_external() {
   tool="$1"
   test "${tool#/}" != "$tool" && test -x "$tool" && test ! -L "$tool" || {
     echo "BLOCKED: verifier path must be an absolute executable non-symlink: $tool" >&2
-    return 1
+    return 2
   }
   tool_dir="${tool%/*}"
   tool_base="${tool##*/}"
   canonical="$(cd -P -- "$tool_dir" && printf '%s/%s\n' "$PWD" "$tool_base")"
   test "$tool" = "$canonical" || {
     echo "BLOCKED: verifier path is not canonical: $tool -> $canonical" >&2
-    return 1
+    return 2
   }
   case "$canonical" in
     "$BASELINE_ROOT"/*|"$CANDIDATE_ROOT"/*)
       echo "BLOCKED: verifier executable is inside a tested worktree: $canonical" >&2
-      return 1
+      return 2
       ;;
   esac
 }
@@ -103,14 +103,14 @@ assert_canonical_external "$VERIFIER_BASH"
 case "$REVIEWED_REF" in
   ''|*[!0-9a-f]*)
     echo "BLOCKED: REVIEWED_REF must be an exact lowercase hexadecimal commit identifier" >&2
-    exit 1
+    exit 2
     ;;
 esac
 case "${#REVIEWED_REF}" in
   40|64) ;;
   *)
     echo "BLOCKED: REVIEWED_REF must contain exactly 40 or 64 hexadecimal characters" >&2
-    exit 1
+    exit 2
     ;;
 esac
 
@@ -143,7 +143,7 @@ PIN_PATH=baseline/orchestrarium-v1/baseline-pin.json
 RESOLVED_REVIEWED_REF="$(trusted_git -C "$CANDIDATE_ROOT" rev-parse --verify "$REVIEWED_REF^{commit}")"
 test "$REVIEWED_REF" = "$RESOLVED_REVIEWED_REF" || {
   echo "BLOCKED: REVIEWED_REF must name the exact reviewed commit" >&2
-  exit 1
+  exit 2
 }
 PIN_JSON="$(trusted_git -C "$CANDIDATE_ROOT" show "$REVIEWED_REF:$PIN_PATH")"
 materialize_bootstrap_tool() {
@@ -160,12 +160,12 @@ materialize_bootstrap_tool() {
   tree_entry="$(trusted_git -C "$CANDIDATE_ROOT" ls-tree "$REVIEWED_REF" -- "$tool_path")"
   test "$(printf '%s\n' "$tree_entry" | trusted_python -c 'import sys; print(sys.stdin.read().split(None, 3)[2])')" = "$tool_blob" || {
     echo "BLOCKED: reviewed bootstrap tool blob mismatch: $key" >&2
-    exit 1
+    exit 2
   }
   trusted_git -C "$CANDIDATE_ROOT" cat-file blob "$tool_blob" > "$BOOTSTRAP_ROOT/$destination"
   test "$(trusted_git -C "$CANDIDATE_ROOT" hash-object "$BOOTSTRAP_ROOT/$destination")" = "$tool_blob" || {
     echo "BLOCKED: materialized bootstrap tool hash mismatch: $key" >&2
-    exit 1
+    exit 2
   }
 }
 materialize_bootstrap_tool stage0Runtime stage0_runtime.py
@@ -191,13 +191,13 @@ Stage 0 is intentionally local-only and does not add a GitHub Actions workflow. 
 - immutable baseline and reviewed-candidate capability/test inventories;
 - target-effect measurements based on normalized Skill bodies;
 - complete tracked-path disposition comparison;
-- baseline/candidate Pytest reports and a differential verdict;
+- parent-generated baseline/candidate file-level Pytest reports and a differential verdict;
 - baseline/candidate logs and comparison reports for every repository-standard validator;
 - a machine-readable summary bound to both exact commit identifiers.
 
 The external trusted and lane directories are removed after a successful run and, by default, after a failed run. Only the accepted copied report set remains under the candidate's unique `.scratch/orche-stage0/reviewed-runs/<commit>-<random>/` directory. The copied directory is never reused as input evidence.
 
-Exit `0` is accepted evidence. Exit `1` means verified semantic parity is `BLOCKED`. Exit `2` means the evidence is operationally invalid and must not be interpreted as parity drift. Operational Pytest exits, operational validator exits, marker-free successes, and marker-free semantic failures therefore produce exit `2`.
+Exit `0` is accepted evidence. Exit `1` means verified semantic parity is `BLOCKED`. Exit `2` means bootstrap validation or later evidence is operationally invalid and must not be interpreted as parity drift. Operational Pytest exits, operational validator exits, marker-free successes, and marker-free semantic failures therefore produce exit `2`.
 
 ## Recovery mode
 
@@ -221,7 +221,8 @@ Only the repository owner may then create, verify, and push the signed tag. Unti
 - **CLI:** Command-Line Interface, a program operated through terminal commands.
 - **Git blob:** an immutable Git object containing one file's bytes.
 - **Git mode:** the tracked Git file mode, such as regular file, executable file, symbolic link, or submodule entry.
-- **JUnit XML:** JUnit Extensible Markup Language, the machine-readable Pytest result format.
+- **JUnit XML:** JUnit Extensible Markup Language, the machine-readable Pytest result format; Stage 0 synthesizes the accepted file from parent-observed per-file process exits rather than accepting candidate-written XML.
+- **`git-path-percent-v1`:** a reversible ASCII encoding that leaves safe path bytes unchanged and writes every other Git path byte as `%HH`.
 - **Linux child subreaper:** a Linux process that adopts orphaned descendants so they remain controllable even after `setsid()` or a double fork.
 - **PATH:** the operating-system executable search path.
 - **POSIX:** Portable Operating System Interface, the process/session model on which the Linux verifier builds.

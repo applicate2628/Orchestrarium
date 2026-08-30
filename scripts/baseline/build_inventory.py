@@ -22,6 +22,8 @@ from typing import Mapping, Sequence
 SCHEMA_VERSION = 2
 DEFAULT_REPOSITORY = "applicate2628/Orchestrarium"
 SKILL_BODY_NORMALIZATION = "utf8-strict+lf+leading-yaml-frontmatter-stripped-v1"
+PATH_ENCODING = "git-path-percent-v1"
+_PATH_SAFE_BYTES = frozenset(b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._/")
 OBJECT_ID = re.compile(r"[0-9a-fA-F]{40}(?:[0-9a-fA-F]{24})?")
 OUTPUT_NAMES = (
     "capability-inventory.json",
@@ -41,6 +43,36 @@ def _canonical_json(value: object) -> str:
 
 def _sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def _encode_git_path(raw_path: bytes) -> str:
+    """Return a reversible ASCII representation of arbitrary Git path bytes."""
+    return "".join(
+        chr(value) if value in _PATH_SAFE_BYTES else f"%{value:02X}"
+        for value in raw_path
+    )
+
+
+def _decode_git_path(encoded_path: str) -> bytes:
+    """Reverse :func:`_encode_git_path`; reject non-canonical input."""
+    output = bytearray()
+    index = 0
+    while index < len(encoded_path):
+        character = encoded_path[index]
+        if character == "%":
+            token = encoded_path[index + 1 : index + 3]
+            if len(token) != 2 or not re.fullmatch(r"[0-9A-F]{2}", token):
+                raise InventoryError(f"invalid encoded Git path: {encoded_path!r}")
+            output.append(int(token, 16))
+            index += 3
+            continue
+        value = ord(character)
+        if value not in _PATH_SAFE_BYTES:
+            raise InventoryError(f"non-canonical encoded Git path: {encoded_path!r}")
+        output.append(value)
+        index += 1
+    return bytes(output)
+
 
 
 def _validate_git_executable(value: Path) -> Path:
@@ -121,7 +153,7 @@ def _list_tree(
         try:
             metadata, raw_path = record.split(b"\t", 1)
             mode, object_type, object_id, size_text = metadata.decode("ascii").split(" ", 3)
-            path = raw_path.decode("utf-8", errors="surrogateescape")
+            path = _encode_git_path(raw_path)
             size = None if size_text == "-" else int(size_text)
         except (ValueError, UnicodeError) as exc:
             raise InventoryError(f"cannot parse git ls-tree record: {record!r}") from exc
@@ -338,6 +370,7 @@ def build_outputs(
             "mode": mode,
             "objectType": object_type,
             "path": path,
+            "pathEncoding": PATH_ENCODING,
             "primarySurface": _primary_surface(surfaces),
             "reviewState": "baseline-captured",
             "sizeBytes": size,
@@ -380,6 +413,7 @@ def build_outputs(
                     else "test-support"
                 ),
                 "path": path,
+                "pathEncoding": entry["pathEncoding"],
                 "replacementTests": [],
                 "reviewState": "baseline-captured",
                 "sizeBytes": entry["sizeBytes"],

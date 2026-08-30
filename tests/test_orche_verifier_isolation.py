@@ -10,6 +10,7 @@ import sys
 import tempfile
 import time
 import unittest
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -576,6 +577,58 @@ class VerifierIsolationTests(unittest.TestCase):
                 "trusted-environment/gitconfig",
             ):
                 self.assertFalse((output / relative).exists(), relative)
+
+    def test_parent_generated_pytest_evidence_cannot_be_rewritten_by_candidate_hook(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            repo = root / "repo"
+            repo.mkdir()
+            (repo / "tests").mkdir()
+            sentinel = repo / "candidate-hook-ran"
+            (repo / "conftest.py").write_text(
+                "def pytest_sessionfinish(session, exitstatus):\n"
+                f"    open({str(sentinel)!r}, 'w').write('ran')\n"
+                "    session.exitstatus = 0\n"
+                "    for arg in session.config.invocation_params.args:\n"
+                "        if str(arg).startswith('--junitxml='):\n"
+                "            open(str(arg).split('=', 1)[1], 'w').write('<testsuite tests=\"1\"><testcase name=\"forged\"/></testsuite>')\n",
+                encoding="utf-8",
+            )
+            (repo / "tests" / "test_failure.py").write_text(
+                "import sys\n"
+                "def test_real_failure():\n"
+                "    assert not any(str(arg).startswith('--junitxml') for arg in sys.argv)\n"
+                "    assert False, 'real failure'\n",
+                encoding="utf-8",
+            )
+            trusted = root / "trusted"
+            logs = trusted / "logs"
+            evidence = trusted / "evidence"
+            lane_parent = root / "lanes"
+            for directory in (trusted, logs, evidence, lane_parent):
+                directory.mkdir()
+            result = VERIFIER.run_parent_generated_pytest_lane(
+                repo_root=repo,
+                test_paths=("tests/test_failure.py",),
+                lane_parent=lane_parent,
+                log_dir=logs,
+                junit_dir=evidence,
+                suite_name="candidate",
+                timeout_seconds=30,
+                tools=TOOLS,
+                trusted_root=trusted,
+            )
+            self.assertEqual(result.exit_code, 1)
+            self.assertFalse(sentinel.exists())
+            tree = ET.parse(result.junit_path)
+            cases = list(tree.getroot().iter("testcase"))
+            self.assertEqual(len(cases), 1)
+            self.assertEqual(cases[0].get("file"), "tests/test_failure.py")
+            failure = cases[0].find("failure")
+            self.assertIsNotNone(failure)
+            assert failure is not None
+            self.assertIn("real failure", failure.text or "")
+            self.assertNotIn("forged", result.junit_path.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

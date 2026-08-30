@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 import json
+import re
+import shutil
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -128,6 +131,50 @@ class BaselinePinTests(unittest.TestCase):
             self.assertIn(entry["change"], {"added", "modified", "removed"})
             self.assertTrue(entry["reason"])
             self.assertTrue(entry["contractIds"])
+
+    def test_no_disposable_tmp_placeholder_is_tracked(self) -> None:
+        tracked = set(git("ls-files").splitlines())
+        self.assertNotIn(".tmp/test-noop", tracked)
+
+    def test_bootstrap_rejects_invalid_review_ref_with_operational_exit_two(self) -> None:
+        text = README.read_text(encoding="utf-8")
+        start = text.index("```bash") + len("```bash\n")
+        end = text.index("\n```", start)
+        script = text[start:end] + "\n"
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            baseline = root / "baseline"
+            candidate = root / "candidate"
+            baseline.mkdir()
+            candidate.mkdir()
+            replacements = {
+                "BASELINE_ROOT": str(baseline),
+                "CANDIDATE_ROOT": str(candidate),
+                "REVIEWED_REF": "not-a-full-object-id",
+                "VERIFIER_PYTHON": str(Path(shutil.which("python3") or shutil.which("python") or "python").resolve()),
+                "VERIFIER_GIT": str(Path(shutil.which("git") or "git").resolve()),
+                "VERIFIER_BASH": str(Path(shutil.which("bash") or "bash").resolve()),
+            }
+            for key, value in replacements.items():
+                script = re.sub(
+                    rf"(?m)^{key}=.*$",
+                    f"{key}={value!r}",
+                    script,
+                    count=1,
+                )
+            path = root / "bootstrap.sh"
+            path.write_text(script, encoding="utf-8")
+            result = subprocess.run(
+                [str(Path(shutil.which("bash") or "bash").resolve()), str(path)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("REVIEWED_REF", result.stderr)
+        self.assertNotIn("exit 1", script)
+        self.assertNotIn("return 1", script)
 
     def test_no_stage0_github_actions_workflow_is_tracked(self) -> None:
         tracked = set(git("ls-files").splitlines())

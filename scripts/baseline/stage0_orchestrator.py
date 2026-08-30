@@ -221,53 +221,43 @@ def _run_verification(
             env=trusted_env,
         )
 
-    baseline_lane_root = lane_root_base / "pytest-baseline"
-    candidate_lane_root = lane_root_base / "pytest-candidate"
-    baseline_xml = baseline_evidence / "pytest.xml"
-    candidate_xml = candidate_evidence / "pytest.xml"
-    baseline_xml_identity = prepare_trusted_output(baseline_xml)
-    baseline_result = run_repository_lane(
-        [
-            os.fspath(tools.python),
-            "-m",
-            "pytest",
-            f"--junitxml={baseline_xml}",
-        ],
-        cwd=baseline_root,
-        env=build_repository_env(
-            tools=tools, lane_root=baseline_lane_root, repo_root=baseline_root
-        ),
-        log_path=logs / "pytest-baseline.log",
+    retained_test_files = load_retained_test_files(
+        baseline_evidence / "test-inventory.json",
+        candidate_evidence / "test-inventory.json",
+    )
+    baseline_lane_root = lane_root_base / "pytest-baseline-files"
+    candidate_lane_root = lane_root_base / "pytest-candidate-files"
+    baseline_lane_root.mkdir(mode=0o700)
+    candidate_lane_root.mkdir(mode=0o700)
+    baseline_result = run_parent_generated_pytest_lane(
+        repo_root=baseline_root,
+        test_paths=retained_test_files,
+        lane_parent=baseline_lane_root,
+        log_dir=logs / "pytest-baseline-files",
+        junit_dir=baseline_evidence,
+        suite_name="baseline",
         timeout_seconds=args.timeout_seconds,
         tools=tools,
         trusted_root=trusted_root,
-        mutable_paths=(baseline_xml,),
     )
-    _verify_prepared_file(baseline_xml_identity, require_nonempty=True)
-    if baseline_result.exit_code == 124:
-        raise VerificationError("baseline Pytest timed out")
+    if baseline_result.timed_out:
+        raise VerificationError("baseline Pytest file lane timed out")
+    baseline_xml = baseline_result.junit_path
 
-    candidate_xml_identity = prepare_trusted_output(candidate_xml)
-    candidate_result = run_repository_lane(
-        [
-            os.fspath(tools.python),
-            "-m",
-            "pytest",
-            f"--junitxml={candidate_xml}",
-        ],
-        cwd=candidate_root,
-        env=build_repository_env(
-            tools=tools, lane_root=candidate_lane_root, repo_root=candidate_root
-        ),
-        log_path=logs / "pytest-candidate.log",
+    candidate_result = run_parent_generated_pytest_lane(
+        repo_root=candidate_root,
+        test_paths=retained_test_files,
+        lane_parent=candidate_lane_root,
+        log_dir=logs / "pytest-candidate-files",
+        junit_dir=candidate_evidence,
+        suite_name="candidate",
         timeout_seconds=args.timeout_seconds,
         tools=tools,
         trusted_root=trusted_root,
-        mutable_paths=(candidate_xml,),
     )
-    _verify_prepared_file(candidate_xml_identity, require_nonempty=True)
-    if candidate_result.exit_code == 124:
-        raise VerificationError("candidate Pytest timed out")
+    if candidate_result.timed_out:
+        raise VerificationError("candidate Pytest file lane timed out")
+    candidate_xml = candidate_result.junit_path
     _assert_both_worktrees_clean(
         baseline_root=baseline_root,
         baseline_ref=baseline_ref,

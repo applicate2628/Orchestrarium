@@ -153,6 +153,13 @@ class ReviewRegressionTests(unittest.TestCase):
         focused = focused[: focused.index("baseline_lane_root =")]
         self.assertIn("_assert_both_worktrees_clean(", focused)
 
+    def test_orchestrator_uses_parent_generated_pytest_evidence(self) -> None:
+        source = (ROOT / "scripts" / "baseline" / "stage0_orchestrator.py").read_text()
+        self.assertIn("run_parent_generated_pytest_lane(", source)
+        self.assertNotIn("--junitxml", source)
+        self.assertNotIn("mutable_paths=(baseline_xml,)", source)
+        self.assertNotIn("mutable_paths=(candidate_xml,)", source)
+
     def test_comparators_distinguish_invalid_evidence_from_semantic_drift(self) -> None:
         command = (ROOT / "scripts" / "baseline" / "compare_command_baseline.py").read_text()
         pytest_source = (ROOT / "scripts" / "baseline" / "compare_pytest_baseline.py").read_text()

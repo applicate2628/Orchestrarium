@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import shutil
@@ -13,6 +14,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "baseline" / "build_inventory.py"
 REAL_GIT = Path(shutil.which("git") or "git").resolve()
+SPEC = importlib.util.spec_from_file_location("orche_build_inventory", SCRIPT)
+assert SPEC and SPEC.loader
+SCRIPT_MODULE = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(SCRIPT_MODULE)
 
 
 def run(*args: str, cwd: Path | None = None, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
@@ -95,6 +100,51 @@ class BaselineInventoryTests(unittest.TestCase):
         self.assertEqual(generator["path"], "baseline/orchestrarium-v1/tooling/build_inventory.py")
         self.assertEqual(generator["gitBlobSha"], blob)
         self.assertEqual(generator["sourcePath"], "scripts/baseline/build_inventory.py")
+
+    def test_git_path_percent_encoding_is_injective_and_reversible(self) -> None:
+        samples = (
+            b"tests/plain.py",
+            b"tests/literal-%FF.py",
+            b"tests/raw-\xff.py",
+            b"tests/line-\n-break.py",
+            b"tests/tab-\t-name.py",
+        )
+        encoded = [SCRIPT_MODULE._encode_git_path(sample) for sample in samples]
+        self.assertEqual(len(encoded), len(set(encoded)))
+        self.assertEqual(
+            [SCRIPT_MODULE._decode_git_path(value) for value in encoded],
+            list(samples),
+        )
+        self.assertEqual(
+            SCRIPT_MODULE._encode_git_path(b"tests/literal-%FF.py"),
+            "tests/literal-%25FF.py",
+        )
+
+    @unittest.skipIf(os.name != "posix", "raw Git path bytes require POSIX")
+    def test_non_utf8_git_path_is_json_safe_and_reversible(self) -> None:
+        raw_relative = b"tests/nonutf8-\xff.py"
+        raw_absolute = os.fsencode(self.repo) + b"/" + raw_relative
+        descriptor = os.open(raw_absolute, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(b"def test_nonutf8():\n    assert True\n")
+        add = subprocess.run(
+            [os.fsencode(REAL_GIT), b"add", b"--", raw_relative],
+            cwd=os.fsencode(self.repo),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        self.assertEqual(add.returncode, 0, add.stderr)
+        self.assertEqual(run(os.fspath(REAL_GIT), "commit", "-qm", "raw path", cwd=self.repo).returncode, 0)
+        self.ref = run(os.fspath(REAL_GIT), "rev-parse", "HEAD", cwd=self.repo).stdout.strip()
+        output = self.repo / ".scratch" / "raw-path"
+        result = self.invoke(output)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads((output / "capability-inventory.json").read_text(encoding="utf-8"))
+        entry = next(item for item in payload["entries"] if "nonutf8" in item["path"] )
+        self.assertEqual(entry["path"], "tests/nonutf8-%FF.py")
+        self.assertEqual(entry["pathEncoding"], "git-path-percent-v1")
+        self.assertEqual(SCRIPT_MODULE._decode_git_path(entry["path"]), raw_relative)
 
     def test_malformed_frontmatter_fails_operationally(self) -> None:
         write(self.repo / "bad" / "skills" / "x" / "SKILL.md", "---\nname: broken\n# no close\n")

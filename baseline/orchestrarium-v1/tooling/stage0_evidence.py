@@ -4,6 +4,7 @@ from __future__ import annotations
 import contextlib
 import ctypes
 import threading
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from types import MappingProxyType
 
@@ -54,6 +55,21 @@ class PreparedFileIdentity:
     device: int
     inode: int
     mode: int
+
+
+@dataclass(frozen=True)
+class RetainedTestFile:
+    inventory_path: str
+    filesystem_path: str
+    content_sha256: str | None = None
+
+
+@dataclass(frozen=True)
+class ParentGeneratedPytestResult:
+    exit_code: int
+    junit_path: Path
+    log_paths: tuple[Path, ...]
+    timed_out: bool = False
 
 
 def _remove_private_temp_root(path: Path) -> None:
@@ -582,6 +598,293 @@ def run_repository_lane(
             raise VerificationError(f"mutable trusted output is not a private regular file: {path}")
     _verify_protected_digests(snapshot)
     return result
+
+
+def _decode_inventory_git_path(encoded_path: str) -> bytes:
+    output = bytearray()
+    index = 0
+    safe = frozenset(b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._/")
+    while index < len(encoded_path):
+        character = encoded_path[index]
+        if character == "%":
+            token = encoded_path[index + 1 : index + 3]
+            if len(token) != 2 or not re.fullmatch(r"[0-9A-F]{2}", token):
+                raise VerificationError(f"invalid inventory Git path: {encoded_path!r}")
+            output.append(int(token, 16))
+            index += 3
+            continue
+        value = ord(character)
+        if value not in safe:
+            raise VerificationError(f"non-canonical inventory Git path: {encoded_path!r}")
+        output.append(value)
+        index += 1
+    return bytes(output)
+
+
+def _load_test_inventory_entries(path: Path, *, label: str) -> dict[str, dict[str, object]]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise VerificationError(f"cannot read {label} test inventory {path}: {exc}") from exc
+    if not isinstance(payload, dict) or payload.get("schemaVersion") != 2:
+        raise VerificationError(f"invalid {label} test inventory schema")
+    entries = payload.get("entries")
+    if not isinstance(entries, list):
+        raise VerificationError(f"invalid {label} test inventory entries")
+    result: dict[str, dict[str, object]] = {}
+    for raw in entries:
+        if not isinstance(raw, dict):
+            raise VerificationError(f"invalid {label} test inventory entry")
+        inventory_path = raw.get("path")
+        if not isinstance(inventory_path, str) or not inventory_path.startswith("tests/"):
+            raise VerificationError(f"invalid {label} test path: {inventory_path!r}")
+        if raw.get("pathEncoding") != "git-path-percent-v1":
+            raise VerificationError(
+                f"invalid {label} test path encoding for {inventory_path!r}"
+            )
+        digest = raw.get("contentSha256")
+        if not isinstance(digest, str) or not SHA256.fullmatch(digest):
+            raise VerificationError(f"invalid {label} test digest for {inventory_path!r}")
+        if raw.get("kind") not in {"test-file", "test-support"}:
+            raise VerificationError(f"invalid {label} test kind for {inventory_path!r}")
+        if inventory_path in result:
+            raise VerificationError(f"duplicate {label} test path: {inventory_path}")
+        result[inventory_path] = raw
+    return result
+
+
+def load_retained_test_files(
+    baseline_inventory: Path, candidate_inventory: Path
+) -> tuple[RetainedTestFile, ...]:
+    baseline = _load_test_inventory_entries(baseline_inventory, label="baseline")
+    candidate = _load_test_inventory_entries(candidate_inventory, label="candidate")
+    missing = sorted(set(baseline) - set(candidate))
+    changed = sorted(
+        path
+        for path in set(baseline) & set(candidate)
+        if baseline[path].get("contentSha256") != candidate[path].get("contentSha256")
+        or baseline[path].get("kind") != candidate[path].get("kind")
+    )
+    if missing or changed:
+        raise VerificationBlocked(
+            "baseline test sources are not retained exactly: "
+            f"missing={missing}, changed={changed}"
+        )
+    retained: list[RetainedTestFile] = []
+    for inventory_path in sorted(baseline):
+        if baseline[inventory_path].get("kind") != "test-file":
+            continue
+        raw_path = _decode_inventory_git_path(inventory_path)
+        parts = raw_path.split(b"/")
+        if (
+            not raw_path.startswith(b"tests/")
+            or b"\x00" in raw_path
+            or any(part in {b"", b".", b".."} for part in parts)
+        ):
+            raise VerificationError(f"unsafe retained test path: {inventory_path!r}")
+        retained.append(
+            RetainedTestFile(
+                inventory_path=inventory_path,
+                filesystem_path=os.fsdecode(raw_path),
+                content_sha256=str(baseline[inventory_path]["contentSha256"]),
+            )
+        )
+    if not retained:
+        raise VerificationError("baseline test inventory contains no test files")
+    return tuple(retained)
+
+
+def _verify_retained_test_source(source: Path, test_file: RetainedTestFile) -> None:
+    try:
+        metadata = source.lstat()
+    except OSError as exc:
+        raise VerificationError(f"cannot inspect retained test file {source}: {exc}") from exc
+    if (
+        stat.S_ISLNK(metadata.st_mode)
+        or not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_nlink != 1
+    ):
+        raise VerificationError(f"retained test path is not a private regular file: {source}")
+    if test_file.content_sha256 is not None:
+        digest = _hash_regular_no_follow(source, metadata)
+        if digest != test_file.content_sha256:
+            raise VerificationBlocked(
+                "retained test source changed before or during execution: "
+                f"{test_file.inventory_path}; expected={test_file.content_sha256}, actual={digest}"
+            )
+
+
+def _xml_safe_text(value: str) -> str:
+    return "".join(
+        character
+        if character in {"\t", "\n", "\r"}
+        or " " <= character <= "\ud7ff"
+        or "\ue000" <= character <= "\ufffd"
+        else "\ufffd"
+        for character in value
+    )
+
+
+def _diagnostic_from_log(path: Path, *, limit: int = 131072) -> str:
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        raise VerificationError(f"cannot read Pytest file log {path}: {exc}") from exc
+    digest = hashlib.sha256(raw).hexdigest()
+    if len(raw) > limit:
+        raw = raw[-limit:]
+        prefix = f"[log truncated to final {limit} bytes; sha256={digest}]\n"
+    else:
+        prefix = f"[log sha256={digest}]\n"
+    return _xml_safe_text(prefix + raw.decode("utf-8", errors="replace"))
+
+
+def _write_parent_junit(
+    *,
+    junit_dir: Path,
+    suite_name: str,
+    cases: Sequence[tuple[RetainedTestFile, CommandResult]],
+) -> Path:
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", suite_name):
+        raise VerificationError(f"invalid Pytest suite name: {suite_name!r}")
+    failures = sum(result.exit_code == 1 for _test, result in cases)
+    errors = sum(result.exit_code not in {0, 1} for _test, result in cases)
+    suite = ET.Element(
+        "testsuite",
+        {
+            "name": suite_name,
+            "tests": str(len(cases)),
+            "failures": str(failures),
+            "errors": str(errors),
+            "skipped": "0",
+        },
+    )
+    for test_file, result in cases:
+        testcase = ET.SubElement(
+            suite,
+            "testcase",
+            {
+                "classname": "pytest.file",
+                "name": test_file.inventory_path,
+                "file": test_file.inventory_path,
+            },
+        )
+        if result.exit_code == 1:
+            failure = ET.SubElement(
+                testcase,
+                "failure",
+                {
+                    "type": "pytest.file.failure",
+                    "message": "one or more tests in the file failed",
+                },
+            )
+            failure.text = _diagnostic_from_log(result.log_path)
+        elif result.exit_code != 0:
+            error = ET.SubElement(
+                testcase,
+                "error",
+                {
+                    "type": "pytest.file.operational",
+                    "message": f"Pytest file lane exited {result.exit_code}",
+                },
+            )
+            error.text = _diagnostic_from_log(result.log_path)
+    payload = ET.tostring(suite, encoding="utf-8", xml_declaration=True)
+    junit_dir.mkdir(parents=True, exist_ok=True)
+    path = junit_dir / f"{suite_name}-{uuid.uuid4().hex}.xml"
+    handle, identity = _fresh_regular_file(path)
+    with handle:
+        handle.write(payload)
+        handle.flush()
+        os.fsync(handle.fileno())
+    _verify_prepared_file(identity, require_nonempty=True)
+    return path
+
+
+def run_parent_generated_pytest_lane(
+    *,
+    repo_root: Path,
+    test_paths: Sequence[str] | Sequence[RetainedTestFile],
+    lane_parent: Path,
+    log_dir: Path,
+    junit_dir: Path,
+    suite_name: str,
+    timeout_seconds: float,
+    tools: ExternalTools,
+    trusted_root: Path,
+) -> ParentGeneratedPytestResult:
+    repo_root = repo_root.resolve(strict=True)
+    lane_parent.mkdir(parents=True, exist_ok=True)
+    log_dir.mkdir(parents=True, exist_ok=True)
+    junit_dir.mkdir(parents=True, exist_ok=True)
+    retained = tuple(
+        item
+        if isinstance(item, RetainedTestFile)
+        else RetainedTestFile(inventory_path=item, filesystem_path=item)
+        for item in test_paths
+    )
+    if not retained:
+        raise VerificationError("Pytest evidence lane requires at least one test file")
+    cases: list[tuple[RetainedTestFile, CommandResult]] = []
+    log_paths: list[Path] = []
+    for index, test_file in enumerate(retained):
+        relative = Path(test_file.filesystem_path)
+        if relative.is_absolute() or ".." in relative.parts:
+            raise VerificationError(f"unsafe Pytest file path: {test_file.inventory_path!r}")
+        source = repo_root / relative
+        _verify_retained_test_source(source, test_file)
+        case_root = Path(
+            tempfile.mkdtemp(prefix=f"{suite_name}-{index:04d}-", dir=lane_parent)
+        )
+        os.chmod(case_root, 0o700)
+        log_name = hashlib.sha256(test_file.inventory_path.encode("ascii")).hexdigest()[:16]
+        log_path = log_dir / f"{suite_name}-{index:04d}-{log_name}.log"
+        try:
+            result = run_repository_lane(
+                [
+                    os.fspath(tools.python),
+                    "-m",
+                    "pytest",
+                    "--noconftest",
+                    "-p",
+                    "no:cacheprovider",
+                    "--tb=long",
+                    os.fspath(relative),
+                ],
+                cwd=repo_root,
+                env=build_repository_env(
+                    tools=tools,
+                    lane_root=case_root,
+                    repo_root=repo_root,
+                ),
+                log_path=log_path,
+                timeout_seconds=timeout_seconds,
+                tools=tools,
+                trusted_root=trusted_root,
+            )
+        finally:
+            _remove_private_temp_root(case_root)
+        _verify_retained_test_source(source, test_file)
+        cases.append((test_file, result))
+        log_paths.append(log_path)
+    operational = next(
+        (result.exit_code for _test, result in cases if result.exit_code not in {0, 1}),
+        None,
+    )
+    exit_code = operational if operational is not None else int(
+        any(result.exit_code == 1 for _test, result in cases)
+    )
+    junit_path = _write_parent_junit(
+        junit_dir=junit_dir,
+        suite_name=suite_name,
+        cases=cases,
+    )
+    return ParentGeneratedPytestResult(
+        exit_code=exit_code,
+        junit_path=junit_path,
+        log_paths=tuple(log_paths),
+        timed_out=any(result.timed_out for _test, result in cases),
+    )
 
 
 def _safe_component(path: Path) -> None:
