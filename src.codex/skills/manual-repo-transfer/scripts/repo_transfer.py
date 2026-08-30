@@ -65,6 +65,9 @@ TRANSFER_ARCHIVE_BOUNDARY_INVALID = "TRANSFER-ARCHIVE-BOUNDARY-INVALID"
 TRANSFER_ARCHIVE_BINDING_INVALID = "TRANSFER-ARCHIVE-BINDING-INVALID"
 TRANSFER_ARCHIVE_IDENTITY_DRIFT = "TRANSFER-ARCHIVE-IDENTITY-DRIFT"
 TRANSFER_ARCHIVE_CLOSE_FAILED = "TRANSFER-ARCHIVE-CLOSE-FAILED"
+TRANSFER_INPUT_BINDING_INVALID = "TRANSFER-INPUT-BINDING-INVALID"
+TRANSFER_INPUT_IDENTITY_DRIFT = "TRANSFER-INPUT-IDENTITY-DRIFT"
+TRANSFER_INPUT_CLOSE_FAILED = "TRANSFER-INPUT-CLOSE-FAILED"
 
 
 _PROCESS_RUNNER_MODULE: Any | None = None
@@ -1057,12 +1060,9 @@ def read_json_bytes(data: bytes, label: str) -> dict[str, Any]:
 
 
 def read_json(path: Path, label: str) -> dict[str, Any]:
-    try:
-        with path.open("rb") as stream:
-            data = stream.read(MAX_JSON_BYTES + 1)
-    except OSError as error:
-        raise ContractError(f"invalid {label}") from error
-    return read_json_bytes(data, label)
+    with BoundOrdinaryInputSession(path) as bound_input:
+        data = bound_input.read_bounded(MAX_JSON_BYTES, label)
+        return read_json_bytes(data, label)
 
 
 def is_sha256(value: Any) -> bool:
@@ -1372,14 +1372,62 @@ _WINDOWS_DOS_DEVICE_BASENAMES = {
     "CONOUT$",
     *(f"COM{index}" for index in range(1, 10)),
     *(f"LPT{index}" for index in range(1, 10)),
+    *(f"COM{index}" for index in "¹²³"),
+    *(f"LPT{index}" for index in "¹²³"),
 }
-def _validate_windows_archive_path_text(value: str, *, absolute: bool) -> None:
+class _OrdinaryFileErrors:
+    __slots__ = ("binding", "drift", "close")
+
+    def __init__(self, *, binding: str, drift: str, close: str) -> None:
+        self.binding = binding
+        self.drift = drift
+        self.close = close
+
+
+class _OrdinaryFileOptions:
+    __slots__ = ("errors", "posix_nonblocking")
+
+    def __init__(
+        self,
+        *,
+        errors: _OrdinaryFileErrors,
+        posix_nonblocking: bool,
+    ) -> None:
+        self.errors = errors
+        self.posix_nonblocking = posix_nonblocking
+
+
+_ARCHIVE_FILE_OPTIONS = _OrdinaryFileOptions(
+    errors=_OrdinaryFileErrors(
+        binding=TRANSFER_ARCHIVE_BINDING_INVALID,
+        drift=TRANSFER_ARCHIVE_IDENTITY_DRIFT,
+        close=TRANSFER_ARCHIVE_CLOSE_FAILED,
+    ),
+    posix_nonblocking=False,
+)
+_INPUT_FILE_OPTIONS = _OrdinaryFileOptions(
+    errors=_OrdinaryFileErrors(
+        binding=TRANSFER_INPUT_BINDING_INVALID,
+        drift=TRANSFER_INPUT_IDENTITY_DRIFT,
+        close=TRANSFER_INPUT_CLOSE_FAILED,
+    ),
+    posix_nonblocking=True,
+)
+
+
+def _validate_windows_ordinary_path_text(
+    value: str,
+    *,
+    absolute: bool,
+    options: _OrdinaryFileOptions,
+) -> None:
+    errors = options.errors
     normalized = value.replace("/", "\\")
     folded = normalized.casefold()
     if "\0" in normalized or folded.startswith(
         ("\\\\?\\", "\\\\.\\", "\\??\\", "\\\\??\\")
     ):
-        raise ContractError(TRANSFER_ARCHIVE_BINDING_INVALID)
+        raise ContractError(errors.binding)
 
     components: list[str]
     if normalized.startswith("\\\\"):
@@ -1387,21 +1435,21 @@ def _validate_windows_archive_path_text(value: str, *, absolute: bool) -> None:
         if len(parts) < 2 or not parts[0] or not parts[1] or any(
             not component for component in parts
         ):
-            raise ContractError(TRANSFER_ARCHIVE_BINDING_INVALID)
+            raise ContractError(errors.binding)
         components = parts
     elif normalized.startswith("\\"):
-        raise ContractError(TRANSFER_ARCHIVE_BINDING_INVALID)
+        raise ContractError(errors.binding)
     elif re.match(r"^[A-Za-z]:", normalized):
         if len(normalized) < 3 or normalized[2] != "\\":
-            raise ContractError(TRANSFER_ARCHIVE_BINDING_INVALID)
+            raise ContractError(errors.binding)
         if ":" in normalized[2:]:
-            raise ContractError(TRANSFER_ARCHIVE_BINDING_INVALID)
+            raise ContractError(errors.binding)
         components = [
             component for component in normalized[3:].split("\\") if component
         ]
     else:
         if absolute or ":" in normalized:
-            raise ContractError(TRANSFER_ARCHIVE_BINDING_INVALID)
+            raise ContractError(errors.binding)
         components = [component for component in normalized.split("\\") if component]
 
     for component in components:
@@ -1410,37 +1458,50 @@ def _validate_windows_archive_path_text(value: str, *, absolute: bool) -> None:
             or ":" in component
             or component.split(".", 1)[0].upper() in _WINDOWS_DOS_DEVICE_BASENAMES
         ):
-            raise ContractError(TRANSFER_ARCHIVE_BINDING_INVALID)
+            raise ContractError(errors.binding)
 
 
-def _canonical_windows_archive_path(raw_path: str | os.PathLike[str]) -> Path:
+def _canonical_windows_ordinary_path(
+    raw_path: str | os.PathLike[str],
+    options: _OrdinaryFileOptions,
+) -> Path:
+    errors = options.errors
     try:
         lexical = os.fspath(raw_path)
         if not isinstance(lexical, str) or not lexical:
-            raise ContractError(TRANSFER_ARCHIVE_BINDING_INVALID)
-        _validate_windows_archive_path_text(lexical, absolute=False)
+            raise ContractError(errors.binding)
+        _validate_windows_ordinary_path_text(
+            lexical,
+            absolute=False,
+            options=options,
+        )
         normalized = lexical.replace("/", "\\")
         canonical = (
             ntpath.normpath(normalized)
             if normalized.startswith("\\\\")
             else ntpath.abspath(normalized)
         )
-        _validate_windows_archive_path_text(canonical, absolute=True)
+        _validate_windows_ordinary_path_text(
+            canonical,
+            absolute=True,
+            options=options,
+        )
         drive, tail = ntpath.splitdrive(canonical)
         if drive.startswith("\\\\"):
             if not tail.startswith("\\"):
-                raise ContractError(TRANSFER_ARCHIVE_BINDING_INVALID)
+                raise ContractError(errors.binding)
         elif not re.fullmatch(r"[A-Za-z]:", drive) or not tail.startswith("\\"):
-            raise ContractError(TRANSFER_ARCHIVE_BINDING_INVALID)
+            raise ContractError(errors.binding)
         return Path(canonical)
     except ContractError:
         raise
     except (OSError, TypeError, ValueError) as error:
-        raise ContractError(TRANSFER_ARCHIVE_BINDING_INVALID) from error
+        raise ContractError(errors.binding) from error
 
 
-class _ArchiveAcquisitionOwner:
-    def __init__(self) -> None:
+class _OrdinaryFileAcquisitionOwner:
+    def __init__(self, errors: _OrdinaryFileErrors) -> None:
+        self.errors = errors
         self.state = "none"
         self.windows_handle: int | None = None
         self.fd: int | None = None
@@ -1448,7 +1509,7 @@ class _ArchiveAcquisitionOwner:
 
     def _require_none(self) -> None:
         if self.state != "none":
-            raise ContractError(TRANSFER_ARCHIVE_BINDING_INVALID)
+            raise ContractError(self.errors.binding)
 
     def take_windows_handle(self, handle: int) -> None:
         self._require_none()
@@ -1464,7 +1525,7 @@ class _ArchiveAcquisitionOwner:
         import msvcrt
 
         if self.state != "windows-handle" or self.windows_handle is None:
-            raise ContractError(TRANSFER_ARCHIVE_BINDING_INVALID)
+            raise ContractError(self.errors.binding)
         descriptor = msvcrt.open_osfhandle(self.windows_handle, flags)
         self.windows_handle = None
         self.fd = descriptor
@@ -1472,7 +1533,7 @@ class _ArchiveAcquisitionOwner:
 
     def fd_to_stream(self) -> None:
         if self.state != "fd" or self.fd is None:
-            raise ContractError(TRANSFER_ARCHIVE_BINDING_INVALID)
+            raise ContractError(self.errors.binding)
         stream = os.fdopen(self.fd, "rb", buffering=0)
         self.fd = None
         self.stream = stream
@@ -1480,7 +1541,7 @@ class _ArchiveAcquisitionOwner:
 
     def release_windows_handle(self) -> int:
         if self.state != "windows-handle" or self.windows_handle is None:
-            raise ContractError(TRANSFER_ARCHIVE_BINDING_INVALID)
+            raise ContractError(self.errors.binding)
         handle = self.windows_handle
         self.windows_handle = None
         self.state = "none"
@@ -1488,7 +1549,7 @@ class _ArchiveAcquisitionOwner:
 
     def release_stream(self) -> Any:
         if self.state != "stream" or self.stream is None:
-            raise ContractError(TRANSFER_ARCHIVE_BINDING_INVALID)
+            raise ContractError(self.errors.binding)
         stream = self.stream
         self.stream = None
         self.state = "none"
@@ -1511,7 +1572,7 @@ class _ArchiveAcquisitionOwner:
             elif state == "windows-handle" and handle is not None:
                 _windows_close_handle(handle)
         except BaseException:
-            raise ContractError(TRANSFER_ARCHIVE_CLOSE_FAILED) from primary
+            raise ContractError(self.errors.close) from primary
 
 
 def _windows_close_handle(handle: int) -> None:
@@ -1527,16 +1588,20 @@ def _windows_close_handle(handle: int) -> None:
         raise OSError(ctypes.get_last_error(), "CloseHandle failed")
 
 
-def _windows_open_archive_path(
+def _windows_open_ordinary_path(
     path: Path,
     *,
     directory: bool,
-    owner: _ArchiveAcquisitionOwner | None = None,
+    options: _OrdinaryFileOptions,
+    owner: _OrdinaryFileAcquisitionOwner | None = None,
 ) -> int:
     import ctypes
     from ctypes import wintypes
 
-    acquisition = owner or _ArchiveAcquisitionOwner()
+    errors = options.errors
+    acquisition = owner or _OrdinaryFileAcquisitionOwner(errors)
+    if acquisition.errors is not errors:
+        raise ContractError(errors.binding)
     acquisition._require_none()
     try:
         kernel32 = _windows_kernel32()
@@ -1576,10 +1641,10 @@ def _windows_open_archive_path(
         identity = _windows_handle_identity(value, include_change_stamp=False)
         attributes = identity[3]
         if attributes & 0x00000400:
-            raise ContractError(TRANSFER_ARCHIVE_BINDING_INVALID)
+            raise ContractError(errors.binding)
         is_directory = bool(attributes & 0x00000010)
         if is_directory != directory:
-            raise ContractError(TRANSFER_ARCHIVE_BINDING_INVALID)
+            raise ContractError(errors.binding)
         return (
             value
             if owner is not None
@@ -1589,8 +1654,8 @@ def _windows_open_archive_path(
         primary = (
             error
             if isinstance(error, ContractError)
-            and str(error) == TRANSFER_ARCHIVE_BINDING_INVALID
-            else ContractError(TRANSFER_ARCHIVE_BINDING_INVALID)
+            and str(error) == errors.binding
+            else ContractError(errors.binding)
         )
         acquisition.rollback(primary)
         if primary is error:
@@ -1640,31 +1705,49 @@ def _windows_handle_identity(handle: int, *, include_change_stamp: bool) -> tupl
     )
 
 
-class BoundArchiveSession:
-    def __init__(self, bundle_path: Path) -> None:
-        self.path = (
-            _canonical_windows_archive_path(bundle_path)
-            if os.name == "nt"
-            else Path(os.path.abspath(bundle_path))
-        )
+def _posix_ordinary_open_flags(
+    options: _OrdinaryFileOptions,
+    *,
+    directory: bool,
+) -> int:
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
+    if options.posix_nonblocking:
+        flags |= getattr(os, "O_NONBLOCK", 0)
+    if directory:
+        flags |= getattr(os, "O_DIRECTORY", 0)
+    return flags
+
+
+class _BoundOrdinaryFileCore:
+    def __init__(
+        self,
+        path: Path,
+        options: _OrdinaryFileOptions,
+    ) -> None:
+        self.options = options
+        self.errors = options.errors
+        try:
+            self.path = (
+                _canonical_windows_ordinary_path(path, options)
+                if os.name == "nt"
+                else Path(os.path.abspath(path))
+            )
+        except (ContractError, OSError, TypeError, ValueError) as error:
+            if isinstance(error, ContractError) and str(error) == self.errors.binding:
+                raise
+            raise ContractError(self.errors.binding) from error
         self.parent_handles: list[int] = []
         self.parent_identities: list[tuple[int, ...]] = []
         self.raw_stream: Any | None = None
-        self.stream: Any | None = None
-        self.archive: BoundArchiveZipFile | None = None
-        self.members: set[TrackedArchiveMember] = set()
         self.leaf_identity: tuple[int, ...] | None = None
         self.eof = 0
         self.closed = False
         try:
             self._open_bound_leaf()
-            assert self.raw_stream is not None
-            self.stream = BoundArchiveStream(self.raw_stream, self)
-            layout = preflight_archive(self.stream)
-            self.require_stable()
-            self.archive = BoundArchiveZipFile(self.stream, self)
-            validate_archive_boundaries(self.archive, layout)
-            self.require_stable()
         except BaseException as error:
             try:
                 self.close(validate=False)
@@ -1675,22 +1758,29 @@ class BoundArchiveSession:
     def _open_bound_leaf(self) -> None:
         try:
             if not self.path.is_absolute() or not self.path.name:
-                raise ContractError(TRANSFER_ARCHIVE_BINDING_INVALID)
+                raise ContractError(self.errors.binding)
             if os.name == "nt":
                 self._open_windows_leaf()
             else:
                 self._open_posix_leaf()
-        except ContractError:
-            raise
-        except (OSError, RuntimeError, ValueError) as error:
-            raise ContractError(TRANSFER_ARCHIVE_BINDING_INVALID) from error
+        except ContractError as error:
+            if str(error) in {self.errors.binding, self.errors.close}:
+                raise
+            raise ContractError(self.errors.binding) from error
+        except (OSError, RuntimeError, TypeError, ValueError) as error:
+            raise ContractError(self.errors.binding) from error
 
     def _open_posix_leaf(self) -> None:
-        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
-        directory_flags = flags | getattr(os, "O_DIRECTORY", 0)
+        flags = _posix_ordinary_open_flags(self.options, directory=False)
+        directory_flags = _posix_ordinary_open_flags(
+            self.options,
+            directory=True,
+        )
         anchor = Path(self.path.anchor)
         descriptor = os.open(anchor, directory_flags)
         self.parent_handles.append(descriptor)
+        if not stat.S_ISDIR(os.fstat(descriptor).st_mode):
+            raise ContractError(self.errors.binding)
         self.parent_identities.append(
             _posix_handle_identity(descriptor, include_change_stamp=False)
         )
@@ -1698,10 +1788,12 @@ class BoundArchiveSession:
         for component in relative_parent.parts:
             descriptor = os.open(component, directory_flags, dir_fd=descriptor)
             self.parent_handles.append(descriptor)
+            if not stat.S_ISDIR(os.fstat(descriptor).st_mode):
+                raise ContractError(self.errors.binding)
             self.parent_identities.append(
                 _posix_handle_identity(descriptor, include_change_stamp=False)
             )
-        acquisition = _ArchiveAcquisitionOwner()
+        acquisition = _OrdinaryFileAcquisitionOwner(self.errors)
         try:
             descriptor = os.open(
                 self.path.name, flags, dir_fd=self.parent_handles[-1]
@@ -1709,7 +1801,7 @@ class BoundArchiveSession:
             acquisition.take_fd(descriptor)
             metadata = os.fstat(descriptor)
             if not stat.S_ISREG(metadata.st_mode):
-                raise ContractError(TRANSFER_ARCHIVE_BINDING_INVALID)
+                raise ContractError(self.errors.binding)
             acquisition.fd_to_stream()
             self.raw_stream = acquisition.release_stream()
             self.leaf_identity = _posix_handle_identity(
@@ -1720,12 +1812,8 @@ class BoundArchiveSession:
             primary = (
                 error
                 if isinstance(error, ContractError)
-                and str(error)
-                in {
-                    TRANSFER_ARCHIVE_BINDING_INVALID,
-                    TRANSFER_ARCHIVE_CLOSE_FAILED,
-                }
-                else ContractError(TRANSFER_ARCHIVE_BINDING_INVALID)
+                and str(error) in {self.errors.binding, self.errors.close}
+                else ContractError(self.errors.binding)
             )
             acquisition.rollback(primary)
             if primary is error:
@@ -1743,15 +1831,22 @@ class BoundArchiveSession:
                 break
             cursor = cursor.parent
         for component in reversed(chain):
-            handle = _windows_open_archive_path(component, directory=True)
+            handle = _windows_open_ordinary_path(
+                component,
+                directory=True,
+                options=self.options,
+            )
             self.parent_handles.append(handle)
             self.parent_identities.append(
                 _windows_handle_identity(handle, include_change_stamp=False)
             )
-        acquisition = _ArchiveAcquisitionOwner()
+        acquisition = _OrdinaryFileAcquisitionOwner(self.errors)
         try:
-            _windows_open_archive_path(
-                self.path, directory=False, owner=acquisition
+            _windows_open_ordinary_path(
+                self.path,
+                directory=False,
+                options=self.options,
+                owner=acquisition,
             )
             acquisition.windows_handle_to_fd(
                 os.O_RDONLY
@@ -1769,17 +1864,163 @@ class BoundArchiveSession:
             primary = (
                 error
                 if isinstance(error, ContractError)
-                and str(error)
-                in {
-                    TRANSFER_ARCHIVE_BINDING_INVALID,
-                    TRANSFER_ARCHIVE_CLOSE_FAILED,
-                }
-                else ContractError(TRANSFER_ARCHIVE_BINDING_INVALID)
+                and str(error) in {self.errors.binding, self.errors.close}
+                else ContractError(self.errors.binding)
             )
             acquisition.rollback(primary)
             if primary is error:
                 raise
             raise primary from error
+
+    def _current_leaf_identity(self) -> tuple[int, ...]:
+        if self.raw_stream is None:
+            raise ContractError(self.errors.drift)
+        if os.name == "nt":
+            import msvcrt
+
+            return _windows_handle_identity(
+                msvcrt.get_osfhandle(self.raw_stream.fileno()),
+                include_change_stamp=True,
+            )
+        return _posix_handle_identity(
+            self.raw_stream.fileno(), include_change_stamp=True
+        )
+
+    def _require_parent_identities(self) -> None:
+        for handle, expected in zip(
+            self.parent_handles, self.parent_identities, strict=True
+        ):
+            current = (
+                _windows_handle_identity(handle, include_change_stamp=False)
+                if os.name == "nt"
+                else _posix_handle_identity(handle, include_change_stamp=False)
+            )
+            if current != expected:
+                raise ContractError(self.errors.drift)
+
+    def _require_name_binding(self) -> None:
+        if os.name == "nt":
+            handle = _windows_open_ordinary_path(
+                self.path,
+                directory=False,
+                options=self.options,
+            )
+            try:
+                current = _windows_handle_identity(
+                    handle, include_change_stamp=True
+                )
+            finally:
+                _windows_close_handle(handle)
+        else:
+            flags = _posix_ordinary_open_flags(self.options, directory=False)
+            descriptor = os.open(
+                self.path.name, flags, dir_fd=self.parent_handles[-1]
+            )
+            try:
+                metadata = os.fstat(descriptor)
+                if not stat.S_ISREG(metadata.st_mode):
+                    raise ContractError(self.errors.drift)
+                current = _posix_handle_identity(
+                    descriptor, include_change_stamp=True
+                )
+            finally:
+                os.close(descriptor)
+        if current != self.leaf_identity:
+            raise ContractError(self.errors.drift)
+
+    def require_stable(self) -> None:
+        try:
+            if self._current_leaf_identity() != self.leaf_identity:
+                raise ContractError(self.errors.drift)
+            self._require_parent_identities()
+            self._require_name_binding()
+        except ContractError:
+            raise
+        except (OSError, RuntimeError, ValueError) as error:
+            raise ContractError(self.errors.drift) from error
+
+    def close(self, *, validate: bool = True) -> None:
+        if self.closed:
+            return
+        self.closed = True
+        failed = False
+        if validate and self.raw_stream is not None:
+            try:
+                self.require_stable()
+            except BaseException:
+                failed = True
+                drift = sys.exc_info()[1]
+            else:
+                drift = None
+        else:
+            drift = None
+        if self.raw_stream is not None:
+            try:
+                self.raw_stream.close()
+            except BaseException:
+                failed = True
+        for handle in reversed(self.parent_handles):
+            try:
+                if os.name == "nt":
+                    _windows_close_handle(handle)
+                else:
+                    os.close(handle)
+            except BaseException:
+                failed = True
+        self.parent_handles.clear()
+        if drift is not None:
+            raise drift
+        if failed:
+            raise ContractError(self.errors.close)
+
+
+class BoundArchiveSession(_BoundOrdinaryFileCore):
+    def __init__(self, bundle_path: Path) -> None:
+        self.stream: Any | None = None
+        self.archive: BoundArchiveZipFile | None = None
+        self.members: set[TrackedArchiveMember] = set()
+        super().__init__(bundle_path, _ARCHIVE_FILE_OPTIONS)
+        try:
+            assert self.raw_stream is not None
+            self.stream = BoundArchiveStream(self.raw_stream, self)
+            layout = preflight_archive(self.stream)
+            self.require_stable()
+            self.archive = BoundArchiveZipFile(self.stream, self)
+            validate_archive_boundaries(self.archive, layout)
+            self.require_stable()
+        except BaseException as error:
+            try:
+                self.close(validate=False)
+            except BaseException as cleanup_error:
+                raise cleanup_error from error
+            raise
+
+    def close(self, *, validate: bool = True) -> None:
+        if self.closed:
+            return
+        failed = False
+        for member in tuple(self.members):
+            try:
+                member.close()
+            except BaseException:
+                failed = True
+        if self.archive is not None:
+            try:
+                self.archive.close()
+            except BaseException:
+                failed = True
+        drift: BaseException | None = None
+        try:
+            super().close(validate=validate)
+        except ContractError as error:
+            if str(error) == TRANSFER_ARCHIVE_IDENTITY_DRIFT:
+                drift = error
+            else:
+                failed = True
+        if drift is not None:
+            raise drift
+        if failed:
+            raise ContractError(TRANSFER_ARCHIVE_CLOSE_FAILED)
 
     def read_exact_at(
         self,
@@ -1810,66 +2051,6 @@ class BoundArchiveSession:
             raise ContractError(TRANSFER_ARCHIVE_BOUNDARY_INVALID)
         return data
 
-    def _current_leaf_identity(self) -> tuple[int, ...]:
-        if self.raw_stream is None:
-            raise ContractError(TRANSFER_ARCHIVE_IDENTITY_DRIFT)
-        if os.name == "nt":
-            import msvcrt
-
-            return _windows_handle_identity(
-                msvcrt.get_osfhandle(self.raw_stream.fileno()),
-                include_change_stamp=True,
-            )
-        return _posix_handle_identity(
-            self.raw_stream.fileno(), include_change_stamp=True
-        )
-
-    def _require_parent_identities(self) -> None:
-        for handle, expected in zip(
-            self.parent_handles, self.parent_identities, strict=True
-        ):
-            current = (
-                _windows_handle_identity(handle, include_change_stamp=False)
-                if os.name == "nt"
-                else _posix_handle_identity(handle, include_change_stamp=False)
-            )
-            if current != expected:
-                raise ContractError(TRANSFER_ARCHIVE_IDENTITY_DRIFT)
-
-    def _require_name_binding(self) -> None:
-        if os.name == "nt":
-            handle = _windows_open_archive_path(self.path, directory=False)
-            try:
-                current = _windows_handle_identity(
-                    handle, include_change_stamp=True
-                )
-            finally:
-                _windows_close_handle(handle)
-        else:
-            flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
-            descriptor = os.open(
-                self.path.name, flags, dir_fd=self.parent_handles[-1]
-            )
-            try:
-                current = _posix_handle_identity(
-                    descriptor, include_change_stamp=True
-                )
-            finally:
-                os.close(descriptor)
-        if current != self.leaf_identity:
-            raise ContractError(TRANSFER_ARCHIVE_IDENTITY_DRIFT)
-
-    def require_stable(self) -> None:
-        try:
-            if self._current_leaf_identity() != self.leaf_identity:
-                raise ContractError(TRANSFER_ARCHIVE_IDENTITY_DRIFT)
-            self._require_parent_identities()
-            self._require_name_binding()
-        except ContractError:
-            raise
-        except (OSError, RuntimeError, ValueError) as error:
-            raise ContractError(TRANSFER_ARCHIVE_IDENTITY_DRIFT) from error
-
     def __enter__(self) -> BoundArchiveZipFile:
         if self.archive is None or self.closed:
             raise ContractError(TRANSFER_ARCHIVE_BINDING_INVALID)
@@ -1878,49 +2059,37 @@ class BoundArchiveSession:
     def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> None:
         self.close(validate=True)
 
-    def close(self, *, validate: bool = True) -> None:
-        if self.closed:
-            return
-        self.closed = True
-        failed = False
-        for member in tuple(self.members):
-            try:
-                member.close()
-            except BaseException:
-                failed = True
-        if self.archive is not None:
-            try:
-                self.archive.close()
-            except BaseException:
-                failed = True
-        if validate and self.raw_stream is not None:
-            try:
-                self.require_stable()
-            except BaseException:
-                failed = True
-                drift = sys.exc_info()[1]
-            else:
-                drift = None
-        else:
-            drift = None
-        if self.raw_stream is not None:
-            try:
-                self.raw_stream.close()
-            except BaseException:
-                failed = True
-        for handle in reversed(self.parent_handles):
-            try:
-                if os.name == "nt":
-                    _windows_close_handle(handle)
-                else:
-                    os.close(handle)
-            except BaseException:
-                failed = True
-        self.parent_handles.clear()
-        if drift is not None:
-            raise drift
-        if failed:
-            raise ContractError(TRANSFER_ARCHIVE_CLOSE_FAILED)
+
+class BoundOrdinaryInputSession(_BoundOrdinaryFileCore):
+    """One no-follow ordinary input held stable from classification through parse."""
+
+    def __init__(self, input_path: Path) -> None:
+        super().__init__(input_path, _INPUT_FILE_OPTIONS)
+
+    def read_bounded(self, cap: int, label: str) -> bytes:
+        if (
+            type(cap) is not int
+            or cap < 0
+            or self.raw_stream is None
+            or self.eof > cap
+        ):
+            raise ContractError(f"invalid {label}")
+        try:
+            data = self.raw_stream.read(cap + 1)
+        except OSError as error:
+            raise ContractError(TRANSFER_INPUT_IDENTITY_DRIFT) from error
+        if len(data) != self.eof:
+            raise ContractError(TRANSFER_INPUT_IDENTITY_DRIFT)
+        self.require_stable()
+        return data
+
+    def __enter__(self) -> "BoundOrdinaryInputSession":
+        if self.raw_stream is None or self.closed:
+            raise ContractError(TRANSFER_INPUT_BINDING_INVALID)
+        return self
+
+    def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> None:
+        self.close(validate=True)
 
 
 def preflight_archive(stream: BoundArchiveStream) -> dict[str, int]:

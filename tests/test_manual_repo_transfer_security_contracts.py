@@ -13,6 +13,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import shutil
 import stat
 import struct
@@ -127,6 +128,149 @@ def directory_alias(alias: Path, target: Path) -> None:
 
 
 class IoBoundaryTests(unittest.TestCase):
+    def test_one_ordinary_file_core_owns_open_rebind_stability_and_close(self) -> None:
+        tree = ast.parse(SCRIPT.read_text(encoding="utf-8"))
+        classes = {
+            node.name: node
+            for node in tree.body
+            if isinstance(node, ast.ClassDef)
+        }
+        self.assertIn("_BoundOrdinaryFileCore", classes)
+        self.assertEqual(
+            ["_OrdinaryFileAcquisitionOwner"],
+            sorted(name for name in classes if name.endswith("AcquisitionOwner")),
+        )
+        core_methods = {
+            node.name
+            for node in classes["_BoundOrdinaryFileCore"].body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        }
+        self.assertTrue(
+            {
+                "_open_posix_leaf",
+                "_open_windows_leaf",
+                "_require_name_binding",
+                "require_stable",
+                "close",
+            }.issubset(core_methods)
+        )
+
+        forbidden_calls = {
+            "_posix_handle_identity",
+            "_windows_handle_identity",
+            "_windows_open_ordinary_path",
+        }
+        for wrapper_name in ("BoundArchiveSession", "BoundOrdinaryInputSession"):
+            wrapper = classes[wrapper_name]
+            for node in ast.walk(wrapper):
+                if not isinstance(node, ast.Call):
+                    continue
+                if isinstance(node.func, ast.Name):
+                    self.assertNotIn(node.func.id, forbidden_calls, wrapper_name)
+                if (
+                    isinstance(node.func, ast.Attribute)
+                    and isinstance(node.func.value, ast.Name)
+                    and node.func.value.id == "os"
+                ):
+                    self.assertNotEqual("open", node.func.attr, wrapper_name)
+
+    def test_ordinary_file_options_parameterize_posix_nonblocking_and_error_ids(self) -> None:
+        module = load_transfer_module()
+        archive_flags = module._posix_ordinary_open_flags(
+            module._ARCHIVE_FILE_OPTIONS,
+            directory=False,
+        )
+        input_flags = module._posix_ordinary_open_flags(
+            module._INPUT_FILE_OPTIONS,
+            directory=False,
+        )
+        self.assertFalse(archive_flags & getattr(os, "O_NONBLOCK", 0))
+        self.assertEqual(
+            getattr(os, "O_NONBLOCK", 0),
+            input_flags & getattr(os, "O_NONBLOCK", 0),
+        )
+        self.assertEqual(
+            module.TRANSFER_ARCHIVE_BINDING_INVALID,
+            module._ARCHIVE_FILE_OPTIONS.errors.binding,
+        )
+        self.assertEqual(
+            module.TRANSFER_INPUT_BINDING_INVALID,
+            module._INPUT_FILE_OPTIONS.errors.binding,
+        )
+
+    def test_ordinary_file_core_parameterizes_path_drift_rollback_and_close_errors(self) -> None:
+        module = load_transfer_module()
+        policies = (
+            module._ARCHIVE_FILE_OPTIONS,
+            module._INPUT_FILE_OPTIONS,
+        )
+        with tempfile.TemporaryDirectory(prefix="repo-transfer-core-policy-") as temp:
+            root = Path(temp)
+            document = root / "document.json"
+            document.write_bytes(b"{}")
+            for options in policies:
+                errors = options.errors
+                with self.subTest(policy=errors.binding, phase="path"):
+                    with self.assertRaisesRegex(
+                        module.ContractError,
+                        f"^{re.escape(errors.binding)}$",
+                    ):
+                        module._BoundOrdinaryFileCore(root, options)
+
+                with self.subTest(policy=errors.binding, phase="drift"):
+                    core = module._BoundOrdinaryFileCore(document, options)
+                    try:
+                        with (
+                            mock.patch.object(
+                                core,
+                                "_current_leaf_identity",
+                                return_value=("changed",),
+                            ),
+                            self.assertRaisesRegex(
+                                module.ContractError,
+                                f"^{re.escape(errors.drift)}$",
+                            ),
+                        ):
+                            core.require_stable()
+                    finally:
+                        core.close(validate=False)
+
+                with self.subTest(policy=errors.binding, phase="rollback"):
+                    owner = module._OrdinaryFileAcquisitionOwner(errors)
+                    owner.take_fd(123)
+                    primary = module.ContractError(errors.binding)
+                    with (
+                        mock.patch.object(
+                            module.os,
+                            "close",
+                            side_effect=OSError("injected rollback close failure"),
+                        ),
+                        self.assertRaisesRegex(
+                            module.ContractError,
+                            f"^{re.escape(errors.close)}$",
+                        ),
+                    ):
+                        owner.rollback(primary)
+                    self.assertEqual("none", owner.state)
+
+                with self.subTest(policy=errors.binding, phase="close"):
+                    core = module._BoundOrdinaryFileCore.__new__(
+                        module._BoundOrdinaryFileCore
+                    )
+                    core.options = options
+                    core.errors = errors
+                    core.closed = False
+                    core.raw_stream = mock.Mock()
+                    core.raw_stream.close.side_effect = OSError(
+                        "injected stream close failure"
+                    )
+                    core.parent_handles = []
+                    with self.assertRaisesRegex(
+                        module.ContractError,
+                        f"^{re.escape(errors.close)}$",
+                    ):
+                        core.close(validate=False)
+
     def test_transfer_helper_delegates_process_ownership_to_process_runner(self) -> None:
         tree = ast.parse(SCRIPT.read_text(encoding="utf-8"))
         direct_popen_calls = [
@@ -444,6 +588,140 @@ class IoBoundaryTests(unittest.TestCase):
                                 module.BoundRepository(root, GIT_EXECUTABLE, "0" * 64)
                             )
                     hasher.assert_not_called()
+
+    def test_json_input_regular_file_is_bounded_and_stable(self) -> None:
+        module = load_transfer_module()
+        with tempfile.TemporaryDirectory(prefix="repo-transfer-json-input-") as temp:
+            document = Path(temp) / "inventory.json"
+            document.write_bytes(b'{"schemaVersion":1}')
+            self.assertEqual({"schemaVersion": 1}, module.read_json(document, "inventory"))
+
+            with mock.patch.object(module, "MAX_JSON_BYTES", 8):
+                with self.assertRaisesRegex(module.ContractError, r"^invalid inventory$"):
+                    module.read_json(document, "inventory")
+
+    def test_json_input_rejects_directory_and_link_before_read(self) -> None:
+        module = load_transfer_module()
+        with tempfile.TemporaryDirectory(prefix="repo-transfer-json-types-") as temp:
+            root = Path(temp)
+            target = root / "inventory.json"
+            target.write_bytes(b"{}")
+            link = root / "linked.json"
+            try:
+                link.symlink_to(target)
+            except OSError as error:
+                self.skipTest(f"file symlink unavailable: {error}")
+
+            for path in (root, link):
+                with self.subTest(path=path), self.assertRaisesRegex(
+                    module.ContractError,
+                    module.TRANSFER_INPUT_BINDING_INVALID,
+                ):
+                    module.read_json(path, "inventory")
+
+    @unittest.skipUnless(
+        os.name != "nt" and hasattr(os, "mkfifo"),
+        "POSIX nonblocking ordinary-input contract",
+    )
+    def test_json_input_fifo_without_writer_is_classified_nonblocking(self) -> None:
+        module = load_transfer_module()
+        with tempfile.TemporaryDirectory(prefix="repo-transfer-json-fifo-") as temp:
+            fifo = Path(temp) / "inventory.json"
+            os.mkfifo(fifo)
+            real_open = module.os.open
+            observed_leaf_flags: list[int] = []
+
+            def checked_open(path, flags, *args, **kwargs):
+                if os.fspath(path) == fifo.name:
+                    observed_leaf_flags.append(flags)
+                    self.assertTrue(flags & os.O_NONBLOCK)
+                    self.assertTrue(flags & getattr(os, "O_NOFOLLOW", 0))
+                return real_open(path, flags, *args, **kwargs)
+
+            with (
+                mock.patch.object(module.os, "open", side_effect=checked_open),
+                mock.patch.object(
+                    module.Path,
+                    "open",
+                    side_effect=AssertionError("unsafe pathname open"),
+                ),
+                self.assertRaisesRegex(
+                    module.ContractError,
+                    module.TRANSFER_INPUT_BINDING_INVALID,
+                ),
+            ):
+                module.read_json(fifo, "inventory")
+            self.assertEqual(1, len(observed_leaf_flags))
+
+    @unittest.skipIf(os.name == "nt", "POSIX socket input contract")
+    def test_json_input_rejects_socket_as_special_file(self) -> None:
+        import socket
+
+        module = load_transfer_module()
+        with tempfile.TemporaryDirectory(prefix="repo-transfer-json-socket-") as temp:
+            socket_path = Path(temp) / "selection.json"
+            listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            try:
+                listener.bind(str(socket_path))
+                with self.assertRaisesRegex(
+                    module.ContractError,
+                    module.TRANSFER_INPUT_BINDING_INVALID,
+                ):
+                    module.read_json(socket_path, "selection")
+            finally:
+                listener.close()
+
+    def test_json_input_detects_path_identity_drift_after_read(self) -> None:
+        module = load_transfer_module()
+        with tempfile.TemporaryDirectory(prefix="repo-transfer-json-drift-") as temp:
+            document = Path(temp) / "inventory.json"
+            replacement = Path(temp) / "replacement.json"
+            document.write_bytes(b'{"schemaVersion":1}')
+            replacement.write_bytes(b'{"schemaVersion":2}')
+            real_parse = module.read_json_bytes
+
+            def replace_then_parse(data: bytes, label: str):
+                if os.name == "nt":
+                    with self.assertRaises(PermissionError):
+                        os.replace(replacement, document)
+                else:
+                    os.replace(replacement, document)
+                return real_parse(data, label)
+
+            if os.name == "nt":
+                with mock.patch.object(module, "read_json_bytes", side_effect=replace_then_parse):
+                    self.assertEqual(
+                        {"schemaVersion": 1},
+                        module.read_json(document, "inventory"),
+                    )
+            else:
+                with (
+                    mock.patch.object(module, "read_json_bytes", side_effect=replace_then_parse),
+                    self.assertRaisesRegex(
+                        module.ContractError,
+                        module.TRANSFER_INPUT_IDENTITY_DRIFT,
+                    ),
+                ):
+                    module.read_json(document, "inventory")
+
+    @unittest.skipUnless(os.name == "nt", "Windows ordinary-input namespace contract")
+    def test_windows_json_input_rejects_ads_devices_and_namespace_aliases(self) -> None:
+        module = load_transfer_module()
+        hostile = (
+            "inventory.json:stream",
+            "inventory.json::$DATA",
+            r"\\.\pipe\inventory.json",
+            r"\\.\PhysicalDrive0",
+            r"C:\NUL",
+        )
+        with mock.patch.object(module, "_windows_open_ordinary_path") as create_file:
+            for path in hostile:
+                with self.subTest(path=path), self.assertRaisesRegex(
+                    module.ContractError,
+                    module.TRANSFER_INPUT_BINDING_INVALID,
+                ):
+                    module.read_json(Path(path), "inventory")
+        self.assertEqual(0, create_file.call_count)
 
     def test_inventory_json_budget_includes_final_newline_and_refuses_overage_before_output(self) -> None:
         module = load_transfer_module()
@@ -1179,13 +1457,25 @@ class SecurityContractTests(unittest.TestCase):
             "C:\\NUL.zip",
             "C:\\CON\\archive.zip",
             "C:\\COM1.foo",
+            "C:\\COM¹",
+            "C:\\COM¹.log",
+            "C:\\COM²",
+            "C:\\COM².log",
+            "C:\\COM³",
+            "C:\\COM³.log",
+            "C:\\LPT¹",
+            "C:\\LPT¹.log",
+            "C:\\LPT²",
+            "C:\\LPT².log",
+            "C:\\LPT³",
+            "C:\\LPT³.log",
             "C:\\trailing.\\archive.zip",
             "C:\\trailing \\archive.zip",
             "\\\\server\\share:stream\\archive.zip",
             "\\\\server\\\\archive.zip",
             "name\0archive.zip",
         )
-        with mock.patch.object(module, "_windows_open_archive_path") as create_file:
+        with mock.patch.object(module, "_windows_open_ordinary_path") as create_file:
             for path in hostile:
                 with self.subTest(path=path), self.assertRaisesRegex(
                     module.ContractError, module.TRANSFER_ARCHIVE_BINDING_INVALID
@@ -1202,22 +1492,37 @@ class SecurityContractTests(unittest.TestCase):
         )
         for path in ordinary_components:
             with self.subTest(ordinary=path):
-                self.assertEqual(path, str(module._canonical_windows_archive_path(path)))
+                self.assertEqual(
+                    path,
+                    str(
+                        module._canonical_windows_ordinary_path(
+                            path,
+                            module._ARCHIVE_FILE_OPTIONS,
+                        )
+                    ),
+                )
 
     @unittest.skipUnless(os.name == "nt", "Windows archive namespace contract")
     def test_windows_archive_path_accepts_drive_relative_resolution_and_ordinary_unc(self) -> None:
         module = load_transfer_module()
-        absolute = module._canonical_windows_archive_path(r"C:\ordinary\archive.zip")
-        relative = module._canonical_windows_archive_path(r"ordinary\archive.zip")
-        unc = module._canonical_windows_archive_path(r"\\server\share\archive.zip")
+        absolute = module._canonical_windows_ordinary_path(
+            r"C:\ordinary\archive.zip", module._ARCHIVE_FILE_OPTIONS
+        )
+        relative = module._canonical_windows_ordinary_path(
+            r"ordinary\archive.zip", module._ARCHIVE_FILE_OPTIONS
+        )
+        unc = module._canonical_windows_ordinary_path(
+            r"\\server\share\archive.zip", module._ARCHIVE_FILE_OPTIONS
+        )
         self.assertEqual(r"C:\ordinary\archive.zip", str(absolute))
         self.assertRegex(str(relative), r"^[A-Za-z]:\\")
         self.assertEqual(r"\\server\share\archive.zip", str(unc))
         with self.assertRaisesRegex(
             module.ContractError, module.TRANSFER_ARCHIVE_BINDING_INVALID
         ):
-            module._canonical_windows_archive_path(
-                r"\\?\UNC\server\share\archive.zip"
+            module._canonical_windows_ordinary_path(
+                r"\\?\UNC\server\share\archive.zip",
+                module._ARCHIVE_FILE_OPTIONS,
             )
 
     @unittest.skipUnless(os.name == "nt", "Windows archive namespace contract")
@@ -1234,7 +1539,10 @@ class SecurityContractTests(unittest.TestCase):
             ), self.assertRaisesRegex(
                 module.ContractError, module.TRANSFER_ARCHIVE_BINDING_INVALID
             ):
-                module._canonical_windows_archive_path(r"relative\archive.zip")
+                module._canonical_windows_ordinary_path(
+                    r"relative\archive.zip",
+                    module._ARCHIVE_FILE_OPTIONS,
+                )
 
     @unittest.skipUnless(os.name == "nt", "Windows ownership transfer contract")
     def test_windows_open_osfhandle_failure_closes_leaf_handle_once(self) -> None:
@@ -1246,11 +1554,16 @@ class SecurityContractTests(unittest.TestCase):
 
         opened: list[tuple[int, bool]] = []
         closed: list[int] = []
-        real_open = module._windows_open_archive_path
+        real_open = module._windows_open_ordinary_path
         real_close = module._windows_close_handle
 
-        def recording_open(path, *, directory, owner=None):
-            handle = real_open(path, directory=directory, owner=owner)
+        def recording_open(path, *, directory, options, owner=None):
+            handle = real_open(
+                path,
+                directory=directory,
+                options=options,
+                owner=owner,
+            )
             opened.append((handle, directory))
             return handle
 
@@ -1259,7 +1572,7 @@ class SecurityContractTests(unittest.TestCase):
             return real_close(handle)
 
         with (
-            mock.patch.object(module, "_windows_open_archive_path", side_effect=recording_open),
+            mock.patch.object(module, "_windows_open_ordinary_path", side_effect=recording_open),
             mock.patch.object(module, "_windows_close_handle", side_effect=recording_close),
             mock.patch.object(msvcrt, "open_osfhandle", side_effect=OSError("injected open_osfhandle failure")),
             self.assertRaisesRegex(
@@ -1285,13 +1598,18 @@ class SecurityContractTests(unittest.TestCase):
         closed_fds: list[int] = []
         leaf_handles: list[int] = []
         closed_handles: list[int] = []
-        real_open_path = module._windows_open_archive_path
+        real_open_path = module._windows_open_ordinary_path
         real_open_osfhandle = msvcrt.open_osfhandle
         real_os_close = module.os.close
         real_close_handle = module._windows_close_handle
 
-        def recording_path(path, *, directory, owner=None):
-            handle = real_open_path(path, directory=directory, owner=owner)
+        def recording_path(path, *, directory, options, owner=None):
+            handle = real_open_path(
+                path,
+                directory=directory,
+                options=options,
+                owner=owner,
+            )
             if not directory:
                 leaf_handles.append(handle)
             return handle
@@ -1310,7 +1628,7 @@ class SecurityContractTests(unittest.TestCase):
             return real_close_handle(handle)
 
         with (
-            mock.patch.object(module, "_windows_open_archive_path", side_effect=recording_path),
+            mock.patch.object(module, "_windows_open_ordinary_path", side_effect=recording_path),
             mock.patch.object(msvcrt, "open_osfhandle", side_effect=recording_transfer),
             mock.patch.object(module.os, "fdopen", side_effect=OSError("injected fdopen failure")),
             mock.patch.object(module.os, "close", side_effect=recording_fd_close),
@@ -1348,7 +1666,7 @@ class SecurityContractTests(unittest.TestCase):
         leaf_handles: list[int] = []
         closed_handles: list[int] = []
         real_fdopen = module.os.fdopen
-        real_open_path = module._windows_open_archive_path
+        real_open_path = module._windows_open_ordinary_path
         real_identity = module._windows_handle_identity
         real_close_handle = module._windows_close_handle
 
@@ -1357,8 +1675,13 @@ class SecurityContractTests(unittest.TestCase):
             streams.append(stream)
             return stream
 
-        def recording_path(path, *, directory, owner=None):
-            handle = real_open_path(path, directory=directory, owner=owner)
+        def recording_path(path, *, directory, options, owner=None):
+            handle = real_open_path(
+                path,
+                directory=directory,
+                options=options,
+                owner=owner,
+            )
             if not directory:
                 leaf_handles.append(handle)
             return handle
@@ -1374,7 +1697,7 @@ class SecurityContractTests(unittest.TestCase):
 
         with (
             mock.patch.object(module.os, "fdopen", side_effect=recording_fdopen),
-            mock.patch.object(module, "_windows_open_archive_path", side_effect=recording_path),
+            mock.patch.object(module, "_windows_open_ordinary_path", side_effect=recording_path),
             mock.patch.object(module, "_windows_handle_identity", side_effect=fail_leaf_identity),
             mock.patch.object(module, "_windows_close_handle", side_effect=recording_handle_close),
             self.assertRaisesRegex(
@@ -1395,11 +1718,16 @@ class SecurityContractTests(unittest.TestCase):
         import msvcrt
 
         leaf_handles: list[int] = []
-        real_open_path = module._windows_open_archive_path
+        real_open_path = module._windows_open_ordinary_path
         real_close_handle = module._windows_close_handle
 
-        def recording_path(path, *, directory, owner=None):
-            handle = real_open_path(path, directory=directory, owner=owner)
+        def recording_path(path, *, directory, options, owner=None):
+            handle = real_open_path(
+                path,
+                directory=directory,
+                options=options,
+                owner=owner,
+            )
             if not directory:
                 leaf_handles.append(handle)
             return handle
@@ -1411,7 +1739,7 @@ class SecurityContractTests(unittest.TestCase):
 
         caught: module.ContractError | None = None
         with (
-            mock.patch.object(module, "_windows_open_archive_path", side_effect=recording_path),
+            mock.patch.object(module, "_windows_open_ordinary_path", side_effect=recording_path),
             mock.patch.object(msvcrt, "open_osfhandle", side_effect=OSError("injected construction failure")),
             mock.patch.object(module, "_windows_close_handle", side_effect=fail_leaf_close),
         ):
@@ -1429,7 +1757,9 @@ class SecurityContractTests(unittest.TestCase):
 
     def test_archive_acquisition_owner_clears_state_before_one_rollback_close(self) -> None:
         module = load_transfer_module()
-        owner = module._ArchiveAcquisitionOwner()
+        owner = module._OrdinaryFileAcquisitionOwner(
+            module._ARCHIVE_FILE_OPTIONS.errors
+        )
         owner.take_windows_handle(123)
         observed: list[tuple[int, str]] = []
         primary = module.ContractError(module.TRANSFER_ARCHIVE_BINDING_INVALID)
@@ -1445,7 +1775,9 @@ class SecurityContractTests(unittest.TestCase):
 
     def test_archive_acquisition_cleanup_failure_is_close_failed_without_retry(self) -> None:
         module = load_transfer_module()
-        owner = module._ArchiveAcquisitionOwner()
+        owner = module._OrdinaryFileAcquisitionOwner(
+            module._ARCHIVE_FILE_OPTIONS.errors
+        )
         owner.take_fd(456)
         primary = module.ContractError(module.TRANSFER_ARCHIVE_BINDING_INVALID)
         close_states: list[str] = []
@@ -1470,7 +1802,9 @@ class SecurityContractTests(unittest.TestCase):
         self.write_selection(self.selection(inventory))
         self.assertEqual(0, self.bundle().returncode)
         module = load_transfer_module()
-        owner = module._ArchiveAcquisitionOwner()
+        owner = module._OrdinaryFileAcquisitionOwner(
+            module._ARCHIVE_FILE_OPTIONS.errors
+        )
         closed: list[int] = []
         real_close = module._windows_close_handle
 
@@ -1491,8 +1825,11 @@ class SecurityContractTests(unittest.TestCase):
                 module.ContractError, module.TRANSFER_ARCHIVE_BINDING_INVALID
             ),
         ):
-            module._windows_open_archive_path(
-                self.bundle_path, directory=False, owner=owner
+            module._windows_open_ordinary_path(
+                self.bundle_path,
+                directory=False,
+                options=module._ARCHIVE_FILE_OPTIONS,
+                owner=owner,
             )
         self.assertEqual(1, len(closed))
         self.assertEqual("none", owner.state)
@@ -1548,6 +1885,8 @@ class SecurityContractTests(unittest.TestCase):
 
         if os.name == "nt":
             session = module.BoundArchiveSession.__new__(module.BoundArchiveSession)
+            session.options = module._ARCHIVE_FILE_OPTIONS
+            session.errors = module._ARCHIVE_FILE_OPTIONS.errors
             session.closed = False
             session.members = set()
             session.archive = None

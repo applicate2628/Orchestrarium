@@ -2093,7 +2093,9 @@ def _validate_committed_transport_projection(
         raise ValueError(detail) from exc
 
 
-def _stage_tree_manifest(path: Path) -> tuple[tuple[str, str], ...]:
+def _stage_tree_manifest(
+    path: Path, *, ignore_runtime_cache: bool = False
+) -> tuple[tuple[str, str], ...]:
     """Return a deterministic, no-follow manifest for one staged skill tree."""
 
     root_stat = path.lstat()
@@ -2116,9 +2118,14 @@ def _stage_tree_manifest(path: Path) -> tuple[tuple[str, str], ...]:
                     f"E_CANONICAL_LEAD_STAGE_INVALID: reparse {relative}"
                 )
             if stat.S_ISDIR(metadata.st_mode):
-                manifest.append((relative, "directory"))
+                if not (ignore_runtime_cache and candidate.name == "__pycache__"):
+                    manifest.append((relative, "directory"))
                 pending.append(candidate)
             elif stat.S_ISREG(metadata.st_mode):
+                if ignore_runtime_cache and _is_ordinary_runtime_cache_file(
+                    Path(relative), metadata
+                ):
+                    continue
                 manifest.append((relative, _file_sha256(candidate)))
             else:
                 raise ValueError(
@@ -2132,12 +2139,15 @@ def _stage_canonical_lead_tree(
 ) -> _CanonicalLeadStage:
     """Compose the provider-neutral canonical lead tree before create-only IO."""
 
-    source_manifest = _stage_tree_manifest(source_lead)
+    source_manifest = _stage_tree_manifest(source_lead, ignore_runtime_cache=True)
     staged = Path(tempfile.mkdtemp(prefix="orchestrarium-codex-lead-stage-"))
     try:
         shutil.rmtree(staged)
-        shutil.copytree(source_lead, staged)
-        if _stage_tree_manifest(staged) != source_manifest:
+        _copy_tree(source_lead, staged, ignore_runtime_cache=True)
+        if (
+            _stage_tree_manifest(staged, ignore_runtime_cache=True)
+            != source_manifest
+        ):
             raise ValueError("E_CANONICAL_LEAD_STAGE_INVALID: source digest")
         for source, destination in _runtime_file_destinations(
             root, helper_target, include_codex_helpers=True
@@ -2172,8 +2182,8 @@ def _stage_canonical_lead_tree(
                 raise ValueError(
                     f"E_CANONICAL_LEAD_STAGE_INVALID: copy digest {relative}"
                 )
-        manifest = _stage_tree_manifest(staged)
-        digest = _tree_sha256(staged)
+        manifest = _stage_tree_manifest(staged, ignore_runtime_cache=True)
+        digest = _tree_sha256(staged, ignore_runtime_cache=True)
         if digest is None:
             raise ValueError("E_CANONICAL_LEAD_STAGE_INVALID: tree digest")
         return _CanonicalLeadStage(staged, manifest, digest)

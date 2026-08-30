@@ -1413,6 +1413,53 @@ def test_codex_complete_canonical_lead_stage_owns_runtime_files_without_mirror(
     assert _no_follow_inventory(installed_lead) == before
 
 
+def test_canonical_lead_stage_excludes_ordinary_runtime_cache(
+    tmp_path: Path,
+) -> None:
+    """Ordinary bytecode must not enter canonical stage evidence."""
+
+    import shutil
+
+    source_lead = tmp_path / "source-lead"
+    shutil.copytree(ROOT / "src.codex" / "skills" / "lead", source_lead)
+    baseline = installer._stage_canonical_lead_tree(
+        ROOT,
+        source_lead,
+        tmp_path / "baseline" / ".agents" / "skills" / "lead" / "scripts",
+    )
+    baseline_manifest = baseline.manifest
+    baseline_digest = baseline.digest
+    shutil.rmtree(baseline.path, ignore_errors=True)
+
+    runtime_cache = source_lead / "scripts" / "__pycache__"
+    runtime_cache.mkdir()
+    cached_file = runtime_cache / "runtime-cache.cpython-test.pyc"
+    source_cache_bytes = b"synthetic ordinary runtime cache\x00\xff"
+    cached_file.write_bytes(source_cache_bytes)
+    cached_metadata = cached_file.lstat()
+    assert stat.S_ISREG(cached_metadata.st_mode)
+    assert not stat.S_ISLNK(cached_metadata.st_mode)
+    assert not installer._is_reparse_metadata(cached_metadata)
+
+    stage = installer._stage_canonical_lead_tree(
+        ROOT,
+        source_lead,
+        tmp_path / ".agents" / "skills" / "lead" / "scripts",
+    )
+    try:
+        assert stage.manifest == baseline_manifest
+        assert stage.digest == baseline_digest
+        assert "__pycache__" not in {
+            part
+            for relative, _digest in stage.manifest
+            for part in Path(relative).parts
+        }
+        assert not tuple(stage.path.rglob("*.pyc"))
+        assert cached_file.read_bytes() == source_cache_bytes
+    finally:
+        shutil.rmtree(stage.path, ignore_errors=True)
+
+
 def test_explicit_empty_runtime_destination_plan_performs_zero_copies(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
