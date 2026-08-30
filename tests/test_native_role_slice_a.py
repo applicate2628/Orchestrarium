@@ -3191,11 +3191,12 @@ def test_global_home_missing_matching_and_mismatch_rules(
     alternate = tmp_path / "alternate"
     primary.mkdir()
     alternate.mkdir()
-    monkeypatch.setattr(installer.os, "name", "nt")
     monkeypatch.delenv("USERPROFILE", raising=False)
     monkeypatch.setenv("HOME", str(primary))
     with pytest.raises(ValueError, match="E_GLOBAL_HOME_AMBIGUOUS"):
-        installer._resolve_global_home()
+        installer._select_global_home_environment(
+            None, str(primary), platform="nt"
+        )
 
     monkeypatch.setenv("USERPROFILE", str(primary))
     assert installer._resolve_global_home() == primary

@@ -1752,12 +1752,15 @@ def test_claude_transport_preflight_accepts_the_published_pre_e7_singleton(
     projection.mkdir(parents=True)
     for name in TRANSPORT_FILES:
         _write_transport(canonical, name, _authored_transport_path(ROOT, name).read_bytes())
-    legacy = subprocess.run(
-        ["git", "show", "8b9fce435853e1988c449805786c9ce9cbf9579e:src.claude/agents/scripts/provider_prompt.py"],
-        cwd=ROOT,
-        check=True,
-        capture_output=True,
-    ).stdout
+    fixture_root = ROOT / "tests" / "fixtures" / "provider-prompt-priors" / "pre-e7"
+    manifest = json.loads((fixture_root / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest == {
+        "payload": "provider_prompt.py",
+        "sha256": installer.PRE_E7_LEGACY_PROVIDER_PROMPT_SHA256,
+        "sourcePath": "src.claude/agents/scripts/provider_prompt.py",
+        "sourceRevision": "8b9fce435853e1988c449805786c9ce9cbf9579e",
+    }
+    legacy = (fixture_root / manifest["payload"]).read_bytes()
     assert hashlib.sha256(legacy).hexdigest() == installer.PRE_E7_LEGACY_PROVIDER_PROMPT_SHA256
     (projection / "provider_prompt.py").write_bytes(legacy)
     for name in ("invoke-codex-prompt.py", "invoke-claude-prompt.py"):

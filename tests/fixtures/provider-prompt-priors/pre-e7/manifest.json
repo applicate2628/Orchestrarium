@@ -1,0 +1,6 @@
+{
+  "payload": "provider_prompt.py",
+  "sha256": "a051c5fd916b9995d3c97995b926052acf15796887988e56dbb25d127e4749b0",
+  "sourcePath": "src.claude/agents/scripts/provider_prompt.py",
+  "sourceRevision": "8b9fce435853e1988c449805786c9ce9cbf9579e"
+}

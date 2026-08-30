@@ -1059,11 +1059,10 @@ def test_runtime_engine_is_projected_and_observability_record_is_current() -> No
     old_bug = "work-items/bugs/2026-07-26-nothing-observes-a-review-loop-that-ran-without-a-ledger.md"
     archived_bug = "work-items/bugs/archive/2026-08/2026-07-26-nothing-observes-a-review-loop-that-ran-without-a-ledger.md"
     assert '"review_loop_state.py"' in installer
-    assert (ROOT / archived_bug).is_file()
     for surface in live_surfaces:
         text = surface.read_text(encoding="utf-8")
         assert old_bug not in text
-        assert archived_bug in text
+        assert archived_bug not in text
     codex = live_surfaces[-1].read_text(encoding="utf-8")
     claude = live_surfaces[-2].read_text(encoding="utf-8")
     assert "ORCHESTRARIUM_REVIEW_LOOP_STATE_V2" in codex

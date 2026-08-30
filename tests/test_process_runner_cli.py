@@ -166,6 +166,7 @@ def test_cli_request_id_replay_in_same_private_directory_is_denied(tmp_path: Pat
     assert first_result.returncode == 0
     replay = first.parent / "request-replay.ready"
     replay.write_bytes(runner.encode_request_bundle(header, b""))
+    replay.chmod(0o600)
     second_result = _invoke_cli(replay, nonce)
     assert second_result.returncode == 2
     assert json.loads(second_result.stdout)["failureId"] == "PSV1-REQUEST-INVALID"
