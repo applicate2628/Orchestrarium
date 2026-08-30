@@ -42,6 +42,16 @@ jobs:
           export PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
           export TERM=dumb
 
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("helper/.orche-payload/fix_skip_evidence.py")
+          text = path.read_text(encoding="utf-8")
+          old = '    r"\\bin\\s+\\d+(?:\\.\\d+)?s(?:\\s+\\([^)]*\\))?\\s*$"\n'
+          new = '    r"\\bin\\s+\\d+(?:\\.\\d+)?s\\b"\n'
+          if old not in text:
+              raise SystemExit("cannot locate terminal-duration pattern")
+          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          PY
           python3 helper/.orche-payload/fix_skip_evidence.py repo
 
           cd repo
