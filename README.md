@@ -195,6 +195,7 @@ Currently shipped:
 - `$explain-simply` — knowledge-style; reader-tailored plain-language explanations for concepts, code paths, results, decisions, and learner notes.
 - `$vak-dissertation-review` — knowledge-style; review of a Russian dissertation (диссертация) and autoreferat for a кандидат/доктор наук defense — нормоконтроль, novelty, ВАК compliance, borrowings, references, ВАК-list publications.
 - `$vcpkg-ports-updater` — knowledge-style leaf specialist; admitted vcpkg overlay source/version synchronization and read-only named-root sweeps against each port's official upstream.
+- `$vcpkg-builder` — knowledge-style leaf executor; one admitted vcpkg port/triplet or aggregate runtime gate with current-run receiving-side evidence.
 
 ## References and maintenance
 

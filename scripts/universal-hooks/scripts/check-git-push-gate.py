@@ -1323,10 +1323,61 @@ def _parse_pr_grant(text: str) -> ActivePrGrant | None:
     )
 
 
-def _derive_pr_grant(entries: list[dict]) -> tuple[str, ActivePrGrant | None]:
+def _canonicalize_numeric_pr_grant(
+    number: int, authorization_workdir: str
+) -> ActivePrGrant:
+    repository_workdir = _normalize_repository_workdir(authorization_workdir)
+    git_exe = _resolve_executable("git", repository_workdir)
+    gh_exe = _resolve_executable("gh", repository_workdir)
+    if git_exe is None or gh_exe is None:
+        raise PrRouteDenied("PRG-PR-UNAVAILABLE")
+    repository_workdir = _prove_repository_root(repository_workdir, git_exe)
+    deadline = time.monotonic() + ORACLE_TIMEOUT_SECONDS
+    _, repo_text = _run_text(
+        [gh_exe, "repo", "view", "--json", "nameWithOwner,url"],
+        deadline, "PRG-PR-UNAVAILABLE", repository_workdir,
+    )
+    repository = _strict_json(repo_text, dict, "PRG-PR-UNAVAILABLE")
+    name = repository.get("nameWithOwner")
+    if not isinstance(name, str) or name.count("/") != 1:
+        raise PrRouteDenied("PRG-PR-UNAVAILABLE")
+    owner, repo = name.split("/", 1)
+    if not REPO_COMPONENT_REGEX.fullmatch(owner) or not REPO_COMPONENT_REGEX.fullmatch(repo):
+        raise PrRouteDenied("PRG-PR-UNAVAILABLE")
+    if repository.get("url") != f"https://github.com/{owner}/{repo}":
+        raise PrRouteDenied("PRG-PR-UNAVAILABLE")
+    _, pr_text = _run_text(
+        [gh_exe, "pr", "view", str(number), "--repo", name, "--json", "number,url"],
+        deadline, "PRG-PR-UNAVAILABLE", repository_workdir,
+    )
+    pr = _strict_json(pr_text, dict, "PRG-PR-UNAVAILABLE")
+    match = PR_URL_REGEX.fullmatch(pr.get("url")) if isinstance(pr.get("url"), str) else None
+    if (
+        match is None or pr.get("number") != number
+        or match.group("owner") != owner or match.group("repo") != repo
+    ):
+        raise PrRouteDenied("PRG-BINDING-DRIFT")
+    if _prove_repository_root(repository_workdir, git_exe) != repository_workdir:
+        raise PrRouteDenied("PRG-BINDING-DRIFT")
+    return ActivePrGrant(match.group("url"), owner, repo, number)
+
+
+def _derive_pr_grant(
+    entries: list[dict], envelope_repository_workdir: str
+) -> tuple[str, ActivePrGrant | None]:
     state = "absent"
     grant: ActivePrGrant | None = None
-    for entry in entries:
+    transcript_workdir: str | None = None
+    genuine_user_indexes = [
+        index for index, entry in enumerate(entries)
+        if is_user_message(entry) and extract_user_typed_text(entry)
+    ]
+    last_user_index = genuine_user_indexes[-1] if genuine_user_indexes else -1
+    for index, entry in enumerate(entries):
+        payload = entry.get("payload") if isinstance(entry, dict) else None
+        if entry.get("type") in ("session_meta", "turn_context"):
+            raw_context = payload.get("cwd") if isinstance(payload, dict) else None
+            transcript_workdir = raw_context if type(raw_context) is str and raw_context else None
         if not is_user_message(entry):
             continue
         text = extract_user_typed_text(entry)
@@ -1337,6 +1388,29 @@ def _derive_pr_grant(entries: list[dict]) -> tuple[str, ActivePrGrant | None]:
             continue
         parsed_grant = _parse_pr_grant(text)
         if parsed_grant is not None:
+            if not parsed_grant.owner:
+                direct_context = entry.get("cwd")
+                if direct_context is not None and (
+                    type(direct_context) is not str or not direct_context
+                ):
+                    state, grant = "malformed", None
+                    continue
+                contexts = {
+                    value for value in (direct_context, transcript_workdir)
+                    if value is not None
+                }
+                if len(contexts) > 1:
+                    state, grant = "malformed", None
+                    continue
+                authorization_workdir = next(iter(contexts), None)
+                if authorization_workdir is None and index == last_user_index:
+                    authorization_workdir = envelope_repository_workdir
+                if authorization_workdir is None:
+                    state, grant = "malformed", None
+                    continue
+                parsed_grant = _canonicalize_numeric_pr_grant(
+                    parsed_grant.number, authorization_workdir
+                )
             state, grant = "active", parsed_grant
             continue
         if text.startswith(PR_RESERVED_PREFIXES):
@@ -2878,7 +2952,9 @@ def evaluate_heavy(preflight: PreflightResult) -> bool:
         )
     if history_status != HISTORY_STATUS_FOUND:
         raise PrRouteDenied("PRG-TRANSCRIPT-UNAVAILABLE")
-    pr_state, pr_grant = _derive_pr_grant(history_entries)
+    pr_state, pr_grant = _derive_pr_grant(
+        history_entries, preflight.repository_workdir
+    )
     if pr_state == "malformed":
         raise PrRouteDenied("PRG-AUTH-MALFORMED")
     if pr_state == "active" and pr_grant is not None:

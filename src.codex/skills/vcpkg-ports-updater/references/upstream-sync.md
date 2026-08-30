@@ -55,3 +55,12 @@ An exit-zero already-installed/no-op result is not proof of the new source. Runt
 ## Stop conditions
 
 Return `REVISE` without widening scope when official-upstream identity is ambiguous, digest/version ordering is unproved, a patch/anchor drifts, a local delta is `UNKNOWN`, overlay resolution chooses the wrong owner, or an affected runtime oracle fails. Return `BLOCKED` only for an external prerequisite or unresolved authority conflict.
+
+## Terms and Abbreviations
+
+- `digest`: a cryptographic content identifier recorded for the selected source archive.
+- `immutable revision`: a fixed release tag or commit that cannot move after selection.
+- `overlay`: a repository-owned port definition that overrides or supplements builtin vcpkg ports.
+- `portfile`: the vcpkg build recipe for one port.
+- `runtime oracle`: the admitted observation that proves the receiving-side behavior.
+- `vcpkg`: the C/C++ package manager and its port ecosystem.

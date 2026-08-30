@@ -42,7 +42,10 @@ A user may replace repeated push confirmations for one concrete GitHub pull requ
 
 ```text
 [approve-pr-publication:v1 pr=https://github.com/<owner>/<repo>/pull/<positive-number>]
+[approve-pr-publication:v1 pr=<positive-number>]
 ```
+
+The full URL form, including an equal Markdown link, retains its embedded identity. The numeric shorthand is resolved through a bounded authoritative lookup in the authorization-time repository, and the grant retains the resulting full owner, repository, number, and canonical URL. Missing, ambiguous, or changing authorization-time repository context fails closed; a later push must match the retained identity and cannot reinterpret the number in another repository.
 
 The grant is ephemeral to the readable session transcript and can be revoked by the exact whole message `[revoke-pr-publication:v1]`. Only a genuine user-authored transcript entry can create or revoke it; assistant text, tool output, compaction summaries, repository files, and work-item records are not authorization sources.
 

@@ -4683,11 +4683,38 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
             return module.ProcessResult(code, value, stderr)
 
         def run(argv, _timeout, repository_workdir):
-            self.assertEqual(repository_workdir, str(REPO_ROOT.resolve()))
-            observed.append(list(argv))
             args = argv[1:]
+            authorization_workdir = changes.get("authorization_workdir")
+            self.assertIn(
+                repository_workdir,
+                tuple(
+                    value for value in
+                    (str(REPO_ROOT.resolve()), authorization_workdir)
+                    if value is not None
+                ),
+            )
+            observed.append(list(argv))
+            if repository_workdir == authorization_workdir:
+                if args == ["rev-parse", "--show-toplevel"]:
+                    return result(0, authorization_workdir + "\n")
+                if args == ["repo", "view", "--json", "nameWithOwner,url"]:
+                    return result(0, {
+                        "nameWithOwner": "source/project",
+                        "url": "https://github.com/source/project",
+                    })
+                if args[:3] == ["pr", "view", "3"]:
+                    return result(0, {
+                        "number": 3,
+                        "url": "https://github.com/source/project/pull/3",
+                    })
+                raise AssertionError(f"unexpected authorization argv: {argv!r}")
             if args == ["rev-parse", "--show-toplevel"]:
                 return result(0, str(REPO_ROOT.resolve()) + "\n")
+            if args == ["repo", "view", "--json", "nameWithOwner,url"]:
+                return result(0, {
+                    "nameWithOwner": "acme/project",
+                    "url": "https://github.com/acme/project",
+                })
             if changes.get("provider_timeout") and args[:2] == ["pr", "view"]:
                 return None
             if changes.get("provider_failure") and args[:2] == ["pr", "view"]:
@@ -4820,6 +4847,31 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
                         for argv in observed
                     )
                 )
+
+    def test_number_shorthand_keeps_authorization_repository_identity_after_switch(self) -> None:
+        with temporary_repository_workdir() as authorization_workdir:
+            grant = user("[approve-pr-publication:v1 pr=3]")
+            grant["cwd"] = authorization_workdir
+            for script in (CANONICAL_HOOK, *HOOKS):
+                with self.subTest(script=script):
+                    stdout, _observed = self._run_module(
+                        script,
+                        [grant],
+                        self._literal_command(script),
+                        pr_number=3,
+                        authorization_workdir=authorization_workdir,
+                    )
+                    self.assertIn("PRG-BINDING-DRIFT", stdout)
+
+    def test_pr_grant_docs_define_numeric_authorization_time_binding(self) -> None:
+        reference = (
+            REPO_ROOT / "shared" / "references" /
+            "repository-publication-safety.md"
+        ).read_text(encoding="utf-8")
+        release_notes = (REPO_ROOT / "RELEASE_NOTES.md").read_text(encoding="utf-8")
+        for text in (reference, release_notes):
+            self.assertIn("pr=<positive-number>", text)
+            self.assertIn("authorization-time repository", text)
 
     def test_pr_grant_accepts_equal_markdown_link(self) -> None:
         url = "https://github.com/acme/project/pull/7"

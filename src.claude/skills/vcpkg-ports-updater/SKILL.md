@@ -93,3 +93,13 @@ never accept the observed hash merely because repeated downloads agree.
 `PASS` requires official-upstream provenance, immutable revision plus digest, valid version ordering, explicit disposition of every prior local delta, current overlay-resolution evidence, required patch/anchor checks, affected-surface validation, protected-root compliance, and no stale live-tree residue.
 
 Read `references/upstream-sync.md` for source-authority, patch-stack, anchor, version, and validation matrices.
+
+## Terms and Abbreviations
+
+- `HEAD`: the current commit at a selected branch tip.
+- `MCP`: Model Context Protocol, the tool/resource integration protocol.
+- `overlay`: a repository-owned port definition that overrides or supplements builtin vcpkg ports.
+- `portfile`: the vcpkg build recipe for one port.
+- `SHA-256`: Secure Hash Algorithm 256-bit digest used to identify an archive or revision input.
+- `triplet`: vcpkg's target platform and toolchain configuration name.
+- `vcpkg`: the C/C++ package manager and its port ecosystem.

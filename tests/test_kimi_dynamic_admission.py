@@ -15,6 +15,11 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 OWNER_PATH = ROOT / "scripts" / "provider_prompt.py"
 
+# The public V2 admission and verification APIs reject non-Windows hosts.
+pytestmark = pytest.mark.skipif(
+    os.name != "nt", reason="Kimi V2 dynamic admission public API is Windows-only"
+)
+
 
 def _load_owner():
     spec = importlib.util.spec_from_file_location("kimi_dynamic_admission_owner", OWNER_PATH)
