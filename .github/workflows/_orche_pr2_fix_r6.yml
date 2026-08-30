@@ -1,0 +1,146 @@
+name: Internal PR2 review fixes r6
+
+on:
+  push:
+    branches:
+      - orche/internal-pr2-export-20260830-r4
+
+permissions:
+  contents: write
+
+jobs:
+  verify-and-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout helper payload
+        uses: actions/checkout@v4
+        with:
+          ref: orche/internal-pr2-export-20260830-r4
+          path: helper
+          fetch-depth: 1
+
+      - name: Checkout pull-request branch
+        uses: actions/checkout@v4
+        with:
+          ref: orche/impl-000-baseline
+          path: repo
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install focused-test dependencies
+        run: python -m pip install --disable-pip-version-check pytest
+
+      - name: Apply, verify, and publish
+        id: publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat helper/.orche-payload/pr2-r6/chunk-* | base64 -d > "$RUNNER_TEMP/pr2-r6.patch.gz"
+          echo '8ab6d575d6c8bc4143ffdc23f4cd1af7071c18b6e98f4ff6eafe6289b886ac86  '"$RUNNER_TEMP/pr2-r6.patch.gz" | sha256sum -c -
+          gzip -dc "$RUNNER_TEMP/pr2-r6.patch.gz" > "$RUNNER_TEMP/pr2-r6.patch"
+
+          cd repo
+          git checkout -B orche/impl-000-baseline origin/orche/impl-000-baseline
+          test "$(git rev-parse HEAD)" = 'e348ed7760fbb34536d2421148b545f69b67d54a'
+          test -z "$(git status --porcelain=v1)"
+          git apply --check "$RUNNER_TEMP/pr2-r6.patch"
+          git apply --index "$RUNNER_TEMP/pr2-r6.patch"
+
+          cat > "$RUNNER_TEMP/expected-paths" <<'PATHS'
+          .tmp/test-noop
+          RELEASE_NOTES.md
+          baseline/orchestrarium-v1/README.md
+          baseline/orchestrarium-v1/baseline-pin.json
+          baseline/orchestrarium-v1/tooling/build_inventory.py
+          baseline/orchestrarium-v1/tooling/stage0_evidence.py
+          baseline/orchestrarium-v1/tooling/stage0_orchestrator.py
+          scripts/baseline/build_inventory.py
+          scripts/baseline/stage0_evidence.py
+          scripts/baseline/stage0_orchestrator.py
+          tests/test_orche_baseline_inventory.py
+          tests/test_orche_baseline_pin.py
+          tests/test_orche_review_regressions.py
+          tests/test_orche_verifier_isolation.py
+          PATHS
+          git diff --cached --name-only | sort > "$RUNNER_TEMP/actual-paths"
+          sort -o "$RUNNER_TEMP/expected-paths" "$RUNNER_TEMP/expected-paths"
+          diff -u "$RUNNER_TEMP/expected-paths" "$RUNNER_TEMP/actual-paths"
+          git diff --cached --check
+
+          for test_file in \
+            tests/test_orche_baseline_pin.py \
+            tests/test_orche_pytest_baseline.py \
+            tests/test_orche_baseline_inventory.py \
+            tests/test_orche_target_effect_baseline.py \
+            tests/test_orche_command_baseline.py \
+            tests/test_orche_capability_baseline.py \
+            tests/test_orche_verifier_isolation.py \
+            tests/test_orche_review_regressions.py; do
+            PYTHONDONTWRITEBYTECODE=1 python "$test_file"
+          done
+
+          rm -rf .scratch
+          find scripts/baseline baseline/orchestrarium-v1/tooling tests -type d -name __pycache__ -prune -exec rm -rf {} +
+          mapfile -t changed_python < <(git diff --cached --name-only -- '*.py')
+          python -m py_compile "${changed_python[@]}"
+          find scripts/baseline baseline/orchestrarium-v1/tooling tests -type d -name __pycache__ -prune -exec rm -rf {} +
+
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          import re
+          import subprocess
+          import tempfile
+
+          readme = Path('baseline/orchestrarium-v1/README.md').read_text(encoding='utf-8')
+          block = re.search(r'```bash\n(.*?)\n```', readme, re.S)
+          assert block is not None
+          with tempfile.NamedTemporaryFile('w', suffix='.sh', delete=False) as handle:
+              handle.write(block.group(1) + '\n')
+              script = handle.name
+          syntax = subprocess.run(['bash', '-n', script], capture_output=True, text=True)
+          assert syntax.returncode == 0, syntax.stderr
+
+          pin = json.loads(Path('baseline/orchestrarium-v1/baseline-pin.json').read_text())
+          for name, record in pin['tooling'].items():
+              actual = subprocess.run(
+                  ['git', 'hash-object', record['path']],
+                  check=True,
+                  capture_output=True,
+                  text=True,
+              ).stdout.strip()
+              assert actual == record['gitBlobSha'], (name, actual, record['gitBlobSha'])
+          PY
+
+          for name in \
+            build_inventory.py \
+            build_target_effect_baseline.py \
+            compare_capability_baseline.py \
+            compare_command_baseline.py \
+            compare_pytest_baseline.py \
+            stage0_runtime.py \
+            stage0_evidence.py \
+            stage0_orchestrator.py \
+            verify_stage0.py; do
+            cmp "scripts/baseline/$name" "baseline/orchestrarium-v1/tooling/$name"
+          done
+
+          git diff --exit-code
+          python scripts/check-publication-gate.py
+          git diff --cached --check
+          test ! -e .scratch
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(stage0): close remaining evidence integrity gaps'
+          git push origin HEAD:orche/impl-000-baseline
+          echo "new_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Record result
+        run: echo "Published ${{ steps.publish.outputs.new_sha }}" >> "$GITHUB_STEP_SUMMARY"
