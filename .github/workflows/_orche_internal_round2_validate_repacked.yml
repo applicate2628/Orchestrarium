@@ -1,0 +1,87 @@
+name: Internal PR2 round-2 validation repacked
+
+on:
+  push:
+    branches:
+      - orche/internal-pr2-review-round-20260830
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Repack corrected chunks and execute the reviewed validation script
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cat \
+            .orche-internal/current-patch-fix/part-03-0 \
+            .orche-internal/current-patch-fix/part-03-1 \
+            > .orche-internal/current-patch/part-03
+          cat \
+            .orche-internal/current-patch-fix/part-05-0 \
+            .orche-internal/current-patch-fix/part-05-1-0 \
+            .orche-internal/current-patch-fix/part-05-1-1 \
+            .orche-internal/current-patch-fix/part-05-1-2 \
+            .orche-internal/current-patch-fix/part-05-1-3 \
+            .orche-internal/current-patch-fix/part-05-1-4 \
+            > .orche-internal/current-patch/part-05
+
+          echo '49e0e01a3493823a89d9142deb96fafa35e58e958d18802cf4531cbce2af68cf  .orche-internal/current-patch/part-03' | sha256sum -c -
+          echo '736cb8e3a2b25815311b584c36053a768f65198c61a7cc84e6f3a963e40d9389  .orche-internal/current-patch/part-05' | sha256sum -c -
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          source = Path('.github/workflows/_orche_internal_round2_validate_chunks.yml')
+          lines = source.read_text(encoding='utf-8').splitlines()
+          marker = '      - name: Reconstruct exact candidate, self-review, and run full verifier'
+          start = lines.index(marker)
+          run_index = next(
+              index for index in range(start + 1, len(lines))
+              if lines[index] == '        run: |'
+          )
+          end = next(
+              index for index in range(run_index + 1, len(lines))
+              if lines[index].startswith('      - name: Upload self-review evidence')
+          )
+          body = []
+          for line in lines[run_index + 1:end]:
+              if line.startswith('          '):
+                  body.append(line[10:])
+              elif not line:
+                  body.append('')
+              else:
+                  raise SystemExit(f'unexpected validation indentation: {line!r}')
+          target = Path('/tmp/orche-round2-validation.sh')
+          target.write_text('\n'.join(body) + '\n', encoding='utf-8')
+          PY
+          bash -n /tmp/orche-round2-validation.sh
+          bash /tmp/orche-round2-validation.sh
+
+      - name: Upload self-review evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: orche-pr2-round2-validation-repacked
+          if-no-files-found: warn
+          path: |
+            /tmp/orche-refs.txt
+            /tmp/orche-full-verifier.log
+            /tmp/pre-full-status
+            /tmp/post-full-status
+            /tmp/orche-stage0-reviewed-*/**
