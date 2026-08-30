@@ -4,10 +4,10 @@ Source-only/maintainer-only, NOT installed: `shared/references/`; these rules ar
 
 ## Role index
 - Roadmap and orchestration: `$product-manager`, `$lead`, `$consultant`, `$knowledge-archivist`.
-- Research/design/planning/specialist constraints: `$product-analyst`, `$analyst`, `$architect`, `$ux-designer`, `$planner`, `$algorithm-scientist`, `$computational-scientist`, `$security-engineer`, `$performance-engineer`, `$reliability-engineer`.
+- Research, design, planning, and specialist constraints: `$product-analyst`, `$analyst`, `$architect`, `$ux-designer`, `$planner`, `$algorithm-scientist`, `$computational-scientist`, `$security-engineer`, `$performance-engineer`, `$reliability-engineer`.
 - Implementation: `$backend-engineer`, `$frontend-engineer`, `$qt-ui-engineer`, `$model-view-engineer`, `$data-engineer`, `$platform-engineer`, `$toolchain-engineer`, `$geometry-engineer`, `$graphics-engineer`, `$visualization-engineer`, `$external-worker`.
-- Review/verification: `$qa-engineer`, `$architecture-reviewer`, `$security-reviewer`, `$performance-reviewer`, `$accessibility-reviewer`, `$ux-reviewer`, `$ui-test-engineer`, `$external-reviewer`.
-- Approved UI implementation: `$frontend-engineer` for web/React; `$qt-ui-engineer` only for Qt desktop.
+- Review and verification: `$qa-engineer`, `$architecture-reviewer`, `$security-reviewer`, `$performance-reviewer`, `$accessibility-reviewer`, `$ux-reviewer`, `$ui-test-engineer`, `$external-reviewer`.
+- Approved UI: `$frontend-engineer` for web/React; `$qt-ui-engineer` only for Qt desktop.
 
 ## Common skills
 Common skills: any role or the main conversation uses on match; they are not roles and do not own delivery. Delegate-style may spawn one artifact; also invocable inline. Set: `$windows-gui-manual-testing`, `$analyzing-video-bugs`, `$bug-hunting`, `$mathtype-book-page`, `$repo-cleanup`, `$manual-repo-transfer`, `$github-pr-review-bot`, `$explain-simply`, `$vak-dissertation-review`, `$vcpkg-ports-updater`, `$vcpkg-builder`.

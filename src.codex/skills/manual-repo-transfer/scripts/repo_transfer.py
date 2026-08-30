@@ -11,6 +11,7 @@ import math
 import ntpath
 import os
 import re
+import secrets
 import stat
 import struct
 import subprocess
@@ -584,8 +585,7 @@ def bind_repository(repository: Path, git_executable: Path) -> BoundRepository:
     return bound
 
 
-def _output_identity(path: Path) -> tuple[int, ...]:
-    metadata = path.lstat()
+def _output_metadata_identity(metadata: os.stat_result) -> tuple[int, ...]:
     return (
         metadata.st_dev,
         metadata.st_ino,
@@ -597,14 +597,21 @@ def _output_identity(path: Path) -> tuple[int, ...]:
     )
 
 
-def _directory_identity(path: Path) -> tuple[int, ...]:
-    metadata = path.lstat()
+def _output_identity(path: Path) -> tuple[int, ...]:
+    return _output_metadata_identity(path.lstat())
+
+
+def _directory_metadata_identity(metadata: os.stat_result) -> tuple[int, ...]:
     return (
         metadata.st_dev,
         metadata.st_ino,
         metadata.st_mode,
         getattr(metadata, "st_file_attributes", 0),
     )
+
+
+def _directory_identity(path: Path) -> tuple[int, ...]:
+    return _directory_metadata_identity(path.lstat())
 
 
 def _require_ordinary_directory(path: Path) -> tuple[int, ...]:
@@ -672,16 +679,71 @@ def bind_output(path: Path, root: Path, *, force: bool) -> OutputBinding:
         raise ContractError(TRANSFER_OUTPUT_PATH_INVALID) from error
 
 
-def _new_output_temporary(binding: OutputBinding) -> tuple[int, Path]:
-    if _require_ordinary_directory(binding.path.parent) != binding.parent_identity:
+def _acquire_output_parent(
+    binding: OutputBinding,
+    owner: "_OrdinaryFileAcquisitionOwner",
+) -> int:
+    if os.name == "nt":
+        handle = _windows_open_ordinary_path(
+            binding.path.parent,
+            directory=True,
+            options=_OUTPUT_FILE_OPTIONS,
+            owner=owner,
+            share_write=True,
+        )
+        if _require_ordinary_directory(binding.path.parent) != binding.parent_identity:
+            raise ContractError(TRANSFER_OUTPUT_IDENTITY_DRIFT)
+        return handle
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_DIRECTORY", 0)
+    )
+    descriptor = os.open(binding.path.parent, flags)
+    owner.take_fd(descriptor)
+    metadata = os.fstat(descriptor)
+    if (
+        not stat.S_ISDIR(metadata.st_mode)
+        or _directory_metadata_identity(metadata) != binding.parent_identity
+    ):
         raise ContractError(TRANSFER_OUTPUT_IDENTITY_DRIFT)
-    try:
+    return descriptor
+
+
+def _new_output_temporary(
+    binding: OutputBinding,
+    parent: int,
+    owner: "_OrdinaryFileAcquisitionOwner",
+) -> tuple[Path, tuple[int, ...]]:
+    if os.name == "nt":
         descriptor, name = tempfile.mkstemp(
             prefix=f".{binding.path.name}.", suffix=".tmp", dir=binding.path.parent
         )
-        return descriptor, Path(name)
-    except OSError as error:
-        raise ContractError(TRANSFER_OUTPUT_PUBLISH_FAILED) from error
+        temporary = Path(name)
+    else:
+        flags = (
+            os.O_RDWR
+            | os.O_CREAT
+            | os.O_EXCL
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+        )
+        for _attempt in range(128):
+            basename = f".{binding.path.name}.{secrets.token_hex(8)}.tmp"
+            try:
+                descriptor = os.open(basename, flags, 0o600, dir_fd=parent)
+                break
+            except FileExistsError:
+                continue
+        else:
+            raise OSError("unable to reserve output temporary")
+        temporary = binding.path.parent / basename
+    owner.take_fd(descriptor)
+    metadata = os.fstat(descriptor)
+    if not stat.S_ISREG(metadata.st_mode):
+        raise ContractError(TRANSFER_OUTPUT_PUBLISH_FAILED)
+    return temporary, _temporary_name_identity(metadata)
 
 
 def _temporary_name_identity(metadata: os.stat_result) -> tuple[int, ...]:
@@ -695,33 +757,88 @@ def _temporary_name_identity(metadata: os.stat_result) -> tuple[int, ...]:
 
 @contextmanager
 def _bound_output_temporary(binding: OutputBinding) -> Iterable[Any]:
-    descriptor, temporary = _new_output_temporary(binding)
-    stream: Any | None = None
+    errors = _OUTPUT_FILE_OPTIONS.errors
+    parent_owner = _OrdinaryFileAcquisitionOwner(errors)
+    temporary_owner = _OrdinaryFileAcquisitionOwner(errors)
+    parent: int | None = None
+    temporary: Path | None = None
+    temporary_identity: tuple[int, ...] | None = None
+    primary: BaseException | None = None
     try:
-        stream = os.fdopen(descriptor, "w+b")
-        descriptor = -1
+        parent = _acquire_output_parent(binding, parent_owner)
+        temporary, temporary_identity = _new_output_temporary(
+            binding, parent, temporary_owner
+        )
+        temporary_owner.fd_to_stream("w+b", buffering=-1)
+        assert temporary_owner.stream is not None
+        stream = temporary_owner.stream
         yield stream
         stream.flush()
         os.fsync(stream.fileno())
-        temporary_identity = _temporary_name_identity(os.fstat(stream.fileno()))
-        stream.close()
-        stream = None
-        publish_output(binding, temporary, temporary_identity)
+        if _temporary_name_identity(os.fstat(stream.fileno())) != temporary_identity:
+            raise ContractError(TRANSFER_OUTPUT_IDENTITY_DRIFT)
+        temporary_owner.rollback(ContractError(TRANSFER_OUTPUT_PUBLISH_FAILED))
+        publish_output(binding, temporary, temporary_identity, parent)
+    except BaseException as error:
+        primary = (
+            error
+            if isinstance(error, ContractError)
+            else ContractError(TRANSFER_OUTPUT_PUBLISH_FAILED)
+        )
+        if primary is error:
+            raise
+        raise primary from error
     finally:
-        if stream is not None:
-            try:
-                stream.close()
-            except OSError:
-                pass
-        if descriptor >= 0:
-            try:
-                os.close(descriptor)
-            except OSError:
-                pass
+        cleanup_primary = primary or ContractError(TRANSFER_OUTPUT_PUBLISH_FAILED)
+        cleanup_error: BaseException | None = None
         try:
-            temporary.unlink(missing_ok=True)
-        except OSError:
-            pass
+            temporary_owner.rollback(cleanup_primary)
+        except BaseException as error:
+            cleanup_error = error
+        try:
+            if temporary is not None and temporary_identity is not None:
+                _cleanup_output_temporary(temporary, temporary_identity, parent)
+        except BaseException as error:
+            cleanup_error = cleanup_error or error
+        try:
+            parent_owner.rollback(cleanup_error or cleanup_primary)
+        except BaseException as error:
+            cleanup_error = error
+        if cleanup_error is not None:
+            raise cleanup_error
+
+
+def _output_named_metadata(path: Path, parent: int | None) -> os.stat_result:
+    if os.name != "nt":
+        if parent is None:
+            raise ContractError(TRANSFER_OUTPUT_PUBLISH_FAILED)
+        return os.stat(path.name, dir_fd=parent, follow_symlinks=False)
+    return path.lstat()
+
+
+def _cleanup_output_temporary(
+    temporary: Path,
+    expected_identity: tuple[int, ...],
+    parent: int | None,
+) -> None:
+    try:
+        current = _temporary_name_identity(_output_named_metadata(temporary, parent))
+    except FileNotFoundError:
+        return
+    except OSError as error:
+        raise ContractError(TRANSFER_OUTPUT_PUBLISH_FAILED) from error
+    if current != expected_identity:
+        return
+    try:
+        if os.name == "nt":
+            temporary.unlink()
+        else:
+            assert parent is not None
+            os.unlink(temporary.name, dir_fd=parent)
+    except FileNotFoundError:
+        return
+    except OSError as error:
+        raise ContractError(TRANSFER_OUTPUT_PUBLISH_FAILED) from error
 
 
 def _fsync_output_parent(parent: Path) -> None:
@@ -738,46 +855,85 @@ def publish_output(
     binding: OutputBinding,
     temporary: Path,
     temporary_identity: tuple[int, ...] | None = None,
+    parent: int | None = None,
 ) -> None:
     try:
         if (
             temporary_identity is not None
-            and _temporary_name_identity(temporary.lstat()) != temporary_identity
+            and _temporary_name_identity(_output_named_metadata(temporary, parent))
+            != temporary_identity
         ):
             raise ContractError(TRANSFER_OUTPUT_IDENTITY_DRIFT)
         if _require_ordinary_directory(binding.path.parent) != binding.parent_identity:
             raise ContractError(TRANSFER_OUTPUT_IDENTITY_DRIFT)
         if binding.destination_identity is None:
-            if os.path.lexists(binding.path):
-                metadata = binding.path.lstat()
-                if not stat.S_ISREG(metadata.st_mode) or is_reparse_point(binding.path):
+            try:
+                metadata = _output_named_metadata(binding.path, parent)
+            except FileNotFoundError:
+                metadata = None
+            if metadata is not None:
+                if (
+                    not stat.S_ISREG(metadata.st_mode)
+                    or stat.S_ISLNK(metadata.st_mode)
+                    or bool(getattr(metadata, "st_file_attributes", 0) & 0x400)
+                ):
                     raise ContractError(TRANSFER_OUTPUT_TYPE_INVALID)
                 raise ContractError(TRANSFER_OUTPUT_EXISTS)
             try:
-                os.link(temporary, binding.path)
+                if os.name == "nt":
+                    os.link(temporary, binding.path)
+                else:
+                    assert parent is not None
+                    os.link(
+                        temporary.name,
+                        binding.path.name,
+                        src_dir_fd=parent,
+                        dst_dir_fd=parent,
+                        follow_symlinks=False,
+                    )
             except FileExistsError as error:
                 raise ContractError(TRANSFER_OUTPUT_EXISTS) from error
             except OSError as error:
                 raise ContractError(TRANSFER_OUTPUT_PUBLISH_FAILED) from error
-            temporary.unlink()
+            if os.name == "nt":
+                temporary.unlink()
+            else:
+                os.unlink(temporary.name, dir_fd=parent)
         else:
-            if not os.path.lexists(binding.path):
+            try:
+                metadata = _output_named_metadata(binding.path, parent)
+            except FileNotFoundError:
                 raise ContractError(TRANSFER_OUTPUT_IDENTITY_DRIFT)
-            metadata = binding.path.lstat()
             if (
                 not stat.S_ISREG(metadata.st_mode)
                 or stat.S_ISLNK(metadata.st_mode)
                 or bool(getattr(metadata, "st_file_attributes", 0) & 0x400)
-                or _output_identity(binding.path) != binding.destination_identity
+                or _output_metadata_identity(metadata) != binding.destination_identity
             ):
                 raise ContractError(TRANSFER_OUTPUT_IDENTITY_DRIFT)
-            os.replace(temporary, binding.path)
-        metadata = binding.path.lstat()
-        if not stat.S_ISREG(metadata.st_mode) or is_reparse_point(binding.path):
+            if os.name == "nt":
+                os.replace(temporary, binding.path)
+            else:
+                os.replace(
+                    temporary.name,
+                    binding.path.name,
+                    src_dir_fd=parent,
+                    dst_dir_fd=parent,
+                )
+        metadata = _output_named_metadata(binding.path, parent)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or stat.S_ISLNK(metadata.st_mode)
+            or bool(getattr(metadata, "st_file_attributes", 0) & 0x400)
+        ):
             raise ContractError(TRANSFER_OUTPUT_PUBLISH_FAILED)
         if _require_ordinary_directory(binding.path.parent) != binding.parent_identity:
             raise ContractError(TRANSFER_OUTPUT_IDENTITY_DRIFT)
-        _fsync_output_parent(binding.path.parent)
+        if os.name == "nt":
+            _fsync_output_parent(binding.path.parent)
+        else:
+            assert parent is not None
+            os.fsync(parent)
     except OSError as error:
         raise ContractError(TRANSFER_OUTPUT_PUBLISH_FAILED) from error
 
@@ -1494,6 +1650,14 @@ _ARCHIVE_FILE_OPTIONS = _OrdinaryFileOptions(
     ),
     posix_nonblocking=False,
 )
+_OUTPUT_FILE_OPTIONS = _OrdinaryFileOptions(
+    errors=_OrdinaryFileErrors(
+        binding=TRANSFER_OUTPUT_IDENTITY_DRIFT,
+        drift=TRANSFER_OUTPUT_IDENTITY_DRIFT,
+        close=TRANSFER_OUTPUT_PUBLISH_FAILED,
+    ),
+    posix_nonblocking=False,
+)
 _INPUT_FILE_OPTIONS = _OrdinaryFileOptions(
     errors=_OrdinaryFileErrors(
         binding=TRANSFER_INPUT_BINDING_INVALID,
@@ -1628,10 +1792,10 @@ class _OrdinaryFileAcquisitionOwner:
         self.fd = descriptor
         self.state = "fd"
 
-    def fd_to_stream(self) -> None:
+    def fd_to_stream(self, mode: str = "rb", *, buffering: int = 0) -> None:
         if self.state != "fd" or self.fd is None:
             raise ContractError(self.errors.binding)
-        stream = os.fdopen(self.fd, "rb", buffering=0)
+        stream = os.fdopen(self.fd, mode, buffering=buffering)
         self.fd = None
         self.stream = stream
         self.state = "stream"
@@ -1691,11 +1855,14 @@ def _windows_open_ordinary_path(
     directory: bool,
     options: _OrdinaryFileOptions,
     owner: _OrdinaryFileAcquisitionOwner | None = None,
+    share_write: bool = False,
 ) -> int:
     import ctypes
     from ctypes import wintypes
 
     errors = options.errors
+    if share_write and options is not _OUTPUT_FILE_OPTIONS:
+        raise ContractError(errors.binding)
     acquisition = owner or _OrdinaryFileAcquisitionOwner(errors)
     if acquisition.errors is not errors:
         raise ContractError(errors.binding)
@@ -1715,8 +1882,9 @@ def _windows_open_ordinary_path(
         create_file.restype = wintypes.HANDLE
         desired_access = 0x00000001 | 0x00000080 if directory else 0x80000000
         flags = 0x00200000 | (0x02000000 if directory else 0x08000000)
+        share_mode = 0x00000001 | (0x00000002 if share_write else 0)
         handle = create_file(
-            str(path), desired_access, 0x00000001, None, 3, flags, None
+            str(path), desired_access, share_mode, None, 3, flags, None
         )
         invalid = ctypes.c_void_p(-1).value
         value = int(handle) if handle else 0

@@ -443,7 +443,15 @@ class IoBoundaryTests(unittest.TestCase):
             self.assertEqual(module.canonical_json(inventory) + b"\n", output.read_bytes())
             self.assertEqual(1, replace_mock.call_count)
             replaced_source, replaced_destination = replace_mock.call_args.args
-            self.assertEqual(output, Path(replaced_destination))
+            if os.name == "nt":
+                self.assertEqual(output, Path(replaced_destination))
+            else:
+                self.assertEqual(Path(replaced_source).name, replaced_source)
+                self.assertEqual(output.name, replaced_destination)
+                self.assertEqual(
+                    replace_mock.call_args.kwargs["src_dir_fd"],
+                    replace_mock.call_args.kwargs["dst_dir_fd"],
+                )
             self.assertNotEqual(output, Path(replaced_source))
             self.assertEqual([], list(output.parent.glob(f".{output.name}.*.tmp")))
 
@@ -550,7 +558,14 @@ class IoBoundaryTests(unittest.TestCase):
             self.assertEqual(b"new\n", output.read_bytes())
             self.assertEqual(1, link_mock.call_count)
             _source, destination = link_mock.call_args.args
-            self.assertEqual(output, Path(destination))
+            if os.name == "nt":
+                self.assertEqual(output, Path(destination))
+            else:
+                self.assertEqual(output.name, destination)
+                self.assertEqual(
+                    link_mock.call_args.kwargs["src_dir_fd"],
+                    link_mock.call_args.kwargs["dst_dir_fd"],
+                )
             self.assertEqual(0, replace_mock.call_count)
             self.assertEqual([], list(output.parent.glob(f".{output.name}.*.tmp")))
 
@@ -629,9 +644,105 @@ class IoBoundaryTests(unittest.TestCase):
                                     output,
                                 )
                 self.assertFalse(output.exists())
-                self.assertEqual(
-                    [], list(output.parent.glob(f".{output.name}.*.tmp"))
+                preserved = list(output.parent.glob(f".{output.name}.*.tmp"))
+                self.assertEqual(1, len(preserved))
+                self.assertEqual(b"substituted temporary bytes", preserved[0].read_bytes())
+
+    def test_output_temporary_acquisition_failure_closes_leaf_fd(self) -> None:
+        module = load_transfer_module()
+        real_fstat = module.os.fstat
+
+        for operation in ("fstat", "fdopen"):
+            with self.subTest(operation=operation), tempfile.TemporaryDirectory(
+                prefix=f"repo-transfer-output-{operation}-"
+            ) as temp:
+                root = Path(temp) / "repo"
+                root.mkdir()
+                output = Path(temp) / "inventory.json"
+                binding = module.bind_output(output, root, force=False)
+                captured: list[int] = []
+
+                def fail_leaf_fstat(descriptor):
+                    metadata = real_fstat(descriptor)
+                    if stat.S_ISREG(metadata.st_mode):
+                        captured.append(descriptor)
+                        raise OSError("injected temporary fstat failure")
+                    return metadata
+
+                def fail_fdopen(descriptor, *args, **kwargs):
+                    captured.append(descriptor)
+                    raise OSError("injected temporary fdopen failure")
+
+                patches = (
+                    mock.patch.object(module.os, "fstat", side_effect=fail_leaf_fstat)
+                    if operation == "fstat"
+                    else mock.patch.object(module.os, "fdopen", side_effect=fail_fdopen)
                 )
+                with patches, self.assertRaisesRegex(
+                    module.ContractError, r"^TRANSFER-OUTPUT-PUBLISH-FAILED$"
+                ):
+                    module.publish_output_bytes(binding, b"trusted bytes")
+                self.assertEqual(1, len(captured))
+                with self.assertRaises(OSError):
+                    real_fstat(captured[0])
+                temporaries = list(output.parent.glob(f".{output.name}.*.tmp"))
+                self.assertEqual(1 if operation == "fstat" else 0, len(temporaries))
+
+    @unittest.skipIf(os.name == "nt", "POSIX descriptor-relative output contract")
+    def test_output_parent_persistent_swap_is_rejected_and_cleaned_by_held_fd(self) -> None:
+        module = load_transfer_module()
+        with tempfile.TemporaryDirectory(prefix="repo-transfer-output-parent-swap-") as temp:
+            base = Path(temp)
+            root = base / "repo"
+            root.mkdir()
+            parent = base / "output"
+            parent.mkdir()
+            output = parent / "inventory.json"
+            binding = module.bind_output(output, root, force=False)
+            displaced = base / "displaced"
+
+            with self.assertRaisesRegex(
+                module.ContractError, r"^TRANSFER-OUTPUT-IDENTITY-DRIFT$"
+            ):
+                with module._bound_output_temporary(binding) as stream:
+                    parent.rename(displaced)
+                    parent.mkdir()
+                    stream.write(b"trusted bytes")
+
+            self.assertFalse(output.exists())
+            self.assertEqual([], list(parent.iterdir()))
+            self.assertEqual([], list(displaced.glob(f".{output.name}.*.tmp")))
+
+    @unittest.skipUnless(os.name == "nt", "Windows live parent-handle contract")
+    def test_output_parent_live_rename_is_denied_until_parent_handle_release(self) -> None:
+        module = load_transfer_module()
+        with tempfile.TemporaryDirectory(prefix="repo-transfer-output-parent-hold-") as temp:
+            base = Path(temp)
+            root = base / "repo"
+            root.mkdir()
+            parent = base / "output"
+            parent.mkdir()
+            output = parent / "inventory.json"
+            binding = module.bind_output(output, root, force=False)
+            moved = base / "moved"
+
+            with self.assertRaisesRegex(
+                module.ContractError, r"^TRANSFER-ARCHIVE-BINDING-INVALID$"
+            ):
+                module._windows_open_ordinary_path(
+                    parent,
+                    directory=True,
+                    options=module._ARCHIVE_FILE_OPTIONS,
+                    share_write=True,
+                )
+
+            with module._bound_output_temporary(binding) as stream:
+                stream.write(b"trusted bytes")
+                with self.assertRaises(OSError):
+                    parent.rename(moved)
+
+            parent.rename(moved)
+            self.assertEqual(b"trusted bytes", (moved / output.name).read_bytes())
 
     def test_payload_read_stops_at_expected_size_plus_one_on_drift(self) -> None:
         module = load_transfer_module()
