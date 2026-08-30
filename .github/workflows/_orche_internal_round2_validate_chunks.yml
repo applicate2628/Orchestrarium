@@ -1,0 +1,319 @@
+name: Internal PR2 round-2 validation chunks
+
+on:
+  push:
+    branches:
+      - orche/internal-pr2-review-round-20260830
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Reconstruct exact candidate, self-review, and run full verifier
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          BASE_PR_HEAD=b92233170c389bcb2fb6ed2b801802c59c48c5c4
+          BASELINE=ce2052fb773576fd6e3206c2a7e21e01852d556b
+          ENVELOPE=baseline/orchestrarium-v1/reviewed-dispositions.json
+          STAGE=/tmp/orche-round2-stage
+          rm -rf "$STAGE"
+          mkdir -m 700 "$STAGE"
+
+          cat > "$STAGE/chunks.sha256" <<'EOF'
+          8425660a23a6265c545dccd22ddb23f6a5cfaa791dd761ba77b43310ed9b8d59  .orche-internal/current-patch/part-00
+          5af3d2e6e450aa62bff51fb96b42887c9e3fa0b18a73a2551e345000ae4f97fd  .orche-internal/current-patch/part-01
+          63ad8df381c177e13362947e20625b5849fc622b0ac1fde89c996d8401cd7b98  .orche-internal/current-patch/part-02
+          49e0e01a3493823a89d9142deb96fafa35e58e958d18802cf4531cbce2af68cf  .orche-internal/current-patch/part-03
+          259189838107fcadbb674408e1a7cb801946398e6009ec86c02e90bd29e373d8  .orche-internal/current-patch/part-04
+          736cb8e3a2b25815311b584c36053a768f65198c61a7cc84e6f3a963e40d9389  .orche-internal/current-patch/part-05
+          05fde63078e317947e00451985cafa2e0d3178a8d4d7b0caa815a98ab58ea4d6  .orche-internal/current-patch/part-06
+          76a6700c0a46062c20672ff83bceb83e3334d6197b9f83f3a9f9fa0ea74f3b21  .orche-internal/current-patch/part-07
+          ac7eb3b39cd053c6c992c52f8e879b35b6fcec349ad4eaf77987454b73e89ca7  .orche-internal/current-patch/part-08
+          EOF
+          sed -i 's/^          //' "$STAGE/chunks.sha256"
+          sha256sum -c "$STAGE/chunks.sha256"
+
+          cat \
+            .orche-internal/current-patch/part-00 \
+            .orche-internal/current-patch/part-01 \
+            .orche-internal/current-patch/part-02 \
+            .orche-internal/current-patch/part-03 \
+            .orche-internal/current-patch/part-04 \
+            .orche-internal/current-patch/part-05 \
+            .orche-internal/current-patch/part-06 \
+            .orche-internal/current-patch/part-07 \
+            .orche-internal/current-patch/part-08 \
+            > "$STAGE/round2.patch.gz.b64"
+          test "$(wc -c < "$STAGE/round2.patch.gz.b64")" -eq 43116
+          base64 --decode "$STAGE/round2.patch.gz.b64" > "$STAGE/round2.patch.gz"
+          echo '369b22568f8e007544e97b38bc657313d6cf0eb45b9807b1e8be729d03c7f5fd  /tmp/orche-round2-stage/round2.patch.gz' | sha256sum -c -
+          gzip -t "$STAGE/round2.patch.gz"
+          gzip -dc "$STAGE/round2.patch.gz" > "$STAGE/round2.patch"
+
+          git reset --hard "$BASE_PR_HEAD"
+          git clean -ffdx
+          git apply --index "$STAGE/round2.patch"
+
+          cat > /tmp/orche-expected-paths <<'EOF'
+          RELEASE_NOTES.md
+          baseline/orchestrarium-v1/README.md
+          baseline/orchestrarium-v1/baseline-pin.json
+          baseline/orchestrarium-v1/tooling/build_inventory.py
+          baseline/orchestrarium-v1/tooling/compare_capability_baseline.py
+          baseline/orchestrarium-v1/tooling/stage0_evidence.py
+          baseline/orchestrarium-v1/tooling/stage0_orchestrator.py
+          baseline/orchestrarium-v1/tooling/stage0_runtime.py
+          scripts/baseline/build_inventory.py
+          scripts/baseline/compare_capability_baseline.py
+          scripts/baseline/stage0_evidence.py
+          scripts/baseline/stage0_orchestrator.py
+          scripts/baseline/stage0_runtime.py
+          tests/test_orche_baseline_inventory.py
+          tests/test_orche_baseline_pin.py
+          tests/test_orche_capability_baseline.py
+          tests/test_orche_review_regressions.py
+          tests/test_orche_verifier_isolation.py
+          EOF
+          sed -i 's/^          //' /tmp/orche-expected-paths
+          sort -o /tmp/orche-expected-paths /tmp/orche-expected-paths
+          git diff --name-only "$BASE_PR_HEAD" | sort > /tmp/orche-actual-paths
+          diff -u /tmp/orche-expected-paths /tmp/orche-actual-paths
+          git diff --check
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'fix(stage0): bind review evidence to exact candidate state'
+          CONTENT_REF=$(git rev-parse HEAD)
+          echo "CONTENT_REF=$CONTENT_REF" | tee /tmp/orche-refs.txt
+
+          PY=$(readlink -f "$(command -v python3)")
+          GIT=$(readlink -f "$(command -v git)")
+          BASH=$(readlink -f "$(command -v bash)")
+          "$PY" -m pip install --disable-pip-version-check 'pytest>=8,<10'
+
+          rm -rf /tmp/orche-candidate-inventory
+          mkdir -m 700 /tmp/orche-candidate-inventory
+          "$PY" scripts/baseline/build_inventory.py \
+            --repo-root "$GITHUB_WORKSPACE" \
+            --repository applicate2628/Orchestrarium \
+            --ref "$CONTENT_REF" \
+            --git-executable "$GIT" \
+            --output-dir /tmp/orche-candidate-inventory \
+            --generator-path baseline/orchestrarium-v1/tooling/build_inventory.py \
+            --generator-blob-sha "$(git rev-parse "$CONTENT_REF:baseline/orchestrarium-v1/tooling/build_inventory.py")" \
+            --generator-materialization git-cat-file-reviewed-tree-blob \
+            --generator-source-path scripts/baseline/build_inventory.py
+
+          BASE_PR_HEAD="$BASE_PR_HEAD" BASELINE="$BASELINE" CONTENT_REF="$CONTENT_REF" ENVELOPE="$ENVELOPE" "$PY" - <<'PY'
+          from __future__ import annotations
+          import json
+          import os
+          import subprocess
+          from pathlib import Path
+
+          base_head = os.environ['BASE_PR_HEAD']
+          baseline = os.environ['BASELINE']
+          content_ref = os.environ['CONTENT_REF']
+          envelope = os.environ['ENVELOPE']
+
+          def git(*args: str) -> str:
+              return subprocess.check_output(['git', *args], text=True)
+
+          old = json.loads(git('show', f'{base_head}:{envelope}'))
+          old_entries = {entry['path']: entry for entry in old['entries']}
+          inventory = json.loads(Path('/tmp/orche-candidate-inventory/capability-inventory.json').read_text(encoding='utf-8'))
+          identities = {
+              entry['path']: {
+                  'contentSha256': entry['contentSha256'],
+                  'mode': entry['mode'],
+                  'objectType': entry['objectType'],
+              }
+              for entry in inventory['entries']
+          }
+
+          raw = git('diff', '--name-status', '--no-renames', baseline, content_ref)
+          changes: dict[str, str] = {}
+          mapping = {'A': 'added', 'M': 'modified', 'D': 'removed'}
+          for line in raw.splitlines():
+              status, path = line.split('\t', 1)
+              changes[path] = mapping[status]
+
+          if envelope not in changes:
+              raise SystemExit('disposition envelope is not part of the content diff')
+          actual_paths = set(changes)
+          if set(old_entries) != actual_paths:
+              raise SystemExit(
+                  'old disposition paths differ from actual content diff: '
+                  f'old_only={sorted(set(old_entries)-actual_paths)}, '
+                  f'actual_only={sorted(actual_paths-set(old_entries))}'
+              )
+
+          entries = []
+          for path in sorted(actual_paths - {envelope}):
+              metadata = old_entries[path]
+              change = changes[path]
+              if metadata['change'] != change:
+                  raise SystemExit(
+                      f'change category mismatch for {path}: '
+                      f'{metadata["change"]} != {change}'
+                  )
+              identity = None if change == 'removed' else identities.get(path)
+              if change != 'removed' and identity is None:
+                  raise SystemExit(f'missing candidate identity for {path}')
+              entries.append({
+                  'path': path,
+                  'change': change,
+                  'reason': metadata['reason'],
+                  'contractIds': metadata['contractIds'],
+                  'candidateIdentity': identity,
+              })
+
+          payload = {
+              'schemaVersion': 2,
+              'scope': 'ORCHE-IMPL-000',
+              'baselineRef': baseline,
+              'candidateRef': content_ref,
+              'entries': entries,
+          }
+          Path(envelope).write_text(
+              json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + '\n',
+              encoding='utf-8',
+          )
+          print(
+              f'wrote schema-2 disposition envelope for {content_ref} '
+              f'with {len(entries)} entries'
+          )
+          PY
+
+          git add "$ENVELOPE"
+          test "$(git diff --cached --name-only | tr -d '\n')" = "$ENVELOPE"
+          git diff --cached --check
+          git commit -m 'chore(stage0): bind reviewed dispositions to candidate bytes'
+          FINAL_REF=$(git rev-parse HEAD)
+          echo "FINAL_REF=$FINAL_REF" | tee -a /tmp/orche-refs.txt
+          test "$(git rev-parse HEAD^)" = "$CONTENT_REF"
+          test "$(git diff --name-only HEAD^ HEAD | tr -d '\n')" = "$ENVELOPE"
+
+          export PYTHONDONTWRITEBYTECODE=1
+          for test_file in \
+            tests/test_orche_baseline_pin.py \
+            tests/test_orche_pytest_baseline.py \
+            tests/test_orche_baseline_inventory.py \
+            tests/test_orche_target_effect_baseline.py \
+            tests/test_orche_command_baseline.py \
+            tests/test_orche_capability_baseline.py \
+            tests/test_orche_verifier_isolation.py \
+            tests/test_orche_review_regressions.py; do
+            "$PY" "$test_file"
+          done
+
+          mapfile -t PYFILES < <(git diff --name-only "$BASE_PR_HEAD"..HEAD -- '*.py')
+          "$PY" -m py_compile "${PYFILES[@]}"
+          find . -type d -name __pycache__ -prune -exec rm -rf {} +
+
+          "$PY" - <<'PY'
+          from pathlib import Path
+          import json
+          import re
+          import subprocess
+          import tempfile
+
+          root = Path('.')
+          names = (
+              'build_inventory.py',
+              'build_target_effect_baseline.py',
+              'compare_capability_baseline.py',
+              'compare_command_baseline.py',
+              'compare_pytest_baseline.py',
+              'stage0_runtime.py',
+              'stage0_evidence.py',
+              'stage0_orchestrator.py',
+              'verify_stage0.py',
+          )
+          for name in names:
+              mutable = root / 'scripts' / 'baseline' / name
+              frozen = root / 'baseline' / 'orchestrarium-v1' / 'tooling' / name
+              assert mutable.read_bytes() == frozen.read_bytes(), name
+
+          pin = json.loads(
+              (root / 'baseline/orchestrarium-v1/baseline-pin.json').read_text()
+          )
+          for record in pin['tooling'].values():
+              actual = subprocess.check_output(
+                  ['git', 'hash-object', record['path']], text=True
+              ).strip()
+              assert actual == record['gitBlobSha'], (
+                  record['path'], actual, record['gitBlobSha']
+              )
+
+          text = (
+              root / 'baseline/orchestrarium-v1/README.md'
+          ).read_text(encoding='utf-8')
+          block = re.search(r'```bash\n(.*?)\n```', text, re.S)
+          assert block is not None
+          with tempfile.NamedTemporaryFile('w', suffix='.sh', delete=False) as handle:
+              handle.write(block.group(1) + '\n')
+              path = handle.name
+          result = subprocess.run(
+              ['bash', '-n', path], capture_output=True, text=True
+          )
+          assert result.returncode == 0, result.stderr
+          PY
+
+          test ! -e .scratch
+          git status --porcelain=v1 --untracked-files=all | tee /tmp/pre-full-status
+          test ! -s /tmp/pre-full-status
+          git diff --check "$BASE_PR_HEAD"..HEAD
+
+          rm -rf /tmp/orche-baseline-worktree
+          git worktree add --detach /tmp/orche-baseline-worktree "$BASELINE"
+          test ! -e /tmp/orche-baseline-worktree/.scratch
+
+          set +e
+          "$PY" scripts/baseline/verify_stage0.py \
+            --baseline-root /tmp/orche-baseline-worktree \
+            --candidate-root "$GITHUB_WORKSPACE" \
+            --reviewed-ref "$FINAL_REF" \
+            --verifier-python "$PY" \
+            --verifier-git "$GIT" \
+            --verifier-bash "$BASH" \
+            --timeout-seconds 900 2>&1 | tee /tmp/orche-full-verifier.log
+          verifier_status=${PIPESTATUS[0]}
+          set -e
+          test "$verifier_status" -eq 0
+
+          git status --porcelain=v1 --untracked-files=all | tee /tmp/post-full-status
+          test ! -s /tmp/post-full-status
+          git diff --check "$BASE_PR_HEAD"..HEAD
+
+          git push --force origin HEAD:refs/heads/orche/internal-pr2-validated-20260830
+
+      - name: Upload self-review evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: orche-pr2-round2-validation-chunks
+          if-no-files-found: warn
+          path: |
+            /tmp/orche-refs.txt
+            /tmp/orche-full-verifier.log
+            /tmp/pre-full-status
+            /tmp/post-full-status
+            /tmp/orche-stage0-reviewed-*/**
