@@ -45,6 +45,8 @@ jobs:
           git apply --check /tmp/orche-r5.patch
           git apply /tmp/orche-r5.patch
           git diff --check
+          git add -A
+          git diff --cached --check
 
       - name: Run focused Stage 0 regression suites
         shell: bash
@@ -75,7 +77,7 @@ jobs:
           python3 scripts/sync-agents-mode-docs.py --root . --check
           python3 scripts/sync-universal-hooks.py --check
           bash src.codex/skills/lead/scripts/validate-skill-pack.sh
-          mapfile -t changed_python < <(git diff --name-only -- '*.py')
+          mapfile -t changed_python < <(git diff --cached --name-only -- '*.py')
           python3 -m py_compile "${changed_python[@]}"
           python3 - <<'PY'
           from pathlib import Path
@@ -110,15 +112,14 @@ jobs:
           PY
           find . -type d -name __pycache__ -prune -exec rm -rf {} +
           rm -rf .pytest_cache .scratch
-          git diff --check
+          git add -A
+          git diff --cached --check
 
-      - name: Stage, run publication gate, and publish
+      - name: Run publication gate and publish
         shell: bash
         working-directory: repo
         run: |
           set -euo pipefail
-          git add -A
-          git diff --cached --check
           test "$(git write-tree)" = 4492aa4679da15cd07d90a0675f146abfe5f97ea
           python3 scripts/check-work-items-state.py
           python3 scripts/check-publication-gate.py
