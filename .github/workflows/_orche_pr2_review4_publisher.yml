@@ -29,7 +29,10 @@ jobs:
           persist-credentials: true
 
       - name: Install test dependencies
-        run: python3 -m pip install --disable-pip-version-check pytest PyYAML
+        run: |
+          python3 -m venv /tmp/orche-review-venv
+          /tmp/orche-review-venv/bin/python -m pip install --disable-pip-version-check pytest PyYAML
+          echo "/tmp/orche-review-venv/bin" >> "$GITHUB_PATH"
 
       - name: Apply reviewed patch, verify, commit, and push
         shell: bash
