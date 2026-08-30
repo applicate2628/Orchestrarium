@@ -1,0 +1,78 @@
+diff --git a/baseline/orchestrarium-v1/README.md b/baseline/orchestrarium-v1/README.md
+index cc6ee7d1..58e5d966 100644
+--- a/baseline/orchestrarium-v1/README.md
++++ b/baseline/orchestrarium-v1/README.md
+@@ -54,7 +54,7 @@ The verifier performs the operational work rather than duplicating security-sens
+ - validates the complete consumed `baseline-pin.json` shape before orchestration, so malformed evidence exits operationally with code `2` rather than raising an uncaught key lookup;
+ - treats path, content digest, Git mode, and Git object type as capability identity, so executable-bit and symbolic-link changes cannot disappear behind unchanged file bytes;
+ - requires a schema-version-2 disposition envelope whose direct-parent candidate commit and exact content digest, Git mode, and Git object type match every approved added or modified path; the final reviewed commit may change only the envelope itself;
+-- compares Pytest exits, JUnit Extensible Markup Language diagnostics, retained skip reasons, and baseline test/support source digests;
++- disables Pytest's cache provider so a test lane cannot create or consume repository-local `.scratch/pytest-cache`, then compares exits, JUnit Extensible Markup Language diagnostics, retained skip reasons, and baseline test/support source digests;
+ - runs all repository-standard validators in both worktrees and requires validator-specific terminal success or failure markers even when both commands exit zero;
+ - rechecks both baseline and candidate worktrees after every untrusted repository-code stage, including each candidate-focused test suite;
+ - snapshots the complete trusted-tree membership and identity before each untrusted lane, forbids new entries, removals, replacements, symbolic links, hard links, or special files, and verifies the exact tree afterward;
+diff --git a/baseline/orchestrarium-v1/baseline-pin.json b/baseline/orchestrarium-v1/baseline-pin.json
+index 78b941e2..cfa63890 100644
+--- a/baseline/orchestrarium-v1/baseline-pin.json
++++ b/baseline/orchestrarium-v1/baseline-pin.json
+@@ -69,7 +69,7 @@
+     },
+     "stage0Orchestrator": {
+       "deterministic": true,
+-      "gitBlobSha": "0e1e2d14a54f3718d91355596214532d796d66a9",
++      "gitBlobSha": "da8d99d52ca692e61cd6bc2865b8c1aeaee24650",
+       "materialization": "git-cat-file-reviewed-tree-blob",
+       "path": "baseline/orchestrarium-v1/tooling/stage0_orchestrator.py",
+       "runtimeMutation": false,
+diff --git a/baseline/orchestrarium-v1/tooling/stage0_orchestrator.py b/baseline/orchestrarium-v1/tooling/stage0_orchestrator.py
+index 0e1e2d14..da8d99d5 100644
+--- a/baseline/orchestrarium-v1/tooling/stage0_orchestrator.py
++++ b/baseline/orchestrarium-v1/tooling/stage0_orchestrator.py
+@@ -243,6 +243,7 @@ def _run_verification(
+                 os.fspath(tools.python),
+                 "-m",
+                 "pytest",
++                "-p", "no:cacheprovider",
+                 f"--junitxml={baseline_xml}",
+             ],
+             cwd=baseline_root,
+@@ -267,6 +268,7 @@ def _run_verification(
+                 os.fspath(tools.python),
+                 "-m",
+                 "pytest",
++                "-p", "no:cacheprovider",
+                 f"--junitxml={candidate_xml}",
+             ],
+             cwd=candidate_root,
+diff --git a/scripts/baseline/stage0_orchestrator.py b/scripts/baseline/stage0_orchestrator.py
+index 0e1e2d14..da8d99d5 100644
+--- a/scripts/baseline/stage0_orchestrator.py
++++ b/scripts/baseline/stage0_orchestrator.py
+@@ -243,6 +243,7 @@ def _run_verification(
+                 os.fspath(tools.python),
+                 "-m",
+                 "pytest",
++                "-p", "no:cacheprovider",
+                 f"--junitxml={baseline_xml}",
+             ],
+             cwd=baseline_root,
+@@ -267,6 +268,7 @@ def _run_verification(
+                 os.fspath(tools.python),
+                 "-m",
+                 "pytest",
++                "-p", "no:cacheprovider",
+                 f"--junitxml={candidate_xml}",
+             ],
+             cwd=candidate_root,
+diff --git a/tests/test_orche_review_regressions.py b/tests/test_orche_review_regressions.py
+index 5c7c75b5..ec0978e2 100644
+--- a/tests/test_orche_review_regressions.py
++++ b/tests/test_orche_review_regressions.py
+@@ -162,6 +162,7 @@ class ReviewRegressionTests(unittest.TestCase):
+         self.assertIn("_assert_both_worktrees_clean(", focused)
+         self.assertIn("temporary_lane_root(", source)
+         self.assertNotIn('lane_root_base / f"focused-', source)
++        self.assertGreaterEqual(source.count('"-p", "no:cacheprovider"'), 2)
+ 
+     def test_comparators_distinguish_invalid_evidence_from_semantic_drift(self) -> None:
+         command = (ROOT / "scripts" / "baseline" / "compare_command_baseline.py").read_text()
