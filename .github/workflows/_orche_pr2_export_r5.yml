@@ -1,4 +1,4 @@
-name: Internal PR2 fix publisher r5
+name: Internal PR2 Pytest diagnostic r5
 
 on:
   push:
@@ -6,32 +6,24 @@ on:
       - orche/internal-pr2-export-20260830-r5
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  verify-and-publish:
+  diagnose:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
     steps:
-      - name: Checkout helper payload
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           ref: orche/internal-pr2-export-20260830-r5
           path: helper
           fetch-depth: 1
-
-      - name: Checkout pull-request branch
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           ref: orche/impl-000-baseline
           path: repo
           fetch-depth: 0
-          persist-credentials: true
-
-      - name: Install test dependencies
-        run: python3 -m pip install --disable-pip-version-check pytest PyYAML
-
-      - name: Verify payload and apply to exact reviewed head
+      - run: python3 -m pip install --disable-pip-version-check pytest==9.1.1 PyYAML
+      - name: Apply exact patch and diagnose authenticated worker
         shell: bash
         run: |
           set -euo pipefail
@@ -39,95 +31,62 @@ jobs:
           echo '141e3d72dbbd554d908e53d1dbc8e2caf69df8e3de2128301c9874828c86969d  /tmp/orche-r5.patch.gz' | sha256sum -c -
           gzip -dc /tmp/orche-r5.patch.gz > /tmp/orche-r5.patch
           cd repo
-          git checkout -B orche/impl-000-baseline origin/orche/impl-000-baseline
           test "$(git rev-parse HEAD)" = e348ed7760fbb34536d2421148b545f69b67d54a
-          test -z "$(git status --porcelain=v1)"
-          git apply --check /tmp/orche-r5.patch
           git apply /tmp/orche-r5.patch
-          git diff --check
-          git add -A
-          git diff --cached --check
-
-      - name: Run focused Stage 0 regression suites
-        shell: bash
-        working-directory: repo
-        run: |
-          set -euo pipefail
-          export PYTHONDONTWRITEBYTECODE=1
-          for test_file in \
-            tests/test_orche_baseline_pin.py \
-            tests/test_orche_pytest_baseline.py \
-            tests/test_orche_baseline_inventory.py \
-            tests/test_orche_target_effect_baseline.py \
-            tests/test_orche_command_baseline.py \
-            tests/test_orche_capability_baseline.py \
-            tests/test_orche_verifier_isolation.py \
-            tests/test_orche_review_regressions.py
-          do
-            python3 "$test_file"
-          done
-
-      - name: Run repository-standard validation and self-review checks
-        shell: bash
-        working-directory: repo
-        run: |
-          set -euo pipefail
-          export PYTHONDONTWRITEBYTECODE=1
-          python3 scripts/validate-agents-spine.py --spine shared/AGENTS.shared.md
-          python3 scripts/sync-agents-mode-docs.py --root . --check
-          python3 scripts/sync-universal-hooks.py --check
-          bash src.codex/skills/lead/scripts/validate-skill-pack.sh
-          mapfile -t changed_python < <(git diff --cached --name-only -- '*.py')
-          python3 -m py_compile "${changed_python[@]}"
           python3 - <<'PY'
           from pathlib import Path
-          import json
-          import re
-          import subprocess
-          import tempfile
+          import importlib.util
+          import os
+          import shutil
+          import sys
 
-          root = Path('.')
-          readme = (root / 'baseline/orchestrarium-v1/README.md').read_text(encoding='utf-8')
-          block = re.search(r'```bash\n(.*?)\n```', readme, re.S)
-          assert block is not None
-          with tempfile.NamedTemporaryFile('w', suffix='.sh', delete=False) as handle:
-              handle.write(block.group(1) + '\n')
-              bootstrap = handle.name
-          result = subprocess.run(['bash', '-n', bootstrap], capture_output=True, text=True)
-          assert result.returncode == 0, result.stderr
+          root = Path.cwd()
+          script = root / 'scripts/baseline/verify_stage0.py'
+          spec = importlib.util.spec_from_file_location('verify_stage0_diag', script)
+          assert spec and spec.loader
+          verifier = importlib.util.module_from_spec(spec)
+          sys.modules[spec.name] = verifier
+          spec.loader.exec_module(verifier)
 
-          pin = json.loads((root / 'baseline/orchestrarium-v1/baseline-pin.json').read_text(encoding='utf-8'))
-          for name, record in pin['tooling'].items():
-              frozen = root / record['path']
-              mutable = root / record['sourcePath']
-              assert frozen.read_bytes() == mutable.read_bytes(), name
-              actual = subprocess.run(
-                  ['git', 'hash-object', str(frozen)],
-                  check=True,
-                  capture_output=True,
-                  text=True,
-              ).stdout.strip()
-              assert actual == record['gitBlobSha'], (name, actual, record['gitBlobSha'])
-          print('README bootstrap, frozen parity, and pinned blobs: PASS')
+          diag = Path('/tmp/orche-pytest-diag')
+          shutil.rmtree(diag, ignore_errors=True)
+          repo = diag / 'repo'
+          tests = repo / 'tests'
+          tests.mkdir(parents=True)
+          (tests / 'test_failure.py').write_text(
+              "def test_failure():\n    assert False, 'diagnostic failure'\n",
+              encoding='utf-8',
+          )
+          trusted = diag / 'trusted'
+          trusted.mkdir()
+          tools = verifier.ExternalTools(
+              Path(sys.executable).resolve(),
+              Path(shutil.which('git') or 'git').resolve(),
+              Path(shutil.which('bash') or 'bash').resolve(),
+          )
+          env = verifier.build_repository_env(
+              tools=tools,
+              lane_root=diag / 'lane',
+              repo_root=repo,
+          )
+          log = trusted / 'logs/pytest.log'
+          accepted = trusted / 'evidence/pytest.xml'
+          try:
+              result = verifier.run_trusted_pytest_lane(
+                  repo_root=repo,
+                  pytest_args=('-p', 'no:cacheprovider', 'tests'),
+                  env=env,
+                  log_path=log,
+                  accepted_junit_path=accepted,
+                  worker_path=root / 'scripts/baseline/run_pytest_lane.py',
+                  timeout_seconds=30,
+                  tools=tools,
+                  trusted_root=trusted,
+              )
+              print('RESULT', result.exit_code)
+              print(accepted.read_text(encoding='utf-8'))
+          except BaseException:
+              print('=== AUTHENTICATED WORKER LOG ===')
+              print(log.read_text(encoding='utf-8', errors='replace') if log.exists() else '<missing>')
+              raise
           PY
-          find . -type d -name __pycache__ -prune -exec rm -rf {} +
-          rm -rf .pytest_cache .scratch
-          git add -A
-          git diff --cached --check
-
-      - name: Run publication gate and publish
-        shell: bash
-        working-directory: repo
-        run: |
-          set -euo pipefail
-          test "$(git write-tree)" = 4492aa4679da15cd07d90a0675f146abfe5f97ea
-          python3 scripts/check-work-items-state.py
-          python3 scripts/check-publication-gate.py
-          git config user.name applicate2628
-          git config user.email dima_den@inbox.ru
-          git commit -m 'fix(stage0): make reviewed evidence parent-owned'
-          git push origin HEAD:orche/impl-000-baseline
-          {
-            echo "PUBLISHED_SHA=$(git rev-parse HEAD)"
-            echo "PUBLISHED_TREE=$(git rev-parse HEAD^{tree})"
-          } >> "$GITHUB_STEP_SUMMARY"
