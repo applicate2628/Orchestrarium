@@ -1,0 +1,39 @@
+name: Internal PR2 review5 publisher
+
+on:
+  push:
+    branches:
+      - orche/internal-pr2-review5-20260831
+
+permissions:
+  contents: write
+
+jobs:
+  verify-and-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout helper payload
+        uses: actions/checkout@v4
+        with:
+          ref: orche/internal-pr2-review5-20260831
+          path: helper
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Checkout pull-request branch
+        uses: actions/checkout@v4
+        with:
+          ref: orche/impl-000-baseline
+          path: repo
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Reconstruct, verify, and publish fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat helper/.orche-payload/pr2-review5.part* | base64 --decode > /tmp/orche-pr2-review5.sh
+          chmod 0700 /tmp/orche-pr2-review5.sh
+          cd repo
+          /tmp/orche-pr2-review5.sh
