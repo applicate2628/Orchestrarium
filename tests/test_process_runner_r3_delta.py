@@ -38,7 +38,7 @@ def _protocol():
 
 def _request(module, owner, *, cwd=None, sink_binding=None):
     executable = Path(sys.executable).resolve()
-    argv = (sys.executable, str(CHILD), "identity")
+    argv = (str(executable), str(CHILD), "identity")
     policy = module.CapturePolicyV1(
         "r3-delta-v1", 1024 * 1024, 64 * 1024, 128 * 1024, 64 * 1024
     )
@@ -62,6 +62,24 @@ def _request(module, owner, *, cwd=None, sink_binding=None):
         ),
     }
     return module.ProcessRequestV1(**values)
+
+
+def test_request_uses_resolved_interpreter_for_argv_and_binding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    executable = Path(sys.executable).resolve()
+    alias = tmp_path / f"python-r3-alias{executable.suffix}"
+    try:
+        alias.symlink_to(executable)
+    except OSError as exc:
+        pytest.skip(f"interpreter symlink unavailable: {exc}")
+    assert alias.resolve() == executable
+    monkeypatch.setattr(sys, "executable", str(alias))
+    module = _runner()
+    request = _request(module, module.ProcessRunnerV1())
+    assert request.argv[0] == str(executable)
+    assert request.argv[0] != str(alias)
+    assert request.resolved_executable == executable
 
 
 def test_request_accepts_only_runner_minted_sealed_memory_sink() -> None:

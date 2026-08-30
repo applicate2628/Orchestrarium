@@ -6278,7 +6278,9 @@ def _incoming_link_result(
         (
             literal_path,
             re.compile(
-                rf"(?<![A-Za-z0-9_.\\/-]){re.escape(literal_path).replace('/', r'[\\/]')}(?![A-Za-z0-9_.\\/-])"
+                r"(?<![A-Za-z0-9_.\\/-]){}(?![A-Za-z0-9_.\\/-])".format(
+                    re.escape(literal_path).replace("/", r"[\\/]"),
+                )
             ),
         )
         for literal_path in literal_paths
