@@ -1006,6 +1006,33 @@ def test_relative_configured_capture_root_is_rejected(
         owner.secure_output_dir("codex")
 
 
+@pytest.mark.parametrize(("uid_offset", "mode"), ((1, 0o700), (0, 0o720)))
+def test_posix_configured_capture_root_requires_effective_user_control(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, uid_offset: int, mode: int
+) -> None:
+    root = (tmp_path / "captures").resolve()
+    effective_uid = 1000
+    original_lstat = Path.lstat
+
+    def controlled_lstat(path: Path):
+        metadata = original_lstat(path)
+        if Path(path) != root:
+            return metadata
+        return SimpleNamespace(
+            st_mode=stat.S_IFDIR | mode,
+            st_dev=metadata.st_dev,
+            st_ino=metadata.st_ino,
+            st_uid=effective_uid + uid_offset,
+        )
+
+    monkeypatch.setenv("CODEX_PROMPTS_DIR", str(root))
+    monkeypatch.setattr(owner.sys, "platform", "linux")
+    monkeypatch.setattr(owner.os, "geteuid", lambda: effective_uid, raising=False)
+    monkeypatch.setattr(Path, "lstat", controlled_lstat)
+    with pytest.raises(ValueError, match="configured capture root.*owner-controlled"):
+        owner.secure_output_dir("codex")
+
+
 def test_real_symlink_ancestor_is_rejected(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1054,6 +1081,40 @@ def test_partial_run_directory_hardening_failure_uses_owner_cleanup(
     monkeypatch.setattr(Path, "chmod", fail_run_chmod)
     with pytest.raises(OSError, match="hardening failed"):
         owner.RunCaptureLifecycle.create("codex", "partial")
+    assert list(root.iterdir()) == []
+
+
+def test_configured_capture_root_replacement_during_mkdtemp_is_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = (tmp_path / "captures").resolve()
+    root.mkdir()
+    monkeypatch.setenv("CODEX_PROMPTS_DIR", str(root))
+    monkeypatch.setattr(owner, "secure_output_dir", lambda _provider: root)
+    original_lstat = Path.lstat
+    original_mkdtemp = owner.tempfile.mkdtemp
+    replaced = False
+
+    def drifting_lstat(path: Path):
+        metadata = original_lstat(path)
+        if Path(path) != root or not replaced:
+            return metadata
+        return SimpleNamespace(
+            st_mode=metadata.st_mode,
+            st_dev=metadata.st_dev,
+            st_ino=metadata.st_ino + 1,
+        )
+
+    def replacing_mkdtemp(**kwargs):
+        nonlocal replaced
+        result = original_mkdtemp(**kwargs)
+        replaced = True
+        return result
+
+    monkeypatch.setattr(Path, "lstat", drifting_lstat)
+    monkeypatch.setattr(owner.tempfile, "mkdtemp", replacing_mkdtemp)
+    with pytest.raises(OSError, match="configured capture root identity changed"):
+        owner.RunCaptureLifecycle.create("codex", "root-race")
     assert list(root.iterdir()) == []
 
 
@@ -1602,6 +1663,42 @@ def test_provider_owner_has_no_direct_subprocess_launches() -> None:
         and node.func.attr in {"run", "Popen"}
     ]
     assert direct == []
+
+
+def test_external_prompt_snapshot_rejects_metadata_drift_during_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    prompt = tmp_path / "prompt.md"
+    prompt.write_bytes(b"stable prompt")
+    original_fdopen = owner.os.fdopen
+
+    class MutatingReadStream:
+        def __init__(self, descriptor: int) -> None:
+            self.stream = original_fdopen(descriptor, "rb")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return self.stream.__exit__(*args)
+
+        def fileno(self) -> int:
+            return self.stream.fileno()
+
+        def read(self, limit: int) -> bytes:
+            data = self.stream.read(limit)
+            metadata = prompt.stat()
+            os.utime(
+                prompt,
+                ns=(metadata.st_atime_ns, metadata.st_mtime_ns + 1_000_000_000),
+            )
+            return data
+
+    monkeypatch.setattr(
+        owner.os, "fdopen", lambda descriptor, _mode: MutatingReadStream(descriptor)
+    )
+    with pytest.raises(ValueError, match="E_EXTERNAL_PROMPT_INVALID"):
+        owner._external_prompt_file_snapshot(prompt)
 
 
 def test_materialization_accepts_limit_and_rejects_limit_plus_one(

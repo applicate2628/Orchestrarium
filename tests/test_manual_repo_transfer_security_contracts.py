@@ -570,6 +570,130 @@ class IoBoundaryTests(unittest.TestCase):
                     [], list(output.parent.glob(f".{output.name}.*.tmp"))
                 )
 
+    def test_output_producers_reject_temporary_name_replacement_before_publish(self) -> None:
+        module = load_transfer_module()
+        with tempfile.TemporaryDirectory(prefix="repo-transfer-temp-binding-") as temp:
+            root = Path(temp) / "repo"
+            root.mkdir()
+            inventory = {
+                "snapshot": {"digest": "0" * 64},
+                "repository": {
+                    "head": "0" * 40,
+                    "gitExecutable": {"path": "git", "sha256": "0" * 64},
+                },
+            }
+            selection = {"schemaVersion": module.SCHEMA_VERSION, "items": []}
+            real_publish = module.publish_output
+
+            for producer in ("bytes", "bundle"):
+                output = Path(temp) / f"{producer}.out"
+                binding = module.bind_output(output, root, force=False)
+
+                def replace_then_publish(*args):
+                    temporary = Path(args[1])
+                    replacement = temporary.with_suffix(".replacement")
+                    replacement.write_bytes(b"substituted temporary bytes")
+                    os.replace(replacement, temporary)
+                    return real_publish(*args)
+
+                with self.subTest(producer=producer), mock.patch.object(
+                    module, "publish_output", side_effect=replace_then_publish
+                ):
+                    with self.assertRaisesRegex(
+                        module.ContractError,
+                        r"^TRANSFER-OUTPUT-IDENTITY-DRIFT$",
+                    ):
+                        if producer == "bytes":
+                            module.publish_output_bytes(binding, b"trusted bytes")
+                        else:
+                            with (
+                                mock.patch.object(
+                                    module, "read_json", side_effect=(inventory, selection)
+                                ),
+                                mock.patch.object(module, "validate_inventory"),
+                                mock.patch.object(
+                                    module, "validate_selection", return_value=[]
+                                ),
+                                mock.patch.object(module, "require_current_inventory"),
+                                mock.patch.object(
+                                    module, "expected_material", return_value=({}, {})
+                                ),
+                                mock.patch.object(
+                                    module, "expected_deletions", return_value=[]
+                                ),
+                            ):
+                                module.bundle(
+                                    SimpleNamespace(root=root),
+                                    Path("inventory.json"),
+                                    Path("selection.json"),
+                                    output,
+                                )
+                self.assertFalse(output.exists())
+                self.assertEqual(
+                    [], list(output.parent.glob(f".{output.name}.*.tmp"))
+                )
+
+    def test_payload_read_stops_at_expected_size_plus_one_on_drift(self) -> None:
+        module = load_transfer_module()
+        payload = b"abc"
+
+        class OneShotPayload:
+            def __init__(self) -> None:
+                self.requests: list[int] = []
+
+            def read(self, size: int) -> bytes:
+                self.requests.append(size)
+                if len(self.requests) > 1:
+                    raise AssertionError("payload reader waited for EOF after drift")
+                return payload + b"x"
+
+        class RecordingArchive:
+            @contextlib.contextmanager
+            def open(self, _info, _mode):
+                yield io.BytesIO()
+
+        stream = OneShotPayload()
+        session = SimpleNamespace(
+            raw_stream=stream,
+            eof=len(payload),
+            require_stable=lambda: None,
+        )
+        with self.assertRaisesRegex(module.ContractError, r"^inventory drift$"):
+            module.write_file_member(
+                RecordingArchive(),
+                "payload.bin",
+                session,
+                {"size": len(payload), "sha256": sha256(payload)},
+            )
+        self.assertEqual([len(payload) + 1], stream.requests)
+
+    def test_source_hash_verification_uses_bound_payload_sessions(self) -> None:
+        module = load_transfer_module()
+        with tempfile.TemporaryDirectory(prefix="repo-transfer-source-binding-") as temp:
+            root = Path(temp)
+            good = b"bound source bytes"
+            (root / "good.bin").write_bytes(good)
+            (root / "mismatch.bin").write_bytes(b"wrong bytes")
+            manifest = {
+                "payload": [
+                    {"path": "good.bin", "size": len(good), "sha256": sha256(good)},
+                    {
+                        "path": "mismatch.bin",
+                        "size": len(b"wrong bytes"),
+                        "sha256": "0" * 64,
+                    },
+                    {"path": "missing.bin", "size": 1, "sha256": "0" * 64},
+                ],
+                "deletions": [],
+            }
+            with mock.patch.object(
+                module,
+                "sha256_file",
+                side_effect=AssertionError("source pathname hash must not reopen"),
+            ):
+                mismatches = module.verify_payload_source(manifest, root)
+            self.assertEqual(2, mismatches)
+
     def test_special_entry_modes_fail_before_hashing(self) -> None:
         module = load_transfer_module()
         empty_git_result = subprocess.CompletedProcess([], 0, stdout=b"", stderr=b"")

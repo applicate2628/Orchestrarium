@@ -18,6 +18,7 @@ import sys
 import tempfile
 import unicodedata
 import zipfile
+from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterable
 from urllib.parse import urlsplit, urlunsplit
@@ -683,6 +684,46 @@ def _new_output_temporary(binding: OutputBinding) -> tuple[int, Path]:
         raise ContractError(TRANSFER_OUTPUT_PUBLISH_FAILED) from error
 
 
+def _temporary_name_identity(metadata: os.stat_result) -> tuple[int, ...]:
+    return (
+        metadata.st_dev,
+        metadata.st_ino,
+        stat.S_IFMT(metadata.st_mode),
+        getattr(metadata, "st_file_attributes", 0),
+    )
+
+
+@contextmanager
+def _bound_output_temporary(binding: OutputBinding) -> Iterable[Any]:
+    descriptor, temporary = _new_output_temporary(binding)
+    stream: Any | None = None
+    try:
+        stream = os.fdopen(descriptor, "w+b")
+        descriptor = -1
+        yield stream
+        stream.flush()
+        os.fsync(stream.fileno())
+        temporary_identity = _temporary_name_identity(os.fstat(stream.fileno()))
+        stream.close()
+        stream = None
+        publish_output(binding, temporary, temporary_identity)
+    finally:
+        if stream is not None:
+            try:
+                stream.close()
+            except OSError:
+                pass
+        if descriptor >= 0:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
 def _fsync_output_parent(parent: Path) -> None:
     if os.name == "nt":
         return
@@ -693,8 +734,17 @@ def _fsync_output_parent(parent: Path) -> None:
         os.close(descriptor)
 
 
-def publish_output(binding: OutputBinding, temporary: Path) -> None:
+def publish_output(
+    binding: OutputBinding,
+    temporary: Path,
+    temporary_identity: tuple[int, ...] | None = None,
+) -> None:
     try:
+        if (
+            temporary_identity is not None
+            and _temporary_name_identity(temporary.lstat()) != temporary_identity
+        ):
+            raise ContractError(TRANSFER_OUTPUT_IDENTITY_DRIFT)
         if _require_ordinary_directory(binding.path.parent) != binding.parent_identity:
             raise ContractError(TRANSFER_OUTPUT_IDENTITY_DRIFT)
         if binding.destination_identity is None:
@@ -733,24 +783,8 @@ def publish_output(binding: OutputBinding, temporary: Path) -> None:
 
 
 def publish_output_bytes(binding: OutputBinding, payload: bytes) -> None:
-    descriptor, temporary = _new_output_temporary(binding)
-    try:
-        with os.fdopen(descriptor, "wb") as stream:
-            stream.write(payload)
-            stream.flush()
-            os.fsync(stream.fileno())
-        publish_output(binding, temporary)
-    except BaseException:
-        try:
-            os.close(descriptor)
-        except OSError:
-            pass
-        raise
-    finally:
-        try:
-            temporary.unlink(missing_ok=True)
-        except OSError:
-            pass
+    with _bound_output_temporary(binding) as stream:
+        stream.write(payload)
 
 
 def is_reparse_point(path: Path) -> bool:
@@ -1329,16 +1363,35 @@ def write_file_member(
     input_session: "BoundPayloadInputSession",
     expected: dict[str, Any],
 ) -> None:
+    with archive.open(deterministic_zip_info(name), "w") as output_stream:
+        consume_payload(input_session, expected, output_stream)
+
+
+def consume_payload(
+    input_session: "BoundPayloadInputSession",
+    expected: dict[str, Any],
+    output_stream: Any | None = None,
+) -> None:
     if input_session.raw_stream is None or input_session.eof != expected["size"]:
         raise ContractError("inventory drift")
     input_session.require_stable()
-    with archive.open(deterministic_zip_info(name), "w") as output_stream:
-        digest = hashlib.sha256()
-        size = 0
-        for chunk in iter(lambda: input_session.raw_stream.read(1024 * 1024), b""):
-            size += len(chunk)
-            digest.update(chunk)
+    digest = hashlib.sha256()
+    size = 0
+    remaining = expected["size"] + 1
+    while remaining:
+        try:
+            chunk = input_session.raw_stream.read(min(1024 * 1024, remaining))
+        except OSError as error:
+            raise ContractError("inventory drift") from error
+        if not chunk:
+            break
+        size += len(chunk)
+        if size > expected["size"]:
+            raise ContractError("inventory drift")
+        digest.update(chunk)
+        if output_stream is not None:
             output_stream.write(chunk)
+        remaining -= len(chunk)
     input_session.require_stable()
     if size != expected["size"] or digest.hexdigest() != expected["sha256"]:
         raise ContractError("inventory drift")
@@ -1358,11 +1411,8 @@ def bundle(repository: BoundRepository, inventory_path: Path, selection_path: Pa
     declared_sizes = [entry["size"] for entry in payload.values()] + [len(data) for data in metadata.values()] + [len(manifest_bytes)]
     if len(declared_sizes) > MAX_ARCHIVE_ENTRIES or any(size > MAX_ARCHIVE_ENTRY_BYTES for size in declared_sizes) or sum(declared_sizes) > MAX_ARCHIVE_UNCOMPRESSED_BYTES:
         raise ContractError("archive resource limit")
-    temporary: Path | None = None
-    try:
-        descriptor, temporary = _new_output_temporary(output_binding)
-        os.close(descriptor)
-        with zipfile.ZipFile(temporary, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
+    with _bound_output_temporary(output_binding) as temporary_stream:
+        with zipfile.ZipFile(temporary_stream, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
             for name, entry in sorted(payload.items()):
                 source = root.joinpath(*PurePosixPath(name).parts)
                 with BoundPayloadInputSession(source) as input_session:
@@ -1371,13 +1421,6 @@ def bundle(repository: BoundRepository, inventory_path: Path, selection_path: Pa
                 archive.writestr(deterministic_zip_info(name), data, compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
             archive.writestr(deterministic_zip_info(MANIFEST_PATH), manifest_bytes, compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
             enforce_archive_infos(archive.infolist())
-        with temporary.open("r+b") as stream:
-            stream.flush()
-            os.fsync(stream.fileno())
-        publish_output(output_binding, temporary)
-    finally:
-        if temporary and temporary.exists():
-            temporary.unlink()
 
 
 def validate_archive_name(name: str) -> str:
@@ -2434,7 +2477,13 @@ def verify_payload_source(manifest: dict[str, Any], root: Path) -> int:
     for entry in manifest["payload"]:
         relative = validate_archive_name(entry["path"])
         source = root.joinpath(*PurePosixPath(relative).parts)
-        if has_reparse_ancestor(root, relative) or not source.is_file() or source.stat().st_size != entry["size"] or sha256_file(source) != entry["sha256"]:
+        if has_reparse_ancestor(root, relative):
+            mismatches += 1
+            continue
+        try:
+            with BoundPayloadInputSession(source) as input_session:
+                consume_payload(input_session, entry)
+        except ContractError:
             mismatches += 1
     for entry in manifest.get("deletions", []):
         relative = validate_archive_name(entry["path"])

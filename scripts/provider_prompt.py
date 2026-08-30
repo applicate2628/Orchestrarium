@@ -2541,6 +2541,15 @@ def secure_output_dir(provider: str) -> Path:
     validate_no_reparse_components(output)
     if not output.is_dir():
         raise ValueError(f"capture root '{output}' is not a directory")
+    if configured and sys.platform != "win32":
+        metadata = output.lstat()
+        if (
+            metadata.st_uid != os.geteuid()
+            or stat.S_IMODE(metadata.st_mode) & (stat.S_IWGRP | stat.S_IWOTH)
+        ):
+            raise ValueError(
+                f"{env_key} configured capture root must be owner-controlled"
+            )
     return output
 
 
@@ -2596,10 +2605,25 @@ def _external_prompt_file_snapshot(path: Path) -> bytes:
     try:
         descriptor = os.open(candidate, flags)
         with os.fdopen(descriptor, "rb") as stream:
-            opened = os.fstat(stream.fileno())
-            if (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
+            pre_read = os.fstat(stream.fileno())
+            if (pre_read.st_dev, pre_read.st_ino) != (before.st_dev, before.st_ino):
                 raise ValueError("E_EXTERNAL_PROMPT_INVALID: prompt identity changed")
             data = stream.read(PROMPT_SNAPSHOT_MAX_BYTES + 1)
+            post_read = os.fstat(stream.fileno())
+            post_path = candidate.lstat()
+            stable_fields = (
+                "st_dev",
+                "st_ino",
+                "st_size",
+                "st_mtime_ns",
+                "st_ctime_ns",
+            )
+            if tuple(getattr(pre_read, name) for name in stable_fields) != tuple(
+                getattr(post_read, name) for name in stable_fields
+            ) or tuple(getattr(before, name) for name in stable_fields) != tuple(
+                getattr(post_path, name) for name in stable_fields
+            ):
+                raise ValueError("E_EXTERNAL_PROMPT_INVALID: prompt metadata changed")
     except OSError as exc:
         raise ValueError("E_EXTERNAL_PROMPT_INVALID: prompt read") from exc
     if len(data) > PROMPT_SNAPSHOT_MAX_BYTES:
@@ -2732,8 +2756,23 @@ class RunCaptureLifecycle:
     @classmethod
     def create(cls, provider: str, slug: str) -> "RunCaptureLifecycle":
         root = secure_output_dir(provider)
+        configured_root = provider != "kimi" and bool(
+            os.environ.get(
+                {"codex": "CODEX_PROMPTS_DIR", "claude": "CLAUDE_PROMPTS_DIR"}.get(
+                    provider, "PROVIDER_PROMPTS_DIR"
+                )
+            )
+        )
+        root_before = root.lstat() if configured_root else None
         run_dir = Path(tempfile.mkdtemp(prefix=f"{slug}-", dir=root))
         try:
+            if configured_root:
+                root_after = root.lstat()
+                if (root_after.st_dev, root_after.st_ino) != (
+                    root_before.st_dev,
+                    root_before.st_ino,
+                ):
+                    raise OSError("configured capture root identity changed")
             metadata = run_dir.lstat()
             if not stat.S_ISDIR(metadata.st_mode) or run_dir.parent != root:
                 raise OSError("private capture directory creation escaped the configured root")
