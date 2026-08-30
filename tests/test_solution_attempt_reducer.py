@@ -435,6 +435,34 @@ def test_capsule_rejects_unsafe_path_grammar(path: str) -> None:
 
 
 @pytest.mark.parametrize(
+    "path",
+    [
+        "scripts/question?.py",
+        "scripts/pipe|.py",
+        "scripts/less<.py",
+        "scripts/greater>.py",
+        "scripts/star*.py",
+        'scripts/quote".py',
+        "scripts/trailing．",
+        "scripts/COM¹.txt",
+        "scripts/LPT³.txt",
+    ],
+)
+def test_capsule_rejects_windows_hostile_and_superscript_device_segments(path: str) -> None:
+    owner = _owner()
+    capsule = _capsule()
+    capsule["objects"][0]["mutationSurfaces"] = [path]
+    assert owner.decode_capsule(json.dumps(capsule))["result"] == "SOL-E001-STATE-INVALID"
+
+
+def test_capsule_accepts_nfc_unicode_surface() -> None:
+    owner = _owner()
+    capsule = _capsule()
+    capsule["objects"][0]["mutationSurfaces"] = ["docs/café-雪.md"]
+    assert owner.decode_capsule(json.dumps(capsule))["result"] == "SOL-OK"
+
+
+@pytest.mark.parametrize(
     "paths",
     [
         ["scripts", "scripts/example.py"],
@@ -584,6 +612,79 @@ def test_multiple_reviews_one_attempt() -> None:
     state = _bind_revise(owner, state, operation="revise-0003", review="review-run-0002")
     assert state["rejectedAttempts"]["class-one"] == ["attempt-one"]
     assert state["reviewRunIdsByAttempt"]["attempt-one"] == ["review-run-0001", "review-run-0002"]
+
+
+def test_reassessment_requires_an_authored_nonempty_frontier_before_receipt_comparison() -> None:
+    owner = _owner()
+    state = _bootstrap(owner)
+
+    missing_object = _event(
+        state,
+        "reassessment",
+        {
+            "decisionObjectId": "object-missing",
+            "rejectedAttemptIds": [],
+            "decision": "retain-class",
+            "reviewRunId": "review-run-0001",
+        },
+        operation="reassess-missing-object",
+        fingerprint_char="2",
+    )
+    result = owner._reassessment(state, missing_object)
+    assert result["result"] == "SOL-E005-IDENTITY-UNAUTHORED"
+    assert result["state"] == state
+
+    absent_frontier = _event(
+        state,
+        "reassessment",
+        {
+            "decisionObjectId": "object-one",
+            "rejectedAttemptIds": [],
+            "decision": "retain-class",
+            "reviewRunId": "review-run-0002",
+        },
+        operation="reassess-absent-frontier",
+        fingerprint_char="3",
+    )
+    result = owner._reassessment(state, absent_frontier)
+    assert result["result"] == "SOL-E006-RECEIPT-STALE"
+    assert result["state"] == state
+
+    empty_frontier_state = copy.deepcopy(state)
+    empty_frontier_state["reassessmentFrontier"]["object-one"] = []
+    empty_frontier = _event(
+        empty_frontier_state,
+        "reassessment",
+        {
+            "decisionObjectId": "object-one",
+            "rejectedAttemptIds": [],
+            "decision": "retain-class",
+            "reviewRunId": "review-run-0003",
+        },
+        operation="reassess-empty-frontier",
+        fingerprint_char="4",
+    )
+    result = owner._reassessment(empty_frontier_state, empty_frontier)
+    assert result["result"] == "SOL-E006-RECEIPT-STALE"
+    assert result["state"] == empty_frontier_state
+
+    valid_state = _bind_revise(owner, state, operation="revise-0004", review="review-run-0004")
+    valid_frontier = _event(
+        valid_state,
+        "reassessment",
+        {
+            "decisionObjectId": "object-one",
+            "rejectedAttemptIds": ["attempt-one"],
+            "decision": "retain-class",
+            "reviewRunId": "review-run-0005",
+        },
+        operation="reassess-valid-frontier",
+        fingerprint_char="5",
+    )
+    result = owner._reassessment(valid_state, valid_frontier)
+    assert result["result"] == "SOL-OK"
+    assert result["state"]["head"] == "5" * 64
+    assert "object-one" not in result["state"]["reassessmentFrontier"]
 
 
 def test_immediate_rejection() -> None:

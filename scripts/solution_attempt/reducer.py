@@ -170,13 +170,14 @@ def _valid_surface(value: object) -> bool:
     if "\\" in value or ":" in value or value.startswith("/") or "//" in value:
         return False
     parts = value.split("/")
-    if any(part in {"", ".", ".."} or part.endswith((".", " ")) for part in parts):
-        return False
     for part in parts:
-        stem = part.split(".", 1)[0].upper()
+        normalized = unicodedata.normalize("NFKC", part)
+        if normalized in {"", ".", ".."} or normalized.endswith((".", " ")):
+            return False
+        stem = normalized.split(".", 1)[0].upper()
         if stem in _RESERVED_WINDOWS_NAMES:
             return False
-        if any(ord(character) < 32 for character in part):
+        if any(ord(character) < 32 or character in '<>:"|?*' for character in normalized):
             return False
     return True
 
@@ -600,7 +601,11 @@ def _reassessment(state: dict, event: dict) -> dict:
         return _unchanged(state, STATE_INVALID)
     if not isinstance(rejected_ids, list) or any(not _is_id(item) for item in rejected_ids):
         return _unchanged(state, STATE_INVALID)
-    frontier = state["reassessmentFrontier"].get(object_id, [])
+    if state["objects"].get(object_id) is None:
+        return _unchanged(state, IDENTITY_UNAUTHORED)
+    frontier = state["reassessmentFrontier"].get(object_id)
+    if not frontier:
+        return _unchanged(state, RECEIPT_STALE)
     if rejected_ids != frontier:
         return _unchanged(state, RECEIPT_STALE)
     changed = copy.deepcopy(state)

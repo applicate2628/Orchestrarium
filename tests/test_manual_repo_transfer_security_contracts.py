@@ -769,6 +769,11 @@ class IoBoundaryTests(unittest.TestCase):
             eof=len(payload),
             require_stable=lambda: None,
         )
+        session.consume_census = lambda expected_size, **kwargs: (
+            module.BoundPayloadInputSession.consume_census(
+                session, expected_size, **kwargs
+            )
+        )
         with self.assertRaisesRegex(module.ContractError, r"^inventory drift$"):
             module.write_file_member(
                 RecordingArchive(),

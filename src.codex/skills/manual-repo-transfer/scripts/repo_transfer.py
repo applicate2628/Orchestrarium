@@ -1199,7 +1199,9 @@ def walk_repository(root: Path) -> Iterable[tuple[str, Path, str]]:
             child = current_path / name
             relative = child.relative_to(root).as_posix()
             if name == ".git":
-                continue
+                if current_path == root:
+                    continue
+                raise ContractError(f"unsupported repository entry: {relative}")
             entry_type = classify(child, relative)
             if entry_type == "directory":
                 kept_directories.append(name)
@@ -1233,7 +1235,8 @@ def build_inventory(repository: BoundRepository) -> dict[str, Any]:
             target, kind = link_metadata(path)
             entry.update(metadataOnly=True, linkTarget=target, linkKind=kind)
         else:
-            entry.update(size=path.stat().st_size, sha256=sha256_file(path))
+            size, digest = inventory_regular_file(path)
+            entry.update(size=size, sha256=digest)
         if portable_path_issue(relative):
             entry.update(metadataOnly=True, hostile=True)
         entries.append(entry)
@@ -1528,29 +1531,11 @@ def consume_payload(
     expected: dict[str, Any],
     output_stream: Any | None = None,
 ) -> None:
-    if input_session.raw_stream is None or input_session.eof != expected["size"]:
-        raise ContractError("inventory drift")
-    input_session.require_stable()
-    digest = hashlib.sha256()
-    size = 0
-    remaining = expected["size"] + 1
-    while remaining:
-        try:
-            chunk = input_session.raw_stream.read(min(1024 * 1024, remaining))
-        except OSError as error:
-            raise ContractError("inventory drift") from error
-        if not chunk:
-            break
-        size += len(chunk)
-        if size > expected["size"]:
-            raise ContractError("inventory drift")
-        digest.update(chunk)
-        if output_stream is not None:
-            output_stream.write(chunk)
-        remaining -= len(chunk)
-    input_session.require_stable()
-    if size != expected["size"] or digest.hexdigest() != expected["sha256"]:
-        raise ContractError("inventory drift")
+    input_session.consume_census(
+        expected["size"],
+        expected_sha256=expected["sha256"],
+        output_stream=output_stream,
+    )
 
 
 def bundle(repository: BoundRepository, inventory_path: Path, selection_path: Path, output: Path, *, force: bool = False) -> None:
@@ -2363,6 +2348,46 @@ class BoundPayloadInputSession(_BoundOrdinaryFileCore):
     def __init__(self, input_path: Path) -> None:
         super().__init__(input_path, _PAYLOAD_FILE_OPTIONS)
 
+    def consume_census(
+        self,
+        expected_size: int,
+        *,
+        expected_sha256: str | None = None,
+        output_stream: Any | None = None,
+    ) -> tuple[int, str]:
+        if (
+            self.raw_stream is None
+            or type(expected_size) is not int
+            or expected_size < 0
+            or self.eof != expected_size
+        ):
+            raise ContractError("inventory drift")
+        self.require_stable()
+        digest = hashlib.sha256()
+        size = 0
+        remaining = expected_size + 1
+        while remaining:
+            try:
+                chunk = self.raw_stream.read(min(1024 * 1024, remaining))
+            except OSError as error:
+                raise ContractError("inventory drift") from error
+            if not chunk:
+                break
+            size += len(chunk)
+            if size > expected_size:
+                raise ContractError("inventory drift")
+            digest.update(chunk)
+            if output_stream is not None:
+                output_stream.write(chunk)
+            remaining -= len(chunk)
+        self.require_stable()
+        current_sha256 = digest.hexdigest()
+        if size != expected_size or (
+            expected_sha256 is not None and current_sha256 != expected_sha256
+        ):
+            raise ContractError("inventory drift")
+        return size, current_sha256
+
     def __enter__(self) -> "BoundPayloadInputSession":
         if self.raw_stream is None or self.closed:
             raise ContractError("inventory drift")
@@ -2370,6 +2395,11 @@ class BoundPayloadInputSession(_BoundOrdinaryFileCore):
 
     def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> None:
         self.close(validate=True)
+
+
+def inventory_regular_file(path: Path) -> tuple[int, str]:
+    with BoundPayloadInputSession(path) as input_session:
+        return input_session.consume_census(input_session.eof)
 
 
 def preflight_archive(stream: BoundArchiveStream) -> dict[str, int]:

@@ -571,6 +571,61 @@ class RepoTransferTests(unittest.TestCase):
         ):
             list(module.walk_repository(self.repo))
 
+    @unittest.skipUnless(
+        os.name != "nt" and hasattr(os, "mkfifo"),
+        "POSIX held-file census contract",
+    )
+    def test_inventory_census_is_nonblocking_for_fifo(self) -> None:
+        module = load_transfer_module()
+        fifo = self.repo / "blocked-census.fifo"
+        os.mkfifo(fifo)
+
+        with self.assertRaisesRegex(module.ContractError, r"^inventory drift$"):
+            module.inventory_regular_file(fifo)
+
+    @unittest.skipIf(os.name == "nt", "POSIX append drift contract")
+    def test_bound_inventory_census_rejects_append(self) -> None:
+        module = load_transfer_module()
+        source = self.repo / "append-drift.bin"
+        source.write_bytes(b"original")
+
+        session = module.BoundPayloadInputSession(source)
+        try:
+            with source.open("ab") as stream:
+                stream.write(b"-appended")
+            with self.assertRaisesRegex(module.ContractError, r"^inventory drift$"):
+                session.consume_census(session.eof)
+        finally:
+            session.close(validate=False)
+
+    @unittest.skipIf(os.name == "nt", "POSIX pathname replacement contract")
+    def test_bound_inventory_census_rejects_path_replacement(self) -> None:
+        module = load_transfer_module()
+        source = self.repo / "replacement-drift.bin"
+        replacement = self.repo / "replacement.bin"
+        source.write_bytes(b"original")
+        replacement.write_bytes(b"substitute")
+
+        session = module.BoundPayloadInputSession(source)
+        try:
+            os.replace(replacement, source)
+            with self.assertRaisesRegex(module.ContractError, r"^inventory drift$"):
+                session.consume_census(session.eof)
+        finally:
+            session.close(validate=False)
+
+    def test_nested_git_history_marker_blocks_inventory(self) -> None:
+        module = load_transfer_module()
+        nested_git = self.repo / "vendor" / ".git"
+        nested_git.mkdir(parents=True)
+        (nested_git / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+
+        with self.assertRaisesRegex(
+            module.ContractError,
+            r"^unsupported repository entry: vendor/\.git$",
+        ):
+            list(module.walk_repository(self.repo))
+
 
 class UnbornRepoTransferTests(unittest.TestCase):
     def setUp(self) -> None:
