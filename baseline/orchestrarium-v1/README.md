@@ -119,6 +119,13 @@ BOOTSTRAP_ROOT="$(
   env -i PATH="$VERIFIER_PATH" HOME=/ TMPDIR=/tmp PYTHONNOUSERSITE=1 PYTHONSAFEPATH=1 \
     "$VERIFIER_PYTHON" -I -c 'import tempfile; print(tempfile.mkdtemp(prefix="orche-stage0-bootstrap-"))'
 )"
+cleanup_bootstrap() {
+  env -i PATH="$VERIFIER_PATH" HOME=/ TMPDIR=/tmp PYTHONNOUSERSITE=1 PYTHONSAFEPATH=1 \
+    "$VERIFIER_PYTHON" -I -c \
+      'import shutil,sys; shutil.rmtree(sys.argv[1], ignore_errors=True)' "$BOOTSTRAP_ROOT"
+}
+trap cleanup_bootstrap EXIT
+
 : > "$BOOTSTRAP_ROOT/gitconfig"
 
 trusted_git() {
@@ -132,12 +139,6 @@ trusted_python() {
     PYTHONNOUSERSITE=1 PYTHONSAFEPATH=1 PYTHONDONTWRITEBYTECODE=1 PYTHONUTF8=1 \
     "$VERIFIER_PYTHON" -I "$@"
 }
-cleanup_bootstrap() {
-  env -i PATH="$VERIFIER_PATH" HOME=/ TMPDIR=/tmp PYTHONNOUSERSITE=1 PYTHONSAFEPATH=1 \
-    "$VERIFIER_PYTHON" -I -c \
-      'import shutil,sys; shutil.rmtree(sys.argv[1], ignore_errors=True)' "$BOOTSTRAP_ROOT"
-}
-trap cleanup_bootstrap EXIT
 
 PIN_PATH=baseline/orchestrarium-v1/baseline-pin.json
 RESOLVED_REVIEWED_REF="$(trusted_git -C "$CANDIDATE_ROOT" rev-parse --verify "$REVIEWED_REF^{commit}")"
