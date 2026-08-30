@@ -839,6 +839,732 @@ class SecurityContractTests(unittest.TestCase):
             "--force",
         )
 
+    def test_archive_integrity_requires_canonical_byte_boundaries_and_keeps_zip64(self) -> None:
+        inventory = self.inventory()
+        self.write_selection(self.selection(inventory))
+        self.assertEqual(0, self.bundle().returncode)
+        original = self.bundle_path.read_bytes()
+        accepted = run_cli("verify", "--bundle", self.bundle_path)
+        self.assertEqual(0, accepted.returncode, accepted.stderr)
+
+        eocd = original.rfind(b"PK\x05\x06")
+        self.assertGreaterEqual(eocd, 0)
+        directory_size = struct.unpack_from("<I", original, eocd + 12)[0]
+        directory_offset = struct.unpack_from("<I", original, eocd + 16)[0]
+        entries = struct.unpack_from("<H", original, eocd + 10)[0]
+
+        variants: dict[str, bytes] = {
+            "one-byte-prefix": b"X" + original,
+            "multi-byte-prefix": bytes(range(1, 32)) + original,
+            "self-extracting-prefix": b"MZ\x90\x00self-extracting-stub" + original,
+            "trailing-data": original + b"undeclared trailing bytes",
+        }
+
+        commented = self.root / "commented.zip"
+        commented.write_bytes(original)
+        with zipfile.ZipFile(commented, "a") as archive:
+            archive.comment = b"declared but noncanonical comment"
+        variants["zip-comment"] = commented.read_bytes()
+
+        gap = b"undeclared gap"
+        central_gap = bytearray(original[:directory_offset] + gap + original[directory_offset:])
+        shifted_eocd = eocd + len(gap)
+        struct.pack_into("<I", central_gap, shifted_eocd + 16, directory_offset + len(gap))
+        variants["gap-before-central-directory"] = bytes(central_gap)
+
+        with zipfile.ZipFile(self.bundle_path) as archive:
+            local_offsets = sorted(info.header_offset for info in archive.infolist())
+        self.assertGreaterEqual(len(local_offsets), 2)
+        local_gap_offset = local_offsets[1]
+        local_gap = bytearray(original[:local_gap_offset] + gap + original[local_gap_offset:])
+        local_gap_directory = directory_offset + len(gap)
+        local_gap_eocd = eocd + len(gap)
+        struct.pack_into("<I", local_gap, local_gap_eocd + 16, local_gap_directory)
+        cursor = local_gap_directory
+        for _ in range(entries):
+            self.assertEqual(b"PK\x01\x02", local_gap[cursor : cursor + 4])
+            name_size, extra_size, comment_size = struct.unpack_from("<HHH", local_gap, cursor + 28)
+            local_offset = struct.unpack_from("<I", local_gap, cursor + 42)[0]
+            if local_offset >= local_gap_offset:
+                struct.pack_into("<I", local_gap, cursor + 42, local_offset + len(gap))
+            cursor += 46 + name_size + extra_size + comment_size
+        variants["gap-between-local-members"] = bytes(local_gap)
+
+        prefix = b"MZ-shifted-offsets"
+        shifted = bytearray(prefix + original)
+        shifted_directory = directory_offset + len(prefix)
+        shifted_eocd = eocd + len(prefix)
+        struct.pack_into("<I", shifted, shifted_eocd + 16, shifted_directory)
+        cursor = shifted_directory
+        for _ in range(entries):
+            self.assertEqual(b"PK\x01\x02", shifted[cursor : cursor + 4])
+            name_size, extra_size, comment_size = struct.unpack_from("<HHH", shifted, cursor + 28)
+            local_offset = struct.unpack_from("<I", shifted, cursor + 42)[0]
+            struct.pack_into("<I", shifted, cursor + 42, local_offset + len(prefix))
+            cursor += 46 + name_size + extra_size + comment_size
+        self.assertEqual(shifted_directory + directory_size, cursor)
+        variants["shifted-central-and-local-offsets"] = bytes(shifted)
+
+        for name, raw in variants.items():
+            with self.subTest(name=name):
+                path = self.root / f"{name}.zip"
+                path.write_bytes(raw)
+                with zipfile.ZipFile(path) as archive:
+                    self.assertIsNone(archive.testzip(), "stdlib accepts the hostile framing")
+                result = run_cli("verify", "--bundle", path)
+                self.assert_contract_error(result, "TRANSFER-ARCHIVE-BOUNDARY-INVALID")
+
+        zip64_eocd = struct.pack(
+            "<4sQ2H2I4Q",
+            b"PK\x06\x06",
+            44,
+            45,
+            45,
+            0,
+            0,
+            entries,
+            entries,
+            directory_size,
+            directory_offset,
+        )
+        locator = struct.pack("<4sIQI", b"PK\x06\x07", 0, eocd, 1)
+        classic_eocd = bytearray(original[eocd:])
+        struct.pack_into("<HHHHII", classic_eocd, 4, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFFFFFF, 0xFFFFFFFF)
+        zip64 = self.root / "canonical-zip64.zip"
+        zip64.write_bytes(original[:eocd] + zip64_eocd + locator + classic_eocd)
+        result = run_cli("verify", "--bundle", zip64)
+        self.assertEqual(0, result.returncode, result.stderr)
+
+    def test_archive_session_passes_one_open_file_object_through_all_zip_reads(self) -> None:
+        inventory = self.inventory()
+        self.write_selection(self.selection(inventory))
+        self.assertEqual(0, self.bundle().returncode)
+        module = load_transfer_module()
+        observed: dict[str, object] = {}
+        real_preflight = module.preflight_archive
+        real_zipfile = module.zipfile.ZipFile
+
+        def recording_preflight(stream):
+            observed["preflight"] = stream
+            return real_preflight(stream)
+
+        def recording_zipfile(stream, *args, **kwargs):
+            observed["zipfile"] = stream
+            return real_zipfile(stream, *args, **kwargs)
+
+        with (
+            mock.patch.object(module, "preflight_archive", side_effect=recording_preflight),
+            mock.patch.object(module.zipfile, "ZipFile", side_effect=recording_zipfile) as zip_open,
+        ):
+            result = module.verify(self.bundle_path, None, None, None)
+        self.assertTrue(result["verified"])
+        self.assertEqual(1, zip_open.call_count)
+        self.assertIs(observed["preflight"], observed["zipfile"])
+        self.assertTrue(hasattr(observed["preflight"], "read"))
+        self.assertNotIsInstance(observed["preflight"], Path)
+
+    def test_archive_session_rejects_or_prevents_path_and_eof_drift(self) -> None:
+        inventory = self.inventory()
+        self.write_selection(self.selection(inventory))
+        self.assertEqual(0, self.bundle().returncode)
+        module = load_transfer_module()
+        original = self.bundle_path.read_bytes()
+
+        replacement = self.root / "replacement.zip"
+        replacement.write_bytes(original + b"undeclared trailing bytes")
+        session = module.open_archive(self.bundle_path)
+        if os.name == "nt":
+            with session:
+                with self.assertRaises(PermissionError):
+                    os.replace(replacement, self.bundle_path)
+        else:
+            with self.assertRaisesRegex(
+                module.ContractError, module.TRANSFER_ARCHIVE_IDENTITY_DRIFT
+            ):
+                with session:
+                    os.replace(replacement, self.bundle_path)
+
+        for operation in ("grow", "truncate"):
+            with self.subTest(operation=operation):
+                self.bundle_path.write_bytes(original)
+                session = module.open_archive(self.bundle_path)
+                if os.name == "nt":
+                    with session:
+                        with self.assertRaises(PermissionError):
+                            mode = "ab" if operation == "grow" else "r+b"
+                            with self.bundle_path.open(mode) as stream:
+                                if operation == "grow":
+                                    stream.write(b"x")
+                                else:
+                                    stream.truncate(len(original) - 1)
+                else:
+                    with self.assertRaisesRegex(
+                        module.ContractError, module.TRANSFER_ARCHIVE_IDENTITY_DRIFT
+                    ):
+                        with session:
+                            mode = "ab" if operation == "grow" else "r+b"
+                            with self.bundle_path.open(mode) as stream:
+                                if operation == "grow":
+                                    stream.write(b"x")
+                                else:
+                                    stream.truncate(len(original) - 1)
+
+    def test_archive_path_swap_between_preflight_and_zipfile_is_denied(self) -> None:
+        inventory = self.inventory()
+        self.write_selection(self.selection(inventory))
+        self.assertEqual(0, self.bundle().returncode)
+        module = load_transfer_module()
+        replacement = self.root / "between-phases.zip"
+        replacement.write_bytes(
+            self.bundle_path.read_bytes() + b"undeclared trailing bytes"
+        )
+        real_zipfile = module.zipfile.ZipFile
+        swap_denied = False
+
+        def swap_then_open(stream, *args, **kwargs):
+            nonlocal swap_denied
+            try:
+                os.replace(replacement, self.bundle_path)
+            except PermissionError:
+                swap_denied = True
+            return real_zipfile(stream, *args, **kwargs)
+
+        with mock.patch.object(module.zipfile, "ZipFile", side_effect=swap_then_open):
+            if os.name == "nt":
+                session = module.open_archive(self.bundle_path)
+                session.close()
+                self.assertTrue(swap_denied)
+            else:
+                with self.assertRaisesRegex(
+                    module.ContractError, module.TRANSFER_ARCHIVE_IDENTITY_DRIFT
+                ):
+                    module.open_archive(self.bundle_path)
+
+    def test_archive_structural_reader_classifies_lengths_before_any_read(self) -> None:
+        module = load_transfer_module()
+
+        class RecordingStream:
+            def __init__(self) -> None:
+                self.requests: list[int] = []
+
+            def seek(self, _offset: int) -> None:
+                pass
+
+            def read(self, size: int) -> bytes:
+                self.requests.append(size)
+                if size > 24:
+                    raise AssertionError("unbounded structural read")
+                return b"\0" * size
+
+        stream = RecordingStream()
+        session = module.BoundArchiveSession.__new__(module.BoundArchiveSession)
+        session.stream = stream
+        session.eof = 1 << 40
+        with self.assertRaisesRegex(
+            module.ContractError, module.TRANSFER_ARCHIVE_BOUNDARY_INVALID
+        ):
+            session.read_exact_at(
+                0,
+                1 << 40,
+                cap=24,
+                allowed_lengths={12, 16, 20, 24},
+            )
+        self.assertEqual([], stream.requests)
+        for size in (12, 16, 20, 24):
+            self.assertEqual(
+                b"\0" * size,
+                session.read_exact_at(
+                    0,
+                    size,
+                    cap=24,
+                    allowed_lengths={12, 16, 20, 24},
+                ),
+            )
+        before = list(stream.requests)
+        with self.assertRaisesRegex(
+            module.ContractError, module.TRANSFER_ARCHIVE_BOUNDARY_INVALID
+        ):
+            session.read_exact_at(
+                0,
+                13,
+                cap=24,
+                allowed_lengths={12, 16, 20, 24},
+            )
+        self.assertEqual(before, stream.requests)
+
+    def test_archive_boundary_parser_accepts_only_valid_fixed_descriptor_lengths(self) -> None:
+        module = load_transfer_module()
+        crc = 0x12345678
+        descriptors = {
+            12: struct.pack("<III", crc, 0, 0),
+            16: b"PK\x07\x08" + struct.pack("<III", crc, 0, 0),
+            20: struct.pack("<IQQ", crc, 0, 0),
+            24: b"PK\x07\x08" + struct.pack("<IQQ", crc, 0, 0),
+        }
+        for size, descriptor in descriptors.items():
+            with self.subTest(size=size):
+                local = bytearray(30)
+                local[:4] = b"PK\x03\x04"
+                struct.pack_into("<H", local, 6, 0x08)
+                central = bytearray(46)
+                central[:4] = b"PK\x01\x02"
+                stream_bytes = bytes(local) + descriptor + bytes(central)
+
+                class StructuralStream:
+                    def read_exact_at(
+                        self,
+                        offset: int,
+                        length: int,
+                        *,
+                        cap: int,
+                        allowed_lengths: set[int] | None = None,
+                    ) -> bytes:
+                        self_outer.assertLessEqual(length, cap)
+                        if allowed_lengths is not None:
+                            self_outer.assertIn(length, allowed_lengths)
+                        return stream_bytes[offset : offset + length]
+
+                self_outer = self
+                info = SimpleNamespace(
+                    header_offset=0,
+                    compress_size=0,
+                    file_size=0,
+                    flag_bits=0x08,
+                    compress_type=0,
+                    CRC=crc,
+                )
+                archive = SimpleNamespace(
+                    infolist=lambda: [info],
+                    start_dir=30 + size,
+                    fp=StructuralStream(),
+                )
+                module.validate_archive_boundaries(
+                    archive,
+                    {
+                        "directoryOffset": 30 + size,
+                        "directorySize": 46,
+                        "entries": 1,
+                    },
+                )
+
+    def test_archive_binding_rejects_file_links_without_following_them(self) -> None:
+        inventory = self.inventory()
+        self.write_selection(self.selection(inventory))
+        self.assertEqual(0, self.bundle().returncode)
+        link = self.root / "linked-transfer.zip"
+        try:
+            link.symlink_to(self.bundle_path)
+        except OSError as error:
+            self.skipTest(f"file symlink unavailable: {error}")
+        result = run_cli("verify", "--bundle", link)
+        self.assert_contract_error(result, "TRANSFER-ARCHIVE-BINDING-INVALID")
+
+    @unittest.skipUnless(os.name == "nt", "Windows archive namespace contract")
+    def test_windows_archive_path_rejects_ads_and_namespace_aliases_before_createfile(self) -> None:
+        module = load_transfer_module()
+        hostile = (
+            "archive.zip:stream",
+            "dir:stream\\archive.zip",
+            "archive.zip::$DATA",
+            "C:archive.zip",
+            "\\\\?\\C:\\archive.zip",
+            "\\\\.\\C:\\archive.zip",
+            "\\??\\C:\\archive.zip",
+            "\\\\??\\C:\\archive.zip",
+            "\\\\?\\UNC\\server\\share\\archive.zip",
+            "\\\\.\\pipe\\archive.zip",
+            "\\\\.\\PhysicalDrive0",
+            "\\Device\\HarddiskVolume1\\archive.zip",
+            "C:\\NUL",
+            "C:\\NUL.zip",
+            "C:\\CON\\archive.zip",
+            "C:\\COM1.foo",
+            "C:\\trailing.\\archive.zip",
+            "C:\\trailing \\archive.zip",
+            "\\\\server\\share:stream\\archive.zip",
+            "\\\\server\\\\archive.zip",
+            "name\0archive.zip",
+        )
+        with mock.patch.object(module, "_windows_open_archive_path") as create_file:
+            for path in hostile:
+                with self.subTest(path=path), self.assertRaisesRegex(
+                    module.ContractError, module.TRANSFER_ARCHIVE_BINDING_INVALID
+                ):
+                    module.BoundArchiveSession(path)
+        self.assertEqual(0, create_file.call_count)
+
+        ordinary_components = (
+            r"C:\GLOBALROOT\archive.zip",
+            r"C:\Device\archive.zip",
+            r"C:\pipe\archive.zip",
+            r"C:\PhysicalDrive0\archive.zip",
+            r"\\server\share\Device\pipe\GLOBALROOT\PhysicalDrive0\archive.zip",
+        )
+        for path in ordinary_components:
+            with self.subTest(ordinary=path):
+                self.assertEqual(path, str(module._canonical_windows_archive_path(path)))
+
+    @unittest.skipUnless(os.name == "nt", "Windows archive namespace contract")
+    def test_windows_archive_path_accepts_drive_relative_resolution_and_ordinary_unc(self) -> None:
+        module = load_transfer_module()
+        absolute = module._canonical_windows_archive_path(r"C:\ordinary\archive.zip")
+        relative = module._canonical_windows_archive_path(r"ordinary\archive.zip")
+        unc = module._canonical_windows_archive_path(r"\\server\share\archive.zip")
+        self.assertEqual(r"C:\ordinary\archive.zip", str(absolute))
+        self.assertRegex(str(relative), r"^[A-Za-z]:\\")
+        self.assertEqual(r"\\server\share\archive.zip", str(unc))
+        with self.assertRaisesRegex(
+            module.ContractError, module.TRANSFER_ARCHIVE_BINDING_INVALID
+        ):
+            module._canonical_windows_archive_path(
+                r"\\?\UNC\server\share\archive.zip"
+            )
+
+    @unittest.skipUnless(os.name == "nt", "Windows archive namespace contract")
+    def test_windows_archive_path_revalidates_canonical_result(self) -> None:
+        module = load_transfer_module()
+        for canonical in (
+            r"\\?\C:\archive.zip",
+            r"C:\archive.zip:stream",
+            r"C:\trailing.\archive.zip",
+            r"C:\NUL.zip",
+        ):
+            with self.subTest(canonical=canonical), mock.patch.object(
+                module.ntpath, "abspath", return_value=canonical
+            ), self.assertRaisesRegex(
+                module.ContractError, module.TRANSFER_ARCHIVE_BINDING_INVALID
+            ):
+                module._canonical_windows_archive_path(r"relative\archive.zip")
+
+    @unittest.skipUnless(os.name == "nt", "Windows ownership transfer contract")
+    def test_windows_open_osfhandle_failure_closes_leaf_handle_once(self) -> None:
+        inventory = self.inventory()
+        self.write_selection(self.selection(inventory))
+        self.assertEqual(0, self.bundle().returncode)
+        module = load_transfer_module()
+        import msvcrt
+
+        opened: list[tuple[int, bool]] = []
+        closed: list[int] = []
+        real_open = module._windows_open_archive_path
+        real_close = module._windows_close_handle
+
+        def recording_open(path, *, directory, owner=None):
+            handle = real_open(path, directory=directory, owner=owner)
+            opened.append((handle, directory))
+            return handle
+
+        def recording_close(handle):
+            closed.append(handle)
+            return real_close(handle)
+
+        with (
+            mock.patch.object(module, "_windows_open_archive_path", side_effect=recording_open),
+            mock.patch.object(module, "_windows_close_handle", side_effect=recording_close),
+            mock.patch.object(msvcrt, "open_osfhandle", side_effect=OSError("injected open_osfhandle failure")),
+            self.assertRaisesRegex(
+                module.ContractError, module.TRANSFER_ARCHIVE_BINDING_INVALID
+            ),
+        ):
+            module.BoundArchiveSession(self.bundle_path)
+        leaf = next(handle for handle, directory in opened if not directory)
+        self.assertEqual(1, closed.count(leaf))
+        probe = self.root / "open-osfhandle-failure.zip"
+        os.replace(self.bundle_path, probe)
+        os.replace(probe, self.bundle_path)
+
+    @unittest.skipUnless(os.name == "nt", "Windows ownership transfer contract")
+    def test_windows_fdopen_failure_closes_crt_fd_once(self) -> None:
+        inventory = self.inventory()
+        self.write_selection(self.selection(inventory))
+        self.assertEqual(0, self.bundle().returncode)
+        module = load_transfer_module()
+        import msvcrt
+
+        transferred_fd: list[int] = []
+        closed_fds: list[int] = []
+        leaf_handles: list[int] = []
+        closed_handles: list[int] = []
+        real_open_path = module._windows_open_archive_path
+        real_open_osfhandle = msvcrt.open_osfhandle
+        real_os_close = module.os.close
+        real_close_handle = module._windows_close_handle
+
+        def recording_path(path, *, directory, owner=None):
+            handle = real_open_path(path, directory=directory, owner=owner)
+            if not directory:
+                leaf_handles.append(handle)
+            return handle
+
+        def recording_transfer(handle, flags):
+            descriptor = real_open_osfhandle(handle, flags)
+            transferred_fd.append(descriptor)
+            return descriptor
+
+        def recording_fd_close(descriptor):
+            closed_fds.append(descriptor)
+            return real_os_close(descriptor)
+
+        def recording_handle_close(handle):
+            closed_handles.append(handle)
+            return real_close_handle(handle)
+
+        with (
+            mock.patch.object(module, "_windows_open_archive_path", side_effect=recording_path),
+            mock.patch.object(msvcrt, "open_osfhandle", side_effect=recording_transfer),
+            mock.patch.object(module.os, "fdopen", side_effect=OSError("injected fdopen failure")),
+            mock.patch.object(module.os, "close", side_effect=recording_fd_close),
+            mock.patch.object(module, "_windows_close_handle", side_effect=recording_handle_close),
+            self.assertRaisesRegex(
+                module.ContractError, module.TRANSFER_ARCHIVE_BINDING_INVALID
+            ),
+        ):
+            module.BoundArchiveSession(self.bundle_path)
+        self.assertEqual(1, len(transferred_fd))
+        observed_close_count = closed_fds.count(transferred_fd[0])
+        try:
+            os.fstat(transferred_fd[0])
+        except OSError:
+            descriptor_was_closed = True
+        else:
+            descriptor_was_closed = False
+            os.close(transferred_fd[0])
+        self.assertEqual(1, observed_close_count)
+        self.assertNotIn(leaf_handles[0], closed_handles)
+        self.assertTrue(descriptor_was_closed)
+        probe = self.root / "fdopen-failure.zip"
+        os.replace(self.bundle_path, probe)
+        os.replace(probe, self.bundle_path)
+
+    @unittest.skipUnless(os.name == "nt", "Windows ownership transfer contract")
+    def test_windows_post_fdopen_identity_failure_is_outer_session_owned(self) -> None:
+        inventory = self.inventory()
+        self.write_selection(self.selection(inventory))
+        self.assertEqual(0, self.bundle().returncode)
+        module = load_transfer_module()
+        import msvcrt
+
+        streams: list[object] = []
+        leaf_handles: list[int] = []
+        closed_handles: list[int] = []
+        real_fdopen = module.os.fdopen
+        real_open_path = module._windows_open_archive_path
+        real_identity = module._windows_handle_identity
+        real_close_handle = module._windows_close_handle
+
+        def recording_fdopen(*args, **kwargs):
+            stream = real_fdopen(*args, **kwargs)
+            streams.append(stream)
+            return stream
+
+        def recording_path(path, *, directory, owner=None):
+            handle = real_open_path(path, directory=directory, owner=owner)
+            if not directory:
+                leaf_handles.append(handle)
+            return handle
+
+        def fail_leaf_identity(handle, *, include_change_stamp):
+            if include_change_stamp:
+                raise OSError("injected identity failure")
+            return real_identity(handle, include_change_stamp=include_change_stamp)
+
+        def recording_handle_close(handle):
+            closed_handles.append(handle)
+            return real_close_handle(handle)
+
+        with (
+            mock.patch.object(module.os, "fdopen", side_effect=recording_fdopen),
+            mock.patch.object(module, "_windows_open_archive_path", side_effect=recording_path),
+            mock.patch.object(module, "_windows_handle_identity", side_effect=fail_leaf_identity),
+            mock.patch.object(module, "_windows_close_handle", side_effect=recording_handle_close),
+            self.assertRaisesRegex(
+                module.ContractError, module.TRANSFER_ARCHIVE_BINDING_INVALID
+            ),
+        ):
+            module.BoundArchiveSession(self.bundle_path)
+        self.assertEqual(1, len(streams))
+        self.assertTrue(streams[0].closed)
+        self.assertNotIn(leaf_handles[0], closed_handles)
+
+    @unittest.skipUnless(os.name == "nt", "Windows ownership transfer contract")
+    def test_constructor_handle_cleanup_failure_preserves_cause_and_close_id(self) -> None:
+        inventory = self.inventory()
+        self.write_selection(self.selection(inventory))
+        self.assertEqual(0, self.bundle().returncode)
+        module = load_transfer_module()
+        import msvcrt
+
+        leaf_handles: list[int] = []
+        real_open_path = module._windows_open_archive_path
+        real_close_handle = module._windows_close_handle
+
+        def recording_path(path, *, directory, owner=None):
+            handle = real_open_path(path, directory=directory, owner=owner)
+            if not directory:
+                leaf_handles.append(handle)
+            return handle
+
+        def fail_leaf_close(handle):
+            if leaf_handles and handle == leaf_handles[0]:
+                raise OSError("injected leaf cleanup failure")
+            return real_close_handle(handle)
+
+        caught: module.ContractError | None = None
+        with (
+            mock.patch.object(module, "_windows_open_archive_path", side_effect=recording_path),
+            mock.patch.object(msvcrt, "open_osfhandle", side_effect=OSError("injected construction failure")),
+            mock.patch.object(module, "_windows_close_handle", side_effect=fail_leaf_close),
+        ):
+            try:
+                module.BoundArchiveSession(self.bundle_path)
+            except module.ContractError as error:
+                caught = error
+        real_close_handle(leaf_handles[0])
+        self.assertIsNotNone(caught)
+        self.assertEqual(module.TRANSFER_ARCHIVE_CLOSE_FAILED, str(caught))
+        self.assertIsInstance(caught.__cause__, module.ContractError)
+        self.assertEqual(
+            module.TRANSFER_ARCHIVE_BINDING_INVALID, str(caught.__cause__)
+        )
+
+    def test_archive_acquisition_owner_clears_state_before_one_rollback_close(self) -> None:
+        module = load_transfer_module()
+        owner = module._ArchiveAcquisitionOwner()
+        owner.take_windows_handle(123)
+        observed: list[tuple[int, str]] = []
+        primary = module.ContractError(module.TRANSFER_ARCHIVE_BINDING_INVALID)
+
+        def close_once(handle):
+            observed.append((handle, owner.state))
+
+        with mock.patch.object(module, "_windows_close_handle", side_effect=close_once):
+            owner.rollback(primary)
+            owner.rollback(primary)
+        self.assertEqual([(123, "none")], observed)
+        self.assertEqual("none", owner.state)
+
+    def test_archive_acquisition_cleanup_failure_is_close_failed_without_retry(self) -> None:
+        module = load_transfer_module()
+        owner = module._ArchiveAcquisitionOwner()
+        owner.take_fd(456)
+        primary = module.ContractError(module.TRANSFER_ARCHIVE_BINDING_INVALID)
+        close_states: list[str] = []
+
+        def fail_close(_descriptor):
+            close_states.append(owner.state)
+            raise OSError("injected acquisition cleanup failure")
+
+        with mock.patch.object(module.os, "close", side_effect=fail_close):
+            with self.assertRaisesRegex(
+                module.ContractError, module.TRANSFER_ARCHIVE_CLOSE_FAILED
+            ) as caught:
+                owner.rollback(primary)
+            owner.rollback(primary)
+        self.assertIs(primary, caught.exception.__cause__)
+        self.assertEqual(["none"], close_states)
+        self.assertEqual("none", owner.state)
+
+    @unittest.skipUnless(os.name == "nt", "Windows acquisition owner contract")
+    def test_windows_path_validation_failure_uses_owner_close_once(self) -> None:
+        inventory = self.inventory()
+        self.write_selection(self.selection(inventory))
+        self.assertEqual(0, self.bundle().returncode)
+        module = load_transfer_module()
+        owner = module._ArchiveAcquisitionOwner()
+        closed: list[int] = []
+        real_close = module._windows_close_handle
+
+        def recording_close(handle):
+            closed.append(handle)
+            return real_close(handle)
+
+        with (
+            mock.patch.object(
+                module,
+                "_windows_handle_identity",
+                side_effect=OSError("injected validation failure"),
+            ),
+            mock.patch.object(
+                module, "_windows_close_handle", side_effect=recording_close
+            ),
+            self.assertRaisesRegex(
+                module.ContractError, module.TRANSFER_ARCHIVE_BINDING_INVALID
+            ),
+        ):
+            module._windows_open_archive_path(
+                self.bundle_path, directory=False, owner=owner
+            )
+        self.assertEqual(1, len(closed))
+        self.assertEqual("none", owner.state)
+
+    @unittest.skipIf(os.name == "nt", "POSIX ownership transfer contract")
+    def test_posix_fdopen_failure_closes_leaf_fd_once(self) -> None:
+        inventory = self.inventory()
+        self.write_selection(self.selection(inventory))
+        self.assertEqual(0, self.bundle().returncode)
+        module = load_transfer_module()
+        captured: list[int] = []
+
+        def reject_fdopen(descriptor, *args, **kwargs):
+            captured.append(descriptor)
+            raise OSError("injected fdopen failure")
+
+        with (
+            mock.patch.object(module.os, "fdopen", side_effect=reject_fdopen),
+            self.assertRaisesRegex(
+                module.ContractError, module.TRANSFER_ARCHIVE_BINDING_INVALID
+            ),
+        ):
+            module.BoundArchiveSession(self.bundle_path)
+        self.assertEqual(1, len(captured))
+        with self.assertRaises(OSError):
+            os.fstat(captured[0])
+
+    def test_archive_session_closes_resources_on_success_failure_and_baseexception(self) -> None:
+        inventory = self.inventory()
+        self.write_selection(self.selection(inventory))
+        self.assertEqual(0, self.bundle().returncode)
+        module = load_transfer_module()
+
+        for failure in (None, RuntimeError("failure"), KeyboardInterrupt()):
+            with self.subTest(failure=type(failure).__name__ if failure else "success"):
+                session = module.open_archive(self.bundle_path)
+                archive = session.archive
+                stream = session.stream
+                if failure is None:
+                    with session:
+                        pass
+                else:
+                    with self.assertRaises(type(failure)):
+                        with session:
+                            raise failure
+                self.assertTrue(stream.closed)
+                self.assertIsNone(archive.fp)
+                session.close()
+                self.assertTrue(stream.closed)
+                probe = self.root / "closed-resource-probe.zip"
+                os.replace(self.bundle_path, probe)
+                os.replace(probe, self.bundle_path)
+
+        if os.name == "nt":
+            session = module.BoundArchiveSession.__new__(module.BoundArchiveSession)
+            session.closed = False
+            session.members = set()
+            session.archive = None
+            session.raw_stream = SimpleNamespace(close=mock.Mock())
+            session.parent_handles = [123]
+            with (
+                mock.patch.object(
+                    module,
+                    "_windows_close_handle",
+                    side_effect=OSError("injected close failure"),
+                ),
+                self.assertRaisesRegex(
+                    module.ContractError, module.TRANSFER_ARCHIVE_CLOSE_FAILED
+                ),
+            ):
+                session.close(validate=False)
+
     def test_alias_cannot_hide_repository_contained_git(self) -> None:
         module = load_transfer_module()
         alias = self.root / "repo-alias"
@@ -2149,7 +2875,10 @@ class SecurityContractTests(unittest.TestCase):
         invalid = self.root / "not-a-zip.bin"
         invalid.write_bytes(b"not a zip")
         self.assert_contract_error(run_cli("verify", "--bundle", invalid), "invalid bundle")
-        self.assert_contract_error(run_cli("verify", "--bundle", self.root), "invalid bundle")
+        self.assert_contract_error(
+            run_cli("verify", "--bundle", self.root),
+            "TRANSFER-ARCHIVE-BINDING-INVALID",
+        )
         self.assert_contract_error(
             run_cli("inventory", "--repo", self.root / "missing", "--output", self.root / "out.json"),
             "TRANSFER-REPOSITORY-BOUNDARY-INVALID",

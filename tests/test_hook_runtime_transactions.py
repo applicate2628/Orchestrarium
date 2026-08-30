@@ -4,9 +4,11 @@ from __future__ import annotations
 import ast
 import hashlib
 import importlib.util
+import inspect
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -52,6 +54,94 @@ def _load_production_installer():
 production_installer = _load_production_installer()
 ABORT_ENV = hook_installer.TEST_TRANSACTION_ABORT_ENV
 ABORT_EXIT = hook_installer.TEST_TRANSACTION_ABORT_EXIT
+
+
+def test_rmtree_callback_kwargs_keep_modern_onexc_contract() -> None:
+    received: list[BaseException] = []
+
+    def modern_rmtree(path, *, onexc):
+        del path, onexc
+
+    def handler(_function, _path, error):
+        received.append(error)
+
+    kwargs = production_installer._rmtree_callback_kwargs(modern_rmtree, handler)
+    error = PermissionError("read-only entry")
+    kwargs["onexc"](lambda _path: None, "entry", error)
+
+    assert set(kwargs) == {"onexc"}
+    assert received == [error]
+
+
+def test_rmtree_callback_kwargs_adapt_legacy_exc_info() -> None:
+    received: list[BaseException] = []
+
+    def legacy_rmtree(path, *, onerror):
+        del path, onerror
+
+    def handler(_function, _path, error):
+        received.append(error)
+
+    kwargs = production_installer._rmtree_callback_kwargs(legacy_rmtree, handler)
+    error = PermissionError("read-only entry")
+    kwargs["onerror"](
+        lambda _path: None,
+        "entry",
+        (PermissionError, error, None),
+    )
+
+    assert set(kwargs) == {"onerror"}
+    assert received == [error]
+
+
+def test_remove_readonly_tree_selects_legacy_callback_before_invocation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    readonly = tree / "readonly.txt"
+    readonly.write_text("payload", encoding="utf-8")
+    readonly.chmod(stat.S_IREAD)
+    speculative_mutation = tmp_path / "speculative-mutation"
+    calls: list[set[str]] = []
+
+    class LegacyRmtree:
+        __signature__ = inspect.Signature(
+            (
+                inspect.Parameter("path", inspect.Parameter.POSITIONAL_OR_KEYWORD),
+                inspect.Parameter(
+                    "onerror",
+                    inspect.Parameter.KEYWORD_ONLY,
+                    default=None,
+                ),
+            )
+        )
+
+        def __call__(self, path, **kwargs):
+            calls.append(set(kwargs))
+            if "onexc" in kwargs:
+                speculative_mutation.write_text("called", encoding="utf-8")
+                raise TypeError("unexpected onexc")
+            assert Path(path) == tree
+            error = PermissionError("read-only entry")
+
+            def retry(value):
+                Path(value).unlink()
+
+            kwargs["onerror"](
+                retry,
+                str(readonly),
+                (PermissionError, error, None),
+            )
+
+    monkeypatch.setattr(production_installer.shutil, "rmtree", LegacyRmtree())
+
+    production_installer._remove_readonly_tree(tree)
+
+    assert calls == [{"onerror"}]
+    assert not speculative_mutation.exists()
+    assert not readonly.exists()
 
 
 @dataclass(frozen=True)

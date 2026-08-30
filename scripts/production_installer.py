@@ -1040,6 +1040,28 @@ def _is_reparse_metadata(metadata: os.stat_result) -> bool:
     )
 
 
+def _rmtree_callback_kwargs(
+    rmtree: Callable[..., Any],
+    onexc: Callable[[Callable[..., Any], str, BaseException], None],
+) -> dict[str, Callable[..., Any]]:
+    """Select the supported rmtree callback contract before tree mutation."""
+
+    parameters = inspect.signature(rmtree).parameters
+    if "onexc" in parameters:
+        return {"onexc": onexc}
+    if "onerror" in parameters:
+
+        def onerror(
+            function: Callable[..., Any],
+            value: str,
+            exc_info: tuple[type[BaseException], BaseException, Any],
+        ) -> None:
+            onexc(function, value, exc_info[1])
+
+        return {"onerror": onerror}
+    raise TypeError("shutil.rmtree exposes no supported error callback")
+
+
 def _remove_readonly_tree(path: Path) -> None:
     """Remove a transaction-owned tree after making only failed entries writable."""
 
@@ -1048,7 +1070,8 @@ def _remove_readonly_tree(path: Path) -> None:
         os.chmod(candidate, candidate.lstat().st_mode | stat.S_IWRITE)
         function(value)
 
-    shutil.rmtree(path, onexc=retry_writable)
+    callback = _rmtree_callback_kwargs(shutil.rmtree, retry_writable)
+    shutil.rmtree(path, **callback)
 
 
 class _CreateOnlyMutablePath:

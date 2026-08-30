@@ -23,6 +23,7 @@ from tests.fixtures.codex_hook_fixture import prepare_codex_home
 
 ROOT = Path(__file__).resolve().parents[1]
 MODULE = ROOT / "scripts/provider_prompt.py"
+FIXTURE_PYTHON_EXECUTABLE = str(Path(sys.executable).resolve(strict=True))
 ENTRYPOINTS = {
     "codex": ROOT / "src.claude/agents/scripts/invoke-codex-prompt.py",
     "claude": ROOT / "src.claude/agents/scripts/invoke-claude-prompt.py",
@@ -1163,7 +1164,7 @@ def test_provider_adapter_uses_settled_canonical_runner_result(tmp_path: Path) -
 
     result, stdout, stderr = owner.run_provider_process(
         owner.ProcessRunnerV1(),
-        [sys.executable, str(child)],
+        [FIXTURE_PYTHON_EXECUTABLE, str(child)],
         [],
         environment,
         ROOT,
@@ -1268,7 +1269,10 @@ def test_provider_adapter_settles_retained_pipe_descendant(tmp_path: Path) -> No
             assert subreaper.prctl(pr_set_child_subreaper, 1, 0, 0, 0) == 0
         result, _stdout, _stderr = owner.run_provider_process(
             owner.ProcessRunnerV1(),
-            [sys.executable, str(ROOT / "tests" / "fixtures" / "process_supervision" / "child_helper.py")],
+            [
+                FIXTURE_PYTHON_EXECUTABLE,
+                str(ROOT / "tests" / "fixtures" / "process_supervision" / "child_helper.py"),
+            ],
             [
                 "grandchild-retains-pipe",
                 "--marker",
@@ -1403,7 +1407,7 @@ def test_provider_adapter_injected_cancellation_emits_nonpass_terminal(
     original_runner = owner.run_provider_process
     base, _stdout, _stderr = original_runner(
         owner.ProcessRunnerV1(),
-        [sys.executable, str(child)],
+        [FIXTURE_PYTHON_EXECUTABLE, str(child)],
         [],
         environment,
         ROOT,
@@ -1541,7 +1545,7 @@ def test_provider_launch_injects_one_runner_through_trust_ledger_and_child(
     original_provider = owner.run_provider_process
     base, raw_stdout, raw_stderr = original_provider(
         runner,
-        [sys.executable, str(fake)],
+        [FIXTURE_PYTHON_EXECUTABLE, str(fake)],
         ["exec", "--skip-git-repo-check", "--json"],
         {"OPENAI_API_KEY": "fixture", "CODEX_HOME": str(home)},
         ROOT,
@@ -3161,6 +3165,96 @@ def test_invalid_credential_needle_fails_before_prompt_consumption(
     assert prompt_reads == []
 
 
+def test_codex_api_key_refuses_cached_auth_file_before_capture_or_provider_launch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An API-key launch must not retain an unscanned cached Codex session."""
+
+    access_canary = "fixture-codex-access-canary"
+    refresh_canary = "fixture-codex-refresh-canary"
+    codex_home = tmp_path / "codex-home"
+    codex_home.mkdir()
+    (codex_home / "auth.json").write_text(
+        json.dumps(
+            {
+                "tokens": {
+                    "access_token": access_canary,
+                    "refresh_token": refresh_canary,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    prompt = tmp_path / "prompt.md"
+    prompt.write_text("fixture", encoding="utf-8")
+    receipt = (tmp_path / "mixed-auth.receipt").resolve()
+    calls: list[str] = []
+    monkeypatch.setattr(
+        owner.os,
+        "environ",
+        {"OPENAI_API_KEY": "fixture-api-key", "CODEX_HOME": str(codex_home)},
+    )
+    monkeypatch.setattr(
+        owner,
+        "resolve_provider_command",
+        lambda _provider: calls.append("binary")
+        or _resolved_command(sys.executable, str(MODULE)),
+    )
+    original_auth = owner.resolve_provider_auth_configuration
+    monkeypatch.setattr(
+        owner,
+        "resolve_provider_auth_configuration",
+        lambda selected: calls.append("auth") or original_auth(selected),
+    )
+    monkeypatch.setattr(owner, "require_codex_hook_trust", lambda *_args: 0)
+    monkeypatch.setattr(
+        owner.RunCaptureLifecycle,
+        "create",
+        lambda *_args, **_kwargs: calls.append("capture"),
+    )
+    monkeypatch.setattr(
+        owner,
+        "run_provider_process",
+        lambda *_args, **_kwargs: calls.append("provider"),
+    )
+
+    code = owner.launch(
+        "codex",
+        [
+            "mixed-auth-fixture",
+            "--prompt-file",
+            str(prompt),
+            "--terminal-receipt",
+            str(receipt),
+        ],
+    )
+
+    captured = capsys.readouterr()
+    assert code != 0
+    assert "E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE" in captured.err
+    assert calls == ["binary", "auth"]
+    assert receipt.read_text(encoding="utf-8") == captured.out
+    for canary in (access_canary, refresh_canary):
+        assert canary not in receipt.read_text(encoding="utf-8")
+        assert canary not in captured.out
+        assert canary not in captured.err
+
+
+def test_codex_api_key_with_clean_home_keeps_exact_environment_coverage(
+    tmp_path: Path,
+) -> None:
+    codex_home = tmp_path / "clean-codex-home"
+    codex_home.mkdir()
+
+    resolved = owner.resolve_provider_auth_configuration(
+        "codex",
+        {"OPENAI_API_KEY": "fixture-api-key", "CODEX_HOME": str(codex_home)},
+    )
+
+    assert resolved.output_scan_disposition == "environment-exact"
+    assert resolved.needles == (b"fixture-api-key",)
+
+
 @pytest.mark.parametrize(
     ("provider", "environment", "expected_disposition", "expected_needles"),
     (
@@ -3361,7 +3455,7 @@ def test_finalizer_refuses_nonopaque_launch_without_exact_nonempty_credential_co
             environment[name] = os.environ[name]
     process_result, raw_stdout, raw_stderr = owner.run_provider_process(
         owner.ProcessRunnerV1(),
-        [sys.executable, str(child)],
+        [FIXTURE_PYTHON_EXECUTABLE, str(child)],
         [],
         environment,
         ROOT,

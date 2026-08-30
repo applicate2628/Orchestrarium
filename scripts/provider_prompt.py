@@ -2379,6 +2379,17 @@ def resolve_provider_auth_configuration(
     source = dict(os.environ if environment is None else environment)
     child = _child_environment_baseline(source)
     if provider == "codex":
+        if source.get("OPENAI_API_KEY"):
+            configured_home = source.get("CODEX_HOME")
+            codex_home: Path | None = None
+            if configured_home:
+                codex_home = Path(configured_home).expanduser()
+            elif environment is None:
+                codex_home = Path.home() / ".codex"
+            if codex_home is not None and os.path.lexists(codex_home / "auth.json"):
+                raise ValueError(
+                    "E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE: mixed Codex API-key and auth-file credentials"
+                )
         mode = "codex-api-key" if source.get("OPENAI_API_KEY") else "codex-auth-file"
     elif provider == "claude":
         selected = []
