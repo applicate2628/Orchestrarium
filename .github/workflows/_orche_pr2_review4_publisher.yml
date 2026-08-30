@@ -45,6 +45,7 @@ jobs:
           test -z "$(git status --porcelain=v1)"
           git apply --check --binary /tmp/pr2-review4.patch
           git apply --binary /tmp/pr2-review4.patch
+          git add -A
 
           expected_paths=$(cat <<'EOF'
           .tmp/test-noop
@@ -63,8 +64,8 @@ jobs:
           tests/test_orche_verifier_isolation.py
           EOF
           )
-          diff -u <(printf '%s\n' "$expected_paths" | sort) <(git diff --name-only | sort)
-          git diff --check
+          diff -u <(printf '%s\n' "$expected_paths" | sort) <(git diff --cached --name-only | sort)
+          git diff --cached --check
 
           export PYTHONDONTWRITEBYTECODE=1
           export PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
@@ -86,7 +87,7 @@ jobs:
           import json, re, subprocess, tempfile
 
           changed = subprocess.check_output(
-              ['git', 'diff', '--name-only', '--', '*.py'], text=True
+              ['git', 'diff', '--cached', '--name-only', '--', '*.py'], text=True
           ).splitlines()
           for name in changed:
               source = Path(name).read_text(encoding='utf-8')
