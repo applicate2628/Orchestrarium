@@ -739,6 +739,73 @@ def _diagnostic_from_log(path: Path, *, limit: int = 131072) -> str:
     return _xml_safe_text(prefix + raw.decode("utf-8", errors="replace"))
 
 
+
+_PYTEST_ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+_PYTEST_TERMINAL_COUNT = re.compile(
+    r"(?P<count>\d+)\s+"
+    r"(?P<outcome>passed|failed|skipped|errors?|xfailed|xpassed|deselected|warnings?)\b"
+)
+_PYTEST_TERMINAL_DURATION = re.compile(
+    r"\bin\s+\d+(?:\.\d+)?s\b"
+)
+
+
+def _pytest_zero_exit_skip_evidence(path: Path) -> tuple[int, str | None]:
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        raise VerificationError(f"cannot read Pytest file log {path}: {exc}") from exc
+    text = _PYTEST_ANSI_ESCAPE.sub(
+        "", raw.decode("utf-8", errors="replace")
+    ).replace("\r\n", "\n").replace("\r", "\n")
+    lines = [line.rstrip() for line in text.split("\n")]
+    counts: dict[str, int] | None = None
+    for line in reversed(lines):
+        if _PYTEST_TERMINAL_DURATION.search(line) is None:
+            continue
+        matches = list(_PYTEST_TERMINAL_COUNT.finditer(line))
+        if not matches:
+            continue
+        counts = {}
+        for match in matches:
+            outcome = match.group("outcome")
+            if outcome in {"error", "errors"}:
+                outcome = "errors"
+            elif outcome in {"warning", "warnings"}:
+                outcome = "warnings"
+            counts[outcome] = counts.get(outcome, 0) + int(match.group("count"))
+        break
+    if counts is None:
+        raise VerificationError(
+            f"zero-exit Pytest file log lacks a parseable terminal summary: {path}"
+        )
+    if counts.get("failed", 0) or counts.get("errors", 0):
+        raise VerificationError(
+            f"zero-exit Pytest file log reports failures or errors: {path}"
+        )
+    observed = sum(
+        counts.get(outcome, 0)
+        for outcome in ("passed", "skipped", "xfailed", "xpassed")
+    )
+    if observed == 0:
+        raise VerificationError(
+            f"zero-exit Pytest file log reports no executed or skipped tests: {path}"
+        )
+    skipped = counts.get("skipped", 0)
+    if skipped == 0:
+        return 0, None
+    diagnostics = [
+        line.strip()
+        for line in lines
+        if line.lstrip().startswith("SKIPPED ")
+    ]
+    if not diagnostics:
+        raise VerificationError(
+            f"Pytest reported {skipped} skipped test(s) without skip diagnostics: {path}"
+        )
+    return skipped, _xml_safe_text("\n".join(diagnostics))
+
+
 def _write_parent_junit(
     *,
     junit_dir: Path,
@@ -747,8 +814,17 @@ def _write_parent_junit(
 ) -> Path:
     if not re.fullmatch(r"[A-Za-z0-9_.-]+", suite_name):
         raise VerificationError(f"invalid Pytest suite name: {suite_name!r}")
+    zero_exit_skips = {
+        test_file.inventory_path: _pytest_zero_exit_skip_evidence(result.log_path)
+        for test_file, result in cases
+        if result.exit_code == 0
+    }
     failures = sum(result.exit_code == 1 for _test, result in cases)
     errors = sum(result.exit_code not in {0, 1} for _test, result in cases)
+    skipped = sum(
+        skipped_count > 0
+        for skipped_count, _diagnostic in zero_exit_skips.values()
+    )
     suite = ET.Element(
         "testsuite",
         {
@@ -756,7 +832,7 @@ def _write_parent_junit(
             "tests": str(len(cases)),
             "failures": str(failures),
             "errors": str(errors),
-            "skipped": "0",
+            "skipped": str(skipped),
         },
     )
     for test_file, result in cases:
@@ -789,6 +865,22 @@ def _write_parent_junit(
                 },
             )
             error.text = _diagnostic_from_log(result.log_path)
+        else:
+            skipped_count, skip_diagnostic = zero_exit_skips[
+                test_file.inventory_path
+            ]
+            if skipped_count:
+                skipped_case = ET.SubElement(
+                    testcase,
+                    "skipped",
+                    {
+                        "type": "pytest.file.skipped",
+                        "message": (
+                            f"{skipped_count} skipped test(s) in retained file"
+                        ),
+                    },
+                )
+                skipped_case.text = skip_diagnostic
     payload = ET.tostring(suite, encoding="utf-8", xml_declaration=True)
     junit_dir.mkdir(parents=True, exist_ok=True)
     path = junit_dir / f"{suite_name}-{uuid.uuid4().hex}.xml"
@@ -848,6 +940,8 @@ def run_parent_generated_pytest_lane(
                     "--noconftest",
                     "-p",
                     "no:cacheprovider",
+                    "-r",
+                    "s",
                     "--tb=long",
                     os.fspath(relative),
                 ],

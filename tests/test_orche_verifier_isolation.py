@@ -631,5 +631,81 @@ class VerifierIsolationTests(unittest.TestCase):
             self.assertNotIn("forged", result.junit_path.read_text(encoding="utf-8"))
 
 
+    def test_parent_generated_pytest_evidence_preserves_candidate_only_skip(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            baseline_repo = root / "baseline"
+            candidate_repo = root / "candidate"
+            test_source = (
+                "from pathlib import Path\n"
+                "import pytest\n"
+                "\n"
+                "def test_runtime_state():\n"
+                "    state = (Path(__file__).parents[1] / 'runtime-state.txt').read_text().strip()\n"
+                "    if state == 'skip':\n"
+                "        pytest.skip('candidate-only runtime skip')\n"
+                "    assert state == 'run'\n"
+            )
+            for repo, state in ((baseline_repo, "run"), (candidate_repo, "skip")):
+                (repo / "tests").mkdir(parents=True)
+                (repo / "tests" / "test_runtime_state.py").write_text(
+                    test_source, encoding="utf-8"
+                )
+                (repo / "runtime-state.txt").write_text(state, encoding="utf-8")
+
+            trusted = root / "trusted"
+            logs = trusted / "logs"
+            baseline_evidence = trusted / "baseline-evidence"
+            candidate_evidence = trusted / "candidate-evidence"
+            baseline_lanes = root / "baseline-lanes"
+            candidate_lanes = root / "candidate-lanes"
+            for directory in (
+                trusted,
+                logs,
+                baseline_evidence,
+                candidate_evidence,
+                baseline_lanes,
+                candidate_lanes,
+            ):
+                directory.mkdir(parents=True, exist_ok=True)
+
+            baseline_result = VERIFIER.run_parent_generated_pytest_lane(
+                repo_root=baseline_repo,
+                test_paths=("tests/test_runtime_state.py",),
+                lane_parent=baseline_lanes,
+                log_dir=logs / "baseline",
+                junit_dir=baseline_evidence,
+                suite_name="baseline",
+                timeout_seconds=30,
+                tools=TOOLS,
+                trusted_root=trusted,
+            )
+            candidate_result = VERIFIER.run_parent_generated_pytest_lane(
+                repo_root=candidate_repo,
+                test_paths=("tests/test_runtime_state.py",),
+                lane_parent=candidate_lanes,
+                log_dir=logs / "candidate",
+                junit_dir=candidate_evidence,
+                suite_name="candidate",
+                timeout_seconds=30,
+                tools=TOOLS,
+                trusted_root=trusted,
+            )
+
+            self.assertEqual(baseline_result.exit_code, 0)
+            self.assertEqual(candidate_result.exit_code, 0)
+            baseline_suite = ET.parse(baseline_result.junit_path).getroot()
+            candidate_suite = ET.parse(candidate_result.junit_path).getroot()
+            self.assertEqual(baseline_suite.get("skipped"), "0")
+            self.assertEqual(candidate_suite.get("skipped"), "1")
+            baseline_case = next(baseline_suite.iter("testcase"))
+            candidate_case = next(candidate_suite.iter("testcase"))
+            self.assertIsNone(baseline_case.find("skipped"))
+            candidate_skip = candidate_case.find("skipped")
+            self.assertIsNotNone(candidate_skip)
+            assert candidate_skip is not None
+            self.assertIn("candidate-only runtime skip", candidate_skip.text or "")
+
+
 if __name__ == "__main__":
     unittest.main()

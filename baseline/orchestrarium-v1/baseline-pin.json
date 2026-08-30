@@ -60,7 +60,7 @@
     },
     "stage0Evidence": {
       "deterministic": true,
-      "gitBlobSha": "d946f61160e073a128a50d3e3e40f34454a40a22",
+      "gitBlobSha": "6285a0776269869e7053067299287e297687f2f2",
       "materialization": "git-cat-file-reviewed-tree-blob",
       "path": "baseline/orchestrarium-v1/tooling/stage0_evidence.py",
       "runtimeMutation": false,
