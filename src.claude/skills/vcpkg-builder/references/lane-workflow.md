@@ -7,7 +7,7 @@ Select exactly one profile from the accepted plan:
 - Targeted base: the repository-defined single-port wrapper with one exact port/triplet selection.
 - Targeted release: the repository-defined release selection, only after its base prerequisite passes when the plan requires that ordering.
 - Aggregate: one explicitly named repository wrapper and arguments; never substitute an aggregate for targeted validation or vice versa.
-- Diagnostic/read-only: no build command; inspect only the admitted logs and MCP surfaces.
+- Diagnostic/read-only: no build command; inspect only the admitted logs and Model Context Protocol (MCP) surfaces.
 
 There is no universal full-lane-first rule. The user and accepted plan own whether the next gate is targeted or aggregate. A failure stops the admitted invocation sequence unless the plan already authorizes the next command under an explicit condition.
 
@@ -22,8 +22,8 @@ There is no universal full-lane-first rule. The user and accepted plan own wheth
 
 For every build record:
 
-- exact wrapper argv and invocation count;
-- UTC start/end and pre-run cutoff;
+- exact wrapper argument vector (argv) and invocation count;
+- Coordinated Universal Time (UTC) start/end and pre-run cutoff;
 - selected buildtrees, packages, install, cache, and scratch roots;
 - relevant source/artifact hashes and current MCP facts;
 - wrapper exit and the port/triplet terminal result;
@@ -64,3 +64,12 @@ Stop without retry, cleanup, or command substitution when:
 - a child remains running or process ownership cannot be established.
 
 Preserve the exact failing tree and logs. Return control to the root lead for diagnosis, planning, or review.
+
+## Terms and Abbreviations
+
+- `argv`: argument vector, the ordered command arguments passed to a wrapper.
+- `MCP`: Model Context Protocol, the tool and resource integration protocol.
+- `runtime oracle`: the admitted observation that proves the requested receiving-side behavior.
+- `triplet`: vcpkg target platform and toolchain configuration name.
+- `UTC`: Coordinated Universal Time.
+- `vcpkg`: the C/C++ package manager and its port ecosystem.

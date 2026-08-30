@@ -34,16 +34,16 @@ If any item is absent or contradictory, return `BLOCKED:CONTRACT` without runnin
 
 - Read the applicable `AGENTS.md`, current plan, and only the task-relevant operator docs before the first run.
 - Where the repository provides CodeGraph, use it before ad-hoc source navigation. After repository edits, wait for its watcher and repeat the exact query; do not rely on an in-scope stale result.
-- Use the vcpkg MCP for port resolution, patch order, and failure-log diagnosis when those facts drive the gate. MCP inspection does not replace the runtime oracle requested by the plan.
+- Use the vcpkg Model Context Protocol (MCP) integration for port resolution, patch order, and failure-log diagnosis when those facts drive the gate. MCP inspection does not replace the runtime oracle requested by the plan.
 - Probe executable, file, root, process, and environment availability in the current session. Do not infer availability from old reports.
 
 ## Preflight
 
 1. Verify the accepted plan and required artifact hashes.
-2. Confirm no conflicting vcpkg, compiler, CMake, Ninja, WSL, mount, or wrapper process is using an overlapping read/write/execute surface. Use a self-excluding process query.
+2. Confirm no conflicting vcpkg, compiler, CMake, Ninja, Windows Subsystem for Linux (WSL), mount, or wrapper process is using an overlapping read/write/execute surface. Use a self-excluding process query.
 3. Resolve roots through the repository's selector and environment contracts. Never substitute a hardcoded fallback.
 4. Discover whether the repository treats `VCPKG_ROOT` as internal or external and apply its documented protection checks. A wrapper-owned refresh is permitted only when the user explicitly authorized it; never launch a separate pull unless admitted.
-5. Record a UTC cutoff and preserve required pre-run evidence without deleting originals.
+5. Record a Coordinated Universal Time (UTC) cutoff and preserve required pre-run evidence without deleting originals.
 6. Verify sufficient free space and the exact protected-root access allowed by the plan. Do not enumerate or mutate a protected aggregate root merely to prove it exists.
 7. Run the named focused/static prechecks. A skip is `UNVERIFIED`, not `PASS`, unless the plan explicitly accepts that environment-gated skip.
 
@@ -67,7 +67,7 @@ If any item is absent or contradictory, return `BLOCKED:CONTRACT` without runnin
 
 - Write exactly the canonical runtime artifact assigned by the plan. Include provenance, command count, timestamps, roots, hashes, per-criterion evidence, process reaping, and `PASS|REVISE|BLOCKED`.
 - Keep raw transcripts and copied logs only in the scratch/evidence root admitted by the plan or repository contract; never place them in tracked reports or the external vcpkg tree.
-- Do not clean before independent QA accepts the evidence. After acceptance, clean only an exact inactive test-owned subtree when a separate plan or root-lead instruction authorizes it.
+- Do not clean before independent Quality Assurance (QA) accepts the evidence. After acceptance, clean only an exact inactive test-owned subtree when a separate plan or root-lead instruction authorizes it.
 - Never mass-clean a repository root, external vcpkg checkout, durable install/cache surface, aggregate root, routing sentinel, or unresolved candidate. Apply any machine-specific prohibited path rule from the repository contract rather than embedding it here.
 
 ## Gate
@@ -81,3 +81,12 @@ The next role is the independent reviewer named by the plan. Never authorize a r
 ## Reference
 
 Read `references/lane-workflow.md` for command-profile selection, root policy, runtime evidence, and stop rules.
+
+## Terms and Abbreviations
+
+- `MCP`: Model Context Protocol, the tool and resource integration protocol.
+- `QA`: Quality Assurance, independent verification of tests, regressions, and acceptance criteria.
+- `triplet`: vcpkg target platform and toolchain configuration name.
+- `UTC`: Coordinated Universal Time.
+- `vcpkg`: the C/C++ package manager and its port ecosystem.
+- `WSL`: Windows Subsystem for Linux.

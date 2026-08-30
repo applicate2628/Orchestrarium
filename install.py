@@ -6,6 +6,13 @@ import subprocess
 import sys
 from pathlib import Path
 
+if sys.version_info < (3, 11):
+    print(
+        "FAIL: Python 3.11 or newer is required to run the Orchestrarium installer.",
+        file=sys.stderr,
+    )
+    raise SystemExit(2)
+
 
 ROOT = Path(__file__).resolve().parent
 
