@@ -1,0 +1,25 @@
+name: Internal PR2 exact checkout export
+
+on:
+  push:
+    branches:
+      - orche/internal-pr2-export-20260831-r1
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Create exact Git bundle
+        run: git bundle create /tmp/orchestrarium.bundle HEAD
+      - uses: actions/upload-artifact@v4
+        with:
+          name: orchestrarium-e348-bundle
+          path: /tmp/orchestrarium.bundle
+          if-no-files-found: error
+          retention-days: 1
