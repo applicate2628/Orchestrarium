@@ -1,0 +1,39 @@
+diff --git a/tests/test_orche_verifier_isolation.py b/tests/test_orche_verifier_isolation.py
+index 8f6068a9..f1d76c67 100644
+--- a/tests/test_orche_verifier_isolation.py
++++ b/tests/test_orche_verifier_isolation.py
+@@ -25,10 +25,15 @@ REAL_BASH = Path(shutil.which("bash") or "bash").resolve()
+ TOOLS = VERIFIER.ExternalTools(Path(sys.executable).resolve(), REAL_GIT, REAL_BASH)
+ 
+ 
+-def run(*args: str, cwd: Path) -> subprocess.CompletedProcess[str]:
++def run(
++    *args: str,
++    cwd: Path,
++    env: dict[str, str] | None = None,
++) -> subprocess.CompletedProcess[str]:
+     return subprocess.run(
+         args,
+         cwd=cwd,
++        env=env,
+         text=True,
+         stdout=subprocess.PIPE,
+         stderr=subprocess.PIPE,
+@@ -126,8 +131,16 @@ class VerifierIsolationTests(unittest.TestCase):
+                 run(str(REAL_GIT), "replace", original, replacement, cwd=repo).returncode,
+                 0,
+             )
++            ordinary_env = os.environ.copy()
++            ordinary_env.pop("GIT_NO_REPLACE_OBJECTS", None)
+             self.assertEqual(
+-                run(str(REAL_GIT), "show", f"{original}:payload.txt", cwd=repo).stdout,
++                run(
++                    str(REAL_GIT),
++                    "show",
++                    f"{original}:payload.txt",
++                    cwd=repo,
++                    env=ordinary_env,
++                ).stdout,
+                 "replacement\n",
+             )
+             with tempfile.TemporaryDirectory() as env_temp:
