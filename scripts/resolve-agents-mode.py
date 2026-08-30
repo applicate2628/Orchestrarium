@@ -276,14 +276,18 @@ def _valid_relative_probe_path(value: Any) -> bool:
 
 
 def _luna_metadata_signature(metadata: Any) -> tuple[Any, ...]:
-    return (
+    identity = (
         metadata.st_mode,
         metadata.st_dev,
         metadata.st_ino,
+        getattr(metadata, "st_file_attributes", 0),
+    )
+    if stat.S_ISDIR(metadata.st_mode):
+        return identity
+    return identity + (
         metadata.st_size,
         getattr(metadata, "st_mtime_ns", None),
         getattr(metadata, "st_ctime_ns", None),
-        getattr(metadata, "st_file_attributes", 0),
     )
 
 

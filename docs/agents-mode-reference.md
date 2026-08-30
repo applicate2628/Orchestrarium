@@ -15,6 +15,10 @@ Luna is not an agents-mode key, external-provider enum value, preset value, or a
 
 Canonical operator-overlay output is now `.agents-mode.yaml` on every provider line. Legacy extensionless `.agents-mode` files remain compatibility input only and must not be recreated as the preferred output.
 
+## Codex review-loop route
+
+The installed Codex `review-loop` skill has a narrow local route that does not alter these global defaults: its surgical and deep verdicts are separate fresh external Codex processes with explicit `externalProvider: codex`, separate prompt files, attempt IDs, and receipts. They never use `auto`, Claude, `fast`, `priority`, or `ultrafast`; standard speed applies. Claude is available there only when the user explicitly selects an approved API-key route, never as fallback. Explicit Kimi may supply the deep/wide read-only nonauthorizing angle; a failed Kimi lane remains UNVERIFIED. The Claude-line review-loop contract and ordinary `agents-mode` provider profiles are unchanged.
+
 The exemplar shared default lives in `shared/agents-mode.defaults.yaml`. The machine-readable contract for allowed scalar keys, production provider sets, shared priority lanes, opinion counts, and init-time preset expansions lives in `shared/agents-mode.schema.json` plus `shared/agents-mode.presets.json`; `scripts/validate-agents-mode-contract.py` checks those sources against this reference, provider init tables, raised-count lists, and canonical-shape snippets. In the monorepo, installers seed project-local and global `agents-mode` files directly from the shared YAML exemplar and must normalize existing files on reinstall when schema or shipped defaults drift; any provider-only additions are applied at install time instead of living in separate `src.<provider>/agents-mode.defaults.yaml` files. Standalone pack roots still ship one canonical pack-root seed file so those repositories remain self-contained outside the monorepo.
 
 The shipped shared exemplar is intentionally a quiet baseline for first install:

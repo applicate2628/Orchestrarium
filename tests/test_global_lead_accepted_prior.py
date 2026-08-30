@@ -306,6 +306,10 @@ ADDITIONAL_STOCK_SKILL_PRIORS = {
         "0274b69a25e1b36f83da4c21f630d222d627c4ee",
         "fe989a918e11ff8066a0c8af54f73ba7bbf763719ea3b604ed147b79bec684d6",
     ),
+    "review-loop": (
+        "01a7eb0ded829233c21c588f1234f62b31308f35",
+        "3e7be1c11624a0fb7beae1c286dd09a3abb4c6b1fb70d138c9bfdc77c1d8df8a",
+    ),
     "visualization-engineer": (
         "65efb6b679d2808c5cdd3f95774a82942c65ad35",
         "56218f313e0ee24fc973eae8792bac0cddfd17ccab390fffb028d787cd0286f0",

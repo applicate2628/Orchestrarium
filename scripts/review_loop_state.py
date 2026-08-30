@@ -24,6 +24,7 @@ from typing import Any, Callable
 
 
 REVIEW_LOOP_ROUND_CAP = 3
+RETRY_EDGE_CAP = 3
 JSON_NESTING_LIMIT = 128
 LANES = ("surgical", "deep", "scout")
 VERDICT_LANES = ("surgical", "deep")
@@ -204,6 +205,94 @@ def _fields(value: dict[str, Any], allowed: set[str], label: str, errors: list[s
         errors.append(f"{label}.{key}: unexpected field")
 
 
+def _analyze_lane_retry_chain(
+    rnd: dict[str, Any], lane: str,
+) -> tuple[list[str], frozenset[str], int]:
+    """Validate one lane's immutable failure-successor chain without mutation.
+
+    V2 deliberately stores only failure edges and the lane's current attempt.
+    Those records therefore encode one immediate-successor chain: every
+    historical failure points once to its direct retry and the current attempt
+    is the unique tip.  Keeping this analysis pure lets validation and the
+    retry mutator share exactly the same interpretation.
+    """
+
+    errors: list[str] = []
+    block = rnd.get(lane)
+    current = block.get("attempt_id") if isinstance(block, dict) else None
+    if not _nonempty(current):
+        return ["retry chain current attempt is missing"], frozenset(), 0
+
+    failures = rnd.get("lane_failures")
+    if not isinstance(failures, list):
+        return ["retry chain failures are missing"], frozenset({current}), 0
+
+    outgoing: dict[str, str] = {}
+    incoming: dict[str, str] = {}
+    nodes: set[str] = {current}
+    for entry in failures:
+        if not isinstance(entry, dict) or entry.get("lane") != lane:
+            continue
+        source = entry.get("attempt_id")
+        if not _nonempty(source):
+            continue
+        nodes.add(source)
+        successor = entry.get("redispatched_as")
+        if successor is None:
+            if source != current or rnd.get("phase") == "complete":
+                errors.append(
+                    f"retry chain has historical unresolved failure at {source}"
+                )
+            continue
+        if not _nonempty(successor):
+            errors.append(f"retry chain has dangling successor at {source}")
+            continue
+        nodes.add(successor)
+        if source in outgoing:
+            errors.append(f"retry chain has branch at {source}")
+            continue
+        outgoing[source] = successor
+        if successor in incoming:
+            errors.append(f"retry chain has merge at {successor}")
+            continue
+        incoming[successor] = source
+
+    edge_count = len(outgoing)
+    if edge_count > RETRY_EDGE_CAP:
+        errors.append(f"retry chain edge cap {RETRY_EDGE_CAP} exceeded")
+
+    for start in nodes:
+        seen: set[str] = set()
+        cursor = start
+        while cursor in outgoing:
+            if cursor in seen:
+                errors.append(f"retry chain has cycle at {cursor}")
+                break
+            seen.add(cursor)
+            cursor = outgoing[cursor]
+
+    roots = [node for node in nodes if node not in incoming]
+    tips = [node for node in nodes if node not in outgoing]
+    if len(roots) != 1:
+        errors.append("retry chain must have one unique root")
+    if tips != [current]:
+        for tip in tips:
+            if tip != current:
+                errors.append(f"retry chain has dangling tip at {tip}")
+        errors.append("retry chain current attempt must be the unique tip")
+    if len(roots) == 1 and tips == [current]:
+        reached: set[str] = set()
+        cursor = roots[0]
+        while cursor not in reached:
+            reached.add(cursor)
+            if cursor not in outgoing:
+                break
+            cursor = outgoing[cursor]
+        if reached != nodes:
+            errors.append("retry chain is disconnected")
+    return errors, frozenset(nodes), edge_count
+
+
 def validate_v2(data: Any, cap: int = REVIEW_LOOP_ROUND_CAP, require_terminal: bool = False) -> list[str]:
     errors: list[str] = []
     if not isinstance(data, dict):
@@ -335,10 +424,20 @@ def validate_v2(data: Any, cap: int = REVIEW_LOOP_ROUND_CAP, require_terminal: b
                 if failure.get("artifact_revision") != revision:
                     errors.append(f"{failure_label}.artifact_revision: mismatch")
                 redispatched = failure.get("redispatched_as")
-                if redispatched is not None and redispatched != current_attempts.get(lane):
-                    errors.append(f"{failure_label}.redispatched_as: must name current lane attempt")
-                if phase == "complete" and not _nonempty(redispatched):
-                    errors.append(f"{failure_label}.redispatched_as: required before completion")
+                if redispatched is not None and not _nonempty(redispatched):
+                    errors.append(f"{failure_label}.redispatched_as: expected non-empty attempt id")
+        chain_owners: dict[str, str] = {}
+        for lane in LANES:
+            chain_errors, attempts, _edge_count = _analyze_lane_retry_chain(rnd, lane)
+            for error in chain_errors:
+                errors.append(f"{label}.{lane}: {error}")
+            for attempt in attempts:
+                owner = chain_owners.setdefault(attempt, lane)
+                if owner != lane:
+                    errors.append(
+                        f"{label}: retry chain cross-lane attempt id {attempt} "
+                        f"belongs to both {owner} and {lane}"
+                    )
         if not isinstance(rnd.get("evidence"), list):
             errors.append(f"{label}.evidence: expected list")
         if phase == "complete" and any(isinstance(rnd.get(lane), dict) and rnd[lane].get("state") != "complete" for lane in LANES):
@@ -1001,6 +1100,12 @@ def command_record_result(args: argparse.Namespace) -> dict[str, Any]:
         block = _attempt(rnd, args.lane, args.attempt_id)
         if block["state"] not in {"admitted", "running"} or not isinstance(result, dict):
             raise StateError("RLSTATE_INVALID", "result cannot be recorded for this attempt")
+        if any(
+            item.get("lane") == args.lane and item.get("attempt_id") == args.attempt_id
+            for item in rnd["lane_failures"]
+            if isinstance(item, dict)
+        ):
+            raise StateError("RLSTATE_INVALID", "failed attempt cannot later record a result")
         allowed = VERDICT_RESULT_FIELDS if args.lane in VERDICT_LANES else SCOUT_RESULT_FIELDS
         if set(result) - allowed:
             raise StateError("RLSTATE_INVALID", "result has unexpected fields")
@@ -1043,6 +1148,16 @@ def command_admit_retry(args: argparse.Namespace) -> dict[str, Any]:
             raise StateError("RLSTATE_ATTEMPT_MISMATCH", "failed attempt is absent or already retried")
         if rnd[args.lane]["attempt_id"] != args.failed_attempt_id:
             raise StateError("RLSTATE_ATTEMPT_MISMATCH", "failed attempt is no longer current")
+        chain_errors, _attempts, edge_count = _analyze_lane_retry_chain(
+            rnd, args.lane
+        )
+        if chain_errors:
+            raise StateError("RLSTATE_INVALID", chain_errors[0])
+        if edge_count >= RETRY_EDGE_CAP:
+            raise StateError(
+                "RLSTATE_RETRY_BUDGET_EXHAUSTED",
+                f"retry edge cap {RETRY_EDGE_CAP} reached",
+            )
         attempt_id = _attempt_id(args.lane, args.round)
         revision = rnd["artifact"]["revision"]
         rnd[args.lane] = {"attempt_id": attempt_id, "artifact_revision": revision, "state": "admitted"}
@@ -1148,6 +1263,18 @@ def command_migrate_v1(args: argparse.Namespace) -> dict[str, Any]:
         errors = validate_v1(data, args.cap)
         if errors:
             raise StateError("RLSTATE_INVALID", errors[0])
+        for number, old in enumerate(data["rounds"], 1):
+            for lane in LANES:
+                failures = [
+                    entry
+                    for entry in old["lane_failures"]
+                    if isinstance(entry, dict) and entry.get("lane") == lane
+                ]
+                if len(failures) > 1:
+                    raise StateError(
+                        "RLSTATE_AMBIGUOUS_V1_RETRY_HISTORY",
+                        f"round={number} lane={lane}",
+                    )
         revisions: dict[int, str] = {}
         for item in args.round_revision:
             try:

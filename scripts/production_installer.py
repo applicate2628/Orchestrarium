@@ -251,6 +251,9 @@ ADDITIONAL_STOCK_SKILL_ACCEPTED_PRIOR_TREE_SHA256 = {
     "second-opinion": frozenset(
         {"fe989a918e11ff8066a0c8af54f73ba7bbf763719ea3b604ed147b79bec684d6"}
     ),
+    "review-loop": frozenset(
+        {"3e7be1c11624a0fb7beae1c286dd09a3abb4c6b1fb70d138c9bfdc77c1d8df8a"}
+    ),
     "visualization-engineer": frozenset(
         {"56218f313e0ee24fc973eae8792bac0cddfd17ccab390fffb028d787cd0286f0"}
     ),
@@ -320,6 +323,18 @@ UI_CONTINUITY_CONTRACT_SOURCE = (
 UI_CONTINUITY_CONTRACT_TARGET = Path("contracts") / "ui-transition-continuity.md"
 CODEX_HOOK_INVENTORY = "codex-hook-inventory.json"
 CODEX_ROLE_MANIFEST = "orchestrarium-role-manifest.json"
+_STOCK_LUNA_PROFILE_POLICY_PRIOR = (
+    Path("shared") / "role-routing-policy.v1.json",
+    "dcab8e4da55b05475f9b9c507a3a9a97679a0c7b72006ff7ffca4b95ccd13451",
+)
+_STOCK_LUNA_PROFILE_MANIFEST_PRIOR = (
+    Path("shared") / "orchestrarium-role-manifest.json",
+    "842b1b29fae7d41a0b2422d8711652b3e6d7c720406c3ce3fc13259518f82115",
+)
+_STOCK_LUNA_PROFILE_PRIOR_PAIR = (
+    _STOCK_LUNA_PROFILE_POLICY_PRIOR,
+    _STOCK_LUNA_PROFILE_MANIFEST_PRIOR,
+)
 CODEX_LEGACY_LUNA_CONFIG_NAME = "luna_mechanical"
 CODEX_LEGACY_LUNA_ROLE = Path("agents") / "luna-mechanical.toml"
 CODEX_LEGACY_LUNA_SHA256 = (
@@ -428,19 +443,32 @@ def _parser(provider: str) -> argparse.ArgumentParser:
     kimi_maintenance = parser.add_mutually_exclusive_group()
     kimi_maintenance.add_argument("--enroll-kimi", action="store_true")
     kimi_maintenance.add_argument("--replace-kimi-enrollment", action="store_true")
+    parser.add_argument(
+        "--kimi-offline-policy",
+        choices=("disabled", "24h", "7d"),
+        default=None,
+    )
     return parser
 
 
-def _enroll_kimi_executable(home: Path, runtime_root: Path, *, dry_run: bool) -> None:
+def _enroll_kimi_executable(
+    home: Path, runtime_root: Path, *, dry_run: bool, offline_policy: str | None = None
+) -> None:
     """Delegate installer enrollment to the provider binding owner."""
 
-    enroll_kimi_executable(home, runtime_root, dry_run=dry_run)
+    enroll_kimi_executable(
+        home, runtime_root, dry_run=dry_run, offline_policy=offline_policy
+    )
 
 
-def _replace_kimi_enrollment(home: Path, runtime_root: Path, *, dry_run: bool) -> None:
+def _replace_kimi_enrollment(
+    home: Path, runtime_root: Path, *, dry_run: bool, offline_policy: str | None = None
+) -> None:
     """Delegate explicit replacement to the provider binding owner."""
 
-    replace_kimi_enrollment(home, runtime_root, dry_run=dry_run)
+    replace_kimi_enrollment(
+        home, runtime_root, dry_run=dry_run, offline_policy=offline_policy
+    )
 
 
 def _repo_root(script: Path) -> Path:
@@ -3308,6 +3336,7 @@ class _CanonicalSkillPlan:
     installed_digest: str | None
     accepted_prior: str | None
     ignore_runtime_cache: bool
+    accepted_prior_files: tuple[tuple[Path, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -3315,6 +3344,31 @@ class _CanonicalSkillsPlan:
     stage: _CanonicalLeadStage
     skills: tuple[_CanonicalSkillPlan, ...]
     transport_stage: _ClaudeTransportProjectionStage | None
+
+
+def _is_exact_stock_luna_profile_prior_pair(
+    installed: Path, stage: _CanonicalLeadStage
+) -> bool:
+    """Admit only the stock policy+manifest pair with every other leaf current."""
+
+    for relative, expected_digest in _STOCK_LUNA_PROFILE_PRIOR_PAIR:
+        installed_leaf = installed / relative
+        staged_leaf = stage.path / relative
+        if (
+            _file_sha256(installed_leaf) != expected_digest
+            or not staged_leaf.is_file()
+            or staged_leaf.is_symlink()
+        ):
+            return False
+    candidate = Path(tempfile.mkdtemp(prefix="orchestrarium-luna-profile-prior-"))
+    try:
+        shutil.rmtree(candidate)
+        _copy_tree(installed, candidate, ignore_runtime_cache=True)
+        for relative, _expected_digest in _STOCK_LUNA_PROFILE_PRIOR_PAIR:
+            (candidate / relative).write_bytes((stage.path / relative).read_bytes())
+        return _tree_sha256(candidate, ignore_runtime_cache=True) == stage.digest
+    finally:
+        shutil.rmtree(candidate, ignore_errors=True)
 
 
 def _preflight_canonical_skills(
@@ -3389,10 +3443,19 @@ def _preflight_canonical_skills(
             )
             if observed is None and exists:
                 raise ValueError(f"E_ACCEPTED_PRIOR_COLLISION: {skill.name}")
+            accepted_prior_files = (
+                _STOCK_LUNA_PROFILE_PRIOR_PAIR
+                if skill.name == "lead"
+                and observed is not None
+                and observed != current
+                and _is_exact_stock_luna_profile_prior_pair(installed, stage)
+                else ()
+            )
             if (
                 observed is not None
                 and observed != current
                 and observed not in accepted_priors
+                and not accepted_prior_files
             ):
                 raise ValueError(f"E_ACCEPTED_PRIOR_COLLISION: {skill.name}")
             planned.append(
@@ -3401,8 +3464,9 @@ def _preflight_canonical_skills(
                     materialized,
                     current,
                     observed,
-                    observed if observed in accepted_priors else None,
+                    observed if observed in accepted_priors and not accepted_prior_files else None,
                     ignore_runtime_cache,
+                    accepted_prior_files,
                 )
             )
 
@@ -3499,7 +3563,14 @@ def _apply_canonical_skills_plan(
         )
 
     lead = next(skill for skill in plan.skills if skill.name == "lead")
-    if lead.accepted_prior is not None:
+    if lead.accepted_prior_files:
+        for relative, expected_digest in lead.accepted_prior_files:
+            owner.migrate_exact_file(
+                target_relative / "lead" / relative,
+                expected_digest,
+                (lead.source / relative).read_bytes(),
+            )
+    elif lead.accepted_prior is not None:
         owner.replace_exact_tree(
             target_relative / "lead",
             lead.accepted_prior,
@@ -4645,6 +4716,11 @@ def _verify_files(
 
 def install(provider: str, argv: list[str] | None = None) -> int:
     args = _parser(provider).parse_args(argv)
+    if args.kimi_offline_policy is not None and not (
+        args.enroll_kimi or args.replace_kimi_enrollment
+    ):
+        print("FAIL: E_KIMI_OFFLINE_POLICY_ORPHAN", file=sys.stderr)
+        return 1
     script = Path(__file__)
     root = _repo_root(script)
     canonical_plan: _CanonicalSkillsPlan | None = None
@@ -4849,7 +4925,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                 else ()
             ),
             kimi_runtime_binding=(
-                target / "orchestrarium-runtime" / "kimi" / "executable-binding-v1.json"
+                target / "orchestrarium-runtime" / "kimi" / "executable-binding-v2.json"
                 if args.enroll_kimi or args.replace_kimi_enrollment
                 else None
             ),
@@ -5110,6 +5186,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                         home,
                         target / "orchestrarium-runtime" / "kimi",
                         dry_run=True,
+                        offline_policy=args.kimi_offline_policy,
                     )
                 elif args.enroll_kimi:
                     assert home is not None
@@ -5117,6 +5194,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                         home,
                         target / "orchestrarium-runtime" / "kimi",
                         dry_run=True,
+                        offline_policy=args.kimi_offline_policy,
                     )
                 print("RESULT: DRY-RUN complete (no files modified).")
                 return 0
@@ -5176,6 +5254,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                     home,
                     target / "orchestrarium-runtime" / "kimi",
                     dry_run=False,
+                    offline_policy=args.kimi_offline_policy,
                 )
             elif args.enroll_kimi:
                 assert home is not None
@@ -5183,6 +5262,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                     home,
                     target / "orchestrarium-runtime" / "kimi",
                     dry_run=False,
+                    offline_policy=args.kimi_offline_policy,
                 )
             print(
                 f"RESULT: OK - {provider.capitalize()} pack installed to {target}"

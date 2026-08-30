@@ -303,7 +303,7 @@ def test_resolver_exposes_componentwise_role_policy_without_changing_agents_mode
         ROOT / "shared" / "role-routing-policy.v1.json"
     )
     assert policy["schemaVersion"] == 1
-    assert policy["modelTierOrder"] == ["fast", "balanced", "frontier", "apex"]
+    assert policy["modelTierOrder"] == ["mechanical", "balanced", "frontier", "apex"]
     assert policy["effortOrder"] == ["low", "medium", "high", "xhigh", "max"]
     assert policy["taskClasses"]["critical-design"] == {
         "requiredModelTier": "frontier",
@@ -1027,7 +1027,7 @@ def test_global_codex_linked_agents_multihop_windows_reparse_chain_is_identity_b
         "stableId": None,
         "taskClass": "mechanical-read",
         "role": "mechanical-scout",
-        "requestedProfile": "fast-high",
+        "requestedProfile": "luna-high",
         "requestedModel": "gpt-5.6-luna",
         "requestedEffort": "high",
         "sandbox": "read-only",

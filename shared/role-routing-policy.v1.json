@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "modelTierOrder": [
-    "fast",
+    "mechanical",
     "balanced",
     "frontier",
     "apex"
@@ -18,18 +18,8 @@
     "security-reviewer"
   ],
   "profiles": {
-    "micro-low": {
-      "modelTier": "fast",
-      "effort": "low",
-      "codexModel": "gpt-5.6-luna"
-    },
-    "fast-medium": {
-      "modelTier": "fast",
-      "effort": "medium",
-      "codexModel": "gpt-5.6-luna"
-    },
-    "fast-high": {
-      "modelTier": "fast",
+    "luna-high": {
+      "modelTier": "mechanical",
       "effort": "high",
       "codexModel": "gpt-5.6-luna"
     },
@@ -61,17 +51,17 @@
   },
   "taskClasses": {
     "micro": {
-      "requiredModelTier": "fast",
+      "requiredModelTier": "mechanical",
       "requiredEffort": "low",
       "mutationClass": "read-only"
     },
     "mechanical-read": {
-      "requiredModelTier": "fast",
+      "requiredModelTier": "mechanical",
       "requiredEffort": "medium",
       "mutationClass": "read-only"
     },
     "mechanical": {
-      "requiredModelTier": "fast",
+      "requiredModelTier": "mechanical",
       "requiredEffort": "medium",
       "mutationClass": "bounded-write"
     },
@@ -113,12 +103,12 @@
   },
   "roles": {
     "mechanical-scout": {
-      "defaultProfile": "fast-high",
-      "allowedProfiles": ["fast-high"]
+      "defaultProfile": "luna-high",
+      "allowedProfiles": ["luna-high"]
     },
     "mechanical-worker": {
-      "defaultProfile": "fast-high",
-      "allowedProfiles": ["fast-high"]
+      "defaultProfile": "luna-high",
+      "allowedProfiles": ["luna-high"]
     },
     "default": {
       "defaultProfile": "frontier-xhigh",

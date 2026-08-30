@@ -129,6 +129,7 @@ class TestWorkflowEconomyContract(unittest.TestCase):
             "smallest deterministic guards+repo-required/adjacent checks+PAO",
             "Hardening=work beyond functional contract",
             "mandatory nonblocking backlog/no implementation",
+            "A security-shaped label/finding does not by itself expand scope",
             "trigger-rule/evidence/invocation table",
             "ambiguity=>reviewer; else nonveto; no implementer/$lead waiver",
             "new=hypothesis+material difference+falsifier+`$lead` acceptance",
@@ -317,6 +318,23 @@ class TestWorkflowEconomyContract(unittest.TestCase):
         self.assertIn("`resultText`", text)
         self.assertNotIn("Проза `.out` ревьюера", text)
         self.assertNotIn("обёртка `--ledger`", text)
+
+    def test_codex_review_loop_defaults_to_two_explicit_standard_codex_verdicts(self) -> None:
+        text = self._read("src.codex/skills/review-loop/SKILL.md")
+        for required in (
+            "two fresh explicit external Codex processes",
+            "`externalProvider: codex`",
+            "distinct attempt IDs, prompt files, and committed receipts",
+            "never `auto` or Claude",
+            "must not request `fast`, `priority`, or `ultrafast`",
+            "explicitly user-selected approved API-key route",
+            "never a fallback",
+            "Kimi may be explicitly selected for the deep/wide angle",
+            "failed Kimi lane remains UNVERIFIED",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, text)
+        self.assertNotIn("`auto` resolves to Claude on the Codex line", text)
 
     def test_provenance_templates_keep_kimi_explicit_and_grok_unavailable(self) -> None:
         for relative in PROVENANCE_PROVIDER_TEMPLATES:

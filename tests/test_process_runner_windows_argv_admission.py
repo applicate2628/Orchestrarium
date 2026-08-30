@@ -117,24 +117,77 @@ def _kimi_argv(module, executable: Path, prompt_file: Path) -> tuple[str, ...]:
     )
 
 
-@pytest.mark.skipif(os.name != "nt", reason="Windows Kimi release-pin contract")
-def test_kimi_executable_binding_accepts_current_and_rollback_release_identities(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.skipif(os.name != "nt", reason="Windows Kimi dynamic binding contract")
+def test_kimi_admission_accepts_exact_caller_binding_without_release_source_pin(
+    tmp_path: Path,
+) -> None:
+    module = _load_runner()
+    executable = _fake_kimi(module, tmp_path / "kimi.exe", b"future-unlisted-release")
+    request_owner = module.ProcessRunnerV1()
+    request = _request(
+        module,
+        request_owner,
+        _kimi_argv(module, executable, tmp_path / "prompt.md"),
+        module.KimiWindowsProfileV1.profile_id,
+        cwd=tmp_path,
+    )
+    try:
+        lifecycle, admission, launch_owner = _admit(module, request_owner, request)
+        try:
+            assert admission.executable_binding is not None
+            assert admission.executable_binding.path == request.expected_executable_binding.path
+            assert admission.executable_binding.size == request.expected_executable_binding.size
+            assert admission.executable_binding.sha256 == request.expected_executable_binding.sha256
+            request_owner.windows_argv_admission_owner.consume(
+                lifecycle, request, admission, launch_owner
+            )
+        finally:
+            _release(request_owner, lifecycle)
+    finally:
+        request_owner.close()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows Kimi metadata probe contract")
+@pytest.mark.parametrize("argument", ("--version", "--help"))
+def test_kimi_metadata_probe_profile_allows_only_exact_bound_read_only_argv(
+    tmp_path: Path, argument: str
+) -> None:
+    module = _load_runner()
+    executable = _fake_kimi(module, tmp_path / "kimi.exe", b"future-unlisted-release")
+    binding = module.ExecutableBindingV1(
+        str(executable.resolve()),
+        executable.stat().st_size,
+        __import__("hashlib").sha256(executable.read_bytes()).hexdigest(),
+    )
+    owner = module.ProcessRunnerV1()
+    request = _request(
+        module,
+        owner,
+        (str(executable), argument),
+        module.KimiWindowsProfileV1.probe_profile_id,
+        cwd=tmp_path,
+        expected_executable_binding=binding,
+    )
+    try:
+        lifecycle, admission, launch_owner = _admit(module, owner, request)
+        try:
+            assert admission.probe_kind == "kimi-metadata-probe-v2"
+            owner.windows_argv_admission_owner.consume(
+                lifecycle, request, admission, launch_owner
+            )
+        finally:
+            _release(owner, lifecycle)
+    finally:
+        owner.close()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows Kimi binding contract")
+def test_kimi_executable_binding_accepts_distinct_exact_manifest_identities(
+    tmp_path: Path,
 ) -> None:
     module = _load_runner()
     current = b"synthetic-current-kimi"
     rollback = b"synthetic-rollback-kimi"
-    monkeypatch.setattr(module.KimiWindowsProfileV1, "expected_size", len(current))
-    monkeypatch.setattr(
-        module.KimiWindowsProfileV1,
-        "accepted_sha256",
-        __import__("hashlib").sha256(current).hexdigest(),
-    )
-    monkeypatch.setattr(
-        module.KimiWindowsProfileV1,
-        "accepted_rollback_bindings",
-        ((len(rollback), __import__("hashlib").sha256(rollback).hexdigest()),),
-    )
 
     current_executable = tmp_path / "current" / "kimi.exe"
     current_executable.parent.mkdir()
@@ -168,23 +221,15 @@ def test_kimi_executable_binding_accepts_current_and_rollback_release_identities
         owner.close()
 
 
-@pytest.mark.skipif(os.name != "nt", reason="Windows Kimi release-pin contract")
-def test_kimi_admission_rejects_another_accepted_release_when_pin_differs(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.skipif(os.name != "nt", reason="Windows Kimi binding contract")
+def test_kimi_admission_rejects_live_object_when_expected_binding_differs(
+    tmp_path: Path,
 ) -> None:
     module = _load_runner()
     owner = module.ProcessRunnerV1()
     current = b"synthetic-current-kimi"
     rollback = b"synthetic-rollback-kimi"
     current_digest = __import__("hashlib").sha256(current).hexdigest()
-    rollback_digest = __import__("hashlib").sha256(rollback).hexdigest()
-    monkeypatch.setattr(module.KimiWindowsProfileV1, "expected_size", len(current))
-    monkeypatch.setattr(module.KimiWindowsProfileV1, "accepted_sha256", current_digest)
-    monkeypatch.setattr(
-        module.KimiWindowsProfileV1,
-        "accepted_rollback_bindings",
-        ((len(rollback), rollback_digest),),
-    )
     executable = tmp_path / "kimi.exe"
     executable.write_bytes(rollback)
     prompt = tmp_path / "prompt.md"
@@ -233,7 +278,7 @@ def test_admission_owner_has_no_direct_subprocess_escape_hatch() -> None:
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows Kimi argv profile contract")
-def test_kimi_profile_accepts_only_fixed_transport_and_binds_prompt_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_kimi_profile_accepts_only_fixed_transport_and_binds_prompt_file(tmp_path: Path) -> None:
     module = _load_runner()
     owner = module.ProcessRunnerV1()
     neutral = tmp_path / "neutral root-Москва"
@@ -241,9 +286,6 @@ def test_kimi_profile_accepts_only_fixed_transport_and_binds_prompt_file(tmp_pat
     prompt = neutral / "prompt instructions.md"
     prompt.write_text("facts only\nGATE: PASS\n", encoding="utf-8")
     executable = _fake_kimi(module, tmp_path / "kimi.exe")
-    digest = __import__("hashlib").sha256(executable.read_bytes()).hexdigest()
-    monkeypatch.setattr(module.KimiWindowsProfileV1, "accepted_sha256", digest)
-    monkeypatch.setattr(module.KimiWindowsProfileV1, "expected_size", executable.stat().st_size)
     request = _request(
         module,
         owner,
@@ -308,7 +350,7 @@ def test_kimi_profile_rejects_argv_variants_without_probe(tmp_path: Path, mutate
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows Kimi argv profile contract")
-def test_kimi_profile_rejects_marker_only_fake_release(tmp_path: Path) -> None:
+def test_kimi_profile_rejects_marker_only_file_when_expected_binding_differs(tmp_path: Path) -> None:
     module = _load_runner()
     owner = module.ProcessRunnerV1()
     neutral = tmp_path / "neutral"
@@ -326,6 +368,9 @@ def test_kimi_profile_rejects_marker_only_fake_release(tmp_path: Path) -> None:
         _kimi_argv(module, executable, prompt),
         "kimi-sealed-bundle-text-v1",
         cwd=neutral,
+        expected_executable_binding=module.ExecutableBindingV1(
+            str(executable.resolve()), executable.stat().st_size, "0" * 64
+        ),
     )
     lifecycle = owner._begin_lifecycle()
     try:
@@ -342,7 +387,7 @@ def test_kimi_profile_rejects_marker_only_fake_release(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows Kimi argv profile contract")
-def test_kimi_profile_rejects_prompt_mutation_between_admit_and_consume(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_kimi_profile_rejects_prompt_mutation_between_admit_and_consume(tmp_path: Path) -> None:
     module = _load_runner()
     owner = module.ProcessRunnerV1()
     neutral = tmp_path / "neutral"
@@ -350,12 +395,6 @@ def test_kimi_profile_rejects_prompt_mutation_between_admit_and_consume(tmp_path
     prompt = neutral / "prompt.md"
     prompt.write_text("GATE: PASS\n", encoding="utf-8")
     executable = _fake_kimi(module, tmp_path / "kimi.exe")
-    monkeypatch.setattr(
-        module.KimiWindowsProfileV1,
-        "accepted_sha256",
-        __import__("hashlib").sha256(executable.read_bytes()).hexdigest(),
-    )
-    monkeypatch.setattr(module.KimiWindowsProfileV1, "expected_size", executable.stat().st_size)
     request = _request(
         module,
         owner,

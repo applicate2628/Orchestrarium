@@ -1,6 +1,6 @@
 # Shared Governance
 Platform-neutral governance, merged with platform policy into `AGENTS.md`.
-Source-only/maintainer-only, NOT installed: `shared/references/` elaboration/glossary; these rules are self-sufficient.
+Source-only/maintainer-only, NOT installed: `shared/references/`; these rules are self-sufficient.
 
 ## Role index
 - Roadmap and orchestration: `$product-manager`, `$lead`, `$consultant`, `$knowledge-archivist`.
@@ -10,7 +10,7 @@ Source-only/maintainer-only, NOT installed: `shared/references/` elaboration/glo
 - For approved UI implementation phases, use `$frontend-engineer` for web/React UI and `$qt-ui-engineer` only for Qt desktop UI.
 
 ## Common skills
-Common skills: any role or the main conversation invokes on match; they are not roles and do not own delivery. Delegate-style may spawn one artifact; also invocable inline. Set: `$windows-gui-manual-testing`, `$analyzing-video-bugs`, `$bug-hunting`, `$mathtype-book-page`, `$repo-cleanup`, `$manual-repo-transfer`, `$github-pr-review-bot`, `$explain-simply`, `$vak-dissertation-review`.
+Common skills: any role or the main conversation uses on match; they are not roles and do not own delivery. Delegate-style may spawn one artifact; also invocable inline. Set: `$windows-gui-manual-testing`, `$analyzing-video-bugs`, `$bug-hunting`, `$mathtype-book-page`, `$repo-cleanup`, `$manual-repo-transfer`, `$github-pr-review-bot`, `$explain-simply`, `$vak-dissertation-review`, `$vcpkg-ports-updater`.
 
 **No-self-residue.** Before `PASS`/handoff/commit/push/transfer, settle residue; preserve user/ambiguous state. `$repo-cleanup` is read-only; Lead gates its report. [Details](references/repository-cleanup.md).
 
@@ -44,7 +44,7 @@ Physical location alone owns V1 lifecycle: current records stay in their categor
   **Functional-first delivery (binding).** `shared/references/spine/functional-first-delivery.md`: detail; spine wins.
   **PAO/TDD.** PAO pre-impl: criteria/contracts; scenario/env/steps; success/failure; safety/cleanup; evidence/owner; source/config/env; actual run records source/config/env; mock/unit≠`Functional PASS`; scope=>new ID/gates; implementation cannot revise. TDD only failure/acceptance/cause/PAO/check; never expands/freezes unverified/workaround output.
   **Boundary.** Pre-PASS PAO-causal; contract/owner/seam/lifecycle/API-schema/dependency/reuse/rollback=>architecture before implementation. Variation (accepted requirement/current second consumer/verified external-contract evolution)=>simplest one-owner stable/local seam; else no hypothetical. Needed designs/lifecycle; urgency no bypass; local correction=no ceremony.
-  **Safety/regression/hardening.** Reachable confidentiality/integrity/authentication/authorization/trust/injection/untrusted-execution/data-loss/corruption/irreversible/publication=>fail closed; owners; containment/remediation only; no publication authority. Post-PASS smallest deterministic guards+repo-required/adjacent checks+PAO; change invalidates. Hardening=work beyond functional contract; post Functional+Regression PASS only, else mandatory nonblocking backlog/no implementation; visible success/failure=>functional/restart.
+  **Safety/regression/hardening.** Reachable confidentiality/integrity/authentication/authorization/trust/injection/untrusted-execution/data-loss/corruption/irreversible/publication=>fail closed; owners; containment/remediation only; no publication authority. Post-PASS smallest deterministic guards+repo-required/adjacent checks+PAO; change invalidates. Hardening=work beyond functional contract; post Functional+Regression PASS only, else mandatory nonblocking backlog/no implementation; visible success/failure=>functional/restart. A security-shaped label/finding does not by itself expand scope; only the verified reachable defect is gate-bearing; broader threat-model, privilege/ACL, adjacent-path, or other hardening requires explicit user admission or a separately proven blocking risk, otherwise nonblocking backlog/no implementation.
   **QA/correction.** PAO/checks/snapshot/unchecked/trigger-rule/evidence/invocation table. AGENTS/repo/clause-4=>veto; ambiguity=>reviewer; else nonveto; no implementer/$lead waiver. Two equivalent=>no third; new=hypothesis+material difference+falsifier+`$lead` acceptance; supersession/relabel/split/merge/derived never reset lineage/budget/gate-backlog; every gate entry/exit=>frozen PAO evidence; ambiguity=>scope/veto.
   **Publication safety unchanged.** Human approval/leak mandatory.
   **Commission.** Final cross-cutting governance/design: freeze; >=2 base-model families (role/prompt/effort/alias/variant≠diverse); runtime IDs; unavailable=`BLOCKED`. Independently challenge premises; name accepted/rejected and better alternative+tradeoff+`Would-flip-if`; sole=PAO/veto/evidence, never majority/deference; delta=>members re-review; optional alternatives=>backlog/no reround.

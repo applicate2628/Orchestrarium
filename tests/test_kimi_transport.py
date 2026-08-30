@@ -60,6 +60,36 @@ def test_installer_kimi_enrollment_actions_are_explicit_and_mutually_exclusive()
         )
 
 
+def test_installer_kimi_offline_policy_is_explicit_and_bounded() -> None:
+    installer = _load_installer()
+    parser = installer._parser("codex")
+
+    parsed = parser.parse_args(
+        ["--global", "--enroll-kimi", "--kimi-offline-policy", "24h"]
+    )
+    assert parsed.kimi_offline_policy == "24h"
+    with pytest.raises(SystemExit):
+        parser.parse_args(
+            ["--global", "--enroll-kimi", "--kimi-offline-policy", "30d"]
+        )
+
+
+def test_orphan_kimi_offline_policy_fails_before_target_or_transaction(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    installer = _load_installer()
+    monkeypatch.setattr(
+        installer,
+        "_target",
+        lambda *_args: pytest.fail("orphan option reached target resolution"),
+    )
+
+    assert installer.install(
+        "codex", ["--global", "--kimi-offline-policy", "24h"]
+    ) == 1
+    assert "E_KIMI_OFFLINE_POLICY_ORPHAN" in capsys.readouterr().err
+
+
 def test_kimi_maintenance_modes_never_launch_provider(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -973,7 +1003,6 @@ def test_kimi_wrapper_has_no_auth_storage_contract() -> None:
     source = OWNER_PATH.read_text(encoding="utf-8")
     forbidden = (
         "_kimi_sanitized_runtime_home",
-        "KIMI_CODE_HOME",
         "access_token",
         "refresh_token",
         "expires_at",
@@ -981,6 +1010,7 @@ def test_kimi_wrapper_has_no_auth_storage_contract() -> None:
         "E_KIMI_AUTH_STORAGE_INVALID",
     )
     assert all(token not in source for token in forbidden)
+    assert source.count('"KIMI_CODE_HOME": str(private_home)') == 1
 
 
 def test_kimi_profile_identifier_has_one_production_owner() -> None:
@@ -995,7 +1025,7 @@ def test_runtime_pin_is_restored_after_injected_post_enrollment_failure(
     tmp_path: Path,
 ) -> None:
     installer = _load_installer()
-    pin = tmp_path / "runtime" / "kimi" / "executable-binding-v1.json"
+    pin = tmp_path / "runtime" / "kimi" / "executable-binding-v2.json"
     pin.parent.mkdir(parents=True)
     before = b'{"accepted":"prior"}\n'
     pin.write_bytes(before)
@@ -1022,480 +1052,3 @@ def test_kimi_transport_adds_no_second_lifecycle_or_smoke_path() -> None:
         "subprocess.run",
     )
     assert all(token not in text for token in forbidden)
-
-
-def test_kimi_enrollment_drift_preserves_specific_error(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    owner = _load_owner()
-    user_home = tmp_path / "user"
-    runtime = user_home / ".codex" / "orchestrarium-runtime" / "kimi"
-    runtime.mkdir(parents=True)
-    executable = tmp_path / "kimi.exe"
-    executable.write_bytes(b"changed-release")
-    (runtime / "executable-binding-v1.json").write_text(
-        json.dumps(
-            {
-                "schema": owner.KIMI_EXECUTABLE_BINDING_SCHEMA_V1,
-                "path": str(executable.resolve()),
-                "sha256": "0" * 64,
-                "size": executable.stat().st_size,
-            }
-        ),
-        encoding="utf-8",
-    )
-    monkeypatch.setenv("USERPROFILE", str(user_home))
-
-    with pytest.raises(ValueError, match="^E_KIMI_EXECUTABLE_BINDING_DRIFT$"):
-        owner.resolve_enrolled_kimi_command()
-
-
-def test_missing_kimi_binding_names_exact_wrapper_enrollment_command(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    owner = _load_owner()
-    user_home = tmp_path / "user"
-    user_home.mkdir()
-    monkeypatch.setenv("USERPROFILE", str(user_home))
-    expected = subprocess.list2cmdline(
-        [sys.executable, str(WRAPPER_PATH.resolve()), "--enroll-executable"]
-    )
-
-    with pytest.raises(ValueError) as failure:
-        owner.resolve_enrolled_kimi_command()
-
-    assert str(failure.value) == (
-        f"E_KIMI_EXECUTABLE_BINDING_INVALID: run {expected}"
-    )
-
-
-def test_kimi_binding_owner_enrolls_replays_and_refuses_drift(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    owner = _load_owner()
-    installer = _load_installer()
-    user_home = tmp_path / "user"
-    executable = user_home / ".kimi-code" / "bin" / "kimi.exe"
-    executable.parent.mkdir(parents=True)
-    payload = b"synthetic-kimi-release"
-    executable.write_bytes(payload)
-    runtime_root = user_home / ".codex" / "orchestrarium-runtime" / "kimi"
-    profile = SimpleNamespace(
-        expected_size=len(payload),
-        accepted_sha256=hashlib.sha256(payload).hexdigest(),
-    )
-    monkeypatch.setattr(owner, "KimiWindowsProfileV1", profile)
-
-    owner.enroll_kimi_executable(user_home, runtime_root, dry_run=False)
-    pin = runtime_root / owner.KIMI_EXECUTABLE_BINDING_FILENAME_V1
-    expected_binding = {
-        "path": str(executable.resolve()),
-        "schema": owner.KIMI_EXECUTABLE_BINDING_SCHEMA_V1,
-        "sha256": profile.accepted_sha256,
-        "size": len(payload),
-    }
-    assert json.loads(pin.read_text(encoding="utf-8")) == expected_binding
-
-    replay_bytes = pin.read_bytes()
-    replay_metadata = pin.stat()
-    replay_identity = (
-        replay_metadata.st_dev,
-        replay_metadata.st_ino,
-        replay_metadata.st_size,
-        replay_metadata.st_mtime_ns,
-    )
-    monkeypatch.setattr(
-        owner.tempfile,
-        "mkstemp",
-        lambda *_args: (_ for _ in ()).throw(
-            AssertionError("exact replay attempted temporary publication")
-        ),
-    )
-    monkeypatch.setattr(
-        owner.os,
-        "link",
-        lambda *_args: (_ for _ in ()).throw(
-            AssertionError("exact replay attempted create-only publication")
-        ),
-    )
-    owner.enroll_kimi_executable(user_home, runtime_root, dry_run=False)
-    replay_after = pin.stat()
-    assert pin.read_bytes() == replay_bytes
-    assert (
-        replay_after.st_dev,
-        replay_after.st_ino,
-        replay_after.st_size,
-        replay_after.st_mtime_ns,
-    ) == replay_identity
-    assert not tuple(runtime_root.glob(".kimi-binding.*.tmp"))
-
-    pin.write_text("{}\n", encoding="utf-8")
-    with pytest.raises(ValueError, match="^E_KIMI_ENROLLMENT_DRIFT"):
-        owner.enroll_kimi_executable(user_home, runtime_root, dry_run=False)
-
-    installer_call: list[tuple[Path, Path, bool]] = []
-    monkeypatch.setattr(
-        installer,
-        "enroll_kimi_executable",
-        lambda home, root, *, dry_run: installer_call.append(
-            (home, root, dry_run)
-        ),
-    )
-    installer._enroll_kimi_executable(user_home, runtime_root, dry_run=True)
-    assert installer_call == [(user_home, runtime_root, True)]
-
-
-def test_ordinary_kimi_enrollment_accepts_rollback_release_but_refuses_rotation(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    owner = _load_owner()
-    user_home = tmp_path / "user"
-    executable = user_home / ".kimi-code" / "bin" / "kimi.exe"
-    executable.parent.mkdir(parents=True)
-    rollback_payload = b"synthetic-kimi-rollback"
-    current_payload = b"synthetic-kimi-current-release"
-    executable.write_bytes(rollback_payload)
-    runtime_root = user_home / ".codex" / "orchestrarium-runtime" / "kimi"
-    profile = SimpleNamespace(
-        expected_size=len(current_payload),
-        accepted_sha256=hashlib.sha256(current_payload).hexdigest(),
-        accepted_rollback_bindings=(
-            (len(rollback_payload), hashlib.sha256(rollback_payload).hexdigest()),
-        ),
-    )
-    monkeypatch.setattr(owner, "KimiWindowsProfileV1", profile)
-
-    owner.enroll_kimi_executable(user_home, runtime_root, dry_run=False)
-    pin = runtime_root / owner.KIMI_EXECUTABLE_BINDING_FILENAME_V1
-    rollback_pin = pin.read_bytes()
-    executable.write_bytes(current_payload)
-
-    with pytest.raises(ValueError, match="^E_KIMI_ENROLLMENT_DRIFT"):
-        owner.enroll_kimi_executable(user_home, runtime_root, dry_run=False)
-
-    assert pin.read_bytes() == rollback_pin
-
-
-def test_explicit_kimi_replacement_rotates_rollback_pin_to_current_release(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    owner = _load_owner()
-    installer = _load_installer()
-    user_home = tmp_path / "user"
-    executable = user_home / ".kimi-code" / "bin" / "kimi.exe"
-    executable.parent.mkdir(parents=True)
-    rollback_payload = b"synthetic-kimi-rollback"
-    current_payload = b"synthetic-kimi-current-release"
-    runtime_root = user_home / ".codex" / "orchestrarium-runtime" / "kimi"
-    profile = SimpleNamespace(
-        expected_size=len(current_payload),
-        accepted_sha256=hashlib.sha256(current_payload).hexdigest(),
-        accepted_rollback_bindings=(
-            (len(rollback_payload), hashlib.sha256(rollback_payload).hexdigest()),
-        ),
-    )
-    monkeypatch.setattr(owner, "KimiWindowsProfileV1", profile)
-
-    executable.write_bytes(rollback_payload)
-    owner.enroll_kimi_executable(user_home, runtime_root, dry_run=False)
-    executable.write_bytes(current_payload)
-    owner.replace_kimi_enrollment(user_home, runtime_root, dry_run=False)
-
-    pin = runtime_root / owner.KIMI_EXECUTABLE_BINDING_FILENAME_V1
-    assert json.loads(pin.read_text(encoding="utf-8")) == {
-        "path": str(executable.resolve()),
-        "schema": owner.KIMI_EXECUTABLE_BINDING_SCHEMA_V1,
-        "sha256": hashlib.sha256(current_payload).hexdigest(),
-        "size": len(current_payload),
-    }
-
-    installer_call: list[tuple[Path, Path, bool]] = []
-    monkeypatch.setattr(
-        installer,
-        "replace_kimi_enrollment",
-        lambda home, root, *, dry_run: installer_call.append(
-            (home, root, dry_run)
-        ),
-    )
-    installer._replace_kimi_enrollment(user_home, runtime_root, dry_run=True)
-    assert installer_call == [(user_home, runtime_root, True)]
-
-
-def test_kimi_replacement_failure_preserves_rollback_pin(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    owner = _load_owner()
-    user_home = tmp_path / "user"
-    executable = user_home / ".kimi-code" / "bin" / "kimi.exe"
-    executable.parent.mkdir(parents=True)
-    rollback_payload = b"synthetic-kimi-rollback"
-    current_payload = b"synthetic-kimi-current-release"
-    runtime_root = user_home / ".codex" / "orchestrarium-runtime" / "kimi"
-    profile = SimpleNamespace(
-        expected_size=len(current_payload),
-        accepted_sha256=hashlib.sha256(current_payload).hexdigest(),
-        accepted_rollback_bindings=(
-            (len(rollback_payload), hashlib.sha256(rollback_payload).hexdigest()),
-        ),
-    )
-    monkeypatch.setattr(owner, "KimiWindowsProfileV1", profile)
-
-    executable.write_bytes(rollback_payload)
-    owner.enroll_kimi_executable(user_home, runtime_root, dry_run=False)
-    pin = runtime_root / owner.KIMI_EXECUTABLE_BINDING_FILENAME_V1
-    rollback_pin = pin.read_bytes()
-    executable.write_bytes(current_payload)
-    monkeypatch.setattr(
-        owner.os,
-        "replace",
-        lambda *_args: (_ for _ in ()).throw(OSError("injected replacement failure")),
-    )
-
-    with pytest.raises(ValueError, match="^E_KIMI_ENROLLMENT_REPLACE_FAILED$"):
-        owner.replace_kimi_enrollment(user_home, runtime_root, dry_run=False)
-
-    assert pin.read_bytes() == rollback_pin
-    assert not tuple(runtime_root.glob(".kimi-binding.*.tmp"))
-
-
-def test_kimi_replacement_postcondition_failure_restores_rollback_pin(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    owner = _load_owner()
-    user_home = tmp_path / "user"
-    executable = user_home / ".kimi-code" / "bin" / "kimi.exe"
-    executable.parent.mkdir(parents=True)
-    rollback_payload = b"synthetic-kimi-rollback"
-    current_payload = b"synthetic-kimi-current-release"
-    runtime_root = user_home / ".codex" / "orchestrarium-runtime" / "kimi"
-    profile = SimpleNamespace(
-        expected_size=len(current_payload),
-        accepted_sha256=hashlib.sha256(current_payload).hexdigest(),
-        accepted_rollback_bindings=(
-            (len(rollback_payload), hashlib.sha256(rollback_payload).hexdigest()),
-        ),
-    )
-    monkeypatch.setattr(owner, "KimiWindowsProfileV1", profile)
-
-    executable.write_bytes(rollback_payload)
-    owner.enroll_kimi_executable(user_home, runtime_root, dry_run=False)
-    pin = runtime_root / owner.KIMI_EXECUTABLE_BINDING_FILENAME_V1
-    rollback_pin = pin.read_bytes()
-    executable.write_bytes(current_payload)
-    real_snapshot = owner._read_kimi_binding_snapshot
-    snapshot_calls = 0
-
-    def fail_committed_snapshot(path: Path, fixed: Path):
-        nonlocal snapshot_calls
-        snapshot_calls += 1
-        if snapshot_calls == 3:
-            raise ValueError("injected postcondition failure")
-        return real_snapshot(path, fixed)
-
-    monkeypatch.setattr(owner, "_read_kimi_binding_snapshot", fail_committed_snapshot)
-
-    with pytest.raises(ValueError, match="^E_KIMI_ENROLLMENT_REPLACE_FAILED$"):
-        owner.replace_kimi_enrollment(user_home, runtime_root, dry_run=False)
-
-    assert pin.read_bytes() == rollback_pin
-    assert not tuple(runtime_root.glob(".kimi-binding.*.tmp"))
-    assert not (runtime_root / owner.KIMI_EXECUTABLE_REPLACEMENT_LOCK_FILENAME_V1).exists()
-
-
-def test_kimi_replacement_restores_rollback_pin_when_executable_cross_swaps(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    owner = _load_owner()
-    user_home = tmp_path / "user"
-    executable = user_home / ".kimi-code" / "bin" / "kimi.exe"
-    executable.parent.mkdir(parents=True)
-    rollback_payload = b"synthetic-kimi-rollback"
-    current_payload = b"synthetic-kimi-current-release"
-    runtime_root = user_home / ".codex" / "orchestrarium-runtime" / "kimi"
-    profile = SimpleNamespace(
-        expected_size=len(current_payload),
-        accepted_sha256=hashlib.sha256(current_payload).hexdigest(),
-        accepted_rollback_bindings=(
-            (len(rollback_payload), hashlib.sha256(rollback_payload).hexdigest()),
-        ),
-    )
-    monkeypatch.setattr(owner, "KimiWindowsProfileV1", profile)
-
-    executable.write_bytes(rollback_payload)
-    owner.enroll_kimi_executable(user_home, runtime_root, dry_run=False)
-    pin = runtime_root / owner.KIMI_EXECUTABLE_BINDING_FILENAME_V1
-    rollback_pin = pin.read_bytes()
-    executable.write_bytes(current_payload)
-    real_replace = owner.os.replace
-    swapped = False
-
-    def cross_swap_after_publish(source: Path, destination: Path) -> None:
-        nonlocal swapped
-        real_replace(source, destination)
-        if not swapped and Path(destination) == pin:
-            swapped = True
-            executable.write_bytes(rollback_payload)
-
-    monkeypatch.setattr(owner.os, "replace", cross_swap_after_publish)
-
-    with pytest.raises(ValueError, match="^E_KIMI_ENROLLMENT_REPLACE_FAILED$"):
-        owner.replace_kimi_enrollment(user_home, runtime_root, dry_run=False)
-
-    assert swapped is True
-    assert pin.read_bytes() == rollback_pin
-    assert not tuple(runtime_root.glob(".kimi-binding.*.tmp"))
-    assert not (runtime_root / owner.KIMI_EXECUTABLE_REPLACEMENT_LOCK_FILENAME_V1).exists()
-
-
-def test_kimi_replacement_race_lock_preserves_rollback_pin(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    owner = _load_owner()
-    user_home = tmp_path / "user"
-    executable = user_home / ".kimi-code" / "bin" / "kimi.exe"
-    executable.parent.mkdir(parents=True)
-    rollback_payload = b"synthetic-kimi-rollback"
-    current_payload = b"synthetic-kimi-current-release"
-    runtime_root = user_home / ".codex" / "orchestrarium-runtime" / "kimi"
-    profile = SimpleNamespace(
-        expected_size=len(current_payload),
-        accepted_sha256=hashlib.sha256(current_payload).hexdigest(),
-        accepted_rollback_bindings=(
-            (len(rollback_payload), hashlib.sha256(rollback_payload).hexdigest()),
-        ),
-    )
-    monkeypatch.setattr(owner, "KimiWindowsProfileV1", profile)
-
-    executable.write_bytes(rollback_payload)
-    owner.enroll_kimi_executable(user_home, runtime_root, dry_run=False)
-    pin = runtime_root / owner.KIMI_EXECUTABLE_BINDING_FILENAME_V1
-    rollback_pin = pin.read_bytes()
-    executable.write_bytes(current_payload)
-    lock = runtime_root / owner.KIMI_EXECUTABLE_REPLACEMENT_LOCK_FILENAME_V1
-    lock.write_bytes(b"active replacement\n")
-
-    with pytest.raises(ValueError, match="^E_KIMI_ENROLLMENT_BUSY$"):
-        owner.replace_kimi_enrollment(user_home, runtime_root, dry_run=False)
-
-    assert pin.read_bytes() == rollback_pin
-
-
-def test_kimi_enrollment_preserves_destination_created_at_placement_time(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    owner = _load_owner()
-    user_home = tmp_path / "user"
-    executable = user_home / ".kimi-code" / "bin" / "kimi.exe"
-    executable.parent.mkdir(parents=True)
-    executable_payload = b"synthetic-kimi-release"
-    executable.write_bytes(executable_payload)
-    runtime_root = user_home / ".codex" / "orchestrarium-runtime" / "kimi"
-    profile = SimpleNamespace(
-        expected_size=len(executable_payload),
-        accepted_sha256=hashlib.sha256(executable_payload).hexdigest(),
-    )
-    monkeypatch.setattr(owner, "KimiWindowsProfileV1", profile)
-    pin = runtime_root / owner.KIMI_EXECUTABLE_BINDING_FILENAME_V1
-    competing_payload = b"concurrent binding owner\n"
-    real_replace = owner.os.replace
-    real_link = owner.os.link
-
-    def race_replace(source: Path, destination: Path) -> None:
-        Path(destination).write_bytes(competing_payload)
-        real_replace(source, destination)
-
-    def race_link(source: Path, destination: Path) -> None:
-        Path(destination).write_bytes(competing_payload)
-        real_link(source, destination)
-
-    monkeypatch.setattr(owner.os, "replace", race_replace)
-    monkeypatch.setattr(owner.os, "link", race_link)
-
-    with pytest.raises(ValueError, match="^E_KIMI_ENROLLMENT_DRIFT"):
-        owner.enroll_kimi_executable(user_home, runtime_root, dry_run=False)
-
-    assert pin.read_bytes() == competing_payload
-    assert not tuple(runtime_root.glob(".kimi-binding.*.tmp"))
-
-
-def test_kimi_enrollment_preserves_dangling_binding_symlink(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    owner = _load_owner()
-    user_home = tmp_path / "user"
-    executable = user_home / ".kimi-code" / "bin" / "kimi.exe"
-    executable.parent.mkdir(parents=True)
-    executable_payload = b"synthetic-kimi-release"
-    executable.write_bytes(executable_payload)
-    runtime_root = user_home / ".codex" / "orchestrarium-runtime" / "kimi"
-    runtime_root.mkdir(parents=True)
-    profile = SimpleNamespace(
-        expected_size=len(executable_payload),
-        accepted_sha256=hashlib.sha256(executable_payload).hexdigest(),
-    )
-    monkeypatch.setattr(owner, "KimiWindowsProfileV1", profile)
-    pin = runtime_root / owner.KIMI_EXECUTABLE_BINDING_FILENAME_V1
-    missing_target = tmp_path / "missing-binding-target.json"
-    try:
-        pin.symlink_to(missing_target)
-    except OSError as exc:
-        pytest.skip(f"file symlink creation unavailable: {exc}")
-
-    with pytest.raises(
-        ValueError, match="^E_KIMI_ENROLLMENT_INVALID: existing pin$"
-    ):
-        owner.enroll_kimi_executable(user_home, runtime_root, dry_run=False)
-
-    assert pin.is_symlink()
-    assert pin.resolve(strict=False) == missing_target.resolve(strict=False)
-    assert not missing_target.exists()
-    assert not tuple(runtime_root.glob(".kimi-binding.*.tmp"))
-
-
-def test_verify_kimi_enrollment_detects_same_size_content_drift(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    owner = _load_owner()
-    user_home = tmp_path / "user"
-    executable = user_home / ".kimi-code" / "bin" / "kimi.exe"
-    executable.parent.mkdir(parents=True)
-    payload = b"release-A"
-    executable.write_bytes(payload)
-    runtime_root = user_home / ".codex" / "orchestrarium-runtime" / "kimi"
-    profile = SimpleNamespace(
-        expected_size=len(payload),
-        accepted_sha256=hashlib.sha256(payload).hexdigest(),
-    )
-    monkeypatch.setattr(owner, "KimiWindowsProfileV1", profile)
-    monkeypatch.setenv("USERPROFILE", str(user_home))
-    owner.enroll_kimi_executable(user_home, runtime_root, dry_run=False)
-
-    assert owner.verify_kimi_enrollment() == [str(executable.resolve())]
-    executable.write_bytes(b"release-B")
-    with pytest.raises(ValueError, match="^E_KIMI_EXECUTABLE_BINDING_DRIFT$"):
-        owner.verify_kimi_enrollment()
-
-
-def test_kimi_release_profile_pins_current_and_rollback_windows_x64_identities() -> None:
-    owner = _load_owner()
-
-    assert owner.KIMI_WINDOWS_PROFILE_V1.expected_size == 151652352
-    assert owner.KIMI_WINDOWS_PROFILE_V1.accepted_sha256 == (
-        "ce3a74ead55994eb1350cc45a1d0d9bf083158f2bba4da49a5ee6168a1830338"
-    )
-    assert owner.KIMI_WINDOWS_PROFILE_V1.accepted_rollback_bindings == ((
-        151532032,
-        "9ddec448e6de4cacb5c4a07bf57c1909e699a0589c39eda851afdaab47b22dd2"
-    ),)
-    assert owner.KIMI_WINDOWS_PROFILE_V1.argv_shape == (
-        "--agent-file",
-        None,
-        "--skills-dir",
-        None,
-        "--model",
-        "kimi-code/k3",
-        "--output-format",
-        "text",
-        "--prompt",
-        owner.KIMI_WINDOWS_PROFILE_V1.constant_prompt,
-    )

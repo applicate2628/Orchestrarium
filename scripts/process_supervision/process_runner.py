@@ -129,16 +129,9 @@ class KimiWindowsProfileV1:
     """The sole owner of the sealed Windows Kimi bundle grammar."""
 
     profile_id = "kimi-sealed-bundle-text-v1"
+    probe_profile_id = "kimi-metadata-probe-v2"
     model = "kimi-code/k3"
     constant_prompt = "Review the sealed bundle and return only the requested result."
-    accepted_sha256 = "CE3A74EAD55994EB1350CC45A1D0D9BF083158F2BBA4DA49A5EE6168A1830338".lower()
-    expected_size = 151652352
-    accepted_rollback_bindings = (
-        (
-            151532032,
-            "9DDEC448E6DE4CACB5C4A07BF57C1909E699A0589C39EDA851AFDAAB47B22DD2".lower(),
-        ),
-    )
     argv_shape = (
         "--agent-file", None,
         "--skills-dir", None,
@@ -171,25 +164,16 @@ class KimiWindowsProfileV1:
         )
 
 
-def kimi_release_bindings(
-    profile: type[KimiWindowsProfileV1] | object = KimiWindowsProfileV1,
-) -> tuple[tuple[int, str], ...]:
-    """Return the current release first, followed by accepted rollback identities."""
-
-    current = (
-        int(getattr(profile, "expected_size")),
-        str(getattr(profile, "accepted_sha256")).lower(),
-    )
-    rollback = tuple(
-        (int(size), str(digest).lower())
-        for size, digest in getattr(profile, "accepted_rollback_bindings", ())
-    )
-    return (current, *rollback)
-
-
 _WINDOWS_ARGV_PROFILES = _WINDOWS_ARGV_PROFILES | frozenset(
-    {KimiWindowsProfileV1.profile_id}
+    {KimiWindowsProfileV1.profile_id, KimiWindowsProfileV1.probe_profile_id}
 )
+
+
+def _is_kimi_executable_profile(profile_id: str | None) -> bool:
+    return profile_id in {
+        KimiWindowsProfileV1.profile_id,
+        KimiWindowsProfileV1.probe_profile_id,
+    }
 _WINDOWS_INTERNAL_PROBE_CAPTURE_BYTES = 64 * 1024
 _WINDOWS_ARGV_PROBE_CANARIES = (
     "",
@@ -1770,24 +1754,18 @@ class WindowsArgvAdmissionOwnerV1:
         launch_owner = executable_launch_owner
         prompt_binding: tuple[str, str, str] | None = None
         executable_binding: ExecutableBindingV1 | None = None
-        if profile_id == KimiWindowsProfileV1.profile_id:
-            prompt_binding = _kimi_bundle_file_binding(
-                request, failure_id="PSV1-ARGV-CODEC-UNSUPPORTED"
-            )
+        if _is_kimi_executable_profile(profile_id):
+            if profile_id == KimiWindowsProfileV1.profile_id:
+                prompt_binding = _kimi_bundle_file_binding(
+                    request, failure_id="PSV1-ARGV-CODEC-UNSUPPORTED"
+                )
             if executable.name.casefold() != "kimi.exe":
                 raise ProcessSupervisionError(
                     "PSV1-EXECUTABLE-UNRESOLVED", "request-validation"
                 )
             executable_binding = launch_owner.binding
-            if (
-                not any(
-                    executable_binding.size == size
-                    and hmac.compare_digest(executable_binding.sha256, digest)
-                    for size, digest in kimi_release_bindings()
-                )
-                or not _expected_executable_binding_matches(
-                    request.expected_executable_binding, executable_binding
-                )
+            if not _expected_executable_binding_matches(
+                request.expected_executable_binding, executable_binding
             ):
                 raise ProcessSupervisionError(
                     "PSV1-EXECUTABLE-UNRESOLVED", "request-validation"
@@ -1831,6 +1809,19 @@ class WindowsArgvAdmissionOwnerV1:
                     "PSV1-ARGV-ATTESTATION", "request-validation"
                 )
             probe_kind = "kimi-sealed-bundle-v1"
+            requested = observed = _json_argv_sha256(request.argv)
+        elif profile_id == KimiWindowsProfileV1.probe_profile_id:
+            if (
+                request.argv not in {
+                    (str(executable), "--version"),
+                    (str(executable), "--help"),
+                }
+                or _windows_argv_roundtrip(request.argv) != request.argv
+            ):
+                raise ProcessSupervisionError(
+                    "PSV1-ARGV-ATTESTATION", "request-validation"
+                )
+            probe_kind = "kimi-metadata-probe-v2"
             requested = observed = _json_argv_sha256(request.argv)
         else:
             raise ProcessSupervisionError(
@@ -1878,9 +1869,7 @@ class WindowsArgvAdmissionOwnerV1:
                 "PSV1-ARGV-ATTESTATION", "request-validation"
             )
         executable_binding = (
-            launch_owner.binding
-            if admission.profile_id == KimiWindowsProfileV1.profile_id
-            else None
+            launch_owner.binding if _is_kimi_executable_profile(admission.profile_id) else None
         )
         if executable_binding is not None:
             identity = executable_binding.sha256
@@ -2132,7 +2121,7 @@ def validate_process_request(
         raise ProcessSupervisionError("PSV1-EXECUTABLE-UNRESOLVED", "request-validation") from exc
     expected_binding = request.expected_executable_binding
     if expected_binding is not None and (
-        request.windows_argv_profile_id != KimiWindowsProfileV1.profile_id
+        not _is_kimi_executable_profile(request.windows_argv_profile_id)
         or executable_launch_owner is None
         or not _expected_executable_binding_matches(
             expected_binding, executable_launch_owner.binding
@@ -5101,7 +5090,6 @@ __all__ = [
     "WindowsArgvAdmissionOwnerV1",
     "WindowsArgvAdmissionV1",
     "KimiWindowsProfileV1",
-    "kimi_release_bindings",
     "WindowsCreateOwnerV1",
     "WindowsInheritanceCoordinatorV1",
     "ValidatedCwdV1",

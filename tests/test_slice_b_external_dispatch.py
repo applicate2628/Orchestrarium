@@ -231,7 +231,7 @@ def test_external_dispatch_denies_unsupported_provider_and_native_is_unchanged()
         "stableId": None,
         "taskClass": "mechanical-read",
         "role": "mechanical-scout",
-        "requestedProfile": "fast-high",
+        "requestedProfile": "luna-high",
         "requestedModel": "gpt-5.6-luna",
         "requestedEffort": "high",
         "sandbox": "read-only",

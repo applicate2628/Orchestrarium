@@ -45,6 +45,48 @@ PROTECTED_EXISTING_ROLE_DIGESTS = {
     "security-reviewer": "0f9b75713128885b8db86b32a9ecb3e756b0022add169a89fc10d615745445f1",
     "worker": "1b311bd1a413c660382c57df74bdccc016f9b8a919e039efe21f703f0b09e475",
 }
+STOCK_FAST_POLICY_SHA256 = "dcab8e4da55b05475f9b9c507a3a9a97679a0c7b72006ff7ffca4b95ccd13451"
+STOCK_FAST_MANIFEST_SHA256 = "842b1b29fae7d41a0b2422d8711652b3e6d7c720406c3ce3fc13259518f82115"
+
+
+def _stock_fast_policy_manifest_pair() -> tuple[bytes, bytes]:
+    policy = POLICY_PATH.read_text(encoding="utf-8")
+    policy = policy.replace('    "mechanical",\n    "balanced"', '    "fast",\n    "balanced"')
+    policy = policy.replace(
+        '''    "luna-high": {
+      "modelTier": "mechanical",
+      "effort": "high",
+      "codexModel": "gpt-5.6-luna"
+    },''',
+        '''    "micro-low": {
+      "modelTier": "fast",
+      "effort": "low",
+      "codexModel": "gpt-5.6-luna"
+    },
+    "fast-medium": {
+      "modelTier": "fast",
+      "effort": "medium",
+      "codexModel": "gpt-5.6-luna"
+    },
+    "fast-high": {
+      "modelTier": "fast",
+      "effort": "high",
+      "codexModel": "gpt-5.6-luna"
+    },''',
+    )
+    policy = policy.replace('"luna-high"', '"fast-high"')
+    policy = policy.replace(
+        '"requiredModelTier": "mechanical"', '"requiredModelTier": "fast"'
+    )
+    policy_bytes = policy.encode("utf-8")
+    manifest = (AGENTS_SOURCE / installer.CODEX_ROLE_MANIFEST).read_text(encoding="utf-8")
+    manifest = manifest.replace(
+        hashlib.sha256(POLICY_PATH.read_bytes()).hexdigest(), STOCK_FAST_POLICY_SHA256
+    )
+    manifest_bytes = manifest.encode("utf-8")
+    assert hashlib.sha256(policy_bytes).hexdigest() == STOCK_FAST_POLICY_SHA256
+    assert hashlib.sha256(manifest_bytes).hexdigest() == STOCK_FAST_MANIFEST_SHA256
+    return policy_bytes, manifest_bytes
 
 
 def _policy() -> dict:
@@ -319,6 +361,41 @@ def test_luna_execution_plan_rejects_choices_forbidden_operations_and_stale_root
         )["stableId"]
         == "E_LUNA_FORBIDDEN_OPERATION"
     )
+
+
+def test_luna_directory_chain_tolerates_unrelated_sibling_churn(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Directory identity must not depend on unrelated child-list metadata."""
+
+    resolver = _resolver_module()
+    exact_root = tmp_path / "exact-root"
+    exact_root.mkdir()
+    (exact_root / "README.md").write_text("exact root\n", encoding="utf-8")
+    original = resolver._luna_component_metadata
+    churned = False
+
+    def component_metadata(path: Path, *, allow_anchor_mount: bool):
+        nonlocal churned
+        metadata = original(path, allow_anchor_mount=allow_anchor_mount)
+        if (
+            not churned
+            and os.path.normcase(os.fspath(path))
+            == os.path.normcase(os.fspath(tmp_path))
+        ):
+            (tmp_path / "unrelated-sibling").mkdir()
+            churned = True
+        return metadata
+
+    monkeypatch.setattr(resolver, "_luna_component_metadata", component_metadata)
+    result = resolver.validate_luna_execution_plan(
+        _luna_plan(exact_root=str(exact_root)),
+        observed_git_root=str(exact_root),
+    )
+
+    assert churned is True
+    assert result["valid"] is True
 
 
 def test_luna_operations_require_exact_root_even_for_literal_comparison() -> None:
@@ -909,42 +986,27 @@ def test_luna_policy_profiles_tasks_and_exclusive_corridors(tmp_path: Path) -> N
 
     assert policy == resolved
     assert policy["effortOrder"] == ["low", "medium", "high", "xhigh", "max"]
-    assert {
-        name: policy["profiles"][name]
-        for name in ("micro-low", "fast-medium", "fast-high")
-    } == {
-        "micro-low": {
-            "modelTier": "fast",
-            "effort": "low",
-            "codexModel": "gpt-5.6-luna",
-        },
-        "fast-medium": {
-            "modelTier": "fast",
-            "effort": "medium",
-            "codexModel": "gpt-5.6-luna",
-        },
-        "fast-high": {
-            "modelTier": "fast",
-            "effort": "high",
-            "codexModel": "gpt-5.6-luna",
-        },
+    assert policy["profiles"]["luna-high"] == {
+        "modelTier": "mechanical",
+        "effort": "high",
+        "codexModel": "gpt-5.6-luna",
     }
     assert {
         name: policy["taskClasses"][name]
         for name in ("micro", "mechanical-read", "mechanical")
     } == {
         "micro": {
-            "requiredModelTier": "fast",
+            "requiredModelTier": "mechanical",
             "requiredEffort": "low",
             "mutationClass": "read-only",
         },
         "mechanical-read": {
-            "requiredModelTier": "fast",
+            "requiredModelTier": "mechanical",
             "requiredEffort": "medium",
             "mutationClass": "read-only",
         },
         "mechanical": {
-            "requiredModelTier": "fast",
+            "requiredModelTier": "mechanical",
             "requiredEffort": "medium",
             "mutationClass": "bounded-write",
         },
@@ -954,8 +1016,8 @@ def test_luna_policy_profiles_tasks_and_exclusive_corridors(tmp_path: Path) -> N
     assert policy["taskRoleEligibility"]["mechanical"] == ["mechanical-worker"]
     for role_name in ("mechanical-scout", "mechanical-worker"):
         assert policy["roles"][role_name] == {
-            "defaultProfile": "fast-high",
-            "allowedProfiles": ["fast-high"],
+            "defaultProfile": "luna-high",
+            "allowedProfiles": ["luna-high"],
         }
     assert policy["mechanicalExecutionContract"]["defaultEffort"] == "high"
     assert policy["mechanicalExecutionContract"]["allowedCallerEfforts"] == [
@@ -984,6 +1046,50 @@ def test_luna_policy_profiles_tasks_and_exclusive_corridors(tmp_path: Path) -> N
     }
     assert "mechanical-scout" not in policy["taskRoleEligibility"]["review"]
     assert "mechanical-worker" not in policy["taskRoleEligibility"]["engineering"]
+
+
+def test_luna_policy_and_dispatch_are_speed_neutral() -> None:
+    """The Luna corridor names capability and effort, never runtime speed."""
+
+    policy = _policy()
+    assert policy["modelTierOrder"] == ["mechanical", "balanced", "frontier", "apex"]
+    assert policy["profiles"]["luna-high"] == {
+        "modelTier": "mechanical",
+        "effort": "high",
+        "codexModel": "gpt-5.6-luna",
+    }
+    assert not {"luna-low", "luna-medium"}.intersection(policy["profiles"])
+    for task_name in ("micro", "mechanical-read", "mechanical"):
+        assert policy["taskClasses"][task_name]["requiredModelTier"] == "mechanical"
+    for role_name in ("mechanical-scout", "mechanical-worker"):
+        assert policy["roles"][role_name] == {
+            "defaultProfile": "luna-high",
+            "allowedProfiles": ["luna-high"],
+        }
+
+    decision = _resolver_module().resolve_role_dispatch(
+        "mechanical-read", "mechanical-scout", "enabled", repo_root=ROOT
+    )
+    assert set(decision) == {
+        "schemaVersion",
+        "status",
+        "stableId",
+        "taskClass",
+        "role",
+        "requestedProfile",
+        "requestedModel",
+        "requestedEffort",
+        "sandbox",
+        "fallback",
+        "executionContract",
+    }
+    assert decision["requestedProfile"] == "luna-high"
+    assert decision["requestedModel"] == "gpt-5.6-luna"
+    assert decision["requestedEffort"] == "high"
+    assert decision["fallback"] == "none"
+    serialized = json.dumps({"policy": policy, "decision": decision}).casefold()
+    for forbidden in ("fast", "priority", "ultrafast"):
+        assert forbidden not in serialized
 
 
 def test_luna_mechanical_corridor_is_exactly_restricted_and_exposed(
@@ -1172,6 +1278,97 @@ def test_luna_native_tomls_are_standalone_trusted_and_manifest_bound() -> None:
         assert hashlib.sha256(
             (AGENTS_SOURCE / f"{role_name}.toml").read_bytes()
         ).hexdigest() == expected_digest
+
+
+def test_installer_migrates_only_the_exact_stock_fast_policy_manifest_pair(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    arguments = [
+        "--force", "--no-hypothesis-hook", "--target", str(project),
+        "--allow-unsafe-target",
+    ]
+    assert installer.install("codex", arguments) == 0
+    lead = project / ".agents" / "skills" / "lead"
+    policy = lead / "shared" / "role-routing-policy.v1.json"
+    manifest = lead / "shared" / "orchestrarium-role-manifest.json"
+    installed_agents = project / ".codex" / "agents"
+    config = project / ".codex" / "config.toml"
+    protected = {
+        path.relative_to(project).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in (config, *sorted(installed_agents.glob("*.toml")))
+    }
+    old_policy, old_manifest = _stock_fast_policy_manifest_pair()
+    policy.write_bytes(old_policy)
+    manifest.write_bytes(old_manifest)
+
+    assert installer.install("codex", arguments) == 0
+    assert policy.read_bytes() == POLICY_PATH.read_bytes()
+    assert manifest.read_bytes() == (
+        AGENTS_SOURCE / installer.CODEX_ROLE_MANIFEST
+    ).read_bytes()
+    assert {
+        path.relative_to(project).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in (config, *sorted(installed_agents.glob("*.toml")))
+    } == protected
+
+
+def test_installer_rejects_drifted_stock_fast_pair_before_mutation(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    arguments = [
+        "--force", "--no-hypothesis-hook", "--target", str(project),
+        "--allow-unsafe-target",
+    ]
+    assert installer.install("codex", arguments) == 0
+    lead = project / ".agents" / "skills" / "lead"
+    policy = lead / "shared" / "role-routing-policy.v1.json"
+    manifest = lead / "shared" / "orchestrarium-role-manifest.json"
+    old_policy, old_manifest = _stock_fast_policy_manifest_pair()
+    policy.write_bytes(old_policy)
+    manifest.write_bytes(old_manifest[:-2] + b" \n")
+    before = {
+        path.relative_to(project).as_posix(): path.read_bytes()
+        for path in sorted(project.rglob("*")) if path.is_file()
+    }
+
+    assert installer.install("codex", arguments) == 1
+    assert {
+        path.relative_to(project).as_posix(): path.read_bytes()
+        for path in sorted(project.rglob("*")) if path.is_file()
+    } == before
+
+
+def test_installer_rolls_back_stock_policy_when_manifest_migration_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    arguments = [
+        "--force", "--no-hypothesis-hook", "--target", str(project),
+        "--allow-unsafe-target",
+    ]
+    assert installer.install("codex", arguments) == 0
+    lead = project / ".agents" / "skills" / "lead"
+    policy = lead / "shared" / "role-routing-policy.v1.json"
+    manifest = lead / "shared" / "orchestrarium-role-manifest.json"
+    old_policy, old_manifest = _stock_fast_policy_manifest_pair()
+    policy.write_bytes(old_policy)
+    manifest.write_bytes(old_manifest)
+    original = installer._CreateOnlyMutablePath.migrate_exact_file
+
+    def fail_manifest(self, relative: Path, expected_digest: str, payload: bytes):
+        if Path(relative).name == "orchestrarium-role-manifest.json":
+            raise RuntimeError("forced manifest migration failure")
+        return original(self, relative, expected_digest, payload)
+
+    monkeypatch.setattr(
+        installer._CreateOnlyMutablePath, "migrate_exact_file", fail_manifest
+    )
+    assert installer.install("codex", arguments) == 1
+    assert policy.read_bytes() == old_policy
+    assert manifest.read_bytes() == old_manifest
 
 
 @pytest.mark.parametrize("mode", ("repo", "target", "global"))
@@ -1409,7 +1606,7 @@ def test_resolve_role_dispatch_policy_only() -> None:
         "stableId": "E_NATIVE_V2_DISABLED",
         "taskClass": "mechanical-read",
         "role": "mechanical-scout",
-        "requestedProfile": "fast-high",
+        "requestedProfile": "luna-high",
         "requestedModel": "gpt-5.6-luna",
         "requestedEffort": "high",
         "sandbox": "read-only",
@@ -1422,7 +1619,7 @@ def test_resolve_role_dispatch_policy_only() -> None:
         "stableId": None,
         "taskClass": "mechanical-read",
         "role": "mechanical-scout",
-        "requestedProfile": "fast-high",
+        "requestedProfile": "luna-high",
         "requestedModel": "gpt-5.6-luna",
         "requestedEffort": "high",
         "sandbox": "read-only",

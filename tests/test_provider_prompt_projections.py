@@ -1068,11 +1068,14 @@ def test_exact_8f92_transport_set_is_one_atomic_prior_plan(tmp_path: Path) -> No
                 "process_supervision/process_runner.py",
             ),
         ),
-        (
-            "7192c914",
-            STOCK_7192_PROJECTION_SHA256,
-            ("provider_prompt.py",),
-        ),
+            (
+                "7192c914",
+                STOCK_7192_PROJECTION_SHA256,
+                (
+                    "provider_prompt.py",
+                    "process_supervision/process_runner.py",
+                ),
+            ),
     ),
 )
 def test_exact_published_transport_set_is_one_atomic_prior_plan(

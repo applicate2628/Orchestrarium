@@ -17,8 +17,11 @@ import sys
 import tempfile
 import time
 import types
+import urllib.error
+import urllib.parse
+import urllib.request
 from dataclasses import dataclass, field, replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 try:
@@ -30,8 +33,8 @@ try:
         ProcessRequestV1,
         ProcessResultV1,
         ProcessRunnerV1,
+        ProcessSupervisionError,
         SettlePolicyV1,
-        kimi_release_bindings,
         resolve_executable_identity,
     )
 except ModuleNotFoundError:
@@ -43,8 +46,8 @@ except ModuleNotFoundError:
         ProcessRequestV1,
         ProcessResultV1,
         ProcessRunnerV1,
+        ProcessSupervisionError,
         SettlePolicyV1,
-        kimi_release_bindings,
         resolve_executable_identity,
     )
 
@@ -97,9 +100,29 @@ _EXTERNAL_DISPATCH_DECISION_FIELDS = frozenset(
     }
 )
 KIMI_WINDOWS_PROFILE_V1 = KimiWindowsProfileV1
-KIMI_EXECUTABLE_BINDING_SCHEMA_V1 = "orchestrarium.kimi-executable-binding.v1"
-KIMI_EXECUTABLE_BINDING_FILENAME_V1 = "executable-binding-v1.json"
-KIMI_EXECUTABLE_REPLACEMENT_LOCK_FILENAME_V1 = ".kimi-binding.replace.lock"
+KIMI_EXECUTABLE_BINDING_SCHEMA_V2 = "orchestrarium.kimi-executable-binding.v2"
+KIMI_EXECUTABLE_BINDING_FILENAME_V2 = "executable-binding-v2.json"
+KIMI_EXECUTABLE_ADMISSION_LOCK_FILENAME_V2 = ".kimi-binding-v2.lock"
+KIMI_ADMISSION_LOCK_MARKER_V2 = b"orchestrarium-kimi-admission-v2\n"
+KIMI_V2_TRANSACTION_FILENAME = ".kimi-v2-receipt.txn.json"
+KIMI_V2_CANDIDATE_FILENAME = ".kimi-v2-receipt.candidate"
+KIMI_V2_ROLLBACK_FILENAME = ".kimi-v2-receipt.rollback"
+KIMI_V2_UPDATE_FILENAME = ".kimi-v2-receipt.txn.update"
+KIMI_LATEST_URL_V2 = "https://code.kimi.com/kimi-code/latest"
+KIMI_CDN_LATEST_URL_V2 = "https://cdn.kimi.com/kimi-code/latest"
+KIMI_MANIFEST_MAX_BYTES_V2 = 16 * 1024
+KIMI_LATEST_MAX_BYTES_V2 = 32
+KIMI_PROBE_MAX_BYTES_V2 = 64 * 1024
+KIMI_EXECUTABLE_MAX_BYTES_V2 = 512 * 1024 * 1024
+KIMI_OFFLINE_DURATIONS_V2 = {
+    "disabled": timedelta(0),
+    "24h": timedelta(hours=24),
+    "7d": timedelta(days=7),
+}
+KIMI_VERSION_PATTERN_V2 = re.compile(
+    r"^(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})$",
+    re.ASCII,
+)
 SETTINGS_SNAPSHOT_MAX_BYTES = 1024 * 1024
 CLEANUP_ISSUE_LIMIT = 32
 CLEANUP_ISSUE_TOKEN_MAX = 64
@@ -393,6 +416,24 @@ class ResultMaterializationError(RuntimeError):
 
 class ClaudeSubscriptionRefusal(ValueError):
     pass
+
+
+class KimiOfficialChannelUnavailableV2(RuntimeError):
+    """The pinned Moonshot channel could not be reached, without relaxing trust."""
+
+
+@dataclass(frozen=True)
+class KimiHttpResponseV2:
+    status: int
+    headers: dict[str, str]
+    body: bytes
+
+
+@dataclass(frozen=True)
+class KimiV1SnapshotV2:
+    path: Path
+    payload: bytes
+    identity: tuple[int, int, int, int]
 
 
 @dataclass
@@ -705,154 +746,6 @@ class TerminalReceiptV1:
             raise OSError(ctypes.get_last_error(), "GetFileInformationByHandle")
         return info
 
-    @staticmethod
-    def _windows_current_user_security_descriptor():
-        import ctypes
-        from ctypes import wintypes
-
-        TOKEN_QUERY = 0x0008
-        TOKEN_USER_CLASS = 1
-
-        class SID_AND_ATTRIBUTES(ctypes.Structure):
-            _fields_ = [("Sid", ctypes.c_void_p), ("Attributes", wintypes.DWORD)]
-
-        class TOKEN_USER(ctypes.Structure):
-            _fields_ = [("User", SID_AND_ATTRIBUTES)]
-
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
-        kernel32.GetCurrentProcess.argtypes = []
-        kernel32.GetCurrentProcess.restype = wintypes.HANDLE
-        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
-        kernel32.CloseHandle.restype = wintypes.BOOL
-        kernel32.LocalFree.argtypes = [ctypes.c_void_p]
-        kernel32.LocalFree.restype = ctypes.c_void_p
-        advapi32.OpenProcessToken.argtypes = [
-            wintypes.HANDLE,
-            wintypes.DWORD,
-            ctypes.POINTER(wintypes.HANDLE),
-        ]
-        advapi32.OpenProcessToken.restype = wintypes.BOOL
-        advapi32.GetTokenInformation.argtypes = [
-            wintypes.HANDLE,
-            wintypes.DWORD,
-            ctypes.c_void_p,
-            wintypes.DWORD,
-            ctypes.POINTER(wintypes.DWORD),
-        ]
-        advapi32.GetTokenInformation.restype = wintypes.BOOL
-        advapi32.ConvertSidToStringSidW.argtypes = [
-            ctypes.c_void_p,
-            ctypes.POINTER(wintypes.LPWSTR),
-        ]
-        advapi32.ConvertSidToStringSidW.restype = wintypes.BOOL
-        advapi32.ConvertStringSecurityDescriptorToSecurityDescriptorW.argtypes = [
-            wintypes.LPCWSTR,
-            wintypes.DWORD,
-            ctypes.POINTER(ctypes.c_void_p),
-            ctypes.POINTER(wintypes.DWORD),
-        ]
-        advapi32.ConvertStringSecurityDescriptorToSecurityDescriptorW.restype = wintypes.BOOL
-        token = wintypes.HANDLE()
-        if not advapi32.OpenProcessToken(
-            kernel32.GetCurrentProcess(), TOKEN_QUERY, ctypes.byref(token)
-        ):
-            raise OSError(ctypes.get_last_error(), "OpenProcessToken")
-        sid_text = wintypes.LPWSTR()
-        try:
-            size = wintypes.DWORD()
-            advapi32.GetTokenInformation(token, TOKEN_USER_CLASS, None, 0, ctypes.byref(size))
-            if not size.value:
-                raise OSError(ctypes.get_last_error(), "GetTokenInformation(size)")
-            buffer = ctypes.create_string_buffer(size.value)
-            if not advapi32.GetTokenInformation(
-                token, TOKEN_USER_CLASS, buffer, size, ctypes.byref(size)
-            ):
-                raise OSError(ctypes.get_last_error(), "GetTokenInformation")
-            token_user = ctypes.cast(buffer, ctypes.POINTER(TOKEN_USER)).contents
-            if not advapi32.ConvertSidToStringSidW(token_user.User.Sid, ctypes.byref(sid_text)):
-                raise OSError(ctypes.get_last_error(), "ConvertSidToStringSidW")
-            sid = sid_text.value
-        finally:
-            if sid_text:
-                kernel32.LocalFree(sid_text)
-            kernel32.CloseHandle(token)
-        descriptor = ctypes.c_void_p()
-        sddl = f"D:P(A;;FA;;;{sid})"
-        if not advapi32.ConvertStringSecurityDescriptorToSecurityDescriptorW(
-            sddl, 1, ctypes.byref(descriptor), None
-        ):
-            raise OSError(
-                ctypes.get_last_error(),
-                "ConvertStringSecurityDescriptorToSecurityDescriptorW",
-            )
-        return descriptor, sddl
-
-    @staticmethod
-    def _windows_verify_dacl(handle: int, expected_sddl: str) -> None:
-        import ctypes
-        from ctypes import wintypes
-
-        DACL_SECURITY_INFORMATION = 0x00000004
-        SE_FILE_OBJECT = 1
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
-        kernel32.LocalFree.argtypes = [ctypes.c_void_p]
-        kernel32.LocalFree.restype = ctypes.c_void_p
-        advapi32.GetSecurityInfo.argtypes = [
-            wintypes.HANDLE,
-            wintypes.DWORD,
-            wintypes.DWORD,
-            ctypes.c_void_p,
-            ctypes.c_void_p,
-            ctypes.POINTER(ctypes.c_void_p),
-            ctypes.c_void_p,
-            ctypes.POINTER(ctypes.c_void_p),
-        ]
-        advapi32.GetSecurityInfo.restype = wintypes.DWORD
-        advapi32.ConvertSecurityDescriptorToStringSecurityDescriptorW.argtypes = [
-            ctypes.c_void_p,
-            wintypes.DWORD,
-            wintypes.DWORD,
-            ctypes.POINTER(wintypes.LPWSTR),
-            ctypes.POINTER(wintypes.DWORD),
-        ]
-        advapi32.ConvertSecurityDescriptorToStringSecurityDescriptorW.restype = wintypes.BOOL
-        descriptor = ctypes.c_void_p()
-        dacl = ctypes.c_void_p()
-        status = advapi32.GetSecurityInfo(
-            wintypes.HANDLE(handle),
-            SE_FILE_OBJECT,
-            DACL_SECURITY_INFORMATION,
-            None,
-            None,
-            ctypes.byref(dacl),
-            None,
-            ctypes.byref(descriptor),
-        )
-        if status != 0:
-            raise OSError(status, "GetSecurityInfo")
-        rendered = wintypes.LPWSTR()
-        try:
-            if not advapi32.ConvertSecurityDescriptorToStringSecurityDescriptorW(
-                descriptor,
-                1,
-                DACL_SECURITY_INFORMATION,
-                ctypes.byref(rendered),
-                None,
-            ):
-                raise OSError(
-                    ctypes.get_last_error(),
-                    "ConvertSecurityDescriptorToStringSecurityDescriptorW",
-                )
-            if rendered.value != expected_sddl:
-                raise OSError("terminal receipt DACL mismatch")
-        finally:
-            if rendered:
-                kernel32.LocalFree(rendered)
-            if descriptor:
-                kernel32.LocalFree(descriptor)
-
     @classmethod
     def _reserve_windows(cls, path: Path) -> "TerminalReceiptV1":
         import ctypes
@@ -1026,7 +919,9 @@ class TerminalReceiptV1:
                     raise OSError("terminal receipt ancestor type")
             parent = held[-1]
             parent_info = cls._windows_file_information(parent)
-            descriptor, expected_sddl = cls._windows_current_user_security_descriptor()
+            descriptor, expected_sddl = (
+                WindowsPrivateObjectOwnerV1.current_user_security_descriptor()
+            )
             leaf = open_relative(
                 parent,
                 path.name,
@@ -1043,7 +938,7 @@ class TerminalReceiptV1:
                 FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT
             ):
                 raise OSError("terminal receipt leaf type")
-            cls._windows_verify_dacl(leaf, expected_sddl)
+            WindowsPrivateObjectOwnerV1.verify_handle_dacl(leaf, expected_sddl)
             current_parent = cls._windows_file_information(parent)
             before_identity = (
                 parent_info.dwVolumeSerialNumber,
@@ -1169,6 +1064,738 @@ class TerminalReceiptV1:
 
     def __exit__(self, _type, _value, _traceback) -> None:
         self.close()
+
+
+class WindowsPrivateObjectOwnerV1:
+    """One Windows owner for protected current-user-only files and directories."""
+
+    @staticmethod
+    def current_user_security_descriptor():
+        import ctypes
+        from ctypes import wintypes
+
+        TOKEN_QUERY = 0x0008
+        TOKEN_USER_CLASS = 1
+
+        class SID_AND_ATTRIBUTES(ctypes.Structure):
+            _fields_ = [("Sid", ctypes.c_void_p), ("Attributes", wintypes.DWORD)]
+
+        class TOKEN_USER(ctypes.Structure):
+            _fields_ = [("User", SID_AND_ATTRIBUTES)]
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+        kernel32.GetCurrentProcess.argtypes = []
+        kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.LocalFree.argtypes = [ctypes.c_void_p]
+        advapi32.OpenProcessToken.argtypes = [
+            wintypes.HANDLE,
+            wintypes.DWORD,
+            ctypes.POINTER(wintypes.HANDLE),
+        ]
+        advapi32.GetTokenInformation.argtypes = [
+            wintypes.HANDLE,
+            wintypes.DWORD,
+            ctypes.c_void_p,
+            wintypes.DWORD,
+            ctypes.POINTER(wintypes.DWORD),
+        ]
+        advapi32.ConvertSidToStringSidW.argtypes = [
+            ctypes.c_void_p,
+            ctypes.POINTER(wintypes.LPWSTR),
+        ]
+        advapi32.ConvertStringSecurityDescriptorToSecurityDescriptorW.argtypes = [
+            wintypes.LPCWSTR,
+            wintypes.DWORD,
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(wintypes.DWORD),
+        ]
+        for function in (
+            advapi32.OpenProcessToken,
+            advapi32.GetTokenInformation,
+            advapi32.ConvertSidToStringSidW,
+            advapi32.ConvertStringSecurityDescriptorToSecurityDescriptorW,
+        ):
+            function.restype = wintypes.BOOL
+        token = wintypes.HANDLE()
+        if not advapi32.OpenProcessToken(
+            kernel32.GetCurrentProcess(), TOKEN_QUERY, ctypes.byref(token)
+        ):
+            raise OSError(ctypes.get_last_error(), "OpenProcessToken")
+        sid_text = wintypes.LPWSTR()
+        try:
+            size = wintypes.DWORD()
+            advapi32.GetTokenInformation(
+                token, TOKEN_USER_CLASS, None, 0, ctypes.byref(size)
+            )
+            if not size.value:
+                raise OSError(ctypes.get_last_error(), "GetTokenInformation(size)")
+            buffer = ctypes.create_string_buffer(size.value)
+            if not advapi32.GetTokenInformation(
+                token, TOKEN_USER_CLASS, buffer, size, ctypes.byref(size)
+            ):
+                raise OSError(ctypes.get_last_error(), "GetTokenInformation")
+            token_user = ctypes.cast(buffer, ctypes.POINTER(TOKEN_USER)).contents
+            if not advapi32.ConvertSidToStringSidW(
+                token_user.User.Sid, ctypes.byref(sid_text)
+            ):
+                raise OSError(ctypes.get_last_error(), "ConvertSidToStringSidW")
+            sid = sid_text.value
+        finally:
+            if sid_text:
+                kernel32.LocalFree(sid_text)
+            kernel32.CloseHandle(token)
+        descriptor = ctypes.c_void_p()
+        sddl = f"D:P(A;;FA;;;{sid})"
+        if not advapi32.ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            sddl, 1, ctypes.byref(descriptor), None
+        ):
+            raise OSError(
+                ctypes.get_last_error(),
+                "ConvertStringSecurityDescriptorToSecurityDescriptorW",
+            )
+        return descriptor, sddl
+
+    @staticmethod
+    def verify_handle_dacl(handle: int, expected_sddl: str) -> None:
+        import ctypes
+        from ctypes import wintypes
+
+        DACL_SECURITY_INFORMATION = 0x00000004
+        SE_FILE_OBJECT = 1
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+        kernel32.LocalFree.argtypes = [ctypes.c_void_p]
+        advapi32.GetSecurityInfo.argtypes = [
+            wintypes.HANDLE,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.c_void_p,
+            ctypes.POINTER(ctypes.c_void_p),
+        ]
+        advapi32.GetSecurityInfo.restype = wintypes.DWORD
+        advapi32.ConvertSecurityDescriptorToStringSecurityDescriptorW.argtypes = [
+            ctypes.c_void_p,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            ctypes.POINTER(wintypes.LPWSTR),
+            ctypes.POINTER(wintypes.DWORD),
+        ]
+        advapi32.ConvertSecurityDescriptorToStringSecurityDescriptorW.restype = wintypes.BOOL
+        descriptor = ctypes.c_void_p()
+        dacl = ctypes.c_void_p()
+        status = advapi32.GetSecurityInfo(
+            wintypes.HANDLE(handle),
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION,
+            None,
+            None,
+            ctypes.byref(dacl),
+            None,
+            ctypes.byref(descriptor),
+        )
+        if status != 0:
+            raise OSError(status, "GetSecurityInfo")
+        rendered = wintypes.LPWSTR()
+        try:
+            if not advapi32.ConvertSecurityDescriptorToStringSecurityDescriptorW(
+                descriptor,
+                1,
+                DACL_SECURITY_INFORMATION,
+                ctypes.byref(rendered),
+                None,
+            ):
+                raise OSError(
+                    ctypes.get_last_error(),
+                    "ConvertSecurityDescriptorToStringSecurityDescriptorW",
+                )
+            if rendered.value != expected_sddl:
+                raise OSError("private object DACL mismatch")
+        finally:
+            if rendered:
+                kernel32.LocalFree(rendered)
+            if descriptor:
+                kernel32.LocalFree(descriptor)
+
+    @classmethod
+    def _open_verified_handle(
+        cls,
+        path: Path,
+        *,
+        directory: bool,
+        share_delete: bool = True,
+        write_dac: bool = False,
+    ) -> int:
+        import ctypes
+        from ctypes import wintypes
+
+        READ_CONTROL = 0x00020000
+        WRITE_DAC = 0x00040000
+        FILE_READ_ATTRIBUTES = 0x0080
+        FILE_SHARE_READ = 0x00000001
+        FILE_SHARE_WRITE = 0x00000002
+        FILE_SHARE_DELETE = 0x00000004
+        OPEN_EXISTING = 3
+        FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000
+        FILE_FLAG_BACKUP_SEMANTICS = 0x02000000
+        INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.CreateFileW.argtypes = [
+            wintypes.LPCWSTR,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            ctypes.c_void_p,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            wintypes.HANDLE,
+        ]
+        kernel32.CreateFileW.restype = wintypes.HANDLE
+        flags = FILE_FLAG_OPEN_REPARSE_POINT | (
+            FILE_FLAG_BACKUP_SEMANTICS if directory else 0
+        )
+        handle = kernel32.CreateFileW(
+            str(path),
+            READ_CONTROL
+            | FILE_READ_ATTRIBUTES
+            | 0x0001
+            | (WRITE_DAC if write_dac else 0),
+            FILE_SHARE_READ
+            | FILE_SHARE_WRITE
+            | (FILE_SHARE_DELETE if share_delete else 0),
+            None,
+            OPEN_EXISTING,
+            flags,
+            None,
+        )
+        if handle == INVALID_HANDLE_VALUE:
+            raise OSError(ctypes.get_last_error(), "CreateFileW(private-object)")
+        return int(handle)
+
+    @classmethod
+    def protect_handle_and_verify(cls, handle: int) -> None:
+        import ctypes
+        from ctypes import wintypes
+
+        DACL_SECURITY_INFORMATION = 0x00000004
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        ntdll = ctypes.WinDLL("ntdll")
+        kernel32.LocalFree.argtypes = [ctypes.c_void_p]
+        descriptor, expected_sddl = cls.current_user_security_descriptor()
+        ntdll.NtSetSecurityObject.argtypes = [
+            wintypes.HANDLE,
+            wintypes.ULONG,
+            ctypes.c_void_p,
+        ]
+        ntdll.NtSetSecurityObject.restype = ctypes.c_long
+        try:
+            status = ntdll.NtSetSecurityObject(
+                wintypes.HANDLE(handle),
+                DACL_SECURITY_INFORMATION,
+                descriptor,
+            )
+            if status < 0:
+                raise OSError(
+                    f"NtSetSecurityObject status=0x{status & 0xFFFFFFFF:08x}"
+                )
+            cls.verify_handle_dacl(handle, expected_sddl)
+        finally:
+            if descriptor:
+                kernel32.LocalFree(descriptor)
+
+    @classmethod
+    def protect_and_verify(cls, path: Path, *, directory: bool) -> None:
+        import ctypes
+        from ctypes import wintypes
+
+        validate_no_reparse_components(path)
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
+        handle = cls._open_verified_handle(
+            path, directory=directory, write_dac=True
+        )
+        try:
+            cls.protect_handle_and_verify(handle)
+        finally:
+            kernel32.CloseHandle(wintypes.HANDLE(handle))
+
+    @classmethod
+    def verify_existing(cls, path: Path, *, directory: bool) -> None:
+        import ctypes
+        from ctypes import wintypes
+
+        validate_no_reparse_components(path)
+        metadata = path.lstat()
+        if (
+            stat.S_ISLNK(metadata.st_mode)
+            or _metadata_is_reparse(metadata)
+            or (directory and not stat.S_ISDIR(metadata.st_mode))
+            or (not directory and not stat.S_ISREG(metadata.st_mode))
+        ):
+            raise OSError("private object type")
+        descriptor, expected_sddl = cls.current_user_security_descriptor()
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.LocalFree.argtypes = [ctypes.c_void_p]
+        handle = cls._open_verified_handle(path, directory=directory)
+        try:
+            cls.verify_handle_dacl(handle, expected_sddl)
+        finally:
+            kernel32.CloseHandle(wintypes.HANDLE(handle))
+            if descriptor:
+                kernel32.LocalFree(descriptor)
+
+    @classmethod
+    def ensure_directory(cls, path: Path) -> None:
+        if path.exists():
+            cls.verify_existing(path, directory=True)
+            return
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.mkdir()
+        try:
+            cls.protect_and_verify(path, directory=True)
+        except BaseException:
+            try:
+                path.rmdir()
+            except OSError:
+                pass
+            raise
+
+    @staticmethod
+    def reject_named_streams(path: Path) -> None:
+        import ctypes
+        from ctypes import wintypes
+
+        FindStreamInfoStandard = 0
+        ERROR_HANDLE_EOF = 38
+        INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
+
+        class WIN32_FIND_STREAM_DATA(ctypes.Structure):
+            _fields_ = [
+                ("StreamSize", ctypes.c_longlong),
+                ("cStreamName", wintypes.WCHAR * 296),
+            ]
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.FindFirstStreamW.argtypes = [
+            wintypes.LPCWSTR,
+            wintypes.DWORD,
+            ctypes.POINTER(WIN32_FIND_STREAM_DATA),
+            wintypes.DWORD,
+        ]
+        kernel32.FindFirstStreamW.restype = wintypes.HANDLE
+        kernel32.FindNextStreamW.argtypes = [
+            wintypes.HANDLE,
+            ctypes.POINTER(WIN32_FIND_STREAM_DATA),
+        ]
+        kernel32.FindNextStreamW.restype = wintypes.BOOL
+        kernel32.FindClose.argtypes = [wintypes.HANDLE]
+        data = WIN32_FIND_STREAM_DATA()
+        handle = kernel32.FindFirstStreamW(
+            str(path), FindStreamInfoStandard, ctypes.byref(data), 0
+        )
+        if handle == INVALID_HANDLE_VALUE:
+            error = ctypes.get_last_error()
+            if error == ERROR_HANDLE_EOF:
+                return
+            raise OSError(error, "FindFirstStreamW")
+        try:
+            while True:
+                if data.cStreamName != "::$DATA":
+                    raise OSError("named stream present")
+                if not kernel32.FindNextStreamW(handle, ctypes.byref(data)):
+                    error = ctypes.get_last_error()
+                    if error != ERROR_HANDLE_EOF:
+                        raise OSError(error, "FindNextStreamW")
+                    break
+        finally:
+            kernel32.FindClose(handle)
+
+
+@dataclass
+class HeldWindowsObjectV2:
+    path: Path
+    handle: int
+    kind: str
+    identity: tuple[object, ...]
+
+
+class WindowsHeldObjectApiV2:
+    """Held no-share-delete identity API used by the Kimi migration corridor."""
+
+    @staticmethod
+    def identity(handle: int, kind: str) -> tuple[object, ...]:
+        import ctypes
+        from ctypes import wintypes
+
+        class FILE_ID_128(ctypes.Structure):
+            _fields_ = [("Identifier", ctypes.c_ubyte * 16)]
+
+        class FILE_ID_INFO(ctypes.Structure):
+            _fields_ = [
+                ("VolumeSerialNumber", ctypes.c_ulonglong),
+                ("FileId", FILE_ID_128),
+            ]
+
+        class FILE_ATTRIBUTE_TAG_INFO(ctypes.Structure):
+            _fields_ = [
+                ("FileAttributes", wintypes.DWORD),
+                ("ReparseTag", wintypes.DWORD),
+            ]
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.GetFileInformationByHandleEx.argtypes = [
+            wintypes.HANDLE,
+            ctypes.c_int,
+            ctypes.c_void_p,
+            wintypes.DWORD,
+        ]
+        kernel32.GetFileInformationByHandleEx.restype = wintypes.BOOL
+        file_id = FILE_ID_INFO()
+        tag = FILE_ATTRIBUTE_TAG_INFO()
+        if not kernel32.GetFileInformationByHandleEx(
+            wintypes.HANDLE(handle), 18, ctypes.byref(file_id), ctypes.sizeof(file_id)
+        ) or not kernel32.GetFileInformationByHandleEx(
+            wintypes.HANDLE(handle), 9, ctypes.byref(tag), ctypes.sizeof(tag)
+        ):
+            raise OSError(ctypes.get_last_error(), "GetFileInformationByHandleEx")
+        return (
+            int(file_id.VolumeSerialNumber),
+            bytes(file_id.FileId.Identifier),
+            kind,
+            int(tag.FileAttributes),
+            int(tag.ReparseTag),
+        )
+
+    @classmethod
+    def open_path(cls, path: Path, kind: str, *, write_dac: bool = False) -> HeldWindowsObjectV2:
+        import ctypes
+        from ctypes import wintypes
+
+        handle = WindowsPrivateObjectOwnerV1._open_verified_handle(
+            path,
+            directory=kind == "directory",
+            share_delete=False,
+            write_dac=write_dac,
+        )
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.SetHandleInformation.argtypes = [
+            wintypes.HANDLE, wintypes.DWORD, wintypes.DWORD
+        ]
+        if not kernel32.SetHandleInformation(wintypes.HANDLE(handle), 1, 0):
+            kernel32.CloseHandle(wintypes.HANDLE(handle))
+            raise OSError(ctypes.get_last_error(), "SetHandleInformation")
+        return HeldWindowsObjectV2(path, handle, kind, cls.identity(handle, kind))
+
+    @classmethod
+    def open_parent_chain_no_follow(cls, path: Path) -> HeldWindowsObjectV2:
+        validate_no_reparse_components(path.parent)
+        return cls.open_path(path.parent, "directory")
+
+    @classmethod
+    def open_relative(
+        cls,
+        parent: HeldWindowsObjectV2,
+        name: str,
+        kind: str,
+        *,
+        write_dac: bool = False,
+        share_delete: bool = False,
+    ) -> HeldWindowsObjectV2:
+        if not name or name in {".", ".."} or Path(name).name != name:
+            raise OSError("relative name invalid")
+        import ctypes
+        from ctypes import wintypes
+
+        class UNICODE_STRING(ctypes.Structure):
+            _fields_ = [
+                ("Length", wintypes.USHORT),
+                ("MaximumLength", wintypes.USHORT),
+                ("Buffer", wintypes.LPWSTR),
+            ]
+
+        class OBJECT_ATTRIBUTES(ctypes.Structure):
+            _fields_ = [
+                ("Length", wintypes.ULONG),
+                ("RootDirectory", wintypes.HANDLE),
+                ("ObjectName", ctypes.POINTER(UNICODE_STRING)),
+                ("Attributes", wintypes.ULONG),
+                ("SecurityDescriptor", ctypes.c_void_p),
+                ("SecurityQualityOfService", ctypes.c_void_p),
+            ]
+
+        class IO_STATUS_BLOCK(ctypes.Structure):
+            _fields_ = [("Status", ctypes.c_longlong), ("Information", ctypes.c_size_t)]
+
+        READ_CONTROL = 0x00020000
+        WRITE_DAC = 0x00040000
+        FILE_READ_ATTRIBUTES = 0x0080
+        SYNCHRONIZE = 0x00100000
+        FILE_SHARE_READ = 1
+        FILE_SHARE_WRITE = 2
+        FILE_OPEN = 1
+        FILE_DIRECTORY_FILE = 1
+        FILE_SYNCHRONOUS_IO_NONALERT = 0x20
+        FILE_NON_DIRECTORY_FILE = 0x40
+        FILE_OPEN_REPARSE_POINT = 0x00200000
+        OBJ_CASE_INSENSITIVE = 0x40
+        buffer = ctypes.create_unicode_buffer(name)
+        encoded_length = len(name.encode("utf-16-le"))
+        string = UNICODE_STRING(
+            encoded_length,
+            encoded_length + 2,
+            ctypes.cast(buffer, wintypes.LPWSTR),
+        )
+        attributes = OBJECT_ATTRIBUTES(
+            ctypes.sizeof(OBJECT_ATTRIBUTES),
+            wintypes.HANDLE(parent.handle),
+            ctypes.pointer(string),
+            OBJ_CASE_INSENSITIVE,
+            None,
+            None,
+        )
+        iosb = IO_STATUS_BLOCK()
+        opened = wintypes.HANDLE()
+        ntdll = ctypes.WinDLL("ntdll")
+        ntdll.NtCreateFile.restype = ctypes.c_long
+        status = ntdll.NtCreateFile(
+            ctypes.byref(opened),
+            READ_CONTROL
+            | FILE_READ_ATTRIBUTES
+            | SYNCHRONIZE
+            | 1
+            | (WRITE_DAC if write_dac else 0),
+            ctypes.byref(attributes),
+            ctypes.byref(iosb),
+            None,
+            0x80,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | (4 if share_delete else 0),
+            FILE_OPEN,
+            FILE_OPEN_REPARSE_POINT
+            | FILE_SYNCHRONOUS_IO_NONALERT
+            | (FILE_DIRECTORY_FILE if kind == "directory" else FILE_NON_DIRECTORY_FILE),
+            None,
+            0,
+        )
+        if status < 0:
+            raise OSError(f"NtCreateFile status=0x{status & 0xFFFFFFFF:08x}")
+        path = parent.path / name
+        return HeldWindowsObjectV2(
+            path, int(opened.value), kind, cls.identity(int(opened.value), kind)
+        )
+
+    @classmethod
+    def reopen_relative_and_match(
+        cls,
+        held: HeldWindowsObjectV2,
+        parent: HeldWindowsObjectV2 | None = None,
+        name: str | None = None,
+    ) -> None:
+        import ctypes
+        from ctypes import wintypes
+
+        reopened = (
+            cls.open_relative(parent, name, held.kind)
+            if parent is not None and name is not None
+            else cls.open_path(held.path, held.kind)
+        )
+        try:
+            if reopened.identity != held.identity:
+                raise OSError("held object identity mismatch")
+        finally:
+            ctypes.WinDLL("kernel32", use_last_error=True).CloseHandle(
+                wintypes.HANDLE(reopened.handle)
+            )
+
+    @staticmethod
+    def enumerate_directory(held: HeldWindowsObjectV2) -> tuple[str, ...]:
+        import ctypes
+        from ctypes import wintypes
+
+        class IO_STATUS_BLOCK(ctypes.Structure):
+            _fields_ = [("Status", ctypes.c_longlong), ("Information", ctypes.c_size_t)]
+
+        ntdll = ctypes.WinDLL("ntdll")
+        ntdll.NtQueryDirectoryFile.argtypes = [
+            wintypes.HANDLE, wintypes.HANDLE, ctypes.c_void_p, ctypes.c_void_p,
+            ctypes.POINTER(IO_STATUS_BLOCK), ctypes.c_void_p, wintypes.ULONG,
+            ctypes.c_int, wintypes.BOOL, ctypes.c_void_p, wintypes.BOOL,
+        ]
+        ntdll.NtQueryDirectoryFile.restype = ctypes.c_long
+        names: list[str] = []
+        restart = True
+        while True:
+            buffer = ctypes.create_string_buffer(64 * 1024)
+            iosb = IO_STATUS_BLOCK()
+            status = ntdll.NtQueryDirectoryFile(
+                wintypes.HANDLE(held.handle), None, None, None,
+                ctypes.byref(iosb), buffer, len(buffer), 12, False, None, restart,
+            )
+            restart = False
+            if status == ctypes.c_long(0x80000006).value:
+                break
+            if status < 0:
+                raise OSError(f"NtQueryDirectoryFile status=0x{status & 0xFFFFFFFF:08x}")
+            offset = 0
+            while offset < iosb.Information:
+                next_offset = int.from_bytes(buffer.raw[offset : offset + 4], "little")
+                name_length = int.from_bytes(buffer.raw[offset + 8 : offset + 12], "little")
+                name = buffer.raw[offset + 12 : offset + 12 + name_length].decode("utf-16-le")
+                if name not in {".", ".."}:
+                    names.append(name)
+                if not next_offset:
+                    break
+                offset += next_offset
+            if iosb.Information == 0:
+                break
+        return tuple(sorted(names))
+
+    @staticmethod
+    def read_exact(held: HeldWindowsObjectV2, limit: int) -> bytes:
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        position = ctypes.c_longlong()
+        if not kernel32.SetFilePointerEx(
+            wintypes.HANDLE(held.handle), ctypes.c_longlong(0), ctypes.byref(position), 0
+        ):
+            raise OSError(ctypes.get_last_error(), "SetFilePointerEx")
+        buffer = ctypes.create_string_buffer(limit + 1)
+        read = wintypes.DWORD()
+        if not kernel32.ReadFile(
+            wintypes.HANDLE(held.handle), buffer, limit + 1,
+            ctypes.byref(read), None,
+        ):
+            raise OSError(ctypes.get_last_error(), "ReadFile")
+        if read.value > limit:
+            raise OSError("held read limit")
+        return bytes(buffer.raw[: read.value])
+
+    @staticmethod
+    def close(held: HeldWindowsObjectV2 | None) -> None:
+        if held is None or held.handle < 0:
+            return
+        import ctypes
+        from ctypes import wintypes
+
+        ctypes.WinDLL("kernel32", use_last_error=True).CloseHandle(
+            wintypes.HANDLE(held.handle)
+        )
+        held.handle = -1
+
+
+@dataclass
+class KimiAdmissionLockV2:
+    path: Path
+    handle: int
+    identity: tuple[object, ...]
+
+    @classmethod
+    def acquire(
+        cls, runtime_root: Path, *, create: bool
+    ) -> "KimiAdmissionLockV2 | None":
+        if os.name != "nt":
+            raise ValueError("E_KIMI_WINDOWS_ONLY")
+        import ctypes
+        from ctypes import wintypes
+
+        GENERIC_READ = 0x80000000
+        GENERIC_WRITE = 0x40000000
+        READ_CONTROL = 0x00020000
+        WRITE_DAC = 0x00040000
+        FILE_READ_ATTRIBUTES = 0x0080
+        OPEN_EXISTING = 3
+        OPEN_ALWAYS = 4
+        FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000
+        ERROR_FILE_NOT_FOUND = 2
+        ERROR_PATH_NOT_FOUND = 3
+        ERROR_SHARING_VIOLATION = 32
+        INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
+        path = runtime_root / KIMI_EXECUTABLE_ADMISSION_LOCK_FILENAME_V2
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.CreateFileW.argtypes = [
+            wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p,
+            wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE,
+        ]
+        kernel32.CreateFileW.restype = wintypes.HANDLE
+        handle = kernel32.CreateFileW(
+            str(path),
+            GENERIC_READ | GENERIC_WRITE | READ_CONTROL | WRITE_DAC | FILE_READ_ATTRIBUTES,
+            0,
+            None,
+            OPEN_ALWAYS if create else OPEN_EXISTING,
+            FILE_FLAG_OPEN_REPARSE_POINT,
+            None,
+        )
+        if handle == INVALID_HANDLE_VALUE:
+            error = ctypes.get_last_error()
+            if error == ERROR_SHARING_VIOLATION:
+                raise ValueError("E_KIMI_ADMISSION_BUSY")
+            if not create and error in {ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND}:
+                return None
+            raise ValueError("E_KIMI_PRIVATE_STATE_INVALID")
+        held = int(handle)
+        create_error = ctypes.get_last_error()
+        try:
+            if not kernel32.SetHandleInformation(wintypes.HANDLE(held), 1, 0):
+                raise OSError(ctypes.get_last_error(), "SetHandleInformation")
+            identity = WindowsHeldObjectApiV2.identity(held, "file")
+            if identity[3] & 0x10 or identity[4] != 0:
+                raise OSError("lock type")
+            existed = create_error == 183
+            lock = cls(path, held, identity)
+            if existed:
+                descriptor, expected_sddl = (
+                    WindowsPrivateObjectOwnerV1.current_user_security_descriptor()
+                )
+                try:
+                    WindowsPrivateObjectOwnerV1.verify_handle_dacl(
+                        held, expected_sddl
+                    )
+                finally:
+                    kernel32.LocalFree(descriptor)
+                if WindowsHeldObjectApiV2.read_exact(
+                    HeldWindowsObjectV2(path, held, "file", identity), 128
+                ) != KIMI_ADMISSION_LOCK_MARKER_V2:
+                    raise OSError("lock marker")
+            else:
+                WindowsPrivateObjectOwnerV1.protect_handle_and_verify(held)
+                written = wintypes.DWORD()
+                buffer = ctypes.create_string_buffer(KIMI_ADMISSION_LOCK_MARKER_V2)
+                if not kernel32.WriteFile(
+                    wintypes.HANDLE(held), buffer, len(KIMI_ADMISSION_LOCK_MARKER_V2),
+                    ctypes.byref(written), None,
+                ) or written.value != len(KIMI_ADMISSION_LOCK_MARKER_V2):
+                    raise OSError(ctypes.get_last_error(), "WriteFile(lock)")
+                if not kernel32.FlushFileBuffers(wintypes.HANDLE(held)):
+                    raise OSError(ctypes.get_last_error(), "FlushFileBuffers(lock)")
+                if WindowsHeldObjectApiV2.read_exact(
+                    HeldWindowsObjectV2(path, held, "file", identity), 128
+                ) != KIMI_ADMISSION_LOCK_MARKER_V2:
+                    raise OSError("lock marker readback")
+            return lock
+        except Exception as exc:
+            kernel32.CloseHandle(wintypes.HANDLE(held))
+            if isinstance(exc, ValueError):
+                raise
+            raise ValueError("E_KIMI_PRIVATE_STATE_INVALID") from exc
+
+    def close(self) -> None:
+        if self.handle < 0:
+            return
+        import ctypes
+        from ctypes import wintypes
+
+        ctypes.WinDLL("kernel32", use_last_error=True).CloseHandle(
+            wintypes.HANDLE(self.handle)
+        )
+        self.handle = -1
+
 
 
 def fail(message: str, code: int = 1) -> int:
@@ -1814,8 +2441,1224 @@ def _reject_repository_path_discovery(
     )
 
 
-def _kimi_binding_path() -> Path:
-    return _kimi_runtime_root() / KIMI_EXECUTABLE_BINDING_FILENAME_V1
+def _kimi_binding_v2_path(runtime_root: Path) -> Path:
+    return runtime_root / KIMI_EXECUTABLE_BINDING_FILENAME_V2
+
+
+def _ensure_kimi_private_root_v2(runtime_root: Path, *, create: bool) -> None:
+    try:
+        if os.name == "nt":
+            if runtime_root.exists():
+                WindowsPrivateObjectOwnerV1.verify_existing(
+                    runtime_root, directory=True
+                )
+            elif create:
+                WindowsPrivateObjectOwnerV1.ensure_directory(runtime_root)
+            return
+        if runtime_root.exists():
+            validate_no_reparse_components(runtime_root)
+            metadata = runtime_root.lstat()
+            if not stat.S_ISDIR(metadata.st_mode) or stat.S_IMODE(metadata.st_mode) != 0o700:
+                raise OSError("Kimi runtime root permissions")
+        elif create:
+            runtime_root.mkdir(mode=0o700, parents=True)
+    except (OSError, ValueError) as exc:
+        raise ValueError("E_KIMI_PRIVATE_STATE_INVALID") from exc
+
+
+def _kimi_version_tuple_v2(value: str) -> tuple[int, int, int]:
+    match = KIMI_VERSION_PATTERN_V2.fullmatch(value)
+    if match is None:
+        raise ValueError("E_KIMI_MANIFEST_INVALID")
+    return tuple(int(part) for part in match.groups())  # type: ignore[return-value]
+
+
+def _kimi_json_no_duplicates_v2(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("E_KIMI_MANIFEST_INVALID")
+        result[key] = value
+    return result
+
+
+class _KimiNoRedirectV2(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, request, fp, code, msg, headers, newurl):
+        return None
+
+
+def _fetch_kimi_https_once_v2(url: str) -> KimiHttpResponseV2:
+    """Fetch one bounded response with system TLS and no proxy or redirect policy."""
+
+    maximum = KIMI_MANIFEST_MAX_BYTES_V2
+    opener = urllib.request.build_opener(
+        urllib.request.ProxyHandler({}), _KimiNoRedirectV2()
+    )
+    request = urllib.request.Request(
+        url,
+        headers={"Accept": "application/json, application/octet-stream"},
+        method="GET",
+    )
+    try:
+        try:
+            response = opener.open(request, timeout=10.0)
+        except urllib.error.HTTPError as exc:
+            response = exc
+        with response:
+            body = response.read(maximum + 1)
+            if len(body) > maximum:
+                raise ValueError("E_KIMI_OFFICIAL_CHANNEL_INVALID")
+            location_values = response.headers.get_all("Location") or []
+            if len(location_values) > 1:
+                raise ValueError("E_KIMI_OFFICIAL_CHANNEL_INVALID")
+            headers = {
+                "location": location_values[0]
+            } if location_values else {}
+            return KimiHttpResponseV2(int(response.status), headers, body)
+    except ValueError:
+        raise
+    except (OSError, TimeoutError, urllib.error.URLError) as exc:
+        raise KimiOfficialChannelUnavailableV2() from exc
+
+
+def _kimi_redirected_body_v2(
+    fetcher,
+    origin_url: str,
+    cdn_url: str,
+    maximum: int,
+) -> bytes:
+    try:
+        origin = fetcher(origin_url)
+        if type(origin) is not KimiHttpResponseV2 or origin.status != 302:
+            raise ValueError("E_KIMI_OFFICIAL_CHANNEL_INVALID")
+        normalized_headers = {
+            str(key).lower(): str(value) for key, value in origin.headers.items()
+        }
+        if normalized_headers != {"location": cdn_url}:
+            raise ValueError("E_KIMI_OFFICIAL_CHANNEL_INVALID")
+        parsed = urllib.parse.urlsplit(cdn_url)
+        if (
+            parsed.scheme != "https"
+            or parsed.hostname != "cdn.kimi.com"
+            or parsed.port is not None
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+            or urllib.parse.urlunsplit(parsed) != cdn_url
+        ):
+            raise ValueError("E_KIMI_OFFICIAL_CHANNEL_INVALID")
+        terminal = fetcher(cdn_url)
+        if (
+            type(terminal) is not KimiHttpResponseV2
+            or terminal.status != 200
+            or terminal.headers.get("location") is not None
+            or len(terminal.body) > maximum
+        ):
+            raise ValueError("E_KIMI_OFFICIAL_CHANNEL_INVALID")
+        return bytes(terminal.body)
+    except KimiOfficialChannelUnavailableV2:
+        raise
+    except (KeyError, TypeError, UnicodeError, ValueError) as exc:
+        if str(exc) == "E_KIMI_OFFICIAL_CHANNEL_INVALID":
+            raise
+        raise ValueError("E_KIMI_OFFICIAL_CHANNEL_INVALID") from exc
+
+
+def _live_kimi_manifest_v2(fetcher) -> tuple[str, str, str, str]:
+    latest_bytes = _kimi_redirected_body_v2(
+        fetcher,
+        KIMI_LATEST_URL_V2,
+        KIMI_CDN_LATEST_URL_V2,
+        KIMI_LATEST_MAX_BYTES_V2,
+    )
+    try:
+        latest_text = latest_bytes.decode("utf-8", errors="strict")
+    except UnicodeError as exc:
+        raise ValueError("E_KIMI_MANIFEST_INVALID") from exc
+    version = latest_text[:-1] if latest_text.endswith("\n") else latest_text
+    _kimi_version_tuple_v2(version)
+    manifest_code = (
+        f"https://code.kimi.com/kimi-code/binaries/{version}/manifest.json"
+    )
+    manifest_cdn = (
+        f"https://cdn.kimi.com/kimi-code/binaries/{version}/manifest.json"
+    )
+    manifest_bytes = _kimi_redirected_body_v2(
+        fetcher, manifest_code, manifest_cdn, KIMI_MANIFEST_MAX_BYTES_V2
+    )
+    try:
+        manifest = json.loads(
+            manifest_bytes.decode("utf-8", errors="strict"),
+            object_pairs_hook=_kimi_json_no_duplicates_v2,
+        )
+        if type(manifest) is not dict or set(manifest) != {"version", "tag", "platforms"}:
+            raise ValueError("E_KIMI_MANIFEST_INVALID")
+        if manifest["version"] != version or manifest["tag"] != (
+            f"@moonshot-ai/kimi-code@{version}"
+        ):
+            raise ValueError("E_KIMI_MANIFEST_INVALID")
+        platforms = manifest["platforms"]
+        if type(platforms) is not dict or not 1 <= len(platforms) <= 16:
+            raise ValueError("E_KIMI_MANIFEST_INVALID")
+        for name, entry in platforms.items():
+            if (
+                not isinstance(name, str)
+                or not re.fullmatch(r"[a-z0-9]+-[a-z0-9]+", name, re.ASCII)
+                or type(entry) is not dict
+                or set(entry) != {"filename", "checksum"}
+                or not isinstance(entry["filename"], str)
+                or not isinstance(entry["checksum"], str)
+                or re.fullmatch(r"[a-f0-9]{64}", entry["checksum"], re.ASCII) is None
+            ):
+                raise ValueError("E_KIMI_MANIFEST_INVALID")
+        selected = platforms.get("win32-x64")
+        if (
+            type(selected) is not dict
+            or selected["filename"] != "kimi-code-win32-x64.exe"
+        ):
+            raise ValueError("E_KIMI_MANIFEST_INVALID")
+        return (
+            version,
+            str(selected["filename"]),
+            str(selected["checksum"]),
+            hashlib.sha256(manifest_bytes).hexdigest(),
+        )
+    except (KeyError, TypeError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError("E_KIMI_MANIFEST_INVALID") from exc
+
+
+def _observe_kimi_executable_v2(path: Path) -> ExecutableBindingV1:
+    try:
+        validate_no_reparse_components(path)
+        before = path.lstat()
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or stat.S_ISLNK(before.st_mode)
+            or _metadata_is_reparse(before)
+            or not 0 < before.st_size <= KIMI_EXECUTABLE_MAX_BYTES_V2
+        ):
+            raise OSError("Kimi executable metadata")
+        flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(path, flags)
+        digest = hashlib.sha256()
+        with os.fdopen(descriptor, "rb") as stream:
+            opened = os.fstat(stream.fileno())
+            if (opened.st_dev, opened.st_ino, opened.st_size) != (
+                before.st_dev,
+                before.st_ino,
+                before.st_size,
+            ):
+                raise OSError("Kimi executable identity")
+            while chunk := stream.read(1024 * 1024):
+                digest.update(chunk)
+        after = path.lstat()
+        if (
+            before.st_dev,
+            before.st_ino,
+            before.st_size,
+            before.st_mtime_ns,
+        ) != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns):
+            raise OSError("Kimi executable drift")
+        return ExecutableBindingV1(
+            str(path),
+            before.st_size,
+            digest.hexdigest(),
+            before.st_dev,
+            before.st_ino,
+            before.st_mode,
+            before.st_mtime_ns,
+        )
+    except (OSError, ValueError, UnicodeError) as exc:
+        raise ValueError("E_KIMI_EXECUTABLE_IDENTITY_INVALID") from exc
+
+
+def _default_kimi_probe_runner_v2(
+    executable: Path,
+    argv: tuple[str, ...],
+    environment: dict[str, str],
+    cwd: Path,
+    binding: ExecutableBindingV1,
+) -> bytes:
+    runner = ProcessRunnerV1()
+    try:
+        sink = runner.mint_memory_capture_sink()
+        request = ProcessRequestV1(
+            schema_version=1,
+            argv=(str(executable), *argv),
+            resolved_executable=executable,
+            cwd=str(cwd),
+            environment=tuple(
+                EnvironmentRowV1(name, value) for name, value in environment.items()
+            ),
+            stdin_bytes=None,
+            deadline_monotonic=time.monotonic() + 10.0,
+            capture_policy=CapturePolicyV1(
+                "kimi-metadata-probe-v2", KIMI_PROBE_MAX_BYTES_V2, 0, 0, 4096
+            ),
+            capture_sink_binding=sink,
+            settle_policy=SettlePolicyV1(5.0),
+            windows_argv_profile_id=KIMI_WINDOWS_PROFILE_V1.probe_profile_id,
+            expected_executable_binding=binding,
+        )
+        result = runner.run(request)
+        stdout = sink.bytes_for("stdout")
+        stderr = sink.bytes_for("stderr")
+        if (
+            result.outcome != "success"
+            or result.target_exit_code != 0
+            or stderr
+            or len(stdout) > KIMI_PROBE_MAX_BYTES_V2
+        ):
+            raise ValueError("E_KIMI_PROBE_INVALID")
+        return stdout
+    except (OSError, ProcessSupervisionError, ValueError) as exc:
+        if str(exc) == "E_KIMI_PROBE_INVALID":
+            raise
+        raise ValueError("E_KIMI_PROBE_INVALID") from exc
+    finally:
+        runner.close()
+
+
+def _probe_kimi_executable_v2(
+    executable: Path,
+    runtime_root: Path | None,
+    binding: ExecutableBindingV1,
+    version: str,
+    probe_runner,
+) -> tuple[str, str]:
+    try:
+        if runtime_root is not None:
+            _ensure_kimi_private_root_v2(runtime_root, create=True)
+        with tempfile.TemporaryDirectory(
+            prefix="orchestrarium-kimi-probe-",
+            dir=runtime_root,
+        ) as temporary:
+            private_home = Path(temporary)
+            if os.name == "nt":
+                WindowsPrivateObjectOwnerV1.protect_and_verify(
+                    private_home, directory=True
+                )
+            else:
+                os.chmod(private_home, 0o700)
+            environment = {
+                "KIMI_CODE_HOME": str(private_home),
+                "KIMI_CODE_NO_AUTO_UPDATE": "1",
+            }
+            system_root = os.environ.get("SYSTEMROOT")
+            if os.name == "nt":
+                if not system_root:
+                    raise ValueError("E_KIMI_PROBE_INVALID")
+                environment["SYSTEMROOT"] = system_root
+            version_output = probe_runner(
+                executable, ("--version",), environment, private_home, binding
+            )
+            help_output = probe_runner(
+                executable, ("--help",), environment, private_home, binding
+            )
+        if (
+            not isinstance(version_output, bytes)
+            or not isinstance(help_output, bytes)
+            or len(version_output) > KIMI_PROBE_MAX_BYTES_V2
+            or len(help_output) > KIMI_PROBE_MAX_BYTES_V2
+            or version_output.decode("utf-8", errors="strict").strip() != version
+        ):
+            raise ValueError("E_KIMI_PROBE_INVALID")
+        help_text = help_output.decode("utf-8", errors="strict")
+        required = ("--agent-file", "--skills-dir", "--model", "--output-format", "--prompt")
+        if any(flag not in help_text for flag in required):
+            raise ValueError("E_KIMI_PROBE_INVALID")
+        return (
+            hashlib.sha256(version_output).hexdigest(),
+            hashlib.sha256(help_output).hexdigest(),
+        )
+    except (OSError, UnicodeError, ValueError) as exc:
+        if str(exc) == "E_KIMI_PROBE_INVALID":
+            raise
+        raise ValueError("E_KIMI_PROBE_INVALID") from exc
+
+
+def _classify_kimi_v1_state_v2(
+    runtime_root: Path, executable: Path
+) -> KimiV1SnapshotV2 | None:
+    path = runtime_root / "executable-binding-v1.json"
+    if not os.path.lexists(path):
+        return None
+    try:
+        validate_no_reparse_components(path)
+        before = path.lstat()
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or stat.S_ISLNK(before.st_mode)
+            or _metadata_is_reparse(before)
+            or before.st_size > 4096
+        ):
+            raise OSError("V1 type")
+        descriptor = os.open(
+            path,
+            os.O_RDONLY
+            | getattr(os, "O_BINARY", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+        )
+        with os.fdopen(descriptor, "rb") as stream:
+            opened = os.fstat(stream.fileno())
+            if (opened.st_dev, opened.st_ino, opened.st_size) != (
+                before.st_dev,
+                before.st_ino,
+                before.st_size,
+            ):
+                raise OSError("V1 identity")
+            payload = stream.read(4097)
+        after = path.lstat()
+        identity = (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
+        if identity != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns):
+            raise OSError("V1 drift")
+        data = json.loads(
+            payload.decode("utf-8", errors="strict"),
+            object_pairs_hook=_kimi_json_no_duplicates_v2,
+        )
+        if type(data) is not dict or set(data) != {"path", "schema", "sha256", "size"}:
+            raise ValueError("customized")
+        expected = {
+            "path": str(executable),
+            "schema": "orchestrarium.kimi-executable-binding.v1",
+            "sha256": data["sha256"],
+            "size": data["size"],
+        }
+        canonical = json.dumps(
+            expected, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8") + b"\n"
+        if (
+            data != expected
+            or payload != canonical
+            or not isinstance(data["size"], int)
+            or not 0 < data["size"] <= KIMI_EXECUTABLE_MAX_BYTES_V2
+            or not isinstance(data["sha256"], str)
+            or re.fullmatch(r"[a-f0-9]{64}", data["sha256"], re.ASCII) is None
+        ):
+            raise ValueError("customized")
+        return KimiV1SnapshotV2(path, payload, identity)
+    except (OSError, TypeError, UnicodeError, ValueError, json.JSONDecodeError) as exc:
+        raise ValueError("E_KIMI_V1_STATE_CUSTOMIZED") from exc
+
+
+def _reclaim_kimi_v1_after_v2_v2(
+    snapshot: KimiV1SnapshotV2,
+    runtime_root: Path,
+    expected_binding: ExecutableBindingV1,
+    reclaim_hook=None,
+) -> None:
+    receipt = _read_kimi_v2_receipt(runtime_root)
+    if (
+        receipt is None
+        or receipt["path"] != expected_binding.path
+        or receipt["size"] != expected_binding.size
+        or not secrets.compare_digest(
+            str(receipt["sha256"]), expected_binding.sha256
+        )
+    ):
+        raise ValueError("E_KIMI_V2_RECLAIM_PENDING")
+    try:
+        current_binding = _observe_kimi_executable_v2(Path(expected_binding.path))
+        if current_binding != expected_binding:
+            raise OSError("current executable changed before V1 reclaim")
+        current = snapshot.path.lstat()
+        identity = (
+            current.st_dev,
+            current.st_ino,
+            current.st_size,
+            current.st_mtime_ns,
+        )
+        if identity != snapshot.identity or snapshot.path.read_bytes() != snapshot.payload:
+            raise OSError("V1 changed before reclaim")
+        if reclaim_hook is not None:
+            reclaim_hook()
+        snapshot.path.unlink()
+        if os.path.lexists(snapshot.path):
+            raise OSError("V1 remains after reclaim")
+    except OSError as exc:
+        raise ValueError("E_KIMI_V2_RECLAIM_PENDING") from exc
+
+
+class KimiAdmissionStateOwnerV2:
+    """Classify and harden only the fixed legacy corridor before admission."""
+
+    def __init__(
+        self,
+        runtime_root: Path,
+        executable: Path,
+        admission_lock: KimiAdmissionLockV2,
+        hook=None,
+    ) -> None:
+        self.root = runtime_root
+        self.executable = executable
+        self.admission_lock = admission_lock
+        self.lock_path = admission_lock.path
+        self.hook = hook or (lambda _event: None)
+        self.held_parent: HeldWindowsObjectV2 | None = None
+        self.held_root: HeldWindowsObjectV2 | None = None
+        self.held_v1: HeldWindowsObjectV2 | None = None
+        self.held_runs: HeldWindowsObjectV2 | None = None
+        self.v1_snapshot: KimiV1SnapshotV2 | None = None
+
+    def _ordinary_directory(self, path: Path) -> None:
+        validate_no_reparse_components(path)
+        metadata = path.lstat()
+        if not stat.S_ISDIR(metadata.st_mode) or _metadata_is_reparse(metadata):
+            raise ValueError("E_KIMI_PRIVATE_STATE_INVALID")
+        if os.name == "nt":
+            WindowsPrivateObjectOwnerV1.reject_named_streams(path)
+
+    def prepare_write(self) -> KimiV1SnapshotV2 | None:
+        if not self.root.exists():
+            raise ValueError("E_KIMI_PRIVATE_STATE_INVALID")
+        self._ordinary_directory(self.root)
+        if os.name == "nt":
+            self.held_parent = WindowsHeldObjectApiV2.open_parent_chain_no_follow(
+                self.root
+            )
+            self.held_root = WindowsHeldObjectApiV2.open_relative(
+                self.held_parent,
+                self.root.name,
+                "directory",
+                write_dac=True,
+            )
+            names = set(WindowsHeldObjectApiV2.enumerate_directory(self.held_root))
+        else:
+            names = {path.name for path in self.root.iterdir()}
+        if self.lock_path.name not in names or not self.lock_path.is_file():
+            raise ValueError("E_KIMI_ADMISSION_BUSY")
+        if WindowsHeldObjectApiV2.identity(
+            self.admission_lock.handle, "file"
+        ) != self.admission_lock.identity:
+            raise ValueError("E_KIMI_PRIVATE_STATE_INVALID")
+        transaction_names = {
+            KIMI_V2_TRANSACTION_FILENAME,
+            KIMI_V2_CANDIDATE_FILENAME,
+            KIMI_V2_ROLLBACK_FILENAME,
+            KIMI_V2_UPDATE_FILENAME,
+        }
+        target = _kimi_binding_v2_path(self.root)
+        v1_path = self.root / "executable-binding-v1.json"
+        runs = self.root / "runs"
+        if names & transaction_names:
+            _ensure_kimi_private_root_v2(self.root, create=False)
+            KimiReceiptTransactionV2(self.root).recover_if_needed()
+            names = {path.name for path in self.root.iterdir()}
+        if target.exists():
+            allowed = {target.name, v1_path.name, runs.name, self.lock_path.name}
+            if not names <= allowed:
+                raise ValueError("E_KIMI_PRIVATE_STATE_INVALID")
+            if runs.exists():
+                self._ordinary_directory(runs)
+                if any(runs.iterdir()):
+                    raise ValueError("E_KIMI_V1_MIGRATION_BUSY")
+            _ensure_kimi_private_root_v2(self.root, create=False)
+            if os.name == "nt":
+                if runs.exists():
+                    WindowsPrivateObjectOwnerV1.verify_existing(
+                        runs, directory=True
+                    )
+                WindowsPrivateObjectOwnerV1.reject_named_streams(target)
+                WindowsPrivateObjectOwnerV1.verify_existing(target, directory=False)
+            snapshot = _classify_kimi_v1_state_v2(self.root, self.executable)
+            if snapshot is not None and os.name == "nt":
+                self.held_v1 = WindowsHeldObjectApiV2.open_relative(
+                    self.held_root, v1_path.name, "file", write_dac=True
+                )
+                if WindowsHeldObjectApiV2.read_exact(self.held_v1, 4096) != snapshot.payload:
+                    raise ValueError("E_KIMI_V1_STATE_CUSTOMIZED")
+            if runs.exists() and os.name == "nt":
+                self.held_runs = WindowsHeldObjectApiV2.open_relative(
+                    self.held_root, runs.name, "directory", write_dac=True
+                )
+            self.v1_snapshot = snapshot
+            return snapshot
+        if names == {self.lock_path.name}:
+            _ensure_kimi_private_root_v2(self.root, create=False)
+            return None
+        if not v1_path.exists():
+            raise ValueError("E_KIMI_PRIVATE_STATE_INVALID")
+        if not names <= {v1_path.name, runs.name, self.lock_path.name}:
+            raise ValueError("E_KIMI_PRIVATE_STATE_INVALID")
+        if os.name == "nt":
+            WindowsPrivateObjectOwnerV1.reject_named_streams(v1_path)
+        if runs.exists():
+            self._ordinary_directory(runs)
+            if any(runs.iterdir()):
+                raise ValueError("E_KIMI_V1_MIGRATION_BUSY")
+        snapshot = _classify_kimi_v1_state_v2(self.root, self.executable)
+        if snapshot is None:
+            raise ValueError("E_KIMI_V1_STATE_CUSTOMIZED")
+        self.v1_snapshot = snapshot
+        try:
+            if os.name == "nt":
+                self.held_v1 = WindowsHeldObjectApiV2.open_relative(
+                    self.held_root, v1_path.name, "file", write_dac=True
+                )
+                if WindowsHeldObjectApiV2.read_exact(self.held_v1, 4096) != snapshot.payload:
+                    raise OSError("held V1 mismatch")
+                if runs.exists():
+                    self.held_runs = WindowsHeldObjectApiV2.open_relative(
+                        self.held_root, runs.name, "directory", write_dac=True
+                    )
+                self.checkpoint(expect_v1=True)
+                WindowsPrivateObjectOwnerV1.protect_handle_and_verify(
+                    self.held_root.handle
+                )
+            else:
+                os.chmod(self.root, 0o700)
+            self.hook("after-root-hardening")
+            if os.name == "nt":
+                WindowsPrivateObjectOwnerV1.protect_handle_and_verify(
+                    self.held_v1.handle
+                )
+            else:
+                os.chmod(v1_path, 0o600)
+            self.hook("after-v1-hardening")
+            if runs.exists():
+                if os.name == "nt":
+                    WindowsPrivateObjectOwnerV1.protect_handle_and_verify(
+                        self.held_runs.handle
+                    )
+                else:
+                    os.chmod(runs, 0o700)
+                self.hook("after-runs-hardening")
+            if os.name == "nt" and WindowsHeldObjectApiV2.read_exact(
+                self.held_v1, 4096
+            ) != snapshot.payload:
+                raise OSError("legacy held bytes changed during hardening")
+            current = v1_path.lstat()
+            if (current.st_dev, current.st_ino, current.st_size, current.st_mtime_ns) != snapshot.identity:
+                raise OSError("legacy state changed during hardening")
+            self.checkpoint(expect_v1=True)
+        except Exception as exc:
+            raise ValueError("E_KIMI_PRIVATE_STATE_INVALID") from exc
+        self.v1_snapshot = snapshot
+        return snapshot
+
+    def checkpoint(self, *, expect_v1: bool) -> None:
+        if os.name != "nt" or self.held_root is None:
+            return
+        WindowsHeldObjectApiV2.reopen_relative_and_match(
+            self.held_root, self.held_parent, self.root.name
+        )
+        names = set(WindowsHeldObjectApiV2.enumerate_directory(self.held_root))
+        allowed = {
+            KIMI_EXECUTABLE_ADMISSION_LOCK_FILENAME_V2,
+            KIMI_EXECUTABLE_BINDING_FILENAME_V2,
+            "runs",
+        }
+        if expect_v1:
+            allowed.add("executable-binding-v1.json")
+        if names - allowed or (expect_v1 and "executable-binding-v1.json" not in names):
+            raise ValueError("E_KIMI_PRIVATE_STATE_INVALID")
+        if self.held_v1 is not None and expect_v1:
+            WindowsHeldObjectApiV2.reopen_relative_and_match(
+                self.held_v1, self.held_root, "executable-binding-v1.json"
+            )
+            if WindowsHeldObjectApiV2.read_exact(self.held_v1, 4096) != self.v1_snapshot.payload:
+                raise ValueError("E_KIMI_V1_STATE_CUSTOMIZED")
+        if self.held_runs is not None:
+            WindowsHeldObjectApiV2.reopen_relative_and_match(
+                self.held_runs, self.held_root, "runs"
+            )
+            if WindowsHeldObjectApiV2.enumerate_directory(self.held_runs):
+                raise ValueError("E_KIMI_V1_MIGRATION_BUSY")
+
+    def release_v1_for_reclaim(self) -> None:
+        WindowsHeldObjectApiV2.close(self.held_v1)
+        self.held_v1 = None
+
+    def close(self) -> None:
+        WindowsHeldObjectApiV2.close(self.held_v1)
+        WindowsHeldObjectApiV2.close(self.held_runs)
+        WindowsHeldObjectApiV2.close(self.held_root)
+        WindowsHeldObjectApiV2.close(self.held_parent)
+
+
+def _read_kimi_v2_receipt(runtime_root: Path) -> dict[str, object] | None:
+    if any(
+        os.path.lexists(runtime_root / name)
+        for name in (
+            KIMI_V2_TRANSACTION_FILENAME,
+            KIMI_V2_CANDIDATE_FILENAME,
+            KIMI_V2_ROLLBACK_FILENAME,
+            KIMI_V2_UPDATE_FILENAME,
+        )
+    ):
+        raise ValueError("E_KIMI_V2_RECEIPT_STATE_INDETERMINATE")
+    path = _kimi_binding_v2_path(runtime_root)
+    if not os.path.lexists(path):
+        return None
+    try:
+        validate_no_reparse_components(path)
+        metadata = path.lstat()
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or stat.S_ISLNK(metadata.st_mode)
+            or _metadata_is_reparse(metadata)
+            or metadata.st_size > 8192
+        ):
+            raise OSError("Kimi V2 receipt metadata")
+        if os.name == "nt":
+            WindowsPrivateObjectOwnerV1.verify_existing(path, directory=False)
+        payload = path.read_bytes()
+        data = json.loads(
+            payload.decode("utf-8", errors="strict"),
+            object_pairs_hook=_kimi_json_no_duplicates_v2,
+        )
+        required = {
+            "schema", "version", "filename", "path", "size", "sha256",
+            "manifestSha256", "versionProbeSha256", "helpProbeSha256",
+            "admittedAt", "maxObservedUtc", "offlinePolicy",
+        }
+        if type(data) is not dict or set(data) != required:
+            raise ValueError("receipt shape")
+        _kimi_version_tuple_v2(str(data["version"]))
+        if (
+            data["schema"] != KIMI_EXECUTABLE_BINDING_SCHEMA_V2
+            or data["filename"] != "kimi-code-win32-x64.exe"
+            or data["offlinePolicy"] not in KIMI_OFFLINE_DURATIONS_V2
+            or not isinstance(data["size"], int)
+            or not 0 < data["size"] <= KIMI_EXECUTABLE_MAX_BYTES_V2
+            or any(
+                re.fullmatch(r"[a-f0-9]{64}", str(data[key]), re.ASCII) is None
+                for key in (
+                    "sha256", "manifestSha256", "versionProbeSha256", "helpProbeSha256"
+                )
+            )
+        ):
+            raise ValueError("receipt values")
+        admitted = datetime.fromisoformat(str(data["admittedAt"]).replace("Z", "+00:00"))
+        maximum = datetime.fromisoformat(
+            str(data["maxObservedUtc"]).replace("Z", "+00:00")
+        )
+        if admitted.tzinfo != timezone.utc or maximum.tzinfo != timezone.utc or maximum < admitted:
+            raise ValueError("receipt time")
+        return data
+    except (OSError, TypeError, UnicodeError, ValueError, json.JSONDecodeError) as exc:
+        raise ValueError("E_KIMI_V2_RECEIPT_INVALID") from exc
+
+
+class KimiReceiptTransactionV2:
+    """Rollback-only fixed-path transaction for one private V2 receipt."""
+
+    def __init__(self, runtime_root: Path, hook=None) -> None:
+        self.root = runtime_root
+        self.target = _kimi_binding_v2_path(runtime_root)
+        self.record = runtime_root / KIMI_V2_TRANSACTION_FILENAME
+        self.candidate = runtime_root / KIMI_V2_CANDIDATE_FILENAME
+        self.rollback = runtime_root / KIMI_V2_ROLLBACK_FILENAME
+        self.update = runtime_root / KIMI_V2_UPDATE_FILENAME
+        self.hook = hook or (lambda _event: None)
+
+    def _emit(self, event: str) -> None:
+        self.hook(event)
+
+    def _write_private(self, path: Path, payload: bytes) -> None:
+        descriptor = os.open(
+            path,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0),
+            0o600,
+        )
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        if os.name == "nt":
+            WindowsPrivateObjectOwnerV1.protect_and_verify(path, directory=False)
+
+    def _record_payload(
+        self, phase: str, prior: bytes | None, candidate: bytes
+    ) -> bytes:
+        target_identity = None
+        if self.target.exists():
+            stat_row = self.target.stat()
+            target_identity = [stat_row.st_dev, stat_row.st_ino, stat_row.st_size, stat_row.st_mtime_ns]
+        data = {
+            "schema": "orchestrarium.kimi-receipt-transaction.v2",
+            "version": 2,
+            "priorPresent": prior is not None,
+            "priorSize": len(prior) if prior is not None else 0,
+            "priorSha256": hashlib.sha256(prior or b"").hexdigest(),
+            "candidateSize": len(candidate),
+            "candidateSha256": hashlib.sha256(candidate).hexdigest(),
+            "capturedIdentity": target_identity,
+            "phase": phase,
+        }
+        return json.dumps(data, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+
+    def _cleanup(self, *, keep_record: bool = False) -> None:
+        paths = (self.candidate, self.rollback, self.update) if keep_record else (
+            self.candidate, self.rollback, self.update, self.record
+        )
+        for path in paths:
+            path.unlink(missing_ok=True)
+
+    def _prove_prior(self, prior: bytes | None) -> None:
+        if prior is None:
+            if os.path.lexists(self.target):
+                raise OSError("target remains")
+        elif not self.target.is_file() or self.target.read_bytes() != prior:
+            raise OSError("prior receipt mismatch")
+
+    def _rollback(self, prior: bytes | None) -> None:
+        self._emit("rollback-start")
+        if prior is None:
+            self.target.unlink(missing_ok=True)
+        else:
+            if not self.rollback.is_file() or self.rollback.read_bytes() != prior:
+                raise OSError("rollback anchor mismatch")
+            os.replace(self.rollback, self.target)
+            if os.name == "nt":
+                WindowsPrivateObjectOwnerV1.verify_existing(self.target, directory=False)
+        self._prove_prior(prior)
+        self._cleanup()
+
+    def _update_phase(self, phase: str, prior: bytes | None, candidate: bytes) -> None:
+        if self.update.exists():
+            old = json.loads(self.record.read_text(encoding="utf-8"))
+            self._discard_valid_update(old)
+        self._write_private(
+            self.update, self._record_payload(phase, prior, candidate)
+        )
+        self._emit("after-phase-update-temp-" + phase)
+        os.replace(self.update, self.record)
+        if os.name == "nt":
+            WindowsPrivateObjectOwnerV1.verify_existing(self.record, directory=False)
+
+    def _discard_valid_update(self, durable: dict[str, object]) -> None:
+        try:
+            if os.name == "nt":
+                WindowsPrivateObjectOwnerV1.verify_existing(
+                    self.update, directory=False
+                )
+            payload = self.update.read_bytes()
+            if len(payload) > 4096:
+                raise OSError("update record too large")
+            update = json.loads(payload.decode("utf-8"))
+            canonical = json.dumps(
+                update, sort_keys=True, separators=(",", ":")
+            ).encode() + b"\n"
+            transitions = {
+                "PREPARED_ROLLBACK": "COMMIT_DECIDED",
+                "COMMIT_DECIDED": "SETTLED_COMMITTED",
+            }
+            if (
+                type(update) is not dict
+                or payload != canonical
+                or transitions.get(str(durable.get("phase"))) != update.get("phase")
+                or any(
+                    update.get(key) != value
+                    for key, value in durable.items()
+                    if key not in {"phase", "capturedIdentity"}
+                )
+                or set(update) != set(durable)
+            ):
+                raise OSError("update record inconsistent")
+            current = self.target.stat()
+            if update.get("capturedIdentity") != [
+                current.st_dev,
+                current.st_ino,
+                current.st_size,
+                current.st_mtime_ns,
+            ]:
+                raise OSError("update target identity inconsistent")
+            self.update.unlink()
+            if os.path.lexists(self.update):
+                raise OSError("update record remains")
+        except Exception as exc:
+            raise ValueError("E_KIMI_V2_RECEIPT_STATE_INDETERMINATE") from exc
+
+    def _validate_candidate_target(self, data: dict[str, object]) -> None:
+        if (
+            not self.target.is_file()
+            or self.target.stat().st_size != data["candidateSize"]
+            or hashlib.sha256(self.target.read_bytes()).hexdigest()
+            != data["candidateSha256"]
+        ):
+            raise OSError("candidate target mismatch")
+        if os.name == "nt":
+            WindowsPrivateObjectOwnerV1.verify_existing(self.target, directory=False)
+
+    def _forward_settle(
+        self, data: dict[str, object], prior: bytes | None, candidate: bytes
+    ) -> None:
+        self._validate_candidate_target(data)
+        self.rollback.unlink(missing_ok=True)
+        if os.path.lexists(self.rollback):
+            raise OSError("rollback anchor remains")
+        self._update_phase("SETTLED_COMMITTED", prior, candidate)
+        self.candidate.unlink(missing_ok=True)
+        self.record.unlink()
+        if any(
+            os.path.lexists(path)
+            for path in (self.candidate, self.rollback, self.update, self.record)
+        ):
+            raise OSError("transaction residue")
+
+    def recover_if_needed(self) -> None:
+        artifacts = tuple(
+            path
+            for path in (self.record, self.candidate, self.rollback, self.update)
+            if os.path.lexists(path)
+        )
+        if not artifacts:
+            return
+        try:
+            if not self.record.is_file():
+                raise OSError("transaction record missing")
+            data = json.loads(self.record.read_text(encoding="utf-8"))
+            required = {
+                "schema", "version", "priorPresent", "priorSize", "priorSha256",
+                "candidateSize", "candidateSha256", "capturedIdentity", "phase",
+            }
+            if (
+                type(data) is not dict
+                or set(data) != required
+                or data.get("schema") != "orchestrarium.kimi-receipt-transaction.v2"
+                or data.get("version") != 2
+                or data.get("phase") not in {
+                    "PREPARED_ROLLBACK", "COMMIT_DECIDED", "SETTLED_COMMITTED"
+                }
+                or not isinstance(data.get("priorPresent"), bool)
+                or not isinstance(data.get("priorSize"), int)
+                or not isinstance(data.get("candidateSize"), int)
+            ):
+                raise OSError("transaction record invalid")
+            if self.update.exists():
+                self._discard_valid_update(data)
+            prior = self.rollback.read_bytes() if self.rollback.is_file() else None
+            if prior is not None and (
+                len(prior) != data["priorSize"]
+                or hashlib.sha256(prior).hexdigest() != data["priorSha256"]
+            ):
+                raise OSError("rollback anchor invalid")
+            phase = data["phase"]
+            if phase == "PREPARED_ROLLBACK":
+                target_bytes = self.target.read_bytes() if self.target.is_file() else None
+                target_is_candidate = (
+                    target_bytes is not None
+                    and len(target_bytes) == data["candidateSize"]
+                    and hashlib.sha256(target_bytes).hexdigest()
+                    == data["candidateSha256"]
+                )
+                target_is_prior = (
+                    data["priorPresent"]
+                    and target_bytes is not None
+                    and len(target_bytes) == data["priorSize"]
+                    and hashlib.sha256(target_bytes).hexdigest() == data["priorSha256"]
+                )
+                if target_is_candidate:
+                    if data["priorPresent"] and prior is None:
+                        raise OSError("rollback anchor missing")
+                    self._rollback(prior)
+                elif target_is_prior or (
+                    not data["priorPresent"] and target_bytes is None
+                ):
+                    self._cleanup()
+                else:
+                    raise OSError("prepared transaction target mismatch")
+            elif phase == "COMMIT_DECIDED":
+                candidate = self.target.read_bytes()
+                self._forward_settle(data, prior, candidate)
+            else:
+                self._validate_candidate_target(data)
+                self._cleanup()
+        except Exception as exc:
+            raise ValueError("E_KIMI_V2_RECEIPT_STATE_INDETERMINATE") from exc
+
+    def commit(self, payload: bytes) -> None:
+        self.recover_if_needed()
+        prior = self.target.read_bytes() if self.target.exists() else None
+        switched = False
+        decided = False
+        try:
+            self._write_private(
+                self.record,
+                self._record_payload("PREPARED_ROLLBACK", prior, payload),
+            )
+            self._emit("after-op-2")
+            if prior is not None:
+                self._write_private(self.rollback, prior)
+            self._emit("after-op-3")
+            self._write_private(self.candidate, payload)
+            self._emit("after-op-4")
+            if self.candidate.read_bytes() != payload:
+                raise OSError("candidate validation")
+            self._emit("after-op-5")
+            os.replace(self.candidate, self.target)
+            switched = True
+            self._emit("after-op-6")
+            self._emit("after-switch")
+            if os.name == "nt":
+                WindowsPrivateObjectOwnerV1.protect_and_verify(self.target, directory=False)
+            self._emit("after-target-protect")
+            if self.target.read_bytes() != payload:
+                raise OSError("candidate readback mismatch")
+            self._emit("after-target-readback")
+            self._emit("after-op-7")
+            self._update_phase("COMMIT_DECIDED", prior, payload)
+            decided = True
+            self._emit("after-op-8")
+            self._emit("before-cleanup")
+            self.rollback.unlink(missing_ok=True)
+            self._emit("after-op-9")
+            self._update_phase("SETTLED_COMMITTED", prior, payload)
+            self._emit("after-op-10")
+            self.candidate.unlink(missing_ok=True)
+            self.record.unlink()
+            self._emit("after-op-11")
+            if any(
+                os.path.lexists(path)
+                for path in (self.candidate, self.rollback, self.update, self.record)
+            ):
+                raise OSError("transaction residue")
+            self._emit("after-op-12")
+        except Exception as exc:
+            try:
+                if decided:
+                    data = json.loads(self.record.read_text(encoding="utf-8"))
+                    self._forward_settle(data, prior, payload)
+                    return
+                elif switched:
+                    self._rollback(prior)
+                else:
+                    self._cleanup()
+                    self._prove_prior(prior)
+            except Exception as rollback_exc:
+                raise ValueError("E_KIMI_V2_RECEIPT_STATE_INDETERMINATE") from rollback_exc
+            raise ValueError("E_KIMI_V2_RECEIPT_WRITE_FAILED") from exc
+
+
+def _write_kimi_v2_receipt(
+    runtime_root: Path, data: dict[str, object], *, transaction_hook=None
+) -> None:
+    _ensure_kimi_private_root_v2(runtime_root, create=True)
+    payload = json.dumps(data, sort_keys=True, separators=(",", ":")).encode("utf-8") + b"\n"
+    KimiReceiptTransactionV2(runtime_root, transaction_hook).commit(payload)
+
+
+def _admit_kimi_executable_v2_locked(
+    home: Path,
+    runtime_root: Path,
+    *,
+    fetcher=None,
+    probe_runner=None,
+    now_utc: datetime | None = None,
+    offline_policy: str | None = None,
+    dry_run: bool,
+    transaction_hook=None,
+    checkpoint_before_publish=None,
+    checkpoint_after_publish=None,
+) -> ExecutableBindingV1:
+    """Admit the fixed installed Kimi object from live Moonshot evidence or V2 cache."""
+
+    fetcher = fetcher or _fetch_kimi_https_once_v2
+    probe_runner = probe_runner or _default_kimi_probe_runner_v2
+    now = now_utc or datetime.now(timezone.utc)
+    if now.tzinfo != timezone.utc:
+        raise ValueError("E_KIMI_CLOCK_INVALID")
+    executable = _fixed_kimi_executable(home)
+    previous = _read_kimi_v2_receipt(runtime_root)
+    if previous is not None:
+        previous_admitted = datetime.fromisoformat(
+            str(previous["admittedAt"]).replace("Z", "+00:00")
+        )
+        previous_maximum = datetime.fromisoformat(
+            str(previous["maxObservedUtc"]).replace("Z", "+00:00")
+        )
+        if now < previous_maximum:
+            raise ValueError("E_KIMI_CLOCK_ROLLBACK")
+    try:
+        version, filename, checksum, manifest_hash = _live_kimi_manifest_v2(fetcher)
+        online = True
+    except KimiOfficialChannelUnavailableV2:
+        online = False
+    if not online:
+        if previous is None:
+            raise ValueError("E_KIMI_LIVE_EVIDENCE_REQUIRED")
+        policy = str(previous["offlinePolicy"])
+        if offline_policy is not None and offline_policy != policy:
+            raise ValueError("E_KIMI_OFFLINE_POLICY_INVALID")
+        if policy == "disabled":
+            raise ValueError("E_KIMI_LIVE_EVIDENCE_REQUIRED")
+        admitted = previous_admitted
+        if now - admitted > KIMI_OFFLINE_DURATIONS_V2[policy]:
+            raise ValueError("E_KIMI_OFFLINE_EXPIRED")
+        binding = _observe_kimi_executable_v2(executable)
+        if (
+            previous["path"] != binding.path
+            or previous["size"] != binding.size
+            or not secrets.compare_digest(str(previous["sha256"]), binding.sha256)
+        ):
+            raise ValueError("E_KIMI_EXECUTABLE_IDENTITY_INVALID")
+        version_probe, help_probe = _probe_kimi_executable_v2(
+            executable,
+            None if dry_run else runtime_root,
+            binding,
+            str(previous["version"]),
+            probe_runner,
+        )
+        if (
+            not secrets.compare_digest(
+                str(previous["versionProbeSha256"]), version_probe
+            )
+            or not secrets.compare_digest(str(previous["helpProbeSha256"]), help_probe)
+        ):
+            raise ValueError("E_KIMI_PROBE_INVALID")
+        if not dry_run:
+            advanced = dict(previous)
+            advanced["maxObservedUtc"] = now.isoformat(timespec="seconds").replace(
+                "+00:00", "Z"
+            )
+            if checkpoint_before_publish is not None:
+                checkpoint_before_publish()
+            _write_kimi_v2_receipt(
+                runtime_root, advanced, transaction_hook=transaction_hook
+            )
+            if checkpoint_after_publish is not None:
+                checkpoint_after_publish()
+        return binding
+
+    assert online
+    selected_policy = offline_policy or (
+        str(previous["offlinePolicy"]) if previous is not None else "disabled"
+    )
+    if selected_policy not in KIMI_OFFLINE_DURATIONS_V2:
+        raise ValueError("E_KIMI_OFFLINE_POLICY_INVALID")
+    if previous is not None:
+        previous_version = _kimi_version_tuple_v2(str(previous["version"]))
+        candidate_version = _kimi_version_tuple_v2(version)
+        if candidate_version < previous_version:
+            raise ValueError("E_KIMI_ADMISSION_DOWNGRADE")
+    binding = _observe_kimi_executable_v2(executable)
+    if not secrets.compare_digest(binding.sha256, checksum):
+        raise ValueError("E_KIMI_EXECUTABLE_IDENTITY_INVALID")
+    version_probe, help_probe = _probe_kimi_executable_v2(
+        executable,
+        None if dry_run else runtime_root,
+        binding,
+        version,
+        probe_runner,
+    )
+    receipt: dict[str, object] = {
+        "schema": KIMI_EXECUTABLE_BINDING_SCHEMA_V2,
+        "version": version,
+        "filename": filename,
+        "path": binding.path,
+        "size": binding.size,
+        "sha256": binding.sha256,
+        "manifestSha256": manifest_hash,
+        "versionProbeSha256": version_probe,
+        "helpProbeSha256": help_probe,
+        "admittedAt": now.isoformat(timespec="seconds").replace("+00:00", "Z"),
+        "maxObservedUtc": now.isoformat(timespec="seconds").replace("+00:00", "Z"),
+        "offlinePolicy": selected_policy,
+    }
+    if previous is not None and _kimi_version_tuple_v2(version) == _kimi_version_tuple_v2(
+        str(previous["version"])
+    ):
+        identity_keys = (
+            "version", "filename", "path", "size", "sha256", "manifestSha256",
+            "versionProbeSha256", "helpProbeSha256",
+        )
+        if any(previous[key] != receipt[key] for key in identity_keys):
+            raise ValueError("E_KIMI_ADMISSION_EQUIVOCATION")
+    if not dry_run:
+        if checkpoint_before_publish is not None:
+            checkpoint_before_publish()
+        _write_kimi_v2_receipt(
+            runtime_root, receipt, transaction_hook=transaction_hook
+        )
+        if checkpoint_after_publish is not None:
+            checkpoint_after_publish()
+    return binding
+
+
+def admit_kimi_executable_v2(
+    home: Path,
+    runtime_root: Path,
+    *,
+    fetcher=None,
+    probe_runner=None,
+    now_utc: datetime | None = None,
+    offline_policy: str | None = None,
+    dry_run: bool,
+    _transaction_hook=None,
+    _hardening_hook=None,
+    _reclaim_hook=None,
+) -> ExecutableBindingV1:
+    """Serialize V2 high-water decisions and remove only the lock this call owns."""
+
+    if os.name != "nt":
+        raise ValueError("E_KIMI_WINDOWS_ONLY")
+    executable = _fixed_kimi_executable(home)
+    if dry_run:
+        if runtime_root.exists():
+            _ensure_kimi_private_root_v2(runtime_root, create=False)
+        v1_snapshot = _classify_kimi_v1_state_v2(runtime_root, executable)
+        return _admit_kimi_executable_v2_locked(
+            home,
+            runtime_root,
+            fetcher=fetcher,
+            probe_runner=probe_runner,
+            now_utc=now_utc,
+            offline_policy=offline_policy,
+            dry_run=True,
+            transaction_hook=_transaction_hook,
+        )
+    if runtime_root.exists():
+        validate_no_reparse_components(runtime_root)
+        root_metadata = runtime_root.lstat()
+        if not stat.S_ISDIR(root_metadata.st_mode) or _metadata_is_reparse(root_metadata):
+            raise ValueError("E_KIMI_PRIVATE_STATE_INVALID")
+    else:
+        _ensure_kimi_private_root_v2(runtime_root, create=True)
+    lock = runtime_root / KIMI_EXECUTABLE_ADMISSION_LOCK_FILENAME_V2
+    admission_lock: KimiAdmissionLockV2 | None = None
+    state_owner: KimiAdmissionStateOwnerV2 | None = None
+    try:
+        admission_lock = KimiAdmissionLockV2.acquire(runtime_root, create=True)
+        if admission_lock is None:
+            raise ValueError("E_KIMI_PRIVATE_STATE_INVALID")
+        state_owner = KimiAdmissionStateOwnerV2(
+            runtime_root, executable, admission_lock, _hardening_hook
+        )
+        v1_snapshot = state_owner.prepare_write()
+        state_owner.checkpoint(expect_v1=v1_snapshot is not None)
+        result = _admit_kimi_executable_v2_locked(
+            home,
+            runtime_root,
+            fetcher=fetcher,
+            probe_runner=probe_runner,
+            now_utc=now_utc,
+            offline_policy=offline_policy,
+            dry_run=False,
+            transaction_hook=_transaction_hook,
+            checkpoint_before_publish=lambda: state_owner.checkpoint(
+                expect_v1=v1_snapshot is not None
+            ),
+            checkpoint_after_publish=lambda: state_owner.checkpoint(
+                expect_v1=v1_snapshot is not None
+            ),
+        )
+        if v1_snapshot is not None:
+            state_owner.release_v1_for_reclaim()
+            _reclaim_kimi_v1_after_v2_v2(
+                v1_snapshot,
+                runtime_root,
+                result,
+                reclaim_hook=_reclaim_hook,
+            )
+        state_owner.checkpoint(expect_v1=False)
+        return result
+    finally:
+        if state_owner is not None:
+            state_owner.close()
+        if admission_lock is not None:
+            admission_lock.close()
 
 
 def _kimi_runtime_root() -> Path:
@@ -1850,352 +3693,50 @@ def _fixed_kimi_executable(home: Path) -> Path:
     return absolute_home / ".kimi-code" / "bin" / "kimi.exe"
 
 
-def _observe_kimi_executable(
-    path: Path, failure_id: str, *, require_current: bool = False
-) -> dict[str, object]:
-    try:
-        accepted_bindings = kimi_release_bindings(KimiWindowsProfileV1)
-        validate_no_reparse_components(path)
-        before = path.lstat()
-        if (
-            not stat.S_ISREG(before.st_mode)
-            or stat.S_ISLNK(before.st_mode)
-            or _metadata_is_reparse(before)
-            or before.st_size not in {size for size, _digest in accepted_bindings}
-        ):
-            raise OSError("Kimi executable metadata")
-        digest = hashlib.sha256()
-        flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
-        descriptor = os.open(path, flags)
-        with os.fdopen(descriptor, "rb") as stream:
-            opened = os.fstat(stream.fileno())
-            if (opened.st_dev, opened.st_ino, opened.st_size) != (
-                before.st_dev,
-                before.st_ino,
-                before.st_size,
-            ):
-                raise OSError("Kimi executable identity")
-            while chunk := stream.read(1024 * 1024):
-                digest.update(chunk)
-        after = path.lstat()
-        if (
-            after.st_dev,
-            after.st_ino,
-            after.st_size,
-            after.st_mtime_ns,
-        ) != (
-            before.st_dev,
-            before.st_ino,
-            before.st_size,
-            before.st_mtime_ns,
-        ):
-            raise OSError("Kimi executable drift")
-        observed_sha256 = digest.hexdigest()
-        observed_binding = (before.st_size, observed_sha256)
-        if not any(
-            observed_binding[0] == size
-            and secrets.compare_digest(observed_binding[1], accepted)
-            for size, accepted in accepted_bindings
-        ):
-            raise OSError("Kimi executable digest")
-        if require_current and not (
-            observed_binding[0] == accepted_bindings[0][0]
-            and secrets.compare_digest(observed_binding[1], accepted_bindings[0][1])
-        ):
-            raise OSError("Kimi executable is not the current release")
-        return {
-            "schema": KIMI_EXECUTABLE_BINDING_SCHEMA_V1,
-            "path": str(path),
-            "size": before.st_size,
-            "sha256": observed_sha256,
-        }
-    except (OSError, ValueError, UnicodeError) as exc:
-        raise ValueError(failure_id) from exc
-
-
 def enroll_kimi_executable(
-    home: Path, runtime_root: Path, *, dry_run: bool
-) -> None:
-    """Create the fixed Kimi continuity pin without launching the provider."""
-
-    executable = _fixed_kimi_executable(home)
-    observed = _observe_kimi_executable(
-        executable, "E_KIMI_ENROLLMENT_INVALID: observed release binding"
-    )
-    pin = Path(os.path.abspath(runtime_root)) / KIMI_EXECUTABLE_BINDING_FILENAME_V1
-    if not runtime_root.is_absolute() or pin.parent != runtime_root:
-        raise ValueError("E_KIMI_ENROLLMENT_INVALID: pin root")
-    payload = json.dumps(
-        observed, sort_keys=True, separators=(",", ":")
-    ).encode("utf-8") + b"\n"
-    if os.path.lexists(pin):
-        try:
-            validate_no_reparse_components(pin)
-            metadata = pin.lstat()
-            if (
-                not stat.S_ISREG(metadata.st_mode)
-                or stat.S_ISLNK(metadata.st_mode)
-                or _metadata_is_reparse(metadata)
-            ):
-                raise OSError("existing pin")
-            existing = pin.read_bytes()
-        except (OSError, ValueError) as exc:
-            raise ValueError("E_KIMI_ENROLLMENT_INVALID: existing pin") from exc
-        if existing == payload:
-            print("  Kimi executable enrollment is exact and left byte-exact")
-            return
-        raise ValueError(
-            "E_KIMI_ENROLLMENT_DRIFT: re-enrollment requires explicit replacement workflow"
-        )
-    if dry_run:
-        print("  [dry-run] Kimi executable enrollment would create local continuity pin")
-        return
-    pin.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    try:
-        validate_no_reparse_components(pin.parent)
-    except (OSError, ValueError) as exc:
-        raise ValueError("E_KIMI_ENROLLMENT_INVALID: pin root") from exc
-    descriptor, temporary_name = tempfile.mkstemp(
-        prefix=".kimi-binding.", suffix=".tmp", dir=pin.parent
-    )
-    temporary = Path(temporary_name)
-    try:
-        with os.fdopen(descriptor, "wb") as stream:
-            stream.write(payload)
-            stream.flush()
-            os.fsync(stream.fileno())
-        try:
-            os.link(temporary, pin)
-        except FileExistsError as exc:
-            raise ValueError(
-                "E_KIMI_ENROLLMENT_DRIFT: re-enrollment requires explicit replacement workflow"
-            ) from exc
-        except OSError as exc:
-            raise ValueError("E_KIMI_ENROLLMENT_INVALID: pin create") from exc
-    finally:
-        temporary.unlink(missing_ok=True)
-    if pin.read_bytes() != payload:
-        raise ValueError("E_KIMI_ENROLLMENT_POSTCONDITION")
-
-
-def _validated_kimi_binding_values(
-    data: object, fixed_executable: Path
-) -> tuple[int, str]:
-    if not isinstance(data, dict):
-        raise ValueError("E_KIMI_EXECUTABLE_BINDING_DRIFT")
-    path = Path(data["path"])
-    size = int(data["size"])
-    digest = str(data["sha256"]).lower()
-    accepted = kimi_release_bindings(KimiWindowsProfileV1)
-    if (
-        data.get("schema") != KIMI_EXECUTABLE_BINDING_SCHEMA_V1
-        or not path.is_absolute()
-        or Path(os.path.abspath(path)) != path
-        or path != fixed_executable
-        or path.name.casefold() != "kimi.exe"
-        or not any(
-            size == accepted_size
-            and secrets.compare_digest(digest, accepted_digest)
-            for accepted_size, accepted_digest in accepted
-        )
-    ):
-        raise ValueError("E_KIMI_EXECUTABLE_BINDING_DRIFT")
-    return size, digest
-
-
-def _read_kimi_binding_snapshot(
-    pin: Path,
-    fixed_executable: Path,
+    home: Path,
+    runtime_root: Path,
     *,
-    validation_failure_id: str = "E_KIMI_ENROLLMENT_INVALID: existing pin",
-) -> tuple[bytes, tuple[int, int, int, int], tuple[int, str]]:
-    """Read one ordinary pin through an identity-bound handle."""
+    dry_run: bool,
+    offline_policy: str | None = None,
+) -> None:
+    """Create or refresh the update-resilient V2 admission from live evidence."""
 
-    try:
-        validate_no_reparse_components(pin)
-        before = pin.lstat()
-        if (
-            not stat.S_ISREG(before.st_mode)
-            or stat.S_ISLNK(before.st_mode)
-            or _metadata_is_reparse(before)
-            or before.st_size > 4096
-        ):
-            raise OSError("Kimi binding metadata")
-        flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
-        descriptor = os.open(pin, flags)
-        with os.fdopen(descriptor, "rb") as stream:
-            opened = os.fstat(stream.fileno())
-            if (opened.st_dev, opened.st_ino, opened.st_size) != (
-                before.st_dev,
-                before.st_ino,
-                before.st_size,
-            ):
-                raise OSError("Kimi binding identity")
-            payload = stream.read(4097)
-        after = pin.lstat()
-        identity = (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
-        if identity != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns):
-            raise OSError("Kimi binding drift")
-        data = json.loads(payload.decode("utf-8"))
-    except (OSError, ValueError, KeyError, TypeError, UnicodeError, json.JSONDecodeError) as exc:
-        raise ValueError("E_KIMI_ENROLLMENT_INVALID: existing pin") from exc
-    try:
-        size, digest = _validated_kimi_binding_values(data, fixed_executable)
-    except (KeyError, TypeError, ValueError) as exc:
-        raise ValueError(validation_failure_id) from exc
-    return payload, identity, (size, digest)
-
-
-def _write_kimi_binding_temporary(parent: Path, prefix: str, payload: bytes) -> Path:
-    descriptor, temporary_name = tempfile.mkstemp(prefix=prefix, suffix=".tmp", dir=parent)
-    temporary = Path(temporary_name)
-    try:
-        with os.fdopen(descriptor, "wb") as stream:
-            stream.write(payload)
-            stream.flush()
-            os.fsync(stream.fileno())
-    except BaseException:
-        temporary.unlink(missing_ok=True)
-        raise
-    return temporary
+    admit_kimi_executable_v2(
+        home,
+        runtime_root,
+        offline_policy=offline_policy,
+        dry_run=dry_run,
+    )
 
 
 def replace_kimi_enrollment(
-    home: Path, runtime_root: Path, *, dry_run: bool
+    home: Path,
+    runtime_root: Path,
+    *,
+    dry_run: bool,
+    offline_policy: str | None = None,
 ) -> None:
-    """Atomically rotate one accepted rollback pin to the current release."""
+    """Compatibility alias for a live V2 refresh; no release pin rotation exists."""
 
-    executable = _fixed_kimi_executable(home)
-    observed = _observe_kimi_executable(
-        executable,
-        "E_KIMI_ENROLLMENT_INVALID: current release binding",
-        require_current=True,
+    enroll_kimi_executable(
+        home,
+        runtime_root,
+        dry_run=dry_run,
+        offline_policy=offline_policy,
     )
-    root = Path(os.path.abspath(runtime_root))
-    pin = root / KIMI_EXECUTABLE_BINDING_FILENAME_V1
-    if not runtime_root.is_absolute() or pin.parent != runtime_root:
-        raise ValueError("E_KIMI_ENROLLMENT_INVALID: pin root")
-    payload = json.dumps(observed, sort_keys=True, separators=(",", ":")).encode("utf-8") + b"\n"
-    existing, existing_identity, existing_binding = _read_kimi_binding_snapshot(
-        pin, executable
-    )
-    accepted = kimi_release_bindings(KimiWindowsProfileV1)
-    if existing == payload:
-        print("  Kimi executable enrollment is current and left byte-exact")
-        return
-    if not any(
-        existing_binding[0] == size
-        and secrets.compare_digest(existing_binding[1], digest)
-        for size, digest in accepted[1:]
-    ):
-        raise ValueError("E_KIMI_ENROLLMENT_DRIFT: replacement requires accepted rollback pin")
-    if dry_run:
-        print("  [dry-run] Kimi executable enrollment would rotate rollback pin to current release")
-        return
-
-    lock = root / KIMI_EXECUTABLE_REPLACEMENT_LOCK_FILENAME_V1
-    lock_descriptor: int | None = None
-    lock_identity: tuple[int, int] | None = None
-    candidate: Path | None = None
-    backup: Path | None = None
-    replaced = False
-    try:
-        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
-        try:
-            lock_descriptor = os.open(lock, flags, 0o600)
-        except FileExistsError as exc:
-            raise ValueError("E_KIMI_ENROLLMENT_BUSY") from exc
-        with os.fdopen(lock_descriptor, "wb") as stream:
-            lock_descriptor = None
-            stream.write(b"orchestrarium-kimi-enrollment-replacement-v1\n")
-            stream.flush()
-            os.fsync(stream.fileno())
-            locked = os.fstat(stream.fileno())
-            lock_identity = (locked.st_dev, locked.st_ino)
-
-        current, current_identity, current_binding = _read_kimi_binding_snapshot(
-            pin, executable
-        )
-        if (
-            current != existing
-            or current_identity != existing_identity
-            or current_binding != existing_binding
-        ):
-            raise ValueError("E_KIMI_ENROLLMENT_DRIFT: pin changed during replacement")
-        reobserved = _observe_kimi_executable(
-            executable,
-            "E_KIMI_ENROLLMENT_INVALID: current release changed during replacement",
-            require_current=True,
-        )
-        if reobserved != observed:
-            raise ValueError("E_KIMI_ENROLLMENT_DRIFT: executable changed during replacement")
-        candidate = _write_kimi_binding_temporary(root, ".kimi-binding.candidate.", payload)
-        backup = _write_kimi_binding_temporary(root, ".kimi-binding.rollback.", existing)
-        os.replace(candidate, pin)
-        candidate = None
-        replaced = True
-        committed, _identity, committed_binding = _read_kimi_binding_snapshot(pin, executable)
-        if committed != payload or committed_binding != accepted[0]:
-            raise OSError("Kimi replacement postcondition")
-        committed_executable = _observe_kimi_executable(
-            executable,
-            "E_KIMI_ENROLLMENT_INVALID: current release changed after replacement",
-            require_current=True,
-        )
-        if committed_executable != observed:
-            raise OSError("Kimi replacement executable postcondition")
-        current_lock = lock.lstat()
-        if (current_lock.st_dev, current_lock.st_ino) != lock_identity:
-            raise OSError("Kimi replacement lock identity")
-        lock.unlink()
-        lock_identity = None
-    except (OSError, TypeError, UnicodeError, ValueError) as exc:
-        if not replaced and isinstance(exc, ValueError):
-            raise
-        if replaced and backup is not None:
-            try:
-                os.replace(backup, pin)
-                backup = None
-                restored, _identity, restored_binding = _read_kimi_binding_snapshot(
-                    pin, executable
-                )
-                if restored != existing or restored_binding != existing_binding:
-                    raise OSError("Kimi rollback postcondition")
-            except (OSError, ValueError, TypeError, UnicodeError) as rollback_exc:
-                raise ValueError("E_KIMI_ENROLLMENT_ROLLBACK_FAILED") from rollback_exc
-        raise ValueError("E_KIMI_ENROLLMENT_REPLACE_FAILED") from exc
-    finally:
-        if lock_descriptor is not None:
-            os.close(lock_descriptor)
-        if candidate is not None:
-            candidate.unlink(missing_ok=True)
-        if backup is not None:
-            backup.unlink(missing_ok=True)
-        if lock_identity is not None:
-            try:
-                current_lock = lock.lstat()
-                if (current_lock.st_dev, current_lock.st_ino) == lock_identity:
-                    lock.unlink()
-            except OSError:
-                pass
 
 
 def _resolve_enrolled_kimi_launch() -> tuple[list[str], ExecutableBindingV1]:
     try:
-        binding_path = _kimi_binding_path()
         fixed_path = _fixed_kimi_executable(_kimi_user_home())
-        _payload, _identity, (size, digest) = _read_kimi_binding_snapshot(
-            binding_path,
-            fixed_path,
-            validation_failure_id="E_KIMI_EXECUTABLE_BINDING_DRIFT",
+        binding = admit_kimi_executable_v2(
+            _kimi_user_home(),
+            _kimi_runtime_root(),
+            dry_run=False,
         )
-        if fixed_path.stat().st_size != size:
-            raise ValueError("E_KIMI_EXECUTABLE_BINDING_DRIFT")
-        binding = ExecutableBindingV1(str(fixed_path), size, digest)
         return [str(fixed_path)], binding
     except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
-        if str(exc) == "E_KIMI_EXECUTABLE_BINDING_DRIFT":
-            raise
         raise ValueError(
             "E_KIMI_EXECUTABLE_BINDING_INVALID: run " + _kimi_enrollment_command()
         ) from exc
@@ -2206,17 +3747,86 @@ def resolve_enrolled_kimi_command() -> list[str]:
     return command
 
 
-def verify_kimi_enrollment() -> list[str]:
-    command, expected = _resolve_enrolled_kimi_launch()
-    observed = _observe_kimi_executable(
-        Path(command[0]), "E_KIMI_EXECUTABLE_BINDING_DRIFT"
+def _verify_kimi_executable_v2_under_lock(
+    home: Path,
+    runtime_root: Path,
+    *,
+    probe_runner=None,
+) -> ExecutableBindingV1:
+    """Verify one existing V2 receipt without network, persistence, or high-water advance."""
+
+    probe_runner = probe_runner or _default_kimi_probe_runner_v2
+    if any(
+        os.path.lexists(runtime_root / name)
+        for name in (
+            KIMI_V2_TRANSACTION_FILENAME,
+            KIMI_V2_CANDIDATE_FILENAME,
+            KIMI_V2_ROLLBACK_FILENAME,
+            KIMI_V2_UPDATE_FILENAME,
+        )
+    ):
+        raise ValueError("E_KIMI_V2_RECEIPT_STATE_INDETERMINATE")
+    if not _kimi_binding_v2_path(runtime_root).is_file():
+        raise ValueError("E_KIMI_V2_RECEIPT_INVALID")
+    _ensure_kimi_private_root_v2(runtime_root, create=False)
+    receipt = _read_kimi_v2_receipt(runtime_root)
+    if receipt is None:
+        raise ValueError("E_KIMI_V2_RECEIPT_INVALID")
+    executable = _fixed_kimi_executable(home)
+    binding = _observe_kimi_executable_v2(executable)
+    if (
+        receipt["path"] != binding.path
+        or receipt["size"] != binding.size
+        or not secrets.compare_digest(str(receipt["sha256"]), binding.sha256)
+    ):
+        raise ValueError("E_KIMI_EXECUTABLE_IDENTITY_INVALID")
+    version_probe, help_probe = _probe_kimi_executable_v2(
+        executable,
+        None,
+        binding,
+        str(receipt["version"]),
+        probe_runner,
     )
     if (
-        observed["size"] != expected.size
-        or not secrets.compare_digest(str(observed["sha256"]), expected.sha256)
+        not secrets.compare_digest(
+            str(receipt["versionProbeSha256"]), version_probe
+        )
+        or not secrets.compare_digest(str(receipt["helpProbeSha256"]), help_probe)
     ):
-        raise ValueError("E_KIMI_EXECUTABLE_BINDING_DRIFT")
-    return command
+        raise ValueError("E_KIMI_PROBE_INVALID")
+    return binding
+
+
+def verify_kimi_executable_v2(
+    home: Path,
+    runtime_root: Path,
+    *,
+    probe_runner=None,
+) -> ExecutableBindingV1:
+    if os.name != "nt":
+        raise ValueError("E_KIMI_WINDOWS_ONLY")
+    if not _kimi_binding_v2_path(runtime_root).is_file():
+        raise ValueError("E_KIMI_V2_RECEIPT_INVALID")
+    admission_lock = KimiAdmissionLockV2.acquire(runtime_root, create=False)
+    if admission_lock is None:
+        raise ValueError("E_KIMI_ADMISSION_LOCK_MISSING")
+    try:
+        return _verify_kimi_executable_v2_under_lock(
+            home, runtime_root, probe_runner=probe_runner
+        )
+    finally:
+        admission_lock.close()
+
+
+def verify_kimi_enrollment() -> list[str]:
+    home = _kimi_user_home()
+    fixed_path = _fixed_kimi_executable(home)
+    verify_kimi_executable_v2(
+        home,
+        _kimi_runtime_root(),
+    )
+    return [str(fixed_path)]
+
 
 
 def _truthy(value: str | None) -> bool:

@@ -576,6 +576,62 @@ def test_policy_rejection_stops_before_kimi_prompt_auth_enrollment_run_ledger_or
     assert "E_EXTERNAL_DISPATCH_POLICY_DENIED" in capsys.readouterr().err
 
 
+def test_kimi_admission_failure_commits_nonauthorizing_terminal_without_downstream_side_effects(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    receipt = tmp_path / "terminal.jsonl"
+
+    def forbidden(name: str):
+        return lambda *_args, **_kwargs: pytest.fail(f"{name} reached")
+
+    monkeypatch.setattr(
+        OWNER,
+        "_load_external_dispatch_resolver",
+        lambda: SimpleNamespace(
+            resolve_external_dispatch=lambda *_args: _accepted_kimi_decision(
+                "review", "qa-engineer"
+            )
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        OWNER,
+        "_resolve_enrolled_kimi_launch",
+        lambda: (_ for _ in ()).throw(ValueError("E_KIMI_ADMISSION_EQUIVOCATION")),
+    )
+    for name in (
+        "prompt_bytes",
+        "resolve_provider_auth_configuration",
+        "ledger_helper",
+        "run_ledger",
+        "materialize_kimi_agent_payload",
+        "run_provider_process",
+    ):
+        monkeypatch.setattr(OWNER, name, forbidden(name))
+    monkeypatch.setattr(OWNER.RunCaptureLifecycle, "create", forbidden("capture"))
+
+    assert OWNER.launch(
+        "kimi",
+        [
+            "admission-rejection",
+            "--task-class",
+            "review",
+            "--role",
+            "qa-engineer",
+            "--terminal-receipt",
+            str(receipt.resolve()),
+        ],
+    ) == 1
+
+    line = receipt.read_text(encoding="utf-8").strip()
+    assert line.startswith(OWNER.RESULT_PREFIX)
+    payload = json.loads(line[len(OWNER.RESULT_PREFIX) :])
+    assert payload["authorizing"] is False
+    assert payload["terminalClass"] == "external-nonauthorizing"
+    assert payload["status"] == "blocked"
+
+
 @pytest.mark.parametrize(
     "argv",
     (
