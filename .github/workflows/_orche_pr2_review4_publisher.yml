@@ -1,4 +1,4 @@
-name: Internal PR2 review-fix publisher
+name: Internal PR2 skip-evidence publisher
 
 on:
   push:
@@ -30,49 +30,24 @@ jobs:
 
       - name: Install test dependencies
         run: |
-          python3 -m venv --copies /tmp/orche-review-venv
-          /tmp/orche-review-venv/bin/python -m pip install --disable-pip-version-check pytest PyYAML
-          echo "/tmp/orche-review-venv/bin" >> "$GITHUB_PATH"
+          python3 -m venv --copies /tmp/orche-skip-review-venv
+          /tmp/orche-skip-review-venv/bin/python -m pip install --disable-pip-version-check pytest PyYAML
+          echo "/tmp/orche-skip-review-venv/bin" >> "$GITHUB_PATH"
 
-      - name: Apply reviewed patch, verify, commit, and push
+      - name: Add regression, verify red, implement, verify green, and publish
         shell: bash
         run: |
           set -euo pipefail
-          cp helper/.orche-payload/pr2-review4.patch.gz /tmp/pr2-review4.patch.gz
-          echo '16b161dd63c248a6fe8ef643389311e882d9c68ff2118e6254fa3336824822f8  /tmp/pr2-review4.patch.gz' | sha256sum -c -
-          gzip -dc /tmp/pr2-review4.patch.gz > /tmp/pr2-review4.patch
-
-          cd repo
-          expected=e348ed7760fbb34536d2421148b545f69b67d54a
-          test "$(git rev-parse HEAD)" = "$expected"
-          test -z "$(git status --porcelain=v1)"
-          git apply --check --binary /tmp/pr2-review4.patch
-          git apply --binary /tmp/pr2-review4.patch
-          git add -A
-
-          expected_paths=$(cat <<'EOF'
-          .tmp/test-noop
-          RELEASE_NOTES.md
-          baseline/orchestrarium-v1/README.md
-          baseline/orchestrarium-v1/baseline-pin.json
-          baseline/orchestrarium-v1/tooling/build_inventory.py
-          baseline/orchestrarium-v1/tooling/stage0_evidence.py
-          baseline/orchestrarium-v1/tooling/stage0_orchestrator.py
-          scripts/baseline/build_inventory.py
-          scripts/baseline/stage0_evidence.py
-          scripts/baseline/stage0_orchestrator.py
-          tests/test_orche_baseline_inventory.py
-          tests/test_orche_baseline_pin.py
-          tests/test_orche_review_regressions.py
-          tests/test_orche_verifier_isolation.py
-          EOF
-          )
-          diff -u <(printf '%s\n' "$expected_paths" | sort) <(git diff --cached --name-only | sort)
-          git diff --cached --check
-
           export PYTHONDONTWRITEBYTECODE=1
           export PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
           export TERM=dumb
+
+          python3 helper/.orche-payload/fix_skip_evidence.py repo
+
+          cd repo
+          cmp scripts/baseline/stage0_evidence.py \
+              baseline/orchestrarium-v1/tooling/stage0_evidence.py
+
           for test_file in \
             tests/test_orche_baseline_pin.py \
             tests/test_orche_pytest_baseline.py \
@@ -87,43 +62,62 @@ jobs:
 
           python3 - <<'PY'
           from pathlib import Path
-          import json, re, subprocess, tempfile
+          import json
+          import re
+          import subprocess
+          import tempfile
 
           changed = subprocess.check_output(
-              ['git', 'diff', '--cached', '--name-only', '--', '*.py'], text=True
+              ["git", "diff", "--name-only", "--", "*.py"], text=True
           ).splitlines()
           for name in changed:
-              source = Path(name).read_text(encoding='utf-8')
-              compile(source, name, 'exec')
+              source = Path(name).read_text(encoding="utf-8")
+              compile(source, name, "exec")
 
-          readme = Path('baseline/orchestrarium-v1/README.md').read_text(encoding='utf-8')
-          match = re.search(r'```bash\n(.*?)\n```', readme, re.S)
+          pin = json.loads(
+              Path("baseline/orchestrarium-v1/baseline-pin.json").read_text()
+          )
+          record = pin["tooling"]["stage0Evidence"]
+          actual = subprocess.check_output(
+              ["git", "hash-object", record["path"]], text=True
+          ).strip()
+          assert actual == record["gitBlobSha"], (
+              actual,
+              record["gitBlobSha"],
+          )
+
+          readme = Path(
+              "baseline/orchestrarium-v1/README.md"
+          ).read_text(encoding="utf-8")
+          match = re.search(r"```bash\n(.*?)\n```", readme, re.S)
           assert match
-          with tempfile.NamedTemporaryFile('w', suffix='.sh', delete=False) as handle:
-              handle.write(match.group(1) + '\n')
+          with tempfile.NamedTemporaryFile(
+              "w", suffix=".sh", delete=False
+          ) as handle:
+              handle.write(match.group(1) + "\n")
               shell_path = handle.name
-          subprocess.run(['bash', '-n', shell_path], check=True)
-
-          pin = json.loads(Path('baseline/orchestrarium-v1/baseline-pin.json').read_text())
-          for key in ('inventoryGenerator', 'stage0Evidence', 'stage0Orchestrator'):
-              record = pin['tooling'][key]
-              actual = subprocess.check_output(
-                  ['git', 'hash-object', record['path']], text=True
-              ).strip()
-              assert actual == record['gitBlobSha'], (key, actual, record['gitBlobSha'])
+          subprocess.run(["bash", "-n", shell_path], check=True)
           PY
-
-          cmp scripts/baseline/build_inventory.py baseline/orchestrarium-v1/tooling/build_inventory.py
-          cmp scripts/baseline/stage0_evidence.py baseline/orchestrarium-v1/tooling/stage0_evidence.py
-          cmp scripts/baseline/stage0_orchestrator.py baseline/orchestrarium-v1/tooling/stage0_orchestrator.py
 
           find . -type d -name __pycache__ -prune -exec rm -rf {} +
           git add -A
+
+          expected_paths=$(cat <<'EOF'
+          RELEASE_NOTES.md
+          baseline/orchestrarium-v1/README.md
+          baseline/orchestrarium-v1/baseline-pin.json
+          baseline/orchestrarium-v1/tooling/stage0_evidence.py
+          scripts/baseline/stage0_evidence.py
+          tests/test_orche_verifier_isolation.py
+          EOF
+          )
+          diff -u <(printf '%s\n' "$expected_paths" | sort) \
+            <(git diff --cached --name-only | sort)
           git diff --cached --check
           python3 scripts/check-publication-gate.py
 
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -m 'fix(stage0): make reviewed evidence fail closed'
+          git commit -m 'fix(stage0): preserve synthesized pytest skips'
           git push origin HEAD:orche/impl-000-baseline
           echo "published_commit=$(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
