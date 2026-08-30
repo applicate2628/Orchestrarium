@@ -165,7 +165,7 @@ def _resolved_argv(argv: tuple[str, ...]) -> tuple[Path, tuple[str, ...]]:
     first = Path(argv[0])
     if first.is_absolute():
         executable = first.resolve()
-        actual_argv = argv
+        actual_argv = (str(executable), *argv[1:])
     else:
         located = shutil.which(argv[0])
         if located is None:

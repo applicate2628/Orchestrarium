@@ -41,8 +41,10 @@ def test_repository_discovered_claude_is_rejected_before_secret_read(
     executable.parent.mkdir()
     executable.write_text("raise SystemExit(0)\n", encoding="utf-8")
     relative_executable = os.path.relpath(executable, nested)
+    secret = _secret(tmp_path / "SECRET.md")
 
     monkeypatch.chdir(nested)
+    monkeypatch.setenv("CLAUDE_SECRET_FILE", str(secret))
     monkeypatch.setenv("CLAUDE_BIN", "claude")
     monkeypatch.setenv("PATH", "")
     monkeypatch.setenv("PATHEXT", ".PY")

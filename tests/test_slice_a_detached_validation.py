@@ -94,6 +94,31 @@ def _run_direct(module, tmp_path: Path, command):
     return receipt, attempts
 
 
+def test_platform_python_commands_canonicalize_absolute_executable_alias(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every Python platform check passes its resolved executable as argv[0]."""
+
+    module = _load()
+    canonical_python = Path(sys.executable).resolve()
+    python_alias = tmp_path / canonical_python.name
+    python_alias.symlink_to(canonical_python)
+    monkeypatch.setattr(module.sys, "executable", str(python_alias))
+
+    python_commands = [
+        command
+        for command in module._platform_commands()
+        if command.argv[0] == str(python_alias)
+    ]
+
+    assert python_commands
+    for command in python_commands:
+        executable, actual_argv = module._resolved_argv(command.argv)
+        assert executable == canonical_python
+        assert actual_argv[0] == str(canonical_python)
+
+
 def _process_running(pid: int) -> bool:
     """Use an operating-system process oracle instead of task-list text."""
 

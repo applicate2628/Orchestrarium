@@ -66,6 +66,7 @@ class ClosureFixture(unittest.TestCase):
         # PASS-gate events require their artifact to exist inside the work item.
         (td / "design.md").write_text("fixture artifact\n", encoding="utf-8")
         (td / "a.md").write_text("fixture artifact\n", encoding="utf-8")
+        (td / "b.md").write_text("fixture artifact\n", encoding="utf-8")
         with (td / "agent-runs.jsonl").open("w", encoding="utf-8") as fh:
             for e in events:
                 fh.write(json.dumps(e) + "\n")

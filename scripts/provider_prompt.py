@@ -203,6 +203,7 @@ _CLAUDE_PERMISSION_MODES = frozenset(
 class Control:
     topic: str | None = None
     prompt_file: Path | None = None
+    terminal_receipt: Path | None = None
     ledger: str | None = None
     ledger_role: str | None = None
     ledger_role_explicit: bool = False
@@ -320,7 +321,7 @@ class PolicyBoundLaunch:
     model: str
     effort: str
     role_provenance: ExternalRoleProvenance
-    provenance: ExecutionProvenance
+    provenance: ExecutionProvenance | None
 
 
 @dataclass(frozen=True)
@@ -394,9 +395,590 @@ class ClaudeSubscriptionRefusal(ValueError):
     pass
 
 
+@dataclass
+class TerminalReceiptV1:
+    """One caller-owned, exclusively reserved durable terminal result file."""
+
+    path: Path
+    file_handle: int
+    parent_handle: int
+    windows: bool
+    ancestor_handles: tuple[int, ...] = ()
+    committed: bool = False
+
+    @staticmethod
+    def _validated_path(path: Path) -> Path:
+        candidate = Path(path)
+        if not candidate.is_absolute() or not candidate.name:
+            raise ValueError("E_EXTERNAL_TERMINAL_RECEIPT_PATH_INVALID")
+        if os.name == "nt":
+            raw = str(candidate)
+            lowered = raw.lower()
+            if lowered.startswith(("\\\\?\\", "\\\\.\\", "\\??\\")):
+                raise ValueError("E_EXTERNAL_TERMINAL_RECEIPT_PATH_INVALID")
+            drive_colons = 1 if candidate.drive and candidate.drive.endswith(":") else 0
+            if raw.count(":") != drive_colons:
+                raise ValueError("E_EXTERNAL_TERMINAL_RECEIPT_PATH_INVALID")
+            reserved = re.compile(r"^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$", re.I)
+            for component in candidate.parts[1:]:
+                if (
+                    component in {".", ".."}
+                    or component.endswith((" ", "."))
+                    or reserved.fullmatch(component)
+                ):
+                    raise ValueError("E_EXTERNAL_TERMINAL_RECEIPT_PATH_INVALID")
+        return candidate
+
+    @classmethod
+    def reserve(cls, path: Path) -> "TerminalReceiptV1":
+        candidate = cls._validated_path(path)
+        try:
+            return cls._reserve_windows(candidate) if os.name == "nt" else cls._reserve_posix(candidate)
+        except FileExistsError as exc:
+            raise ValueError("E_EXTERNAL_TERMINAL_RECEIPT_EXISTS") from exc
+        except ValueError:
+            raise
+        except OSError as exc:
+            raise ValueError("E_EXTERNAL_TERMINAL_RECEIPT_UNAVAILABLE") from exc
+
+    @classmethod
+    def _reserve_posix(cls, path: Path) -> "TerminalReceiptV1":
+        nofollow = getattr(os, "O_NOFOLLOW", None)
+        directory = getattr(os, "O_DIRECTORY", None)
+        if nofollow is None or directory is None or os.open not in os.supports_dir_fd:
+            raise ValueError("E_EXTERNAL_TERMINAL_RECEIPT_UNSUPPORTED")
+        parts = path.parts
+        parent = os.open(parts[0], os.O_RDONLY | directory | nofollow)
+        try:
+            for component in parts[1:-1]:
+                if component in {"", ".", ".."}:
+                    raise ValueError("E_EXTERNAL_TERMINAL_RECEIPT_PATH_INVALID")
+                next_parent = os.open(
+                    component,
+                    os.O_RDONLY | directory | nofollow,
+                    dir_fd=parent,
+                )
+                os.close(parent)
+                parent = next_parent
+            descriptor = os.open(
+                parts[-1],
+                os.O_CREAT | os.O_EXCL | os.O_RDWR | nofollow,
+                0o600,
+                dir_fd=parent,
+            )
+            try:
+                os.set_inheritable(descriptor, False)
+                os.fchmod(descriptor, 0o600)
+                metadata = os.fstat(descriptor)
+                if not stat.S_ISREG(metadata.st_mode) or stat.S_IMODE(metadata.st_mode) != 0o600:
+                    raise OSError("terminal receipt permissions")
+            except BaseException:
+                os.close(descriptor)
+                raise
+            return cls(path, descriptor, parent, False)
+        except BaseException:
+            os.close(parent)
+            raise
+
+    @staticmethod
+    def _windows_file_information(handle: int):
+        import ctypes
+        from ctypes import wintypes
+
+        class BY_HANDLE_FILE_INFORMATION(ctypes.Structure):
+            _fields_ = [
+                ("dwFileAttributes", wintypes.DWORD),
+                ("ftCreationTime", wintypes.FILETIME),
+                ("ftLastAccessTime", wintypes.FILETIME),
+                ("ftLastWriteTime", wintypes.FILETIME),
+                ("dwVolumeSerialNumber", wintypes.DWORD),
+                ("nFileSizeHigh", wintypes.DWORD),
+                ("nFileSizeLow", wintypes.DWORD),
+                ("nNumberOfLinks", wintypes.DWORD),
+                ("nFileIndexHigh", wintypes.DWORD),
+                ("nFileIndexLow", wintypes.DWORD),
+            ]
+
+        info = BY_HANDLE_FILE_INFORMATION()
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.GetFileInformationByHandle.argtypes = [
+            wintypes.HANDLE,
+            ctypes.POINTER(BY_HANDLE_FILE_INFORMATION),
+        ]
+        kernel32.GetFileInformationByHandle.restype = wintypes.BOOL
+        if not kernel32.GetFileInformationByHandle(wintypes.HANDLE(handle), ctypes.byref(info)):
+            raise OSError(ctypes.get_last_error(), "GetFileInformationByHandle")
+        return info
+
+    @staticmethod
+    def _windows_current_user_security_descriptor():
+        import ctypes
+        from ctypes import wintypes
+
+        TOKEN_QUERY = 0x0008
+        TOKEN_USER_CLASS = 1
+
+        class SID_AND_ATTRIBUTES(ctypes.Structure):
+            _fields_ = [("Sid", ctypes.c_void_p), ("Attributes", wintypes.DWORD)]
+
+        class TOKEN_USER(ctypes.Structure):
+            _fields_ = [("User", SID_AND_ATTRIBUTES)]
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+        kernel32.GetCurrentProcess.argtypes = []
+        kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
+        kernel32.LocalFree.argtypes = [ctypes.c_void_p]
+        kernel32.LocalFree.restype = ctypes.c_void_p
+        advapi32.OpenProcessToken.argtypes = [
+            wintypes.HANDLE,
+            wintypes.DWORD,
+            ctypes.POINTER(wintypes.HANDLE),
+        ]
+        advapi32.OpenProcessToken.restype = wintypes.BOOL
+        advapi32.GetTokenInformation.argtypes = [
+            wintypes.HANDLE,
+            wintypes.DWORD,
+            ctypes.c_void_p,
+            wintypes.DWORD,
+            ctypes.POINTER(wintypes.DWORD),
+        ]
+        advapi32.GetTokenInformation.restype = wintypes.BOOL
+        advapi32.ConvertSidToStringSidW.argtypes = [
+            ctypes.c_void_p,
+            ctypes.POINTER(wintypes.LPWSTR),
+        ]
+        advapi32.ConvertSidToStringSidW.restype = wintypes.BOOL
+        advapi32.ConvertStringSecurityDescriptorToSecurityDescriptorW.argtypes = [
+            wintypes.LPCWSTR,
+            wintypes.DWORD,
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(wintypes.DWORD),
+        ]
+        advapi32.ConvertStringSecurityDescriptorToSecurityDescriptorW.restype = wintypes.BOOL
+        token = wintypes.HANDLE()
+        if not advapi32.OpenProcessToken(
+            kernel32.GetCurrentProcess(), TOKEN_QUERY, ctypes.byref(token)
+        ):
+            raise OSError(ctypes.get_last_error(), "OpenProcessToken")
+        sid_text = wintypes.LPWSTR()
+        try:
+            size = wintypes.DWORD()
+            advapi32.GetTokenInformation(token, TOKEN_USER_CLASS, None, 0, ctypes.byref(size))
+            if not size.value:
+                raise OSError(ctypes.get_last_error(), "GetTokenInformation(size)")
+            buffer = ctypes.create_string_buffer(size.value)
+            if not advapi32.GetTokenInformation(
+                token, TOKEN_USER_CLASS, buffer, size, ctypes.byref(size)
+            ):
+                raise OSError(ctypes.get_last_error(), "GetTokenInformation")
+            token_user = ctypes.cast(buffer, ctypes.POINTER(TOKEN_USER)).contents
+            if not advapi32.ConvertSidToStringSidW(token_user.User.Sid, ctypes.byref(sid_text)):
+                raise OSError(ctypes.get_last_error(), "ConvertSidToStringSidW")
+            sid = sid_text.value
+        finally:
+            if sid_text:
+                kernel32.LocalFree(sid_text)
+            kernel32.CloseHandle(token)
+        descriptor = ctypes.c_void_p()
+        sddl = f"D:P(A;;FA;;;{sid})"
+        if not advapi32.ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            sddl, 1, ctypes.byref(descriptor), None
+        ):
+            raise OSError(
+                ctypes.get_last_error(),
+                "ConvertStringSecurityDescriptorToSecurityDescriptorW",
+            )
+        return descriptor, sddl
+
+    @staticmethod
+    def _windows_verify_dacl(handle: int, expected_sddl: str) -> None:
+        import ctypes
+        from ctypes import wintypes
+
+        DACL_SECURITY_INFORMATION = 0x00000004
+        SE_FILE_OBJECT = 1
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+        kernel32.LocalFree.argtypes = [ctypes.c_void_p]
+        kernel32.LocalFree.restype = ctypes.c_void_p
+        advapi32.GetSecurityInfo.argtypes = [
+            wintypes.HANDLE,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.c_void_p,
+            ctypes.POINTER(ctypes.c_void_p),
+        ]
+        advapi32.GetSecurityInfo.restype = wintypes.DWORD
+        advapi32.ConvertSecurityDescriptorToStringSecurityDescriptorW.argtypes = [
+            ctypes.c_void_p,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            ctypes.POINTER(wintypes.LPWSTR),
+            ctypes.POINTER(wintypes.DWORD),
+        ]
+        advapi32.ConvertSecurityDescriptorToStringSecurityDescriptorW.restype = wintypes.BOOL
+        descriptor = ctypes.c_void_p()
+        dacl = ctypes.c_void_p()
+        status = advapi32.GetSecurityInfo(
+            wintypes.HANDLE(handle),
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION,
+            None,
+            None,
+            ctypes.byref(dacl),
+            None,
+            ctypes.byref(descriptor),
+        )
+        if status != 0:
+            raise OSError(status, "GetSecurityInfo")
+        rendered = wintypes.LPWSTR()
+        try:
+            if not advapi32.ConvertSecurityDescriptorToStringSecurityDescriptorW(
+                descriptor,
+                1,
+                DACL_SECURITY_INFORMATION,
+                ctypes.byref(rendered),
+                None,
+            ):
+                raise OSError(
+                    ctypes.get_last_error(),
+                    "ConvertSecurityDescriptorToStringSecurityDescriptorW",
+                )
+            if rendered.value != expected_sddl:
+                raise OSError("terminal receipt DACL mismatch")
+        finally:
+            if rendered:
+                kernel32.LocalFree(rendered)
+            if descriptor:
+                kernel32.LocalFree(descriptor)
+
+    @classmethod
+    def _reserve_windows(cls, path: Path) -> "TerminalReceiptV1":
+        import ctypes
+        from ctypes import wintypes
+
+        GENERIC_READ = 0x80000000
+        GENERIC_WRITE = 0x40000000
+        FILE_READ_ATTRIBUTES = 0x0080
+        SYNCHRONIZE = 0x00100000
+        FILE_SHARE_READ = 0x00000001
+        FILE_SHARE_WRITE = 0x00000002
+        OPEN_EXISTING = 3
+        FILE_ATTRIBUTE_NORMAL = 0x00000080
+        FILE_ATTRIBUTE_DIRECTORY = 0x00000010
+        FILE_ATTRIBUTE_REPARSE_POINT = 0x00000400
+        FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000
+        FILE_FLAG_BACKUP_SEMANTICS = 0x02000000
+        HANDLE_FLAG_INHERIT = 0x00000001
+        INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
+        OBJ_CASE_INSENSITIVE = 0x00000040
+        FILE_OPEN = 1
+        FILE_CREATE = 2
+        FILE_DIRECTORY_FILE = 0x00000001
+        FILE_WRITE_THROUGH = 0x00000002
+        FILE_SYNCHRONOUS_IO_NONALERT = 0x00000020
+        FILE_NON_DIRECTORY_FILE = 0x00000040
+        FILE_OPEN_REPARSE_POINT = 0x00200000
+        STATUS_OBJECT_NAME_COLLISION = ctypes.c_long(0xC0000035).value
+
+        class UNICODE_STRING(ctypes.Structure):
+            _fields_ = [
+                ("Length", wintypes.USHORT),
+                ("MaximumLength", wintypes.USHORT),
+                ("Buffer", wintypes.LPWSTR),
+            ]
+
+        class OBJECT_ATTRIBUTES(ctypes.Structure):
+            _fields_ = [
+                ("Length", wintypes.ULONG),
+                ("RootDirectory", wintypes.HANDLE),
+                ("ObjectName", ctypes.POINTER(UNICODE_STRING)),
+                ("Attributes", wintypes.ULONG),
+                ("SecurityDescriptor", ctypes.c_void_p),
+                ("SecurityQualityOfService", ctypes.c_void_p),
+            ]
+
+        class IO_STATUS_BLOCK(ctypes.Structure):
+            _fields_ = [
+                ("Status", ctypes.c_longlong),
+                ("Information", ctypes.c_size_t),
+            ]
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        ntdll = ctypes.WinDLL("ntdll")
+        kernel32.CreateFileW.argtypes = [
+            wintypes.LPCWSTR,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            ctypes.c_void_p,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            wintypes.HANDLE,
+        ]
+        kernel32.CreateFileW.restype = wintypes.HANDLE
+        kernel32.SetHandleInformation.argtypes = [
+            wintypes.HANDLE,
+            wintypes.DWORD,
+            wintypes.DWORD,
+        ]
+        kernel32.SetHandleInformation.restype = wintypes.BOOL
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
+        kernel32.LocalFree.argtypes = [ctypes.c_void_p]
+        kernel32.LocalFree.restype = ctypes.c_void_p
+        ntdll.NtCreateFile.argtypes = [
+            ctypes.POINTER(wintypes.HANDLE),
+            wintypes.DWORD,
+            ctypes.POINTER(OBJECT_ATTRIBUTES),
+            ctypes.POINTER(IO_STATUS_BLOCK),
+            ctypes.c_void_p,
+            wintypes.ULONG,
+            wintypes.ULONG,
+            wintypes.ULONG,
+            wintypes.ULONG,
+            ctypes.c_void_p,
+            wintypes.ULONG,
+        ]
+        ntdll.NtCreateFile.restype = ctypes.c_long
+
+        root = kernel32.CreateFileW(
+            path.anchor,
+            FILE_READ_ATTRIBUTES,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            None,
+            OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+            None,
+        )
+        if root == INVALID_HANDLE_VALUE:
+            raise OSError(ctypes.get_last_error(), "CreateFileW(root)")
+        held: list[int] = [int(root)]
+        descriptor = None
+        leaf = INVALID_HANDLE_VALUE
+
+        def open_relative(
+            parent: int,
+            name: str,
+            *,
+            directory: bool,
+            create: bool,
+            security_descriptor: int | None = None,
+        ) -> int:
+            buffer = ctypes.create_unicode_buffer(name)
+            object_name = UNICODE_STRING(
+                len(name.encode("utf-16-le")),
+                len(name.encode("utf-16-le")) + 2,
+                ctypes.cast(buffer, wintypes.LPWSTR),
+            )
+            attributes = OBJECT_ATTRIBUTES(
+                ctypes.sizeof(OBJECT_ATTRIBUTES),
+                wintypes.HANDLE(parent),
+                ctypes.pointer(object_name),
+                OBJ_CASE_INSENSITIVE,
+                security_descriptor,
+                None,
+            )
+            io_status = IO_STATUS_BLOCK()
+            opened = wintypes.HANDLE()
+            options = FILE_OPEN_REPARSE_POINT | FILE_SYNCHRONOUS_IO_NONALERT | (
+                FILE_DIRECTORY_FILE if directory else FILE_NON_DIRECTORY_FILE | FILE_WRITE_THROUGH
+            )
+            desired = (
+                FILE_READ_ATTRIBUTES | SYNCHRONIZE
+                if directory
+                else GENERIC_READ | GENERIC_WRITE | SYNCHRONIZE
+            )
+            status = ntdll.NtCreateFile(
+                ctypes.byref(opened),
+                desired,
+                ctypes.byref(attributes),
+                ctypes.byref(io_status),
+                None,
+                FILE_ATTRIBUTE_NORMAL,
+                FILE_SHARE_READ | FILE_SHARE_WRITE if directory else 0,
+                FILE_CREATE if create else FILE_OPEN,
+                options,
+                None,
+                0,
+            )
+            if status < 0:
+                if status == STATUS_OBJECT_NAME_COLLISION:
+                    raise FileExistsError(183, "NtCreateFile(receipt)", str(path))
+                raise OSError(f"NtCreateFile status=0x{status & 0xFFFFFFFF:08x}")
+            return int(opened.value)
+
+        try:
+            root_info = cls._windows_file_information(int(root))
+            if (
+                not root_info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY
+                or root_info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT
+            ):
+                raise OSError("terminal receipt root type")
+            for component in path.parts[1:-1]:
+                current = open_relative(held[-1], component, directory=True, create=False)
+                held.append(current)
+                current_info = cls._windows_file_information(current)
+                if (
+                    not current_info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY
+                    or current_info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT
+                ):
+                    raise OSError("terminal receipt ancestor type")
+            parent = held[-1]
+            parent_info = cls._windows_file_information(parent)
+            descriptor, expected_sddl = cls._windows_current_user_security_descriptor()
+            leaf = open_relative(
+                parent,
+                path.name,
+                directory=False,
+                create=True,
+                security_descriptor=descriptor,
+            )
+            if not kernel32.SetHandleInformation(
+                wintypes.HANDLE(leaf), HANDLE_FLAG_INHERIT, 0
+            ):
+                raise OSError(ctypes.get_last_error(), "SetHandleInformation")
+            leaf_info = cls._windows_file_information(leaf)
+            if leaf_info.dwFileAttributes & (
+                FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT
+            ):
+                raise OSError("terminal receipt leaf type")
+            cls._windows_verify_dacl(leaf, expected_sddl)
+            current_parent = cls._windows_file_information(parent)
+            before_identity = (
+                parent_info.dwVolumeSerialNumber,
+                parent_info.nFileIndexHigh,
+                parent_info.nFileIndexLow,
+            )
+            after_identity = (
+                current_parent.dwVolumeSerialNumber,
+                current_parent.nFileIndexHigh,
+                current_parent.nFileIndexLow,
+            )
+            if before_identity != after_identity:
+                raise OSError("terminal receipt parent identity changed")
+            return cls(
+                path,
+                int(leaf),
+                int(parent),
+                True,
+                ancestor_handles=tuple(held),
+            )
+        except BaseException:
+            if leaf != INVALID_HANDLE_VALUE:
+                kernel32.CloseHandle(leaf)
+            for handle in reversed(held):
+                kernel32.CloseHandle(handle)
+            raise
+        finally:
+            if descriptor:
+                kernel32.LocalFree(descriptor)
+
+    def commit(self, line: bytes) -> None:
+        if self.committed or not line or not line.endswith(b"\n"):
+            raise ValueError("E_EXTERNAL_TERMINAL_RECEIPT_COMMIT_INVALID")
+        if self.windows:
+            self._commit_windows(line)
+        else:
+            self._commit_posix(line)
+        self.committed = True
+
+    def _commit_posix(self, line: bytes) -> None:
+        view = memoryview(line)
+        while view:
+            written = os.write(self.file_handle, view)
+            if written <= 0:
+                raise OSError("terminal receipt write")
+            view = view[written:]
+        os.fsync(self.file_handle)
+        os.fsync(self.parent_handle)
+        os.lseek(self.file_handle, 0, os.SEEK_SET)
+        readback = bytearray()
+        while len(readback) <= len(line):
+            chunk = os.read(self.file_handle, len(line) + 1 - len(readback))
+            if not chunk:
+                break
+            readback.extend(chunk)
+        if bytes(readback) != line:
+            raise OSError("terminal receipt exact readback")
+
+    def _commit_windows(self, line: bytes) -> None:
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        offset = 0
+        while offset < len(line):
+            chunk = line[offset : offset + 0x7FFFFFFF]
+            written = wintypes.DWORD()
+            buffer = ctypes.create_string_buffer(chunk)
+            if not kernel32.WriteFile(
+                wintypes.HANDLE(self.file_handle),
+                buffer,
+                len(chunk),
+                ctypes.byref(written),
+                None,
+            ) or written.value != len(chunk):
+                raise OSError(ctypes.get_last_error(), "WriteFile(receipt)")
+            offset += written.value
+        if not kernel32.FlushFileBuffers(wintypes.HANDLE(self.file_handle)):
+            raise OSError(ctypes.get_last_error(), "FlushFileBuffers(receipt)")
+        position = ctypes.c_longlong()
+        if not kernel32.SetFilePointerEx(
+            wintypes.HANDLE(self.file_handle), ctypes.c_longlong(0), ctypes.byref(position), 0
+        ):
+            raise OSError(ctypes.get_last_error(), "SetFilePointerEx(receipt)")
+        buffer = ctypes.create_string_buffer(len(line) + 1)
+        read = wintypes.DWORD()
+        if not kernel32.ReadFile(
+            wintypes.HANDLE(self.file_handle),
+            buffer,
+            len(line) + 1,
+            ctypes.byref(read),
+            None,
+        ):
+            raise OSError(ctypes.get_last_error(), "ReadFile(receipt)")
+        if read.value != len(line) or buffer.raw[: read.value] != line:
+            raise OSError("terminal receipt exact readback")
+
+    def close(self) -> None:
+        if self.file_handle < 0:
+            return
+        if self.windows:
+            import ctypes
+            from ctypes import wintypes
+
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel32.CloseHandle(wintypes.HANDLE(self.file_handle))
+            handles = self.ancestor_handles or (self.parent_handle,)
+            for handle in reversed(handles):
+                kernel32.CloseHandle(wintypes.HANDLE(handle))
+        else:
+            os.close(self.file_handle)
+            os.close(self.parent_handle)
+        self.file_handle = -1
+        self.parent_handle = -1
+
+    def __enter__(self) -> "TerminalReceiptV1":
+        return self
+
+    def __exit__(self, _type, _value, _traceback) -> None:
+        self.close()
+
+
 def fail(message: str, code: int = 1) -> int:
     print(f"FAIL: {message}", file=sys.stderr)
     return code
+
+
+def stable_failure_id_from_exception(exc: BaseException, fallback: str) -> str:
+    match = re.match(r"(E_[A-Z0-9_]{1,127})(?:\b|:)", str(exc), re.ASCII)
+    return match.group(1) if match is not None else fallback
 
 
 def parse_control(argv: list[str], *, external: bool = False) -> Control:
@@ -405,6 +987,7 @@ def parse_control(argv: list[str], *, external: bool = False) -> Control:
     value_flags = {
         "-promptfile": "prompt_file",
         "--prompt-file": "prompt_file",
+        "--terminal-receipt": "terminal_receipt",
         "-ledger": "ledger",
         "--ledger": "ledger",
         "-ledgerrole": "ledger_role",
@@ -442,7 +1025,7 @@ def parse_control(argv: list[str], *, external: bool = False) -> Control:
                 raise ValueError(f"{token} requires a value")
             value = argv[index + 1]
             attr = value_flags[key]
-            if attr == "prompt_file":
+            if attr in {"prompt_file", "terminal_receipt"}:
                 parsed_value: object = Path(value)
             elif attr in {"live_root"}:
                 parsed_value = Path(value)
@@ -2194,6 +2777,69 @@ class RunCaptureLifecycle:
             )
 
 
+@dataclass
+class ReservedExternalRunV1:
+    """Own one reserved receipt and the exact capture lifecycle until finalization."""
+
+    receipt: TerminalReceiptV1
+    lifecycle: RunCaptureLifecycle | None = None
+    state: str = "absent"
+    finalized: bool = False
+    _cleanup_result: CleanupResult | None = None
+
+    def adopt_lifecycle(self, lifecycle: RunCaptureLifecycle) -> None:
+        if self.state != "absent" or self.lifecycle is not None:
+            raise ValueError("E_EXTERNAL_RESERVED_RUN_LIFECYCLE_ALREADY_OWNED")
+        self.lifecycle = lifecycle
+        self.state = "provisional"
+
+    def mark_initialized(self, lifecycle: RunCaptureLifecycle) -> None:
+        if self.state != "provisional" or self.lifecycle is not lifecycle:
+            raise ValueError("E_EXTERNAL_RESERVED_RUN_LIFECYCLE_MISMATCH")
+        self.state = "initialized"
+
+    def cleanup_once(self) -> CleanupResult:
+        if self._cleanup_result is not None:
+            return self._cleanup_result
+        try:
+            if self.state == "absent":
+                result = CleanupResult(())
+            elif self.state == "provisional" and self.lifecycle is not None:
+                result = RunCaptureLifecycle.release_provisional(
+                    self.lifecycle.run_dir
+                )
+            elif self.state == "initialized" and self.lifecycle is not None:
+                result = self.lifecycle.cleanup()
+            else:
+                result = _bounded_cleanup_result(
+                    ("cleanup-state-invalid", "cleanup-retention-unknown"),
+                    recovery_retained=False,
+                )
+        except Exception:
+            result = _bounded_cleanup_result(
+                ("cleanup-owner-failed", "cleanup-retention-unknown"),
+                recovery_retained=False,
+            )
+        self._cleanup_result = result
+        self.state = "cleaned"
+        return result
+
+    def mark_finalized(self) -> None:
+        if self.finalized:
+            raise ValueError("reserved external run is already finalized")
+        if self.state != "cleaned":
+            raise ValueError("E_EXTERNAL_RESERVED_RUN_CLEANUP_REQUIRED")
+        self.finalized = True
+
+    def __enter__(self) -> "ReservedExternalRunV1":
+        return self
+
+    def __exit__(self, _type, _value, _traceback) -> None:
+        if not self.finalized:
+            self.cleanup_once()
+        self.receipt.close()
+
+
 def _bounded_cleanup_result(
     issues: tuple[str, ...], *, recovery_retained: bool
 ) -> CleanupResult:
@@ -2652,14 +3298,19 @@ def credential_scan_terminal(
 
 
 def provider_output_safety_scan_terminal(
-    provider: str, needles: tuple[bytes, ...], *, stdout: bytes, stderr: bytes
+    provider: str,
+    needles: tuple[bytes, ...],
+    *,
+    stdout: bytes,
+    stderr: bytes,
+    serialized_line: bool = False,
 ) -> str | None:
-    """Reuse the publication machine-path classifier before serializing Kimi output."""
+    """Reuse the sole credential/path detectors for every public terminal line."""
 
     credential = credential_scan_terminal(needles, stdout=stdout, stderr=stderr)
     if credential is not None:
         return credential
-    if provider != "kimi":
+    if provider != "kimi" and not serialized_line:
         return None
     try:
         script_dir = Path(__file__).resolve().parent
@@ -2879,27 +3530,31 @@ def capture_overflow_terminal(stream: StreamCaptureResult) -> TerminalResult:
     )
 
 
-def with_emit_failure(outcome: FinalOutcome) -> FinalOutcome:
+def serialized_safety_failure_outcome(
+    outcome: FinalOutcome, stable_id: str
+) -> FinalOutcome:
+    """Return a path/detail-free blocked result after the public line fails scanning."""
+
     return FinalOutcome(
-        outcome.exit_code if outcome.exit_code != 0 else 1,
-        "FAILED:result-emission",
+        1,
+        f"UNVERIFIED:{stable_id}",
         "blocked",
         "none",
-        f"result: envelope emission failed; combined={outcome.token}",
-        outcome.primary_exit_code,
-        outcome.primary_token,
-        outcome.primary_status,
-        outcome.primary_gate,
-        outcome.primary_note,
+        stable_id,
+        1,
+        f"UNVERIFIED:{stable_id}",
+        "blocked",
+        "none",
+        stable_id,
         outcome.cleanup_status,
         outcome.cleanup_issue_count,
-        outcome.cleanup_diagnostic,
+        "",
         outcome.recovery_retained,
-        outcome.stderr_marker_count,
+        0,
     )
 
 
-def emit_provider_result(
+def build_provider_result_line(
     provider: str,
     model: str,
     effort: str,
@@ -2915,7 +3570,7 @@ def emit_provider_result(
     expected_provenance: ExecutionProvenance | None = None,
     child_nonzero_category: str | None = None,
     launch_flags: tuple[str, ...] | list[str] | None = None,
-) -> None:
+) -> str:
     if provenance is not None:
         provenance = require_exact_execution_provenance(
             expected_provenance or provenance, provenance
@@ -2992,8 +3647,80 @@ def emit_provider_result(
     line = RESULT_PREFIX + json.dumps(
         payload, ensure_ascii=True, separators=(",", ":")
     )
-    sys.stdout.write(line + "\n")
-    sys.stdout.flush()
+    return line + "\n"
+
+
+def build_minimal_provider_failure_line(
+    provider: str,
+    model: str,
+    effort: str,
+    *,
+    stable_id: str,
+    cancelled: bool,
+    timed_out: bool,
+    exit_code: int = 1,
+    cleanup_status: str = "complete",
+    cleanup_issue_count: int = 0,
+    recovery_retained: bool = False,
+) -> str:
+    """Build one detail-free V2 failure without depending on the full builder."""
+
+    safe_provider = provider if provider in EXTERNAL_PROVIDER_NAMES else "unknown"
+    safe_model = model if isinstance(model, str) and _MODEL_TOKEN.fullmatch(model) else "unavailable"
+    safe_effort = effort if effort in EFFORTS or effort == "unsupported" else "unspecified"
+    safe_id = (
+        stable_id
+        if isinstance(stable_id, str)
+        and re.fullmatch(r"E_[A-Z0-9_]{1,127}", stable_id, re.ASCII)
+        else "E_EXTERNAL_PROVIDER_TERMINAL_BUILD_FAILED"
+    )
+    safe_cleanup = cleanup_status if cleanup_status in {"complete", "incomplete"} else "incomplete"
+    safe_count = cleanup_issue_count if isinstance(cleanup_issue_count, int) and 0 <= cleanup_issue_count <= CLEANUP_ISSUE_LIMIT else CLEANUP_ISSUE_LIMIT
+    safe_exit_code = (
+        130
+        if cancelled
+        else 124
+        if timed_out
+        else exit_code
+        if isinstance(exit_code, int) and 0 < exit_code <= 255
+        else 1
+    )
+    token = f"UNVERIFIED:{safe_id}"
+    payload = {
+        "schema": "orchestrarium.provider-result.v2",
+        "provider": safe_provider,
+        "model": safe_model,
+        "effort": safe_effort,
+        "resultText": "",
+        "exitCode": safe_exit_code,
+        "token": token,
+        "status": "blocked",
+        "gate": "none",
+        "note": safe_id,
+        "cancelled": bool(cancelled),
+        "timedOut": bool(timed_out),
+        "stderrMarkerCount": 0,
+        "cleanupStatus": safe_cleanup,
+        "cleanupIssueCount": safe_count,
+        "captureRecoveryRetained": bool(recovery_retained),
+        "primaryOutcome": {
+            "exitCode": safe_exit_code,
+            "token": token,
+            "status": "blocked",
+            "gate": "none",
+            "note": safe_id,
+        },
+        "authorizing": False,
+        "closesRunIds": [],
+        "independentVerificationRequired": True,
+        "terminalClass": "external-nonauthorizing",
+        "actualExecutionPath": "direct-external-cli",
+        "assignedRole": "none",
+        "executionRole": "none",
+    }
+    return RESULT_PREFIX + json.dumps(
+        payload, ensure_ascii=True, separators=(",", ":")
+    ) + "\n"
 
 
 def parse_provider_result(output: str) -> dict[str, object]:
@@ -3243,14 +3970,14 @@ def record_terminal(
     return recorded
 
 
-def finalize_run(
+def finalize_reserved_run_once(
     control: Control,
     provider: str,
     model: str,
     effort: str,
     slug: str,
     launch_run_id: str,
-    lifecycle: RunCaptureLifecycle,
+    reserved_run: ReservedExternalRunV1,
     exit_code: int,
     stream: StreamCaptureResult | None = None,
     *,
@@ -3267,7 +3994,44 @@ def finalize_run(
     process_result: ProcessResultV1 | None = None,
     runner: ProcessRunnerV1 | None = None,
     launch_flags: tuple[str, ...] | list[str] | None = None,
+    stable_failure_id: str | None = None,
 ) -> int:
+    terminal_receipt = reserved_run.receipt
+    lifecycle = reserved_run.lifecycle
+    if terminal_receipt.committed:
+        print("FAIL: terminal receipt was already committed", file=sys.stderr)
+        return 1
+    if lifecycle is None:
+        cleanup = reserved_run.cleanup_once()
+        line = build_minimal_provider_failure_line(
+            provider,
+            model,
+            effort,
+            stable_id=stable_failure_id or "E_EXTERNAL_PROVIDER_PRELAUNCH_FAILED",
+            cancelled=cancelled,
+            timed_out=timed_out,
+            exit_code=exit_code,
+            cleanup_status="complete" if cleanup.clean else "incomplete",
+            cleanup_issue_count=len(cleanup.issues),
+            recovery_retained=cleanup.recovery_retained,
+        )
+        try:
+            terminal_receipt.commit(line.encode("utf-8", errors="strict"))
+        except (OSError, ValueError) as exc:
+            print(
+                f"FAIL: terminal receipt commit failed: {type(exc).__name__}",
+                file=sys.stderr,
+            )
+            return 1
+        reserved_run.mark_finalized()
+        try:
+            sys.stdout.write(line)
+            sys.stdout.flush()
+        except Exception:
+            print("FAIL: E_EXTERNAL_PROVIDER_RESULT_STDOUT_FAILED", file=sys.stderr)
+            return 1
+        return 130 if cancelled else 124 if timed_out else exit_code if exit_code != 0 else 1
+
     if provenance is not None:
         provenance = require_exact_execution_provenance(provenance, provenance)
     frozen_role = role_provenance or external_role_provenance(control, provider)
@@ -3301,13 +4065,16 @@ def finalize_run(
     if credential_coverage_unavailable:
         scan_outcome = "E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE"
     elif scan_required:
-        scan_outcome = (
-            provider_output_safety_scan_terminal(
-                provider, credential_needles, stdout=raw_stdout, stderr=raw_stderr
+        try:
+            scan_outcome = (
+                provider_output_safety_scan_terminal(
+                    provider, credential_needles, stdout=raw_stdout, stderr=raw_stderr
+                )
+                if raw_streams_settled
+                else scan_unavailable
             )
-            if raw_streams_settled
-            else scan_unavailable
-        )
+        except Exception:
+            scan_outcome = scan_unavailable
     if scan_required and stream is not None and stream.overflow:
         scan_outcome = scan_unavailable
     child_nonzero_category = None
@@ -3330,23 +4097,16 @@ def finalize_run(
             if scan_outcome is not None
             else provider_stream_result(process_result, include_stderr=False)
         )
+    primary_terminal: TerminalResult | None = None
+    combined_exit = exit_code
     if scan_outcome is not None:
         result_text = ""
         terminal = output_safety_scan_failure_terminal(lifecycle, scan_outcome)
-        outcome = settle_once(
-            exit_code if exit_code != 0 else 1,
-            terminal,
-            lifecycle,
-            external=True,
-        )
+        combined_exit = exit_code if exit_code != 0 else 1
     elif stream is not None and stream.overflow:
         result_text = ""
-        outcome = settle_once(
-            exit_code if exit_code != 0 else 1,
-            capture_overflow_terminal(stream),
-            lifecycle,
-            external=True,
-        )
+        terminal = capture_overflow_terminal(stream)
+        combined_exit = exit_code if exit_code != 0 else 1
     else:
         try:
             terminal, result_text = materialize_terminal(
@@ -3367,12 +4127,7 @@ def finalize_run(
                 "UNVERIFIED:result-materialization",
                 0,
             )
-            outcome = settle_once(
-                exit_code if exit_code != 0 else 1,
-                terminal,
-                lifecycle,
-                external=True,
-            )
+            combined_exit = exit_code if exit_code != 0 else 1
             print("FAIL: result materialization failed", file=sys.stderr)
         else:
             primary_terminal = terminal
@@ -3385,13 +4140,15 @@ def finalize_run(
                     "COMPLETE:EXTERNAL_NONAUTHORIZING",
                     terminal.stderr_marker_count,
                 )
-            outcome = settle_once(
-                exit_code,
-                terminal,
-                lifecycle,
-                external=True,
-                primary_terminal=primary_terminal,
-            )
+    cleanup = reserved_run.cleanup_once()
+    outcome = combine_terminal_outcomes(
+        combined_exit,
+        terminal,
+        cleanup,
+        lifecycle,
+        external=True,
+        primary_terminal=primary_terminal,
+    )
     if outcome.cleanup_status != "complete":
         print(
             "FAIL: secure capture cleanup did not complete",
@@ -3401,10 +4158,9 @@ def finalize_run(
     if launch_error:
         print(f"FAIL: {launch_error}", file=sys.stderr)
 
-    result_delivered = False
     terminal_outcome = outcome
     try:
-        emit_provider_result(
+        line = build_provider_result_line(
             provider,
             model,
             effort,
@@ -3420,12 +4176,65 @@ def finalize_run(
             child_nonzero_category=child_nonzero_category,
             launch_flags=launch_flags,
         )
-        result_delivered = True
-    except Exception as exc:
-        print(f"FAIL: could not emit provider result: {exc}", file=sys.stderr)
-        terminal_outcome = with_emit_failure(outcome)
+    except Exception:
+        terminal_outcome = serialized_safety_failure_outcome(
+            outcome, "E_EXTERNAL_PROVIDER_TERMINAL_BUILD_FAILED"
+        )
+        line = build_minimal_provider_failure_line(
+            provider,
+            model,
+            effort,
+            stable_id="E_EXTERNAL_PROVIDER_TERMINAL_BUILD_FAILED",
+            cancelled=cancelled,
+            timed_out=timed_out,
+            cleanup_status=outcome.cleanup_status,
+            cleanup_issue_count=outcome.cleanup_issue_count,
+            recovery_retained=outcome.recovery_retained,
+        )
 
-    ledger_failed = False
+    try:
+        serialized_scan = provider_output_safety_scan_terminal(
+            provider,
+            credential_needles,
+            stdout=line.encode("utf-8", errors="strict"),
+            stderr=b"",
+            serialized_line=True,
+        )
+    except Exception:
+        serialized_scan = "E_EXTERNAL_PROVIDER_OUTPUT_SCAN_UNAVAILABLE"
+    if serialized_scan is not None:
+        result_text = ""
+        public_stream = None
+        terminal_outcome = serialized_safety_failure_outcome(outcome, serialized_scan)
+        line = build_minimal_provider_failure_line(
+            provider,
+            model,
+            effort,
+            stable_id=serialized_scan,
+            cancelled=cancelled,
+            timed_out=timed_out,
+            cleanup_status=outcome.cleanup_status,
+            cleanup_issue_count=outcome.cleanup_issue_count,
+            recovery_retained=outcome.recovery_retained,
+        )
+
+    try:
+        terminal_receipt.commit(line.encode("utf-8", errors="strict"))
+    except (OSError, ValueError) as exc:
+        print(
+            f"FAIL: terminal receipt commit failed: {type(exc).__name__}",
+            file=sys.stderr,
+        )
+        return terminal_outcome.exit_code if terminal_outcome.exit_code != 0 else 1
+    reserved_run.mark_finalized()
+
+    try:
+        sys.stdout.write(line)
+        sys.stdout.flush()
+    except Exception:
+        print("FAIL: E_EXTERNAL_PROVIDER_RESULT_STDOUT_FAILED", file=sys.stderr)
+        return terminal_outcome.exit_code if terminal_outcome.exit_code != 0 else 1
+
     if control.ledger:
         try:
             recorded = record_terminal(
@@ -3438,7 +4247,7 @@ def finalize_run(
                 terminal_outcome,
                 cancelled=cancelled,
                 timed_out=timed_out,
-                result_delivered=result_delivered,
+                result_delivered=True,
                 realization=realization,
                 runner=runner,
                 role_provenance=frozen_role,
@@ -3447,71 +4256,102 @@ def finalize_run(
                 child_nonzero_category=child_nonzero_category,
                 launch_flags=launch_flags,
             )
-        except Exception as exc:
+        except Exception:
             recorded = False
-            print(f"FAIL: terminal ledger append raised: {exc}", file=sys.stderr)
         if not recorded:
-            ledger_failed = True
-
-    if not result_delivered:
-        return terminal_outcome.exit_code if terminal_outcome.exit_code != 0 else 1
-    if ledger_failed:
-        return outcome.exit_code if outcome.exit_code != 0 else 1
-    return outcome.exit_code
-
-
-def settle_initialized_setup_failure(
-    control: Control,
-    provider: str,
-    model: str,
-    effort: str,
-    slug: str,
-    lifecycle: RunCaptureLifecycle,
-    failure: Exception,
-    realization: dict[str, object] | None,
-    *,
-    runner: ProcessRunnerV1 | None = None,
-    role_provenance: ExternalRoleProvenance | None = None,
-    provenance: ExecutionProvenance | None = None,
-    launch_flags: tuple[str, ...] | list[str] | None = None,
-) -> int:
-    """Settle an unlaunched run without fabricating a durable ledger relation."""
-
-    return finalize_run(
-        replace(control, ledger=None),
-        provider,
-        model,
-        effort,
-        slug,
-        "",
-        lifecycle,
-        1,
-        launch_error=type(failure).__name__,
-        realization=realization,
-        runner=runner,
-        role_provenance=role_provenance,
-        provenance=provenance,
-        launch_flags=launch_flags,
-    )
+            print("FAIL: E_EXTERNAL_TERMINAL_LEDGER_APPEND_FAILED", file=sys.stderr)
+            return terminal_outcome.exit_code if terminal_outcome.exit_code != 0 else 1
+    return terminal_outcome.exit_code
 
 
 def launch(provider: str, argv: list[str]) -> int:
     """Provider-launch composition root and sole owner of the injected runner."""
 
-    if provider in POLICY_BOUND_EXTERNAL_PROVIDERS:
-        try:
+    try:
+        if provider in POLICY_BOUND_EXTERNAL_PROVIDERS:
             prevalidated = _prevalidate_policy_bound_external_launch(provider, argv)
-        except ValueError as exc:
-            return fail(str(exc))
+        else:
+            unavailable = EXTERNAL_UNAVAILABLE_IDS.get(provider)
+            if unavailable is not None:
+                return fail(f"{unavailable}: provider execution is unavailable")
+            control = parse_control(argv)
+            topic = validate_topic(control.topic)
+            flags, model, effort = resolved_profile(provider, control.provider_flags)
+            if control.ledger_closes:
+                return fail(
+                    "E_EXTERNAL_CLOSES_FORBIDDEN: external provider results cannot close ledger runs"
+                )
+            role_provenance = external_role_provenance(control, provider)
+            prevalidated = PolicyBoundLaunch(
+                control,
+                topic,
+                tuple(flags),
+                model,
+                effort,
+                role_provenance,
+                None,
+            )
         if provider == "kimi" and os.name != "nt":
             return fail("E_KIMI_WINDOWS_ONLY: Kimi bundle review is Windows-only")
-        with ProcessRunnerV1() as runner:
-            return _launch_with_runner(
-                provider, argv, runner, prevalidated=prevalidated
-            )
+        if prevalidated.control.terminal_receipt is None:
+            return fail("--terminal-receipt is required for external launches")
+        receipt = TerminalReceiptV1.reserve(prevalidated.control.terminal_receipt)
+    except ValueError as exc:
+        return fail(str(exc))
 
-    with ProcessRunnerV1() as runner:
-        return _launch_with_runner(provider, argv, runner)
+    with ReservedExternalRunV1(receipt) as reserved_run:
+        try:
+            with ProcessRunnerV1() as runner:
+                return _launch_with_runner(
+                    provider,
+                    argv,
+                    runner,
+                    prevalidated=prevalidated,
+                    reserved_run=reserved_run,
+                )
+        except KeyboardInterrupt:
+            if receipt.committed:
+                return 130
+            return finalize_reserved_run_once(
+                replace(prevalidated.control, ledger=None),
+                provider,
+                prevalidated.model,
+                prevalidated.effort,
+                prevalidated.topic,
+                "",
+                reserved_run,
+                130,
+                cancelled=True,
+                role_provenance=prevalidated.role_provenance,
+                provenance=prevalidated.provenance,
+                launch_flags=(
+                    prevalidated.provenance.launch_flags
+                    if prevalidated.provenance is not None
+                    else prevalidated.flags
+                ),
+                stable_failure_id="E_EXTERNAL_PROVIDER_CANCELLED",
+            )
+        except Exception:
+            if receipt.committed:
+                return 1
+            return finalize_reserved_run_once(
+                replace(prevalidated.control, ledger=None),
+                provider,
+                prevalidated.model,
+                prevalidated.effort,
+                prevalidated.topic,
+                "",
+                reserved_run,
+                1,
+                role_provenance=prevalidated.role_provenance,
+                provenance=prevalidated.provenance,
+                launch_flags=(
+                    prevalidated.provenance.launch_flags
+                    if prevalidated.provenance is not None
+                    else prevalidated.flags
+                ),
+                stable_failure_id="E_EXTERNAL_PROCESS_RUNNER_UNAVAILABLE",
+            )
 
 
 def kimi_main(argv: list[str]) -> int:
@@ -3578,46 +4418,43 @@ def _launch_with_runner(
     argv: list[str],
     runner: ProcessRunnerV1,
     *,
-    prevalidated: PolicyBoundLaunch | None = None,
+    prevalidated: PolicyBoundLaunch,
+    reserved_run: ReservedExternalRunV1,
 ) -> int:
-    if prevalidated is None:
-        unavailable = EXTERNAL_UNAVAILABLE_IDS.get(provider)
-        if unavailable is not None:
-            return fail(f"{unavailable}: provider execution is unavailable")
-        try:
-            control = parse_control(argv)
-            topic = validate_topic(control.topic)
-            flags, model, effort = resolved_profile(provider, control.provider_flags)
-        except ValueError as exc:
-            return fail(str(exc))
+    control = prevalidated.control
+    topic = prevalidated.topic
+    flags = list(prevalidated.flags)
+    model = prevalidated.model
+    effort = prevalidated.effort
+    role_provenance = prevalidated.role_provenance
+    provenance = prevalidated.provenance
+    launch_flags = provenance.launch_flags if provenance is not None else tuple(flags)
 
-        if control.ledger_closes:
-            return fail(
-                "E_EXTERNAL_CLOSES_FORBIDDEN: external provider results cannot close ledger runs"
-            )
-        try:
-            role_provenance = external_role_provenance(control, provider)
-        except ValueError as exc:
-            return fail(str(exc))
-        provenance: ExecutionProvenance | None = None
-        launch_flags = tuple(flags)
-    else:
-        control = prevalidated.control
-        topic = prevalidated.topic
-        flags = list(prevalidated.flags)
-        model = prevalidated.model
-        effort = prevalidated.effort
-        role_provenance = prevalidated.role_provenance
-        provenance = prevalidated.provenance
-        launch_flags = provenance.launch_flags
+    def reserved_failure(stable_id: str, *, code: int = 1) -> int:
+        print(f"FAIL: {stable_id}", file=sys.stderr)
+        return finalize_reserved_run_once(
+            replace(control, ledger=None),
+            provider,
+            model,
+            effort,
+            topic,
+            "",
+            reserved_run,
+            code,
+            stable_failure_id=stable_id,
+        )
 
     try:
         query_cwd = Path.cwd().resolve(strict=True)
         command, expected_executable_binding = _resolve_launch_provider_command(
             provider, query_cwd
         )
-    except (OSError, ValueError) as exc:
-        return fail(str(exc))
+    except Exception as exc:
+        return reserved_failure(
+            stable_failure_id_from_exception(
+                exc, "E_EXTERNAL_PROVIDER_COMMAND_UNAVAILABLE"
+            )
+        )
 
     if _requires_early_native_windows_refusal(provider):
         executable = Path(command[0])
@@ -3627,13 +4464,10 @@ def _launch_with_runner(
                 and executable.is_file()
                 and bool(resolve_executable_identity(executable))
             )
-        except (OSError, ValueError):
+        except Exception:
             identity_available = False
         if identity_available and len(command) == 1:
-            return fail(
-                f"{E_EXTERNAL_PROVIDER_WINDOWS_NATIVE_ARGV_UNAVAILABLE}: "
-                f"native {provider} argv observation is unavailable on Windows"
-            )
+            return reserved_failure(E_EXTERNAL_PROVIDER_WINDOWS_NATIVE_ARGV_UNAVAILABLE)
 
     try:
         auth_configuration = resolve_provider_auth_configuration(provider)
@@ -3647,9 +4481,13 @@ def _launch_with_runner(
             "Vertex AI), or explicitly set ORCHESTRARIUM_ALLOW_SUBSCRIPTION_CLAUDE=1.",
             file=sys.stderr,
         )
-        return 3
-    except ValueError as exc:
-        return fail(str(exc))
+        return reserved_failure("E_EXTERNAL_PROVIDER_AUTH_REFUSED", code=3)
+    except Exception as exc:
+        return reserved_failure(
+            stable_failure_id_from_exception(
+                exc, "E_EXTERNAL_PROVIDER_AUTH_UNAVAILABLE"
+            )
+        )
     if (
         provider != "kimi"
         and (
@@ -3658,31 +4496,38 @@ def _launch_with_runner(
             or not auth_configuration.needles
         )
     ):
-        return fail("E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE")
+        return reserved_failure("E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE")
 
     try:
         body = assemble_external_prompt(prompt_bytes(control, external=True))
-    except ValueError as exc:
-        return fail(str(exc))
+    except Exception as exc:
+        return reserved_failure(
+            stable_failure_id_from_exception(exc, "E_EXTERNAL_PROMPT_INVALID")
+        )
 
     kimi_agent_payload: bytes | None = None
     if provider == "kimi":
         try:
             kimi_agent_payload = prepare_kimi_agent_payload(body)
-        except ValueError as exc:
-            return fail(str(exc))
+        except Exception as exc:
+            return reserved_failure(
+                stable_failure_id_from_exception(exc, "E_KIMI_BUNDLE_INVALID")
+            )
 
     if provider == "codex":
         if not Path(command[0]).is_absolute() or not Path(command[0]).is_file():
-            return fail("resolved Codex executable is not an absolute regular file")
+            return reserved_failure("E_EXTERNAL_PROVIDER_EXECUTABLE_INVALID")
         codex_home = Path(
             os.environ.get("CODEX_HOME") or Path.home() / ".codex"
         ).expanduser().resolve(strict=False)
-        trust_result = require_codex_hook_trust(
-            runner, command, codex_home, query_cwd
-        )
+        try:
+            trust_result = require_codex_hook_trust(
+                runner, command, codex_home, query_cwd
+            )
+        except Exception:
+            return reserved_failure("E_EXTERNAL_PROVIDER_HOOK_TRUST")
         if trust_result:
-            return trust_result
+            return reserved_failure("E_EXTERNAL_PROVIDER_HOOK_TRUST", code=trust_result)
 
     lifecycle: RunCaptureLifecycle | None = None
     lifecycle_initialized = False
@@ -3691,26 +4536,43 @@ def _launch_with_runner(
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         slug = f"{topic}-{timestamp}-{secrets.token_hex(4)}"
         lifecycle = RunCaptureLifecycle.create(provider, slug)
+        reserved_run.adopt_lifecycle(lifecycle)
         lifecycle.initialize(body)
+        reserved_run.mark_initialized(lifecycle)
         lifecycle_initialized = True
-    except (OSError, ValueError) as exc:
-        if lifecycle is not None:
-            cleanup = RunCaptureLifecycle.release_provisional(lifecycle.run_dir)
-            for issue in cleanup.issues:
-                print(
-                    f"FAIL: provisional capture preserved after setup failure: {issue}",
-                    file=sys.stderr,
-                )
-        return fail(str(exc))
+    except Exception:
+        if lifecycle is None:
+            return reserved_failure("E_EXTERNAL_CAPTURE_SETUP")
+        return finalize_reserved_run_once(
+            replace(control, ledger=None),
+            provider,
+            model,
+            effort,
+            topic,
+            "",
+            reserved_run,
+            1,
+            launch_error="E_EXTERNAL_CAPTURE_SETUP",
+            credential_needles=auth_configuration.needles,
+            auth_output_scan_disposition=auth_configuration.output_scan_disposition,
+            runner=runner,
+            role_provenance=role_provenance,
+            provenance=provenance,
+            launch_flags=launch_flags,
+        )
 
     assert lifecycle is not None
 
     launch_run_id = ""
     if control.ledger:
-        if ledger_helper() is None:
-            return settle_initialized_setup_failure(
-                control, provider, model, effort, slug, lifecycle,
-                RuntimeError("ledger helper unavailable"), realization, runner=runner,
+        try:
+            helper_available = ledger_helper() is not None
+        except Exception:
+            helper_available = False
+        if not helper_available:
+            return finalize_reserved_run_once(
+                replace(control, ledger=None), provider, model, effort, slug, "", reserved_run, 1,
+                launch_error="E_EXTERNAL_LEDGER_HELPER_UNAVAILABLE", realization=realization, runner=runner,
                 role_provenance=role_provenance, provenance=provenance,
                 launch_flags=launch_flags,
             )
@@ -3750,10 +4612,14 @@ def _launch_with_runner(
                 launch_flags=launch_flags,
             ),
         ]
-        if not run_ledger(runner, launch_args):
-            return settle_initialized_setup_failure(
-                control, provider, model, effort, slug, lifecycle,
-                RuntimeError("launch ledger append failed"), realization, runner=runner,
+        try:
+            launch_recorded = run_ledger(runner, launch_args)
+        except Exception:
+            launch_recorded = False
+        if not launch_recorded:
+            return finalize_reserved_run_once(
+                replace(control, ledger=None), provider, model, effort, slug, "", reserved_run, 1,
+                launch_error="E_EXTERNAL_LAUNCH_LEDGER_FAILED", realization=realization, runner=runner,
                 role_provenance=role_provenance, provenance=provenance,
                 launch_flags=launch_flags,
             )
@@ -3766,9 +4632,10 @@ def _launch_with_runner(
             kimi_agent, kimi_skills = materialize_kimi_agent_payload(
                 kimi_agent_payload, lifecycle.run_dir
             )
-        except (OSError, ValueError) as exc:
-            return settle_initialized_setup_failure(
-                control, provider, model, effort, slug, lifecycle, exc, realization, runner=runner,
+        except Exception:
+            return finalize_reserved_run_once(
+                control, provider, model, effort, slug, launch_run_id, reserved_run, 1,
+                launch_error="E_KIMI_BUNDLE_MATERIALIZATION", realization=realization, runner=runner,
                 role_provenance=role_provenance, provenance=provenance,
                 launch_flags=launch_flags,
             )
@@ -3825,7 +4692,7 @@ def _launch_with_runner(
         interrupted = True
         launch_error = f"{provider} process supervision cancelled"
         exit_code = 130
-    except (OSError, ValueError) as exc:
+    except Exception as exc:
         launch_error = f"{provider} launch failed: {type(exc).__name__}"
         exit_code = 1
     if stream_result is not None and stream_result.issues:
@@ -3833,14 +4700,14 @@ def _launch_with_runner(
         launch_error = f"{launch_error + '; ' if launch_error else ''}stream capture incomplete: {detail}"
         if exit_code == 0:
             exit_code = 1
-    return finalize_run(
+    return finalize_reserved_run_once(
         control,
         provider,
         model,
         effort,
         slug,
         launch_run_id,
-        lifecycle,
+        reserved_run,
         exit_code,
         stream_result,
         cancelled=interrupted,

@@ -112,7 +112,8 @@ The prompt file is the only governance an external Command-Line Interface (CLI) 
 
 ## Run-completion oracle
 
-- A provider run is complete only when its approved thin `invoke-<provider>-prompt` wrapper returns one terminal envelope and wrapper process exit. The strict V2 parser requires the full external-nonauthorizing tuple: `authorizing=false`, `closesRunIds=[]`, `independentVerificationRequired=true`, `terminalClass=external-nonauthorizing`, and `actualExecutionPath=direct-external-cli`. `resultText` is direct provider output, untrusted and potentially sensitive; never persist or re-prompt it. Wrapper-private captures are not consumer surfaces, and the envelope cannot directly close a work-item. A failed envelope/oracle check makes the run `UNVERIFIED`: re-dispatch it or return `BLOCKED:dependency`.
+- Every provider launch requires a caller-declared absolute `--terminal-receipt <path>`. The wrapper exclusively reserves that caller-owned path before provider, private-capture, or ledger side effects; the caller owns its retention and deletion. After process settlement and secure capture cleanup, the wrapper builds one Version 2 (V2) envelope, safety-scans the complete serialized line for every provider, durably commits and exactly reads back the receipt, writes and flushes the identical line to standard output exactly once, then appends the optional path-free terminal ledger event. A detector finding or unavailable detector commits only a minimal blocked envelope with empty `resultText` and stable detail-free identifiers. The receipt is external-nonauthorizing and never closes a run.
+- A provider run is complete only when its approved thin `invoke-<provider>-prompt` wrapper returns one terminal envelope and wrapper process exit, or when a caller-side wait loses standard output but the reserved terminal receipt later contains the complete exact line. The strict V2 parser requires the full external-nonauthorizing tuple: `authorizing=false`, `closesRunIds=[]`, `independentVerificationRequired=true`, `terminalClass=external-nonauthorizing`, and `actualExecutionPath=direct-external-cli`. `resultText` is direct provider output, untrusted and potentially sensitive; never re-prompt it. Wrapper-private captures are not consumer surfaces, and the envelope cannot directly close a work-item. A failed envelope/oracle check makes the run `UNVERIFIED`: re-dispatch it or return `BLOCKED:dependency`.
 
 ## Stall and timeout policy
 
@@ -266,3 +267,4 @@ Rules:
 - `QA`: Quality Assurance; verification work for tests, regressions, and acceptance criteria.
 - `12 + 1`: twelve external routing lines plus one owner/control line from the release-backed RF12 interpretation.
 - `stdin`: standard input stream for a process.
+- `terminal receipt`: mandatory caller-owned durable file containing the exact settled V2 result line before optional ledger work and stdout delivery.

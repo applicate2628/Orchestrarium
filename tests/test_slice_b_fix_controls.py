@@ -101,7 +101,7 @@ def test_execution_provenance_drift_is_rejected_before_envelope_or_ledger_sink(
     )
 
     with pytest.raises(ValueError, match="E_EXTERNAL_PROVENANCE_MISMATCH"):
-        OWNER.emit_provider_result(
+        OWNER.build_provider_result_line(
             "kimi",
             "kimi-code/k3",
             "unsupported",
@@ -140,9 +140,7 @@ def test_execution_provenance_has_identical_envelope_and_ledger_projection(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     provenance = _execution_provenance()
-    output = io.StringIO()
-    monkeypatch.setattr(OWNER.sys, "stdout", output)
-    OWNER.emit_provider_result(
+    encoded = OWNER.build_provider_result_line(
         "kimi",
         "kimi-code/k3",
         "unsupported",
@@ -156,7 +154,7 @@ def test_execution_provenance_has_identical_envelope_and_ledger_projection(
             "qa-engineer", "external-reviewer"
         ),
     )
-    envelope = OWNER.parse_provider_result(output.getvalue())
+    envelope = OWNER.parse_provider_result(encoded)
     assert {key: envelope[key] for key in provenance.payload()} == provenance.payload()
 
     ledger = tmp_path / "item-frozen"

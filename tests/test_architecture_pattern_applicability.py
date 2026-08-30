@@ -8,6 +8,7 @@ classes, and failure oracles.
 from __future__ import annotations
 
 import importlib.util
+import os
 import re
 import shutil
 import subprocess
@@ -24,6 +25,7 @@ VALIDATOR_DECLARATIONS = (
     ROOT / "src.codex/skills/lead/scripts/validate-skill-pack.py",
     ROOT / "src.claude/agents/scripts/validate-skill-pack.py",
 )
+FAKE_CODEX_HOOKS_HOST = ROOT / "tests/fixtures/fake_codex_hooks_host.py"
 
 APPLICABILITY_IDS = ("AP0", "AP1", "AP2", "AP3", "AP4", "AP5")
 GUARD_IDS = (
@@ -527,9 +529,13 @@ def test_installed_parity_and_validator(
     ]
     if provider == "claude":
         installer_arguments.append("--no-hypothesis-hook")
+    installer_environment = os.environ.copy()
+    if provider == "codex":
+        installer_environment["CODEX_BIN"] = str(FAKE_CODEX_HOOKS_HOST)
     result = subprocess.run(
         installer_arguments,
         cwd=ROOT,
+        env=installer_environment,
         capture_output=True,
         text=True,
         encoding="utf-8",

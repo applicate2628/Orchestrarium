@@ -262,6 +262,10 @@ def _safe_provider_resolution(provider_prompt, calls: list[str]):
     )
 
 
+def _terminal_receipt_args(tmp_path: Path, label: str) -> list[str]:
+    return ["--terminal-receipt", str((tmp_path / f"{label}.receipt").resolve())]
+
+
 @pytest.mark.parametrize(
     ("name", "payload"),
     (
@@ -270,7 +274,7 @@ def _safe_provider_resolution(provider_prompt, calls: list[str]):
     ),
 )
 def test_wrapper_rejects_bounded_strict_stdin_before_provider_or_capture(
-    monkeypatch: pytest.MonkeyPatch, name: str, payload: bytes
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str, payload: bytes
 ) -> None:
     """Catches stdin bypassing the strict bounded task snapshot before any launch side effect."""
 
@@ -306,7 +310,9 @@ def test_wrapper_rejects_bounded_strict_stdin_before_provider_or_capture(
         lambda *_args, **_kwargs: pytest.fail(f"child launch reached for {name}"),
     )
 
-    assert provider_prompt.launch("codex", ["strict-stdin"]) == 1
+    assert provider_prompt.launch(
+        "codex", ["strict-stdin", *_terminal_receipt_args(tmp_path, name)]
+    ) == 1
     assert calls == ["binary-preflight", "auth-configuration"]
 
 
@@ -355,11 +361,20 @@ def test_wrapper_rejects_composed_overflow_before_provider_or_capture(
         ),
     )
 
-    assert provider_prompt.launch("codex", ["strict-file", "--prompt-file", str(task)]) == 1
+    assert provider_prompt.launch(
+        "codex",
+        [
+            "strict-file",
+            "--prompt-file",
+            str(task),
+            *_terminal_receipt_args(tmp_path, "composed-overflow"),
+        ],
+    ) == 1
     assert calls == ["binary-preflight", "auth-configuration"]
 
 
 def test_claude_auth_refusal_follows_provider_preflight_and_precedes_invalid_prompt(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Binary provenance is checked before auth refusal, with prompt still unread."""
@@ -398,7 +413,13 @@ def test_claude_auth_refusal_follows_provider_preflight_and_precedes_invalid_pro
         lambda *_args, **_kwargs: pytest.fail("child reached after auth refusal"),
     )
 
-    assert provider_prompt.launch("claude", ["auth-before-invalid-prompt"]) == 3
+    assert provider_prompt.launch(
+        "claude",
+        [
+            "auth-before-invalid-prompt",
+            *_terminal_receipt_args(tmp_path, "auth-before-invalid-prompt"),
+        ],
+    ) == 3
     assert calls == ["binary-preflight", "auth-refusal"]
 
 

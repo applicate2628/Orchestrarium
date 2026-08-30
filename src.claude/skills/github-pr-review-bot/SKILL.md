@@ -17,6 +17,7 @@ Drive one GitHub-hosted Codex review loop to a terminal result on the current re
 - Do not start or rerun CI as part of this loop.
 - Never retrigger solely because time elapsed. A bot-authored `eyes` reaction on the exact trigger is acknowledged/in progress, not clean; keep polling that run.
 - Verify reaction authors, not aggregate reaction counts.
+- Classify `clean` only after fetching every GraphQL `reviewThreads` page through `pageInfo.hasNextPage=false`; record the terminal cursor and inventory the unresolved current-head bot-thread IDs and count; summary comments and `gh pr view` review/comment fields are nonauthorizing for `clean`.
 
 ## State machine
 

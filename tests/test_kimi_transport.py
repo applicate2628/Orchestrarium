@@ -338,10 +338,18 @@ def test_kimi_payload_validation_precedes_capture_and_launch_ledger(
         "run_ledger",
         lambda *_args, **_kwargs: pytest.fail("launch ledger reached before Kimi validation"),
     )
+    receipt_path = (tmp_path / "kimi-validation.receipt").resolve()
+    prevalidated.control.terminal_receipt = receipt_path
 
-    assert owner._launch_with_runner(
-        "kimi", [], SimpleNamespace(), prevalidated=prevalidated
-    ) == 1
+    with owner.TerminalReceiptV1.reserve(receipt_path) as receipt:
+        reserved = owner.ReservedExternalRunV1(receipt)
+        assert owner._launch_with_runner(
+            "kimi",
+            [],
+            SimpleNamespace(),
+            prevalidated=prevalidated,
+            reserved_run=reserved,
+        ) == 1
     assert "E_KIMI_BUNDLE_TEMPLATE_INVALID" in capsys.readouterr().err
 
 
@@ -484,23 +492,28 @@ def _finalize_kimi(
     else:
         control = owner.Control()
         provenance = owner.ExternalRoleProvenance("none", "external-reviewer")
-    code = owner.finalize_run(
-        control,
-        "kimi",
-        "kimi-code/k3",
-        "unsupported",
-        "fixture",
-        "launch-fixture" if with_ledger else "",
-        lifecycle,
-        exit_code,
-        capture,
-        cancelled=cancelled,
-        role_provenance=provenance,
-        raw_stdout=stdout,
-        raw_stderr=stderr,
-        process_result=process_result or process,
-        runner=object() if with_ledger else None,
-    )
+    receipt_path = (tmp_path / "kimi-terminal.receipt").resolve()
+    control.terminal_receipt = receipt_path
+    with owner.TerminalReceiptV1.reserve(receipt_path) as receipt:
+        code = owner.finalize_reserved_run_once(
+            control,
+            "kimi",
+            "kimi-code/k3",
+            "unsupported",
+            "fixture",
+            "launch-fixture" if with_ledger else "",
+            owner.ReservedExternalRunV1(
+                receipt, lifecycle=lifecycle, state="initialized"
+            ),
+            exit_code,
+            capture,
+            cancelled=cancelled,
+            role_provenance=provenance,
+            raw_stdout=stdout,
+            raw_stderr=stderr,
+            process_result=process_result or process,
+            runner=object() if with_ledger else None,
+        )
     payload = owner.parse_provider_result(capsys.readouterr().out)
     notes = (
         ledger_calls[0][ledger_calls[0].index("--notes") + 1]
@@ -824,20 +837,24 @@ def test_generic_capture_metadata_remains_exactly_as_supplied(
     lifecycle.initialize(b"fixture prompt")
     stream = owner.StreamCaptureResult(False, 17, 13, "a" * 64, ("fixture",))
 
-    code = owner.finalize_run(
-        owner.Control(),
-        "claude",
-        "opus",
-        "xhigh",
-        "fixture",
-        "",
-        lifecycle,
-        0,
-        stream,
-        role_provenance=owner.ExternalRoleProvenance("none", "external-reviewer"),
-        raw_stdout=b"GATE: PASS\n",
-        raw_stderr=b"",
-    )
+    receipt_path = (tmp_path / "generic-terminal.receipt").resolve()
+    with owner.TerminalReceiptV1.reserve(receipt_path) as receipt:
+        code = owner.finalize_reserved_run_once(
+            owner.Control(terminal_receipt=receipt_path),
+            "claude",
+            "opus",
+            "xhigh",
+            "fixture",
+            "",
+            owner.ReservedExternalRunV1(
+                receipt, lifecycle=lifecycle, state="initialized"
+            ),
+            0,
+            stream,
+            role_provenance=owner.ExternalRoleProvenance("none", "external-reviewer"),
+            raw_stdout=b"GATE: PASS\n",
+            raw_stderr=b"",
+        )
     payload = owner.parse_provider_result(capsys.readouterr().out)
 
     assert code == 0
