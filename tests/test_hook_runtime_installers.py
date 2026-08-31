@@ -458,6 +458,10 @@ def test_hook_health_timeout_is_typed_and_deletes_spool(
     (KeyboardInterrupt, SystemExit),
     ids=("keyboard-interrupt", "system-exit"),
 )
+@pytest.mark.skipif(
+    os.name != "nt",
+    reason="Windows ProcessRunner interruption contract",
+)
 def test_hook_health_preserves_interruption_after_runner_cleanup(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -504,6 +508,31 @@ def test_hook_health_preserves_interruption_after_runner_cleanup(
         )
 
     assert cleanup_types == [interruption_type]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX hook-health owner")
+def test_posix_hook_health_does_not_enter_generic_process_runner(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    program = _write_health_program(tmp_path, stdout=b"healthy")
+
+    def forbidden_loader(*_args, **_kwargs):
+        raise AssertionError("generic ProcessRunner must remain unavailable on POSIX")
+
+    monkeypatch.setattr(
+        PRODUCTION_INSTALLER,
+        "_load_module_from_path",
+        forbidden_loader,
+    )
+
+    completed = PRODUCTION_INSTALLER._run_hook_health_bounded(
+        [str(program)],
+        tmp_path,
+        program,
+    )
+
+    assert completed.returncode == 0
 
 
 def test_hook_health_processes_use_bounded_owner_only() -> None:

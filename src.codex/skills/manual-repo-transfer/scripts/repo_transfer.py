@@ -12,11 +12,14 @@ import ntpath
 import os
 import re
 import secrets
+import selectors
+import signal
 import stat
 import struct
 import subprocess
 import sys
 import tempfile
+import time
 import unicodedata
 import zipfile
 from contextlib import contextmanager
@@ -52,6 +55,7 @@ MAX_JSON_BYTES = 8 * 1024 * 1024
 MAX_JSON_DEPTH = 64
 MAX_ARCHIVE_CENTRAL_DIRECTORY_BYTES = 8 * 1024 * 1024
 GIT_COMMAND_TIMEOUT_SECONDS = 60
+GIT_PROCESS_CLEANUP_SECONDS = 2
 TRANSFER_REPOSITORY_BOUNDARY_INVALID = "TRANSFER-REPOSITORY-BOUNDARY-INVALID"
 TRANSFER_GIT_BINDING_INVALID = "TRANSFER-GIT-BINDING-INVALID"
 TRANSFER_GIT_ROOT_MISMATCH = "TRANSFER-GIT-ROOT-MISMATCH"
@@ -362,7 +366,7 @@ def _load_process_runner() -> Any:
         raise ContractError("repository transfer process runner is unavailable") from error
 
 
-def run_bounded_process(command: list[str], repository: Path | None, environment: dict[str, str]) -> subprocess.CompletedProcess[bytes]:
+def _run_process_runner_git_process(command: list[str], repository: Path | None, environment: dict[str, str]) -> subprocess.CompletedProcess[bytes]:
     owner: Any | None = None
     try:
         runner_module = _load_process_runner()
@@ -405,6 +409,178 @@ def run_bounded_process(command: list[str], repository: Path | None, environment
     )
     completed.executable_identity_sha256 = result.executable_identity_sha256
     return completed
+
+
+def _posix_process_group_exists(process_group: int) -> bool:
+    try:
+        os.killpg(process_group, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
+def _settle_posix_git_process(process: subprocess.Popen[bytes]) -> bool:
+    process_group = process.pid
+    deadline = time.monotonic() + GIT_PROCESS_CLEANUP_SECONDS
+    try:
+        if _posix_process_group_exists(process_group):
+            try:
+                os.killpg(process_group, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+        graceful_deadline = min(deadline, time.monotonic() + 0.25)
+        while (
+            _posix_process_group_exists(process_group)
+            and time.monotonic() < graceful_deadline
+        ):
+            process.poll()
+            time.sleep(0.01)
+        if _posix_process_group_exists(process_group):
+            try:
+                os.killpg(process_group, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        if process.poll() is None:
+            try:
+                process.wait(timeout=max(0.0, deadline - time.monotonic()))
+            except subprocess.TimeoutExpired:
+                return False
+        while _posix_process_group_exists(process_group) and time.monotonic() < deadline:
+            time.sleep(0.01)
+        return not _posix_process_group_exists(process_group)
+    except (OSError, ValueError):
+        return False
+
+
+def _run_posix_git_process(command: list[str], repository: Path | None, environment: dict[str, str]) -> subprocess.CompletedProcess[bytes]:
+    try:
+        if not command or not Path(command[0]).is_absolute():
+            raise OSError("Git executable is not absolute")
+        process = subprocess.Popen(
+            command,
+            executable=command[0],
+            cwd=repository,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=environment,
+            shell=False,
+            start_new_session=True,
+            close_fds=True,
+            bufsize=0,
+        )
+    except OSError as error:
+        raise ContractError("not a git repository") from error
+    assert process.stdout is not None and process.stderr is not None
+    streams = {process.stdout: "stdout", process.stderr: "stderr"}
+    captures = {"stdout": bytearray(), "stderr": bytearray()}
+    selector = selectors.DefaultSelector()
+    overflow = False
+    capture_error = False
+    timed_out = False
+    leftover_tree = False
+    interrupted: BaseException | None = None
+    deadline = time.monotonic() + GIT_COMMAND_TIMEOUT_SECONDS
+    try:
+        for stream in streams:
+            os.set_blocking(stream.fileno(), False)
+            selector.register(stream, selectors.EVENT_READ, streams[stream])
+        while selector.get_map() or process.poll() is None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                timed_out = True
+                break
+            events = selector.select(min(0.05, remaining))
+            for key, _ in events:
+                try:
+                    chunk = os.read(key.fd, 64 * 1024)
+                except BlockingIOError:
+                    continue
+                except OSError:
+                    capture_error = True
+                    break
+                if not chunk:
+                    selector.unregister(key.fileobj)
+                    continue
+                captured = captures[key.data]
+                available = MAX_JSON_BYTES + 1 - len(captured)
+                if available > 0:
+                    captured.extend(chunk[:available])
+                if len(captured) > MAX_JSON_BYTES or len(chunk) > available:
+                    overflow = True
+                    break
+            if overflow or capture_error:
+                break
+            if process.poll() is not None and _posix_process_group_exists(process.pid):
+                leftover_tree = True
+                break
+    except BaseException as error:
+        interrupted = error
+    finally:
+        tree_empty = _settle_posix_git_process(process)
+        cleanup_deadline = time.monotonic() + GIT_PROCESS_CLEANUP_SECONDS
+        while selector.get_map() and time.monotonic() < cleanup_deadline:
+            try:
+                events = selector.select(0.05)
+                if not events and not tree_empty:
+                    continue
+                for key, _ in events:
+                    try:
+                        chunk = os.read(key.fd, 64 * 1024)
+                    except BlockingIOError:
+                        continue
+                    except OSError:
+                        capture_error = True
+                        selector.unregister(key.fileobj)
+                        continue
+                    if not chunk:
+                        selector.unregister(key.fileobj)
+                        continue
+                    captured = captures[key.data]
+                    available = MAX_JSON_BYTES + 1 - len(captured)
+                    if available > 0:
+                        captured.extend(chunk[:available])
+                    if len(captured) > MAX_JSON_BYTES or len(chunk) > available:
+                        overflow = True
+            except (OSError, ValueError):
+                capture_error = True
+                break
+        if selector.get_map():
+            capture_error = True
+        selector.close()
+        for stream in streams:
+            try:
+                stream.close()
+            except OSError:
+                capture_error = True
+    if interrupted is not None:
+        raise interrupted
+    if timed_out:
+        raise ContractError("git command timed out")
+    if overflow:
+        raise ContractError("git output exceeds JSON limit")
+    if capture_error:
+        raise ContractError("git output capture failed")
+    if leftover_tree or not tree_empty:
+        raise ContractError("git process tree did not settle")
+    completed = subprocess.CompletedProcess(
+        command,
+        process.returncode if process.returncode is not None else -signal.SIGKILL,
+        bytes(captures["stdout"]),
+        bytes(captures["stderr"]),
+    )
+    completed.executable_identity_sha256 = _load_process_runner().resolve_executable_identity(
+        Path(command[0])
+    )
+    return completed
+
+
+def run_bounded_process(command: list[str], repository: Path | None, environment: dict[str, str]) -> subprocess.CompletedProcess[bytes]:
+    if os.name == "posix":
+        return _run_posix_git_process(command, repository, environment)
+    return _run_process_runner_git_process(command, repository, environment)
 
 
 def local_filter_drivers(repository: BoundRepository) -> list[str]:

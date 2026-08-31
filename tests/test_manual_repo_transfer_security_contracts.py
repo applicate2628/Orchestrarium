@@ -296,18 +296,47 @@ class IoBoundaryTests(unittest.TestCase):
                     ):
                         core.close(validate=False)
 
-    def test_transfer_helper_delegates_process_ownership_to_process_runner(self) -> None:
-        tree = ast.parse(SCRIPT.read_text(encoding="utf-8"))
-        direct_popen_calls = [
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and isinstance(node.func.value, ast.Name)
-            and node.func.value.id == "subprocess"
-            and node.func.attr == "Popen"
-        ]
-        self.assertEqual([], direct_popen_calls)
+    def test_transfer_helper_routes_only_posix_git_to_the_owner_local_path(self) -> None:
+        module = load_transfer_module()
+        command = [str(GIT_EXECUTABLE), "status"]
+        repository = Path.cwd()
+        expected = subprocess.CompletedProcess(command, 0, b"", b"")
+
+        with (
+            mock.patch.object(module.os, "name", "posix"),
+            mock.patch.object(
+                module, "_run_posix_git_process", return_value=expected
+            ) as posix_owner,
+            mock.patch.object(
+                module,
+                "_run_process_runner_git_process",
+                side_effect=AssertionError("POSIX must not enter ProcessRunnerV1"),
+            ),
+        ):
+            self.assertIs(
+                expected,
+                module.run_bounded_process(command, repository, {}),
+            )
+        posix_owner.assert_called_once_with(command, repository, {})
+
+        with (
+            mock.patch.object(module.os, "name", "nt"),
+            mock.patch.object(
+                module,
+                "_run_process_runner_git_process",
+                return_value=expected,
+            ) as process_runner_owner,
+            mock.patch.object(
+                module,
+                "_run_posix_git_process",
+                side_effect=AssertionError("Windows must retain ProcessRunnerV1"),
+            ),
+        ):
+            self.assertIs(
+                expected,
+                module.run_bounded_process(command, repository, {}),
+            )
+        process_runner_owner.assert_called_once_with(command, repository, {})
 
     def test_bound_git_process_rejects_runner_executable_identity_mismatch(self) -> None:
         module = load_transfer_module()

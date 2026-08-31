@@ -1209,6 +1209,7 @@ def test_codex_jsonl_treats_literal_unicode_separators_as_record_data(
     assert owner.parse_codex_jsonl_result(record, 100) == text.encode("utf-8")
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows provider execution contract")
 def test_provider_adapter_uses_settled_canonical_runner_result(tmp_path: Path) -> None:
     child = tmp_path / "provider.py"
     child.write_text(
@@ -1240,6 +1241,31 @@ def test_provider_adapter_uses_settled_canonical_runner_result(tmp_path: Path) -
     assert stdout == b"GATE: PASS\n"
     assert stderr == b"provider diagnostic\n"
     assert owner.provider_stream_result(result).issues == ()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX provider execution fails closed")
+def test_posix_provider_execution_is_unavailable_before_executable_acquisition(
+    tmp_path: Path,
+) -> None:
+    result, stdout, stderr = owner.run_provider_process(
+        owner.ProcessRunnerV1(),
+        [str(tmp_path / "must-not-execute")],
+        [],
+        {},
+        ROOT,
+        b"provider-body",
+        owner.Control(timeout_secs=5, capture_max_bytes=1024),
+    )
+
+    assert result.event_id == "process.supervision.settled.v1"
+    assert result.outcome == "supervisor-failure"
+    assert result.failure_id == "PSV1-POSIX-ORACLE-UNAVAILABLE"
+    assert result.terminal_stage == "request-validation"
+    assert result.stdin.written_bytes == 0
+    assert result.tree.tree_empty is False
+    assert result.resources_closed is True
+    assert stdout == b""
+    assert stderr == b""
 
 
 def test_provider_adapter_passes_absolute_lexical_executable_without_resolve(
@@ -1414,6 +1440,7 @@ def _assert_external_terminal_is_nonauthorizing(
     ]
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows provider execution contract")
 def test_provider_adapter_timeout_emits_nonpass_settled_terminal(tmp_path: Path) -> None:
     result, item, output_root = _run_transport(
         tmp_path,
@@ -1434,6 +1461,7 @@ def test_provider_adapter_timeout_emits_nonpass_settled_terminal(tmp_path: Path)
     _assert_external_terminal_is_nonauthorizing(item, payload)
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows provider execution contract")
 def test_provider_adapter_capture_overflow_emits_nonpass_settled_terminal(
     tmp_path: Path,
 ) -> None:
@@ -1457,6 +1485,7 @@ def test_provider_adapter_capture_overflow_emits_nonpass_settled_terminal(
     _assert_external_terminal_is_nonauthorizing(item, payload)
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows provider execution contract")
 def test_provider_adapter_injected_cancellation_emits_nonpass_terminal(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -1526,6 +1555,7 @@ def test_provider_adapter_injected_cancellation_emits_nonpass_terminal(
     _assert_external_terminal_is_nonauthorizing(item, payload)
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows provider execution contract")
 @pytest.mark.parametrize(
     ("exception_type", "expected_code"),
     ((KeyboardInterrupt, 130), (OSError, 1), (ValueError, 1)),
@@ -1595,6 +1625,7 @@ def test_provider_launch_exception_without_settled_streams_emits_and_records_una
     assert list(output_root.iterdir()) == []
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows provider execution contract")
 def test_provider_launch_injects_one_runner_through_trust_ledger_and_child(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -2059,6 +2090,7 @@ def test_path_discovered_provider_outside_repository_remains_accepted(
     assert getattr(resolution, "target", None) == external.resolve()
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows provider execution contract")
 @pytest.mark.parametrize(("provider", "environment_key"), tuple(BIN_ENV.items()))
 @pytest.mark.parametrize("discovered", (False, True), ids=("explicit", "path"))
 def test_python_provider_binding_resolves_interpreter_before_process_runner(
@@ -2495,6 +2527,7 @@ def test_codex_terminal_record_requires_actual_terminal_readback(
     assert recorded is False
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows provider execution contract")
 @pytest.mark.parametrize("provider", ("codex", "claude"))
 @pytest.mark.parametrize(
     ("ledger_role", "execution_role"),
@@ -3136,6 +3169,7 @@ def test_cleanup_does_not_touch_preexisting_root_artifacts(
     assert list(root.iterdir()) == [sentinel]
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows provider execution contract")
 @pytest.mark.parametrize("provider", ("codex", "claude"))
 def test_real_transport_emits_one_envelope_then_path_free_terminal_ledger(
     tmp_path: Path, provider: str
@@ -3173,6 +3207,7 @@ def test_real_transport_emits_one_envelope_then_path_free_terminal_ledger(
     assert list(output_root.iterdir()) == []
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows provider execution contract")
 @pytest.mark.parametrize(
     ("provider", "auth_environment", "credential_key"),
     (

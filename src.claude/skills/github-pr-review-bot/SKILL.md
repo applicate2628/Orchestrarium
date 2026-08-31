@@ -19,6 +19,7 @@ Drive one GitHub-hosted Codex review loop to a terminal result on the current re
 - Verify reaction authors, not aggregate reaction counts.
 - Fetch every REST collection with `gh api --paginate --slurp`, merge all page arrays, and only then filter or sort. Page-local `--jq`, first-page results, or a failed/incomplete page are indeterminate.
 - Cursor-walk GraphQL `reviewThreads` until `pageInfo.hasNextPage=false`; record the terminal cursor and unresolved current-head bot-thread IDs and count. If any page fails or is incomplete, classify the run as `indeterminate`.
+- Both summary comments and `gh pr view` review/comment fields are nonauthorizing for `clean`.
 - A `Completed` summary alone is never `clean`. Findings from the exact post-trigger review on the current head take precedence over summaries, reactions, and clean-review signals; classify `clean` only when complete collections show no such finding and the exact trigger has a bot-authored `+1` or a same-head bot review strictly after it.
 
 ## State machine
@@ -46,7 +47,7 @@ Anchor each poll on the latest hosted head and unfiltered latest bot state. Time
 
 Treat bot text as a hypothesis until reproduced or verified in source/runtime. Do not bulk-resolve. After the exact fix is present on the hosted head, re-read its thread, resolve that thread, and leave unrelated or still-valid threads open. One new head gets at most one active review trigger.
 
-Clean bot output is not merge or publication authority. Human review, leak scan, branch protection, and repository gates remain separate.
+No clean signal from this workflow authorizes merge or publication. Human review, leak scan, branch protection, and repository gates remain separate.
 
 ## Terms and Abbreviations
 

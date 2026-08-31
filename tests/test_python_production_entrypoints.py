@@ -196,6 +196,16 @@ def test_global_home_selection_ignores_userprofile_on_posix() -> None:
     ) == ("HOME", "/tmp/orchestrarium-home", None)
 
 
+def test_install_docs_match_platform_global_home_contract() -> None:
+    install = (ROOT / "INSTALL.md").read_text(encoding="utf-8")
+
+    assert (
+        "For global installs, POSIX requires `HOME` and ignores `USERPROFILE`; "
+        "Windows requires `USERPROFILE` and does not fall back to `HOME`."
+        in install
+    )
+
+
 @pytest.mark.skipif(
     not BASH_SMOKE_AVAILABLE,
     reason="POSIX bash launcher smoke is unavailable on this host",

@@ -22,6 +22,7 @@ def test_clean_requires_complete_review_thread_inventory() -> None:
         "summary comments",
         "`gh pr view` review/comment fields",
         "nonauthorizing for `clean`",
+        "No clean signal from this workflow authorizes merge or publication",
     )
     for clause in required_contract:
         assert clause in body, f"missing fail-closed clean-oracle clause: {clause}"

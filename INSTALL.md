@@ -8,7 +8,7 @@ The Codex installer materializes all 17 manifest native-role TOMLs through the c
 
 Run the router installer from the repository root:
 
-For global installs, POSIX uses `HOME` (or `USERPROFILE` when it is present); Windows requires `USERPROFILE` and does not fall back to `HOME`.
+For global installs, POSIX requires `HOME` and ignores `USERPROFILE`; Windows requires `USERPROFILE` and does not fall back to `HOME`.
 
 ```bash
 bash install.sh --global

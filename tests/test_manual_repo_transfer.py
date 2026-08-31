@@ -155,7 +155,7 @@ class RepoTransferTests(unittest.TestCase):
         with self.assertRaisesRegex(
             module.ContractError, r"PSV1-POSIX-ORACLE-UNAVAILABLE"
         ):
-            module.run_bounded_process(
+            module._run_process_runner_git_process(
                 [str(GIT_EXECUTABLE), "status"], self.repo, {}
             )
 
