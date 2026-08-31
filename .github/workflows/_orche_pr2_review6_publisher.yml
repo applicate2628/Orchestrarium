@@ -1,0 +1,170 @@
+name: Internal PR2 outcome-evidence publisher
+
+on:
+  push:
+    branches:
+      - orche/internal-pr2-review6-20260831
+
+permissions:
+  contents: write
+
+jobs:
+  verify-and-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout helper payload
+        uses: actions/checkout@v4
+        with:
+          ref: orche/internal-pr2-review6-20260831
+          path: helper
+          fetch-depth: 1
+
+      - name: Checkout pull-request branch
+        uses: actions/checkout@v4
+        with:
+          ref: orche/impl-000-baseline
+          path: repo
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Install test dependencies
+        run: |
+          python3 -m venv --copies /tmp/orche-outcome-review-venv
+          /tmp/orche-outcome-review-venv/bin/python -m pip install --disable-pip-version-check pytest PyYAML
+          echo "/tmp/orche-outcome-review-venv/bin" >> "$GITHUB_PATH"
+
+      - name: Add regressions, verify red, implement, verify green, and publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PYTHONDONTWRITEBYTECODE=1
+          export PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
+          export TERM=dumb
+
+          test "$(git -C repo rev-parse HEAD)" = "075e049ef4aecc110721d5a9496109fee204f872"
+          test -z "$(git -C repo status --porcelain=v1)"
+
+          python3 helper/.orche-payload/fix_outcome_evidence.py tests repo
+
+          cd repo
+          set +e
+          python3 tests/test_orche_pytest_baseline.py \
+            PytestComparatorTests.test_retained_zero_exit_outcome_fingerprint_changes_block \
+            > /tmp/orche-outcome-red-comparator.log 2>&1
+          red_comparator=$?
+          python3 tests/test_orche_verifier_isolation.py \
+            VerifierIsolationTests.test_zero_exit_outcome_parser_preserves_non_skip_counts_and_diagnostics \
+            > /tmp/orche-outcome-red-parser.log 2>&1
+          red_parser=$?
+          set -e
+
+          if [ "$red_comparator" -eq 0 ] || [ "$red_parser" -eq 0 ]; then
+            echo "RED verification failed: one or more regressions passed before implementation" >&2
+            cat /tmp/orche-outcome-red-comparator.log >&2
+            cat /tmp/orche-outcome-red-parser.log >&2
+            exit 1
+          fi
+          grep -q "FAILED" /tmp/orche-outcome-red-comparator.log
+          grep -Eq "FAILED|ERROR" /tmp/orche-outcome-red-parser.log
+          echo "RED verified: file-level JUnit currently discards non-skip zero-exit outcomes"
+
+          cd ..
+          python3 helper/.orche-payload/fix_outcome_evidence.py implement repo
+          cd repo
+
+          cmp scripts/baseline/stage0_evidence.py \
+              baseline/orchestrarium-v1/tooling/stage0_evidence.py
+          cmp scripts/baseline/compare_pytest_baseline.py \
+              baseline/orchestrarium-v1/tooling/compare_pytest_baseline.py
+
+          for test_file in \
+            tests/test_orche_baseline_pin.py \
+            tests/test_orche_pytest_baseline.py \
+            tests/test_orche_baseline_inventory.py \
+            tests/test_orche_target_effect_baseline.py \
+            tests/test_orche_command_baseline.py \
+            tests/test_orche_capability_baseline.py \
+            tests/test_orche_verifier_isolation.py \
+            tests/test_orche_review_regressions.py; do
+            python3 "$test_file"
+          done
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+          import re
+          import subprocess
+          import tempfile
+
+          changed = subprocess.check_output(
+              ["git", "diff", "--name-only", "--", "*.py"], text=True
+          ).splitlines()
+          for name in changed:
+              source = Path(name).read_text(encoding="utf-8")
+              compile(source, name, "exec")
+
+          pin = json.loads(
+              Path("baseline/orchestrarium-v1/baseline-pin.json").read_text(
+                  encoding="utf-8"
+              )
+          )
+          for key in ("pytestComparator", "stage0Evidence"):
+              record = pin["tooling"][key]
+              actual = subprocess.check_output(
+                  ["git", "hash-object", record["path"]], text=True
+              ).strip()
+              assert actual == record["gitBlobSha"], (
+                  key,
+                  actual,
+                  record["gitBlobSha"],
+              )
+
+          readme = Path(
+              "baseline/orchestrarium-v1/README.md"
+          ).read_text(encoding="utf-8")
+          match = re.search(r"```bash\n(.*?)\n```", readme, re.S)
+          assert match
+          with tempfile.NamedTemporaryFile(
+              "w", suffix=".sh", delete=False
+          ) as handle:
+              handle.write(match.group(1) + "\n")
+              shell_path = handle.name
+          subprocess.run(["bash", "-n", shell_path], check=True)
+
+          evidence_source = Path(
+              "scripts/baseline/stage0_evidence.py"
+          ).read_text(encoding="utf-8")
+          comparator_source = Path(
+              "scripts/baseline/compare_pytest_baseline.py"
+          ).read_text(encoding="utf-8")
+          assert '"orche.pytest.outcomes.v1"' in evidence_source
+          assert '"changedRetainedOutcomeEvidence"' in comparator_source
+          assert 'return {"schemaVersion":4,' in comparator_source
+          PY
+
+          find . -type d -name __pycache__ -prune -exec rm -rf {} +
+          git add -A
+
+          expected_paths=$(cat <<'EOF'
+          RELEASE_NOTES.md
+          baseline/orchestrarium-v1/README.md
+          baseline/orchestrarium-v1/baseline-pin.json
+          baseline/orchestrarium-v1/tooling/compare_pytest_baseline.py
+          baseline/orchestrarium-v1/tooling/stage0_evidence.py
+          scripts/baseline/compare_pytest_baseline.py
+          scripts/baseline/stage0_evidence.py
+          tests/test_orche_pytest_baseline.py
+          tests/test_orche_verifier_isolation.py
+          EOF
+          )
+          diff -u <(printf '%s\n' "$expected_paths" | sort) \
+            <(git diff --cached --name-only | sort)
+          git diff --cached --check
+          python3 scripts/check-publication-gate.py
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(stage0): preserve zero-exit pytest outcomes'
+          git push origin HEAD:orche/impl-000-baseline
+          echo "published_commit=$(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
