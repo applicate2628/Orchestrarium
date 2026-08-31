@@ -43,8 +43,13 @@ def test_public_process_launch_contract_is_windows_only() -> None:
 
     for path in PUBLIC_PROCESS_SUPERVISION_DOCS:
         text = path.read_text(encoding="utf-8")
+        contract_subject = (
+            "Generic POSIX launches"
+            if path.name == "RELEASE_NOTES.md"
+            else "All POSIX process launches"
+        )
         assert (
-            "All POSIX process launches fail at request validation with "
+            f"{contract_subject} fail at request validation with "
             "`PSV1-POSIX-ORACLE-UNAVAILABLE` before executable acquisition or "
             "subprocess creation."
         ) in text

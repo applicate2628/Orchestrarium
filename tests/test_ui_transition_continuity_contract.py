@@ -8,6 +8,7 @@ negative controls without introducing a runtime validator or framework policy.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -360,9 +361,15 @@ def _run_isolated_install(provider: str, target: Path) -> Path:
     ]
     if provider == "claude":
         command.append("--no-hypothesis-hook")
+    environment = os.environ.copy()
+    if provider == "codex":
+        environment["CODEX_BIN"] = str(
+            ROOT / "tests" / "fixtures" / "fake_codex_hooks_host.py"
+        )
     result = subprocess.run(
         command,
         cwd=ROOT,
+        env=environment,
         capture_output=True,
         text=True,
         encoding="utf-8",

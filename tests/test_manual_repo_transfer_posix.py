@@ -132,10 +132,24 @@ class PosixRepoTransferTests(unittest.TestCase):
         self.assertEqual(0, libc.prctl(37, ctypes.byref(prior_subreaper), 0, 0, 0))
         self.assertEqual(0, libc.prctl(36, 1, 0, 0, 0))
         module = load_transfer_module()
+        readiness_marker: Path | None = None
+        real_monotonic = time.monotonic
+
+        def monotonic_after_fake_git_ready() -> float:
+            if readiness_marker is not None:
+                readiness_deadline = real_monotonic() + 5
+                while not readiness_marker.is_file():
+                    if real_monotonic() >= readiness_deadline:
+                        raise AssertionError("fake Git did not signal readiness")
+                    time.sleep(0.01)
+            return real_monotonic()
+
         executable = self.write_fake_git(
             "import os, subprocess, sys, time\n"
             "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])\n"
-            "open(sys.argv[1], 'w', encoding='ascii').write(f'{os.getpid()} {child.pid}')\n"
+            "with open(sys.argv[1], 'w', encoding='ascii') as pid_file:\n"
+            "    pid_file.write(f'{os.getpid()} {child.pid}')\n"
+            "open(sys.argv[2], 'w', encoding='ascii').close()\n"
             "time.sleep(30)\n"
         )
         process_groups: list[int] = []
@@ -144,12 +158,20 @@ class PosixRepoTransferTests(unittest.TestCase):
             with (
                 mock.patch.object(module, "GIT_COMMAND_TIMEOUT_SECONDS", 0.1),
                 mock.patch.object(module, "GIT_PROCESS_CLEANUP_SECONDS", 1),
+                mock.patch.object(
+                    module.time,
+                    "monotonic",
+                    side_effect=monotonic_after_fake_git_ready,
+                ),
             ):
                 for ordinal in range(3):
                     child_pid = self.root / f"child-{ordinal}.pid"
+                    readiness_marker = self.root / f"child-{ordinal}.ready"
                     with self.assertRaisesRegex(module.ContractError, r"^git command timed out$"):
                         module._run_posix_git_process(
-                            [str(executable), str(child_pid)], None, os.environ.copy()
+                            [str(executable), str(child_pid), str(readiness_marker)],
+                            None,
+                            os.environ.copy(),
                         )
                     group, pid = map(int, child_pid.read_text(encoding="ascii").split())
                     process_groups.append(group)

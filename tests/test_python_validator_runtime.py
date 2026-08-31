@@ -30,8 +30,8 @@ PROVIDER_RUNTIME_MIRRORS = (
     ROOT / "src.claude/agents/scripts/skill_pack_validator_runtime.py",
 )
 EXPECTED_SUMMARIES = (
-    "PASS: 548  WARN: 0  FAIL: 0",
-    "Checks: 479  |  Passed: 479  |  Warnings: 0  |  Errors: 0",
+    "PASS: 556  WARN: 0  FAIL: 0",
+    "Checks: 489  |  Passed: 489  |  Warnings: 0  |  Errors: 0",
 )
 
 
@@ -1030,7 +1030,9 @@ def test_scoped_action_registry_keeps_source_only_maintainer_checks_out_of_insta
     )
     source_only_actions = tuple(
         action
-        for action in dict(module.ACTIONS)["dev_repo"]
+        for scope, actions in module.ACTIONS
+        if scope in ("dev_repo", "dev_repo_nonstandalone")
+        for action in actions
         if module._is_source_only_maintainer_action(action)
     )
     assert source_only_actions
@@ -1060,6 +1062,70 @@ def test_scoped_action_registry_keeps_source_only_maintainer_checks_out_of_insta
         module._is_source_only_maintainer_action(action)
         for action in installed_actions
     )
+
+
+@pytest.mark.parametrize("validator", VALIDATORS)
+def test_work_item_helper_root_actions_are_owned_by_source_only_scope(
+    validator: Path,
+) -> None:
+    """Catches source helper checks leaking installed layout after slice shifts."""
+    module = _load(validator, f"work_item_helper_scope_{validator.parent.parent.name}")
+    source_prefixes = (
+        "@ROOT/scripts/check-work-items-state",
+        "@ROOT/scripts/validate-work-item-state",
+    )
+    source_helper_actions = tuple(
+        action
+        for action in module._DECLARED_ACTIONS
+        if any(
+            str(value).startswith(source_prefixes)
+            for value in action
+        )
+    )
+
+    assert source_helper_actions
+    assert all(
+        module._is_source_only_maintainer_action(action)
+        for action in source_helper_actions
+    )
+
+
+@pytest.mark.parametrize(
+    ("provider", "expected_clean_result"),
+    (
+        ("codex", "VALIDATION PASSED\n"),
+        ("claude", "  RESULT: PASS\n"),
+    ),
+)
+def test_materialized_installed_validator_routes_work_item_helpers_to_installed_scripts(
+    tmp_path: Path,
+    provider: str,
+    expected_clean_result: str,
+) -> None:
+    target, validator = _materialize_installed_pack(tmp_path, provider)
+    environment = os.environ.copy()
+    environment["PATH"] = ""
+
+    result = subprocess.run(
+        [sys.executable, str(validator)],
+        cwd=target,
+        env=environment,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+
+    output = result.stdout + result.stderr
+    assert result.returncode == 0, output
+    assert expected_clean_result in result.stdout
+    assert "file missing: @ROOT/scripts/check-work-items-state" not in output
+    assert "file missing: @ROOT/scripts/validate-work-item-state" not in output
+    assert "installed check-work-items-state.py" in result.stdout
+    assert "installed check-work-items-state.sh" in result.stdout
+    assert "installed validate-work-item-state.py" in result.stdout
+    assert "installed validate-work-item-state.sh" in result.stdout
 
 
 @pytest.mark.parametrize(

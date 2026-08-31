@@ -195,6 +195,80 @@ class ResolveAgentsModeTest(unittest.TestCase):
             defaults_only = self._resolve("claude", base / "project", home)
             self.assertEqual(defaults_only["reserveResolverTrust"], "not-executable")
 
+    def test_supported_quoted_scalars_resolve_to_semantic_values_without_rewrite(self) -> None:
+        """Quoted YAML syntax is decoded for runtime use but remains byte-exact on disk."""
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            project = base / "project"
+            home = base / "home"
+            project.mkdir()
+            home.mkdir()
+            overlay = project / ".agents" / ".agents-mode.yaml"
+            self._write(
+                overlay,
+                r"""
+                externalProvider: "claude"
+                reserveResolver: 'disabled'
+                externalPriorityProfile: "quality\"first"
+                """,
+            )
+            original = overlay.read_bytes()
+
+            resolved = self._resolve("codex", project, home)
+
+            self.assertEqual(resolved["values"]["externalProvider"], "claude")
+            self.assertEqual(resolved["values"]["reserveResolver"], "disabled")
+            self.assertEqual(resolved["values"]["externalPriorityProfile"], 'quality"first')
+            self.assertEqual(overlay.read_bytes(), original)
+
+    def test_unquoted_scalar_keeps_its_semantic_value(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            project = base / "project"
+            home = base / "home"
+            project.mkdir()
+            home.mkdir()
+            self._write(project / ".agents" / ".agents-mode.yaml", "mcpMode: force\n")
+
+            resolved = self._resolve("codex", project, home)
+
+            self.assertEqual(resolved["values"]["mcpMode"], "force")
+
+    def test_invalid_quoted_scalar_fails_closed_without_rewrite(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            project = base / "project"
+            home = base / "home"
+            project.mkdir()
+            home.mkdir()
+            overlay = project / ".agents" / ".agents-mode.yaml"
+            original = b'externalProvider: "claude\n'
+            overlay.parent.mkdir(parents=True)
+            overlay.write_bytes(original)
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "scripts" / "resolve-agents-mode.py"),
+                    "--provider",
+                    "codex",
+                    "--project-root",
+                    str(project),
+                    "--home",
+                    str(home),
+                    "--repo-root",
+                    str(ROOT),
+                    "--json",
+                ],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("E_AGENTS_MODE_INVALID_YAML", result.stderr)
+            self.assertEqual(overlay.read_bytes(), original)
+
     def test_removed_providers_fail_with_migration_diagnostic(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)

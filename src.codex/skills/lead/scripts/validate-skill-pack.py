@@ -1623,6 +1623,7 @@ _SOURCE_ONLY_MAINTAINER_PREFIXES = (
     "@ROOT/INSTALL.md",
     "@ROOT/RELEASE_NOTES.md",
     "@ROOT/scripts/agent-run-ledger",
+    "@ROOT/scripts/check-work-items-state",
     "@ROOT/scripts/validate-work-item-state",
 )
 

@@ -381,19 +381,33 @@ def render_scalar(key: str, meta: ScalarMeta, existing: dict[str, ScalarMeta]) -
 
 
 def decode_supported_yaml_scalar(value: str) -> str:
-    """Decode quoted string forms for semantic scalar comparisons only."""
+    """Decode the narrow quoted-string subset used by agents-mode semantics."""
     value = value.strip()
+    if not value or value[0] not in {"'", '"'}:
+        return value
     if len(value) < 2 or value[0] != value[-1]:
-        return value
+        raise ValueError("E_AGENTS_MODE_INVALID_YAML: invalid quoted scalar")
     if value[0] == "'":
-        return value[1:-1].replace("''", "'")
-    if value[0] != '"':
-        return value
+        inner = value[1:-1]
+        decoded: list[str] = []
+        index = 0
+        while index < len(inner):
+            if inner[index] != "'":
+                decoded.append(inner[index])
+                index += 1
+                continue
+            if index + 1 >= len(inner) or inner[index + 1] != "'":
+                raise ValueError("E_AGENTS_MODE_INVALID_YAML: invalid single-quoted scalar")
+            decoded.append("'")
+            index += 2
+        return "".join(decoded)
     try:
         decoded = json.loads(value)
-    except json.JSONDecodeError:
-        return value
-    return decoded if isinstance(decoded, str) else value
+    except json.JSONDecodeError as exc:
+        raise ValueError("E_AGENTS_MODE_INVALID_YAML: invalid double-quoted scalar") from exc
+    if not isinstance(decoded, str):
+        raise ValueError("E_AGENTS_MODE_INVALID_YAML: quoted scalar must decode to a string")
+    return decoded
 
 
 def reject_removed_external_provider(existing: dict[str, ScalarMeta]) -> None:

@@ -792,6 +792,8 @@ def test_installed_kimi_grok_contract_splits_admitted_and_unavailable_routes() -
     for relative in live_consumers:
         text = (ROOT / relative).read_text(encoding="utf-8")
         assert "Kimi" in text and "read-only" in text, relative
-        assert "independent" in text and "nonauthorizing" in text, relative
+        assert "independent" in text and (
+            "nonauthorizing" in text or "non-authorizing" in text
+        ), relative
         assert "Grok" in text and "unavailable" in text, relative
         assert "Kimi/Grok are unavailable" not in text, relative

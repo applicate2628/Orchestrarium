@@ -813,7 +813,7 @@ def parse_provider_list(value: str) -> list[str]:
     return [provider.strip() for provider in value.split(",") if provider.strip()]
 
 
-def parse_agents_mode_text(text: str) -> dict[str, Any]:
+def parse_agents_mode_text(text: str, scalar_decoder: Any) -> dict[str, Any]:
     result: dict[str, Any] = {}
     current_block: str | None = None
     current_profile: str | None = None
@@ -830,7 +830,7 @@ def parse_agents_mode_text(text: str) -> dict[str, Any]:
             elif current_block == "externalOpinionCounts":
                 result[current_block] = {}
             else:
-                result[current_block] = strip_comment(rest)
+                result[current_block] = scalar_decoder(strip_comment(rest))
             continue
 
         if current_block == "externalPriorityProfiles":
@@ -855,13 +855,12 @@ def parse_agents_mode_text(text: str) -> dict[str, Any]:
     return result
 
 
-def canonical_defaults(repo_root: Path, provider: str) -> dict[str, Any]:
-    normalizer = _load_normalizer(repo_root)
+def canonical_defaults(repo_root: Path, provider: str, normalizer: Any) -> dict[str, Any]:
     template = repo_root / "shared" / "agents-mode.defaults.yaml"
     missing_target = repo_root / ".scratch" / "__agents_mode_missing__"
     normalizer_provider = "codex" if provider == "codex" else "shared"
     content = normalizer.normalize_file(str(template), str(missing_target), normalizer_provider)
-    return parse_agents_mode_text(content)
+    return parse_agents_mode_text(content, normalizer.decode_supported_yaml_scalar)
 
 
 def load_role_policy(repo_root: Path) -> tuple[dict[str, Any], Path]:
@@ -1546,11 +1545,15 @@ def resolve(provider: str, project_root: Path, home: Path, repo_root: Path) -> d
     values: dict[str, Any] = {}
     sources: dict[str, dict[str, str]] = {}
     reserve_resolver_layers: list[tuple[str, Any]] = []
+    normalizer = _load_normalizer(repo_root)
 
     for rank, path in layer_paths(provider, project_root, home):
         if not path.is_file():
             continue
-        parsed = parse_agents_mode_text(path.read_text(encoding="utf-8"))
+        parsed = parse_agents_mode_text(
+            path.read_text(encoding="utf-8"),
+            normalizer.decode_supported_yaml_scalar,
+        )
         if "reserveResolver" in parsed:
             reserve_resolver_layers.append((rank, parsed["reserveResolver"]))
         for key, value in parsed.items():
@@ -1559,7 +1562,7 @@ def resolve(provider: str, project_root: Path, home: Path, repo_root: Path) -> d
             values[key] = value
             sources[key] = {"rank": rank, "path": str(path)}
 
-    for key, value in canonical_defaults(repo_root, provider).items():
+    for key, value in canonical_defaults(repo_root, provider, normalizer).items():
         if key in values:
             continue
         values[key] = value
