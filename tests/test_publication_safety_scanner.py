@@ -1555,6 +1555,183 @@ class TestPublicationSafetyScannerV3(unittest.TestCase):
             self.assertIn("PS-FINDING-COMMIT-MESSAGE", proc.stderr)
             self.assertNotIn("publication-safety: clean", proc.stdout + proc.stderr)
 
+    def test_range_timeout_reaps_spawned_git_process_tree(self) -> None:
+        module = _load_canonical_scanner("_scanner_v3_range_tree_timeout")
+        self.assertTrue(hasattr(module, "_run_owned_process"))
+        with tempfile.TemporaryDirectory() as td:
+            child_pid_path = Path(td) / "child.pid"
+            wrapper = (
+                "import pathlib,subprocess,sys,time;"
+                "child=subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)']);"
+                "pathlib.Path(sys.argv[1]).write_text(str(child.pid),encoding='ascii');"
+                "time.sleep(60)"
+            )
+            with self.assertRaises(subprocess.TimeoutExpired):
+                module._run_owned_process(
+                    [sys.executable, "-c", wrapper, str(child_pid_path)],
+                    timeout=0.5,
+                )
+            self.assertTrue(child_pid_path.exists(), "wrapper did not spawn its sleeper")
+            child_pid = int(child_pid_path.read_text(encoding="ascii"))
+            deadline = time.monotonic() + 2.0
+            while time.monotonic() < deadline:
+                try:
+                    os.kill(child_pid, 0)
+                except OSError:
+                    break
+                time.sleep(0.05)
+            else:
+                self.fail("timed-out range Git process left its sleeper child alive")
+
+    @unittest.skipIf(os.name == "nt", "POSIX process-group regression")
+    def test_posix_timeout_preserves_result_after_group_reap(self) -> None:
+        module = _load_canonical_scanner("_scanner_v3_posix_timeout_order")
+        with tempfile.TemporaryDirectory() as td:
+            pids_path = Path(td) / "pids"
+            wrapper = (
+                "import os,pathlib,subprocess,sys,time;"
+                "child=subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)'],"
+                "stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL);"
+                "pathlib.Path(sys.argv[1]).write_text(f'{os.getpid()} {child.pid}',encoding='ascii');"
+                "time.sleep(60)"
+            )
+            with self.assertRaises(subprocess.TimeoutExpired):
+                module._run_owned_process(
+                    [sys.executable, "-c", wrapper, str(pids_path)], timeout=0.5
+                )
+            group_pid = int(pids_path.read_text(encoding="ascii").split()[0])
+            with self.assertRaises(ProcessLookupError):
+                os.killpg(group_pid, 0)
+
+    @unittest.skipIf(os.name == "nt", "POSIX process-group regression")
+    def test_posix_async_cancel_returns_refusal_after_group_reap(self) -> None:
+        module = _load_canonical_scanner("_scanner_v3_posix_cancel_order")
+        with tempfile.TemporaryDirectory() as td:
+            pids_path = Path(td) / "pids"
+            wrapper = (
+                "import os,pathlib,subprocess,sys,time;"
+                "child=subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)'],"
+                "stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL);"
+                "pathlib.Path(sys.argv[1]).write_text(f'{os.getpid()} {child.pid}',encoding='ascii');"
+                "time.sleep(60)"
+            )
+
+            async def exercise_cancel():
+                task = asyncio.create_task(module._read_git_lines_bounded(
+                    (sys.executable, "-u", "-c", wrapper, str(pids_path)),
+                    byte_cap=1024,
+                    line_cap=256,
+                    deadline=asyncio.get_running_loop().time() + 5.0,
+                    accepted_codes=frozenset({0}),
+                ))
+                deadline = asyncio.get_running_loop().time() + 1.0
+                while not pids_path.exists():
+                    self.assertLess(asyncio.get_running_loop().time(), deadline)
+                    await asyncio.sleep(0.01)
+                task.cancel()
+                return await task
+
+            outcome = asyncio.run(exercise_cancel())
+            self.assertIsInstance(outcome, module.Refusal)
+            self.assertEqual(outcome.reason, "cancelled")
+            group_pid = int(pids_path.read_text(encoding="ascii").split()[0])
+            with self.assertRaises(ProcessLookupError):
+                os.killpg(group_pid, 0)
+
+    def test_range_settles_descendants_after_parent_exit(self) -> None:
+        module = _load_canonical_scanner("_scanner_v3_range_parent_exit")
+        for exit_code in (0, 7):
+            with self.subTest(exit_code=exit_code), tempfile.TemporaryDirectory() as td:
+                child_pid_path = Path(td) / "child.pid"
+                wrapper = (
+                    "import pathlib,subprocess,sys;"
+                    "child=subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)'],"
+                    "stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL);"
+                    "pathlib.Path(sys.argv[1]).write_text(str(child.pid),encoding='ascii');"
+                    "sys.exit(int(sys.argv[2]))"
+                )
+                outcome = module._run_owned_process(
+                    [
+                        sys.executable, "-c", wrapper, str(child_pid_path),
+                        str(exit_code),
+                    ],
+                    timeout=2.0,
+                )
+                self.assertEqual(outcome.returncode, exit_code)
+                child_pid = int(child_pid_path.read_text(encoding="ascii"))
+                try:
+                    os.kill(child_pid, 0)
+                except OSError:
+                    pass
+                else:
+                    self.fail(
+                        f"range parent exit {exit_code} left its sleeper child alive"
+                    )
+
+    def test_object_reader_close_settles_exited_parent_descendants(self) -> None:
+        module = _load_canonical_scanner("_scanner_v3_reader_close_tree")
+        with tempfile.TemporaryDirectory() as td:
+            child_pid_path = Path(td) / "child.pid"
+            wrapper = (
+                "import pathlib,subprocess,sys;"
+                "child=subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)'],"
+                "stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL);"
+                "pathlib.Path(sys.argv[1]).write_text(str(child.pid),encoding='ascii');"
+                "sys.stdin.buffer.read()"
+            )
+
+            async def exercise_reader_close():
+                reader = module.ObjectReaderSession(
+                    argv=(sys.executable, "-u", "-c", wrapper, str(child_pid_path)),
+                    request_timeout=1.0,
+                    settle_timeout=1.0,
+                )
+                self.assertIsNone(await reader.start())
+                deadline = asyncio.get_running_loop().time() + 1.0
+                while not child_pid_path.exists():
+                    self.assertLess(asyncio.get_running_loop().time(), deadline)
+                    await asyncio.sleep(0.01)
+                self.assertIsNone(await reader.finalize())
+
+            asyncio.run(exercise_reader_close())
+            child_pid = int(child_pid_path.read_text(encoding="ascii"))
+            try:
+                os.kill(child_pid, 0)
+            except OSError:
+                pass
+            else:
+                self.fail("object-reader close left its sleeper child alive")
+
+    def test_range_remote_probe_keeps_pushurl_out_of_child_argv_and_diagnostics(self) -> None:
+        module = _load_canonical_scanner("_scanner_v3_pushurl_transport")
+        canary = _join("https://probe-user:", "credential-canary", "@example.invalid/repo.git")
+        captured: dict[str, object] = {}
+
+        async def fake_reader(argv, **kwargs):
+            captured["argv"] = argv
+            captured["env"] = kwargs.get("env")
+            return 2, ()
+
+        stderr = io.StringIO()
+        async def exercise_remote_probe():
+            return await module._remote_destination_oid(
+                canary,
+                "main",
+                deadline=asyncio.get_running_loop().time() + 5.0,
+                object_format=module._SHA1_OBJECT_FORMAT,
+            )
+
+        with mock.patch.object(module, "_read_git_lines_bounded", side_effect=fake_reader):
+            with contextlib.redirect_stderr(stderr):
+                outcome = asyncio.run(exercise_remote_probe())
+
+        self.assertIsNone(outcome)
+        argv_diagnostics = repr(captured.get("argv")) + stderr.getvalue()
+        self.assertNotIn(canary, argv_diagnostics)
+        child_env = captured.get("env")
+        self.assertIsInstance(child_env, dict)
+        self.assertIn(canary, child_env.values())
+
     def test_range_uses_unique_pushurl_not_fetch_url_for_destination_oid(self) -> None:
         for push_has_seed in (True, False):
             with self.subTest(push_has_seed=push_has_seed), tempfile.TemporaryDirectory() as td:

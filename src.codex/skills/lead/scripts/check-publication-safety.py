@@ -9,6 +9,7 @@ from enum import Enum
 import hashlib
 import os
 import re
+import signal
 import subprocess
 import sys
 import time
@@ -94,6 +95,7 @@ _MAX_TREE_CACHE_ENTRIES = _MAX_OBJECTS
 _RECEIPT_DOMAIN = b"publication-safety-range-receipt-v3"
 _OBJECT_REQUEST_TIMEOUT_SECONDS = 5.0
 OBJECT_REAP_ATTEMPT_SECONDS = 3.0
+_PROCESS_TREE_CLEANUP_SECONDS = 3.0
 OBJECT_REAP_MAX_ATTEMPTS = 2
 _SCANNER_REFUSAL_IDS = frozenset({
     "PS-MSG-RANGE",
@@ -424,8 +426,16 @@ class ScanOutcome:
 
 
 def _run_git(
-    args: list[str], *, text: bool = False, timeout: float | None = None
+    args: list[str],
+    *,
+    text: bool = False,
+    timeout: float | None = None,
+    owned: bool = False,
 ) -> subprocess.CompletedProcess:
+    if owned:
+        return _run_owned_process(
+            [_GIT_EXECUTABLE, *args], text=text, timeout=timeout
+        )
     return subprocess.run(
         [_GIT_EXECUTABLE, *args],
         capture_output=True,
@@ -436,6 +446,210 @@ def _run_git(
     )
 
 
+def _owned_process_group_kwargs() -> dict[str, object]:
+    """Create one independently addressable process tree for a bounded child."""
+    if os.name == "nt":
+        return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+    return {"start_new_session": True}
+
+
+def _windows_process_rows() -> tuple[tuple[int, int], ...] | None:
+    """Return one Toolhelp process snapshot without launching another process."""
+    import ctypes
+    from ctypes import wintypes
+
+    class PROCESSENTRY32W(ctypes.Structure):
+        _fields_ = (
+            ("dwSize", wintypes.DWORD),
+            ("cntUsage", wintypes.DWORD),
+            ("th32ProcessID", wintypes.DWORD),
+            ("th32DefaultHeapID", ctypes.c_size_t),
+            ("th32ModuleID", wintypes.DWORD),
+            ("cntThreads", wintypes.DWORD),
+            ("th32ParentProcessID", wintypes.DWORD),
+            ("pcPriClassBase", wintypes.LONG),
+            ("dwFlags", wintypes.DWORD),
+            ("szExeFile", wintypes.WCHAR * 260),
+        )
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateToolhelp32Snapshot.argtypes = (wintypes.DWORD, wintypes.DWORD)
+    kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+    kernel32.Process32FirstW.argtypes = (
+        wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY32W)
+    )
+    kernel32.Process32FirstW.restype = wintypes.BOOL
+    kernel32.Process32NextW.argtypes = (
+        wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY32W)
+    )
+    kernel32.Process32NextW.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    snapshot = kernel32.CreateToolhelp32Snapshot(0x00000002, 0)
+    invalid_handle = ctypes.c_void_p(-1).value
+    if snapshot == invalid_handle:
+        return None
+    rows: list[tuple[int, int]] = []
+    try:
+        entry = PROCESSENTRY32W()
+        entry.dwSize = ctypes.sizeof(entry)
+        if not kernel32.Process32FirstW(snapshot, ctypes.byref(entry)):
+            return None
+        while True:
+            rows.append((int(entry.th32ProcessID), int(entry.th32ParentProcessID)))
+            if not kernel32.Process32NextW(snapshot, ctypes.byref(entry)):
+                break
+    finally:
+        kernel32.CloseHandle(snapshot)
+    return tuple(rows)
+
+
+def _windows_terminate_pid(pid: int, timeout: float) -> None:
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.argtypes = (
+        wintypes.DWORD, wintypes.BOOL, wintypes.DWORD
+    )
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.TerminateProcess.argtypes = (wintypes.HANDLE, wintypes.UINT)
+    kernel32.TerminateProcess.restype = wintypes.BOOL
+    kernel32.WaitForSingleObject.argtypes = (wintypes.HANDLE, wintypes.DWORD)
+    kernel32.WaitForSingleObject.restype = wintypes.DWORD
+    kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    handle = kernel32.OpenProcess(0x0001 | 0x00100000, False, pid)
+    if not handle:
+        return
+    try:
+        kernel32.TerminateProcess(handle, 1)
+        milliseconds = max(1, min(0xFFFFFFFE, int(timeout * 1000)))
+        kernel32.WaitForSingleObject(handle, milliseconds)
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+class _OwnedProcessSettlement:
+    """One owner for terminate, direct-reap ordering, and group-empty proof."""
+
+    def __init__(self, pid: int) -> None:
+        self.pid = pid
+        self._known_windows_pids = {pid}
+
+    def _windows_live_members(self) -> set[int] | None:
+        rows = _windows_process_rows()
+        if rows is None:
+            return None
+        changed = True
+        while changed:
+            changed = False
+            for child_pid, parent_pid in rows:
+                if (
+                    parent_pid in self._known_windows_pids
+                    and child_pid not in self._known_windows_pids
+                ):
+                    self._known_windows_pids.add(child_pid)
+                    changed = True
+        return {
+            process_pid
+            for process_pid, _parent_pid in rows
+            if process_pid in self._known_windows_pids
+        }
+
+    def terminate(self, deadline: float) -> bool:
+        if os.name != "nt":
+            try:
+                os.killpg(self.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                return True
+            except OSError:
+                return False
+            return True
+        live = self._windows_live_members()
+        if live is None:
+            return False
+        for process_pid in sorted(live, reverse=True):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return False
+            _windows_terminate_pid(process_pid, min(0.1, remaining))
+        return True
+
+    def verify_empty(self, deadline: float) -> bool:
+        while True:
+            if os.name != "nt":
+                try:
+                    os.killpg(self.pid, 0)
+                except ProcessLookupError:
+                    return True
+                except OSError:
+                    return False
+            else:
+                live = self._windows_live_members()
+                if live is None:
+                    return False
+                if not live:
+                    return True
+            if time.monotonic() >= deadline:
+                return False
+            if not self.terminate(deadline):
+                return False
+            time.sleep(0.01)
+
+
+def _run_owned_process(
+    argv: list[str],
+    *,
+    text: bool = False,
+    timeout: float | None = None,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess:
+    """Run a bounded process and settle its whole owned tree on timeout."""
+    process = subprocess.Popen(
+        argv,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=text,
+        encoding="utf-8" if text else None,
+        errors="replace" if text else None,
+        env=env,
+        **_owned_process_group_kwargs(),
+    )
+    expired: subprocess.TimeoutExpired | None = None
+    try:
+        stdout, stderr = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        expired = exc
+        stdout, stderr = None, None
+    cleanup_deadline = time.monotonic() + _PROCESS_TREE_CLEANUP_SECONDS
+    settlement = _OwnedProcessSettlement(process.pid)
+    termination_started = settlement.terminate(cleanup_deadline)
+    if process.poll() is None:
+        try:
+            process.kill()
+        except ProcessLookupError:
+            pass
+    try:
+        remaining = max(0.0, cleanup_deadline - time.monotonic())
+        stdout, stderr = process.communicate(timeout=remaining)
+    except subprocess.TimeoutExpired:
+        termination_started = False
+    group_settled = (
+        termination_started
+        and process.poll() is not None
+        and settlement.verify_empty(cleanup_deadline)
+    )
+    if not group_settled:
+        raise RuntimeError("owned process group did not settle")
+    if expired is not None:
+        raise subprocess.TimeoutExpired(
+            expired.cmd, expired.timeout, output=stdout, stderr=stderr
+        ) from None
+    return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
+
+
 def _range_git_argv(*args: str) -> tuple[str, ...]:
     """Build a replacement-disabled Git command for pushed-object inspection."""
     return (_GIT_EXECUTABLE, "--no-replace-objects", *args)
@@ -444,7 +658,39 @@ def _range_git_argv(*args: str) -> tuple[str, ...]:
 def _run_range_git(
     args: list[str], *, text: bool = False, timeout: float | None = None
 ) -> subprocess.CompletedProcess:
-    return _run_git(["--no-replace-objects", *args], text=text, timeout=timeout)
+    return _run_git(
+        ["--no-replace-objects", *args],
+        text=text,
+        timeout=timeout,
+        owned=True,
+    )
+
+
+async def _settle_owned_async_process(
+    process: asyncio.subprocess.Process,
+) -> bool:
+    cleanup_deadline = time.monotonic() + _PROCESS_TREE_CLEANUP_SECONDS
+    settlement = _OwnedProcessSettlement(process.pid)
+    termination_started = await asyncio.to_thread(
+        settlement.terminate, cleanup_deadline
+    )
+    if process.returncode is None:
+        try:
+            process.kill()
+        except ProcessLookupError:
+            pass
+    try:
+        remaining = max(0.0, cleanup_deadline - time.monotonic())
+        await asyncio.wait_for(
+            process.wait(), timeout=remaining
+        )
+    except Exception:
+        return False
+    if not termination_started or process.returncode is None:
+        return False
+    return await asyncio.to_thread(
+        settlement.verify_empty, cleanup_deadline
+    )
 
 
 def _repo_root() -> Path:
@@ -667,6 +913,7 @@ async def _read_git_lines_bounded(
     line_cap: int,
     deadline: float,
     accepted_codes: frozenset[int],
+    env: dict[str, str] | None = None,
 ) -> tuple[int, tuple[bytes, ...]] | Refusal:
     try:
         process = await asyncio.create_subprocess_exec(
@@ -674,13 +921,14 @@ async def _read_git_lines_bounded(
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
+            env=env,
+            **_owned_process_group_kwargs(),
         )
     except (OSError, subprocess.SubprocessError):
         return _refusal("PS-MSG-SPAWN", "selection")
     if process.stdout is None:
-        if process.returncode is None:
-            process.kill()
-            await process.wait()
+        if not await _settle_owned_async_process(process):
+            return _refusal("PS-MSG-REAP", "selection-child")
         return _refusal("PS-MSG-READ", "selection-pipe")
 
     rows: list[bytes] = []
@@ -742,15 +990,7 @@ async def _read_git_lines_bounded(
                 refusal = _refusal("PS-MSG-READ", "selection-wait")
 
     if process.returncode is None:
-        try:
-            process.kill()
-        except ProcessLookupError:
-            pass
-        try:
-            await asyncio.wait_for(
-                process.wait(), timeout=OBJECT_REAP_ATTEMPT_SECONDS
-            )
-        except Exception:
+        if not await _settle_owned_async_process(process):
             return _refusal("PS-MSG-REAP", "selection-child")
     if process.returncode is None:
         return _refusal("PS-MSG-REAP", "selection-child")
@@ -801,14 +1041,27 @@ async def _remote_destination_oid(
     if len(encoded_ref) > _MAX_PATH_BYTES:
         return _refusal("PS-MSG-LIMIT", "destination-ref")
     line_cap = object_format.hex_length + 1 + len(encoded_ref)
+    probe_remote = "publication-safety-verified-push-destination"
+    child_env = os.environ.copy()
+    for key in tuple(child_env):
+        if key == "GIT_CONFIG_COUNT" or re.fullmatch(
+            r"GIT_CONFIG_(?:KEY|VALUE)_\d+", key
+        ):
+            del child_env[key]
+    child_env.update({
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": f"remote.{probe_remote}.url",
+        "GIT_CONFIG_VALUE_0": push_destination,
+    })
     result = await _read_git_lines_bounded(
         _range_git_argv(
-            "ls-remote", "--refs", "--exit-code", push_destination, destination_ref
+            "ls-remote", "--refs", "--exit-code", probe_remote, destination_ref
         ),
         byte_cap=line_cap + 1,
         line_cap=line_cap,
         deadline=deadline,
         accepted_codes=frozenset({0, 2}),
+        env=child_env,
     )
     if isinstance(result, Refusal):
         return result
@@ -886,13 +1139,13 @@ async def _read_git_oid_lines_bounded(
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
+            **_owned_process_group_kwargs(),
         )
     except (OSError, subprocess.SubprocessError):
         return _refusal("PS-MSG-SPAWN", "selection")
     if process.stdout is None:
-        if process.returncode is None:
-            process.kill()
-            await process.wait()
+        if not await _settle_owned_async_process(process):
+            return _refusal("PS-MSG-REAP", "selection-child")
         return _refusal("PS-MSG-READ", "selection-pipe")
 
     rows: list[str] = []
@@ -965,15 +1218,7 @@ async def _read_git_oid_lines_bounded(
                 refusal = _refusal("PS-MSG-READ", "selection-wait")
 
     if process.returncode is None:
-        try:
-            process.kill()
-        except ProcessLookupError:
-            pass
-        try:
-            await asyncio.wait_for(
-                process.wait(), timeout=OBJECT_REAP_ATTEMPT_SECONDS
-            )
-        except Exception:
+        if not await _settle_owned_async_process(process):
             return _refusal("PS-MSG-REAP", "selection-child")
     if process.returncode is None:
         return _refusal("PS-MSG-REAP", "selection-child")
@@ -1183,6 +1428,7 @@ class _AsyncGitObjectReader:
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
+                **_owned_process_group_kwargs(),
             )
         except (OSError, subprocess.SubprocessError):
             self._state = ReaderState.SPAWN_FAILED
@@ -1328,11 +1574,10 @@ class _AsyncGitObjectReader:
                 errors.append("terminate")
             terminal = await self._wait_step(deadline, errors, "terminate-wait")
         if not terminal:
-            try:
-                process.kill()
-            except Exception:
-                errors.append("kill")
-            terminal = await self._wait_step(deadline, errors, "kill-wait")
+            errors.append("terminate-wait")
+        terminal = await _settle_owned_async_process(process)
+        if not terminal:
+            errors.append("group-settle")
         child = ChildObservation(
             child_identity,
             process.returncode,

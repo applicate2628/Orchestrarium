@@ -8,6 +8,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import stat
 import subprocess
 import sys
@@ -17,7 +18,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from tests.fixtures.runtime_capabilities import requires_windows_process_runner
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -388,26 +388,46 @@ def test_validator_capture_policy_is_the_single_exact_process_policy_owner() -> 
     assert not hasattr(process_policy, "filesystem_write_limit")
 
 
-def test_validator_runtime_has_no_direct_subprocess_or_tree_helper() -> None:
+def test_validator_runtime_has_one_narrow_posix_process_owner() -> None:
     tree = ast.parse(RUNTIME.read_text(encoding="utf-8"))
-    assert not any(
-        isinstance(node, (ast.Import, ast.ImportFrom))
-        and any(alias.name == "subprocess" for alias in node.names)
+    subprocess_imports = [
+        node
         for node in ast.walk(tree)
-    )
-    assert not any(
-        isinstance(node, ast.Call)
+        if isinstance(node, (ast.Import, ast.ImportFrom))
+        and any(alias.name == "subprocess" for alias in node.names)
+    ]
+    popen_calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Attribute)
         and isinstance(node.func.value, ast.Name)
         and node.func.value.id == "subprocess"
+        and node.func.attr == "Popen"
+    ]
+    run_calls = [
+        node
         for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "subprocess"
+        and node.func.attr == "run"
+    ]
+    assert len(subprocess_imports) == 1
+    assert len(popen_calls) == 1
+    assert run_calls == []
+    keywords = {keyword.arg: keyword.value for keyword in popen_calls[0].keywords}
+    assert isinstance(keywords["shell"], ast.Constant) and keywords["shell"].value is False
+    assert (
+        isinstance(keywords["start_new_session"], ast.Constant)
+        and keywords["start_new_session"].value is True
     )
     text = RUNTIME.read_text(encoding="utf-8")
     assert "ProcessRunnerV1" in text
     assert "taskkill" not in text.casefold()
 
 
-@requires_windows_process_runner
 def test_validator_process_adapter_preserves_exact_python_argv(tmp_path: Path) -> None:
     runtime = _load(RUNTIME, "validator_exact_argv")
     child = _write_python(
@@ -528,6 +548,65 @@ def test_validator_process_adapter_returns_typed_timeout_and_settles(
     assert result.direct_reaped
     assert result.primary_thread_closed
     assert result.job_handle_closed
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX cleanup-budget contract")
+def test_validator_timeout_gets_a_fresh_bounded_cleanup_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = _load(RUNTIME, "validator_fresh_cleanup_budget")
+    child = _write_python(
+        tmp_path,
+        "ignore_term.py",
+        "import signal, time\n"
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+        "time.sleep(60)\n",
+    )
+    cleanup_budgets: list[float] = []
+
+    def settle(process, timeout_seconds: float) -> bool:
+        cleanup_budgets.append(timeout_seconds)
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        process.wait(timeout=2.0)
+        return True
+
+    monkeypatch.setattr(runtime, "_settle_validator_posix_group", settle)
+
+    result = _validator(runtime)._run_python(child, timeout_seconds=0.1)
+
+    assert result.failure_id == "PSV1-DEADLINE"
+    assert result.timed_out
+    assert cleanup_budgets == [runtime.VALIDATOR_SETTLEMENT_TIMEOUT_SECONDS]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX descendant settlement contract")
+def test_validator_settles_descendant_after_parent_exits(tmp_path: Path) -> None:
+    runtime = _load(RUNTIME, "validator_exited_parent_descendant")
+    parent = _write_python(
+        tmp_path,
+        "exited_parent.py",
+        "import subprocess, sys\n"
+        "code = \"import signal, time\\n"
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN)\\n"
+        "time.sleep(60)\"\n"
+        "child = subprocess.Popen([sys.executable, '-c', code])\n"
+        "print(f'DESCENDANT={child.pid}', flush=True)\n",
+    )
+
+    result = _validator(runtime)._run_python(parent, timeout_seconds=0.2)
+
+    match = re.search(r"DESCENDANT=(\d+)", result.stdout)
+    assert match is not None
+    with pytest.raises(runtime._PROCESS_RUNNER.ProcessSupervisionError):
+        runtime._PROCESS_RUNNER.get_process_start_marker(int(match.group(1)))
+    assert result.failure_id == "PSV1-DEADLINE"
+    assert result.timed_out
+    assert result.resources_closed
+    assert result.tree_empty
+    assert result.direct_reaped
 
 
 def test_validator_process_adapter_reaps_output_retaining_grandchild(

@@ -9,6 +9,9 @@ import json
 import math
 import os
 import re
+import selectors
+import signal
+import subprocess
 import sys
 import tempfile
 import time
@@ -166,6 +169,203 @@ def validator_environment_rows() -> tuple[EnvironmentRowV1, ...]:
     )
 
 
+def _validator_posix_group_exists(process_group: int) -> bool:
+    try:
+        os.killpg(process_group, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _settle_validator_posix_group(
+    process: subprocess.Popen[bytes], timeout_seconds: float
+) -> bool:
+    """Terminate and observe only the validator child's private process group."""
+
+    process_group = process.pid
+    deadline = time.monotonic() + timeout_seconds
+    if process.poll() is not None:
+        process.wait()
+    graceful_deadline = min(deadline, time.monotonic() + 0.25)
+    if _validator_posix_group_exists(process_group):
+        try:
+            os.killpg(process_group, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+    while time.monotonic() < graceful_deadline:
+        if process.poll() is None:
+            try:
+                process.wait(
+                    timeout=max(
+                        0.001,
+                        min(0.05, graceful_deadline - time.monotonic()),
+                    )
+                )
+            except subprocess.TimeoutExpired:
+                pass
+        if not _validator_posix_group_exists(process_group):
+            return process.poll() is not None
+        time.sleep(0.01)
+    if _validator_posix_group_exists(process_group):
+        try:
+            os.killpg(process_group, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    while time.monotonic() < deadline:
+        if process.poll() is None:
+            try:
+                process.wait(
+                    timeout=max(0.001, min(0.05, deadline - time.monotonic()))
+                )
+            except subprocess.TimeoutExpired:
+                pass
+        if not _validator_posix_group_exists(process_group):
+            return process.poll() is not None
+        time.sleep(0.01)
+    return False
+
+
+def _run_validator_posix_python(
+    argv: tuple[str, ...],
+    cwd: str,
+    environment: tuple[EnvironmentRowV1, ...],
+    deadline_seconds: float,
+    capture_policy: ValidatorCapturePolicyV1,
+) -> ValidatorProcessResultV1:
+    """Run only a validator-owned Python child in one private POSIX group."""
+
+    captures = {"stdout": bytearray(), "stderr": bytearray()}
+    observed = {"stdout": 0, "stderr": 0}
+    persisted_total = 0
+    failure_id: str | None = None
+    timed_out = False
+    tree_empty = True
+    resources_closed = True
+    process: subprocess.Popen[bytes] | None = None
+    selector: selectors.BaseSelector | None = None
+    streams: dict[object, str] = {}
+    execution_deadline = time.monotonic() + deadline_seconds
+    env = {row.name: row.value for row in environment}
+    try:
+        process = subprocess.Popen(
+            argv,
+            executable=argv[0],
+            cwd=cwd,
+            env=env,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            close_fds=True,
+            shell=False,
+            start_new_session=True,
+            bufsize=0,
+        )
+    except (OSError, ValueError):
+        return ValidatorProcessResultV1(
+            returncode=1,
+            stdout="",
+            stderr="",
+            failure_id="PSV1-PROCESS-CREATE",
+            timed_out=False,
+            stdout_observed_bytes=0,
+            stdout_persisted_bytes=0,
+            stdout_truncated=False,
+            stderr_observed_bytes=0,
+            stderr_persisted_bytes=0,
+            stderr_truncated=False,
+            resources_closed=True,
+            settlement_state="EMPTY",
+            tree_empty=True,
+            direct_reaped=True,
+            primary_thread_closed=True,
+            job_handle_closed=True,
+        )
+    assert process.stdout is not None and process.stderr is not None
+    streams = {process.stdout: "stdout", process.stderr: "stderr"}
+    try:
+        selector = selectors.DefaultSelector()
+        for stream, name in streams.items():
+            os.set_blocking(stream.fileno(), False)
+            selector.register(stream, selectors.EVENT_READ, name)
+        while selector.get_map() or process.poll() is None:
+            remaining = execution_deadline - time.monotonic()
+            if remaining <= 0:
+                failure_id = "PSV1-DEADLINE"
+                timed_out = True
+                break
+            for key, _events in selector.select(min(0.05, remaining)):
+                try:
+                    chunk = os.read(key.fd, capture_policy.chunk_size)
+                except BlockingIOError:
+                    continue
+                except OSError:
+                    failure_id = "PSV1-CAPTURE-IO"
+                    break
+                if not chunk:
+                    selector.unregister(key.fileobj)
+                    continue
+                name = key.data
+                observed[name] += len(chunk)
+                available = capture_policy.aggregate_persisted_limit - persisted_total
+                accepted = chunk[: max(0, available)]
+                captures[name].extend(accepted)
+                persisted_total += len(accepted)
+                if len(accepted) != len(chunk):
+                    failure_id = "PSV1-CAPTURE-LIMIT"
+                    break
+            if failure_id is not None:
+                break
+    except (OSError, ValueError):
+        failure_id = "PSV1-CAPTURE-IO"
+    finally:
+        tree_empty = _settle_validator_posix_group(
+            process, VALIDATOR_SETTLEMENT_TIMEOUT_SECONDS
+        )
+        if not tree_empty:
+            failure_id = "PSV1-TREE-SETTLEMENT"
+        if selector is not None:
+            try:
+                selector.close()
+            except OSError:
+                resources_closed = False
+        for stream in streams:
+            try:
+                stream.close()
+            except OSError:
+                resources_closed = False
+        if not resources_closed and failure_id is None:
+            failure_id = "PSV1-RESOURCE-CLOSE"
+    returncode = process.returncode if process.returncode is not None else 1
+    retained = capture_policy.prefix_limit_per_stream + capture_policy.tail_limit_per_stream
+    return ValidatorProcessResultV1(
+        returncode=returncode if failure_id is None or returncode != 0 else 1,
+        stdout=_diagnostic_text(bytes(captures["stdout"]), capture_policy),
+        stderr=_diagnostic_text(bytes(captures["stderr"]), capture_policy),
+        failure_id=failure_id,
+        timed_out=timed_out,
+        stdout_observed_bytes=observed["stdout"],
+        stdout_persisted_bytes=len(captures["stdout"]),
+        stdout_truncated=(
+            observed["stdout"] > len(captures["stdout"])
+            or len(captures["stdout"]) > retained
+        ),
+        stderr_observed_bytes=observed["stderr"],
+        stderr_persisted_bytes=len(captures["stderr"]),
+        stderr_truncated=(
+            observed["stderr"] > len(captures["stderr"])
+            or len(captures["stderr"]) > retained
+        ),
+        resources_closed=resources_closed and tree_empty,
+        settlement_state="EMPTY" if tree_empty else "AMBIGUOUS",
+        tree_empty=tree_empty,
+        direct_reaped=process.poll() is not None,
+        primary_thread_closed=True,
+        job_handle_closed=True,
+    )
+
+
 def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace")
 
@@ -319,9 +519,9 @@ class Validator:
         self.warnings = 0
         self.errors = 0
         self.process_failure_id: str | None = None
-        self._process_runner = (
-            process_runner if process_runner is not None else ProcessRunnerV1()
-        )
+        self._process_runner = process_runner
+        if self._process_runner is None and os.name != "posix":
+            self._process_runner = ProcessRunnerV1()
         self._child_timeout_seconds = child_timeout_seconds
         self._runner_closed = False
 
@@ -553,7 +753,6 @@ class Validator:
         executable = Path(sys.executable).resolve()
         argv = (str(executable), str(script), *args)
         capture_policy = ValidatorCapturePolicyV1()
-        sink = self._process_runner.mint_memory_capture_sink()
         temporary_cwd = (
             None
             if os.name == "nt"
@@ -561,6 +760,16 @@ class Validator:
         )
         child_cwd = str(self.layout.root) if temporary_cwd is None else temporary_cwd.name
         try:
+            if os.name == "posix" and self._process_runner is None:
+                return _run_validator_posix_python(
+                    argv,
+                    child_cwd,
+                    validator_environment_rows(),
+                    float(deadline_seconds),
+                    capture_policy,
+                )
+            assert self._process_runner is not None
+            sink = self._process_runner.mint_memory_capture_sink()
             request = ProcessRequestV1(
                 schema_version=1,
                 argv=argv,
@@ -614,6 +823,8 @@ class Validator:
         if self._runner_closed:
             return
         self._runner_closed = True
+        if self._process_runner is None:
+            return
         result = self._process_runner.close()
         if result.outcome != "closed":
             self.process_failure_id = result.failure_id
