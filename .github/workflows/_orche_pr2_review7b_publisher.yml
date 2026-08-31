@@ -1,0 +1,47 @@
+name: Internal PR2 review7 robust publisher
+
+on:
+  push:
+    branches:
+      - orche/internal-pr2-review7-20260831
+
+permissions:
+  contents: write
+
+jobs:
+  verify-and-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout current helper scripts
+        uses: actions/checkout@v4
+        with:
+          ref: orche/internal-pr2-review7-20260831
+          path: helper-current
+          fetch-depth: 1
+
+      - name: Checkout verified repair payload
+        uses: actions/checkout@v4
+        with:
+          ref: 10aca97e16a4020d1420c427e1c14e9c4eefb0da
+          path: helper-payload
+          fetch-depth: 1
+
+      - name: Checkout pull-request branch
+        uses: actions/checkout@v4
+        with:
+          ref: orche/impl-000-baseline
+          path: repo
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Install test dependencies
+        run: |
+          python3 -m venv --copies /tmp/orche-review7b-venv
+          /tmp/orche-review7b-venv/bin/python -m pip install --disable-pip-version-check pytest PyYAML
+          echo "/tmp/orche-review7b-venv/bin" >> "$GITHUB_PATH"
+
+      - name: Verify and publish both review repairs
+        shell: bash
+        run: |
+          bash helper-current/.orche-payload/run_review7b.sh helper-payload repo
