@@ -17,7 +17,9 @@ Drive one GitHub-hosted Codex review loop to a terminal result on the current re
 - Do not start or rerun CI as part of this loop.
 - Never retrigger solely because time elapsed. A bot-authored `eyes` reaction on the exact trigger is acknowledged/in progress, not clean; keep polling that run.
 - Verify reaction authors, not aggregate reaction counts.
-- Classify `clean` only after fetching every GraphQL `reviewThreads` page through `pageInfo.hasNextPage=false`; record the terminal cursor and inventory the unresolved current-head bot-thread IDs and count; summary comments and `gh pr view` review/comment fields are nonauthorizing for `clean`.
+- Fetch every REST collection with `gh api --paginate --slurp`, merge all page arrays, and only then filter or sort. Page-local `--jq`, first-page results, or a failed/incomplete page are indeterminate.
+- Cursor-walk GraphQL `reviewThreads` until `pageInfo.hasNextPage=false`; record the terminal cursor and unresolved current-head bot-thread IDs and count. If any page fails or is incomplete, classify the run as `indeterminate`.
+- A `Completed` summary alone is never `clean`. Findings from the exact post-trigger review on the current head take precedence over summaries, reactions, and clean-review signals; classify `clean` only when complete collections show no such finding and the exact trigger has a bot-authored `+1` or a same-head bot review strictly after it.
 
 ## State machine
 
@@ -28,7 +30,7 @@ Drive one GitHub-hosted Codex review loop to a terminal result on the current re
 | Bot `+1` on the newest exact trigger, head unchanged, no current finding comment, and no unresolved current bot thread | clean | Record bot PASS; continue any separate human/publication gates. |
 | Bot `eyes` on the newest exact trigger, with no later terminal evidence or current finding | in progress | Poll reviews, reactions, and current unresolved threads; do not retrigger. |
 | Current-head bot review strictly after the newest exact trigger, with no current finding comment and no unresolved current bot thread | clean | Record bot PASS; continue any separate human/publication gates. |
-| No bot terminal output and no acknowledged run | indeterminate | Re-read authoritative state; do not invent a timeout or autonomous retrigger. |
+| `Completed` summary without the required `+1` or same-head post-trigger review, incomplete collection, or no bot terminal output | indeterminate | Re-read authoritative state; do not invent a timeout or autonomous retrigger. |
 
 ## Hosted probes
 
@@ -36,7 +38,7 @@ Use `gh pr view <pr> --repo <owner>/<repo> --json headRefOid,state,isDraft,merge
 
 - exact issue comments and reaction actors through `gh api repos/<owner>/<repo>/issues/<pr>/comments` and `.../issues/comments/<id>/reactions`;
 - submitted reviews through `gh api repos/<owner>/<repo>/pulls/<pr>/reviews`;
-- `reviewThreads { id isResolved isOutdated path line comments }` through paginated GraphQL.
+- `reviewThreads { id isResolved isOutdated path line comments }` through the full GraphQL cursor walk.
 
 Anchor each poll on the latest hosted head and unfiltered latest bot state. Time windows are secondary only.
 

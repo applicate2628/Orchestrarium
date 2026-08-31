@@ -188,6 +188,14 @@ def test_global_home_selection_uses_home_when_posix_lacks_userprofile() -> None:
     ) == ("HOME", "/tmp/orchestrarium-home", None)
 
 
+def test_global_home_selection_ignores_userprofile_on_posix() -> None:
+    assert INSTALLER._select_global_home_environment(
+        "/ignored-userprofile",
+        "/tmp/orchestrarium-home",
+        platform="posix",
+    ) == ("HOME", "/tmp/orchestrarium-home", None)
+
+
 @pytest.mark.skipif(
     not BASH_SMOKE_AVAILABLE,
     reason="POSIX bash launcher smoke is unavailable on this host",

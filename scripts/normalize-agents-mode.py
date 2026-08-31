@@ -380,11 +380,27 @@ def render_scalar(key: str, meta: ScalarMeta, existing: dict[str, ScalarMeta]) -
     return [f"{key}: {value}{comment_suffix(meta.comment)}"]
 
 
+def decode_supported_yaml_scalar(value: str) -> str:
+    """Decode quoted string forms for semantic scalar comparisons only."""
+    value = value.strip()
+    if len(value) < 2 or value[0] != value[-1]:
+        return value
+    if value[0] == "'":
+        return value[1:-1].replace("''", "'")
+    if value[0] != '"':
+        return value
+    try:
+        decoded = json.loads(value)
+    except json.JSONDecodeError:
+        return value
+    return decoded if isinstance(decoded, str) else value
+
+
 def reject_removed_external_provider(existing: dict[str, ScalarMeta]) -> None:
     configured = existing.get("externalProvider")
     if configured is None:
         return
-    provider = configured.value.strip().lower()
+    provider = decode_supported_yaml_scalar(configured.value).lower()
     if provider in REMOVED_EXTERNAL_PROVIDERS:
         raise ValueError(
             "E_EXTERNAL_PROVIDER_REMOVED: "

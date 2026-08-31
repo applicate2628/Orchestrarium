@@ -231,7 +231,10 @@ STOCK_7872_CANONICAL_SKILL_TREE_SHA256 = {
     "second-opinion": "b82628910567799a6f03962f3ec0289cb47b4607093c074466b1a2656b53f432",
 }
 STOCK_CONSULTANT_ACCEPTED_PRIOR_TREE_SHA256 = frozenset(
-    {"33998c6a60b442c09957d3edef914daa02d718eafa5f881473ce017fb29a4bd9"}
+    {
+        "33998c6a60b442c09957d3edef914daa02d718eafa5f881473ce017fb29a4bd9",
+        "f3d56fa8d361acf65d6624242c7cc61007bb8332fe6531dabc7766db940a9c5b",
+    }
 )
 ADDITIONAL_STOCK_SKILL_ACCEPTED_PRIOR_TREE_SHA256 = {
     "architect": frozenset(
@@ -1707,11 +1710,9 @@ def _select_global_home_environment(
         if not userprofile:
             raise ValueError("E_GLOBAL_HOME_AMBIGUOUS: USERPROFILE is required")
         return "USERPROFILE", userprofile, home
-    if userprofile:
-        return "USERPROFILE", userprofile, home
     if home:
         return "HOME", home, None
-    raise ValueError("E_GLOBAL_HOME_AMBIGUOUS: USERPROFILE or HOME is required")
+    raise ValueError("E_GLOBAL_HOME_AMBIGUOUS: HOME is required")
 
 
 def _resolve_global_home() -> Path:

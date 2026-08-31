@@ -416,11 +416,33 @@ SCAN_OUTPUT_BYTE_CAP = 256 * 1024
 SCAN_TIMEOUT_SECONDS = 300.0
 SCAN_SETTLEMENT_ATTEMPT_SECONDS = 3.0
 SCAN_SETTLEMENT_MAX_ENTRIES = 2
-OID_REGEX = re.compile(r"^[0-9a-fA-F]{40}$")
 REMOTE_NAME_REGEX = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
 PR_HEAD_REF_REGEX = re.compile(r"^[A-Za-z0-9._/-]{1,255}$", re.ASCII)
 REPO_COMPONENT_REGEX = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$")
 NODE_ID_REGEX = re.compile(r"^[A-Za-z0-9_=-]{1,256}$")
+
+
+@dataclass(frozen=True)
+class GitObjectFormat:
+    name: str
+    hex_length: int
+    oid_re: re.Pattern[str]
+
+    def matches(self, value: str) -> bool:
+        return self.oid_re.fullmatch(value) is not None
+
+
+_SHA1_OBJECT_FORMAT = GitObjectFormat(
+    "sha1", 40, re.compile(r"[0-9a-fA-F]{40}")
+)
+_SHA256_OBJECT_FORMAT = GitObjectFormat(
+    "sha256", 64, re.compile(r"[0-9a-fA-F]{64}")
+)
+_SUPPORTED_OBJECT_FORMATS = {
+    value.name: value for value in (_SHA1_OBJECT_FORMAT, _SHA256_OBJECT_FORMAT)
+}
+_SUPPORTED_OID_REGEX = re.compile(r"^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$")
+_LOWERCASE_OID_PATTERN = r"(?:[0-9a-f]{40}|[0-9a-f]{64})"
 SCAN_DENIAL_REASONS = {
     "PGG-SCAN-PROVENANCE": "The canonical gate-owned range scanner could not be established.",
     "PRG-SCAN-PROVENANCE": "The canonical gate-owned range scanner could not be established.",
@@ -435,6 +457,29 @@ SCAN_DENIAL_REASONS = {
     "PGG-SCAN-CORRELATION": "The trusted scanner result did not match its exact pending invocation.",
     "PRG-SCAN-CORRELATION": "The trusted scanner result did not match its exact pending invocation.",
 }
+
+
+def _detect_git_object_format(
+    repository_workdir: str,
+    git_exe: str,
+    failure_id: str,
+    *,
+    deadline: float | None = None,
+) -> GitObjectFormat:
+    active_deadline = deadline or (time.monotonic() + ORACLE_TIMEOUT_SECONDS)
+    _, output = _run_text(
+        [git_exe, "rev-parse", "--show-object-format"],
+        active_deadline,
+        failure_id,
+        repository_workdir,
+    )
+    rows = output.splitlines()
+    if len(rows) != 1:
+        raise PrRouteDenied(failure_id)
+    object_format = _SUPPORTED_OBJECT_FORMATS.get(rows[0])
+    if object_format is None:
+        raise PrRouteDenied(failure_id)
+    return object_format
 
 
 class ActivePrGrant(NamedTuple):
@@ -1019,13 +1064,13 @@ SCAN_FAILURE_MARKER_REGEX = re.compile(
 #     report line embedding this text as a substring must never be credited).
 # `remote`, `dst`, and `tip` are captured so `evaluate_push` can compare the
 # first two against the admitted immutable grammar decision's binding.
-# `tip` is captured (and its shape validated as 40 hex characters) because it
+# `tip` is captured (and its shape validated as a supported Git object ID) because it
 # is always part of the real receipt's own text. The legacy generic range
 # branch does not compare it; the strict PR route does compare it to a fresh
 # `git rev-parse --verify HEAD` result.
 SCAN_CLEAN_RANGE_REGEX = re.compile(
     r"^publication-safety:\s*clean\s*\(\s*range\s*,\s*examined\s+(?P<count>[1-9]\d*)\s+files?\s*,"
-    r"\s*remote\s+(?P<remote>\S+)\s*,\s*dst\s+(?P<dst>\S+)\s*,\s*tip\s+(?P<tip>[0-9a-f]{40})\s*\)\s*$",
+    rf"\s*remote\s+(?P<remote>\S+)\s*,\s*dst\s+(?P<dst>\S+)\s*,\s*tip\s+(?P<tip>{_LOWERCASE_OID_PATTERN})\s*\)\s*$",
     re.IGNORECASE | re.MULTILINE,
 )
 
@@ -1041,7 +1086,7 @@ SCAN_CLEAN_RANGE_V3_REGEX = re.compile(
     r"path-set=(?P<path_set>[0-9a-f]{64}), history=complete, "
     r"remote=(?P<remote>[A-Za-z0-9._~%-]+), "
     r"dst=(?P<dst>[A-Za-z0-9._~%-]+), "
-    r"src=(?P<src>[A-Za-z0-9._~%-]+), tip=(?P<tip>[0-9a-f]{40})\)$",
+    rf"src=(?P<src>[A-Za-z0-9._~%-]+), tip=(?P<tip>{_LOWERCASE_OID_PATTERN})\)$",
     re.MULTILINE,
 )
 SCAN_CLEAN_PATH_REGEX = re.compile(
@@ -2367,13 +2412,16 @@ def _refresh_scan_binding(
             binding.remote, binding.destination, binding.source_oid,
             repository_workdir, git_exe,
         )
+    object_format = _detect_git_object_format(
+        repository_workdir, git_exe, "PRG-RECEIPT-MISMATCH"
+    )
     head_proc = subprocess.run(
         [git_exe, "rev-parse", "--verify", "HEAD^{commit}"],
         capture_output=True, text=True, encoding="utf-8", errors="strict",
         cwd=repository_workdir,
     )
     rows = head_proc.stdout.splitlines()
-    if head_proc.returncode or len(rows) != 1 or not OID_REGEX.fullmatch(rows[0]):
+    if head_proc.returncode or len(rows) != 1 or not object_format.matches(rows[0]):
         raise PrRouteDenied("PRG-RECEIPT-MISMATCH")
     head = rows[0].lower()
     return PushScanBinding("strict", binding.remote, binding.destination, head, head)
@@ -2528,9 +2576,18 @@ def _required_text(value: object, failure_id: str, *, cap: int = 512) -> str:
     return value
 
 
-def _required_oid(value: object, failure_id: str) -> str:
-    text = _required_text(value, failure_id, cap=40)
-    if not OID_REGEX.fullmatch(text):
+def _required_oid(
+    value: object,
+    failure_id: str,
+    object_format: GitObjectFormat | None = None,
+) -> str:
+    cap = object_format.hex_length if object_format is not None else 64
+    text = _required_text(value, failure_id, cap=cap)
+    if not (
+        object_format.matches(text)
+        if object_format is not None
+        else _SUPPORTED_OID_REGEX.fullmatch(text)
+    ):
         raise PrRouteDenied(failure_id)
     return text.lower()
 
@@ -2603,6 +2660,12 @@ def _verify_pr_oracle(
     if gh_exe is None:
         raise PrRouteDenied("PRG-PR-UNAVAILABLE")
     target = literal.target
+    object_format = _detect_git_object_format(
+        repository_workdir,
+        git_exe,
+        "PRG-BINDING-DRIFT",
+        deadline=deadline,
+    )
 
     fields = (
         "id,number,url,state,closed,mergedAt,baseRefName,baseRefOid,"
@@ -2629,11 +2692,11 @@ def _verify_pr_oracle(
     if pr.get("state") != "OPEN" or pr.get("closed") is not False or pr.get("mergedAt") is not None:
         raise PrRouteDenied("PRG-PR-STATE")
     base_ref = _required_text(pr.get("baseRefName"), "PRG-BINDING-DRIFT", cap=255)
-    _required_oid(pr.get("baseRefOid"), "PRG-BINDING-DRIFT")
+    _required_oid(pr.get("baseRefOid"), "PRG-BINDING-DRIFT", object_format)
     head_ref = _required_text(pr.get("headRefName"), "PRG-BINDING-DRIFT", cap=255)
     if not _portable_pr_head_ref(head_ref):
         raise PrRouteDenied("PRG-COMMAND-SHAPE")
-    head_oid = _required_oid(pr.get("headRefOid"), "PRG-BINDING-DRIFT")
+    head_oid = _required_oid(pr.get("headRefOid"), "PRG-BINDING-DRIFT", object_format)
     head_repo = pr.get("headRepository")
     head_owner = pr.get("headRepositoryOwner")
     if not isinstance(head_repo, dict) or not isinstance(head_owner, dict):
@@ -2738,7 +2801,11 @@ def _verify_pr_oracle(
     if len(remote_rows) != 1:
         raise PrRouteDenied("PRG-BRANCH-DRIFT")
     remote_parts = remote_rows[0].split("\t")
-    if len(remote_parts) != 2 or remote_parts[1] != target.destination or not OID_REGEX.fullmatch(remote_parts[0]):
+    if (
+        len(remote_parts) != 2
+        or remote_parts[1] != target.destination
+        or not object_format.matches(remote_parts[0])
+    ):
         raise PrRouteDenied("PRG-BRANCH-DRIFT")
     if remote_parts[0].lower() != head_oid:
         raise PrRouteDenied("PRG-BRANCH-DRIFT")
@@ -2748,7 +2815,7 @@ def _verify_pr_oracle(
         "PRG-RECEIPT-MISMATCH", repository_workdir,
     )
     local_head_rows = local_head_text.splitlines()
-    if len(local_head_rows) != 1 or not OID_REGEX.fullmatch(local_head_rows[0]):
+    if len(local_head_rows) != 1 or not object_format.matches(local_head_rows[0]):
         raise PrRouteDenied("PRG-RECEIPT-MISMATCH")
     return target, local_head_rows[0].lower()
 
@@ -2851,13 +2918,20 @@ def _resolve_generic_scan_binding(
 ) -> PushScanBinding:
     if not source:
         raise PrRouteDenied("PGG-RANGE-TIP-BINDING")
+    object_format = _detect_git_object_format(
+        repository_workdir, git_exe, "PGG-RANGE-TIP-BINDING"
+    )
     source_proc = subprocess.run(
         [git_exe, "rev-parse", "--verify", source],
         capture_output=True, text=True, encoding="utf-8", errors="strict",
         cwd=repository_workdir,
     )
     source_rows = source_proc.stdout.splitlines()
-    if source_proc.returncode or len(source_rows) != 1 or not OID_REGEX.fullmatch(source_rows[0]):
+    if (
+        source_proc.returncode
+        or len(source_rows) != 1
+        or not object_format.matches(source_rows[0])
+    ):
         raise PrRouteDenied("PGG-RANGE-TIP-BINDING")
     source_oid = source_rows[0].lower()
     type_proc = subprocess.run(
@@ -2873,7 +2947,11 @@ def _resolve_generic_scan_binding(
         cwd=repository_workdir,
     )
     head_rows = head_proc.stdout.splitlines()
-    if head_proc.returncode or len(head_rows) != 1 or not OID_REGEX.fullmatch(head_rows[0]):
+    if (
+        head_proc.returncode
+        or len(head_rows) != 1
+        or not object_format.matches(head_rows[0])
+    ):
         raise PrRouteDenied("PGG-RANGE-TIP-BINDING")
     return PushScanBinding(
         "generic", remote, destination, source_oid, head_rows[0].lower()

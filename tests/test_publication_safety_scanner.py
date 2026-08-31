@@ -1144,11 +1144,22 @@ class TestPublicationSafetyScannerV3(unittest.TestCase):
             check=check,
         )
 
-    def _init_range_repo(self, root: Path, *, publish_seed: bool = True) -> Path:
+    def _init_range_repo(
+        self,
+        root: Path,
+        *,
+        publish_seed: bool = True,
+        object_format: str = "sha1",
+    ) -> Path:
         origin = root / "origin.git"
         repo = root / "repo"
-        subprocess.run([_git(), "init", "-q", "--bare", str(origin)], check=True)
-        subprocess.run([_git(), "init", "-q", "-b", "main", str(repo)], check=True)
+        format_args = [] if object_format == "sha1" else [f"--object-format={object_format}"]
+        subprocess.run(
+            [_git(), "init", "-q", "--bare", *format_args, str(origin)], check=True
+        )
+        subprocess.run(
+            [_git(), "init", "-q", "-b", "main", *format_args, str(repo)], check=True
+        )
         self._git_run(repo, "config", "user.email", "t@t")
         self._git_run(repo, "config", "user.name", "t")
         self._git_run(repo, "remote", "add", "origin", str(origin))
@@ -1253,6 +1264,63 @@ class TestPublicationSafetyScannerV3(unittest.TestCase):
             self.assertIn(f"commits={len(selected)}", proc.stdout)
             self.assertIn(f"commit-set={self._expected_digest(selected)}", proc.stdout)
             self.assertIn("messages=complete", proc.stdout)
+
+    def test_range_object_format_matrix_scans_complete_text_and_binary_graph(self) -> None:
+        for object_format, oid_length in (("sha1", 40), ("sha256", 64)):
+            with self.subTest(object_format=object_format), tempfile.TemporaryDirectory() as td:
+                repo = self._init_range_repo(Path(td), object_format=object_format)
+                self.assertEqual(
+                    self._git_run(repo, "rev-parse", "--show-object-format").stdout.strip(),
+                    object_format,
+                )
+                self._commit(repo, "nested/text.txt", "clean text", "clean text commit")
+                (repo / "binary.bin").write_bytes(b"\0\1\2")
+                self._git_run(repo, "add", "binary.bin")
+                self._git_run(repo, "commit", "-q", "-m", "clean binary commit")
+                tip = self._git_run(repo, "rev-parse", "HEAD").stdout.strip()
+                commits = self._git_run(
+                    repo, "rev-list", "--topo-order", "HEAD", "--not", "--remotes=origin"
+                ).stdout.splitlines()
+                objects = self._git_run(
+                    repo,
+                    "rev-list",
+                    "--objects",
+                    "--no-object-names",
+                    "HEAD",
+                    "--not",
+                    "--remotes=origin",
+                ).stdout.splitlines()
+
+                proc = self._run_range(repo)
+
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                self.assertEqual(len(tip), oid_length)
+                self.assertTrue(all(len(oid) == oid_length for oid in commits))
+                self.assertTrue(all(len(oid) == oid_length for oid in objects))
+                self.assertIn(f"commits={len(commits)}", proc.stdout)
+                self.assertIn(f"objects={len(objects)}", proc.stdout)
+                self.assertIn("blobs=2", proc.stdout)
+                self.assertIn("text=1", proc.stdout)
+                self.assertIn("binary=1", proc.stdout)
+                self.assertIn(f"tip={tip})", proc.stdout)
+
+    def test_range_selection_refuses_unknown_git_object_format(self) -> None:
+        module = _load_canonical_scanner("_scanner_v3_unknown_object_format")
+        responses = (
+            subprocess.CompletedProcess(["git", "remote"], 0, "origin\n", ""),
+            subprocess.CompletedProcess(
+                ["git", "rev-parse", "--show-object-format"], 0, "sha512\n", ""
+            ),
+        )
+        with mock.patch.object(module, "_run_git", side_effect=responses):
+            result = asyncio.run(module._range_selection(
+                module.RangeRequest("origin", "main", "main")
+            ))
+
+        self.assertIsInstance(result, module.Refusal)
+        self.assertEqual(result.failure_id, "PS-MSG-RANGE")
+        self.assertEqual(result.phase, "selection")
+        self.assertEqual(result.reason, "object-format")
 
     def test_v3_commit_set_digest_row_mutation(self) -> None:
         rows = ["1" * 40, "2" * 40, "3" * 40]

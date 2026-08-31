@@ -71,7 +71,6 @@ _SCANNER_REGEX_CATALOG_LINE = re.compile(
     r"""re\.compile\([rubfRUBF]*(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')\),?"""
 )
 
-_OID_RE = re.compile(r"[0-9a-f]{40}")
 _MAX_COMMITS = 10_000
 _MAX_OBJECTS = 100_000
 _MAX_BLOBS = 50_000
@@ -91,8 +90,6 @@ _SCAN_DEADLINE_SECONDS = 240.0
 _MAX_TREE_VISITS = _MAX_SUBJECTS
 _MAX_TREE_FRONTIER = _MAX_OBJECTS
 _MAX_TREE_CACHE_ENTRIES = _MAX_OBJECTS
-_MAX_COMMIT_LIST_BYTES = _MAX_COMMITS * 41
-_MAX_OBJECT_LIST_BYTES = _MAX_OBJECTS * 41
 _RECEIPT_DOMAIN = b"publication-safety-range-receipt-v3"
 _OBJECT_REQUEST_TIMEOUT_SECONDS = 5.0
 OBJECT_REAP_ATTEMPT_SECONDS = 3.0
@@ -125,6 +122,31 @@ _REFUSAL_PHASES = {
 
 
 @dataclass(frozen=True)
+class GitObjectFormat:
+    name: str
+    hex_length: int
+    raw_length: int
+    oid_re: re.Pattern[str]
+
+    def matches(self, value: str) -> bool:
+        return self.oid_re.fullmatch(value) is not None
+
+    def list_byte_cap(self, count_cap: int) -> int:
+        return count_cap * (self.hex_length + 1)
+
+
+_SHA1_OBJECT_FORMAT = GitObjectFormat(
+    "sha1", 40, 20, re.compile(r"[0-9a-f]{40}")
+)
+_SHA256_OBJECT_FORMAT = GitObjectFormat(
+    "sha256", 64, 32, re.compile(r"[0-9a-f]{64}")
+)
+_SUPPORTED_OBJECT_FORMATS = {
+    value.name: value for value in (_SHA1_OBJECT_FORMAT, _SHA256_OBJECT_FORMAT)
+}
+
+
+@dataclass(frozen=True)
 class RangeRequest:
     remote: str
     destination: str
@@ -139,6 +161,7 @@ class RangeSelection:
     tip: str
     expected_oids: tuple[str, ...]
     object_oids: tuple[str, ...] = ()
+    object_format: GitObjectFormat = _SHA1_OBJECT_FORMAT
 
 
 @dataclass(frozen=True)
@@ -566,7 +589,25 @@ def _remaining_seconds(deadline: float) -> float:
     return remaining
 
 
-def _resolve_commit(revision: str, timeout: float | None = None) -> str:
+def _detect_git_object_format(timeout: float | None = None) -> GitObjectFormat:
+    proc = _run_git(
+        ["rev-parse", "--show-object-format"], text=True, timeout=timeout
+    )
+    rows = proc.stdout.splitlines()
+    if proc.returncode or len(rows) != 1:
+        raise ValueError("object-format")
+    try:
+        return _SUPPORTED_OBJECT_FORMATS[rows[0]]
+    except KeyError as exc:
+        raise ValueError("object-format") from exc
+
+
+def _resolve_commit(
+    revision: str,
+    timeout: float | None = None,
+    *,
+    object_format: GitObjectFormat = _SHA1_OBJECT_FORMAT,
+) -> str:
     if not revision:
         raise ValueError("revision")
     proc = _run_git(
@@ -583,13 +624,14 @@ def _resolve_commit(revision: str, timeout: float | None = None) -> str:
     if len(rows) != 1:
         raise ValueError("revision")
     oid = rows[0].lower()
-    if not _OID_RE.fullmatch(oid):
+    if not object_format.matches(oid):
         raise ValueError("revision")
     return oid
 
 
 def _resolve_head(timeout: float | None = None) -> str:
-    return _resolve_commit("HEAD", timeout)
+    object_format = _detect_git_object_format(timeout)
+    return _resolve_commit("HEAD", timeout, object_format=object_format)
 
 
 async def _read_git_oid_lines_bounded(
@@ -598,6 +640,7 @@ async def _read_git_oid_lines_bounded(
     count_cap: int,
     byte_cap: int,
     deadline: float,
+    object_format: GitObjectFormat = _SHA1_OBJECT_FORMAT,
 ) -> tuple[str, ...] | Refusal:
     try:
         process = await asyncio.create_subprocess_exec(
@@ -621,13 +664,13 @@ async def _read_git_oid_lines_bounded(
     refusal: Refusal | None = None
 
     def accept(raw: bytes) -> Refusal | None:
-        if len(raw) != 40:
+        if len(raw) != object_format.hex_length:
             return _refusal("PS-MSG-FRAME", "oid")
         try:
             oid = raw.decode("ascii").lower()
         except UnicodeDecodeError:
             return _refusal("PS-MSG-FRAME", "oid")
-        if not _OID_RE.fullmatch(oid) or oid in seen:
+        if not object_format.matches(oid) or oid in seen:
             return _refusal("PS-MSG-FRAME", "oid")
         if len(rows) >= count_cap:
             return _refusal("PS-MSG-LIMIT", "count")
@@ -658,7 +701,7 @@ async def _read_git_oid_lines_bounded(
             while refusal is None:
                 newline = pending.find(b"\n")
                 if newline < 0:
-                    if len(pending) > 40:
+                    if len(pending) > object_format.hex_length:
                         refusal = _refusal("PS-MSG-FRAME", "oid")
                     break
                 raw = bytes(pending[:newline])
@@ -729,8 +772,20 @@ async def _range_selection(
     if remotes.returncode or request.remote not in configured:
         return _refusal("PS-MSG-RANGE", "remote")
     try:
-        tip = _resolve_commit(request.source, _remaining_seconds(deadline))
-    except (OSError, ValueError, subprocess.TimeoutExpired):
+        object_format = _detect_git_object_format(_remaining_seconds(deadline))
+    except subprocess.TimeoutExpired:
+        return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
+    except (OSError, ValueError):
+        return _refusal("PS-MSG-RANGE", "object-format")
+    try:
+        tip = _resolve_commit(
+            request.source,
+            _remaining_seconds(deadline),
+            object_format=object_format,
+        )
+    except subprocess.TimeoutExpired:
+        return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
+    except (OSError, ValueError):
         return _refusal("PS-MSG-RANGE", "destination")
     commit_ids = await _read_git_oid_lines_bounded(
         (
@@ -738,9 +793,10 @@ async def _range_selection(
             "--not", f"--remotes={request.remote}",
         ),
         count_cap=_MAX_COMMITS,
-        byte_cap=_MAX_COMMIT_LIST_BYTES,
+        byte_cap=object_format.list_byte_cap(_MAX_COMMITS),
         deadline=asyncio.get_running_loop().time()
         + max(0.0, deadline - time.monotonic()),
+        object_format=object_format,
     )
     if isinstance(commit_ids, Refusal):
         return commit_ids
@@ -750,9 +806,10 @@ async def _range_selection(
             "--not", f"--remotes={request.remote}",
         ),
         count_cap=_MAX_OBJECTS,
-        byte_cap=_MAX_OBJECT_LIST_BYTES,
+        byte_cap=object_format.list_byte_cap(_MAX_OBJECTS),
         deadline=asyncio.get_running_loop().time()
         + max(0.0, deadline - time.monotonic()),
+        object_format=object_format,
     )
     if isinstance(object_ids, Refusal):
         return object_ids
@@ -768,6 +825,7 @@ async def _range_selection(
         tip,
         commit_ids,
         object_ids,
+        object_format,
     )
 
 
@@ -1118,7 +1176,10 @@ def _decode_commit_message(raw: bytes) -> DecodedMessage | Refusal:
         return _refusal("PS-MSG-DECODE", "utf8")
 
 
-def _decode_commit_record(raw: bytes) -> CommitRecord | Refusal:
+def _decode_commit_record(
+    raw: bytes,
+    object_format: GitObjectFormat = _SHA1_OBJECT_FORMAT,
+) -> CommitRecord | Refusal:
     decoded = _decode_commit_message(raw)
     if isinstance(decoded, Refusal):
         return decoded
@@ -1139,7 +1200,7 @@ def _decode_commit_record(raw: bytes) -> CommitRecord | Refusal:
             oid = value.decode("ascii").lower()
         except UnicodeDecodeError:
             return _refusal("PS-MSG-FRAME", "commit-header")
-        if not _OID_RE.fullmatch(oid):
+        if not object_format.matches(oid):
             return _refusal("PS-MSG-FRAME", "commit-header")
         target.append(oid)
     if len(trees) != 1:
@@ -1147,17 +1208,21 @@ def _decode_commit_record(raw: bytes) -> CommitRecord | Refusal:
     return CommitRecord(trees[0], tuple(parents), decoded)
 
 
-def _parse_tree(raw: bytes) -> tuple[TreeEntry, ...] | Refusal:
+def _parse_tree(
+    raw: bytes,
+    object_format: GitObjectFormat = _SHA1_OBJECT_FORMAT,
+) -> tuple[TreeEntry, ...] | Refusal:
     entries: list[TreeEntry] = []
     offset = 0
     while offset < len(raw):
         space = raw.find(b" ", offset)
         nul = raw.find(b"\0", space + 1 if space >= 0 else offset)
-        if space <= offset or nul <= space + 1 or nul + 21 > len(raw):
+        oid_end = nul + 1 + object_format.raw_length
+        if space <= offset or nul <= space + 1 or oid_end > len(raw):
             return _refusal("PS-MSG-FRAME", "tree")
         mode = raw[offset:space]
         name = raw[space + 1:nul]
-        raw_oid = raw[nul + 1:nul + 21]
+        raw_oid = raw[nul + 1:oid_end]
         if b"/" in name or not name:
             return _refusal("PS-MSG-FRAME", "tree-path")
         if mode in {b"100644", b"100755", b"120000"}:
@@ -1169,7 +1234,7 @@ def _parse_tree(raw: bytes) -> tuple[TreeEntry, ...] | Refusal:
         else:
             return _refusal("PS-MSG-FRAME", "tree-mode")
         entries.append(TreeEntry(kind, name, raw_oid.hex()))
-        offset = nul + 21
+        offset = oid_end
     return tuple(entries)
 
 
@@ -1361,7 +1426,7 @@ async def _acquire_history(
             if oid not in commit_set:
                 return _refusal("PS-MSG-COVERAGE", "unexpected-commit")
             coverage_recorder.record(CoverageEvent.ACQUIRED, result.returned_oid)
-            record = _decode_commit_record(result.raw)
+            record = _decode_commit_record(result.raw, selection.object_format)
             if isinstance(record, Refusal):
                 return record
             aggregate_messages += record.message.raw_size
@@ -1473,7 +1538,7 @@ async def _acquire_history(
                 return raw_tree
             if tree_oid in unpublished_trees:
                 reached_unpublished_trees.add(tree_oid)
-            entries = _parse_tree(raw_tree)
+            entries = _parse_tree(raw_tree, selection.object_format)
             if isinstance(entries, Refusal):
                 return entries
             for entry in reversed(entries):
@@ -1617,7 +1682,11 @@ async def _scan_range_async(
                 else:
                     history, coverage, findings = acquisition
                     resolver = tip_resolver or (
-                        lambda timeout=None: _resolve_commit(request.source, timeout)
+                        lambda timeout=None: _resolve_commit(
+                            request.source,
+                            timeout,
+                            object_format=selection.object_format,
+                        )
                     )
                     drift = _confirm_tip(
                         selection.tip,
@@ -1715,13 +1784,15 @@ def _serialize_range_receipt_v3(
     destination: str,
     source: str,
     tip: str,
+    *,
+    object_format: GitObjectFormat = _SHA1_OBJECT_FORMAT,
 ) -> str:
     if not history.commit_ids or not history.object_ids:
         raise ValueError("non-empty receipt")
     if (
         history.text_blobs + history.binary_blobs != len(history.blob_ids)
         or history.blob_bytes < 0
-        or not _OID_RE.fullmatch(tip)
+        or not object_format.matches(tip)
     ):
         raise ValueError("receipt fields")
     receipt = RangeReceiptV3(
@@ -1880,6 +1951,7 @@ def _format_outcome(outcome: ScanOutcome) -> tuple[str, str, int]:
                     selection.destination,
                     selection.source,
                     selection.tip,
+                    object_format=selection.object_format,
                 ),
                 "",
                 0,

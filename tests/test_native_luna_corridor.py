@@ -469,6 +469,71 @@ def test_luna_path_kind_missing_leaf_preserves_path_and_parent_guards(
         )["stableId"] == "E_LUNA_PRECONDITION_FAILED"
 
 
+def test_luna_path_kind_accepts_stable_special_leaf_as_other_without_content_read(
+    tmp_path: Path,
+) -> None:
+    """Catches path-kind rejecting a stable no-follow non-file, non-directory leaf."""
+
+    resolver = _resolver_module()
+    exact_root = tmp_path / "exact-root"
+    target = exact_root / "parent" / "special-entry"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"placeholder")
+    original_lstat = resolver.os.lstat
+
+    class SpecialMetadata:
+        def __init__(self, metadata: os.stat_result) -> None:
+            self.__dict__.update(
+                st_mode=stat.S_IFIFO | 0o600,
+                st_dev=metadata.st_dev,
+                st_ino=metadata.st_ino,
+                st_size=metadata.st_size,
+                st_mtime_ns=metadata.st_mtime_ns,
+                st_ctime_ns=metadata.st_ctime_ns,
+                st_file_attributes=getattr(metadata, "st_file_attributes", 0),
+            )
+
+    def special_lstat(path: object, *args: object, **kwargs: object) -> object:
+        metadata = original_lstat(path, *args, **kwargs)
+        return SpecialMetadata(metadata) if Path(path) == target else metadata
+
+    def forbidden_content_open(*args: object, **kwargs: object) -> int:
+        raise AssertionError("path-kind must not open special-entry content")
+
+    plan = _luna_plan(exact_root=exact_root)
+    plan["operations"] = [
+        {
+            "ordinal": 0,
+            "op": "path-kind",
+            "args": {"path": "parent/special-entry"},
+        }
+    ]
+    facts = _luna_facts()
+    facts["facts"] = [
+        {
+            "ordinal": 0,
+            "op": "path-kind",
+            "execution": "ok",
+            "value": "other",
+            "errorId": None,
+        }
+    ]
+
+    with pytest.MonkeyPatch.context() as patcher:
+        patcher.setattr(resolver.os, "lstat", special_lstat)
+        patcher.setattr(resolver.os, "open", forbidden_content_open)
+        assert resolver.validate_luna_execution_plan(
+            plan, observed_git_root=exact_root
+        )["valid"] is True
+        assert resolver.validate_scout_facts(
+            plan,
+            facts,
+            observed_tools=["filesystem.read"],
+            consumer_purpose="facts-only",
+            observed_git_root=exact_root,
+        )["valid"] is True
+
+
 def test_luna_directory_chain_tolerates_unrelated_sibling_churn(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -615,6 +680,38 @@ def test_luna_worker_plan_requires_exact_caller_patch_root_tool_path_and_hashes(
         assert resolver.validate_luna_execution_plan(
             invalid, observed_git_root=exact_root
         )["valid"] is False
+
+
+def test_luna_worker_preimage_hash_reads_at_most_captured_size_plus_one(
+    tmp_path: Path,
+) -> None:
+    """Catches an appending target keeping the pre-image hash read alive past its bound."""
+
+    resolver = _resolver_module()
+    exact_root = tmp_path / "exact-root"
+    target = exact_root / "shared" / "example.txt"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"before\n")
+    plan = _worker_plan(exact_root=exact_root)
+    remaining = target.stat().st_size + 1
+    read_sizes: list[int] = []
+
+    def growing_read(descriptor: int, count: int) -> bytes:
+        nonlocal remaining
+        assert descriptor >= 0
+        assert 0 < count <= remaining
+        read_sizes.append(count)
+        remaining -= count
+        return b"x" * count
+
+    with pytest.MonkeyPatch.context() as patcher:
+        patcher.setattr(resolver.os, "read", growing_read)
+        result = resolver.validate_luna_execution_plan(
+            plan, observed_git_root=exact_root
+        )
+
+    assert result["stableId"] == "E_LUNA_PRECONDITION_FAILED"
+    assert read_sizes == [target.stat().st_size + 1]
 
 
 @pytest.mark.parametrize(

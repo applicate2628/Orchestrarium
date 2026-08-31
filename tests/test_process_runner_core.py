@@ -360,6 +360,59 @@ def test_windows_abi_layout_matches_pointer_width() -> None:
     assert layout["processInformationSize"] == struct.calcsize("P") * 2 + 8
 
 
+def test_run_returns_typed_request_failure_for_non_request_object() -> None:
+    """Catches failure formatting dereferencing an input already rejected by type."""
+    runner = _load_runner()
+
+    result = runner.ProcessRunnerV1().run(object())
+
+    assert result.outcome == "supervisor-failure"
+    assert result.failure_id == "PSV1-REQUEST-INVALID"
+    assert result.terminal_stage == "request-validation"
+    assert result.resolved_executable == ""
+    assert result.argv_count == 0
+    assert result.stdin.expected_bytes == 0
+    assert result.stdin.complete is True
+    assert result.policy_id is None
+
+
+@pytest.mark.parametrize(
+    ("field", "malformed", "expected_attribute"),
+    (
+        ("argv", object(), ("argv_count", 0)),
+        ("argv", ("\ud800",), ("argv_count", 0)),
+        ("resolved_executable", object(), ("resolved_executable", "")),
+        ("resolved_executable", Path("\ud800"), ("resolved_executable", "")),
+        ("stdin_bytes", object(), ("stdin.expected_bytes", 0)),
+    ),
+)
+def test_request_failure_formatting_is_total_for_malformed_fields(
+    field: str,
+    malformed: object,
+    expected_attribute: tuple[str, object],
+) -> None:
+    """Catches a rejected dataclass field escaping as a formatter exception."""
+    runner = _load_runner()
+    request = _request(runner, (sys.executable, str(CHILD), "identity"))
+    request = dataclasses.replace(
+        request,
+        schema_version=0,
+        **{field: malformed},
+    )
+
+    result = runner.ProcessRunnerV1().run(request)
+
+    assert result.outcome == "supervisor-failure"
+    assert result.failure_id == "PSV1-REQUEST-INVALID"
+    assert result.terminal_stage == "request-validation"
+    attribute, expected = expected_attribute
+    if attribute == "stdin.expected_bytes":
+        observed = result.stdin.expected_bytes
+    else:
+        observed = getattr(result, attribute)
+    assert observed == expected
+
+
 @pytest.mark.parametrize(
     "bad_argv",
     (

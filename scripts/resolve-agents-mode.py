@@ -350,7 +350,7 @@ def _luna_stable_ordinary_chain(
         elif leaf_kind == "ordinary":
             if not (stat.S_ISREG(metadata.st_mode) or stat.S_ISDIR(metadata.st_mode)):
                 return None
-        else:
+        elif leaf_kind != "entry":
             return None
         snapshots.append((path, _luna_metadata_signature(metadata)))
         leaf_metadata = metadata
@@ -421,17 +421,26 @@ def _luna_existing_file_sha256(path: Path, expected_metadata: Any) -> str | None
         if not stat.S_ISREG(opened.st_mode) or opened_identity != expected_identity:
             return None
         digest = hashlib.sha256()
-        while True:
-            chunk = os.read(descriptor, 1024 * 1024)
+        captured_size = opened.st_size
+        remaining = captured_size + 1
+        observed_size = 0
+        while remaining:
+            chunk = os.read(descriptor, min(1024 * 1024, remaining))
             if not chunk:
                 break
+            observed_size += len(chunk)
+            remaining -= len(chunk)
+            if observed_size > captured_size:
+                return None
             digest.update(chunk)
+        if observed_size != captured_size:
+            return None
         after = _luna_component_metadata(path, allow_anchor_mount=False)
         if (
             after is None
             or _luna_metadata_signature(after)
             != _luna_metadata_signature(expected_metadata)
-            or os.fstat(descriptor).st_size != opened.st_size
+            or os.fstat(descriptor).st_size != captured_size
         ):
             return None
         return digest.hexdigest()
@@ -474,7 +483,7 @@ def _validate_luna_operation(
         leaf_kind = (
             "directory"
             if op == "list-directory"
-            else "ordinary"
+            else "entry"
             if op == "path-kind"
             else "file"
         )

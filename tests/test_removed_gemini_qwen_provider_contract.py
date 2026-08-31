@@ -46,15 +46,20 @@ def test_removed_provider_surfaces_are_not_live() -> None:
 
 
 @pytest.mark.parametrize("provider", REMOVED_PROVIDERS)
+@pytest.mark.parametrize(
+    ("scalar_style", "quote"),
+    (("unquoted", ""), ("single-quoted", "'"), ("double-quoted", '"')),
+)
 def test_legacy_provider_scalar_fails_closed_without_rewrite(
-    tmp_path: Path, provider: str
+    tmp_path: Path, provider: str, scalar_style: str, quote: str
 ) -> None:
     normalizer = _load_script(
-        f"normalize_agents_mode_removed_{provider}",
+        f"normalize_agents_mode_{scalar_style}_removed_{provider}",
         "scripts/normalize-agents-mode.py",
     )
     target = tmp_path / ".agents-mode.yaml"
-    original = f"externalProvider: {provider}\noperatorNote: preserve-me\n"
+    yaml_value = f"{quote}{provider}{quote}"
+    original = f"externalProvider: {yaml_value}\noperatorNote: preserve-me\n"
     target.write_text(original, encoding="utf-8")
 
     with pytest.raises(ValueError, match=rf"E_EXTERNAL_PROVIDER_REMOVED.*{provider}"):
@@ -65,6 +70,29 @@ def test_legacy_provider_scalar_fails_closed_without_rewrite(
         )
 
     assert target.read_text(encoding="utf-8") == original
+
+
+@pytest.mark.parametrize("yaml_value", ("'claude'", '"codex"'))
+def test_nonremoved_quoted_provider_scalar_keeps_original_syntax(
+    tmp_path: Path, yaml_value: str
+) -> None:
+    normalizer = _load_script(
+        "normalize_agents_mode_nonremoved_quoted_provider",
+        "scripts/normalize-agents-mode.py",
+    )
+    target = tmp_path / ".agents-mode.yaml"
+    target.write_text(f"externalProvider: {yaml_value}\n", encoding="utf-8")
+
+    normalized = normalizer.normalize_file(
+        str(ROOT / "shared" / "agents-mode.defaults.yaml"),
+        str(target),
+        "codex",
+    )
+
+    provider_line = next(
+        line for line in normalized.splitlines() if line.startswith("externalProvider:")
+    )
+    assert provider_line.split("  #", 1)[0] == f"externalProvider: {yaml_value}"
 
 
 @pytest.mark.parametrize("provider", REMOVED_PROVIDERS)

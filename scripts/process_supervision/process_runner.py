@@ -2060,15 +2060,74 @@ def _empty_stream() -> StreamObservationV1:
     return StreamObservationV1(0, 0, False, b"", b"", hashlib.sha256().hexdigest(), None)
 
 
+def _failure_request_projection(
+    request: object,
+) -> tuple[tuple[str, ...], str, bytes, str | None]:
+    def bounded_utf8(value: str, limit: int) -> bytes | None:
+        try:
+            encoded = str.encode(value, "utf-8")
+        except UnicodeError:
+            return None
+        return encoded if len(encoded) <= limit else None
+
+    argv: tuple[str, ...] = ()
+    executable = ""
+    stdin_bytes = b""
+    policy_id: str | None = None
+    if type(request) is not ProcessRequestV1:
+        return argv, executable, stdin_bytes, policy_id
+
+    fields = object.__getattribute__(request, "__dict__")
+    raw_argv = fields.get("argv")
+    if type(raw_argv) is tuple and len(raw_argv) <= MAX_ARGV_COUNT:
+        aggregate = 0
+        candidate: list[str] = []
+        for item in raw_argv:
+            if type(item) is not str or "\0" in item:
+                break
+            encoded = bounded_utf8(item, MAX_ARG_BYTES)
+            if encoded is None:
+                break
+            aggregate += len(encoded) + 1
+            if aggregate > MAX_ARGV_BYTES:
+                break
+            candidate.append(item)
+        else:
+            argv = tuple(candidate)
+
+    raw_executable = fields.get("resolved_executable")
+    if type(raw_executable) is type(Path()):
+        candidate_executable = str(raw_executable)
+        if bounded_utf8(candidate_executable, MAX_ARG_BYTES) is not None:
+            executable = candidate_executable
+
+    raw_stdin = fields.get("stdin_bytes")
+    if type(raw_stdin) is bytes and len(raw_stdin) <= MAX_STDIN_BYTES:
+        stdin_bytes = raw_stdin
+
+    raw_policy = fields.get("capture_policy")
+    if type(raw_policy) in {CapturePolicyV1, RepositoryTransferCapturePolicyV1}:
+        raw_policy_id = object.__getattribute__(raw_policy, "__dict__").get(
+            "policy_id"
+        )
+        if (
+            type(raw_policy_id) is str
+            and raw_policy_id
+            and raw_policy_id.isascii()
+            and len(raw_policy_id) <= MAX_REGISTRY_TOKEN_BYTES
+        ):
+            policy_id = raw_policy_id
+    return argv, executable, stdin_bytes, policy_id
+
+
 def _request_failure(
-    request: ProcessRequestV1,
+    request: object,
     error: ProcessSupervisionError,
     started: float,
     *,
     executable_identity_sha256: str | None = None,
 ) -> ProcessResultV1:
-    argv = request.argv if isinstance(request, ProcessRequestV1) else ()
-    executable = os.fspath(request.resolved_executable) if isinstance(request, ProcessRequestV1) else ""
+    argv, executable, stdin_bytes, policy_id = _failure_request_projection(request)
     executable_identity = executable_identity_sha256
     if executable_identity is None:
         executable_identity = hashlib.sha256(b"").hexdigest()
@@ -2092,14 +2151,14 @@ def _request_failure(
         and error.terminal_stage == "deadline",
         False,
         max(0.0, time.monotonic() - started),
-        StdinObservationV1(len(request.stdin_bytes or b""), 0, not request.stdin_bytes),
+        StdinObservationV1(len(stdin_bytes), 0, not stdin_bytes),
         _empty_stream(),
         _empty_stream(),
         tree,
         True,
         False,
         (),
-        policy_id=getattr(request.capture_policy, "policy_id", None),
+        policy_id=policy_id,
     )
 
 

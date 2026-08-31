@@ -3584,7 +3584,10 @@ class TestOracleFailClosed(unittest.TestCase):
             owner = parent[call]
             while not isinstance(owner, ast.FunctionDef):
                 owner = parent[owner]
-            if owner.name == "test_gate_owned_snapshot_executes_real_sibling_for_bound_range":
+            if owner.name in {
+                "test_gate_owned_snapshot_executes_real_sibling_for_bound_range",
+                "test_gate_owned_snapshot_authorizes_sha256_repository_range",
+            }:
                 argv = call.args[0]
                 self.assertIsInstance(argv, ast.List)
                 executable = argv.elts[0]
@@ -4710,6 +4713,8 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
                 raise AssertionError(f"unexpected authorization argv: {argv!r}")
             if args == ["rev-parse", "--show-toplevel"]:
                 return result(0, str(REPO_ROOT.resolve()) + "\n")
+            if args == ["rev-parse", "--show-object-format"]:
+                return result(0, "sha1\n")
             if args == ["repo", "view", "--json", "nameWithOwner,url"]:
                 return result(0, {
                     "nameWithOwner": "acme/project",
@@ -6960,6 +6965,51 @@ class TestPublicationSafetyTrustedScanR2(unittest.TestCase):
             head,
         )
         self.assertTrue(observation.consumption_id)
+        self.assertEqual(observation.execution.pending.state, module.PendingState.CONSUMED)
+
+    def test_gate_owned_snapshot_authorizes_sha256_repository_range(self) -> None:
+        module = self._module("real_snapshot_sha256")
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            remote = root / "remote.git"
+            repo = root / "repo"
+            subprocess.run(
+                ["git", "init", "-q", "--bare", "--object-format=sha256", str(remote)],
+                check=True,
+            )
+            subprocess.run(
+                ["git", "init", "-q", "--object-format=sha256", str(repo)], check=True
+            )
+            for key, value in (("user.name", "T"), ("user.email", "t@t")):
+                subprocess.run(["git", "-C", str(repo), "config", key, value], check=True)
+            (repo / "seed.txt").write_text("clean seed\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(repo), "add", "seed.txt"], check=True)
+            subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "clean seed"], check=True)
+            subprocess.run(["git", "-C", str(repo), "remote", "add", "origin", str(remote)], check=True)
+            subprocess.run(["git", "-C", str(repo), "push", "-q", "origin", "HEAD:refs/heads/main"], check=True)
+            (repo / "next.bin").write_bytes(b"\0\1\2")
+            subprocess.run(["git", "-C", str(repo), "add", "next.bin"], check=True)
+            subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "clean next"], check=True)
+            head = subprocess.run(
+                ["git", "-C", str(repo), "rev-parse", "HEAD"],
+                check=True, capture_output=True, text=True, encoding="utf-8",
+            ).stdout.strip()
+            self.assertEqual(len(head), 64)
+            binding = module._resolve_generic_scan_binding(
+                "origin", "refs/heads/main", "HEAD", str(repo.resolve()),
+                str(Path(shutil.which("git") or "").resolve(strict=True)),
+            )
+            observation = module._run_authoritative_scan(
+                binding,
+                str(repo.resolve()),
+                str(Path(shutil.which("git") or "").resolve(strict=True)),
+            )
+
+        self.assertEqual(type(observation).__name__, "ConsumedAuthoritativeEvidence")
+        self.assertEqual(observation.parsed_outcome.kind, "valid-v3")
+        self.assertEqual(observation.parsed_outcome.receipt.commits, 1)
+        self.assertEqual(observation.parsed_outcome.receipt.source, head)
+        self.assertEqual(observation.parsed_outcome.receipt.tip, head)
         self.assertEqual(observation.execution.pending.state, module.PendingState.CONSUMED)
 
     def test_transcript_lookalike_cannot_credit_a_denied_authoritative_scan(self) -> None:

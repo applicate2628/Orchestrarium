@@ -52,6 +52,22 @@ STOCK_CONSULTANT_REVISION = "e55b2466281ecc50ad2a940a4de14a5ea90fb98c^"
 STOCK_CONSULTANT_TREE_SHA256 = (
     "33998c6a60b442c09957d3edef914daa02d718eafa5f881473ce017fb29a4bd9"
 )
+E55B_STOCK_CONSULTANT_REVISION = "e55b2466281ecc50ad2a940a4de14a5ea90fb98c"
+E55B_STOCK_CONSULTANT_TREE_SHA256 = (
+    "f3d56fa8d361acf65d6624242c7cc61007bb8332fe6531dabc7766db940a9c5b"
+)
+STOCK_CONSULTANT_PRIORS = (
+    pytest.param(
+        STOCK_CONSULTANT_REVISION,
+        STOCK_CONSULTANT_TREE_SHA256,
+        id="pre-e55-parent",
+    ),
+    pytest.param(
+        E55B_STOCK_CONSULTANT_REVISION,
+        E55B_STOCK_CONSULTANT_TREE_SHA256,
+        id="e55b2466",
+    ),
+)
 PARTIAL_KIMI_LUNA_GLOBAL_LEAD_TREE_SHA256 = (
     "006161c105d8fcaaa3e9ae891e8b14e42ca170c026445062f983884a9296a3c6"
 )
@@ -613,13 +629,13 @@ def _extract_additional_stock_skill(
     return destination / "src.codex" / "skills" / name
 
 
-def _extract_stock_consultant(destination: Path) -> Path:
+def _extract_stock_consultant(destination: Path, revision: str) -> Path:
     archive = subprocess.run(
         [
             "git",
             "archive",
             "--format=tar",
-            STOCK_CONSULTANT_REVISION,
+            revision,
             "src.codex/skills/consultant",
         ],
         cwd=ROOT,
@@ -657,12 +673,13 @@ def _runtime_cache_insensitive_tree_bytes(root: Path) -> dict[Path, bytes]:
     return files
 
 
+@pytest.mark.parametrize(("revision", "expected_prior"), STOCK_CONSULTANT_PRIORS)
 def test_exact_stock_consultant_is_accepted_and_replaced_byte_for_byte(
-    tmp_path: Path,
+    tmp_path: Path, revision: str, expected_prior: str
 ) -> None:
     installer = _load_installer()
-    historical = _extract_stock_consultant(tmp_path / "historical")
-    assert installer._tree_sha256(historical) == STOCK_CONSULTANT_TREE_SHA256
+    historical = _extract_stock_consultant(tmp_path / "historical", revision)
+    assert installer._tree_sha256(historical) == expected_prior
 
     target = tmp_path / "target"
     skills_root = target / ".agents" / "skills"
@@ -674,7 +691,7 @@ def test_exact_stock_consultant_is_accepted_and_replaced_byte_for_byte(
     )
     try:
         selected = next(skill for skill in plan.skills if skill.name == "consultant")
-        assert selected.accepted_prior == STOCK_CONSULTANT_TREE_SHA256
+        assert selected.accepted_prior == expected_prior
         owner = installer._CreateOnlyMutablePath(
             target, installer._InstallTransaction([], enabled=False), dry_run=False
         )
@@ -686,9 +703,13 @@ def test_exact_stock_consultant_is_accepted_and_replaced_byte_for_byte(
         installer._discard_canonical_skills_plan(plan)
 
 
-def test_stock_consultant_one_byte_drift_is_rejected(tmp_path: Path) -> None:
+@pytest.mark.parametrize(("revision", "expected_prior"), STOCK_CONSULTANT_PRIORS)
+def test_stock_consultant_one_byte_drift_is_rejected(
+    tmp_path: Path, revision: str, expected_prior: str
+) -> None:
     installer = _load_installer()
-    historical = _extract_stock_consultant(tmp_path / "historical")
+    historical = _extract_stock_consultant(tmp_path / "historical", revision)
+    assert installer._tree_sha256(historical) == expected_prior
     skills_root = tmp_path / "target" / ".agents" / "skills"
     skills_root.mkdir(parents=True)
     installed = skills_root / "consultant"
@@ -702,11 +723,13 @@ def test_stock_consultant_one_byte_drift_is_rejected(tmp_path: Path) -> None:
         )
 
 
+@pytest.mark.parametrize(("revision", "expected_prior"), STOCK_CONSULTANT_PRIORS)
 def test_stock_consultant_prior_is_rejected_for_another_skill(
-    tmp_path: Path,
+    tmp_path: Path, revision: str, expected_prior: str
 ) -> None:
     installer = _load_installer()
-    historical = _extract_stock_consultant(tmp_path / "historical")
+    historical = _extract_stock_consultant(tmp_path / "historical", revision)
+    assert installer._tree_sha256(historical) == expected_prior
     skills_root = tmp_path / "target" / ".agents" / "skills"
     skills_root.mkdir(parents=True)
     shutil.copytree(historical, skills_root / "design-panel")
@@ -717,9 +740,13 @@ def test_stock_consultant_prior_is_rejected_for_another_skill(
         )
 
 
-def test_stock_consultant_transaction_abort_restores_prior(tmp_path: Path) -> None:
+@pytest.mark.parametrize(("revision", "expected_prior"), STOCK_CONSULTANT_PRIORS)
+def test_stock_consultant_transaction_abort_restores_prior(
+    tmp_path: Path, revision: str, expected_prior: str
+) -> None:
     installer = _load_installer()
-    historical = _extract_stock_consultant(tmp_path / "historical")
+    historical = _extract_stock_consultant(tmp_path / "historical", revision)
+    assert installer._tree_sha256(historical) == expected_prior
     target = tmp_path / "target"
     skills_root = target / ".agents" / "skills"
     skills_root.mkdir(parents=True)
@@ -747,9 +774,13 @@ def test_stock_consultant_transaction_abort_restores_prior(tmp_path: Path) -> No
     assert {path.name for path in skills_root.iterdir()} == {"consultant"}
 
 
-def test_stock_consultant_second_preflight_is_noop(tmp_path: Path) -> None:
+@pytest.mark.parametrize(("revision", "expected_prior"), STOCK_CONSULTANT_PRIORS)
+def test_stock_consultant_second_preflight_is_noop(
+    tmp_path: Path, revision: str, expected_prior: str
+) -> None:
     installer = _load_installer()
-    historical = _extract_stock_consultant(tmp_path / "historical")
+    historical = _extract_stock_consultant(tmp_path / "historical", revision)
+    assert installer._tree_sha256(historical) == expected_prior
     target = tmp_path / "target"
     skills_root = target / ".agents" / "skills"
     skills_root.mkdir(parents=True)
