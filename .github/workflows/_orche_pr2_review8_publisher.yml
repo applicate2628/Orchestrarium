@@ -1,0 +1,39 @@
+name: Internal PR2 review8 publisher
+
+on:
+  push:
+    branches:
+      - orche/internal-pr2-review8-20260831
+
+permissions:
+  contents: write
+
+jobs:
+  verify-and-publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout review helper
+        uses: actions/checkout@v4
+        with:
+          ref: orche/internal-pr2-review8-20260831
+          path: helper
+          fetch-depth: 1
+
+      - name: Checkout pull-request branch
+        uses: actions/checkout@v4
+        with:
+          ref: orche/impl-000-baseline
+          path: repo
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Install test dependencies
+        shell: bash
+        run: |
+          python3 -m venv --copies /tmp/orche-review8-venv
+          /tmp/orche-review8-venv/bin/python -m pip install --disable-pip-version-check pytest PyYAML
+          echo "/tmp/orche-review8-venv/bin" >> "$GITHUB_PATH"
+
+      - name: Verify and publish review repairs
+        shell: bash --noprofile --norc -e -o pipefail {0}
+        run: bash helper/.orche-payload/run_review8.sh repo
