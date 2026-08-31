@@ -1,0 +1,32 @@
+name: Internal PR2 review8 source export
+
+on:
+  push:
+    branches:
+      - orche/internal-pr2-review8-20260831
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout pull-request branch
+        uses: actions/checkout@v4
+        with:
+          ref: orche/impl-000-baseline
+          fetch-depth: 0
+      - name: Archive exact source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "498f7954a3a74525d237870fd1f1b30ac820c955"
+          tar --exclude=.git -czf /tmp/orche-pr2-source.tar.gz .
+      - name: Upload source archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: orche-pr2-source-498f7954
+          path: /tmp/orche-pr2-source.tar.gz
+          if-no-files-found: error
+          retention-days: 1
