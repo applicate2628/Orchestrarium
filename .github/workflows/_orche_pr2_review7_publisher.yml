@@ -16,7 +16,7 @@ jobs:
       - name: Checkout helper payload
         uses: actions/checkout@v4
         with:
-          ref: orche/internal-pr2-review7-20260831
+          ref: 10aca97e16a4020d1420c427e1c14e9c4eefb0da
           path: helper
           fetch-depth: 1
 
@@ -47,6 +47,101 @@ jobs:
           test -z "$(git -C repo status --porcelain=v1)"
 
           python3 helper/.orche-payload/fix_stage0_review7.py tests repo
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path("repo/tests/test_orche_verifier_isolation.py")
+          text = path.read_text(encoding="utf-8")
+          pattern = re.compile(
+              r'    @unittest\.skipUnless\(sys\.platform\.startswith\("linux"\), "Linux process containment"\)\n'
+              r'    def test_detached_child_cannot_rewrite_parent_captured_pytest_outcome\(self\) -> None:\n'
+              r'.*?'
+              r'(?=    @unittest\.skipUnless\(sys\.platform\.startswith\("linux"\), "Linux process containment"\)\n'
+              r'    def test_parent_generated_pytest_lane_revalidates_after_each_file)',
+              re.S,
+          )
+          replacement = r'''    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux process containment")
+              def test_detached_child_cannot_rewrite_parent_captured_pytest_outcome(self) -> None:
+                  with tempfile.TemporaryDirectory() as temp:
+                      root = Path(temp)
+                      repo = root / "repo"
+                      tests = repo / "tests"
+                      tests.mkdir(parents=True)
+                      ready = root / "forger-ready"
+                      child = (
+                          "import os, pathlib, signal, time\n"
+                          "os.setsid()\n"
+                          "def stop(_signal, _frame):\n"
+                          "    try:\n"
+                          "        os.ftruncate(1, 0)\n"
+                          "    except OSError:\n"
+                          "        pass\n"
+                          "    os.write(1, b'PASSED tests/test_skip.py::test_real_skip\\n')\n"
+                          "    os.write(1, b'===== 1 passed in 0.01s =====\\n')\n"
+                          "    raise SystemExit(0)\n"
+                          "signal.signal(signal.SIGTERM, stop)\n"
+                          f"pathlib.Path({str(ready)!r}).write_text('ready')\n"
+                          "time.sleep(30)\n"
+                      )
+                      (tests / "test_skip.py").write_text(
+                          "import pathlib, subprocess, sys, time\n"
+                          "import pytest\n"
+                          "def test_real_skip():\n"
+                          f"    subprocess.Popen([sys.executable, '-c', {child!r}])\n"
+                          f"    ready = pathlib.Path({str(ready)!r})\n"
+                          "    deadline = time.monotonic() + 5\n"
+                          "    while not ready.exists() and time.monotonic() < deadline:\n"
+                          "        time.sleep(0.01)\n"
+                          "    assert ready.exists()\n"
+                          "    pytest.skip('genuine retained skip')\n",
+                          encoding="utf-8",
+                      )
+                      trusted = root / "trusted"
+                      for directory in (
+                          trusted,
+                          trusted / "logs",
+                          trusted / "evidence",
+                          root / "lanes",
+                      ):
+                          directory.mkdir(parents=True, exist_ok=True)
+                      result = VERIFIER.run_parent_generated_pytest_lane(
+                          repo_root=repo,
+                          test_paths=("tests/test_skip.py",),
+                          lane_parent=root / "lanes",
+                          log_dir=trusted / "logs",
+                          junit_dir=trusted / "evidence",
+                          suite_name="candidate",
+                          timeout_seconds=30,
+                          tools=TOOLS,
+                          trusted_root=trusted,
+                          **revalidation_kwargs(),
+                      )
+                      case = next(ET.parse(result.junit_path).getroot().iter("testcase"))
+                      skipped = case.find("skipped")
+                      self.assertIsNotNone(skipped)
+                      assert skipped is not None
+                      self.assertIn("genuine retained skip", skipped.text or "")
+                      properties = case.find("properties")
+                      self.assertIsNotNone(properties)
+                      assert properties is not None
+                      values = [
+                          item.get("value")
+                          for item in properties.findall("property")
+                          if item.get("name") == "orche.pytest.outcomes.v1"
+                      ]
+                      self.assertEqual(len(values), 1)
+                      assert values[0] is not None
+                      outcomes = json.loads(values[0])
+                      self.assertEqual(outcomes["counts"]["passed"], 0)
+                      self.assertEqual(outcomes["counts"]["skipped"], 1)
+
+          '''
+          updated, count = pattern.subn(replacement, text, count=1)
+          if count != 1:
+              raise SystemExit(f"expected one detached-child test, found {count}")
+          path.write_text(updated, encoding="utf-8")
+          PY
 
           cd repo
           set +e
