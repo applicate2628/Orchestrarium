@@ -14,6 +14,8 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "baseline" / "compare_pytest_baseline.py"
 A = "a" * 40
 B = "b" * 40
+OUTCOME_PROPERTY = "orche.pytest.outcomes.v1"
+OUTCOME_KEYS = ("passed", "skipped", "xfailed", "xpassed", "deselected")
 
 
 def canonical(value: object) -> str:
@@ -50,24 +52,108 @@ def write_inventory(path: Path, ref: str, mapping: dict[str, str]) -> None:
     path.write_text(canonical(payload))
 
 
-def write_junit(path: Path, cases: list[dict[str, str | None]]) -> None:
+def outcome_evidence(
+    *,
+    passed: int = 0,
+    skipped: int = 0,
+    xfailed: int = 0,
+    xpassed: int = 0,
+    deselected: int = 0,
+    diagnostics: dict[str, list[str]] | None = None,
+) -> dict[str, object]:
+    counts = {
+        "passed": passed,
+        "skipped": skipped,
+        "xfailed": xfailed,
+        "xpassed": xpassed,
+        "deselected": deselected,
+    }
+    details = {key: [] for key in OUTCOME_KEYS}
+    if diagnostics:
+        for key, lines in diagnostics.items():
+            details[key] = list(lines)
+    if passed and not details["passed"]:
+        details["passed"] = [
+            f"PASSED tests/generated.py::test_pass[{index}]"
+            for index in range(passed)
+        ]
+    if skipped and not details["skipped"]:
+        details["skipped"] = [
+            f"SKIPPED [{skipped}] tests/generated.py: retained skip"
+        ]
+    if xfailed and not details["xfailed"]:
+        details["xfailed"] = [
+            f"XFAIL tests/generated.py::test_xfail[{index}] - expected"
+            for index in range(xfailed)
+        ]
+    if xpassed and not details["xpassed"]:
+        details["xpassed"] = [
+            f"XPASS tests/generated.py::test_xpass[{index}] - unexpected"
+            for index in range(xpassed)
+        ]
+    if deselected:
+        details["deselected"] = [f"{deselected} deselected"]
+    return {
+        "schemaVersion": 1,
+        "counts": counts,
+        "diagnostics": details,
+    }
+
+
+def write_junit(path: Path, cases: list[dict[str, object]]) -> None:
     suite = ET.Element("testsuite")
     for case in cases:
+        name = str(case["name"])
         node = ET.SubElement(
             suite,
             "testcase",
             classname="demo",
-            name=str(case["name"]),
-            file=f"tests/{case['name']}.py",
+            name=name,
+            file=f"tests/{name}.py",
         )
         status = case.get("status")
+        outcomes = case.get("outcomes")
+        if outcomes is None and status in {None, "passed", "skipped"}:
+            if status == "skipped":
+                reason = str(case.get("message") or "retained skip")
+                outcomes = outcome_evidence(
+                    skipped=1,
+                    diagnostics={
+                        "skipped": [
+                            f"SKIPPED tests/{name}.py::{name} - {reason}"
+                        ]
+                    },
+                )
+            else:
+                outcomes = outcome_evidence(
+                    passed=1,
+                    diagnostics={
+                        "passed": [f"PASSED tests/{name}.py::{name}"]
+                    },
+                )
+        if outcomes is not None:
+            if not isinstance(outcomes, dict):
+                raise AssertionError("outcomes must be an object")
+            properties = ET.SubElement(node, "properties")
+            ET.SubElement(
+                properties,
+                "property",
+                name=OUTCOME_PROPERTY,
+                value=json.dumps(
+                    outcomes,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+            )
         if status in {"failure", "error", "skipped"}:
             child = ET.SubElement(node, str(status))
             if case.get("type") is not None:
                 child.set("type", str(case["type"]))
             if case.get("message") is not None:
                 child.set("message", str(case["message"]))
-            child.text = case.get("details")
+            details = case.get("details")
+            child.text = None if details is None else str(details)
     ET.ElementTree(suite).write(path, encoding="unicode")
 
 
@@ -155,6 +241,59 @@ class PytestComparatorTests(unittest.TestCase):
         self.assertEqual(
             report["observations"]["additionalCandidateTestFiles"],
             ["tests/test_new.py"],
+        )
+
+    def test_retained_zero_exit_outcome_fingerprint_changes_block(self) -> None:
+        baseline_outcomes = outcome_evidence(
+            passed=3,
+            diagnostics={
+                "passed": [
+                    "PASSED tests/test_existing.py::test_existing[a]",
+                    "PASSED tests/test_existing.py::test_existing[b]",
+                    "PASSED tests/test_existing.py::test_existing[c]",
+                ]
+            },
+        )
+        candidate_outcomes = outcome_evidence(
+            passed=1,
+            xfailed=1,
+            deselected=1,
+            diagnostics={
+                "passed": [
+                    "PASSED tests/test_existing.py::test_existing[a]",
+                ],
+                "xfailed": [
+                    "XFAIL tests/test_existing.py::test_existing[b] - expected failure",
+                ],
+            },
+        )
+        write_junit(
+            self.baseline_junit,
+            [
+                {
+                    "name": "existing",
+                    "status": "passed",
+                    "outcomes": baseline_outcomes,
+                }
+            ],
+        )
+        write_junit(
+            self.candidate_junit,
+            [
+                {
+                    "name": "existing",
+                    "status": "passed",
+                    "outcomes": candidate_outcomes,
+                }
+            ],
+        )
+        result = self.invoke()
+        self.assertEqual(result.returncode, 1, result.stderr)
+        report = json.loads(self.output.read_text())
+        self.assertEqual(report["schemaVersion"], 4)
+        self.assertEqual(
+            report["blockers"]["changedRetainedOutcomeEvidence"],
+            ["demo::existing"],
         )
 
     def test_changed_or_missing_baseline_test_source_blocks(self) -> None:

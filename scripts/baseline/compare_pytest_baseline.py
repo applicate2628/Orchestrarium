@@ -7,6 +7,7 @@ from pathlib import Path
 
 OBJ=re.compile(r"(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})\Z"); SHA=re.compile(r"[0-9a-f]{64}\Z")
 HEX=set("0123456789abcdefABCDEF"); PATHCH=set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
+OUTCOME_PROPERTY="orche.pytest.outcomes.v1"; OUTCOME_KEYS=("passed","skipped","xfailed","xpassed","deselected"); RESULT_STATUSES={"passed","skipped"}
 class Error(RuntimeError): pass
 
 def canon(v): return json.dumps(v,ensure_ascii=False,indent=2,sort_keys=True)+"\n"
@@ -44,6 +45,47 @@ def norm(v,work,lane,oid,pats):
     while lines and not lines[-1]: lines.pop()
     return "\n".join(lines) or None
 
+def outcome(node,tid,status):
+    values=[]
+    props=node.find("properties")
+    if props is not None:
+        for item in props.findall("property"):
+            if item.get("name")==OUTCOME_PROPERTY: values.append(item.get("value"))
+    if not values:
+        if status in RESULT_STATUSES: raise Error(f"JUnit testcase {tid!r} lacks trusted Pytest outcome evidence")
+        return None
+    if len(values)!=1 or values[0] is None: raise Error(f"JUnit testcase {tid!r} has invalid or duplicate Pytest outcome evidence")
+    try: payload=json.loads(values[0])
+    except json.JSONDecodeError as e: raise Error(f"JUnit testcase {tid!r} has invalid Pytest outcome JSON: {e}") from e
+    if not isinstance(payload,dict) or set(payload)!={"schemaVersion","counts","diagnostics"} or payload.get("schemaVersion")!=1:
+        raise Error(f"JUnit testcase {tid!r} has invalid Pytest outcome schema")
+    counts=payload.get("counts"); diagnostics=payload.get("diagnostics")
+    if not isinstance(counts,dict) or set(counts)!=set(OUTCOME_KEYS):
+        raise Error(f"JUnit testcase {tid!r} has invalid Pytest outcome counts")
+    if any(type(counts[key]) is not int or counts[key]<0 for key in OUTCOME_KEYS):
+        raise Error(f"JUnit testcase {tid!r} has invalid Pytest outcome count value")
+    if not isinstance(diagnostics,dict) or set(diagnostics)!=set(OUTCOME_KEYS):
+        raise Error(f"JUnit testcase {tid!r} has invalid Pytest outcome diagnostics")
+    for key in OUTCOME_KEYS:
+        lines=diagnostics[key]
+        if not isinstance(lines,list) or any(not isinstance(line,str) or not line for line in lines):
+            raise Error(f"JUnit testcase {tid!r} has invalid {key} diagnostics")
+    for key in ("passed","xfailed","xpassed"):
+        if len(diagnostics[key])!=counts[key]:
+            raise Error(f"JUnit testcase {tid!r} has inconsistent {key} diagnostics")
+    if bool(diagnostics["skipped"])!=bool(counts["skipped"]):
+        raise Error(f"JUnit testcase {tid!r} has inconsistent skipped diagnostics")
+    expected_deselected=[] if counts["deselected"]==0 else [f"{counts['deselected']} deselected"]
+    if diagnostics["deselected"]!=expected_deselected:
+        raise Error(f"JUnit testcase {tid!r} has inconsistent deselected diagnostics")
+    if sum(counts[key] for key in ("passed","skipped","xfailed","xpassed"))==0:
+        raise Error(f"JUnit testcase {tid!r} has no executed or skipped outcomes")
+    if status=="passed" and counts["skipped"]!=0:
+        raise Error(f"passed JUnit testcase {tid!r} reports skipped outcomes")
+    if status=="skipped" and counts["skipped"]==0:
+        raise Error(f"skipped JUnit testcase {tid!r} lacks skipped outcomes")
+    return payload
+
 def junit(path):
     try: tree=ET.parse(path).getroot()
     except (OSError,ET.ParseError) as e: raise Error(f"cannot parse JUnit file {path}: {e}") from e
@@ -56,7 +98,7 @@ def junit(path):
         for k in ("failure","error","skipped"):
             y=x.find(k)
             if y is not None: st=k; typ=y.get("type"); msg=y.get("message"); body=y.text; break
-        out[tid]={"status":st,"type":typ,"message":msg,"body":body,"file":f or None,"class":c,"name":n}
+        out[tid]={"status":st,"type":typ,"message":msg,"body":body,"file":f or None,"class":c,"name":n,"outcomes":outcome(x,tid,st)}
     if not out: raise Error(f"JUnit file contains no testcases: {path}")
     return out
 
@@ -78,6 +120,10 @@ def inventory(path,expected,label):
     return out
 
 def diag(x,work,lane,oid,pats): return tuple(norm(x[k],work,lane,oid,pats) for k in ("type","message","body"))
+def outcome_diag(x,work,lane,oid,pats):
+    payload=x["outcomes"]
+    if payload is None: return None
+    return (tuple((key,payload["counts"][key]) for key in OUTCOME_KEYS),tuple((key,tuple(norm(line,work,lane,oid,pats) for line in payload["diagnostics"][key])) for key in OUTCOME_KEYS))
 def contradiction(code,n):
     if code not in {0,1}: return [{"exitCode":code,"junitFailureCount":n,"reason":"operational-pytest-exit"}]
     return [{"exitCode":code,"junitFailureCount":n}] if (code==0)!=(n==0) else []
@@ -100,6 +146,8 @@ def compare(a):
     bs={i for i in b if b[i]["status"]=="skipped"}; cs={i for i in c if c[i]["status"]=="skipped"}
     bd={i:diag(b[i],roots[0],roots[2],br,pats) for i in bf}; cd={i:diag(c[i],roots[1],roots[3],cr,pats) for i in cf}
     sd1={i:diag(b[i],roots[0],roots[2],br,pats) for i in bs&cs}; sd2={i:diag(c[i],roots[1],roots[3],cr,pats) for i in bs&cs}
+    outcome_ids={i for i in bids&cids if b[i]["status"] in RESULT_STATUSES and c[i]["status"] in RESULT_STATUSES}
+    od1={i:outcome_diag(b[i],roots[0],roots[2],br,pats) for i in outcome_ids}; od2={i:outcome_diag(c[i],roots[1],roots[3],cr,pats) for i in outcome_ids}
     missbd=sorted(i for i,v in bd.items() if not any(x is not None for x in v)); misscd=sorted(i for i,v in cd.items() if not any(x is not None for x in v))
     missbs=sorted(i for i,v in sd1.items() if not any(x is not None for x in v)); misscs=sorted(i for i,v in sd2.items() if not any(x is not None for x in v))
     blockers={
@@ -111,6 +159,7 @@ def compare(a):
       "changedKnownFailureDiagnostics":sorted(i for i in bf&cf if b[i]["status"]==c[i]["status"] and i not in set(missbd+misscd) and bd[i]!=cd[i]),
       "missingBaselineSkipDiagnostics":missbs,"missingCandidateSkipDiagnostics":misscs,
       "changedRetainedSkipDiagnostics":sorted(i for i in bs&cs if i not in set(missbs+misscs) and sd1[i]!=sd2[i]),
+      "changedRetainedOutcomeEvidence":sorted(i for i in outcome_ids if od1[i]!=od2[i]),
       "baselineSkipsNoLongerSkipped":sorted(i for i in bs if i in c and c[i]["status"]!="skipped"),
       "missingBaselineTestFiles":sorted(set(bi)-set(ci)),
       "changedBaselineTestFiles":sorted(i for i in set(bi)&set(ci) if bi[i]!=ci[i]),
@@ -120,7 +169,7 @@ def compare(a):
     resolved=a.baseline_exit==1 and a.candidate_exit==0 and not cf and not blockers["baselineExitContradiction"]
     blockers["pytestExitCodeRegression"]=[] if a.candidate_exit==a.baseline_exit or resolved else [{"baselineExitCode":a.baseline_exit,"candidateExitCode":a.candidate_exit}]
     verdict="PASS" if all(not v for v in blockers.values()) else "BLOCKED"
-    return {"schemaVersion":3,"baseline":{"exitCode":a.baseline_exit,"ref":br,"failures":len(bf),"total":len(b)},"candidate":{"exitCode":a.candidate_exit,"ref":cr,"failures":len(cf),"total":len(c)},"blockers":blockers,"observations":{"additionalCandidateTests":sorted(cids-bids),"additionalCandidateTestFiles":sorted(set(ci)-set(bi)),"resolvedBaselineFailures":sorted(i for i in bf if i in c and c[i]["status"]=="passed")},"verdict":verdict}
+    return {"schemaVersion":4,"baseline":{"exitCode":a.baseline_exit,"ref":br,"failures":len(bf),"total":len(b)},"candidate":{"exitCode":a.candidate_exit,"ref":cr,"failures":len(cf),"total":len(c)},"blockers":blockers,"observations":{"additionalCandidateTests":sorted(cids-bids),"additionalCandidateTestFiles":sorted(set(ci)-set(bi)),"resolvedBaselineFailures":sorted(i for i in bf if i in c and c[i]["status"]=="passed")},"verdict":verdict}
 
 def args(v):
     p=argparse.ArgumentParser(description=__doc__)

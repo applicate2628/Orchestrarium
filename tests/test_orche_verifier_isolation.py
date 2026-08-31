@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import py_compile
 import shutil
@@ -630,6 +631,166 @@ class VerifierIsolationTests(unittest.TestCase):
             self.assertIn("real failure", failure.text or "")
             self.assertNotIn("forged", result.junit_path.read_text(encoding="utf-8"))
 
+
+    def test_zero_exit_outcome_parser_preserves_non_skip_counts_and_diagnostics(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            log = Path(temp) / "pytest.log"
+            log.write_text(
+                "================ short test summary info ================\n"
+                "PASSED tests/test_demo.py::test_pass[a]\n"
+                "PASSED tests/test_demo.py::test_pass[b]\n"
+                "XFAIL tests/test_demo.py::test_expected_failure - known defect\n"
+                "XPASS tests/test_demo.py::test_unexpected_pass - fixed defect\n"
+                "===== 2 passed, 1 xfailed, 1 xpassed, 3 deselected in 0.02s =====\n",
+                encoding="utf-8",
+            )
+            evidence = VERIFIER._pytest_zero_exit_outcome_evidence(log)
+
+        self.assertEqual(
+            evidence["counts"],
+            {
+                "passed": 2,
+                "skipped": 0,
+                "xfailed": 1,
+                "xpassed": 1,
+                "deselected": 3,
+            },
+        )
+        self.assertEqual(
+            evidence["diagnostics"]["passed"],
+            [
+                "PASSED tests/test_demo.py::test_pass[a]",
+                "PASSED tests/test_demo.py::test_pass[b]",
+            ],
+        )
+        self.assertEqual(
+            evidence["diagnostics"]["xfailed"],
+            [
+                "XFAIL tests/test_demo.py::test_expected_failure - known defect",
+            ],
+        )
+        self.assertEqual(
+            evidence["diagnostics"]["xpassed"],
+            [
+                "XPASS tests/test_demo.py::test_unexpected_pass - fixed defect",
+            ],
+        )
+        self.assertEqual(
+            evidence["diagnostics"]["deselected"],
+            ["3 deselected"],
+        )
+
+    def test_parent_generated_pytest_evidence_preserves_non_skip_outcomes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            baseline_repo = root / "baseline"
+            candidate_repo = root / "candidate"
+            test_source = (
+                "from pathlib import Path\n"
+                "import pytest\n"
+                "\n"
+                "state = (Path(__file__).parents[1] / 'runtime-state.txt').read_text().strip()\n"
+                "parameters = (1, 2) if state == 'wide' else (1,)\n"
+                "\n"
+                "@pytest.mark.parametrize('value', parameters)\n"
+                "def test_parameter(value):\n"
+                "    assert value > 0\n"
+                "\n"
+                "@pytest.mark.xfail(reason='known defect')\n"
+                "def test_expected_failure():\n"
+                "    assert False\n"
+                "\n"
+                "@pytest.mark.xfail(reason='fixed defect')\n"
+                "def test_unexpected_pass():\n"
+                "    assert True\n"
+            )
+            for repo, state in ((baseline_repo, "wide"), (candidate_repo, "narrow")):
+                (repo / "tests").mkdir(parents=True)
+                (repo / "tests" / "test_outcomes.py").write_text(
+                    test_source, encoding="utf-8"
+                )
+                (repo / "runtime-state.txt").write_text(state, encoding="utf-8")
+
+            trusted = root / "trusted"
+            baseline_evidence = trusted / "baseline-evidence"
+            candidate_evidence = trusted / "candidate-evidence"
+            baseline_lanes = root / "baseline-lanes"
+            candidate_lanes = root / "candidate-lanes"
+            for directory in (
+                trusted,
+                baseline_evidence,
+                candidate_evidence,
+                baseline_lanes,
+                candidate_lanes,
+            ):
+                directory.mkdir(parents=True, exist_ok=True)
+
+            baseline_result = VERIFIER.run_parent_generated_pytest_lane(
+                repo_root=baseline_repo,
+                test_paths=("tests/test_outcomes.py",),
+                lane_parent=baseline_lanes,
+                log_dir=trusted / "logs" / "baseline",
+                junit_dir=baseline_evidence,
+                suite_name="baseline",
+                timeout_seconds=30,
+                tools=TOOLS,
+                trusted_root=trusted,
+            )
+            candidate_result = VERIFIER.run_parent_generated_pytest_lane(
+                repo_root=candidate_repo,
+                test_paths=("tests/test_outcomes.py",),
+                lane_parent=candidate_lanes,
+                log_dir=trusted / "logs" / "candidate",
+                junit_dir=candidate_evidence,
+                suite_name="candidate",
+                timeout_seconds=30,
+                tools=TOOLS,
+                trusted_root=trusted,
+            )
+
+            def read_outcomes(path: Path) -> dict[str, object]:
+                case = next(ET.parse(path).getroot().iter("testcase"))
+                properties = case.find("properties")
+                self.assertIsNotNone(properties)
+                assert properties is not None
+                values = [
+                    item.get("value")
+                    for item in properties.findall("property")
+                    if item.get("name") == "orche.pytest.outcomes.v1"
+                ]
+                self.assertEqual(len(values), 1)
+                assert values[0] is not None
+                return json.loads(values[0])
+
+            baseline_outcomes = read_outcomes(baseline_result.junit_path)
+            candidate_outcomes = read_outcomes(candidate_result.junit_path)
+
+        self.assertEqual(baseline_result.exit_code, 0)
+        self.assertEqual(candidate_result.exit_code, 0)
+        self.assertEqual(
+            baseline_outcomes["counts"],
+            {
+                "passed": 2,
+                "skipped": 0,
+                "xfailed": 1,
+                "xpassed": 1,
+                "deselected": 0,
+            },
+        )
+        self.assertEqual(
+            candidate_outcomes["counts"],
+            {
+                "passed": 1,
+                "skipped": 0,
+                "xfailed": 1,
+                "xpassed": 1,
+                "deselected": 0,
+            },
+        )
+        self.assertEqual(len(baseline_outcomes["diagnostics"]["passed"]), 2)
+        self.assertEqual(len(candidate_outcomes["diagnostics"]["passed"]), 1)
+        self.assertEqual(len(baseline_outcomes["diagnostics"]["xfailed"]), 1)
+        self.assertEqual(len(baseline_outcomes["diagnostics"]["xpassed"]), 1)
 
     def test_parent_generated_pytest_evidence_preserves_candidate_only_skip(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

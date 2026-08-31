@@ -52,7 +52,7 @@
     },
     "pytestComparator": {
       "deterministic": true,
-      "gitBlobSha": "208d3f9502def1cdff2279b2c83ee220269a0bfa",
+      "gitBlobSha": "1367613738de092164e81696b9cd4de3f85346a7",
       "materialization": "git-cat-file-reviewed-tree-blob",
       "path": "baseline/orchestrarium-v1/tooling/compare_pytest_baseline.py",
       "runtimeMutation": false,
@@ -60,7 +60,7 @@
     },
     "stage0Evidence": {
       "deterministic": true,
-      "gitBlobSha": "6285a0776269869e7053067299287e297687f2f2",
+      "gitBlobSha": "9f93650702be1661bdb339ea64c70d23553b26da",
       "materialization": "git-cat-file-reviewed-tree-blob",
       "path": "baseline/orchestrarium-v1/tooling/stage0_evidence.py",
       "runtimeMutation": false,

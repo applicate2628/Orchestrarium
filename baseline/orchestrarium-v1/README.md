@@ -51,7 +51,7 @@ The verifier performs the operational work rather than duplicating security-sens
 - inventories both the pinned baseline and exact reviewed candidate commit; arbitrary Git path bytes use reversible ASCII `git-path-percent-v1` encoding so generated JSON never contains surrogate code points;
 - treats path, content digest, Git mode, and Git object type as capability identity, so executable-bit and symbolic-link changes cannot disappear behind unchanged file bytes;
 - requires an exact reviewed disposition for every added, modified, or removed tracked path;
-- verifies baseline test/support source digests before execution, runs each retained baseline test file with candidate `conftest.py` discovery disabled and without any `--junitxml` argument, then has the trusted parent synthesize the accepted file-level JUnit Extensible Markup Language report, including skip counts and reasons, only after the test process and descendants are gone;
+- verifies baseline test/support source digests before execution, runs each retained baseline test file with candidate `conftest.py` discovery disabled and without any `--junitxml` argument, then has the trusted parent synthesize the accepted file-level JUnit Extensible Markup Language report, including a canonical zero-exit outcome fingerprint with passed, skipped, expected-failure, unexpected-pass, and deselected counts plus trusted short diagnostics, only after the test process and descendants are gone;
 - runs all repository-standard validators in both worktrees and requires validator-specific terminal success or failure markers even when both commands exit zero;
 - rechecks both baseline and candidate worktrees after every untrusted repository-code stage, including each candidate-focused test suite;
 - snapshots the complete trusted-tree membership and identity before each untrusted lane, forbids new entries, removals, replacements, symbolic links, hard links, or special files, and verifies the exact tree afterward;
@@ -222,7 +222,8 @@ Only the repository owner may then create, verify, and push the signed tag. Unti
 - **CLI:** Command-Line Interface, a program operated through terminal commands.
 - **Git blob:** an immutable Git object containing one file's bytes.
 - **Git mode:** the tracked Git file mode, such as regular file, executable file, symbolic link, or submodule entry.
-- **JUnit XML:** JUnit Extensible Markup Language, the machine-readable Pytest result format; Stage 0 synthesizes the accepted file from parent-observed per-file process exits rather than accepting candidate-written XML.
+- **Expected failure (`xfail`):** a Pytest outcome in which a known failing case fails as declared without making the test process fail.
+- **JUnit XML:** JUnit Extensible Markup Language, the machine-readable Pytest result format; Stage 0 synthesizes the accepted file from parent-observed per-file process exits and canonical outcome fingerprints rather than accepting candidate-written XML.
 - **`git-path-percent-v1`:** a reversible ASCII encoding that leaves safe path bytes unchanged and writes every other Git path byte as `%HH`.
 - **Linux child subreaper:** a Linux process that adopts orphaned descendants so they remain controllable even after `setsid()` or a double fork.
 - **PATH:** the operating-system executable search path.
@@ -232,4 +233,5 @@ Only the repository owner may then create, verify, and push the signed tag. Unti
 - **Pytest:** the Python test runner used by the repository suite.
 - **SHA-256:** Secure Hash Algorithm 256-bit, used for evidence and executable byte digests.
 - **Skill:** a repository instruction package whose methodology body is compared independently of provider frontmatter.
+- **Unexpected pass (`xpass`):** a Pytest outcome in which a case declared as an expected failure passes and must remain visible in parity evidence.
 - **V1:** Version 1, the accepted legacy behavior frozen before Orche 2.0 migration.
