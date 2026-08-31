@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import contextlib
+from collections.abc import Callable
 import ctypes
 import threading
 import xml.etree.ElementTree as ET
@@ -18,6 +19,9 @@ _PROCESS_POLL_SECONDS = 0.05
 _PROCESS_TERM_GRACE_SECONDS = 1.0
 _PROCESS_CLEANUP_TIMEOUT_SECONDS = 5.0
 _PROCESS_QUIET_POLLS = 8
+_PROCESS_OUTPUT_LIMIT_BYTES = 16 * 1024 * 1024
+_PROCESS_OUTPUT_READ_BYTES = 64 * 1024
+_PROCESS_OUTPUT_JOIN_SECONDS = 2.0
 ProcessRecord = tuple[int, str, int]
 
 
@@ -352,6 +356,39 @@ def prepare_trusted_output(path: Path) -> PreparedFileIdentity:
     return identity
 
 
+def _drain_process_output(
+    stream,
+    captured: bytearray,
+    state: dict[str, object],
+) -> None:
+    try:
+        while True:
+            chunk = stream.read(_PROCESS_OUTPUT_READ_BYTES)
+            if not chunk:
+                return
+            remaining = max(0, _PROCESS_OUTPUT_LIMIT_BYTES - len(captured))
+            if remaining:
+                captured.extend(chunk[:remaining])
+            if len(chunk) > remaining:
+                state["overflow"] = True
+    except BaseException as exc:
+        state["error"] = exc
+    finally:
+        try:
+            stream.close()
+        except BaseException as exc:
+            state.setdefault("error", exc)
+
+
+def _write_parent_captured_log(path: Path, payload: bytes) -> None:
+    handle, identity = _fresh_regular_file(path)
+    with handle:
+        handle.write(payload)
+        handle.flush()
+        os.fsync(handle.fileno())
+    _verify_prepared_file(identity)
+
+
 def run_isolated(
     command: Sequence[str],
     *,
@@ -368,61 +405,112 @@ def run_isolated(
     try:
         _enable_child_subreaper()
         preexisting = _direct_child_snapshot(_proc_table())
+        captured = bytearray()
+        capture_state: dict[str, object] = {}
+        parent_diagnostics: list[bytes] = []
         cleanup_error: VerificationError | None = None
-        log, log_identity = _fresh_regular_file(log_path)
-        with log:
-            if tools is not None:
-                tools.verify(command[0])
+        if tools is not None:
+            tools.verify(command[0])
+        try:
+            process = subprocess.Popen(
+                list(command),
+                cwd=cwd,
+                env=dict(env),
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+                close_fds=True,
+            )
+        except FileNotFoundError as exc:
+            parent_diagnostics.append(
+                f"BLOCKED: command executable not found: {exc}\n".encode()
+            )
+            result = CommandResult(127, log_path, launch_error=str(exc))
+        except OSError as exc:
+            parent_diagnostics.append(
+                f"BLOCKED: command launch failed: {exc}\n".encode()
+            )
+            result = CommandResult(126, log_path, launch_error=str(exc))
+        else:
+            if process.stdout is None:
+                _terminate_process_group(process)
+                _cleanup_lane_descendants(preexisting)
+                raise VerificationError("repository process stdout pipe was not created")
+            reader = threading.Thread(
+                target=_drain_process_output,
+                args=(process.stdout, captured, capture_state),
+                name=f"orche-stage0-output-{process.pid}",
+            )
             try:
-                process = subprocess.Popen(
-                    list(command),
-                    cwd=cwd,
-                    env=dict(env),
-                    stdin=subprocess.DEVNULL,
-                    stdout=log,
-                    stderr=subprocess.STDOUT,
-                    start_new_session=True,
-                )
-            except FileNotFoundError as exc:
-                log.write(f"BLOCKED: command executable not found: {exc}\n".encode())
-                log.flush()
-                os.fsync(log.fileno())
-                result = CommandResult(127, log_path, launch_error=str(exc))
-            except OSError as exc:
-                log.write(f"BLOCKED: command launch failed: {exc}\n".encode())
-                log.flush()
-                os.fsync(log.fileno())
-                result = CommandResult(126, log_path, launch_error=str(exc))
-            else:
-                timed_out = False
+                reader.start()
+            except BaseException as exc:
+                _terminate_process_group(process)
+                if process.poll() is None:
+                    process.kill()
+                    process.wait()
+                _cleanup_lane_descendants(preexisting)
+                raise VerificationError(
+                    f"cannot start repository output capture: {exc}"
+                ) from exc
+            timed_out = False
+            try:
                 try:
+                    return_code = process.wait(timeout=timeout_seconds)
+                except subprocess.TimeoutExpired:
+                    timed_out = True
+                    return_code = 124
+            finally:
+                _terminate_process_group(process)
+                if process.poll() is None:
                     try:
-                        return_code = process.wait(timeout=timeout_seconds)
+                        process.wait(timeout=2)
                     except subprocess.TimeoutExpired:
-                        timed_out = True
-                        return_code = 124
-                        log.write(
-                            f"BLOCKED: command timed out after {timeout_seconds:g}s\n".encode()
-                        )
-                finally:
-                    _terminate_process_group(process)
-                    if process.poll() is None:
-                        try:
-                            process.wait(timeout=2)
-                        except subprocess.TimeoutExpired:
-                            process.kill()
-                            process.wait()
-                    try:
-                        _cleanup_lane_descendants(preexisting)
-                    except VerificationError as exc:
-                        cleanup_error = exc
-                        log.write(f"BLOCKED: {exc}\n".encode())
-                log.flush()
-                os.fsync(log.fileno())
-                result = CommandResult(return_code, log_path, timed_out=timed_out)
-        _verify_prepared_file(log_identity)
+                        process.kill()
+                        process.wait()
+                try:
+                    _cleanup_lane_descendants(preexisting)
+                except VerificationError as exc:
+                    cleanup_error = exc
+            reader.join(timeout=_PROCESS_OUTPUT_JOIN_SECONDS)
+            if reader.is_alive():
+                try:
+                    process.stdout.close()
+                except OSError:
+                    pass
+                reader.join(timeout=_PROCESS_OUTPUT_JOIN_SECONDS)
+            if reader.is_alive():
+                capture_state["error"] = VerificationError(
+                    "repository output capture did not reach end-of-file after descendant cleanup"
+                )
+            if timed_out:
+                parent_diagnostics.append(
+                    f"BLOCKED: command timed out after {timeout_seconds:g}s\n".encode()
+                )
+            result = CommandResult(return_code, log_path, timed_out=timed_out)
+
         if cleanup_error is not None:
             raise cleanup_error
+        capture_error = capture_state.get("error")
+        if capture_error is not None:
+            if isinstance(capture_error, BaseException):
+                raise VerificationError(
+                    f"cannot capture repository process output: {capture_error}"
+                ) from capture_error
+            raise VerificationError(
+                f"cannot capture repository process output: {capture_error!r}"
+            )
+        if capture_state.get("overflow"):
+            parent_diagnostics.append(
+                "BLOCKED: command output exceeded trusted capture limit of "
+                f"{_PROCESS_OUTPUT_LIMIT_BYTES} bytes\n".encode()
+            )
+        payload = bytes(captured) + b"".join(parent_diagnostics)
+        _write_parent_captured_log(log_path, payload)
+        if capture_state.get("overflow"):
+            raise VerificationError(
+                "repository process output exceeded the trusted capture limit"
+            )
         return result
     finally:
         _LANE_LOCK.release()
@@ -789,27 +877,27 @@ def _pytest_zero_exit_outcome_evidence(path: Path) -> dict[str, object]:
         "", raw.decode("utf-8", errors="replace")
     ).replace("\r\n", "\n").replace("\r", "\n")
     lines = [line.rstrip() for line in text.split("\n")]
-    parsed_counts: dict[str, int] | None = None
-    for line in reversed(lines):
+    summaries: list[list[re.Match[str]]] = []
+    for line in lines:
         if _PYTEST_TERMINAL_DURATION.search(line) is None:
             continue
         matches = list(_PYTEST_TERMINAL_COUNT.finditer(line))
-        if not matches:
-            continue
-        parsed_counts = {}
-        for match in matches:
-            outcome = match.group("outcome")
-            if outcome in {"error", "errors"}:
-                outcome = "errors"
-            elif outcome in {"warning", "warnings"}:
-                outcome = "warnings"
-            parsed_counts[outcome] = (
-                parsed_counts.get(outcome, 0) + int(match.group("count"))
-            )
-        break
-    if parsed_counts is None:
+        if matches:
+            summaries.append(matches)
+    if len(summaries) != 1:
         raise VerificationError(
-            f"zero-exit Pytest file log lacks a parseable terminal summary: {path}"
+            "zero-exit Pytest file log must contain exactly one terminal summary: "
+            f"{path}; found={len(summaries)}"
+        )
+    parsed_counts: dict[str, int] = {}
+    for match in summaries[0]:
+        outcome = match.group("outcome")
+        if outcome in {"error", "errors"}:
+            outcome = "errors"
+        elif outcome in {"warning", "warnings"}:
+            outcome = "warnings"
+        parsed_counts[outcome] = (
+            parsed_counts.get(outcome, 0) + int(match.group("count"))
         )
     if parsed_counts.get("failed", 0) or parsed_counts.get("errors", 0):
         raise VerificationError(
@@ -966,6 +1054,7 @@ def run_parent_generated_pytest_lane(
     timeout_seconds: float,
     tools: ExternalTools,
     trusted_root: Path,
+    revalidate_worktrees: Callable[[], None],
 ) -> ParentGeneratedPytestResult:
     repo_root = repo_root.resolve(strict=True)
     lane_parent.mkdir(parents=True, exist_ok=True)
@@ -1021,6 +1110,7 @@ def run_parent_generated_pytest_lane(
         finally:
             _remove_private_temp_root(case_root)
         _verify_retained_test_source(source, test_file)
+        revalidate_worktrees()
         cases.append((test_file, result))
         log_paths.append(log_path)
     operational = next(

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import inspect
 import json
 import os
 import py_compile
@@ -24,6 +25,19 @@ SPEC.loader.exec_module(VERIFIER)
 REAL_GIT = Path(shutil.which("git") or "git").resolve()
 REAL_BASH = Path(shutil.which("bash") or "bash").resolve()
 TOOLS = VERIFIER.ExternalTools(Path(sys.executable).resolve(), REAL_GIT, REAL_BASH)
+
+
+def revalidation_kwargs(callback=None):
+    if (
+        "revalidate_worktrees"
+        not in inspect.signature(
+            VERIFIER.run_parent_generated_pytest_lane
+        ).parameters
+    ):
+        return {}
+    return {
+        "revalidate_worktrees": callback or (lambda: None),
+    }
 
 
 def run(*args: str, cwd: Path) -> subprocess.CompletedProcess[str]:
@@ -372,17 +386,19 @@ class VerifierIsolationTests(unittest.TestCase):
             self.assertIn("command executable not found", result.log_path.read_text())
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "Linux process containment")
-    def test_lane_cannot_replace_parent_owned_log_path(self) -> None:
+    def test_lane_cannot_precreate_parent_owned_log_path(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             log_path = root / "run.log"
             external = root / "external"
             external.write_text("external")
             code = (
-                "import os,pathlib; "
-                f"p=pathlib.Path({str(log_path)!r}); p.unlink(); p.symlink_to({str(external)!r})"
+                "import pathlib; "
+                f"pathlib.Path({str(log_path)!r}).symlink_to({str(external)!r})"
             )
-            with self.assertRaisesRegex(VERIFIER.VerificationError, "replaced or linked"):
+            with self.assertRaisesRegex(
+                VERIFIER.VerificationError, "cannot create fresh trusted file"
+            ):
                 VERIFIER.run_isolated(
                     [str(TOOLS.python), "-c", code],
                     cwd=root,
@@ -392,6 +408,128 @@ class VerifierIsolationTests(unittest.TestCase):
                     tools=TOOLS,
                 )
             self.assertEqual(external.read_text(), "external")
+            self.assertTrue(log_path.is_symlink())
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux process containment")
+    def test_child_stdout_is_nonseekable_and_parent_captured(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            code = (
+                "import os, stat\n"
+                "print(f'stdout_fifo={stat.S_ISFIFO(os.fstat(1).st_mode)}', flush=True)\n"
+                "try:\n"
+                "    os.ftruncate(1, 0)\n"
+                "except OSError as exc:\n"
+                "    print(f'truncate_errno={exc.errno}', flush=True)\n"
+                "else:\n"
+                "    print('truncate_succeeded=True', flush=True)\n"
+            )
+            result = VERIFIER.run_isolated(
+                [str(TOOLS.python), "-c", code],
+                cwd=root,
+                env={**os.environ},
+                log_path=root / "captured.log",
+                timeout_seconds=10,
+                tools=TOOLS,
+            )
+            text = result.log_path.read_text(encoding="utf-8")
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn("stdout_fifo=True", text)
+        self.assertRegex(text, r"truncate_errno=\d+")
+        self.assertNotIn("truncate_succeeded=True", text)
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux process containment")
+    def test_detached_child_cannot_rewrite_parent_captured_pytest_outcome(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            log_path = root / "captured.log"
+            code = (
+                "import os\n"
+                "print('SKIPPED [1] tests/test_skip.py:1: genuine retained skip', flush=True)\n"
+                "print('===== 1 skipped in 0.01s =====', flush=True)\n"
+                "try:\n"
+                "    os.ftruncate(1, 0)\n"
+                "except OSError:\n"
+                "    pass\n"
+                "print('PASSED tests/test_skip.py::test_real_skip', flush=True)\n"
+                "print('===== 1 passed in 0.01s =====', flush=True)\n"
+            )
+            result = VERIFIER.run_isolated(
+                [str(TOOLS.python), "-c", code],
+                cwd=root,
+                env={**os.environ},
+                log_path=log_path,
+                timeout_seconds=10,
+                tools=TOOLS,
+            )
+            self.assertEqual(result.exit_code, 0)
+            with self.assertRaisesRegex(
+                VERIFIER.VerificationError,
+                "exactly one terminal summary",
+            ):
+                VERIFIER._pytest_zero_exit_outcome_evidence(result.log_path)
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux process containment")
+    def test_parent_generated_pytest_lane_revalidates_after_each_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            repo = root / "repo"
+            tests = repo / "tests"
+            tests.mkdir(parents=True)
+            support = repo / "support.txt"
+            support.write_text("original\n", encoding="utf-8")
+            second_ran = root / "second-ran"
+            (tests / "test_00_mutate.py").write_text(
+                "from pathlib import Path\n"
+                "def test_mutate_support():\n"
+                f"    Path({str(support)!r}).write_text('changed\\n')\n",
+                encoding="utf-8",
+            )
+            (tests / "test_01_restore.py").write_text(
+                "from pathlib import Path\n"
+                "def test_restore_support():\n"
+                f"    Path({str(support)!r}).write_text('original\\n')\n"
+                f"    Path({str(second_ran)!r}).write_text('ran')\n",
+                encoding="utf-8",
+            )
+            trusted = root / "trusted"
+            for directory in (
+                trusted,
+                trusted / "logs",
+                trusted / "evidence",
+                root / "lanes",
+            ):
+                directory.mkdir(parents=True, exist_ok=True)
+            checks = []
+
+            def revalidate() -> None:
+                checks.append(support.read_text(encoding="utf-8"))
+                if checks[-1] != "original\n":
+                    raise VERIFIER.VerificationBlocked(
+                        "worktree changed between retained test files"
+                    )
+
+            with self.assertRaisesRegex(
+                VERIFIER.VerificationBlocked,
+                "worktree changed between retained test files",
+            ):
+                VERIFIER.run_parent_generated_pytest_lane(
+                    repo_root=repo,
+                    test_paths=(
+                        "tests/test_00_mutate.py",
+                        "tests/test_01_restore.py",
+                    ),
+                    lane_parent=root / "lanes",
+                    log_dir=trusted / "logs",
+                    junit_dir=trusted / "evidence",
+                    suite_name="candidate",
+                    timeout_seconds=30,
+                    tools=TOOLS,
+                    trusted_root=trusted,
+                    **revalidation_kwargs(revalidate),
+                )
+            self.assertEqual(checks, ["changed\n"])
+            self.assertFalse(second_ran.exists())
 
     @unittest.skipIf(os.name != "posix", "symlink output contract")
     def test_symlinked_scratch_is_rejected_without_deleting_external_sentinel(self) -> None:
@@ -618,6 +756,7 @@ class VerifierIsolationTests(unittest.TestCase):
                 timeout_seconds=30,
                 tools=TOOLS,
                 trusted_root=trusted,
+                **revalidation_kwargs(),
             )
             self.assertEqual(result.exit_code, 1)
             self.assertFalse(sentinel.exists())
@@ -735,6 +874,7 @@ class VerifierIsolationTests(unittest.TestCase):
                 timeout_seconds=30,
                 tools=TOOLS,
                 trusted_root=trusted,
+                **revalidation_kwargs(),
             )
             candidate_result = VERIFIER.run_parent_generated_pytest_lane(
                 repo_root=candidate_repo,
@@ -746,6 +886,7 @@ class VerifierIsolationTests(unittest.TestCase):
                 timeout_seconds=30,
                 tools=TOOLS,
                 trusted_root=trusted,
+                **revalidation_kwargs(),
             )
 
             def read_outcomes(path: Path) -> dict[str, object]:
@@ -840,6 +981,7 @@ class VerifierIsolationTests(unittest.TestCase):
                 timeout_seconds=30,
                 tools=TOOLS,
                 trusted_root=trusted,
+                **revalidation_kwargs(),
             )
             candidate_result = VERIFIER.run_parent_generated_pytest_lane(
                 repo_root=candidate_repo,
@@ -851,6 +993,7 @@ class VerifierIsolationTests(unittest.TestCase):
                 timeout_seconds=30,
                 tools=TOOLS,
                 trusted_root=trusted,
+                **revalidation_kwargs(),
             )
 
             self.assertEqual(baseline_result.exit_code, 0)

@@ -229,6 +229,18 @@ def _run_verification(
     candidate_lane_root = lane_root_base / "pytest-candidate-files"
     baseline_lane_root.mkdir(mode=0o700)
     candidate_lane_root.mkdir(mode=0o700)
+
+    def revalidate_pytest_worktrees() -> None:
+        _assert_both_worktrees_clean(
+            baseline_root=baseline_root,
+            baseline_ref=baseline_ref,
+            baseline_tree=baseline_tree,
+            candidate_root=candidate_root,
+            candidate_ref=reviewed_ref,
+            tools=tools,
+            env=trusted_env,
+        )
+
     baseline_result = run_parent_generated_pytest_lane(
         repo_root=baseline_root,
         test_paths=retained_test_files,
@@ -239,6 +251,7 @@ def _run_verification(
         timeout_seconds=args.timeout_seconds,
         tools=tools,
         trusted_root=trusted_root,
+        revalidate_worktrees=revalidate_pytest_worktrees,
     )
     if baseline_result.timed_out:
         raise VerificationError("baseline Pytest file lane timed out")
@@ -254,6 +267,7 @@ def _run_verification(
         timeout_seconds=args.timeout_seconds,
         tools=tools,
         trusted_root=trusted_root,
+        revalidate_worktrees=revalidate_pytest_worktrees,
     )
     if candidate_result.timed_out:
         raise VerificationError("candidate Pytest file lane timed out")

@@ -164,6 +164,24 @@ class ReviewRegressionTests(unittest.TestCase):
         self.assertNotIn("mutable_paths=(baseline_xml,)", source)
         self.assertNotIn("mutable_paths=(candidate_xml,)", source)
 
+    def test_retained_pytest_files_use_parent_capture_and_per_file_revalidation(self) -> None:
+        evidence = (
+            ROOT / "scripts" / "baseline" / "stage0_evidence.py"
+        ).read_text(encoding="utf-8")
+        orchestrator = (
+            ROOT / "scripts" / "baseline" / "stage0_orchestrator.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("stdout=subprocess.PIPE", evidence)
+        self.assertIn("_write_parent_captured_log", evidence)
+        self.assertIn("revalidate_worktrees()", evidence)
+        self.assertIn("def revalidate_pytest_worktrees()", orchestrator)
+        self.assertEqual(
+            orchestrator.count(
+                "revalidate_worktrees=revalidate_pytest_worktrees"
+            ),
+            2,
+        )
+
     def test_comparators_distinguish_invalid_evidence_from_semantic_drift(self) -> None:
         command = (ROOT / "scripts" / "baseline" / "compare_command_baseline.py").read_text()
         pytest_source = (ROOT / "scripts" / "baseline" / "compare_pytest_baseline.py").read_text()
