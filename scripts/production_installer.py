@@ -248,6 +248,9 @@ ADDITIONAL_STOCK_SKILL_ACCEPTED_PRIOR_TREE_SHA256 = {
     "graphics-engineer": frozenset(
         {"e4b1294c4f2de8e31f0083500c7a7335a2abece08f801bb4e60e715eed3e081d"}
     ),
+    "github-pr-review-bot": frozenset(
+        {"d1a5bff367e42891951371faa2d66274cb34f0eb7b9c86c214376e75833f6841"}
+    ),
     "init-project": frozenset(
         {"c079a182db6139257be2b7b138c6a4b28aa730747c1988d54132f8b07504dd1c"}
     ),

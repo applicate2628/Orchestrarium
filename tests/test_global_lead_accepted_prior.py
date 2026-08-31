@@ -318,6 +318,10 @@ ADDITIONAL_STOCK_SKILL_PRIORS = {
         "65efb6b679d2808c5cdd3f95774a82942c65ad35",
         "e4b1294c4f2de8e31f0083500c7a7335a2abece08f801bb4e60e715eed3e081d",
     ),
+    "github-pr-review-bot": (
+        "2dbf91b3e96e9dbf2bf785d16bf6964faf766d46",
+        "d1a5bff367e42891951371faa2d66274cb34f0eb7b9c86c214376e75833f6841",
+    ),
     "init-project": (
         "9831fe66b157020f90f888ec8c878887135aa776",
         "c079a182db6139257be2b7b138c6a4b28aa730747c1988d54132f8b07504dd1c",
@@ -1541,6 +1545,59 @@ def test_additional_stock_skill_fixture_survives_missing_git_history(
     )
     installer = _load_installer()
     assert installer._tree_sha256(historical) == expected_prior
+
+
+def test_github_pr_review_bot_prior_is_skill_scoped(tmp_path: Path) -> None:
+    installer = _load_installer()
+    revision, expected_prior = ADDITIONAL_STOCK_SKILL_PRIORS["github-pr-review-bot"]
+    historical = _extract_additional_stock_skill(
+        "github-pr-review-bot", revision, tmp_path / "historical"
+    )
+    assert installer._tree_sha256(historical) == expected_prior
+    skills_root = tmp_path / "target" / ".agents" / "skills"
+    skills_root.mkdir(parents=True)
+    shutil.copytree(historical, skills_root / "consultant")
+
+    with pytest.raises(ValueError, match="E_ACCEPTED_PRIOR_COLLISION: consultant"):
+        installer._preflight_canonical_skills(
+            ROOT / "src.codex" / "skills", skills_root, root=ROOT
+        )
+
+
+def test_github_pr_review_bot_prior_transaction_abort_restores_prior(
+    tmp_path: Path,
+) -> None:
+    installer = _load_installer()
+    revision, expected_prior = ADDITIONAL_STOCK_SKILL_PRIORS["github-pr-review-bot"]
+    historical = _extract_additional_stock_skill(
+        "github-pr-review-bot", revision, tmp_path / "historical"
+    )
+    assert installer._tree_sha256(historical) == expected_prior
+    target = tmp_path / "target"
+    skills_root = target / ".agents" / "skills"
+    skills_root.mkdir(parents=True)
+    installed = skills_root / "github-pr-review-bot"
+    shutil.copytree(historical, installed)
+    prior_bytes = _tree_bytes(installed)
+    plan = installer._preflight_canonical_skills(
+        ROOT / "src.codex" / "skills", skills_root, root=ROOT
+    )
+    try:
+        with pytest.raises(RuntimeError, match="forced review skill rollback"):
+            transaction = installer._InstallTransaction([installed], enabled=True)
+            with transaction:
+                owner = installer._CreateOnlyMutablePath(
+                    target, transaction, dry_run=False
+                )
+                installer._apply_canonical_skills_plan(
+                    plan, skills_root, owner, root=ROOT
+                )
+                raise RuntimeError("forced review skill rollback")
+    finally:
+        installer._discard_canonical_skills_plan(plan)
+
+    assert _tree_bytes(installed) == prior_bytes
+    assert {path.name for path in skills_root.iterdir()} == {"github-pr-review-bot"}
 
 
 def test_exact_947_manual_transfer_is_accepted_and_drift_refused(

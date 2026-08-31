@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "baseline": "2dbf91b3e96e9dbf2bf785d16bf6964faf766d46",
+  "files": {
+    "github-pr-review-bot/SKILL.md": "fd4396ae28043a9b393bf817cafb131485e1a4ddf2678eca4a648850687505e5",
+    "github-pr-review-bot/agents/openai.yaml": "f3ac0408e1f12c1aa95393ef359bf4169463cc5f1c042ce461af176d0a5424bd"
+  }
+}
