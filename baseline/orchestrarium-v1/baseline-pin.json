@@ -84,7 +84,7 @@
     },
     "stage0Verifier": {
       "deterministic": true,
-      "gitBlobSha": "77b5a71b8783e7fad6997e626b8b0985f4d0c3e6",
+      "gitBlobSha": "7b18e75d1237e1399d59b683f56ed3844ae7ee7c",
       "materialization": "git-cat-file-reviewed-tree-blob",
       "path": "baseline/orchestrarium-v1/tooling/verify_stage0.py",
       "runtimeMutation": false,
