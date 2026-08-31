@@ -347,6 +347,12 @@ ADDITIONAL_STOCK_SKILL_PRIORS = {
         "56218f313e0ee24fc973eae8792bac0cddfd17ccab390fffb028d787cd0286f0",
     ),
 }
+SUPPLEMENTAL_STOCK_SKILL_PRIORS = {
+    (
+        "manual-repo-transfer",
+        "2dbf91b3e96e9dbf2bf785d16bf6964faf766d46",
+    ): "e0d160e3f216d79fe2aa221b6ed8d4d4b63dd06882d4ea69feb46cdccab1afcc",
+}
 
 
 # These entries are pinned historical source blobs, not a version-range
@@ -602,6 +608,11 @@ def _extract_additional_stock_skill(
             )
             if skill_revision == revision
         }
+        expected_names.update(
+            skill_name
+            for (skill_name, skill_revision) in SUPPLEMENTAL_STOCK_SKILL_PRIORS
+            if skill_revision == revision
+        )
         assert fixture_names == expected_names
         target = destination / name
         selected = {
@@ -1620,7 +1631,12 @@ def test_exact_947_manual_transfer_is_accepted_and_drift_refused(
 
 def test_exact_2db_manual_transfer_is_accepted_and_drift_refused(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    def reject_git_history(*_args, **_kwargs):
+        raise AssertionError("historical Git objects are unavailable")
+
+    monkeypatch.setattr(subprocess, "run", reject_git_history)
     installer = _load_installer()
     historical = _extract_additional_stock_skill(
         "manual-repo-transfer",
@@ -1631,7 +1647,12 @@ def test_exact_2db_manual_transfer_is_accepted_and_drift_refused(
         installer,
         tmp_path,
         "manual-repo-transfer",
-        "e0d160e3f216d79fe2aa221b6ed8d4d4b63dd06882d4ea69feb46cdccab1afcc",
+        SUPPLEMENTAL_STOCK_SKILL_PRIORS[
+            (
+                "manual-repo-transfer",
+                "2dbf91b3e96e9dbf2bf785d16bf6964faf766d46",
+            )
+        ],
         historical,
     )
 

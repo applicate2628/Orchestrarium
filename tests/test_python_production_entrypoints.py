@@ -221,14 +221,19 @@ def test_posix_launcher_forwards_stdin_argv_and_exit_code(entrypoint: str) -> No
     shell = ROOT / entrypoint
     with tempfile.TemporaryDirectory() as td:
         temp = Path(td)
-        fake_python = temp / "python3"
         argv_path = temp / "argv.txt"
         stdin_path = temp / "stdin.txt"
-        fake_python.write_text(
-            "#!/usr/bin/env bash\nprintf '%s\\n' \"$@\" > \"$LAUNCHER_ARGV\"\ncat > \"$LAUNCHER_STDIN\"\nexit 23\n",
-            encoding="utf-8",
-        )
-        fake_python.chmod(0o755)
+        for executable in ("python", "python3"):
+            fake_python = temp / executable
+            fake_python.write_text(
+                "#!/usr/bin/env bash\n"
+                'if [ "$#" -eq 2 ] && [ "$1" = "-c" ]; then exit 0; fi\n'
+                "printf '%s\\n' \"$@\" > \"$LAUNCHER_ARGV\"\n"
+                "cat > \"$LAUNCHER_STDIN\"\n"
+                "exit 23\n",
+                encoding="utf-8",
+            )
+            fake_python.chmod(0o755)
         env = os.environ.copy()
         env["PATH"] = str(temp) + os.pathsep + env.get("PATH", "")
         env["LAUNCHER_ARGV"] = str(argv_path)

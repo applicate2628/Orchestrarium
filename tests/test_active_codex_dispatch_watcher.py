@@ -258,6 +258,7 @@ def test_recycled_pid_with_mismatched_start_marker_is_dead(tmp_path: Path) -> No
         process.wait(timeout=5)
 
 
+@pytest.mark.skipif(os.name != "nt", reason="production ProcessRunner execution is Windows-only")
 @pytest.mark.parametrize(
     ("provider", "entrypoint", "bin_env", "output_env"),
     (
