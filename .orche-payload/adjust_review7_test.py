@@ -42,7 +42,7 @@ replacement = r'''    @unittest.skipUnless(sys.platform.startswith("linux"), "Li
             self.assertEqual(result.exit_code, 0)
             with self.assertRaisesRegex(
                 VERIFIER.VerificationError,
-                "exactly one parseable terminal summary",
+                "exactly one terminal summary",
             ):
                 VERIFIER._pytest_zero_exit_outcome_evidence(result.log_path)
 
