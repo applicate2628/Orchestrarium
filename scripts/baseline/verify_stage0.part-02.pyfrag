@@ -1,0 +1,181 @@
+    parser.add_argument("--orche-child", action="store_true", required=True)
+    parser.add_argument("--repo-root", type=Path, required=True)
+    parser.add_argument("--event-fd", type=int, required=True)
+    parser.add_argument("--ack-fd", type=int, required=True)
+    parser.add_argument("tests", nargs="+")
+    args = parser.parse_args(argv)
+    repo_root = args.repo_root.resolve(strict=True)
+    # All trusted imports happen before exposing repository modules on sys.path.
+    import pytest
+
+    sys.path.insert(0, os.fspath(repo_root))
+    os.chdir(repo_root)
+    plugin = _ChildPlugin(args.event_fd, args.ack_fd, pytest.UsageError)
+    return int(
+        pytest.main(
+            [
+                "--noconftest",
+                "-c",
+                os.devnull,
+                "-p",
+                "no:cacheprovider",
+                "-r",
+                "A",
+                "--tb=long",
+                "--rootdir",
+                os.fspath(repo_root),
+                *args.tests,
+            ],
+            plugins=[plugin],
+        )
+    )
+
+
+def _validate_private_temp_parent(parent: Path) -> Path:
+    try:
+        before = parent.lstat()
+    except OSError as exc:
+        raise runtime.VerificationError(
+            f"cannot inspect private temporary parent {parent}: {exc}"
+        ) from exc
+    if stat.S_ISLNK(before.st_mode) or not stat.S_ISDIR(before.st_mode):
+        raise runtime.VerificationError(
+            f"private temporary parent must be a real directory: {parent}"
+        )
+    if before.st_uid not in _TEMP_PARENT_ALLOWED_OWNERS:
+        raise runtime.VerificationError(
+            "private temporary parent has an untrusted owner: "
+            f"{parent}; uid={before.st_uid}, expected root or effective uid {os.geteuid()}"
+        )
+    if not os.access(parent, os.W_OK | os.X_OK):
+        raise runtime.VerificationError(
+            f"private temporary parent is not writable and searchable: {parent}"
+        )
+    if before.st_mode & (stat.S_IWGRP | stat.S_IWOTH) and not before.st_mode & stat.S_ISVTX:
+        raise runtime.VerificationError(
+            "shared writable private temporary parent requires sticky-bit protection: "
+            f"{parent}; mode={oct(stat.S_IMODE(before.st_mode))}"
+        )
+    resolved = parent.resolve(strict=True)
+    after = resolved.lstat()
+    if (before.st_dev, before.st_ino, before.st_mode, before.st_uid) != (
+        after.st_dev, after.st_ino, after.st_mode, after.st_uid
+    ):
+        raise runtime.VerificationError("private temporary parent changed during validation")
+    return resolved
+
+
+def _secure_private_temp_parent() -> Path:
+    return _validate_private_temp_parent(Path("/tmp"))
+
+
+def _drain_stdout(stream, captured: bytearray, state: dict[str, object]) -> None:
+    try:
+        while True:
+            chunk = stream.read(evidence._PROCESS_OUTPUT_READ_BYTES)
+            if not chunk:
+                return
+            remaining = max(0, evidence._PROCESS_OUTPUT_LIMIT_BYTES - len(captured))
+            if remaining:
+                captured.extend(chunk[:remaining])
+            if len(chunk) > remaining:
+                state["overflow"] = True
+    except BaseException as exc:
+        state["error"] = exc
+    finally:
+        try:
+            stream.close()
+        except BaseException as exc:
+            state.setdefault("error", exc)
+
+
+def _read_events(
+    descriptor: int,
+    ack_fd: int,
+    protocol: _ProtocolState,
+    revalidate: Callable[[], None],
+) -> None:
+    try:
+        with os.fdopen(descriptor, "rb", buffering=0) as raw:
+            buffer = bytearray()
+            while True:
+                chunk = raw.read(_EVENT_READ_SIZE)
+                if not chunk:
+                    if buffer:
+                        raise runtime.VerificationError(
+                            "trusted Pytest event stream ended with a partial record"
+                        )
+                    return
+                buffer.extend(chunk)
+                if len(buffer) > _MAX_EVENT_LINE and b"\n" not in buffer:
+                    raise runtime.VerificationError(
+                        "trusted Pytest event record exceeded line limit"
+                    )
+                while True:
+                    newline = buffer.find(b"\n")
+                    if newline < 0:
+                        break
+                    line = bytes(buffer[:newline])
+                    del buffer[: newline + 1]
+                    if not line:
+                        raise runtime.VerificationError("empty trusted Pytest event record")
+                    protocol.consume(line, revalidate, ack_fd)
+    except BaseException as exc:
+        protocol.error = exc
+        try:
+            os.close(ack_fd)
+        except OSError:
+            pass
+
+
+def _node_file(nodeid: str) -> str:
+    return nodeid.split("::", 1)[0].replace("\\", "/")
+
+
+def _final_node_outcome(protocol: _ProtocolState, nodeid: str) -> tuple[str, str | None]:
+    reports = {
+        when: protocol.reports[(nodeid, when)]
+        for when in ("setup", "call", "teardown")
+        if (nodeid, when) in protocol.reports
+    }
+    teardown = reports.get("teardown")
+    if teardown is not None and teardown.outcome == "failed":
+        return "error", teardown.longrepr
+    setup = reports.get("setup")
+    if setup is not None and setup.outcome == "failed":
+        return "error", setup.longrepr
+    call = reports.get("call")
+    selected = call or setup
+    if selected is None:
+        raise runtime.VerificationError(f"Pytest node has no decisive report: {nodeid!r}")
+    if selected.wasxfail is not None:
+        if selected.outcome == "skipped":
+            return "xfailed", selected.wasxfail or selected.longrepr
+        if selected.outcome == "passed":
+            return "xpassed", selected.wasxfail
+    if selected.outcome == "passed":
+        return "passed", None
+    if selected.outcome == "skipped":
+        return "skipped", selected.longrepr
+    return "failure", selected.longrepr
+
+
+def _xml_safe(value: str) -> str:
+    return "".join(
+        ch
+        if ch in {"\t", "\n", "\r"}
+        or " " <= ch <= "\ud7ff"
+        or "\ue000" <= ch <= "\ufffd"
+        else "\ufffd"
+        for ch in value
+    )
+
+
+def _write_junit(
+    *,
+    junit_dir: Path,
+    suite_name: str,
+    retained: Sequence[evidence.RetainedTestFile],
+    protocol: _ProtocolState,
+) -> tuple[Path, int]:
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", suite_name):

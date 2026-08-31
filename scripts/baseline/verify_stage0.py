@@ -1,176 +1,49 @@
 #!/usr/bin/env python3
-"""Load the reviewed modular Stage 0 verifier without ambient import paths."""
+"""Assemble and execute the reviewed Stage 0 verifier fragments."""
 from __future__ import annotations
 
-import importlib.util
+import hashlib
 import os
 import stat
-import sys
 from pathlib import Path
 
-
-def _load(name: str, filename: str):
-    path = Path(__file__).resolve().with_name(filename)
-    spec = importlib.util.spec_from_file_location(name, path)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"cannot load Stage 0 module: {path}")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-_runtime = _load("stage0_runtime", "stage0_runtime.py")
+_FRAGMENT_RECORDS = (
+    ("verify_stage0.part-00.pyfrag", "37abb235cb268185d5e3f18546cd075ca29f15e4b02e3f0fc4c53144038b6d9c", "49258b10e4bf843213557d7420f5154b29ee91d4"),
+    ("verify_stage0.part-01.pyfrag", "94968cdf02e3e42b7ce517fb5f9214e24800f1bd7474489d325e3777e4502801", "24a8cb22480d03c03a7b177ea3fcba553dcd380b"),
+    ("verify_stage0.part-02.pyfrag", "47d3c7bb72f7c94a7371791ec96aa8cbd75c66e35f3bdc5111bb06fc7950313a", "5edff4c8596929df9d70dc804cfb025dda6e22ec"),
+    ("verify_stage0.part-03.pyfrag", "f64cb0117839c837890b03c624c4253eace6cf40d64256d2c551b5dccce7eb22", "f6839cc46a4109d128e141f143e6ae54beed1727"),
+    ("verify_stage0.part-04.pyfrag", "cdce90bbe5ba049885268b1cfc69531a33237965c7df5cc5e5f4b00b2994c74b", "36545db5ccce1a07cf14947e5c6b6ab098144d24"),
+    ("verify_stage0.part-05.pyfrag", "022caee2756f334a3b98d711b5deca242bc120cba9bf6bf1bb86451dd8375a76", "bb60ef66bb8a875ed25836f7cd59c2d0209a0389"),
+    ("verify_stage0.part-06.pyfrag", "7bb25980e66e39ff4742a95d56a705f67b8ef008a462ef94f0635a64571e68a1", "89b295146e22619cad1b449baa07d1cfb890660d"),
+)
 
 
-def _validate_shared_temporary_parent(path: Path, metadata) -> None:
-    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
-        raise _runtime.VerificationError(
-            f"private temporary parent must be a real directory: {path}"
-        )
-    if metadata.st_uid != 0:
-        raise _runtime.VerificationError(
-            f"shared temporary parent must be owned by root: {path}"
-        )
-    if not metadata.st_mode & stat.S_ISVTX:
-        raise _runtime.VerificationError(
-            f"shared temporary parent must have the sticky bit set: {path}"
-        )
-
-
-def _safe_private_temp_parent() -> Path:
-    parent = Path("/tmp")
-    flags = (
-        os.O_RDONLY
-        | getattr(os, "O_DIRECTORY", 0)
-        | getattr(os, "O_CLOEXEC", 0)
-        | getattr(os, "O_NOFOLLOW", 0)
-    )
+def _read_fragment(root: Path, name: str, expected_sha256: str) -> bytes:
+    path = root / name
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags)
     try:
-        lexical = parent.lstat()
-        descriptor = os.open(parent, flags)
-    except OSError as exc:
-        raise _runtime.VerificationError(
-            f"cannot securely open private temporary parent {parent}: {exc}"
-        ) from exc
-    try:
-        opened = os.fstat(descriptor)
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+            raise RuntimeError(f"Stage 0 verifier fragment is not a private regular file: {path}")
+        blocks = []
+        digest = hashlib.sha256()
+        while True:
+            block = os.read(descriptor, 1024 * 1024)
+            if not block:
+                break
+            digest.update(block)
+            blocks.append(block)
     finally:
         os.close(descriptor)
-    _validate_shared_temporary_parent(parent, lexical)
-    _validate_shared_temporary_parent(parent, opened)
-    lexical_identity = (
-        lexical.st_dev,
-        lexical.st_ino,
-        lexical.st_mode,
-        lexical.st_uid,
-        lexical.st_gid,
-    )
-    opened_identity = (
-        opened.st_dev,
-        opened.st_ino,
-        opened.st_mode,
-        opened.st_uid,
-        opened.st_gid,
-    )
-    if lexical_identity != opened_identity:
-        raise _runtime.VerificationError(
-            f"private temporary parent changed while being opened: {parent}"
-        )
-    resolved = parent.resolve(strict=True)
-    try:
-        resolved_metadata = resolved.lstat()
-    except OSError as exc:
-        raise _runtime.VerificationError(
-            f"cannot revalidate private temporary parent {resolved}: {exc}"
-        ) from exc
-    resolved_identity = (
-        resolved_metadata.st_dev,
-        resolved_metadata.st_ino,
-        resolved_metadata.st_mode,
-        resolved_metadata.st_uid,
-        resolved_metadata.st_gid,
-    )
-    if resolved_identity != opened_identity:
-        raise _runtime.VerificationError(
-            f"private temporary parent identity changed during resolution: {parent}"
-        )
-    return resolved
+    if digest.hexdigest() != expected_sha256:
+        raise RuntimeError(f"Stage 0 verifier fragment digest mismatch: {path}")
+    return b"".join(blocks)
 
 
-def _install_full_suite_gates() -> None:
-    existing_names = {item.name for item in _runtime.VALIDATORS}
-    required_names = {"pytest-full-suite", "unittest-full-suite"}
-    overlap = sorted(existing_names & required_names)
-    if overlap:
-        raise _runtime.VerificationError(
-            f"duplicate Stage 0 full-suite validator names: {overlap}"
-        )
-    full_suite = (
-        _runtime.ValidatorSpec(
-            "pytest-full-suite",
-            "python",
-            (
-                "-B",
-                "-m",
-                "pytest",
-                "-q",
-                "--tb=no",
-                "--disable-warnings",
-                "tests/",
-            ),
-            (
-                r"(?m)^(?!.*(?:failed|error|errors)).*\b"
-                r"(?:passed|skipped|xfailed|xpassed|deselected)\b.* in <VOLATILE>$"
-            ),
-            r"(?m)^.*\b(?:failed|error|errors)\b.* in <VOLATILE>$",
-            (
-                r"(?m)^(?:[.sfxXEF]+[ ]+\[[ 0-9]+%\]\n?)+",
-                r"\b\d+ (?=(?:passed|failed|errors?|skipped|xfailed|xpassed|deselected|warnings?)\b)",
-                r"\b\d+(?:\.\d+)?s\b",
-            ),
-        ),
-        _runtime.ValidatorSpec(
-            "unittest-full-suite",
-            "python",
-            (
-                "-B",
-                "-m",
-                "unittest",
-                "discover",
-                "-q",
-                "-s",
-                "tests",
-                "-p",
-                "test_*.py",
-            ),
-            (
-                r"(?ms)^Ran <VOLATILE> tests? in <VOLATILE>\n\n"
-                r"OK(?: \((?:skipped|expected failures)=<VOLATILE>"
-                r"(?:, (?:skipped|expected failures)=<VOLATILE>)*\))?$"
-            ),
-            r"(?m)^FAILED \(.*\)$",
-            (
-                r"(?m)(?<=^Ran )[1-9]\d*(?= tests? in )",
-                r"(?<==)[1-9]\d*",
-                r"\b\d+(?:\.\d+)?s\b",
-            ),
-        ),
-    )
-    _runtime.VALIDATORS = (*full_suite, *_runtime.VALIDATORS)
-
-
-_install_full_suite_gates()
-_evidence = _load("stage0_evidence", "stage0_evidence.py")
-_evidence._private_temp_parent = _safe_private_temp_parent
-_orchestrator = _load("stage0_orchestrator", "stage0_orchestrator.py")
-for _module in (_runtime, _evidence, _orchestrator):
-    for _name, _value in vars(_module).items():
-        if not _name.startswith("__"):
-            globals()[_name] = _value
-
-# Keep the hardened owner authoritative after re-exporting the legacy module.
-_private_temp_parent = _safe_private_temp_parent
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+_root = Path(__file__).resolve().parent
+_source = b"".join(
+    _read_fragment(_root, name, sha256)
+    for name, sha256, _git_blob in _FRAGMENT_RECORDS
+)
+exec(compile(_source, f"{__file__}::<reviewed-fragments>", "exec"), globals())

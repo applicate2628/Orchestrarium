@@ -1,0 +1,168 @@
+            if not any(key[0] == nodeid for key in self.reports):
+                raise runtime.VerificationError(f"checkpoint lacks reports for {nodeid!r}")
+            revalidate()
+            self.checkpoints.append(nodeid)
+            try:
+                os.write(ack_fd, _ACK)
+            except OSError as exc:
+                raise runtime.VerificationError(
+                    f"cannot acknowledge trusted Pytest checkpoint: {exc}"
+                ) from exc
+            return
+        if kind == "finish":
+            if self.finish_seen:
+                raise runtime.VerificationError("duplicate trusted Pytest finish")
+            exitstatus = event.get("exitstatus")
+            if type(exitstatus) is not int:
+                raise runtime.VerificationError("invalid trusted Pytest finish exit status")
+            if tuple(self.checkpoints) != self.collected:
+                raise runtime.VerificationError(
+                    "trusted Pytest finish arrived before every collected item checkpoint"
+                )
+            self.session_exitstatus = exitstatus
+            self.finish_seen = True
+            return
+        raise runtime.VerificationError(f"unknown trusted Pytest event kind: {kind!r}")
+
+    def validate_complete(self) -> None:
+        if not self.hello_seen or not self.collection_seen or not self.finish_seen:
+            raise runtime.VerificationError(
+                "trusted Pytest event stream is incomplete: "
+                f"hello={self.hello_seen}, collection={self.collection_seen}, finish={self.finish_seen}"
+            )
+        if tuple(self.checkpoints) != self.collected:
+            raise runtime.VerificationError("trusted Pytest checkpoints are incomplete")
+        for nodeid in self.collected:
+            phases = {when for (item, when) in self.reports if item == nodeid}
+            if "setup" not in phases or "teardown" not in phases:
+                raise runtime.VerificationError(
+                    f"trusted Pytest node lacks setup or teardown report: {nodeid!r}"
+                )
+
+
+def _write_all(fd: int, payload: bytes) -> None:
+    view = memoryview(payload)
+    while view:
+        written = os.write(fd, view)
+        if written <= 0:
+            raise OSError("short write to trusted Pytest event pipe")
+        view = view[written:]
+
+
+class _ChildPlugin:
+    def __init__(self, event_fd: int, ack_fd: int, usage_error) -> None:
+        self.event_fd = event_fd
+        self.ack_fd = ack_fd
+        self.sequence = 0
+        self.deselected: list[str] = []
+        self._locked = False
+        self._usage_error = usage_error
+
+    def _send(self, kind: str, **fields: object) -> None:
+        event = {"protocol": _PROTOCOL, "sequence": self.sequence, "kind": kind, **fields}
+        self.sequence += 1
+        payload = json.dumps(
+            event, ensure_ascii=True, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8") + b"\n"
+        if len(payload) > _MAX_EVENT_LINE:
+            raise RuntimeError("trusted Pytest event exceeded line limit")
+        _write_all(self.event_fd, payload)
+
+    def pytest_configure(self, config) -> None:
+        self._send("hello")
+
+    def pytest_collection(self, session):
+        # Imported test and production modules must not be able to become Pytest plugins.
+        if not self._locked:
+            manager = session.config.pluginmanager
+
+            def reject_register(plugin, name=None):
+                raise self._usage_error(
+                    f"repository code attempted late Pytest plugin registration: {name!r}"
+                )
+
+            def reject_module(module):
+                specs = getattr(module, "pytest_plugins", ())
+                if specs:
+                    raise self._usage_error(
+                        f"repository test module declares forbidden pytest_plugins: {specs!r}"
+                    )
+
+            manager.register = reject_register
+            manager.consider_module = reject_module
+            self._locked = True
+
+    def pytest_deselected(self, items) -> None:
+        self.deselected.extend(item.nodeid for item in items)
+
+    def pytest_collection_finish(self, session) -> None:
+        self._send(
+            "collection",
+            collected=[item.nodeid for item in session.items],
+            deselected=self.deselected,
+        )
+
+    def pytest_runtest_logreport(self, report) -> None:
+        wasxfail = getattr(report, "wasxfail", None)
+        longrepr = None
+        if report.failed or report.skipped:
+            try:
+                longrepr = report.longreprtext
+            except BaseException:
+                longrepr = str(report.longrepr)
+            encoded = longrepr.encode("utf-8", errors="replace")
+            if len(encoded) > _MAX_DIAGNOSTIC:
+                digest = __import__("hashlib").sha256(encoded).hexdigest()
+                encoded = encoded[-_MAX_DIAGNOSTIC:]
+                longrepr = (
+                    f"[diagnostic truncated to final {_MAX_DIAGNOSTIC} bytes; sha256={digest}]\n"
+                    + encoded.decode("utf-8", errors="replace")
+                )
+        self._send(
+            "report",
+            nodeid=report.nodeid,
+            when=report.when,
+            outcome=report.outcome,
+            wasxfail=None if wasxfail is None else str(wasxfail),
+            longrepr=longrepr,
+        )
+
+    def pytest_runtest_protocol(self, item, nextitem):
+        yield
+        self._send("checkpoint", nodeid=item.nodeid)
+        if os.read(self.ack_fd, 1) != _ACK:
+            raise RuntimeError("trusted parent did not acknowledge Pytest checkpoint")
+
+    def pytest_sessionfinish(self, session, exitstatus) -> None:
+        self._send("finish", exitstatus=int(exitstatus))
+
+
+# Attach hook metadata without importing Pytest in the trusted parent process.
+_ChildPlugin.pytest_runtest_protocol.pytest_impl = {
+    "wrapper": True,
+    "hookwrapper": False,
+    "optionalhook": False,
+    "tryfirst": True,
+    "trylast": False,
+    "specname": None,
+}
+_ChildPlugin.pytest_collection.pytest_impl = {
+    "wrapper": False,
+    "hookwrapper": False,
+    "optionalhook": False,
+    "tryfirst": True,
+    "trylast": False,
+    "specname": None,
+}
+_ChildPlugin.pytest_sessionfinish.pytest_impl = {
+    "wrapper": False,
+    "hookwrapper": False,
+    "optionalhook": False,
+    "tryfirst": True,
+    "trylast": False,
+    "specname": None,
+}
+
+
+def _child_main(argv: Sequence[str]) -> int:
+    parser = argparse.ArgumentParser(add_help=False)

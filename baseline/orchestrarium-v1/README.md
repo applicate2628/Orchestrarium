@@ -37,8 +37,8 @@ The reviewed `baseline-pin.json` identifies nine frozen tools and verifier modul
 
 The verifier performs the operational work rather than duplicating security-sensitive logic in shell documentation. It:
 
-- resolves exact external Python, Git, and Bash executables outside both tested worktrees;
-- records each selected executable's canonical path, device, inode, ownership, mode, timestamps, size, and Secure Hash Algorithm 256-bit digest, then revalidates that identity immediately before every launch and again after every untrusted repository lane;
+- resolves exact external Python, Git, Bash, and `env` executables outside both tested worktrees;
+- records each selected verifier executable's canonical path, device, inode, ownership, mode, timestamps, size, and Secure Hash Algorithm 256-bit digest, then revalidates that identity immediately before every launch and again after every untrusted repository lane;
 - removes ambient Python, Git, virtual-environment, and provider-home state;
 - disables Git replacement objects through both `GIT_NO_REPLACE_OBJECTS=1` and `git --no-replace-objects` before resolving any reviewed identity or object bytes;
 - binds every trusted Git operation to the physically resolved `.git` directory and exact worktree using explicit `--git-dir` and `--work-tree` arguments;
@@ -50,19 +50,20 @@ The verifier performs the operational work rather than duplicating security-sens
 - preserves `PYTHONSAFEPATH=1` while explicitly exposing only the already verified lane worktree as `PYTHONPATH` to repository tests and validators;
 - inventories both the pinned baseline and exact reviewed candidate commit; arbitrary Git path bytes use reversible ASCII `git-path-percent-v1` encoding so generated JSON never contains surrogate code points;
 - treats path, content digest, Git mode, and Git object type as capability identity, so executable-bit and symbolic-link changes cannot disappear behind unchanged file bytes;
-- requires an exact reviewed disposition for every added, modified, or removed tracked path;
-- verifies baseline test/support source digests before and after execution, runs each retained baseline test file with candidate `conftest.py` discovery disabled and without any `--junitxml` argument, routes child output through a non-seekable pipe into a bounded parent-owned capture, creates the parent-owned log only after every descendant is gone, and revalidates both worktrees after every retained-file process; the resulting file-level Pytest fingerprints are supplemental blockers and can never authorize acceptance by themselves;
-- additionally runs the whole `tests/` tree in one Pytest process, preserving session fixtures, import caches, module globals, and other full-suite semantics that per-file subprocesses reset;
-- independently runs the repository's `unittest` suite outside the Pytest process, so a candidate-controlled `pytest_sessionfinish` hook that rewrites Pytest exit status or terminal statistics cannot by itself produce accepted evidence;
+- requires a schema-version-2 reviewed disposition for every added, modified, or removed tracked path; each entry records the exact baseline and candidate Git object, mode, and object type, while a final manifest-only envelope binds the review to the exact candidate code commit and tree;
+- executes all retained baseline test files in one Pytest session with repository `conftest.py`, external plugins, configuration discovery, and late plugin registration disabled; a trusted plugin loaded before repository imports emits monotonic collection and setup/call/teardown events over a dedicated pipe, and the parent revalidates both worktrees before acknowledging every completed test item;
+- synthesizes the accepted JUnit Extensible Markup Language report from those trusted per-item events rather than from candidate-controlled terminal statistics or `pytest_sessionfinish` exit rewriting, preserving passed, skipped, expected-failure, unexpected-pass, deselected, failure, and error outcomes while retaining one-process module, fixture, and import-cache semantics;
+- additionally runs a single-process full Pytest suite over the whole `tests/` tree and an independent `unittest` suite as supplemental blockers;
 - runs all repository-standard validators in both worktrees and requires validator-specific terminal success or failure markers even when both commands exit zero;
 - rechecks both baseline and candidate worktrees after every untrusted repository-code stage, including each candidate-focused test suite;
 - snapshots the complete trusted-tree membership and identity before each untrusted lane, forbids new entries, removals, replacements, symbolic links, hard links, or special files, and verifies the exact tree afterward;
 - creates fresh report names on every run and never recursively deletes candidate `.scratch` content;
+- removes a newly created reviewed-run directory if report copying fails, so a partial visible run cannot survive as apparently completed evidence;
 - copies completed reports to a unique output directory only after the trusted evidence has been accepted.
 
 ## Canonical invocation
 
-Run on Linux with Bash. Supply two clean worktrees, the exact full candidate commit, and canonical non-symlink executable paths. The bootstrap sanitizes the environment before reading the pin or resolving Git objects, disables Git replacement objects, verifies the frozen verifier blobs in the reviewed tree, and invokes the wrapper with Python isolated mode.
+Run on Linux with Bash. Supply two clean worktrees, the exact full candidate commit, and canonical non-symlink executable paths. The bootstrap validates the selected `env` executable before clearing variables, sanitizes the environment before reading the pin or resolving Git objects, disables Git replacement objects, verifies the frozen verifier blobs in the reviewed tree, and invokes the wrapper with Python isolated mode.
 
 ```bash
 set -euo pipefail
@@ -73,6 +74,7 @@ REVIEWED_REF='<exact-40-character-candidate-commit-sha>'
 VERIFIER_PYTHON=/absolute/canonical/path/to/python3
 VERIFIER_GIT=/absolute/canonical/path/to/git
 VERIFIER_BASH=/absolute/canonical/path/to/bash
+VERIFIER_ENV=/usr/bin/env
 
 BASELINE_ROOT="$(cd -P -- "$BASELINE_ROOT" && printf '%s\n' "$PWD")"
 CANDIDATE_ROOT="$(cd -P -- "$CANDIDATE_ROOT" && printf '%s\n' "$PWD")"
@@ -98,10 +100,6 @@ assert_canonical_external() {
   esac
 }
 
-assert_canonical_external "$VERIFIER_PYTHON"
-assert_canonical_external "$VERIFIER_GIT"
-assert_canonical_external "$VERIFIER_BASH"
-
 case "$REVIEWED_REF" in
   ''|*[!0-9a-f]*)
     echo "BLOCKED: REVIEWED_REF must be an exact lowercase hexadecimal commit identifier" >&2
@@ -116,9 +114,14 @@ case "${#REVIEWED_REF}" in
     ;;
 esac
 
-VERIFIER_PATH="${VERIFIER_PYTHON%/*}:${VERIFIER_GIT%/*}:${VERIFIER_BASH%/*}:/usr/local/bin:/usr/bin:/bin"
+assert_canonical_external "$VERIFIER_PYTHON"
+assert_canonical_external "$VERIFIER_GIT"
+assert_canonical_external "$VERIFIER_BASH"
+assert_canonical_external "$VERIFIER_ENV"
+
+VERIFIER_PATH="${VERIFIER_ENV%/*}:${VERIFIER_PYTHON%/*}:${VERIFIER_GIT%/*}:${VERIFIER_BASH%/*}:/usr/local/bin:/usr/bin:/bin"
 verify_shared_tmp() {
-  env -i PATH="$VERIFIER_PATH" HOME=/ PYTHONNOUSERSITE=1 PYTHONSAFEPATH=1 \
+  "$VERIFIER_ENV" -i PATH="$VERIFIER_PATH" HOME=/ PYTHONNOUSERSITE=1 PYTHONSAFEPATH=1 \
     "$VERIFIER_PYTHON" -I -c '
 import os, stat, sys
 path = "/tmp"
@@ -144,11 +147,11 @@ if identity(lexical) != identity(opened):
 verify_shared_tmp
 
 BOOTSTRAP_ROOT="$(
-  env -i PATH="$VERIFIER_PATH" HOME=/ TMPDIR=/tmp PYTHONNOUSERSITE=1 PYTHONSAFEPATH=1 \
+  "$VERIFIER_ENV" -i PATH="$VERIFIER_PATH" HOME=/ TMPDIR=/tmp PYTHONNOUSERSITE=1 PYTHONSAFEPATH=1 \
     "$VERIFIER_PYTHON" -I -c 'import tempfile; print(tempfile.mkdtemp(prefix="orche-stage0-bootstrap-"))'
 )"
 cleanup_bootstrap() {
-  env -i PATH="$VERIFIER_PATH" HOME=/ TMPDIR=/tmp PYTHONNOUSERSITE=1 PYTHONSAFEPATH=1 \
+  "$VERIFIER_ENV" -i PATH="$VERIFIER_PATH" HOME=/ TMPDIR=/tmp PYTHONNOUSERSITE=1 PYTHONSAFEPATH=1 \
     "$VERIFIER_PYTHON" -I -c \
       'import shutil,sys; shutil.rmtree(sys.argv[1], ignore_errors=True)' "$BOOTSTRAP_ROOT"
 }
@@ -157,13 +160,13 @@ trap cleanup_bootstrap EXIT
 : > "$BOOTSTRAP_ROOT/gitconfig"
 
 trusted_git() {
-  env -i PATH="$VERIFIER_PATH" HOME="$BOOTSTRAP_ROOT" TMPDIR="$BOOTSTRAP_ROOT" \
+  "$VERIFIER_ENV" -i PATH="$VERIFIER_PATH" HOME="$BOOTSTRAP_ROOT" TMPDIR="$BOOTSTRAP_ROOT" \
     GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL="$BOOTSTRAP_ROOT/gitconfig" \
     GIT_NO_REPLACE_OBJECTS=1 \
     "$VERIFIER_GIT" --no-replace-objects "$@"
 }
 trusted_python() {
-  env -i PATH="$VERIFIER_PATH" HOME="$BOOTSTRAP_ROOT" TMPDIR="$BOOTSTRAP_ROOT" \
+  "$VERIFIER_ENV" -i PATH="$VERIFIER_PATH" HOME="$BOOTSTRAP_ROOT" TMPDIR="$BOOTSTRAP_ROOT" \
     PYTHONNOUSERSITE=1 PYTHONSAFEPATH=1 PYTHONDONTWRITEBYTECODE=1 PYTHONUTF8=1 \
     "$VERIFIER_PYTHON" -I "$@"
 }
@@ -201,6 +204,36 @@ materialize_bootstrap_tool stage0Runtime stage0_runtime.py
 materialize_bootstrap_tool stage0Evidence stage0_evidence.py
 materialize_bootstrap_tool stage0Orchestrator stage0_orchestrator.py
 materialize_bootstrap_tool stage0Verifier verify_stage0.py
+materialize_bootstrap_fragments() {
+  fragment_count="$(
+    printf '%s' "$PIN_JSON" | trusted_python -c \
+      'import json,sys; print(len(json.load(sys.stdin)["tooling"]["stage0Verifier"]["fragments"]))'
+  )"
+  fragment_index=0
+  while test "$fragment_index" -lt "$fragment_count"; do
+    fragment_path="$(
+      printf '%s' "$PIN_JSON" | trusted_python -c \
+        'import json,sys; print(json.load(sys.stdin)["tooling"]["stage0Verifier"]["fragments"][int(sys.argv[1])]["path"])' "$fragment_index"
+    )"
+    fragment_blob="$(
+      printf '%s' "$PIN_JSON" | trusted_python -c \
+        'import json,sys; print(json.load(sys.stdin)["tooling"]["stage0Verifier"]["fragments"][int(sys.argv[1])]["gitBlobSha"])' "$fragment_index"
+    )"
+    fragment_entry="$(trusted_git -C "$CANDIDATE_ROOT" ls-tree "$REVIEWED_REF" -- "$fragment_path")"
+    test "$(printf '%s\n' "$fragment_entry" | trusted_python -c 'import sys; print(sys.stdin.read().split(None, 3)[2])')" = "$fragment_blob" || {
+      echo "BLOCKED: reviewed verifier fragment blob mismatch: $fragment_path" >&2
+      exit 2
+    }
+    fragment_name="${fragment_path##*/}"
+    trusted_git -C "$CANDIDATE_ROOT" cat-file blob "$fragment_blob" > "$BOOTSTRAP_ROOT/$fragment_name"
+    test "$(trusted_git -C "$CANDIDATE_ROOT" hash-object "$BOOTSTRAP_ROOT/$fragment_name")" = "$fragment_blob" || {
+      echo "BLOCKED: materialized verifier fragment hash mismatch: $fragment_path" >&2
+      exit 2
+    }
+    fragment_index=$((fragment_index + 1))
+  done
+}
+materialize_bootstrap_fragments
 
 trusted_python "$BOOTSTRAP_ROOT/verify_stage0.py" \
   --baseline-root "$BASELINE_ROOT" \
@@ -211,7 +244,7 @@ trusted_python "$BOOTSTRAP_ROOT/verify_stage0.py" \
   --verifier-bash "$VERIFIER_BASH"
 ```
 
-The bootstrap uses `git cat-file blob` to materialize the reviewed verifier wrapper and its three reviewed modules, verifies every blob, and executes the wrapper with `python -I`. Before the first temporary directory is created, the bootstrap verifies that `/tmp` is a stable root-owned sticky directory; the isolated loader repeats the same fail-closed check and binds the evidence module to the hardened owner. An `EXIT` trap removes the bootstrap directory on every shell completion path. The verifier creates its trusted and lane roots as separate mode-`0700` directories under that verified Linux `/tmp`, not beneath the bootstrap directory, so explicit recovery preservation is not erased by the shell trap. The bootstrap directory contains no repository code except those verified frozen verifier blobs. Repository tests and validators receive only their verified worktree through an explicit per-lane `PYTHONPATH`; frozen verifier tools never inherit it.
+The bootstrap uses `git cat-file blob` to materialize the reviewed verifier wrapper, its three reviewed modules, and the verifier fragments declared in the pin; it verifies every blob and executes the wrapper with `python -I`. The validated `VERIFIER_ENV` executable provides the required `env -i` semantics without consulting ambient `PATH`. The supplied `VERIFIER_ENV` is validated with shell built-ins before its first use, so ambient `PATH` cannot select a substitute environment scrubber. Before the first temporary directory is created, the bootstrap verifies that `/tmp` is a stable root-owned sticky directory; the isolated loader repeats the same fail-closed check. An `EXIT` trap removes the bootstrap directory on every shell completion path. The verifier creates its trusted and lane roots as separate mode-`0700` directories under that verified Linux `/tmp`, not beneath the bootstrap directory, so explicit recovery preservation is not erased by the shell trap. The bootstrap directory contains no repository code except those verified frozen verifier blobs. Repository tests and validators receive only their verified worktree through an explicit per-lane `PYTHONPATH`; frozen verifier tools never inherit it.
 
 ## Evidence lifecycle and acceptance
 
@@ -219,15 +252,15 @@ Stage 0 is intentionally local-only and does not add a GitHub Actions workflow. 
 
 - immutable baseline and reviewed-candidate capability/test inventories;
 - target-effect measurements based on normalized Skill bodies;
-- complete tracked-path disposition comparison;
-- supplemental parent-generated baseline/candidate file-level Pytest reports and a differential verdict;
-- baseline/candidate comparison reports for the single-process full Pytest suite and independent `unittest` suite;
+- complete tracked-path disposition comparison bound to the exact candidate content commit and identities;
+- trusted-event baseline/candidate file-level Pytest reports and a differential verdict from one full retained-test session per lane;
+- baseline/candidate comparison reports for the supplemental single-process full Pytest suite and independent `unittest` suite;
 - baseline/candidate logs and comparison reports for every repository-standard validator;
 - a machine-readable summary bound to both exact commit identifiers.
 
-The external trusted and lane directories are removed after a successful run and, by default, after a failed run. Only the accepted copied report set remains under the candidate's unique `.scratch/orche-stage0/reviewed-runs/<commit>-<random>/` directory. The copied directory is never reused as input evidence.
+The external trusted and lane directories are removed after a successful run and, by default, after a failed run. Only the accepted copied report set remains under the candidate's unique `.scratch/orche-stage0/reviewed-runs/<commit>-<random>/` directory. A copy failure removes that fresh directory before the verifier returns. The copied directory is never reused as input evidence.
 
-Exit `0` is accepted evidence only when the supplemental file-level differential, the single-process Pytest gate, the independent `unittest` gate, capability comparison, and every repository validator all accept. Exit `1` means verified semantic parity is `BLOCKED`. Exit `2` means bootstrap validation or later evidence is operationally invalid and must not be interpreted as parity drift. Operational Pytest exits, operational validator exits, marker-free successes, and marker-free semantic failures therefore produce exit `2`.
+Exit `0` is accepted evidence only when the trusted event differential, the supplemental single-process Pytest gate, the independent `unittest` gate, capability comparison, and every repository validator all accept. Exit `1` means verified semantic parity is `BLOCKED`. Exit `2` means bootstrap validation or later evidence is operationally invalid and must not be interpreted as parity drift. Operational Pytest exits, operational validator exits, marker-free successes, and marker-free semantic failures therefore produce exit `2`.
 
 ## Recovery mode
 
@@ -249,20 +282,21 @@ Only the repository owner may then create, verify, and push the signed tag. Unti
 
 - **Bash:** Bourne Again Shell, the command interpreter used by the bootstrap.
 - **CLI:** Command-Line Interface, a program operated through terminal commands.
+- **`env`:** the external operating-system utility that starts a command with a replaced or cleared environment.
 - **Git blob:** an immutable Git object containing one file's bytes.
 - **Git mode:** the tracked Git file mode, such as regular file, executable file, symbolic link, or submodule entry.
 - **Expected failure (`xfail`):** a Pytest outcome in which a known failing case fails as declared without making the test process fail.
-- **JUnit XML:** JUnit Extensible Markup Language, the machine-readable Pytest result format; Stage 0 synthesizes a supplemental file-level report from parent-observed per-file process exits and canonical outcome fingerprints rather than accepting candidate-written XML.
+- **JUnit XML:** JUnit Extensible Markup Language, the machine-readable test-result format; Stage 0 synthesizes its accepted report from trusted per-item events rather than accepting candidate-written XML or terminal summaries.
 - **`git-path-percent-v1`:** a reversible ASCII encoding that leaves safe path bytes unchanged and writes every other Git path byte as `%HH`.
 - **Linux child subreaper:** a Linux process that adopts orphaned descendants so they remain controllable even after `setsid()` or a double fork.
 - **PATH:** the operating-system executable search path.
 - **POSIX:** Portable Operating System Interface, the process/session model on which the Linux verifier builds.
 - **PR:** Pull Request, a proposed repository change submitted for review.
 - **`/proc`:** the Linux process-information filesystem used to identify and reap every lane descendant.
-- **Pytest:** the Python test runner used both for the supplemental per-file fingerprints and the required single-process full-suite gate.
+- **Pytest:** the Python test runner used for the required trusted-event retained-test session and the supplemental ordinary full-suite gate.
 - **Sticky bit:** a directory permission bit that prevents one unprivileged user from renaming or removing another user's entries in a shared writable directory.
 - **SHA-256:** Secure Hash Algorithm 256-bit, used for evidence and executable byte digests.
 - **Skill:** a repository instruction package whose methodology body is compared independently of provider frontmatter.
-- **`unittest`:** Python's standard-library unit-test framework, used as an independent full-suite oracle outside the candidate-controlled Pytest process.
+- **`unittest`:** Python's standard-library unit-test framework, used as an additional full-suite blocker outside the ordinary Pytest process.
 - **Unexpected pass (`xpass`):** a Pytest outcome in which a case declared as an expected failure passes and must remain visible in parity evidence.
 - **V1:** Version 1, the accepted legacy behavior frozen before Orche 2.0 migration.

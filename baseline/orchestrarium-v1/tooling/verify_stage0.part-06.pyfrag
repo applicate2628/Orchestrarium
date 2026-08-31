@@ -1,0 +1,123 @@
+            candidate_root,
+            "rev-list",
+            "--parents",
+            "-n",
+            "1",
+            reviewed_ref,
+        )
+    ).strip().split()
+    if parents != [reviewed_ref, candidate_ref]:
+        raise runtime.VerificationError(
+            "reviewed disposition envelope must be a direct manifest-only child: "
+            f"actual={parents!r}, expected={[reviewed_ref, candidate_ref]!r}"
+        )
+    actual_tree = str(
+        runtime._run_git(
+            tools,
+            env,
+            candidate_root,
+            "rev-parse",
+            f"{candidate_ref}^{{tree}}",
+        )
+    ).strip().lower()
+    if actual_tree != candidate_tree:
+        raise runtime.VerificationError(
+            "reviewed disposition candidate tree mismatch: "
+            f"expected={candidate_tree}, actual={actual_tree}"
+        )
+    changed = str(
+        runtime._run_git(
+            tools,
+            env,
+            candidate_root,
+            "diff-tree",
+            "--no-commit-id",
+            "--name-only",
+            "-r",
+            candidate_ref,
+            reviewed_ref,
+        )
+    ).splitlines()
+    if changed != [runtime.DISPOSITIONS_PATH]:
+        raise runtime.VerificationError(
+            "reviewed disposition envelope changed paths other than its manifest: "
+            f"{changed!r}"
+        )
+    return payload
+
+
+_ORIGINAL_LOAD_PIN = evidence.load_pin_from_commit
+_ORIGINAL_COPY_REPORTS = evidence._copy_reports
+
+
+def _load_pin_with_protocol(*args, **kwargs):
+    payload = _ORIGINAL_LOAD_PIN(*args, **kwargs)
+    loader_records = globals().get("_FRAGMENT_RECORDS", ())
+    tooling = payload.get("tooling")
+    verifier_record = tooling.get("stage0Verifier") if isinstance(tooling, dict) else None
+    fragments = verifier_record.get("fragments") if isinstance(verifier_record, dict) else None
+    expected_fragments = [
+        {
+            "path": f"baseline/orchestrarium-v1/tooling/{name}",
+            "gitBlobSha": git_blob,
+        }
+        for name, _sha256, git_blob in loader_records
+    ]
+    if fragments != expected_fragments:
+        raise runtime.VerificationError(
+            "reviewed baseline pin Stage 0 verifier fragments are invalid"
+        )
+    if len(args) >= 4:
+        tools, env, candidate_root, reviewed_ref = args[:4]
+    else:
+        tools = kwargs["tools"]
+        env = kwargs["env"]
+        candidate_root = kwargs["candidate_root"]
+        reviewed_ref = kwargs["reviewed_ref"]
+    _load_review_envelope(
+        tools=tools,
+        env=env,
+        candidate_root=candidate_root,
+        reviewed_ref=reviewed_ref,
+    )
+    return payload
+
+
+def _copy_reports_fail_closed(trusted_root: Path, output: Path) -> None:
+    try:
+        _ORIGINAL_COPY_REPORTS(trusted_root, output)
+    except BaseException:
+        evidence._remove_private_temp_root(output)
+        raise
+
+
+def install() -> None:
+    """Install all reviewed hardening before the orchestrator imports symbols."""
+    _install_full_suite_gates()
+    _patch_claude_validator_marker()
+    evidence._private_temp_parent = _safe_private_temp_parent
+    evidence.load_pin_from_commit = _load_pin_with_protocol
+    evidence.run_parent_generated_pytest_lane = run_parent_generated_pytest_lane
+    evidence._copy_reports = _copy_reports_fail_closed
+    evidence.VALIDATORS = runtime.VALIDATORS
+
+
+if len(sys.argv) > 1 and sys.argv[1] == "--orche-child":
+    raise SystemExit(_child_main(sys.argv[1:]))
+
+install()
+_orchestrator = _load("stage0_orchestrator", "stage0_orchestrator.py")
+for _module in (_runtime, _evidence, _orchestrator):
+    for _name, _value in vars(_module).items():
+        if not _name.startswith("__"):
+            globals()[_name] = _value
+
+# Keep hardened owners authoritative after legacy-module re-export.
+_private_temp_parent = _safe_private_temp_parent
+_validate_shared_temporary_parent = _validate_shared_temporary_parent
+_validate_private_temp_parent = _validate_private_temp_parent
+_load_review_envelope = _load_review_envelope
+_copy_reports_fail_closed = _copy_reports_fail_closed
+
+if __name__ == "__main__":
+    raise SystemExit(main())

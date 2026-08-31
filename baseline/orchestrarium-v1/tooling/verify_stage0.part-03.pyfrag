@@ -1,0 +1,169 @@
+        raise runtime.VerificationError(f"invalid Pytest suite name: {suite_name!r}")
+    path_map = {
+        Path(item.filesystem_path).as_posix(): item.inventory_path for item in retained
+    }
+    by_file: dict[str, list[tuple[str, str, str | None]]] = {
+        item.inventory_path: [] for item in retained
+    }
+    for nodeid in protocol.collected:
+        file_path = _node_file(nodeid)
+        inventory_path = path_map.get(file_path)
+        if inventory_path is None:
+            raise runtime.VerificationError(
+                f"collected Pytest node escapes retained files: {nodeid!r}"
+            )
+        outcome, diagnostic = _final_node_outcome(protocol, nodeid)
+        by_file[inventory_path].append((nodeid, outcome, diagnostic))
+    deselected_by_file: dict[str, list[str]] = {item.inventory_path: [] for item in retained}
+    for nodeid in protocol.deselected:
+        inventory_path = path_map.get(_node_file(nodeid))
+        if inventory_path is None:
+            raise runtime.VerificationError(
+                f"deselected Pytest node escapes retained files: {nodeid!r}"
+            )
+        deselected_by_file[inventory_path].append(nodeid)
+    for item in retained:
+        if not by_file[item.inventory_path] and not deselected_by_file[item.inventory_path]:
+            raise runtime.VerificationError(
+                f"retained test file produced no collected or deselected nodes: {item.inventory_path}"
+            )
+
+    file_status: dict[str, str] = {}
+    file_evidence: dict[str, dict[str, object]] = {}
+    file_failure_text: dict[str, str] = {}
+    semantic_failures = 0
+    for item in retained:
+        records = by_file[item.inventory_path]
+        outcomes = [record[1] for record in records]
+        if "error" in outcomes:
+            status = "error"
+        elif "failure" in outcomes:
+            status = "failure"
+        elif "skipped" in outcomes:
+            status = "skipped"
+        else:
+            status = "passed"
+        file_status[item.inventory_path] = status
+        if status in {"error", "failure"}:
+            semantic_failures += 1
+            file_failure_text[item.inventory_path] = "\n\n".join(
+                _xml_safe(f"{nodeid}\n{diagnostic or outcome}")
+                for nodeid, outcome, diagnostic in records
+                if outcome in {"error", "failure"}
+            )
+            continue
+        counts = {
+            key: sum(outcome == key for _nodeid, outcome, _diag in records)
+            for key in ("passed", "skipped", "xfailed", "xpassed")
+        }
+        counts["deselected"] = len(deselected_by_file[item.inventory_path])
+        diagnostics = {
+            "passed": [_xml_safe(f"PASSED {nodeid}") for nodeid, out, _ in records if out == "passed"],
+            "skipped": [
+                _xml_safe(f"SKIPPED {nodeid} - {diag or 'skipped'}")
+                for nodeid, out, diag in records
+                if out == "skipped"
+            ],
+            "xfailed": [
+                _xml_safe(f"XFAIL {nodeid} - {diag or 'expected failure'}")
+                for nodeid, out, diag in records
+                if out == "xfailed"
+            ],
+            "xpassed": [
+                _xml_safe(f"XPASS {nodeid} - {diag or 'unexpected pass'}")
+                for nodeid, out, diag in records
+                if out == "xpassed"
+            ],
+            "deselected": (
+                []
+                if counts["deselected"] == 0
+                else [f"{counts['deselected']} deselected"]
+            ),
+        }
+        file_evidence[item.inventory_path] = {
+            "schemaVersion": 1,
+            "counts": counts,
+            "diagnostics": diagnostics,
+        }
+
+    suite = ET.Element(
+        "testsuite",
+        {
+            "name": suite_name,
+            "tests": str(len(retained)),
+            "failures": str(sum(value == "failure" for value in file_status.values())),
+            "errors": str(sum(value == "error" for value in file_status.values())),
+            "skipped": str(sum(value == "skipped" for value in file_status.values())),
+        },
+    )
+    for item in retained:
+        testcase = ET.SubElement(
+            suite,
+            "testcase",
+            {
+                "classname": "pytest.file",
+                "name": item.inventory_path,
+                "file": item.inventory_path,
+            },
+        )
+        status = file_status[item.inventory_path]
+        if status in {"failure", "error"}:
+            child = ET.SubElement(
+                testcase,
+                status,
+                {
+                    "type": f"pytest.file.{status}",
+                    "message": f"one or more tests in the file produced {status}",
+                },
+            )
+            child.text = file_failure_text[item.inventory_path]
+            continue
+        properties = ET.SubElement(testcase, "properties")
+        ET.SubElement(
+            properties,
+            "property",
+            {
+                "name": "orche.pytest.outcomes.v1",
+                "value": json.dumps(
+                    file_evidence[item.inventory_path],
+                    ensure_ascii=True,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+            },
+        )
+        if status == "skipped":
+            diagnostics = file_evidence[item.inventory_path]["diagnostics"]
+            child = ET.SubElement(
+                testcase,
+                "skipped",
+                {
+                    "type": "pytest.file.skipped",
+                    "message": "one or more retained tests skipped",
+                },
+            )
+            child.text = "\n".join(diagnostics["skipped"])
+    payload = ET.tostring(suite, encoding="utf-8", xml_declaration=True)
+    junit_dir.mkdir(parents=True, exist_ok=True)
+    path = junit_dir / f"{suite_name}-{uuid.uuid4().hex}.xml"
+    handle, identity = evidence._fresh_regular_file(path)
+    with handle:
+        handle.write(payload)
+        handle.flush()
+        os.fsync(handle.fileno())
+    evidence._verify_prepared_file(identity, require_nonempty=True)
+    return path, int(bool(semantic_failures))
+
+
+def run_parent_generated_pytest_lane(
+    *,
+    repo_root: Path,
+    test_paths: Sequence[str] | Sequence[evidence.RetainedTestFile],
+    lane_parent: Path,
+    log_dir: Path,
+    junit_dir: Path,
+    suite_name: str,
+    timeout_seconds: float,
+    tools,
+    trusted_root: Path,
+    revalidate_worktrees: Callable[[], None],

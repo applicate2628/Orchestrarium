@@ -1,0 +1,139 @@
+) -> evidence.ParentGeneratedPytestResult:
+    repo_root = repo_root.resolve(strict=True)
+    lane_parent.mkdir(parents=True, exist_ok=True)
+    log_dir.mkdir(parents=True, exist_ok=True)
+    junit_dir.mkdir(parents=True, exist_ok=True)
+    retained = tuple(
+        item
+        if isinstance(item, evidence.RetainedTestFile)
+        else evidence.RetainedTestFile(inventory_path=item, filesystem_path=item)
+        for item in test_paths
+    )
+    if not retained:
+        raise runtime.VerificationError("Pytest evidence lane requires at least one test file")
+    for item in retained:
+        relative = Path(item.filesystem_path)
+        if relative.is_absolute() or ".." in relative.parts:
+            raise runtime.VerificationError(f"unsafe Pytest file path: {item.inventory_path!r}")
+        evidence._verify_retained_test_source(repo_root / relative, item)
+    session_root = Path(tempfile.mkdtemp(prefix=f"{suite_name}-session-", dir=lane_parent))
+    os.chmod(session_root, 0o700)
+    log_path = log_dir / f"{suite_name}-full-session.log"
+    try:
+        # Reserve descriptor numbers inside the custom runner by using placeholders replaced
+        # immediately before Popen. The module path is reviewed and loaded before repo imports.
+        command_template = [
+            os.fspath(tools.python),
+            "-I",
+            os.fspath(Path(__file__).resolve()),
+            "--orche-child",
+            "--repo-root",
+            os.fspath(repo_root),
+            "--event-fd",
+            "{EVENT_FD}",
+            "--ack-fd",
+            "{ACK_FD}",
+            *[Path(item.filesystem_path).as_posix() for item in retained],
+        ]
+        # Inline a small adapter around _run_event_process because it owns the pipe descriptors.
+        result_code, timed_out, protocol = _run_event_process_with_placeholders(
+            command_template=command_template,
+            cwd=Path(__file__).resolve().parent,
+            env=runtime.build_repository_env(
+                tools=tools, lane_root=session_root, repo_root=repo_root
+            ),
+            log_path=log_path,
+            timeout_seconds=timeout_seconds,
+            tools=tools,
+            trusted_root=trusted_root,
+            revalidate=revalidate_worktrees,
+        )
+    finally:
+        evidence._remove_private_temp_root(session_root)
+    for item in retained:
+        evidence._verify_retained_test_source(repo_root / Path(item.filesystem_path), item)
+    revalidate_worktrees()
+    if timed_out:
+        return evidence.ParentGeneratedPytestResult(
+            exit_code=124,
+            junit_path=junit_dir / f"{suite_name}-timed-out.xml",
+            log_paths=(log_path,),
+            timed_out=True,
+        )
+    if result_code not in {0, 1}:
+        raise runtime.VerificationError(
+            f"Pytest full-session lane exited operationally with status {result_code}"
+        )
+    junit_path, trusted_exit = _write_junit(
+        junit_dir=junit_dir,
+        suite_name=suite_name,
+        retained=retained,
+        protocol=protocol,
+    )
+    if trusted_exit == 0 and result_code != 0:
+        raise runtime.VerificationError(
+            "Pytest process exited nonzero without a trusted failing or error report"
+        )
+    return evidence.ParentGeneratedPytestResult(
+        exit_code=trusted_exit,
+        junit_path=junit_path,
+        log_paths=(log_path,),
+        timed_out=False,
+    )
+
+
+def _run_event_process_with_placeholders(**kwargs):
+    """Create the event pipes and replace descriptor placeholders atomically."""
+    command_template = kwargs.pop("command_template")
+    event_r, event_w = os.pipe2(os.O_CLOEXEC)
+    ack_r, ack_w = os.pipe2(os.O_CLOEXEC)
+    command = [
+        str(event_w) if item == "{EVENT_FD}" else str(ack_r) if item == "{ACK_FD}" else item
+        for item in command_template
+    ]
+    # Delegate to a local copy that accepts the already-created descriptors.
+    return _run_event_process_fds(
+        command=command,
+        event_r=event_r,
+        event_w=event_w,
+        ack_r=ack_r,
+        ack_w=ack_w,
+        **kwargs,
+    )
+
+
+def _run_event_process_fds(
+    *, command, event_r, event_w, ack_r, ack_w, cwd, env, log_path,
+    timeout_seconds, tools, trusted_root, revalidate
+):
+    # Same logic as _run_event_process, but descriptor ownership is supplied by the caller.
+    if timeout_seconds <= 0:
+        raise runtime.VerificationError("timeout must be positive")
+    if not evidence._LANE_LOCK.acquire(blocking=False):
+        raise runtime.VerificationError("concurrent Stage 0 lane execution is unsupported")
+    protocol = _ProtocolState(); captured = bytearray(); capture_state = {}
+    snapshot = evidence._trusted_evidence_snapshot(trusted_root, exclude=(log_path,))
+    try:
+        evidence._enable_child_subreaper(); preexisting = evidence._direct_child_snapshot(evidence._proc_table()); tools.verify(command[0])
+        try:
+            process = subprocess.Popen(list(command), cwd=cwd, env=dict(env), stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True,
+                close_fds=True, pass_fds=(event_w, ack_r))
+        except FileNotFoundError as exc:
+            evidence._write_parent_captured_log(log_path, f"BLOCKED: command executable not found: {exc}\n".encode()); return 127, False, protocol
+        except OSError as exc:
+            evidence._write_parent_captured_log(log_path, f"BLOCKED: command launch failed: {exc}\n".encode()); return 126, False, protocol
+        finally:
+            os.close(event_w); os.close(ack_r)
+        if process.stdout is None: raise runtime.VerificationError("repository process stdout pipe was not created")
+        out_thread = threading.Thread(target=_drain_stdout,args=(process.stdout,captured,capture_state),daemon=True)
+        evt_thread = threading.Thread(target=_read_events,args=(event_r,ack_w,protocol,revalidate),daemon=True)
+        out_thread.start(); evt_thread.start(); deadline=time.monotonic()+timeout_seconds; timed_out=False
+        while process.poll() is None:
+            if protocol.error is not None: evidence._terminate_process_group(process)
+            if time.monotonic() >= deadline:
+                timed_out=True; evidence._terminate_process_group(process)
+            time.sleep(_POLL_SECONDS)
+        return_code=process.wait()
+        evidence._terminate_process_group(process); evidence._cleanup_lane_descendants(preexisting)
+        try: os.close(ack_w)

@@ -28,7 +28,7 @@
   "tooling": {
     "capabilityComparator": {
       "deterministic": true,
-      "gitBlobSha": "48b294a1b10d48e91b24a176f954c9cffb665d6f",
+      "gitBlobSha": "4df5117a3ab44c446d3a5b0d4345854f87efed51",
       "materialization": "git-cat-file-reviewed-tree-blob",
       "path": "baseline/orchestrarium-v1/tooling/compare_capability_baseline.py",
       "runtimeMutation": false,
@@ -84,11 +84,41 @@
     },
     "stage0Verifier": {
       "deterministic": true,
-      "gitBlobSha": "7b18e75d1237e1399d59b683f56ed3844ae7ee7c",
+      "gitBlobSha": "d0730cdc64008d8230f1a441dcc2264729e3be94",
       "materialization": "git-cat-file-reviewed-tree-blob",
       "path": "baseline/orchestrarium-v1/tooling/verify_stage0.py",
       "runtimeMutation": false,
-      "sourcePath": "scripts/baseline/verify_stage0.py"
+      "sourcePath": "scripts/baseline/verify_stage0.py",
+      "fragments": [
+        {
+          "path": "baseline/orchestrarium-v1/tooling/verify_stage0.part-00.pyfrag",
+          "gitBlobSha": "49258b10e4bf843213557d7420f5154b29ee91d4"
+        },
+        {
+          "path": "baseline/orchestrarium-v1/tooling/verify_stage0.part-01.pyfrag",
+          "gitBlobSha": "24a8cb22480d03c03a7b177ea3fcba553dcd380b"
+        },
+        {
+          "path": "baseline/orchestrarium-v1/tooling/verify_stage0.part-02.pyfrag",
+          "gitBlobSha": "5edff4c8596929df9d70dc804cfb025dda6e22ec"
+        },
+        {
+          "path": "baseline/orchestrarium-v1/tooling/verify_stage0.part-03.pyfrag",
+          "gitBlobSha": "f6839cc46a4109d128e141f143e6ae54beed1727"
+        },
+        {
+          "path": "baseline/orchestrarium-v1/tooling/verify_stage0.part-04.pyfrag",
+          "gitBlobSha": "36545db5ccce1a07cf14947e5c6b6ab098144d24"
+        },
+        {
+          "path": "baseline/orchestrarium-v1/tooling/verify_stage0.part-05.pyfrag",
+          "gitBlobSha": "bb60ef66bb8a875ed25836f7cd59c2d0209a0389"
+        },
+        {
+          "path": "baseline/orchestrarium-v1/tooling/verify_stage0.part-06.pyfrag",
+          "gitBlobSha": "89b295146e22619cad1b449baa07d1cfb890660d"
+        }
+      ]
     },
     "targetEffectGenerator": {
       "deterministic": true,
