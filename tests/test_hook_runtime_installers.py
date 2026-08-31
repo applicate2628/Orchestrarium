@@ -1,6 +1,7 @@
 """Python runtime-profile, reclaim, and direct-hook contract tests."""
 from __future__ import annotations
 
+import ctypes
 import importlib.util
 import inspect
 import io
@@ -10,6 +11,7 @@ import signal
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from types import SimpleNamespace
 from pathlib import Path
@@ -533,6 +535,98 @@ def test_posix_hook_health_does_not_enter_generic_process_runner(
     )
 
     assert completed.returncode == 0
+
+
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"), reason="Linux child-subreaper owner"
+)
+def test_posix_hook_health_reaps_ignoring_descendant_before_stable_tree_failure(
+    tmp_path: Path,
+) -> None:
+    libc = ctypes.CDLL(None, use_errno=True)
+    prior = ctypes.c_int()
+    assert libc.prctl(37, ctypes.byref(prior), 0, 0, 0) == 0
+    assert libc.prctl(36, 1, 0, 0, 0) == 0
+    marker = tmp_path / "hook-health.pids"
+    ready = tmp_path / "hook-health.ready"
+    program = tmp_path / "hook-health-descendant.py"
+    program.write_text(
+        "import os, pathlib, subprocess, sys, time\n"
+        "code = \"import os, pathlib, signal, sys, time\\n"
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN)\\n"
+        "for descriptor in (0, 1, 2):\\n"
+        "    try: os.close(descriptor)\\n"
+        "    except OSError: pass\\n"
+        "pathlib.Path(sys.argv[1]).write_text('ready', encoding='ascii')\\n"
+        "time.sleep(60)\"\n"
+        "child = subprocess.Popen([sys.executable, '-c', code, sys.argv[2]])\n"
+        "deadline = time.monotonic() + 5.0\n"
+        "while not pathlib.Path(sys.argv[2]).is_file():\n"
+        "    if time.monotonic() >= deadline: raise RuntimeError('child not ready')\n"
+        "    time.sleep(0.01)\n"
+        "pathlib.Path(sys.argv[1]).write_text(\n"
+        "    f'{os.getpid()} {child.pid}', encoding='ascii'\n"
+        ")\n",
+        encoding="utf-8",
+    )
+    process_group: int | None = None
+    try:
+        with pytest.raises(PRODUCTION_INSTALLER._InstallFailure) as failure:
+            PRODUCTION_INSTALLER._run_hook_health_bounded(
+                [str(program), str(marker), str(ready)],
+                tmp_path,
+                program,
+            )
+        process_group, descendant_pid = map(
+            int, marker.read_text(encoding="ascii").split()
+        )
+        assert failure.value.stable_id == "E_HOOK_HEALTH_FAILED"
+        assert "PSV1-TREE-NOT-EMPTY" in str(failure.value.cause)
+        assert not Path(f"/proc/{descendant_pid}").exists()
+    finally:
+        if process_group is not None:
+            try:
+                os.killpg(process_group, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            while True:
+                try:
+                    reaped_pid, _status = os.waitpid(-process_group, os.WNOHANG)
+                except ChildProcessError:
+                    break
+                if reaped_pid == 0:
+                    break
+        assert libc.prctl(36, prior.value, 0, 0, 0) == 0
+
+
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"), reason="Linux child-subreaper owner"
+)
+def test_posix_hook_health_spawn_baseexception_restores_shared_owner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    program = _write_health_program(tmp_path, stdout=b"healthy")
+
+    class InjectedBaseException(BaseException):
+        pass
+
+    monkeypatch.setattr(
+        PRODUCTION_INSTALLER.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(InjectedBaseException()),
+    )
+    with tempfile.NamedTemporaryFile() as spool:
+        with pytest.raises(InjectedBaseException):
+            PRODUCTION_INSTALLER._run_posix_hook_health_child(
+                [str(program)],
+                tmp_path,
+                program,
+                os.environ.copy(),
+                spool,
+                time.monotonic() + 6.0,
+            )
+
+    assert not PRODUCTION_INSTALLER._POSIX_PROCESS_GROUP._LINUX_SUBREAPER_LOCK.locked()
 
 
 def test_hook_health_processes_use_bounded_owner_only() -> None:

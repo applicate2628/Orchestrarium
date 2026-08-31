@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -93,6 +94,21 @@ def _run_installed_external_dispatch(
         text=True,
         encoding="utf-8",
     )
+
+
+def _make_runtime_directory_link(logical: Path, backing: Path, kind: str) -> None:
+    logical.parent.mkdir(parents=True, exist_ok=True)
+    if kind == "symlink":
+        logical.symlink_to(backing, target_is_directory=True)
+        return
+    result = subprocess.run(
+        ["cmd.exe", "/d", "/c", "mklink", "/J", str(logical), str(backing)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    if result.returncode != 0:
+        pytest.skip(f"directory junction unavailable: {result.stdout}{result.stderr}")
 
 
 def _canonical_sha(value: object) -> str:
@@ -360,6 +376,63 @@ def test_installed_codex_external_dispatch_retains_policy_parity(
     assert json.loads(result.stdout) == RESOLVER.resolve_external_dispatch(
         "kimi", "exploration", "analyst", repo_root=ROOT
     )
+
+
+@pytest.mark.parametrize(
+    "kind",
+    ("ordinary", "symlink", "junction")
+    if os.name == "nt"
+    else ("ordinary", "symlink"),
+)
+def test_installed_global_codex_external_dispatch_accepts_declared_agents_root(
+    tmp_path: Path,
+    kind: str,
+) -> None:
+    home = tmp_path / f"home-{kind}"
+    home.mkdir()
+    project_root = tmp_path / f"project-{kind}"
+    project_root.mkdir()
+    logical_agents = home / ".agents"
+    backing_agents = (
+        logical_agents if kind == "ordinary" else tmp_path / f"backing-agents-{kind}"
+    )
+    policy_root = backing_agents / "skills" / "lead"
+    scripts = policy_root / "scripts"
+    shared = policy_root / "shared"
+    scripts.mkdir(parents=True)
+    shared.mkdir()
+    scripts.joinpath("resolve-agents-mode.py").write_bytes(RESOLVER_PATH.read_bytes())
+    scripts.joinpath("linked_runtime_subroots.py").write_bytes(
+        (ROOT / "scripts" / "linked_runtime_subroots.py").read_bytes()
+    )
+    shared.joinpath("role-routing-policy.v1.json").write_bytes(
+        (ROOT / "shared" / "role-routing-policy.v1.json").read_bytes()
+    )
+    if kind != "ordinary":
+        redirect_agents = tmp_path / f"redirect-agents-{kind}"
+        try:
+            _make_runtime_directory_link(redirect_agents, backing_agents, kind)
+            _make_runtime_directory_link(logical_agents, redirect_agents, kind)
+        except OSError as exc:
+            pytest.skip(f"directory {kind} unavailable: {exc}")
+    resolver = logical_agents / "skills" / "lead" / "scripts" / "resolve-agents-mode.py"
+
+    result = _run_installed_external_dispatch(
+        resolver,
+        provider="kimi",
+        task_class="review",
+        role="qa-engineer",
+        project_root=project_root,
+        home=home,
+        cwd=tmp_path,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    decision = json.loads(result.stdout)
+    assert decision["status"] == "external-authorized"
+    assert decision["stableId"] is None
+    assert decision["executionAuthorized"] is True
+    assert decision["fallback"] == "none"
 
 
 def test_installed_external_dispatch_rejects_absent_anchor(

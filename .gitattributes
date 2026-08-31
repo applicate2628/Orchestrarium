@@ -7,5 +7,6 @@
 shared/AGENTS.shared.md text eol=lf
 shared/references/spine/*.md text eol=lf
 
-# Historical accepted-prior fixtures preserve their source blob bytes, including CRLF.
-tests/fixtures/canonical-skill-priors/**/agents/openai.yaml whitespace=cr-at-eol
+# Historical accepted-prior payloads preserve their source blob bytes, including CRLF.
+# Revision manifests remain text; only files inside each skill payload are byte-exact.
+tests/fixtures/canonical-skill-priors/*/*/** -text

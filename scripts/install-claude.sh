@@ -5,8 +5,4 @@ if command -v python3 >/dev/null 2>&1; then PYTHON=python3
 elif command -v python >/dev/null 2>&1; then PYTHON=python
 else printf '%s\n' 'FAIL: Python 3.11 or newer is required to run the Orchestrarium installer.' >&2; exit 127
 fi
-if ! "$PYTHON" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)'; then
-  printf '%s\n' 'FAIL: Python 3.11 or newer is required to run the Orchestrarium installer.' >&2
-  exit 2
-fi
 exec "$PYTHON" "$SCRIPT_DIR/install-claude.py" "$@"

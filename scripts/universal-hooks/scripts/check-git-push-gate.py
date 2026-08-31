@@ -5,8 +5,8 @@ the human-review-before-push rule.
 WHAT THIS DENIES: a command that confidently runs `git push` when neither the
 genuine user's per-turn approval marker nor one fresh gate-owned canonical
 range scan authorizes the exact pending push. The gate derives the only scanner
-producer as one held gate plus gate-relative three-module closure (`hook_common.py`, the
-machine-path classifier, and `check-publication-safety.py`), snapshots and
+producer as one held gate plus gate-relative four-module closure (`hook_common.py`, the
+machine-path classifier, the POSIX process-group helper, and `check-publication-safety.py`), snapshots and
 executes those bytes directly with its current trusted interpreter, and binds
 the exactly correlated typed result to remote, destination, source, current
 HEAD, and receipt tip. Scanner-
@@ -539,7 +539,7 @@ class SourceLayout:
 
 
 SOURCE_LAYOUTS = (
-    SourceLayout("universal", ("scripts", "universal-hooks", "scripts", "check-git-push-gate.py"), 1),
+    SourceLayout("universal", ("scripts", "universal-hooks", "scripts", "check-git-push-gate.py"), 2),
     SourceLayout("generated-codex", ("src.codex", "skills", "lead", "scripts", "check-git-push-gate.py"), 1),
     SourceLayout("generated-claude", ("src.claude", "agents", "scripts", "check-git-push-gate.py"), 1),
     SourceLayout("global", (".codex", "skills", "lead", "scripts", "check-git-push-gate.py"), 1),
@@ -1738,11 +1738,16 @@ exec(compile(sources["classifier"],classifier["__file__"],"exec"),classifier,cla
 finder=classifier.get("find_machine_paths")
 if not callable(finder):
     raise RuntimeError("classifier contract")
+posix_helper_name="_orchestrarium_posix_process_group_v1"
+posix_helper=types.ModuleType(posix_helper_name)
+posix_helper.__file__="<closure>/process_supervision/posix_process_group.py"
+sys.modules[posix_helper_name]=posix_helper
+exec(compile(sources["posix_helper"],posix_helper.__file__,"exec"),posix_helper.__dict__,posix_helper.__dict__)
 if len(sys.argv)<3 or sys.argv[1]!="--gate-git-executable":
     raise RuntimeError("git executable contract")
 git_executable=sys.argv[2]
 scanner_path="<closure>/check-publication-safety.py"
-scanner={"__name__":"__main__","__file__":scanner_path,"__package__":None,"__cached__":None,"__injected_find_machine_paths__":finder,"__injected_git_executable__":git_executable}
+scanner={"__name__":"__main__","__file__":scanner_path,"__package__":None,"__cached__":None,"__injected_find_machine_paths__":finder,"__injected_git_executable__":git_executable,"__injected_posix_process_group_module__":posix_helper}
 sys.argv=[scanner_path,*sys.argv[3:]]
 exec(compile(sources["scanner"],scanner_path,"exec"),scanner,scanner)
 '''
@@ -1921,7 +1926,10 @@ def _layout_for_gate(gate: Path) -> tuple[SourceLayout, Path]:
     if len(matches) != 1:
         raise ValueError("layout")
     layout = matches[0]
-    return layout, gate.parent.parent
+    trust_root = gate.parent
+    for _index in range(layout.trust_root_up):
+        trust_root = trust_root.parent
+    return layout, trust_root
 
 
 def _component_paths(trust_root: Path, paths: tuple[Path, ...]) -> tuple[tuple[str, Path], ...]:
@@ -1979,10 +1987,16 @@ def _capture_source_closure() -> tuple[tuple[int, ...], CanonicalSourceClosure]:
     gate = Path(os.path.abspath(__file__))
     layout, trust_root_path = _layout_for_gate(gate)
     parent = gate.parent
+    posix_helper = (
+        gate.parents[2] / "process_supervision" / "posix_process_group.py"
+        if layout.name == "universal"
+        else parent / "process_supervision" / "posix_process_group.py"
+    )
     paths = (
         ("gate", gate),
         ("hook_common", parent / "hook_common.py"),
         ("classifier", parent.parent / "hooks" / "check-machine-local-path.py"),
+        ("posix_helper", posix_helper),
         ("scanner", parent / "check-publication-safety.py"),
     )
     fds: list[int] = []

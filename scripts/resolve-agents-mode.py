@@ -1478,23 +1478,27 @@ def _installed_external_policy_root(
         (
             project_root,
             (".agents", "skills", "lead", "scripts"),
+            "project",
         ),
         (
             home,
             (".agents", "skills", "lead", "scripts"),
+            "global",
         ),
         (
             project_root,
             (".claude", "agents", "scripts"),
+            "project",
         ),
         (
             home,
             (".claude", "agents", "scripts"),
+            "global",
         ),
     )
     selected = [
-        (base, directories)
-        for base, directories in candidates
+        (base, directories, scope)
+        for base, directories, scope in candidates
         if _same_path(
             resolver,
             base.joinpath(*directories, "resolve-agents-mode.py"),
@@ -1503,14 +1507,31 @@ def _installed_external_policy_root(
     if len(selected) != 1:
         raise ValueError("installed external resolver layout is missing or ambiguous")
 
-    base, directories = selected[0]
-    current = base
-    for directory in directories:
-        current /= directory
-        if not _ordinary_directory(current):
-            raise ValueError("installed external resolver layout contains a reparse or missing root")
-
-    policy_root = resolver.parent.parent
+    base, directories, scope = selected[0]
+    logical_policy_root = base.joinpath(*directories[:-1])
+    authority = None
+    if scope == "global":
+        authority = _linked_runtime_subroots_module(
+            resolver
+        ).LinkedRuntimeSubrootAuthority.bind(
+            logical_policy_root,
+            scope=scope,
+            trusted_global_roots=(logical_policy_root,),
+            allow_linked_ancestors=True,
+        )
+    if authority is None:
+        current = base
+        for directory in directories:
+            current /= directory
+            if not _ordinary_directory(current):
+                raise ValueError(
+                    "installed external resolver layout contains a reparse or missing root"
+                )
+        policy_root = logical_policy_root
+    else:
+        policy_root = authority.resolved_root
+        authority.ordinary_file(Path("scripts") / "resolve-agents-mode.py")
+        authority.ordinary_file(Path("shared") / "role-routing-policy.v1.json")
     shared_root = policy_root / "shared"
     policy_path = shared_root / "role-routing-policy.v1.json"
     if (

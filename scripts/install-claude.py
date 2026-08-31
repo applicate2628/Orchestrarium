@@ -1,12 +1,9 @@
 #!/usr/bin/env python3
-import sys
+from pathlib import Path
 
-if sys.version_info < (3, 11):
-    print(
-        "FAIL: Python 3.11 or newer is required to run the Orchestrarium installer.",
-        file=sys.stderr,
-    )
-    raise SystemExit(2)
+from python_installer_bootstrap import ensure_supported_python
+
+ensure_supported_python(str(Path(__file__).resolve()))
 
 from production_installer import install
 

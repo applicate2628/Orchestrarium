@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import ast
+import ctypes
 import hashlib
 import importlib.util
 import json
@@ -419,10 +420,11 @@ def test_validator_runtime_has_one_narrow_posix_process_owner() -> None:
     assert run_calls == []
     keywords = {keyword.arg: keyword.value for keyword in popen_calls[0].keywords}
     assert isinstance(keywords["shell"], ast.Constant) and keywords["shell"].value is False
-    assert (
-        isinstance(keywords["start_new_session"], ast.Constant)
-        and keywords["start_new_session"].value is True
-    )
+    process_group_kwargs = keywords[None]
+    assert isinstance(process_group_kwargs, ast.Attribute)
+    assert isinstance(process_group_kwargs.value, ast.Name)
+    assert process_group_kwargs.value.id == "process_group_owner"
+    assert process_group_kwargs.attr == "popen_kwargs"
     text = RUNTIME.read_text(encoding="utf-8")
     assert "ProcessRunnerV1" in text
     assert "taskkill" not in text.casefold()
@@ -564,16 +566,15 @@ def test_validator_timeout_gets_a_fresh_bounded_cleanup_budget(
     )
     cleanup_budgets: list[float] = []
 
-    def settle(process, timeout_seconds: float) -> bool:
-        cleanup_budgets.append(timeout_seconds)
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        process.wait(timeout=2.0)
-        return True
+    real_settle = runtime.PosixProcessGroupOwnerV1.settle
 
-    monkeypatch.setattr(runtime, "_settle_validator_posix_group", settle)
+    def settle(owner, timeout_seconds: float, *, direct_process=None):
+        cleanup_budgets.append(timeout_seconds)
+        return real_settle(
+            owner, timeout_seconds, direct_process=direct_process
+        )
+
+    monkeypatch.setattr(runtime.PosixProcessGroupOwnerV1, "settle", settle)
 
     result = _validator(runtime)._run_python(child, timeout_seconds=0.1)
 
@@ -607,6 +608,111 @@ def test_validator_settles_descendant_after_parent_exits(tmp_path: Path) -> None
     assert result.resources_closed
     assert result.tree_empty
     assert result.direct_reaped
+
+
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"), reason="Linux child-subreaper contract"
+)
+def test_validator_reaps_sigterm_ignoring_descendant_after_parent_exits(
+    tmp_path: Path,
+) -> None:
+    libc = ctypes.CDLL(None, use_errno=True)
+    prior = ctypes.c_int()
+    assert libc.prctl(37, ctypes.byref(prior), 0, 0, 0) == 0
+    assert libc.prctl(36, 1, 0, 0, 0) == 0
+    process_group: int | None = None
+    descendant_pid: int | None = None
+    runtime = _load(RUNTIME, "validator_exited_parent_ignoring_descendant")
+    ready = tmp_path / "descendant.ready"
+    parent = _write_python(
+        tmp_path,
+        "exited_parent_ignoring_descendant.py",
+        "import os, pathlib, subprocess, sys, time\n"
+        "code = \"import os, pathlib, signal, sys, time\\n"
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN)\\n"
+        "for descriptor in (0, 1, 2):\\n"
+        "    try: os.close(descriptor)\\n"
+        "    except OSError: pass\\n"
+        "pathlib.Path(sys.argv[1]).write_text('ready', encoding='ascii')\\n"
+        "time.sleep(60)\"\n"
+        "child = subprocess.Popen([sys.executable, '-c', code, sys.argv[1]])\n"
+        "deadline = time.monotonic() + 5.0\n"
+        "while not pathlib.Path(sys.argv[1]).is_file():\n"
+        "    if time.monotonic() >= deadline: raise RuntimeError('descendant not ready')\n"
+        "    time.sleep(0.01)\n"
+        "print(f'GROUP={os.getpid()} DESCENDANT={child.pid}', flush=True)\n",
+    )
+
+    try:
+        result = _validator(runtime)._run_python(
+            parent, str(ready), timeout_seconds=1.0
+        )
+        match = re.search(r"GROUP=(\d+) DESCENDANT=(\d+)", result.stdout)
+        assert match is not None
+        process_group, descendant_pid = map(int, match.groups())
+        assert result.failure_id is None
+        assert result.resources_closed
+        assert result.tree_empty
+        assert result.direct_reaped
+        assert not Path(f"/proc/{descendant_pid}").exists()
+    finally:
+        if process_group is not None:
+            try:
+                os.killpg(process_group, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            while True:
+                try:
+                    reaped_pid, _status = os.waitpid(-process_group, os.WNOHANG)
+                except ChildProcessError:
+                    break
+                if reaped_pid == 0:
+                    break
+        assert libc.prctl(36, prior.value, 0, 0, 0) == 0
+
+
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"), reason="Linux child-subreaper contract"
+)
+def test_validator_spawn_baseexception_restores_shared_owner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = _load(RUNTIME, "validator_spawn_baseexception")
+    libc = ctypes.CDLL(None, use_errno=True)
+    prior = ctypes.c_int()
+    assert libc.prctl(37, ctypes.byref(prior), 0, 0, 0) == 0
+
+    class InjectedBaseException(BaseException):
+        pass
+
+    monkeypatch.setattr(
+        runtime.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(InjectedBaseException()),
+    )
+    observed_locked = False
+    observed_state = -1
+    try:
+        with pytest.raises(InjectedBaseException):
+            runtime._run_validator_posix_python(
+                (sys.executable, "-c", "pass"),
+                str(tmp_path),
+                runtime.validator_environment_rows(),
+                1.0,
+                runtime.ValidatorCapturePolicyV1(),
+            )
+        observed_locked = runtime._POSIX_PROCESS_GROUP._LINUX_SUBREAPER_LOCK.locked()
+        current = ctypes.c_int()
+        assert libc.prctl(37, ctypes.byref(current), 0, 0, 0) == 0
+        observed_state = current.value
+    finally:
+        assert libc.prctl(36, prior.value, 0, 0, 0) == 0
+        lock = runtime._POSIX_PROCESS_GROUP._LINUX_SUBREAPER_LOCK
+        if lock.locked():
+            lock.release()
+
+    assert not observed_locked
+    assert observed_state == prior.value
 
 
 def test_validator_process_adapter_reaps_output_retaining_grandchild(

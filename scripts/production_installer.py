@@ -14,7 +14,6 @@ import os
 import re
 import selectors
 import shutil
-import signal
 import stat
 import subprocess
 import sys
@@ -31,6 +30,60 @@ except ModuleNotFoundError:
     from scripts.provider_prompt import enroll_kimi_executable, replace_kimi_enrollment
 
 
+_POSIX_PROCESS_GROUP_CONTRACT_V1 = "orchestrarium.posix-process-group.module.v1"
+
+
+def _valid_posix_process_group_module(module: object) -> bool:
+    try:
+        marker = getattr(module, "POSIX_PROCESS_GROUP_MODULE_CONTRACT_V1")
+        contract = getattr(module, "posix_process_group_module_contract_v1")
+        owner_type = getattr(module, "PosixProcessGroupOwnerV1")
+        error_type = getattr(module, "PosixProcessGroupError")
+        returned = contract()
+    except BaseException:
+        return False
+    return (
+        marker == _POSIX_PROCESS_GROUP_CONTRACT_V1
+        and returned == (marker, owner_type, error_type)
+        and isinstance(owner_type, type)
+        and isinstance(error_type, type)
+        and issubclass(error_type, RuntimeError)
+    )
+
+
+def _load_posix_process_group_module():
+    module_name = "_orchestrarium_posix_process_group_v1"
+    path = (
+        Path(__file__).resolve().parent
+        / "process_supervision"
+        / "posix_process_group.py"
+    )
+    existing = sys.modules.get(module_name)
+    if existing is not None:
+        if not _valid_posix_process_group_module(existing):
+            raise RuntimeError("posix-process-group-v1-identity-mismatch")
+        return existing
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("posix-process-group-v1-unavailable")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    try:
+        spec.loader.exec_module(module)
+    except BaseException:
+        sys.modules.pop(module_name, None)
+        raise
+    if not _valid_posix_process_group_module(module):
+        sys.modules.pop(module_name, None)
+        raise RuntimeError("posix-process-group-v1-identity-mismatch")
+    return module
+
+
+_POSIX_PROCESS_GROUP = _load_posix_process_group_module()
+PosixProcessGroupError = _POSIX_PROCESS_GROUP.PosixProcessGroupError
+PosixProcessGroupOwnerV1 = _POSIX_PROCESS_GROUP.PosixProcessGroupOwnerV1
+
+
 CODEX_BEGIN = "<!-- BEGIN ORCHESTRARIUM CODEX PACK -->"
 CODEX_END = "<!-- END ORCHESTRARIUM CODEX PACK -->"
 RUNTIME_HELPERS = (
@@ -41,6 +94,7 @@ RUNTIME_HELPERS = (
     "check-work-items-state.sh",
     "mutate-work-item.py",
     "provider_prompt.py",
+    "process_supervision/posix_process_group.py",
     "process_supervision/process_runner.py",
     "invoke-codex-prompt.py",
     "invoke-claude-prompt.py",
@@ -4260,58 +4314,6 @@ def _write_parent_stdout(payload: bytes) -> None:
     binary.flush()
 
 
-def _posix_process_group_exists(process_group: int) -> bool:
-    try:
-        os.killpg(process_group, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
-
-
-def _settle_posix_hook_health_group(
-    process: subprocess.Popen[bytes],
-    process_group: int,
-    deadline: float,
-) -> None:
-    """Terminate, kill if needed, and observe one private POSIX group empty."""
-
-    if process.poll() is not None:
-        process.wait()
-    remaining = max(0.0, deadline - time.monotonic())
-    terminate_deadline = time.monotonic() + (remaining / 2.0)
-    if _posix_process_group_exists(process_group):
-        try:
-            os.killpg(process_group, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-    while time.monotonic() < terminate_deadline:
-        if process.poll() is None:
-            try:
-                process.wait(timeout=min(0.05, terminate_deadline - time.monotonic()))
-            except subprocess.TimeoutExpired:
-                pass
-        if not _posix_process_group_exists(process_group):
-            return
-        time.sleep(0.01)
-    if _posix_process_group_exists(process_group):
-        try:
-            os.killpg(process_group, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-    while time.monotonic() < deadline:
-        if process.poll() is None:
-            try:
-                process.wait(timeout=min(0.05, deadline - time.monotonic()))
-            except subprocess.TimeoutExpired:
-                pass
-        if not _posix_process_group_exists(process_group):
-            return
-        time.sleep(0.01)
-    raise _hook_health_failure("POSIX hook-health process group did not settle")
-
-
 def _run_posix_hook_health_child(
     arguments: list[str],
     cwd: Path,
@@ -4343,10 +4345,11 @@ def _run_posix_hook_health_child(
         raise _hook_health_failure("hook-health cwd is invalid")
     argv = (str(executable), str(candidate), *arguments[1:])
     process: subprocess.Popen[bytes] | None = None
-    process_group: int | None = None
+    process_group_owner: PosixProcessGroupOwnerV1 | None = None
     stderr_probe = bytearray()
     execution_deadline = deadline - _HOOK_HEALTH_SETTLEMENT_RESERVE_SECONDS
     try:
+        process_group_owner = PosixProcessGroupOwnerV1.acquire()
         process = subprocess.Popen(
             argv,
             cwd=str(canonical_cwd),
@@ -4356,9 +4359,9 @@ def _run_posix_hook_health_child(
             stderr=subprocess.PIPE,
             close_fds=True,
             shell=False,
-            start_new_session=True,
+            **process_group_owner.popen_kwargs,
         )
-        process_group = process.pid
+        process_group_owner.bind_process_group(process.pid)
         assert process.stderr is not None
         stderr_eof = False
         with selectors.DefaultSelector() as selector:
@@ -4382,9 +4385,20 @@ def _run_posix_hook_health_child(
                         selector.unregister(key.fileobj)
                         stderr_eof = True
             returncode = process.wait()
-            tree_was_not_empty = _posix_process_group_exists(process_group)
-            _settle_posix_hook_health_group(process, process_group, deadline)
-            if tree_was_not_empty:
+            try:
+                closure = process_group_owner.settle(
+                    _HOOK_HEALTH_SETTLEMENT_RESERVE_SECONDS,
+                    direct_process=process,
+                )
+            except PosixProcessGroupError as exc:
+                raise _hook_health_failure(
+                    "POSIX hook-health process group did not settle"
+                ) from exc
+            if not closure.complete:
+                raise _hook_health_failure(
+                    "POSIX hook-health process group did not settle"
+                )
+            if closure.group_was_present:
                 raise _hook_health_failure("PSV1-TREE-NOT-EMPTY")
             while not stderr_eof:
                 remaining = deadline - time.monotonic()
@@ -4415,12 +4429,23 @@ def _run_posix_hook_health_child(
             os.fstat(spool.fileno()).st_size,
         )
     finally:
-        if process is not None and process_group is not None:
-            cleanup_deadline = max(
-                deadline,
-                time.monotonic() + _HOOK_HEALTH_SETTLEMENT_RESERVE_SECONDS,
-            )
-            _settle_posix_hook_health_group(process, process_group, cleanup_deadline)
+        if process_group_owner is not None:
+            try:
+                if process is None:
+                    process_group_owner.close()
+                else:
+                    closure = process_group_owner.settle(
+                        _HOOK_HEALTH_SETTLEMENT_RESERVE_SECONDS,
+                        direct_process=process,
+                    )
+                    if not closure.complete:
+                        raise _hook_health_failure(
+                            "POSIX hook-health process group did not settle"
+                        )
+            except PosixProcessGroupError as exc:
+                raise _hook_health_failure(
+                    "POSIX hook-health process group did not settle"
+                ) from exc
         if process is not None and process.stderr is not None:
             process.stderr.close()
 

@@ -10,7 +10,6 @@ import math
 import os
 import re
 import selectors
-import signal
 import subprocess
 import sys
 import tempfile
@@ -45,6 +44,60 @@ EnvironmentRowV1 = _PROCESS_RUNNER.EnvironmentRowV1
 ProcessRequestV1 = _PROCESS_RUNNER.ProcessRequestV1
 ProcessRunnerV1 = _PROCESS_RUNNER.ProcessRunnerV1
 SettlePolicyV1 = _PROCESS_RUNNER.SettlePolicyV1
+
+
+_POSIX_PROCESS_GROUP_CONTRACT_V1 = "orchestrarium.posix-process-group.module.v1"
+
+
+def _valid_posix_process_group_module(module: object) -> bool:
+    try:
+        marker = getattr(module, "POSIX_PROCESS_GROUP_MODULE_CONTRACT_V1")
+        contract = getattr(module, "posix_process_group_module_contract_v1")
+        owner_type = getattr(module, "PosixProcessGroupOwnerV1")
+        error_type = getattr(module, "PosixProcessGroupError")
+        returned = contract()
+    except BaseException:
+        return False
+    return (
+        marker == _POSIX_PROCESS_GROUP_CONTRACT_V1
+        and returned == (marker, owner_type, error_type)
+        and isinstance(owner_type, type)
+        and isinstance(error_type, type)
+        and issubclass(error_type, RuntimeError)
+    )
+
+
+def _load_posix_process_group_module():
+    module_name = "_orchestrarium_posix_process_group_v1"
+    path = (
+        Path(__file__).resolve().parent
+        / "process_supervision"
+        / "posix_process_group.py"
+    )
+    existing = sys.modules.get(module_name)
+    if existing is not None:
+        if not _valid_posix_process_group_module(existing):
+            raise RuntimeError("posix-process-group-v1-identity-mismatch")
+        return existing
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("posix-process-group-v1-unavailable")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    try:
+        spec.loader.exec_module(module)
+    except BaseException:
+        sys.modules.pop(module_name, None)
+        raise
+    if not _valid_posix_process_group_module(module):
+        sys.modules.pop(module_name, None)
+        raise RuntimeError("posix-process-group-v1-identity-mismatch")
+    return module
+
+
+_POSIX_PROCESS_GROUP = _load_posix_process_group_module()
+PosixProcessGroupError = _POSIX_PROCESS_GROUP.PosixProcessGroupError
+PosixProcessGroupOwnerV1 = _POSIX_PROCESS_GROUP.PosixProcessGroupOwnerV1
 
 
 VALIDATOR_CHILD_TIMEOUT_SECONDS = 120.0
@@ -169,64 +222,6 @@ def validator_environment_rows() -> tuple[EnvironmentRowV1, ...]:
     )
 
 
-def _validator_posix_group_exists(process_group: int) -> bool:
-    try:
-        os.killpg(process_group, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
-
-
-def _settle_validator_posix_group(
-    process: subprocess.Popen[bytes], timeout_seconds: float
-) -> bool:
-    """Terminate and observe only the validator child's private process group."""
-
-    process_group = process.pid
-    deadline = time.monotonic() + timeout_seconds
-    if process.poll() is not None:
-        process.wait()
-    graceful_deadline = min(deadline, time.monotonic() + 0.25)
-    if _validator_posix_group_exists(process_group):
-        try:
-            os.killpg(process_group, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-    while time.monotonic() < graceful_deadline:
-        if process.poll() is None:
-            try:
-                process.wait(
-                    timeout=max(
-                        0.001,
-                        min(0.05, graceful_deadline - time.monotonic()),
-                    )
-                )
-            except subprocess.TimeoutExpired:
-                pass
-        if not _validator_posix_group_exists(process_group):
-            return process.poll() is not None
-        time.sleep(0.01)
-    if _validator_posix_group_exists(process_group):
-        try:
-            os.killpg(process_group, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-    while time.monotonic() < deadline:
-        if process.poll() is None:
-            try:
-                process.wait(
-                    timeout=max(0.001, min(0.05, deadline - time.monotonic()))
-                )
-            except subprocess.TimeoutExpired:
-                pass
-        if not _validator_posix_group_exists(process_group):
-            return process.poll() is not None
-        time.sleep(0.01)
-    return False
-
-
 def _run_validator_posix_python(
     argv: tuple[str, ...],
     cwd: str,
@@ -244,11 +239,13 @@ def _run_validator_posix_python(
     tree_empty = True
     resources_closed = True
     process: subprocess.Popen[bytes] | None = None
+    process_group_owner: PosixProcessGroupOwnerV1 | None = None
     selector: selectors.BaseSelector | None = None
     streams: dict[object, str] = {}
     execution_deadline = time.monotonic() + deadline_seconds
     env = {row.name: row.value for row in environment}
     try:
+        process_group_owner = PosixProcessGroupOwnerV1.acquire()
         process = subprocess.Popen(
             argv,
             executable=argv[0],
@@ -259,10 +256,18 @@ def _run_validator_posix_python(
             stderr=subprocess.PIPE,
             close_fds=True,
             shell=False,
-            start_new_session=True,
+            **process_group_owner.popen_kwargs,
             bufsize=0,
         )
-    except (OSError, ValueError):
+        process_group_owner.bind_process_group(process.pid)
+    except BaseException as exc:
+        if process_group_owner is not None:
+            try:
+                process_group_owner.close()
+            except PosixProcessGroupError:
+                pass
+        if not isinstance(exc, (OSError, ValueError, PosixProcessGroupError)):
+            raise
         return ValidatorProcessResultV1(
             returncode=1,
             stdout="",
@@ -320,9 +325,15 @@ def _run_validator_posix_python(
     except (OSError, ValueError):
         failure_id = "PSV1-CAPTURE-IO"
     finally:
-        tree_empty = _settle_validator_posix_group(
-            process, VALIDATOR_SETTLEMENT_TIMEOUT_SECONDS
-        )
+        assert process_group_owner is not None
+        try:
+            closure = process_group_owner.settle(
+                VALIDATOR_SETTLEMENT_TIMEOUT_SECONDS,
+                direct_process=process,
+            )
+            tree_empty = closure.complete
+        except PosixProcessGroupError:
+            tree_empty = False
         if not tree_empty:
             failure_id = "PSV1-TREE-SETTLEMENT"
         if selector is not None:

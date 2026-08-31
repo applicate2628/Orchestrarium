@@ -7,11 +7,12 @@ import asyncio
 from collections import Counter
 from enum import Enum
 import hashlib
+import importlib.util
 import os
 import re
-import signal
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -19,6 +20,111 @@ from typing import Callable, Iterable
 from urllib.parse import quote
 
 _GIT_EXECUTABLE = globals().get("__injected_git_executable__", "git")
+
+
+_POSIX_PROCESS_GROUP_CONTRACT_V1 = "orchestrarium.posix-process-group.module.v1"
+
+
+def _valid_posix_process_group_module(module: object) -> bool:
+    try:
+        marker = getattr(module, "POSIX_PROCESS_GROUP_MODULE_CONTRACT_V1")
+        contract = getattr(module, "posix_process_group_module_contract_v1")
+        owner_type = getattr(module, "PosixProcessGroupOwnerV1")
+        error_type = getattr(module, "PosixProcessGroupError")
+        returned = contract()
+    except BaseException:
+        return False
+    return (
+        marker == _POSIX_PROCESS_GROUP_CONTRACT_V1
+        and returned == (marker, owner_type, error_type)
+        and isinstance(owner_type, type)
+        and isinstance(error_type, type)
+        and issubclass(error_type, RuntimeError)
+    )
+
+
+def _load_posix_process_group_module():
+    module_name = "_orchestrarium_posix_process_group_v1"
+    injected = globals().get("__injected_posix_process_group_module__")
+    if injected is not None:
+        if (
+            getattr(injected, "__name__", None) != module_name
+            or getattr(injected, "__file__", None)
+            != "<closure>/process_supervision/posix_process_group.py"
+            or sys.modules.get(module_name) is not injected
+            or tuple(getattr(injected, "__all__", ()))
+            != (
+                "PosixProcessGroupClosureV1",
+                "PosixProcessGroupError",
+                "PosixProcessGroupOwnerV1",
+            )
+            or not _valid_posix_process_group_module(injected)
+        ):
+            raise RuntimeError("POSIX process-group injected contract mismatch")
+        return injected
+    script = Path(__file__).resolve()
+    candidates = [
+        script.parent / "process_supervision" / "posix_process_group.py"
+    ]
+    if (
+        script.parent.name == "scripts"
+        and script.parent.parent.name == "universal-hooks"
+    ):
+        candidates.append(
+            script.parents[2]
+            / "process_supervision"
+            / "posix_process_group.py"
+        )
+    elif (
+        script.parents[0].name == "scripts"
+        and script.parents[1].name == "lead"
+        and script.parents[2].name == "skills"
+        and script.parents[3].name == "src.codex"
+    ):
+        candidates.append(
+            script.parents[4]
+            / "scripts"
+            / "process_supervision"
+            / "posix_process_group.py"
+        )
+    elif (
+        script.parents[0].name == "scripts"
+        and script.parents[1].name == "agents"
+        and script.parents[2].name == "src.claude"
+    ):
+        candidates.append(
+            script.parents[3]
+            / "scripts"
+            / "process_supervision"
+            / "posix_process_group.py"
+        )
+    available = tuple(path for path in candidates if path.is_file())
+    if len(available) != 1:
+        raise RuntimeError("POSIX process-group helper unavailable or ambiguous")
+    existing = sys.modules.get(module_name)
+    if existing is not None:
+        if not _valid_posix_process_group_module(existing):
+            raise RuntimeError("POSIX process-group helper identity mismatch")
+        return existing
+    spec = importlib.util.spec_from_file_location(module_name, available[0])
+    if spec is None or spec.loader is None:
+        raise RuntimeError("POSIX process-group helper unavailable or ambiguous")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    try:
+        spec.loader.exec_module(module)
+    except BaseException:
+        sys.modules.pop(module_name, None)
+        raise
+    if not _valid_posix_process_group_module(module):
+        sys.modules.pop(module_name, None)
+        raise RuntimeError("POSIX process-group helper identity mismatch")
+    return module
+
+
+_POSIX_PROCESS_GROUP = _load_posix_process_group_module()
+PosixProcessGroupError = _POSIX_PROCESS_GROUP.PosixProcessGroupError
+PosixProcessGroupOwnerV1 = _POSIX_PROCESS_GROUP.PosixProcessGroupOwnerV1
 
 
 _SCANNER_EXEMPT_PATHS = frozenset({
@@ -448,9 +554,7 @@ def _run_git(
 
 def _owned_process_group_kwargs() -> dict[str, object]:
     """Create one independently addressable process tree for a bounded child."""
-    if os.name == "nt":
-        return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
-    return {"start_new_session": True}
+    return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
 
 
 def _windows_process_rows() -> tuple[tuple[int, int], ...] | None:
@@ -558,14 +662,6 @@ class _OwnedProcessSettlement:
         }
 
     def terminate(self, deadline: float) -> bool:
-        if os.name != "nt":
-            try:
-                os.killpg(self.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                return True
-            except OSError:
-                return False
-            return True
         live = self._windows_live_members()
         if live is None:
             return False
@@ -578,19 +674,11 @@ class _OwnedProcessSettlement:
 
     def verify_empty(self, deadline: float) -> bool:
         while True:
-            if os.name != "nt":
-                try:
-                    os.killpg(self.pid, 0)
-                except ProcessLookupError:
-                    return True
-                except OSError:
-                    return False
-            else:
-                live = self._windows_live_members()
-                if live is None:
-                    return False
-                if not live:
-                    return True
+            live = self._windows_live_members()
+            if live is None:
+                return False
+            if not live:
+                return True
             if time.monotonic() >= deadline:
                 return False
             if not self.terminate(deadline):
@@ -606,43 +694,83 @@ def _run_owned_process(
     env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess:
     """Run a bounded process and settle its whole owned tree on timeout."""
-    process = subprocess.Popen(
-        argv,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=text,
-        encoding="utf-8" if text else None,
-        errors="replace" if text else None,
-        env=env,
-        **_owned_process_group_kwargs(),
-    )
+    process_group_owner: PosixProcessGroupOwnerV1 | None = None
+    try:
+        process_kwargs: dict[str, object]
+        if os.name == "nt":
+            process_kwargs = _owned_process_group_kwargs()
+        else:
+            process_group_owner = PosixProcessGroupOwnerV1.acquire()
+            process_kwargs = process_group_owner.popen_kwargs
+        process = subprocess.Popen(
+            argv,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=text,
+            encoding="utf-8" if text else None,
+            errors="replace" if text else None,
+            env=env,
+            **process_kwargs,
+        )
+        if process_group_owner is not None:
+            process_group_owner.bind_process_group(process.pid)
+    except BaseException:
+        if process_group_owner is not None:
+            try:
+                process_group_owner.close()
+            except PosixProcessGroupError:
+                pass
+        raise
     expired: subprocess.TimeoutExpired | None = None
+    pending_error: BaseException | None = None
     try:
         stdout, stderr = process.communicate(timeout=timeout)
     except subprocess.TimeoutExpired as exc:
         expired = exc
         stdout, stderr = None, None
+    except BaseException as exc:
+        pending_error = exc
+        stdout, stderr = None, None
     cleanup_deadline = time.monotonic() + _PROCESS_TREE_CLEANUP_SECONDS
-    settlement = _OwnedProcessSettlement(process.pid)
-    termination_started = settlement.terminate(cleanup_deadline)
-    if process.poll() is None:
+    if os.name == "nt":
+        settlement = _OwnedProcessSettlement(process.pid)
+        termination_started = settlement.terminate(cleanup_deadline)
+        if process.poll() is None:
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
         try:
-            process.kill()
-        except ProcessLookupError:
-            pass
-    try:
-        remaining = max(0.0, cleanup_deadline - time.monotonic())
-        stdout, stderr = process.communicate(timeout=remaining)
-    except subprocess.TimeoutExpired:
-        termination_started = False
-    group_settled = (
-        termination_started
-        and process.poll() is not None
-        and settlement.verify_empty(cleanup_deadline)
-    )
+            remaining = max(0.0, cleanup_deadline - time.monotonic())
+            stdout, stderr = process.communicate(timeout=remaining)
+        except subprocess.TimeoutExpired:
+            termination_started = False
+        group_settled = (
+            termination_started
+            and process.poll() is not None
+            and settlement.verify_empty(cleanup_deadline)
+        )
+    else:
+        assert process_group_owner is not None
+        try:
+            closure = process_group_owner.settle(
+                _PROCESS_TREE_CLEANUP_SECONDS,
+                direct_process=process,
+            )
+            group_settled = closure.complete
+        except PosixProcessGroupError:
+            group_settled = False
+        if group_settled:
+            try:
+                remaining = max(0.0, cleanup_deadline - time.monotonic())
+                stdout, stderr = process.communicate(timeout=remaining)
+            except (subprocess.TimeoutExpired, OSError, ValueError):
+                group_settled = False
     if not group_settled:
         raise RuntimeError("owned process group did not settle")
+    if pending_error is not None:
+        raise pending_error
     if expired is not None:
         raise subprocess.TimeoutExpired(
             expired.cmd, expired.timeout, output=stdout, stderr=stderr
@@ -666,31 +794,178 @@ def _run_range_git(
     )
 
 
+async def _acquire_posix_process_group_owner() -> PosixProcessGroupOwnerV1:
+    task = asyncio.create_task(
+        asyncio.to_thread(PosixProcessGroupOwnerV1.acquire)
+    )
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        owner = await task
+        await asyncio.to_thread(owner.close)
+        raise
+
+
+class _AsyncioDirectProcessObservation:
+    """Passive thread-safe observation of asyncio's exclusive direct-child reap."""
+
+    def __init__(self, process: asyncio.subprocess.Process) -> None:
+        self._process = process
+        self._terminal = threading.Event()
+        self._returncode: int | None = None
+        self._task = asyncio.create_task(self._observe())
+
+    async def _observe(self) -> int:
+        returncode = await self._process.wait()
+        self._returncode = returncode
+        self._terminal.set()
+        return returncode
+
+    @property
+    def task(self) -> asyncio.Task[int]:
+        return self._task
+
+    def poll(self) -> int | None:
+        return self._returncode if self._terminal.is_set() else None
+
+    def wait(self, timeout: float | None = None) -> int:
+        if not self._terminal.wait(timeout):
+            raise subprocess.TimeoutExpired(("asyncio-direct-child",), timeout)
+        assert self._returncode is not None
+        return self._returncode
+
+
+async def _create_owned_async_process(
+    argv: tuple[str, ...],
+    **kwargs,
+) -> tuple[
+    asyncio.subprocess.Process,
+    PosixProcessGroupOwnerV1 | None,
+    _AsyncioDirectProcessObservation | None,
+]:
+    process_group_owner: PosixProcessGroupOwnerV1 | None = None
+    direct_observation: _AsyncioDirectProcessObservation | None = None
+    process_kwargs: dict[str, object]
+    if os.name == "nt":
+        process_kwargs = _owned_process_group_kwargs()
+    else:
+        process_group_owner = await _acquire_posix_process_group_owner()
+        process_kwargs = process_group_owner.popen_kwargs
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *argv, **kwargs, **process_kwargs
+        )
+        if process_group_owner is not None:
+            process_group_owner.bind_process_group(process.pid)
+            direct_observation = _AsyncioDirectProcessObservation(process)
+        return process, process_group_owner, direct_observation
+    except BaseException:
+        if process_group_owner is not None:
+            try:
+                await asyncio.to_thread(process_group_owner.close)
+            except PosixProcessGroupError:
+                pass
+        raise
+
+
+async def _drain_owned_async_reader(
+    reader: asyncio.StreamReader | None,
+    deadline: float,
+) -> bool:
+    if reader is None:
+        return True
+    try:
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return False
+            chunk = await asyncio.wait_for(
+                reader.read(_READ_CHUNK_BYTES), timeout=remaining
+            )
+            if not chunk:
+                return True
+    except (asyncio.TimeoutError, OSError, ValueError):
+        return False
+
+
+async def _wait_owned_async_direct(
+    process: asyncio.subprocess.Process,
+    direct_observation: _AsyncioDirectProcessObservation | None,
+    timeout: float,
+) -> int:
+    if os.name == "nt":
+        return await asyncio.wait_for(process.wait(), timeout=timeout)
+    if direct_observation is None:
+        raise RuntimeError("POSIX direct-process observation is unavailable")
+    return await asyncio.wait_for(
+        asyncio.shield(direct_observation.task), timeout=timeout
+    )
+
+
 async def _settle_owned_async_process(
     process: asyncio.subprocess.Process,
+    process_group_owner: PosixProcessGroupOwnerV1 | None,
+    direct_observation: _AsyncioDirectProcessObservation | None,
+    timeout_seconds: float = _PROCESS_TREE_CLEANUP_SECONDS,
+    *,
+    drain_readers: tuple[asyncio.StreamReader | None, ...] = (),
 ) -> bool:
-    cleanup_deadline = time.monotonic() + _PROCESS_TREE_CLEANUP_SECONDS
-    settlement = _OwnedProcessSettlement(process.pid)
-    termination_started = await asyncio.to_thread(
-        settlement.terminate, cleanup_deadline
-    )
-    if process.returncode is None:
-        try:
-            process.kill()
-        except ProcessLookupError:
-            pass
-    try:
-        remaining = max(0.0, cleanup_deadline - time.monotonic())
-        await asyncio.wait_for(
-            process.wait(), timeout=remaining
+    cleanup_deadline = time.monotonic() + timeout_seconds
+    if os.name == "nt":
+        settlement = _OwnedProcessSettlement(process.pid)
+        termination_started = await asyncio.to_thread(
+            settlement.terminate, cleanup_deadline
         )
-    except Exception:
+        if process.returncode is None:
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
+        try:
+            remaining = max(0.0, cleanup_deadline - time.monotonic())
+            await asyncio.wait_for(process.wait(), timeout=remaining)
+        except Exception:
+            return False
+        if not termination_started or process.returncode is None:
+            return False
+        return await asyncio.to_thread(
+            settlement.verify_empty, cleanup_deadline
+        )
+
+    if process_group_owner is None or direct_observation is None:
         return False
-    if not termination_started or process.returncode is None:
-        return False
-    return await asyncio.to_thread(
-        settlement.verify_empty, cleanup_deadline
+    remaining = max(0.000001, cleanup_deadline - time.monotonic())
+    settle_task = asyncio.create_task(
+        asyncio.to_thread(
+            process_group_owner.settle,
+            remaining,
+            direct_process=direct_observation,
+        )
     )
+    cancelled: asyncio.CancelledError | None = None
+    try:
+        closure = await asyncio.shield(settle_task)
+    except asyncio.CancelledError as exc:
+        cancelled = exc
+        closure = await settle_task
+    except PosixProcessGroupError:
+        return False
+    drained = True
+    for reader in drain_readers:
+        if not await _drain_owned_async_reader(reader, cleanup_deadline):
+            drained = False
+    observed_returncode = direct_observation.poll()
+    complete = (
+        closure.complete
+        and closure.lock_released
+        and observed_returncode is not None
+        and process.returncode == observed_returncode
+        and direct_observation.task.done()
+        and drained
+    )
+    if cancelled is not None:
+        raise cancelled
+    return complete
 
 
 def _repo_root() -> Path:
@@ -915,19 +1190,26 @@ async def _read_git_lines_bounded(
     accepted_codes: frozenset[int],
     env: dict[str, str] | None = None,
 ) -> tuple[int, tuple[bytes, ...]] | Refusal:
+    process_group_owner: PosixProcessGroupOwnerV1 | None = None
+    direct_observation: _AsyncioDirectProcessObservation | None = None
     try:
-        process = await asyncio.create_subprocess_exec(
-            *argv,
+        (
+            process,
+            process_group_owner,
+            direct_observation,
+        ) = await _create_owned_async_process(
+            argv,
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
             env=env,
-            **_owned_process_group_kwargs(),
         )
     except (OSError, subprocess.SubprocessError):
         return _refusal("PS-MSG-SPAWN", "selection")
     if process.stdout is None:
-        if not await _settle_owned_async_process(process):
+        if not await _settle_owned_async_process(
+            process, process_group_owner, direct_observation
+        ):
             return _refusal("PS-MSG-REAP", "selection-child")
         return _refusal("PS-MSG-READ", "selection-pipe")
 
@@ -983,16 +1265,20 @@ async def _read_git_lines_bounded(
             refusal = _refusal("PS-MSG-READ-TIMEOUT", "deadline")
         else:
             try:
-                await asyncio.wait_for(process.wait(), timeout=remaining)
+                await _wait_owned_async_direct(
+                    process, direct_observation, remaining
+                )
             except asyncio.TimeoutError:
                 refusal = _refusal("PS-MSG-READ-TIMEOUT", "deadline")
             except Exception:
                 refusal = _refusal("PS-MSG-READ", "selection-wait")
 
-    if process.returncode is None:
-        if not await _settle_owned_async_process(process):
-            return _refusal("PS-MSG-REAP", "selection-child")
-    if process.returncode is None:
+    if not await _settle_owned_async_process(
+        process,
+        process_group_owner,
+        direct_observation,
+        drain_readers=(process.stdout,),
+    ):
         return _refusal("PS-MSG-REAP", "selection-child")
     if refusal is not None:
         return refusal
@@ -1133,18 +1419,25 @@ async def _read_git_oid_lines_bounded(
     deadline: float,
     object_format: GitObjectFormat = _SHA1_OBJECT_FORMAT,
 ) -> tuple[str, ...] | Refusal:
+    process_group_owner: PosixProcessGroupOwnerV1 | None = None
+    direct_observation: _AsyncioDirectProcessObservation | None = None
     try:
-        process = await asyncio.create_subprocess_exec(
-            *argv,
+        (
+            process,
+            process_group_owner,
+            direct_observation,
+        ) = await _create_owned_async_process(
+            argv,
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
-            **_owned_process_group_kwargs(),
         )
     except (OSError, subprocess.SubprocessError):
         return _refusal("PS-MSG-SPAWN", "selection")
     if process.stdout is None:
-        if not await _settle_owned_async_process(process):
+        if not await _settle_owned_async_process(
+            process, process_group_owner, direct_observation
+        ):
             return _refusal("PS-MSG-REAP", "selection-child")
         return _refusal("PS-MSG-READ", "selection-pipe")
 
@@ -1211,16 +1504,20 @@ async def _read_git_oid_lines_bounded(
             refusal = _refusal("PS-MSG-READ-TIMEOUT", "deadline")
         else:
             try:
-                await asyncio.wait_for(process.wait(), timeout=remaining)
+                await _wait_owned_async_direct(
+                    process, direct_observation, remaining
+                )
             except asyncio.TimeoutError:
                 refusal = _refusal("PS-MSG-READ-TIMEOUT", "deadline")
             except Exception:
                 refusal = _refusal("PS-MSG-READ", "selection-wait")
 
-    if process.returncode is None:
-        if not await _settle_owned_async_process(process):
-            return _refusal("PS-MSG-REAP", "selection-child")
-    if process.returncode is None:
+    if not await _settle_owned_async_process(
+        process,
+        process_group_owner,
+        direct_observation,
+        drain_readers=(process.stdout,),
+    ):
         return _refusal("PS-MSG-REAP", "selection-child")
     if refusal is not None:
         return refusal
@@ -1396,6 +1693,8 @@ class _AsyncGitObjectReader:
         self._request_timeout = request_timeout
         self._settle_timeout = settle_timeout
         self._process: asyncio.subprocess.Process | None = None
+        self._process_group_owner: PosixProcessGroupOwnerV1 | None = None
+        self._direct_observation: _AsyncioDirectProcessObservation | None = None
         self._poisoned = False
         self._state = ReaderState.CREATED
         self._finalizer_task: asyncio.Task[_ReaderFinalizerResult] | None = None
@@ -1423,12 +1722,15 @@ class _AsyncGitObjectReader:
         if self._process is not None or self._state is not ReaderState.CREATED:
             return _refusal("PS-MSG-READ", "reader-state")
         try:
-            self._process = await asyncio.create_subprocess_exec(
-                *self._argv,
+            (
+                self._process,
+                self._process_group_owner,
+                self._direct_observation,
+            ) = await _create_owned_async_process(
+                self._argv,
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
-                **_owned_process_group_kwargs(),
             )
         except (OSError, subprocess.SubprocessError):
             self._state = ReaderState.SPAWN_FAILED
@@ -1517,7 +1819,15 @@ class _AsyncGitObjectReader:
         if process is None:
             return True
         try:
-            await self._within(process.wait(), deadline)
+            if os.name == "nt":
+                await self._within(process.wait(), deadline)
+            else:
+                if self._direct_observation is None:
+                    errors.append(phase)
+                    return False
+                await self._within(
+                    asyncio.shield(self._direct_observation.task), deadline
+                )
             return process.returncode is not None
         except asyncio.TimeoutError:
             return False
@@ -1566,16 +1876,24 @@ class _AsyncGitObjectReader:
             None,
             loop.time(),
         )
-        terminal = await self._wait_step(deadline, errors, "wait")
-        if not terminal:
-            try:
-                process.terminate()
-            except Exception:
-                errors.append("terminate")
-            terminal = await self._wait_step(deadline, errors, "terminate-wait")
-        if not terminal:
-            errors.append("terminate-wait")
-        terminal = await _settle_owned_async_process(process)
+        if os.name == "nt":
+            terminal = await self._wait_step(deadline, errors, "wait")
+            if not terminal:
+                try:
+                    process.terminate()
+                except Exception:
+                    errors.append("terminate")
+                terminal = await self._wait_step(
+                    deadline, errors, "terminate-wait"
+                )
+            if not terminal:
+                errors.append("terminate-wait")
+        terminal = await _settle_owned_async_process(
+            process,
+            self._process_group_owner,
+            self._direct_observation,
+            self._settle_timeout,
+        )
         if not terminal:
             errors.append("group-settle")
         child = ChildObservation(
@@ -2165,6 +2483,9 @@ async def _scan_range_async(
         selection.expected_oids, coverage_observer, coverage_fault
     )
     pending: ScanOutcome | None = None
+    acquired: tuple[
+        HistoryProof, CoverageProof, tuple[Finding, ...]
+    ] | None = None
     reader: _AsyncGitObjectReader | None = None
 
     if selection.object_oids:
@@ -2193,35 +2514,7 @@ async def _scan_range_async(
                         "refusal", "range", refusal=acquisition, selection=selection
                     )
                 else:
-                    history, coverage, findings = acquisition
-                    resolver = tip_resolver or (
-                        lambda timeout=None: _resolve_commit(
-                            request.source,
-                            timeout,
-                            object_format=selection.object_format,
-                        )
-                    )
-                    drift = _confirm_tip(
-                        selection.tip,
-                        resolver,
-                        max(0.001, wall_deadline - time.monotonic()),
-                    )
-                    if drift is not None:
-                        pending = ScanOutcome(
-                            "refusal", "range", refusal=drift, selection=selection
-                        )
-                    elif findings:
-                        pending = ScanOutcome(
-                            "findings", "range", file_count=len(history.paths),
-                            findings=tuple(findings), selection=selection,
-                            coverage=coverage, history=history,
-                        )
-                    else:
-                        pending = ScanOutcome(
-                            "clean", "range", file_count=len(history.paths),
-                            selection=selection,
-                            coverage=coverage, history=history,
-                        )
+                    acquired = acquisition
         except asyncio.CancelledError:
             pending = ScanOutcome(
                 "refusal", "range",
@@ -2235,13 +2528,6 @@ async def _scan_range_async(
                 selection=selection,
             )
 
-    if pending is None:
-        pending = ScanOutcome(
-            "refusal", "range",
-            refusal=_refusal("PS-MSG-COVERAGE", "empty-selection"),
-            selection=selection,
-        )
-
     if reader is None:
         certificate = None
         finalization = None
@@ -2254,6 +2540,52 @@ async def _scan_range_async(
         ):
             finalization = await _finalize_reader(reader)
         certificate = reader.reap_certificate
+
+    if acquired is not None and finalization is None:
+        history, coverage, findings = acquired
+        try:
+            resolver = tip_resolver or (
+                lambda timeout=None: _resolve_commit(
+                    request.source,
+                    timeout,
+                    object_format=selection.object_format,
+                )
+            )
+            drift = _confirm_tip(
+                selection.tip,
+                resolver,
+                max(0.001, wall_deadline - time.monotonic()),
+            )
+        except Exception:
+            pending = ScanOutcome(
+                "refusal", "range",
+                refusal=_refusal("PS-MSG-READ", "unexpected"),
+                selection=selection,
+            )
+        else:
+            if drift is not None:
+                pending = ScanOutcome(
+                    "refusal", "range", refusal=drift, selection=selection
+                )
+            elif findings:
+                pending = ScanOutcome(
+                    "findings", "range", file_count=len(history.paths),
+                    findings=tuple(findings), selection=selection,
+                    coverage=coverage, history=history,
+                )
+            else:
+                pending = ScanOutcome(
+                    "clean", "range", file_count=len(history.paths),
+                    selection=selection,
+                    coverage=coverage, history=history,
+                )
+
+    if pending is None:
+        pending = ScanOutcome(
+            "refusal", "range",
+            refusal=_refusal("PS-MSG-COVERAGE", "empty-selection"),
+            selection=selection,
+        )
     return _finalize_range_outcome(pending, finalization, certificate)
 
 

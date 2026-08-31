@@ -3560,6 +3560,7 @@ class TestOracleFailClosed(unittest.TestCase):
             "test_malformed_envelope_fails_open",
             "test_empty_stdin_fails_open",
             "test_non_bash_tool_input_fails_open",
+            "test_frozen_bootstrap_injects_held_posix_helper_and_reaches_range_main",
         }
         # Test-only setup owner: creates an isolated Git root for direct
         # process-bound probes and cannot execute a caller-controlled command.
@@ -7155,6 +7156,12 @@ class TestPublicationSafetyTrustedScanR3(unittest.TestCase):
     def _module(self, suffix: str):
         return _load_gate_module(CANONICAL_HOOK, "publication_r3_" + suffix)
 
+    def test_push_gate_projections_match_canonical_bytes(self) -> None:
+        canonical = CANONICAL_HOOK.read_bytes()
+        for projection in HOOKS:
+            with self.subTest(projection=projection):
+                self.assertEqual(canonical, projection.read_bytes())
+
     def _closure(self, module):
         interpreter = module._interpreter_identity()
         root = module.PathComponentIdentity(".", "directory", ())
@@ -7162,6 +7169,47 @@ class TestPublicationSafetyTrustedScanR3(unittest.TestCase):
             module.SOURCE_LAYOUTS[0], root, (root,), (), "a" * 64, (),
             "b" * 64, interpreter,
         )
+
+    def test_frozen_bootstrap_injects_held_posix_helper_and_reaches_range_main(
+        self,
+    ) -> None:
+        git_executable = shutil.which("git")
+        if git_executable is None:
+            self.skipTest("git is required")
+        module = self._module("posix_helper_bootstrap")
+        fds, closure = module._capture_source_closure()
+        try:
+            self.assertEqual(
+                tuple(node.role for node in closure.nodes),
+                ("gate", "hook_common", "classifier", "posix_helper", "scanner"),
+            )
+            payload = module._closure_payload(closure)
+            with temporary_repository_workdir() as repository_workdir:
+                result = subprocess.run(
+                    [
+                        sys.executable,
+                        "-I",
+                        "-c",
+                        module._SCAN_BOOTSTRAP,
+                        "--gate-git-executable",
+                        git_executable,
+                        "--range",
+                        "origin",
+                        "main",
+                    ],
+                    cwd=repository_workdir,
+                    input=payload,
+                    capture_output=True,
+                    timeout=10.0,
+                )
+        finally:
+            for fd in fds:
+                os.close(fd)
+
+        combined = result.stdout + result.stderr
+        self.assertEqual(2, result.returncode, combined.decode("utf-8", "replace"))
+        self.assertIn(b"id=PS-MSG-RANGE", result.stderr)
+        self.assertNotIn(b"helper unavailable", combined)
 
     def _pending(self, module, binding, argv):
         interpreter = module._interpreter_identity()
@@ -7301,7 +7349,11 @@ class TestPublicationSafetyTrustedScanR3(unittest.TestCase):
             "check-publication-safety.py"
         ).read_text(encoding="utf-8")
         self.assertNotIn("def _load_path_finder", scanner_source, "R3-DYNAMIC-CLASSIFIER")
-        self.assertNotIn("importlib.util", scanner_source, "R3-DYNAMIC-CLASSIFIER")
+        self.assertIn(
+            "__injected_posix_process_group_module__",
+            scanner_source,
+            "R3-HELD-POSIX-HELPER",
+        )
 
         layouts = (
             Path("source") / "scripts" / "universal-hooks" / "scripts",
@@ -7324,6 +7376,10 @@ class TestPublicationSafetyTrustedScanR3(unittest.TestCase):
                 REPO_ROOT / "scripts" / "universal-hooks" / "hooks" /
                 "check-machine-local-path.py"
             ).read_bytes(),
+            "posix_helper": (
+                REPO_ROOT / "scripts" / "process_supervision" /
+                "posix_process_group.py"
+            ).read_bytes(),
         }
         original_file = module.__file__
         with tempfile.TemporaryDirectory() as td:
@@ -7338,17 +7394,29 @@ class TestPublicationSafetyTrustedScanR3(unittest.TestCase):
                     scanner = script_dir / "check-publication-safety.py"
                     common = script_dir / "hook_common.py"
                     classifier = hook_dir / "check-machine-local-path.py"
+                    posix_helper = (
+                        script_dir.parents[1] / "process_supervision" /
+                        "posix_process_group.py"
+                        if layout.parts[0] == "source"
+                        else script_dir / "process_supervision" /
+                        "posix_process_group.py"
+                    )
+                    posix_helper.parent.mkdir(parents=True, exist_ok=True)
                     gate.write_bytes(sources["gate"])
                     scanner.write_bytes(sources["scanner"])
                     common.write_bytes(sources["common"])
                     classifier.write_bytes(sources["classifier"])
+                    posix_helper.write_bytes(sources["posix_helper"])
                     module.__file__ = str(gate)
                     fds, closure = module._capture_source_closure()
                     try:
                         with self.subTest(layout=layout.as_posix(), phase="roles"):
                             self.assertEqual(
                                 tuple(node.role for node in closure.nodes),
-                                ("gate", "hook_common", "classifier", "scanner"),
+                                (
+                                    "gate", "hook_common", "classifier",
+                                    "posix_helper", "scanner",
+                                ),
                             )
                         self.assertEqual(
                             len(fds), len(closure.components) + len(closure.nodes) + 1,
@@ -7372,12 +7440,14 @@ class TestPublicationSafetyTrustedScanR3(unittest.TestCase):
                         "gate": gate,
                         "hook_common": common,
                         "classifier": classifier,
+                        "posix_helper": posix_helper,
                         "scanner": scanner,
                     }
                     role_sources = {
                         "gate": sources["gate"],
                         "hook_common": sources["common"],
                         "classifier": sources["classifier"],
+                        "posix_helper": sources["posix_helper"],
                         "scanner": sources["scanner"],
                     }
                     for role, target in role_paths.items():
@@ -8173,6 +8243,10 @@ class TestPublicationSafetyTrustedScanR5Proof(unittest.TestCase):
                 REPO_ROOT / "scripts" / "universal-hooks" / "hooks" /
                 "check-machine-local-path.py"
             ).read_bytes(),
+            "posix_helper": (
+                REPO_ROOT / "scripts" / "process_supervision" /
+                "posix_process_group.py"
+            ).read_bytes(),
         }
         original_file = module.__file__
         scratch = REPO_ROOT / ".scratch"
@@ -8190,15 +8264,26 @@ class TestPublicationSafetyTrustedScanR5Proof(unittest.TestCase):
                         "scanner": script_dir / "check-publication-safety.py",
                         "hook_common": script_dir / "hook_common.py",
                         "classifier": hook_dir / "check-machine-local-path.py",
+                        "posix_helper": (
+                            script_dir.parents[1] / "process_supervision" /
+                            "posix_process_group.py"
+                            if layout.parts[0] == "source"
+                            else script_dir / "process_supervision" /
+                            "posix_process_group.py"
+                        ),
                     }
                     for role, path in paths.items():
+                        path.parent.mkdir(parents=True, exist_ok=True)
                         path.write_bytes(sources[role])
                     module.__file__ = str(paths["gate"])
                     fds, closure = module._capture_source_closure()
                     try:
                         self.assertEqual(
                             tuple(node.role for node in closure.nodes),
-                            ("gate", "hook_common", "classifier", "scanner"),
+                            (
+                                "gate", "hook_common", "classifier",
+                                "posix_helper", "scanner",
+                            ),
                         )
                         for index, component in enumerate(closure.components):
                             components = list(closure.components)

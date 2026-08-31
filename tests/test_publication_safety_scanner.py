@@ -38,18 +38,21 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import ctypes
 import dataclasses
 import importlib.util
 import hashlib
 import inspect
 import io
 import os
+import signal
 import subprocess
 import sys
 import tempfile
 import time
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -71,6 +74,20 @@ def _join(*parts: str) -> str:
 def _git() -> str | None:
     from shutil import which
     return which("git")
+
+
+def _linux_child_subreaper_state() -> int:
+    libc = ctypes.CDLL(None, use_errno=True)
+    state = ctypes.c_int()
+    if libc.prctl(37, ctypes.byref(state), 0, 0, 0) != 0:
+        raise OSError(ctypes.get_errno(), "PR_GET_CHILD_SUBREAPER")
+    return state.value
+
+
+def _set_linux_child_subreaper_state(value: int) -> None:
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.prctl(36, value, 0, 0, 0) != 0:
+        raise OSError(ctypes.get_errno(), "PR_SET_CHILD_SUBREAPER")
 
 
 def _assert_batch_finding_lines(
@@ -1192,6 +1209,39 @@ class TestPublicationSafetyScannerV3(unittest.TestCase):
             encoding="utf-8",
         )
 
+    @unittest.skipUnless(
+        sys.platform.startswith("linux"), "Linux shared subreaper owner"
+    )
+    def test_default_range_path_finishes_reader_before_tip_confirmation(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = self._init_range_repo(Path(td))
+            self._commit(repo, "candidate.txt", "clean candidate", "candidate")
+            process = subprocess.Popen(
+                [
+                    sys.executable,
+                    str(CANONICAL_SCANNER),
+                    "--range",
+                    "origin",
+                    "main",
+                ],
+                cwd=repo,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                start_new_session=True,
+            )
+            try:
+                stdout, stderr = process.communicate(timeout=8.0)
+            except subprocess.TimeoutExpired:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.communicate(timeout=2.0)
+                self.fail("default range path nested the process-wide owner")
+
+            self.assertEqual(0, process.returncode, stdout + stderr)
+            self.assertIn("receipt=v3", stdout)
+            self.assertEqual("", stderr)
+
     def _run_path(self, content: str) -> subprocess.CompletedProcess:
         return self._run_path_process(content)
 
@@ -1603,6 +1653,155 @@ class TestPublicationSafetyScannerV3(unittest.TestCase):
             with self.assertRaises(ProcessLookupError):
                 os.killpg(group_pid, 0)
 
+    @unittest.skipIf(os.name == "nt", "POSIX bounded sync cleanup")
+    def test_posix_timeout_preserves_output_with_bounded_post_settlement_communicate(
+        self,
+    ) -> None:
+        module = _load_canonical_scanner("_scanner_sync_bounded_communicate")
+        real_popen = module.subprocess.Popen
+        communicate_timeouts: list[float | None] = []
+
+        class RecordingProcess:
+            def __init__(self, *args, **kwargs):
+                self._process = real_popen(*args, **kwargs)
+
+            def __getattr__(self, name):
+                return getattr(self._process, name)
+
+            def communicate(self, *args, **kwargs):
+                communicate_timeouts.append(kwargs.get("timeout"))
+                return self._process.communicate(*args, **kwargs)
+
+        module.subprocess.Popen = RecordingProcess
+        started = time.monotonic()
+        try:
+            with self.assertRaises(subprocess.TimeoutExpired) as captured:
+                module._run_owned_process(
+                    [
+                        sys.executable,
+                        "-u",
+                        "-c",
+                        "import time;print('before-timeout',flush=True);time.sleep(60)",
+                    ],
+                    timeout=0.2,
+                    text=True,
+                )
+        finally:
+            module.subprocess.Popen = real_popen
+
+        self.assertLess(time.monotonic() - started, 4.0)
+        self.assertGreaterEqual(len(communicate_timeouts), 2)
+        self.assertEqual(0.2, communicate_timeouts[0])
+        self.assertIsNotNone(communicate_timeouts[1])
+        self.assertIn("before-timeout", captured.exception.output)
+
+    @unittest.skipUnless(
+        sys.platform.startswith("linux"), "Linux sync BaseException cleanup"
+    )
+    def test_posix_keyboard_interrupt_settles_and_reraises_original(self) -> None:
+        module = _load_canonical_scanner("_scanner_sync_keyboard_interrupt")
+        helper = module._POSIX_PROCESS_GROUP
+        initial_state = _linux_child_subreaper_state()
+        real_popen = module.subprocess.Popen
+        interruption = KeyboardInterrupt("injected-communicate-interrupt")
+        created = []
+
+        class InterruptingProcess:
+            def __init__(self, *args, **kwargs):
+                self._process = real_popen(*args, **kwargs)
+                self._first = True
+                created.append(self)
+
+            def __getattr__(self, name):
+                return getattr(self._process, name)
+
+            def communicate(self, *args, **kwargs):
+                if self._first:
+                    self._first = False
+                    raise interruption
+                return self._process.communicate(*args, **kwargs)
+
+        module.subprocess.Popen = InterruptingProcess
+        observed_locked = True
+        observed_group = True
+        observed_closed = False
+        try:
+            with self.assertRaises(KeyboardInterrupt) as captured:
+                module._run_owned_process(
+                    [sys.executable, "-c", "import time;time.sleep(60)"],
+                    timeout=2.0,
+                )
+            self.assertIs(interruption, captured.exception)
+            observed_locked = helper._LINUX_SUBREAPER_LOCK.locked()
+            process = created[0]
+            try:
+                os.killpg(process.pid, 0)
+            except ProcessLookupError:
+                observed_group = False
+            observed_closed = process.stdout.closed and process.stderr.closed
+        finally:
+            module.subprocess.Popen = real_popen
+            if created:
+                process = created[0]
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                try:
+                    process._process.communicate(timeout=2.0)
+                except (subprocess.TimeoutExpired, OSError, ValueError):
+                    pass
+            _set_linux_child_subreaper_state(initial_state)
+            if helper._LINUX_SUBREAPER_LOCK.locked():
+                helper._LINUX_SUBREAPER_LOCK.release()
+
+        self.assertFalse(observed_locked)
+        self.assertFalse(observed_group)
+        self.assertTrue(observed_closed)
+
+    @unittest.skipUnless(
+        sys.platform.startswith("linux"), "Linux child-subreaper regression"
+    )
+    def test_posix_success_reaps_ignoring_descendant_after_parent_exits(self) -> None:
+        module = _load_canonical_scanner("_scanner_v3_posix_exited_parent")
+        with tempfile.TemporaryDirectory() as td:
+            pids_path = Path(td) / "pids"
+            ready_path = Path(td) / "ready"
+            wrapper = (
+                "import os,pathlib,subprocess,sys,time;"
+                "code=\"import os,pathlib,signal,sys,time\\n"
+                "signal.signal(signal.SIGTERM,signal.SIG_IGN)\\n"
+                "[os.close(fd) for fd in (0,1,2)]\\n"
+                "pathlib.Path(sys.argv[1]).write_text('ready',encoding='ascii')\\n"
+                "time.sleep(60)\";"
+                "child=subprocess.Popen([sys.executable,'-c',code,sys.argv[2]]);"
+                "deadline=time.monotonic()+5;"
+                "exec(\"while not pathlib.Path(sys.argv[2]).is_file():\\n"
+                "    assert time.monotonic()<deadline\\n"
+                "    time.sleep(0.01)\");"
+                "pathlib.Path(sys.argv[1]).write_text("
+                "f'{os.getpid()} {child.pid}',encoding='ascii')"
+            )
+
+            result = module._run_owned_process(
+                [
+                    sys.executable,
+                    "-c",
+                    wrapper,
+                    str(pids_path),
+                    str(ready_path),
+                ],
+                timeout=2.0,
+            )
+
+            self.assertEqual(0, result.returncode)
+            process_group, descendant_pid = map(
+                int, pids_path.read_text(encoding="ascii").split()
+            )
+            with self.assertRaises(ProcessLookupError):
+                os.killpg(process_group, 0)
+            self.assertFalse(Path(f"/proc/{descendant_pid}").exists())
+
     @unittest.skipIf(os.name == "nt", "POSIX process-group regression")
     def test_posix_async_cancel_returns_refusal_after_group_reap(self) -> None:
         module = _load_canonical_scanner("_scanner_v3_posix_cancel_order")
@@ -1637,6 +1836,141 @@ class TestPublicationSafetyScannerV3(unittest.TestCase):
             group_pid = int(pids_path.read_text(encoding="ascii").split()[0])
             with self.assertRaises(ProcessLookupError):
                 os.killpg(group_pid, 0)
+
+    @unittest.skipUnless(
+        sys.platform.startswith("linux"), "Linux asyncio child observation"
+    )
+    def test_async_owner_observes_direct_status_without_stealing_child_reap(self) -> None:
+        module = _load_canonical_scanner("_scanner_async_direct_observation")
+
+        async def exercise():
+            process, owner, observation = await module._create_owned_async_process(
+                (sys.executable, "-c", "raise SystemExit(7)"),
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            await asyncio.wait_for(asyncio.shield(observation.task), timeout=2.0)
+            settled = await module._settle_owned_async_process(
+                process,
+                owner,
+                observation,
+                drain_readers=(process.stdout, process.stderr),
+            )
+            return process, observation, settled
+
+        process, observation, settled = asyncio.run(exercise())
+        self.assertTrue(settled)
+        self.assertEqual(7, process.returncode)
+        self.assertEqual(7, observation.poll())
+        self.assertTrue(observation.task.done())
+
+    @unittest.skipUnless(
+        sys.platform.startswith("linux"), "Linux asyncio group signal ownership"
+    )
+    def test_async_owner_alone_sends_term_then_kill(self) -> None:
+        module = _load_canonical_scanner("_scanner_async_owner_signals")
+        helper = module._POSIX_PROCESS_GROUP
+        real_os = helper.os
+        signals: list[int] = []
+        temp = tempfile.TemporaryDirectory()
+        ready = Path(temp.name) / "ready"
+
+        def killpg(process_group: int, signum: int) -> None:
+            if signum:
+                signals.append(signum)
+            real_os.killpg(process_group, signum)
+
+        helper.os = SimpleNamespace(
+            **{
+                name: getattr(real_os, name)
+                for name in dir(real_os)
+                if not name.startswith("__") and name != "killpg"
+            },
+            killpg=killpg,
+        )
+        try:
+            async def exercise():
+                process, owner, observation = await module._create_owned_async_process(
+                    (
+                        sys.executable,
+                        "-c",
+                        "import pathlib,signal,sys,time;"
+                        "signal.signal(signal.SIGTERM,signal.SIG_IGN);"
+                        "pathlib.Path(sys.argv[1]).write_text('ready',encoding='ascii');"
+                        "time.sleep(60)",
+                        str(ready),
+                    ),
+                    stdin=asyncio.subprocess.DEVNULL,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                process.terminate = mock.Mock(
+                    side_effect=AssertionError("async transport terminate called")
+                )
+                process.kill = mock.Mock(
+                    side_effect=AssertionError("async transport kill called")
+                )
+                deadline = asyncio.get_running_loop().time() + 2.0
+                while not ready.is_file():
+                    self.assertLess(asyncio.get_running_loop().time(), deadline)
+                    await asyncio.sleep(0.01)
+                settled = await module._settle_owned_async_process(
+                    process,
+                    owner,
+                    observation,
+                    timeout_seconds=1.0,
+                    drain_readers=(process.stdout, process.stderr),
+                )
+                return process, observation, settled
+
+            process, observation, settled = asyncio.run(exercise())
+        finally:
+            helper.os = real_os
+            temp.cleanup()
+
+        self.assertTrue(settled)
+        self.assertEqual([signal.SIGTERM, signal.SIGKILL], signals)
+        self.assertIsNotNone(process.returncode)
+        self.assertEqual(process.returncode, observation.poll())
+
+    @unittest.skipUnless(
+        sys.platform.startswith("linux"), "Linux asyncio output drain"
+    )
+    def test_async_one_shot_settlement_drains_output_to_eof_without_pending_task(self) -> None:
+        module = _load_canonical_scanner("_scanner_async_output_drain")
+
+        async def exercise():
+            process, owner, observation = await module._create_owned_async_process(
+                (
+                    sys.executable,
+                    "-c",
+                    "import os,time;os.write(1,b'x'*65536);time.sleep(60)",
+                ),
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            settled = await module._settle_owned_async_process(
+                process,
+                owner,
+                observation,
+                timeout_seconds=1.0,
+                drain_readers=(process.stdout, process.stderr),
+            )
+            pending = {
+                task
+                for task in asyncio.all_tasks()
+                if task is not asyncio.current_task() and not task.done()
+            }
+            return process, observation, settled, pending
+
+        process, observation, settled, pending = asyncio.run(exercise())
+        self.assertTrue(settled)
+        self.assertTrue(process.stdout.at_eof())
+        self.assertTrue(process.stderr.at_eof())
+        self.assertTrue(observation.task.done())
+        self.assertEqual(set(), pending)
 
     def test_range_settles_descendants_after_parent_exit(self) -> None:
         module = _load_canonical_scanner("_scanner_v3_range_parent_exit")

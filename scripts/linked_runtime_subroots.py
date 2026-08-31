@@ -142,6 +142,7 @@ class LinkedRuntimeSubrootAuthority:
     resolved_identity: Identity
     link_chain: tuple[LinkWitness, ...]
     trusted_global_roots: tuple[Path, ...]
+    allow_linked_ancestors: bool = False
 
     @property
     def name(self) -> str:
@@ -154,15 +155,26 @@ class LinkedRuntimeSubrootAuthority:
         *,
         scope: str,
         trusted_global_roots: tuple[Path, ...],
+        allow_linked_ancestors: bool = False,
     ) -> "LinkedRuntimeSubrootAuthority | None":
         selected = _lexical_absolute(logical_root)
-        kind = _logical_leaf_link_kind(selected)
-        if kind is None:
-            return None
         trusted = tuple(_lexical_absolute(path) for path in trusted_global_roots)
-        if scope != "global" or not any(_same_path(selected, path) for path in trusted):
-            raise ValueError("E_RUNTIME_SUBROOT_SCOPE_DENIED")
-        resolved_root, link_chain = _resolve_linked_directory(selected)
+        is_trusted_global = scope == "global" and any(
+            _same_path(selected, path) for path in trusted
+        )
+        if allow_linked_ancestors:
+            if not is_trusted_global:
+                raise ValueError("E_RUNTIME_SUBROOT_SCOPE_DENIED")
+            resolved_root, link_chain = _resolve_linked_directory(selected)
+            if not link_chain:
+                return None
+        else:
+            kind = _logical_leaf_link_kind(selected)
+            if kind is None:
+                return None
+            if not is_trusted_global:
+                raise ValueError("E_RUNTIME_SUBROOT_SCOPE_DENIED")
+            resolved_root, link_chain = _resolve_linked_directory(selected)
         return cls(
             logical_root=selected,
             logical_identity=_identity(selected),
@@ -170,6 +182,7 @@ class LinkedRuntimeSubrootAuthority:
             resolved_identity=_identity(resolved_root),
             link_chain=link_chain,
             trusted_global_roots=trusted,
+            allow_linked_ancestors=allow_linked_ancestors,
         )
 
     def assert_current(self) -> None:
@@ -177,6 +190,7 @@ class LinkedRuntimeSubrootAuthority:
             self.logical_root,
             scope="global",
             trusted_global_roots=self.trusted_global_roots,
+            allow_linked_ancestors=self.allow_linked_ancestors,
         )
         if (
             current is None
