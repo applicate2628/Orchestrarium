@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
 import hashlib
 import importlib.util
 import json
@@ -20,6 +21,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import threading
 import unicodedata
 import zipfile
 from contextlib import contextmanager
@@ -77,10 +79,73 @@ TRANSFER_INPUT_CLOSE_FAILED = "TRANSFER-INPUT-CLOSE-FAILED"
 
 
 _PROCESS_RUNNER_MODULE: Any | None = None
+_LINUX_SUBREAPER_LOCK = threading.RLock()
+_PR_SET_CHILD_SUBREAPER = 36
+_PR_GET_CHILD_SUBREAPER = 37
 
 
 class ContractError(Exception):
     pass
+
+
+class _LinuxSubreaperError(Exception):
+    pass
+
+
+class _LinuxChildSubreaper:
+    """Temporarily adopt only this executor's orphaned Linux process-group children."""
+
+    def __init__(self) -> None:
+        self._active = False
+        self._locked = False
+        self._libc: Any | None = None
+        self._prior = 0
+
+    def start(self) -> None:
+        if not sys.platform.startswith("linux"):
+            return
+        _LINUX_SUBREAPER_LOCK.acquire()
+        self._locked = True
+        try:
+            libc = ctypes.CDLL(None, use_errno=True)
+            prctl = libc.prctl
+            prctl.restype = ctypes.c_int
+            prior = ctypes.c_int()
+            if prctl(_PR_GET_CHILD_SUBREAPER, ctypes.byref(prior), 0, 0, 0) != 0:
+                raise OSError(ctypes.get_errno(), "PR_GET_CHILD_SUBREAPER")
+            if prctl(_PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) != 0:
+                raise OSError(ctypes.get_errno(), "PR_SET_CHILD_SUBREAPER")
+            self._libc = libc
+            self._prior = prior.value
+            self._active = True
+        except (AttributeError, OSError) as error:
+            self.close()
+            raise _LinuxSubreaperError("Linux child subreaper is unavailable") from error
+
+    def reap_process_group(self, process_group: int) -> None:
+        if not self._active:
+            return
+        try:
+            while True:
+                reaped_pid, _status = os.waitpid(-process_group, os.WNOHANG)
+                if reaped_pid == 0:
+                    return
+        except ChildProcessError:
+            return
+        except OSError as error:
+            raise _LinuxSubreaperError("Linux child subreaper reap failed") from error
+
+    def close(self) -> None:
+        try:
+            if self._active:
+                assert self._libc is not None
+                if self._libc.prctl(_PR_SET_CHILD_SUBREAPER, self._prior, 0, 0, 0) != 0:
+                    raise _LinuxSubreaperError("Linux child subreaper restore failed")
+        finally:
+            self._active = False
+            if self._locked:
+                self._locked = False
+                _LINUX_SUBREAPER_LOCK.release()
 
 
 class BoundRepository:
@@ -421,7 +486,9 @@ def _posix_process_group_exists(process_group: int) -> bool:
         return True
 
 
-def _settle_posix_git_process(process: subprocess.Popen[bytes]) -> bool:
+def _settle_posix_git_process(
+    process: subprocess.Popen[bytes], subreaper: _LinuxChildSubreaper
+) -> bool:
     process_group = process.pid
     deadline = time.monotonic() + GIT_PROCESS_CLEANUP_SECONDS
     try:
@@ -448,16 +515,20 @@ def _settle_posix_git_process(process: subprocess.Popen[bytes]) -> bool:
             except subprocess.TimeoutExpired:
                 return False
         while _posix_process_group_exists(process_group) and time.monotonic() < deadline:
+            subreaper.reap_process_group(process_group)
             time.sleep(0.01)
+        subreaper.reap_process_group(process_group)
         return not _posix_process_group_exists(process_group)
-    except (OSError, ValueError):
+    except (OSError, ValueError, _LinuxSubreaperError):
         return False
 
 
 def _run_posix_git_process(command: list[str], repository: Path | None, environment: dict[str, str]) -> subprocess.CompletedProcess[bytes]:
+    subreaper = _LinuxChildSubreaper()
     try:
         if not command or not Path(command[0]).is_absolute():
             raise OSError("Git executable is not absolute")
+        subreaper.start()
         process = subprocess.Popen(
             command,
             executable=command[0],
@@ -471,7 +542,14 @@ def _run_posix_git_process(command: list[str], repository: Path | None, environm
             close_fds=True,
             bufsize=0,
         )
+    except _LinuxSubreaperError as error:
+        subreaper.close()
+        raise ContractError("git process containment is unavailable") from error
     except OSError as error:
+        try:
+            subreaper.close()
+        except _LinuxSubreaperError as cleanup_error:
+            raise ContractError("git process containment cleanup failed") from cleanup_error
         raise ContractError("not a git repository") from error
     assert process.stdout is not None and process.stderr is not None
     streams = {process.stdout: "stdout", process.stderr: "stderr"}
@@ -482,6 +560,7 @@ def _run_posix_git_process(command: list[str], repository: Path | None, environm
     timed_out = False
     leftover_tree = False
     interrupted: BaseException | None = None
+    containment_cleanup_error = False
     deadline = time.monotonic() + GIT_COMMAND_TIMEOUT_SECONDS
     try:
         for stream in streams:
@@ -519,7 +598,7 @@ def _run_posix_git_process(command: list[str], repository: Path | None, environm
     except BaseException as error:
         interrupted = error
     finally:
-        tree_empty = _settle_posix_git_process(process)
+        tree_empty = _settle_posix_git_process(process, subreaper)
         cleanup_deadline = time.monotonic() + GIT_PROCESS_CLEANUP_SECONDS
         while selector.get_map() and time.monotonic() < cleanup_deadline:
             try:
@@ -555,8 +634,14 @@ def _run_posix_git_process(command: list[str], repository: Path | None, environm
                 stream.close()
             except OSError:
                 capture_error = True
+        try:
+            subreaper.close()
+        except _LinuxSubreaperError:
+            containment_cleanup_error = True
     if interrupted is not None:
         raise interrupted
+    if containment_cleanup_error:
+        raise ContractError("git process containment cleanup failed")
     if timed_out:
         raise ContractError("git command timed out")
     if overflow:

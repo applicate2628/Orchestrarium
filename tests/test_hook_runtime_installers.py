@@ -666,10 +666,14 @@ def test_hook_health_failure_byte_4097_terminates_kills_and_reaps(
     ),
 )
 def test_python_target_resolution_is_absolute_and_direct(
-    platform: str, source: Path
+    tmp_path: Path, platform: str, source: Path
 ) -> None:
-    target = HELPER.resolve_hook_target(str(source), "windows", platform)
-    assert Path(target.executable) == Path(sys.executable).resolve()
+    python_executable = tmp_path / "python.exe"
+    python_executable.touch()
+    target = HELPER.resolve_hook_target(
+        str(source), "windows", platform, python_executable=str(python_executable)
+    )
+    assert Path(target.executable) == python_executable.resolve()
     assert len(target.args) == 1
     assert Path(target.args[0]) == source.resolve()
     assert target.args[0].endswith(".py")

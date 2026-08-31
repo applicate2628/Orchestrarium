@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ctypes
 import importlib.util
 import json
 import os
@@ -23,6 +24,22 @@ def load_transfer_module():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def _linux_process_state(pid: int) -> str | None:
+    try:
+        stat_line = Path(f"/proc/{pid}/stat").read_text(encoding="ascii")
+    except FileNotFoundError:
+        return None
+    return stat_line.rsplit(")", 1)[1].lstrip().split(" ", 1)[0]
+
+
+def _linux_child_subreaper_state() -> int:
+    libc = ctypes.CDLL(None, use_errno=True)
+    state = ctypes.c_int()
+    if libc.prctl(37, ctypes.byref(state), 0, 0, 0) != 0:
+        raise OSError(ctypes.get_errno(), "PR_GET_CHILD_SUBREAPER")
+    return state.value
 
 
 @unittest.skipUnless(os.name == "posix", "requires POSIX process groups")
@@ -94,31 +111,58 @@ class PosixRepoTransferTests(unittest.TestCase):
             ):
                 module._run_posix_git_process([str(executable)], None, os.environ.copy())
 
-    def test_posix_owner_times_out_and_reaps_its_descendant_group(self) -> None:
+    @unittest.skipUnless(sys.platform.startswith("linux"), "requires Linux subreaper")
+    def test_posix_owner_restores_subreaper_after_launch_failure(self) -> None:
         module = load_transfer_module()
-        child_pid = self.root / "child.pid"
-        executable = self.write_fake_git(
-            "import subprocess, sys, time\n"
-            "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])\n"
-            "open(sys.argv[1], 'w', encoding='ascii').write(str(child.pid))\n"
-            "time.sleep(30)\n"
-        )
+        initial_state = _linux_child_subreaper_state()
 
-        with (
-            mock.patch.object(module, "GIT_COMMAND_TIMEOUT_SECONDS", 0.1),
-            mock.patch.object(module, "GIT_PROCESS_CLEANUP_SECONDS", 1),
-            self.assertRaisesRegex(module.ContractError, r"^git command timed out$"),
-        ):
+        with self.assertRaisesRegex(module.ContractError, r"^not a git repository$"):
             module._run_posix_git_process(
-                [str(executable), str(child_pid)], None, os.environ.copy()
+                [str(self.root / "missing-git")], None, os.environ.copy()
             )
 
-        pid = int(child_pid.read_text(encoding="ascii"))
-        for _ in range(20):
-            try:
-                os.kill(pid, 0)
-            except ProcessLookupError:
-                break
-            time.sleep(0.05)
-        else:
-            self.fail("POSIX Git owner left its timed-out descendant running")
+        self.assertEqual(initial_state, _linux_child_subreaper_state())
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "requires Linux subreaper")
+    def test_posix_owner_reaps_each_adopted_timeout_descendant(self) -> None:
+        """Each timed-out Git descendant must be gone, not merely a re-parented zombie."""
+
+        libc = ctypes.CDLL(None, use_errno=True)
+        prior_subreaper = ctypes.c_int()
+        self.assertEqual(0, libc.prctl(37, ctypes.byref(prior_subreaper), 0, 0, 0))
+        self.assertEqual(0, libc.prctl(36, 1, 0, 0, 0))
+        module = load_transfer_module()
+        executable = self.write_fake_git(
+            "import os, subprocess, sys, time\n"
+            "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])\n"
+            "open(sys.argv[1], 'w', encoding='ascii').write(f'{os.getpid()} {child.pid}')\n"
+            "time.sleep(30)\n"
+        )
+        process_groups: list[int] = []
+        states: list[str | None] = []
+        try:
+            with (
+                mock.patch.object(module, "GIT_COMMAND_TIMEOUT_SECONDS", 0.1),
+                mock.patch.object(module, "GIT_PROCESS_CLEANUP_SECONDS", 1),
+            ):
+                for ordinal in range(3):
+                    child_pid = self.root / f"child-{ordinal}.pid"
+                    with self.assertRaisesRegex(module.ContractError, r"^git command timed out$"):
+                        module._run_posix_git_process(
+                            [str(executable), str(child_pid)], None, os.environ.copy()
+                        )
+                    group, pid = map(int, child_pid.read_text(encoding="ascii").split())
+                    process_groups.append(group)
+                    states.append(_linux_process_state(pid))
+        finally:
+            for process_group in process_groups:
+                while True:
+                    try:
+                        reaped_pid, _status = os.waitpid(-process_group, os.WNOHANG)
+                    except ChildProcessError:
+                        break
+                    if reaped_pid == 0:
+                        break
+            self.assertEqual(0, libc.prctl(36, prior_subreaper.value, 0, 0, 0))
+
+        self.assertEqual([None, None, None], states)
