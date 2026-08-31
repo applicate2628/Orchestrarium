@@ -2279,6 +2279,100 @@ class SecurityContractTests(unittest.TestCase):
         self.assertEqual(self.repo.resolve(), repository.root)
         self.assertEqual(self.repo.resolve(), launched.call_args.args[1])
 
+    def test_linked_worktree_gitdir_rejects_link_component_and_identity_drift(self) -> None:
+        module = load_transfer_module()
+        worktree = self.root / "linked-worktree"
+        worktree.mkdir()
+        git_directory = self.root / "git-metadata" / "worktrees" / "linked-worktree"
+        git_directory.mkdir(parents=True)
+        marker = worktree / ".git"
+        marker.write_text(f"gitdir: {git_directory}\n", encoding="utf-8")
+
+        linked_parent = self.root / "linked-gitdir-parent"
+        directory_alias(linked_parent, git_directory.parent)
+        marker.write_text(
+            f"gitdir: {linked_parent / git_directory.name}\n", encoding="utf-8"
+        )
+        launched = mock.Mock(
+            return_value=bounded_git_result(
+                module._load_process_runner().resolve_executable_identity(
+                    GIT_EXECUTABLE
+                ),
+                stdout=os.fsencode(worktree) + b"\n",
+            )
+        )
+        with mock.patch.object(module, "run_bounded_process", launched):
+            with self.assertRaisesRegex(
+                module.ContractError, r"^TRANSFER-REPOSITORY-BOUNDARY-INVALID$"
+            ):
+                module.bind_repository(worktree, GIT_EXECUTABLE)
+        launched.assert_not_called()
+
+        marker.write_text(f"gitdir: {git_directory}\n", encoding="utf-8")
+        with mock.patch.object(module, "run_bounded_process", launched):
+            repository = module.bind_repository(worktree, GIT_EXECUTABLE)
+            displaced = git_directory.with_name(f"{git_directory.name}-displaced")
+            git_directory.rename(displaced)
+            git_directory.mkdir()
+            with self.assertRaisesRegex(
+                module.ContractError, r"^TRANSFER-GIT-BINDING-DRIFT$"
+            ):
+                module.run_bound_git_process(
+                    repository,
+                    [str(GIT_EXECUTABLE), "rev-parse", "--show-toplevel"],
+                )
+        self.assertEqual(1, launched.call_count)
+
+    def test_linked_worktree_gitdir_rejects_canceled_link_component_before_git_launch(
+        self,
+    ) -> None:
+        module = load_transfer_module()
+        worktree = self.root / "linked-worktree"
+        worktree.mkdir()
+        git_directory = self.root / "safe-gitdir"
+        git_directory.mkdir()
+        linked_component = self.root / "linked-component"
+        directory_alias(linked_component, git_directory)
+        (worktree / ".git").write_text(
+            f"gitdir: {linked_component / '..' / git_directory.name}\n",
+            encoding="utf-8",
+        )
+        launched = mock.Mock()
+
+        with mock.patch.object(module, "run_bounded_process", launched):
+            with self.assertRaisesRegex(
+                module.ContractError, r"^TRANSFER-REPOSITORY-BOUNDARY-INVALID$"
+            ):
+                module.bind_repository(worktree, GIT_EXECUTABLE)
+
+        launched.assert_not_called()
+
+    def test_linked_worktree_gitdir_allows_ordinary_parent_component(self) -> None:
+        module = load_transfer_module()
+        worktree_parent = self.root / "worktrees"
+        worktree = worktree_parent / "linked-worktree"
+        worktree.mkdir(parents=True)
+        git_directory = worktree_parent / "safe-gitdir"
+        git_directory.mkdir()
+        (worktree / ".git").write_text(
+            "gitdir: ../safe-gitdir\n",
+            encoding="utf-8",
+        )
+        launched = mock.Mock(
+            return_value=bounded_git_result(
+                module._load_process_runner().resolve_executable_identity(
+                    GIT_EXECUTABLE
+                ),
+                stdout=os.fsencode(worktree) + b"\n",
+            )
+        )
+
+        with mock.patch.object(module, "run_bounded_process", launched):
+            repository = module.bind_repository(worktree, GIT_EXECUTABLE)
+
+        self.assertEqual(git_directory, repository.git_directory)
+        self.assertEqual(1, launched.call_count)
+
     def test_git_root_mismatch_fails(self) -> None:
         module = load_transfer_module()
         different_root = self.root / "different-repository"

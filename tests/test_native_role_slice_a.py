@@ -15,6 +15,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from tests.fixtures.runtime_capabilities import codex_hook_host_env
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -369,11 +370,10 @@ def test_source_native_roles_match_policy_profiles_and_supported_toml_fields() -
 def _run_codex_installer(
     project: Path, *, install_hooks: bool = True
 ) -> subprocess.CompletedProcess[str]:
-    env = None
-    if not install_hooks:
-        import os
-
-        env = os.environ.copy()
+    env = os.environ.copy()
+    if install_hooks:
+        env = codex_hook_host_env(env, ROOT)
+    else:
         env["ORCHESTRARIUM_NO_HYPOTHESIS_HOOK"] = "1"
     return subprocess.run(
         [

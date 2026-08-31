@@ -156,6 +156,8 @@ class BoundRepository:
         git_executable_sha256: str,
         git_executable_identity: tuple[int, ...] | None = None,
         git_executable_content_sha256: str | None = None,
+        git_directory: Path | None = None,
+        git_directory_identity: tuple[int, ...] | None = None,
     ) -> None:
         self.root = root
         self.git_executable = git_executable
@@ -164,6 +166,8 @@ class BoundRepository:
         self.git_executable_content_sha256 = (
             git_executable_content_sha256 or git_executable_sha256
         )
+        self.git_directory = git_directory
+        self.git_directory_identity = git_directory_identity
 
 
 class OutputBinding:
@@ -713,26 +717,68 @@ def path_is_within(path: Path, root: Path) -> bool:
         return False
 
 
-def valid_git_marker(root: Path) -> bool:
+def bind_repository_git_directory(root: Path) -> tuple[Path, tuple[int, ...]]:
     marker = root / ".git"
-    if not os.path.lexists(marker) or is_reparse_point(marker):
-        return False
     try:
+        if not os.path.lexists(marker) or is_reparse_point(marker):
+            raise ContractError(TRANSFER_REPOSITORY_BOUNDARY_INVALID)
         metadata = marker.lstat()
         if stat.S_ISDIR(metadata.st_mode):
-            return True
-        if not stat.S_ISREG(metadata.st_mode):
-            return False
-        data = marker.read_bytes()
-        match = re.fullmatch(rb"gitdir: ([^\x00\r\n]+)\r?\n?", data)
-        if match is None:
-            return False
-        git_directory = Path(os.fsdecode(match.group(1)))
-        if not git_directory.is_absolute():
-            git_directory = root / git_directory
-        physical = Path(os.path.realpath(git_directory))
-        return physical.is_dir() and not is_reparse_point(physical)
-    except (OSError, ValueError):
+            git_directory = marker
+        else:
+            if not stat.S_ISREG(metadata.st_mode):
+                raise ContractError(TRANSFER_REPOSITORY_BOUNDARY_INVALID)
+            data = marker.read_bytes()
+            match = re.fullmatch(rb"gitdir: ([^\x00\r\n]+)\r?\n?", data)
+            if match is None:
+                raise ContractError(TRANSFER_REPOSITORY_BOUNDARY_INVALID)
+            git_directory = Path(os.fsdecode(match.group(1)))
+            if not git_directory.is_absolute():
+                anchor = root
+                authored_parts = git_directory.parts
+            else:
+                anchor = Path(git_directory.anchor)
+                authored_parts = git_directory.parts[1:]
+        if stat.S_ISDIR(metadata.st_mode):
+            anchor = Path(git_directory.anchor)
+            authored_parts = git_directory.parts[1:]
+        for component in reversed((anchor, *anchor.parents)):
+            component_metadata = component.lstat()
+            if (
+                not stat.S_ISDIR(component_metadata.st_mode)
+                or stat.S_ISLNK(component_metadata.st_mode)
+                or bool(getattr(component_metadata, "st_file_attributes", 0) & 0x400)
+            ):
+                raise ContractError(TRANSFER_REPOSITORY_BOUNDARY_INVALID)
+        current = anchor
+        for authored_part in authored_parts:
+            current = (
+                current.parent
+                if authored_part == os.pardir
+                else current / authored_part
+            )
+            component_metadata = current.lstat()
+            if (
+                not stat.S_ISDIR(component_metadata.st_mode)
+                or stat.S_ISLNK(component_metadata.st_mode)
+                or bool(getattr(component_metadata, "st_file_attributes", 0) & 0x400)
+            ):
+                raise ContractError(TRANSFER_REPOSITORY_BOUNDARY_INVALID)
+        absolute = Path(os.path.abspath(current))
+        if path_key(absolute) != path_key(Path(os.path.realpath(absolute))):
+            raise ContractError(TRANSFER_REPOSITORY_BOUNDARY_INVALID)
+        return absolute, _directory_identity(absolute)
+    except ContractError:
+        raise
+    except (OSError, ValueError) as error:
+        raise ContractError(TRANSFER_REPOSITORY_BOUNDARY_INVALID) from error
+
+
+def valid_git_marker(root: Path) -> bool:
+    try:
+        bind_repository_git_directory(root)
+        return True
+    except ContractError:
         return False
 
 
@@ -813,8 +859,25 @@ def require_current_git_binding(repository: BoundRepository) -> None:
         raise ContractError(TRANSFER_GIT_BINDING_DRIFT) from error
 
 
+def require_current_repository_binding(repository: BoundRepository) -> None:
+    try:
+        git_directory, identity = bind_repository_git_directory(repository.root)
+        if (
+            repository.git_directory is None
+            or repository.git_directory_identity is None
+            or path_key(git_directory) != path_key(repository.git_directory)
+            or identity != repository.git_directory_identity
+        ):
+            raise ContractError(TRANSFER_GIT_BINDING_DRIFT)
+    except ContractError as error:
+        if str(error) == TRANSFER_GIT_BINDING_DRIFT:
+            raise
+        raise ContractError(TRANSFER_GIT_BINDING_DRIFT) from error
+
+
 def run_bound_git_process(repository: BoundRepository, command: list[str]) -> subprocess.CompletedProcess[bytes]:
     require_current_git_binding(repository)
+    require_current_repository_binding(repository)
     result = run_bounded_process(command, repository.root, sanitized_git_environment())
     if (
         getattr(result, "executable_identity_sha256", None)
@@ -822,16 +885,24 @@ def run_bound_git_process(repository: BoundRepository, command: list[str]) -> su
     ):
         raise ContractError(TRANSFER_GIT_BINDING_DRIFT)
     require_current_git_binding(repository)
+    require_current_repository_binding(repository)
     return result
 
 
 def bind_repository(repository: Path, git_executable: Path) -> BoundRepository:
     root = physical_repository_root(repository)
+    git_directory, git_directory_identity = bind_repository_git_directory(root)
     executable, identity, runner_digest, content_digest = bind_git_executable(
         git_executable, root
     )
     bound = BoundRepository(
-        root, executable, runner_digest, identity, content_digest
+        root,
+        executable,
+        runner_digest,
+        identity,
+        content_digest,
+        git_directory,
+        git_directory_identity,
     )
     result = run_bound_git_process(
         bound,

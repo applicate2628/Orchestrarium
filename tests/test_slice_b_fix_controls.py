@@ -10,6 +10,7 @@ import inspect
 from types import SimpleNamespace
 
 import pytest
+from tests.fixtures.runtime_capabilities import requires_windows_kimi
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -576,6 +577,7 @@ def test_policy_rejection_stops_before_kimi_prompt_auth_enrollment_run_ledger_or
     assert "E_EXTERNAL_DISPATCH_POLICY_DENIED" in capsys.readouterr().err
 
 
+@requires_windows_kimi
 def test_kimi_admission_failure_commits_nonauthorizing_terminal_without_downstream_side_effects(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

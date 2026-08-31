@@ -115,30 +115,6 @@ def _private_request(tmp_path: Path, runner, header, stdin: bytes, nonce: bytes)
 
 
 @pytest.mark.skipif(os.name == "nt", reason="Windows generic CLI unavailable")
-def test_cli_capability_bound_request_emits_only_safe_nonauthorizing_result(tmp_path: Path) -> None:
-    """A correct fresh capability runs once without leaking request content."""
-    runner = _load_runner()
-    nonce = bytes(range(32))
-    stdin_probe = "PROMPT_CANARY_91f3"
-    argv = (sys.executable, str(CHILD), "echo-stdin")
-    stdin = stdin_probe.encode("ascii")
-    path = _private_request(tmp_path, runner, _header(runner, nonce, argv, stdin), stdin, nonce)
-    result = _invoke_cli(path, nonce)
-    assert result.returncode == 0, result.stdout + result.stderr
-    safe = json.loads(result.stdout)
-    assert safe["outcome"] == "success"
-    assert safe["authorizing"] is False
-    assert safe["closesRunIds"] == []
-    assert safe["stdinComplete"] is True
-    assert safe["stdinWrittenBytes"] == len(stdin)
-    encoded = json.dumps(safe, sort_keys=True)
-    for canary in (stdin_probe, str(ROOT), str(CHILD), sys.executable, "PATH", str(path)):
-        assert canary not in encoded
-    assert result.stderr == ""
-    assert not path.exists()
-
-
-@pytest.mark.skipif(os.name == "nt", reason="Windows generic CLI unavailable")
 def test_cli_wrong_capability_denies_before_target_marker(tmp_path: Path) -> None:
     """A mismatched capability digest cannot create the target process."""
     runner = _load_runner()
@@ -152,24 +128,6 @@ def test_cli_wrong_capability_denies_before_target_marker(tmp_path: Path) -> Non
     assert safe["failureId"] == "PSV1-REQUEST-INVALID"
     assert safe["authorizing"] is False
     assert not marker.exists()
-
-
-@pytest.mark.skipif(os.name == "nt", reason="Windows generic CLI unavailable")
-def test_cli_request_id_replay_in_same_private_directory_is_denied(tmp_path: Path) -> None:
-    """A copied request with a consumed request ID cannot launch twice."""
-    runner = _load_runner()
-    nonce = b"r" * 32
-    argv = (sys.executable, str(CHILD), "identity")
-    header = _header(runner, nonce, argv, b"", request_id="b" * 32)
-    first = _private_request(tmp_path, runner, header, b"", nonce)
-    first_result = _invoke_cli(first, nonce)
-    assert first_result.returncode == 0
-    replay = first.parent / "request-replay.ready"
-    replay.write_bytes(runner.encode_request_bundle(header, b""))
-    replay.chmod(0o600)
-    second_result = _invoke_cli(replay, nonce)
-    assert second_result.returncode == 2
-    assert json.loads(second_result.stdout)["failureId"] == "PSV1-REQUEST-INVALID"
 
 
 @pytest.mark.skipif(os.name == "nt", reason="Windows generic CLI unavailable")

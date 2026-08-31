@@ -84,6 +84,7 @@ _MAX_TREE_CACHE_BYTES = 64 * 1_048_576
 _MAX_BLOB_BYTES = 64 * 1_048_576
 _MAX_AGGREGATE_BLOB_BYTES = 512 * 1_048_576
 _MAX_LINE_BYTES = 8 * 1_048_576
+_MAX_PARENT_GRAPH_BYTES = 16 * 1_048_576
 _MAX_FINDINGS = 32
 _READ_CHUNK_BYTES = 64 * 1_024
 _SCAN_DEADLINE_SECONDS = 240.0
@@ -162,6 +163,8 @@ class RangeSelection:
     expected_oids: tuple[str, ...]
     object_oids: tuple[str, ...] = ()
     object_format: GitObjectFormat = _SHA1_OBJECT_FORMAT
+    destination_oid: str | None = None
+    expected_parents: tuple[tuple[str, tuple[str, ...]], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -433,6 +436,17 @@ def _run_git(
     )
 
 
+def _range_git_argv(*args: str) -> tuple[str, ...]:
+    """Build a replacement-disabled Git command for pushed-object inspection."""
+    return (_GIT_EXECUTABLE, "--no-replace-objects", *args)
+
+
+def _run_range_git(
+    args: list[str], *, text: bool = False, timeout: float | None = None
+) -> subprocess.CompletedProcess:
+    return _run_git(["--no-replace-objects", *args], text=text, timeout=timeout)
+
+
 def _repo_root() -> Path:
     proc = _run_git(["rev-parse", "--show-toplevel"], text=True)
     if proc.returncode:
@@ -590,7 +604,7 @@ def _remaining_seconds(deadline: float) -> float:
 
 
 def _detect_git_object_format(timeout: float | None = None) -> GitObjectFormat:
-    proc = _run_git(
+    proc = _run_range_git(
         ["rev-parse", "--show-object-format"], text=True, timeout=timeout
     )
     rows = proc.stdout.splitlines()
@@ -610,7 +624,7 @@ def _resolve_commit(
 ) -> str:
     if not revision:
         raise ValueError("revision")
-    proc = _run_git(
+    proc = _run_range_git(
         [
             "rev-parse", "--verify", "--end-of-options",
             f"{revision}^{{commit}}",
@@ -627,6 +641,230 @@ def _resolve_commit(
     if not object_format.matches(oid):
         raise ValueError("revision")
     return oid
+
+
+def _graft_overlay_present(timeout: float | None = None) -> bool:
+    proc = _run_range_git(
+        ["rev-parse", "--git-path", "info/grafts"], text=True, timeout=timeout
+    )
+    rows = proc.stdout.splitlines()
+    if proc.returncode or len(rows) != 1 or not rows[0]:
+        raise ValueError("graft-path")
+    graft_path = Path(rows[0])
+    try:
+        with graft_path.open("rb") as stream:
+            return bool(stream.read(1))
+    except FileNotFoundError:
+        return False
+    except OSError as exc:
+        raise ValueError("graft-path") from exc
+
+
+async def _read_git_lines_bounded(
+    argv: tuple[str, ...],
+    *,
+    byte_cap: int,
+    line_cap: int,
+    deadline: float,
+    accepted_codes: frozenset[int],
+) -> tuple[int, tuple[bytes, ...]] | Refusal:
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *argv,
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return _refusal("PS-MSG-SPAWN", "selection")
+    if process.stdout is None:
+        if process.returncode is None:
+            process.kill()
+            await process.wait()
+        return _refusal("PS-MSG-READ", "selection-pipe")
+
+    rows: list[bytes] = []
+    pending = bytearray()
+    total_bytes = 0
+    refusal: Refusal | None = None
+    try:
+        while refusal is None:
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                refusal = _refusal("PS-MSG-READ-TIMEOUT", "deadline")
+                break
+            try:
+                chunk = await asyncio.wait_for(
+                    process.stdout.read(_READ_CHUNK_BYTES), timeout=remaining
+                )
+            except asyncio.TimeoutError:
+                refusal = _refusal("PS-MSG-READ-TIMEOUT", "deadline")
+                break
+            if not chunk:
+                break
+            total_bytes += len(chunk)
+            if total_bytes > byte_cap:
+                refusal = _refusal("PS-MSG-LIMIT", "selection-bytes")
+                break
+            pending.extend(chunk)
+            while refusal is None:
+                newline = pending.find(b"\n")
+                if newline < 0:
+                    if len(pending) > line_cap:
+                        refusal = _refusal("PS-MSG-FRAME", "selection-line")
+                    break
+                raw = bytes(pending[:newline])
+                del pending[:newline + 1]
+                if len(raw) > line_cap:
+                    refusal = _refusal("PS-MSG-FRAME", "selection-line")
+                else:
+                    rows.append(raw)
+        if refusal is None and pending:
+            if len(pending) > line_cap:
+                refusal = _refusal("PS-MSG-FRAME", "selection-line")
+            else:
+                rows.append(bytes(pending))
+    except asyncio.CancelledError:
+        refusal = _refusal("PS-MSG-READ", "cancelled")
+    except Exception:
+        refusal = _refusal("PS-MSG-READ", "selection")
+
+    if refusal is None:
+        remaining = deadline - asyncio.get_running_loop().time()
+        if remaining <= 0:
+            refusal = _refusal("PS-MSG-READ-TIMEOUT", "deadline")
+        else:
+            try:
+                await asyncio.wait_for(process.wait(), timeout=remaining)
+            except asyncio.TimeoutError:
+                refusal = _refusal("PS-MSG-READ-TIMEOUT", "deadline")
+            except Exception:
+                refusal = _refusal("PS-MSG-READ", "selection-wait")
+
+    if process.returncode is None:
+        try:
+            process.kill()
+        except ProcessLookupError:
+            pass
+        try:
+            await asyncio.wait_for(
+                process.wait(), timeout=OBJECT_REAP_ATTEMPT_SECONDS
+            )
+        except Exception:
+            return _refusal("PS-MSG-REAP", "selection-child")
+    if process.returncode is None:
+        return _refusal("PS-MSG-REAP", "selection-child")
+    if refusal is not None:
+        return refusal
+    if process.returncode not in accepted_codes:
+        return _refusal("PS-MSG-RANGE", "selection-child")
+    return process.returncode, tuple(rows)
+
+
+def _destination_ref(destination: str) -> str:
+    return destination if destination.startswith("refs/") else f"refs/heads/{destination}"
+
+
+async def _unique_push_destination(
+    remote: str, *, deadline: float
+) -> str | Refusal:
+    result = await _read_git_lines_bounded(
+        _range_git_argv("remote", "get-url", "--push", "--all", remote),
+        byte_cap=(2 * _MAX_PATH_BYTES) + 2,
+        line_cap=_MAX_PATH_BYTES,
+        deadline=deadline,
+        accepted_codes=frozenset({0}),
+    )
+    if isinstance(result, Refusal):
+        return result
+    _returncode, rows = result
+    if len(rows) != 1 or not rows[0]:
+        return _refusal("PS-MSG-RANGE", "push-destination")
+    try:
+        return rows[0].decode("utf-8", "strict")
+    except UnicodeDecodeError:
+        return _refusal("PS-MSG-RANGE", "push-destination")
+
+
+async def _remote_destination_oid(
+    push_destination: str,
+    destination: str,
+    *,
+    deadline: float,
+    object_format: GitObjectFormat,
+) -> str | None | Refusal:
+    destination_ref = _destination_ref(destination)
+    try:
+        encoded_ref = destination_ref.encode("utf-8", "strict")
+    except UnicodeError:
+        return _refusal("PS-MSG-RANGE", "destination-ref")
+    if len(encoded_ref) > _MAX_PATH_BYTES:
+        return _refusal("PS-MSG-LIMIT", "destination-ref")
+    line_cap = object_format.hex_length + 1 + len(encoded_ref)
+    result = await _read_git_lines_bounded(
+        _range_git_argv(
+            "ls-remote", "--refs", "--exit-code", push_destination, destination_ref
+        ),
+        byte_cap=line_cap + 1,
+        line_cap=line_cap,
+        deadline=deadline,
+        accepted_codes=frozenset({0, 2}),
+    )
+    if isinstance(result, Refusal):
+        return result
+    returncode, rows = result
+    if returncode == 2 and not rows:
+        return None
+    if returncode != 0 or len(rows) != 1:
+        return _refusal("PS-MSG-RANGE", "destination-remote")
+    parts = rows[0].split(b"\t")
+    if len(parts) != 2 or parts[1] != encoded_ref:
+        return _refusal("PS-MSG-FRAME", "destination-remote")
+    try:
+        oid = parts[0].decode("ascii").lower()
+    except UnicodeDecodeError:
+        return _refusal("PS-MSG-FRAME", "destination-remote")
+    if not object_format.matches(oid):
+        return _refusal("PS-MSG-FRAME", "destination-remote")
+    return oid
+
+
+async def _read_parent_graph_bounded(
+    argv: tuple[str, ...],
+    *,
+    deadline: float,
+    object_format: GitObjectFormat,
+) -> tuple[tuple[str, tuple[str, ...]], ...] | Refusal:
+    result = await _read_git_lines_bounded(
+        argv,
+        byte_cap=_MAX_PARENT_GRAPH_BYTES,
+        line_cap=_MAX_COMMIT_TREE_BYTES,
+        deadline=deadline,
+        accepted_codes=frozenset({0}),
+    )
+    if isinstance(result, Refusal):
+        return result
+    _returncode, rows = result
+    if len(rows) > _MAX_COMMITS:
+        return _refusal("PS-MSG-LIMIT", "count")
+    parsed: list[tuple[str, tuple[str, ...]]] = []
+    seen: set[str] = set()
+    for row in rows:
+        fields = row.split(b" ")
+        if not fields or any(len(field) != object_format.hex_length for field in fields):
+            return _refusal("PS-MSG-FRAME", "parent-graph")
+        try:
+            values = tuple(field.decode("ascii").lower() for field in fields)
+        except UnicodeDecodeError:
+            return _refusal("PS-MSG-FRAME", "parent-graph")
+        if any(not object_format.matches(value) for value in values):
+            return _refusal("PS-MSG-FRAME", "parent-graph")
+        oid, parents = values[0], values[1:]
+        if oid in seen:
+            return _refusal("PS-MSG-FRAME", "parent-graph")
+        seen.add(oid)
+        parsed.append((oid, parents))
+    return tuple(parsed)
 
 
 def _resolve_head(timeout: float | None = None) -> str:
@@ -763,7 +1001,7 @@ async def _range_selection(
 ) -> RangeSelection | Refusal:
     deadline = deadline if deadline is not None else time.monotonic() + _SCAN_DEADLINE_SECONDS
     try:
-        remotes = _run_git(
+        remotes = _run_range_git(
             ["remote"], text=True, timeout=_remaining_seconds(deadline)
         )
     except subprocess.TimeoutExpired:
@@ -778,6 +1016,13 @@ async def _range_selection(
     except (OSError, ValueError):
         return _refusal("PS-MSG-RANGE", "object-format")
     try:
+        if _graft_overlay_present(_remaining_seconds(deadline)):
+            return _refusal("PS-MSG-RANGE", "graft-overlay")
+    except subprocess.TimeoutExpired:
+        return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
+    except (OSError, ValueError):
+        return _refusal("PS-MSG-RANGE", "graft-overlay")
+    try:
         tip = _resolve_commit(
             request.source,
             _remaining_seconds(deadline),
@@ -787,23 +1032,35 @@ async def _range_selection(
         return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
     except (OSError, ValueError):
         return _refusal("PS-MSG-RANGE", "destination")
-    commit_ids = await _read_git_oid_lines_bounded(
-        (
-            _GIT_EXECUTABLE, "rev-list", "--topo-order", tip,
-            "--not", f"--remotes={request.remote}",
-        ),
-        count_cap=_MAX_COMMITS,
-        byte_cap=object_format.list_byte_cap(_MAX_COMMITS),
+    loop_deadline = asyncio.get_running_loop().time() + max(
+        0.0, deadline - time.monotonic()
+    )
+    push_destination = await _unique_push_destination(
+        request.remote, deadline=loop_deadline
+    )
+    if isinstance(push_destination, Refusal):
+        return push_destination
+    destination_oid = await _remote_destination_oid(
+        push_destination,
+        request.destination,
+        deadline=loop_deadline,
+        object_format=object_format,
+    )
+    if isinstance(destination_oid, Refusal):
+        return destination_oid
+    exclusion = () if destination_oid is None else ("--not", destination_oid)
+    parent_graph = await _read_parent_graph_bounded(
+        _range_git_argv("rev-list", "--parents", "--topo-order", tip, *exclusion),
         deadline=asyncio.get_running_loop().time()
         + max(0.0, deadline - time.monotonic()),
         object_format=object_format,
     )
-    if isinstance(commit_ids, Refusal):
-        return commit_ids
+    if isinstance(parent_graph, Refusal):
+        return parent_graph
+    commit_ids = tuple(oid for oid, _parents in parent_graph)
     object_ids = await _read_git_oid_lines_bounded(
-        (
-            _GIT_EXECUTABLE, "rev-list", "--objects", "--no-object-names", tip,
-            "--not", f"--remotes={request.remote}",
+        _range_git_argv(
+            "rev-list", "--objects", "--no-object-names", tip, *exclusion
         ),
         count_cap=_MAX_OBJECTS,
         byte_cap=object_format.list_byte_cap(_MAX_OBJECTS),
@@ -819,13 +1076,15 @@ async def _range_selection(
     if any(oid not in object_set for oid in commit_ids):
         return _refusal("PS-MSG-COVERAGE", "commit-object-set")
     return RangeSelection(
-        request.remote,
-        request.destination,
-        request.source,
-        tip,
-        commit_ids,
-        object_ids,
-        object_format,
+        remote=request.remote,
+        destination=request.destination,
+        source=request.source,
+        tip=tip,
+        expected_oids=commit_ids,
+        object_oids=object_ids,
+        object_format=object_format,
+        destination_oid=destination_oid,
+        expected_parents=parent_graph,
     )
 
 
@@ -884,7 +1143,7 @@ class _AsyncGitObjectReader:
     def __init__(
         self,
         *,
-        argv: tuple[str, ...] = (_GIT_EXECUTABLE, "cat-file", "--batch"),
+        argv: tuple[str, ...] = _range_git_argv("cat-file", "--batch"),
         request_timeout: float = _OBJECT_REQUEST_TIMEOUT_SECONDS,
         settle_timeout: float = OBJECT_REAP_ATTEMPT_SECONDS,
     ) -> None:
@@ -1460,6 +1719,15 @@ async def _acquire_history(
         return _refusal("PS-MSG-COVERAGE", "object-set")
     if set(commit_records) != commit_set:
         return _refusal("PS-MSG-COVERAGE", "commit-set")
+    if selection.expected_parents:
+        expected_parents = dict(selection.expected_parents)
+        if set(expected_parents) != commit_set:
+            return _refusal("PS-MSG-COVERAGE", "parent-graph-set")
+        if any(
+            commit_records[oid].parents != expected_parents[oid]
+            for oid in selection.expected_oids
+        ):
+            return _refusal("PS-MSG-COVERAGE", "parent-graph")
     coverage = coverage_recorder.proof()
     if isinstance(coverage, Refusal):
         return coverage

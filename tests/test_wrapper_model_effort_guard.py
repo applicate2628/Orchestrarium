@@ -18,6 +18,7 @@ from tests.fixtures.codex_hook_fixture import (
 from tests.fixtures.provider_prompt_projection import (
     materialize_provider_prompt_runtime,
 )
+from tests.fixtures.runtime_capabilities import requires_windows_process_runner
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -181,6 +182,7 @@ def _run_transport(
 
 
 @pytest.mark.parametrize("provider", ("codex", "claude"))
+@requires_windows_process_runner
 def test_root_thin_wrapper_delivers_one_governance_frame_then_exact_task_bytes(
     tmp_path: Path, provider: str
 ) -> None:
@@ -394,6 +396,7 @@ def test_conflicting_singular_control_values_are_rejected() -> None:
 
 
 @pytest.mark.parametrize("provider", ("codex", "claude"))
+@requires_windows_process_runner
 def test_default_profile_reaches_fake_provider_with_explicit_model_and_effort(
     tmp_path: Path, provider: str
 ) -> None:
@@ -419,6 +422,7 @@ def test_default_profile_reaches_fake_provider_with_explicit_model_and_effort(
 
 
 @pytest.mark.parametrize("provider", ("codex", "claude"))
+@requires_windows_process_runner
 def test_full_profile_override_reaches_fake_provider_byte_for_byte(
     tmp_path: Path, provider: str
 ) -> None:

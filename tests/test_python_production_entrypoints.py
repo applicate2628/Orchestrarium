@@ -12,6 +12,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
+from tests.fixtures.runtime_capabilities import codex_hook_host_env
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -359,6 +360,7 @@ def test_codex_production_entrypoint_creates_only_source_manifest_roles(
         capture_output=True,
         text=True,
         encoding="utf-8",
+        env=codex_hook_host_env(os.environ, ROOT),
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "RESULT: OK - Codex pack installed" in result.stdout

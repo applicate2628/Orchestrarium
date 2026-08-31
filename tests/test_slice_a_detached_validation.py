@@ -12,6 +12,7 @@ import types
 from pathlib import Path
 
 import pytest
+from tests.fixtures.runtime_capabilities import requires_windows_process_runner
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -241,6 +242,7 @@ def test_detached_adapter_has_one_canonical_process_owner() -> None:
     ) in source
 
 
+@requires_windows_process_runner
 def test_slice_a_authorization_scope_polarity(
     tmp_path: Path,
 ) -> None:
@@ -464,6 +466,7 @@ def test_partial_acquisition_cleanup_failure_manifest_is_durable_before_interrup
             _cleanup_partial_fixture(repo, targets[0])
 
 
+@requires_windows_process_runner
 def test_deep_evidence_directory_uses_a_bounded_workspace_worktree_path(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -879,6 +882,7 @@ def test_shell_census_omission_fails_before_child_and_without_manifest(
     assert not (run_dir / module.TERMINAL_MANIFEST_NAME).exists()
 
 
+@requires_windows_process_runner
 def test_explicit_untracked_exclusion_is_absent_from_detached_worktree(
     tmp_path: Path,
 ) -> None:
@@ -987,6 +991,7 @@ def test_interruption_before_publication_leaves_no_terminal_manifest(
 @pytest.mark.parametrize(
     "scope", ("unit-fixture", "platform-final-correction-a", "slice-a-final")
 )
+@requires_windows_process_runner
 def test_detached_manifest_always_nonauthorizing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scope: str
 ) -> None:

@@ -11,6 +11,7 @@ import pytest
 from tests.fixtures.provider_prompt_projection import (
     materialize_provider_prompt_runtime,
 )
+from tests.fixtures.runtime_capabilities import requires_windows_process_runner
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -108,8 +109,16 @@ def test_subscription_only_fails_before_prompt_persistence(tmp_path: Path) -> No
 @pytest.mark.parametrize(
     ("signal", "expected_returncode"),
     (
-        ({"ANTHROPIC_" + "API_KEY": "synthetic"}, 0),
-        ({"ANTHROPIC_" + "AUTH_TOKEN": "synthetic"}, 0),
+        pytest.param(
+            {"ANTHROPIC_" + "API_KEY": "synthetic"},
+            0,
+            marks=requires_windows_process_runner,
+        ),
+        pytest.param(
+            {"ANTHROPIC_" + "AUTH_TOKEN": "synthetic"},
+            0,
+            marks=requires_windows_process_runner,
+        ),
         ({"CLAUDE_CODE_USE_BEDROCK": "1"}, 1),
         ({"CLAUDE_CODE_USE_VERTEX": "true"}, 1),
         ({"ORCHESTRARIUM_ALLOW_SUBSCRIPTION_CLAUDE": "1"}, 1),

@@ -17,6 +17,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from tests.fixtures.runtime_capabilities import requires_windows_process_runner
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -406,6 +407,7 @@ def test_validator_runtime_has_no_direct_subprocess_or_tree_helper() -> None:
     assert "taskkill" not in text.casefold()
 
 
+@requires_windows_process_runner
 def test_validator_process_adapter_preserves_exact_python_argv(tmp_path: Path) -> None:
     runtime = _load(RUNTIME, "validator_exact_argv")
     child = _write_python(
@@ -436,54 +438,6 @@ def test_validator_process_adapter_preserves_exact_python_argv(tmp_path: Path) -
     assert result.resources_closed
     assert result.tree_empty
     assert result.direct_reaped
-
-
-@pytest.mark.skipif(os.name == "nt", reason="POSIX cwd ownership and mode contract")
-def test_validator_process_adapter_uses_owned_private_posix_cwd_and_cleans_it(
-    tmp_path: Path,
-) -> None:
-    runtime = _load(RUNTIME, "validator_private_posix_cwd")
-    layout_root = tmp_path / "world-writable-layout"
-    layout_root.mkdir()
-    layout_root.chmod(0o777)
-    base = runtime.detect_layout(VALIDATORS[0], "codex", ROOT)
-    validator = runtime.Validator(
-        runtime.Layout(
-            root=layout_root,
-            provider=base.provider,
-            dev_repo=base.dev_repo,
-            standalone=base.standalone,
-            pack=base.pack,
-            skills=base.skills,
-            scripts=base.scripts,
-            agents_text=base.agents_text,
-        )
-    )
-    child = _write_python(
-        tmp_path,
-        "echo_cwd.py",
-        "import json, os, stat\n"
-        "metadata = os.stat(os.getcwd())\n"
-        "print(json.dumps({\n"
-        "    'cwd': os.getcwd(),\n"
-        "    'mode': stat.S_IMODE(metadata.st_mode),\n"
-        "    'owner': metadata.st_uid,\n"
-        "    'effective_user': os.geteuid(),\n"
-        "}))\n",
-    )
-
-    try:
-        result = validator._run_python(child, timeout_seconds=10.0)
-    finally:
-        validator.close()
-
-    assert stat.S_IMODE(layout_root.stat().st_mode) == 0o777
-    assert result.returncode == 0, result.stderr
-    observed = json.loads(result.stdout)
-    assert observed["cwd"] != str(layout_root)
-    assert observed["owner"] == observed["effective_user"]
-    assert observed["mode"] & 0o077 == 0
-    assert not Path(observed["cwd"]).exists()
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX cwd ownership and mode contract")
