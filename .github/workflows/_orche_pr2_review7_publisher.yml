@@ -1,0 +1,185 @@
+name: Internal PR2 log-isolation publisher
+
+on:
+  push:
+    branches:
+      - orche/internal-pr2-review7-20260831
+
+permissions:
+  contents: write
+
+jobs:
+  verify-and-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout helper payload
+        uses: actions/checkout@v4
+        with:
+          ref: orche/internal-pr2-review7-20260831
+          path: helper
+          fetch-depth: 1
+
+      - name: Checkout pull-request branch
+        uses: actions/checkout@v4
+        with:
+          ref: orche/impl-000-baseline
+          path: repo
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Install test dependencies
+        run: |
+          python3 -m venv --copies /tmp/orche-log-review-venv
+          /tmp/orche-log-review-venv/bin/python -m pip install --disable-pip-version-check pytest PyYAML
+          echo "/tmp/orche-log-review-venv/bin" >> "$GITHUB_PATH"
+
+      - name: Add regressions, verify red, implement, verify green, and publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PYTHONDONTWRITEBYTECODE=1
+          export PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
+          export TERM=dumb
+
+          expected_head=e2a333d567aac72ad27360804dc6c9ef2cbb536f
+          test "$(git -C repo rev-parse HEAD)" = "$expected_head"
+          test -z "$(git -C repo status --porcelain=v1)"
+
+          python3 helper/.orche-payload/fix_stage0_review7.py tests repo
+
+          cd repo
+          set +e
+          python3 tests/test_orche_verifier_isolation.py \
+            VerifierIsolationTests.test_child_stdout_is_nonseekable_and_parent_captured \
+            > /tmp/orche-review7-red-pipe.log 2>&1
+          red_pipe=$?
+          python3 tests/test_orche_verifier_isolation.py \
+            VerifierIsolationTests.test_detached_child_cannot_rewrite_parent_captured_pytest_outcome \
+            > /tmp/orche-review7-red-forgery.log 2>&1
+          red_forgery=$?
+          python3 tests/test_orche_verifier_isolation.py \
+            VerifierIsolationTests.test_parent_generated_pytest_lane_revalidates_after_each_file \
+            > /tmp/orche-review7-red-worktree.log 2>&1
+          red_worktree=$?
+          python3 tests/test_orche_review_regressions.py \
+            ReviewRegressionTests.test_retained_pytest_files_use_parent_capture_and_per_file_revalidation \
+            > /tmp/orche-review7-red-contract.log 2>&1
+          red_contract=$?
+          set -e
+
+          for value in "$red_pipe" "$red_forgery" "$red_worktree" "$red_contract"; do
+            if [ "$value" -eq 0 ]; then
+              echo "RED verification failed: a new regression passed before implementation" >&2
+              cat /tmp/orche-review7-red-*.log >&2
+              exit 1
+            fi
+          done
+          grep -Eq "FAILED|ERROR" /tmp/orche-review7-red-pipe.log
+          grep -Eq "FAILED|ERROR" /tmp/orche-review7-red-forgery.log
+          grep -Eq "FAILED|ERROR" /tmp/orche-review7-red-worktree.log
+          grep -Eq "FAILED|ERROR" /tmp/orche-review7-red-contract.log
+          echo "RED verified: child stdout is seekable and worktrees are not checked between retained files"
+
+          cd ..
+          python3 helper/.orche-payload/fix_stage0_review7.py implement repo
+          cd repo
+
+          cmp scripts/baseline/stage0_evidence.py \
+              baseline/orchestrarium-v1/tooling/stage0_evidence.py
+          cmp scripts/baseline/stage0_orchestrator.py \
+              baseline/orchestrarium-v1/tooling/stage0_orchestrator.py
+
+          for test_file in \
+            tests/test_orche_baseline_pin.py \
+            tests/test_orche_pytest_baseline.py \
+            tests/test_orche_baseline_inventory.py \
+            tests/test_orche_target_effect_baseline.py \
+            tests/test_orche_command_baseline.py \
+            tests/test_orche_capability_baseline.py \
+            tests/test_orche_verifier_isolation.py \
+            tests/test_orche_review_regressions.py; do
+            python3 "$test_file"
+          done
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+          import re
+          import subprocess
+          import tempfile
+
+          changed = subprocess.check_output(
+              ["git", "diff", "--name-only", "--", "*.py"], text=True
+          ).splitlines()
+          for name in changed:
+              source = Path(name).read_text(encoding="utf-8")
+              compile(source, name, "exec")
+
+          pin = json.loads(
+              Path("baseline/orchestrarium-v1/baseline-pin.json").read_text(
+                  encoding="utf-8"
+              )
+          )
+          for key in ("stage0Evidence", "stage0Orchestrator"):
+              record = pin["tooling"][key]
+              actual = subprocess.check_output(
+                  ["git", "hash-object", record["path"]], text=True
+              ).strip()
+              assert actual == record["gitBlobSha"], (
+                  key,
+                  actual,
+                  record["gitBlobSha"],
+              )
+
+          readme = Path(
+              "baseline/orchestrarium-v1/README.md"
+          ).read_text(encoding="utf-8")
+          match = re.search(r"```bash\n(.*?)\n```", readme, re.S)
+          assert match
+          with tempfile.NamedTemporaryFile(
+              "w", suffix=".sh", delete=False
+          ) as handle:
+              handle.write(match.group(1) + "\n")
+              shell_path = handle.name
+          subprocess.run(["bash", "-n", shell_path], check=True)
+
+          evidence = Path(
+              "scripts/baseline/stage0_evidence.py"
+          ).read_text(encoding="utf-8")
+          orchestrator = Path(
+              "scripts/baseline/stage0_orchestrator.py"
+          ).read_text(encoding="utf-8")
+          assert "stdout=subprocess.PIPE" in evidence
+          assert "_write_parent_captured_log" in evidence
+          assert "revalidate_worktrees()" in evidence
+          assert orchestrator.count(
+              "revalidate_worktrees=revalidate_pytest_worktrees"
+          ) == 2
+          PY
+
+          find . -type d -name __pycache__ -prune -exec rm -rf {} +
+          git add -A
+
+          expected_paths=$(cat <<'EOF'
+          RELEASE_NOTES.md
+          baseline/orchestrarium-v1/README.md
+          baseline/orchestrarium-v1/baseline-pin.json
+          baseline/orchestrarium-v1/tooling/stage0_evidence.py
+          baseline/orchestrarium-v1/tooling/stage0_orchestrator.py
+          scripts/baseline/stage0_evidence.py
+          scripts/baseline/stage0_orchestrator.py
+          tests/test_orche_review_regressions.py
+          tests/test_orche_verifier_isolation.py
+          EOF
+          )
+          diff -u <(printf '%s\n' "$expected_paths" | sort) \
+            <(git diff --cached --name-only | sort)
+          git diff --cached --check
+          python3 scripts/check-publication-gate.py
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(stage0): isolate pytest logs and revalidate files'
+          git push origin HEAD:orche/impl-000-baseline
+          echo "published_commit=$(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
