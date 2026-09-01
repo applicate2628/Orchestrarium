@@ -32,7 +32,7 @@ PROVIDER_RUNTIME_MIRRORS = (
     ROOT / "src.claude/agents/scripts/skill_pack_validator_runtime.py",
 )
 EXPECTED_SUMMARIES = (
-    "PASS: 556  WARN: 0  FAIL: 0",
+    "PASS: 557  WARN: 0  FAIL: 0",
     "Checks: 489  |  Passed: 489  |  Warnings: 0  |  Errors: 0",
 )
 

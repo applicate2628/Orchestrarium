@@ -660,6 +660,12 @@ When admitting a new candidate approach into discovery, the roadmap decision pac
 4. **Parallel writes are acceptable only after contracts and phase boundaries are fixed and the full resource surfaces are disjoint or isolated.**
 5. **If the cost of merging or coordinating exceeds the benefit, do not parallelize.**
 6. **Independent reviewers belong after implementation, not inside the implementation lane.**
+7. **Ready set.** A lane is ready only when its approved inputs and external prerequisites are accepted, its owner, scope, one artifact, and gate are explicit, its mandatory risk owners are known, its marginal benefit is positive, and it has no unresolved stop condition, human gate, integration conflict, or overlapping resource surface.
+8. **Admission choice.** From the current ready set, admit the largest useful pairwise-compatible subset. Rank candidates by priority, critical-path or unblocking value, mandatory risk coverage, marginal benefit, merge cost, and pairwise resource isolation. `parallelMode: force` requires eligible refill; it does not require maximum fan-out when no additional compatible lane has positive marginal benefit.
+9. **Capacity discovery.** When the runtime exposes free capacity, treat that current value as authoritative. Otherwise, launch one ranked candidate at a time until the runtime explicitly refuses capacity; never infer or cache a numeric concurrency cap. Recompute admission after every launch and every lane-settled event.
+10. **Release and refill.** Completed, `BLOCKED`, cancelled, and parked lanes release capacity; refill in the same turn unless a stop condition, human gate, integration conflict, or nonpositive marginal benefit prevents it. A waiting or long-running lane does not head-of-line block independent ready work. A lane waiting on an external prerequisite is parked or closed with a durable recovery point rather than occupying active admission indefinitely.
+11. **Integration serialization.** Integration-owner and shared integration-surface work is serialized.
+12. **Native execution truth.** Native role definitions supply fixed installed profiles and default effort floors; a requested override changes effective execution only when the host explicitly supports it and confirms it in returned runtime metadata. Otherwise record the fixed resolved profile/floor or an unavailable/deviated outcome; requested model or effort text is not execution evidence.
 
 ---
 

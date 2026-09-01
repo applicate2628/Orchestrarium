@@ -254,6 +254,35 @@ SPINE_MUST_NOT_CONTAIN = [
     ("P7-not-in-spine", "stop-after-current-run intent, persist the stop across turns"),
 ]
 
+DYNAMIC_ADMISSION_OWNERS = (
+    "src.claude/skills/lead/SKILL.md",
+    "src.codex/skills/lead/SKILL.md",
+    "src.claude/agents/contracts/operating-model.md",
+    "src.codex/skills/lead/operating-model.md",
+    "shared/references/subagent-operating-model.md",
+)
+
+DYNAMIC_ADMISSION_CLAUSES = (
+    "A lane is ready only when its approved inputs and external prerequisites are accepted",
+    "largest useful pairwise-compatible subset",
+    "priority, critical-path or unblocking value, mandatory risk coverage, marginal benefit, merge cost, and pairwise resource isolation",
+    "`parallelMode: force` requires eligible refill; it does not require maximum fan-out",
+    "When the runtime exposes free capacity, treat that current value as authoritative.",
+    "launch one ranked candidate at a time until the runtime explicitly refuses capacity; never infer or cache a numeric concurrency cap",
+    "Recompute admission after every launch and every lane-settled event.",
+    "Completed, `BLOCKED`, cancelled, and parked lanes release capacity",
+    "refill in the same turn unless a stop condition, human gate, integration conflict, or nonpositive marginal benefit prevents it",
+    "A waiting or long-running lane does not head-of-line block independent ready work.",
+    "waiting on an external prerequisite is parked or closed with a durable recovery point",
+    "Integration-owner and shared integration-surface work is serialized.",
+)
+
+NATIVE_PROFILE_TRUTH = (
+    "Native role definitions supply fixed installed profiles and default effort floors; "
+    "a requested override changes effective execution only when the host explicitly "
+    "supports it and confirms it in returned runtime metadata."
+)
+
 
 class TestOrchestrationDisciplineContract(unittest.TestCase):
     _cache: dict[str, str] = {}
@@ -283,6 +312,63 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
                     substring, spine,
                     f"[{gap_id}] {substring!r} must NOT be in the spine (P7 is Lead-file-only)",
                 )
+
+    def test_dynamic_lane_ready_admission_contract_is_cross_pack_and_canonical(self) -> None:
+        for owner in DYNAMIC_ADMISSION_OWNERS:
+            text = self._read(owner)
+            for clause in DYNAMIC_ADMISSION_CLAUSES:
+                with self.subTest(owner=owner, clause=clause):
+                    self.assertIn(clause, text)
+
+    def test_dynamic_admission_removes_fixed_caps_and_stale_sequential_claims(self) -> None:
+        owners = DYNAMIC_ADMISSION_OWNERS + (
+            "references-codex/subagent-operating-model.md",
+            "references-claude/subagent-operating-model.md",
+        )
+        stale = (
+            "practical limit of four",
+            "top-priority four",
+            "no native internal parallel skill dispatch",
+            "internal Codex-role work is still orchestrated sequentially",
+            "runtime default surface",
+            "all MCP",
+        )
+        for owner in owners:
+            text = self._read(owner)
+            for residue in stale:
+                with self.subTest(owner=owner, residue=residue):
+                    self.assertNotIn(residue, text)
+
+    def test_native_profile_and_effort_truth_is_pinned_across_operating_owners(self) -> None:
+        owners = (
+            "src.claude/skills/lead/SKILL.md",
+            "src.codex/skills/lead/SKILL.md",
+            "src.claude/agents/contracts/operating-model.md",
+            "src.codex/skills/lead/operating-model.md",
+            "shared/references/subagent-operating-model.md",
+        )
+        for owner in owners:
+            with self.subTest(owner=owner):
+                self.assertIn(NATIVE_PROFILE_TRUTH, self._read(owner))
+
+    def test_handoff_requires_fresh_exact_tool_selection_on_both_packs(self) -> None:
+        owners = (
+            "src.claude/agents/contracts/subagent-contracts.md",
+            "src.codex/skills/lead/subagent-contracts.md",
+        )
+        for owner in owners:
+            text = self._read(owner)
+            with self.subTest(owner=owner):
+                self.assertIn(
+                    "<exact task-scoped tool or MCP identifier discovered immediately before this spawn, or none>",
+                    text,
+                )
+                self.assertIn(
+                    "The caller performs fresh discovery before every subagent spawn and records only the exact task-scoped identifiers selected for that run, or `none`.",
+                    text,
+                )
+                self.assertNotIn("runtime default surface", text)
+                self.assertNotIn("all MCP", text)
 
     def test_cleanup_disposition_is_one_exact_cross_pack_field(self) -> None:
         field = (
