@@ -32,6 +32,8 @@
 
 
 def _validate_private_temp_parent(parent: Path) -> Path:
+    effective_uid = _linux_effective_uid()
+    allowed_owners = frozenset({0, effective_uid})
     try:
         before = parent.lstat()
     except OSError as exc:
@@ -42,10 +44,10 @@ def _validate_private_temp_parent(parent: Path) -> Path:
         raise runtime.VerificationError(
             f"private temporary parent must be a real directory: {parent}"
         )
-    if before.st_uid not in _TEMP_PARENT_ALLOWED_OWNERS:
+    if before.st_uid not in allowed_owners:
         raise runtime.VerificationError(
             "private temporary parent has an untrusted owner: "
-            f"{parent}; uid={before.st_uid}, expected root or effective uid {os.geteuid()}"
+            f"{parent}; uid={before.st_uid}, expected root or effective uid {effective_uid}"
         )
     if not os.access(parent, os.W_OK | os.X_OK):
         raise runtime.VerificationError(

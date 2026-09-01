@@ -44,7 +44,15 @@ _MAX_EVENT_BYTES = 64 * 1024 * 1024
 _MAX_DIAGNOSTIC = 256 * 1024
 _EVENT_READ_SIZE = 64 * 1024
 _POLL_SECONDS = 0.05
-_TEMP_PARENT_ALLOWED_OWNERS = frozenset({0, os.geteuid()})
+
+
+def _linux_effective_uid() -> int:
+    geteuid = getattr(os, "geteuid", None)
+    if not sys.platform.startswith("linux") or not callable(geteuid):
+        raise runtime.VerificationError(
+            "Stage 0 temporary-parent validation requires Linux"
+        )
+    return int(geteuid())
 
 
 @dataclass(frozen=True)

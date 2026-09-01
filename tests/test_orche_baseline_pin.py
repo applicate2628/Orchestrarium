@@ -5,6 +5,7 @@ import json
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -136,6 +137,7 @@ class BaselinePinTests(unittest.TestCase):
         tracked = set(git("ls-files").splitlines())
         self.assertNotIn(".tmp/test-noop", tracked)
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux Stage 0 bootstrap")
     def test_bootstrap_rejects_invalid_review_ref_with_operational_exit_two(self) -> None:
         text = README.read_text(encoding="utf-8")
         start = text.index("```bash") + len("```bash\n")

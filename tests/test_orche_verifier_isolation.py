@@ -24,7 +24,11 @@ sys.modules[SPEC.name] = VERIFIER
 SPEC.loader.exec_module(VERIFIER)
 REAL_GIT = Path(shutil.which("git") or "git").resolve()
 REAL_BASH = Path(shutil.which("bash") or "bash").resolve()
-TOOLS = VERIFIER.ExternalTools(Path(sys.executable).resolve(), REAL_GIT, REAL_BASH)
+TOOLS = (
+    VERIFIER.ExternalTools(Path(sys.executable).resolve(), REAL_GIT, REAL_BASH)
+    if sys.platform.startswith("linux")
+    else None
+)
 
 
 def revalidation_kwargs(callback=None):
@@ -60,6 +64,7 @@ def process_is_live(pid: int) -> bool:
 
 
 class VerifierIsolationTests(unittest.TestCase):
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux Stage 0 runtime")
     def test_sanitized_environment_drops_ambient_startup_and_git_redirection(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             env = VERIFIER.build_sanitized_env(
@@ -80,6 +85,7 @@ class VerifierIsolationTests(unittest.TestCase):
         self.assertEqual(env["GIT_NO_REPLACE_OBJECTS"], "1")
         self.assertEqual(env["GIT_OPTIONAL_LOCKS"], "0")
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux Stage 0 runtime")
     def test_repository_environment_restores_only_the_reviewed_import_root(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -111,6 +117,7 @@ class VerifierIsolationTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip(), "42")
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux Stage 0 runtime")
     def test_trusted_git_ignores_replacement_objects(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             repo = Path(temp) / "repo"
@@ -158,6 +165,7 @@ class VerifierIsolationTests(unittest.TestCase):
                 )
         self.assertEqual(trusted, "original\n")
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux Stage 0 runtime")
     def test_selected_executable_is_reverified_before_every_launch(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -181,6 +189,7 @@ class VerifierIsolationTests(unittest.TestCase):
                 VERIFIER._run_git(tools, env, repo, "rev-parse", "--git-dir")
             self.assertFalse(marker.exists())
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux Stage 0 runtime")
     def test_unsafe_local_git_configuration_is_rejected_even_when_overridden(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -209,6 +218,7 @@ class VerifierIsolationTests(unittest.TestCase):
                         repo, expected_ref=ref, tools=TOOLS, env=env
                     )
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux Stage 0 runtime")
     def test_local_core_worktree_cannot_redirect_physical_cleanliness(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -310,6 +320,7 @@ class VerifierIsolationTests(unittest.TestCase):
             time.sleep(1.0)
             self.assertFalse(delayed_sentinel.exists())
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux Stage 0 runtime")
     def test_external_tool_set_is_rejected_when_any_captured_identity_is_inside_worktree(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -555,6 +566,7 @@ class VerifierIsolationTests(unittest.TestCase):
             self.assertNotEqual(first, second)
             self.assertTrue(first.is_dir() and second.is_dir())
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux Stage 0 runtime")
     def test_clean_worktree_rejects_ignored_importable_bytecode_and_hidden_flags(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             repo = Path(temp) / "repo"
@@ -600,6 +612,7 @@ class VerifierIsolationTests(unittest.TestCase):
                         repo.resolve(), expected_ref=ref, tools=TOOLS, env=env
                     )
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux trusted-tree metadata")
     def test_trusted_snapshot_rejects_new_entries_symlinks_and_hardlinks(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             trusted = Path(temp) / "trusted"
@@ -620,6 +633,7 @@ class VerifierIsolationTests(unittest.TestCase):
             with self.assertRaisesRegex(VERIFIER.VerificationError, "hard-linked"):
                 VERIFIER._trusted_evidence_snapshot(trusted)
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux trusted-tree metadata")
     def test_candidate_lane_cannot_mutate_previously_accepted_trusted_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             trusted = Path(temp) / "trusted"
@@ -639,6 +653,7 @@ class VerifierIsolationTests(unittest.TestCase):
             ):
                 VERIFIER._verify_protected_digests(snapshot)
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux /tmp workspace contract")
     def test_verification_workspace_cleans_success_and_failure_by_default(self) -> None:
         success_paths: tuple[Path, Path]
         with VERIFIER.verification_workspace() as workspace:
@@ -654,6 +669,7 @@ class VerifierIsolationTests(unittest.TestCase):
         assert failure_paths is not None
         self.assertTrue(all(not path.exists() for path in failure_paths))
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux /tmp workspace contract")
     def test_verification_workspace_does_not_live_under_bootstrap_tmpdir(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             bootstrap = Path(temp) / "bootstrap"
@@ -670,6 +686,7 @@ class VerifierIsolationTests(unittest.TestCase):
                 else:
                     os.environ["TMPDIR"] = previous
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux /tmp workspace contract")
     def test_failed_workspace_is_preserved_only_when_explicitly_requested(self) -> None:
         paths: tuple[Path, Path] | None = None
         try:
@@ -684,6 +701,7 @@ class VerifierIsolationTests(unittest.TestCase):
                 for path in paths:
                     VERIFIER._remove_private_temp_root(path)
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux trusted-tree metadata")
     def test_report_copy_excludes_tool_and_lane_state(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -717,6 +735,7 @@ class VerifierIsolationTests(unittest.TestCase):
             ):
                 self.assertFalse((output / relative).exists(), relative)
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux Stage 0 lane")
     def test_parent_generated_pytest_evidence_cannot_be_rewritten_by_candidate_hook(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -819,6 +838,7 @@ class VerifierIsolationTests(unittest.TestCase):
             ["3 deselected"],
         )
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux Stage 0 lane")
     def test_parent_generated_pytest_evidence_preserves_non_skip_outcomes(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -933,6 +953,7 @@ class VerifierIsolationTests(unittest.TestCase):
         self.assertEqual(len(baseline_outcomes["diagnostics"]["xfailed"]), 1)
         self.assertEqual(len(baseline_outcomes["diagnostics"]["xpassed"]), 1)
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux Stage 0 lane")
     def test_parent_generated_pytest_evidence_preserves_candidate_only_skip(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

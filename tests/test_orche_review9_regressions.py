@@ -21,7 +21,11 @@ sys.modules[SPEC.name] = VERIFIER
 SPEC.loader.exec_module(VERIFIER)
 REAL_GIT = Path(shutil.which("git") or "git").resolve()
 REAL_BASH = Path(shutil.which("bash") or "bash").resolve()
-TOOLS = VERIFIER.ExternalTools(Path(sys.executable).resolve(), REAL_GIT, REAL_BASH)
+TOOLS = (
+    VERIFIER.ExternalTools(Path(sys.executable).resolve(), REAL_GIT, REAL_BASH)
+    if sys.platform.startswith("linux")
+    else None
+)
 
 
 def run_git(repo: Path, *args: str) -> str:

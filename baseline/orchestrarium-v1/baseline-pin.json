@@ -84,7 +84,7 @@
     },
     "stage0Verifier": {
       "deterministic": true,
-      "gitBlobSha": "d0730cdc64008d8230f1a441dcc2264729e3be94",
+      "gitBlobSha": "157c030c1e780e6e675526451cd2398df24a4c2a",
       "materialization": "git-cat-file-reviewed-tree-blob",
       "path": "baseline/orchestrarium-v1/tooling/verify_stage0.py",
       "runtimeMutation": false,
@@ -92,7 +92,7 @@
       "fragments": [
         {
           "path": "baseline/orchestrarium-v1/tooling/verify_stage0.part-00.pyfrag",
-          "gitBlobSha": "49258b10e4bf843213557d7420f5154b29ee91d4"
+          "gitBlobSha": "40d5d117f12ef9f7bb27912ee9989cd92f65d492"
         },
         {
           "path": "baseline/orchestrarium-v1/tooling/verify_stage0.part-01.pyfrag",
@@ -100,7 +100,7 @@
         },
         {
           "path": "baseline/orchestrarium-v1/tooling/verify_stage0.part-02.pyfrag",
-          "gitBlobSha": "5edff4c8596929df9d70dc804cfb025dda6e22ec"
+          "gitBlobSha": "ccd04766a67ccf40b31de385005cb0d6a751fbf1"
         },
         {
           "path": "baseline/orchestrarium-v1/tooling/verify_stage0.part-03.pyfrag",

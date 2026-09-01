@@ -8,9 +8,9 @@ import stat
 from pathlib import Path
 
 _FRAGMENT_RECORDS = (
-    ("verify_stage0.part-00.pyfrag", "37abb235cb268185d5e3f18546cd075ca29f15e4b02e3f0fc4c53144038b6d9c", "49258b10e4bf843213557d7420f5154b29ee91d4"),
+    ("verify_stage0.part-00.pyfrag", "5387fedb86235e446fbfee7d2c37512c0e56624ac62a925ec396898a2ac577a4", "40d5d117f12ef9f7bb27912ee9989cd92f65d492"),
     ("verify_stage0.part-01.pyfrag", "94968cdf02e3e42b7ce517fb5f9214e24800f1bd7474489d325e3777e4502801", "24a8cb22480d03c03a7b177ea3fcba553dcd380b"),
-    ("verify_stage0.part-02.pyfrag", "47d3c7bb72f7c94a7371791ec96aa8cbd75c66e35f3bdc5111bb06fc7950313a", "5edff4c8596929df9d70dc804cfb025dda6e22ec"),
+    ("verify_stage0.part-02.pyfrag", "b4e6dd7bbda91ede333b6c5cd6ea674b566fb3b43869c99460dad153575f4def", "ccd04766a67ccf40b31de385005cb0d6a751fbf1"),
     ("verify_stage0.part-03.pyfrag", "f64cb0117839c837890b03c624c4253eace6cf40d64256d2c551b5dccce7eb22", "f6839cc46a4109d128e141f143e6ae54beed1727"),
     ("verify_stage0.part-04.pyfrag", "cdce90bbe5ba049885268b1cfc69531a33237965c7df5cc5e5f4b00b2994c74b", "36545db5ccce1a07cf14947e5c6b6ab098144d24"),
     ("verify_stage0.part-05.pyfrag", "022caee2756f334a3b98d711b5deca242bc120cba9bf6bf1bb86451dd8375a76", "bb60ef66bb8a875ed25836f7cd59c2d0209a0389"),

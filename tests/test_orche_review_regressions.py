@@ -58,6 +58,61 @@ def run_python(root: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
 
 
 class ReviewRegressionTests(unittest.TestCase):
+    @unittest.skipUnless(sys.platform == "win32", "Windows import contract")
+    def test_stage0_verifier_loaders_import_on_windows(self) -> None:
+        source = (
+            "import importlib.util, sys\n"
+            "from pathlib import Path\n"
+            "path = Path(sys.argv[1])\n"
+            "spec = importlib.util.spec_from_file_location('stage0_windows_import', path)\n"
+            "assert spec is not None and spec.loader is not None\n"
+            "module = importlib.util.module_from_spec(spec)\n"
+            "sys.modules[spec.name] = module\n"
+            "spec.loader.exec_module(module)\n"
+        )
+        for script in (
+            ROOT / "scripts" / "baseline" / "verify_stage0.py",
+            ROOT / "baseline" / "orchestrarium-v1" / "tooling" / "verify_stage0.py",
+        ):
+            with self.subTest(script=script):
+                result = run_python(ROOT, "-I", "-c", source, os.fspath(script))
+                self.assertEqual(result.returncode, 0, result.stdout)
+
+    @unittest.skipUnless(sys.platform == "win32", "Windows refusal contract")
+    def test_stage0_temp_parent_refuses_windows_before_path_inspection(self) -> None:
+        missing_parent = ROOT / "definitely-missing-stage0-temp-parent"
+        self.assertFalse(missing_parent.exists())
+        source = (
+            "import importlib.util, sys\n"
+            "from pathlib import Path\n"
+            "path = Path(sys.argv[1])\n"
+            "spec = importlib.util.spec_from_file_location('stage0_windows_refusal', path)\n"
+            "assert spec is not None and spec.loader is not None\n"
+            "module = importlib.util.module_from_spec(spec)\n"
+            "sys.modules[spec.name] = module\n"
+            "spec.loader.exec_module(module)\n"
+            "try:\n"
+            "    module._validate_private_temp_parent(Path(sys.argv[2]))\n"
+            "except module.VerificationError as exc:\n"
+            "    assert 'requires Linux' in str(exc), str(exc)\n"
+            "else:\n"
+            "    raise AssertionError('Stage 0 temp-parent validation accepted Windows')\n"
+        )
+        for script in (
+            ROOT / "scripts" / "baseline" / "verify_stage0.py",
+            ROOT / "baseline" / "orchestrarium-v1" / "tooling" / "verify_stage0.py",
+        ):
+            with self.subTest(script=script):
+                result = run_python(
+                    ROOT,
+                    "-I",
+                    "-c",
+                    source,
+                    os.fspath(script),
+                    os.fspath(missing_parent),
+                )
+                self.assertEqual(result.returncode, 0, result.stdout)
+
     def test_mutable_and_frozen_tooling_are_byte_identical(self) -> None:
         for name in (
             "build_inventory.py",
@@ -129,6 +184,7 @@ class ReviewRegressionTests(unittest.TestCase):
         module = load_verifier("stage0_verifier_review")
         self.assertEqual(set(module.FOCUSED_TESTS), EXPECTED_FOCUSED)
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux /tmp ownership contract")
     def test_verifier_hardens_shared_temporary_parent(self) -> None:
         module = load_verifier("stage0_temp_parent_review")
         good = types.SimpleNamespace(st_mode=stat.S_IFDIR | 0o1777, st_uid=0)
@@ -350,6 +406,7 @@ class ReviewRegressionTests(unittest.TestCase):
         self.assertIn('raw.get("mode")', capability)
         self.assertIn('raw.get("objectType")', capability)
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux Stage 0 bootstrap")
     def test_documented_bootstrap_is_valid_bash_syntax(self) -> None:
         text = README.read_text(encoding="utf-8")
         start = text.index("```bash") + len("```bash\n")
