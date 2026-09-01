@@ -1317,9 +1317,11 @@ def _remote_probe_env(push_destination: str) -> dict[str, str]:
         ):
             del child_env[key]
     child_env.update({
-        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_COUNT": "2",
         "GIT_CONFIG_KEY_0": f"remote.{_REMOTE_PROBE_NAME}.url",
         "GIT_CONFIG_VALUE_0": push_destination,
+        "GIT_CONFIG_KEY_1": f"url.{push_destination}.insteadOf",
+        "GIT_CONFIG_VALUE_1": push_destination,
     })
     return child_env
 

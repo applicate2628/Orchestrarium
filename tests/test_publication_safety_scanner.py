@@ -2566,6 +2566,194 @@ class TestPublicationSafetyScannerV3(unittest.TestCase):
         self.assertIsInstance(child_env, dict)
         self.assertIn(canary, child_env.values())
 
+    def test_range_remote_probe_pins_first_url_rewrite_across_config_scopes(self) -> None:
+        for rewrite_scope in ("local", "global"):
+            with self.subTest(rewrite_scope=rewrite_scope), tempfile.TemporaryDirectory() as td:
+                root = Path(td)
+                repo = self._init_range_repo(root)
+                first_target = root / "origin.git"
+                second_target = root / "second.git"
+                subprocess.run(
+                    [_git(), "init", "-q", "--bare", str(second_target)], check=True
+                )
+
+                synthetic_remote = "freeze-probe://repository"
+                first_url = first_target.resolve().as_uri()
+                second_url = second_target.resolve().as_uri()
+                isolated_global = root / "global.gitconfig"
+                isolated_global.write_text("", encoding="utf-8")
+                scanner_env = os.environ.copy()
+                scanner_env.update({
+                    "GIT_CONFIG_GLOBAL": str(isolated_global),
+                    "GIT_CONFIG_NOSYSTEM": "1",
+                })
+                config_argv = (
+                    [_git(), "-C", str(repo), "config", "--local"]
+                    if rewrite_scope == "local"
+                    else [_git(), "config", "--file", str(isolated_global)]
+                )
+                for key, value in (
+                    (f"url.{first_url}.insteadOf", synthetic_remote),
+                    (f"url.{second_url}.insteadOf", first_url),
+                ):
+                    subprocess.run(
+                        [*config_argv, key, value],
+                        cwd=root,
+                        check=True,
+                        capture_output=True,
+                    )
+                self._git_run(repo, "remote", "set-url", "origin", synthetic_remote)
+
+                frozen = subprocess.run(
+                    [_git(), "-C", str(repo), "remote", "get-url", "--push", "--all", "origin"],
+                    env=scanner_env,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    check=True,
+                ).stdout.strip()
+                self.assertEqual(frozen, first_url)
+
+                omitted_without_pin = self._commit(
+                    repo,
+                    "finding.txt",
+                    "clean body",
+                    self._leak_message(f"{rewrite_scope}-rewrite-finding"),
+                )
+                self._git_run(
+                    repo,
+                    "push",
+                    "-q",
+                    second_url,
+                    "HEAD:refs/heads/main",
+                )
+                self._commit(repo, "tip.txt", "clean tip", "clean tip")
+
+                direct_url_probe = subprocess.run(
+                    [_git(), "-C", str(repo), "ls-remote", "--refs", first_url, "refs/heads/main"],
+                    env=scanner_env,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    check=True,
+                )
+                self.assertEqual(
+                    direct_url_probe.stdout.split("\t", 1)[0],
+                    omitted_without_pin,
+                    "a direct URL remains subject to a chained insteadOf rewrite",
+                )
+
+                proc = subprocess.run(
+                    [sys.executable, str(CANONICAL_SCANNER), "--range", "origin", "main"],
+                    cwd=repo,
+                    env=scanner_env,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                )
+
+                self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+                self.assertIn("PS-FINDING-COMMIT-MESSAGE", proc.stderr)
+                self.assertNotIn("publication-safety: clean", proc.stdout + proc.stderr)
+
+    def test_range_remote_probe_self_map_preserves_git_config_visibility(self) -> None:
+        module = _load_canonical_scanner("_scanner_v3_remote_probe_config_visibility")
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            config_path = root / "global.gitconfig"
+            destination = "ext::git-upload-pack synthetic/repository.git"
+            subprocess.run(
+                [_git(), "config", "--file", str(config_path), "credential.helper", "synthetic-helper"],
+                cwd=root,
+                check=True,
+                capture_output=True,
+            )
+            subprocess.run(
+                [_git(), "config", "--file", str(config_path), "protocol.ext.allow", "always"],
+                cwd=root,
+                check=True,
+                capture_output=True,
+            )
+            ambient = {
+                "GIT_CONFIG_GLOBAL": str(config_path),
+                "GIT_CONFIG_NOSYSTEM": "1",
+                "GIT_CONFIG_COUNT": "1",
+                "GIT_CONFIG_KEY_0": "discarded.synthetic",
+                "GIT_CONFIG_VALUE_0": "discarded",
+            }
+            with mock.patch.dict(os.environ, ambient, clear=False):
+                child_env = module._remote_probe_env(destination)
+
+            self.assertEqual(child_env["GIT_CONFIG_COUNT"], "2")
+            self.assertEqual(
+                child_env["GIT_CONFIG_KEY_0"],
+                f"remote.{module._REMOTE_PROBE_NAME}.url",
+            )
+            self.assertEqual(child_env["GIT_CONFIG_VALUE_0"], destination)
+            self.assertEqual(
+                child_env["GIT_CONFIG_KEY_1"], f"url.{destination}.insteadOf"
+            )
+            self.assertEqual(child_env["GIT_CONFIG_VALUE_1"], destination)
+            self.assertNotIn("discarded.synthetic", child_env.values())
+
+            for key, expected in (
+                ("credential.helper", "synthetic-helper"),
+                ("protocol.ext.allow", "always"),
+            ):
+                visible = subprocess.run(
+                    [_git(), "config", "--get", key],
+                    cwd=root,
+                    env=child_env,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    check=True,
+                )
+                self.assertEqual(visible.stdout.strip(), expected)
+
+            parsed_self_map = subprocess.run(
+                [_git(), "config", "--get", f"url.{destination}.insteadOf"],
+                cwd=root,
+                env=child_env,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                check=True,
+            )
+            self.assertEqual(parsed_self_map.stdout.strip(), destination)
+
+    def test_range_remote_probe_does_not_apply_push_instead_of_to_fetch(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo = self._init_range_repo(root)
+            first_url = (root / "origin.git").resolve().as_uri()
+            second_target = root / "push-only.git"
+            subprocess.run(
+                [_git(), "init", "-q", "--bare", str(second_target)], check=True
+            )
+            second_url = second_target.resolve().as_uri()
+            seed = self._git_run(repo, "rev-parse", "HEAD").stdout.strip()
+
+            probe = subprocess.run(
+                [
+                    _git(),
+                    "-C",
+                    str(repo),
+                    "-c",
+                    f"url.{second_url}.pushInsteadOf={first_url}",
+                    "ls-remote",
+                    "--refs",
+                    first_url,
+                    "refs/heads/main",
+                ],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                check=True,
+            )
+
+            self.assertEqual(probe.stdout.split("\t", 1)[0], seed)
+
     def test_range_uses_unique_pushurl_not_fetch_url_for_destination_oid(self) -> None:
         for push_has_seed in (True, False):
             with self.subTest(push_has_seed=push_has_seed), tempfile.TemporaryDirectory() as td:
