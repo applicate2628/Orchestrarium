@@ -682,8 +682,9 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
     """Regression tests for `--range <remote> <dst>` (2026-07-27,
     work-items/active/2026-07-26-push-gate-range-receipt/): the scanner's
     subject becomes the commit set about to be PUBLISHED
-    (`<tip> --not <authoritative-push-destination-oid>`, or all history for
-    a missing destination), read from COMMITTED objects at `tip` -- never the
+    (`<tip> --not <authoritative-push-destination-oid>`, or `<tip> --not
+    <authoritative-remote-tip>...` for a missing destination), read from
+    COMMITTED objects at `tip` -- never the
     working tree or index -- rather than the staged index `tracked` mode
     reads. See that scanner's own `--range` branch for the implementation."""
 
@@ -750,9 +751,7 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
                 with tempfile.TemporaryDirectory() as td:
                     repo = self._init_range_repo(Path(td))
                     self._commit_file(repo, "b.txt", "clean content, nothing machine-local here")
-                    expected_blob_bytes = sum(
-                        len((repo / name).read_bytes()) for name in ("seed.txt", "b.txt")
-                    )
+                    expected_blob_bytes = len((repo / "b.txt").read_bytes())
                     git = _git()
                     tip = subprocess.run(
                         [git, "-C", str(repo), "rev-parse", "HEAD"],
@@ -762,11 +761,11 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
                     self.assertEqual(rc, 0, err)
                     self.assertRegex(
                         out,
-                        rf"^publication-safety: clean \(range, receipt=v3, commits=2, "
-                        rf"commit-set=[0-9a-f]{{64}}, messages=complete, objects=6, "
-                        rf"object-set=[0-9a-f]{{64}}, blobs=2, blob-set=[0-9a-f]{{64}}, "
-                        rf"blob-bytes={expected_blob_bytes}, text=2, binary=0, subjects=3, "
-                        rf"subject-set=[0-9a-f]{{64}}, paths=2, path-set=[0-9a-f]{{64}}, "
+                        rf"^publication-safety: clean \(range, receipt=v3, commits=1, "
+                        rf"commit-set=[0-9a-f]{{64}}, messages=complete, objects=3, "
+                        rf"object-set=[0-9a-f]{{64}}, blobs=1, blob-set=[0-9a-f]{{64}}, "
+                        rf"blob-bytes={expected_blob_bytes}, text=1, binary=0, subjects=1, "
+                        rf"subject-set=[0-9a-f]{{64}}, paths=1, path-set=[0-9a-f]{{64}}, "
                         rf"history=complete, remote=origin, dst=claude, "
                         rf"src=claude, tip={tip}\)\n?$",
                     )
@@ -778,11 +777,15 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
             with self.subTest(scanner=scanner.parent.parent.name):
                 with tempfile.TemporaryDirectory() as td:
                     repo = self._init_range_repo(Path(td))
-                    rc, out, err = self._run_range(scanner, repo, "origin", "main")
-                    self.assertEqual(rc, 2, err)
-                    self.assertEqual(out, "")
-                    self.assertIn("PS-MSG-COVERAGE", err)
-                    self.assertNotIn("publication-safety: clean", err)
+                    for destination in ("main", "claude"):
+                        with self.subTest(destination=destination):
+                            rc, out, err = self._run_range(
+                                scanner, repo, "origin", destination
+                            )
+                            self.assertEqual(rc, 2, err)
+                            self.assertEqual(out, "")
+                            self.assertIn("PS-MSG-COVERAGE", err)
+                            self.assertNotIn("publication-safety: clean", err)
 
     def test_range_mode_reads_content_at_tip_not_working_tree(self) -> None:
         # O16, the single most important range-mode content-source property:
@@ -853,7 +856,7 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
             self.assertEqual(rc, 1, out + err)
             self.assertIn("PS-FINDING-CONTENT", err)
 
-    def test_range_mode_root_history_without_published_seed_is_scanned(self) -> None:
+    def test_range_mode_empty_remote_ref_inventory_refuses(self) -> None:
         leak = "pass" + "word" + ": hunter2"
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -868,8 +871,9 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
             subprocess.run([_git(), "-C", str(repo), "remote", "add", "origin", str(origin)], check=True)
             self._commit_file(repo, "root.txt", leak, message="root commit")
             rc, out, err = self._run_range(CANONICAL_SCANNER, repo, "origin", "claude")
-            self.assertEqual(rc, 1, out + err)
-            self.assertIn("PS-FINDING-CONTENT", err)
+            self.assertEqual(rc, 2, out + err)
+            self.assertIn("id=PS-MSG-RANGE reason=remote-refs", err)
+            self.assertNotIn("PS-FINDING", out + err)
 
     def test_range_mode_merge_parent_history_is_scanned_after_tip_delete(self) -> None:
         leak = "pass" + "word" + ": hunter2"
@@ -913,18 +917,16 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
             repo = self._init_range_repo(Path(td))
             for name in ("a.txt", "b.txt"):
                 (repo / name).write_text("shared clean\n", encoding="utf-8")
-            expected_blob_bytes = sum(
-                len((repo / name).read_bytes()) for name in ("seed.txt", "a.txt")
-            )
+            expected_blob_bytes = len((repo / "a.txt").read_bytes())
             subprocess.run([_git(), "-C", str(repo), "add", "a.txt", "b.txt"], check=True)
             subprocess.run([_git(), "-C", str(repo), "commit", "-q", "-m", "shared clean blob"], check=True)
             rc, out, err = self._run_range(CANONICAL_SCANNER, repo, "origin", "claude")
             self.assertEqual(rc, 0, err)
-            self.assertIn("blobs=2", out)
+            self.assertIn("blobs=1", out)
             self.assertIn(f"blob-bytes={expected_blob_bytes}", out)
-            self.assertIn("text=2, binary=0", out)
-            self.assertIn("subjects=4", out)
-            self.assertIn("paths=3", out)
+            self.assertIn("text=1, binary=0", out)
+            self.assertIn("subjects=2", out)
+            self.assertIn("paths=2", out)
 
     def test_range_mode_same_raw_path_with_two_blobs_binds_two_detector_paths(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -933,9 +935,9 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
             self._commit_file(repo, "versioned.txt", "clean version two")
             rc, out, err = self._run_range(CANONICAL_SCANNER, repo, "origin", "claude")
             self.assertEqual(rc, 0, err)
-            self.assertIn("blobs=3", out)
-            self.assertIn("subjects=5", out)
-            self.assertIn("paths=3", out)
+            self.assertIn("blobs=2", out)
+            self.assertIn("subjects=2", out)
+            self.assertIn("paths=2", out)
 
     def test_range_mode_receipt_records_explicit_text_and_binary_disposition(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -944,18 +946,14 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
             binary_fixture = repo / "binary.bin"
             text_fixture.write_text("clean text\n", encoding="utf-8")
             binary_fixture.write_bytes(b"\0\xff\x01")
-            expected_blob_bytes = (
-                len((repo / "seed.txt").read_bytes())
-                + len(text_fixture.read_bytes())
-                + len(binary_fixture.read_bytes())
-            )
+            expected_blob_bytes = len(text_fixture.read_bytes()) + len(binary_fixture.read_bytes())
             subprocess.run([_git(), "-C", str(repo), "add", "text.txt", "binary.bin"], check=True)
             subprocess.run([_git(), "-C", str(repo), "commit", "-q", "-m", "mixed blobs"], check=True)
             rc, out, err = self._run_range(CANONICAL_SCANNER, repo, "origin", "claude")
             self.assertEqual(rc, 0, err)
-            self.assertIn("blobs=3", out)
+            self.assertIn("blobs=2", out)
             self.assertIn(f"blob-bytes={expected_blob_bytes}", out)
-            self.assertIn("text=2, binary=1", out)
+            self.assertIn("text=1, binary=1", out)
 
     def test_range_mode_binary_blob_with_secret_marker_blocks_and_redacts(self) -> None:
         sentinel = "A1B2C3D4E5F6G7H8IJK"
@@ -1429,8 +1427,17 @@ class TestPublicationSafetyScannerV3(unittest.TestCase):
                     self._commit(repo, "base.txt", "clean base", "clean base")
                     self._git_run(repo, "merge", "--no-ff", "side", "-q", "-m", message)
                 proc = self._run_range(repo)
-                self.assertEqual(proc.returncode, 1, f"case={case} out={proc.stdout!r} err={proc.stderr!r}")
-                self.assertNotIn("A1B2C3D4E5F6G7H8IJK", proc.stdout + proc.stderr)
+                if case in {"initial", "other-remote"}:
+                    self.assertEqual(
+                        proc.returncode,
+                        2,
+                        f"case={case} out={proc.stdout!r} err={proc.stderr!r}",
+                    )
+                    self.assertIn("reason=remote-refs", proc.stderr)
+                    self.assertNotIn("PS-FINDING", proc.stdout + proc.stderr)
+                else:
+                    self.assertEqual(proc.returncode, 1, f"case={case} out={proc.stdout!r} err={proc.stderr!r}")
+                    self.assertNotIn("A1B2C3D4E5F6G7H8IJK", proc.stdout + proc.stderr)
 
     def test_range_message_zero_file_nonzero_commit(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -1501,8 +1508,8 @@ class TestPublicationSafetyScannerV3(unittest.TestCase):
 
             self.assertEqual(symbolic.returncode, 0, symbolic.stderr)
             self.assertEqual(full_sha.returncode, 0, full_sha.stderr)
-            self.assertIn("commits=2", symbolic.stdout)
-            self.assertIn("paths=2", symbolic.stdout)
+            self.assertIn("commits=1", symbolic.stdout)
+            self.assertIn("paths=1", symbolic.stdout)
             self.assertIn(
                 f"dst=candidate, src=candidate, tip={candidate_tip})",
                 symbolic.stdout,
@@ -1604,6 +1611,282 @@ class TestPublicationSafetyScannerV3(unittest.TestCase):
             self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
             self.assertIn("PS-FINDING-COMMIT-MESSAGE", proc.stderr)
             self.assertNotIn("publication-safety: clean", proc.stdout + proc.stderr)
+
+    def test_range_missing_destination_excludes_remote_tips_without_local_tracking(self) -> None:
+        for tracking_state in ("missing", "stale"):
+            with self.subTest(tracking_state=tracking_state), tempfile.TemporaryDirectory() as td:
+                repo = self._init_range_repo(Path(td), publish_seed=False)
+                self._commit(
+                    repo,
+                    "remote-finding.txt",
+                    "clean remote body",
+                    self._leak_message("remote-main-finding"),
+                )
+                self._git_run(repo, "push", "-q", "origin", "HEAD:refs/heads/main")
+                self._git_run(repo, "switch", "-q", "-c", "new-branch")
+                first = self._commit(
+                    repo, "new-one.txt", "clean new one", "clean new one"
+                )
+                self._commit(repo, "new-two.txt", "clean new two", "clean new two")
+                tracking_ref = "refs/remotes/origin/main"
+                if tracking_state == "missing":
+                    self._git_run(repo, "update-ref", "-d", tracking_ref)
+                else:
+                    self._git_run(repo, "update-ref", tracking_ref, first)
+
+                proc = subprocess.run(
+                    [
+                        sys.executable,
+                        str(CANONICAL_SCANNER),
+                        "--range",
+                        "origin",
+                        "new-branch",
+                        "--range-source",
+                        "HEAD",
+                    ],
+                    cwd=repo,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                )
+
+                self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+                self.assertIn("publication-safety: clean (range, receipt=v3, commits=2,", proc.stdout)
+                self.assertNotIn("PS-FINDING", proc.stdout + proc.stderr)
+
+    def test_range_missing_destination_uses_local_commit_subset_of_remote_refs(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo = self._init_range_repo(root, publish_seed=False)
+            self._commit(
+                repo,
+                "remote-finding.txt",
+                "clean remote body",
+                self._leak_message("remote-main-finding"),
+            )
+            self._git_run(repo, "push", "-q", "origin", "HEAD:refs/heads/main")
+            tagged_tip = self._commit(
+                repo, "tagged-only.txt", "clean tagged only", "clean tagged only"
+            )
+            self._git_run(
+                repo, "tag", "-a", "remote-base", "-m", "remote base", tagged_tip
+            )
+            self._git_run(repo, "push", "-q", "origin", "refs/tags/remote-base")
+
+            pr_repo = root / "pr-source"
+            subprocess.run(
+                [_git(), "init", "-q", "-b", "pr-source", str(pr_repo)], check=True
+            )
+            self._git_run(pr_repo, "config", "user.email", "t@t")
+            self._git_run(pr_repo, "config", "user.name", "t")
+            pr_tip = self._commit(
+                pr_repo, "pr-only.txt", "clean remote pr", "clean remote pr"
+            )
+            self._git_run(
+                pr_repo,
+                "push",
+                "-q",
+                str(root / "origin.git"),
+                "HEAD:refs/pull/1/head",
+            )
+            self.assertNotEqual(
+                self._git_run(repo, "cat-file", "-e", pr_tip, check=False).returncode,
+                0,
+            )
+
+            self._git_run(repo, "switch", "-q", "-c", "new-branch")
+            for index in range(3):
+                self._commit(
+                    repo,
+                    f"new-{index}.txt",
+                    f"clean new {index}",
+                    f"clean new {index}",
+                )
+
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(CANONICAL_SCANNER),
+                    "--range",
+                    "origin",
+                    "new-branch",
+                    "--range-source",
+                    "HEAD",
+                ],
+                cwd=repo,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            self.assertIn(
+                "publication-safety: clean (range, receipt=v3, commits=3,",
+                proc.stdout,
+            )
+            self.assertNotIn("PS-FINDING", proc.stdout + proc.stderr)
+
+    def test_range_missing_destination_refuses_local_noncommit_remote_tip(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = self._init_range_repo(Path(td))
+            blob = self._git_run(repo, "rev-parse", "HEAD:seed.txt").stdout.strip()
+            self._git_run(
+                repo, "push", "-q", "origin", f"{blob}:refs/tags/blob-only"
+            )
+            self._commit(repo, "new.txt", "clean new", "clean new")
+
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(CANONICAL_SCANNER),
+                    "--range",
+                    "origin",
+                    "new-branch",
+                    "--range-source",
+                    "HEAD",
+                ],
+                cwd=repo,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+            )
+
+            self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+            self.assertIn("reason=remote-ref-type", proc.stderr)
+            self.assertNotIn("publication-safety: clean", proc.stdout + proc.stderr)
+
+    def test_range_missing_destination_refuses_malformed_remote_ref_inventory(self) -> None:
+        module = _load_canonical_scanner("_scanner_v3_remote_ref_inventory")
+        tip = "1" * 40
+        other = "2" * 40
+        cases = {
+            "empty": (),
+            "invalid-oid": (b"not-an-oid\trefs/heads/main",),
+            "malformed-row": (tip.encode("ascii"),),
+            "invalid-ref": (f"{tip}\tHEAD".encode("ascii"),),
+            "duplicate-ref": (
+                f"{tip}\trefs/heads/main".encode("ascii"),
+                f"{tip}\trefs/heads/main".encode("ascii"),
+            ),
+            "conflicting-ref": (
+                f"{tip}\trefs/heads/main".encode("ascii"),
+                f"{other}\trefs/heads/main".encode("ascii"),
+            ),
+        }
+
+        async def run_case(remote_rows: tuple[bytes, ...]):
+            async def fake_reader(argv, **_kwargs):
+                if "get-url" in argv:
+                    return 0, (b"synthetic-push-destination",)
+                if "ls-remote" in argv and "--exit-code" in argv:
+                    return 2, ()
+                if "ls-remote" in argv:
+                    return 0, remote_rows
+                if "rev-list" in argv:
+                    return 0, (tip.encode("ascii"),)
+                raise AssertionError(argv)
+
+            with (
+                mock.patch.object(
+                    module,
+                    "_run_range_git",
+                    return_value=subprocess.CompletedProcess(
+                        ["git", "remote"], 0, "origin\n", ""
+                    ),
+                ),
+                mock.patch.object(
+                    module,
+                    "_detect_git_object_format",
+                    return_value=module._SHA1_OBJECT_FORMAT,
+                ),
+                mock.patch.object(module, "_graft_overlay_present", return_value=False),
+                mock.patch.object(module, "_resolve_commit", return_value=tip),
+                mock.patch.object(module, "_read_git_lines_bounded", side_effect=fake_reader),
+                mock.patch.object(
+                    module,
+                    "_read_git_oid_lines_bounded",
+                    new=mock.AsyncMock(return_value=(tip,)),
+                ),
+            ):
+                return await module._range_selection(
+                    module.RangeRequest("origin", "new-branch", "HEAD")
+                )
+
+        for name, rows in cases.items():
+            with self.subTest(case=name):
+                outcome = asyncio.run(run_case(rows))
+                self.assertIsInstance(outcome, module.Refusal)
+                self.assertIn(outcome.failure_id, {"PS-MSG-FRAME", "PS-MSG-RANGE"})
+
+    def test_range_missing_destination_refuses_over_cap_remote_ref_inventory(self) -> None:
+        module = _load_canonical_scanner("_scanner_v3_remote_ref_inventory_cap")
+        tip = "1" * 40
+        remote_rows = tuple(
+            f"{tip}\trefs/heads/branch-{index:05d}".encode("ascii")
+            for index in range(257)
+        )
+
+        async def fake_reader(argv, **_kwargs):
+            if "get-url" in argv:
+                return 0, (b"synthetic-push-destination",)
+            if "ls-remote" in argv and "--exit-code" in argv:
+                return 2, ()
+            if "ls-remote" in argv:
+                return 0, remote_rows
+            if "rev-list" in argv:
+                return 0, (tip.encode("ascii"),)
+            raise AssertionError(argv)
+
+        with (
+            mock.patch.object(
+                module,
+                "_run_range_git",
+                return_value=subprocess.CompletedProcess(
+                    ["git", "remote"], 0, "origin\n", ""
+                ),
+            ),
+            mock.patch.object(
+                module,
+                "_detect_git_object_format",
+                return_value=module._SHA1_OBJECT_FORMAT,
+            ),
+            mock.patch.object(module, "_graft_overlay_present", return_value=False),
+            mock.patch.object(module, "_resolve_commit", return_value=tip),
+            mock.patch.object(module, "_read_git_lines_bounded", side_effect=fake_reader),
+            mock.patch.object(
+                module,
+                "_read_git_oid_lines_bounded",
+                new=mock.AsyncMock(return_value=(tip,)),
+            ),
+        ):
+            outcome = asyncio.run(
+                module._range_selection(
+                    module.RangeRequest("origin", "new-branch", "HEAD")
+                )
+            )
+
+        self.assertIsInstance(outcome, module.Refusal)
+        self.assertEqual(outcome.failure_id, "PS-MSG-LIMIT")
+
+    def test_range_missing_destination_remote_ref_query_failure_refuses(self) -> None:
+        module = _load_canonical_scanner("_scanner_v3_remote_ref_query_failure")
+        refusal = module._refusal("PS-MSG-RANGE", "selection-child")
+
+        async def exercise():
+            return await module._remote_ref_tip_oids(
+                "synthetic-push-destination",
+                deadline=asyncio.get_running_loop().time() + 5.0,
+                object_format=module._SHA1_OBJECT_FORMAT,
+            )
+
+        with mock.patch.object(
+            module,
+            "_read_git_lines_bounded",
+            new=mock.AsyncMock(return_value=refusal),
+        ):
+            outcome = asyncio.run(exercise())
+
+        self.assertIs(outcome, refusal)
 
     def test_range_timeout_reaps_spawned_git_process_tree(self) -> None:
         module = _load_canonical_scanner("_scanner_v3_range_tree_timeout")
@@ -2098,8 +2381,13 @@ class TestPublicationSafetyScannerV3(unittest.TestCase):
 
                 proc = self._run_range(repo)
 
-                self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
-                self.assertIn("PS-FINDING-COMMIT-MESSAGE", proc.stderr)
+                if push_has_seed:
+                    self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+                    self.assertIn("PS-FINDING-COMMIT-MESSAGE", proc.stderr)
+                else:
+                    self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+                    self.assertIn("reason=remote-refs", proc.stderr)
+                    self.assertNotIn("PS-FINDING", proc.stdout + proc.stderr)
                 self.assertNotIn("publication-safety: clean", proc.stdout + proc.stderr)
 
     def test_range_refuses_multiple_configured_push_destinations(self) -> None:

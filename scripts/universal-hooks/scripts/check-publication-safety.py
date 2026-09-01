@@ -198,6 +198,7 @@ _SCAN_DEADLINE_SECONDS = 240.0
 _MAX_TREE_VISITS = _MAX_SUBJECTS
 _MAX_TREE_FRONTIER = _MAX_OBJECTS
 _MAX_TREE_CACHE_ENTRIES = _MAX_OBJECTS
+_MAX_REMOTE_REFS = 256
 _RECEIPT_DOMAIN = b"publication-safety-range-receipt-v3"
 _OBJECT_REQUEST_TIMEOUT_SECONDS = 5.0
 OBJECT_REAP_ATTEMPT_SECONDS = 3.0
@@ -308,6 +309,13 @@ class ObjectReadSuccess:
     returned_oid: str
     object_type: str
     raw: bytes
+
+
+@dataclass(frozen=True)
+class ObjectClassification:
+    requested_name: str
+    returned_oid: str | None
+    object_type: str | None
 
 
 @dataclass(frozen=True)
@@ -1291,6 +1299,24 @@ def _destination_ref(destination: str) -> str:
     return destination if destination.startswith("refs/") else f"refs/heads/{destination}"
 
 
+_REMOTE_PROBE_NAME = "publication-safety-verified-push-destination"
+
+
+def _remote_probe_env(push_destination: str) -> dict[str, str]:
+    child_env = os.environ.copy()
+    for key in tuple(child_env):
+        if key == "GIT_CONFIG_COUNT" or re.fullmatch(
+            r"GIT_CONFIG_(?:KEY|VALUE)_\d+", key
+        ):
+            del child_env[key]
+    child_env.update({
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": f"remote.{_REMOTE_PROBE_NAME}.url",
+        "GIT_CONFIG_VALUE_0": push_destination,
+    })
+    return child_env
+
+
 async def _unique_push_destination(
     remote: str, *, deadline: float
 ) -> str | Refusal:
@@ -1327,21 +1353,10 @@ async def _remote_destination_oid(
     if len(encoded_ref) > _MAX_PATH_BYTES:
         return _refusal("PS-MSG-LIMIT", "destination-ref")
     line_cap = object_format.hex_length + 1 + len(encoded_ref)
-    probe_remote = "publication-safety-verified-push-destination"
-    child_env = os.environ.copy()
-    for key in tuple(child_env):
-        if key == "GIT_CONFIG_COUNT" or re.fullmatch(
-            r"GIT_CONFIG_(?:KEY|VALUE)_\d+", key
-        ):
-            del child_env[key]
-    child_env.update({
-        "GIT_CONFIG_COUNT": "1",
-        "GIT_CONFIG_KEY_0": f"remote.{probe_remote}.url",
-        "GIT_CONFIG_VALUE_0": push_destination,
-    })
+    child_env = _remote_probe_env(push_destination)
     result = await _read_git_lines_bounded(
         _range_git_argv(
-            "ls-remote", "--refs", "--exit-code", probe_remote, destination_ref
+            "ls-remote", "--refs", "--exit-code", _REMOTE_PROBE_NAME, destination_ref
         ),
         byte_cap=line_cap + 1,
         line_cap=line_cap,
@@ -1366,6 +1381,144 @@ async def _remote_destination_oid(
     if not object_format.matches(oid):
         return _refusal("PS-MSG-FRAME", "destination-remote")
     return oid
+
+
+def _parse_remote_ref_tip_oids(
+    rows: tuple[bytes, ...], object_format: GitObjectFormat
+) -> tuple[str, ...] | Refusal:
+    if not rows:
+        return _refusal("PS-MSG-RANGE", "remote-refs")
+    if len(rows) > _MAX_REMOTE_REFS:
+        return _refusal("PS-MSG-LIMIT", "remote-ref-count")
+    line_cap = object_format.hex_length + 1 + _MAX_PATH_BYTES
+    refs: dict[bytes, str] = {}
+    tips: list[str] = []
+    seen_tips: set[str] = set()
+    for raw in rows:
+        if len(raw) > line_cap:
+            return _refusal("PS-MSG-FRAME", "remote-ref")
+        parts = raw.split(b"\t")
+        if len(parts) != 2:
+            return _refusal("PS-MSG-FRAME", "remote-ref")
+        raw_oid, raw_ref = parts
+        if (
+            not raw_ref.startswith(b"refs/")
+            or len(raw_ref) > _MAX_PATH_BYTES
+            or b"\0" in raw_ref
+        ):
+            return _refusal("PS-MSG-FRAME", "remote-ref")
+        try:
+            oid = raw_oid.decode("ascii").lower()
+        except UnicodeDecodeError:
+            return _refusal("PS-MSG-FRAME", "remote-ref")
+        if not object_format.matches(oid) or raw_ref in refs:
+            return _refusal("PS-MSG-FRAME", "remote-ref")
+        refs[raw_ref] = oid
+        if oid not in seen_tips:
+            seen_tips.add(oid)
+            tips.append(oid)
+    if not tips:
+        return _refusal("PS-MSG-RANGE", "remote-refs")
+    return tuple(tips)
+
+
+async def _remote_ref_tip_oids(
+    push_destination: str,
+    *,
+    deadline: float,
+    object_format: GitObjectFormat,
+) -> tuple[str, ...] | Refusal:
+    line_cap = object_format.hex_length + 1 + _MAX_PATH_BYTES
+    result = await _read_git_lines_bounded(
+        _range_git_argv("ls-remote", "--refs", _REMOTE_PROBE_NAME),
+        byte_cap=_MAX_REMOTE_REFS * (line_cap + 1),
+        line_cap=line_cap,
+        deadline=deadline,
+        accepted_codes=frozenset({0}),
+        env=_remote_probe_env(push_destination),
+    )
+    if isinstance(result, Refusal):
+        return result
+    _returncode, rows = result
+    return _parse_remote_ref_tip_oids(rows, object_format)
+
+
+async def _local_remote_commit_tip_oids(
+    remote_tip_oids: tuple[str, ...],
+    *,
+    deadline: float,
+    object_format: GitObjectFormat,
+) -> tuple[str, ...] | Refusal:
+    reader = _AsyncGitObjectReader(
+        argv=_range_git_argv("cat-file", "--batch-check")
+    )
+    pending: tuple[str, ...] | Refusal | None = None
+    commits: list[str] = []
+    seen_commits: set[str] = set()
+    try:
+        start_refusal = await reader.start()
+        if start_refusal is not None:
+            pending = start_refusal
+        else:
+            for remote_tip in remote_tip_oids:
+                classified = await reader.classify(
+                    remote_tip,
+                    object_format=object_format,
+                    scan_deadline=deadline,
+                )
+                if isinstance(classified, Refusal):
+                    pending = classified
+                    break
+                if classified.returned_oid is None:
+                    # An object absent from the local database cannot be an
+                    # ancestor of the locally resolved source tip. Keeping it
+                    # out of local rev-list arguments preserves coverage while
+                    # avoiding a remote-only bad-object failure.
+                    continue
+                if classified.object_type == "commit":
+                    commit_oid = classified.returned_oid
+                elif classified.object_type == "tag":
+                    peeled = await reader.classify(
+                        f"{remote_tip}^{{commit}}",
+                        object_format=object_format,
+                        require_identity=False,
+                        scan_deadline=deadline,
+                    )
+                    if isinstance(peeled, Refusal):
+                        pending = peeled
+                        break
+                    if peeled.returned_oid is None or peeled.object_type != "commit":
+                        pending = _refusal("PS-MSG-RANGE", "remote-ref-type")
+                        break
+                    commit_oid = peeled.returned_oid
+                else:
+                    pending = _refusal("PS-MSG-RANGE", "remote-ref-type")
+                    break
+                if commit_oid not in seen_commits:
+                    seen_commits.add(commit_oid)
+                    commits.append(commit_oid)
+            if pending is None:
+                pending = tuple(commits)
+    except asyncio.CancelledError:
+        pending = _refusal("PS-MSG-READ", "cancelled")
+    except Exception:
+        pending = _refusal("PS-MSG-READ", "unexpected")
+
+    finalization = await _finalize_reader(reader)
+    if (
+        finalization is not None
+        and finalization.failure_id == "PS-MSG-REAP"
+        and reader.state is ReaderState.REAP_PENDING
+    ):
+        finalization = await _finalize_reader(reader)
+    if finalization is not None:
+        return finalization
+    certificate = reader.reap_certificate
+    if certificate is None or not certificate.complete:
+        return _refusal("PS-MSG-REAP", "certificate")
+    if pending is None:
+        return _refusal("PS-MSG-READ", "unexpected")
+    return pending
 
 
 async def _read_parent_graph_bounded(
@@ -1590,7 +1743,24 @@ async def _range_selection(
     )
     if isinstance(destination_oid, Refusal):
         return destination_oid
-    exclusion = () if destination_oid is None else ("--not", destination_oid)
+    if destination_oid is None:
+        remote_tip_oids = await _remote_ref_tip_oids(
+            push_destination,
+            deadline=loop_deadline,
+            object_format=object_format,
+        )
+        if isinstance(remote_tip_oids, Refusal):
+            return remote_tip_oids
+        local_commit_tips = await _local_remote_commit_tip_oids(
+            remote_tip_oids,
+            deadline=loop_deadline,
+            object_format=object_format,
+        )
+        if isinstance(local_commit_tips, Refusal):
+            return local_commit_tips
+        exclusion = () if not local_commit_tips else ("--not", *local_commit_tips)
+    else:
+        exclusion = ("--not", destination_oid)
     parent_graph = await _read_parent_graph_bounded(
         _range_git_argv("rev-list", "--parents", "--topo-order", tip, *exclusion),
         deadline=asyncio.get_running_loop().time()
@@ -1664,6 +1834,40 @@ def _parse_batch_frame_header(
     if length < 0:
         return _refusal("PS-MSG-FRAME", "length")
     return object_type, length
+
+
+def _parse_batch_check_frame(
+    header: bytes,
+    requested_name: str,
+    object_format: GitObjectFormat,
+    *,
+    require_identity: bool,
+) -> ObjectClassification | Refusal:
+    try:
+        requested = requested_name.encode("ascii")
+    except UnicodeEncodeError:
+        return _refusal("PS-MSG-FRAME", "batch-check-request")
+    if header == requested + b" missing":
+        return ObjectClassification(requested_name, None, None)
+    parts = header.split(b" ")
+    if len(parts) != 3:
+        return _refusal("PS-MSG-FRAME", "batch-check-header")
+    raw_oid, raw_type, raw_length = parts
+    try:
+        returned_oid = raw_oid.decode("ascii").lower()
+        object_type = raw_type.decode("ascii")
+        length = int(raw_length)
+    except (UnicodeDecodeError, ValueError):
+        return _refusal("PS-MSG-FRAME", "batch-check-header")
+    if (
+        not object_format.matches(returned_oid)
+        or object_type not in {"commit", "tree", "blob", "tag"}
+        or length < 0
+    ):
+        return _refusal("PS-MSG-FRAME", "batch-check-header")
+    if require_identity and returned_oid != requested_name:
+        return _refusal("PS-MSG-FRAME", "batch-check-identity")
+    return ObjectClassification(requested_name, returned_oid, object_type)
 
 
 @dataclass(frozen=True)
@@ -1810,6 +2014,64 @@ class _AsyncGitObjectReader:
         except asyncio.IncompleteReadError:
             self._poisoned = True
             return _refusal("PS-MSG-READ", "short-read")
+        except (BrokenPipeError, ConnectionError, OSError, ValueError, UnicodeError):
+            self._poisoned = True
+            return _refusal("PS-MSG-READ", "pipe")
+
+    async def classify(
+        self,
+        object_name: str,
+        *,
+        object_format: GitObjectFormat,
+        require_identity: bool = True,
+        scan_deadline: float | None = None,
+    ) -> ObjectClassification | Refusal:
+        process = self._process
+        if (
+            self._poisoned
+            or self._state is not ReaderState.ACTIVE
+            or process is None
+            or process.stdin is None
+            or process.stdout is None
+        ):
+            return _refusal("PS-MSG-READ", "reader-state")
+        try:
+            encoded_name = object_name.encode("ascii")
+        except UnicodeEncodeError:
+            return _refusal("PS-MSG-FRAME", "batch-check-request")
+        if (
+            not encoded_name
+            or len(encoded_name) > object_format.hex_length + len("^{commit}")
+            or b"\0" in encoded_name
+            or b"\n" in encoded_name
+            or b"\r" in encoded_name
+        ):
+            return _refusal("PS-MSG-FRAME", "batch-check-request")
+        deadline = asyncio.get_running_loop().time() + self._request_timeout
+        if scan_deadline is not None:
+            deadline = min(deadline, scan_deadline)
+        try:
+            process.stdin.write(encoded_name + b"\n")
+            await self._within(process.stdin.drain(), deadline)
+            header = await self._within(process.stdout.readline(), deadline)
+            if not header.endswith(b"\n") or len(header) > 256:
+                self._poisoned = True
+                return _refusal("PS-MSG-FRAME", "batch-check-delimiter")
+            parsed = _parse_batch_check_frame(
+                header[:-1],
+                object_name,
+                object_format,
+                require_identity=require_identity,
+            )
+            if isinstance(parsed, Refusal):
+                self._poisoned = True
+            return parsed
+        except asyncio.TimeoutError:
+            self._poisoned = True
+            return _refusal("PS-MSG-READ-TIMEOUT", "deadline")
+        except asyncio.CancelledError:
+            self._poisoned = True
+            return _refusal("PS-MSG-READ", "cancelled")
         except (BrokenPipeError, ConnectionError, OSError, ValueError, UnicodeError):
             self._poisoned = True
             return _refusal("PS-MSG-READ", "pipe")
