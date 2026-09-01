@@ -1607,7 +1607,7 @@ _CODEX_HOOK_HEALTH_DEV_ACTIONS = (
     (
         "check_normalized_sha256",
         "@ROOT/scripts/check-hook-health.py",
-        "381e7352e3eac59c8737414581758c3f038f04076ec29afb8c7adda916f7b8f5",
+        "1ce4ce47e923c1dc92ea6ecae3ff79872b77217eae75d4d58b0f47a53b6bf2bb",
         "CODEX-HOOK-HEALTH-SIDECAR-DRIFT: root helper source matches its pinned payload",
     ),
 )

@@ -8,7 +8,6 @@ values.  Event adapters own envelope parsing and delivery.
 
 from __future__ import annotations
 
-import json
 import ntpath
 import os
 import posixpath
@@ -23,11 +22,11 @@ SESSION_START_CONTEXT = "\n".join(
     (
         "[MCP / tools reminder - re-shown at session start and after every compaction]",
         "MCP servers may be connected in this environment. For codebase, architecture, API/docs, search, browser, debugger, profiler, or repository-understanding tasks, make MCP/tool-discovery an explicit checkpoint before falling back to ad-hoc shell reads.",
-        "MCP tools load on demand: use the platform's tool discovery (e.g. ToolSearch) to see the connected servers and load a tool's schema, then call the relevant tool. If a relevant MCP is unavailable or broken, say so briefly instead of silently substituting a weaker path.",
-        'CONNECTED but uninitialized is not unavailable: do NOT skip a connected MCP reporting "not initialized", "no index", "empty", or "no data yet". Many servers require or build their own index/state on first use — when they report no index, INITIALIZE them per the server\'s own instructions (e.g. run a code-graph server\'s init / check its status; codegraph builds its initial index via `codegraph init`, then a file-watcher keeps it fresh) and use or await the result — never silently substitute ad-hoc shell/grep. Only a genuinely absent server (not connected, not installed, or absent from tool discovery) may be skipped with an explanation.',
+        "MCP tools load on demand: use the platform's runtime tool discovery to see the connected servers and load a tool's schema, then call the relevant tool. Non-normative interface example only: ToolSearch may provide that discovery on some hosts; its name never selects a tool. If a relevant MCP is unavailable or broken, say so briefly instead of silently substituting a weaker path.",
+        'CONNECTED but uninitialized is not unavailable: do NOT skip a connected MCP reporting "not initialized", "no index", "empty", or "no data yet". Many servers require or build their own index/state on first use — when they report no index, INITIALIZE them per the server\'s own instructions and use or await the result — never silently substitute ad-hoc shell/grep. Only a genuinely absent server (not connected, not installed, or absent from runtime tool discovery) may be skipped with an explanation.',
         "When mcpMode: force is active, relevant MCP use is a standing instruction. Under mcpMode: auto, still consider MCP first when it fits the task and record why it was skipped if the task explicitly asked for MCP.",
-        "For any stateful or indexed repository-understanding tool - whether MCP, CLI, or skill-backed - repository/project/branch/worktree/indexed-input changes invalidate any earlier answer: use the tool's own status/freshness probe; when it reports stale or pending, run its documented sync/update/reindex, confirm fresh, then repeat the intended query. Graphify, including standalone CLI or skill-backed use, follows `status/freshness -> sync/update/reindex -> confirm fresh -> repeat intended query`. Example: CodeGraph `status -> sync -> fresh status -> repeat query`. If the tool is needed now, stale state does not justify skipping it or deferring refresh to an authorizer or later concurrent work. If refresh fails, report it explicitly. Use an alternate tool only when refresh genuinely fails, the tool is unavailable, the user forbids it, or refresh exceeds an explicit approved resource bound; report the reason; do not present stale output as current or any stale evidence as current. Stateless or live MCPs need no refresh. Other stateless or live tools likewise need no refresh.",
-        "High-value categories when present: semantic code navigation and code-graph, Repomix or repository packers, language-server / LSP, current library / framework / API docs (use these instead of answering API questions from memory), debuggers and profilers, browser automation, memory, search, and fetch utilities.",
+        "For any stateful or indexed repository-understanding tool - whether MCP, CLI, or skill-backed - repository/project/branch/worktree/indexed-input changes invalidate any earlier answer: use the tool's own status/freshness probe; when it reports stale or pending, run its documented sync/update/reindex, confirm fresh, then repeat the intended query. Non-normative workflow examples only: Graphify follows `status/freshness -> sync/update/reindex -> confirm fresh -> repeat intended query`; CodeGraph follows `status -> sync -> fresh status -> repeat query`. These names never select a tool. If the tool is needed now, stale state does not justify skipping it or deferring refresh to an authorizer or later concurrent work. If refresh fails, report it explicitly. Use an alternate tool only when refresh genuinely fails, the tool is unavailable, the user forbids it, or refresh exceeds an explicit approved resource bound; report the reason; do not present stale output as current or any stale evidence as current. Stateless or live MCPs need no refresh. Other stateless or live tools likewise need no refresh.",
+        "Non-normative capability examples only, never selection logic: semantic code navigation and code-graph, Repomix or repository packers, language-server / LSP, current library / framework / API docs (use these instead of answering API questions from memory), debuggers and profilers, browser automation, memory, search, and fetch utilities.",
         "This STILL APPLIES AFTER COMPACTION - do not forget MCP just because the context was summarized.",
         "SUBAGENTS: dispatched agents inherit the runtime tool surface. In the dispatch prompt, explicitly allow relevant MCP discovery/use within the assigned role, scope, and safety limits; do not accidentally hide MCP availability, but keep any deliberate tool limits honest.",
     )
@@ -55,10 +54,11 @@ TURN_ANCHOR_CONTEXT = (
     "MCP checkpoint: for repository navigation or understanding, discover and use the"
     " relevant configured MCP before an ad-hoc shell search; if shell is genuinely the"
     " right instrument, state why. Repository-understanding freshness: any stateful/indexed"
-    " tool (MCP, CLI, or skill-backed), explicitly Graphify, is invalidated by repository/"
+    " tool (MCP, CLI, or skill-backed) is invalidated by repository/"
     "project/branch/worktree/indexed-input changes; use status/freshness, then sync/update/"
-    "reindex, fresh recheck, then repeat the query - explicitly, Graphify follows `status/"
-    "freshness -> sync/update/reindex -> confirm fresh -> repeat intended query`. If the"
+    "reindex, fresh recheck, then repeat the query. Non-normative workflow example only:"
+    " Graphify follows `status/freshness -> sync/update/reindex -> confirm fresh -> repeat"
+    " intended query`; this name never selects a tool. If the"
     " tool is needed now, stale does not justify skipping or deferring refresh to an"
     " authorizer or later concurrent work. Use"
     " an alternate only after refresh genuinely fails, the tool is unavailable, the user"
@@ -73,13 +73,6 @@ ADMITTED_TOOLS = frozenset(
 SHELL_TOOLS = frozenset({"Bash", "PowerShell", "shell_command", "exec_command"})
 SEARCH_COMMANDS = frozenset({"grep", "rg", "ag", "ack"})
 DIRECTORY_CHANGE_COMMANDS = frozenset({"cd", "chdir", "pushd", "set-location"})
-CODE_INTEL_HINTS = (
-    "codegraph",
-    "serena",
-    "language-server",
-    "lsp",
-    "repomix",
-)
 EXEMPT_SCOPE_SEGMENTS = frozenset({"work-items", ".reports", ".plans", ".scratch"})
 SOURCE_SCOPE_SEGMENTS = frozenset({"src", "scripts", "tests", "lib", "app"})
 CODE_SUFFIXES = frozenset(
@@ -108,64 +101,12 @@ CODE_PATTERN_RE = re.compile(
     r"\bcall(er|ee)s?\b|\bdefinition\b|\breferences?\b)",
     re.IGNORECASE,
 )
-SAFE_SERVER_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]{1,80}$")
 SHELL_OPERATORS = frozenset({";", "&&", "||", "|", "&", "(", ")"})
 OPTIONS_WITH_VALUES = frozenset(
     {"-g", "--glob", "--type", "-t", "--include", "--exclude", "--iglob"}
 )
 WINDOWS_DRIVE_ABSOLUTE_RE = re.compile(r"^[A-Za-z]:[\\/]")
 WINDOWS_ENV_SCOPE_RE = re.compile(r"%[^%]+%")
-
-
-def _home_from(environ: Mapping[str, str]) -> Path:
-    raw = environ.get("USERPROFILE") or environ.get("HOME")
-    return Path(raw).expanduser() if raw else Path.home()
-
-
-def _accepted_server_name(value: object) -> str | None:
-    name = str(value)
-    if not SAFE_SERVER_NAME_RE.fullmatch(name):
-        return None
-    low = name.casefold()
-    return name if any(hint in low for hint in CODE_INTEL_HINTS) else None
-
-
-def configured_code_intel_servers(
-    environ: Mapping[str, str] | None = None,
-) -> tuple[str, ...]:
-    """Return only safe matching server names, never server configuration values."""
-    source = os.environ if environ is None else environ
-    home = _home_from(source)
-    found: set[str] = set()
-    for candidate in (home / ".claude.json", home / ".claude" / "settings.json"):
-        try:
-            data = json.loads(candidate.read_text(encoding="utf-8"))
-        except Exception:
-            continue
-        servers = data.get("mcpServers") if isinstance(data, dict) else None
-        if isinstance(servers, dict):
-            for value in servers:
-                accepted = _accepted_server_name(value)
-                if accepted is not None:
-                    found.add(accepted)
-
-    try:
-        import tomllib
-    except Exception:
-        tomllib = None
-    if tomllib is not None:
-        try:
-            with (home / ".codex" / "config.toml").open("rb") as handle:
-                data = tomllib.load(handle)
-        except Exception:
-            data = None
-        servers = data.get("mcp_servers") if isinstance(data, dict) else None
-        if isinstance(servers, dict):
-            for value in servers:
-                accepted = _accepted_server_name(value)
-                if accepted is not None:
-                    found.add(accepted)
-    return tuple(sorted(found, key=str.casefold))
 
 
 def _path_segments(value: str) -> tuple[str, ...]:
@@ -481,15 +422,13 @@ def classify_tool_choice(
     )
 
 
-def render_momentum_advisory(servers: tuple[str, ...]) -> str:
-    """Render only up to three server names plus the remaining-name count."""
-    shown = ", ".join(servers[:3])
-    if len(servers) > 3:
-        shown += f" (+{len(servers) - 3} more)"
+def render_momentum_advisory() -> str:
+    """Render one provider-neutral runtime-discovery checkpoint."""
     return (
-        "[mcp-momentum AUDIT] this looks like a code-navigation search, and a "
-        f"code-intelligence MCP is configured: {shown}. "
-        "A text scan finds strings; those tools answer symbols, callers, and definitions. "
-        "Load the relevant tool schema and ask it, or proceed if the shell scan is "
+        "[mcp-momentum AUDIT] this looks like a code-navigation search. Use runtime "
+        "tool discovery as the only availability source, load the relevant tool schema, "
+        "and query it when it fits. A text scan finds strings; semantic tools can answer "
+        "symbols, callers, and definitions. Names in configuration, documentation, or "
+        "examples are non-normative and never select a tool. Proceed if the shell scan is "
         "genuinely the right instrument here. AUDIT mode -- allowing."
     )

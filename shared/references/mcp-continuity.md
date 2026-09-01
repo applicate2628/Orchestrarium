@@ -9,7 +9,7 @@ One dependency-free policy module, `scripts/universal-hooks/scripts/mcp_continui
 | Event | Adapter | Shared behavior |
 | --- | --- | --- |
 | `SessionStart` | `mcp-usage-reminder.py` | Reintroduces the full MCP discovery and use guidance after a new session or compaction. |
-| `UserPromptSubmit` | `turn-anchor-reminder.py` | Adds a short checkpoint requiring relevant configured MCP discovery before ad hoc repository search. |
+| `UserPromptSubmit` | `turn-anchor-reminder.py` | Adds a short checkpoint requiring runtime discovery of relevant MCP tools before ad hoc repository search. |
 | `PreToolUse` | `check-mcp-momentum.py` | Classifies a qualifying code-navigation search before provider-specific advisory or force-mode enforcement. |
 
 The policy admits exactly `Grep`, `Bash`, `PowerShell`, `shell_command`, and `exec_command`. Shell-shaped inputs read `tool_input.command`; `exec_command` reads `tool_input.cmd` and accepts `command` as a compatibility shape. Shell text is untrusted data: the policy tokenizes it and never executes it.
@@ -21,8 +21,8 @@ worktree, or indexed-input change as invalidating an earlier result from a
 connected stateful or indexed MCP. The agent must use that server's own
 status/freshness probe; if it reports stale or pending state, run its documented
 sync, update, or reindex operation, confirm freshness again, then repeat the
-intended query. For CodeGraph this is `status -> sync -> fresh status -> repeat
-query`.
+intended query. As an explicitly non-normative workflow example, CodeGraph uses
+`status -> sync -> fresh status -> repeat query`; this name never selects a tool.
 
 This is capability-based, not a per-provider or per-server registry: a
 stateless or live MCP does not need a refresh. A failed refresh is reported
@@ -47,16 +47,19 @@ The exact task-memory exemption is intentionally narrow. It does not create a ge
 The shared classifier does not choose whether a provider advises or denies.
 Codex remains warn-only. Claude remains warn-only for `mcpMode: auto` and for
 dispatched-agent envelopes, but a root Claude conversation in effective
-`mcpMode: force` denies each qualifying search when a configured
-code-intelligence server is present. Exact `[approve-mcp-fallback:v1]` in the
+`mcpMode: force` denies each qualifying search and requires runtime tool
+discovery as the only availability source. Exact `[approve-mcp-fallback:v1]` in the
 bounded host-projected `user`-role record grants one Claude root recovery turn;
 assistant and tool text cannot mint it. This projection is not authenticated
-authorization, and a forged host-shaped user record can satisfy it. Missing
-servers or unresolved mode allow with a stable
-diagnostic so the hook cannot create an impossible retry loop. All paths are
+authorization, and a forged host-shaped user record can satisfy it. An
+unresolved mode still allows with a stable diagnostic. All paths are
 process fail-open and mutate no persistent state.
 
-Configuration discovery reads only server names from the supported Claude JSON and Codex TOML MCP tables. Advisory output contains at most three matching safe names plus an omitted-count suffix. It never serializes server commands, environment values, tokens, or other configuration fields.
+The universal policy does not read home-directory MCP configuration, infer
+availability from configured names, or select a tool from a name registry.
+Qualifying advisory paths emit one generic runtime-discovery checkpoint. Named
+tools in documentation are explicitly non-normative examples and never
+selection logic.
 
 Advisory paths influence the next model action and cannot prove obedience. The
 Claude root-force denial is an action-level guard only for searches admitted by
@@ -69,5 +72,3 @@ Provider-specific event envelopes, matcher registration, and installed paths liv
 ## Terms and Abbreviations
 
 - `MCP`: Model Context Protocol, the interface through which connected tools and resources are exposed.
-- `TOML`: Tom's Obvious Minimal Language, the configuration format used by Codex.
-- `JSON`: JavaScript Object Notation, the configuration format used by Claude Code.
