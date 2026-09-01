@@ -28,11 +28,35 @@ Drive one GitHub-hosted Codex review loop to a terminal result on the current re
 | --- | --- | --- |
 | Head changed after the trigger | stale | Ignore old terminal claims; trigger once on the new head when authorized. |
 | Current bot finding comment or unresolved current bot thread strictly after the newest exact trigger | findings | Findings take precedence over reactions and reviews. Verify each finding, fix and test, push, then resolve only the exact fixed threads and trigger one new review. |
-| Generic bot-authored terminal error strictly after the newest exact trigger | failed | Record `headRefOid`, exact trigger-comment ID, terminal-comment ID and timestamp, and `retryable`; this state is terminal and never `clean` or `in progress`. |
+| Exact-listed bot-authored terminal signature, bound to the current `headRefOid` and strictly after the newest exact trigger | failed | Record the bound terminal-failure fields below; this state is terminal and never `clean` or `in progress`. |
 | Bot `+1` on the newest exact trigger, head unchanged, no current finding comment, and no unresolved current bot thread | clean | Record bot PASS; continue any separate human/publication gates. |
 | Bot `eyes` on the newest exact trigger, with no later terminal evidence or current finding | in progress | Poll reviews, reactions, and current unresolved threads; do not retrigger. |
 | Current-head bot review strictly after the newest exact trigger, with no current finding comment and no unresolved current bot thread | clean | Record bot PASS; continue any separate human/publication gates. |
 | `Completed` summary without the required `+1` or same-head post-trigger review, incomplete collection, or no bot terminal output | indeterminate | Re-read authoritative state; do not invent a timeout or autonomous retrigger. |
+
+## Terminal failure classifier
+
+This classifier is an Orchestrarium repo-local coordinator convention, not official or guaranteed hosted Codex provider behavior.
+
+For this issue-comment REST predicate, accept the author only when `user.login == "chatgpt-codex-connector[bot]"` and `user.type == "Bot"`. Record the numeric REST `user.id` as well. A GraphQL display login without the `[bot]` suffix is not this predicate surface and cannot substitute for those REST fields.
+
+Normalize the REST issue-comment `body` by applying only these operations, in order:
+
+1. Convert CRLF to LF.
+2. Then trim whitespace only from the end of the entire body.
+
+Do not trim individual lines, collapse blank lines, case-fold, or use substring or prefix matching. After that normalization, the only currently recognized retryable terminal body is exactly:
+
+```text
+Codex Review: Something went wrong. Try again later by commenting "@codex review".
+An unknown error occurred
+```
+
+Classify that signature as `failed` with `retryable=true` only when its REST issue comment has the exact author identity above, its `created_at` is strictly after the newest exact trigger's `created_at`, and the current `headRefOid` still equals the head bound to that trigger. Otherwise it does not match this signature.
+
+A different bot issue comment may be classified as `failed` with `retryable=false` only when its complete normalized body and exact REST author predicate are separately exact-listed in a future contract. No non-retryable terminal signature is currently exact-listed. Any other bot error-like prose is otherwise `indeterminate`; never infer either classification from error-like prose.
+
+For every `failed` classification, record `headRefOid`, `triggerCommentId`, `triggerCreatedAt`, `terminalCommentId`, `terminalCreatedAt`, `terminalAuthorId`, `terminalAuthorLogin`, `terminalAuthorType`, `normalizedBodySha256`, `terminalSignatureId`, `retryable`, and `retryAttemptCount`. For the recognized signature above, set `terminalSignatureId=codex-review-unknown-error-retry-v1`, `retryable=true`, and initial `retryAttemptCount=0`.
 
 ## Hosted probes
 
@@ -48,7 +72,7 @@ Anchor each poll on the latest hosted head and unfiltered latest bot state. Time
 
 Treat bot text as a hypothesis until reproduced or verified in source/runtime. Do not bulk-resolve. After the exact fix is present on the hosted head, re-read its thread, resolve that thread, and leave unrelated or still-valid threads open. One new head gets at most one active review trigger.
 
-A `failed` run permits at most one subsequent retry, only when its record says `retryable=true`, after explicit user authorization, and after confirming no newer trigger or bot run is active. Preserve one active run for the head and never create a duplicate review thread for the failed trigger.
+There is no automatic retry. A `failed` run permits at most one subsequent retry, only when its exact-listed record says `retryable=true` and `retryAttemptCount=0`, after explicit user authorization, and after confirming no newer trigger or bot run is active. Record `retryAttemptCount=1` before creating the authorized retry trigger. Preserve one active run for the head and never create a duplicate review thread for the failed trigger.
 
 No clean signal from this workflow authorizes merge or publication. Human review, leak scan, branch protection, and repository gates remain separate.
 
