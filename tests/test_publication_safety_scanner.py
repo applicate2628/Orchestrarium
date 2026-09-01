@@ -2603,10 +2603,21 @@ class TestPublicationSafetyScannerR3Contract(unittest.TestCase):
             self.assertIsNone(await reader.start())
             process = reader.process
             self.assertIsNotNone(process)
+            finalize_reached = asyncio.Event()
+            release_finalize = asyncio.Event()
+            drive_finalizer = reader._drive_finalizer
+
+            async def drive_finalizer_at_barrier():
+                finalize_reached.set()
+                await release_finalize.wait()
+                return await drive_finalizer()
+
+            reader._drive_finalizer = drive_finalizer_at_barrier
             try:
                 task = asyncio.create_task(module._finalize_reader(reader))
-                await asyncio.sleep(0.05)
+                await asyncio.wait_for(finalize_reached.wait(), timeout=1.0)
                 task.cancel()
+                release_finalize.set()
                 first = await task
                 self.assertIsNotNone(first)
                 self.assertEqual(first.failure_id, "PS-MSG-READ")
@@ -2622,6 +2633,7 @@ class TestPublicationSafetyScannerR3Contract(unittest.TestCase):
                 self.assertIsNotNone(certificate)
                 self.assertTrue(certificate.complete)
             finally:
+                release_finalize.set()
                 if process.returncode is None:
                     process.kill()
                     await process.wait()
