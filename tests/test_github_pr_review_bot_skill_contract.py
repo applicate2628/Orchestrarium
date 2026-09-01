@@ -26,3 +26,22 @@ def test_clean_requires_complete_review_thread_inventory() -> None:
     )
     for clause in required_contract:
         assert clause in body, f"missing fail-closed clean-oracle clause: {clause}"
+
+
+def test_post_trigger_bot_error_is_a_bound_terminal_failure() -> None:
+    bodies = [path.read_text(encoding="utf-8") for path in SKILL_PATHS]
+
+    assert bodies[0] == bodies[1]
+    body = bodies[0]
+    required_contract = (
+        "Generic bot-authored terminal error strictly after the newest exact trigger",
+        "| failed |",
+        "`headRefOid`, exact trigger-comment ID, terminal-comment ID and timestamp, and `retryable`",
+        "terminal and never `clean` or `in progress`",
+        "at most one subsequent retry",
+        "explicit user authorization",
+        "one active run",
+        "duplicate review thread",
+    )
+    for clause in required_contract:
+        assert clause in body, f"missing terminal failure clause: {clause}"

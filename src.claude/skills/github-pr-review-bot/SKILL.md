@@ -28,6 +28,7 @@ Drive one GitHub-hosted Codex review loop to a terminal result on the current re
 | --- | --- | --- |
 | Head changed after the trigger | stale | Ignore old terminal claims; trigger once on the new head when authorized. |
 | Current bot finding comment or unresolved current bot thread strictly after the newest exact trigger | findings | Findings take precedence over reactions and reviews. Verify each finding, fix and test, push, then resolve only the exact fixed threads and trigger one new review. |
+| Generic bot-authored terminal error strictly after the newest exact trigger | failed | Record `headRefOid`, exact trigger-comment ID, terminal-comment ID and timestamp, and `retryable`; this state is terminal and never `clean` or `in progress`. |
 | Bot `+1` on the newest exact trigger, head unchanged, no current finding comment, and no unresolved current bot thread | clean | Record bot PASS; continue any separate human/publication gates. |
 | Bot `eyes` on the newest exact trigger, with no later terminal evidence or current finding | in progress | Poll reviews, reactions, and current unresolved threads; do not retrigger. |
 | Current-head bot review strictly after the newest exact trigger, with no current finding comment and no unresolved current bot thread | clean | Record bot PASS; continue any separate human/publication gates. |
@@ -46,6 +47,8 @@ Anchor each poll on the latest hosted head and unfiltered latest bot state. Time
 ## Finding lifecycle
 
 Treat bot text as a hypothesis until reproduced or verified in source/runtime. Do not bulk-resolve. After the exact fix is present on the hosted head, re-read its thread, resolve that thread, and leave unrelated or still-valid threads open. One new head gets at most one active review trigger.
+
+A `failed` run permits at most one subsequent retry, only when its record says `retryable=true`, after explicit user authorization, and after confirming no newer trigger or bot run is active. Preserve one active run for the head and never create a duplicate review thread for the failed trigger.
 
 No clean signal from this workflow authorizes merge or publication. Human review, leak scan, branch protection, and repository gates remain separate.
 
