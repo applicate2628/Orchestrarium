@@ -1726,6 +1726,89 @@ class TestPublicationSafetyScannerV3(unittest.TestCase):
             )
             self.assertNotIn("PS-FINDING", proc.stdout + proc.stderr)
 
+    def test_range_missing_destination_excludes_remote_only_annotated_tag_peel(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            publisher = self._init_range_repo(root, publish_seed=False)
+            published = self._commit(
+                publisher,
+                "published.txt",
+                "clean published body",
+                self._leak_message("published-tag-history"),
+            )
+            self._git_run(publisher, "push", "-q", "origin", "HEAD:refs/heads/main")
+            self._git_run(
+                publisher,
+                "tag",
+                "-a",
+                "published-base",
+                "-m",
+                "published base",
+                published,
+            )
+            tag_oid = self._git_run(
+                publisher, "rev-parse", "refs/tags/published-base"
+            ).stdout.strip()
+            self._git_run(
+                publisher, "push", "-q", "origin", "refs/tags/published-base"
+            )
+
+            repo = root / "consumer"
+            subprocess.run([_git(), "init", "-q", "-b", "main", str(repo)], check=True)
+            self._git_run(repo, "config", "user.email", "t@t")
+            self._git_run(repo, "config", "user.name", "t")
+            self._git_run(repo, "remote", "add", "origin", str(root / "origin.git"))
+            self._git_run(repo, "fetch", "-q", "--no-tags", "origin", "refs/heads/main")
+            self._git_run(repo, "reset", "-q", "--hard", "FETCH_HEAD")
+            remote_only = self._commit(
+                publisher, "remote-only.txt", "clean remote only", "clean remote only"
+            )
+            self._git_run(
+                publisher,
+                "tag",
+                "-a",
+                "remote-only",
+                "-m",
+                "remote only",
+                remote_only,
+            )
+            remote_only_tag = self._git_run(
+                publisher, "rev-parse", "refs/tags/remote-only"
+            ).stdout.strip()
+            self._git_run(
+                publisher, "push", "-q", "origin", "refs/tags/remote-only"
+            )
+            self._git_run(root / "origin.git", "update-ref", "-d", "refs/heads/main")
+            self.assertEqual(
+                self._git_run(repo, "cat-file", "-e", published).returncode,
+                0,
+            )
+            self.assertNotEqual(
+                self._git_run(repo, "cat-file", "-e", tag_oid, check=False).returncode,
+                0,
+            )
+            self.assertNotEqual(
+                self._git_run(repo, "cat-file", "-e", remote_only, check=False).returncode,
+                0,
+            )
+            self.assertNotEqual(
+                self._git_run(
+                    repo, "cat-file", "-e", remote_only_tag, check=False
+                ).returncode,
+                0,
+            )
+            self._git_run(repo, "switch", "-q", "-c", "new-branch")
+            self._commit(repo, "new.txt", "clean new", "clean new")
+
+            proc = self._run_range(repo, dst="new-branch")
+
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            self.assertIn(
+                "publication-safety: clean (range, receipt=v3, commits=1,",
+                proc.stdout,
+            )
+            self.assertNotIn("PS-FINDING", proc.stdout + proc.stderr)
+
     def test_range_missing_destination_refuses_local_noncommit_remote_tip(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = self._init_range_repo(Path(td))
@@ -1755,6 +1838,47 @@ class TestPublicationSafetyScannerV3(unittest.TestCase):
             self.assertIn("reason=remote-ref-type", proc.stderr)
             self.assertNotIn("publication-safety: clean", proc.stdout + proc.stderr)
 
+    def test_range_missing_destination_refuses_remote_only_tag_peeled_to_local_blob(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            publisher = self._init_range_repo(root)
+            blob_oid = self._git_run(
+                publisher, "rev-parse", "HEAD:seed.txt"
+            ).stdout.strip()
+
+            repo = root / "consumer"
+            subprocess.run([_git(), "init", "-q", "-b", "main", str(repo)], check=True)
+            self._git_run(repo, "config", "user.email", "t@t")
+            self._git_run(repo, "config", "user.name", "t")
+            self._git_run(repo, "remote", "add", "origin", str(root / "origin.git"))
+            self._git_run(repo, "fetch", "-q", "--no-tags", "origin", "refs/heads/main")
+            self._git_run(repo, "reset", "-q", "--hard", "FETCH_HEAD")
+
+            self._git_run(
+                publisher, "tag", "-a", "blob-base", "-m", "blob base", blob_oid
+            )
+            tag_oid = self._git_run(
+                publisher, "rev-parse", "refs/tags/blob-base"
+            ).stdout.strip()
+            self._git_run(publisher, "push", "-q", "origin", "refs/tags/blob-base")
+            self._git_run(root / "origin.git", "update-ref", "-d", "refs/heads/main")
+            self.assertEqual(
+                self._git_run(repo, "cat-file", "-e", blob_oid).returncode,
+                0,
+            )
+            self.assertNotEqual(
+                self._git_run(repo, "cat-file", "-e", tag_oid, check=False).returncode,
+                0,
+            )
+            self._git_run(repo, "switch", "-q", "-c", "new-branch")
+            self._commit(repo, "new.txt", "clean new", "clean new")
+
+            proc = self._run_range(repo, dst="new-branch")
+
+            self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+            self.assertIn("reason=remote-ref-type", proc.stderr)
+            self.assertNotIn("publication-safety: clean", proc.stdout + proc.stderr)
+
     def test_range_missing_destination_refuses_malformed_remote_ref_inventory(self) -> None:
         module = _load_canonical_scanner("_scanner_v3_remote_ref_inventory")
         tip = "1" * 40
@@ -1764,6 +1888,47 @@ class TestPublicationSafetyScannerV3(unittest.TestCase):
             "invalid-oid": (b"not-an-oid\trefs/heads/main",),
             "malformed-row": (tip.encode("ascii"),),
             "invalid-ref": (f"{tip}\tHEAD".encode("ascii"),),
+            "invalid-ref-empty-component": (
+                f"{tip}\trefs/heads//main".encode("ascii"),
+            ),
+            "invalid-ref-dot-component": (
+                f"{tip}\trefs/heads/.hidden".encode("ascii"),
+            ),
+            "invalid-ref-lock-suffix": (
+                f"{tip}\trefs/heads/main.lock".encode("ascii"),
+            ),
+            "invalid-ref-double-dot": (
+                f"{tip}\trefs/heads/main..next".encode("ascii"),
+            ),
+            "invalid-ref-at-brace": (
+                f"{tip}\trefs/heads/main@{{next".encode("ascii"),
+            ),
+            "invalid-ref-forbidden-byte": (
+                f"{tip}\trefs/heads/main?next".encode("ascii"),
+            ),
+            "invalid-ref-trailing-dot": (
+                f"{tip}\trefs/heads/main.".encode("ascii"),
+            ),
+            "invalid-ref-pseudoref": (
+                f"{tip}\trefs/tags/base^{{commit}}".encode("ascii"),
+            ),
+            "orphan-tag-peel": (
+                f"{tip}\trefs/tags/base^{{}}".encode("ascii"),
+            ),
+            "non-tag-peel": (
+                f"{tip}\trefs/heads/main".encode("ascii"),
+                f"{tip}\trefs/heads/main^{{}}".encode("ascii"),
+            ),
+            "duplicate-tag-peel": (
+                f"{tip}\trefs/tags/base".encode("ascii"),
+                f"{other}\trefs/tags/base^{{}}".encode("ascii"),
+                f"{other}\trefs/tags/base^{{}}".encode("ascii"),
+            ),
+            "conflicting-tag-peel": (
+                f"{tip}\trefs/tags/base".encode("ascii"),
+                f"{tip}\trefs/tags/base^{{}}".encode("ascii"),
+                f"{other}\trefs/tags/base^{{}}".encode("ascii"),
+            ),
             "duplicate-ref": (
                 f"{tip}\trefs/heads/main".encode("ascii"),
                 f"{tip}\trefs/heads/main".encode("ascii"),
@@ -1867,6 +2032,58 @@ class TestPublicationSafetyScannerV3(unittest.TestCase):
 
         self.assertIsInstance(outcome, module.Refusal)
         self.assertEqual(outcome.failure_id, "PS-MSG-LIMIT")
+
+    def test_range_missing_destination_accepts_exact_ref_cap_with_tag_peels(self) -> None:
+        module = _load_canonical_scanner("_scanner_v3_remote_ref_inventory_exact_cap")
+        tag_oid = "1" * 40
+        commit_oid = "2" * 40
+        rows = tuple(
+            row
+            for index in range(module._MAX_REMOTE_REFS)
+            for row in (
+                f"{tag_oid}\trefs/tags/tag-{index:05d}".encode("ascii"),
+                f"{commit_oid}\trefs/tags/tag-{index:05d}^{{}}".encode("ascii"),
+            )
+        )
+
+        outcome = module._parse_remote_ref_tip_oids(rows, module._SHA1_OBJECT_FORMAT)
+
+        self.assertIsInstance(outcome, tuple)
+        self.assertEqual(len(outcome), module._MAX_REMOTE_REFS)
+        self.assertTrue(all(row.peeled_oid == commit_oid for row in outcome))
+
+    def test_range_missing_destination_refuses_conflicting_local_tag_peel(self) -> None:
+        module = _load_canonical_scanner("_scanner_v3_remote_ref_local_peel")
+        with tempfile.TemporaryDirectory() as td:
+            repo = self._init_range_repo(Path(td))
+            local_commit_oid = self._git_run(repo, "rev-parse", "HEAD").stdout.strip()
+            self._git_run(repo, "tag", "-a", "base", "-m", "base", local_commit_oid)
+            tag_oid = self._git_run(repo, "rev-parse", "refs/tags/base").stdout.strip()
+            advertised_commit_oid = self._commit(
+                repo, "other.txt", "clean other", "clean other"
+            )
+
+            async def exercise():
+                return await module._local_remote_commit_tip_oids(
+                    (
+                        module.RemoteRefTip(
+                            b"refs/tags/base", tag_oid, advertised_commit_oid
+                        ),
+                    ),
+                    deadline=asyncio.get_running_loop().time() + 5.0,
+                    object_format=module._SHA1_OBJECT_FORMAT,
+                )
+
+            previous_cwd = Path.cwd()
+            os.chdir(repo)
+            try:
+                outcome = asyncio.run(exercise())
+            finally:
+                os.chdir(previous_cwd)
+
+        self.assertIsInstance(outcome, module.Refusal)
+        self.assertEqual(outcome.failure_id, "PS-MSG-RANGE")
+        self.assertEqual(outcome.reason, "remote-ref-type")
 
     def test_range_missing_destination_remote_ref_query_failure_refuses(self) -> None:
         module = _load_canonical_scanner("_scanner_v3_remote_ref_query_failure")

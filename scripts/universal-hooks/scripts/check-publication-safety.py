@@ -264,6 +264,13 @@ class RangeRequest:
 
 
 @dataclass(frozen=True)
+class RemoteRefTip:
+    refname: bytes
+    oid: str
+    peeled_oid: str | None = None
+
+
+@dataclass(frozen=True)
 class RangeSelection:
     remote: str
     destination: str
@@ -1385,15 +1392,14 @@ async def _remote_destination_oid(
 
 def _parse_remote_ref_tip_oids(
     rows: tuple[bytes, ...], object_format: GitObjectFormat
-) -> tuple[str, ...] | Refusal:
+) -> tuple[RemoteRefTip, ...] | Refusal:
     if not rows:
         return _refusal("PS-MSG-RANGE", "remote-refs")
-    if len(rows) > _MAX_REMOTE_REFS:
+    if len(rows) > 2 * _MAX_REMOTE_REFS:
         return _refusal("PS-MSG-LIMIT", "remote-ref-count")
-    line_cap = object_format.hex_length + 1 + _MAX_PATH_BYTES
+    line_cap = object_format.hex_length + 1 + _MAX_PATH_BYTES + len(b"^{}")
     refs: dict[bytes, str] = {}
-    tips: list[str] = []
-    seen_tips: set[str] = set()
+    peeled_refs: dict[bytes, str] = {}
     for raw in rows:
         if len(raw) > line_cap:
             return _refusal("PS-MSG-FRAME", "remote-ref")
@@ -1401,25 +1407,49 @@ def _parse_remote_ref_tip_oids(
         if len(parts) != 2:
             return _refusal("PS-MSG-FRAME", "remote-ref")
         raw_oid, raw_ref = parts
-        if (
-            not raw_ref.startswith(b"refs/")
-            or len(raw_ref) > _MAX_PATH_BYTES
-            or b"\0" in raw_ref
-        ):
+        is_peeled = raw_ref.endswith(b"^{}")
+        base_ref = raw_ref[:-3] if is_peeled else raw_ref
+        if is_peeled and not base_ref.startswith(b"refs/tags/"):
+            return _refusal("PS-MSG-FRAME", "remote-ref")
+        if not _valid_remote_refname(base_ref):
             return _refusal("PS-MSG-FRAME", "remote-ref")
         try:
             oid = raw_oid.decode("ascii").lower()
         except UnicodeDecodeError:
             return _refusal("PS-MSG-FRAME", "remote-ref")
-        if not object_format.matches(oid) or raw_ref in refs:
+        destination = peeled_refs if is_peeled else refs
+        if not object_format.matches(oid) or base_ref in destination:
             return _refusal("PS-MSG-FRAME", "remote-ref")
-        refs[raw_ref] = oid
-        if oid not in seen_tips:
-            seen_tips.add(oid)
-            tips.append(oid)
-    if not tips:
+        destination[base_ref] = oid
+    if len(refs) > _MAX_REMOTE_REFS:
+        return _refusal("PS-MSG-LIMIT", "remote-ref-count")
+    if not refs:
         return _refusal("PS-MSG-RANGE", "remote-refs")
-    return tuple(tips)
+    if any(refname not in refs for refname in peeled_refs):
+        return _refusal("PS-MSG-FRAME", "remote-ref")
+    return tuple(
+        RemoteRefTip(refname, oid, peeled_refs.get(refname))
+        for refname, oid in refs.items()
+    )
+
+
+def _valid_remote_refname(raw_ref: bytes) -> bool:
+    if (
+        not raw_ref.startswith(b"refs/")
+        or len(raw_ref) > _MAX_PATH_BYTES
+        or raw_ref.endswith((b"/", b"."))
+        or b".." in raw_ref
+        or b"@{" in raw_ref
+    ):
+        return False
+    components = raw_ref.split(b"/")
+    if any(
+        not component or component.startswith(b".") or component.endswith(b".lock")
+        for component in components
+    ):
+        return False
+    forbidden = b" ~^:?*[\\"
+    return all(byte >= 0x20 and byte != 0x7F and byte not in forbidden for byte in raw_ref)
 
 
 async def _remote_ref_tip_oids(
@@ -1427,12 +1457,13 @@ async def _remote_ref_tip_oids(
     *,
     deadline: float,
     object_format: GitObjectFormat,
-) -> tuple[str, ...] | Refusal:
-    line_cap = object_format.hex_length + 1 + _MAX_PATH_BYTES
+) -> tuple[RemoteRefTip, ...] | Refusal:
+    base_line_cap = object_format.hex_length + 1 + _MAX_PATH_BYTES
+    peeled_line_cap = base_line_cap + len(b"^{}")
     result = await _read_git_lines_bounded(
-        _range_git_argv("ls-remote", "--refs", _REMOTE_PROBE_NAME),
-        byte_cap=_MAX_REMOTE_REFS * (line_cap + 1),
-        line_cap=line_cap,
+        _range_git_argv("ls-remote", _REMOTE_PROBE_NAME, "refs/*"),
+        byte_cap=_MAX_REMOTE_REFS * (base_line_cap + peeled_line_cap + 2),
+        line_cap=peeled_line_cap,
         deadline=deadline,
         accepted_codes=frozenset({0}),
         env=_remote_probe_env(push_destination),
@@ -1444,7 +1475,7 @@ async def _remote_ref_tip_oids(
 
 
 async def _local_remote_commit_tip_oids(
-    remote_tip_oids: tuple[str, ...],
+    remote_tip_oids: tuple[RemoteRefTip, ...],
     *,
     deadline: float,
     object_format: GitObjectFormat,
@@ -1460,9 +1491,9 @@ async def _local_remote_commit_tip_oids(
         if start_refusal is not None:
             pending = start_refusal
         else:
-            for remote_tip in remote_tip_oids:
+            for remote_ref in remote_tip_oids:
                 classified = await reader.classify(
-                    remote_tip,
+                    remote_ref.oid,
                     object_format=object_format,
                     scan_deadline=deadline,
                 )
@@ -1470,16 +1501,32 @@ async def _local_remote_commit_tip_oids(
                     pending = classified
                     break
                 if classified.returned_oid is None:
-                    # An object absent from the local database cannot be an
-                    # ancestor of the locally resolved source tip. Keeping it
-                    # out of local rev-list arguments preserves coverage while
-                    # avoiding a remote-only bad-object failure.
-                    continue
-                if classified.object_type == "commit":
+                    if remote_ref.peeled_oid is None:
+                        # Neither the remote ref object nor an authoritative
+                        # peel can name a locally available commit exclusion.
+                        continue
+                    peeled = await reader.classify(
+                        remote_ref.peeled_oid,
+                        object_format=object_format,
+                        scan_deadline=deadline,
+                    )
+                    if isinstance(peeled, Refusal):
+                        pending = peeled
+                        break
+                    if peeled.returned_oid is None:
+                        continue
+                    if peeled.object_type != "commit":
+                        pending = _refusal("PS-MSG-RANGE", "remote-ref-type")
+                        break
+                    commit_oid = peeled.returned_oid
+                elif classified.object_type == "commit":
+                    if remote_ref.peeled_oid is not None:
+                        pending = _refusal("PS-MSG-RANGE", "remote-ref-type")
+                        break
                     commit_oid = classified.returned_oid
                 elif classified.object_type == "tag":
                     peeled = await reader.classify(
-                        f"{remote_tip}^{{commit}}",
+                        f"{remote_ref.oid}^{{commit}}",
                         object_format=object_format,
                         require_identity=False,
                         scan_deadline=deadline,
@@ -1488,6 +1535,12 @@ async def _local_remote_commit_tip_oids(
                         pending = peeled
                         break
                     if peeled.returned_oid is None or peeled.object_type != "commit":
+                        pending = _refusal("PS-MSG-RANGE", "remote-ref-type")
+                        break
+                    if (
+                        remote_ref.peeled_oid is not None
+                        and peeled.returned_oid != remote_ref.peeled_oid
+                    ):
                         pending = _refusal("PS-MSG-RANGE", "remote-ref-type")
                         break
                     commit_oid = peeled.returned_oid
