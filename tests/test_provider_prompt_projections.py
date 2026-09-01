@@ -651,7 +651,7 @@ def test_global_scope_accepts_installer_authorized_linked_claude_agents(
 
 def test_linked_runtime_subroots_helper_is_pinned_to_canonical_digest() -> None:
     validator = _load_validator()
-    expected_digest = "a2194fcb49b26e354552279d03b00e2e3bf1231268e0948070949fc411a8a432"
+    expected_digest = "7df6b9d36875eb4588fee959e29dc46adac3ed1753839031ae5d04885b28fb11"
 
     assert validator._LINKED_RUNTIME_SUBROOTS_SHA256 == expected_digest
     assert _sha((ROOT / "scripts" / "linked_runtime_subroots.py").read_bytes()) == expected_digest

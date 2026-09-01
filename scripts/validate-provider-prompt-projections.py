@@ -51,7 +51,7 @@ _CROSS_HOST_MARKERS = (
     "src.codex/skills/lead/scripts/provider_prompt",
 )
 _LINKED_RUNTIME_SUBROOTS_SHA256 = (
-    "a2194fcb49b26e354552279d03b00e2e3bf1231268e0948070949fc411a8a432"
+    "7df6b9d36875eb4588fee959e29dc46adac3ed1753839031ae5d04885b28fb11"
 )
 
 
