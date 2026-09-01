@@ -43,10 +43,18 @@ def test_repository_root_resolution_is_bounded_and_unambiguous(
     tmp_path: Path, hook_index: int
 ) -> None:
     hook = load_hook(HOOKS[hook_index], str(hook_index))
-    workspace = tmp_path / "workspace"
+    outer = make_repo(tmp_path / "outer")
+    fixture_root = outer / ".scratch" / "pytest"
+    workspace = fixture_root / "workspace"
     repo = make_repo(workspace / "repo", git_file=hook_index % 2 == 1)
     nested = repo / "nested" / "work"
     nested.mkdir(parents=True)
+
+    exact = hook.resolve_repository_root(
+        {"cwd": str(repo)}, time.monotonic() + 10
+    )
+    assert exact.status == "selected"
+    assert exact.root == repo
 
     containing = hook.resolve_repository_root(
         {"cwd": str(nested)}, time.monotonic() + 10
@@ -68,7 +76,7 @@ def test_repository_root_resolution_is_bounded_and_unambiguous(
     assert ambiguous.root is None
     assert ambiguous.candidate_count == 2
 
-    missing = tmp_path / "empty"
+    missing = fixture_root / "empty"
     missing.mkdir()
     not_found = hook.resolve_repository_root(
         {"cwd": str(missing)}, time.monotonic() + 10

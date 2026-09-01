@@ -32,5 +32,6 @@
 - Если tracked-контент выглядит как scratch-материал, переместите его обратно в локальное пространство или redacted до коммита.
 - `$security-reviewer`, `$knowledge-archivist` или другой релевантный reviewer может запустить сканирование как часть выборочной проверки или gate публикации.
 - Любой автор может запустить сканирование как локальную self-check, но это не заменяет обязательное человеческое ревью публикации.
+- Авторизация `git push` по результату сканирования требует один gate-owned range-receipt Version 3 с полным покрытием неопубликованного графа commit/tree/blob и каждого subject commit/raw-path/blob. Version 2, tracked, path, manual, zero-commit, incomplete, mixed, malformed, finding, refusal, timeout, cancellation, drift и cleanup-failed evidence не авторизуют публикацию.
 - Только `$security-reviewer` может одобрить исключение безопасности публикации к результату сканирования. Любая публикация без этого одобрения считается `BLOCKED`.
 - Точные команды publication-safety scan живут в root docs репозитория и runtime docs соответствующего pack. Этот reference намеренно оставляет policy на общем уровне, чтобы один design-level источник истины подходил текущим и будущим pack'ам.

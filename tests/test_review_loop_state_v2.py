@@ -328,6 +328,249 @@ def test_failure_retry_keeps_revision_and_round_can_complete(tmp_path: Path) -> 
     assert complete.returncode == 0, complete.stderr
 
 
+def test_two_retry_chain_is_append_only_idempotent_and_completes(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    state, receipt = _begin(repo)
+    initial_attempt = receipt["attempts"]["scout"]
+
+    first_failure = _run(
+        repo,
+        "record-failure",
+        "--state", state,
+        "--operation-id", "fail-scout-a",
+        "--round", 1,
+        "--lane", "scout",
+        "--attempt-id", initial_attempt,
+        "--artifact-revision", receipt["artifact_revision"],
+        "--failure", "died",
+    )
+    assert first_failure.returncode == 0, first_failure.stderr
+    first_retry = _run(
+        repo,
+        "admit-retry",
+        "--state", state,
+        "--operation-id", "retry-scout-a",
+        "--round", 1,
+        "--lane", "scout",
+        "--failed-attempt-id", initial_attempt,
+    )
+    assert first_retry.returncode == 0, first_retry.stderr
+    second_attempt = json.loads(first_retry.stdout)["attempt_id"]
+
+    second_failure = _run(
+        repo,
+        "record-failure",
+        "--state", state,
+        "--operation-id", "fail-scout-b",
+        "--round", 1,
+        "--lane", "scout",
+        "--attempt-id", second_attempt,
+        "--artifact-revision", receipt["artifact_revision"],
+        "--failure", "limit",
+    )
+    assert second_failure.returncode == 0, second_failure.stderr
+    second_retry_args = (
+        "admit-retry",
+        "--state", state,
+        "--operation-id", "retry-scout-b",
+        "--round", 1,
+        "--lane", "scout",
+        "--failed-attempt-id", second_attempt,
+    )
+    second_retry = _run(repo, *second_retry_args)
+    assert second_retry.returncode == 0, second_retry.stderr
+    third_attempt = json.loads(second_retry.stdout)["attempt_id"]
+    replay = _run(repo, *second_retry_args)
+    assert replay.returncode == 0, replay.stderr
+    assert json.loads(replay.stdout) == json.loads(second_retry.stdout)
+
+    receipt["attempts"]["scout"] = third_attempt
+    for lane in ("surgical", "deep", "scout"):
+        assert _record(repo, state, receipt, lane, "REVISE").returncode == 0
+    complete = _run(
+        repo,
+        "complete-round",
+        "--state", state,
+        "--operation-id", "complete-two-retry-chain",
+        "--round", 1,
+    )
+    assert complete.returncode == 0, complete.stderr
+
+    persisted = json.loads(state.read_text(encoding="utf-8"))
+    failures = persisted["rounds"][0]["lane_failures"]
+    assert [(entry["attempt_id"], entry["redispatched_as"]) for entry in failures] == [
+        (initial_attempt, second_attempt),
+        (second_attempt, third_attempt),
+    ]
+
+
+def test_retry_chain_rejects_non_linear_and_cross_lane_edges(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    state, receipt = _begin(repo)
+    persisted = json.loads(state.read_text(encoding="utf-8"))
+    round_one = persisted["rounds"][0]
+    initial = round_one["scout"]["attempt_id"]
+    round_one["lane_failures"] = [
+        {
+            "lane": "scout",
+            "attempt_id": initial,
+            "artifact_revision": receipt["artifact_revision"],
+            "failure": "died",
+            "redispatched_as": "scout-retry-a",
+        },
+        {
+            "lane": "scout",
+            "attempt_id": initial,
+            "artifact_revision": receipt["artifact_revision"],
+            "failure": "limit",
+            "redispatched_as": round_one["scout"]["attempt_id"],
+        },
+    ]
+    errors = _engine_module().validate_v2(persisted)
+    assert any("branch" in error for error in errors)
+
+    round_one["lane_failures"] = [
+        {
+            "lane": "surgical",
+            "attempt_id": round_one["surgical"]["attempt_id"],
+            "artifact_revision": receipt["artifact_revision"],
+            "failure": "died",
+            "redispatched_as": round_one["scout"]["attempt_id"],
+        }
+    ]
+    errors = _engine_module().validate_v2(persisted)
+    assert any("cross-lane" in error for error in errors)
+
+
+def test_completed_retry_chain_rejects_current_unresolved_failure(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    state, receipt = _begin(repo)
+    persisted = json.loads(state.read_text(encoding="utf-8"))
+    round_one = persisted["rounds"][0]
+    for lane in ("surgical", "deep"):
+        round_one[lane].update(
+            {
+                "state": "complete",
+                "verdict": "REVISE",
+                "rationale": "specific evidence-backed result",
+                "root_proven": "yes",
+                "scope_unchanged": "yes",
+                "verification_adequate": "yes",
+            }
+        )
+    round_one["scout"].update(
+        {"state": "complete", "findings": [], "reconciliation": []}
+    )
+    round_one["lane_failures"] = [
+        {
+            "lane": "scout",
+            "attempt_id": round_one["scout"]["attempt_id"],
+            "artifact_revision": receipt["artifact_revision"],
+            "failure": "died",
+        }
+    ]
+    round_one["phase"] = "complete"
+    errors = _engine_module().validate_v2(persisted)
+    assert any("historical unresolved" in error for error in errors)
+
+
+def test_retry_edge_budget_has_stable_failure_and_preserves_state(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    state, receipt = _begin(repo)
+    current_attempt = receipt["attempts"]["scout"]
+    for number in range(3):
+        failed = _run(
+            repo,
+            "record-failure",
+            "--state", state,
+            "--operation-id", f"fail-budget-{number}",
+            "--round", 1,
+            "--lane", "scout",
+            "--attempt-id", current_attempt,
+            "--artifact-revision", receipt["artifact_revision"],
+            "--failure", "died",
+        )
+        assert failed.returncode == 0, failed.stderr
+        retried = _run(
+            repo,
+            "admit-retry",
+            "--state", state,
+            "--operation-id", f"retry-budget-{number}",
+            "--round", 1,
+            "--lane", "scout",
+            "--failed-attempt-id", current_attempt,
+        )
+        assert retried.returncode == 0, retried.stderr
+        current_attempt = json.loads(retried.stdout)["attempt_id"]
+
+    failed = _run(
+        repo,
+        "record-failure",
+        "--state", state,
+        "--operation-id", "fail-budget-exhausted",
+        "--round", 1,
+        "--lane", "scout",
+        "--attempt-id", current_attempt,
+        "--artifact-revision", receipt["artifact_revision"],
+        "--failure", "died",
+    )
+    assert failed.returncode == 0, failed.stderr
+    before = state.read_bytes()
+    exhausted = _run(
+        repo,
+        "admit-retry",
+        "--state", state,
+        "--operation-id", "retry-budget-exhausted",
+        "--round", 1,
+        "--lane", "scout",
+        "--failed-attempt-id", current_attempt,
+    )
+    assert exhausted.returncode != 0
+    assert "RLSTATE_RETRY_BUDGET_EXHAUSTED" in exhausted.stderr
+    assert state.read_bytes() == before
+
+
+def test_v1_migration_rejects_ambiguous_multi_failure_history(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    revision = _git_revision(repo)
+    state = repo / ".scratch" / "reviews" / "legacy" / "state.json"
+    state.parent.mkdir(parents=True)
+    state.write_text(
+        json.dumps(
+            {
+                "objective": "o",
+                "scope": "s",
+                "runtime_root": "r",
+                "rounds": [
+                    {
+                        "round": 1,
+                        "diff": "initial",
+                        "surgical": {"attempt_id": "s1", "verdict": "PASS", "rationale": "specific"},
+                        "deep": {"attempt_id": "d1", "verdict": "PASS", "rationale": "specific"},
+                        "scout": {"attempt_id": "c3", "findings": []},
+                        "lane_failures": [
+                            {"lane": "scout", "attempt_id": "c1", "failure": "died", "redispatched_as": "c3"},
+                            {"lane": "scout", "attempt_id": "c2", "failure": "limit", "redispatched_as": "c3"},
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    before = state.read_bytes()
+    migration = _run(
+        repo,
+        "migrate-v1",
+        "--state", state,
+        "--operation-id", "migrate-ambiguous-retries",
+        "--round-revision", f"1=git:{revision}",
+    )
+    assert migration.returncode != 0
+    assert "RLSTATE_AMBIGUOUS_V1_RETRY_HISTORY" in migration.stderr
+    assert state.read_bytes() == before
+
+
 def test_next_round_accepts_new_frozen_revision_after_revise(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
     state, receipt = _begin(repo)
@@ -1047,19 +1290,28 @@ def test_nonconverged_close_requires_a_complete_revise_round(
     assert state.read_bytes() == before
 
 
-def test_runtime_engine_is_projected_and_bindings_keep_observability_bug_open() -> None:
+def test_runtime_engine_is_projected_and_observability_record_is_current() -> None:
     installer = (ROOT / "scripts" / "production_installer.py").read_text(encoding="utf-8")
-    codex = (ROOT / "src.codex" / "skills" / "review-loop" / "SKILL.md").read_text(encoding="utf-8")
-    claude = (ROOT / "src.claude" / "commands" / "agents-review-loop.md").read_text(encoding="utf-8")
-    open_bug = "work-items/bugs/2026-07-26-nothing-observes-a-review-loop-that-ran-without-a-ledger.md"
+    live_surfaces = (
+        ROOT / "shared" / "references" / "review-loop-methodology.md",
+        ROOT / "shared" / "references" / "ru" / "review-loop-methodology.md",
+        ROOT / "src.claude" / "agents" / "contracts" / "review-loop.md",
+        ROOT / "src.claude" / "commands" / "agents-review-loop.md",
+        ROOT / "src.codex" / "skills" / "review-loop" / "SKILL.md",
+    )
+    old_bug = "work-items/bugs/2026-07-26-nothing-observes-a-review-loop-that-ran-without-a-ledger.md"
+    archived_bug = "work-items/bugs/archive/2026-08/2026-07-26-nothing-observes-a-review-loop-that-ran-without-a-ledger.md"
     assert '"review_loop_state.py"' in installer
+    for surface in live_surfaces:
+        text = surface.read_text(encoding="utf-8")
+        assert old_bug not in text
+        assert archived_bug not in text
+    codex = live_surfaces[-1].read_text(encoding="utf-8")
+    claude = live_surfaces[-2].read_text(encoding="utf-8")
     assert "ORCHESTRARIUM_REVIEW_LOOP_STATE_V2" in codex
     assert "ORCHESTRARIUM_REVIEW_LOOP_STATE_V2" in claude
-    assert open_bug in codex
-    assert open_bug in claude
     assert "absence observer" not in codex
     assert "only launchable attempt IDs" not in claude
-    assert (ROOT / open_bug).is_file()
 
 
 @pytest.mark.parametrize(

@@ -4,7 +4,7 @@
 **Status:** Approved
 **Scope:** Orchestrarium skill-pack routing canon across the production Codex/Claude core plus explicit example integrations
 
-**2026-04-28 production note:** Shipped production `externalProvider: auto` routing is now limited to `codex | claude`. Gemini CLI and Qwen remain explicit example integrations, both classified here as `WEAK MODEL / NOT RECOMMENDED`, and they do not participate in the shipped production profiles or production-only provider fallback/workdir schema.
+**2026-08-26 production note:** Shipped production `externalProvider: auto` routing remains limited to the Codex/Claude pair. Kimi Code is an explicit-only, read-only Windows enrolled no-tools bundle-review route: independently verified and nonauthorizing. Grok remains unavailable in 1.x. Neither participates in shipped production profiles.
 
 ## Problem
 
@@ -151,7 +151,7 @@ Full value-by-value operator semantics now live in [`agents-mode-reference.md`](
 |  | `review.performance-architecture` | `codex > claude > reserve` |
 |  | `review.ui-visual-correctness` | `codex > claude > reserve` |
 
-   `externalProvider: auto` is pack-neutral and resolves through the active named profile instead of a line-default provider mapping, but the shipped production profile remains limited to Codex plus Claude provider families, with `reserve` only as the supplemental advisory/review candidate. The profile follows the release-backed `12 + 1` routing read in [`docs/routing/full-v2-hard-r2-routing-evidence-2026-05-01.md`](routing/full-v2-hard-r2-routing-evidence-2026-05-01.md); the `L00 owner/control` line is documented there but is not an external profile lane. Currency: `ASSUMPTION (UNVERIFIED — lane priorities carried over from the gpt-5.5/opus-4.7 release, pending re-benchmark)`; the benchmarked models are retired, and per the standing rule in the external-dispatch contracts a model-family migration invalidates the routing-evidence `PASS` until re-benchmarked or explicitly re-affirmed on the current families. Explicit self-provider selection is allowed only as an override for isolation, transport, profile, or an intentionally independent rerun. Gemini and Qwen remain `WEAK MODEL / NOT RECOMMENDED` example-only routes outside this production profile table.
+   `externalProvider: auto` is pack-neutral and resolves through the active named profile instead of a line-default provider mapping, but the shipped production profile remains limited to Codex plus Claude provider families, with `reserve` only as the supplemental advisory/review candidate. The profile follows the release-backed `12 + 1` routing read in [`docs/routing/full-v2-hard-r2-routing-evidence-2026-05-01.md`](routing/full-v2-hard-r2-routing-evidence-2026-05-01.md); the `L00 owner/control` line is documented there but is not an external profile lane. Currency: `ASSUMPTION (UNVERIFIED — lane priorities carried over from the gpt-5.5/opus-4.7 release, pending re-benchmark)`; the benchmarked models are retired, and per the standing rule in the external-dispatch contracts a model-family migration invalidates the routing-evidence `PASS` until re-benchmarked or explicitly re-affirmed on the current families. Explicit self-provider selection is allowed only as an override for isolation, transport, profile, or an intentionally independent rerun.
 
 4. **Common rules**
    - CLI availability check before dispatch (`which codex` / `where codex` on Claude Code, `claude` / `claude.exe` on Codex)
@@ -169,14 +169,14 @@ Full value-by-value operator semantics now live in [`agents-mode-reference.md`](
    - Execution record mandatory for all three roles:
      - **Execution role:** `<consultant | external-worker | external-reviewer>`
      - **Assigned / replaced internal role:** `<eligible internal role label | none>`
-     - **Requested provider:** `<internal | claude | codex>`
+     - **Requested provider:** `<internal | codex | claude | kimi | grok>`
      - **Resolved provider:** `<provider selected after routing/default resolution | none>`
      - **Actual execution path:** `<internal consultant | external CLI (provider name) | role disabled | role-play (violation)>`
      - **Model / profile used:** `<actual profile or model when known | runtime default | unspecified by runtime>`
      - **Deviation reason:** `<none | external unavailable: [reason]>`
    - Provider-backed consultant execution in `external` mode and both external adapter roles must use direct external launch from the orchestrating runtime or an approved transport wrapper script. If the host runtime cannot launch the selected provider directly, the route is `role disabled`.
    - Reporting rule: if the operator or caller left provider selection at runtime default behavior, artifacts must record `Requested provider: internal` and put the real provider choice in `Resolved provider`; do not emit `auto` in the execution record.
-   - Work-item ledger rule: when task memory is enabled, the execution record maps directly to `agent-runs.jsonl`: `Execution role` becomes `executionRole`; `Assigned / replaced internal role` becomes `assignedRole`; `Resolved provider` becomes `provider`; `Model / profile used` becomes `model`; and publication-safe execution-path detail belongs in `notes` until the schema grows a dedicated path field. Adapter closeout is incomplete until the ledger has the event, artifact, gate, and evidence.
+   - Work-item ledger rule: when task memory is enabled, the execution record maps directly to `agent-runs.jsonl`: `Execution role` becomes `executionRole`; `Assigned / replaced internal role` becomes `assignedRole`; `Resolved provider` becomes `provider`; `Model / profile used` becomes `model`; and the publication-safe execution path becomes `actualExecutionPath`. The V2 external-nonauthorizing mapping is owned by the approved wrapper contract, not by this design note. Adapter closeout is incomplete until the ledger has the event, artifact, gate, and evidence.
 
 ### Practical launch rules
 
@@ -186,9 +186,9 @@ Full value-by-value operator semantics now live in [`agents-mode-reference.md`](
 | Claude CLI is unauthenticated, or the repository intentionally carries auth in `.claude/SECRET.md` | Do not convert a primary `claude` route into a wrapper-backed run. Advisory/review lanes may still reach the independent `reserve` candidate later in the profile order when enabled. |
 | Python Claude API transport | Use `python .claude/agents/scripts/invoke-claude-api.py`. It accepts `--print-secret-path`, forwards remaining Claude flags unchanged, and preserves the provider exit code. |
 | Bash / Git Bash Claude API launcher | Use `.claude/agents/scripts/invoke-claude-api.sh`; it delegates to the same Python transport. If the active environment cannot see the provider binary, set `CLAUDE_BIN` explicitly. |
-| External provider CLI prompt payload | Write the substantive task prompt to a temporary prompt file and feed it through stdin or the provider's supported file-input mechanism. Keep argv for launcher flags, model/profile options, and file paths; inline prompt strings are only for tiny smoke checks or a documented provider limitation, and the deviation must be recorded. |
+| External provider CLI prompt payload | Use the approved thin wrapper owner in `agents/contracts/external-dispatch.md`; it owns file/stdin prompt delivery, the strict V2 parser, full external-nonauthorizing tuple, and untrusted/potentially-sensitive resultText contract. No raw, transport-neutral, or inline substantive prompt chain is an alternative. |
 | Codex commit review transport | Use `codex review --commit <sha>` without a free-form prompt. If custom review instructions are needed, prefer a narrower `codex exec` run on the admitted scope instead of mixing text with `review --commit`. |
-| Wide release or parity audits | Split by admitted repo, file set, or lane. Do not default to one mega neutral-dir prompt over the whole pack family because Codex and Gemini are more likely to stall on ultra-wide review scopes. |
+| Wide release or parity audits | Split by admitted repo, file set, or lane. Do not default to one mega neutral-dir prompt over the whole pack family. |
 | Neutral workdir default | Keep `external<Provider>WorkdirMode: neutral` unless the external run truly needs in-place filesystem execution or repo-local instruction surfaces, and always pass the exact repo, commit, file, or artifact scope explicitly. |
 
 ## Routing rules
@@ -203,7 +203,7 @@ The orchestrator (the main conversation, as Lead) **prefers** external roles by 
 - `mcpMode: auto | force` — `auto` uses MCP by judgment; `force` treats relevant MCP use as an explicit standing instruction
 - `preferExternalWorker: true` — `$external-worker` on eligible worker-side lanes
 - `preferExternalReviewer: true` — `$external-reviewer` on eligible `review` + `QA` stages
-- `externalProvider: auto | claude | codex` — use the shipped production provider universe; `auto` resolves through the active named profile, while example-provider routing stays explicit-only and outside the production profile set
+- `externalProvider: auto | codex | claude | kimi | grok` — `auto` resolves through the shipped Codex/Claude profile; Kimi is explicit-only Windows no-tools bundle review and Grok is unavailable in 1.x
 - `externalPriorityProfile: balanced | quality-first | <custom>` — select which ordered provider map `auto` uses
 - `reserveResolver: disabled | claude-sonnet | claude-wrapper | wrapper:<command>` — choose the concrete read-only resolver for symbolic `reserve`; `wrapper:<command>` is a PATH-resolved command or repo-relative wrapper path
 - `externalPriorityProfiles` — maintain the per-profile lane matrix; the shipped production profiles stay on the Codex/Claude pair plus advisory/review-only `reserve`
@@ -256,7 +256,6 @@ Normal routing fallback to domain specialist. Not an error — standard routing 
 | `src.claude/agents/contracts/subagent-contracts.md` | **Update** — mention new roles |
 | Team templates (JSON) | **No change** — substitution via routing decision, not template entries |
 | `src.codex/` (mirror) | **Analogous changes** — external-worker SKILL.md, external-reviewer SKILL.md, dispatch protocol, consultant refactor, governance updates |
-| `src.gemini/` (mirror) | **Analogous changes** — external-worker surfaces, external-reviewer surfaces, dispatch protocol, and governance updates |
 
 ## Constraints
 
@@ -291,4 +290,3 @@ Normal routing fallback to domain specialist. Not an error — standard routing 
 - `12 + 1`: twelve external routing lines plus one owner/control line from the release-backed RF12 interpretation.
 - `stdin`: standard input stream for a process.
 - `status.md`: human-readable recovery summary for the active work item.
-- `WEAK MODEL / NOT RECOMMENDED`: repository classification for example-only providers excluded from production `auto` routing.

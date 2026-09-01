@@ -168,7 +168,7 @@ Lifecycle of `constraints/claims.md` in the work-item folder:
 - `analyst` и `product-analyst` reduce uncertainty before interpretive roles make tradeoff decisions.
 - Delegation passes accepted artifacts, not raw transcripts.
 - **Codex sequential model:** one skill invocation at a time. No native parallel dispatch. If independent work could theoretically run in parallel, lead still invokes roles sequentially and manages the ordering.
-- `REVISE` returns work to the responsible role for up to 3 iterations; after 3, escalate to the user. `BLOCKED` stops progression and is classified as `BLOCKED:dependency` or `BLOCKED:prerequisite`.
+- `REVISE` returns work to the responsible role under the shared spine's consecutive same-role/same-artifact cycle cap; escalate to the user when it is exhausted. `BLOCKED` stops progression and is classified as `BLOCKED:dependency` or `BLOCKED:prerequisite`.
 - Multi-phase implementation requires one explicit integration owner before QA.
 - Reviewers stay independent and report to the orchestrating owner.
 - Interaction types: `LEAD_MED` (default), `DIRECT` (sequential, lead-authorized), `CLAIMS`, `RETURN`, `ESCALATE`, `ADVISORY`, `NONE`. `PARALLEL` is not natively supported in Codex; independent scopes are handled sequentially.

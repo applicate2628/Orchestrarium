@@ -29,10 +29,9 @@ description: "Review or QA run on external CLI provider; read-only."
 - Honor the contract-resolved `externalPriorityProfile`, `reserveResolver`, `externalPriorityProfiles`, and `externalOpinionCounts`; this role does not reimplement their resolution.
 - Resolve config, provider, model/profile, workdir, fallback, and transport under the shared external-dispatch contract; do not reproduce its resolution logic here.
 - Honor `reserve` only as a supplemental review or QA candidate after primary `claude` / `codex`; it is not a primary-Claude retry and never grants edit or implementation ownership.
-- Explicit Gemini and Qwen routes remain manual `WEAK MODEL / NOT RECOMMENDED` example-only paths.
-- If a repository wants an example-only provider demonstration, use a scalar explicit provider override instead of broadening shipped or repo-local `auto` profiles.
+- Keep explicit-only and unavailable providers out of shipped and repo-local `auto` profiles.
 - Never select `gpt-5.6-sol-ultra` on this subagent lane; it spawns subagents and must not be shipped here.
-- Use file-based prompt delivery for substantive task prompts: write the prompt to a temporary prompt file and feed it through stdin or the provider's supported file-input mechanism; direct prompt argv is only for tiny smoke checks or documented provider limitations.
+- Use file-based prompt delivery for substantive task prompts through the approved thin wrapper: write the prompt to a temporary prompt file and feed it through stdin or the provider's supported file-input mechanism; direct prompt argv is only for a fixed synthetic non-substantive smoke token. If the wrapper is unavailable, fail or reroute honestly.
 - If the selected primary Claude CLI path fails, do not silently convert that same run to the wrapper. A review lane may later collect `reserve` as a separate profile candidate when enabled; otherwise stop with the provider reason.
 - This adapter is a direct external launch contract. Do not spawn it as an internal specialist or helper; the orchestrator must launch the selected external provider directly or fail closed.
 - Do not silently fall back to an internal reviewer or to `$consultant`.
@@ -41,8 +40,8 @@ description: "Review or QA run on external CLI provider; read-only."
 
 ## Execution recipe
 
-- The Codex pack ships no primary-run prompt wrappers; use the transport-neutral probe, persisted prompt, sibling `.out` / `.err` capture, exact launch flags, and provider read-only or sandbox mode owned by the shared external-dispatch contract.
-- Actively poll output artifacts and process status, apply the contract's effort-tiered stall policy, and never duplicate a still-running launch.
+- Use the approved thin wrapper owned by `../lead/external-dispatch.md`; that owner supplies the strict V2 parser, full external-nonauthorizing tuple, and untrusted/potentially-sensitive resultText contract. Do not retype the schema, consume wrapper-private captures, or substitute a direct closure/manual sidecar path.
+- Await the wrapper's terminal return, then apply the owner's stall/timeout and tracked-ledger rules; never duplicate a still-running launch.
 - Accept completion only when the shared run-completion oracle passes. A failed review run is `UNVERIFIED` under review-loop invariant 7 in `../review-loop/SKILL.md`; this role cites that lane-accounting owner instead of restating it.
 
 ## Return exactly one artifact

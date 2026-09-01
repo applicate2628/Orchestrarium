@@ -1,4 +1,5 @@
 import importlib.util
+import hashlib
 import json
 import os
 import shutil
@@ -26,6 +27,12 @@ def run_checker(root: Path, *args: str) -> subprocess.CompletedProcess:
 def write_checker_bundle(bundle_dir: Path, sentinel_source: str | None = None) -> Path:
     """Copy the checker into an isolated installed-layout fixture."""
     bundle_dir.mkdir(parents=True)
+    schema_dir = bundle_dir.parent / "shared" / "schemas"
+    schema_dir.mkdir(parents=True)
+    shutil.copy2(
+        ROOT / "shared" / "schemas" / "agent-runs.schema.json",
+        schema_dir / "agent-runs.schema.json",
+    )
     checker = bundle_dir / CHECKER.name
     shutil.copy2(CHECKER, checker)
     shutil.copy2(VALIDATOR, bundle_dir / VALIDATOR.name)
@@ -48,6 +55,50 @@ def load_checker_module():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def load_validator_module():
+    spec = importlib.util.spec_from_file_location("work_item_validator_direct", VALIDATOR)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_false_event_validity_cannot_settle_revise_or_register_terminal():
+    validator = load_validator_module()
+    revise = {
+        "schemaVersion": 2, "runId": "revise-001", "role": "qa-engineer",
+        "executionRole": "internal", "gate": "REVISE", "status": "revise",
+    }
+    closer = {
+        "schemaVersion": 2, "runId": "closer-001", "role": "qa-engineer",
+        "executionRole": "internal", "gate": "PASS", "status": "completed",
+        "closesRunIds": ["revise-001"], "eventKind": "terminal", "launchRunId": "launch-001",
+    }
+    launch = {"schemaVersion": 2, "runId": "launch-001", "eventKind": "launch"}
+    errors: list[str] = []
+    open_revise, open_launches = validator.validate_closure(
+        [launch, revise, closer], errors, event_validity=[True, True, False]
+    )
+    assert [event["runId"] for event in open_revise] == ["revise-001"]
+    assert [event["runId"] for event in open_launches] == ["launch-001"]
+
+
+def test_invalid_launch_target_cannot_be_settled_by_a_valid_terminal():
+    validator = load_validator_module()
+    launch = {"schemaVersion": 2, "runId": "launch-001", "eventKind": "launch"}
+    terminal = {
+        "schemaVersion": 2, "runId": "terminal-001", "eventKind": "terminal",
+        "launchRunId": "launch-001", "status": "completed", "gate": "PASS",
+    }
+    errors: list[str] = []
+
+    _open_revise, open_launches = validator.validate_closure(
+        [launch, terminal], errors, event_validity=[False, True]
+    )
+
+    assert [event["runId"] for event in open_launches] == ["launch-001"]
 
 
 def valid_status() -> str:
@@ -148,9 +199,6 @@ def write_staged_item(
 REQUIRED_SENTINEL_STUB = """\
 def resolve_epic_locations(epics_dir, slug):
     return {"state": "missing", "locations": []}
-
-def delivery_action_validation_errors(active_dir):
-    return {}
 """
 
 
@@ -187,7 +235,7 @@ def test_checker_rejects_incomplete_required_sentinel_contract(tmp_path: Path):
     repo = tmp_path / "repo"
     checker = write_checker_bundle(
         tmp_path / "bundle",
-        "def resolve_epic_locations(epics_dir, slug):\n    return {'state': 'missing', 'locations': []}\n",
+        "def unrelated_capability():\n    return None\n",
     )
     write_valid_item(repo)
 
@@ -195,7 +243,7 @@ def test_checker_rejects_incomplete_required_sentinel_contract(tmp_path: Path):
 
     assert result.returncode == 1, result.stdout + result.stderr
     assert result.stdout.count("required-sentinel-contract-mismatch") == 1
-    assert "missing callable(s): delivery_action_validation_errors" in result.stdout
+    assert "missing callable(s): resolve_epic_locations" in result.stdout
 
 
 def test_checker_keeps_absent_optional_sentinel_reporting_verdict_neutral(tmp_path: Path):
@@ -340,23 +388,6 @@ def evaluate_all(context):
     )
 
 
-def test_checker_fails_causally_when_required_delivery_validation_raises(tmp_path: Path):
-    repo = tmp_path / "repo"
-    checker = write_checker_bundle(
-        tmp_path / "bundle",
-        REQUIRED_SENTINEL_STUB.replace(
-            "return {}", 'raise RuntimeError("delivery validation failed")'
-        ),
-    )
-    write_valid_item(repo)
-
-    result = run_bundled_checker(checker, repo)
-
-    assert result.returncode == 1, result.stdout + result.stderr
-    assert result.stdout.count("required-sentinel-call-failed") == 1
-    assert "RuntimeError: delivery validation failed" in result.stdout
-
-
 def test_checker_preserves_required_epic_resolver_call_failure_cause(tmp_path: Path):
     repo = tmp_path / "repo"
     checker = write_checker_bundle(
@@ -381,75 +412,21 @@ def test_checker_preserves_required_epic_resolver_call_failure_cause(tmp_path: P
     assert "epic location resolver failed: RuntimeError: epic resolution failed" in result.stdout
 
 
-def delivery_action_contract(*, include_oracle: bool = True, action_class: str = "mutation") -> str:
-    lines = [
-        "## Delivery action",
-        "",
-        "- **Primary**: true",
-        "- **Fingerprint**: delivery-core-v1",
-        f"- **Class**: {action_class}",
-        "- **Target**: scripts/universal-hooks/scripts/workitem_sentinels.py",
-    ]
-    if include_oracle:
-        lines.append("- **Oracle**: correlated-success")
-    return "\n".join(lines) + "\n"
-
-
-def test_checker_accepts_one_explicit_primary_delivery_action(tmp_path: Path):
+def test_checker_treats_unowned_markdown_sections_as_inert(tmp_path: Path):
     item = write_valid_item(tmp_path)
+    baseline = run_checker(tmp_path)
     with (item / "status.md").open("a", encoding="utf-8") as handle:
-        handle.write("\n" + delivery_action_contract())
-    result = run_checker(tmp_path)
-    assert result.returncode == 0, result.stdout + result.stderr
+        handle.write(
+            "\n## Delivery action\n\n"
+            "This retired heading is ordinary Markdown and carries no control meaning.\n"
+        )
 
+    with_unowned_section = run_checker(tmp_path)
 
-def test_checker_rejects_incomplete_delivery_action(tmp_path: Path):
-    item = write_valid_item(tmp_path)
-    with (item / "status.md").open("a", encoding="utf-8") as handle:
-        handle.write("\n" + delivery_action_contract(include_oracle=False))
-    result = run_checker(tmp_path)
-    assert result.returncode == 1
-    assert "invalid ## Delivery action contract" in result.stdout
-
-
-def test_checker_rejects_unsupported_verification_delivery_action(tmp_path: Path):
-    item = write_valid_item(tmp_path)
-    with (item / "status.md").open("a", encoding="utf-8") as handle:
-        handle.write("\n" + delivery_action_contract(action_class="verification"))
-
-    result = run_checker(tmp_path)
-
-    assert result.returncode == 1
-    assert "invalid ## Delivery action contract" in result.stdout
-
-
-def test_checker_rejects_multiple_primary_delivery_actions(tmp_path: Path):
-    for name in ("first-item", "second-item"):
-        item = write_valid_item(tmp_path, name)
-        with (item / "status.md").open("a", encoding="utf-8") as handle:
-            handle.write("\n" + delivery_action_contract())
-    result = run_checker(tmp_path)
-    assert result.returncode == 1
-    assert result.stdout.count("multiple primary ## Delivery action contracts") == 2
-
-
-def test_checker_accepts_one_declared_and_one_absent_active_item(tmp_path: Path):
-    declared = write_valid_item(tmp_path, "declared-item")
-    with (declared / "status.md").open("a", encoding="utf-8") as handle:
-        handle.write("\n" + delivery_action_contract())
-    write_valid_item(tmp_path, "absent-item")
-
-    result = run_checker(tmp_path)
-
-    assert result.returncode == 0, result.stdout + result.stderr
-
-
-def test_checker_keeps_parked_item_compatible(tmp_path: Path):
-    item = write_valid_item(tmp_path)
-    status = valid_status().replace("**Primary task status**: open", "**Primary task status**: parked")
-    (item / "status.md").write_text(status + "\n" + delivery_action_contract(), encoding="utf-8")
-    result = run_checker(tmp_path)
-    assert result.returncode == 0, result.stdout + result.stderr
+    assert baseline.returncode == 0, baseline.stdout + baseline.stderr
+    assert with_unowned_section.returncode == baseline.returncode
+    assert with_unowned_section.stdout == baseline.stdout
+    assert with_unowned_section.stderr == baseline.stderr
 
 
 def test_checker_passes_when_no_active_directory_exists(tmp_path: Path):
@@ -471,6 +448,29 @@ def test_checker_validates_all_active_items(tmp_path: Path):
     assert "PASS valid-item" in result.stdout
     assert "FAIL bad-item" in result.stdout
     assert "missing ledger" in result.stdout
+
+
+def test_checker_rejects_unapplied_active_bug_disposition_manifest(
+    tmp_path: Path,
+) -> None:
+    item = write_valid_item(tmp_path)
+    (item / "bug-dispositions.json").write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "workItem": item.name,
+                "closedAt": "2026-08-11T10:09:00Z",
+                "bugs": [],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = run_checker(tmp_path)
+
+    assert result.returncode == 1
+    assert "WI-BUG-DISPOSITIONS-PENDING" in result.stdout
 
 
 def test_pass_surfaces_active_items_and_denies_completion(tmp_path: Path):
@@ -795,6 +795,68 @@ def test_checker_reports_stale_running_agent_when_threshold_is_enabled(tmp_path:
     assert "stale running agent" in result.stdout
 
 
+def test_checker_stale_check_ignores_settled_launches_but_reports_unmatched_launches(
+    tmp_path: Path,
+):
+    item = write_valid_item(tmp_path, "stale-item")
+    launch_common = {
+        "schemaVersion": 2,
+        "workItem": "stale-item",
+        "role": "qa-engineer",
+        "executionRole": "internal",
+        "scope": ["tests/test_work_items_state_checker.py"],
+        "artifact": "reviews/qa.md",
+        "startedAt": "2026-05-03T08:00:00Z",
+        "updatedAt": "2026-05-03T08:00:00Z",
+        "lane": "stale-check",
+    }
+    settled_launch = {
+        **launch_common,
+        "runId": "launch-settled-001",
+        "status": "running",
+        "gate": "none",
+        "evidence": [],
+        "eventKind": "launch",
+    }
+    terminal = {
+        **launch_common,
+        "runId": "terminal-settled-001",
+        "status": "completed",
+        "gate": "PASS",
+        "evidence": [{"kind": "command", "ref": "pytest -q"}],
+        "eventKind": "terminal",
+        "launchRunId": "launch-settled-001",
+    }
+    unmatched_launch = {
+        **launch_common,
+        "runId": "launch-unmatched-001",
+        "status": "running",
+        "gate": "none",
+        "evidence": [],
+        "eventKind": "launch",
+    }
+    (item / "agent-runs.jsonl").write_text(
+        "\n".join(
+            json.dumps(event) for event in (settled_launch, terminal, unmatched_launch)
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = run_checker(
+        tmp_path,
+        "--no-strict-revise",
+        "--stale-hours",
+        "1",
+        "--now",
+        "2026-05-03T10:30:00Z",
+    )
+
+    assert result.returncode == 1, result.stdout
+    assert "launch-settled-001: stale running agent" not in result.stdout
+    assert "launch-unmatched-001: stale running agent" in result.stdout
+
+
 def test_archive_scan_propagates_security_reviewer_waiver_validity(tmp_path: Path, subtests):
     def archived_case(case_name: str, *, invalid: bool = False, legacy_waiver: bool = False):
         root = tmp_path / case_name
@@ -860,6 +922,290 @@ def test_archive_scan_propagates_security_reviewer_waiver_validity(tmp_path: Pat
         assert f"{waiver_id}: field closesRunIds requires schemaVersion 2" not in result.stdout
 
 
+def raw_v2_archived_review_events(item_name: str) -> tuple[dict, dict]:
+    target = ledger_event(
+        schemaVersion=2,
+        runId="run-archive-legacy-target",
+        workItem=item_name,
+        role="qa-engineer",
+        executionRole="internal",
+        status="revise",
+        gate="REVISE",
+        artifact=".scratch/reviews/legacy-qa-pass.md",
+        lane="archive-legacy-review",
+        effort="high",
+        provider="codex",
+        findingClass="correctness",
+    )
+    closer = ledger_event(
+        schemaVersion=2,
+        runId="run-archive-legacy-closer",
+        workItem=item_name,
+        role="qa-engineer",
+        executionRole="internal",
+        status="completed",
+        gate="PASS",
+        artifact=".scratch/reviews/legacy-qa-pass.md",
+        evidence=[{"kind": "review", "ref": "legacy archived review PASS"}],
+        lane="archive-legacy-review",
+        effort="high",
+        provider="codex",
+        closesRunIds=[target["runId"]],
+    )
+    return target, closer
+
+
+def test_archive_scan_accepts_raw_v2_missing_legacy_review_pointer(tmp_path: Path) -> None:
+    item_name = "archived-legacy-review-pointer"
+    item = tmp_path / "work-items" / "archive" / "2026-07" / item_name
+    item.mkdir(parents=True)
+    target, closer = raw_v2_archived_review_events(item_name)
+    ledger = item / "agent-runs.jsonl"
+    ledger.write_text(
+        "\n".join(json.dumps(event) for event in (target, closer)) + "\n",
+        encoding="utf-8",
+    )
+    before = ledger.read_bytes()
+
+    result = run_checker(tmp_path, "--telemetry")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "artifact does not exist" not in result.stdout
+    assert "open REVISE obligation survived archival" not in result.stdout
+    assert "archive-legacy-review-pointer-compat=1" in result.stdout
+    assert ledger.read_bytes() == before
+
+
+def test_archive_review_pointer_closes_only_its_named_revise(tmp_path: Path) -> None:
+    validator = load_validator_module()
+    item_name = "archived-legacy-review-residual"
+    item = tmp_path / "work-items" / "archive" / "2026-07" / item_name
+    (item / "reviews").mkdir(parents=True)
+    (item / "reviews" / "parked.md").write_text("PARKED\n", encoding="utf-8")
+    target, closer = raw_v2_archived_review_events(item_name)
+    parked = ledger_event(
+        schemaVersion=2,
+        runId="run-archive-parked-residual",
+        workItem=item_name,
+        role="qa-engineer",
+        executionRole="internal",
+        status="revise",
+        gate="REVISE",
+        artifact="reviews/parked.md",
+        lane="archive-parked-residual",
+        effort="high",
+        provider="codex",
+        findingClass="correctness",
+    )
+    ledger = item / "agent-runs.jsonl"
+    ledger.write_text(
+        "\n".join(json.dumps(event) for event in (target, parked, closer)) + "\n",
+        encoding="utf-8",
+    )
+    before = ledger.read_bytes()
+    telemetry: dict[str, int] = {}
+
+    errors, open_revise, open_launches = validator.validate_archived_ledger_obligations(
+        item, telemetry=telemetry
+    )
+
+    assert errors == []
+    assert [event["runId"] for event in open_revise] == [parked["runId"]]
+    assert open_launches == []
+    assert telemetry.get("archive-legacy-review-pointer-compat") == 1
+    assert ledger.read_bytes() == before
+
+
+def test_archive_review_pointer_compatibility_is_strictly_bounded(tmp_path: Path) -> None:
+    validator = load_validator_module()
+    item = tmp_path / "work-items" / "archive" / "2026-07" / "bounded-review-pointer"
+    item.mkdir(parents=True)
+    base = ledger_event(
+        schemaVersion=2,
+        runId="run-bounded-review-pointer",
+        workItem=item.name,
+        role="qa-engineer",
+        executionRole="internal",
+        status="completed",
+        gate="PASS",
+        artifact=".scratch/reviews/missing.md",
+        evidence=[{"kind": "review", "ref": "legacy archived review PASS"}],
+    )
+
+    def derive(event: dict, transformation: str = "raw", authorizations=None):
+        encoded = json.dumps(
+            event, ensure_ascii=False, separators=(",", ":"), sort_keys=True
+        ).encode("utf-8")
+        event_sha = hashlib.sha256(encoded).hexdigest()
+        row = validator.LedgerProjectionRowV1(
+            event, 1, event_sha, event_sha, transformation
+        )
+        errors: list[str] = []
+        validity, closure_validity = validator.derive_archived_event_validity(
+            [event], item, errors, authorizations or {}, rows=(row,)
+        )
+        return errors, validity, closure_validity
+
+    for name, update in (
+        ("repository path", {"artifact": "reviews/missing.md"}),
+        ("scratch outside reviews", {"artifact": ".scratch/output/missing.md"}),
+        ("reviews directory itself", {"artifact": ".scratch/reviews"}),
+        ("typed scratch identity", {"scratchEvidence": []}),
+    ):
+        errors, validity, closure_validity = derive({**base, **update})
+        assert any("artifact does not exist" in error for error in errors), name
+        assert validity == [False], name
+        assert closure_validity == [False], name
+
+    for transformation in ("manifest-projected", "migration-replaced"):
+        errors, validity, closure_validity = derive(base, transformation)
+        assert any("artifact does not exist" in error for error in errors), transformation
+        assert validity == [False], transformation
+        assert closure_validity == [False], transformation
+
+    active = tmp_path / "work-items" / "active" / "bounded-review-pointer"
+    active.mkdir(parents=True)
+    active_errors: list[str] = []
+    assert not validator.validate_event(base, active, set(), active_errors)
+    assert any("artifact does not exist" in error for error in active_errors)
+
+    present = item / ".scratch" / "reviews" / "present.md"
+    present.parent.mkdir(parents=True)
+    present.write_text("present but typed identity is malformed\n", encoding="utf-8")
+    existing_mismatch = {
+        **base,
+        "artifact": ".scratch/reviews/present.md",
+        "scratchEvidence": [],
+    }
+    errors, validity, closure_validity = derive(existing_mismatch)
+    assert any("scratchEvidence" in error for error in errors)
+    assert validity == [False]
+    assert closure_validity == [False]
+
+    authorized = {**base, "artifactRevision": "a" * 64}
+    encoded = json.dumps(
+        authorized, ensure_ascii=False, separators=(",", ":"), sort_keys=True
+    ).encode("utf-8")
+    event_sha = hashlib.sha256(encoded).hexdigest()
+    authorization = validator.HistoricalArtifactAuthorization(
+        1,
+        event_sha,
+        event_sha,
+        authorized["runId"],
+        authorized["artifact"],
+        authorized["artifactRevision"],
+    )
+    errors, validity, closure_validity = derive(authorized, authorizations={1: authorization})
+    assert errors == []
+    assert validity == [True]
+    assert closure_validity == [False]
+
+    drifted_authorization = validator.HistoricalArtifactAuthorization(
+        1,
+        "0" * 64,
+        event_sha,
+        authorized["runId"],
+        authorized["artifact"],
+        authorized["artifactRevision"],
+    )
+    errors, validity, closure_validity = derive(
+        authorized, authorizations={1: drifted_authorization}
+    )
+    assert any("artifact does not exist" in error for error in errors)
+    assert validity == [False]
+    assert closure_validity == [False]
+
+    version_three = {"schemaVersion": 3}
+    errors, validity, closure_validity = derive(version_three)
+    assert errors == []
+    assert validity == [False]
+    assert closure_validity == [False]
+
+
+def test_active_only_keeps_periodic_archive_failures_out_of_publication_scope(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "work-items" / "active").mkdir(parents=True)
+    item_name = "archived-open-revise"
+    item = tmp_path / "work-items" / "archive" / "2026-07" / item_name
+    (item / "reviews").mkdir(parents=True)
+    (item / "reviews" / "qa.md").write_text("REVISE\n", encoding="utf-8")
+    revise = ledger_event(
+        schemaVersion=2,
+        runId="run-archived-open-revise-001",
+        workItem=item_name,
+        role="qa-engineer",
+        executionRole="internal",
+        status="revise",
+        gate="REVISE",
+        artifact="reviews/qa.md",
+        lane="archived-review",
+        findingClass="correctness",
+    )
+    (item / "agent-runs.jsonl").write_text(
+        json.dumps(revise) + "\n", encoding="utf-8"
+    )
+
+    periodic = run_checker(tmp_path)
+    publication = run_checker(tmp_path, "--active-only")
+
+    assert periodic.returncode == 1
+    assert "open REVISE obligation survived archival" in periodic.stdout
+    assert publication.returncode == 0, publication.stdout
+    assert "(ARCHIVED)" not in publication.stdout
+    assert "archive obligation scan skipped" in publication.stdout
+
+
+def test_publication_gate_requests_active_only_work_item_scope() -> None:
+    source = (ROOT / "scripts" / "check-publication-gate.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert '"--active-only"' in source
+    assert "run: python scripts/check-work-items-state.py --active-only" in source
+
+
+def test_archive_scan_keeps_skipped_legacy_positions_for_v2_closure_targets(tmp_path: Path):
+    item = tmp_path / "work-items" / "archive" / "2026-07" / "archived-legacy-target"
+    (item / "reviews").mkdir(parents=True)
+    (item / "reviews" / "security.md").write_text("PASS\n", encoding="utf-8")
+    target_id = "run-archive-legacy-target"
+    target = ledger_event(
+        schemaVersion=1,
+        runId=target_id,
+        workItem="archived-legacy-target",
+        role="security-reviewer",
+        executionRole="external-reviewer",
+        status="revise",
+        gate="REVISE",
+        artifact="reviews/security.md",
+        lane="archive-legacy-target",
+        findingClass="security",
+    )
+    closer = ledger_event(
+        schemaVersion=2,
+        runId="run-archive-v2-closer",
+        workItem="archived-legacy-target",
+        role="security-reviewer",
+        executionRole="internal",
+        status="completed",
+        gate="WAIVED:security-reviewer",
+        scope=["archive security review"],
+        artifact="reviews/security.md",
+        evidence=[{"kind": "manual-check", "ref": f"security-reviewer waives {target_id}"}],
+        closesRunIds=[target_id],
+    )
+    (item / "agent-runs.jsonl").write_text(
+        "\n".join(json.dumps(event) for event in (target, closer)) + "\n",
+        encoding="utf-8",
+    )
+
+    result = run_checker(tmp_path)
+
+    assert result.returncode == 1
+    assert "does not reference an earlier event (C1)" not in result.stdout
+
+
 def test_done_predicate_twin_not_drifted():
     # The state-checker re-implements the SEN-0 archival-orphan invariant's
     # DONE_STATE regex (no shared import across the sentinel/validator
@@ -903,3 +1249,69 @@ class TestArchiveOnlyDependencyTerminality(unittest.TestCase):
                 lifecycle.work_item_dependency_state(root, "dependency"),
                 "done",
             )
+
+
+def test_decision_schema_failure_reaches_repository_state_checker(tmp_path: Path) -> None:
+    decision = (
+        tmp_path
+        / "work-items"
+        / "decisions"
+        / "2026-08-11-schema-test.md"
+    )
+    decision.parent.mkdir(parents=True)
+    decision.write_text(
+        "---\nstatus: proposed\nnot-a-field\ndate: 2026-08-11\n---\n"
+        "\n# Decision: malformed\n",
+        encoding="utf-8",
+    )
+    entry = {
+        "path": decision.name,
+        "sha256": hashlib.sha256(decision.read_bytes()).hexdigest().upper(),
+        "state": "admitted",
+    }
+    baseline = hashlib.sha256(
+        f"{entry['path']}\0{entry['sha256']}\n".encode("utf-8")
+    ).hexdigest().upper()
+    policy_slug = "2026-08-18-current-decision-schema-versioned-read-compatibility"
+    (decision.parent / f"{policy_slug}.md").write_text(
+        "\n".join(
+            [
+                f"- id: {policy_slug}",
+                "- status: accepted",
+                "- date: 2026-08-18",
+                "- decided-by: $architect",
+                "- context: schema-test",
+                "- supersedes: none",
+                "- superseded-by: none",
+                "- accepted-evidence: fixture",
+                "- v0-manifest: work-items/decision-v0-compatibility.json",
+                f"- v0-baseline-sha256: {baseline}",
+                "- v0-cutover-date: 2026-08-18",
+                "",
+                f"# Decision: {policy_slug}",
+                "",
+                "## Decision",
+                "Fixture policy anchor.",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "work-items" / "decision-v0-compatibility.json").write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "policyDecision": policy_slug,
+                "cutoverDate": "2026-08-18",
+                "baselineSha256": baseline,
+                "entries": [entry],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = run_checker(tmp_path)
+
+    assert result.returncode == 1
+    assert "WI-DECISION-V0-SCHEMA-INVALID" in result.stdout

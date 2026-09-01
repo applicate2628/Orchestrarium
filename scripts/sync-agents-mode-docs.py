@@ -14,8 +14,6 @@ REFERENCE_DOC = Path("docs/agents-mode-reference.md")
 INIT_SURFACES = {
     "codex": Path("src.codex/skills/init-project/SKILL.md"),
     "claude": Path("src.claude/commands/agents-init-project.md"),
-    "gemini": Path("src.gemini/skills/init-project/SKILL.md"),
-    "qwen": Path("src.qwen/skills/init-project/SKILL.md"),
 }
 
 INIT_ROLE_LABELS = {
@@ -212,20 +210,24 @@ def scalar_keys_for_provider(
     return result
 
 
-def scalar_comment(scalar: dict[str, Any], provider: str) -> str:
+def scalar_comment(scalar: dict[str, Any]) -> str:
     name = scalar["name"]
-    allowed = " | ".join(str(value) for value in scalar["allowed"])
+    allowed_values = [str(value) for value in scalar["allowed"]]
     default = scalar["default"]
     if name == "externalProvider":
-        if provider == "qwen":
-            return (
-                f"# allowed here: {allowed}; default: {default}; "
-                "gemini/qwen are WEAK MODEL / NOT RECOMMENDED example-only routes"
-            )
-        return (
-            f"# allowed here: {allowed}; default: {default}; "
-            "gemini/qwen are explicit example-only and not recommended"
+        selectable = " | ".join(
+            value
+            for value in allowed_values
+            if value not in {"gemini", "qwen", "kimi", "grok"}
         )
+        return (
+            f"# selectable here: {selectable}; default: {default}; "
+            "kimi requires explicit global Windows enrollment and is not "
+            "initialized as a project-local scalar; grok remains unavailable "
+            "in 1.x; removed gemini/qwen values fail closed with "
+            "E_EXTERNAL_PROVIDER_REMOVED"
+        )
+    allowed = " | ".join(allowed_values)
     return f"# allowed: {allowed}; default: {default}"
 
 
@@ -233,37 +235,17 @@ def canonical_shape(schema_data: dict[str, Any], provider: str) -> str:
     lines: list[str] = []
     for scalar in scalar_keys_for_provider(schema_data, provider):
         name = scalar["name"]
-        lines.append(f"{name}: {{value}}  {scalar_comment(scalar, provider)}")
+        lines.append(f"{name}: {{value}}  {scalar_comment(scalar)}")
         if name != "reserveResolver":
             continue
 
-        if provider in {"gemini", "qwen"}:
-            lines.extend(render_profile_yaml(schema_data["priorityProfiles"]))
-            lines.extend(render_counts_yaml(schema_data["externalOpinionCounts"]))
-        else:
-            lines.append(
-                "externalPriorityProfiles: {value}  # allowed: structured profile map"
-            )
-            lines.append(
-                "externalOpinionCounts: {value}  # allowed: structured lane-count map"
-            )
+        lines.append(
+            "externalPriorityProfiles: {value}  # allowed: structured profile map"
+        )
+        lines.append(
+            "externalOpinionCounts: {value}  # allowed: structured lane-count map"
+        )
     return "\n".join(lines)
-
-
-def render_profile_yaml(profiles: dict[str, dict[str, list[str]]]) -> list[str]:
-    lines = ["externalPriorityProfiles:"]
-    for profile_name, lanes in profiles.items():
-        lines.append(f"  {profile_name}:")
-        for lane_name, providers in lanes.items():
-            lines.append(f"    {lane_name}: [{', '.join(providers)}]")
-    return lines
-
-
-def render_counts_yaml(counts: dict[str, int]) -> list[str]:
-    lines = ["externalOpinionCounts:"]
-    for lane_name, value in counts.items():
-        lines.append(f"  {lane_name}: {value}")
-    return lines
 
 
 def replace_table_after_heading(text: str, heading: str, replacement: str) -> str:

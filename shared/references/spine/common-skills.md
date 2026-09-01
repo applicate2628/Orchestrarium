@@ -9,13 +9,13 @@ Two archetypes:
 Discovery, invocation, and installed layout:
 - Codex installs them under `skills/<name>/` next to role skills. Every skill in this tree carries `agents/openai.yaml` so Codex can uniformly register `$<name>` as a spawnable subagent; the archetype distinction is informational on this side. Knowledge-style skills typically use the subagent prompt to load the workflow body, while delegate-style skills also produce a self-contained findings artifact.
 - Claude installs them under `.claude/skills/<name>/` so the `Skill` tool can invoke them. Delegate-style additionally installs a thin wrapper at `.claude/agents/<name>.md` so the main conversation can spawn a fresh-context subagent via the Agent tool; knowledge-style ships only the `Skill`-tool form. Both archetypes remain reachable by every role with `Skill` tool access.
-- Gemini and Qwen install them under their installed extension root's `skills/<name>/` directory (for example `.gemini/extensions/orchestrarium-gemini/skills/<name>/`, not the source-tree `src.gemini/skills/`) and rely on each runtime's native skill resolver; subagent-style fresh-context delegation is not modeled there.
 
 Common-skill index (installed names):
 - `$windows-gui-manual-testing` — delegate-style. Windows desktop GUI manual visual verification with screenshots, video frames, or live inspection across toolkit/runtime variants; owns screen capture when no recording exists, hard crop validation, and structural-vs-cosmetic classification of UI issues. Returns an evidence-backed findings package.
 - `$analyzing-video-bugs` — knowledge-style. Extract frames from any UI/animation/layout bug video (user-provided or agent-captured), locate scene transitions, dense-sample around transitions, read the smallest distinguishing frame set.
 - `$bug-hunting` — knowledge-style. Systematic runtime bug investigation via diagnostic logging: log first, never patch on unverified theory, never re-roll on guesses, remove diagnostics in the same commit cycle as the fix.
 - `$mathtype-book-page` — knowledge-style. Bring translated technical-book DOCX pages to accepted MathType format with source-PDF authority, gate discipline, and defective-chunk repair workflow.
+- `$manual-repo-transfer` — knowledge-style. Prepare a Git repository for an offline machine transfer by inventorying dirty, ignored, recovery, and runtime state; create and validate a selected byte-only transfer bundle; and produce preview-only cleanup evidence. Actual transfer waits for current tasks and pull-request gates to pass; it never authorizes deletion, wipe, or publication.
 - `$explain-simply` — knowledge-style. Turn concepts, code paths, results, decisions, or learner notes into reader-tailored plain-language explanations with analogies, explicit assumptions, and term definitions.
 
 ## Terms and Abbreviations

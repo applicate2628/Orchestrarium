@@ -20,6 +20,7 @@ TOP_KEY_RE = re.compile(r"^([A-Za-z][A-Za-z0-9]*):(?:\s*(.*))?$")
 INDENT2_KEY_RE = re.compile(r"^ {2}([^:#][^:]*):(?:\s*(.*))?$")
 INDENT4_KEY_RE = re.compile(r"^ {4}([^:#][^:]*):\s*(.*)$")
 RETIRED_PROFILE_NAMES = {"gemini-crosscheck"}
+REMOVED_EXTERNAL_PROVIDERS = frozenset({"gemini", "qwen"})
 RETIRED_PROFILE_LANE_NAMES = {
     "worker.long-autonomous",
     "worker.ui-structural-modernization",
@@ -379,6 +380,49 @@ def render_scalar(key: str, meta: ScalarMeta, existing: dict[str, ScalarMeta]) -
     return [f"{key}: {value}{comment_suffix(meta.comment)}"]
 
 
+def decode_supported_yaml_scalar(value: str) -> str:
+    """Decode the narrow quoted-string subset used by agents-mode semantics."""
+    value = value.strip()
+    if not value or value[0] not in {"'", '"'}:
+        return value
+    if len(value) < 2 or value[0] != value[-1]:
+        raise ValueError("E_AGENTS_MODE_INVALID_YAML: invalid quoted scalar")
+    if value[0] == "'":
+        inner = value[1:-1]
+        decoded: list[str] = []
+        index = 0
+        while index < len(inner):
+            if inner[index] != "'":
+                decoded.append(inner[index])
+                index += 1
+                continue
+            if index + 1 >= len(inner) or inner[index + 1] != "'":
+                raise ValueError("E_AGENTS_MODE_INVALID_YAML: invalid single-quoted scalar")
+            decoded.append("'")
+            index += 2
+        return "".join(decoded)
+    try:
+        decoded = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise ValueError("E_AGENTS_MODE_INVALID_YAML: invalid double-quoted scalar") from exc
+    if not isinstance(decoded, str):
+        raise ValueError("E_AGENTS_MODE_INVALID_YAML: quoted scalar must decode to a string")
+    return decoded
+
+
+def reject_removed_external_provider(existing: dict[str, ScalarMeta]) -> None:
+    configured = existing.get("externalProvider")
+    if configured is None:
+        return
+    provider = decode_supported_yaml_scalar(configured.value).lower()
+    if provider in REMOVED_EXTERNAL_PROVIDERS:
+        raise ValueError(
+            "E_EXTERNAL_PROVIDER_REMOVED: "
+            f"externalProvider '{provider}' was removed; choose auto, codex, claude, "
+            "or the explicitly admitted kimi route"
+        )
+
+
 def render_profiles(
     meta: BlockMeta,
     existing: BlockMeta | None,
@@ -516,6 +560,7 @@ def normalize_file(template: str, target: str, provider: str) -> str:
         known_keys=known_keys,
         retired_keys=retired_keys,
     )
+    reject_removed_external_provider(existing_scalars)
     if legacy_reserve_disabled(target_path) and "reserveResolver" not in existing_scalars:
         existing_scalars["reserveResolver"] = ScalarMeta(value="disabled", comment="")
     allow_reserve = reserve_resolver_allows_reserve(scalar_meta, existing_scalars)

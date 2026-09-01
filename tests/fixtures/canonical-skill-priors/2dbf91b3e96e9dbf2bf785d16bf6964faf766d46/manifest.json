@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "baseline": "2dbf91b3e96e9dbf2bf785d16bf6964faf766d46",
+  "files": {
+    "github-pr-review-bot/SKILL.md": "fd4396ae28043a9b393bf817cafb131485e1a4ddf2678eca4a648850687505e5",
+    "github-pr-review-bot/agents/openai.yaml": "f3ac0408e1f12c1aa95393ef359bf4169463cc5f1c042ce461af176d0a5424bd",
+    "manual-repo-transfer/SKILL.md": "2640da07d5d74eccbc00932141c71ca5904e769dc28589a3597ee141091031ce",
+    "manual-repo-transfer/agents/openai.yaml": "906d6eb48ebb43f51b757e4c37a6ab817e6f04a0e46e0eb78905804dc8099784",
+    "manual-repo-transfer/references/manifest-schema.md": "d9a599d027242468775f3e7914dc441e4eb4d696a3b2434184822b32f768a7a9",
+    "manual-repo-transfer/scripts/repo_transfer.py": "43859e91cdc856e5aa94cbe831fe5c2cc37e29498e9f467370c0c27ad7200815"
+  }
+}

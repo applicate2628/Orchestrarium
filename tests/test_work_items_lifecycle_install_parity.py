@@ -49,6 +49,7 @@ EXPECTED_COUNTS = {
 }
 CURRENT_LIFECYCLE_SURFACES = (
     ROOT / "INSTALL.md",
+    ROOT / "scripts" / "check-work-items-state.py",
     ROOT / "src.codex" / "AGENTS.codex.md",
     ROOT / "src.codex" / "skills" / "lead" / "SKILL.md",
     ROOT / "src.claude" / "CLAUDE.md",
@@ -87,6 +88,11 @@ RETIRED_CONTROL_CLAIMS = (
     "archival Stop-hook",
     "archival Stop hook flags",
     "SEN-2",
+    "## Delivery action",
+    "DELIVERY_ACTION_HEADING",
+    "_parse_delivery_action",
+    "delivery_action_validation_errors",
+    "REQUIRED_SENTINEL_CALL_ID",
     "Registered ONLY on `Stop`",
     "neither blocking Stop guard",
     "28 wrappers from 14 owned stems",
@@ -166,6 +172,32 @@ def _all_strings(value):
 
 
 class TestWorkItemsLifecycleInstallParity(unittest.TestCase):
+    def test_bug_disposition_close_contract_is_present_across_installed_surfaces(self) -> None:
+        surfaces = (
+            ROOT / "shared" / "AGENTS.shared.md",
+            ROOT / "src.codex" / "AGENTS.codex.md",
+            ROOT / "src.claude" / "CLAUDE.md",
+            ROOT / "src.codex" / "skills" / "lead" / "SKILL.md",
+            ROOT / "src.claude" / "skills" / "lead" / "SKILL.md",
+            ROOT / "src.codex" / "skills" / "knowledge-archivist" / "SKILL.md",
+            ROOT / "src.claude" / "agents" / "knowledge-archivist.md",
+        )
+        for path in surfaces:
+            text = path.read_text(encoding="utf-8")
+            with self.subTest(path=str(path.relative_to(ROOT))):
+                self.assertIn("bug-dispositions.json", text)
+                self.assertIn("terminalize", text)
+                self.assertIn("preserve-current", text)
+
+        owner = (ROOT / "scripts" / "mutate-work-item.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('BUG_DISPOSITIONS_MANIFEST = "bug-dispositions.json"', owner)
+        self.assertIn(
+            'BUG_DISPOSITIONS_RECEIPT = "bug-dispositions-receipt.json"', owner
+        )
+        self.assertIn('"WI-BUG-DISPOSITIONS-PENDING"', owner)
+
     def test_current_contract_runtime_and_validator_inventory_is_archive_only(self) -> None:
         stale: list[str] = []
         for path in CURRENT_LIFECYCLE_SURFACES:
@@ -220,7 +252,7 @@ class TestWorkItemsLifecycleInstallParity(unittest.TestCase):
         self.assertIn("Physical location owns membership", codex)
 
         claude = (ROOT / "src.claude" / "CLAUDE.md").read_text(encoding="utf-8")
-        self.assertIn("auto-installs thirteen hook entries", claude)
+        self.assertIn("auto-installs thirteen `settings.json` entries", claude)
         self.assertIn("nine structural hooks", claude)
         self.assertIn("Physical location owns lifecycle membership", claude)
 
@@ -325,6 +357,72 @@ class TestWorkItemsLifecycleInstallParity(unittest.TestCase):
                     self.assertEqual(
                         list(installed.rglob(f"{OBSOLETE_MARKER}{suffix}")),
                         [],
+                    )
+
+    def test_production_installers_ship_lifecycle_validator_schema(self) -> None:
+        installer = _load_installer()
+        with tempfile.TemporaryDirectory() as directory:
+            temp = Path(directory)
+            for provider in ("codex", "claude"):
+                installed_root = temp / provider
+                helper_target = installed_root / "scripts"
+                installer._install_runtime_files(ROOT, helper_target, False)
+                schema = (
+                    installed_root / "shared" / "schemas" / "agent-runs.schema.json"
+                )
+                validator = installed_root / "scripts" / "validate-work-item-state.py"
+                classifier = installed_root / "scripts" / "maintenance" / "cleanup.py"
+                with self.subTest(provider=provider, stage="schema"):
+                    self.assertTrue(schema.is_file(), schema)
+                    self.assertEqual(
+                        hashlib.sha256(schema.read_bytes()).hexdigest(),
+                        hashlib.sha256(
+                            (
+                                ROOT / "shared" / "schemas" / "agent-runs.schema.json"
+                            ).read_bytes()
+                        ).hexdigest(),
+                    )
+                    self.assertEqual(
+                        hashlib.sha256(classifier.read_bytes()).hexdigest(),
+                        hashlib.sha256(
+                            (ROOT / "scripts" / "maintenance" / "cleanup.py").read_bytes()
+                        ).hexdigest(),
+                    )
+                validation_help = subprocess.run(
+                    [sys.executable, str(validator), "--help"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                with self.subTest(provider=provider, stage="validator-load"):
+                    self.assertEqual(
+                        validation_help.returncode,
+                        0,
+                        validation_help.stdout + validation_help.stderr,
+                    )
+                lifecycle = installed_root / "scripts" / "mutate-work-item.py"
+                classifier_load = subprocess.run(
+                    [
+                        sys.executable,
+                        "-c",
+                        (
+                            "import importlib.util,sys;"
+                            f"p=r'{lifecycle}';"
+                            "s=importlib.util.spec_from_file_location('installed_lifecycle',p);"
+                            "m=importlib.util.module_from_spec(s);"
+                            "sys.modules[s.name]=m;s.loader.exec_module(m);"
+                            "m._scratch_classifier_module()"
+                        ),
+                    ],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                with self.subTest(provider=provider, stage="classifier-load"):
+                    self.assertEqual(
+                        classifier_load.returncode,
+                        0,
+                        classifier_load.stdout + classifier_load.stderr,
                     )
 
 

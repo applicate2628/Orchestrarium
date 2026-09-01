@@ -35,7 +35,8 @@ Execute in order:
 - Prefer accepted facts, evidence-backed artifacts, and explicit constraints over opinion-driven discussion.
 - Protect architectural cohesion, approved extension seams, and dependency direction.
 - Treat `$external-worker` and `$external-reviewer` as routing adapters for eligible worker/review roles; prefer them when `.agents/.agents-mode.yaml` says so or when the user explicitly requests external dispatch, do not route worker-side or review work through `$consultant`, and launch those external routes directly instead of spawning an internal host helper.
-- Any spawned internal subagent is internal by definition even if the prompt assigns it a provider label or model such as Gemini Pro or Qwen. Do not satisfy an external route with an internal subagent impersonating that provider.
+- For a Luna mechanical handoff, consume `RoleDispatchPolicyV1` and the caller-owned tool selection contract in the installed `AGENTS.md`; do not reproduce their corridor, native-only, no-fallback, or per-spawn selection rules in Lead.
+- Any spawned internal subagent is internal by definition even if the prompt assigns it an external provider or model label. Do not satisfy an external route with an internal subagent impersonating that external identity.
 - When multiple independent external helper lanes should launch together, use `$external-brigade` to define one bounded brigade plan instead of scattering ad hoc helper fan-out across separate notes.
 - One subagent equals one profession, one artifact, and one gate.
 - Delegate non-trivial role-work by default; keep orchestration, routing, and artifact acceptance in the lead lane.
@@ -72,7 +73,7 @@ The canonical brief should capture:
 
 ## Task-memory rule
 
-- **Physical lifecycle V1 (superseding older path examples below).** Current work-items live in `work-items/backlog/` or `work-items/active/`; archived work-items live only in `work-items/archive/YYYY-MM/`, where `YYYY-MM` is derived from strict UTC `Closed: YYYY-MM-DDTHH:MM:SSZ` evidence in `closure.md`. Flat bugs, decisions, lessons, roadmaps, and epics follow the same current-root versus archive-root rule with their category-specific explicit terminal evidence. `status.md` owns active recovery; `closure.md` owns work-item outcome; README and `index.md` are derived compatibility views. Use `mutate-work-item.py` for any lifecycle change. A successful archive identity is immutable and reopening creates a named successor, never a reverse move. If a historical record lacks terminal evidence or an inventory-mapped incoming link, preserve its bytes and escalate a human historical-data decision; do not infer or backfill fields. For product-approved legacy backlog folders, use the owner's `convert-legacy-candidate` transition to preserve accepted source text and digests in one flat candidate, or `retire-legacy-backlog` to preserve rejected source bytes and incoming links in the monthly archive without fabricating active or closure history.
+- **Physical lifecycle V1 (superseding older path examples below).** Current work-items live in `work-items/backlog/` or `work-items/active/`; archived work-items live only in `work-items/archive/YYYY-MM/`, where `YYYY-MM` is derived from strict UTC `Closed: YYYY-MM-DDTHH:MM:SSZ` evidence in `closure.md`. Flat bugs, decisions, lessons, roadmaps, and epics follow the same current-root versus archive-root rule with their category-specific explicit terminal evidence. `status.md` owns active recovery; `closure.md` owns work-item outcome; README and `index.md` are derived compatibility views. Before close, Lead writes exact `bug-dispositions.json` covering every current bug whose parsed `context` equals the item slug, with each row `terminalize` or `preserve-current`; `mutate-work-item.py` applies the rows, archives the item, writes `bug-dispositions-receipt.json`, and refreshes README as one rollback-safe transaction. An active manifest is pending close. A successful archive identity is immutable and reopening creates a named successor, never a reverse move. Historical archives without the newer manifest remain compatible. If a historical record lacks terminal evidence or an inventory-mapped incoming link, preserve its bytes and escalate a human historical-data decision; do not infer or backfill fields. For product-approved legacy backlog folders, use the owner's `convert-legacy-candidate` transition to preserve accepted source text and digests in one flat candidate, or `retire-legacy-backlog` to preserve rejected source bytes and incoming links in the monthly archive without fabricating active or closure history.
 - **Owned scratch evidence.** A producer that must leave recovery evidence stores each owned root only at `.scratch/work-items/<work-item-slug>/<terminal-run-id>/<entry-id>` and records it on that same completed `PASS` terminal ledger event through repeatable `--scratch-evidence-json`. Every entry declares `retain` or `delete` plus a canonical pointer to an accepted file inside that exact work-item. `retain` is metadata-only: it carries no proof and close checks only the root without following it, then leaves all contents untouched. `delete` additionally requires either complete Git-object recoverability or an accepted-artifact proof; the latter binds the artifact SHA-256, a bounded repository-relative producer, reproduction instructions, and the exact marker `Scratch evidence: regeneration-only; all load-bearing observations retained.` Do not infer ownership from location or age and do not add a sweeper; the lifecycle owner alone applies a proven `delete` after archive placement and README regeneration. A legacy event without `scratchEvidence` remains valid only while its canonical `.scratch/work-items/<work-item-slug>` namespace is absent; an existing undeclared namespace blocks close and is never mutated.
 
 - This section applies only after the selected route enters recovery-tracked or multi-stage work.
@@ -115,14 +116,14 @@ A work-item that needs another finished first declares `Depends-on: <slug>, <slu
 
 Durable, cross-cutting architecture decisions live in a flat registry `work-items/decisions/<date>-<slug>.md` (the same flat list-item-frontmatter shape as `work-items/bugs/`), so a decision survives its originating work-item's archival instead of being buried in that item's `design.md`.
 
-- **Shape.** Frontmatter uses the bug-registry list-item style (`- key:` bullets, no `---` fences): `- id:`, `- status: proposed | accepted | dropped | superseded | reverted`, `- date: <YYYY-MM-DD>`, `- decided-by: <role or human>`, `- context: <work-item slug | cross-cutting>`, `- supersedes: <decision id | none>`, `- superseded-by: <decision id | none>`. Body: `## Decision`, `## Rationale`, `## Consequences`, `## Alternatives rejected`. The decision `status` lifecycle is SELF-CONTAINED — independent of the work-item/epic done-predicate. **`- date:` is REQUIRED, not optional** — the stale-proposed self-check below needs it, and this key list previously omitted it, which meant a record authored exactly to the list could never flag (fixed 2026-07-26). **Bullets are the only authoring shape** — do not author a new record with a leading `---` YAML fence; on 2026-07-26, 15 of 39 registry entries were found drifted to that shape by authoring mistake, not by design.
+- **Shape.** Frontmatter uses the bug-registry list-item style (`- key:` bullets, no `---` fences): `- id:`, `- status: proposed | accepted | dropped | superseded | reverted`, `- date: <YYYY-MM-DD>`, `- decided-by: <role or human>`, `- context: <work-item slug | cross-cutting>`, `- supersedes: <decision id | none>`, `- superseded-by: <decision id | none>`. Body: `## Decision`, `## Rationale`, `## Consequences`, `## Alternatives rejected`. The decision `status` lifecycle is SELF-CONTAINED — independent of the work-item/epic done-predicate. The lifecycle owner structurally enforces those seven fields exactly once, non-empty, in the leading list block; `id` and `date` must match the filename. Optional list fields and indented continuations remain valid. Historical monthly archives retain legacy-read compatibility and immutable bytes.
 - **Authoring + acceptance gate.** `$architect` authors a cross-cutting or long-lived decision in `status: proposed`; a work-item's `design.md` REFERENCES it by id rather than duplicating it. Promotion `proposed -> accepted` happens only after the corresponding `$architecture-reviewer` gate passes. `proposed -> dropped` (with a one-line reason) retires a declined proposal.
 - **Citation contract (enforced both ways).** The registry id is a CONTRACT, not a courtesy: `$architect`'s gate requires every cross-cutting / long-lived decision in the claims section to carry a `work-items/decisions/` id, and `$architecture-reviewer` returns a blocking `REVISE` when such a decision is asserted in the design with no id. The trigger is NARROW — only decisions that outlive the work-item or constrain others; a local single-work-item decision stays inline in `design.md` so the registry does not flood.
 - **Supersede (two-way edge).** When decision B supersedes A, set B's `- supersedes: A` AND A's `- status: superseded` + `- superseded-by: B` in one step — a stored bidirectional link (mirroring the epic child<->parent join). `reverted` keeps a one-line reason.
 - **Ownership.** Lifecycle TRANSITIONS are a SEMANTIC act owned by `$architect`/`$lead`; `$knowledge-archivist` does ONLY the non-semantic bookkeeping (writing the stored back-link field, reconciling physical locations, and verifying the generated read-model).
 - **Stale-proposed accountability.** The lead is accountable for resolving a `proposed` decision that the decision scan keeps surfacing — drive it to `accepted` (after the `$architecture-reviewer` gate) or `dropped` (with a one-line reason). Do not let a proposal idle indefinitely; surfacing it is visibility, not closure.
-- **Stale-proposed turn-end self-check (decidable, text-enforced).** At turn-end, if `work-items/decisions/` holds an entry whose LEADING frontmatter matches BOTH a `status: proposed` field AND a `date: <YYYY-MM-DD>` field strictly before today's date, name that entry and either drive it forward (route to `$architecture-reviewer` for the `proposed -> accepted` gate, or `dropped` with a reason) or state why it is still legitimately pending. LEADING frontmatter means the block before the first `#` heading, recognized in EITHER shape actually present in the registry: the canonical `- status:` / `- date:` bullets, OR a legacy top-of-file `---`-delimited YAML block (`---` / `status: …` / `date: …` / `---`). Never a body line in either shape — including a bullet a YAML-shaped record pushes past its closing `---` fence (some push `- id:` / `- context:` there, after the first heading); those are body, not frontmatter, and still do not count. This dual-shape read is a deliberate, bounded tolerance for the two shapes actually found on 2026-07-26 (see Shape above), not a loosening to "match `status: proposed` anywhere in the file" — a body line quoting another record's status still does not register as a verdict. The trigger is `proposed AND date < today` — a decision filed today never flags (its first-day review window is legitimate); it surfaces only once the calendar day rolls over with no promotion. This is the same `date < today` predicate a future hook would use; it is enforced as governance the model reads, NOT a hook (a warn-only `Stop` hook is invisible — only a `Stop` block reason reaches the model — and a blocking gate on a legitimately-pending next-day proposal is over-aggressive for a rare registry). SCOPE: decisions only; the `work-items/lessons/` registry has a different lifecycle (`status: open`, no `proposed`/`date:`) and no analogous stale state, so it is NOT covered.
-- **Residual (honest).** The stale-proposed self-check is text-enforced, not structurally caught — no hook scans `work-items/decisions/`. The blocking `Stop` hook (trigger `proposed AND date < today`, override `[acknowledge-stale-proposed]`, decisions-only, fail-open + `agent_id` skip — designed in the Move 5 decision record) is DEFERRED; build it against evidence (an observed stale-proposed instance, or the registry growing past ~5 entries), not its hypothetical. Also DEFERRED: an authoring-time schema gate — nothing today tells an author which frontmatter shape or key set is canonical at record-creation time, so a third shape can still appear unnoticed. The natural owner is `scripts/validate-work-item-state.py` (the existing work-items schema validator); it was under concurrent edit elsewhere when this residual was written (2026-07-26) and is out of this fix's scope, so the gap is disclosed here rather than patched around with a second, parallel validator — see `work-items/bugs/2026-07-26-decision-frontmatter-drift-hides-most-proposed-records-from-the-stale-check.md`.
+- **Stale-proposed turn-end self-check (decidable, text-enforced).** At turn-end, if a current decision's lifecycle-validated leading block has both `- status: proposed` and `- date: <YYYY-MM-DD>` strictly before today, name it and either route it to `$architecture-reviewer`, drop it with a reason, or state why it remains pending. A body quotation never counts. The first calendar day is the legitimate review window. SCOPE: decisions only; lessons use a different lifecycle.
+- **Residual (honest).** Current-record shape is structurally enforced by `scripts/mutate-work-item.py audit`; semantic staleness and supersession-link consistency are not. No hook decides when a proposal should advance or validates the two-way relation graph. A blocking stale-proposal Stop hook remains deferred pending evidence; do not add a parallel schema validator.
 
 ## Lessons (delivery lessons-learned registry)
 
@@ -135,17 +136,6 @@ Lessons learned during delivery (a recurring miss, a wrong assumption, a process
 - **Stale-open accountability.** The main conversation (as Lead) is accountable for resolving an `open` lesson that keeps getting surfaced — drive it to `applied` or `dropped` (one-line reason). Listing it is visibility, not closure.
 - **Surfacing.** The lead derives the open-lessons count live by scanning `work-items/lessons/` for `status: open` (count + id + `## Lesson` first line). `$product-manager` consults open lessons when admitting similar work so the same mistake is not repeated.
 - **Residual (honest).** Registry hygiene is governance-enforced only — no hook scans `work-items/lessons/`, so an `open` lesson nobody applies is not structurally caught.
-
-## Orchestrator upgrades (work-items/roadmaps/orchestrator-upgrades.md)
-
-The standing precedent-driven improvement plan `work-items/roadmaps/orchestrator-upgrades.md` is a thin PROMOTION LEDGER — the join view tracking which lessons/decisions have earned a concrete orchestrator (control-plane) change, and which are still knowledge-only. It is NOT a second status board: it does not restate board state, it points into it.
-
-- **Shape.** A flat single file: a table `Precedent (lesson) | Orchestrator change | Status | Evidence` plus a `## Knowledge-only precedents` bucket for lessons that don't (yet) call for a mechanism. Status vocabulary: ✅ shipped · 🔄 in-progress (design/audit/impl) · ⬜ planned (owed, not started) · ⏸ parked.
-- **Ownership.** `$lead` decides WHICH precedent earns an orchestrator change — a semantic act, the same authority level as a decision or lesson lifecycle transition; `$knowledge-archivist` owns refresh mechanics and reconciles rows against the source lessons' status, in the same Board-refresh post-wave pass.
-- **Anti-duplication.** For any row NOT `✅ shipped`, point at the owning board milestone (`work-items/README.md`) or the owning `work-items/active/<slug>` instead of restating status here — this ledger derives its in-progress truth from the board/work-item rather than tracking it a second time, which is the exact dual-canon defect class this ledger exists to avoid repeating.
-- **No self-cert on `✅ shipped`.** A row may be marked `✅ shipped` only when (a) the source lesson in `work-items/lessons/` is `applied` in the same change, AND (b) an independent review gate — not the role that authored the change — has passed. A same-session or self-authored orchestrator change enters as `🔄` and stays there until that independent gate closes.
-- **Recurrence-triggered promotion.** A knowledge-only lesson that later RECURS (the discipline it names fails to hold a second time) is promoted from the knowledge-only bucket to the main table with status `⬜ planned` — recurrence is itself the signal that a reminder is no longer enough and a mechanism is now owed.
-- **Residual (honest).** Registry hygiene here is governance-enforced only — no hook scans `work-items/roadmaps/orchestrator-upgrades.md` for stale rows or self-certified `✅` marks.
 
 ## Backlog (physical-root spec)
 
@@ -226,7 +216,7 @@ If any field is missing, tighten the task before delegating it.
 Use the templates in [subagent-contracts.md](subagent-contracts.md) for concrete handoffs and response format.
 
 - **Evidence discipline required**: the handoff must include the template's `Evidence discipline` field with the four accepted evidence categories, `ASSUMPTION (UNVERIFIED)` fallback, and banned correctness-drivers; a handoff without it is incomplete.
-- **Tool surface named**: `Allowed tools` must affirmatively name the repo-relevant MCP servers and skills for the lane, or state `runtime default surface`; a generic tool list that does neither is incomplete.
+- **Tool selection recorded**: immediately before each native spawn, discover the current tool surface and fill `Allowed tools` exactly as required by the installed `AGENTS.md`; inherited availability does not widen that recorded selection.
 
 ## Delegation-first rule
 
@@ -282,7 +272,7 @@ Require every pipeline subagent to end with exactly one gate status:
 - `REVISE`: the artifact stays in the same role and needs a bounded correction.
 - `BLOCKED`: the role cannot proceed without new context, a decision, or a different role.
 - `RETURN(role)`: an independent reviewer sends the artifact back to a specific upstream role because the upstream artifact has a structural gap requiring that role's expertise — not a bounded correction. Example: `RETURN(security-engineer)` — threat model missing server-side validation surface entirely. Route the finding to the named role; do not treat it as REVISE or BLOCKED.
-- Default `REVISE` cap: no more than 3 consecutive `REVISE` cycles for the same role and artifact before the lead escalates to the user with a summary of all iterations, remaining findings, and a recommendation.
+- Apply the shared spine's consecutive same-role/same-artifact `REVISE`-cycle cap before the lead escalates to the user with a summary of all attempts, remaining findings, and a recommendation.
 
 Do not advance work on optimism or partial acceptance.
 
@@ -290,13 +280,14 @@ Do not advance work on optimism or partial acceptance.
 `PASS` advances the pipeline, but it does not by itself close the batch. Batch closure requires requested-scope reconciliation and no remaining open obligations unless the user explicitly parks or reprioritizes them.
 
 Lead acceptance is a mechanical completeness gate: confirm the required artifact exists, required fields/evidence are present, approved edits are in place, and configured state/ledger agrees. Do not re-read the whole artifact inline to substitute for specialist correctness review; any correctness doubt routes to an independent adversarial re-gate.
+For every Lead-managed acceptance, require one complete current-invocation `RepoCleanupReportV1` with status `PASS`, bound to the same physical repository identity and `HEAD`/unborn state. Missing, stale, incomplete, null, non-`PASS`, or non-zero residue/unclassified rows map mechanically to `REVISE:self-residue`; the report never authorizes cleanup or substitutes for an owner verdict. Valid `ephemeral-volume-exempt` rows are nonblocking only when their fixed `$repo-cleanup` evidence is complete. Direct-root flows keep the shared no-self-residue invariant and turn anchor without fabricating this Lead gate.
 When an accepted artifact asserts a root cause, a fix verification, or `diagnosis confirmed`, mechanical acceptance additionally requires a cited runtime-captured observation (command output, log line, or reproduction number); prose-only confirmation is `REVISE`, and the lead never pins a second-hand verdict as `CONFIRMED`.
 
 ## Rolling-loop rule
 
 - The system operates as a rolling loop, not a stop-and-wait chain.
 - `PASS` should immediately advance to the next approved role.
-- `REVISE` should stay within the same role for a bounded correction instead of reopening the whole pipeline, but only for up to 3 consecutive cycles on the same role and artifact.
+- `REVISE` should stay within the same role for a bounded correction instead of reopening the whole pipeline, subject to the shared spine's consecutive same-role/same-artifact cycle cap.
 - `BLOCKED` is reserved for real external blockers, missing decisions, or unavailable prerequisites that cannot be fixed inside the current role.
 
 ## Flow-continuity rule
@@ -385,7 +376,7 @@ Invoke `$consultant` when the lead wants a second opinion on ambiguity, tradeoff
 
 ## Using Consultant
 
-`$consultant` is the independent advisory consultant for this repository. All usage rules, toggle check, and execution paths are in `$CODEX_HOME/skills/consultant/SKILL.md`.
+`$consultant` is the independent advisory consultant for this repository. All usage rules, toggle check, and execution paths are in `$HOME/.agents/skills/consultant/SKILL.md`.
 
 Lead rules for `$consultant`:
 
@@ -398,6 +389,64 @@ Lead rules for `$consultant`:
 - If the external-provider run fails, times out, or hits quota or auth limits, record that in the plan file. Do not silently swap `$consultant` to an internal path; if an explicitly requested or repo-policy-required consultant sweep cannot be satisfied in the selected mode, escalate honestly instead.
 - When mode is `external`, keep the consultant lane external-only. Internal fallback is not part of the consultant contract anymore.
 - Require the consultant-check memo set to end with a ready-to-send second prompt that begins with a direct imperative to continue and names the next concrete action.
+
+<!-- APAT-BLOCK:LEAD-ROUTING:BEGIN -->
+## Architecture-pattern routing recognition (APAT)
+
+Inside already-admitted non-trivial work, route to `$architect` before Plan or Implement when accepted evidence shows at least one of these problem shapes. Lead recognises the shape and does not select a pattern:
+
+- conflicting business meanings, invariants, owners, or change cadence across a proposed semantic boundary;
+- a long-lived or branch-heavy lifecycle with legal and illegal transitions, retry, timeout, cancellation, restart, manual intervention, or audit requirements;
+- materially asymmetric command/query models, scaling, authorization, or consistency needs;
+- one local database mutation plus message publication that cannot currently be one atomic operation;
+- one business transaction crossing autonomous services or data owners.
+
+This route does not change template admission and is not a universal Architect prelude. Simple Create, Read, Update, Delete (CRUD), a coherent small domain, local linear control flow, one local transaction, and a flow with no dual write do not force Architect. An irreversible cross-owner invariant still routes Architect so saga can be rejected or deferred rather than assumed.
+
+<a id="apat-en-apat-p01-semantic-boundary-outcome"></a>
+<!-- APAT-SEMANTIC id="APAT-P01-SEMANTIC-BOUNDARY.outcome" value="route-architect:consider-AP1:no-deployment-inference" -->
+- `APAT-P01-SEMANTIC-BOUNDARY` -> `route-architect:consider-AP1:no-deployment-inference`.
+
+<a id="apat-en-apat-p02-long-lived-lifecycle-outcome"></a>
+<!-- APAT-SEMANTIC id="APAT-P02-LONG-LIVED-LIFECYCLE.outcome" value="route-architect:consider-AP2:require-transition-evidence" -->
+- `APAT-P02-LONG-LIVED-LIFECYCLE` -> `route-architect:consider-AP2:require-transition-evidence`.
+
+<a id="apat-en-apat-p03-read-write-asymmetry-outcome"></a>
+<!-- APAT-SEMANTIC id="APAT-P03-READ-WRITE-ASYMMETRY.outcome" value="route-architect:consider-AP3:no-event-sourcing-inference" -->
+- `APAT-P03-READ-WRITE-ASYMMETRY` -> `route-architect:consider-AP3:no-event-sourcing-inference`.
+
+<a id="apat-en-apat-p04-dual-write-outcome"></a>
+<!-- APAT-SEMANTIC id="APAT-P04-DUAL-WRITE.outcome" value="route-architect:consider-AP4:require-relay-evidence" -->
+- `APAT-P04-DUAL-WRITE` -> `route-architect:consider-AP4:require-relay-evidence`.
+
+<a id="apat-en-apat-p05-cross-owner-transaction-outcome"></a>
+<!-- APAT-SEMANTIC id="APAT-P05-CROSS-OWNER-TRANSACTION.outcome" value="route-architect:consider-AP5:require-compensation-evidence" -->
+- `APAT-P05-CROSS-OWNER-TRANSACTION` -> `route-architect:consider-AP5:require-compensation-evidence`.
+
+<a id="apat-en-apat-n01-coherent-domain-outcome"></a>
+<!-- APAT-SEMANTIC id="APAT-N01-COHERENT-DOMAIN.outcome" value="no-force-architect:reject-AP1" -->
+- `APAT-N01-COHERENT-DOMAIN` -> `no-force-architect:reject-AP1` when alternatives are otherwise requested.
+
+<a id="apat-en-apat-n02-linear-flow-outcome"></a>
+<!-- APAT-SEMANTIC id="APAT-N02-LINEAR-FLOW.outcome" value="no-force-architect:reject-AP2" -->
+- `APAT-N02-LINEAR-FLOW` -> `no-force-architect:reject-AP2` when alternatives are otherwise requested.
+
+<a id="apat-en-apat-n03-simple-crud-outcome"></a>
+<!-- APAT-SEMANTIC id="APAT-N03-SIMPLE-CRUD.outcome" value="no-force-architect:reject-AP3" -->
+- `APAT-N03-SIMPLE-CRUD` -> `no-force-architect:reject-AP3` when alternatives are otherwise requested.
+
+<a id="apat-en-apat-n04-no-dual-write-outcome"></a>
+<!-- APAT-SEMANTIC id="APAT-N04-NO-DUAL-WRITE.outcome" value="no-force-architect:reject-AP4" -->
+- `APAT-N04-NO-DUAL-WRITE` -> `no-force-architect:reject-AP4` when alternatives are otherwise requested.
+
+<a id="apat-en-apat-n05-local-atomic-outcome"></a>
+<!-- APAT-SEMANTIC id="APAT-N05-LOCAL-ATOMIC.outcome" value="no-force-architect:reject-AP5" -->
+- `APAT-N05-LOCAL-ATOMIC` -> `no-force-architect:reject-AP5` when alternatives are otherwise requested.
+
+<a id="apat-en-apat-n06-irreversible-invariant-outcome"></a>
+<!-- APAT-SEMANTIC id="APAT-N06-IRREVERSIBLE-INVARIANT.outcome" value="route-architect:reject-or-defer-AP5" -->
+- `APAT-N06-IRREVERSIBLE-INVARIANT` -> `route-architect:reject-or-defer-AP5` and require a changed boundary, requirement, or actually supported transaction mechanism.
+<!-- APAT-BLOCK:LEAD-ROUTING:END -->
 
 ## Non-goals
 

@@ -8,13 +8,9 @@ Use it together with:
 - [../INSTALL.md](../INSTALL.md) for install and runtime rules
 - [../src.codex/README.md](../src.codex/README.md) for the Codex source subtree
 - [../src.claude/README.md](../src.claude/README.md) for the Claude source subtree
-- [../src.gemini/README.md](../src.gemini/README.md) for the Gemini source subtree
-- [../src.qwen/README.md](../src.qwen/README.md) for the Qwen source subtree
 - [../shared/references/README.md](../shared/references/README.md) for the shared design core
 - [../references-codex/README.md](../references-codex/README.md)
 - [../references-claude/README.md](../references-claude/README.md)
-- [../references-gemini/README.md](../references-gemini/README.md)
-- [../references-qwen/README.md](../references-qwen/README.md)
 
 Current docs in this branch:
 
@@ -42,7 +38,5 @@ Current docs in this branch:
 - `Definition of Ready/Done`: agile DoR/DoD vocabulary mapped onto existing admission and close gates by `definition-of-ready-done.md` (a pointer map, not a new checklist).
 - `Depends-on`: standing cross-work-item dependency edge declared in `status.md`; drives the derived blocked-by / ready-set views.
 - `lessons registry`: flat in-repo store of durable delivery lessons under `work-items/lessons/` (a recurring miss, wrong assumption, or process gap), captured so it survives a work-item's archival.
-- `Gemini`: Google Gemini CLI provider line, documented here as an example integration.
 - `MCP`: Model Context Protocol; a protocol for exposing tools and resources to agent runtimes.
-- `Qwen`: Qwen provider line, documented here as an example integration.
 - `runtime`: installed provider-facing files and directories used by an agent tool.

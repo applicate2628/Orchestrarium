@@ -9,6 +9,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 INSTALLER_MODULE = ROOT / "scripts" / "production_installer.py"
+CHECKER_MODULE = ROOT / "scripts" / "check-hook-health.py"
 FAKE_CODEX_HOOKS_HOST = Path(__file__).with_name("fake_codex_hooks_host.py")
 
 
@@ -21,6 +22,17 @@ def _load_installer():
     sys.modules[spec.name] = installer
     spec.loader.exec_module(installer)
     return installer
+
+
+def _load_checker():
+    spec = importlib.util.spec_from_file_location(
+        "check_hook_health_codex_hook_fixture", CHECKER_MODULE
+    )
+    assert spec and spec.loader
+    checker = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = checker
+    spec.loader.exec_module(checker)
+    return checker
 
 
 def prepare_codex_home(tmp_path: Path) -> Path:
@@ -38,5 +50,11 @@ def prepare_codex_home(tmp_path: Path) -> Path:
         hooks.setdefault(event, []).append(entry)
     (codex_home / "hooks.json").write_text(
         json.dumps({"hooks": hooks}), encoding="utf-8"
+    )
+    _load_checker().write_codex_inventory(
+        target=codex_home / "hooks.json",
+        specs=_load_installer()._hook_specs("codex", installed_root),
+        inventory_path=codex_home / "codex-hook-inventory.json",
+        host_os="windows" if sys.platform == "win32" else "posix",
     )
     return codex_home

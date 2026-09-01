@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "baseline": "65efb6b679d2808c5cdd3f95774a82942c65ad35",
+  "files": {
+    "graphics-engineer/SKILL.md": "d15aa552add95a1239a2134efcddae6633a6ba3091d6d02d9f05830db0f75248",
+    "graphics-engineer/agents/openai.yaml": "cf32576a4ab9b8242b560c4c8efe39aa2aaca6492faded2746c65db3e9fd89bb",
+    "visualization-engineer/SKILL.md": "1590ae40d58c3879f3cd3504ad97bf7c9152689900ac170ca55fcfd9ae0687e2",
+    "visualization-engineer/agents/openai.yaml": "e4d02b7aa59bbe90649eda4d490607b485c87a92d89e311bae053c9159537ba4"
+  }
+}

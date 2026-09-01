@@ -1,0 +1,4 @@
+interface:
+  display_name: "GitHub PR Review Bot"
+  short_description: "Run a current-head Codex PR review loop"
+  default_prompt: "Use $github-pr-review-bot to drive this GitHub pull request through one current-head Codex bot review loop without triggering CI."

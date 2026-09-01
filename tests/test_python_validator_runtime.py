@@ -1,14 +1,22 @@
 """Single-owner Python runtime tests for the production pack validators."""
 from __future__ import annotations
 
+import ast
+import ctypes
+import hashlib
 import importlib.util
+import json
 import os
+import re
 import shutil
+import signal
+import stat
 import subprocess
 import sys
 import tempfile
-from collections import Counter
+import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -24,8 +32,8 @@ PROVIDER_RUNTIME_MIRRORS = (
     ROOT / "src.claude/agents/scripts/skill_pack_validator_runtime.py",
 )
 EXPECTED_SUMMARIES = (
-    "PASS: 529  WARN: 0  FAIL: 0",
-    "Checks: 448  |  Passed: 448  |  Warnings: 0  |  Errors: 0",
+    "PASS: 556  WARN: 0  FAIL: 0",
+    "Checks: 489  |  Passed: 489  |  Warnings: 0  |  Errors: 0",
 )
 
 
@@ -126,6 +134,16 @@ def _run_validator(
     return result
 
 
+def _copy_validator_runtime(destination: Path) -> None:
+    destination.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(RUNTIME, destination / RUNTIME.name)
+    shutil.copytree(
+        ROOT / "scripts" / "process_supervision",
+        destination / "process_supervision",
+        dirs_exist_ok=True,
+    )
+
+
 def _materialize_installed_pack(
     tmp_path: Path,
     provider: str,
@@ -134,6 +152,12 @@ def _materialize_installed_pack(
     if provider == "codex":
         pack = target / ".agents"
         shutil.copytree(ROOT / "src.codex" / "skills", pack / "skills")
+        schema_target = pack / "skills" / "lead" / "shared" / "schemas"
+        schema_target.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(
+            ROOT / "shared" / "schemas" / "agent-runs.schema.json",
+            schema_target / "agent-runs.schema.json",
+        )
         shared = (ROOT / "shared" / "AGENTS.shared.md").read_text(encoding="utf-8")
         codex = (ROOT / "src.codex" / "AGENTS.codex.md").read_text(encoding="utf-8")
         (target / "AGENTS.md").write_text(
@@ -160,7 +184,10 @@ def _materialize_installed_pack(
         "validate-work-item-state.sh",
     ):
         shutil.copy2(ROOT / "scripts" / name, scripts / name)
-    shutil.copy2(RUNTIME, scripts / RUNTIME.name)
+    _copy_validator_runtime(scripts)
+    contract = pack / "contracts" / "ui-transition-continuity.md"
+    contract.parent.mkdir()
+    shutil.copy2(ROOT / "shared/references/ui-transition-continuity.md", contract)
     return target, scripts / "validate-skill-pack.py"
 
 
@@ -174,12 +201,831 @@ def _replace_directory_with_symlink(link: Path, target: Path) -> None:
     assert link.is_dir()
 
 
+def _create_directory_link(link: Path, target: Path) -> None:
+    if os.name == "nt":
+        result = subprocess.run(
+            ["cmd.exe", "/d", "/c", "mklink", "/J", str(link), str(target)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+        if result.returncode:
+            pytest.skip(f"directory junctions are unavailable: {result.stderr}")
+    else:
+        try:
+            link.symlink_to(target, target_is_directory=True)
+        except (OSError, NotImplementedError) as exc:
+            pytest.skip(f"directory symlinks are unavailable: {exc}")
+    assert link.is_dir()
+
+
+@pytest.mark.parametrize("legacy_kind", ("directory", "directory-link"))
+def test_codex_global_split_layout_wins_over_stale_legacy_skills(
+    tmp_path: Path,
+    legacy_kind: str,
+) -> None:
+    home = tmp_path / "home"
+    codex = home / ".codex"
+    scripts = home / ".agents" / "skills" / "lead" / "scripts"
+    scripts.mkdir(parents=True)
+    codex.mkdir()
+    (codex / "AGENTS.md").write_text("global codex contract\n", encoding="utf-8")
+    validator = scripts / "validate-skill-pack.py"
+    validator.touch()
+
+    legacy_skills = codex / "skills"
+    if legacy_kind == "directory":
+        legacy_skills.mkdir()
+    else:
+        legacy_target = tmp_path / "stale-legacy-skills"
+        legacy_target.mkdir()
+        _create_directory_link(legacy_skills, legacy_target)
+
+    runtime = _load(RUNTIME, f"global_split_layout_{legacy_kind}")
+    layout = runtime.detect_layout(validator, "codex", home)
+
+    assert layout.root == home.resolve()
+    assert not layout.dev_repo
+    assert layout.pack == codex
+    assert layout.skills == home / ".agents" / "skills"
+    assert layout.scripts == scripts
+    assert layout.agents_text == "global codex contract\n"
+    validator_runtime = runtime.Validator(layout)
+    try:
+        assert validator_runtime.logical_path(
+            "@ROOT/src.codex/skills/manual-repo-transfer/SKILL.md"
+        ) == str(layout.skills / "manual-repo-transfer" / "SKILL.md")
+        assert validator_runtime.logical_path(
+            "@ROOT/src.codex/contracts/ui-transition-continuity.md"
+        ) == str(layout.pack / "contracts" / "ui-transition-continuity.md")
+    finally:
+        validator_runtime.close()
+
+
+def test_codex_legacy_and_project_layouts_remain_compatible(tmp_path: Path) -> None:
+    runtime = _load(RUNTIME, "legacy_and_project_layouts")
+
+    legacy_root = tmp_path / "legacy"
+    legacy_scripts = legacy_root / ".codex" / "skills" / "lead" / "scripts"
+    legacy_scripts.mkdir(parents=True)
+    (legacy_root / ".codex" / "AGENTS.md").write_text(
+        "legacy codex contract\n", encoding="utf-8"
+    )
+    legacy_layout = runtime.detect_layout(
+        legacy_scripts / "validate-skill-pack.py", "codex", legacy_root
+    )
+    assert legacy_layout.pack == legacy_root / ".codex"
+    assert legacy_layout.skills == legacy_root / ".codex" / "skills"
+    assert legacy_layout.scripts == legacy_scripts
+
+    project_root = tmp_path / "project"
+    project_scripts = project_root / ".agents" / "skills" / "lead" / "scripts"
+    project_scripts.mkdir(parents=True)
+    (project_root / "AGENTS.md").write_text(
+        "project codex contract\n", encoding="utf-8"
+    )
+    project_layout = runtime.detect_layout(
+        project_scripts / "validate-skill-pack.py", "codex", project_root
+    )
+    assert project_layout.pack == project_root / ".agents"
+    assert project_layout.skills == project_root / ".agents" / "skills"
+    assert project_layout.scripts == project_scripts
+
+
+@pytest.mark.parametrize(
+    ("provider", "relative_instruction", "leak_text"),
+    (
+        (
+            "codex",
+            Path(".agents/skills/qa-engineer/SKILL.md"),
+            "## Orchestrator upgrades "
+            "(work-items/roadmaps/orchestrator-upgrades.md)",
+        ),
+        (
+            "codex",
+            Path(".agents/skills/qa-engineer/SKILL.md"),
+            "## Orchestrarium-upgrade ledger",
+        ),
+        (
+            "claude",
+            Path(".claude/agents/qa-engineer.md"),
+            "## Orchestrator upgrades "
+            "(work-items/roadmaps/orchestrator-upgrades.md)",
+        ),
+        (
+            "claude",
+            Path(".claude/agents/qa-engineer.md"),
+            "## Orchestrarium-upgrade ledger",
+        ),
+    ),
+)
+def test_reusable_instruction_guard_rejects_project_specific_upgrade_ledger(
+    tmp_path: Path,
+    provider: str,
+    relative_instruction: Path,
+    leak_text: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    target, validator = _materialize_installed_pack(tmp_path, provider)
+    instruction = target / relative_instruction
+    instruction.write_text(
+        instruction.read_text(encoding="utf-8")
+        + f"\n{leak_text}\n",
+        encoding="utf-8",
+    )
+    runtime = _load(RUNTIME, f"project_specific_ledger_guard_{provider}")
+
+    result = runtime.validate_pack(
+        script=validator,
+        provider=provider,
+        actions=(),
+        maintainer_only_shared_reference_names=frozenset(),
+        utility_skills=frozenset(),
+        curated_role_skills=frozenset(),
+        root=target,
+        enforce_reusable_instruction_boundaries=True,
+    )
+
+    assert result.checks == 1
+    assert result.passed == 0
+    assert result.errors == 1
+    output = capsys.readouterr().out
+    assert "project-specific Orchestrarium upgrade-ledger obligation" in output
+    assert instruction.name in output
+
+
 def test_canonical_runtime_is_the_only_engine_and_exports_public_entrypoints() -> None:
     assert RUNTIME.is_file()
     assert all(not path.exists() for path in PROVIDER_RUNTIME_MIRRORS)
     runtime = _load(RUNTIME, "canonical_skill_pack_validator_runtime")
     assert callable(runtime.validate_pack)
     assert callable(runtime.run_validator_cli)
+
+
+def _validator(runtime):
+    return runtime.Validator(runtime.detect_layout(VALIDATORS[0], "codex", ROOT))
+
+
+def _write_python(tmp_path: Path, name: str, body: str) -> Path:
+    path = tmp_path / name
+    path.write_text(body, encoding="utf-8")
+    return path
+
+
+def test_validator_capture_policy_is_the_single_exact_process_policy_owner() -> None:
+    runtime = _load(RUNTIME, "validator_capture_policy_owner")
+    policy = runtime.ValidatorCapturePolicyV1()
+    process_policy = policy.to_capture_policy()
+
+    assert process_policy.policy_id == "validator-bounded-v1"
+    assert process_policy.aggregate_persisted_limit == 1024 * 1024
+    assert process_policy.prefix_limit_per_stream == 64 * 1024
+    assert process_policy.tail_limit_per_stream == 128 * 1024
+    assert process_policy.chunk_size == 64 * 1024
+    assert not hasattr(process_policy, "worker_count")
+    assert not hasattr(process_policy, "poll_cadence")
+    assert not hasattr(process_policy, "filesystem_write_limit")
+
+
+def test_validator_runtime_has_one_narrow_posix_process_owner() -> None:
+    tree = ast.parse(RUNTIME.read_text(encoding="utf-8"))
+    subprocess_imports = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.Import, ast.ImportFrom))
+        and any(alias.name == "subprocess" for alias in node.names)
+    ]
+    popen_calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "subprocess"
+        and node.func.attr == "Popen"
+    ]
+    run_calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "subprocess"
+        and node.func.attr == "run"
+    ]
+    assert len(subprocess_imports) == 1
+    assert len(popen_calls) == 1
+    assert run_calls == []
+    keywords = {keyword.arg: keyword.value for keyword in popen_calls[0].keywords}
+    assert isinstance(keywords["shell"], ast.Constant) and keywords["shell"].value is False
+    process_group_kwargs = keywords[None]
+    assert isinstance(process_group_kwargs, ast.Attribute)
+    assert isinstance(process_group_kwargs.value, ast.Name)
+    assert process_group_kwargs.value.id == "process_group_owner"
+    assert process_group_kwargs.attr == "popen_kwargs"
+    text = RUNTIME.read_text(encoding="utf-8")
+    assert "ProcessRunnerV1" in text
+    assert "taskkill" not in text.casefold()
+
+
+def test_validator_process_adapter_preserves_exact_python_argv(tmp_path: Path) -> None:
+    runtime = _load(RUNTIME, "validator_exact_argv")
+    child = _write_python(
+        tmp_path,
+        "echo_argv.py",
+        "import json, sys\n"
+        "payload = json.dumps(sys.argv[1:], ensure_ascii=False).encode('utf-8')\n"
+        "sys.stdout.buffer.write(payload)\n",
+    )
+    expected = (
+        "",
+        "two words",
+        'quote"inside',
+        "backslashes\\\\before\\\"quote",
+        "C:\\path with space\\",
+        "Москва-测试",
+    )
+
+    result = _validator(runtime)._run_python(
+        child,
+        *expected,
+        timeout_seconds=10.0,
+    )
+
+    assert result.returncode == 0
+    assert json.loads(result.stdout) == list(expected)
+    assert result.failure_id is None
+    assert result.resources_closed
+    assert result.tree_empty
+    assert result.direct_reaped
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX cwd ownership and mode contract")
+@pytest.mark.parametrize(
+    ("name", "body", "timeout_seconds", "timed_out"),
+    (
+        (
+            "child_failure",
+            "import os, sys\nprint(os.getcwd(), flush=True)\nsys.exit(7)\n",
+            10.0,
+            False,
+        ),
+        (
+            "child_cancel",
+            "import os, time\nprint(os.getcwd(), flush=True)\ntime.sleep(60)\n",
+            0.2,
+            True,
+        ),
+    ),
+)
+def test_validator_private_posix_cwd_cleans_after_failure_or_cancellation(
+    tmp_path: Path,
+    name: str,
+    body: str,
+    timeout_seconds: float,
+    timed_out: bool,
+) -> None:
+    runtime = _load(RUNTIME, f"validator_private_posix_cwd_{name}")
+    child = _write_python(tmp_path, f"{name}.py", body)
+    validator = _validator(runtime)
+
+    try:
+        result = validator._run_python(child, timeout_seconds=timeout_seconds)
+    finally:
+        validator.close()
+
+    child_cwd = Path(result.stdout.strip())
+    assert result.returncode != 0
+    assert result.timed_out is timed_out
+    assert child_cwd != ROOT
+    assert not child_cwd.exists()
+
+
+def test_validator_process_adapter_bounds_infinite_output_and_settles(
+    tmp_path: Path,
+) -> None:
+    runtime = _load(RUNTIME, "validator_infinite_output")
+    child = _write_python(
+        tmp_path,
+        "infinite_output.py",
+        "import os\nchunk = b'x' * 65536\nwhile True:\n    os.write(1, chunk)\n",
+    )
+    before = {path.name for path in tmp_path.iterdir()}
+    started = time.monotonic()
+
+    result = _validator(runtime)._run_python(child, timeout_seconds=0.5)
+
+    assert time.monotonic() - started < 8.0
+    assert result.returncode != 0
+    assert result.failure_id in {"PSV1-CAPTURE-LIMIT", "PSV1-DEADLINE"}
+    assert result.stdout_persisted_bytes + result.stderr_persisted_bytes <= 1024 * 1024
+    assert len(result.stdout.encode("utf-8")) <= (64 + 128) * 1024
+    assert result.resources_closed
+    assert result.tree_empty
+    assert result.direct_reaped
+    assert result.primary_thread_closed
+    assert result.job_handle_closed
+    assert {path.name for path in tmp_path.iterdir()} == before
+
+
+def test_validator_process_adapter_returns_typed_timeout_and_settles(
+    tmp_path: Path,
+) -> None:
+    runtime = _load(RUNTIME, "validator_typed_timeout")
+    child = _write_python(
+        tmp_path,
+        "sleep_forever.py",
+        "import time\ntime.sleep(60)\n",
+    )
+
+    result = _validator(runtime)._run_python(child, timeout_seconds=0.2)
+
+    assert result.returncode != 0
+    assert result.failure_id == "PSV1-DEADLINE"
+    assert result.timed_out
+    assert result.resources_closed
+    assert result.tree_empty
+    assert result.direct_reaped
+    assert result.primary_thread_closed
+    assert result.job_handle_closed
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX cleanup-budget contract")
+def test_validator_timeout_gets_a_fresh_bounded_cleanup_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = _load(RUNTIME, "validator_fresh_cleanup_budget")
+    child = _write_python(
+        tmp_path,
+        "ignore_term.py",
+        "import signal, time\n"
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+        "time.sleep(60)\n",
+    )
+    cleanup_budgets: list[float] = []
+
+    real_settle = runtime.PosixProcessGroupOwnerV1.settle
+
+    def settle(owner, timeout_seconds: float, *, direct_process=None):
+        cleanup_budgets.append(timeout_seconds)
+        return real_settle(
+            owner, timeout_seconds, direct_process=direct_process
+        )
+
+    monkeypatch.setattr(runtime.PosixProcessGroupOwnerV1, "settle", settle)
+
+    result = _validator(runtime)._run_python(child, timeout_seconds=0.1)
+
+    assert result.failure_id == "PSV1-DEADLINE"
+    assert result.timed_out
+    assert cleanup_budgets == [runtime.VALIDATOR_SETTLEMENT_TIMEOUT_SECONDS]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX descendant settlement contract")
+def test_validator_settles_descendant_after_parent_exits(tmp_path: Path) -> None:
+    runtime = _load(RUNTIME, "validator_exited_parent_descendant")
+    parent = _write_python(
+        tmp_path,
+        "exited_parent.py",
+        "import subprocess, sys\n"
+        "code = \"import signal, time\\n"
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN)\\n"
+        "time.sleep(60)\"\n"
+        "child = subprocess.Popen([sys.executable, '-c', code])\n"
+        "print(f'DESCENDANT={child.pid}', flush=True)\n",
+    )
+
+    result = _validator(runtime)._run_python(parent, timeout_seconds=0.2)
+
+    match = re.search(r"DESCENDANT=(\d+)", result.stdout)
+    assert match is not None
+    with pytest.raises(runtime._PROCESS_RUNNER.ProcessSupervisionError):
+        runtime._PROCESS_RUNNER.get_process_start_marker(int(match.group(1)))
+    assert result.failure_id == "PSV1-DEADLINE"
+    assert result.timed_out
+    assert result.resources_closed
+    assert result.tree_empty
+    assert result.direct_reaped
+
+
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"), reason="Linux child-subreaper contract"
+)
+def test_validator_reaps_sigterm_ignoring_descendant_after_parent_exits(
+    tmp_path: Path,
+) -> None:
+    libc = ctypes.CDLL(None, use_errno=True)
+    prior = ctypes.c_int()
+    assert libc.prctl(37, ctypes.byref(prior), 0, 0, 0) == 0
+    assert libc.prctl(36, 1, 0, 0, 0) == 0
+    process_group: int | None = None
+    descendant_pid: int | None = None
+    runtime = _load(RUNTIME, "validator_exited_parent_ignoring_descendant")
+    ready = tmp_path / "descendant.ready"
+    parent = _write_python(
+        tmp_path,
+        "exited_parent_ignoring_descendant.py",
+        "import os, pathlib, subprocess, sys, time\n"
+        "code = \"import os, pathlib, signal, sys, time\\n"
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN)\\n"
+        "for descriptor in (0, 1, 2):\\n"
+        "    try: os.close(descriptor)\\n"
+        "    except OSError: pass\\n"
+        "pathlib.Path(sys.argv[1]).write_text('ready', encoding='ascii')\\n"
+        "time.sleep(60)\"\n"
+        "child = subprocess.Popen([sys.executable, '-c', code, sys.argv[1]])\n"
+        "deadline = time.monotonic() + 5.0\n"
+        "while not pathlib.Path(sys.argv[1]).is_file():\n"
+        "    if time.monotonic() >= deadline: raise RuntimeError('descendant not ready')\n"
+        "    time.sleep(0.01)\n"
+        "print(f'GROUP={os.getpid()} DESCENDANT={child.pid}', flush=True)\n",
+    )
+
+    try:
+        result = _validator(runtime)._run_python(
+            parent, str(ready), timeout_seconds=1.0
+        )
+        match = re.search(r"GROUP=(\d+) DESCENDANT=(\d+)", result.stdout)
+        assert match is not None
+        process_group, descendant_pid = map(int, match.groups())
+        assert result.failure_id is None
+        assert result.resources_closed
+        assert result.tree_empty
+        assert result.direct_reaped
+        assert not Path(f"/proc/{descendant_pid}").exists()
+    finally:
+        if process_group is not None:
+            try:
+                os.killpg(process_group, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            while True:
+                try:
+                    reaped_pid, _status = os.waitpid(-process_group, os.WNOHANG)
+                except ChildProcessError:
+                    break
+                if reaped_pid == 0:
+                    break
+        assert libc.prctl(36, prior.value, 0, 0, 0) == 0
+
+
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"), reason="Linux child-subreaper contract"
+)
+def test_validator_spawn_baseexception_restores_shared_owner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = _load(RUNTIME, "validator_spawn_baseexception")
+    libc = ctypes.CDLL(None, use_errno=True)
+    prior = ctypes.c_int()
+    assert libc.prctl(37, ctypes.byref(prior), 0, 0, 0) == 0
+
+    class InjectedBaseException(BaseException):
+        pass
+
+    monkeypatch.setattr(
+        runtime.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(InjectedBaseException()),
+    )
+    observed_locked = False
+    observed_state = -1
+    try:
+        with pytest.raises(InjectedBaseException):
+            runtime._run_validator_posix_python(
+                (sys.executable, "-c", "pass"),
+                str(tmp_path),
+                runtime.validator_environment_rows(),
+                1.0,
+                runtime.ValidatorCapturePolicyV1(),
+            )
+        observed_locked = runtime._POSIX_PROCESS_GROUP._LINUX_SUBREAPER_LOCK.locked()
+        current = ctypes.c_int()
+        assert libc.prctl(37, ctypes.byref(current), 0, 0, 0) == 0
+        observed_state = current.value
+    finally:
+        assert libc.prctl(36, prior.value, 0, 0, 0) == 0
+        lock = runtime._POSIX_PROCESS_GROUP._LINUX_SUBREAPER_LOCK
+        if lock.locked():
+            lock.release()
+
+    assert not observed_locked
+    assert observed_state == prior.value
+
+
+def test_validator_process_adapter_reaps_output_retaining_grandchild(
+    tmp_path: Path,
+) -> None:
+    runtime = _load(RUNTIME, "validator_output_retaining_grandchild")
+    parent = _write_python(
+        tmp_path,
+        "retaining_parent.py",
+        "import subprocess, sys\n"
+        "code = \"import os, time\\nchunk = b'g' * 65536\\n"
+        "while True:\\n    os.write(1, chunk)\\n    time.sleep(0.01)\"\n"
+        "child = subprocess.Popen([sys.executable, '-c', code])\n"
+        "print(f'GRANDCHILD={child.pid}', flush=True)\n",
+    )
+    started = time.monotonic()
+
+    result = _validator(runtime)._run_python(parent, timeout_seconds=0.5)
+
+    assert time.monotonic() - started < 8.0
+    assert "GRANDCHILD=" in result.stdout
+    match = re.search(r"GRANDCHILD=(\d+)", result.stdout)
+    assert match is not None
+    with pytest.raises(runtime._PROCESS_RUNNER.ProcessSupervisionError):
+        runtime._PROCESS_RUNNER.get_process_start_marker(int(match.group(1)))
+    assert result.returncode != 0
+    assert result.failure_id in {"PSV1-CAPTURE-LIMIT", "PSV1-DEADLINE"}
+    assert result.resources_closed
+    assert result.tree_empty
+    assert result.direct_reaped
+    assert result.primary_thread_closed
+    assert result.job_handle_closed
+
+
+class _RecordingBinding:
+    def bytes_for(self, _stream: str) -> bytes:
+        return b""
+
+
+class _RecordingRunner:
+    def __init__(self) -> None:
+        self.requests = []
+
+    def mint_memory_capture_sink(self):
+        return _RecordingBinding()
+
+    def run(self, request):
+        self.requests.append(request)
+        stream = SimpleNamespace(
+            observed_bytes=0,
+            persisted_bytes=0,
+            truncated=False,
+            prefix_bytes=b"",
+            tail_bytes=b"",
+        )
+        tree = SimpleNamespace(
+            tree_empty=True,
+            direct_reaped=True,
+            primary_thread_closed=True,
+            job_handle_closed=True,
+            settlement_state="EMPTY",
+        )
+        return SimpleNamespace(
+            outcome="success",
+            target_exit_code=0,
+            failure_id=None,
+            timed_out=False,
+            stdout=stream,
+            stderr=stream,
+            tree=tree,
+            resources_closed=True,
+            cleanup_uncertain=False,
+        )
+
+    def close(self):
+        return SimpleNamespace(outcome="closed", failure_id=None)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX cwd ownership and mode contract")
+def test_validator_private_posix_cwd_cleans_when_runner_raises(tmp_path: Path) -> None:
+    runtime = _load(RUNTIME, "validator_private_posix_cwd_exception")
+
+    class ExplodingRunner:
+        def __init__(self) -> None:
+            self.cwd: Path | None = None
+
+        def mint_memory_capture_sink(self):
+            return _RecordingBinding()
+
+        def run(self, request):
+            self.cwd = Path(request.cwd)
+            metadata = self.cwd.stat()
+            assert metadata.st_uid == os.geteuid()
+            assert stat.S_IMODE(metadata.st_mode) & 0o077 == 0
+            raise RuntimeError("runner-exploded")
+
+        def close(self):
+            return SimpleNamespace(outcome="closed", failure_id=None)
+
+    runner = ExplodingRunner()
+    validator = runtime.Validator(
+        runtime.detect_layout(VALIDATORS[0], "codex", ROOT), process_runner=runner
+    )
+    child = _write_python(tmp_path, "never_started.py", "raise AssertionError\n")
+
+    with pytest.raises(RuntimeError, match="runner-exploded"):
+        validator._run_python(child, timeout_seconds=10.0)
+    validator.close()
+
+    assert runner.cwd is not None
+    assert not runner.cwd.exists()
+
+
+@pytest.mark.parametrize(
+    ("budget_delta", "expected_launches"),
+    ((-0.001, 0), (0.0, 1), (1.0, 1)),
+)
+def test_validator_sequence_budget_denies_below_and_accepts_exact_or_above(
+    budget_delta: float,
+    expected_launches: int,
+) -> None:
+    runtime = _load(RUNTIME, f"validator_sequence_budget_{budget_delta}")
+    runner = _RecordingRunner()
+    child_deadline = 1.0
+    required = runtime.required_validator_sequence_budget((child_deadline,))
+
+    result = runtime.validate_pack(
+        script=VALIDATORS[0],
+        provider="codex",
+        actions=(("check_agent_run_ledger_contract", "sequence probe"),),
+        maintainer_only_shared_reference_names=frozenset(),
+        utility_skills=frozenset(),
+        curated_role_skills=frozenset(),
+        root=ROOT,
+        process_runner=runner,
+        child_timeout_seconds=child_deadline,
+        outer_budget_seconds=required + budget_delta,
+    )
+
+    assert len(runner.requests) == expected_launches
+    if expected_launches:
+        assert result.errors == 0
+        request = runner.requests[0]
+        assert request.argv == (
+            str(Path(sys.executable).resolve()),
+            str(ROOT / "scripts/check-agent-run-ledger-contract.py"),
+            "--root",
+            str(ROOT),
+        )
+        if os.name == "nt":
+            assert request.cwd == str(ROOT)
+        else:
+            assert request.cwd != str(ROOT)
+            assert not Path(request.cwd).exists()
+        assert request.environment == runtime.validator_environment_rows()
+        assert tuple(row.name for row in request.environment) == tuple(
+            name
+            for name in runtime.VALIDATOR_ENVIRONMENT_ALLOWLIST
+            if name in os.environ
+        )
+    else:
+        assert result.errors == 1
+        assert result.process_failure_id == "PSV1-DEADLINE-COMPOSITION"
+
+
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    (
+        (b"plain\nbody\n", "366c65d58ad0d90fdd93095d1c9ae82a13afbce33e4ca9e6e384d3c1e4b4f01f"),
+        (b"plain\r\nbody\r\n", "366c65d58ad0d90fdd93095d1c9ae82a13afbce33e4ca9e6e384d3c1e4b4f01f"),
+        (b"plain\rbody\r", "366c65d58ad0d90fdd93095d1c9ae82a13afbce33e4ca9e6e384d3c1e4b4f01f"),
+        (b"---\r\nname: demo\r\n---\r\nbody\r\n", "9e2ec912af5dff2a72300863864fc4da04e81999339d9fac5c7590ba8a3f4e11"),
+        (b"name: demo\r\nbody\r\n", "68d93eb64d12ffced451f894a644945b015e2de1df72c4a3faa6956e33b29850"),
+        (b"---\r\nname: demo\r\nbody\r\n", "b4e972b2a859ff21d1694808d4698be7f8d445c8f3493f544996463ee288a003"),
+    ),
+)
+def test_common_skill_body_digest_normalizes_newlines_and_frontmatter(
+    content: bytes,
+    expected: str,
+) -> None:
+    """Catches newline/frontmatter divergence in the one public digest owner."""
+    runtime = _load(RUNTIME, f"common_skill_digest_{hashlib.sha256(content).hexdigest()[:8]}")
+    operation = getattr(runtime, "common_skill_body_sha256", None)
+    assert callable(operation), "canonical public common-skill body digest is missing"
+    assert operation(content) == expected
+
+
+def test_runtime_has_no_common_skill_policy_map_and_pin_check_uses_digest_owner() -> None:
+    """Catches a surviving semantic map or a second normalization implementation."""
+    tree = ast.parse(RUNTIME.read_text(encoding="utf-8"))
+    assignments = {
+        target.id
+        for node in tree.body
+        if isinstance(node, (ast.Assign, ast.AnnAssign))
+        for target in (
+            node.targets if isinstance(node, ast.Assign) else (node.target,)
+        )
+        if isinstance(target, ast.Name)
+    }
+    obsolete_policy_name = "COMMON_SKILL_BODY_" + "PINS"
+    assert obsolete_policy_name not in assignments
+
+    validator = next(
+        node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "Validator"
+    )
+    pin_check = next(
+        node
+        for node in validator.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name == "check_common_skill_body_pin"
+    )
+    calls = {
+        child.func.id
+        for child in ast.walk(pin_check)
+        if isinstance(child, ast.Call) and isinstance(child.func, ast.Name)
+    }
+    assert "common_skill_body_sha256" in calls
+    assert "hashlib" not in ast.unparse(pin_check)
+
+
+def _common_pin_actions(names: tuple[str, ...], candidate: Path) -> tuple[tuple[str, ...], ...]:
+    expected = hashlib.sha256(b"body\n").hexdigest()
+    return tuple(
+        ("check_common_skill_body_pin", name, expected, str(candidate))
+        for name in names
+    )
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected_errors", "expected_fragment"),
+    (
+        ("matching", 0, None),
+        ("missing", 1, "missing: windows-gui-manual-testing"),
+        ("extra", 1, "extra: synthetic-common"),
+        ("non-applicable-extra", 0, None),
+    ),
+)
+def test_common_pin_completeness_uses_exact_applicable_action_names(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    mutation: str,
+    expected_errors: int,
+    expected_fragment: str | None,
+) -> None:
+    """Catches missing/extra pins and accidental inclusion of an inactive scope."""
+    runtime = _load(RUNTIME, f"common_pin_completeness_{mutation}")
+    agents_text = (ROOT / "shared/AGENTS.shared.md").read_text(encoding="utf-8")
+    names = runtime.extract_roles(agents_text, "## Common skills")
+    candidate = tmp_path / "SKILL.md"
+    candidate.write_bytes(b"---\nname: fixture\ndescription: fixture\n---\nbody\n")
+    applicable_names = names
+    scoped_actions: tuple[tuple[str, object], ...] = ()
+    if mutation == "missing":
+        applicable_names = tuple(name for name in names if name != "windows-gui-manual-testing")
+    elif mutation == "extra":
+        applicable_names = (*names, "synthetic-common")
+    elif mutation == "non-applicable-extra":
+        scoped_actions = (
+            (
+                "installed",
+                _common_pin_actions(("synthetic-common",), candidate),
+            ),
+        )
+
+    result = runtime.validate_pack(
+        script=VALIDATORS[0],
+        provider="codex",
+        actions=(
+            ("direct", "common_pin_completeness", "common pin completeness"),
+            *_common_pin_actions(applicable_names, candidate),
+            *scoped_actions,
+        ),
+        maintainer_only_shared_reference_names=frozenset(),
+        utility_skills=frozenset(),
+        curated_role_skills=frozenset(),
+        root=ROOT,
+    )
+
+    assert result.errors == expected_errors
+    output = capsys.readouterr().out
+    if expected_fragment is not None:
+        assert expected_fragment in output
+
+
+def test_layering_codex_derives_common_names_from_the_spine(tmp_path: Path) -> None:
+    """Catches a layering exclusion still coupled to a stale runtime name map."""
+    target, validator = _materialize_installed_pack(tmp_path, "codex")
+    agents = target / "AGENTS.md"
+    text = agents.read_text(encoding="utf-8")
+    text, replacements = re.subn(
+        r"(## Common skills.*?\bSet:\s*)",
+        r"\1`$synthetic-common`, ",
+        text,
+        count=1,
+        flags=re.DOTALL,
+    )
+    assert replacements == 1
+    agents.write_text(text, encoding="utf-8")
+    skill = target / ".agents/skills/synthetic-common/SKILL.md"
+    skill.parent.mkdir()
+    skill.write_text("B1 B2 B3\n", encoding="utf-8")
+
+    runtime = _load(RUNTIME, "layering_codex_spine_common")
+    result = runtime.validate_pack(
+        script=validator,
+        provider="codex",
+        actions=(("direct", "layering_codex", "layering codex"),),
+        maintainer_only_shared_reference_names=frozenset(),
+        utility_skills=frozenset({"synthetic-common"}),
+        curated_role_skills=frozenset(),
+        root=target,
+    )
+    assert result.errors == 0
 
 
 @pytest.mark.parametrize("validator", VALIDATORS)
@@ -224,7 +1070,7 @@ def test_extracted_style_source_loader_runs_with_root_canonical_engine(
     shutil.copy2(validator, adapter)
     engine = extracted / "scripts" / RUNTIME.name
     engine.parent.mkdir(parents=True)
-    shutil.copy2(RUNTIME, engine)
+    _copy_validator_runtime(engine.parent)
     _run_validator(adapter, summary, cwd=extracted)
 
 
@@ -241,7 +1087,7 @@ def test_installed_sibling_loader_runs_fresh_validator(
     scripts.mkdir(parents=True)
     adapter = scripts / validator.name
     shutil.copy2(validator, adapter)
-    shutil.copy2(RUNTIME, scripts / RUNTIME.name)
+    _copy_validator_runtime(scripts)
     _run_validator(adapter, summary, cwd=scripts)
 
 
@@ -305,13 +1151,13 @@ def test_mutable_action_seam_detects_missing_required_content(
         result = module.validate(ROOT)
     finally:
         module.ACTIONS = original_actions
-    assert result.checks == 1
-    assert result.passed == 0
+    assert result.checks == 2
+    assert result.passed == 1
     assert result.errors == 1
 
 
 @pytest.mark.parametrize("validator", VALIDATORS)
-def test_scoped_action_registry_preserves_source_inventory(
+def test_scoped_action_registry_keeps_source_only_maintainer_checks_out_of_installed_layout(
     validator: Path,
 ) -> None:
     module = _load(validator, f"validator_scope_inventory_{validator.parent.parent.name}")
@@ -321,26 +1167,117 @@ def test_scoped_action_registry_preserves_source_inventory(
         "dev_repo_nonstandalone",
         "installed",
     )
-    source_actions = tuple(
+    source_only_actions = tuple(
         action
         for scope, actions in module.ACTIONS
-        if scope != "installed"
+        if scope in ("dev_repo", "dev_repo_nonstandalone")
+        for action in actions
+        if module._is_source_only_maintainer_action(action)
+    )
+    assert source_only_actions
+    assert any(
+        any(str(value).startswith("@ROOT/docs/") for value in action)
+        for action in source_only_actions
+    )
+    assert (
+        "check_contains",
+        "@ROOT/docs/agents-mode-reference.md",
+        "## Canonical maintenance",
+        "agents-mode reference defines canonical maintenance",
+    ) in source_only_actions
+    assert (
+        "check_contains",
+        "@ROOT/docs/agents-mode-reference.md",
+        "Substantive task prompts are file-based by default",
+        "agents-mode reference documents file-based external CLI prompts",
+    ) in source_only_actions
+    installed_actions = tuple(
+        action
+        for scope, actions in module.ACTIONS
+        if scope in ("all", "installed")
         for action in actions
     )
-    assert Counter(source_actions) == Counter(module._DECLARED_ACTIONS)
+    assert not any(
+        module._is_source_only_maintainer_action(action)
+        for action in installed_actions
+    )
+
+
+@pytest.mark.parametrize("validator", VALIDATORS)
+def test_work_item_helper_root_actions_are_owned_by_source_only_scope(
+    validator: Path,
+) -> None:
+    """Catches source helper checks leaking installed layout after slice shifts."""
+    module = _load(validator, f"work_item_helper_scope_{validator.parent.parent.name}")
+    source_prefixes = (
+        "@ROOT/scripts/check-work-items-state",
+        "@ROOT/scripts/validate-work-item-state",
+    )
+    source_helper_actions = tuple(
+        action
+        for action in module._DECLARED_ACTIONS
+        if any(
+            str(value).startswith(source_prefixes)
+            for value in action
+        )
+    )
+
+    assert source_helper_actions
+    assert all(
+        module._is_source_only_maintainer_action(action)
+        for action in source_helper_actions
+    )
 
 
 @pytest.mark.parametrize(
-    ("provider", "expected_summary", "installed_label"),
+    ("provider", "expected_clean_result"),
+    (
+        ("codex", "VALIDATION PASSED\n"),
+        ("claude", "  RESULT: PASS\n"),
+    ),
+)
+def test_materialized_installed_validator_routes_work_item_helpers_to_installed_scripts(
+    tmp_path: Path,
+    provider: str,
+    expected_clean_result: str,
+) -> None:
+    target, validator = _materialize_installed_pack(tmp_path, provider)
+    environment = os.environ.copy()
+    environment["PATH"] = ""
+
+    result = subprocess.run(
+        [sys.executable, str(validator)],
+        cwd=target,
+        env=environment,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+
+    output = result.stdout + result.stderr
+    assert result.returncode == 0, output
+    assert expected_clean_result in result.stdout
+    assert "file missing: @ROOT/scripts/check-work-items-state" not in output
+    assert "file missing: @ROOT/scripts/validate-work-item-state" not in output
+    assert "installed check-work-items-state.py" in result.stdout
+    assert "installed check-work-items-state.sh" in result.stdout
+    assert "installed validate-work-item-state.py" in result.stdout
+    assert "installed validate-work-item-state.sh" in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("provider", "expected_clean_result", "installed_label"),
     (
         (
             "codex",
-            "PASS: 342  WARN: 0  FAIL: 0",
+            "VALIDATION PASSED\n",
             "installed work-item state validator enforces evidence for PASS",
         ),
         (
             "claude",
-            "Checks: 337  |  Passed: 337  |  Warnings: 0  |  Errors: 0",
+            "  RESULT: PASS\n",
             "installed work-item state validator enforces evidence for PASS",
         ),
     ),
@@ -349,7 +1286,7 @@ def test_scoped_action_registry_preserves_source_inventory(
 def test_installed_validator_uses_script_layout_and_runs_installed_actions(
     tmp_path: Path,
     provider: str,
-    expected_summary: str,
+    expected_clean_result: str,
     installed_label: str,
     cwd_mode: str,
 ) -> None:
@@ -368,7 +1305,7 @@ def test_installed_validator_uses_script_layout_and_runs_installed_actions(
         check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert expected_summary in result.stdout
+    assert expected_clean_result in result.stdout
     assert installed_label in result.stdout
     assert "dev repo validator unavailable in installed layout" not in result.stdout
     assert "agents-mode reference defines canonical maintenance" not in result.stdout
@@ -427,7 +1364,7 @@ def test_installed_codex_layering_checks_only_orchestrarium_owned_skills(
         "root_document",
         "required_marker",
         "stale_marker",
-        "expected_summary",
+        "expected_clean_result",
         "expected_label",
     ),
     (
@@ -437,8 +1374,8 @@ def test_installed_codex_layering_checks_only_orchestrarium_owned_skills(
             "AGENTS.md",
             "## Role index",
             "## Stale role index",
-            "PASS: 342  WARN: 0  FAIL: 0",
-            "Section '## Role index' present in AGENTS.md",
+            "VALIDATION PASSED\n",
+                "installable skill/agent instructions contain no project-specific Orchestrarium upgrade-ledger obligation",
         ),
         (
             "claude",
@@ -446,7 +1383,7 @@ def test_installed_codex_layering_checks_only_orchestrarium_owned_skills(
             ".claude/CLAUDE.md",
             "agents-design-panel.md",
             "agents-stale-panel.md",
-            "Checks: 337  |  Passed: 337  |  Warnings: 0  |  Errors: 0",
+            "  RESULT: PASS\n",
             "CLAUDE.md dispatch index exposes the design-panel command",
         ),
     ),
@@ -458,7 +1395,7 @@ def test_installed_validator_prefers_logical_root_across_provider_subtree_symlin
     root_document: str,
     required_marker: str,
     stale_marker: str,
-    expected_summary: str,
+    expected_clean_result: str,
     expected_label: str,
 ) -> None:
     logical_home = tmp_path / "logical"
@@ -498,7 +1435,7 @@ def test_installed_validator_prefers_logical_root_across_provider_subtree_symlin
 
         result = _run_validator(
             logical_validator,
-            expected_summary,
+            expected_clean_result,
             cwd=ROOT,
             root=None,
         )

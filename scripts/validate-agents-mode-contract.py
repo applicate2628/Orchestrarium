@@ -10,15 +10,13 @@ import subprocess
 import sys
 import textwrap
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 
 PRESET_DOCS = Path("docs/agents-mode-reference.md")
 INIT_SURFACES = {
     "codex": Path("src.codex/skills/init-project/SKILL.md"),
     "claude": Path("src.claude/commands/agents-init-project.md"),
-    "gemini": Path("src.gemini/skills/init-project/SKILL.md"),
-    "qwen": Path("src.qwen/skills/init-project/SKILL.md"),
 }
 
 
@@ -617,23 +615,7 @@ def validate_manual_reference_surfaces(root: Path) -> None:
         root / "src.codex" / "skills" / "lead" / "external-dispatch.md",
         root / "src.codex" / "skills" / "lead" / "subagent-contracts.md",
         root / "src.claude" / "agents" / "consultant.md",
-        root / "src.gemini" / "skills" / "lead" / "external-dispatch.md",
-        root / "src.gemini" / "skills" / "lead" / "subagent-contracts.md",
-        root / "src.qwen" / "skills" / "lead" / "subagent-contracts.md",
     ]
-
-    if "| Gemini CLI | `disabled` | `auto` | `auto`" not in reference:
-        raise ContractError(
-            "agents-mode reference must keep Gemini first-write defaults on shared auto defaults"
-        )
-    if "| Qwen Code | `disabled` | `auto` | `auto`" not in reference:
-        raise ContractError(
-            "agents-mode reference must keep Qwen first-write defaults on shared auto defaults"
-        )
-    if "explicit `gemini` only" in reference or "explicit `qwen` only" in reference:
-        raise ContractError(
-            "agents-mode reference must not present example providers as first-write defaults"
-        )
 
     if "externalPriorityProfile: balanced | quality-first | <custom>" not in external_worker:
         raise ContractError(
@@ -673,7 +655,7 @@ def validate_manual_reference_surfaces(root: Path) -> None:
 # The first cut hardcoded the `gpt-5.\d+-` namespace, so the guard would have
 # silently no-oped at exactly the moment a family rename swept the copies; the
 # shape is now generalized from whatever values the schema carries.
-_ENUM_SCAN_ROOTS = ("docs", "shared", "src.claude", "src.codex", "src.gemini", "src.qwen")
+_ENUM_SCAN_ROOTS = ("docs", "shared", "src.claude", "src.codex")
 _ENUM_SCAN_TOP = ("README.md", "INSTALL.md")
 _ENUM_SCAN_EXTS = (".md", ".json", ".yaml", ".yml", ".toml", ".sh", ".ps1")
 # Changelog / release-note / history stems are EXEMPT: recording a superseded
@@ -740,6 +722,9 @@ def _validate_profile_enum_copies(
     root: Path,
     schema_data: dict[str, Any],
     key_name: str,
+    *,
+    line_anchor: str | None = None,
+    path_filter: Callable[[Path], bool] | None = None,
 ) -> None:
     """Every LIVE surface that ENUMERATES the profile-enum allowed values
     (an `X | Y | Z` listing) must carry EXACTLY the schema set — the schema
@@ -765,6 +750,8 @@ def _validate_profile_enum_copies(
     for path in _iter_enum_scan_files(root):
         if path.stem.lower() in _ENUM_EXEMPT_STEMS:
             continue  # changelog / release-note / history — historical prose
+        if path_filter is not None and not path_filter(path):
+            continue
         try:
             text = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
@@ -772,6 +759,8 @@ def _validate_profile_enum_copies(
         for lineno, line in enumerate(text.splitlines(), 1):
             if line.lstrip().startswith("|"):
                 continue  # markdown preset-table row, not an inline enum listing
+            if line_anchor is not None and line_anchor not in line:
+                continue
             if not listing_re.search(line):
                 continue
             found = set(token_re.findall(line))
@@ -804,14 +793,46 @@ def validate_claude_profile_enum(root: Path, schema_data: dict[str, Any]) -> Non
     _validate_profile_enum_copies(root, schema_data, "externalClaudeProfile")
 
 
+def validate_external_provider_enum(root: Path, schema_data: dict[str, Any]) -> None:
+    """Keep scalar ``externalProvider`` enum listings schema-exact.
+
+    Provider-priority examples intentionally list only the candidates legal in
+    their particular lane; they are validated by ``validate_schema``.  Only a
+    line that names the scalar can be an allowed-value enum copy.
+    """
+    active_roots = {"docs", "shared", "src.codex", "src.claude"}
+    active_root_files = {"AGENTS.md", "CLAUDE.md", "README.md", "INSTALL.md"}
+
+    def active_surface(path: Path) -> bool:
+        relative = path.relative_to(root)
+        return (
+            relative.name in active_root_files and len(relative.parts) == 1
+        ) or relative.parts[0] in active_roots
+
+    _validate_profile_enum_copies(
+        root,
+        schema_data,
+        "externalProvider",
+        line_anchor="externalProvider",
+        path_filter=active_surface,
+    )
+
+
 def validate_schema(schema_data: dict[str, Any], presets_data: dict[str, Any]) -> None:
     production = set(schema_data["productionAutoProviders"])
     examples = set(schema_data["exampleOnlyProviders"])
+    explicit = set(schema_data["explicitOnlyProviders"])
     supplemental = set(schema_data["advisoryReviewSupplementalProviders"])
-    if production & examples:
-        raise ContractError("production and example-only providers overlap")
-    if supplemental & production:
-        raise ContractError("supplemental providers must be separate from production")
+    buckets = (production, examples, explicit, supplemental)
+    if any(
+        left & right
+        for index, left in enumerate(buckets)
+        for right in buckets[index + 1 :]
+    ):
+        raise ContractError("provider classification buckets overlap")
+    provider_allowed = _schema_allowed_values(schema_data, "externalProvider")
+    if provider_allowed != {"auto"} | production | examples | explicit:
+        raise ContractError("externalProvider enum and classification buckets drifted")
 
     lanes = set(schema_data["externalOpinionCounts"])
     for profile_name, lanes_map in schema_data["priorityProfiles"].items():
@@ -819,9 +840,9 @@ def validate_schema(schema_data: dict[str, Any], presets_data: dict[str, Any]) -
             if lane not in lanes:
                 raise ContractError(f"profile {profile_name} uses unknown lane {lane}")
             provider_set = set(providers)
-            if provider_set & examples:
+            if provider_set & (examples | explicit):
                 raise ContractError(
-                    f"profile {profile_name} lane {lane} includes example provider"
+                    f"profile {profile_name} lane {lane} includes non-auto provider"
                 )
             if "reserve" in provider_set:
                 if not (lane.startswith("advisory.") or lane.startswith("review.")):
@@ -884,6 +905,7 @@ def main() -> int:
         validate_generated_docs_sync(root)
         validate_defaults(root, schema_data)
         validate_manual_reference_surfaces(root)
+        validate_external_provider_enum(root, schema_data)
         validate_codex_profile_enum(root, schema_data)
         validate_claude_profile_enum(root, schema_data)
         validate_available_presets(root, presets_data)

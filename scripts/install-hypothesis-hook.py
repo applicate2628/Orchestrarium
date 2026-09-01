@@ -9,9 +9,9 @@ args fields, so re-runs update in place rather than appending
 duplicates).
 
 Supported targets:
-  --platform claude   →  Claude Code settings.json (e.g. ~/.claude/settings.json)
-  --platform codex    →  Codex hooks.json (e.g. ~/.codex/hooks.json)
-  --platform generic  →  Provider-neutral exec-form JSON for compatible runtimes
+  --platform claude   ->  Claude Code settings.json (e.g. ~/.claude/settings.json)
+  --platform codex    ->  Codex hooks.json (e.g. ~/.codex/hooks.json)
+  --platform generic  ->  Provider-neutral exec-form JSON for compatible runtimes
                          using the provider's hook schema.
 
 Cross-platform behavior:

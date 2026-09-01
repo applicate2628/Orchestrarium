@@ -1,0 +1,4 @@
+interface:
+  display_name: "vcpkg Builder"
+  short_description: "Execute one admitted vcpkg runtime build gate"
+  default_prompt: "Use $vcpkg-builder as a leaf runtime executor for one accepted vcpkg gate. Discover wrappers, resolved root identities, protected surfaces, and invariants from the repository contract; run only the admitted command count, classify the last proven execution stage, preserve failures without implicit retry or cleanup, and return current-run evidence to the named reviewer."

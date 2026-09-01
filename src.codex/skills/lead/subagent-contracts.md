@@ -10,9 +10,8 @@ Goal:
 Approved inputs:
 - <accepted artifact or fact>
 - <accepted artifact or fact>
-Allowed tools (affirmatively name repo-relevant MCP servers/skills, or state "runtime default surface"):
-- <allowed tool, MCP server, skill, or "runtime default surface">
-- <allowed tool, MCP server, or skill>
+Allowed tools:
+- <exact task-scoped identifier discovered immediately before this spawn, or none>
 Scope:
 - <allowed area>
 Out of scope:
@@ -25,6 +24,11 @@ Diff-invisible invariants:
 - <behavior or contract that must remain true although the diff may not expose it>
 Named regression guard:
 - <test/probe plus expected result that falsifies preservation>
+Dead/superseded code disposition:
+- deleted <files/symbols/paths> | none (probe: <named search/reachability/test>)
+Cleanup disposition:
+- <owned child process trees, temp/capture paths, and isolation worktrees: `cleaned` | `preserved` + reason | `none`>
+- ResourceRowV1 for every selected resource: <category; creator/adopter role + run; exact identity; preexisting flag; settlement probe and current result; disposition>
 Evidence discipline:
 - <cite each decision-driving claim with an in-repo file:line, installed-dependency surface check, versioned official docs/upstream source URL, or target-environment smoke test preserved under .scratch/; otherwise label it ASSUMPTION (UNVERIFIED) with the resolving step; never use "should work", "should be fine", "probably", "likely", "I think", "based on training data", "in general", or "this pattern usually works" as a correctness-driver>
 Defect-class inventory:
@@ -41,11 +45,13 @@ Gate to next stage:
 - <what must be proven>
 ```
 
-Before dispatch, fill `Diff-invisible invariants` and `Named regression guard`; `none` is valid only with a one-line reason. An implementation or review handoff with either field omitted is incomplete.
+Before dispatch, fill `Diff-invisible invariants`, `Named regression guard`, `Dead/superseded code disposition`, and `Cleanup disposition`. For `Dead/superseded code disposition`, `none` is valid only with a one-line reason. When a change supersedes a mechanism, `none` is invalid. For `Cleanup disposition`, `preserved` requires a reason and `none` means the recipient owns no resource in that category. An implementation or review handoff with any field omitted is incomplete.
+
+Populate `Allowed tools` under the caller-owned tool selection contract in installed `AGENTS.md`. The caller performs fresh discovery before each native spawn and records the exact selection or `none`; an inherited but unlisted tool remains behaviorally forbidden.
 
 `Approved inputs` identify the producing run's declared scope and accepted artifact revision when available; no new handoff field is required. Evaluate authored claims and review verdicts against the producing run's declared scope and accepted baseline: later independently owned lane deltas are reviewed in their own lane and do not retroactively falsify the earlier artifact; an actual material revision of the accepted upstream artifact still invalidates dependent `PASS` states and triggers dependent re-review.
 
-Receiving-side echo: the returned artifact MUST (a) report the Named regression guard's actual result (expected vs observed), (b) answer each Diff-invisible invariant as verified or ASSUMPTION (UNVERIFIED), (c) when the dispatch cited a defect class, include the class audit — every enumerated participant classified fixed / not-affected. An artifact missing the echo fails the mechanical acceptance gate.
+Receiving-side echo: the returned artifact MUST (a) report the Named regression guard's actual result (expected vs observed), (b) answer each Diff-invisible invariant as verified or ASSUMPTION (UNVERIFIED), (c) report the Dead/superseded code disposition result and its named probe, (d) report the Cleanup disposition for owned child process trees, temp/capture paths, and isolation worktrees as `cleaned`, `preserved` with its reason, or `none`, and (e) when the dispatch cited a defect class, include the class audit — every enumerated participant classified fixed / not-affected. It also returns a complete current `ResourceRowV1` for every selected owned resource, including branches, locks, handles, generated artifacts, and dead/superseded surfaces; allowed dispositions additionally include `ephemeral-volume-exempt`. An absent/unknown field, ownership/classification gap, invalid exemption, or missing settlement result makes the row `unclassified`; an artifact missing this echo fails the mechanical acceptance gate.
 
 **Class-completeness trigger (mandatory):** when a reviewer, bot, or test cites one instance of a defect class, the dispatch prompt MUST direct the recipient to enumerate every participant of that class, classify each one, and fix every confirmed instance. A prompt scoped only to the named line is invalid.
 
@@ -84,6 +90,10 @@ plain hardcoding, which is a different rule and a different fix.
 ## Artifact gate — no delegation without brief
 
 A lead MUST NOT delegate recovery-tracked or multi-stage work until the configured task-memory item folder, if the repository uses one, contains a verified `brief.md` and full `status.md`.
+
+### Workflow economy projection
+
+Apply the binding shared **Workflow economy (binding)** rule. This contract projects the one-canonical-artifact/concise-root-ledger boundary and forbids progress-only artifacts or progress-only `REVISE`; it does not add a second provider-specific review policy.
 
 - `brief.md` must have explicit scope, out-of-scope, acceptance criteria, required roles, and critical risks with owners.
 - `status.md` must have a current snapshot with stage, last accepted artifact, next concrete action, and any open obligations that still block closeout.
@@ -228,12 +238,12 @@ Use `external-dispatch.md` when the routing decision prefers or explicitly selec
 - There is no generic external adapter for owner roles such as `$product-manager` or `$lead`. If a request lands in one of those lanes, fail fast with an unsupported-route explanation instead of probing providers.
 - If the external CLI is unavailable, the role is disabled at the role level and the orchestrator may reroute to another eligible internal specialist.
 - `$external-worker` and `$external-reviewer` are direct external launch routes, not internal specialist subagents. Do not satisfy these roles by spawning an internal helper/agent host that then relays to another CLI.
-- Any spawned internal subagent remains internal even if its prompt says to act as Gemini, Qwen, Claude, or Codex. Provider-labeled internal delegation does not satisfy an external adapter route.
+- Any spawned internal subagent remains internal even if its prompt assigns an external-provider label. Provider-labeled internal delegation does not satisfy an external adapter route.
 - **Subagent no-spawn-and-wait rule.** A dispatched subagent is NOT re-invoked when a background child it launched (a `run_in_background` shell-out or a background agent) finishes — background-completion notifications go only to the MAIN orchestrating loop. So a subagent must never launch a background child and end its turn "waiting for the notification"; the child strands and the subagent returns an empty result (the recurring `external`-mode consultant role-confusion). A subagent has two compliant paths: complete the work synchronously in-turn (a single blocking shell-out it parses before returning), or return a result telling the orchestrating runtime to own the long-running/background step and feed the outcome back. The orchestrating runtime — which receives background-completion notifications — owns any launch that cannot finish inside one subagent turn.
 - Wherever Codex is the resolved external provider, honor `externalCodexProfile` first. `default` inherits `externalModelMode`: under `runtime-default`, leave Codex on its runtime default model/profile, and under `pinned-top-pro`, start on model `gpt-5.6-sol` with `model_reasoning_effort = "xhigh"` through a supported Codex config/profile path; only an explicitly configured repo-local fully autonomous low-reasoning worker lane may retry once on `gpt-5.6-terra` after usage-limit or quota exhaustion on the primary path. `gpt-5.6-sol-max` requests model `gpt-5.6-sol` with `model_reasoning_effort = "max"` for higher-complexity/hard lanes (NOT `gpt-5.6-sol-ultra`, which spawns subagents and must never be shipped on a subagent lane). `gpt-5.6-terra` selects the balanced Codex model tier (a distinct model, `model_reasoning_effort = "high"`, not an effort downgrade) and must record unavailable or deviated if that model cannot be verified against the installed runtime. `gpt-5.6-sol-xhigh` (shipped as the default) explicitly requests model `gpt-5.6-sol` with `model_reasoning_effort = "xhigh"` via `-c model_reasoning_effort=xhigh` regardless of `externalModelMode`, and is the best-effort sibling of Claude's `opus-xhigh`; consultant lane invocations must always use `gpt-5.6-sol-xhigh` regardless of the operator-set value. Do not silently downgrade below the approved floor.
 - Wherever an advisory or review profile order resolves to `reserve`, bind it through `reserveResolver` and record the concrete execution path. It is independent of the primary `claude` candidate and is not a retry, fallback, or transport swap for a failed primary Claude run.
 - Treat fallback pools asymmetrically: `gpt-5.6-terra` is the balanced cheaper Codex reasoning lane (a genuine second-choice model), while `reserve` is a symbolic supplemental advisory/review candidate that may appear only after primary `claude`/`codex` in eligible profile orders.
-- `externalProvider: auto` resolves through the active production priority profile, then applies explicit-only self-provider exclusion and CLI availability. Example-only providers such as Gemini and Qwen stay explicit-only and must not appear in shipped `auto` profiles.
+- `externalProvider: auto` resolves through the active production priority profile, then applies explicit-only self-provider exclusion and command-line-interface availability. Explicit-only and unavailable providers must not appear in shipped `auto` profiles.
 - `parallelMode` is the general rule for whether independent helper lanes should be parallelized by judgment at all. External fan-out follows that rule instead of defining a separate global concurrency model.
 - Independent external adapters may run in parallel when their scopes are disjoint, `parallelMode` permits ordinary parallel fan-out, and provider runtimes support concurrent non-interactive execution. If native internal slot limits would otherwise block more independent eligible lanes, prefer available external adapters instead of silently serializing or dropping them.
 - Same-provider reuse is allowed for independent external fan-out. Do not impose a one-instance-per-provider cap when multiple admitted artifacts or disjoint slices need the same helper/provider combination.
@@ -640,7 +650,7 @@ Acceptance criteria:
 - if it finds a real blocker, it points back to the proper specialist role
 
 Invocation note:
-- `$consultant` usage rules, toggle check, and execution paths are in `$CODEX_HOME/skills/consultant/SKILL.md`
+- `$consultant` usage rules, toggle check, and execution paths are in `$HOME/.agents/skills/consultant/SKILL.md`
 - if the selected external consultant path fails or is unavailable, report that honestly and reroute; use an internal consultant only when `consultantMode: internal` was selected explicitly before dispatch
 - `external-dispatch.md` is the shared contract for the new external adapters and the consultant config fields they share
 
@@ -711,4 +721,3 @@ Ask these before advancing:
 - `REVISE`: workflow state meaning the artifact must return to the same role for bounded correction.
 - `QA`: Quality Assurance; verification work for tests, regressions, and acceptance criteria.
 - `status.md`: human-readable recovery summary for the active work item.
-- `WEAK MODEL / NOT RECOMMENDED`: repository classification for example-only providers excluded from production `auto` routing.

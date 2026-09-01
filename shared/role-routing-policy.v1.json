@@ -1,0 +1,253 @@
+{
+  "schemaVersion": 1,
+  "modelTierOrder": [
+    "mechanical",
+    "balanced",
+    "frontier",
+    "apex"
+  ],
+  "effortOrder": [
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "finalAuthorizingRoles": [
+    "architecture-reviewer",
+    "security-reviewer"
+  ],
+  "profiles": {
+    "luna-high": {
+      "modelTier": "mechanical",
+      "effort": "high",
+      "codexModel": "gpt-5.6-luna"
+    },
+    "balanced-medium": {
+      "modelTier": "balanced",
+      "effort": "medium",
+      "codexModel": "gpt-5.6-terra"
+    },
+    "balanced-high": {
+      "modelTier": "balanced",
+      "effort": "high",
+      "codexModel": "gpt-5.6-terra"
+    },
+    "frontier-high": {
+      "modelTier": "frontier",
+      "effort": "high",
+      "codexModel": "gpt-5.6-sol"
+    },
+    "frontier-xhigh": {
+      "modelTier": "frontier",
+      "effort": "xhigh",
+      "codexModel": "gpt-5.6-sol"
+    },
+    "apex-max": {
+      "modelTier": "apex",
+      "effort": "max",
+      "codexModel": "gpt-5.6-sol"
+    }
+  },
+  "taskClasses": {
+    "micro": {
+      "requiredModelTier": "mechanical",
+      "requiredEffort": "low",
+      "mutationClass": "read-only"
+    },
+    "mechanical-read": {
+      "requiredModelTier": "mechanical",
+      "requiredEffort": "medium",
+      "mutationClass": "read-only"
+    },
+    "mechanical": {
+      "requiredModelTier": "mechanical",
+      "requiredEffort": "medium",
+      "mutationClass": "bounded-write"
+    },
+    "exploration": {
+      "requiredModelTier": "balanced",
+      "requiredEffort": "high",
+      "mutationClass": "read-only"
+    },
+    "engineering": {
+      "requiredModelTier": "balanced",
+      "requiredEffort": "high",
+      "mutationClass": "bounded-write"
+    },
+    "planning": {
+      "requiredModelTier": "balanced",
+      "requiredEffort": "high",
+      "mutationClass": "read-only"
+    },
+    "review": {
+      "requiredModelTier": "balanced",
+      "requiredEffort": "high",
+      "mutationClass": "read-only"
+    },
+    "critical-design": {
+      "requiredModelTier": "frontier",
+      "requiredEffort": "xhigh",
+      "mutationClass": "read-only"
+    },
+    "critical-security": {
+      "requiredModelTier": "frontier",
+      "requiredEffort": "xhigh",
+      "mutationClass": "read-only"
+    },
+    "recovery": {
+      "requiredModelTier": "frontier",
+      "requiredEffort": "high",
+      "mutationClass": "bounded-write"
+    }
+  },
+  "roles": {
+    "mechanical-scout": {
+      "defaultProfile": "luna-high",
+      "allowedProfiles": ["luna-high"]
+    },
+    "mechanical-worker": {
+      "defaultProfile": "luna-high",
+      "allowedProfiles": ["luna-high"]
+    },
+    "default": {
+      "defaultProfile": "frontier-xhigh",
+      "allowedProfiles": ["balanced-high", "frontier-high", "frontier-xhigh", "apex-max"]
+    },
+    "explorer": {
+      "defaultProfile": "balanced-high",
+      "allowedProfiles": ["balanced-medium", "balanced-high", "frontier-high"]
+    },
+    "worker": {
+      "defaultProfile": "frontier-high",
+      "allowedProfiles": ["balanced-medium", "balanced-high", "frontier-high", "frontier-xhigh"]
+    },
+    "analyst": {
+      "defaultProfile": "balanced-high",
+      "allowedProfiles": ["balanced-high", "frontier-high", "frontier-xhigh"]
+    },
+    "planner": {
+      "defaultProfile": "balanced-high",
+      "allowedProfiles": ["balanced-high", "frontier-high", "frontier-xhigh"]
+    },
+    "architect": {
+      "defaultProfile": "frontier-xhigh",
+      "allowedProfiles": ["frontier-high", "frontier-xhigh", "apex-max"]
+    },
+    "architecture-reviewer": {
+      "defaultProfile": "frontier-xhigh",
+      "allowedProfiles": ["frontier-xhigh", "apex-max"]
+    },
+    "algorithm-scientist": {
+      "defaultProfile": "frontier-xhigh",
+      "allowedProfiles": ["frontier-xhigh", "apex-max"]
+    },
+    "computational-scientist": {
+      "defaultProfile": "frontier-xhigh",
+      "allowedProfiles": ["frontier-xhigh", "apex-max"]
+    },
+    "security-engineer": {
+      "defaultProfile": "frontier-xhigh",
+      "allowedProfiles": ["frontier-high", "frontier-xhigh"]
+    },
+    "security-reviewer": {
+      "defaultProfile": "frontier-xhigh",
+      "allowedProfiles": ["frontier-xhigh", "apex-max"]
+    },
+    "backend-engineer": {
+      "defaultProfile": "balanced-high",
+      "allowedProfiles": ["balanced-medium", "balanced-high", "frontier-high", "frontier-xhigh"]
+    },
+    "platform-engineer": {
+      "defaultProfile": "frontier-high",
+      "allowedProfiles": ["balanced-medium", "balanced-high", "frontier-high", "frontier-xhigh"]
+    },
+    "qa-engineer": {
+      "defaultProfile": "balanced-high",
+      "allowedProfiles": ["balanced-high", "frontier-high", "frontier-xhigh"]
+    },
+    "knowledge-archivist": {
+      "defaultProfile": "balanced-medium",
+      "allowedProfiles": ["balanced-medium", "balanced-high"]
+    }
+  },
+  "mechanicalExecutionContract": {
+    "schemaVersion": 1,
+    "requiresFullySpecifiedTask": true,
+    "decisionAuthority": "none",
+    "ambiguity": "abort",
+    "fallback": "none",
+    "objectiveOracle": "caller-required",
+    "defaultEffort": "high",
+    "allowedCallerEfforts": ["high", "xhigh", "max"],
+    "scout": {
+      "status": "native-required-when-feature-enabled",
+      "planContract": "LunaExecutionContractV1",
+      "outputContract": "ScoutFactsV1",
+      "readProbeOrder": "caller-specified-exact-order",
+      "targetBinding": "required-exact-git-root",
+      "allowedTools": "caller-supplied-exact-runtime-ids",
+      "allowedOperations": [
+        "path-kind",
+        "file-size",
+        "sha256",
+        "read-lines",
+        "list-directory",
+        "literal-equals"
+      ],
+      "toolAttestation": "caller-required-exact-equality",
+      "factsOnly": true,
+      "forbiddenOutputs": ["diagnosis", "design", "selection", "recommendation", "risk", "gate"]
+    },
+    "worker": {
+      "status": "native-required-when-feature-enabled",
+      "planContract": "LunaExecutionContractV1",
+      "sandboxMode": "workspace-write",
+      "targetBinding": "required-exact-git-root",
+      "allowedTools": "caller-supplied-exact-runtime-ids",
+      "allowedOperations": ["apply-exact-patch"],
+      "precondition": "caller-specified-exact-pre-image-sha256",
+      "postcondition": "caller-verifies-exact-post-image-sha256",
+      "forbiddenOperations": ["shell", "delete", "rename", "path-choice"],
+      "directCodeOrPatchAuthoring": false
+    }
+  },
+  "taskRoleEligibility": {
+    "micro": ["mechanical-scout"],
+    "mechanical-read": ["mechanical-scout"],
+    "mechanical": ["mechanical-worker"],
+    "exploration": ["explorer", "analyst"],
+    "engineering": ["worker", "backend-engineer", "platform-engineer"],
+    "planning": ["analyst", "planner", "architect"],
+    "review": ["qa-engineer", "architecture-reviewer", "security-reviewer"],
+    "critical-design": ["architect", "architecture-reviewer", "algorithm-scientist", "computational-scientist"],
+    "critical-security": ["security-engineer", "security-reviewer"],
+    "recovery": ["default", "worker", "platform-engineer"]
+  },
+  "providerRealizations": {
+    "codex": {
+      "modelTier": "native",
+      "effort": "native"
+    },
+    "kimi": {
+      "modelTier": "model-only",
+      "effort": "unsupported",
+      "allowedTaskClasses": ["exploration", "planning", "review"],
+      "requiredMutationClass": "read-only",
+      "independentVerification": true,
+      "executionDisposition": "explicit-read-only",
+      "availability": "available",
+      "effortMappingLoss": "no-native-effort-control"
+    },
+    "grok": {
+      "modelTier": "model-only",
+      "effort": "high",
+      "allowedTaskClasses": ["exploration", "planning", "review"],
+      "requiredMutationClass": "read-only",
+      "independentVerification": true,
+      "executionDisposition": "classifier-only",
+      "availability": "unavailable",
+      "effortMappingLoss": "none"
+    }
+  }
+}

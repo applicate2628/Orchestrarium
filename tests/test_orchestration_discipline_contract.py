@@ -169,7 +169,13 @@ PINS = [
      ["src.claude/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md"]),
     ("A7-guard", "Named regression guard:",
      ["src.claude/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md"]),
-    ("A7-rule", "Before dispatch, fill `Diff-invisible invariants` and `Named regression guard`; `none` is valid only with a one-line reason.",
+    ("A7-rule", "Before dispatch, fill `Diff-invisible invariants`, `Named regression guard`, `Dead/superseded code disposition`, and `Cleanup disposition`. For `Dead/superseded code disposition`, `none` is valid only with a one-line reason. When a change supersedes a mechanism, `none` is invalid. For `Cleanup disposition`, `preserved` requires a reason and `none` means the recipient owns no resource in that category. An implementation or review handoff with any field omitted is incomplete.",
+     ["src.claude/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md"]),
+
+    # Resource cleanup ownership — shared lifecycle invariant plus one exact field/echo in both packs.
+    ("cleanup-spine", "Any resource (handle, connection, subscription, lock, transaction, owned child process/process tree, temp file, external state) needs explicit cleanup/release on success, failure, cancellation, and timeout paths.",
+     [SPINE]),
+    ("cleanup-echo", "report the Cleanup disposition for owned child process trees, temp/capture paths, and isolation worktrees as `cleaned`, `preserved` with its reason, or `none`",
      ["src.claude/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md"]),
 
     # A9 — object-axis re-aim trigger (both subagent-contracts); the 2448-char block was a
@@ -278,6 +284,22 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
                     f"[{gap_id}] {substring!r} must NOT be in the spine (P7 is Lead-file-only)",
                 )
 
+    def test_cleanup_disposition_is_one_exact_cross_pack_field(self) -> None:
+        field = (
+            "Cleanup disposition:\n"
+            "- <owned child process trees, temp/capture paths, and isolation worktrees: "
+            "`cleaned` | `preserved` + reason | `none`>"
+        )
+        owners = (
+            "src.claude/agents/contracts/subagent-contracts.md",
+            "src.codex/skills/lead/subagent-contracts.md",
+        )
+        for owner in owners:
+            with self.subTest(owner=owner):
+                text = self._read(owner)
+                self.assertEqual(text.count("Cleanup disposition:"), 1)
+                self.assertIn(field, text)
+
     def test_quick_fix_handles_the_exact_tool_update_incident(self) -> None:
         spine = self._read(SPINE)
         for clause in (
@@ -308,10 +330,6 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
         spine = self._read(SPINE)
         self.assertIn(
             "Before mutation create only `work-items/active/<slug>/status.md`",
-            spine,
-        )
-        self.assertIn(
-            "no roadmap/brief/Research/Design/Plan/consultant/pre-review/report",
             spine,
         )
         self.assertIn(

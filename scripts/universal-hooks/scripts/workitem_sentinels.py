@@ -1,7 +1,7 @@
 """Shared read-only work-item inspection for the periodic state checker.
 
-This module owns physical active/archive discovery, location resolution,
-delivery-action shape validation, and informational lifecycle findings used by
+This module owns physical active/archive discovery, location resolution, and
+informational lifecycle findings used by
 ``scripts/check-work-items-state.py``. It is imported support code, not a
 registered hook entry. Physical location owns lifecycle membership: status and
 closure text can identify a move still due, but never make an active record
@@ -51,14 +51,6 @@ class Finding:
 # How far up from the session cwd to search for a work-items/active directory.
 MAX_PARENTS = 40
 
-DELIVERY_ACTION_HEADING = "## delivery action"
-DELIVERY_ACTION_FIELD_RE = re.compile(
-    r"^-\s+\*\*(Primary|Fingerprint|Class|Target|Oracle)\*\*:\s*(.*?)\s*$",
-    re.IGNORECASE,
-)
-DELIVERY_FINGERPRINT_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
-DELIVERY_CLASSES = {"mutation"}
-DELIVERY_ORACLE = "correlated-success"
 def _find_active_dir(start: Path) -> Path | None:
     """Walk up from the session cwd to the nearest work-items/active directory,
     stopping at the first ancestor that is itself a repository root (contains
@@ -222,91 +214,6 @@ def resolve_slug_locations(ctx: dict, slug: str) -> dict:
 # ---------------------------------------------------------------------------
 # build_context -- the single traversal every registry entry reads from.
 # ---------------------------------------------------------------------------
-
-
-def _parse_delivery_action(item: Path) -> tuple[dict | None, str]:
-    status_path = item / "status.md"
-    if not status_path.is_file():
-        return None, "ABSENT"
-    try:
-        text = status_path.read_text(encoding="utf-8", errors="strict")
-    except (OSError, UnicodeError):
-        return None, "INVALID"
-    if len(text) > 128 * 1024:
-        return None, "INVALID"
-    fields: dict[str, str] = {}
-    in_section = False
-    found_section = False
-    for raw_line in text.splitlines():
-        line = raw_line.strip()
-        if not in_section:
-            if line.lower().rstrip(": ") == DELIVERY_ACTION_HEADING:
-                in_section = True
-                found_section = True
-            continue
-        if line.startswith("## "):
-            break
-        if not line:
-            continue
-        match = DELIVERY_ACTION_FIELD_RE.fullmatch(line)
-        if match is None:
-            return None, "INVALID"
-        key = match.group(1).lower()
-        if key in fields:
-            return None, "INVALID"
-        fields[key] = match.group(2).strip()
-    if not found_section:
-        return None, "ABSENT"
-    if set(fields) != {"primary", "fingerprint", "class", "target", "oracle"}:
-        return None, "INVALID"
-    if fields["primary"].lower() != "true":
-        return None, "INVALID"
-    fingerprint = fields["fingerprint"].lower()
-    action_class = fields["class"].lower()
-    target = fields["target"].replace("\\", "/")
-    oracle = fields["oracle"].lower()
-    if not DELIVERY_FINGERPRINT_RE.fullmatch(fingerprint):
-        return None, "INVALID"
-    if action_class not in DELIVERY_CLASSES or oracle != DELIVERY_ORACLE:
-        return None, "INVALID"
-    if not target or len(target) > 240 or target.startswith("/") or re.match(r"^[A-Za-z]:/", target):
-        return None, "INVALID"
-    if ".." in target.split("/"):
-        return None, "INVALID"
-    return {
-        "fingerprint": fingerprint,
-        "action_class": action_class,
-        "target_id": target,
-        "oracle": oracle,
-    }, "VALID"
-
-
-def delivery_action_validation_errors(active_dir: Path) -> dict[str, list[str]]:
-    """Validate the canonical opted-in section owned by this module.
-
-    Exact shape: `## Delivery action` followed by Primary=true, Fingerprint,
-    Class, Target, and Oracle bullet fields. Absence is accepted while a stage
-    is active; this validator checks declared shape and does not infer
-    lifecycle terminality.
-    """
-    errors: dict[str, list[str]] = {}
-    valid_names: list[str] = []
-    if not active_dir.is_dir():
-        return errors
-    for item in sorted(path for path in active_dir.iterdir() if path.is_dir()):
-        action, status = _parse_delivery_action(item)
-        if status == "INVALID":
-            errors.setdefault(item.name, []).append(
-                "invalid ## Delivery action contract (require exact Primary, Fingerprint, Class, Target, Oracle fields)"
-            )
-        elif action is not None:
-            valid_names.append(item.name)
-    if len(valid_names) > 1:
-        for name in valid_names:
-            errors.setdefault(name, []).append(
-                "multiple primary ## Delivery action contracts; exactly one primary action is allowed across active items"
-            )
-    return errors
 
 
 def build_context(

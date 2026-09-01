@@ -4,12 +4,15 @@ from __future__ import annotations
 import ast
 import hashlib
 import importlib.util
+import inspect
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -51,6 +54,94 @@ def _load_production_installer():
 production_installer = _load_production_installer()
 ABORT_ENV = hook_installer.TEST_TRANSACTION_ABORT_ENV
 ABORT_EXIT = hook_installer.TEST_TRANSACTION_ABORT_EXIT
+
+
+def test_rmtree_callback_kwargs_keep_modern_onexc_contract() -> None:
+    received: list[BaseException] = []
+
+    def modern_rmtree(path, *, onexc):
+        del path, onexc
+
+    def handler(_function, _path, error):
+        received.append(error)
+
+    kwargs = production_installer._rmtree_callback_kwargs(modern_rmtree, handler)
+    error = PermissionError("read-only entry")
+    kwargs["onexc"](lambda _path: None, "entry", error)
+
+    assert set(kwargs) == {"onexc"}
+    assert received == [error]
+
+
+def test_rmtree_callback_kwargs_adapt_legacy_exc_info() -> None:
+    received: list[BaseException] = []
+
+    def legacy_rmtree(path, *, onerror):
+        del path, onerror
+
+    def handler(_function, _path, error):
+        received.append(error)
+
+    kwargs = production_installer._rmtree_callback_kwargs(legacy_rmtree, handler)
+    error = PermissionError("read-only entry")
+    kwargs["onerror"](
+        lambda _path: None,
+        "entry",
+        (PermissionError, error, None),
+    )
+
+    assert set(kwargs) == {"onerror"}
+    assert received == [error]
+
+
+def test_remove_readonly_tree_selects_legacy_callback_before_invocation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    readonly = tree / "readonly.txt"
+    readonly.write_text("payload", encoding="utf-8")
+    readonly.chmod(stat.S_IREAD)
+    speculative_mutation = tmp_path / "speculative-mutation"
+    calls: list[set[str]] = []
+
+    class LegacyRmtree:
+        __signature__ = inspect.Signature(
+            (
+                inspect.Parameter("path", inspect.Parameter.POSITIONAL_OR_KEYWORD),
+                inspect.Parameter(
+                    "onerror",
+                    inspect.Parameter.KEYWORD_ONLY,
+                    default=None,
+                ),
+            )
+        )
+
+        def __call__(self, path, **kwargs):
+            calls.append(set(kwargs))
+            if "onexc" in kwargs:
+                speculative_mutation.write_text("called", encoding="utf-8")
+                raise TypeError("unexpected onexc")
+            assert Path(path) == tree
+            error = PermissionError("read-only entry")
+
+            def retry(value):
+                Path(value).unlink()
+
+            kwargs["onerror"](
+                retry,
+                str(readonly),
+                (PermissionError, error, None),
+            )
+
+    monkeypatch.setattr(production_installer.shutil, "rmtree", LegacyRmtree())
+
+    production_installer._remove_readonly_tree(tree)
+
+    assert calls == [{"onerror"}]
+    assert not speculative_mutation.exists()
+    assert not readonly.exists()
 
 
 @dataclass(frozen=True)
@@ -143,7 +234,7 @@ def _seed_unrelated_provider_state(project: Path, case: Case) -> tuple[Path, ...
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(f"unrelated-{index}".encode("ascii"))
     custom = (
-        project / ".agents" / "skills" / "lead" / "user-custom.txt"
+        project / ".agents" / "user-custom.txt"
         if case.provider == "codex"
         else provider_root / "agents" / "user-custom.txt"
     )
@@ -161,23 +252,242 @@ def _make_file_symlink(link: Path, target: Path) -> None:
     assert link.is_symlink()
 
 
-def _policy_owner_count(source: str) -> int:
-    tree = ast.parse(source)
-    return sum(
-        isinstance(node, ast.ClassDef) and node.name == "TestAbortPolicy"
-        for node in ast.walk(tree)
+def _make_directory_junction(link: Path, target: Path) -> None:
+    if os.name != "nt":
+        pytest.skip("Windows junction coverage")
+    link.parent.mkdir(parents=True, exist_ok=True)
+    result = subprocess.run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "New-Item",
+            "-ItemType",
+            "Junction",
+            "-Path",
+            str(link),
+            "-Target",
+            str(target),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if result.returncode != 0 or not os.path.isjunction(link):
+        pytest.skip(f"junction creation is unavailable: {result.stdout}{result.stderr}")
+
+
+ABORT_POLICY_PATHS = (
+    HELPER_PATH,
+    ROOT / "scripts/production_installer.py",
+    ROOT / "scripts/install-codex.py",
+    ROOT / "scripts/install-claude.py",
+)
+ABORT_STAGES = ("sync", "register", "verify", "reclaim")
+
+
+def _abort_policy_sources() -> dict[Path, str]:
+    return {path: path.read_text(encoding="utf-8") for path in ABORT_POLICY_PATHS}
+
+
+def _fold_static_string(node: ast.AST | None) -> str | None:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left = _fold_static_string(node.left)
+        right = _fold_static_string(node.right)
+        return left + right if left is not None and right is not None else None
+    if isinstance(node, ast.JoinedStr):
+        parts = [_fold_static_string(value) for value in node.values]
+        return "".join(parts) if all(part is not None for part in parts) else None
+    return None
+
+
+def _fold_stage_container(node: ast.AST | None) -> tuple[str, ...] | None:
+    if isinstance(node, (ast.Tuple, ast.List, ast.Set)):
+        values = tuple(_fold_static_string(item) for item in node.elts)
+    elif (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id in {"tuple", "list", "set"}
+        and len(node.args) == 1
+        and not node.keywords
+    ):
+        return _fold_stage_container(node.args[0])
+    else:
+        return None
+    if any(value is None for value in values):
+        return None
+    return tuple(value for value in values if value is not None)
+
+
+def _assigned_name(node: ast.Assign | ast.AnnAssign) -> str:
+    targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+    if len(targets) != 1 or not isinstance(targets[0], ast.Name):
+        return "<complex-target>"
+    return targets[0].id
+
+
+class AbortPolicyOwnershipContract:
+    """Bounded AST owner proof for the test-only installer interruption policy."""
+
+    _ENV_ALLOWLIST = frozenset(
+        {
+            ("scripts/install-hypothesis-hook.py", "TestAbortPolicy.resolve_and_preflight", "mapping", None),
+            ("scripts/install-hypothesis-hook.py", "main", "get", "ORCHESTRARIUM_NO_HYPOTHESIS_HOOK"),
+            ("scripts/production_installer.py", "_run", "copy", None),
+            ("scripts/production_installer.py", "_run_hook_health_bounded", "copy", None),
+            ("scripts/production_installer.py", "_install_hooks", "get", "CODEX_BIN"),
+            ("scripts/production_installer.py", "_resolve_global_home", "get", "USERPROFILE"),
+            ("scripts/production_installer.py", "_resolve_global_home", "get", "HOME"),
+            ("scripts/production_installer.py", "install", "get", "ORCHESTRARIUM_NO_HYPOTHESIS_HOOK"),
+        }
     )
 
+    def __init__(self, sources: dict[Path, str]) -> None:
+        self._sources = sources
 
-def _assert_no_abort_env_reads(sources: dict[Path, str]) -> None:
-    offenders = [path for path, text in sources.items() if ABORT_ENV in text]
-    assert offenders == []
+    @staticmethod
+    def _owner(node: ast.AST, parents: dict[ast.AST, ast.AST]) -> str:
+        names: list[str] = []
+        current = node
+        while current in parents:
+            current = parents[current]
+            if isinstance(current, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                names.append(current.name)
+        return ".".join(reversed(names)) or "<module>"
+
+    @staticmethod
+    def _relative(path: Path) -> str:
+        return path.resolve().relative_to(ROOT.resolve()).as_posix()
+
+    def errors(self) -> tuple[str, ...]:
+        errors: list[str] = []
+        class_owners: list[tuple[str, str]] = []
+        key_owners: list[tuple[str, str, str]] = []
+        stage_owners: list[tuple[str, str, str]] = []
+        environment_uses: list[tuple[str, str, str, str | None]] = []
+
+        for path, source in self._sources.items():
+            relative = self._relative(path)
+            try:
+                tree = ast.parse(source)
+            except SyntaxError as exc:
+                errors.append(f"ABORT-OWNER-PARSE:{relative}:{exc.lineno}")
+                continue
+            parents = {
+                child: parent
+                for parent in ast.walk(tree)
+                for child in ast.iter_child_nodes(parent)
+            }
+            for node in ast.walk(tree):
+                owner = self._owner(node, parents)
+                if isinstance(node, ast.ClassDef) and node.name == "TestAbortPolicy":
+                    class_owners.append((relative, node.name))
+                if isinstance(node, (ast.Assign, ast.AnnAssign)):
+                    value = node.value
+                    name = _assigned_name(node)
+                    if _fold_static_string(value) == ABORT_ENV:
+                        key_owners.append((relative, owner, name))
+                    stages = _fold_stage_container(value)
+                    if stages is not None and len(stages) == 4 and set(stages) == set(ABORT_STAGES):
+                        stage_owners.append((relative, owner, name))
+                if (
+                    isinstance(node, ast.ImportFrom)
+                    and node.module == "os"
+                    and any(alias.name in {"environ", "getenv"} for alias in node.names)
+                ):
+                    environment_uses.append((relative, owner, "import", None))
+                if not (
+                    isinstance(node, ast.Attribute)
+                    and isinstance(node.value, ast.Name)
+                    and node.value.id == "os"
+                    and node.attr in {"environ", "getenv"}
+                ):
+                    continue
+                if node.attr == "getenv":
+                    call = parents.get(node)
+                    key = (
+                        _fold_static_string(call.args[0])
+                        if isinstance(call, ast.Call) and call.args
+                        else None
+                    )
+                    environment_uses.append((relative, owner, "getenv", key))
+                    continue
+                parent = parents.get(node)
+                call = parents.get(parent) if parent is not None else None
+                if (
+                    isinstance(parent, ast.Attribute)
+                    and parent.value is node
+                    and parent.attr in {"get", "copy"}
+                    and isinstance(call, ast.Call)
+                ):
+                    key = _fold_static_string(call.args[0]) if parent.attr == "get" and call.args else None
+                    environment_uses.append((relative, owner, parent.attr, key))
+                else:
+                    environment_uses.append((relative, owner, "mapping", None))
+
+        expected_class = [("scripts/install-hypothesis-hook.py", "TestAbortPolicy")]
+        if class_owners != expected_class:
+            errors.append(f"ABORT-OWNER-CLASS:{class_owners!r}")
+        expected_key = [("scripts/install-hypothesis-hook.py", "TestAbortPolicy", "ABORT_ENV")]
+        if key_owners != expected_key:
+            errors.append(f"ABORT-OWNER-KEY:{key_owners!r}")
+        expected_stages = [("scripts/install-hypothesis-hook.py", "TestAbortPolicy", "STAGES")]
+        if stage_owners != expected_stages:
+            errors.append(f"ABORT-OWNER-STAGES:{stage_owners!r}")
+        for observation in environment_uses:
+            if observation not in self._ENV_ALLOWLIST:
+                errors.append(f"ABORT-OWNER-ENV:{observation!r}")
+        actual_environment = Counter(environment_uses)
+        expected_environment = Counter(self._ENV_ALLOWLIST)
+        if actual_environment != expected_environment:
+            errors.append(
+                "ABORT-OWNER-ENV-CARDINALITY:"
+                f"actual={sorted(actual_environment.items())!r}:"
+                f"expected={sorted(expected_environment.items())!r}"
+            )
+        return tuple(sorted(set(errors)))
+
+    def assert_valid(self) -> None:
+        errors = self.errors()
+        assert errors == (), "\n".join(errors)
 
 
-def _assert_no_second_stage_owner(sources: dict[Path, str]) -> None:
-    stage_tuple = '("sync", "register", "verify", "reclaim")'
-    offenders = [path for path, text in sources.items() if stage_tuple in text]
-    assert offenders == []
+def _run_fake_global_abort_case(case: Case, stage: str, tmp_path: Path) -> bool:
+    fake_home = tmp_path / case.provider / stage / "home"
+    config = fake_home / Path(case.config)
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text('{"hooks": {}, "sentinel": "preserve"}\n', encoding="utf-8")
+    if case.provider != "codex":
+        installed = fake_home / Path(case.installed_root)
+        installed.mkdir(parents=True, exist_ok=True)
+        (installed / "owned-sentinel.bin").write_bytes(b"owned-before")
+    (fake_home / "unrelated-sentinel.bin").write_bytes(b"unrelated-before")
+    before = _tree_snapshot(fake_home)
+    env = os.environ.copy()
+    env["HOME"] = str(fake_home)
+    env["USERPROFILE"] = str(fake_home)
+    env[ABORT_ENV] = stage
+    env.setdefault("PYTEST_CURRENT_TEST", f"fake-global-{case.provider}-{stage}")
+    if case.provider == "codex":
+        env["CODEX_BIN"] = str(ROOT / "tests/fixtures/fake_codex_hooks_host.py")
+    result = subprocess.run(
+        [sys.executable, str(case.script), "--global", "--force"],
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=240,
+    )
+    output = result.stdout + result.stderr
+    assert result.returncode not in (0, ABORT_EXIT), (case.provider, stage, output)
+    assert "forbidden for global install scope" in output, (case.provider, stage, output)
+    assert "TEST-ABORT:" not in output, (case.provider, stage, output)
+    assert _tree_snapshot(fake_home) == before, (case.provider, stage)
+    return True
 
 
 def _checkpoint(
@@ -405,6 +715,94 @@ def test_transaction_commit_keeps_write_through_symlink_referent_change(
     assert external.read_bytes() == b'{"after": true}\n'
 
 
+def test_global_codex_install_preserves_hooks_symlink_and_uses_real_sidecar(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    logical = home / ".codex" / "hooks.json"
+    resolved = tmp_path / "shared" / "hooks.json"
+    resolved.parent.mkdir()
+    resolved.write_bytes(b'{"hooks": {}}\n')
+    _make_file_symlink(logical, resolved)
+    link_target = os.readlink(logical)
+    env = os.environ.copy()
+    env.pop("ORCHESTRARIUM_NO_HYPOTHESIS_HOOK", None)
+    env["USERPROFILE"] = str(home)
+    env["HOME"] = str(home)
+    env["CODEX_BIN"] = str(ROOT / "tests/fixtures/fake_codex_hooks_host.py")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts/install-codex.py"),
+            "--global",
+            "--force",
+        ],
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=240,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert logical.is_symlink()
+    assert os.readlink(logical) == link_target
+    assert json.loads(resolved.read_text(encoding="utf-8"))["hooks"]
+    inventory = resolved.parent / "codex-hook-inventory.json"
+    assert inventory.is_file()
+    assert not (logical.parent / inventory.name).exists()
+
+
+def test_global_codex_install_resolves_hooks_referent_through_junction(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    logical = home / ".codex" / "hooks.json"
+    real_root = tmp_path / "real-env"
+    resolved = real_root / "Agents" / ".codex" / "hooks.json"
+    resolved.parent.mkdir(parents=True)
+    resolved.write_bytes(b'{"hooks": {}}\n')
+    junction = tmp_path / "env"
+    _make_directory_junction(junction, real_root)
+    _make_file_symlink(
+        logical,
+        junction / "Agents" / ".codex" / "hooks.json",
+    )
+    file_link_target = os.readlink(logical)
+    env = os.environ.copy()
+    env.pop("ORCHESTRARIUM_NO_HYPOTHESIS_HOOK", None)
+    env["USERPROFILE"] = str(home)
+    env["HOME"] = str(home)
+    env["CODEX_BIN"] = str(ROOT / "tests/fixtures/fake_codex_hooks_host.py")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts/install-codex.py"),
+            "--global",
+            "--force",
+        ],
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=240,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert logical.is_symlink()
+    assert os.readlink(logical) == file_link_target
+    assert os.path.isjunction(junction)
+    inventory = resolved.parent / "codex-hook-inventory.json"
+    assert inventory.is_file()
+    assert not (logical.parent / inventory.name).exists()
+
+
 def test_transaction_rejects_symlink_cycle_before_mutation(tmp_path: Path) -> None:
     first = tmp_path / "first.json"
     second = tmp_path / "second.json"
@@ -470,8 +868,11 @@ def test_registration_symlink_referent_restored_after_reclaim_failure(
         output = result.stdout + result.stderr
 
         assert result.returncode != 0, output
-        assert "abort" in output.casefold(), output
-        assert "reclaim" in output.casefold(), output
+        if case.provider == "codex":
+            assert "hook transaction checkpoint failed at reclaim" in output, output
+        else:
+            assert "abort" in output.casefold(), output
+            assert "reclaim" in output.casefold(), output
         assert registration.is_symlink()
         assert os.readlink(registration) == link_target
         assert external.read_bytes() == b'{"hooks": {}}\n'
@@ -722,55 +1123,104 @@ def test_transaction_abort_rejects_junction_escape() -> None:
     assert "TEST-ABORT:" not in output
 
 
-def test_transaction_abort_policy_has_one_structural_owner() -> None:
+def test_transaction_abort_policy_contract_accepts_current_source() -> None:
+    AbortPolicyOwnershipContract(_abort_policy_sources()).assert_valid()
+
+
+def test_transaction_abort_policy_contract_rejects_archived_constructed_owner() -> None:
+    assert "AbortPolicyOwnershipContract" in globals(), "ABORT-PROOF-MISSING"
     helper_source = HELPER_PATH.read_text(encoding="utf-8")
-    assert _policy_owner_count(helper_source) == 1
-    for path in (
-        ROOT / "scripts/production_installer.py",
-        ROOT / "scripts/install-codex.py",
-        ROOT / "scripts/install-claude.py",
-    ):
-        assert _policy_owner_count(path.read_text(encoding="utf-8")) == 0
+    mutant = helper_source + """
+
+def duplicate_abort_owner():
+    ambient = os.environ
+    key = "ORCHESTRARIUM_TEST_" + "ABORT_HOOK_TRANSACTION_AFTER"
+    stages = tuple(("sync", "register", "verify", "reclaim"))
+    return ambient.get(key), stages
+"""
+    sources = _abort_policy_sources()
+    sources[HELPER_PATH] = mutant
+    errors = AbortPolicyOwnershipContract(sources).errors()
+    assert any(error.startswith("ABORT-OWNER-ENV:") for error in errors), errors
+    assert any(error.startswith("ABORT-OWNER-KEY:") for error in errors), errors
+    assert any(error.startswith("ABORT-OWNER-STAGES:") for error in errors), errors
+
+
+def test_transaction_abort_all_global_stages_preserve_state(tmp_path: Path) -> None:
+    assert "_run_fake_global_abort_case" in globals(), "ABORT-GLOBAL-MATRIX-MISSING"
+    observed = {
+        (case.provider, stage)
+        for case in CASES
+        for stage in hook_installer.TEST_TRANSACTION_STAGES
+        if _run_fake_global_abort_case(case, stage, tmp_path)
+    }
+    assert observed == {
+        (provider, stage)
+        for provider in ("codex", "claude")
+        for stage in ("sync", "register", "verify", "reclaim")
+    }
 
 
 def test_transaction_abort_semantic_oracle_rejects_constructed_policy_owners() -> None:
-    helper_source = HELPER_PATH.read_text(encoding="utf-8")
-    planted = helper_source + "\nclass TestAbortPolicy:\n    pass\n"
-    assert _policy_owner_count(planted) == 2
+    sources = _abort_policy_sources()
+    sources[HELPER_PATH] += "\nclass TestAbortPolicy:\n    pass\n"
+    errors = AbortPolicyOwnershipContract(sources).errors()
+    assert any(error.startswith("ABORT-OWNER-CLASS:") for error in errors), errors
 
 
-def test_transaction_abort_policy_owner_guard_rejects_installer_environment_reads() -> None:
-    sources = {
-        path: path.read_text(encoding="utf-8")
-        for path in (
-            ROOT / "scripts/production_installer.py",
-            ROOT / "scripts/install-codex.py",
-            ROOT / "scripts/install-claude.py",
-        )
-    }
-    _assert_no_abort_env_reads(sources)
+@pytest.mark.parametrize(
+    "suffix",
+    (
+        f'\nos.environ.get("{ABORT_ENV}")\n',
+        '\nos.getenv("ORCHESTRARIUM_TEST_" + "ABORT_HOOK_TRANSACTION_AFTER")\n',
+        '\nfrom os import environ\n',
+    ),
+    ids=("direct-get", "split-getenv", "import-environ"),
+)
+def test_transaction_abort_policy_contract_rejects_installer_environment_reads(
+    suffix: str,
+) -> None:
+    sources = _abort_policy_sources()
     planted_path = ROOT / "scripts/production_installer.py"
-    planted = dict(sources)
-    planted[planted_path] += f'\nos.environ.get("{ABORT_ENV}")\n'
-    with pytest.raises(AssertionError):
-        _assert_no_abort_env_reads(planted)
+    sources[planted_path] += suffix
+    errors = AbortPolicyOwnershipContract(sources).errors()
+    assert any(error.startswith("ABORT-OWNER-ENV:") for error in errors), errors
 
 
-def test_transaction_abort_policy_owner_guard_rejects_second_stage_enumeration() -> None:
-    sources = {
-        path: path.read_text(encoding="utf-8")
-        for path in (
-            ROOT / "scripts/production_installer.py",
-            ROOT / "scripts/install-codex.py",
-            ROOT / "scripts/install-claude.py",
-        )
-    }
-    _assert_no_second_stage_owner(sources)
+def test_transaction_abort_policy_contract_rejects_duplicate_allowed_environment_read() -> None:
+    sources = _abort_policy_sources()
+    source = sources[HELPER_PATH]
+    needle = "        source = os.environ if environ is None else environ\n"
+    assert source.count(needle) == 1
+    sources[HELPER_PATH] = source.replace(
+        needle,
+        needle + "        duplicate_ambient = os.environ\n",
+        1,
+    )
+    errors = AbortPolicyOwnershipContract(sources).errors()
+    assert any(
+        error.startswith("ABORT-OWNER-ENV-CARDINALITY:") for error in errors
+    ), errors
+
+
+@pytest.mark.parametrize(
+    "expression",
+    (
+        '("sync", "register", "verify", "reclaim")',
+        '["sync", "register", "verify", "reclaim"]',
+        '{"sync", "register", "verify", "reclaim"}',
+        'tuple(("sync", "register", "verify", "reclaim"))',
+    ),
+    ids=("tuple", "list", "set", "constructed-tuple"),
+)
+def test_transaction_abort_policy_contract_rejects_second_stage_enumeration(
+    expression: str,
+) -> None:
+    sources = _abort_policy_sources()
     planted_path = ROOT / "scripts/install-codex.py"
-    planted = dict(sources)
-    planted[planted_path] += '\nSTAGES = ("sync", "register", "verify", "reclaim")\n'
-    with pytest.raises(AssertionError):
-        _assert_no_second_stage_owner(planted)
+    sources[planted_path] += f"\nSTAGES = {expression}\n"
+    errors = AbortPolicyOwnershipContract(sources).errors()
+    assert any(error.startswith("ABORT-OWNER-STAGES:") for error in errors), errors
 
 
 def test_transaction_abort_surface_is_hidden_from_operator_and_publication_paths() -> None:
@@ -796,3 +1246,262 @@ def test_transaction_abort_surface_is_hidden_from_operator_and_publication_paths
         assert completed.returncode == 0, completed.stdout + completed.stderr
         assert ABORT_ENV not in completed.stdout
         assert "--test-transaction-" not in completed.stdout
+
+
+_VERIFY_FAILURE_IDS = (
+    "E_INSTALL_VERIFY_FILES_MISSING",
+    "E_INSTALL_VERIFY_RUNTIME_MISSING",
+    "E_INSTALL_VERIFY_HOOK_RUNTIME_MISSING",
+    "E_INSTALL_VERIFY_CONTROL_FILES_MISSING",
+)
+
+
+@pytest.mark.parametrize("stable_id", _VERIFY_FAILURE_IDS)
+def test_rollback_identity_failure_settles_independent_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    stable_id: str,
+) -> None:
+    """F6: one identity refusal cannot suppress disjoint cleanup or the cause."""
+
+    project = tmp_path / stable_id.lower()
+    project.mkdir()
+    hooks = project / ".codex" / "hooks.json"
+    inventory = project / ".codex" / "codex-hook-inventory.json"
+    hooks.parent.mkdir()
+    hooks_before = b'{"hooks": "before"}\n'
+    inventory_before = b'{"inventory": "before"}\n'
+    hooks.write_bytes(hooks_before)
+    inventory.write_bytes(inventory_before)
+    backup_paths: list[Path] = []
+    real_mkdtemp = tempfile.mkdtemp
+
+    def record_mkdtemp(suffix=None, prefix=None, dir=None):
+        path = Path(real_mkdtemp(suffix=suffix, prefix=prefix, dir=tmp_path))
+        backup_paths.append(path)
+        return str(path)
+
+    monkeypatch.setattr(production_installer.tempfile, "mkdtemp", record_mkdtemp)
+    failure_type = getattr(production_installer, "_InstallFailure", None)
+    original = (
+        failure_type(stable_id, "verify", "forced")
+        if isinstance(failure_type, type)
+        else RuntimeError(stable_id)
+    )
+    bad = project / ".agents" / "bad.txt"
+    good = project / ".agents" / "good.txt"
+
+    with pytest.raises(BaseException) as caught:
+        transaction = production_installer._InstallTransaction(
+            [hooks, inventory], enabled=True
+        )
+        with transaction:
+            owner = production_installer._CreateOnlyMutablePath(
+                project, transaction, dry_run=False
+            )
+            owner.create_file(Path(".agents/bad.txt"), b"created bad\n")
+            owner.create_file(Path(".agents/good.txt"), b"created good\n")
+            bad.unlink()
+            bad.write_bytes(b"replacement preserved\n")
+            hooks.write_bytes(b"mutated hooks\n")
+            inventory.write_bytes(b"mutated inventory\n")
+            raise original
+
+    aggregate = caught.value
+    assert getattr(aggregate, "stable_id", None) == "E_ROLLBACK_SETTLEMENT_FAILED"
+    assert getattr(aggregate, "cause", None) is original
+    assert hooks.read_bytes() == hooks_before
+    assert inventory.read_bytes() == inventory_before
+    assert bad.read_bytes() == b"replacement preserved\n"
+    assert not good.exists()
+    member_ids = [member.stable_id for member in aggregate.members]
+    assert member_ids
+    assert set(member_ids) == {"E_ROLLBACK_CREATED_IDENTITY_CHANGED"}
+    assert aggregate.recovery_path is None
+    assert backup_paths and all(not path.exists() for path in backup_paths)
+
+
+def test_rollback_restore_failure_retains_complete_backup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """F6: a failed snapshot restore retains one reported recovery set."""
+
+    target = tmp_path / "hooks.json"
+    target.write_bytes(b"before\n")
+    backup_paths: list[Path] = []
+    real_mkdtemp = tempfile.mkdtemp
+
+    def record_mkdtemp(suffix=None, prefix=None, dir=None):
+        path = Path(real_mkdtemp(suffix=suffix, prefix=prefix, dir=tmp_path))
+        backup_paths.append(path)
+        return str(path)
+
+    monkeypatch.setattr(production_installer.tempfile, "mkdtemp", record_mkdtemp)
+    failure_type = getattr(production_installer, "_InstallFailure", None)
+    original = (
+        failure_type("E_INSTALL_VERIFY_FILES_MISSING", "verify", "forced")
+        if isinstance(failure_type, type)
+        else RuntimeError("E_INSTALL_VERIFY_FILES_MISSING")
+    )
+    if hasattr(production_installer._InstallTransaction, "_restore_entry"):
+        monkeypatch.setattr(
+            production_installer._InstallTransaction,
+            "_restore_entry",
+            lambda _self, _entry: (_ for _ in ()).throw(OSError("restore denied")),
+        )
+    else:
+        monkeypatch.setattr(
+            production_installer._InstallTransaction,
+            "_restore",
+            lambda _self: (_ for _ in ()).throw(OSError("restore denied")),
+        )
+
+    recovery_path: Path | None = None
+    try:
+        with pytest.raises(BaseException) as caught:
+            transaction = production_installer._InstallTransaction(
+                [target], enabled=True
+            )
+            with transaction:
+                target.write_bytes(b"mutated\n")
+                raise original
+        aggregate = caught.value
+        assert getattr(aggregate, "stable_id", None) == "E_ROLLBACK_SETTLEMENT_FAILED"
+        assert getattr(aggregate, "cause", None) is original
+        assert [member.stable_id for member in aggregate.members] == [
+            "E_ROLLBACK_RESTORE_FAILED"
+        ]
+        recovery_path = aggregate.recovery_path
+        assert recovery_path is not None and recovery_path.is_dir()
+        assert recovery_path in backup_paths
+    finally:
+        if recovery_path is not None:
+            shutil.rmtree(recovery_path, ignore_errors=True)
+
+
+def test_install_transaction_excludes_dry_run_and_committed_success_from_rollback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """F6: disabled dry-run and committed success never enter rollback settlement."""
+
+    dry_target = tmp_path / "dry.txt"
+    dry_target.write_bytes(b"before\n")
+    with production_installer._InstallTransaction([dry_target], enabled=False):
+        dry_target.write_bytes(b"dry-run owner did not mutate this path\n")
+    assert dry_target.read_bytes() == b"dry-run owner did not mutate this path\n"
+
+    backup_paths: list[Path] = []
+    real_mkdtemp = tempfile.mkdtemp
+
+    def record_mkdtemp(suffix=None, prefix=None, dir=None):
+        path = Path(real_mkdtemp(suffix=suffix, prefix=prefix, dir=tmp_path))
+        backup_paths.append(path)
+        return str(path)
+
+    monkeypatch.setattr(production_installer.tempfile, "mkdtemp", record_mkdtemp)
+    committed = tmp_path / "committed.txt"
+    committed.write_bytes(b"before\n")
+    transaction = production_installer._InstallTransaction(
+        [committed], enabled=True
+    )
+    with transaction:
+        committed.write_bytes(b"committed\n")
+        transaction.commit()
+    assert committed.read_bytes() == b"committed\n"
+    assert backup_paths and all(not path.exists() for path in backup_paths)
+
+
+def test_hook_health_deadline_failure_rolls_back_before_transaction_settles(
+    tmp_path: Path,
+) -> None:
+    """A typed hook-health deadline restores the transaction's prior bytes."""
+
+    target = tmp_path / "hooks.json"
+    before = b'{"hooks":"before"}\n'
+    target.write_bytes(before)
+
+    with pytest.raises(production_installer._InstallFailure) as failure:
+        transaction = production_installer._InstallTransaction(
+            [target], enabled=True
+        )
+        with transaction:
+            target.write_bytes(b'{"hooks":"mutated"}\n')
+            raise production_installer._hook_health_failure(
+                "hook health child deadline exceeded"
+            )
+
+    assert failure.value.stable_id == "E_HOOK_HEALTH_FAILED"
+    assert failure.value.context == "health"
+    assert "deadline" in str(failure.value.cause)
+    assert target.read_bytes() == before
+
+
+@pytest.mark.parametrize("stable_id", _VERIFY_FAILURE_IDS)
+def test_every_precommit_verification_path_enters_rollback_with_typed_cause(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    stable_id: str,
+) -> None:
+    """F5/F6: no pre-commit validation branch returns from inside the transaction."""
+
+    project = tmp_path / stable_id.lower()
+    project.mkdir()
+    observed: list[BaseException | None] = []
+    original_exit = production_installer._InstallTransaction.__exit__
+
+    def observe_exit(self, exc_type, exc, traceback):
+        observed.append(exc)
+        return original_exit(self, exc_type, exc, traceback)
+
+    monkeypatch.setattr(
+        production_installer._InstallTransaction, "__exit__", observe_exit
+    )
+    if stable_id == "E_INSTALL_VERIFY_FILES_MISSING":
+        monkeypatch.setattr(
+            production_installer, "_verify_files", lambda *_args, **_kwargs: ["missing"]
+        )
+        monkeypatch.setattr(
+            production_installer, "_reclaim_retired", lambda *_args, **_kwargs: None
+        )
+    else:
+        def remove_validation_target(*_args, **_kwargs):
+            if stable_id == "E_INSTALL_VERIFY_RUNTIME_MISSING":
+                path = (
+                    project
+                    / ".agents"
+                    / "skills"
+                    / "lead"
+                    / "scripts"
+                    / "agent-run-ledger.py"
+                )
+            elif stable_id == "E_INSTALL_VERIFY_HOOK_RUNTIME_MISSING":
+                path = (
+                    project
+                    / ".agents"
+                    / "skills"
+                    / "lead"
+                    / "scripts"
+                    / "check-hook-health.py"
+                )
+            else:
+                path = project / "AGENTS.md"
+            path.unlink()
+
+        monkeypatch.setattr(
+            production_installer, "_reclaim_retired", remove_validation_target
+        )
+
+    result = production_installer.install(
+        "codex",
+        [
+            "--target",
+            str(project),
+            "--force",
+            "--allow-unsafe-target",
+            "--no-hypothesis-hook",
+        ],
+    )
+
+    assert result == 1
+    assert len(observed) == 1
+    assert getattr(observed[0], "stable_id", None) == stable_id

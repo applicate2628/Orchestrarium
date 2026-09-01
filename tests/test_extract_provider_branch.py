@@ -1,10 +1,12 @@
 """Unit tests for the provider-branch extractor's transform logic.
 
 These exercise the pure functions (no git, deterministic). The end-to-end transform
-is validated empirically (0 DROPPED files across all 4 provider branches); these
+is validated empirically for both production provider branches; these
 tests guard the inclusion/curation/skill-generation rules against regression.
 """
 import importlib.util
+import subprocess
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -34,10 +36,11 @@ def test_claude_includes_pack_paths():
         assert inc(p), p
 
 
-def test_claude_excludes_other_providers_merged_root_and_maintainer_only_files():
+def test_claude_excludes_other_provider_surfaces_merged_root_and_maintainer_only_files():
     for p in (
-        "src.codex/skills/lead/SKILL.md",
-        "src.gemini/agents/lead.md",
+        "src.codex/AGENTS.codex.md",
+        "src.codex/agents/default.toml",
+        "src.retired-provider/agents/lead.md",
         "references-codex/README.md",
         "AGENTS.md",
         "CLAUDE.md",
@@ -90,6 +93,53 @@ def test_codex_provider_scopes_correctly():
     assert not inc("src.claude/agents/lead.md", "codex")
     assert not inc("references-claude/README.md", "codex")
     assert inc("shared/AGENTS.shared.md", "codex")  # shared stays for every provider
+
+
+def test_removed_providers_are_not_selectable():
+    assert mod.PROVIDERS == ("claude", "codex")
+
+
+def test_standalone_claude_extract_supports_installer_dry_run(tmp_path: Path):
+    extracted = tmp_path / "claude-standalone"
+    extract = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts" / "extract-provider-branch.py"),
+            "--provider",
+            "claude",
+            "--source-ref",
+            "HEAD",
+            "--branch-ref",
+            "HEAD",
+            "--out",
+            str(extracted),
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert extract.returncode == 0, extract.stdout + extract.stderr
+
+    install = subprocess.run(
+        [
+            sys.executable,
+            str(extracted / "scripts" / "install-claude.py"),
+            "--target",
+            str(tmp_path / "target"),
+            "--allow-unsafe-target",
+            "--dry-run",
+            "--no-hypothesis-hook",
+        ],
+        cwd=extracted,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert install.returncode == 0, install.stdout + install.stderr
+    assert (extracted / "src.codex" / "skills" / "lead" / "SKILL.md").is_file()
+    assert (extracted / mod.CLAUDE_CANONICAL_ROLE_MANIFEST).is_file()
+    assert not (extracted / "src.codex" / "AGENTS.codex.md").exists()
 
 
 # --- skill generation (claude) ----------------------------------------------

@@ -10,6 +10,10 @@ Reference for routing, interaction types, periodic controls, and role aliases. R
 - Independent roles (e.g., `security-engineer` and `performance-engineer`) SHOULD be launched in parallel via multiple Agent tool calls in a single message.
 - Sequential dependencies (e.g., `architect` → `planner`) MUST wait for the previous agent to return its artifact before launching the next.
 
+## Workflow economy projection
+
+Apply the binding shared **Workflow economy (binding)** rule. This Claude projection adds no default review, consultant, or external-brigade fan-out unless evidence, explicit user/configuration intent, or a documented risk trigger admits it. Kimi may be selected explicitly only for read-only research/review with independent verification and nonauthorizing results; Grok remains disabled and non-executing in 1.x. Preserve every template-required security, performance, or geometry role and the human publication/leak-check gate.
+
 ## Template-based routing
 
 Team templates in `.claude/agents/team-templates/` define the team composition and execution chain for each task type.
@@ -58,7 +62,7 @@ Claude-line keeps one shared local config file at `.claude/.agents-mode.yaml`.
 - `mcpMode: auto` allows MCP use by judgment when appropriate; `force` makes relevant MCP use an explicit standing instruction.
 - `preferExternalWorker: true` prefers `$external-worker` for eligible worker-side slots.
 - `preferExternalReviewer: true` prefers `$external-reviewer` for eligible review and QA-side slots.
-- `externalProvider: auto` resolves by the active named production priority profile instead of a host-line default; shipped `auto` uses `codex | claude` only. Explicit `codex`, `claude`, `gemini`, or `qwen` may be selected when the route is eligible, but Gemini and Qwen stay explicit `WEAK MODEL / NOT RECOMMENDED` example-only paths.
+- `externalProvider: auto` resolves by the active named production priority profile instead of a host-line default; shipped `auto` uses the Codex/Claude pair only. Explicit user override may choose Kimi for a policy-admitted read-only research/review lane; the fixed Kimi transport remains independently verified and nonauthorizing. Grok remains unavailable and must not be launched or probed in 1.x.
 - The Claude-line canonical schema may include the shared `externalModelMode` and `externalCodexProfile`; `externalClaudeProfile` remains Codex-line only.
 - The team template JSON does not change; routing substitutions happen at execution time.
 - `Assigned role` in provenance names the internal role being replaced; it does not narrow the adapter to only one profession.
@@ -136,7 +140,7 @@ Periodic controls complement stage gates. Stage gates answer "may this item adva
 | Refactor debt scan | `$architecture-reviewer` | Milestone close | Admit bounded refactor item |
 | Closure and archive hygiene | `$knowledge-archivist` | Monthly / milestone close | Archive, reconcile physical roots, and regenerate `work-items/README.md` |
 | Board refresh | `$knowledge-archivist` | Every delivery wave (post-wave sync pass) | Refresh `work-items/README.md` against git and the tree |
-| Registry governance reconciliation | `$knowledge-archivist` | Accepted task-memory governance change, all-registry request, or milestone-wide cleanup | Run one complete structural plus semantic-currency matrix across every current registry; the orchestrator-upgrades-to-lessons check is one row, and placement-only success is not overall `PASS`; route non-consistent rows to semantic owners through `$lead` |
+| Registry governance reconciliation | `$knowledge-archivist` | Accepted task-memory governance change, all-registry request, or milestone-wide cleanup | Run one complete structural plus semantic-currency matrix across every current registry; placement-only success is not overall `PASS`; route non-consistent rows to semantic owners through `$lead` |
 | Governance alignment | `$knowledge-archivist` | Governance change | Propagate to all governance files in same commit |
 | Documentation sync | `$knowledge-archivist` | Skill, role, or template added/removed/renamed | Update README, INSTALL, install scripts per root CLAUDE.md checklists |
 | Batch-close consultant-check | `$lead` | Only when explicitly requested by lead or repo-local lane policy and `consultantMode` is enabled | Satisfy the requested consultant sweep or keep the batch open and escalate honestly |
@@ -218,15 +222,15 @@ When an upstream artifact is revised after downstream artifacts have already bee
 
 ## REVISE iteration cap
 
-Any REVISE loop (QA, reviewer, or other gate returning REVISE) is capped at **3 iterations** per stage:
+Use the shared spine's consecutive same-role/same-artifact `REVISE`-cycle cap. This binding does not own or restate its numeric value:
 
-1. **Iteration 1-3**: The implementer (or responsible role) addresses findings and re-submits. The gate re-evaluates.
-2. **After iteration 3**: If the gate still returns REVISE, escalate to the user with:
-   - Summary of all 3 iterations and what was attempted
+1. While the cap is not exhausted, the responsible role addresses findings and re-submits the same artifact. The gate re-evaluates.
+2. When the cap is exhausted without `PASS`, escalate to the user with:
+   - Summary of all attempts and what was tried
    - Remaining unresolved findings
    - Recommendation: fix approach, redesign, or defer
 3. The user decides: continue fixing, re-plan, or accept with known issues.
-4. The iteration count is tracked in `status.md` under the REVISE loop section.
+4. Track consecutive cycles by role and artifact in `status.md` under the REVISE loop section.
 
 ## Parallel execution protocol
 

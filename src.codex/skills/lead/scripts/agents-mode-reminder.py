@@ -13,12 +13,13 @@ delegationMode is force or auto; SILENT on manual and on the no-file/
 unresolved state (fail-safe). The silence is load-bearing -- the block
 appears only when delegation is operative.
 
-SELF-CONTAINED first-match read of the documented read-order (the full
-resolver, scripts/resolve-agents-mode.py, is NOT shipped to install targets;
-force/auto are always file-explicit, and no file anywhere means the pack is
-not installed here / the config was removed, so this does NOT inject a
-standing directive into an arbitrary directory -- the defaults/normalizer
-layers stay out of scope on purpose):
+SELF-CONTAINED first-match read of the documented read-order. The full resolver,
+``resolve-agents-mode.py``, is shipped beside this hook for explicit complete
+configuration resolution, but SessionStart deliberately does not import or
+execute it: this narrow hook must remain fail-open, avoid normalization/default
+side effects, and surface only a file-explicit delegation posture. No file
+anywhere means the pack is not installed here or the config was removed, so the
+hook does NOT inject a standing directive into an arbitrary directory:
   ./.agents/.agents-mode.yaml -> ./.agents/.agents-mode ->
   ~/.codex/.agents-mode.yaml -> ~/.codex/.agents-mode -> ~/.agents-mode.yaml
   First file DEFINING delegationMode wins; none -> unresolved -> silent.

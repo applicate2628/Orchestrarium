@@ -45,7 +45,7 @@ Exactly five roles can be adopted inline instead of dispatched — no fresh cont
 | `/agents-check-policies` | Audit codebase compliance with configured policies |
 | `/agents-validate` | Structural integrity check of the skill-pack |
 | `/agents-status` | Project dashboard: active chains, policies, pack summary; flags reserved `$product-manager` admissions |
-| `/agents-check-safety` | Scan staged files for secrets before commit |
+| `/agents-check-safety` | Run a manual staged or range diagnostic; push authorization uses the gate's own fresh canonical sibling scan |
 
 ### Decision tree
 
@@ -72,7 +72,7 @@ Show 3-4 natural language examples of how to invoke agents:
 - "build a new export feature for reports" → full-delivery
 - "$external-worker implement this approved phase through Codex CLI" → direct invocation
 - "$external-reviewer audit this change through Codex CLI" → direct invocation
-- "/agents-external-brigade run two external-reviewer lanes plus one explicit example-only Gemini visual worker lane" → direct invocation
+- "/agents-external-brigade run two external-reviewer lanes plus one explicit Kimi read-only nonauthorizing review lane with independent verification" → direct invocation
 - "$consultant what do you think about this approach?" → direct invocation
 
 ### Project policies

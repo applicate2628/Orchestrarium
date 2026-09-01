@@ -32,9 +32,21 @@ hook = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = hook
 SPEC.loader.exec_module(hook)
 
+FUNCTIONAL_TEST_BUDGET_SECONDS = 5.0
+
 
 def _init_git_repo(root: Path) -> None:
     subprocess.run(["git", "init", "-q", str(root)], check=True, capture_output=True)
+
+
+def _scan_functionally(scratch: Path, **kwargs):
+    """Exercise scan semantics without coupling to the production latency SLO."""
+
+    return hook._scan_valuables(
+        scratch,
+        time_budget_seconds=FUNCTIONAL_TEST_BUDGET_SECONDS,
+        **kwargs,
+    )
 
 
 def _make_valuable(path: str, age_days: float, size: int = 10) -> dict:
@@ -151,12 +163,16 @@ def test_directory_summary_is_capped_to_top_n_with_a_more_tail():
 
 def _run_main_with_envelope(monkeypatch, capsys, envelope: dict) -> tuple[int, str]:
     monkeypatch.setattr(hook, "read_stdin_utf8", lambda: json.dumps(envelope))
+    monkeypatch.setattr(
+        hook, "HOOK_TIME_BUDGET_SECONDS", FUNCTIONAL_TEST_BUDGET_SECONDS
+    )
     exit_code = hook.main()
     captured = capsys.readouterr()
     return exit_code, captured.out
 
 
 def test_main_is_silent_when_scratch_has_no_candidates(tmp_path: Path, monkeypatch, capsys):
+    _init_git_repo(tmp_path)
     (tmp_path / hook.SCRATCH_DIRNAME).mkdir()
 
     exit_code, out = _run_main_with_envelope(monkeypatch, capsys, {"cwd": str(tmp_path)})
@@ -207,7 +223,7 @@ def test_scan_git_uniqueness_predicate_matches_cleanup_engine_shape(tmp_path: Pa
     (scratch / "unique.md").write_text("genuinely unique content", encoding="utf-8")
     (scratch / "noise.log").write_text("unique but junk extension", encoding="utf-8")
 
-    result = hook._scan_valuables(scratch)
+    result = _scan_functionally(scratch)
 
     assert [item["path"] for item in result] == ["unique.md"]
 
@@ -225,7 +241,7 @@ def test_unambiguous_cache_directory_is_pruned_at_any_depth(tmp_path: Path, dirn
     nested.mkdir(parents=True)
     (nested / "compiled.pyc").write_text("cached bytecode", encoding="utf-8")
 
-    result = hook._scan_valuables(scratch)
+    result = _scan_functionally(scratch)
 
     assert result == []
 
@@ -238,7 +254,7 @@ def test_ambiguous_directory_name_nested_deeper_is_not_pruned(tmp_path: Path, di
     nested.mkdir(parents=True)
     (nested / "notes.md").write_text("hand-authored content", encoding="utf-8")
 
-    result = hook._scan_valuables(scratch)
+    result = _scan_functionally(scratch)
 
     assert [item["path"] for item in result] == [f"plans/{dirname}/notes.md"]
 
@@ -254,7 +270,7 @@ def test_scan_falls_back_to_age_gate_when_not_a_git_repository(tmp_path: Path, m
     ).timestamp()
     os.utime(old_path, (old_timestamp, old_timestamp))
 
-    result = hook._scan_valuables(scratch)
+    result = _scan_functionally(scratch)
 
     assert [item["path"] for item in result] == ["old.md"]
 
@@ -280,7 +296,7 @@ def test_junction_is_never_followed_or_flagged(tmp_path: Path):
     if result.returncode != 0 or not os.path.isjunction(junction):
         pytest.skip("junction creation is unavailable on this host")
 
-    scan_result = hook._scan_valuables(scratch)
+    scan_result = _scan_functionally(scratch)
 
     assert scan_result == []
     assert (outside / "target.md").exists()
@@ -301,8 +317,8 @@ def test_zero_mutation_of_working_tree_and_git_object_store(tmp_path: Path):
         return entries
 
     before = snapshot()
-    hook._scan_valuables(scratch)
-    hook._scan_valuables(scratch)
+    _scan_functionally(scratch)
+    _scan_functionally(scratch)
     after = snapshot()
 
     assert before == after
@@ -333,7 +349,7 @@ def test_git_check_ceiling_excludes_the_excess_and_discloses_it(tmp_path: Path):
         (scratch / f"file{i:04d}.md").write_text(f"unique content {i}", encoding="utf-8")
 
     report = hook.ScanReport()
-    result = hook._scan_valuables(scratch, report=report)
+    result = _scan_functionally(scratch, report=report)
 
     assert report.candidates_found == extra
     assert report.candidates_git_verified == hook.MAX_GIT_CHECK_FILES

@@ -39,6 +39,7 @@ description: "UX designer: define flows, states, and usability criteria."
 
 ## Working rules
 
+- For a dynamic UI transition, follow the [Causal UI Continuity contract](../contracts/ui-transition-continuity.md): author the cause and permission vector, task anchors, invalidation fallback, announcement, and applicable dimensions; ordinary exact or value refresh uses the closed default and needs no manual matrix.
 - Design for interaction clarity, task completion, and low ambiguity.
 - Make the expected states and transitions explicit, especially when failure or asynchronous behavior matters, and preserve named user input across every transition.
 - For each error state, state the user-facing message intent as **what happened + what the user can do next**; a bare `show error` is `REVISE`.
