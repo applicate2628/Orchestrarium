@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -121,11 +122,19 @@ class BaselinePinTests(unittest.TestCase):
         dispositions = json.loads(
             (BASELINE / "reviewed-dispositions.json").read_text()
         )
+        self.assertEqual(dispositions["schemaVersion"], 2)
+        self.assertEqual(
+            dispositions["reviewEnvelope"],
+            {
+                "kind": "manifest-only-child",
+                "path": "baseline/orchestrarium-v1/reviewed-dispositions.json",
+            },
+        )
         self.assertEqual(dispositions["scope"], "ORCHE-IMPL-000")
         self.assertEqual(dispositions["baselineRef"], EXPECTED_COMMIT)
         paths = [entry["path"] for entry in dispositions["entries"]]
         self.assertEqual(len(paths), len(set(paths)))
-        self.assertIn("baseline/orchestrarium-v1/reviewed-dispositions.json", paths)
+        self.assertNotIn("baseline/orchestrarium-v1/reviewed-dispositions.json", paths)
         self.assertIn("scripts/baseline/verify_stage0.py", paths)
         self.assertIn("tests/test_orche_capability_baseline.py", paths)
         for entry in dispositions["entries"]:
@@ -137,6 +146,7 @@ class BaselinePinTests(unittest.TestCase):
         tracked = set(git("ls-files").splitlines())
         self.assertNotIn(".tmp/test-noop", tracked)
 
+    @unittest.skipIf(os.name == "nt", "documented bootstrap is POSIX-only")
     @unittest.skipUnless(sys.platform.startswith("linux"), "Linux Stage 0 bootstrap")
     def test_bootstrap_rejects_invalid_review_ref_with_operational_exit_two(self) -> None:
         text = README.read_text(encoding="utf-8")

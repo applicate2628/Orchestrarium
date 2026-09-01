@@ -406,6 +406,7 @@ class ReviewRegressionTests(unittest.TestCase):
         self.assertIn('raw.get("mode")', capability)
         self.assertIn('raw.get("objectType")', capability)
 
+    @unittest.skipIf(os.name == "nt", "documented bootstrap is POSIX-only")
     @unittest.skipUnless(sys.platform.startswith("linux"), "Linux Stage 0 bootstrap")
     def test_documented_bootstrap_is_valid_bash_syntax(self) -> None:
         text = README.read_text(encoding="utf-8")
