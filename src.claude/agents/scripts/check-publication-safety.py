@@ -10,6 +10,7 @@ import hashlib
 import importlib.util
 import os
 import re
+import secrets
 import subprocess
 import sys
 import threading
@@ -1306,24 +1307,33 @@ def _destination_ref(destination: str) -> str:
     return destination if destination.startswith("refs/") else f"refs/heads/{destination}"
 
 
-_REMOTE_PROBE_NAME = "publication-safety-verified-push-destination"
+_REMOTE_PROBE_ALIAS_PREFIX = "publication-safety-probe://"
+_REMOTE_PROBE_NONCE_BYTES = 32
+_REMOTE_PROBE_NONCE_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 
-def _remote_probe_env(push_destination: str) -> dict[str, str]:
-    child_env = os.environ.copy()
-    for key in tuple(child_env):
-        if key == "GIT_CONFIG_COUNT" or re.fullmatch(
-            r"GIT_CONFIG_(?:KEY|VALUE)_\d+", key
-        ):
-            del child_env[key]
-    child_env.update({
-        "GIT_CONFIG_COUNT": "2",
-        "GIT_CONFIG_KEY_0": f"remote.{_REMOTE_PROBE_NAME}.url",
-        "GIT_CONFIG_VALUE_0": push_destination,
-        "GIT_CONFIG_KEY_1": f"url.{push_destination}.insteadOf",
-        "GIT_CONFIG_VALUE_1": push_destination,
-    })
-    return child_env
+def _remote_probe_binding(
+    push_destination: str,
+) -> tuple[str, dict[str, str]] | Refusal:
+    try:
+        nonce = secrets.token_hex(_REMOTE_PROBE_NONCE_BYTES)
+        if not isinstance(nonce, str) or not _REMOTE_PROBE_NONCE_PATTERN.fullmatch(nonce):
+            return _refusal("PS-MSG-RANGE", "remote-binding")
+        remote_alias = _REMOTE_PROBE_ALIAS_PREFIX + nonce
+        child_env = os.environ.copy()
+        for key in tuple(child_env):
+            if key == "GIT_CONFIG_COUNT" or re.fullmatch(
+                r"GIT_CONFIG_(?:KEY|VALUE)_\d+", key
+            ):
+                del child_env[key]
+        child_env.update({
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": f"url.{push_destination}.insteadOf",
+            "GIT_CONFIG_VALUE_0": remote_alias,
+        })
+    except Exception:
+        return _refusal("PS-MSG-RANGE", "remote-binding")
+    return remote_alias, child_env
 
 
 async def _unique_push_destination(
@@ -1362,10 +1372,13 @@ async def _remote_destination_oid(
     if len(encoded_ref) > _MAX_PATH_BYTES:
         return _refusal("PS-MSG-LIMIT", "destination-ref")
     line_cap = object_format.hex_length + 1 + len(encoded_ref)
-    child_env = _remote_probe_env(push_destination)
+    binding = _remote_probe_binding(push_destination)
+    if isinstance(binding, Refusal):
+        return binding
+    remote_alias, child_env = binding
     result = await _read_git_lines_bounded(
         _range_git_argv(
-            "ls-remote", "--refs", "--exit-code", _REMOTE_PROBE_NAME, destination_ref
+            "ls-remote", "--refs", "--exit-code", remote_alias, destination_ref
         ),
         byte_cap=line_cap + 1,
         line_cap=line_cap,
@@ -1462,13 +1475,17 @@ async def _remote_ref_tip_oids(
 ) -> tuple[RemoteRefTip, ...] | Refusal:
     base_line_cap = object_format.hex_length + 1 + _MAX_PATH_BYTES
     peeled_line_cap = base_line_cap + len(b"^{}")
+    binding = _remote_probe_binding(push_destination)
+    if isinstance(binding, Refusal):
+        return binding
+    remote_alias, child_env = binding
     result = await _read_git_lines_bounded(
-        _range_git_argv("ls-remote", _REMOTE_PROBE_NAME, "refs/*"),
+        _range_git_argv("ls-remote", remote_alias, "refs/*"),
         byte_cap=_MAX_REMOTE_REFS * (base_line_cap + peeled_line_cap + 2),
         line_cap=peeled_line_cap,
         deadline=deadline,
         accepted_codes=frozenset({0}),
-        env=_remote_probe_env(push_destination),
+        env=child_env,
     )
     if isinstance(result, Refusal):
         return result

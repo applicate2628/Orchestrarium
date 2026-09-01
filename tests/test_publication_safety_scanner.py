@@ -45,6 +45,7 @@ import hashlib
 import inspect
 import io
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -2536,38 +2537,61 @@ class TestPublicationSafetyScannerV3(unittest.TestCase):
             else:
                 self.fail("object-reader close left its sleeper child alive")
 
-    def test_range_remote_probe_keeps_pushurl_out_of_child_argv_and_diagnostics(self) -> None:
+    def test_range_remote_probes_use_fresh_aliases_and_hide_push_destination(self) -> None:
         module = _load_canonical_scanner("_scanner_v3_pushurl_transport")
         canary = _join("https://probe-user:", "credential-canary", "@example.invalid/repo.git")
-        captured: dict[str, object] = {}
+        captured: list[tuple[tuple[str, ...], dict[str, str]]] = []
 
         async def fake_reader(argv, **kwargs):
-            captured["argv"] = argv
-            captured["env"] = kwargs.get("env")
-            return 2, ()
+            captured.append((argv, kwargs["env"]))
+            if "--exit-code" in argv:
+                return 2, ()
+            return 0, ((b"1" * 40) + b"\trefs/heads/main",)
 
-        stderr = io.StringIO()
-        async def exercise_remote_probe():
-            return await module._remote_destination_oid(
+        async def exercise_remote_probes():
+            destination = await module._remote_destination_oid(
                 canary,
                 "main",
                 deadline=asyncio.get_running_loop().time() + 5.0,
                 object_format=module._SHA1_OBJECT_FORMAT,
             )
+            refs = await module._remote_ref_tip_oids(
+                canary,
+                deadline=asyncio.get_running_loop().time() + 5.0,
+                object_format=module._SHA1_OBJECT_FORMAT,
+            )
+            return destination, refs
 
-        with mock.patch.object(module, "_read_git_lines_bounded", side_effect=fake_reader):
+        stderr = io.StringIO()
+        with (
+            mock.patch.object(
+                module.secrets,
+                "token_hex",
+                side_effect=("a" * 64, "b" * 64),
+            ) as nonce,
+            mock.patch.object(module, "_read_git_lines_bounded", side_effect=fake_reader),
+        ):
             with contextlib.redirect_stderr(stderr):
-                outcome = asyncio.run(exercise_remote_probe())
+                destination, refs = asyncio.run(exercise_remote_probes())
 
-        self.assertIsNone(outcome)
-        argv_diagnostics = repr(captured.get("argv")) + stderr.getvalue()
-        self.assertNotIn(canary, argv_diagnostics)
-        child_env = captured.get("env")
-        self.assertIsInstance(child_env, dict)
-        self.assertIn(canary, child_env.values())
+        self.assertIsNone(destination)
+        self.assertEqual(len(refs), 1)
+        self.assertEqual(nonce.call_args_list, [mock.call(32), mock.call(32)])
+        self.assertEqual(len(captured), 2)
+        aliases: list[str] = []
+        for argv, child_env in captured:
+            alias = next(value for value in argv if value.startswith("publication-safety-probe://"))
+            aliases.append(alias)
+            self.assertRegex(alias, r"^publication-safety-probe://[0-9a-f]{64}$")
+            self.assertNotIn(canary, repr(argv) + stderr.getvalue())
+            self.assertEqual(child_env["GIT_CONFIG_COUNT"], "1")
+            self.assertEqual(child_env["GIT_CONFIG_KEY_0"], f"url.{canary}.insteadOf")
+            self.assertEqual(child_env["GIT_CONFIG_VALUE_0"], alias)
+            self.assertNotIn(canary, child_env.values())
+        self.assertNotEqual(aliases[0], aliases[1])
 
-    def test_range_remote_probe_pins_first_url_rewrite_across_config_scopes(self) -> None:
-        for rewrite_scope in ("local", "global"):
+    def test_range_remote_probe_fresh_alias_resists_rewrite_scopes(self) -> None:
+        for rewrite_scope in ("system", "global", "local"):
             with self.subTest(rewrite_scope=rewrite_scope), tempfile.TemporaryDirectory() as td:
                 root = Path(td)
                 repo = self._init_range_repo(root)
@@ -2577,27 +2601,31 @@ class TestPublicationSafetyScannerV3(unittest.TestCase):
                     [_git(), "init", "-q", "--bare", str(second_target)], check=True
                 )
 
-                synthetic_remote = "freeze-probe://repository"
+                synthetic_remote = f"freeze-probe-{rewrite_scope}://repository"
                 first_url = first_target.resolve().as_uri()
                 second_url = second_target.resolve().as_uri()
+                isolated_system = root / "system.gitconfig"
                 isolated_global = root / "global.gitconfig"
+                isolated_system.write_text("", encoding="utf-8")
                 isolated_global.write_text("", encoding="utf-8")
                 scanner_env = os.environ.copy()
                 scanner_env.update({
+                    "GIT_CONFIG_SYSTEM": str(isolated_system),
                     "GIT_CONFIG_GLOBAL": str(isolated_global),
-                    "GIT_CONFIG_NOSYSTEM": "1",
                 })
-                config_argv = (
-                    [_git(), "-C", str(repo), "config", "--local"]
-                    if rewrite_scope == "local"
-                    else [_git(), "config", "--file", str(isolated_global)]
-                )
+                scanner_env.pop("GIT_CONFIG_NOSYSTEM", None)
+                config_argv = {
+                    "system": [_git(), "config", "--file", str(isolated_system)],
+                    "global": [_git(), "config", "--file", str(isolated_global)],
+                    "local": [_git(), "-C", str(repo), "config", "--local"],
+                }[rewrite_scope]
                 for key, value in (
                     (f"url.{first_url}.insteadOf", synthetic_remote),
                     (f"url.{second_url}.insteadOf", first_url),
+                    (f"url.{second_url}.insteadOf", "publication-safety-probe://"),
                 ):
                     subprocess.run(
-                        [*config_argv, key, value],
+                        [*config_argv, "--add", key, value],
                         cwd=root,
                         check=True,
                         capture_output=True,
@@ -2643,6 +2671,29 @@ class TestPublicationSafetyScannerV3(unittest.TestCase):
                     "a direct URL remains subject to a chained insteadOf rewrite",
                 )
 
+                fresh_alias = "publication-safety-probe://" + ("c" * 64)
+                binding_env = scanner_env.copy()
+                for key in tuple(binding_env):
+                    if key == "GIT_CONFIG_COUNT" or re.fullmatch(
+                        r"GIT_CONFIG_(?:KEY|VALUE)_\d+", key
+                    ):
+                        del binding_env[key]
+                binding_env.update({
+                    "GIT_CONFIG_COUNT": "1",
+                    "GIT_CONFIG_KEY_0": f"url.{first_url}.insteadOf",
+                    "GIT_CONFIG_VALUE_0": fresh_alias,
+                })
+                one_pass_probe = subprocess.run(
+                    [_git(), "-C", str(repo), "ls-remote", "--refs", fresh_alias, "refs/heads/main"],
+                    env=binding_env,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    check=True,
+                )
+                seed = self._git_run(repo, "rev-parse", "HEAD~2").stdout.strip()
+                self.assertEqual(one_pass_probe.stdout.split("\t", 1)[0], seed)
+
                 proc = subprocess.run(
                     [sys.executable, str(CANONICAL_SCANNER), "--range", "origin", "main"],
                     cwd=repo,
@@ -2655,8 +2706,15 @@ class TestPublicationSafetyScannerV3(unittest.TestCase):
                 self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
                 self.assertIn("PS-FINDING-COMMIT-MESSAGE", proc.stderr)
                 self.assertNotIn("publication-safety: clean", proc.stdout + proc.stderr)
+                for hidden in (
+                    synthetic_remote,
+                    first_url,
+                    second_url,
+                    "publication-safety-probe://",
+                ):
+                    self.assertNotIn(hidden, proc.stdout + proc.stderr)
 
-    def test_range_remote_probe_self_map_preserves_git_config_visibility(self) -> None:
+    def test_range_remote_probe_binding_preserves_git_config_visibility(self) -> None:
         module = _load_canonical_scanner("_scanner_v3_remote_probe_config_visibility")
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -2681,19 +2739,18 @@ class TestPublicationSafetyScannerV3(unittest.TestCase):
                 "GIT_CONFIG_KEY_0": "discarded.synthetic",
                 "GIT_CONFIG_VALUE_0": "discarded",
             }
-            with mock.patch.dict(os.environ, ambient, clear=False):
-                child_env = module._remote_probe_env(destination)
+            with (
+                mock.patch.dict(os.environ, ambient, clear=False),
+                mock.patch.object(module.secrets, "token_hex", return_value="d" * 64),
+            ):
+                binding = module._remote_probe_binding(destination)
 
-            self.assertEqual(child_env["GIT_CONFIG_COUNT"], "2")
-            self.assertEqual(
-                child_env["GIT_CONFIG_KEY_0"],
-                f"remote.{module._REMOTE_PROBE_NAME}.url",
-            )
-            self.assertEqual(child_env["GIT_CONFIG_VALUE_0"], destination)
-            self.assertEqual(
-                child_env["GIT_CONFIG_KEY_1"], f"url.{destination}.insteadOf"
-            )
-            self.assertEqual(child_env["GIT_CONFIG_VALUE_1"], destination)
+            self.assertNotIsInstance(binding, module.Refusal)
+            alias, child_env = binding
+            self.assertEqual(alias, "publication-safety-probe://" + ("d" * 64))
+            self.assertEqual(child_env["GIT_CONFIG_COUNT"], "1")
+            self.assertEqual(child_env["GIT_CONFIG_KEY_0"], f"url.{destination}.insteadOf")
+            self.assertEqual(child_env["GIT_CONFIG_VALUE_0"], alias)
             self.assertNotIn("discarded.synthetic", child_env.values())
 
             for key, expected in (
@@ -2720,39 +2777,37 @@ class TestPublicationSafetyScannerV3(unittest.TestCase):
                 encoding="utf-8",
                 check=True,
             )
-            self.assertEqual(parsed_self_map.stdout.strip(), destination)
+            self.assertEqual(parsed_self_map.stdout.strip(), alias)
 
-    def test_range_remote_probe_does_not_apply_push_instead_of_to_fetch(self) -> None:
-        with tempfile.TemporaryDirectory() as td:
-            root = Path(td)
-            repo = self._init_range_repo(root)
-            first_url = (root / "origin.git").resolve().as_uri()
-            second_target = root / "push-only.git"
-            subprocess.run(
-                [_git(), "init", "-q", "--bare", str(second_target)], check=True
+    def test_range_remote_probe_rng_failure_refuses_before_git(self) -> None:
+        module = _load_canonical_scanner("_scanner_v3_remote_probe_rng_failure")
+        reader = mock.AsyncMock(side_effect=AssertionError("Git must not run"))
+
+        async def exercise_remote_probes():
+            destination = await module._remote_destination_oid(
+                "https://example.invalid/repository.git",
+                "main",
+                deadline=asyncio.get_running_loop().time() + 5.0,
+                object_format=module._SHA1_OBJECT_FORMAT,
             )
-            second_url = second_target.resolve().as_uri()
-            seed = self._git_run(repo, "rev-parse", "HEAD").stdout.strip()
-
-            probe = subprocess.run(
-                [
-                    _git(),
-                    "-C",
-                    str(repo),
-                    "-c",
-                    f"url.{second_url}.pushInsteadOf={first_url}",
-                    "ls-remote",
-                    "--refs",
-                    first_url,
-                    "refs/heads/main",
-                ],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                check=True,
+            refs = await module._remote_ref_tip_oids(
+                "https://example.invalid/repository.git",
+                deadline=asyncio.get_running_loop().time() + 5.0,
+                object_format=module._SHA1_OBJECT_FORMAT,
             )
+            return destination, refs
 
-            self.assertEqual(probe.stdout.split("\t", 1)[0], seed)
+        with (
+            mock.patch.object(module.secrets, "token_hex", side_effect=OSError("rng unavailable")),
+            mock.patch.object(module, "_read_git_lines_bounded", new=reader),
+        ):
+            outcomes = asyncio.run(exercise_remote_probes())
+
+        for outcome in outcomes:
+            self.assertIsInstance(outcome, module.Refusal)
+            self.assertEqual(outcome.failure_id, "PS-MSG-RANGE")
+            self.assertEqual(outcome.reason, "remote-binding")
+        reader.assert_not_awaited()
 
     def test_range_uses_unique_pushurl_not_fetch_url_for_destination_oid(self) -> None:
         for push_has_seed in (True, False):
