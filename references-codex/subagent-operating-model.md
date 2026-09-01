@@ -9,7 +9,7 @@ This file keeps only Codex-specific runtime and repository concretization for th
 ## Codex-specific runtime notes
 
 - Codex native subagent dispatch is available when the current host exposes it. Admit those native lanes through the shared rolling lane-ready-set contract; do not assume sequential-only internal execution, and do not infer a numeric concurrency cap from an earlier refusal or another runtime.
-- Codex native role TOMLs are fixed installed profiles with default effort floors. A per-launch model or effort override is effective only when the host explicitly supports it and returned runtime metadata confirms it; otherwise record the fixed profile/floor or the unavailable/deviated result.
+- Codex native role TOMLs declare the installed default profile; role policy owns every effort floor and corridor. Claim an override only when the host explicitly supports it and returned actual runtime metadata confirms the effective model and effort; otherwise record `unspecified by runtime`.
 - Consultant config lives in `.agents/.agents-mode.yaml`.
 - Codex may extend the shared `agents-mode` schema with `externalClaudeProfile` to select the Claude CLI execution profile (`sonnet-high`, `opus-xhigh` shipped default, `opus-max` max-depth escalation, or `fable-xhigh` current flagship-family best-effort tier) when `externalProvider` resolves to Claude.
 - `externalProvider: auto` resolves by lane type through the active named production priority profile rather than by Codex-line default. Shipped production `auto` uses `codex | claude` only. Explicit Kimi selection is limited to policy-admitted read-only work; Grok remains unavailable, and removed Gemini/Qwen scalar values fail closed with `E_EXTERNAL_PROVIDER_REMOVED`.

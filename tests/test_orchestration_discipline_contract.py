@@ -260,6 +260,7 @@ DYNAMIC_ADMISSION_OWNERS = (
     "src.claude/agents/contracts/operating-model.md",
     "src.codex/skills/lead/operating-model.md",
     "shared/references/subagent-operating-model.md",
+    "shared/references/ru/subagent-operating-model.md",
 )
 
 DYNAMIC_ADMISSION_CLAUSES = (
@@ -277,10 +278,61 @@ DYNAMIC_ADMISSION_CLAUSES = (
     "Integration-owner and shared integration-surface work is serialized.",
 )
 
-NATIVE_PROFILE_TRUTH = (
-    "Native role definitions supply fixed installed profiles and default effort floors; "
-    "a requested override changes effective execution only when the host explicitly "
-    "supports it and confirms it in returned runtime metadata."
+RUSSIAN_DYNAMIC_ADMISSION_CLAUSES = (
+    "Lane готова только когда её approved inputs и external prerequisites приняты",
+    "largest useful pairwise-compatible subset",
+    "priority, critical-path или unblocking value, mandatory risk coverage, marginal benefit, merge cost и pairwise resource isolation",
+    "`parallelMode: force` требует eligible refill; это не требование maximum fan-out",
+    "Если runtime показывает free capacity, считайте текущее значение authoritative.",
+    "запускайте по одному ranked candidate до явного capacity refusal от runtime; никогда не выводите и не кэшируйте numeric concurrency cap",
+    "Пересчитывайте admission после каждого запуска и каждого lane-settled event.",
+    "Completed, `BLOCKED`, cancelled и parked lanes освобождают capacity",
+    "пополняйте capacity в том же turn, если этому не мешают stop condition, human gate, integration conflict или неположительный marginal benefit",
+    "Waiting или long-running lane не должна head-of-line блокировать независимую ready work.",
+    "ожидающая external prerequisite, переводится в parked или closed с durable recovery point",
+    "Integration-owner и работа с shared integration surface выполняются последовательно.",
+)
+
+SHARED_MODEL_EFFORT_TRUTH = (
+    "Model and effort truth comes only from route-authoritative evidence; never infer "
+    "either value from a role name, provider name, or requested profile. When actual "
+    "runtime metadata is absent, record `unspecified by runtime`."
+)
+
+CODEX_MODEL_EFFORT_TRUTH = (
+    "Codex native role TOMLs declare the installed default profile; role policy owns "
+    "every effort floor and corridor. Claim an override only when the host explicitly "
+    "supports it and returned actual runtime metadata confirms the effective model and "
+    "effort; otherwise record `unspecified by runtime`."
+)
+
+CLAUDE_MODEL_EFFORT_TRUTH = (
+    "Claude internal Agent model and effort are host-selected; role definitions declare "
+    "no fixed model, effort, or floor. Unless returned actual runtime metadata proves "
+    "the effective values, record `unspecified by runtime`."
+)
+
+DYNAMIC_FORCE_PARITY = (
+    (
+        "force makes eligible-ready refill a standing instruction",
+        "`force` делает пополнение `eligible-ready` lanes постоянным указанием",
+    ),
+    (
+        "marginal benefit stays positive",
+        "`marginal benefit` положителен",
+    ),
+    (
+        "merge cost plus resource isolation permit another launch",
+        "`merge cost` вместе с `resource isolation` допускают ещё один запуск",
+    ),
+    (
+        "completed, `BLOCKED`, and parked lanes trigger refill",
+        "`completed`, `BLOCKED` и `parked` lanes запускают пополнение",
+    ),
+    (
+        "force never means always-max fan-out",
+        "`force` никогда не означает `always-max` fan-out",
+    ),
 )
 
 
@@ -316,7 +368,12 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
     def test_dynamic_lane_ready_admission_contract_is_cross_pack_and_canonical(self) -> None:
         for owner in DYNAMIC_ADMISSION_OWNERS:
             text = self._read(owner)
-            for clause in DYNAMIC_ADMISSION_CLAUSES:
+            clauses = (
+                RUSSIAN_DYNAMIC_ADMISSION_CLAUSES
+                if owner == "shared/references/ru/subagent-operating-model.md"
+                else DYNAMIC_ADMISSION_CLAUSES
+            )
+            for clause in clauses:
                 with self.subTest(owner=owner, clause=clause):
                     self.assertIn(clause, text)
 
@@ -339,17 +396,51 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
                 with self.subTest(owner=owner, residue=residue):
                     self.assertNotIn(residue, text)
 
-    def test_native_profile_and_effort_truth_is_pinned_across_operating_owners(self) -> None:
+    def test_model_and_effort_truth_is_provider_neutral_in_the_shared_owner(self) -> None:
+        shared = self._read("shared/references/subagent-operating-model.md")
+        self.assertIn(SHARED_MODEL_EFFORT_TRUTH, shared)
+        self.assertNotIn("Native role definitions supply fixed installed profiles", shared)
+
+    def test_codex_model_and_effort_truth_is_toml_and_policy_backed(self) -> None:
         owners = (
-            "src.claude/skills/lead/SKILL.md",
             "src.codex/skills/lead/SKILL.md",
-            "src.claude/agents/contracts/operating-model.md",
             "src.codex/skills/lead/operating-model.md",
-            "shared/references/subagent-operating-model.md",
+            "references-codex/subagent-operating-model.md",
         )
         for owner in owners:
             with self.subTest(owner=owner):
-                self.assertIn(NATIVE_PROFILE_TRUTH, self._read(owner))
+                self.assertIn(CODEX_MODEL_EFFORT_TRUTH, self._read(owner))
+
+    def test_claude_model_and_effort_truth_is_host_selected_without_role_inference(self) -> None:
+        owners = (
+            "src.claude/skills/lead/SKILL.md",
+            "src.claude/agents/contracts/operating-model.md",
+            "references-claude/subagent-operating-model.md",
+        )
+        stale = ("fixed installed profiles", "default effort floors")
+        for owner in owners:
+            text = self._read(owner)
+            with self.subTest(owner=owner):
+                self.assertIn(CLAUDE_MODEL_EFFORT_TRUTH, text)
+                for residue in stale:
+                    self.assertNotIn(residue, text)
+
+    def test_shared_english_and_russian_force_summaries_have_semantic_parity(self) -> None:
+        english = self._read("shared/references/subagent-operating-model.md")
+        russian = self._read("shared/references/ru/subagent-operating-model.md")
+        for english_clause, russian_clause in DYNAMIC_FORCE_PARITY:
+            with self.subTest(english=english_clause, russian=russian_clause):
+                self.assertIn(english_clause, english)
+                self.assertIn(russian_clause, russian)
+
+    def test_release_note_does_not_overclaim_native_execution_truth(self) -> None:
+        release_notes = self._read("RELEASE_NOTES.md")
+        self.assertNotIn(
+            "Native role profiles and effort floors are reported as fixed execution truth",
+            release_notes,
+        )
+        self.assertIn("route-authoritative evidence", release_notes)
+        self.assertIn("`unspecified by runtime`", release_notes)
 
     def test_handoff_requires_fresh_exact_tool_selection_on_both_packs(self) -> None:
         owners = (

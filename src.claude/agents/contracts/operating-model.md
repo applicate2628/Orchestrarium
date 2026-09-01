@@ -77,7 +77,7 @@ Claude-line keeps one shared local config file at `.claude/.agents-mode.yaml`.
 - Treat same-lane multi-opinion collection and general external fan-out as different mechanisms: `externalOpinionCounts` governs distinct opinions for one lane, while brigade-style fan-out covers multiple independent lanes or slices on top of the general `parallelMode` rule.
 - If native internal slot limits would otherwise block additional independent eligible lanes, prefer available external adapters instead of silently serializing or dropping them.
 - Once a provider or subagent run is launched, a later preference change to effort, model, or framing applies to the next dispatch. Do not stop and replace the in-flight run: spent reasoning is sunk and redispatch adds cost. Stop only when the run is orphaned, no longer needed, or its prompt is broken/wrong.
-- Resolve effort before launch from task complexity and the lane's mandated floor; do not reflexively escalate to `max`/`xhigh` where no floor requires it. Native role definitions supply fixed installed profiles and default effort floors; a requested override changes effective execution only when the host explicitly supports it and confirms it in returned runtime metadata. Otherwise record the fixed resolved profile/floor or an unavailable/deviated outcome instead of claiming an unobserved override.
+- Record route complexity before launch without inventing execution values. Claude internal Agent model and effort are host-selected; role definitions declare no fixed model, effort, or floor. Unless returned actual runtime metadata proves the effective values, record `unspecified by runtime`.
 
 ## Batch-close consultant check
 
