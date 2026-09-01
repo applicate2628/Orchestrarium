@@ -46,7 +46,7 @@ def test_public_process_launch_contract_is_windows_only() -> None:
         contract_subject = (
             "Generic POSIX launches"
             if path.name == "RELEASE_NOTES.md"
-            else "All POSIX process launches"
+            else "Generic `ProcessRunnerV1` requests on POSIX"
         )
         assert (
             f"{contract_subject} fail at request validation with "

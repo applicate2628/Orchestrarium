@@ -20,9 +20,7 @@ CONSUMERS = {
     },
     "tests/test_process_runner_cli.py": {},
     "tests/test_python_validator_runtime.py": {
-        "test_validator_process_adapter_preserves_exact_python_argv": (
-            "requires_windows_process_runner"
-        ),
+        "test_validator_process_adapter_preserves_exact_python_argv": None,
     },
     "tests/test_slice_a_detached_validation.py": {
         "test_slice_a_authorization_scope_polarity": "requires_windows_process_runner",

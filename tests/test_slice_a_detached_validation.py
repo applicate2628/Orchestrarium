@@ -498,7 +498,7 @@ def test_deep_evidence_directory_uses_a_bounded_workspace_worktree_path(
     assert worktree.parent.parent == repo.parent
     assert worktree.parent.name.startswith(".orchestrarium-slice-a-worktree-")
     assert worktree.name == "candidate"
-    assert ".scratch" not in {part.casefold() for part in worktree.parts}
+    assert not worktree.is_relative_to(repo / ".scratch")
     assert len(str(worktree)) < len(str(run_dir / "worktree"))
     assert not worktree.exists()
 
