@@ -34,6 +34,32 @@ def test_clean_requires_complete_review_thread_inventory() -> None:
         assert clause in body, f"missing fail-closed clean-oracle clause: {clause}"
 
 
+def test_clean_review_result_taxonomy_includes_semantic_issue_comments() -> None:
+    bodies = [path.read_text(encoding="utf-8") for path in SKILL_PATHS]
+
+    assert bodies[0] == bodies[1]
+    body = bodies[0]
+    required_contract = (
+        "substantive bot-authored current-head review-result",
+        "submitted-review or REST issue-comment surface",
+        "issue-comment review-result uses `IssueCommentOrder`",
+        "verified bot identity on that surface",
+        "explicit and unambiguous final no-findings meaning",
+        "reviewed-commit binding",
+        "full `headRefOid` or an unambiguous commit prefix",
+        "complete collections",
+        "no current finding comments",
+        "no unresolved current bot threads",
+        "Wording, emoji, and boilerplate may vary",
+        "must not use an exact body, signature, or phrase allowlist",
+        "summary-only issue comment remains nonauthorizing",
+    )
+    for clause in required_contract:
+        assert clause in body, f"missing flexible clean review-result clause: {clause}"
+
+    assert "Didn't find any major issues" not in body
+
+
 def test_retryable_terminal_failure_uses_the_exact_incident_predicate() -> None:
     bodies = [path.read_text(encoding="utf-8") for path in SKILL_PATHS]
 

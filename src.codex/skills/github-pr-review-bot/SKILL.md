@@ -20,8 +20,8 @@ Drive one GitHub-hosted Codex review loop to a terminal result on the current re
 - Verify reaction authors, not aggregate reaction counts.
 - Fetch every REST collection with `gh api --paginate --slurp`, merge all page arrays, and only then filter or sort. Page-local `--jq`, first-page results, or a failed/incomplete page are indeterminate.
 - Cursor-walk Graph Query Language (GraphQL) `reviewThreads` until `pageInfo.hasNextPage=false`; record the terminal cursor and unresolved current-head bot-thread IDs and count. If any page fails or is incomplete, classify the run as `indeterminate`.
-- Both summary comments and `gh pr view` review/comment fields are nonauthorizing for `clean`.
-- A `Completed` summary alone is never `clean`. Findings from the exact post-trigger review on the current head take precedence over summaries, reactions, and clean-review signals; classify `clean` only when complete collections show no such finding and the exact trigger has a bot-authored `+1` or a same-head bot review strictly after it.
+- A substantive bot-authored current-head review-result may arrive on the submitted-review or REST issue-comment surface. It qualifies for `clean` only with verified bot identity on that surface, explicit and unambiguous final no-findings meaning, and a reviewed-commit binding that matches the full `headRefOid` or an unambiguous commit prefix that uniquely resolves to that same hosted head. A REST issue-comment review-result uses `IssueCommentOrder` and must be ordered after the newest exact trigger. Wording, emoji, and boilerplate may vary; clean classification must not use an exact body, signature, or phrase allowlist. Exact-body allowlisting remains exclusive to the failure classifier below.
+- A summary-only issue comment remains nonauthorizing for `clean`; so do other summary comments and `gh pr view` review/comment fields. A `Completed` summary alone is never `clean`. Findings from the exact post-trigger review on the current head take precedence over summaries, reactions, and clean-review signals; classify `clean` only when complete collections show no current finding comments or unresolved current bot threads and the exact trigger has a bot-authored `+1` or a qualifying review-result above.
 
 ## State machine
 
@@ -32,8 +32,8 @@ Drive one GitHub-hosted Codex review loop to a terminal result on the current re
 | Exact-listed bot-authored terminal signature, bound to the current `headRefOid` and ordered after the newest exact trigger by `IssueCommentOrder` | failed | Record the bound terminal-failure fields below; this state is terminal and never `clean` or `in progress`. |
 | Bot `+1` on the newest exact trigger, head unchanged, no current finding comment, and no unresolved current bot thread | clean | Record bot PASS; continue any separate human/publication gates. |
 | Bot `eyes` on the newest exact trigger, with no later terminal evidence or current finding | in progress | Poll reviews, reactions, and current unresolved threads; do not retrigger. |
-| Current-head bot review strictly after the newest exact trigger, with no current finding comment and no unresolved current bot thread | clean | Record bot PASS; continue any separate human/publication gates. |
-| `Completed` summary without the required `+1` or same-head post-trigger review, incomplete collection, or no bot terminal output | indeterminate | Re-read authoritative state; do not invent a timeout or autonomous retrigger. |
+| Substantive bot-authored current-head review-result on the submitted-review surface strictly after the newest exact trigger, or on the REST issue-comment surface after it by `IssueCommentOrder`, with verified bot identity, matching reviewed commit, explicit final no-findings meaning, complete collections, no current finding comments, and no unresolved current bot threads | clean | Record bot PASS; continue any separate human/publication gates. |
+| Summary-only issue comment, `Completed` summary without the required `+1` or qualifying post-trigger review-result, incomplete collection, or no bot terminal output | indeterminate | Re-read authoritative state; do not invent a timeout or autonomous retrigger. |
 
 ## Terminal failure classifier
 
@@ -63,8 +63,8 @@ For every `failed` classification, record `headRefOid`, `triggerCommentId`, `tri
 
 Use `gh pr view <pr> --repo <owner>/<repo> --json headRefOid,state,isDraft,mergeable,updatedAt,url` first. Then query:
 
-- exact issue comments and reaction actors through `gh api repos/<owner>/<repo>/issues/<pr>/comments` and `.../issues/comments/<id>/reactions`;
-- submitted reviews through `gh api repos/<owner>/<repo>/pulls/<pr>/reviews`;
+- exact issue comments, including substantive review-result candidates, and reaction actors through `gh api repos/<owner>/<repo>/issues/<pr>/comments` and `.../issues/comments/<id>/reactions`;
+- submitted-review candidates through `gh api repos/<owner>/<repo>/pulls/<pr>/reviews`;
 - `reviewThreads { id isResolved isOutdated path line comments }` through the full GraphQL cursor walk.
 
 Anchor each poll on the latest hosted head and unfiltered latest bot state. Time windows are secondary only.
