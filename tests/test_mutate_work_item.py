@@ -4036,6 +4036,34 @@ def test_root_contract_topology_is_shared_by_audit_close_reopen_and_refresh(
     assert all((root / "work-items" / name / "receipt.json").is_file() for name in declared)
 
 
+def test_root_contract_has_one_shared_documentation_owner_and_pack_pointers(
+    tmp_path: Path,
+) -> None:
+    root = Path(__file__).resolve().parents[1]
+    shared = root / "shared" / "references" / "work-items-root-contract.md"
+    shared_text = shared.read_text(encoding="utf-8")
+    for token in (
+        "ProjectTopology",
+        '"version": 2',
+        "auxiliaryRoots",
+        "flat-json",
+        "MUST NOT be redeclared",
+        "non-reparse",
+        "audit, close, reopen",
+        "WI-CATEGORY-ROOT-CONTRACT-INVALID",
+    ):
+        assert token in shared_text
+
+    pointer = "work-items-root-contract.md"
+    for relative in (
+        "shared/references/README.md",
+        "docs/work-item-execution-tracking.md",
+        "references-codex/repository-task-memory.md",
+        "references-claude/repository-task-memory.md",
+    ):
+        assert pointer in (root / relative).read_text(encoding="utf-8")
+
+
 def test_root_contract_does_not_admit_undeclared_root(tmp_path: Path) -> None:
     module = load_module()
     root = tmp_path / "repo"

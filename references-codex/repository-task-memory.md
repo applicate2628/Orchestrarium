@@ -16,6 +16,10 @@ The immediate failure mode this policy addresses is simple: a lead can plan well
 
 `shared/references/` is the canonical home for stable repository-wide design methodology. `references-codex/` keeps Codex-specific reference material plus compatibility pointers. `docs/agents-mode-reference.md` is the shared operator reference when `.agents/.agents-mode.yaml` behavior matters. The configured task-memory directory, when used, is the home for item-specific execution memory.
 
+For optional project-owned `work-items/` auxiliary roots, the shared
+[`work-items root contract`](../shared/references/work-items-root-contract.md)
+is authoritative. This Codex addendum adds no alternate topology or schema.
+
 ## Mandatory artifact set
 
 For any non-trivial work routed through `$lead`, the item folder must contain these artifacts:
