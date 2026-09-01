@@ -6336,9 +6336,8 @@ def _launch_with_runner(
             "WARNING: Refusing automated Claude launch.\n"
             "Automated `claude -p` under a subscription is not permitted.\n"
             "Anthropic policy: https://code.claude.com/docs/en/legal-and-compliance\n\n"
-            "Use commercial authentication (ANTHROPIC_API_KEY, "
-            "ANTHROPIC_AUTH_TOKEN, Amazon Bedrock, or Google "
-            "Vertex AI), or explicitly set ORCHESTRARIUM_ALLOW_SUBSCRIPTION_CLAUDE=1.",
+            "Use commercial authentication with ANTHROPIC_API_KEY or "
+            "ANTHROPIC_AUTH_TOKEN.",
             file=sys.stderr,
         )
         return reserved_failure("E_EXTERNAL_PROVIDER_AUTH_REFUSED", code=3)

@@ -106,6 +106,22 @@ def test_subscription_only_fails_before_prompt_persistence(tmp_path: Path) -> No
     assert not (tmp_path / "artifacts").exists()
 
 
+def test_subscription_refusal_recommends_only_admitted_credentials(
+    tmp_path: Path,
+) -> None:
+    result = _run(tmp_path)
+
+    assert result.returncode == 3
+    assert "ANTHROPIC_API_KEY" in result.stderr
+    assert "ANTHROPIC_AUTH_TOKEN" in result.stderr
+    for rejected_mode in (
+        "Amazon Bedrock",
+        "Google Vertex AI",
+        "ORCHESTRARIUM_ALLOW_SUBSCRIPTION_CLAUDE",
+    ):
+        assert rejected_mode not in result.stderr
+
+
 @pytest.mark.parametrize(
     ("signal", "expected_returncode"),
     (
