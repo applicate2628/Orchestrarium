@@ -17,6 +17,7 @@ from tests.fixtures.codex_hook_fixture import (
 from tests.fixtures.provider_prompt_projection import (
     materialize_provider_prompt_runtime,
 )
+from tests.fixtures.runtime_capabilities import requires_windows_process_runner
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -198,6 +199,7 @@ def _run_transport(tmp_path: Path, err_line: str) -> dict:
     )
 
 
+@requires_windows_process_runner
 def test_real_captured_fatal_line_blocks_an_otherwise_passing_run(
     tmp_path: Path,
 ) -> None:
@@ -207,6 +209,7 @@ def test_real_captured_fatal_line_blocks_an_otherwise_passing_run(
     assert "err markers present" in terminal["notes"]
 
 
+@requires_windows_process_runner
 def test_control_clean_err_with_same_shape_run_settles_as_pass(
     tmp_path: Path,
 ) -> None:
