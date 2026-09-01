@@ -1,0 +1,164 @@
+        except OSError: pass
+        out_thread.join(timeout=evidence._PROCESS_OUTPUT_JOIN_SECONDS); evt_thread.join(timeout=evidence._PROCESS_OUTPUT_JOIN_SECONDS)
+        if out_thread.is_alive() or evt_thread.is_alive(): raise runtime.VerificationError("trusted Pytest output/event capture did not terminate")
+        if capture_state.get('error') is not None: raise runtime.VerificationError(f"cannot capture repository process output: {capture_state['error']}")
+        payload=bytes(captured)
+        if timed_out: payload += f"BLOCKED: command timed out after {timeout_seconds:g}s\n".encode(); return_code=124
+        if capture_state.get('overflow'): payload += f"BLOCKED: command output exceeded trusted capture limit of {evidence._PROCESS_OUTPUT_LIMIT_BYTES} bytes\n".encode()
+        evidence._write_parent_captured_log(log_path,payload); tools.verify_all(); evidence._verify_protected_digests(snapshot)
+        if capture_state.get('overflow'): raise runtime.VerificationError("repository process output exceeded the trusted capture limit")
+        if protocol.error is not None:
+            if isinstance(protocol.error,runtime.VerificationBlocked): raise protocol.error
+            raise runtime.VerificationError(f"trusted Pytest event processing failed: {protocol.error}") from protocol.error
+        if not timed_out and return_code in {0,1}: protocol.validate_complete()
+        return int(return_code), timed_out, protocol
+    finally:
+        for fd in (event_r,event_w,ack_r,ack_w):
+            try: os.close(fd)
+            except OSError: pass
+        evidence._LANE_LOCK.release()
+
+
+
+def _validate_shared_temporary_parent(path: Path, metadata) -> None:
+    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+        raise runtime.VerificationError(
+            f"private temporary parent must be a real directory: {path}"
+        )
+    if metadata.st_uid != 0:
+        raise runtime.VerificationError(
+            f"shared temporary parent must be owned by root: {path}"
+        )
+    if not metadata.st_mode & stat.S_ISVTX:
+        raise runtime.VerificationError(
+            f"shared temporary parent must have the sticky bit set: {path}"
+        )
+
+
+def _safe_private_temp_parent() -> Path:
+    return _validate_private_temp_parent(Path("/tmp"))
+
+
+def _install_full_suite_gates() -> None:
+    existing_names = {item.name for item in runtime.VALIDATORS}
+    required_names = {"pytest-full-suite", "unittest-full-suite"}
+    overlap = sorted(existing_names & required_names)
+    if overlap:
+        raise runtime.VerificationError(
+            f"duplicate Stage 0 full-suite validator names: {overlap}"
+        )
+    full_suite = (
+        runtime.ValidatorSpec(
+            "pytest-full-suite",
+            "python",
+            (
+                "-B",
+                "-m",
+                "pytest",
+                "-q",
+                "--tb=no",
+                "--disable-warnings",
+                "tests/",
+            ),
+            (
+                r"(?m)^(?!.*(?:failed|error|errors)).*\b"
+                r"(?:passed|skipped|xfailed|xpassed|deselected)\b.* in <VOLATILE>$"
+            ),
+            r"(?m)^.*\b(?:failed|error|errors)\b.* in <VOLATILE>$",
+            (
+                r"(?m)^(?:[.sfxXEF]+[ ]+\[[ 0-9]+%\]\n?)+",
+                r"\b\d+ (?=(?:passed|failed|errors?|skipped|xfailed|xpassed|deselected|warnings?)\b)",
+                r"\b\d+(?:\.\d+)?s\b",
+            ),
+        ),
+        runtime.ValidatorSpec(
+            "unittest-full-suite",
+            "python",
+            (
+                "-B",
+                "-m",
+                "unittest",
+                "discover",
+                "-q",
+                "-s",
+                "tests",
+                "-p",
+                "test_*.py",
+            ),
+            (
+                r"(?ms)^Ran <VOLATILE> tests? in <VOLATILE>\n\n"
+                r"OK(?: \((?:skipped|expected failures)=<VOLATILE>"
+                r"(?:, (?:skipped|expected failures)=<VOLATILE>)*\))?$"
+            ),
+            r"(?m)^FAILED \(.*\)$",
+            (
+                r"(?m)(?<=^Ran )[1-9]\d*(?= tests? in )",
+                r"(?<==)[1-9]\d*",
+                r"\b\d+(?:\.\d+)?s\b",
+            ),
+        ),
+    )
+    runtime.VALIDATORS = (*full_suite, *runtime.VALIDATORS)
+
+
+def _patch_claude_validator_marker() -> None:
+    patched = []
+    for spec in runtime.VALIDATORS:
+        if spec.name != "claude-pack":
+            patched.append(spec)
+            continue
+        patched.append(
+            runtime.ValidatorSpec(
+                spec.name,
+                spec.kind,
+                spec.arguments,
+                (
+                    r"(?m)^(?:  RESULT: PASS(?: with warnings)?|"
+                    r"VALIDATION PASSED(?: \(with warnings\))?)$"
+                ),
+                r"(?m)^(?:  RESULT: FAIL|VALIDATION FAILED)$",
+                spec.volatile_patterns,
+            )
+        )
+    runtime.VALIDATORS = tuple(patched)
+
+
+def _load_review_envelope(
+    *, tools, env: Mapping[str, str], candidate_root: Path, reviewed_ref: str
+) -> dict[str, object]:
+    try:
+        payload = json.loads(
+            evidence._git_show_bytes(
+                tools, env, candidate_root, reviewed_ref, runtime.DISPOSITIONS_PATH
+            ).decode("utf-8")
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise runtime.VerificationError(
+            f"cannot parse reviewed disposition envelope: {exc}"
+        ) from exc
+    if not isinstance(payload, dict) or payload.get("schemaVersion") != 2:
+        raise runtime.VerificationError(
+            "reviewed dispositions must use schemaVersion 2"
+        )
+    if payload.get("scope") != "ORCHE-IMPL-000":
+        raise runtime.VerificationError(
+            "reviewed disposition envelope scope must be ORCHE-IMPL-000"
+        )
+    candidate_ref = runtime.exact_ref(
+        str(payload.get("candidateRef", "")), label="disposition candidate ref"
+    )
+    candidate_tree = runtime.exact_ref(
+        str(payload.get("candidateTree", "")), label="disposition candidate tree"
+    )
+    review_envelope = payload.get("reviewEnvelope")
+    if review_envelope != {
+        "kind": "manifest-only-child",
+        "path": runtime.DISPOSITIONS_PATH,
+    }:
+        raise runtime.VerificationError(
+            "reviewed disposition envelope declaration is invalid"
+        )
+    parents = str(
+        runtime._run_git(
+            tools,
+            env,
