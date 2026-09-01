@@ -4052,6 +4052,54 @@ def test_root_contract_does_not_admit_undeclared_root(tmp_path: Path) -> None:
         raise AssertionError("contract admitted an undeclared work-items root")
 
 
+def test_root_contract_rejects_lifecycle_and_read_model_root_collisions(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    reserved_roots = (
+        "active",
+        "archive",
+        "backlog",
+        "bugs",
+        "decisions",
+        "epics",
+        "legacy-ledger-historical-dispositions",
+        "lessons",
+        "roadmaps",
+    )
+
+    for name in reserved_roots:
+        root = tmp_path / name
+        write_root_contract(root, {name: {"kind": "flat-json"}})
+        try:
+            module._resolve_project_topology(root)
+        except module.LifecycleError as exc:
+            assert exc.failure_id == "WI-CATEGORY-ROOT-CONTRACT-INVALID", name
+            assert name in str(exc), name
+        else:
+            raise AssertionError(f"root contract admitted reserved root: {name}")
+
+
+def test_root_contract_collision_fails_before_candidate_mutation(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    write_root_contract(root, {"backlog": {"kind": "flat-json"}})
+
+    try:
+        module.create_candidate(
+            root,
+            "collision-must-not-mutate",
+            b"Status: candidate\nTask: reject collision\nNext action: none\n",
+        )
+    except module.LifecycleError as exc:
+        assert exc.failure_id == "WI-CATEGORY-ROOT-CONTRACT-INVALID"
+    else:
+        raise AssertionError("candidate mutation accepted a colliding root contract")
+
+    assert not (root / "work-items" / "backlog").exists()
+    assert not (root / "work-items" / "README.md").exists()
+
+
 def test_root_contract_rejects_malformed_and_unconfined_roots(tmp_path: Path) -> None:
     module = load_module()
     cases = {

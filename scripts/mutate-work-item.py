@@ -905,17 +905,52 @@ ROOT_CONTRACT_FAILURE = "WI-CATEGORY-ROOT-CONTRACT-INVALID"
 class ProjectTopology:
     work_items: Path
     auxiliary_roots: frozenset[str]
+    read_model_roots: frozenset[str] = frozenset()
 
     @property
-    def allowed_roots(self) -> frozenset[str]:
+    def canonical_roots(self) -> frozenset[str]:
         roots = {"backlog", "active", "archive"}
         roots.update(
             category.current_root
             for category in CATEGORIES.values()
             if category.current_kind == "flat"
         )
+        return frozenset(roots)
+
+    @property
+    def reserved_roots(self) -> frozenset[str]:
+        return self.canonical_roots | self.read_model_roots
+
+    @property
+    def allowed_roots(self) -> frozenset[str]:
+        roots = set(self.reserved_roots)
         roots.update(self.auxiliary_roots)
         return frozenset(roots)
+
+    def with_read_model_roots(self) -> ProjectTopology:
+        if self.read_model_roots:
+            return self
+        try:
+            validator = _load_agent_run_ledger().load_validator()
+            historical_storage = validator.historical_artifact_disposition_storage_identity()
+            historical_storage = validator.confine_legacy_projection_identifier(
+                historical_storage,
+                failure_id="WI-LEDGER-MIGRATION-MANIFEST-INVALID",
+            )
+        except (FileNotFoundError, ImportError, OSError):
+            # Standalone checker bundles intentionally omit the optional
+            # lifecycle writer and retain their legacy category set.
+            return self
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise LifecycleError(
+                "WI-LEDGER-MIGRATION-MANIFEST-INVALID",
+                "historical disposition storage identity is unavailable or invalid",
+            ) from exc
+        return ProjectTopology(
+            work_items=self.work_items,
+            auxiliary_roots=self.auxiliary_roots,
+            read_model_roots=frozenset({historical_storage}),
+        )
 
 
 def _resolve_project_topology(
@@ -959,10 +994,19 @@ def _resolve_project_topology(
         or not isinstance(contract.get("auxiliaryRoots"), dict)
     ):
         raise LifecycleError(ROOT_CONTRACT_FAILURE, "root contract schema is invalid")
+    topology = ProjectTopology(
+        work_items=work_items,
+        auxiliary_roots=frozenset(),
+    ).with_read_model_roots()
     auxiliary_roots: set[str] = set()
     for name, definition in contract["auxiliaryRoots"].items():
         if not isinstance(name, str) or SLUG_RE.fullmatch(name) is None:
             raise LifecycleError(ROOT_CONTRACT_FAILURE, "auxiliary root name is not a bare root")
+        if name in topology.reserved_roots:
+            raise LifecycleError(
+                ROOT_CONTRACT_FAILURE,
+                f"auxiliary root collides with a reserved root: {name}",
+            )
         if not isinstance(definition, dict) or definition != {"kind": "flat-json"}:
             raise LifecycleError(ROOT_CONTRACT_FAILURE, f"auxiliary root definition is invalid: {name}")
         auxiliary_path = work_items / name
@@ -975,8 +1019,9 @@ def _resolve_project_topology(
             raise LifecycleError(ROOT_CONTRACT_FAILURE, f"auxiliary root is not a directory: {name}")
         auxiliary_roots.add(name)
     return ProjectTopology(
-        work_items=work_items,
+        work_items=topology.work_items,
         auxiliary_roots=frozenset(auxiliary_roots),
+        read_model_roots=topology.read_model_roots,
     )
 
 
@@ -4346,26 +4391,9 @@ def reopen_item(
 
 
 def audit_categories(root: Path) -> tuple[str, ...]:
-    topology = _resolve_project_topology(root)
+    topology = _resolve_project_topology(root).with_read_model_roots()
     work_items = topology.work_items
-    try:
-        validator = _load_agent_run_ledger().load_validator()
-        historical_storage = validator.historical_artifact_disposition_storage_identity()
-        historical_storage = validator.confine_legacy_projection_identifier(
-            historical_storage, failure_id="WI-LEDGER-MIGRATION-MANIFEST-INVALID"
-        )
-    except (FileNotFoundError, ImportError, OSError):
-        # Standalone checker bundles intentionally omit the optional lifecycle
-        # writer; without its directory they retain their legacy category set.
-        historical_storage = None
-    except (AttributeError, TypeError, ValueError) as exc:
-        raise LifecycleError(
-            "WI-LEDGER-MIGRATION-MANIFEST-INVALID",
-            "historical disposition storage identity is unavailable or invalid",
-        ) from exc
     allowed_roots = set(topology.allowed_roots)
-    if historical_storage is not None:
-        allowed_roots.add(historical_storage)
     if work_items.is_dir():
         unknown_roots = sorted(
             path.name
