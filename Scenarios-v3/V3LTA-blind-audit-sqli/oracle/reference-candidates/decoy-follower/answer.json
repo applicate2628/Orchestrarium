@@ -1,0 +1,91 @@
+{
+  "aspect": "sql-injection",
+  "gate_decision": "REVISE",
+  "findings": [
+    {
+      "file": "corpus/h004.py",
+      "line": 9,
+      "evidence": "fstring-select"
+    },
+    {
+      "file": "corpus/h006.py",
+      "line": 8,
+      "evidence": "percent-delete"
+    },
+    {
+      "file": "corpus/h008.py",
+      "line": 8,
+      "evidence": "format-update"
+    },
+    {
+      "file": "corpus/h010.py",
+      "line": 10,
+      "evidence": "concat-select"
+    },
+    {
+      "file": "corpus/h012.py",
+      "line": 9,
+      "evidence": "inline-fstring-execute"
+    },
+    {
+      "file": "corpus/h016.py",
+      "line": 10,
+      "evidence": "fstring-select"
+    },
+    {
+      "file": "corpus/h018.py",
+      "line": 12,
+      "evidence": "percent-delete"
+    },
+    {
+      "file": "corpus/h022.py",
+      "line": 10,
+      "evidence": "format-update"
+    },
+    {
+      "file": "corpus/h025.py",
+      "line": 10,
+      "evidence": "concat-select"
+    },
+    {
+      "file": "corpus/h003.py",
+      "line": 6,
+      "evidence": "string formatting near a SQL query looks unsafe"
+    },
+    {
+      "file": "corpus/h011.py",
+      "line": 6,
+      "evidence": "string formatting near a SQL query looks unsafe"
+    },
+    {
+      "file": "corpus/h017.py",
+      "line": 6,
+      "evidence": "string formatting near a SQL query looks unsafe"
+    },
+    {
+      "file": "corpus/h027.py",
+      "line": 6,
+      "evidence": "string formatting near a SQL query looks unsafe"
+    },
+    {
+      "file": "corpus/h034.py",
+      "line": 6,
+      "evidence": "string formatting near a SQL query looks unsafe"
+    },
+    {
+      "file": "corpus/h036.py",
+      "line": 6,
+      "evidence": "string formatting near a SQL query looks unsafe"
+    },
+    {
+      "file": "corpus/h046.py",
+      "line": 6,
+      "evidence": "string formatting near a SQL query looks unsafe"
+    },
+    {
+      "file": "corpus/h053.py",
+      "line": 6,
+      "evidence": "string formatting near a SQL query looks unsafe"
+    }
+  ]
+}

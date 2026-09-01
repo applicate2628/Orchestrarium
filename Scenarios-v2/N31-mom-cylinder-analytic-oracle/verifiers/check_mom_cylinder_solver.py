@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import argparse
 import importlib.util
 import json
@@ -89,7 +90,8 @@ def check_shape(root: Path, contract: dict, errors: list[str]):
 
 
 def import_solver(root: Path):
-    solver_path = root / "candidate" / "workspace" / "mom_solver.py"
+    exec_root = Path(os.environ["BENCH_EXEC_ROOT"]).resolve() if os.environ.get("BENCH_EXEC_ROOT") else root
+    solver_path = exec_root / "candidate" / "workspace" / "mom_solver.py"
     spec = importlib.util.spec_from_file_location("n31_candidate_mom_solver", solver_path)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"Could not import solver from {solver_path}")

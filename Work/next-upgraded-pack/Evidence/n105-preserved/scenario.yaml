@@ -1,0 +1,21 @@
+id: N105
+surface_id: RF12-L12-W84
+pack_id: RF12-hard
+role_class: review
+artifact_type: staged baseline-current visual regression review decision
+modality_family: screenshot diff visual review, staged release gate, calibrated coordinates, false-positive restraint
+allowed_change_surface:
+  - candidate/review-decision.json
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+score_profile: "visual-review, screenshot-diff, exact-regression-tuples, release-gate, reentry-tests, calibrated-coordinate-window"
+overlay_flags:
+  - rf12-unresolved-primary
+  - visual-correctness
+  - screenshot-diff
+  - release-gate
+  - false-positive-control
+  - binary-separator-candidate

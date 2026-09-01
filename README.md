@@ -24,6 +24,7 @@ It preserves:
 | `Archive/2026-04-16-first-baseline/Results/short-results-x1-x5-2026-04-16.md` | narrowed `X1..X5` basis surface |
 | `Scenarios-v3/README.md` | active Scenarios-v3 discovery boundary |
 | `Work/scenarios-v3-base/README.md` | mutable Scenarios-v3 design and evidence workspace |
+| `Work/scenarios-v4-base/README.md` | mutable Scenarios-v4 calibration pack and L09 visible-identity policy details |
 | `Work/next-upgraded-pack/README.md` | active mutable workspace for the next upgraded pack |
 | `Work/next-upgraded-pack/Results-drafts/short-results-current-2026-04-18.md` | current live short result table |
 | `Work/next-upgraded-pack/Tooling/HOW-TO-USE-TESTS.md` | human guide for running the current tests |
@@ -37,7 +38,19 @@ It preserves:
 | `Scenarios-v3/` | active discovery root for admitted Scenarios-v3 roots |
 | `Work/` | mutable future benchmark-pack workspaces |
 | `Work/scenarios-v3-base/` | current Scenarios-v3 design, templates, evidence, and draft results |
+| `Work/scenarios-v4-base/` | mutable Scenarios-v4 deterministic scorer, calibration roots, and pilot fixtures |
 | `Work/next-upgraded-pack/` | current next-wave workspace |
+
+## Identity Principle
+
+Expected benchmark identity must use only visible or directly derivable vocabulary. A rubric must not
+target hidden oracle IDs, model-invented witness IDs, or any other key the candidate cannot derive
+from the visible task, schema, and sources.
+
+For source-card review fixtures, the source-card ID is an evidence pointer, not a dictated conclusion.
+The candidate still has to judge which cards are defects, which are safe, how evidence binds across
+cards, severity, action, and cross-diff reasoning. L09-specific schema details live in
+`Work/scenarios-v4-base/README.md`.
 
 ## Current archival rule
 
@@ -57,6 +70,7 @@ It preserves:
 | current frozen snapshot | `Archive/2026-04-16-first-baseline/` |
 | active v3 discovery | `Scenarios-v3/` has `1` admitted run root; `V3L02` produced `binary tie remains` |
 | active v3 workspace | `Work/scenarios-v3-base/` |
+| active v4 calibration workspace | `Work/scenarios-v4-base/` |
 | active mutable workspace | `Work/next-upgraded-pack/` |
 | current live short checkpoint | `Work/next-upgraded-pack/Results-drafts/short-results-current-2026-04-18.md` |
 | active mutable model-version note | `X3` now maps to `opus 4.7max` for future mutable work |
@@ -69,5 +83,6 @@ It preserves:
 ## Terms and Abbreviations
 
 - `ADR`: Architecture Decision Record.
+- `L09`: pre-pull-request review lane.
 - `RF12`: role-fit scorecard over twelve routing lines plus one owner/control line.
 - `V3L02`: first admitted Scenarios-v3 root for `L02 advisory.design-adr`.

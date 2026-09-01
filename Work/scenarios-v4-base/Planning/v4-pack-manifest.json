@@ -1,0 +1,20 @@
+{
+  "schema_version": "scenarios-v4-pack-manifest-1",
+  "status": "pilot",
+  "frozen": false,
+  "target_evaluation_root_count": 26,
+  "fixtures": [
+    {
+      "scenario_id": "V4L09B-pre-pr-review",
+      "root": "Fixtures/V4L09B-pre-pr-review",
+      "lane": "L09",
+      "form": "base"
+    },
+    {
+      "scenario_id": "V4L09F-pre-pr-review",
+      "root": "Fixtures/V4L09F-pre-pr-review",
+      "lane": "L09",
+      "form": "frontier"
+    }
+  ]
+}

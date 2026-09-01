@@ -1,0 +1,32 @@
+{
+  "variant": "l",
+  "scenario_id": "V3L05L",
+  "total_consumers": 36,
+  "completed_count": 22,
+  "missed": [
+    "quote_c20",
+    "quote_c21",
+    "quote_c22",
+    "quote_c23",
+    "quote_c24",
+    "quote_c25",
+    "quote_c26",
+    "quote_c27",
+    "quote_c28",
+    "quote_c29",
+    "quote_c30",
+    "quote_c31",
+    "quote_c32",
+    "quote_c33"
+  ],
+  "false_positives": [],
+  "breadth_fraction": 0.611111,
+  "points": 61,
+  "pass_fraction": 0.9,
+  "visible_tests_pass": true,
+  "visible_log": "",
+  "failure_ids": [
+    "breadth-below-threshold"
+  ],
+  "verdict": "FAIL"
+}

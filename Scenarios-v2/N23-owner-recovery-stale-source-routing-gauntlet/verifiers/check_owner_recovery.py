@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -14,6 +15,63 @@ def parse_args():
     parser.add_argument("--bundle-shape-only", action="store_true")
     parser.add_argument("--expect-start-state", action="store_true")
     return parser.parse_args()
+
+
+# --- Perturbation layer (R6/B4/L00) -----------------------------------------
+#
+# oracle/perturbation-contract.json defines input-conditioned variants of the
+# correct owner decision (non-transcribable: the correct answer depends on the
+# CURRENT content of the selector input files, not a memorized template). The
+# active perturbation is detected by hashing the selector input file(s) and
+# matching against the contract's pinned snapshots -- never an out-of-band
+# flag -- so a candidate cannot special-case on a marker id.
+
+def load_perturbation_contract(root: Path):
+    path = root / "oracle" / "perturbation-contract.json"
+    if not path.exists():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def sha256_of(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def detect_active_perturbation(root: Path, perturbation_contract: dict):
+    input_paths = perturbation_contract["selector"]["input_paths"]
+    current_hashes = {}
+    for rel in input_paths:
+        candidate_path = root / rel
+        if not candidate_path.exists():
+            return None
+        current_hashes[rel] = sha256_of(candidate_path)
+    for entry in perturbation_contract["perturbations"]:
+        if entry.get("input_snapshots", {}) == current_hashes:
+            return entry
+    return None
+
+
+def apply_perturbation_delta(contract: dict, perturbation_entry: dict | None) -> dict:
+    """Return a copy of `contract` with the active perturbation's answer_delta merged in.
+
+    Only list-valued keys named `add_<key>` / `remove_<key>` in answer_delta are
+    touched; every other contract field (sections, tables, citations,
+    interruption/stale ids) is left as-is -- perturbations change which FACTS
+    are correct, not the required packet structure.
+    """
+    effective = json.loads(json.dumps(contract))
+    if perturbation_entry is None:
+        return effective
+    delta = perturbation_entry.get("answer_delta", {})
+    for key in ("required_exact_phrases", "disallowed_markers"):
+        base_list = effective.get(key, [])
+        remove = set(delta.get(f"remove_{key}", []))
+        add = delta.get(f"add_{key}", [])
+        effective[key] = [item for item in base_list if item not in remove]
+        for item in add:
+            if item not in effective[key]:
+                effective[key].append(item)
+    return effective
 
 
 def load_json(path: Path):
@@ -130,7 +188,17 @@ def main():
     check_shape(root, contract, errors)
 
     if not args.bundle_shape_only:
-        failures = evaluate_packet(root, contract)
+        perturbation_contract = load_perturbation_contract(root)
+        active_perturbation = None
+        if perturbation_contract is not None:
+            active_perturbation = detect_active_perturbation(root, perturbation_contract)
+            if active_perturbation is None:
+                errors.append(
+                    "Unrecognized perturbation state: selector input files do not match any entry "
+                    "in oracle/perturbation-contract.json (baseline or perturbed)."
+                )
+        effective_contract = apply_perturbation_delta(contract, active_perturbation)
+        failures = evaluate_packet(root, effective_contract)
         failure_ids = sorted({failure["id"] for failure in failures})
         if args.expect_start_state:
             expected = sorted(contract["expected_start_state_failures"])

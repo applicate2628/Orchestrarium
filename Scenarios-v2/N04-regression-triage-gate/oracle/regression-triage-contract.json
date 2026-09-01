@@ -166,5 +166,57 @@
     "microbenchmark",
     "new architecture",
     "PR ready"
+  ],
+  "findings_table_section": "## Likely Regressions",
+  "findings_table_header": ["#", "File", "Line", "Category", "Severity", "Title", "Evidence"],
+  "allowed_categories": ["state-mutation", "output-count", "dedupe-key"],
+  "allowed_severities": ["blocking", "major", "minor"],
+  "exact_finding_count": 3,
+  "table_findings": [
+    {
+      "id": "F1",
+      "file": "inputs/review-target/src/status_snapshot_cli.py",
+      "acceptable_lines": [11, 12, 13],
+      "severity": "blocking",
+      "category_terms": ["state-mutation"],
+      "title_keywords": ["dry-run", "dry_run", "persist_run_marker", "mutate", "status-cache"],
+      "required_evidence_terms": ["persist_run_marker", "dry_run"]
+    },
+    {
+      "id": "F2",
+      "file": "inputs/review-target/src/report_formatter.py",
+      "acceptable_lines": [19, 20],
+      "severity": "major",
+      "category_terms": ["output-count"],
+      "title_keywords": ["only_failed", "footer", "total jobs", "visible"],
+      "required_evidence_terms": ["all_jobs", "only_failed"]
+    },
+    {
+      "id": "F3",
+      "file": "inputs/review-target/src/alert_digest.py",
+      "acceptable_lines": [5, 6],
+      "severity": "major",
+      "category_terms": ["dedupe-key"],
+      "title_keywords": ["digest", "duplicate", "generated_at_minute", "ops-summary"],
+      "required_evidence_terms": ["generated_at_minute", "build_digest_key"]
+    }
+  ],
+  "forbidden_findings": [
+    {
+      "title_keywords": ["sha1", "hashing helper", "security boundary"],
+      "reason": "sha1 in alert_digest.py is a local dedupe helper, not a security boundary issue"
+    },
+    {
+      "title_keywords": ["performance regression", "list processing", "microbenchmark"],
+      "reason": "the small list processing in report_formatter.py is not a separate performance regression; the real issue is the wrong count semantics"
+    },
+    {
+      "title_keywords": ["test_windows_timezone_stamp", "timezone flake", "windows flake"],
+      "reason": "test_windows_timezone_stamp is a known pre-existing Windows flake with no new packet-local evidence"
+    },
+    {
+      "title_keywords": ["line-length", "docs lint", "branch noise"],
+      "reason": "the older docs line-length warning is branch noise, not a regression caused by this packet"
+    }
   ]
 }

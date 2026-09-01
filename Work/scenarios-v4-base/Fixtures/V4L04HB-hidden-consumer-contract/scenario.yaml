@@ -1,0 +1,7 @@
+schema_version: scenarios-v4-ranked-1
+scenario_id: V4L04HB-hidden-consumer-contract
+lane: L04H
+form: base
+candidate_artifact: candidate/migration-answer.json
+allowed_write_paths:
+  - candidate/migration-answer.json

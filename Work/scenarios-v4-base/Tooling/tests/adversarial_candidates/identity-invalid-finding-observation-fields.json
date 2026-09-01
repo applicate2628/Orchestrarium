@@ -1,0 +1,24 @@
+{
+  "cases": [
+    {"case_id": "case one", "outcome": "PASS"}
+  ],
+  "claims": [
+    {"id": "caf\u00e9", "source_ids": ["SRC-1"]}
+  ],
+  "findings": {
+    "correctness": [
+      {"id": "F1", "symbol": "load", "severity": "high"},
+      {"id": "F2", "file": 42, "symbol": "save", "severity": "low"},
+      {"id": "F3", "file": "src/c.py", "symbol": " \u00a0 ", "severity": "medium"}
+    ]
+  },
+  "sentinel": {
+    "filler_1": "ok",
+    "filler_2": "ok",
+    "filler_3": "ok",
+    "filler_4": "ok",
+    "filler_5": "ok",
+    "filler_6": "ok",
+    "filler_7": "ok"
+  }
+}

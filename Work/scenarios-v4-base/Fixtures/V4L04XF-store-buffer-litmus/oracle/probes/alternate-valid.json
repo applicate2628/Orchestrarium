@@ -1,0 +1,182 @@
+{
+ "scenario_id": "V4L04XF-store-buffer-litmus",
+ "verdicts": {
+  "P01-O1": {
+   "value": "B-ONLY",
+   "unit": "Class"
+  },
+  "P01-O2": {
+   "value": "NEITHER",
+   "unit": "Class"
+  },
+  "P02-O1": {
+   "value": "NEITHER",
+   "unit": "Class"
+  },
+  "P02-O2": {
+   "value": "BOTH",
+   "unit": "Class"
+  },
+  "P03-O1": {
+   "value": "A-ONLY",
+   "unit": "Class"
+  },
+  "P03-O2": {
+   "value": "B-ONLY",
+   "unit": "Class"
+  },
+  "P04-O1": {
+   "value": "NEITHER",
+   "unit": "Class"
+  },
+  "P04-O2": {
+   "value": "A-ONLY",
+   "unit": "Class"
+  },
+  "P05-O1": {
+   "value": "NEITHER",
+   "unit": "Class"
+  },
+  "P05-O2": {
+   "value": "BOTH",
+   "unit": "Class"
+  },
+  "P06-O1": {
+   "value": "NEITHER",
+   "unit": "Class"
+  },
+  "P06-O2": {
+   "value": "BOTH",
+   "unit": "Class"
+  },
+  "P07-O1": {
+   "value": "B-ONLY",
+   "unit": "Class"
+  },
+  "P07-O2": {
+   "value": "NEITHER",
+   "unit": "Class"
+  },
+  "P08-O1": {
+   "value": "BOTH",
+   "unit": "Class"
+  },
+  "P08-O2": {
+   "value": "BOTH",
+   "unit": "Class"
+  },
+  "P09-O1": {
+   "value": "NEITHER",
+   "unit": "Class"
+  },
+  "P09-O2": {
+   "value": "BOTH",
+   "unit": "Class"
+  },
+  "P10-O1": {
+   "value": "B-ONLY",
+   "unit": "Class"
+  },
+  "P10-O2": {
+   "value": "NEITHER",
+   "unit": "Class"
+  },
+  "P11-O1": {
+   "value": "B-ONLY",
+   "unit": "Class"
+  },
+  "P11-O2": {
+   "value": "BOTH",
+   "unit": "Class"
+  },
+  "P12-O1": {
+   "value": "A-ONLY",
+   "unit": "Class"
+  },
+  "P12-O2": {
+   "value": "NEITHER",
+   "unit": "Class"
+  },
+  "P13-O1": {
+   "value": "NEITHER",
+   "unit": "Class"
+  },
+  "P13-O2": {
+   "value": "BOTH",
+   "unit": "Class"
+  },
+  "P14-O1": {
+   "value": "B-ONLY",
+   "unit": "Class"
+  },
+  "P14-O2": {
+   "value": "BOTH",
+   "unit": "Class"
+  },
+  "P15-O1": {
+   "value": "NEITHER",
+   "unit": "Class"
+  },
+  "P15-O2": {
+   "value": "BOTH",
+   "unit": "Class"
+  },
+  "P16-O1": {
+   "value": "B-ONLY",
+   "unit": "Class"
+  },
+  "P16-O2": {
+   "value": "NEITHER",
+   "unit": "Class"
+  },
+  "P17-O1": {
+   "value": "B-ONLY",
+   "unit": "Class"
+  },
+  "P17-O2": {
+   "value": "NEITHER",
+   "unit": "Class"
+  },
+  "P18-O1": {
+   "value": "B-ONLY",
+   "unit": "Class"
+  },
+  "P18-O2": {
+   "value": "BOTH",
+   "unit": "Class"
+  },
+  "P19-O1": {
+   "value": "NEITHER",
+   "unit": "Class"
+  },
+  "P19-O2": {
+   "value": "BOTH",
+   "unit": "Class"
+  },
+  "P20-O1": {
+   "value": "NEITHER",
+   "unit": "Class"
+  },
+  "P20-O2": {
+   "value": "B-ONLY",
+   "unit": "Class"
+  }
+ },
+ "divergent_program_ids": [
+  "p01",
+  "p03",
+  "p04",
+  "p07",
+  "p10",
+  "p11",
+  "p12",
+  "p14",
+  "p16",
+  "p17",
+  "p18",
+  "p20"
+ ],
+ "equivalence_gate": {
+  "machines_verdict": "DIVERGE"
+ }
+}

@@ -1,0 +1,484 @@
+{
+ "schema_version": "l04x-ground-truth-1",
+ "scenario_id": "V4L04XF-store-buffer-litmus",
+ "form": "frontier",
+ "derivation": "Every class below is computed by exhaustive breadth-first enumeration of the full configuration space of both machines (reproducer/machines.py); reachable AND unreachable verdicts are machine-checked, never hand-asserted. reproducer/generate.py regenerates every derived artifact byte-identically.",
+ "machines": {
+  "SB-A": "unbounded FIFO store buffer, store-to-load forwarding (newest own entry)",
+  "SB-B": "capacity-2 FIFO store buffer with forced oldest write-back inside the overflowing store action, no store-to-load forwarding"
+ },
+ "class_vocabulary": [
+  "both",
+  "a-only",
+  "b-only",
+  "neither"
+ ],
+ "points": {
+  "verdict": 2.2,
+  "set": 8,
+  "gate": 4
+ },
+ "class_counts": {
+  "b-only": 10,
+  "neither": 15,
+  "both": 12,
+  "a-only": 3
+ },
+ "divergent_program_ids": [
+  "P01",
+  "P03",
+  "P04",
+  "P07",
+  "P10",
+  "P11",
+  "P12",
+  "P14",
+  "P16",
+  "P17",
+  "P18",
+  "P20"
+ ],
+ "machines_verdict": "diverge",
+ "programs": {
+  "P01": {
+   "author_id": "F-N1",
+   "family": "own-read-export",
+   "threads": "thread T1:\n  ST x 1\n  ST y 2\n  LD r1 x\n  STR p r1\nthread T2:\n  LD r2 p\n  LD r3 x",
+   "divergent": true,
+   "observations": {
+    "P01-O1": {
+     "claims": "T1.r1 = 0 and T2.r2 = 0 and p = 0",
+     "class": "b-only",
+     "reachable_sb_a": false,
+     "reachable_sb_b": true,
+     "reachable_sc": false
+    },
+    "P01-O2": {
+     "claims": "T2.r2 = 1 and T2.r3 = 0",
+     "class": "neither",
+     "reachable_sb_a": false,
+     "reachable_sb_b": false,
+     "reachable_sc": false
+    }
+   }
+  },
+  "P02": {
+   "author_id": "F-N2",
+   "family": "own-read-export-forced",
+   "threads": "thread T1:\n  ST x 1\n  ST y 2\n  ST z 3\n  LD r1 x\n  STR p r1\nthread T2:\n  LD r2 p\n  LD r3 x",
+   "divergent": false,
+   "observations": {
+    "P02-O1": {
+     "claims": "T1.r1 = 0",
+     "class": "neither",
+     "reachable_sb_a": false,
+     "reachable_sb_b": false,
+     "reachable_sc": false
+    },
+    "P02-O2": {
+     "claims": "T2.r2 = 1 and T2.r3 = 1",
+     "class": "both",
+     "reachable_sb_a": true,
+     "reachable_sb_b": true,
+     "reachable_sc": true
+    }
+   }
+  },
+  "P03": {
+   "author_id": "F-N3",
+   "family": "n6-str-export",
+   "threads": "thread T1:\n  ST x 1\n  LD r1 x\n  STR e r1\n  LD r2 y\nthread T2:\n  ST y 2\n  ST x 2",
+   "divergent": true,
+   "observations": {
+    "P03-O1": {
+     "claims": "e = 1 and T1.r2 = 0 and x = 1",
+     "class": "a-only",
+     "reachable_sb_a": true,
+     "reachable_sb_b": false,
+     "reachable_sc": false
+    },
+    "P03-O2": {
+     "claims": "e = 0",
+     "class": "b-only",
+     "reachable_sb_a": false,
+     "reachable_sb_b": true,
+     "reachable_sc": false
+    }
+   }
+  },
+  "P04": {
+   "author_id": "F-N4",
+   "family": "n6-cas",
+   "threads": "thread T1:\n  ST x 1\n  LD r1 x\n  LD r2 y\nthread T2:\n  ST y 2\n  CAS r3 x 0 2",
+   "divergent": true,
+   "observations": {
+    "P04-O1": {
+     "claims": "T1.r1 = 1 and T1.r2 = 0 and T2.r3 = 1 and x = 2",
+     "class": "neither",
+     "reachable_sb_a": false,
+     "reachable_sb_b": false,
+     "reachable_sc": false
+    },
+    "P04-O2": {
+     "claims": "T1.r1 = 1 and T1.r2 = 0 and T2.r3 = 1 and x = 1",
+     "class": "a-only",
+     "reachable_sb_a": true,
+     "reachable_sb_b": false,
+     "reachable_sc": false
+    }
+   }
+  },
+  "P05": {
+   "author_id": "F-C1",
+   "family": "wrc",
+   "threads": "thread T1:\n  ST x 1\n  ST f 1\nthread T2:\n  LD r1 f\n  ST g 1\nthread T3:\n  LD r2 g\n  LD r3 x",
+   "divergent": false,
+   "observations": {
+    "P05-O1": {
+     "claims": "T2.r1 = 1 and T3.r2 = 1 and T3.r3 = 0",
+     "class": "neither",
+     "reachable_sb_a": false,
+     "reachable_sb_b": false,
+     "reachable_sc": false
+    },
+    "P05-O2": {
+     "claims": "T2.r1 = 0 and T3.r2 = 1 and T3.r3 = 1",
+     "class": "both",
+     "reachable_sb_a": true,
+     "reachable_sb_b": true,
+     "reachable_sc": true
+    }
+   }
+  },
+  "P06": {
+   "author_id": "F-C2",
+   "family": "cas-contention",
+   "threads": "thread T1:\n  CAS r1 x 0 1\nthread T2:\n  CAS r1 x 0 2",
+   "divergent": false,
+   "observations": {
+    "P06-O1": {
+     "claims": "T1.r1 = 1 and T2.r1 = 1",
+     "class": "neither",
+     "reachable_sb_a": false,
+     "reachable_sb_b": false,
+     "reachable_sc": false
+    },
+    "P06-O2": {
+     "claims": "T1.r1 = 1 and T2.r1 = 0 and x = 1",
+     "class": "both",
+     "reachable_sb_a": true,
+     "reachable_sb_b": true,
+     "reachable_sc": true
+    }
+   }
+  },
+  "P07": {
+   "author_id": "F-C3",
+   "family": "cas-interleave",
+   "threads": "thread T1:\n  ST x 1\n  ST y 1\n  LD r1 x\nthread T2:\n  CAS r2 x 0 5\n  LD r3 y",
+   "divergent": true,
+   "observations": {
+    "P07-O1": {
+     "claims": "T1.r1 = 5",
+     "class": "b-only",
+     "reachable_sb_a": false,
+     "reachable_sb_b": true,
+     "reachable_sc": false
+    },
+    "P07-O2": {
+     "claims": "T1.r1 = 5 and T2.r3 = 1 and x = 5",
+     "class": "neither",
+     "reachable_sb_a": false,
+     "reachable_sb_b": false,
+     "reachable_sc": false
+    }
+   }
+  },
+  "P08": {
+   "author_id": "F-C4",
+   "family": "sb-half-fence",
+   "threads": "thread T1:\n  ST x 1\n  FENCE\n  LD r1 y\nthread T2:\n  ST y 1\n  LD r1 x",
+   "divergent": false,
+   "observations": {
+    "P08-O1": {
+     "claims": "T1.r1 = 0 and T2.r1 = 0",
+     "class": "both",
+     "reachable_sb_a": true,
+     "reachable_sb_b": true,
+     "reachable_sc": false
+    },
+    "P08-O2": {
+     "claims": "T1.r1 = 1 and T2.r1 = 0",
+     "class": "both",
+     "reachable_sb_a": true,
+     "reachable_sb_b": true,
+     "reachable_sc": true
+    }
+   }
+  },
+  "P09": {
+   "author_id": "F-C5",
+   "family": "cas-sync-flush",
+   "threads": "thread T1:\n  ST x 1\n  ST y 2\n  ST z 3\n  CAS r1 w 0 1\nthread T2:\n  CAS r2 w 0 1\n  LD r3 x",
+   "divergent": false,
+   "observations": {
+    "P09-O1": {
+     "claims": "T1.r1 = 1 and T2.r2 = 0 and T2.r3 = 0",
+     "class": "neither",
+     "reachable_sb_a": false,
+     "reachable_sb_b": false,
+     "reachable_sc": false
+    },
+    "P09-O2": {
+     "claims": "T1.r1 = 0 and T2.r2 = 1 and T2.r3 = 0",
+     "class": "both",
+     "reachable_sb_a": true,
+     "reachable_sb_b": true,
+     "reachable_sc": true
+    }
+   }
+  },
+  "P10": {
+   "author_id": "F-C6",
+   "family": "same-var-own",
+   "threads": "thread T1:\n  ST x 1\n  ST x 2\n  LD r1 x\nthread T2:\n  LD r2 x\n  LD r3 x",
+   "divergent": true,
+   "observations": {
+    "P10-O1": {
+     "claims": "T1.r1 = 1",
+     "class": "b-only",
+     "reachable_sb_a": false,
+     "reachable_sb_b": true,
+     "reachable_sc": false
+    },
+    "P10-O2": {
+     "claims": "T2.r2 = 2 and T2.r3 = 1",
+     "class": "neither",
+     "reachable_sb_a": false,
+     "reachable_sb_b": false,
+     "reachable_sc": false
+    }
+   }
+  },
+  "P11": {
+   "author_id": "F-C7",
+   "family": "forced-flush-window",
+   "threads": "thread T1:\n  ST x 1\n  ST y 1\n  ST z 1\n  LD r1 z\n  LD r2 x\nthread T2:\n  LD r3 z\n  LD r4 x",
+   "divergent": true,
+   "observations": {
+    "P11-O1": {
+     "claims": "T1.r1 = 0 and T1.r2 = 1",
+     "class": "b-only",
+     "reachable_sb_a": false,
+     "reachable_sb_b": true,
+     "reachable_sc": false
+    },
+    "P11-O2": {
+     "claims": "T2.r3 = 0 and T2.r4 = 1",
+     "class": "both",
+     "reachable_sb_a": true,
+     "reachable_sb_b": true,
+     "reachable_sc": true
+    }
+   }
+  },
+  "P12": {
+   "author_id": "F-C8",
+   "family": "n6-fenced",
+   "threads": "thread T1:\n  ST x 1\n  LD r1 x\n  LD r2 y\nthread T2:\n  ST y 2\n  FENCE\n  ST x 2",
+   "divergent": true,
+   "observations": {
+    "P12-O1": {
+     "claims": "T1.r1 = 1 and T1.r2 = 0 and x = 1",
+     "class": "a-only",
+     "reachable_sb_a": true,
+     "reachable_sb_b": false,
+     "reachable_sc": false
+    },
+    "P12-O2": {
+     "claims": "T1.r1 = 2 and T1.r2 = 0",
+     "class": "neither",
+     "reachable_sb_a": false,
+     "reachable_sb_b": false,
+     "reachable_sc": false
+    }
+   }
+  },
+  "P13": {
+   "author_id": "F-C9",
+   "family": "mp-cas-flag",
+   "threads": "thread T1:\n  ST x 7\n  CAS r1 f 0 1\nthread T2:\n  CAS r2 f 1 2\n  LD r3 x",
+   "divergent": false,
+   "observations": {
+    "P13-O1": {
+     "claims": "T2.r2 = 1 and T2.r3 = 0",
+     "class": "neither",
+     "reachable_sb_a": false,
+     "reachable_sb_b": false,
+     "reachable_sc": false
+    },
+    "P13-O2": {
+     "claims": "T2.r2 = 1 and T2.r3 = 7 and f = 2",
+     "class": "both",
+     "reachable_sb_a": true,
+     "reachable_sb_b": true,
+     "reachable_sc": true
+    }
+   }
+  },
+  "P14": {
+   "author_id": "F-CA",
+   "family": "same-var-forced",
+   "threads": "thread T1:\n  ST x 1\n  ST x 2\n  ST x 3\n  LD r1 x",
+   "divergent": true,
+   "observations": {
+    "P14-O1": {
+     "claims": "T1.r1 = 1",
+     "class": "b-only",
+     "reachable_sb_a": false,
+     "reachable_sb_b": true,
+     "reachable_sc": false
+    },
+    "P14-O2": {
+     "claims": "T1.r1 = 3",
+     "class": "both",
+     "reachable_sb_a": true,
+     "reachable_sb_b": true,
+     "reachable_sc": true
+    }
+   }
+  },
+  "P15": {
+   "author_id": "F-CB",
+   "family": "iriw-ish-3t",
+   "threads": "thread T1:\n  ST x 1\n  ST a 1\nthread T2:\n  ST y 1\n  ST b 1\nthread T3:\n  LD r1 a\n  LD r2 y\n  LD r3 b\n  LD r4 x",
+   "divergent": false,
+   "observations": {
+    "P15-O1": {
+     "claims": "T3.r1 = 1 and T3.r2 = 0 and T3.r3 = 1 and T3.r4 = 0",
+     "class": "neither",
+     "reachable_sb_a": false,
+     "reachable_sb_b": false,
+     "reachable_sc": false
+    },
+    "P15-O2": {
+     "claims": "T3.r1 = 1 and T3.r2 = 0 and T3.r3 = 1 and T3.r4 = 1",
+     "class": "both",
+     "reachable_sb_a": true,
+     "reachable_sb_b": true,
+     "reachable_sc": true
+    }
+   }
+  },
+  "P16": {
+   "author_id": "F-CC",
+   "family": "own-read-chain",
+   "threads": "thread T1:\n  ST x 1\n  ST y 1\n  LD r1 x\n  STR z r1\nthread T2:\n  LD r2 z\n  LD r3 y",
+   "divergent": true,
+   "observations": {
+    "P16-O1": {
+     "claims": "T2.r2 = 0 and T2.r3 = 1 and z = 0",
+     "class": "b-only",
+     "reachable_sb_a": false,
+     "reachable_sb_b": true,
+     "reachable_sc": false
+    },
+    "P16-O2": {
+     "claims": "T2.r2 = 1 and T2.r3 = 0",
+     "class": "neither",
+     "reachable_sb_a": false,
+     "reachable_sb_b": false,
+     "reachable_sc": false
+    }
+   }
+  },
+  "P17": {
+   "author_id": "F-CD",
+   "family": "own-read-race",
+   "threads": "thread T1:\n  ST x 1\n  LD r1 x\n  FENCE\n  LD r2 x\nthread T2:\n  ST x 2",
+   "divergent": true,
+   "observations": {
+    "P17-O1": {
+     "claims": "T1.r1 = 0 and T1.r2 = 1 and x = 2",
+     "class": "b-only",
+     "reachable_sb_a": false,
+     "reachable_sb_b": true,
+     "reachable_sc": false
+    },
+    "P17-O2": {
+     "claims": "T1.r1 = 2 and T1.r2 = 2 and x = 1",
+     "class": "neither",
+     "reachable_sb_a": false,
+     "reachable_sb_b": false,
+     "reachable_sc": false
+    }
+   }
+  },
+  "P18": {
+   "author_id": "F-CE",
+   "family": "eviction-order",
+   "threads": "thread T1:\n  ST x 1\n  ST y 1\n  ST x 2\n  LD r1 y\nthread T2:\n  LD r2 x\n  LD r3 y",
+   "divergent": true,
+   "observations": {
+    "P18-O1": {
+     "claims": "T1.r1 = 0",
+     "class": "b-only",
+     "reachable_sb_a": false,
+     "reachable_sb_b": true,
+     "reachable_sc": false
+    },
+    "P18-O2": {
+     "claims": "T2.r2 = 0 and T2.r3 = 1",
+     "class": "both",
+     "reachable_sb_a": true,
+     "reachable_sb_b": true,
+     "reachable_sc": true
+    }
+   }
+  },
+  "P19": {
+   "author_id": "F-CG",
+   "family": "observer-fence-decoy",
+   "threads": "thread T1:\n  ST x 1\n  ST y 1\nthread T2:\n  LD r1 y\n  FENCE\n  LD r2 x",
+   "divergent": false,
+   "observations": {
+    "P19-O1": {
+     "claims": "T2.r1 = 1 and T2.r2 = 0",
+     "class": "neither",
+     "reachable_sb_a": false,
+     "reachable_sb_b": false,
+     "reachable_sc": false
+    },
+    "P19-O2": {
+     "claims": "T2.r1 = 0 and T2.r2 = 1",
+     "class": "both",
+     "reachable_sb_a": true,
+     "reachable_sb_b": true,
+     "reachable_sc": true
+    }
+   }
+  },
+  "P20": {
+   "author_id": "F-CJ",
+   "family": "same-var-race",
+   "threads": "thread T1:\n  ST x 1\n  ST x 2\nthread T2:\n  ST x 3\n  LD r1 x",
+   "divergent": true,
+   "observations": {
+    "P20-O1": {
+     "claims": "T2.r1 = 3 and x = 1",
+     "class": "neither",
+     "reachable_sb_a": false,
+     "reachable_sb_b": false,
+     "reachable_sc": false
+    },
+    "P20-O2": {
+     "claims": "T2.r1 = 1 and x = 3",
+     "class": "b-only",
+     "reachable_sb_a": false,
+     "reachable_sb_b": true,
+     "reachable_sc": false
+    }
+   }
+  }
+ }
+}

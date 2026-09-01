@@ -1,0 +1,15 @@
+{
+  "case_id": "F02-retry-depends-on-state",
+  "precondition": "F01-out-of-order-ack has cleared dirty state for pending revision 41",
+  "trace": [
+    {"step": 1, "event": "edit", "revision": 41, "dirty": true},
+    {"step": 2, "event": "stale_ack_applied", "ack_revision": 40, "dirty": false},
+    {"step": 3, "event": "save_failed", "failed_revision": 41},
+    {"step": 4, "event": "schedule_retry", "result": "skipped", "reason": "dirty false"}
+  ],
+  "invariant": {
+    "finding_is_real_only_after": "F01-out-of-order-ack",
+    "must_schedule_retry_for_failed_revision": 41,
+    "observed_retry_enqueued": false
+  }
+}

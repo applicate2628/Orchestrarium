@@ -1,0 +1,101 @@
+{
+  "required_top_level_entries": [
+    "README.md",
+    "scenario.yaml",
+    "discrimination.yaml",
+    "inputs",
+    "candidate",
+    "oracle",
+    "verifiers"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "V3L01C",
+    "surface_id": "V3L01C",
+    "pack_id": "V3P01",
+    "role_class": "planning",
+    "artifact_type": "delivery order memo plus order witness",
+    "modality_family": "dependency-ordering derivation",
+    "allowed_change_surface": [
+      "candidate/delivery-order.md",
+      "candidate/order-witness.json"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md"
+    ],
+    "score_profile": "owner, advisory, factual, design, planning",
+    "overlay_flags": [
+      "planner",
+      "hidden-derivation",
+      "order-witness"
+    ]
+  },
+  "required_bundle_paths": [
+    "README.md",
+    "scenario.yaml",
+    "discrimination.yaml",
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/workitems.json",
+    "inputs/constraints.md",
+    "candidate/README.md",
+    "candidate/delivery-order.md",
+    "candidate/order-witness.json",
+    "oracle/README.md",
+    "oracle/scoring-anchors.md",
+    "oracle/dependency-order-contract.json",
+    "oracle/reference/delivery-order.md",
+    "oracle/reference/order-witness.json",
+    "verifiers/README.md",
+    "verifiers/check_dependency_order.py"
+  ],
+  "tie_break_rule": "ascending slug order among ready items",
+  "derived_edges": [
+    {"item": "c-cache", "depends_on": "d-auth", "source": "constraint C1 - cache warms from the authenticated endpoint"}
+  ],
+  "required_sections": [
+    "## Delivery Order",
+    "## Derived Dependencies",
+    "## Critical Path And Readiness",
+    "## Gate Decision"
+  ],
+  "required_exact_phrases": [
+    "tie-break: ascending slug order among ready items",
+    "Derived dependency: c-cache depends on d-auth",
+    "the explicit Depends-on edges alone are not sufficient",
+    "critical path length: 5",
+    "first ready item: a-schema"
+  ],
+  "required_table_headers": [
+    "| Step | Item | Ready set |"
+  ],
+  "disallowed_markers": [
+    "c-cache can start before d-auth",
+    "only the explicit Depends-on edges matter",
+    "no derived dependencies"
+  ],
+  "expected_start_state_failures": [
+    "contains-disallowed-markers",
+    "missing-required-phrases",
+    "missing-required-sections",
+    "missing-required-tables",
+    "witness-critical-path-length",
+    "witness-missing-derived-edge",
+    "witness-phase-order",
+    "witness-tie-break-rule"
+  ]
+}

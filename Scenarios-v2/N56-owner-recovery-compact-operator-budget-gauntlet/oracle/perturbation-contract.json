@@ -1,0 +1,64 @@
+{
+  "schema": "perturbation-v1",
+  "bundle_id": "N56",
+  "purpose": "Non-transcribable owner-oracle layer. The active perturbation is read from the committed content of the selector input file(s), never from an out-of-band flag. A memorized/copied-template answer that is correct only for the baseline (unperturbed) packet must FAIL when a different perturbation is active, because the perturbed-correct decision is textually different from the baseline-correct decision.",
+  "selector": {
+    "input_paths": [
+      "inputs/interruption-log.md",
+      "inputs/source-excerpts.md"
+    ],
+    "detection": "sha256 of each selector input file's current bytes must match exactly one perturbation entry's input_snapshots map; no match is a hard verifier error (unrecognized/drifted inputs state)."
+  },
+  "perturbations": [
+    {
+      "id": "baseline",
+      "category": "none",
+      "description": "Unperturbed reference packet: both selector files are the content committed in this bundle (compact owner recovery X3 primary, staged X1 primary; I8 treats the operator budget as scoreable).",
+      "input_snapshots": {
+        "inputs/interruption-log.md": "4665e4a5137334494eac3a86bc34006076f816b85e824868447475fed7e4961b",
+        "inputs/source-excerpts.md": "dfd3a43ad997c2e01b9aee2fff552dc1d801a8bcaef90648d962f4bd65f83f83"
+      },
+      "answer_delta": {}
+    },
+    {
+      "id": "P1-execution-shape-split-retired",
+      "category": "source-freshness-flipped",
+      "description": "source-excerpts.md's line-114 fact is rewritten: a 2026-04-24 scorer-normalization pass retired the compact/staged execution-shape split, so compact and staged owner recovery both route X1 primary now. Under this perturbation the baseline 'Compact owner recovery: X3 primary' claim is stale.",
+      "input_snapshots": {
+        "inputs/interruption-log.md": "4665e4a5137334494eac3a86bc34006076f816b85e824868447475fed7e4961b",
+        "inputs/source-excerpts.md": "e988ba11911883db50770e34304c1eabbd8a40d48cd44edda5a9d5f1ef24d056"
+      },
+      "answer_delta": {
+        "add_required_exact_phrases": [
+          "Compact owner recovery: X1 primary (execution-shape split retired 2026-04-24)"
+        ],
+        "remove_required_exact_phrases": [
+          "Compact owner recovery: X3 primary"
+        ],
+        "add_disallowed_markers": [
+          "Compact owner recovery: X3 primary"
+        ]
+      }
+    },
+    {
+      "id": "P2-operator-budget-downgraded",
+      "category": "gate-verdict-inverted",
+      "description": "I8's row is rewritten so a 2026-04-25 policy memo downgraded the operator budget to diagnostic-only (non-scoreable) for N56 while the byte-budget tooling is recalibrated. Under this perturbation the baseline 'Visible operator budget: worker-output <= 40000 bytes' scoreable-gate claim is stale.",
+      "input_snapshots": {
+        "inputs/interruption-log.md": "2695a7ae79ce45cba42d9bdfff4b7304a874e01e10a0fc92644bf4e47a0f6528",
+        "inputs/source-excerpts.md": "dfd3a43ad997c2e01b9aee2fff552dc1d801a8bcaef90648d962f4bd65f83f83"
+      },
+      "answer_delta": {
+        "add_required_exact_phrases": [
+          "Visible operator budget: diagnostic-only pending recalibration (2026-04-25 policy memo)"
+        ],
+        "remove_required_exact_phrases": [
+          "Visible operator budget: worker-output <= 40000 bytes"
+        ],
+        "add_disallowed_markers": [
+          "Visible operator budget: worker-output <= 40000 bytes"
+        ]
+      }
+    }
+  ]
+}

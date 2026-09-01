@@ -1,0 +1,76 @@
+{
+  "family": "V3L05-stamina-migration",
+  "item": "F1",
+  "rf12_line": "L05",
+  "expected_winner": "stamina",
+  "expected_winner_registered": "2026-07-12",
+  "variants": {
+    "s": {
+      "consumers": 8,
+      "decoys": 4,
+      "seed": 5011
+    },
+    "m": {
+      "consumers": 18,
+      "decoys": 9,
+      "seed": 5012
+    },
+    "l": {
+      "consumers": 36,
+      "decoys": 18,
+      "seed": 5013
+    }
+  },
+  "pass_fraction": 0.9,
+  "threshold_basis": "task-intrinsic; registered before any target-model run; immutable",
+  "four_probe_results": {
+    "probe1_reference_pass": {
+      "long_fraction": 1.0,
+      "verdict": "PASS"
+    },
+    "probe2_vacuous_fail": {
+      "starter": {
+        "fraction": 0.0,
+        "verdict": "FAIL"
+      },
+      "keyword_stuffed": {
+        "fraction": 0.0,
+        "verdict": "FAIL"
+      }
+    },
+    "probe3_adversarial_fail": {
+      "decoy_blanket": {
+        "fraction": 1.0,
+        "false_positives": 18,
+        "verdict": "FAIL"
+      },
+      "visible_only_stop_when_green": {
+        "fraction": 0.055556,
+        "verdict": "FAIL"
+      },
+      "truncated_60pct": {
+        "fraction": 0.611111,
+        "verdict": "FAIL"
+      }
+    },
+    "probe4_near_peer_split": {
+      "modelA_strong": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "modelB_near_peer": [
+        1.0,
+        0.944444,
+        0.916667
+      ],
+      "modelC_weak": [
+        1.0,
+        0.833333,
+        0.611111
+      ],
+      "note": "A and B BOTH clear every binary bar (all PASS); graded fraction + completion-vs-length slope separate them (A drop 0.0 / long 1.0 vs B drop 0.083 / long 0.917, slope -0.028/10). C separates on binary + slope -0.137/10."
+    }
+  },
+  "reproduce": "python generate/gen_main.py <benchmarks-root>  # rewrites the three roots deterministically; then generate/make_probes.py builds each probe candidate from oracle"
+}

@@ -1,0 +1,16 @@
+id: V3L01A
+surface_id: V3L01A
+pack_id: V3P01
+role_class: factual
+artifact_type: analyst cross-file citation memo
+modality_family: repository cross-file investigation
+allowed_change_surface:
+  - candidate/analyst-citation-memo.md
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/repo-snapshot/**
+score_profile: "owner, advisory, factual, design, planning"
+overlay_flags: []

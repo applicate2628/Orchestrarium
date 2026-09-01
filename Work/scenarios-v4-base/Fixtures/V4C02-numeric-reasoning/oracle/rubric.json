@@ -1,0 +1,27 @@
+{
+  "schema_version": "v4-rubric-1",
+  "scenario_id": "V4C02-numeric-reasoning",
+  "candidate_artifact": "numeric-answer.json",
+  "score": {"max_points": 100, "pass_threshold": 80, "partial_threshold": 50, "integrity_penalty_cap": 15},
+  "components": [
+    {"id": "numeric", "weight": 50, "semantic": true, "atoms": [
+      {"id": "N1", "type": "numeric", "weight": 1, "candidate_path": "results.N1", "expected": 12, "unit": "ms", "full_tolerance": 0.5, "zero_tolerance": 4},
+      {"id": "N2", "type": "numeric", "weight": 1, "candidate_path": "results.N2", "expected": 0.125, "unit": "ratio", "full_tolerance": 0.005, "zero_tolerance": 0.05},
+      {"id": "N3", "type": "numeric", "weight": 1, "candidate_path": "results.N3", "expected": 64, "unit": "MiB", "full_tolerance": 0, "zero_tolerance": 16},
+      {"id": "N4", "type": "numeric", "weight": 1, "candidate_path": "results.N4", "expected": 3.5, "unit": "s", "full_tolerance": 0.1, "zero_tolerance": 1},
+      {"id": "N5", "type": "numeric", "weight": 1, "candidate_path": "results.N5", "expected": 99.9, "unit": "percent", "full_tolerance": 0.1, "zero_tolerance": 2}
+    ]},
+    {"id": "invariants", "weight": 20, "semantic": true, "atoms": [
+      {"id": "stability", "type": "set_f1", "weight": 1, "candidate_path": "invariants.stability", "expected": ["bounded-memory", "finite-input"], "casefold": true},
+      {"id": "ordering", "type": "set_f1", "weight": 1, "candidate_path": "invariants.ordering", "expected": ["stable-order", "unit-preserving"], "casefold": true}
+    ]},
+    {"id": "falsification", "weight": 20, "semantic": true, "atoms": [
+      {"id": "F1", "type": "case_fraction", "weight": 1, "candidate_path": "cases", "id_field": "case_id", "value_field": "outcome", "casefold_values": true, "expected": {"F1": "PASS"}},
+      {"id": "F2", "type": "case_fraction", "weight": 1, "candidate_path": "cases", "id_field": "case_id", "value_field": "outcome", "casefold_values": true, "expected": {"F2": "PASS"}}
+    ]},
+    {"id": "schema", "weight": 10, "semantic": false, "atoms": [
+      {"id": "required-fields", "type": "required_fields", "weight": 1, "required_paths": ["scenario_id", "results", "invariants", "cases"]}
+    ]}
+  ],
+  "integrity_events": []
+}

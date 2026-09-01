@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "scenario_id": {"const": "V4C01-source-bound-advice"},
+    "decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "recommendation": {"enum": ["retain", "replace", "defer"]},
+        "escalation": {"enum": ["human-review", "implementation", "none"]}
+      },
+      "required": ["recommendation", "escalation"]
+    },
+    "source_authority_order": {
+      "type": "array",
+      "items": {"enum": ["SRC-current", "SRC-runtime", "SRC-legacy"]},
+      "uniqueItems": true
+    },
+    "claims": {
+      "oneOf": [
+        {"type": "array", "items": {"$ref": "#/$defs/claim"}},
+        {"type": "object", "additionalProperties": {"$ref": "#/$defs/claimBody"}}
+      ]
+    },
+    "actions": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "cases": {
+      "oneOf": [
+        {"type": "array", "items": {"$ref": "#/$defs/case"}},
+        {"type": "object", "additionalProperties": {"type": "object", "properties": {"outcome": {"enum": ["APPROVE", "REJECT", "ESCALATE"]}}, "required": ["outcome"]}}
+      ]
+    },
+    "non_claims": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {"safe_to_execute_without_review": {"type": "boolean"}},
+      "required": ["safe_to_execute_without_review"]
+    },
+    "narrative": {"type": "string"}
+  },
+  "required": ["scenario_id", "decision", "source_authority_order", "claims", "actions", "cases", "non_claims"],
+  "$defs": {
+    "claim": {"type": "object", "properties": {"id": {"enum": ["C-compat", "C-risk"]}, "source_ids": {"type": "array", "items": {"type": "string"}}}, "required": ["id", "source_ids"]},
+    "claimBody": {"type": "object", "properties": {"source_ids": {"type": "array", "items": {"type": "string"}}}, "required": ["source_ids"]},
+    "case": {"type": "object", "properties": {"case_id": {"enum": ["A1", "A2", "A3"]}, "outcome": {"enum": ["APPROVE", "REJECT", "ESCALATE"]}}, "required": ["case_id", "outcome"]}
+  }
+}

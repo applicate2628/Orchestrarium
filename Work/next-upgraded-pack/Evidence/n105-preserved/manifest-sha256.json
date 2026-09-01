@@ -1,0 +1,32 @@
+{
+  "purpose": "R1 restore N98 (L12) - N105 pristine run preserved as design provenance for the N98/N105 visual family; N105 is NOT restored as a second live Scenarios-v2 slot (N98 and N105 share byte-identical inputs/baseline.png + inputs/current.png, so they are one visual family, not two independent discriminators). L12's second independent slot comes from F4 (Phase 3), not from N105.",
+  "source": ".scratch/v2-cohort-runs/2026-04-30_16-15-40-X4-x4-full-v2-hard-r2-final-2026-04-30/N105/run/",
+  "copied_to": "Work/next-upgraded-pack/Evidence/n105-preserved/",
+  "copy_kind": "copy (source retained in .scratch; not a move, per BUILD-PLAN-v2.1.md R1 wording \"copy N105's pristine run\")",
+  "generated": "2026-07-12",
+  "pristine_evidence": "source run's meta/summary.json records changedPaths: [] (candidate never modified) - reproduced this session",
+  "fixture_identity_evidence": {
+    "claim": "inputs/baseline.png and inputs/current.png are byte-identical between N98 and N105",
+    "N98_baseline_md5": "6fcfce64aa43411337a20d44239ad72e",
+    "N98_current_md5": "895cf8d979a7e7aaaec4d58e393e01de",
+    "N105_baseline_md5": "6fcfce64aa43411337a20d44239ad72e",
+    "N105_current_md5": "895cf8d979a7e7aaaec4d58e393e01de",
+    "verified": "own-probe this session, matches BUILD-PLAN-v2.1.md R1 cited md5 values"
+  },
+  "files": [
+    { "path": "README.md", "sha256": "ef0554df770ddef9913a3494e33ecf4aaaa1740270d2cbac65df3fb5550854f2", "size_bytes": 482 },
+    { "path": "candidate/README.md", "sha256": "48e3a31cbcb8cdc75e6fc99773b463689bea755ec6b2bf31c11606fd5a5d50e1", "size_bytes": 202 },
+    { "path": "candidate/review-decision.json", "sha256": "9f06e6ba28f2429cbed32a3b4726ff444e1d8bd7cf56866398efecae5add7c9b", "size_bytes": 258 },
+    { "path": "inputs/README.md", "sha256": "26bcc56f480828934cfbdf55a8006a1a2264015b021ab620ef8abf42264eda8b", "size_bytes": 162 },
+    { "path": "inputs/baseline.png", "sha256": "8520e334fc86266df765340b82eb19a45c9a9902e6631045ad344a348fcbc403", "size_bytes": 58406 },
+    { "path": "inputs/current.png", "sha256": "86ad11a5f764844d02d5ce33754a920e9d8d8974e7f884566a87bc7ea2b42f1e", "size_bytes": 57477 },
+    { "path": "inputs/task.md", "sha256": "6be02a2e6bfd449d632c4a9904ea9d62462accefec2cd7675748bd10a354447b", "size_bytes": 2945 },
+    { "path": "oracle/README.md", "sha256": "8f2b0e0d055483579866d81c1ab2f00e5c9ab8c1056368fa161b40d9f85edf10", "size_bytes": 151 },
+    { "path": "oracle/answer-schema.json", "sha256": "90b975a4d19f6c8186cfbacb86a5f38637a6c8ee030347ee4b344cabbd8ec0b5", "size_bytes": 2572 },
+    { "path": "oracle/scoring-anchors.md", "sha256": "76e3d91f558c790feec33d16b7cad795fefa209ca2f3f181c41533e68056c6ae", "size_bytes": 469 },
+    { "path": "oracle/staged-screenshot-diff-contract.json", "sha256": "15cdc7f7039ab4d828ff99e04e3ecae4b04a288974b2f2bbfe52004854da7332", "size_bytes": 3889 },
+    { "path": "scenario.yaml", "sha256": "a45f54800a289d94f125e2c5861485a9242f6eb5cf2a43dcd07503a21ebf522c", "size_bytes": 700 },
+    { "path": "verifiers/README.md", "sha256": "1f805b6bc767f2ccb284fd6ec8ecd1ffc6c5d9a238a32678765c35bd67865e19", "size_bytes": 292 },
+    { "path": "verifiers/check_staged_screenshot_diff_review.py", "sha256": "16856fe8c1ba807b4967f1ba62f565d9c394f81f255e8d5d082c0178caa65a5a", "size_bytes": 16282 }
+  ]
+}

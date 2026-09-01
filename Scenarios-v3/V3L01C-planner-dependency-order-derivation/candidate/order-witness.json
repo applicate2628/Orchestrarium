@@ -1,0 +1,7 @@
+{
+  "tie_break_rule": "descending slug order",
+  "phase_order": ["a-schema", "b-api", "c-cache", "d-auth", "e-ui", "f-tests", "g-docs", "h-rollout"],
+  "first_item": "a-schema",
+  "critical_path_length": 8,
+  "derived_dependencies": []
+}

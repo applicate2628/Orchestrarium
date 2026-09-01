@@ -1,0 +1,15 @@
+{
+  "case_id": "F04-feed-permission-profile",
+  "entrypoint": "feed.query.load_page",
+  "input_rows": 1200,
+  "measurement": {
+    "id": "permission_lookup_calls",
+    "value": 1201,
+    "unit": "calls"
+  },
+  "threshold": {
+    "max_value": 25,
+    "unit": "calls"
+  },
+  "result": "threshold-exceeded"
+}

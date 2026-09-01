@@ -1,0 +1,12 @@
+schema: discrimination-v1
+target_construct: "distinguishing genuine performance-architecture defects (a per-request owner rebuild whose cost lives in another file, a quadratic hidden in a comprehension) from surface-level perf smells, under an exact-finding-count and false-positive-trap discipline"
+eligible_profiles:
+  - systemic-mgmt
+  - stamina
+  - ultimate-depth
+  - working-audit
+expected_winner: ultimate-depth
+expected_winner_registered: 2026-07-12
+validated_discrimination: none
+validation_evidence: none
+notes: "L11 second performance-architecture review discriminator (F5/A4), independent of S28 (JS target). The all-P L11 slots are already strong verifiers; this slot targets near-peer SEPARATION, not raw hardness: separation comes from cross-file cost tracing (LaneStore rebuild in store.py), a quadratic hidden in a list comprehension, and three planted surface-smell decoys that a near-peer reviewer plausibly flags. exact_finding_count=4 + forbidden_findings + distinct-row + evidence-term binding is the mechanism."

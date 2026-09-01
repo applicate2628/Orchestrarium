@@ -1,0 +1,3 @@
+The README edit changes wording only and does not change a reviewed runtime file.
+Observed command: python -m markdownlint README.md
+Result: README.md: 0 errors.

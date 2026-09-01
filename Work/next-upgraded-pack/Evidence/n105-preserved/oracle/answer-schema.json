@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["scenario_id", "gate_decision", "phase_trace", "visual_findings", "non_findings", "release_gate"],
+  "properties": {
+    "scenario_id": {"type": "string", "const": "N105-staged-screenshot-diff-review"},
+    "gate_decision": {"type": "string", "enum": ["REVISE"]},
+    "phase_trace": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["phase", "status", "return_cue"],
+        "properties": {
+          "phase": {"type": "string", "enum": ["diff-triage", "release-gate"]},
+          "status": {"type": "string", "enum": ["complete", "REVISE"]},
+          "return_cue": {"type": "string"}
+        }
+      }
+    },
+    "visual_findings": {
+      "type": "array",
+      "minItems": 8,
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "component", "defect", "severity", "x", "y", "evidence", "owner", "visible_return_cue"],
+        "properties": {
+          "id": {"type": "string", "enum": ["V01", "V02", "V03", "V04", "V05", "V06", "V07", "V08"]},
+          "component": {"type": "string"},
+          "defect": {"type": "string"},
+          "severity": {"type": "string", "enum": ["high", "medium", "low"]},
+          "x": {"type": "integer", "minimum": 0, "maximum": 1399},
+          "y": {"type": "integer", "minimum": 0, "maximum": 899},
+          "evidence": {"type": "string"},
+          "owner": {"type": "string", "enum": ["ux-reviewer", "frontend-engineer", "qa-engineer"]},
+          "visible_return_cue": {"type": "string"}
+        }
+      }
+    },
+    "non_findings": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "items": {
+        "type": "string",
+        "enum": [
+          "decorative grid/background lines",
+          "disabled Export button",
+          "muted timestamp/meta text",
+          "brand logo/header mark",
+          "skeleton shimmer placeholder"
+        ]
+      }
+    },
+    "release_gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["block_publish", "reentry_step", "required_tests"],
+      "properties": {
+        "block_publish": {"type": "boolean"},
+        "reentry_step": {"type": "string"},
+        "required_tests": {
+          "type": "array",
+          "minItems": 3,
+          "items": {"type": "string"}
+        }
+      }
+    }
+  }
+}

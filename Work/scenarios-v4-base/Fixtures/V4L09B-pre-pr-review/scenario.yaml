@@ -1,0 +1,7 @@
+schema_version: scenarios-v4-ranked-1
+scenario_id: V4L09B-pre-pr-review
+lane: L09
+form: base
+candidate_artifact: candidate/review.json
+allowed_write_paths:
+  - candidate/review.json

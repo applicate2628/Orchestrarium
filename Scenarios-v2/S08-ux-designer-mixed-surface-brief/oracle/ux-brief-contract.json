@@ -175,5 +175,39 @@
     "```ts",
     "```tsx",
     "apply_patch"
-  ]
+  ],
+  "ordering_scoring": {
+    "mechanism": "derivation-priority-ladder",
+    "pass_threshold": 70,
+    "max_points": 100,
+    "note": "R4b: presence-only floor kept; the graded layer requires the DERIVED publish-gating and return-before-publish ordering. inputs/state-and-flow-friction.md states the FAILURE (the publish affordance is visible because local checks are green while a reviewer clarification is unresolved) but not the fix; the correct brief must derive that publish stays unavailable until review-specific blockers are resolved, i.e. publish is gated behind the return/blocker states. A brief that leaves publish available early fails.",
+    "scopes": {
+      "ladder": ["## Proposed end-to-end flow", "## State model and ownership", "## Key interaction changes"]
+    },
+    "components": {
+      "publish_gating": {
+        "type": "conjunction",
+        "points": 60,
+        "mandatory": true,
+        "mandatory_min": 60,
+        "scope": "ladder",
+        "conjunction": [
+          {"group": "publish", "any_of": ["publish"]},
+          {"group": "gated", "any_of": ["unavailable until", "not available until", "only after", "gated", "blocked until", "hidden until", "not publishable", "withheld", "cannot publish until", "until review", "until the review", "until review-specific", "until blockers", "until the review-specific blockers"]}
+        ]
+      },
+      "owner_clarity": {
+        "type": "any_of",
+        "points": 25,
+        "scope": "ladder",
+        "any_of": ["desktop-owned", "web-owned", "shared handoff state", "current owner", "owner is", "curator owns", "changes requested"]
+      },
+      "reentry_named": {
+        "type": "any_of",
+        "points": 15,
+        "scope": "ladder",
+        "any_of": ["re-entry", "repair target", "return point", "resume", "comes back", "re-entry point", "return loop"]
+      }
+    }
+  }
 }

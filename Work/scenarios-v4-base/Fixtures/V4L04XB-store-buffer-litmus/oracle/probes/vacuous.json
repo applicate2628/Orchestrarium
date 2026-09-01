@@ -1,0 +1,6 @@
+{
+ "scenario_id": "V4L04XB-store-buffer-litmus",
+ "verdicts": {},
+ "divergent_program_ids": [],
+ "equivalence_gate": {}
+}

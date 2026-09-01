@@ -1,0 +1,311 @@
+{
+ "scenario_id": "V4L04HF-hidden-consumer-contract",
+ "verdicts": {
+  "CONS-24": {
+   "unit": "verdict",
+   "value": "safe"
+  },
+  "CONS-23": {
+   "unit": "verdict",
+   "value": "safe"
+  },
+  "CONS-22": {
+   "unit": "verdict",
+   "value": "safe"
+  },
+  "CONS-21": {
+   "unit": "verdict",
+   "value": "break"
+  },
+  "CONS-20": {
+   "unit": "verdict",
+   "value": "safe"
+  },
+  "CONS-19": {
+   "unit": "verdict",
+   "value": "break"
+  },
+  "CONS-18": {
+   "unit": "verdict",
+   "value": "safe"
+  },
+  "CONS-17": {
+   "unit": "verdict",
+   "value": "break"
+  },
+  "CONS-16": {
+   "unit": "verdict",
+   "value": "safe"
+  },
+  "CONS-15": {
+   "unit": "verdict",
+   "value": "break"
+  },
+  "CONS-14": {
+   "unit": "verdict",
+   "value": "safe"
+  },
+  "CONS-13": {
+   "unit": "verdict",
+   "value": "break"
+  },
+  "CONS-12": {
+   "unit": "verdict",
+   "value": "safe"
+  },
+  "CONS-11": {
+   "unit": "verdict",
+   "value": "break"
+  },
+  "CONS-10": {
+   "unit": "verdict",
+   "value": "safe"
+  },
+  "CONS-09": {
+   "unit": "verdict",
+   "value": "break"
+  },
+  "CONS-08": {
+   "unit": "verdict",
+   "value": "safe"
+  },
+  "CONS-07": {
+   "unit": "verdict",
+   "value": "break"
+  },
+  "CONS-06": {
+   "unit": "verdict",
+   "value": "safe"
+  },
+  "CONS-05": {
+   "unit": "verdict",
+   "value": "break"
+  },
+  "CONS-04": {
+   "unit": "verdict",
+   "value": "safe"
+  },
+  "CONS-03": {
+   "unit": "verdict",
+   "value": "safe"
+  },
+  "CONS-02": {
+   "unit": "verdict",
+   "value": "break"
+  },
+  "CONS-01": {
+   "unit": "verdict",
+   "value": "safe"
+  }
+ },
+ "causes": {
+  "CONS-24": {
+   "unit": "change-id",
+   "value": "none"
+  },
+  "CONS-23": {
+   "unit": "change-id",
+   "value": "none"
+  },
+  "CONS-22": {
+   "unit": "change-id",
+   "value": "none"
+  },
+  "CONS-21": {
+   "unit": "change-id",
+   "value": "C03"
+  },
+  "CONS-20": {
+   "unit": "change-id",
+   "value": "none"
+  },
+  "CONS-19": {
+   "unit": "change-id",
+   "value": "C12"
+  },
+  "CONS-18": {
+   "unit": "change-id",
+   "value": "none"
+  },
+  "CONS-17": {
+   "unit": "change-id",
+   "value": "C11"
+  },
+  "CONS-16": {
+   "unit": "change-id",
+   "value": "none"
+  },
+  "CONS-15": {
+   "unit": "change-id",
+   "value": "C08"
+  },
+  "CONS-14": {
+   "unit": "change-id",
+   "value": "none"
+  },
+  "CONS-13": {
+   "unit": "change-id",
+   "value": "C09"
+  },
+  "CONS-12": {
+   "unit": "change-id",
+   "value": "none"
+  },
+  "CONS-11": {
+   "unit": "change-id",
+   "value": "C08"
+  },
+  "CONS-10": {
+   "unit": "change-id",
+   "value": "none"
+  },
+  "CONS-09": {
+   "unit": "change-id",
+   "value": "C04"
+  },
+  "CONS-08": {
+   "unit": "change-id",
+   "value": "none"
+  },
+  "CONS-07": {
+   "unit": "change-id",
+   "value": "C06"
+  },
+  "CONS-06": {
+   "unit": "change-id",
+   "value": "none"
+  },
+  "CONS-05": {
+   "unit": "change-id",
+   "value": "C03"
+  },
+  "CONS-04": {
+   "unit": "change-id",
+   "value": "none"
+  },
+  "CONS-03": {
+   "unit": "change-id",
+   "value": "none"
+  },
+  "CONS-02": {
+   "unit": "change-id",
+   "value": "C02"
+  },
+  "CONS-01": {
+   "unit": "change-id",
+   "value": "none"
+  }
+ },
+ "fixes": {
+  "CONS-24": {
+   "unit": "fix-id",
+   "value": "FIX-NONE"
+  },
+  "CONS-23": {
+   "unit": "fix-id",
+   "value": "FIX-NONE"
+  },
+  "CONS-22": {
+   "unit": "fix-id",
+   "value": "FIX-NONE"
+  },
+  "CONS-21": {
+   "unit": "fix-id",
+   "value": "FIX-UNITS"
+  },
+  "CONS-20": {
+   "unit": "fix-id",
+   "value": "FIX-NONE"
+  },
+  "CONS-19": {
+   "unit": "fix-id",
+   "value": "FIX-CATCH"
+  },
+  "CONS-18": {
+   "unit": "fix-id",
+   "value": "FIX-NONE"
+  },
+  "CONS-17": {
+   "unit": "fix-id",
+   "value": "FIX-KEYS"
+  },
+  "CONS-16": {
+   "unit": "fix-id",
+   "value": "FIX-NONE"
+  },
+  "CONS-15": {
+   "unit": "fix-id",
+   "value": "FIX-PRECEDENCE"
+  },
+  "CONS-14": {
+   "unit": "fix-id",
+   "value": "FIX-NONE"
+  },
+  "CONS-13": {
+   "unit": "fix-id",
+   "value": "FIX-FRESH"
+  },
+  "CONS-12": {
+   "unit": "fix-id",
+   "value": "FIX-NONE"
+  },
+  "CONS-11": {
+   "unit": "fix-id",
+   "value": "FIX-PRECEDENCE"
+  },
+  "CONS-10": {
+   "unit": "fix-id",
+   "value": "FIX-NONE"
+  },
+  "CONS-09": {
+   "unit": "fix-id",
+   "value": "FIX-CATCH"
+  },
+  "CONS-08": {
+   "unit": "fix-id",
+   "value": "FIX-NONE"
+  },
+  "CONS-07": {
+   "unit": "fix-id",
+   "value": "FIX-ORDER"
+  },
+  "CONS-06": {
+   "unit": "fix-id",
+   "value": "FIX-NONE"
+  },
+  "CONS-05": {
+   "unit": "fix-id",
+   "value": "FIX-UNITS"
+  },
+  "CONS-04": {
+   "unit": "fix-id",
+   "value": "FIX-NONE"
+  },
+  "CONS-03": {
+   "unit": "fix-id",
+   "value": "FIX-NONE"
+  },
+  "CONS-02": {
+   "unit": "fix-id",
+   "value": "FIX-DEFAULT"
+  },
+  "CONS-01": {
+   "unit": "fix-id",
+   "value": "FIX-NONE"
+  }
+ },
+ "breaking_change_ids": [
+  "C02",
+  "C03",
+  "C04",
+  "C06",
+  "C08",
+  "C09",
+  "C11",
+  "C12"
+ ],
+ "release_gate": {
+  "migration_clearance": "block"
+ },
+ "narrative": "Readiness call restated: the migration must hold until the listed call sites are remediated."
+}

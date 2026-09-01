@@ -1,0 +1,22 @@
+{
+  "cases": {
+    "Case One": {"outcome": "PASS"},
+    "Case\u200b One": {"outcome": "FAIL"},
+    "Case\u200c One": {"outcome": "FAIL"},
+    "Case\u200d One": {"outcome": "FAIL"},
+    "Case\ufeff One": {"outcome": "FAIL"},
+    "Case\u2060 One": {"outcome": "FAIL"},
+    "Case\u200e One": {"outcome": "FAIL"},
+    "Case\ufe0f One": {"outcome": "FAIL"},
+    "Ｃase One": {"outcome": "FAIL"}
+  },
+  "claims": {
+    "Café": {"source_ids": ["SRC-1"]},
+    "Ca\u200bfé": {"source_ids": ["SRC-2"]}
+  },
+  "findings": {"correctness": [{"id": "F1", "file": "src/a.py", "symbol": "load", "severity": "high"}]},
+  "sentinel": {
+    "filler_1": "ok", "filler_2": "ok", "filler_3": "ok", "filler_4": "ok",
+    "filler_5": "ok", "filler_6": "ok", "filler_7": "ok"
+  }
+}

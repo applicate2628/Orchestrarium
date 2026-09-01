@@ -8,3 +8,5 @@
   been proven workable.
 - A no-action choice preserves optionality, but it delays concrete evidence about whether the
   memo-only pattern is actually usable.
+- One reviewer argues that shared memo scaffolding would save the most authoring time overall and
+  should therefore be built first, before the single advisory pilot.

@@ -29,6 +29,12 @@
 - TODO: if the verdict is `REVISE` or `BLOCKED`, describe the bug-registry follow-up that should be
   recorded
 
+## Findings
+
+| # | File | Line | Category | Severity | Title | Evidence |
+|---|---|---|---|---|---|---|
+| 1 | [fill in after run] | [fill] | [fill] | [fill] | [fill] | [fill] |
+
 ## Residual Risk
 
 - TODO: summarize the remaining risk after the verdict without proposing implementation repairs

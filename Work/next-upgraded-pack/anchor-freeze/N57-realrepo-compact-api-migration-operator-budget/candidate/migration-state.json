@@ -1,0 +1,17 @@
+{
+  "contractId": "N57-realrepo-compact-api-migration-operator-budget",
+  "planFingerprint": "",
+  "phases": [],
+  "sourceBindings": [],
+  "staleSourceRejections": [],
+  "interfaceMap": [],
+  "callSiteMigration": [],
+  "compatibilityMatrix": [],
+  "validation": {
+    "commands": []
+  },
+  "patchBudget": {
+    "maxChangedPaths": 12,
+    "requiredChangedPaths": []
+  }
+}

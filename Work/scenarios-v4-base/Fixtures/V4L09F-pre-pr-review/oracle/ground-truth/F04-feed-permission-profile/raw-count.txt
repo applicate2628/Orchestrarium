@@ -1,0 +1,3 @@
+profile run: feed.load_page rows=1200
+permission_lookup calls=1201
+threshold calls<=25

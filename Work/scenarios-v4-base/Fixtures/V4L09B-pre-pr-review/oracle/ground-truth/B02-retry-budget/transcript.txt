@@ -1,0 +1,4 @@
+event-01 command: python oracle/ground-truth/B02-retry-budget/failing-test.py
+Traceback (most recent call last):
+  ...
+AssertionError: observed 4 job calls with max_retries=3

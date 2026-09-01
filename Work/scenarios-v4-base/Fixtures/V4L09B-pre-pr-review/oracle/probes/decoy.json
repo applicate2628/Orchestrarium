@@ -1,0 +1,55 @@
+{
+  "scenario_id": "V4L09B-pre-pr-review",
+  "findings": {
+    "correctness-cache": [
+      {
+        "anchor_source_id": "B-CARD-101",
+        "file": "cache/store.py",
+        "symbol": "Cache.get",
+        "severity": "high"
+      }
+    ],
+    "reliability-retry": [
+      {
+        "anchor_source_id": "B-CARD-501",
+        "file": "logging/format.py",
+        "symbol": "format_event",
+        "severity": "low"
+      }
+    ],
+    "performance-query": [],
+    "security-token": [
+      {
+        "anchor_source_id": "B-CARD-601",
+        "file": "README.md",
+        "symbol": "local_cache",
+        "severity": "low"
+      }
+    ]
+  },
+  "evidence": {
+    "bindings": {}
+  },
+  "non_findings": [
+    "B-CARD-501",
+    "B-CARD-502",
+    "B-CARD-601",
+    "B-CARD-602"
+  ],
+  "review_scope": [
+    "cache/store.py",
+    "workers/retry.py",
+    "items/repository.py",
+    "auth/token.py"
+  ],
+  "rejected_sources": [
+    "B-CARD-501",
+    "B-CARD-502",
+    "B-CARD-601",
+    "B-CARD-602"
+  ],
+  "review_gate": {
+    "merge_clearance": "needs-review"
+  },
+  "actions": {}
+}

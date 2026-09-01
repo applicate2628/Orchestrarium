@@ -1,0 +1,29 @@
+{
+  "schema": "mutation-gate-v1",
+  "bundle": "N71",
+  "package": "flowlimit",
+  "test_filename": "test_window_regression.py",
+  "mandated_test_relpath": "candidate/workspace/tests/test_window_regression.py",
+  "fixed": "fixed",
+  "buggy": "buggy",
+  "mutants": [
+    {
+      "id": "isolation",
+      "defect_class": "same-tenant / different-user budget isolation",
+      "required_behavior": "state must be isolated by (tenant_id, user_id, route, window_index); two users in one tenant+route must not share a budget",
+      "detect_hint": "assert a second user in the same tenant+route+window is still allowed after the first user is exhausted"
+    },
+    {
+      "id": "retry-after",
+      "defect_class": "retry_after equals remaining seconds to window end",
+      "required_behavior": "a denied request's retry_after is the remaining seconds until the current window ends, not the full window",
+      "detect_hint": "assert the exact retry_after value on a denial (e.g. 50.0 at t=10 in a 60s window)"
+    },
+    {
+      "id": "boundary",
+      "defect_class": "exact next-window boundary opens a new window",
+      "required_behavior": "a request whose timestamp lands exactly on the next window boundary uses the new window",
+      "detect_hint": "assert a request at the exact boundary timestamp is allowed after the previous window was exhausted"
+    }
+  ]
+}

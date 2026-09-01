@@ -1,0 +1,13 @@
+{
+  "schema_version": "v4-rubric-1",
+  "scenario_id": "V4-template",
+  "candidate_artifact": "answer.json",
+  "score": {
+    "max_points": 100,
+    "pass_threshold": 80,
+    "partial_threshold": 50,
+    "integrity_penalty_cap": 15
+  },
+  "components": [],
+  "integrity_events": []
+}

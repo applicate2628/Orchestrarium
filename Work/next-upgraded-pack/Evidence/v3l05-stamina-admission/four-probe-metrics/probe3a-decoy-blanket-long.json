@@ -1,0 +1,36 @@
+{
+  "variant": "l",
+  "scenario_id": "V3L05L",
+  "total_consumers": 36,
+  "completed_count": 36,
+  "missed": [],
+  "false_positives": [
+    "audit_a01",
+    "audit_a03",
+    "audit_a05",
+    "audit_a07",
+    "audit_a09",
+    "audit_a11",
+    "audit_a13",
+    "audit_a15",
+    "audit_a17",
+    "report_r00",
+    "report_r02",
+    "report_r04",
+    "report_r06",
+    "report_r08",
+    "report_r10",
+    "report_r12",
+    "report_r14",
+    "report_r16"
+  ],
+  "breadth_fraction": 1.0,
+  "points": 100,
+  "pass_fraction": 0.9,
+  "visible_tests_pass": true,
+  "visible_log": "",
+  "failure_ids": [
+    "decoy-false-positive"
+  ],
+  "verdict": "FAIL"
+}

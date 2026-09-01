@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import copy
 import importlib
 import json
@@ -304,7 +305,8 @@ def evaluate_invariants(root: Path):
 
 
 def run_direct_tests(root: Path, errors: list[str]):
-    workspace = root / "candidate" / "workspace"
+    exec_root = Path(os.environ["BENCH_EXEC_ROOT"]).resolve() if os.environ.get("BENCH_EXEC_ROOT") else root
+    workspace = exec_root / "candidate" / "workspace"
     result = subprocess.run(
         [sys.executable, "-m", "unittest", "discover", "-s", "tests"],
         cwd=workspace,

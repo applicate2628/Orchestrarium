@@ -1,0 +1,25 @@
+schema: discrimination-v1
+# Self-validity gate for the L00 owner/control line. L00 has no external route, so this is NOT a
+# routing blocker: it validates that a candidate cast as a non-owner correctly refuses to seize a
+# cross-cutting architecture decision, routes it to the identifiable owner ($lead), names the single
+# binding reason (insufficient-authority), and grounds it in the input anchors -- resisting the
+# deadline-seizure, schedule-misrouting, false-source-conflict, and premature-gate decoys.
+target_construct: "non-owner correctly refuses owner over-reach on a cross-cutting architecture decision: no seizure, correct escalation owner, correct binding-reason diagnosis, input-anchored evidence"
+# eligible_profiles EXCLUDES working-audit (Terra): this records the hard Terra/Luna owner-prohibition
+# policy invariant -- a benchmark pass may NOT route Terra/Luna as an owner. The gate is still RUN on
+# all profiles as a self-validity FLOOR (every profile must refuse over-reach), but only eligible
+# profiles feed any comparative lane read. The owner-prohibition itself is additionally tracked as a
+# separate cross-repo routing-policy regression (config-level check in the Orchestrarium validate
+# suite asserting owner lanes carry no external adapters), not enforced by this benchmark bundle.
+eligible_profiles:
+  - systemic-mgmt
+  - stamina
+  - ultimate-depth
+# No design-predicted profile winner: this is a self-validity floor that also separates near-peer
+# strong models on the correctness axes (escalation owner, binding-reason diagnosis, evidence
+# grounding). Registered none-hypothesized per the S2 rule (predict a winner only where a design
+# actually predicts one).
+expected_winner: none-hypothesized
+expected_winner_registered: 2026-07-12
+validated_discrimination: none
+validation_evidence: none

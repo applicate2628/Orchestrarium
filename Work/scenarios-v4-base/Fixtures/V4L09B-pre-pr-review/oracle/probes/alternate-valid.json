@@ -1,0 +1,100 @@
+{
+  "scenario_id": "V4L09B-pre-pr-review",
+  "findings": {
+    "correctness-cache": [
+      {
+        "anchor_source_id": "B-CARD-101",
+        "file": "CACHE/STORE.PY",
+        "symbol": "cache.get",
+        "severity": "HIGH"
+      }
+    ],
+    "reliability-retry": [
+      {
+        "anchor_source_id": "B-CARD-201",
+        "file": "WORKERS/RETRY.PY",
+        "symbol": "retryworker.run",
+        "severity": "MEDIUM"
+      }
+    ],
+    "performance-query": [
+      {
+        "anchor_source_id": "B-CARD-301",
+        "file": "ITEMS/REPOSITORY.PY",
+        "symbol": "LIST_ITEMS",
+        "severity": "Medium"
+      }
+    ],
+    "security-token": [
+      {
+        "anchor_source_id": "B-CARD-401",
+        "file": "AUTH/TOKEN.PY",
+        "symbol": "PARSE_TOKEN",
+        "severity": "high"
+      }
+    ]
+  },
+  "evidence": {
+    "bindings": {
+      "B-CARD-401": {
+        "source_ids": [
+          "B-CARD-402",
+          "B-CARD-401"
+        ]
+      },
+      "B-CARD-301": {
+        "source_ids": [
+          "B-CARD-302",
+          "B-CARD-301"
+        ]
+      },
+      "B-CARD-201": {
+        "source_ids": [
+          "B-CARD-202",
+          "B-CARD-201"
+        ]
+      },
+      "B-CARD-101": {
+        "source_ids": [
+          "B-CARD-102",
+          "B-CARD-101"
+        ]
+      }
+    }
+  },
+  "non_findings": [
+    "B-CARD-602",
+    "B-CARD-601",
+    "B-CARD-502",
+    "B-CARD-501"
+  ],
+  "review_scope": [
+    "AUTH/TOKEN.PY",
+    "ITEMS/REPOSITORY.PY",
+    "WORKERS/RETRY.PY",
+    "CACHE/STORE.PY"
+  ],
+  "rejected_sources": [
+    "B-CARD-602",
+    "B-CARD-601",
+    "B-CARD-502",
+    "B-CARD-501"
+  ],
+  "review_gate": {
+    "merge_clearance": "NEEDS-REVIEW"
+  },
+  "actions": {
+    "B-CARD-401": {
+      "outcome": "BLOCK-MERGE"
+    },
+    "B-CARD-301": {
+      "outcome": "OPTIMIZE-BEFORE-MERGE"
+    },
+    "B-CARD-201": {
+      "outcome": "ADD-REGRESSION-TEST"
+    },
+    "B-CARD-101": {
+      "outcome": "FIX-BEFORE-MERGE"
+    }
+  }
+}

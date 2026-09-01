@@ -1,0 +1,23 @@
+{
+  "cases": {
+    " \u00a0 ": {"outcome": "PASS"}
+  },
+  "claims": {
+    "caf\u00e9": {"id": 123, "source_ids": ["SRC-1"]},
+    "valid": {"id": "  ", "source_ids": ["SRC-1"]}
+  },
+  "findings": {
+    "correctness": [
+      {"id": "F1", "file": "src/a.py", "symbol": "load", "severity": "high"}
+    ]
+  },
+  "sentinel": {
+    "filler_1": "ok",
+    "filler_2": "ok",
+    "filler_3": "ok",
+    "filler_4": "ok",
+    "filler_5": "ok",
+    "filler_6": "ok",
+    "filler_7": "ok"
+  }
+}

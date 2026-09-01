@@ -176,5 +176,45 @@
     "```ts",
     "```tsx",
     "apply_patch"
-  ]
+  ],
+  "ordering_scoring": {
+    "mechanism": "derivation-priority-ladder",
+    "pass_threshold": 70,
+    "max_points": 100,
+    "note": "R4b: the presence-only section-term floor is kept as a floor; the graded layer requires the DERIVED priority ladder. inputs/hierarchy-and-information-friction.md and inputs/current-cross-surface-audit.md list the failures with screenshots/metadata FIRST; the correct brief must re-rank so the current release verdict / blocker leads and screenshots / routine metadata are demoted. Transcribing the audit order (metadata first) fails the mandatory lead check.",
+    "scopes": {
+      "ladder": [
+        "## Proposed cross-surface information structure",
+        "## Proposed static emphasis model",
+        "## Key hierarchy changes"
+      ]
+    },
+    "components": {
+      "lead_with_decision": {
+        "type": "lead",
+        "points": 40,
+        "mandatory": true,
+        "scope": "ladder",
+        "high": ["current release verdict", "release verdict", "release decision", "active blocker", "reviewer ask", "publish readiness"],
+        "low": ["screenshot", "routine metadata", "supporting metadata", "history", "passive count", "bundle decoration", "thumbnail"]
+      },
+      "priority_ordering": {
+        "type": "order_pairs",
+        "points": 45,
+        "scope": "ladder",
+        "pairs": [
+          ["release verdict", "supporting metadata"],
+          ["blocker", "supporting metadata"],
+          ["release verdict", "screenshot"],
+          ["blocker", "history"]
+        ]
+      },
+      "demotion_named": {
+        "type": "any_of",
+        "points": 15,
+        "scope": "ladder",
+        "any_of": ["demote", "below the", "should not outrank", "not visually outrank", "outrank", "beneath", "lower than", "deprioritize", "rank below"]
+      }
+    }
+  }
 }

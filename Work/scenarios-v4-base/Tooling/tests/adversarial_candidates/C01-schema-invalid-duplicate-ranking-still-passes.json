@@ -1,0 +1,12 @@
+{
+  "scenario_id": "V4C01-source-bound-advice",
+  "decision": {"recommendation": "retain", "escalation": "human-review"},
+  "source_authority_order": ["SRC-runtime", "SRC-current", "SRC-legacy", "SRC-current", "SRC-runtime", "SRC-legacy"],
+  "claims": {
+    "C-compat": {"source_ids": ["SRC-current", "SRC-runtime"]},
+    "C-risk": {"source_ids": ["SRC-runtime", "SRC-legacy"]}
+  },
+  "actions": ["plan-migration", "request-human-review"],
+  "cases": {"A1": {"outcome": "REJECT"}, "A2": {"outcome": "APPROVE"}, "A3": {"outcome": "ESCALATE"}},
+  "non_claims": {"safe_to_execute_without_review": false}
+}

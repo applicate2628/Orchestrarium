@@ -1,0 +1,9 @@
+{
+  "tie_break_rule": "ascending slug order among ready items",
+  "phase_order": ["a-schema", "b-api", "d-auth", "c-cache", "e-ui", "f-tests", "g-docs", "h-rollout"],
+  "first_item": "a-schema",
+  "critical_path_length": 5,
+  "derived_dependencies": [
+    {"item": "c-cache", "depends_on": "d-auth", "source": "constraint C1 - the cache warmer calls the authenticated rate-card endpoint"}
+  ]
+}

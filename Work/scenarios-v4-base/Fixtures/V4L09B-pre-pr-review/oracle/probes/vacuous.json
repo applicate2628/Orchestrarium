@@ -1,0 +1,17 @@
+{
+  "scenario_id": "V4L09B-pre-pr-review",
+  "findings": {
+    "correctness-cache": [],
+    "reliability-retry": [],
+    "performance-query": [],
+    "security-token": []
+  },
+  "evidence": {
+    "bindings": {}
+  },
+  "non_findings": [],
+  "review_scope": [],
+  "rejected_sources": [],
+  "review_gate": {},
+  "actions": {}
+}

@@ -1,0 +1,311 @@
+{
+ "scenario_id": "V4L04HF-hidden-consumer-contract",
+ "verdicts": {
+  "CONS-01": {
+   "value": "SAFE",
+   "unit": "verdict"
+  },
+  "CONS-02": {
+   "value": "BREAK",
+   "unit": "verdict"
+  },
+  "CONS-03": {
+   "value": "SAFE",
+   "unit": "verdict"
+  },
+  "CONS-04": {
+   "value": "SAFE",
+   "unit": "verdict"
+  },
+  "CONS-05": {
+   "value": "BREAK",
+   "unit": "verdict"
+  },
+  "CONS-06": {
+   "value": "SAFE",
+   "unit": "verdict"
+  },
+  "CONS-07": {
+   "value": "BREAK",
+   "unit": "verdict"
+  },
+  "CONS-08": {
+   "value": "SAFE",
+   "unit": "verdict"
+  },
+  "CONS-09": {
+   "value": "BREAK",
+   "unit": "verdict"
+  },
+  "CONS-10": {
+   "value": "SAFE",
+   "unit": "verdict"
+  },
+  "CONS-11": {
+   "value": "BREAK",
+   "unit": "verdict"
+  },
+  "CONS-12": {
+   "value": "SAFE",
+   "unit": "verdict"
+  },
+  "CONS-13": {
+   "value": "BREAK",
+   "unit": "verdict"
+  },
+  "CONS-14": {
+   "value": "SAFE",
+   "unit": "verdict"
+  },
+  "CONS-15": {
+   "value": "BREAK",
+   "unit": "verdict"
+  },
+  "CONS-16": {
+   "value": "SAFE",
+   "unit": "verdict"
+  },
+  "CONS-17": {
+   "value": "BREAK",
+   "unit": "verdict"
+  },
+  "CONS-18": {
+   "value": "SAFE",
+   "unit": "verdict"
+  },
+  "CONS-19": {
+   "value": "BREAK",
+   "unit": "verdict"
+  },
+  "CONS-20": {
+   "value": "SAFE",
+   "unit": "verdict"
+  },
+  "CONS-21": {
+   "value": "BREAK",
+   "unit": "verdict"
+  },
+  "CONS-22": {
+   "value": "SAFE",
+   "unit": "verdict"
+  },
+  "CONS-23": {
+   "value": "SAFE",
+   "unit": "verdict"
+  },
+  "CONS-24": {
+   "value": "SAFE",
+   "unit": "verdict"
+  }
+ },
+ "causes": {
+  "CONS-01": {
+   "value": "NONE",
+   "unit": "change-id"
+  },
+  "CONS-02": {
+   "value": "c02",
+   "unit": "change-id"
+  },
+  "CONS-03": {
+   "value": "NONE",
+   "unit": "change-id"
+  },
+  "CONS-04": {
+   "value": "NONE",
+   "unit": "change-id"
+  },
+  "CONS-05": {
+   "value": "c03",
+   "unit": "change-id"
+  },
+  "CONS-06": {
+   "value": "NONE",
+   "unit": "change-id"
+  },
+  "CONS-07": {
+   "value": "c06",
+   "unit": "change-id"
+  },
+  "CONS-08": {
+   "value": "NONE",
+   "unit": "change-id"
+  },
+  "CONS-09": {
+   "value": "c04",
+   "unit": "change-id"
+  },
+  "CONS-10": {
+   "value": "NONE",
+   "unit": "change-id"
+  },
+  "CONS-11": {
+   "value": "c08",
+   "unit": "change-id"
+  },
+  "CONS-12": {
+   "value": "NONE",
+   "unit": "change-id"
+  },
+  "CONS-13": {
+   "value": "c09",
+   "unit": "change-id"
+  },
+  "CONS-14": {
+   "value": "NONE",
+   "unit": "change-id"
+  },
+  "CONS-15": {
+   "value": "c08",
+   "unit": "change-id"
+  },
+  "CONS-16": {
+   "value": "NONE",
+   "unit": "change-id"
+  },
+  "CONS-17": {
+   "value": "c11",
+   "unit": "change-id"
+  },
+  "CONS-18": {
+   "value": "NONE",
+   "unit": "change-id"
+  },
+  "CONS-19": {
+   "value": "c12",
+   "unit": "change-id"
+  },
+  "CONS-20": {
+   "value": "NONE",
+   "unit": "change-id"
+  },
+  "CONS-21": {
+   "value": "c03",
+   "unit": "change-id"
+  },
+  "CONS-22": {
+   "value": "NONE",
+   "unit": "change-id"
+  },
+  "CONS-23": {
+   "value": "NONE",
+   "unit": "change-id"
+  },
+  "CONS-24": {
+   "value": "NONE",
+   "unit": "change-id"
+  }
+ },
+ "fixes": {
+  "CONS-01": {
+   "value": "fix-none",
+   "unit": "fix-id"
+  },
+  "CONS-02": {
+   "value": "fix-default",
+   "unit": "fix-id"
+  },
+  "CONS-03": {
+   "value": "fix-none",
+   "unit": "fix-id"
+  },
+  "CONS-04": {
+   "value": "fix-none",
+   "unit": "fix-id"
+  },
+  "CONS-05": {
+   "value": "fix-units",
+   "unit": "fix-id"
+  },
+  "CONS-06": {
+   "value": "fix-none",
+   "unit": "fix-id"
+  },
+  "CONS-07": {
+   "value": "fix-order",
+   "unit": "fix-id"
+  },
+  "CONS-08": {
+   "value": "fix-none",
+   "unit": "fix-id"
+  },
+  "CONS-09": {
+   "value": "fix-catch",
+   "unit": "fix-id"
+  },
+  "CONS-10": {
+   "value": "fix-none",
+   "unit": "fix-id"
+  },
+  "CONS-11": {
+   "value": "fix-precedence",
+   "unit": "fix-id"
+  },
+  "CONS-12": {
+   "value": "fix-none",
+   "unit": "fix-id"
+  },
+  "CONS-13": {
+   "value": "fix-fresh",
+   "unit": "fix-id"
+  },
+  "CONS-14": {
+   "value": "fix-none",
+   "unit": "fix-id"
+  },
+  "CONS-15": {
+   "value": "fix-precedence",
+   "unit": "fix-id"
+  },
+  "CONS-16": {
+   "value": "fix-none",
+   "unit": "fix-id"
+  },
+  "CONS-17": {
+   "value": "fix-keys",
+   "unit": "fix-id"
+  },
+  "CONS-18": {
+   "value": "fix-none",
+   "unit": "fix-id"
+  },
+  "CONS-19": {
+   "value": "fix-catch",
+   "unit": "fix-id"
+  },
+  "CONS-20": {
+   "value": "fix-none",
+   "unit": "fix-id"
+  },
+  "CONS-21": {
+   "value": "fix-units",
+   "unit": "fix-id"
+  },
+  "CONS-22": {
+   "value": "fix-none",
+   "unit": "fix-id"
+  },
+  "CONS-23": {
+   "value": "fix-none",
+   "unit": "fix-id"
+  },
+  "CONS-24": {
+   "value": "fix-none",
+   "unit": "fix-id"
+  }
+ },
+ "breaking_change_ids": [
+  "c12",
+  "c11",
+  "c09",
+  "c08",
+  "c06",
+  "c04",
+  "c03",
+  "c02"
+ ],
+ "release_gate": {
+  "migration_clearance": "Block"
+ },
+ "narrative": "Same review, shouted and whispered in different places."
+}

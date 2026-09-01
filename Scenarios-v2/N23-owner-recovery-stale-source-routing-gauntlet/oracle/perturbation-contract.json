@@ -1,0 +1,64 @@
+{
+  "schema": "perturbation-v1",
+  "bundle_id": "N23",
+  "purpose": "Non-transcribable owner-oracle layer. The active perturbation is read from the committed content of the selector input file(s), never from an out-of-band flag. A memorized/copied-template answer that is correct only for the baseline (unperturbed) packet must FAIL when a different perturbation is active, because the perturbed-correct decision is textually different from the baseline-correct decision.",
+  "selector": {
+    "input_paths": [
+      "inputs/interruption-log.md",
+      "inputs/source-excerpts.md"
+    ],
+    "detection": "sha256 of each selector input file's current bytes must match exactly one perturbation entry's input_snapshots map; no match is a hard verifier error (unrecognized/drifted inputs state)."
+  },
+  "perturbations": [
+    {
+      "id": "baseline",
+      "category": "none",
+      "description": "Unperturbed reference packet: both selector files are the content committed in this bundle (I6 says W3/N23 is admitted next; source-excerpts.md has no N23 self-validation row).",
+      "input_snapshots": {
+        "inputs/interruption-log.md": "c5129f077ddbc0fd7b56951f5f3811cd03bdb010715ea4f01fdda2c512ef212a",
+        "inputs/source-excerpts.md": "f6cca517b85d3fda7ff6589ff834f4bd77b3eb711f432990491f5ab6b7fafcf8"
+      },
+      "answer_delta": {}
+    },
+    {
+      "id": "P1-i6-w3-already-closed",
+      "category": "interruption-log-entry-changed",
+      "description": "I6's row is rewritten so a follow-up materialization memo shows W3/N23 has ALREADY been materialized, validated, and closed in a parallel session. Under this perturbation the baseline 'W3/N23 is the admitted next wave' claim is stale: the admitted next wave moves to W4 and the packet must say W3/N23 is already closed, not repeat it.",
+      "input_snapshots": {
+        "inputs/interruption-log.md": "49f483e7a31bb52e64f6b4ad9616764b568301137c22055eed90dfc342b71ab5",
+        "inputs/source-excerpts.md": "f6cca517b85d3fda7ff6589ff834f4bd77b3eb711f432990491f5ab6b7fafcf8"
+      },
+      "answer_delta": {
+        "add_required_exact_phrases": [
+          "W4 is the admitted next wave; W3 / E13 / N23 is already closed"
+        ],
+        "remove_required_exact_phrases": [
+          "W3 / E13 / N23 is the admitted next wave"
+        ],
+        "add_disallowed_markers": [
+          "W3 / E13 / N23 is the admitted next wave"
+        ]
+      }
+    },
+    {
+      "id": "P2-qa-gate-already-validated",
+      "category": "gate-verdict-inverted",
+      "description": "A new source-excerpts.md row is added citing a 2026-04-24 evidence file: N23 bundle, verifier, scorer, and reference have ALREADY passed validation. Under this perturbation the baseline 'QA waits until validation' gate is stale: QA may proceed now, citing the validation evidence.",
+      "input_snapshots": {
+        "inputs/interruption-log.md": "c5129f077ddbc0fd7b56951f5f3811cd03bdb010715ea4f01fdda2c512ef212a",
+        "inputs/source-excerpts.md": "8922ab0a34fcadae1aaa7a59dbbb2ccda9f1b20a1f4ae5a9367dfade065b4004"
+      },
+      "answer_delta": {
+        "add_required_exact_phrases": [
+          "QA gate: proceed now, N23 bundle, verifier, scorer, and reference already passed validation on 2026-04-24"
+        ],
+        "remove_required_exact_phrases": [
+          "QA gate only after N23 bundle, verifier, scorer, and reference pass validate"
+        ],
+        "add_disallowed_markers": [
+          "QA gate only after N23 bundle, verifier, scorer, and reference pass validate"
+        ]
+      }
+    }
+  ]
+}

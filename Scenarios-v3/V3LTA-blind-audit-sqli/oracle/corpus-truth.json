@@ -1,0 +1,628 @@
+{
+  "generated_by": "oracle/generate_corpus.py",
+  "seed": 20260712,
+  "aspect": "sql-injection",
+  "counts": {
+    "total": 80,
+    "defect": 20,
+    "decoy": 15,
+    "clean": 45
+  },
+  "defects": [
+    {
+      "id": "D01",
+      "file": "corpus/h004.py",
+      "shape": "fstring-select",
+      "tainted_source": "req.args.get",
+      "build_line": 8,
+      "execute_line": 9,
+      "acceptable_lines": [
+        7,
+        8,
+        9,
+        10
+      ],
+      "evidence_terms": [
+        "fstring",
+        "user_id"
+      ]
+    },
+    {
+      "id": "D02",
+      "file": "corpus/h006.py",
+      "shape": "percent-delete",
+      "tainted_source": "payload[",
+      "build_line": 7,
+      "execute_line": 8,
+      "acceptable_lines": [
+        6,
+        7,
+        8,
+        9
+      ],
+      "evidence_terms": [
+        "%",
+        "token"
+      ]
+    },
+    {
+      "id": "D03",
+      "file": "corpus/h008.py",
+      "shape": "format-update",
+      "tainted_source": "body[",
+      "build_line": 7,
+      "execute_line": 8,
+      "acceptable_lines": [
+        6,
+        7,
+        8,
+        9
+      ],
+      "evidence_terms": [
+        ".format",
+        "uid"
+      ]
+    },
+    {
+      "id": "D04",
+      "file": "corpus/h010.py",
+      "shape": "concat-select",
+      "tainted_source": "params[",
+      "build_line": 9,
+      "execute_line": 10,
+      "acceptable_lines": [
+        8,
+        9,
+        10,
+        11
+      ],
+      "evidence_terms": [
+        "concat",
+        "username"
+      ]
+    },
+    {
+      "id": "D05",
+      "file": "corpus/h012.py",
+      "shape": "inline-fstring-execute",
+      "tainted_source": "request.query[",
+      "build_line": 9,
+      "execute_line": 9,
+      "acceptable_lines": [
+        8,
+        9,
+        10
+      ],
+      "evidence_terms": [
+        "fstring",
+        "kind"
+      ]
+    },
+    {
+      "id": "D06",
+      "file": "corpus/h016.py",
+      "shape": "fstring-select",
+      "tainted_source": "req.args.get",
+      "build_line": 9,
+      "execute_line": 10,
+      "acceptable_lines": [
+        8,
+        9,
+        10,
+        11
+      ],
+      "evidence_terms": [
+        "fstring",
+        "user_id"
+      ]
+    },
+    {
+      "id": "D07",
+      "file": "corpus/h018.py",
+      "shape": "percent-delete",
+      "tainted_source": "payload[",
+      "build_line": 11,
+      "execute_line": 12,
+      "acceptable_lines": [
+        10,
+        11,
+        12,
+        13
+      ],
+      "evidence_terms": [
+        "%",
+        "token"
+      ]
+    },
+    {
+      "id": "D08",
+      "file": "corpus/h022.py",
+      "shape": "format-update",
+      "tainted_source": "body[",
+      "build_line": 9,
+      "execute_line": 10,
+      "acceptable_lines": [
+        8,
+        9,
+        10,
+        11
+      ],
+      "evidence_terms": [
+        ".format",
+        "uid"
+      ]
+    },
+    {
+      "id": "D09",
+      "file": "corpus/h025.py",
+      "shape": "concat-select",
+      "tainted_source": "params[",
+      "build_line": 9,
+      "execute_line": 10,
+      "acceptable_lines": [
+        8,
+        9,
+        10,
+        11
+      ],
+      "evidence_terms": [
+        "concat",
+        "username"
+      ]
+    },
+    {
+      "id": "D10",
+      "file": "corpus/h032.py",
+      "shape": "inline-fstring-execute",
+      "tainted_source": "request.query[",
+      "build_line": 7,
+      "execute_line": 7,
+      "acceptable_lines": [
+        6,
+        7,
+        8
+      ],
+      "evidence_terms": [
+        "fstring",
+        "kind"
+      ]
+    },
+    {
+      "id": "D11",
+      "file": "corpus/h038.py",
+      "shape": "fstring-select",
+      "tainted_source": "req.args.get",
+      "build_line": 9,
+      "execute_line": 10,
+      "acceptable_lines": [
+        8,
+        9,
+        10,
+        11
+      ],
+      "evidence_terms": [
+        "fstring",
+        "user_id"
+      ]
+    },
+    {
+      "id": "D12",
+      "file": "corpus/h041.py",
+      "shape": "percent-delete",
+      "tainted_source": "payload[",
+      "build_line": 10,
+      "execute_line": 11,
+      "acceptable_lines": [
+        9,
+        10,
+        11,
+        12
+      ],
+      "evidence_terms": [
+        "%",
+        "token"
+      ]
+    },
+    {
+      "id": "D13",
+      "file": "corpus/h047.py",
+      "shape": "format-update",
+      "tainted_source": "body[",
+      "build_line": 11,
+      "execute_line": 12,
+      "acceptable_lines": [
+        10,
+        11,
+        12,
+        13
+      ],
+      "evidence_terms": [
+        ".format",
+        "uid"
+      ]
+    },
+    {
+      "id": "D14",
+      "file": "corpus/h049.py",
+      "shape": "concat-select",
+      "tainted_source": "params[",
+      "build_line": 5,
+      "execute_line": 6,
+      "acceptable_lines": [
+        4,
+        5,
+        6,
+        7
+      ],
+      "evidence_terms": [
+        "concat",
+        "username"
+      ]
+    },
+    {
+      "id": "D15",
+      "file": "corpus/h051.py",
+      "shape": "inline-fstring-execute",
+      "tainted_source": "request.query[",
+      "build_line": 10,
+      "execute_line": 10,
+      "acceptable_lines": [
+        9,
+        10,
+        11
+      ],
+      "evidence_terms": [
+        "fstring",
+        "kind"
+      ]
+    },
+    {
+      "id": "D16",
+      "file": "corpus/h055.py",
+      "shape": "fstring-select",
+      "tainted_source": "req.args.get",
+      "build_line": 9,
+      "execute_line": 10,
+      "acceptable_lines": [
+        8,
+        9,
+        10,
+        11
+      ],
+      "evidence_terms": [
+        "fstring",
+        "user_id"
+      ]
+    },
+    {
+      "id": "D17",
+      "file": "corpus/h059.py",
+      "shape": "percent-delete",
+      "tainted_source": "payload[",
+      "build_line": 11,
+      "execute_line": 12,
+      "acceptable_lines": [
+        10,
+        11,
+        12,
+        13
+      ],
+      "evidence_terms": [
+        "%",
+        "token"
+      ]
+    },
+    {
+      "id": "D18",
+      "file": "corpus/h069.py",
+      "shape": "format-update",
+      "tainted_source": "body[",
+      "build_line": 10,
+      "execute_line": 11,
+      "acceptable_lines": [
+        9,
+        10,
+        11,
+        12
+      ],
+      "evidence_terms": [
+        ".format",
+        "uid"
+      ]
+    },
+    {
+      "id": "D19",
+      "file": "corpus/h072.py",
+      "shape": "concat-select",
+      "tainted_source": "params[",
+      "build_line": 5,
+      "execute_line": 6,
+      "acceptable_lines": [
+        4,
+        5,
+        6,
+        7
+      ],
+      "evidence_terms": [
+        "concat",
+        "username"
+      ]
+    },
+    {
+      "id": "D20",
+      "file": "corpus/h080.py",
+      "shape": "inline-fstring-execute",
+      "tainted_source": "request.query[",
+      "build_line": 10,
+      "execute_line": 10,
+      "acceptable_lines": [
+        9,
+        10,
+        11
+      ],
+      "evidence_terms": [
+        "fstring",
+        "kind"
+      ]
+    }
+  ],
+  "decoys": [
+    {
+      "file": "corpus/h003.py",
+      "shape": "validated-table-fstring",
+      "reason": "f-string interpolates only a whitelisted constant table name; the user value is a bound qmark parameter"
+    },
+    {
+      "file": "corpus/h011.py",
+      "shape": "format-on-log",
+      "reason": "the %-format targets a logging call, not the SQL string; the query is parameterized"
+    },
+    {
+      "file": "corpus/h017.py",
+      "shape": "concat-constants",
+      "reason": "string concatenation joins only module constants; the user value is passed as a bound parameter"
+    },
+    {
+      "file": "corpus/h027.py",
+      "shape": "named-param-fstring",
+      "reason": "the f-string on the query contains no user interpolation (only a bound :term placeholder); the user value is a bound parameter"
+    },
+    {
+      "file": "corpus/h034.py",
+      "shape": "validated-table-fstring",
+      "reason": "f-string interpolates only a whitelisted constant table name; the user value is a bound qmark parameter"
+    },
+    {
+      "file": "corpus/h036.py",
+      "shape": "format-on-log",
+      "reason": "the %-format targets a logging call, not the SQL string; the query is parameterized"
+    },
+    {
+      "file": "corpus/h046.py",
+      "shape": "concat-constants",
+      "reason": "string concatenation joins only module constants; the user value is passed as a bound parameter"
+    },
+    {
+      "file": "corpus/h053.py",
+      "shape": "named-param-fstring",
+      "reason": "the f-string on the query contains no user interpolation (only a bound :term placeholder); the user value is a bound parameter"
+    },
+    {
+      "file": "corpus/h054.py",
+      "shape": "validated-table-fstring",
+      "reason": "f-string interpolates only a whitelisted constant table name; the user value is a bound qmark parameter"
+    },
+    {
+      "file": "corpus/h060.py",
+      "shape": "format-on-log",
+      "reason": "the %-format targets a logging call, not the SQL string; the query is parameterized"
+    },
+    {
+      "file": "corpus/h061.py",
+      "shape": "concat-constants",
+      "reason": "string concatenation joins only module constants; the user value is passed as a bound parameter"
+    },
+    {
+      "file": "corpus/h067.py",
+      "shape": "named-param-fstring",
+      "reason": "the f-string on the query contains no user interpolation (only a bound :term placeholder); the user value is a bound parameter"
+    },
+    {
+      "file": "corpus/h076.py",
+      "shape": "validated-table-fstring",
+      "reason": "f-string interpolates only a whitelisted constant table name; the user value is a bound qmark parameter"
+    },
+    {
+      "file": "corpus/h077.py",
+      "shape": "format-on-log",
+      "reason": "the %-format targets a logging call, not the SQL string; the query is parameterized"
+    },
+    {
+      "file": "corpus/h079.py",
+      "shape": "concat-constants",
+      "reason": "string concatenation joins only module constants; the user value is passed as a bound parameter"
+    }
+  ],
+  "clean": [
+    {
+      "file": "corpus/h001.py",
+      "shape": "parameterized-qmark"
+    },
+    {
+      "file": "corpus/h002.py",
+      "shape": "orm-filter-by"
+    },
+    {
+      "file": "corpus/h005.py",
+      "shape": "pure-no-db"
+    },
+    {
+      "file": "corpus/h007.py",
+      "shape": "named-params"
+    },
+    {
+      "file": "corpus/h009.py",
+      "shape": "parameterized-qmark"
+    },
+    {
+      "file": "corpus/h013.py",
+      "shape": "orm-filter-by"
+    },
+    {
+      "file": "corpus/h014.py",
+      "shape": "pure-no-db"
+    },
+    {
+      "file": "corpus/h015.py",
+      "shape": "named-params"
+    },
+    {
+      "file": "corpus/h019.py",
+      "shape": "parameterized-qmark"
+    },
+    {
+      "file": "corpus/h020.py",
+      "shape": "orm-filter-by"
+    },
+    {
+      "file": "corpus/h021.py",
+      "shape": "pure-no-db"
+    },
+    {
+      "file": "corpus/h023.py",
+      "shape": "named-params"
+    },
+    {
+      "file": "corpus/h024.py",
+      "shape": "parameterized-qmark"
+    },
+    {
+      "file": "corpus/h026.py",
+      "shape": "orm-filter-by"
+    },
+    {
+      "file": "corpus/h028.py",
+      "shape": "pure-no-db"
+    },
+    {
+      "file": "corpus/h029.py",
+      "shape": "named-params"
+    },
+    {
+      "file": "corpus/h030.py",
+      "shape": "parameterized-qmark"
+    },
+    {
+      "file": "corpus/h031.py",
+      "shape": "orm-filter-by"
+    },
+    {
+      "file": "corpus/h033.py",
+      "shape": "pure-no-db"
+    },
+    {
+      "file": "corpus/h035.py",
+      "shape": "named-params"
+    },
+    {
+      "file": "corpus/h037.py",
+      "shape": "parameterized-qmark"
+    },
+    {
+      "file": "corpus/h039.py",
+      "shape": "orm-filter-by"
+    },
+    {
+      "file": "corpus/h040.py",
+      "shape": "pure-no-db"
+    },
+    {
+      "file": "corpus/h042.py",
+      "shape": "named-params"
+    },
+    {
+      "file": "corpus/h043.py",
+      "shape": "parameterized-qmark"
+    },
+    {
+      "file": "corpus/h044.py",
+      "shape": "orm-filter-by"
+    },
+    {
+      "file": "corpus/h045.py",
+      "shape": "pure-no-db"
+    },
+    {
+      "file": "corpus/h048.py",
+      "shape": "named-params"
+    },
+    {
+      "file": "corpus/h050.py",
+      "shape": "parameterized-qmark"
+    },
+    {
+      "file": "corpus/h052.py",
+      "shape": "orm-filter-by"
+    },
+    {
+      "file": "corpus/h056.py",
+      "shape": "pure-no-db"
+    },
+    {
+      "file": "corpus/h057.py",
+      "shape": "named-params"
+    },
+    {
+      "file": "corpus/h058.py",
+      "shape": "parameterized-qmark"
+    },
+    {
+      "file": "corpus/h062.py",
+      "shape": "orm-filter-by"
+    },
+    {
+      "file": "corpus/h063.py",
+      "shape": "pure-no-db"
+    },
+    {
+      "file": "corpus/h064.py",
+      "shape": "named-params"
+    },
+    {
+      "file": "corpus/h065.py",
+      "shape": "parameterized-qmark"
+    },
+    {
+      "file": "corpus/h066.py",
+      "shape": "orm-filter-by"
+    },
+    {
+      "file": "corpus/h068.py",
+      "shape": "pure-no-db"
+    },
+    {
+      "file": "corpus/h070.py",
+      "shape": "named-params"
+    },
+    {
+      "file": "corpus/h071.py",
+      "shape": "parameterized-qmark"
+    },
+    {
+      "file": "corpus/h073.py",
+      "shape": "orm-filter-by"
+    },
+    {
+      "file": "corpus/h074.py",
+      "shape": "pure-no-db"
+    },
+    {
+      "file": "corpus/h075.py",
+      "shape": "named-params"
+    },
+    {
+      "file": "corpus/h078.py",
+      "shape": "parameterized-qmark"
+    }
+  ]
+}

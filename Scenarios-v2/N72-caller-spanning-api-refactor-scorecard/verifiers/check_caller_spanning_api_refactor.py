@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import argparse
 import copy
 import fnmatch
@@ -186,7 +187,8 @@ def verify_report_caller(module: Any, failures: list[tuple[str, str]]) -> None:
 
 
 def run_visible_tests(root: Path, failures: list[tuple[str, str]]) -> None:
-    workspace = root / "candidate" / "workspace"
+    exec_root = Path(os.environ["BENCH_EXEC_ROOT"]).resolve() if os.environ.get("BENCH_EXEC_ROOT") else root
+    workspace = exec_root / "candidate" / "workspace"
     env_code = (
         "import os,sys,subprocess; "
         "os.environ['PYTHONPATH']='src'; "

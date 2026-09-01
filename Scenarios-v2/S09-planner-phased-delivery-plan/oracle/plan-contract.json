@@ -185,5 +185,46 @@
     "## Confirmed facts",
     "## Decision",
     "## Findings"
-  ]
+  ],
+  "derivation_scoring": {
+    "mechanism": "derivation-dependency-ordering",
+    "pass_threshold": 70,
+    "max_points": 100,
+    "note": "R4b: the fixed phase-heading order + phase_expectations are kept as a floor; on top of that the graded layer requires the DERIVED causal dependency (why Phase 2 needs Phase 1's stable JSON payload) and the explicit rejection of the seeded 'fold --dry-run into Phase 1' shortcut. Copying the fixed heading order without deriving the dependency, or following the shortcut, fails.",
+    "phase2_block_start": "### Phase 2 - Dry-run preview and write-guard",
+    "phase2_block_end": "### Phase 3 - Verification, docs, and handoff",
+    "phase3_block_start": "### Phase 3 - Verification, docs, and handoff",
+    "phase3_block_end": "## Cross-phase risks and mitigations",
+    "components": {
+      "phase2_dependency_derivation": {
+        "points": 45,
+        "mandatory_min": 30,
+        "scope": "phase2_block",
+        "conjunction": [
+          {"group": "json_contract", "any_of": ["json contract", "json payload", "payload contract", "status.snapshot.json", "json shape", "payload shape"]},
+          {"group": "stability", "any_of": ["stable", "stabil", "finalized", "explicit", "locked", "frozen", "established", "before the preview", "first"]},
+          {"group": "preview_link", "any_of": ["dry-run", "write-guard", "write guard", "preview", "would-be payload", "returns the"]}
+        ]
+      },
+      "phase3_dependency": {
+        "points": 15,
+        "scope": "phase3_block",
+        "any_of": ["phase 2 pass", "after phase 2", "behavior is stable", "stable behavior", "verification route", "once behavior"]
+      },
+      "shortcut_rejection": {
+        "points": 25,
+        "mandatory_min": 15,
+        "scope": "whole",
+        "conjunction": [
+          {"group": "shortcut_ref", "any_of": ["fold", "combine", "merge", "same phase", "one phase", "collapse", "save a phase", "reviewer suggest", "reviewer suggested", "raised suggestion", "shortcut"]},
+          {"group": "reject", "any_of": ["reject", "not fold", "should not", "must not", "cannot ship", "only after", "kept separate", "separate phase", "not combine", "not be combined", "keep them separate", "declined", "not accepted"]}
+        ]
+      },
+      "boundary_discipline": {
+        "points": 15,
+        "scope": "whole",
+        "any_of": ["do not widen", "stays inside", "admitted", "not reopen", "no runners", "without widening", "bounded", "inside the accepted"]
+      }
+    }
+  }
 }

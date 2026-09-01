@@ -1,0 +1,69 @@
+{
+  "verdict": "PASS",
+  "score_0_100": 100.0,
+  "matched_count": 8,
+  "expected_count": 8,
+  "pass_min_matched": 7,
+  "pass_score_threshold_0_100": 80.0,
+  "false_positive_count": 0,
+  "parse_error": null,
+  "failures": [],
+  "matches": [
+    {
+      "expected_id": "V01",
+      "reported_id": "V01",
+      "distance_px": 0.0,
+      "severity_ok": true
+    },
+    {
+      "expected_id": "V02",
+      "reported_id": "V02",
+      "distance_px": 0.0,
+      "severity_ok": true
+    },
+    {
+      "expected_id": "V03",
+      "reported_id": "V03",
+      "distance_px": 0.0,
+      "severity_ok": true
+    },
+    {
+      "expected_id": "V04",
+      "reported_id": "V04",
+      "distance_px": 0.0,
+      "severity_ok": true
+    },
+    {
+      "expected_id": "V05",
+      "reported_id": "V05",
+      "distance_px": 0.0,
+      "severity_ok": true
+    },
+    {
+      "expected_id": "V06",
+      "reported_id": "V06",
+      "distance_px": 0.0,
+      "severity_ok": true
+    },
+    {
+      "expected_id": "V07",
+      "reported_id": "V07",
+      "distance_px": 0.0,
+      "severity_ok": true
+    },
+    {
+      "expected_id": "V08",
+      "reported_id": "V08",
+      "distance_px": 0.0,
+      "severity_ok": true
+    }
+  ],
+  "unmatched_expected": [],
+  "unmatched_findings": [],
+  "false_positive_hits": [],
+  "non_finding_coverage_count": 5,
+  "non_finding_expected_count": 5,
+  "missing_non_findings": [],
+  "mean_error_px": 0.0,
+  "max_error_px": 0.0
+}

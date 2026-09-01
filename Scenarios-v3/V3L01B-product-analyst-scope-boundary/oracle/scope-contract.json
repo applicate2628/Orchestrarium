@@ -1,0 +1,83 @@
+{
+  "required_top_level_entries": [
+    "scenario.yaml",
+    "README.md",
+    "discrimination.yaml",
+    "inputs",
+    "candidate",
+    "oracle",
+    "verifiers"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "required_metadata": {
+    "id": "V3L01B",
+    "surface_id": "V3L01B",
+    "pack_id": "V3P01",
+    "role_class": "factual",
+    "artifact_type": "product brief",
+    "modality_family": "product scope framing",
+    "allowed_change_surface": [
+      "candidate/product-brief.md"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md"
+    ],
+    "score_profile": "owner, advisory, factual, design, planning",
+    "overlay_flags": []
+  },
+  "required_bundle_paths": [
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/bounded-scope.md",
+    "inputs/noisy-intake-notes.md",
+    "candidate/README.md",
+    "candidate/product-brief.md",
+    "oracle/README.md",
+    "oracle/scope-contract.json",
+    "oracle/scoring-anchors.md",
+    "oracle/reference/product-brief.md",
+    "verifiers/README.md",
+    "verifiers/check_scope_boundary.py"
+  ],
+  "editable_brief": "candidate/product-brief.md",
+  "required_sections": [
+    "# Product Brief",
+    "## Problem Statement",
+    "## In Scope",
+    "## Out Of Scope (Parked)",
+    "## Success Criteria",
+    "## Gate Decision"
+  ],
+  "problem_section": "## Problem Statement",
+  "in_scope_section": "## In Scope",
+  "out_of_scope_section": "## Out Of Scope (Parked)",
+  "required_in_scope_groups": [
+    ["csv"],
+    ["visible rows", "currently-visible", "visible results", "current results rows", "rows currently shown"],
+    ["download button", "export button", "toolbar"],
+    ["filter", "sort"]
+  ],
+  "forbidden_in_scope_terms": ["xlsx", "pdf", "scheduled", "email", "dashboard", "chart"],
+  "required_parked_groups": [
+    ["xlsx", "pdf", "additional format", "other format", "extra format"],
+    ["scheduled", "email", "recurring export"],
+    ["dashboard", "charts", "reporting dashboard"]
+  ],
+  "problem_required_terms": ["csv", "export"],
+  "expected_gate_decision": "PASS",
+  "disallowed_markers": ["```", "diff --git", "apply_patch", "TODO"]
+}

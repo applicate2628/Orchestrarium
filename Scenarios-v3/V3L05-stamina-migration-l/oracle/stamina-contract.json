@@ -1,0 +1,695 @@
+{
+  "schema_version": "scenarios-v3-oracle-2026-05-01",
+  "scenario_id": "V3L05L",
+  "root_name": "V3L05-stamina-migration-l",
+  "rf12_line": "L05",
+  "role_trigger": "homogeneous-breadth-contract-migration",
+  "target_separator": "stamina-breadth-slope",
+  "variant": "l",
+  "seed": 5013,
+  "score": {
+    "max_points": 100,
+    "graded_measure": "breadth_fraction",
+    "pass_fraction": 0.9,
+    "pass_threshold_points": 90,
+    "false_positive_policy": "any_false_positive_fails",
+    "total_consumers": 36,
+    "total_decoys": 18,
+    "visible_covered": [
+      "quote_anchor_alpha",
+      "quote_anchor_beta"
+    ]
+  },
+  "required_top_level_entries": [
+    "README.md",
+    "scenario.yaml",
+    "inputs",
+    "candidate",
+    "oracle",
+    "verifiers"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "rf12_line",
+    "role_trigger",
+    "target_separator",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "required_metadata": {
+    "id": "V3L05L",
+    "surface_id": "V3-W5-L",
+    "pack_id": "V3P05",
+    "role_class": "implementation",
+    "artifact_type": "homogeneous breadth contract migration",
+    "modality_family": "single-stream breadth under fixed depth",
+    "rf12_line": "L05",
+    "role_trigger": "homogeneous-breadth-contract-migration",
+    "target_separator": "stamina-breadth-slope",
+    "allowed_change_surface": [
+      "candidate/workspace/src/ledgerkit/m*.py",
+      "candidate/refactor-ledger.json"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md",
+      "candidate/workspace/README.md",
+      "candidate/workspace/tests/**",
+      "candidate/workspace/src/ledgerkit/__init__.py",
+      "candidate/workspace/src/ledgerkit/contract.py"
+    ],
+    "score_profile": "homogeneous breadth migration, hidden consumers, decoy precision, graded fraction, completion-vs-length slope",
+    "overlay_flags": [
+      "stamina",
+      "graded-fraction",
+      "hidden-consumer",
+      "decoy-precision",
+      "matched-length-triplet"
+    ]
+  },
+  "required_bundle_files": [
+    "inputs/README.md",
+    "inputs/task.md",
+    "candidate/README.md",
+    "candidate/refactor-ledger.json",
+    "candidate/workspace/README.md",
+    "candidate/workspace/src/ledgerkit/__init__.py",
+    "candidate/workspace/src/ledgerkit/contract.py",
+    "candidate/workspace/tests/test_visible.py",
+    "oracle/README.md",
+    "oracle/stamina-contract.json",
+    "oracle/scoring-anchors.md",
+    "verifiers/README.md",
+    "verifiers/check_stamina_migration.py",
+    "verifiers/compute_stamina_slope.py",
+    "candidate/workspace/src/ledgerkit/m00.py",
+    "candidate/workspace/src/ledgerkit/m01.py",
+    "candidate/workspace/src/ledgerkit/m02.py",
+    "candidate/workspace/src/ledgerkit/m03.py",
+    "candidate/workspace/src/ledgerkit/m04.py",
+    "candidate/workspace/src/ledgerkit/m05.py",
+    "candidate/workspace/src/ledgerkit/m06.py",
+    "candidate/workspace/src/ledgerkit/m07.py",
+    "candidate/workspace/src/ledgerkit/m08.py"
+  ],
+  "migration_rule": {
+    "consumer_selector": "quote_*",
+    "add_fields": {
+      "region": "module REGION",
+      "currency": "CURRENCY_BY_REGION[REGION]",
+      "source": "ledger-v2"
+    },
+    "must_not_touch_selectors": [
+      "report_*",
+      "audit_*"
+    ]
+  },
+  "consumers": [
+    {
+      "module": "m00",
+      "func": "quote_anchor_alpha",
+      "expected": {
+        "account": "acct-anchor-alpha",
+        "amount": 100,
+        "region": "eu",
+        "currency": "EUR",
+        "source": "ledger-v2"
+      }
+    },
+    {
+      "module": "m00",
+      "func": "quote_anchor_beta",
+      "expected": {
+        "account": "acct-anchor-beta",
+        "amount": 110,
+        "region": "eu",
+        "currency": "EUR",
+        "source": "ledger-v2"
+      }
+    },
+    {
+      "module": "m02",
+      "func": "quote_c00",
+      "expected": {
+        "account": "acct-c00",
+        "amount": 100,
+        "region": "uk",
+        "currency": "GBP",
+        "source": "ledger-v2"
+      }
+    },
+    {
+      "module": "m02",
+      "func": "quote_c01",
+      "expected": {
+        "account": "acct-c01",
+        "amount": 101,
+        "region": "uk",
+        "currency": "GBP",
+        "source": "ledger-v2"
+      }
+    },
+    {
+      "module": "m07",
+      "func": "quote_c02",
+      "expected": {
+        "account": "acct-c02",
+        "amount": 102,
+        "region": "jp",
+        "currency": "JPY",
+        "source": "ledger-v2"
+      }
+    },
+    {
+      "module": "m04",
+      "func": "quote_c03",
+      "expected": {
+        "account": "acct-c03",
+        "amount": 103,
+        "region": "eu",
+        "currency": "EUR",
+        "source": "ledger-v2"
+      }
+    },
+    {
+      "module": "m05",
+      "func": "quote_c04",
+      "expected": {
+        "account": "acct-c04",
+        "amount": 104,
+        "region": "us",
+        "currency": "USD",
+        "source": "ledger-v2"
+      }
+    },
+    {
+      "module": "m07",
+      "func": "quote_c05",
+      "expected": {
+        "account": "acct-c05",
+        "amount": 105,
+        "region": "jp",
+        "currency": "JPY",
+        "source": "ledger-v2"
+      }
+    },
+    {
+      "module": "m08",
+      "func": "quote_c06",
+      "expected": {
+        "account": "acct-c06",
+        "amount": 106,
+        "region": "eu",
+        "currency": "EUR",
+        "source": "ledger-v2"
+      }
+    },
+    {
+      "module": "m07",
+      "func": "quote_c07",
+      "expected": {
+        "account": "acct-c07",
+        "amount": 107,
+        "region": "jp",
+        "currency": "JPY",
+        "source": "ledger-v2"
+      }
+    },
+    {
+      "module": "m03",
+      "func": "quote_c08",
+      "expected": {
+        "account": "acct-c08",
+        "amount": 108,
+        "region": "jp",
+        "currency": "JPY",
+        "source": "ledger-v2"
+      }
+    },
+    {
+      "module": "m06",
+      "func": "quote_c09",
+      "expected": {
+        "account": "acct-c09",
+        "amount": 109,
+        "region": "uk",
+        "currency": "GBP",
+        "source": "ledger-v2"
+      }
+    },
+    {
+      "module": "m08",
+      "func": "quote_c10",
+      "expected": {
+        "account": "acct-c10",
+        "amount": 110,
+        "region": "eu",
+        "currency": "EUR",
+        "source": "ledger-v2"
+      }
+    },
+    {
+      "module": "m07",
+      "func": "quote_c11",
+      "expected": {
+        "account": "acct-c11",
+        "amount": 111,
+        "region": "jp",
+        "currency": "JPY",
+        "source": "ledger-v2"
+      }
+    },
+    {
+      "module": "m05",
+      "func": "quote_c12",
+      "expected": {
+        "account": "acct-c12",
+        "amount": 112,
+        "region": "us",
+        "currency": "USD",
+        "source": "ledger-v2"
+      }
+    },
+    {
+      "module": "m02",
+      "func": "quote_c13",
+      "expected": {
+        "account": "acct-c13",
+        "amount": 113,
+        "region": "uk",
+        "currency": "GBP",
+        "source": "ledger-v2"
+      }
+    },
+    {
+      "module": "m03",
+      "func": "quote_c14",
+      "expected": {
+        "account": "acct-c14",
+        "amount": 114,
+        "region": "jp",
+        "currency": "JPY",
+        "source": "ledger-v2"
+      }
+    },
+    {
+      "module": "m04",
+      "func": "quote_c15",
+      "expected": {
+        "account": "acct-c15",
+        "amount": 115,
+        "region": "eu",
+        "currency": "EUR",
+        "source": "ledger-v2"
+      }
+    },
+    {
+      "module": "m08",
+      "func": "quote_c16",
+      "expected": {
+        "account": "acct-c16",
+        "amount": 116,
+        "region": "eu",
+        "currency": "EUR",
+        "source": "ledger-v2"
+      }
+    },
+    {
+      "module": "m01",
+      "func": "quote_c17",
+      "expected": {
+        "account": "acct-c17",
+        "amount": 117,
+        "region": "us",
+        "currency": "USD",
+        "source": "ledger-v2"
+      }
+    },
+    {
+      "module": "m03",
+      "func": "quote_c18",
+      "expected": {
+        "account": "acct-c18",
+        "amount": 118,
+        "region": "jp",
+        "currency": "JPY",
+        "source": "ledger-v2"
+      }
+    },
+    {
+      "module": "m00",
+      "func": "quote_c19",
+      "expected": {
+        "account": "acct-c19",
+        "amount": 119,
+        "region": "eu",
+        "currency": "EUR",
+        "source": "ledger-v2"
+      }
+    },
+    {
+      "module": "m04",
+      "func": "quote_c20",
+      "expected": {
+        "account": "acct-c20",
+        "amount": 120,
+        "region": "eu",
+        "currency": "EUR",
+        "source": "ledger-v2"
+      }
+    },
+    {
+      "module": "m00",
+      "func": "quote_c21",
+      "expected": {
+        "account": "acct-c21",
+        "amount": 121,
+        "region": "eu",
+        "currency": "EUR",
+        "source": "ledger-v2"
+      }
+    },
+    {
+      "module": "m04",
+      "func": "quote_c22",
+      "expected": {
+        "account": "acct-c22",
+        "amount": 122,
+        "region": "eu",
+        "currency": "EUR",
+        "source": "ledger-v2"
+      }
+    },
+    {
+      "module": "m01",
+      "func": "quote_c23",
+      "expected": {
+        "account": "acct-c23",
+        "amount": 123,
+        "region": "us",
+        "currency": "USD",
+        "source": "ledger-v2"
+      }
+    },
+    {
+      "module": "m04",
+      "func": "quote_c24",
+      "expected": {
+        "account": "acct-c24",
+        "amount": 124,
+        "region": "eu",
+        "currency": "EUR",
+        "source": "ledger-v2"
+      }
+    },
+    {
+      "module": "m07",
+      "func": "quote_c25",
+      "expected": {
+        "account": "acct-c25",
+        "amount": 125,
+        "region": "jp",
+        "currency": "JPY",
+        "source": "ledger-v2"
+      }
+    },
+    {
+      "module": "m02",
+      "func": "quote_c26",
+      "expected": {
+        "account": "acct-c26",
+        "amount": 126,
+        "region": "uk",
+        "currency": "GBP",
+        "source": "ledger-v2"
+      }
+    },
+    {
+      "module": "m05",
+      "func": "quote_c27",
+      "expected": {
+        "account": "acct-c27",
+        "amount": 127,
+        "region": "us",
+        "currency": "USD",
+        "source": "ledger-v2"
+      }
+    },
+    {
+      "module": "m06",
+      "func": "quote_c28",
+      "expected": {
+        "account": "acct-c28",
+        "amount": 128,
+        "region": "uk",
+        "currency": "GBP",
+        "source": "ledger-v2"
+      }
+    },
+    {
+      "module": "m06",
+      "func": "quote_c29",
+      "expected": {
+        "account": "acct-c29",
+        "amount": 129,
+        "region": "uk",
+        "currency": "GBP",
+        "source": "ledger-v2"
+      }
+    },
+    {
+      "module": "m03",
+      "func": "quote_c30",
+      "expected": {
+        "account": "acct-c30",
+        "amount": 130,
+        "region": "jp",
+        "currency": "JPY",
+        "source": "ledger-v2"
+      }
+    },
+    {
+      "module": "m01",
+      "func": "quote_c31",
+      "expected": {
+        "account": "acct-c31",
+        "amount": 131,
+        "region": "us",
+        "currency": "USD",
+        "source": "ledger-v2"
+      }
+    },
+    {
+      "module": "m07",
+      "func": "quote_c32",
+      "expected": {
+        "account": "acct-c32",
+        "amount": 132,
+        "region": "jp",
+        "currency": "JPY",
+        "source": "ledger-v2"
+      }
+    },
+    {
+      "module": "m08",
+      "func": "quote_c33",
+      "expected": {
+        "account": "acct-c33",
+        "amount": 133,
+        "region": "eu",
+        "currency": "EUR",
+        "source": "ledger-v2"
+      }
+    }
+  ],
+  "report_decoys": [
+    {
+      "module": "m02",
+      "func": "report_r00",
+      "expected": {
+        "account": "acct-r00",
+        "amount": 200,
+        "region": "uk",
+        "currency": "GBP",
+        "source": "report-v2"
+      }
+    },
+    {
+      "module": "m06",
+      "func": "report_r02",
+      "expected": {
+        "account": "acct-r02",
+        "amount": 202,
+        "region": "uk",
+        "currency": "GBP",
+        "source": "report-v2"
+      }
+    },
+    {
+      "module": "m05",
+      "func": "report_r04",
+      "expected": {
+        "account": "acct-r04",
+        "amount": 204,
+        "region": "us",
+        "currency": "USD",
+        "source": "report-v2"
+      }
+    },
+    {
+      "module": "m00",
+      "func": "report_r06",
+      "expected": {
+        "account": "acct-r06",
+        "amount": 206,
+        "region": "eu",
+        "currency": "EUR",
+        "source": "report-v2"
+      }
+    },
+    {
+      "module": "m05",
+      "func": "report_r08",
+      "expected": {
+        "account": "acct-r08",
+        "amount": 208,
+        "region": "us",
+        "currency": "USD",
+        "source": "report-v2"
+      }
+    },
+    {
+      "module": "m01",
+      "func": "report_r10",
+      "expected": {
+        "account": "acct-r10",
+        "amount": 210,
+        "region": "us",
+        "currency": "USD",
+        "source": "report-v2"
+      }
+    },
+    {
+      "module": "m00",
+      "func": "report_r12",
+      "expected": {
+        "account": "acct-r12",
+        "amount": 212,
+        "region": "eu",
+        "currency": "EUR",
+        "source": "report-v2"
+      }
+    },
+    {
+      "module": "m05",
+      "func": "report_r14",
+      "expected": {
+        "account": "acct-r14",
+        "amount": 214,
+        "region": "us",
+        "currency": "USD",
+        "source": "report-v2"
+      }
+    },
+    {
+      "module": "m08",
+      "func": "report_r16",
+      "expected": {
+        "account": "acct-r16",
+        "amount": 216,
+        "region": "eu",
+        "currency": "EUR",
+        "source": "report-v2"
+      }
+    }
+  ],
+  "audit_decoys": [
+    {
+      "module": "m06",
+      "func": "audit_a01",
+      "expected": {
+        "account": "acct-a01",
+        "ts": 1001
+      }
+    },
+    {
+      "module": "m01",
+      "func": "audit_a03",
+      "expected": {
+        "account": "acct-a03",
+        "ts": 1003
+      }
+    },
+    {
+      "module": "m03",
+      "func": "audit_a05",
+      "expected": {
+        "account": "acct-a05",
+        "ts": 1005
+      }
+    },
+    {
+      "module": "m03",
+      "func": "audit_a07",
+      "expected": {
+        "account": "acct-a07",
+        "ts": 1007
+      }
+    },
+    {
+      "module": "m02",
+      "func": "audit_a09",
+      "expected": {
+        "account": "acct-a09",
+        "ts": 1009
+      }
+    },
+    {
+      "module": "m08",
+      "func": "audit_a11",
+      "expected": {
+        "account": "acct-a11",
+        "ts": 1011
+      }
+    },
+    {
+      "module": "m01",
+      "func": "audit_a13",
+      "expected": {
+        "account": "acct-a13",
+        "ts": 1013
+      }
+    },
+    {
+      "module": "m06",
+      "func": "audit_a15",
+      "expected": {
+        "account": "acct-a15",
+        "ts": 1015
+      }
+    },
+    {
+      "module": "m04",
+      "func": "audit_a17",
+      "expected": {
+        "account": "acct-a17",
+        "ts": 1017
+      }
+    }
+  ],
+  "not_run_classification": [
+    "quota",
+    "timeout_without_summary",
+    "route_failure",
+    "wrapper_failure"
+  ]
+}

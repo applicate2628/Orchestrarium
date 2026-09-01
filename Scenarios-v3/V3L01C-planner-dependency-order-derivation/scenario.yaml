@@ -1,0 +1,19 @@
+id: V3L01C
+surface_id: V3L01C
+pack_id: V3P01
+role_class: planning
+artifact_type: delivery order memo plus order witness
+modality_family: dependency-ordering derivation
+allowed_change_surface:
+  - candidate/delivery-order.md
+  - candidate/order-witness.json
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+score_profile: "owner, advisory, factual, design, planning"
+overlay_flags:
+  - planner
+  - hidden-derivation
+  - order-witness

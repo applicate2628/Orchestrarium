@@ -1,0 +1,16 @@
+{
+  "function": "items.repository.list_items",
+  "call": {"account_id": "acct-17"},
+  "observed_fetch": {
+    "method": "db.fetch_items",
+    "arguments": {},
+    "query": "SELECT * FROM items",
+    "rows_read": 5000
+  },
+  "post_fetch_filter": {
+    "predicate": "row.account_id == account_id",
+    "returned_rows": 3
+  },
+  "invariant": "account_id must be bound before fetching rows",
+  "result": "violated"
+}

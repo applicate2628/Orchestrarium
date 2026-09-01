@@ -1,0 +1,310 @@
+{
+ "scenario_id": "V4L04HF-hidden-consumer-contract",
+ "verdicts": {
+  "CONS-01": {
+   "value": "safe",
+   "unit": "verdict"
+  },
+  "CONS-02": {
+   "value": "break",
+   "unit": "verdict"
+  },
+  "CONS-03": {
+   "value": "break",
+   "unit": "verdict"
+  },
+  "CONS-04": {
+   "value": "break",
+   "unit": "verdict"
+  },
+  "CONS-05": {
+   "value": "break",
+   "unit": "verdict"
+  },
+  "CONS-06": {
+   "value": "break",
+   "unit": "verdict"
+  },
+  "CONS-07": {
+   "value": "safe",
+   "unit": "verdict"
+  },
+  "CONS-08": {
+   "value": "break",
+   "unit": "verdict"
+  },
+  "CONS-09": {
+   "value": "safe",
+   "unit": "verdict"
+  },
+  "CONS-10": {
+   "value": "safe",
+   "unit": "verdict"
+  },
+  "CONS-11": {
+   "value": "break",
+   "unit": "verdict"
+  },
+  "CONS-12": {
+   "value": "break",
+   "unit": "verdict"
+  },
+  "CONS-13": {
+   "value": "safe",
+   "unit": "verdict"
+  },
+  "CONS-14": {
+   "value": "safe",
+   "unit": "verdict"
+  },
+  "CONS-15": {
+   "value": "safe",
+   "unit": "verdict"
+  },
+  "CONS-16": {
+   "value": "safe",
+   "unit": "verdict"
+  },
+  "CONS-17": {
+   "value": "safe",
+   "unit": "verdict"
+  },
+  "CONS-18": {
+   "value": "safe",
+   "unit": "verdict"
+  },
+  "CONS-19": {
+   "value": "safe",
+   "unit": "verdict"
+  },
+  "CONS-20": {
+   "value": "safe",
+   "unit": "verdict"
+  },
+  "CONS-21": {
+   "value": "safe",
+   "unit": "verdict"
+  },
+  "CONS-22": {
+   "value": "safe",
+   "unit": "verdict"
+  },
+  "CONS-23": {
+   "value": "break",
+   "unit": "verdict"
+  },
+  "CONS-24": {
+   "value": "safe",
+   "unit": "verdict"
+  }
+ },
+ "causes": {
+  "CONS-01": {
+   "value": "none",
+   "unit": "change-id"
+  },
+  "CONS-02": {
+   "value": "C02",
+   "unit": "change-id"
+  },
+  "CONS-03": {
+   "value": "C06",
+   "unit": "change-id"
+  },
+  "CONS-04": {
+   "value": "C08",
+   "unit": "change-id"
+  },
+  "CONS-05": {
+   "value": "C03",
+   "unit": "change-id"
+  },
+  "CONS-06": {
+   "value": "C07",
+   "unit": "change-id"
+  },
+  "CONS-07": {
+   "value": "none",
+   "unit": "change-id"
+  },
+  "CONS-08": {
+   "value": "C04",
+   "unit": "change-id"
+  },
+  "CONS-09": {
+   "value": "none",
+   "unit": "change-id"
+  },
+  "CONS-10": {
+   "value": "none",
+   "unit": "change-id"
+  },
+  "CONS-11": {
+   "value": "C08",
+   "unit": "change-id"
+  },
+  "CONS-12": {
+   "value": "C11",
+   "unit": "change-id"
+  },
+  "CONS-13": {
+   "value": "none",
+   "unit": "change-id"
+  },
+  "CONS-14": {
+   "value": "none",
+   "unit": "change-id"
+  },
+  "CONS-15": {
+   "value": "none",
+   "unit": "change-id"
+  },
+  "CONS-16": {
+   "value": "none",
+   "unit": "change-id"
+  },
+  "CONS-17": {
+   "value": "none",
+   "unit": "change-id"
+  },
+  "CONS-18": {
+   "value": "none",
+   "unit": "change-id"
+  },
+  "CONS-19": {
+   "value": "none",
+   "unit": "change-id"
+  },
+  "CONS-20": {
+   "value": "none",
+   "unit": "change-id"
+  },
+  "CONS-21": {
+   "value": "none",
+   "unit": "change-id"
+  },
+  "CONS-22": {
+   "value": "none",
+   "unit": "change-id"
+  },
+  "CONS-23": {
+   "value": "C03",
+   "unit": "change-id"
+  },
+  "CONS-24": {
+   "value": "none",
+   "unit": "change-id"
+  }
+ },
+ "fixes": {
+  "CONS-01": {
+   "value": "FIX-NONE",
+   "unit": "fix-id"
+  },
+  "CONS-02": {
+   "value": "FIX-DEFAULT",
+   "unit": "fix-id"
+  },
+  "CONS-03": {
+   "value": "FIX-ORDER",
+   "unit": "fix-id"
+  },
+  "CONS-04": {
+   "value": "FIX-PRECEDENCE",
+   "unit": "fix-id"
+  },
+  "CONS-05": {
+   "value": "FIX-UNITS",
+   "unit": "fix-id"
+  },
+  "CONS-06": {
+   "value": "FIX-RENAME",
+   "unit": "fix-id"
+  },
+  "CONS-07": {
+   "value": "FIX-NONE",
+   "unit": "fix-id"
+  },
+  "CONS-08": {
+   "value": "FIX-CATCH",
+   "unit": "fix-id"
+  },
+  "CONS-09": {
+   "value": "FIX-NONE",
+   "unit": "fix-id"
+  },
+  "CONS-10": {
+   "value": "FIX-NONE",
+   "unit": "fix-id"
+  },
+  "CONS-11": {
+   "value": "FIX-PRECEDENCE",
+   "unit": "fix-id"
+  },
+  "CONS-12": {
+   "value": "FIX-KEYS",
+   "unit": "fix-id"
+  },
+  "CONS-13": {
+   "value": "FIX-NONE",
+   "unit": "fix-id"
+  },
+  "CONS-14": {
+   "value": "FIX-NONE",
+   "unit": "fix-id"
+  },
+  "CONS-15": {
+   "value": "FIX-NONE",
+   "unit": "fix-id"
+  },
+  "CONS-16": {
+   "value": "FIX-NONE",
+   "unit": "fix-id"
+  },
+  "CONS-17": {
+   "value": "FIX-NONE",
+   "unit": "fix-id"
+  },
+  "CONS-18": {
+   "value": "FIX-NONE",
+   "unit": "fix-id"
+  },
+  "CONS-19": {
+   "value": "FIX-NONE",
+   "unit": "fix-id"
+  },
+  "CONS-20": {
+   "value": "FIX-NONE",
+   "unit": "fix-id"
+  },
+  "CONS-21": {
+   "value": "FIX-NONE",
+   "unit": "fix-id"
+  },
+  "CONS-22": {
+   "value": "FIX-NONE",
+   "unit": "fix-id"
+  },
+  "CONS-23": {
+   "value": "FIX-UNITS",
+   "unit": "fix-id"
+  },
+  "CONS-24": {
+   "value": "FIX-NONE",
+   "unit": "fix-id"
+  }
+ },
+ "breaking_change_ids": [
+  "C02",
+  "C03",
+  "C04",
+  "C06",
+  "C07",
+  "C08",
+  "C11"
+ ],
+ "release_gate": {
+  "migration_clearance": "block"
+ },
+ "narrative": "Changelog-surface reading: flagged every scary-sounding entry and every smelly record."
+}

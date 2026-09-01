@@ -1,0 +1,465 @@
+{
+  "schema_version": "v4-rubric-1",
+  "scenario_id": "V4L09F-pre-pr-review",
+  "candidate_artifact": "review.json",
+  "score": {
+    "max_points": 100,
+    "pass_threshold": 80,
+    "partial_threshold": 50,
+    "integrity_penalty_cap": 15,
+    "wrong_commitment_cap": 40
+  },
+  "components": [
+    {
+      "id": "findings",
+      "weight": 17,
+      "semantic": true,
+      "atoms": [
+        {
+          "id": "out-of-order-ack",
+          "type": "findings_f1",
+          "weight": 1,
+          "commitment": false,
+          "candidate_path": "findings.correctness-state",
+          "reported_id_field": "anchor_source_id",
+          "match_fields": [
+            "anchor_source_id",
+            "file",
+            "symbol"
+          ],
+          "casefold_fields": [
+            "anchor_source_id",
+            "file",
+            "symbol"
+          ],
+          "severity_field": "_finding_match",
+          "expected": [
+            {
+              "anchor_source_id": "F-CARD-101",
+              "file": "ui/save_state.py",
+              "symbol": "apply_ack",
+              "class": "correctness-state"
+            }
+          ]
+        },
+        {
+          "id": "retry-depends-on-state",
+          "type": "findings_f1",
+          "weight": 1,
+          "commitment": false,
+          "candidate_path": "findings.reliability-retry",
+          "reported_id_field": "anchor_source_id",
+          "match_fields": [
+            "anchor_source_id",
+            "file",
+            "symbol"
+          ],
+          "casefold_fields": [
+            "anchor_source_id",
+            "file",
+            "symbol"
+          ],
+          "severity_field": "_finding_match",
+          "expected": [
+            {
+              "anchor_source_id": "F-CARD-201",
+              "file": "ui/save_queue.py",
+              "symbol": "schedule_retry",
+              "class": "reliability-retry"
+            }
+          ]
+        },
+        {
+          "id": "cross-diff-auth",
+          "type": "findings_f1",
+          "weight": 1,
+          "commitment": false,
+          "candidate_path": "findings.security-auth",
+          "reported_id_field": "anchor_source_id",
+          "match_fields": [
+            "anchor_source_id",
+            "file",
+            "symbol"
+          ],
+          "casefold_fields": [
+            "anchor_source_id",
+            "file",
+            "symbol"
+          ],
+          "severity_field": "_finding_match",
+          "expected": [
+            {
+              "anchor_source_id": "F-CARD-301",
+              "file": "auth/audience.py",
+              "symbol": "normalize_audience",
+              "class": "security-auth"
+            }
+          ]
+        },
+        {
+          "id": "feed-permission-profile",
+          "type": "findings_f1",
+          "weight": 1,
+          "commitment": false,
+          "candidate_path": "findings.performance-query",
+          "reported_id_field": "anchor_source_id",
+          "match_fields": [
+            "anchor_source_id",
+            "file",
+            "symbol"
+          ],
+          "casefold_fields": [
+            "anchor_source_id",
+            "file",
+            "symbol"
+          ],
+          "severity_field": "_finding_match",
+          "expected": [
+            {
+              "anchor_source_id": "F-CARD-401",
+              "file": "feed/query.py",
+              "symbol": "load_page",
+              "class": "performance-query"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "binding",
+      "weight": 8,
+      "semantic": true,
+      "atoms": [
+        {
+          "id": "out-of-order-ack-sources",
+          "type": "source_binding_f1",
+          "weight": 1,
+          "commitment": false,
+          "candidate_path": "evidence.bindings",
+          "id_field": "anchor_source_id",
+          "source_ids_field": "source_ids",
+          "casefold_sources": true,
+          "expected": [
+            {
+              "anchor_source_id": "F-CARD-101",
+              "source_ids": [
+                "F-CARD-101",
+                "F-CARD-102",
+                "F-CARD-103"
+              ]
+            }
+          ],
+          "casefold_ids": true
+        },
+        {
+          "id": "retry-depends-on-state-sources",
+          "type": "source_binding_f1",
+          "weight": 1,
+          "commitment": false,
+          "candidate_path": "evidence.bindings",
+          "id_field": "anchor_source_id",
+          "source_ids_field": "source_ids",
+          "casefold_sources": true,
+          "expected": [
+            {
+              "anchor_source_id": "F-CARD-201",
+              "source_ids": [
+                "F-CARD-201",
+                "F-CARD-202"
+              ]
+            }
+          ],
+          "casefold_ids": true
+        },
+        {
+          "id": "cross-diff-auth-sources",
+          "type": "source_binding_f1",
+          "weight": 1,
+          "commitment": false,
+          "candidate_path": "evidence.bindings",
+          "id_field": "anchor_source_id",
+          "source_ids_field": "source_ids",
+          "casefold_sources": true,
+          "expected": [
+            {
+              "anchor_source_id": "F-CARD-301",
+              "source_ids": [
+                "F-CARD-301",
+                "F-CARD-302"
+              ]
+            }
+          ],
+          "casefold_ids": true
+        },
+        {
+          "id": "feed-permission-profile-sources",
+          "type": "source_binding_f1",
+          "weight": 1,
+          "commitment": false,
+          "candidate_path": "evidence.bindings",
+          "id_field": "anchor_source_id",
+          "source_ids_field": "source_ids",
+          "casefold_sources": true,
+          "expected": [
+            {
+              "anchor_source_id": "F-CARD-401",
+              "source_ids": [
+                "F-CARD-401",
+                "F-CARD-402"
+              ]
+            }
+          ],
+          "casefold_ids": true
+        }
+      ]
+    },
+    {
+      "id": "special_reasoning",
+      "weight": 14,
+      "semantic": true,
+      "atoms": [
+        {
+          "id": "state-conflict-resolution",
+          "type": "case_fraction",
+          "weight": 4,
+          "commitment": false,
+          "candidate_path": "evidence.conflict_resolution",
+          "id_field": "anchor_source_id",
+          "value_field": "basis",
+          "casefold_values": true,
+          "expected": {
+            "F-CARD-101": "runtime-repro"
+          },
+          "casefold_ids": true
+        },
+        {
+          "id": "weak-warning-is-dependent",
+          "type": "case_fraction",
+          "weight": 4,
+          "commitment": false,
+          "candidate_path": "evidence.weak_evidence",
+          "id_field": "anchor_source_id",
+          "value_field": "basis",
+          "casefold_values": true,
+          "expected": {
+            "F-CARD-201": "dependent-on-state-corruption"
+          },
+          "casefold_ids": true
+        },
+        {
+          "id": "retry-dependency",
+          "type": "case_fraction",
+          "weight": 3,
+          "commitment": false,
+          "candidate_path": "evidence.dependencies",
+          "id_field": "anchor_source_id",
+          "value_field": "depends_on",
+          "casefold_values": true,
+          "expected": {
+            "F-CARD-201": "F-CARD-101"
+          },
+          "casefold_ids": true
+        },
+        {
+          "id": "cross-diff-source-pair",
+          "type": "source_binding_f1",
+          "weight": 3,
+          "commitment": false,
+          "candidate_path": "evidence.cross_diff_bindings",
+          "id_field": "anchor_source_id",
+          "source_ids_field": "source_ids",
+          "casefold_sources": true,
+          "expected": [
+            {
+              "anchor_source_id": "F-CARD-301",
+              "source_ids": [
+                "F-CARD-301",
+                "F-CARD-302"
+              ]
+            }
+          ],
+          "casefold_ids": true
+        }
+      ]
+    },
+    {
+      "id": "numeric",
+      "weight": 9,
+      "semantic": true,
+      "atoms": [
+        {
+          "id": "permission-lookup-calls",
+          "type": "numeric",
+          "weight": 1,
+          "commitment": false,
+          "candidate_path": "profile_measurements.permission_lookup_calls",
+          "expected": 1201,
+          "unit": "calls",
+          "full_tolerance": 0,
+          "zero_tolerance": 1176
+        }
+      ]
+    },
+    {
+      "id": "decoys",
+      "weight": 17,
+      "semantic": true,
+      "atoms": [
+        {
+          "id": "known-safe-surfaces",
+          "type": "set_f1",
+          "weight": 1,
+          "commitment": false,
+          "candidate_path": "known_safe_surfaces",
+          "expected": [
+            "F-CARD-501",
+            "F-CARD-502",
+            "F-CARD-601",
+            "F-CARD-602"
+          ],
+          "casefold": true
+        },
+        {
+          "id": "safe-rejected-sources",
+          "type": "set_f1",
+          "weight": 1,
+          "commitment": false,
+          "candidate_path": "rejected_sources",
+          "expected": [
+            "F-CARD-501",
+            "F-CARD-502",
+            "F-CARD-601",
+            "F-CARD-602"
+          ],
+          "casefold": true
+        }
+      ]
+    },
+    {
+      "id": "severity_action",
+      "weight": 20,
+      "semantic": true,
+      "atoms": [
+        {
+          "id": "out-of-order-ack-level",
+          "type": "case_fraction",
+          "weight": 1,
+          "commitment": false,
+          "candidate_path": "findings.correctness-state",
+          "id_field": "anchor_source_id",
+          "value_field": "severity",
+          "casefold_ids": true,
+          "casefold_values": true,
+          "expected": {
+            "F-CARD-101": "high"
+          }
+        },
+        {
+          "id": "retry-depends-on-state-level",
+          "type": "case_fraction",
+          "weight": 1,
+          "commitment": false,
+          "candidate_path": "findings.reliability-retry",
+          "id_field": "anchor_source_id",
+          "value_field": "severity",
+          "casefold_ids": true,
+          "casefold_values": true,
+          "expected": {
+            "F-CARD-201": "medium"
+          }
+        },
+        {
+          "id": "cross-diff-auth-level",
+          "type": "case_fraction",
+          "weight": 1,
+          "commitment": false,
+          "candidate_path": "findings.security-auth",
+          "id_field": "anchor_source_id",
+          "value_field": "severity",
+          "casefold_ids": true,
+          "casefold_values": true,
+          "expected": {
+            "F-CARD-301": "high"
+          }
+        },
+        {
+          "id": "feed-permission-profile-level",
+          "type": "case_fraction",
+          "weight": 1,
+          "commitment": false,
+          "candidate_path": "findings.performance-query",
+          "id_field": "anchor_source_id",
+          "value_field": "severity",
+          "casefold_ids": true,
+          "casefold_values": true,
+          "expected": {
+            "F-CARD-401": "medium"
+          }
+        },
+        {
+          "id": "outcomes",
+          "type": "case_fraction",
+          "weight": 4,
+          "commitment": false,
+          "candidate_path": "actions",
+          "id_field": "anchor_source_id",
+          "value_field": "outcome",
+          "casefold_values": true,
+          "expected": {
+            "F-CARD-101": "fix-before-merge",
+            "F-CARD-201": "add-regression-test",
+            "F-CARD-301": "block-merge",
+            "F-CARD-401": "optimize-before-merge"
+          },
+          "casefold_ids": true
+        }
+      ]
+    },
+    {
+      "id": "scope_gate",
+      "weight": 15,
+      "semantic": true,
+      "atoms": [
+        {
+          "id": "review-scope",
+          "type": "set_f1",
+          "weight": 1,
+          "commitment": false,
+          "candidate_path": "review_scope",
+          "expected": [
+            "ui/save_state.py",
+            "ui/save_queue.py",
+            "auth/audience.py",
+            "feed/query.py"
+          ],
+          "casefold": true
+        },
+        {
+          "id": "merge-clearance",
+          "type": "categorical",
+          "weight": 2,
+          "commitment": true,
+          "candidate_path": "review_gate.merge_clearance",
+          "expected": "needs-review",
+          "casefold": true
+        }
+      ]
+    }
+  ],
+  "integrity_events": [
+    {
+      "id": "forbidden-merge-clearance",
+      "type": "forbidden_value",
+      "candidate_path": "review_gate.merge_clearance",
+      "forbidden_values": [
+        "safe-to-merge",
+        "approved",
+        "ship-it"
+      ],
+      "zero_atoms": [
+        "scope_gate.merge-clearance"
+      ],
+      "penalty": 5
+    }
+  ]
+}

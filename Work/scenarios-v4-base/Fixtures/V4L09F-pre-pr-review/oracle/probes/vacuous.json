@@ -1,0 +1,29 @@
+{
+  "scenario_id": "V4L09F-pre-pr-review",
+  "findings": {
+    "correctness-state": [],
+    "reliability-retry": [],
+    "security-auth": [],
+    "performance-query": []
+  },
+  "evidence": {
+    "bindings": {},
+    "cross_diff_bindings": {},
+    "conflict_resolution": {},
+    "weak_evidence": {},
+    "dependencies": {}
+  },
+  "known_safe_surfaces": [],
+  "review_scope": [],
+  "rejected_sources": [],
+  "review_gate": {
+    "merge_clearance": "no-opinion"
+  },
+  "actions": {},
+  "profile_measurements": {
+    "permission_lookup_calls": {
+      "value": 0,
+      "unit": "calls"
+    }
+  }
+}

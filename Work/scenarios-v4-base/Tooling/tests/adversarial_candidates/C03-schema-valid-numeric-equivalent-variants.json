@@ -1,0 +1,13 @@
+{
+  "scenario_id": "V4C03-implementation-runtime",
+  "cases": {
+    "R1": {"outcome": "0200"},
+    "R2": {"outcome": "409.0"},
+    "R3": {"outcome": "2.02e2"},
+    "R4": {"outcome": " 200 "},
+    "R5": {"outcome": "5.03E+2"}
+  },
+  "interfaces": {"routes": ["/jobs", "/jobs/{id}"], "events": ["job.accepted", "job.completed"]},
+  "changed_paths": ["src/service.py", "tests/test_service.py"],
+  "tests": {"T1": {"outcome": "PASS"}}
+}

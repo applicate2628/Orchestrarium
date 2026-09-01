@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -14,6 +15,64 @@ def parse_args():
     parser.add_argument("--bundle-shape-only", action="store_true")
     parser.add_argument("--expect-start-state", action="store_true")
     return parser.parse_args()
+
+
+# --- Perturbation layer (R6/B4/L00) -----------------------------------------
+#
+# oracle/perturbation-contract.json defines input-conditioned variants of the
+# correct route decision (non-transcribable: finding-18 -- the routeDecision
+# markers appear verbatim in inputs/phases/02-route-decision.md, so a
+# memorized/copied answer that reproduces the ORIGINAL phase-file wording must
+# fail once the CURRENT phase file says something else). The active
+# perturbation is detected by hashing the selector input file(s) and matching
+# against the contract's pinned snapshots -- never an out-of-band flag.
+
+def load_perturbation_contract(root: Path):
+    path = root / "oracle" / "perturbation-contract.json"
+    if not path.exists():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def sha256_of(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def detect_active_perturbation(root: Path, perturbation_contract: dict):
+    input_paths = perturbation_contract["selector"]["input_paths"]
+    current_hashes = {}
+    for rel in input_paths:
+        candidate_path = root / rel
+        if not candidate_path.exists():
+            return None
+        current_hashes[rel] = sha256_of(candidate_path)
+    for entry in perturbation_contract["perturbations"]:
+        if entry.get("input_snapshots", {}) == current_hashes:
+            return entry
+    return None
+
+
+def apply_perturbation_delta(contract: dict, perturbation_entry: dict | None) -> dict:
+    """Return a copy of `contract` with the active perturbation's answer_delta merged in.
+
+    Only list-valued keys named `add_<key>` / `remove_<key>` in answer_delta are
+    touched (here: routeDecisionMarkers); every other contract field (phase
+    ids, required sections, changed-path budget) is left as-is -- perturbations
+    change which FACTS are correct, not the required packet structure.
+    """
+    effective = json.loads(json.dumps(contract))
+    if perturbation_entry is None:
+        return effective
+    delta = perturbation_entry.get("answer_delta", {})
+    for key in ("routeDecisionMarkers",):
+        base_list = effective.get(key, [])
+        remove = set(delta.get(f"remove_{key}", []))
+        add = delta.get(f"add_{key}", [])
+        effective[key] = [item for item in base_list if item not in remove]
+        for item in add:
+            if item not in effective[key]:
+                effective[key].append(item)
+    return effective
 
 
 def load_json(path: Path):
@@ -177,7 +236,20 @@ def main():
         print("N40 verifier PASS (bundle shape)")
         return 0
 
-    failures = evaluate_bundle(root, contract)
+    perturbation_contract = load_perturbation_contract(root)
+    active_perturbation = None
+    if perturbation_contract is not None:
+        active_perturbation = detect_active_perturbation(root, perturbation_contract)
+        if active_perturbation is None:
+            print(
+                "ERROR: Unrecognized perturbation state: inputs/phases/02-route-decision.md content "
+                "does not match any entry in oracle/perturbation-contract.json (baseline or perturbed).",
+                file=sys.stderr,
+            )
+            return 1
+    effective_contract = apply_perturbation_delta(contract, active_perturbation)
+
+    failures = evaluate_bundle(root, effective_contract)
     if args.expect_start_state:
         expected = set(contract["expected_start_state_failures"])
         observed = {failure["id"] for failure in failures}

@@ -1,0 +1,130 @@
+{
+  "scenario_id": "V4L09F-pre-pr-review",
+  "findings": {
+    "performance-query": [
+      {
+        "anchor_source_id": "F-CARD-401",
+        "file": "FEED/QUERY.PY",
+        "symbol": "LOAD_PAGE",
+        "severity": "MEDIUM"
+      }
+    ],
+    "security-auth": [
+      {
+        "anchor_source_id": "F-CARD-301",
+        "file": "AUTH/AUDIENCE.PY",
+        "symbol": "NORMALIZE_AUDIENCE",
+        "severity": "HIGH"
+      }
+    ],
+    "reliability-retry": [
+      {
+        "anchor_source_id": "F-CARD-201",
+        "file": "UI/SAVE_QUEUE.PY",
+        "symbol": "SCHEDULE_RETRY",
+        "severity": "MEDIUM"
+      }
+    ],
+    "correctness-state": [
+      {
+        "anchor_source_id": "F-CARD-101",
+        "file": "UI/SAVE_STATE.PY",
+        "symbol": "APPLY_ACK",
+        "severity": "HIGH"
+      }
+    ]
+  },
+  "evidence": {
+    "bindings": {
+      "F-CARD-401": {
+        "source_ids": [
+          "F-CARD-402",
+          "F-CARD-401"
+        ]
+      },
+      "F-CARD-301": {
+        "source_ids": [
+          "F-CARD-302",
+          "F-CARD-301"
+        ]
+      },
+      "F-CARD-201": {
+        "source_ids": [
+          "F-CARD-202",
+          "F-CARD-201"
+        ]
+      },
+      "F-CARD-101": {
+        "source_ids": [
+          "F-CARD-103",
+          "F-CARD-102",
+          "F-CARD-101"
+        ]
+      }
+    },
+    "cross_diff_bindings": {
+      "F-CARD-301": {
+        "source_ids": [
+          "F-CARD-302",
+          "F-CARD-301"
+        ]
+      }
+    },
+    "conflict_resolution": {
+      "F-CARD-101": {
+        "basis": "runtime-repro"
+      }
+    },
+    "weak_evidence": {
+      "F-CARD-201": {
+        "basis": "dependent-on-state-corruption"
+      }
+    },
+    "dependencies": {
+      "F-CARD-201": {
+        "depends_on": "F-CARD-101"
+      }
+    }
+  },
+  "known_safe_surfaces": [
+    "F-CARD-601",
+    "F-CARD-602",
+    "F-CARD-501",
+    "F-CARD-502"
+  ],
+  "review_scope": [
+    "FEED/QUERY.PY",
+    "AUTH/AUDIENCE.PY",
+    "UI/SAVE_QUEUE.PY",
+    "UI/SAVE_STATE.PY"
+  ],
+  "rejected_sources": [
+    "F-CARD-602",
+    "F-CARD-601",
+    "F-CARD-502",
+    "F-CARD-501"
+  ],
+  "review_gate": {
+    "merge_clearance": "NEEDS-REVIEW"
+  },
+  "actions": {
+    "F-CARD-401": {
+      "outcome": "OPTIMIZE-BEFORE-MERGE"
+    },
+    "F-CARD-301": {
+      "outcome": "BLOCK-MERGE"
+    },
+    "F-CARD-201": {
+      "outcome": "ADD-REGRESSION-TEST"
+    },
+    "F-CARD-101": {
+      "outcome": "FIX-BEFORE-MERGE"
+    }
+  },
+  "profile_measurements": {
+    "permission_lookup_calls": {
+      "value": 1201,
+      "unit": "calls"
+    }
+  }
+}

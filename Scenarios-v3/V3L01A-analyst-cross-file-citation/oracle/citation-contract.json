@@ -1,0 +1,144 @@
+{
+  "required_top_level_entries": [
+    "scenario.yaml",
+    "README.md",
+    "discrimination.yaml",
+    "inputs",
+    "candidate",
+    "oracle",
+    "verifiers"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "required_metadata": {
+    "id": "V3L01A",
+    "surface_id": "V3L01A",
+    "pack_id": "V3P01",
+    "role_class": "factual",
+    "artifact_type": "analyst cross-file citation memo",
+    "modality_family": "repository cross-file investigation",
+    "allowed_change_surface": [
+      "candidate/analyst-citation-memo.md"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md",
+      "candidate/repo-snapshot/**"
+    ],
+    "score_profile": "owner, advisory, factual, design, planning",
+    "overlay_flags": []
+  },
+  "required_bundle_paths": [
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/bounded-scope.md",
+    "candidate/README.md",
+    "candidate/analyst-citation-memo.md",
+    "candidate/repo-snapshot/config/defaults.py",
+    "candidate/repo-snapshot/config/effective.py",
+    "candidate/repo-snapshot/pipeline/scorer.py",
+    "candidate/repo-snapshot/docs/legacy-config.md",
+    "oracle/README.md",
+    "oracle/citation-contract.json",
+    "oracle/scoring-anchors.md",
+    "oracle/reference/analyst-citation-memo.md",
+    "verifiers/README.md",
+    "verifiers/check_analyst_citation.py"
+  ],
+  "editable_memo": "candidate/analyst-citation-memo.md",
+  "required_memo_sections": [
+    "# Analyst Cross-File Citation Memo",
+    "## Investigation goal",
+    "## Confirmed Facts",
+    "## Mis-Cited Sources Rejected",
+    "## Explicit Unknowns",
+    "## Gate Decision"
+  ],
+  "confirmed_facts_table_header": ["#", "Question", "File", "Line", "Symbol", "Fact"],
+  "rejected_table_header": ["#", "Mis-Cited Source", "File", "Why Wrong"],
+  "unknowns_table_header": ["#", "Unknown", "Why"],
+  "exact_confirmed_fact_count": 3,
+  "exact_rejected_count": 3,
+  "exact_unknown_count": 2,
+  "allowed_question_values": ["1", "2", "3"],
+  "required_confirmed_facts": [
+    {
+      "id": "F1",
+      "question_values": ["1"],
+      "file": "candidate/repo-snapshot/config/effective.py",
+      "acceptable_lines": [5],
+      "symbol_keywords": ["effective_retry_limit"],
+      "fact_terms": ["5", "effective"]
+    },
+    {
+      "id": "F2",
+      "question_values": ["2"],
+      "file": "candidate/repo-snapshot/config/effective.py",
+      "acceptable_lines": [6],
+      "symbol_keywords": ["effective_timeout_ms"],
+      "fact_terms": ["8000", "effective"]
+    },
+    {
+      "id": "F3",
+      "question_values": ["3"],
+      "file": "candidate/repo-snapshot/config/effective.py",
+      "acceptable_lines": [7],
+      "symbol_keywords": ["effective_profile"],
+      "fact_terms": ["batch"]
+    }
+  ],
+  "required_rejected_sources": [
+    {
+      "id": "R1",
+      "theme_keywords": ["declared default retry", "default retry", "defaults retry", "declared retry", "defaults.py retry"],
+      "file": "candidate/repo-snapshot/config/defaults.py",
+      "rejection_terms": ["effective"]
+    },
+    {
+      "id": "R2",
+      "theme_keywords": ["legacy config", "legacy notes", "stale doc", "legacy-config", "legacy configuration", "config notes"],
+      "file": "candidate/repo-snapshot/docs/legacy-config.md",
+      "rejection_terms": ["effective"]
+    },
+    {
+      "id": "R3",
+      "theme_keywords": ["declared profile", "interactive profile", "active_profile", "declared active", "defaults.py profile"],
+      "file": "candidate/repo-snapshot/config/defaults.py",
+      "rejection_terms": ["batch"]
+    }
+  ],
+  "required_unknowns": [
+    {
+      "id": "U1",
+      "term_keywords": ["non-batch", "other pipeline", "other profile", "interactive pipeline", "pipelines other"],
+      "why_terms": ["not shown", "not present", "not included", "slice", "no evidence"]
+    },
+    {
+      "id": "U2",
+      "term_keywords": ["override source", "where the override", "env", "cli", "how the batch override", "origin of the override"],
+      "why_terms": ["not shown", "not present", "not included", "slice", "no evidence"]
+    }
+  ],
+  "expected_gate_decision": "PASS",
+  "disallowed_markers": [
+    "the effective retry limit is 3",
+    "the scorer runs under the interactive profile",
+    "defaults.py is authoritative",
+    "the legacy doc is authoritative",
+    "```python",
+    "diff --git",
+    "apply_patch"
+  ]
+}

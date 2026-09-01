@@ -1,0 +1,119 @@
+{
+  "schema_version": "scenarios-v3-oracle-2026-07-12",
+  "scenario_id": "V3LTA",
+  "root_name": "V3LTA-blind-audit-sqli",
+  "rf12_line": "LTA",
+  "role_trigger": "wide-shallow-blind-audit",
+  "target_separator": "budget-bounded-recall",
+  "aspect": "sql-injection",
+  "expected_winner": "working-audit",
+
+  "score": {
+    "metric": "recall_at_precision_floor",
+    "precision_floor": 0.8,
+    "recall_pass_threshold": 0.7,
+    "notes": "SCORED ARTIFACT = recall (fraction of planted defects located) GATED by a fixed precision floor, under an IDENTICAL enforced budget on every profile. If precision < precision_floor the run FAILS regardless of recall (FP-decoy punishment). Cost/latency is NEVER divided into the score: no coverage-per-cost, no cost denominator (A8 BLOCKER avoided). Cost stays a DEFERRED, ASSUMPTION-labeled diagnostic (I6) until telemetry variance is known (P3)."
+  },
+
+  "budget": {
+    "enforced_by": "harness",
+    "budget_output_tokens_cap": 6000,
+    "budget_wall_clock_ms": 900000,
+    "note": "The output-token cap and turnaround timeout are HARNESS PROPERTIES pinned identically for all four profiles by the v2.1 runner (same pinning mechanism as F1). This verifier does NOT generate under the cap; when a telemetry summary.json is available it flags an over-cap run as a non-scoring BUDGET-VIOLATION (defense-in-depth demonstration of enforcement). Absent telemetry, the budget is assumed harness-enforced and cost is reported ASSUMPTION-labeled only."
+  },
+
+  "answer_contract": {
+    "path": "candidate/answer.json",
+    "required_top_level": ["aspect", "findings"],
+    "aspect_must_equal": "sql-injection",
+    "finding_required_keys": ["file", "line"],
+    "finding_file_match": "basename (corpus/hNNN.py, inputs/corpus/hNNN.py, or hNNN.py all accepted)",
+    "finding_line_match": "line must fall inside the defect's acceptable_lines window on the matched file",
+    "duplicate_policy": "a second finding matching an already-claimed defect id is ignored (neither TP nor FP); a finding matching no defect window is a FP",
+    "gate_decision_optional": true
+  },
+
+  "exit_codes": {
+    "0": "PASS  (bundle-shape OR scored: recall >= recall_pass_threshold AND precision >= precision_floor)",
+    "1": "SCORED-FAIL  (quality: recall < threshold, OR precision < floor) -- a genuine model-quality FAIL",
+    "2": "NOT-SCOREABLE / NR  (missing or invalid answer.json, missing corpus/truth, parse failure) -- route/runtime separation, NOT a quality FAIL",
+    "3": "BUDGET-VIOLATION  (telemetry present and outputTokens > budget_output_tokens_cap) -- disqualified, not scored"
+  },
+
+  "required_top_level_entries": [
+    "README.md",
+    "scenario.yaml",
+    "discrimination.yaml",
+    "inputs",
+    "candidate",
+    "oracle",
+    "verifiers"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "rf12_line",
+    "role_trigger",
+    "target_separator",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "V3LTA",
+    "surface_id": "V3-TA1",
+    "pack_id": "V3PTA",
+    "role_class": "review",
+    "artifact_type": "blind single-aspect audit findings",
+    "modality_family": "wide-shallow blind code audit, single defect class, fixed enforced budget, recall-at-precision-floor",
+    "rf12_line": "LTA",
+    "role_trigger": "wide-shallow-blind-audit",
+    "target_separator": "budget-bounded-recall",
+    "allowed_change_surface": [
+      "candidate/answer.json"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md"
+    ],
+    "score_profile": "recall@precision-floor under identical enforced budget; cost diagnostic ASSUMPTION-labeled (I6)",
+    "overlay_flags": [
+      "working-audit",
+      "blind-audit",
+      "fixed-budget",
+      "recall-precision",
+      "cost-deferred"
+    ]
+  },
+  "required_bundle_files": [
+    "inputs/README.md",
+    "inputs/task.md",
+    "candidate/README.md",
+    "candidate/answer.json",
+    "oracle/README.md",
+    "oracle/blind-audit-contract.json",
+    "oracle/corpus-truth.json",
+    "oracle/false-positive-traps.md",
+    "oracle/scoring-anchors.md",
+    "oracle/generate_corpus.py",
+    "verifiers/README.md",
+    "verifiers/check_blind_audit.py"
+  ],
+  "required_corpus_count": 80,
+  "corpus_truth_file": "oracle/corpus-truth.json",
+  "not_run_classification": [
+    "quota",
+    "timeout_without_summary",
+    "route_failure",
+    "wrapper_failure",
+    "parse_failure",
+    "missing_answer"
+  ]
+}

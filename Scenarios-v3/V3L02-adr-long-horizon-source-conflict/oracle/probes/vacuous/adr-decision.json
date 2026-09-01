@@ -1,0 +1,15 @@
+{
+  "scenario_id": "V3L02",
+  "decision": {
+    "choice": "",
+    "status": ""
+  },
+  "source_authority_order": [],
+  "accepted_claims": [],
+  "rejected_options": [],
+  "compatibility_plan": [],
+  "rollback_plan": [],
+  "non_claims": [],
+  "gate_decision": "",
+  "notes": "keywords: PlanBridge owns translation, producer boundary, legacy_plan_id, seat-sync, idempotency_key, consumer shim, v1, 90 days, global entitlement bus, audit correlation, consumer-side shims, idempotency, direct schema switch, legacy_plan_id, stale, 14 days"
+}

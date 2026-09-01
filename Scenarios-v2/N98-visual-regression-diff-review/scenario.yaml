@@ -1,0 +1,20 @@
+id: N98
+surface_id: RF12-L12
+pack_id: RF12-hard
+role_class: review
+artifact_type: baseline-current visual regression review JSON
+modality_family: screenshot diff visual review with calibrated coordinates and false-positive traps
+allowed_change_surface:
+  - candidate/answer.json
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+score_profile: "visual-review, screenshot-diff, exact-regression-tuples, calibrated-coordinate-window"
+overlay_flags:
+  - rf12-unresolved-primary
+  - visual-correctness
+  - screenshot-diff
+  - false-positive-control
+  - binary-separator-candidate

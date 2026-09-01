@@ -1,0 +1,73 @@
+{
+  "scenario_id": "V4L09F-pre-pr-review",
+  "real_findings": {
+    "F01-out-of-order-ack": {
+      "file": "ui/save_state.py",
+      "symbol": "apply_ack",
+      "class": "correctness-state",
+      "source_ids": ["F-CARD-101", "F-CARD-102", "F-CARD-103"],
+      "proof_files": [
+        "F01-out-of-order-ack/failing-test.py",
+        "F01-out-of-order-ack/transcript.txt"
+      ],
+      "summary": "A stale acknowledgement clears dirty state for a newer edit."
+    },
+    "F02-retry-depends-on-state": {
+      "file": "ui/save_queue.py",
+      "symbol": "schedule_retry",
+      "class": "reliability-retry",
+      "source_ids": ["F-CARD-201", "F-CARD-202"],
+      "depends_on": "F01-out-of-order-ack",
+      "proof_files": ["F02-retry-depends-on-state/trace-invariant.json"],
+      "summary": "Retry scheduling is skipped only after stale acknowledgement state corruption has marked the editor clean."
+    },
+    "F03-cross-diff-auth": {
+      "file": "auth/audience.py",
+      "symbol": "normalize_audience",
+      "class": "security-auth",
+      "source_ids": ["F-CARD-301", "F-CARD-302"],
+      "cross_diff_source_ids": ["F-CARD-301", "F-CARD-302"],
+      "proof_files": [
+        "F03-cross-diff-auth/failing-integration-test.py",
+        "F03-cross-diff-auth/transcript.txt"
+      ],
+      "summary": "Combining audience normalization with forwarded tenant headers accepts a cross-tenant request."
+    },
+    "F04-feed-permission-profile": {
+      "file": "feed/query.py",
+      "symbol": "load_page",
+      "class": "performance-query",
+      "source_ids": ["F-CARD-401", "F-CARD-402"],
+      "proof_files": [
+        "F04-feed-permission-profile/profile-threshold.json",
+        "F04-feed-permission-profile/raw-count.txt"
+      ],
+      "summary": "The page loader performs 1201 permission lookups for a 1200-row page load."
+    }
+  },
+  "safe_sources": {
+    "F05-fixture-name-safe": {
+      "source_ids": ["F-CARD-501", "F-CARD-502"],
+      "proof_files": ["F05-fixture-name-safe/passing-proof.txt"],
+      "summary": "The SHA wording change is confined to fixture naming and does not call hash code at runtime."
+    },
+    "F06-log-sampling-safe": {
+      "source_ids": ["F-CARD-601", "F-CARD-602"],
+      "proof_files": ["F06-log-sampling-safe/passing-proof.txt"],
+      "summary": "Shutdown log sampling does not alter the final flush path."
+    }
+  },
+  "numeric_targets": {
+    "permission_lookup_calls": {
+      "candidate_path": "profile_measurements.permission_lookup_calls",
+      "expected": 1201,
+      "unit": "calls",
+      "full_tolerance": 0,
+      "zero_tolerance": 1176,
+      "proof_files": [
+        "F04-feed-permission-profile/profile-threshold.json",
+        "F04-feed-permission-profile/raw-count.txt"
+      ]
+    }
+  }
+}

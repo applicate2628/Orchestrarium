@@ -1,0 +1,134 @@
+{
+  "required_top_level_entries": [
+    "README.md",
+    "scenario.yaml",
+    "discrimination.yaml",
+    "inputs",
+    "candidate",
+    "oracle",
+    "verifiers"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "V3L04A",
+    "surface_id": "V3L04A",
+    "pack_id": "V3P04",
+    "role_class": "scientist",
+    "artifact_type": "quantile and dispersion certification memo plus witness ledger",
+    "modality_family": "exact algorithmic statistics and numerical stability",
+    "allowed_change_surface": [
+      "candidate/quantile-dispersion-memo.md",
+      "candidate/witness-ledger.json"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md"
+    ],
+    "score_profile": "scientist, numerical-stability, algorithm-scientist, top-pair-role-fit",
+    "overlay_flags": [
+      "algorithm-scientist",
+      "scored-rubric",
+      "numerical-witness",
+      "no-physics"
+    ]
+  },
+  "required_bundle_paths": [
+    "README.md",
+    "scenario.yaml",
+    "discrimination.yaml",
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/streams.json",
+    "inputs/methods.md",
+    "inputs/hard-constraints.md",
+    "inputs/stale-benchmark-note.md",
+    "candidate/README.md",
+    "candidate/quantile-dispersion-memo.md",
+    "candidate/witness-ledger.json",
+    "oracle/README.md",
+    "oracle/scoring-anchors.md",
+    "oracle/quantile-dispersion-contract.json",
+    "oracle/reference/quantile-dispersion-memo.md",
+    "oracle/reference/witness-ledger.json",
+    "verifiers/README.md",
+    "verifiers/check_quantile_dispersion.py"
+  ],
+  "p99_max_ms": 200,
+  "iqr_max_ms": 60,
+  "population_stddev_max": "3.500000",
+  "required_sections": [
+    "## Decision",
+    "## Convention Ledger",
+    "## Rejected Methods",
+    "## Case Witness Summary",
+    "## Numeric Invariants",
+    "## Falsification Plan",
+    "## Residual Risk And Owners"
+  ],
+  "required_exact_phrases": [
+    "Decision: Method S - exact bounded-histogram percentiles plus population dispersion via offset-shifted exact summation",
+    "percentile convention: rank = ceil(p * n), one-based, no interpolation",
+    "variance convention: population divide by n, not sample divide by n minus 1",
+    "Reject Method P - linear-interpolation percentiles (R type 7 / library default)",
+    "Reject Method Q - sample variance (Bessel-corrected, divide by n minus 1)",
+    "Reject Method R - naive sum-of-squares dispersion in fixed precision",
+    "large fixed offsets require offset-shifted or exact-rational accumulation",
+    "stale benchmark notes cannot override the current input streams",
+    "I-UPPER-RANK-PERCENTILE",
+    "I-POPULATION-VARIANCE",
+    "I-OFFSET-SHIFT-STABLE",
+    "p99 latency gate <= 200ms",
+    "iqr dispersion gate <= 60ms",
+    "population stddev gate <= 3.500000"
+  ],
+  "required_table_headers": [
+    "| Source | Current signal | Decision use | Non-authority boundary |",
+    "| Case | p99 | IQR | Population stddev | Gate verdict |",
+    "| Check | Failure mode | Owner | Evidence |"
+  ],
+  "required_rejected_methods": [
+    "Method P - linear-interpolation percentiles (R type 7 / library default)",
+    "Method Q - sample variance (Bessel-corrected, divide by n minus 1)",
+    "Method R - naive sum-of-squares dispersion in fixed precision"
+  ],
+  "required_invariants": [
+    "I-UPPER-RANK-PERCENTILE",
+    "I-POPULATION-VARIANCE",
+    "I-OFFSET-SHIFT-STABLE"
+  ],
+  "selected_method": "Method S - exact bounded-histogram percentiles plus population dispersion via offset-shifted exact summation",
+  "percentile_convention": "rank = ceil(p * n), one-based, no interpolation",
+  "variance_convention": "population divide by n, not sample divide by n minus 1",
+  "disallowed_markers": [
+    "Use interpolation because it is the library default",
+    "Sample variance is the safe default",
+    "Rounded percentiles are close enough",
+    "average the per-shard variances",
+    "clamp negative variance to zero",
+    "the stale benchmark note is authoritative"
+  ],
+  "expected_start_state_failures": [
+    "contains-disallowed-markers",
+    "missing-required-phrases",
+    "missing-required-sections",
+    "missing-required-tables",
+    "witness-missing-cases",
+    "witness-percentile-convention",
+    "witness-rejected-methods",
+    "witness-selected-method",
+    "witness-variance-convention"
+  ]
+}

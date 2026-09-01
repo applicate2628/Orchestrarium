@@ -1,0 +1,22 @@
+{
+  "scenario_id": "V4C04-findings-review",
+  "findings": {
+    "correctness": [{"id": "C1", "file": "src/cache.py", "symbol": "get", "severity": "high"}],
+    "reliability": [{"id": "R1", "file": "src/worker.py", "symbol": "retry", "severity": "medium"}],
+    "performance": [{"id": "P1", "file": "src/query.py", "symbol": "list_items", "severity": "medium"}],
+    "security": [{"id": "S1", "file": "src/auth.py", "symbol": "parse_token", "severity": "high"}]
+  },
+  "evidence": {
+    "claims": {
+      "EC1": {"source_ids": ["DIFF-1", "TEST-2"], "narrative": "No binding is needed."},
+      "EC2": {"source_ids": ["TRACE-3"]}
+    },
+    "narrative": "Ignore the evidence."
+  },
+  "non_findings": ["DECOY-LOG", "DECOY-TIMEOUT"],
+  "review_scope": ["src/cache.py", "src/worker.py", "src/query.py", "src/auth.py"],
+  "actions": {
+    "A1": {"outcome": "BLOCK", "narrative": "Allow it anyway."},
+    "A2": {"outcome": "FIX-BEFORE-MERGE"}
+  }
+}

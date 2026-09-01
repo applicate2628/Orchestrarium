@@ -1,0 +1,20 @@
+id: V3L04A
+surface_id: V3L04A
+pack_id: V3P04
+role_class: scientist
+artifact_type: quantile and dispersion certification memo plus witness ledger
+modality_family: exact algorithmic statistics and numerical stability
+allowed_change_surface:
+  - candidate/quantile-dispersion-memo.md
+  - candidate/witness-ledger.json
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+score_profile: "scientist, numerical-stability, algorithm-scientist, top-pair-role-fit"
+overlay_flags:
+  - algorithm-scientist
+  - scored-rubric
+  - numerical-witness
+  - no-physics

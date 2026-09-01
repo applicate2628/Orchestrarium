@@ -280,7 +280,8 @@ def verify_persistence(package: Any, snapshot: dict[str, Any] | None, failures: 
 
 
 def run_visible_tests(root: Path, failures: list[tuple[str, str]]) -> None:
-    workspace = root / "candidate" / "workspace"
+    exec_root = Path(os.environ["BENCH_EXEC_ROOT"]).resolve() if os.environ.get("BENCH_EXEC_ROOT") else root
+    workspace = exec_root / "candidate" / "workspace"
     env = os.environ.copy()
     env["PYTHONPATH"] = "src"
     completed = subprocess.run(

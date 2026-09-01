@@ -1,0 +1,21 @@
+id: N22
+surface_id: E12
+pack_id: E12
+role_class: scientist
+artifact_type: numerical stability decision memo plus witness ledger
+modality_family: numerical stability and algorithmic constraints
+allowed_change_surface:
+  - candidate/numerical-stability-decision-memo.md
+  - candidate/witness-ledger.json
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/stale-advice/**
+score_profile: "scientist, numerical-stability, top-pair-role-fit"
+overlay_flags:
+  - top-pair-role-fit
+  - scientist-constraints
+  - scored-rubric
+  - numerical-witness

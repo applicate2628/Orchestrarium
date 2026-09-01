@@ -1,0 +1,106 @@
+{
+  "scenario_id": "V4L09F-pre-pr-review",
+  "findings": {
+    "correctness-state": [
+      {
+        "anchor_source_id": "F-CARD-102",
+        "file": "ui/save_state.py",
+        "symbol": "apply_ack",
+        "severity": "low"
+      }
+    ],
+    "reliability-retry": [
+      {
+        "anchor_source_id": "F-CARD-202",
+        "file": "ui/save_queue.py",
+        "symbol": "queue.warn",
+        "severity": "low"
+      }
+    ],
+    "security-auth": [
+      {
+        "anchor_source_id": "F-CARD-301",
+        "file": "auth/audience.py",
+        "symbol": "normalize_audience",
+        "severity": "medium"
+      }
+    ],
+    "performance-query": [
+      {
+        "anchor_source_id": "F-CARD-402",
+        "file": "feed/query.py",
+        "symbol": "load_page",
+        "severity": "low"
+      }
+    ]
+  },
+  "evidence": {
+    "bindings": {
+      "F-CARD-102": {
+        "source_ids": [
+          "F-CARD-102"
+        ]
+      },
+      "F-CARD-202": {
+        "source_ids": [
+          "F-CARD-202"
+        ]
+      },
+      "F-CARD-301": {
+        "source_ids": [
+          "F-CARD-301"
+        ]
+      },
+      "F-CARD-402": {
+        "source_ids": [
+          "F-CARD-402"
+        ]
+      }
+    },
+    "cross_diff_bindings": {},
+    "conflict_resolution": {},
+    "weak_evidence": {},
+    "dependencies": {}
+  },
+  "known_safe_surfaces": [
+    "F-CARD-501",
+    "F-CARD-502",
+    "F-CARD-601",
+    "F-CARD-602"
+  ],
+  "review_scope": [
+    "ui/save_state.py",
+    "ui/save_queue.py",
+    "auth/audience.py",
+    "feed/query.py"
+  ],
+  "rejected_sources": [
+    "F-CARD-501",
+    "F-CARD-502",
+    "F-CARD-601",
+    "F-CARD-602"
+  ],
+  "review_gate": {
+    "merge_clearance": "needs-review"
+  },
+  "actions": {
+    "F-CARD-102": {
+      "outcome": "no-action"
+    },
+    "F-CARD-202": {
+      "outcome": "measure-before-merge"
+    },
+    "F-CARD-301": {
+      "outcome": "add-regression-test"
+    },
+    "F-CARD-402": {
+      "outcome": "measure-before-merge"
+    }
+  },
+  "profile_measurements": {
+    "permission_lookup_calls": {
+      "value": 0,
+      "unit": "calls"
+    }
+  }
+}

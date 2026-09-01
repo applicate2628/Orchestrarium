@@ -1,0 +1,85 @@
+{
+  "unit": "milliseconds",
+  "required_invariants": [
+    "I-UPPER-RANK-PERCENTILE",
+    "I-POPULATION-VARIANCE",
+    "I-OFFSET-SHIFT-STABLE"
+  ],
+  "cases": [
+    {
+      "case_id": "p99-rank-vs-interpolation-flip",
+      "description": "Upper-rank p99 lands on 200 (pass); linear interpolation would report >200 and flip the gate.",
+      "histogram": {
+        "180": 98,
+        "200": 1,
+        "300": 1
+      },
+      "dispersion_shards": [
+        [12, 14],
+        [16, 18]
+      ]
+    },
+    {
+      "case_id": "population-vs-sample-stddev-flip",
+      "description": "Population stddev clears 3.5; Bessel-corrected sample stddev would exceed it and flip the gate.",
+      "histogram": {
+        "120": 96,
+        "150": 4
+      },
+      "dispersion_shards": [
+        [10, 13, 16],
+        [19, 10, 13]
+      ]
+    },
+    {
+      "case_id": "large-offset-cancellation-stability",
+      "description": "Dispersion samples carry a ~1e9 offset; naive E[x^2]-E[x]^2 in fixed precision loses the spread.",
+      "histogram": {
+        "160": 97,
+        "205": 3
+      },
+      "dispersion_shards": [
+        [1000000000, 1000000003, 1000000006],
+        [1000000009, 1000000002, 1000000005]
+      ]
+    },
+    {
+      "case_id": "iqr-interpolation-consistency",
+      "description": "Upper-rank IQR is 30; interpolated quartiles would report 35 for the same stream.",
+      "histogram": {
+        "10": 25,
+        "20": 25,
+        "40": 25,
+        "90": 25
+      },
+      "dispersion_shards": [
+        [3, 5, 7],
+        [9, 11, 13]
+      ]
+    },
+    {
+      "case_id": "stddev-gate-exceedance",
+      "description": "Population stddev genuinely exceeds 3.5 and must FAIL on the dispersion gate.",
+      "histogram": {
+        "100": 90,
+        "130": 10
+      },
+      "dispersion_shards": [
+        [1, 5, 9],
+        [2, 8, 12]
+      ]
+    },
+    {
+      "case_id": "zero-spread-degenerate",
+      "description": "Degenerate spread must produce exact 0.000000 with no special-case drift.",
+      "histogram": {
+        "140": 50
+      },
+      "dispersion_shards": [
+        [500],
+        [500],
+        [500]
+      ]
+    }
+  ]
+}

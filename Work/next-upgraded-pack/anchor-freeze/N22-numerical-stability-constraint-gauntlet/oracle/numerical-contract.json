@@ -1,0 +1,135 @@
+{
+  "required_top_level_entries": [
+    "README.md",
+    "scenario.yaml",
+    "inputs",
+    "candidate",
+    "oracle",
+    "verifiers"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "N22",
+    "surface_id": "E12",
+    "pack_id": "E12",
+    "role_class": "scientist",
+    "artifact_type": "numerical stability decision memo plus witness ledger",
+    "modality_family": "numerical stability and algorithmic constraints",
+    "allowed_change_surface": [
+      "candidate/numerical-stability-decision-memo.md",
+      "candidate/witness-ledger.json"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md",
+      "candidate/stale-advice/**"
+    ],
+    "score_profile": "scientist, numerical-stability, top-pair-role-fit",
+    "overlay_flags": [
+      "top-pair-role-fit",
+      "scientist-constraints",
+      "scored-rubric",
+      "numerical-witness"
+    ]
+  },
+  "required_bundle_paths": [
+    "README.md",
+    "scenario.yaml",
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/options.md",
+    "inputs/hard-constraints.md",
+    "inputs/cases.json",
+    "inputs/stale-benchmark-note.md",
+    "candidate/README.md",
+    "candidate/numerical-stability-decision-memo.md",
+    "candidate/witness-ledger.json",
+    "candidate/stale-advice/old-fast-path.md",
+    "oracle/README.md",
+    "oracle/scoring-anchors.md",
+    "oracle/numerical-contract.json",
+    "verifiers/README.md",
+    "verifiers/check_numerical_stability_decision.py",
+    "verifiers/check_scope.py"
+  ],
+  "required_sections": [
+    "## Decision",
+    "## Witness Ledger Summary",
+    "## Rejected Options",
+    "## Numeric Invariants",
+    "## Non-Claim Ledger",
+    "## Falsification Plan",
+    "## Residual Risk And Owners"
+  ],
+  "required_exact_phrases": [
+    "Decision: Option C - exact bounded histogram p95 plus Welford/Chan variance merge with compensated summation",
+    "rank = ceil(0.95 * n), one-based, no interpolation",
+    "Reject Option A - naive sum/sum_sq variance plus rounded-rank p95",
+    "Reject Option B - full sort plus Decimal replay",
+    "Reject Option D - approximate sketch p95",
+    "stale benchmark notes cannot override current adversarial cases",
+    "clamping negative variance to zero is forbidden",
+    "I-P95-UPPER-RANK",
+    "I-BOUNDED-HISTOGRAM-EXACT",
+    "I-WELFORD-CHAN-MERGE",
+    "I-NO-CLAMPED-VARIANCE",
+    "I-STALE-NOTES-NON-AUTHORITATIVE",
+    "p95 latency gate <= 200ms",
+    "population variance gate <= 4.000000"
+  ],
+  "required_table_headers": [
+    "| Source | Current value | Decision use | Non-claim boundary |",
+    "| Case | p95 | Population variance | Gate verdict |",
+    "| Check | Failure mode | Owner | Evidence |"
+  ],
+  "required_rejected_options": [
+    "Option A - naive sum/sum_sq variance plus rounded-rank p95",
+    "Option B - full sort plus Decimal replay",
+    "Option D - approximate sketch p95"
+  ],
+  "required_case_ids": [
+    "p95-boundary-flip",
+    "sparse-tail-pass",
+    "shard-imbalance-variance-fail",
+    "large-offset-cancellation",
+    "zero-spread-degenerate"
+  ],
+  "required_invariants": [
+    "I-P95-UPPER-RANK",
+    "I-BOUNDED-HISTOGRAM-EXACT",
+    "I-WELFORD-CHAN-MERGE"
+  ],
+  "selected_option": "Option C - exact bounded histogram p95 plus Welford/Chan variance merge with compensated summation",
+  "quantile_convention": "rank = ceil(0.95 * n), one-based, no interpolation",
+  "disallowed_markers": [
+    "Use Option A because it was fastest",
+    "Rounded p95 is close enough",
+    "negative variance can be clamped to zero",
+    "Choose Option B because Decimal is safest",
+    "Option D is acceptable because sketches are bounded",
+    "average shard variances"
+  ],
+  "expected_start_state_failures": [
+    "contains-disallowed-markers",
+    "missing-required-phrases",
+    "missing-required-sections",
+    "missing-required-tables",
+    "witness-missing-cases",
+    "witness-quantile-convention",
+    "witness-rejected-options",
+    "witness-selected-option"
+  ]
+}

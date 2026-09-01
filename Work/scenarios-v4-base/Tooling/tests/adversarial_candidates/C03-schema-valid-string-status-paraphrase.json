@@ -1,0 +1,14 @@
+{
+  "scenario_id": "V4C03-implementation-runtime",
+  "cases": [
+    {"case_id": "R5", "outcome": "503"},
+    {"case_id": "R3", "outcome": "202"},
+    {"case_id": "R1", "outcome": "200"},
+    {"case_id": "R4", "outcome": "200"},
+    {"case_id": "R2", "outcome": "409"}
+  ],
+  "interfaces": {"routes": ["/jobs/{id}", "/jobs"], "events": ["job.completed", "job.accepted"]},
+  "changed_paths": ["tests/test_service.py", "src/service.py"],
+  "tests": [{"test_id": "T1", "outcome": "PASS"}],
+  "narrative": "The HTTP outcomes are represented in their conventional string form; the public API and event contracts remain unchanged."
+}

@@ -1,0 +1,23 @@
+id: V3LTA
+surface_id: V3-TA1
+pack_id: V3PTA
+role_class: review
+artifact_type: blind single-aspect audit findings
+modality_family: wide-shallow blind code audit, single defect class, fixed enforced budget, recall-at-precision-floor
+rf12_line: LTA
+role_trigger: wide-shallow-blind-audit
+target_separator: budget-bounded-recall
+allowed_change_surface:
+  - candidate/answer.json
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+score_profile: "recall@precision-floor under identical enforced budget; cost diagnostic ASSUMPTION-labeled (I6)"
+overlay_flags:
+  - working-audit
+  - blind-audit
+  - fixed-budget
+  - recall-precision
+  - cost-deferred

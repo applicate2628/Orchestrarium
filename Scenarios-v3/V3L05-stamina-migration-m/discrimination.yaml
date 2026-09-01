@@ -1,0 +1,42 @@
+schema: discrimination-v1
+target_construct: "sustained single-stream breadth: complete, precise application of ONE mechanical contract migration across 18 homogeneous scattered consumers in a single session, past the point where visible tests already pass"
+eligible_profiles:
+  - stamina
+  - systemic-mgmt
+  - ultimate-depth
+  - working-audit
+expected_winner: stamina
+expected_winner_registered: 2026-07-12
+validated_discrimination: none
+validation_evidence: none
+
+# --- Family-specific pre-registration (immutable after registration) ---
+family: V3L05-stamina-migration
+variant: m
+total_consumers: 18
+total_decoys: 9
+graded_measure: breadth_fraction
+pass_fraction: 0.9
+false_positive_policy: any_false_positive_fails
+
+# Threshold grounded in TASK-INTRINSIC structure, fixed before any model run:
+#   atomic shared contract => completeness required; visible tests cover only 2/N,
+#   far below the bar; 0.60-complete FAILS, reference (1.0) PASSES with margin.
+threshold_basis: task-intrinsic
+threshold_registered_before_model_runs: true
+
+# --- Harness pinning (avoids the "measuring the wrapper" confound) ---
+harness_properties:
+  max_output_tokens: pinned-identical-both-providers
+  context_config: pinned-identical-both-providers
+  expected_output_tokens_upper_bound: 1200
+  rationale: "per-consumer edit adds 3 short fields; total migrated diff is a few hundred tokens for the long variant, far below any default output cap, so a fraction difference between models is stamina, not budget"
+  degrade_path: "if a hard output-token cap cannot be pinned equal on one CLI, the budget arm degrades to post-hoc token-telemetry stratification and this file is annotated accordingly"
+
+# --- Triplet linkage ---
+triplet:
+  short: V3L05-stamina-migration-s
+  medium: V3L05-stamina-migration-m
+  long: V3L05-stamina-migration-l
+slope_tool: verifiers/compute_stamina_slope.py
+depth_sibling: Scenarios-v2/N72-caller-spanning-api-refactor-scorecard

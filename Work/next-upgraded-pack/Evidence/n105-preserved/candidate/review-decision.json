@@ -1,0 +1,12 @@
+{
+  "scenario_id": "N105-staged-screenshot-diff-review",
+  "gate_decision": "APPROVE",
+  "phase_trace": [],
+  "visual_findings": [],
+  "non_findings": [],
+  "release_gate": {
+    "block_publish": false,
+    "reentry_step": "",
+    "required_tests": []
+  }
+}

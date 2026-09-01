@@ -1,0 +1,52 @@
+{
+  "verdict": "PASS",
+  "score_0_100": 100.0,
+  "matched_count": 8,
+  "expected_count": 8,
+  "pass_min_matched": 7,
+  "pass_score_threshold_0_100": 80.0,
+  "false_positive_count": 0,
+  "parse_error": null,
+  "failures": [],
+  "matches": [
+    {
+      "id": "V01",
+      "distance_px": 0.0
+    },
+    {
+      "id": "V02",
+      "distance_px": 0.0
+    },
+    {
+      "id": "V03",
+      "distance_px": 0.0
+    },
+    {
+      "id": "V04",
+      "distance_px": 0.0
+    },
+    {
+      "id": "V05",
+      "distance_px": 0.0
+    },
+    {
+      "id": "V06",
+      "distance_px": 0.0
+    },
+    {
+      "id": "V07",
+      "distance_px": 0.0
+    },
+    {
+      "id": "V08",
+      "distance_px": 0.0
+    }
+  ],
+  "unmatched_expected": [],
+  "false_positive_hits": [],
+  "non_finding_coverage_count": 5,
+  "non_finding_expected_count": 5,
+  "missing_non_findings": [],
+  "mean_error_px": 0.0,
+  "max_error_px": 0.0
+}

@@ -1,0 +1,54 @@
+{
+  "schema": "perturbation-v1",
+  "bundle_id": "N40",
+  "purpose": "Non-transcribable owner-oracle layer. inputs/phases/02-route-decision.md spells out the required per-lane routing decisions as literal bullet text (finding-18: these bullets appear verbatim in routeDecisionMarkers, so a memorized/copied answer that reproduces the ORIGINAL bullet wording passes even when it never actually re-reads the current phase file). The active perturbation is detected by hashing that phase file; a candidate that transcribes a cached/prior-session answer instead of reading the CURRENT phase-file bullets must fail.",
+  "selector": {
+    "input_paths": [
+      "inputs/phases/02-route-decision.md"
+    ],
+    "detection": "sha256 of inputs/phases/02-route-decision.md's current bytes must match exactly one perturbation entry's input_snapshots map; no match is a hard verifier error (unrecognized/drifted inputs state)."
+  },
+  "perturbations": [
+    {
+      "id": "baseline",
+      "category": "none",
+      "description": "Unperturbed reference packet: the phase file committed in this bundle (systems/toolchain single-shot: X3 primary; UI implementation single-shot: X3 primary, X5 contender only).",
+      "input_snapshots": {
+        "inputs/phases/02-route-decision.md": "8370ca7eab5bf2a55d150f2ef7c9a82a3b7d940f722f93f564d047c4793f85ec"
+      },
+      "answer_delta": {}
+    },
+    {
+      "id": "P1-toolchain-lane-flipped",
+      "category": "gate-verdict-inverted",
+      "description": "The phase file's 'systems/toolchain single-shot' bullet is rewritten to 'X1 primary, staged N39 pending' (was X3 primary). The route decision must mirror the CURRENT phase-file bullet, not the baseline value.",
+      "input_snapshots": {
+        "inputs/phases/02-route-decision.md": "978d831bbfc85ed039a00ecb54ed3fec0dbe8da61f2ce050a5d6ccf23a9ffbe3"
+      },
+      "answer_delta": {
+        "add_routeDecisionMarkers": [
+          "systems/toolchain single-shot: X1 primary, staged N39 pending"
+        ],
+        "remove_routeDecisionMarkers": [
+          "systems/toolchain single-shot: X3 primary, staged N39 pending"
+        ]
+      }
+    },
+    {
+      "id": "P2-ui-lane-flipped",
+      "category": "gate-verdict-inverted",
+      "description": "The phase file's 'UI implementation single-shot' bullet is rewritten to 'X5 primary, staged N38 pending, X3 contender only' (was X3 primary, X5 contender only). The route decision must mirror the CURRENT phase-file bullet, not the baseline value.",
+      "input_snapshots": {
+        "inputs/phases/02-route-decision.md": "6c0e32c8f2b79ce9640c83e3f5dd7f3fd91cb8d095c127b42d82850ab1fc9a01"
+      },
+      "answer_delta": {
+        "add_routeDecisionMarkers": [
+          "UI implementation single-shot: X5 primary, staged N38 pending, X3 contender only"
+        ],
+        "remove_routeDecisionMarkers": [
+          "UI implementation single-shot: X3 primary, staged N38 pending, X5 contender only"
+        ]
+      }
+    }
+  ]
+}

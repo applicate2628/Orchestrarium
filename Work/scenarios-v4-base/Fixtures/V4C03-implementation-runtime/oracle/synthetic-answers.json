@@ -1,0 +1,6 @@
+{
+  "purpose": "Synthetic calibration corpus; never a model result.",
+  "monotonic_order": ["reference", "paraphrase", "strong", "threshold", "partial", "decoy", "vacuous"],
+  "paraphrase_max_delta": 2,
+  "additional_probes": ["one-atom-locality", "20-percent-deletion"]
+}

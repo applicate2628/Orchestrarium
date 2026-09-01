@@ -1,0 +1,54 @@
+# S1 -- profile registry (BUILD-PLAN-v2.1.md Phase 1, item S1).
+#
+# Maps each canonical C4-vocabulary profile token to the provider + model + effort that runs it,
+# plus a one-line construct definition of the capability the profile is meant to isolate.
+#
+# Model bindings live ONLY here. A model rename (e.g. gpt-5.6-sol -> gpt-5.7-sol) touches this one
+# file and nothing else -- not the 74 bundle discrimination.yaml files (S2), not the aggregator lane
+# maps (H6), not the runner's row configs (H7, which reads this registry instead of hardcoding
+# labels). This is fable's staleness objection from review-loop-synthesis.md, closed structurally.
+#
+# Token semantics (audit-findings.md [4]/[5]/[6]/[7], BUILD-PLAN-v2.1.md I6/F1/F2/F3):
+#   systemic-mgmt  -- owner-level judgment axis (Opus).
+#   stamina        -- sustained single-stream execution axis (Sonnet).
+#   ultimate-depth -- deep multi-step reasoning axis (Sol).
+#   working-audit  -- wide-shallow blind-audit axis (Terra).
+#
+# I6 (Honest measurability labels): systemic-mgmt and working-audit attributions are not cleanly
+# P/F-measurable; every published attribution for those two profiles carries an
+# ASSUMPTION (UNVERIFIED)-class label plus the telemetry citation it leans on. Recorded here as a
+# `measurability` field so downstream consumers (aggregator, evidence doc) do not have to re-derive it.
+#
+# Model ids and effort below are OPERATOR INPUT, supplied directly for this build pass (resolves the
+# BUILD-PLAN-v2.1.md uncertainty-ledger item U3 "exact model ids for all four profiles").
+
+schema: profiles-v1
+
+profiles:
+  systemic-mgmt:
+    provider: claude
+    model: claude-opus-4-8
+    effort: xhigh
+    construct: "Owner-level judgment under cross-cutting ambiguity: correctly deciding vs. escalating/deferring an architecture-owner decision (L00 owner lane)."
+    measurability: assumption-unverified
+
+  stamina:
+    provider: claude
+    model: claude-sonnet-5
+    effort: xhigh
+    construct: "Sustained single-stream breadth under fixed depth: completing one large mechanical change across many homogeneous consumers in an uninterrupted stream without late-stream drop-off."
+    measurability: pf-measurable
+
+  ultimate-depth:
+    provider: codex
+    model: gpt-5.6-sol
+    effort: xhigh
+    construct: "Deep multi-step reasoning under ambiguity: sustained high-effort derivation on hard, narrow-scope problems that resist transcription or keyword-matching."
+    measurability: pf-measurable
+
+  working-audit:
+    provider: codex
+    model: gpt-5.6-terra
+    effort: xhigh
+    construct: "Wide-shallow single-aspect blind audit: maximizing recall at a fixed precision floor across many small files under an identical enforced output/time budget."
+    measurability: assumption-unverified

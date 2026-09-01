@@ -19,6 +19,17 @@
 /Work/**/yarn-debug.log*
 /Work/**/yarn-error.log*
 
+# Python bytecode is always regenerable and never benchmark evidence.
+**/__pycache__/
+**/*.pyc
+
 # OS noise
 **/.DS_Store
 **/Thumbs.db
+.codegraph/
+/graphify-out/
+
+# Local task memory -- never published, same convention as the Orchestrarium repo
+# (its .gitignore:11 ignores /work-items/ for the same reason: these are recovery
+# artifacts for the local session, not repository content).
+/work-items/

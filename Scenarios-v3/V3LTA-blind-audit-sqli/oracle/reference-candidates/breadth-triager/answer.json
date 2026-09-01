@@ -1,0 +1,91 @@
+{
+  "aspect": "sql-injection",
+  "gate_decision": "REVISE",
+  "findings": [
+    {
+      "file": "corpus/h004.py",
+      "line": 9,
+      "evidence": "fstring-select"
+    },
+    {
+      "file": "corpus/h006.py",
+      "line": 8,
+      "evidence": "percent-delete"
+    },
+    {
+      "file": "corpus/h008.py",
+      "line": 8,
+      "evidence": "format-update"
+    },
+    {
+      "file": "corpus/h010.py",
+      "line": 10,
+      "evidence": "concat-select"
+    },
+    {
+      "file": "corpus/h012.py",
+      "line": 9,
+      "evidence": "inline-fstring-execute"
+    },
+    {
+      "file": "corpus/h016.py",
+      "line": 10,
+      "evidence": "fstring-select"
+    },
+    {
+      "file": "corpus/h018.py",
+      "line": 12,
+      "evidence": "percent-delete"
+    },
+    {
+      "file": "corpus/h022.py",
+      "line": 10,
+      "evidence": "format-update"
+    },
+    {
+      "file": "corpus/h025.py",
+      "line": 10,
+      "evidence": "concat-select"
+    },
+    {
+      "file": "corpus/h032.py",
+      "line": 7,
+      "evidence": "inline-fstring-execute"
+    },
+    {
+      "file": "corpus/h038.py",
+      "line": 10,
+      "evidence": "fstring-select"
+    },
+    {
+      "file": "corpus/h041.py",
+      "line": 11,
+      "evidence": "percent-delete"
+    },
+    {
+      "file": "corpus/h047.py",
+      "line": 12,
+      "evidence": "format-update"
+    },
+    {
+      "file": "corpus/h049.py",
+      "line": 6,
+      "evidence": "concat-select"
+    },
+    {
+      "file": "corpus/h051.py",
+      "line": 10,
+      "evidence": "inline-fstring-execute"
+    },
+    {
+      "file": "corpus/h055.py",
+      "line": 10,
+      "evidence": "fstring-select"
+    },
+    {
+      "file": "corpus/h003.py",
+      "line": 6,
+      "evidence": "looks like an f-string in a query"
+    }
+  ]
+}

@@ -1,0 +1,66 @@
+{
+  "selected_method": "Method S - exact bounded-histogram percentiles plus population dispersion via offset-shifted exact summation",
+  "percentile_convention": "rank = ceil(p * n), one-based, no interpolation",
+  "variance_convention": "population divide by n, not sample divide by n minus 1",
+  "rejected_methods": {
+    "Method P - linear-interpolation percentiles (R type 7 / library default)": "interpolation between order statistics can flip a near-boundary gate; the release gate requires the declared upper-rank value",
+    "Method Q - sample variance (Bessel-corrected, divide by n minus 1)": "the gate is defined on the population dispersion of the observed stream, not an inferential estimate",
+    "Method R - naive sum-of-squares dispersion in fixed precision": "E[x^2]-E[x]^2 with a large offset cancels catastrophically and reports a wrong or zero spread"
+  },
+  "cases": [
+    {
+      "case_id": "p99-rank-vs-interpolation-flip",
+      "p99": 200,
+      "iqr": 0,
+      "population_stddev": "2.236068",
+      "gate_verdict": "PASS",
+      "failure_reasons": [],
+      "invariant_ids": ["I-UPPER-RANK-PERCENTILE", "I-POPULATION-VARIANCE", "I-OFFSET-SHIFT-STABLE"]
+    },
+    {
+      "case_id": "population-vs-sample-stddev-flip",
+      "p99": 150,
+      "iqr": 0,
+      "population_stddev": "3.201562",
+      "gate_verdict": "PASS",
+      "failure_reasons": [],
+      "invariant_ids": ["I-UPPER-RANK-PERCENTILE", "I-POPULATION-VARIANCE", "I-OFFSET-SHIFT-STABLE"]
+    },
+    {
+      "case_id": "large-offset-cancellation-stability",
+      "p99": 205,
+      "iqr": 0,
+      "population_stddev": "2.910708",
+      "gate_verdict": "FAIL",
+      "failure_reasons": ["p99 latency 205ms exceeds <= 200ms"],
+      "invariant_ids": ["I-UPPER-RANK-PERCENTILE", "I-POPULATION-VARIANCE", "I-OFFSET-SHIFT-STABLE"]
+    },
+    {
+      "case_id": "iqr-interpolation-consistency",
+      "p99": 90,
+      "iqr": 30,
+      "population_stddev": "3.415650",
+      "gate_verdict": "PASS",
+      "failure_reasons": [],
+      "invariant_ids": ["I-UPPER-RANK-PERCENTILE", "I-POPULATION-VARIANCE", "I-OFFSET-SHIFT-STABLE"]
+    },
+    {
+      "case_id": "stddev-gate-exceedance",
+      "p99": 130,
+      "iqr": 0,
+      "population_stddev": "3.890873",
+      "gate_verdict": "FAIL",
+      "failure_reasons": ["population stddev 3.890873 exceeds <= 3.500000"],
+      "invariant_ids": ["I-UPPER-RANK-PERCENTILE", "I-POPULATION-VARIANCE", "I-OFFSET-SHIFT-STABLE"]
+    },
+    {
+      "case_id": "zero-spread-degenerate",
+      "p99": 140,
+      "iqr": 0,
+      "population_stddev": "0.000000",
+      "gate_verdict": "PASS",
+      "failure_reasons": [],
+      "invariant_ids": ["I-UPPER-RANK-PERCENTILE", "I-POPULATION-VARIANCE", "I-OFFSET-SHIFT-STABLE"]
+    }
+  ]
+}

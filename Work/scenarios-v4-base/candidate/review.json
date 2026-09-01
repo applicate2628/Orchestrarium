@@ -1,0 +1,130 @@
+{
+  "scenario_id": "V4L09F-pre-pr-review",
+  "findings": {
+    "correctness-state": [
+      {
+        "id": "F-STATE-STALE-ACK",
+        "file": "ui/save_state.py",
+        "symbol": "apply_ack",
+        "witness_id": "W-STATE-STALE-ACK",
+        "severity": "high"
+      }
+    ],
+    "reliability-retry": [
+      {
+        "id": "F-RETRY-MASKS-DIRTY-LOSS",
+        "file": "ui/save_queue.py",
+        "symbol": "schedule_retry",
+        "witness_id": "W-RETRY-MASKS-DIRTY-LOSS",
+        "severity": "medium"
+      }
+    ],
+    "security-auth": [
+      {
+        "id": "F-AUTH-AUDIENCE-TRUNCATED",
+        "file": "auth/audience.py",
+        "symbol": "normalize_audience",
+        "witness_id": "W-AUTH-AUDIENCE-TRUNCATED",
+        "severity": "high"
+      },
+      {
+        "id": "F-AUTH-TENANT-HEADER-SPOOF",
+        "file": "gateway/routes.py",
+        "symbol": "forward_tenant",
+        "witness_id": "W-AUTH-TENANT-HEADER-SPOOF",
+        "severity": "high"
+      }
+    ],
+    "performance-query": [
+      {
+        "id": "F-PERF-PERMISSION-LOOKUP-PER-ROW",
+        "file": "feed/query.py",
+        "symbol": "load_page",
+        "witness_id": "W-PERF-PERMISSION-LOOKUP-PER-ROW",
+        "severity": "medium"
+      }
+    ]
+  },
+  "evidence": {
+    "bindings": [
+      {
+        "id": "W-STATE-STALE-ACK",
+        "source_ids": ["F-CARD-101", "F-CARD-103"]
+      },
+      {
+        "id": "W-RETRY-MASKS-DIRTY-LOSS",
+        "source_ids": ["F-CARD-201", "F-CARD-202"]
+      },
+      {
+        "id": "W-AUTH-AUDIENCE-TRUNCATED",
+        "source_ids": ["F-CARD-301"]
+      },
+      {
+        "id": "W-AUTH-TENANT-HEADER-SPOOF",
+        "source_ids": ["F-CARD-302"]
+      },
+      {
+        "id": "W-PERF-PERMISSION-LOOKUP-PER-ROW",
+        "source_ids": ["F-CARD-401", "F-CARD-402"]
+      }
+    ],
+    "conflict_resolution": [
+      {
+        "id": "W-STATE-STALE-ACK",
+        "basis": "trace-supersedes-narrow-passing-test"
+      }
+    ],
+    "weak_evidence": [
+      {
+        "id": "W-STATE-STALE-ACK",
+        "basis": "F-CARD-102-single-ack-happy-path-only"
+      }
+    ],
+    "dependencies": [
+      {
+        "id": "W-RETRY-MASKS-DIRTY-LOSS",
+        "depends_on": "W-STATE-STALE-ACK"
+      }
+    ],
+    "cross_diff_bindings": [
+      {
+        "id": "W-RETRY-MASKS-DIRTY-LOSS",
+        "source_ids": ["F-CARD-101", "F-CARD-103", "F-CARD-201", "F-CARD-202"]
+      }
+    ]
+  },
+  "known_safe_surfaces": ["F-CARD-102", "F-CARD-501", "F-CARD-502", "F-CARD-601", "F-CARD-602"],
+  "review_scope": [
+    "ui/save_state.py",
+    "ui/save_queue.py",
+    "auth/audience.py",
+    "gateway/routes.py",
+    "feed/query.py",
+    "tests/fixtures/hash_names.py",
+    "runtime/shutdown.py"
+  ],
+  "rejected_sources": [],
+  "review_gate": {
+    "merge_clearance": "needs-review"
+  },
+  "severity": [
+    {"id": "W-STATE-STALE-ACK", "level": "high"},
+    {"id": "W-RETRY-MASKS-DIRTY-LOSS", "level": "medium"},
+    {"id": "W-AUTH-AUDIENCE-TRUNCATED", "level": "high"},
+    {"id": "W-AUTH-TENANT-HEADER-SPOOF", "level": "high"},
+    {"id": "W-PERF-PERMISSION-LOOKUP-PER-ROW", "level": "medium"}
+  ],
+  "actions": [
+    {"id": "W-STATE-STALE-ACK", "outcome": "fix-before-merge"},
+    {"id": "W-RETRY-MASKS-DIRTY-LOSS", "outcome": "fix-before-merge"},
+    {"id": "W-AUTH-AUDIENCE-TRUNCATED", "outcome": "block-merge"},
+    {"id": "W-AUTH-TENANT-HEADER-SPOOF", "outcome": "block-merge"},
+    {"id": "W-PERF-PERMISSION-LOOKUP-PER-ROW", "outcome": "optimize-before-merge"}
+  ],
+  "profile_measurements": {
+    "permission_lookup_calls": {
+      "value": 1201,
+      "unit": "calls"
+    }
+  }
+}

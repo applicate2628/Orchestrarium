@@ -1,0 +1,12 @@
+schema: discrimination-v1
+target_construct: "tracing a configuration value across files to its authoritative runtime override and citing the effective source, rather than mis-citing a plausible-but-superseded declared default or a stale doc that repeats the same value"
+eligible_profiles:
+  - systemic-mgmt
+  - stamina
+  - ultimate-depth
+  - working-audit
+expected_winner: ultimate-depth
+expected_winner_registered: 2026-07-12
+validated_discrimination: none
+validation_evidence: none
+notes: "A9 analyst sub-scenario (F5). Harder-separating mis-citation than S06: the wrong citation is a plausible-but-overridden value that appears verbatim in two surface sources (defaults.py + legacy doc), not an unrelated distractor file. Separation is cross-file override tracing plus a mandatory rejection table, not raw repo size."

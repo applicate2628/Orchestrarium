@@ -1,0 +1,27 @@
+{
+  "schema_version": "v4-rubric-1",
+  "scenario_id": "V4C03-implementation-runtime",
+  "candidate_artifact": "implementation-result.json",
+  "score": {"max_points": 100, "pass_threshold": 80, "partial_threshold": 50, "integrity_penalty_cap": 15},
+  "components": [
+    {"id": "behavior", "weight": 50, "semantic": true, "atoms": [
+      {"id": "R1", "type": "case_fraction", "weight": 1, "candidate_path": "cases", "id_field": "case_id", "value_field": "outcome", "casefold_values": true, "numeric_string_equivalence": true, "expected": {"R1": 200}},
+      {"id": "R2", "type": "case_fraction", "weight": 1, "candidate_path": "cases", "id_field": "case_id", "value_field": "outcome", "casefold_values": true, "numeric_string_equivalence": true, "expected": {"R2": 409}},
+      {"id": "R3", "type": "case_fraction", "weight": 1, "candidate_path": "cases", "id_field": "case_id", "value_field": "outcome", "casefold_values": true, "numeric_string_equivalence": true, "expected": {"R3": 202}},
+      {"id": "R4", "type": "case_fraction", "weight": 1, "candidate_path": "cases", "id_field": "case_id", "value_field": "outcome", "casefold_values": true, "numeric_string_equivalence": true, "expected": {"R4": 200}},
+      {"id": "R5", "type": "case_fraction", "weight": 1, "candidate_path": "cases", "id_field": "case_id", "value_field": "outcome", "casefold_values": true, "numeric_string_equivalence": true, "expected": {"R5": 503}}
+    ]},
+    {"id": "interfaces", "weight": 20, "semantic": true, "atoms": [
+      {"id": "routes", "type": "set_f1", "weight": 1, "candidate_path": "interfaces.routes", "expected": ["/jobs", "/jobs/{id}"], "casefold": true},
+      {"id": "events", "type": "set_f1", "weight": 1, "candidate_path": "interfaces.events", "expected": ["job.accepted", "job.completed"], "casefold": true}
+    ]},
+    {"id": "scope-tests", "weight": 20, "semantic": true, "atoms": [
+      {"id": "changed-paths", "type": "set_f1", "weight": 1, "candidate_path": "changed_paths", "expected": ["src/service.py", "tests/test_service.py"], "casefold": true},
+      {"id": "T1", "type": "case_fraction", "weight": 1, "candidate_path": "tests", "id_field": "test_id", "value_field": "outcome", "casefold_values": true, "expected": {"T1": "PASS"}}
+    ]},
+    {"id": "schema", "weight": 10, "semantic": false, "atoms": [
+      {"id": "required-fields", "type": "required_fields", "weight": 1, "required_paths": ["scenario_id", "cases", "interfaces", "changed_paths", "tests"]}
+    ]}
+  ],
+  "integrity_events": []
+}

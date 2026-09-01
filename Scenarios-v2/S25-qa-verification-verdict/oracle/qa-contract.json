@@ -72,7 +72,7 @@
     "oracle/scoring-anchors.md": "427e135c5936f2fb2f5473a413f8fa9499a4885e389b28d6c9cf01459dd9bed6",
     "README.md": "107fc0a6b1f832221eb041f23f3727a6bd9f31e86f7421ee4a47894b1d8155ef",
     "scenario.yaml": "139066b8c93f651c0752a9105288777aa3bbcb77a337e120c1aad24a4c436ebd",
-    "verifiers/check_qa_verdict.py": "ec459fb3d6123370703f315fcbf31b3ca82a5a0e04bb0dd2ac9e460c9a885d7f",
+    "verifiers/check_qa_verdict.py": "f4a919f75b6b022df788ddf0ec943c01a633a995281e1fcd1fd614e11b46c481",
     "verifiers/README.md": "ca5d89be7cdec30331f13419eac87476cd8de1e1dd660bdb611ffed2d340ab06"
   },
   "editable_report": "candidate/qa-verdict.md",
@@ -83,6 +83,7 @@
     "## Regression Classification",
     "## Performance Smoke",
     "## Bug Registry Expectation",
+    "## Findings",
     "## Residual Risk",
     "## Gate Decision"
   ],
@@ -202,6 +203,49 @@
         "dry-run",
         "nearby smoke"
       ]
+    }
+  ],
+  "findings_table_section": "## Findings",
+  "findings_table_header": ["#", "File", "Line", "Category", "Severity", "Title", "Evidence"],
+  "allowed_categories": ["state-mutation", "coverage-gap"],
+  "allowed_severities": ["high", "medium", "low"],
+  "exact_finding_count": 2,
+  "table_findings": [
+    {
+      "id": "F1",
+      "file": "inputs/bounded-diff.patch",
+      "acceptable_lines": [12, 13, 17, 18, 19],
+      "severity": "high",
+      "category_terms": ["state-mutation"],
+      "title_keywords": ["dry-run", "dry_run", "write_snapshot", "status.snapshot.json"],
+      "required_evidence_terms": ["write_snapshot", "dry_run"]
+    },
+    {
+      "id": "F2",
+      "file": "inputs/nearby-smoke-coverage.md",
+      "acceptable_lines": [11, 12],
+      "severity": "medium",
+      "category_terms": ["coverage-gap"],
+      "title_keywords": ["--text-summary", "not run", "nearby smoke", "coverage"],
+      "required_evidence_terms": ["--text-summary", "not run"]
+    }
+  ],
+  "forbidden_findings": [
+    {
+      "title_keywords": ["performance failure", "budget breach", "performance regression"],
+      "reason": "a performance failure is not applicable: the supplied smoke evidence is within budget"
+    },
+    {
+      "title_keywords": ["architecture redesign", "design review"],
+      "reason": "an architecture redesign request is out of scope: the scenario is a QA gate, not a design review"
+    },
+    {
+      "title_keywords": ["transport concern", "provenance", "adapter behavior"],
+      "reason": "a transport or provenance concern is out of scope: no adapter behavior is in scope"
+    },
+    {
+      "title_keywords": ["only test-rot", "test-rot", "test rot"],
+      "reason": "a claim that the bug is only test-rot is wrong: direct smoke evidence shows a real contract failure"
     }
   ]
 }

@@ -1,0 +1,24 @@
+{
+  "cases": {
+    "Case   One": {"outcome": "PASS"},
+    " case\u00a0one ": {"outcome": "FAIL"}
+  },
+  "claims": {
+    "Cafe\u0301": {"source_ids": ["SRC-1"]},
+    " CAF\u00c9 ": {"source_ids": ["SRC-2"]}
+  },
+  "findings": {
+    "correctness": [
+      {"id": "F1", "file": "src/a.py", "symbol": "load", "severity": "high"}
+    ]
+  },
+  "sentinel": {
+    "filler_1": "ok",
+    "filler_2": "ok",
+    "filler_3": "ok",
+    "filler_4": "ok",
+    "filler_5": "ok",
+    "filler_6": "ok",
+    "filler_7": "ok"
+  }
+}

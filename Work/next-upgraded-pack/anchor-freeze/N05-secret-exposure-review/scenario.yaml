@@ -1,0 +1,15 @@
+id: N05
+surface_id: R27
+pack_id: P06
+role_class: review
+artifact_type: review findings
+modality_family: security gate
+allowed_change_surface:
+  - candidate/review-report.md
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/review-target/**
+score_profile: "review, QA"
+overlay_flags: []

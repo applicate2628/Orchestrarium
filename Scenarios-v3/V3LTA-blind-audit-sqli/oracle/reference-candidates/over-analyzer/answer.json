@@ -1,0 +1,31 @@
+{
+  "aspect": "sql-injection",
+  "gate_decision": "REVISE",
+  "findings": [
+    {
+      "file": "corpus/h004.py",
+      "line": 9,
+      "evidence": "deep analysis of fstring-select: full taint trace, exploit sketch, remediation"
+    },
+    {
+      "file": "corpus/h006.py",
+      "line": 8,
+      "evidence": "deep analysis of percent-delete: full taint trace, exploit sketch, remediation"
+    },
+    {
+      "file": "corpus/h008.py",
+      "line": 8,
+      "evidence": "deep analysis of format-update: full taint trace, exploit sketch, remediation"
+    },
+    {
+      "file": "corpus/h010.py",
+      "line": 10,
+      "evidence": "deep analysis of concat-select: full taint trace, exploit sketch, remediation"
+    },
+    {
+      "file": "corpus/h012.py",
+      "line": 9,
+      "evidence": "deep analysis of inline-fstring-execute: full taint trace, exploit sketch, remediation"
+    }
+  ]
+}

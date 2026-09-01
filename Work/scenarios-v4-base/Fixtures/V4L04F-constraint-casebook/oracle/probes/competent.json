@@ -1,0 +1,9 @@
+{
+  "scenario_id":"V4L04F-constraint-casebook","measurements":{
+    "N01":{"value":71,"unit":"records"},"N02":{"value":39,"unit":"records"},"N03":{"value":24,"unit":"records"},"N04":{"value":17,"unit":"ticks"},"N05":{"value":7,"unit":"weight-units"},"N06":{"value":10,"unit":"evictions"},"N07":{"value":2,"unit":"items"},"N08":{"value":6,"unit":"promotions"},"N09":{"value":5,"unit":"selections"},"N10":{"value":74,"unit":"utility-points"},"N11":{"value":1,"unit":"selections"},"N12":{"value":24,"unit":"cost-credits"},"N13":{"value":8,"unit":"mutations"},"N14":{"value":4,"unit":"items"},
+    "W01":{"value":2,"unit":"units"},"W02":{"value":2,"unit":"units"},"W03":{"value":0,"unit":"units"},"W04":{"value":2,"unit":"units"},"T01":{"value":122,"unit":"utility-points"},"T02":{"value":1,"unit":"utility-points"}
+  },"cases":{
+    "I01":{"value":"holds","unit":"enum"},"I02":{"value":"holds","unit":"enum"},"I03":{"value":"violated","unit":"enum"},"I04":{"value":"holds","unit":"enum"},"I05":{"value":"violated","unit":"enum"},"I06":{"value":"violated","unit":"enum"},
+    "F01":{"value":"FF01-B","unit":"case-id"},"F02":{"value":"FW-03","unit":"step-id"},"F03":{"value":"FF03-C","unit":"case-id"},"F04":{"value":"FS-022","unit":"case-id"},"F05":{"value":"FL-08","unit":"step-id"}
+  },"narrative":"I expanded four-way multiplicities, simulated repeated weighted evictions and ledger state, exhaustively checked coupled selections and allocations, and returned exact visible step anchors."
+}

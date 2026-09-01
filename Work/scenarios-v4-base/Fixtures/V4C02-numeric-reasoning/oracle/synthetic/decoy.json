@@ -1,0 +1,6 @@
+{
+  "scenario_id": "V4C02-numeric-reasoning",
+  "results": {"N1": {"value": 16, "unit": "ms"}, "N2": {"value": 0.17, "unit": "ratio"}, "N3": {"value": 72, "unit": "MiB"}, "N4": {"value": 4.2, "unit": "s"}, "N5": {"value": 101.5, "unit": "percent"}},
+  "invariants": {"stability": ["bounded-memory"], "ordering": ["stable-order"]},
+  "cases": {"F1": {"outcome": "FAIL"}, "F2": {"outcome": "PASS"}}
+}

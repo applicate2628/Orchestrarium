@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["image_id", "findings", "non_findings"],
+  "properties": {
+    "image_id": {
+      "type": "string",
+      "const": "N98-visual-regression-diff"
+    },
+    "findings": {
+      "type": "array",
+      "minItems": 8,
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "required": ["id", "component", "defect", "severity", "x", "y", "evidence"],
+        "properties": {
+          "id": {"type": "string", "enum": ["V01", "V02", "V03", "V04", "V05", "V06", "V07", "V08"]},
+          "component": {"type": "string"},
+          "defect": {"type": "string"},
+          "severity": {"type": "string", "enum": ["high", "medium", "low"]},
+          "x": {"type": "integer", "minimum": 0, "maximum": 1399},
+          "y": {"type": "integer", "minimum": 0, "maximum": 899},
+          "evidence": {"type": "string"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "non_findings": {
+      "type": "array",
+      "items": {"type": "string"}
+    }
+  },
+  "additionalProperties": false
+}

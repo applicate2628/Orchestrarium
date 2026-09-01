@@ -1,0 +1,11 @@
+schema: discrimination-v1
+target_construct: "wide-shallow single-aspect blind audit: recall of a planted defect class across a large small-file corpus under a fixed, identically-enforced output budget"
+eligible_profiles:
+  - systemic-mgmt
+  - stamina
+  - ultimate-depth
+  - working-audit
+expected_winner: working-audit
+expected_winner_registered: 2026-07-12
+validated_discrimination: none
+validation_evidence: none

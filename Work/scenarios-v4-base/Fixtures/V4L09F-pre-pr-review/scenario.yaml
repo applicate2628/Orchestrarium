@@ -1,0 +1,7 @@
+schema_version: scenarios-v4-1
+scenario_id: V4L09F-pre-pr-review
+lane: L09
+form: frontier
+candidate_artifact: candidate/review.json
+allowed_write_paths:
+  - candidate/review.json

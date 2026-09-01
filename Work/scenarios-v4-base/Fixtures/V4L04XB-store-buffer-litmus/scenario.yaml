@@ -1,0 +1,7 @@
+schema_version: scenarios-v4-ranked-1
+scenario_id: V4L04XB-store-buffer-litmus
+lane: L04X
+form: base
+candidate_artifact: candidate/litmus-answer.json
+allowed_write_paths:
+  - candidate/litmus-answer.json

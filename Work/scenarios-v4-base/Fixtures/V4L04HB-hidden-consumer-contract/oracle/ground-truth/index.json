@@ -1,0 +1,157 @@
+{
+ "schema_version": "l04h-ground-truth-1",
+ "scenario_id": "V4L04HB-hidden-consumer-contract",
+ "form": "base",
+ "change_ids": [
+  "C01",
+  "C02",
+  "C03",
+  "C04",
+  "C05",
+  "C06",
+  "C07",
+  "C08",
+  "C09",
+  "C10"
+ ],
+ "breaking_change_ids": [
+  "C02",
+  "C03",
+  "C04",
+  "C06",
+  "C08",
+  "C09"
+ ],
+ "migration_clearance": "block",
+ "fix_menu": [
+  "FIX-NONE",
+  "FIX-DEFAULT",
+  "FIX-UNITS",
+  "FIX-CATCH",
+  "FIX-ORDER",
+  "FIX-PRECEDENCE",
+  "FIX-FRESH",
+  "FIX-RENAME"
+ ],
+ "points": {
+  "verdict": 2.5,
+  "cause": 1.5,
+  "fix": 1.5,
+  "set": 8,
+  "gate": 4
+ },
+ "consumers": {
+  "CONS-01": {
+   "verdict": "break",
+   "cause": "C02",
+   "fix": "FIX-DEFAULT",
+   "tier": "obvious",
+   "reasoning": "get() with no default on an absent key returned None in v1; v2 raises MissingKeyError (C02)."
+  },
+  "CONS-02": {
+   "verdict": "break",
+   "cause": "C03",
+   "fix": "FIX-UNITS",
+   "tier": "obvious",
+   "reasoning": "bare '250' parsed as 250 ms in v1; v2 reads bare numbers as seconds -> 250000 (C03)."
+  },
+  "CONS-03": {
+   "verdict": "break",
+   "cause": "C06",
+   "fix": "FIX-ORDER",
+   "tier": "subtle",
+   "reasoning": "items() file order [zone,region,shard] becomes sorted order under v2 (C06); the diff gate byte-compares."
+  },
+  "CONS-04": {
+   "verdict": "break",
+   "cause": "C02",
+   "fix": "FIX-DEFAULT",
+   "tier": "obvious",
+   "reasoning": "get_int() with no default on an absent key returned None in v1; v2 raises (C02)."
+  },
+  "CONS-05": {
+   "verdict": "safe",
+   "cause": "none",
+   "fix": "FIX-NONE",
+   "tier": "obvious",
+   "reasoning": "all reads pass defaults and use suffixed durations; error taxonomy base unchanged."
+  },
+  "CONS-06": {
+   "verdict": "safe",
+   "cause": "none",
+   "fix": "FIX-NONE",
+   "tier": "obvious",
+   "reasoning": "suffixed durations unchanged; overlay-only key resolves identically under either precedence."
+  },
+  "CONS-07": {
+   "verdict": "safe",
+   "cause": "none",
+   "fix": "FIX-NONE",
+   "tier": "decoy-safe",
+   "reasoning": "uses items() (C06 smell) but sorts entries itself, so sorted yield order is invisible to it."
+  },
+  "CONS-08": {
+   "verdict": "safe",
+   "cause": "none",
+   "fix": "FIX-NONE",
+   "tier": "obvious",
+   "reasoning": "no environment overlay exists in its deployment, so C08 has no collision to flip."
+  },
+  "CONS-09": {
+   "verdict": "break",
+   "cause": "C04",
+   "fix": "FIX-CATCH",
+   "tier": "subtle",
+   "reasoning": "retry predicate is isinstance(err, RetryableError); v2 moves StaleReadError out of RetryableError (C04)."
+  },
+  "CONS-10": {
+   "verdict": "break",
+   "cause": "C08",
+   "fix": "FIX-PRECEDENCE",
+   "tier": "subtle",
+   "reasoning": "both layers define db.pool; v2 flips precedence to the env overlay -> 5 instead of 20 (C08)."
+  },
+  "CONS-11": {
+   "verdict": "break",
+   "cause": "C09",
+   "fix": "FIX-FRESH",
+   "tier": "subtle",
+   "reasoning": "'internal-only' memoization (C09) stops backend_read_count() from matching audit cycles."
+  },
+  "CONS-12": {
+   "verdict": "break",
+   "cause": "C03",
+   "fix": "FIX-UNITS",
+   "tier": "subtle",
+   "reasoning": "env-injected bare '1500' silently becomes 1500000 ms under v2 (C03); the alarm budget inflates 1000x."
+  },
+  "CONS-13": {
+   "verdict": "safe",
+   "cause": "none",
+   "fix": "FIX-NONE",
+   "tier": "decoy-safe",
+   "reasoning": "retry predicate names StaleReadError directly (C04 smell), so the hierarchy move is invisible to it."
+  },
+  "CONS-14": {
+   "verdict": "safe",
+   "cause": "none",
+   "fix": "FIX-NONE",
+   "tier": "decoy-safe",
+   "reasoning": "fetch(timeout=...) keeps working: C07 retains timeout as a deprecated alias this release."
+  },
+  "CONS-15": {
+   "verdict": "safe",
+   "cause": "none",
+   "fix": "FIX-NONE",
+   "tier": "decoy-safe",
+   "reasoning": "has an env overlay (C08 smell) but the layers define disjoint keys, so no precedence flip applies."
+  },
+  "CONS-16": {
+   "verdict": "safe",
+   "cause": "none",
+   "fix": "FIX-NONE",
+   "tier": "decoy-safe",
+   "reasoning": "repeated reads (C09 smell) but the record explicitly tolerates snapshot staleness; values are identical anyway."
+  }
+ }
+}

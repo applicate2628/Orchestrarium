@@ -1,0 +1,9 @@
+{
+  "scenario_id": "V4C01-source-bound-advice",
+  "decision": {"recommendation": "retain", "escalation": "human-review"},
+  "source_authority_order": ["SRC-current", "SRC-legacy", "SRC-runtime"],
+  "claims": [{"id": "C-compat", "source_ids": ["SRC-current", "SRC-runtime"]}],
+  "actions": ["plan-migration"],
+  "cases": [{"case_id": "A1", "outcome": "REJECT"}, {"case_id": "A2", "outcome": "REJECT"}],
+  "non_claims": {"safe_to_execute_without_review": false}
+}

@@ -1,0 +1,101 @@
+{
+  "scenario_id": "N110",
+  "image_id": "N110-visual-micro-marker-canvas-v1",
+  "image": {
+    "path": "inputs/micro-marker-canvas.png",
+    "width": 2200,
+    "height": 1600,
+    "origin": "top-left",
+    "marker_size_px": 13,
+    "grid": {
+      "minor_px": 100,
+      "major_px": 500
+    }
+  },
+  "targets": [
+    {
+      "id": "red",
+      "center": {
+        "x": 1916,
+        "y": 247
+      },
+      "size_px": 13,
+      "color_rgb": [
+        239,
+        68,
+        68
+      ]
+    },
+    {
+      "id": "cyan",
+      "center": {
+        "x": 319,
+        "y": 1412
+      },
+      "size_px": 13,
+      "color_rgb": [
+        6,
+        182,
+        212
+      ]
+    },
+    {
+      "id": "lime",
+      "center": {
+        "x": 1288,
+        "y": 736
+      },
+      "size_px": 13,
+      "color_rgb": [
+        132,
+        204,
+        22
+      ]
+    },
+    {
+      "id": "magenta",
+      "center": {
+        "x": 2073,
+        "y": 1188
+      },
+      "size_px": 13,
+      "color_rgb": [
+        217,
+        70,
+        239
+      ]
+    },
+    {
+      "id": "amber",
+      "center": {
+        "x": 744,
+        "y": 433
+      },
+      "size_px": 13,
+      "color_rgb": [
+        245,
+        158,
+        11
+      ]
+    },
+    {
+      "id": "blue",
+      "center": {
+        "x": 1521,
+        "y": 991
+      },
+      "size_px": 13,
+      "color_rgb": [
+        37,
+        99,
+        235
+      ]
+    }
+  ],
+  "thresholds": {
+    "pass_mean_px": 8.0,
+    "pass_max_px": 14.0,
+    "excellent_mean_px": 3.0,
+    "excellent_max_px": 6.0
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "scenario_id": "V4C01-source-bound-advice",
+  "decision": {"recommendation": "replace", "escalation": "implementation"},
+  "source_authority_order": ["SRC-legacy", "SRC-runtime", "SRC-current"],
+  "claims": {"C-compat": {"source_ids": ["SRC-legacy"]}, "C-risk": {"source_ids": ["SRC-current"]}},
+  "actions": ["delete-now"],
+  "cases": {"A1": {"outcome": "APPROVE"}, "A2": {"outcome": "APPROVE"}, "A3": {"outcome": "REJECT"}},
+  "non_claims": {"safe_to_execute_without_review": false}
+}

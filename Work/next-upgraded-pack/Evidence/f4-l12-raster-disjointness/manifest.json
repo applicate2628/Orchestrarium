@@ -1,0 +1,70 @@
+{
+  "item": "F4-l12-raster",
+  "purpose": "Fixture-independence acceptance check for the new V3L12-support-queue-visual-grounding raster family (BUILD-PLAN-v2.1.md Phase 3 item F4). Confirms inputs/actual-screenshot.png is md5-disjoint from the N98/N105 pair and from the N21/N48 shared render, per the review-flagged FIXTURE NON-INDEPENDENCE confound.",
+  "new_fixture": {
+    "path": "Scenarios-v3/V3L12-support-queue-visual-grounding/inputs/actual-screenshot.png",
+    "generator": "Work/next-upgraded-pack/Tooling/generate-v3l12-support-queue-assets.py",
+    "md5": "306973abebf566d7e51ef272bb83720f",
+    "size_bytes": 76928
+  },
+  "disjointness_checks": [
+    {
+      "fixture": "N98/inputs/baseline.png",
+      "path": "Scenarios-v2/N98-visual-regression-diff-review/inputs/baseline.png",
+      "md5": "6fcfce64aa43411337a20d44239ad72e",
+      "size_bytes": 58406,
+      "collides_with_new_fixture": false
+    },
+    {
+      "fixture": "N98/inputs/current.png",
+      "path": "Scenarios-v2/N98-visual-regression-diff-review/inputs/current.png",
+      "md5": "895cf8d979a7e7aaaec4d58e393e01de",
+      "size_bytes": 57477,
+      "collides_with_new_fixture": false
+    },
+    {
+      "fixture": "N105-preserved/inputs/baseline.png (Work/.../Evidence/n105-preserved)",
+      "path": "Work/next-upgraded-pack/Evidence/n105-preserved/inputs/baseline.png",
+      "md5": "6fcfce64aa43411337a20d44239ad72e",
+      "size_bytes": 58406,
+      "collides_with_new_fixture": false
+    },
+    {
+      "fixture": "N105-preserved/inputs/current.png (Work/.../Evidence/n105-preserved)",
+      "path": "Work/next-upgraded-pack/Evidence/n105-preserved/inputs/current.png",
+      "md5": "895cf8d979a7e7aaaec4d58e393e01de",
+      "size_bytes": 57477,
+      "collides_with_new_fixture": false
+    },
+    {
+      "fixture": "N80/inputs/actual-screenshot.png (informational, not a named confound target, checked anyway)",
+      "path": "Scenarios-v2/N80-screenshot-grounding-review-v2/inputs/actual-screenshot.png",
+      "md5": "32177b5caa506c8dbc1a0e18e6cc8a13",
+      "size_bytes": 76264,
+      "collides_with_new_fixture": false
+    },
+    {
+      "fixture": "N21/inputs/panel-cases.json (shared render source, raw bytes)",
+      "path": "Scenarios-v2/N21-visual-provider-fit-raster-gauntlet/inputs/panel-cases.json",
+      "md5": "6471661d8d21fb588834e7688651050b",
+      "size_bytes": 845,
+      "collides_with_new_fixture": false
+    },
+    {
+      "fixture": "N48/inputs/panel-cases.json (shared render source, raw bytes)",
+      "path": "Scenarios-v2/N48-visual-compact-operator-budget-hotfix/inputs/panel-cases.json",
+      "md5": "6471661d8d21fb588834e7688651050b",
+      "size_bytes": 845,
+      "collides_with_new_fixture": false
+    }
+  ],
+  "n21_n48_rendered_ppm_checks": [
+    {
+      "case_id": "unknown",
+      "rendered_ppm_md5": "05899a09f0377690bcbe2768c80568d6",
+      "collides_with_new_fixture": false
+    }
+  ],
+  "all_disjoint": true,
+  "method": "md5(open(path, \"rb\").read()) for static PNG/JSON fixtures; for N21/N48 also rendered visual_panel.renderer.render_panel(spec) + export_ppm(frame) and hashed the PPM bytes, since N21/N48 do not ship a static rendered PNG (the candidate renderer produces it at execution time from panel-cases.json)."
+}

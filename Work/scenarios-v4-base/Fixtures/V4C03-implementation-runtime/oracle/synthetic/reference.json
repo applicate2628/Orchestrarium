@@ -1,0 +1,8 @@
+{
+  "scenario_id": "V4C03-implementation-runtime",
+  "cases": {"R1": {"outcome": 200}, "R2": {"outcome": 409}, "R3": {"outcome": 202}, "R4": {"outcome": 200}, "R5": {"outcome": 503}},
+  "interfaces": {"routes": ["/jobs", "/jobs/{id}"], "events": ["job.accepted", "job.completed"]},
+  "changed_paths": ["src/service.py", "tests/test_service.py"],
+  "tests": {"T1": {"outcome": "PASS"}},
+  "narrative": "The retry-safe path preserves routes and emits the existing lifecycle events."
+}

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import argparse
 import importlib.util
 import json
@@ -22,6 +23,7 @@ PALETTE: dict[int, RGB] = {
 BACKGROUND: RGB = (17, 19, 24)
 FOCUS_RING: RGB = (250, 204, 21)
 ADDITIVE_HIGHLIGHT: RGB = (30, 24, 0)
+FULL_FRAME_MISMATCH_TOLERANCE = 2
 
 
 def parse_args():
@@ -94,7 +96,8 @@ def check_shape(root: Path, contract: dict, errors: list[str]):
 
 
 def import_candidate_module(root: Path):
-    module_path = root / "candidate" / "visual-owned" / "src" / "visual_panel" / "renderer.py"
+    exec_root = Path(os.environ["BENCH_EXEC_ROOT"]).resolve() if os.environ.get("BENCH_EXEC_ROOT") else root
+    module_path = exec_root / "candidate" / "visual-owned" / "src" / "visual_panel" / "renderer.py"
     spec = importlib.util.spec_from_file_location("N48_candidate_renderer", module_path)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"Unable to import candidate module from {module_path}")
@@ -198,7 +201,7 @@ def evaluate(root: Path):
                 failures.add("ppm-metadata")
 
     if actual != expected:
-        expected_points = [
+        witness_points = [
             (2, 2),
             (6, 6),
             (13, 5),
@@ -207,14 +210,24 @@ def evaluate(root: Path):
             (18, 3),
             (20, 2),
         ]
-        if any(actual[y][x] != expected[y][x] for x, y in expected_points):
-            pass
+        if any(actual[y][x] != expected[y][x] for x, y in witness_points):
+            failures.add("witness-points")
+
+        mismatch_count = sum(
+            1
+            for y in range(len(expected))
+            for x in range(len(expected[0]))
+            if actual[y][x] != expected[y][x]
+        )
+        if mismatch_count > FULL_FRAME_MISMATCH_TOLERANCE:
+            failures.add("full-frame-mismatch")
 
     return sorted(failures)
 
 
 def run_direct_tests(root: Path, errors: list[str]):
-    workspace = root / "candidate" / "visual-owned"
+    exec_root = Path(os.environ["BENCH_EXEC_ROOT"]).resolve() if os.environ.get("BENCH_EXEC_ROOT") else root
+    workspace = exec_root / "candidate" / "visual-owned"
     result = subprocess.run(
         [sys.executable, "tests/test_renderer.py"],
         cwd=workspace,

@@ -1,0 +1,28 @@
+id: V3L05S
+surface_id: V3-W5-S
+pack_id: V3P05
+role_class: implementation
+artifact_type: homogeneous breadth contract migration
+modality_family: single-stream breadth under fixed depth
+rf12_line: L05
+role_trigger: homogeneous-breadth-contract-migration
+target_separator: stamina-breadth-slope
+allowed_change_surface:
+  - candidate/workspace/src/ledgerkit/m*.py
+  - candidate/refactor-ledger.json
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/workspace/README.md
+  - candidate/workspace/tests/**
+  - candidate/workspace/src/ledgerkit/__init__.py
+  - candidate/workspace/src/ledgerkit/contract.py
+score_profile: "homogeneous breadth migration, hidden consumers, decoy precision, graded fraction, completion-vs-length slope"
+overlay_flags:
+  - stamina
+  - graded-fraction
+  - hidden-consumer
+  - decoy-precision
+  - matched-length-triplet

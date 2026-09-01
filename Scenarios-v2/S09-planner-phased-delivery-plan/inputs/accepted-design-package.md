@@ -21,3 +21,10 @@ perform a preview-only dry run.
 2. Land write-guard behavior only after the JSON path and its tests are explicit.
 3. Update user-facing docs only after the behavior and verification route are stable.
 4. Hand off to QA and review after the local checks pass; do not fold review work into the plan.
+
+## Raised suggestion (not yet decided)
+
+During intake one reviewer suggested shipping `--dry-run` in the same phase as the JSON contract to
+save a phase. The suggestion has not been accepted, and no rationale for or against it was recorded.
+The planner must decide whether the phases can be safely combined, using only the design
+commitments above.

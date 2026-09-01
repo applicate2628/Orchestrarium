@@ -1,0 +1,5 @@
+event-01 command: python oracle/ground-truth/F01-out-of-order-ack/failing-test.py
+Traceback (most recent call last):
+  File "oracle/ground-truth/F01-out-of-order-ack/failing-test.py", line 29, in <module>
+    assert state.dirty is True, (
+AssertionError: stale ack for revision 40 cleared dirty state for pending revision 41

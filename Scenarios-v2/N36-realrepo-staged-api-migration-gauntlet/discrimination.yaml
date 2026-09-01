@@ -1,0 +1,11 @@
+schema: discrimination-v1
+target_construct: "multi-session API contract migration, scattered consumers, review response, hidden repo-style tests, and patch-quality discipline"
+eligible_profiles:
+  - systemic-mgmt
+  - stamina
+  - ultimate-depth
+  - working-audit
+expected_winner: none-hypothesized
+expected_winner_registered: 2026-07-12
+validated_discrimination: none
+validation_evidence: none

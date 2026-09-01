@@ -1,0 +1,17 @@
+{
+  "variant": "m",
+  "scenario_id": "V3L05M",
+  "total_consumers": 18,
+  "completed_count": 17,
+  "missed": [
+    "quote_c15"
+  ],
+  "false_positives": [],
+  "breadth_fraction": 0.944444,
+  "points": 94,
+  "pass_fraction": 0.9,
+  "visible_tests_pass": true,
+  "visible_log": "",
+  "failure_ids": [],
+  "verdict": "PASS"
+}

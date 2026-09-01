@@ -1,0 +1,70 @@
+{
+  "schema": "perturbation-v1",
+  "bundle_id": "N26",
+  "purpose": "Non-transcribable owner-oracle layer. The active perturbation is read from the committed content of the selector input file(s), never from an out-of-band flag. A memorized/copied-template answer that is correct only for the baseline (unperturbed) packet must FAIL when a different perturbation is active, because the perturbed-correct decision is textually different from the baseline-correct decision.",
+  "selector": {
+    "input_paths": [
+      "inputs/interruption-log.md",
+      "inputs/source-excerpts.md"
+    ],
+    "detection": "sha256 of each selector input file's current bytes must match exactly one perturbation entry's input_snapshots map; no match is a hard verifier error (unrecognized/drifted inputs state)."
+  },
+  "perturbations": [
+    {
+      "id": "baseline",
+      "category": "none",
+      "description": "Unperturbed reference packet: both selector files are the content committed in this bundle (owner recovery is X3 provisional-primary pending N26 repeat; I6 keeps X5 a UI contender only).",
+      "input_snapshots": {
+        "inputs/interruption-log.md": "131497569238a44729e5810deab0feb8853e06592c75f8deee5b785ae1b9c3ad",
+        "inputs/source-excerpts.md": "915ae0774f706f30c5f74bba7671d4386241d63df516f04bcd9710333a255e3f"
+      },
+      "answer_delta": {}
+    },
+    {
+      "id": "P1-owner-recovery-confirmed",
+      "category": "source-freshness-flipped",
+      "description": "source-excerpts.md's line-96 fact is rewritten: owner roles are now X3 CONFIRMED-primary because N26 repeat already passed with a stable 3/3 margin, so no further repeat is required. Under this perturbation the baseline 'provisional pending N26 repeat' framing is stale.",
+      "input_snapshots": {
+        "inputs/interruption-log.md": "131497569238a44729e5810deab0feb8853e06592c75f8deee5b785ae1b9c3ad",
+        "inputs/source-excerpts.md": "1b50f62541d800e0c56b5b50383d6cc203ef265f6d149f52873ae68f5e54ea68"
+      },
+      "answer_delta": {
+        "add_required_exact_phrases": [
+          "Owner recovery: X3 confirmed-primary; N26 repeat already passed"
+        ],
+        "remove_required_exact_phrases": [
+          "Owner recovery: X3 provisional-primary pending N26 repeat"
+        ],
+        "add_disallowed_markers": [
+          "Owner recovery: X3 provisional-primary pending N26 repeat"
+        ],
+        "decision_json_expected_overrides": {
+          "current_owner_policy": "X3 confirmed-primary; N26 repeat already passed"
+        }
+      }
+    },
+    {
+      "id": "P2-x5-ui-promoted",
+      "category": "interruption-log-entry-changed",
+      "description": "I6's row is rewritten so a follow-up architecture-reviewer-approved policy decision on 2026-04-24 promoted X5 to the UI global default. Under this perturbation the baseline 'X5 contender only' framing and the disallowed 'X5 is the global UI default' marker trade places.",
+      "input_snapshots": {
+        "inputs/interruption-log.md": "20447d28f49e48d2f924b4eb0c4295c3088ce6657527f7e917056cb122df08b7",
+        "inputs/source-excerpts.md": "915ae0774f706f30c5f74bba7671d4386241d63df516f04bcd9710333a255e3f"
+      },
+      "answer_delta": {
+        "add_required_exact_phrases": [
+          "UI implementation: X5 promoted to global default (architecture-reviewer approved 2026-04-24)"
+        ],
+        "remove_required_exact_phrases": [
+          "UI implementation: X3 primary versus X1; X5 contender only"
+        ],
+        "add_disallowed_markers": [
+          "UI implementation: X3 primary versus X1; X5 contender only"
+        ],
+        "remove_disallowed_markers": [
+          "X5 is the global UI default"
+        ]
+      }
+    }
+  ]
+}

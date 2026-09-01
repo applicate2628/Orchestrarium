@@ -1,0 +1,8 @@
+{
+  "scenario_id": "V4C03-implementation-runtime",
+  "cases": [{"case_id": "R5", "outcome": 503}, {"case_id": "R3", "outcome": 202}, {"case_id": "R1", "outcome": 200}, {"case_id": "R4", "outcome": 200}, {"case_id": "R2", "outcome": 409}],
+  "interfaces": {"routes": ["/JOBS/{ID}", "/JOBS"], "events": ["JOB.COMPLETED", "JOB.ACCEPTED"]},
+  "changed_paths": ["TESTS/TEST_SERVICE.PY", "SRC/SERVICE.PY"],
+  "tests": [{"test_id": "T1", "outcome": "PASS"}],
+  "narrative": "Duplicate replay stays idempotent, payload conflicts remain conflicts, and dependency exhaustion remains visible."
+}

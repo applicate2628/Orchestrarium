@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["scenario_id", "measurements", "cases"],
+  "additionalProperties": false,
+  "properties": {
+    "scenario_id": {"const": "V4L04B-constraint-casebook"},
+    "measurements": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "N01": {"type":"object","required":["value","unit"],"additionalProperties":false,"properties":{"value":{"oneOf":[{"type":"number"},{"type":"string","minLength":1,"maxLength":64}]},"unit":{"type":"string","minLength":1,"maxLength":32}}},
+        "N02": {"type":"object","required":["value","unit"],"additionalProperties":false,"properties":{"value":{"oneOf":[{"type":"number"},{"type":"string","minLength":1,"maxLength":64}]},"unit":{"type":"string","minLength":1,"maxLength":32}}},
+        "N03": {"type":"object","required":["value","unit"],"additionalProperties":false,"properties":{"value":{"oneOf":[{"type":"number"},{"type":"string","minLength":1,"maxLength":64}]},"unit":{"type":"string","minLength":1,"maxLength":32}}},
+        "N04": {"type":"object","required":["value","unit"],"additionalProperties":false,"properties":{"value":{"oneOf":[{"type":"number"},{"type":"string","minLength":1,"maxLength":64}]},"unit":{"type":"string","minLength":1,"maxLength":32}}},
+        "N05": {"type":"object","required":["value","unit"],"additionalProperties":false,"properties":{"value":{"oneOf":[{"type":"number"},{"type":"string","minLength":1,"maxLength":64}]},"unit":{"type":"string","minLength":1,"maxLength":32}}},
+        "N06": {"type":"object","required":["value","unit"],"additionalProperties":false,"properties":{"value":{"oneOf":[{"type":"number"},{"type":"string","minLength":1,"maxLength":64}]},"unit":{"type":"string","minLength":1,"maxLength":32}}},
+        "N07": {"type":"object","required":["value","unit"],"additionalProperties":false,"properties":{"value":{"oneOf":[{"type":"number"},{"type":"string","minLength":1,"maxLength":64}]},"unit":{"type":"string","minLength":1,"maxLength":32}}},
+        "N08": {"type":"object","required":["value","unit"],"additionalProperties":false,"properties":{"value":{"oneOf":[{"type":"number"},{"type":"string","minLength":1,"maxLength":64}]},"unit":{"type":"string","minLength":1,"maxLength":32}}},
+        "N09": {"type":"object","required":["value","unit"],"additionalProperties":false,"properties":{"value":{"oneOf":[{"type":"number"},{"type":"string","minLength":1,"maxLength":64}]},"unit":{"type":"string","minLength":1,"maxLength":32}}},
+        "N10": {"type":"object","required":["value","unit"],"additionalProperties":false,"properties":{"value":{"oneOf":[{"type":"number"},{"type":"string","minLength":1,"maxLength":64}]},"unit":{"type":"string","minLength":1,"maxLength":32}}},
+        "N11": {"type":"object","required":["value","unit"],"additionalProperties":false,"properties":{"value":{"oneOf":[{"type":"number"},{"type":"string","minLength":1,"maxLength":64}]},"unit":{"type":"string","minLength":1,"maxLength":32}}},
+        "N12": {"type":"object","required":["value","unit"],"additionalProperties":false,"properties":{"value":{"oneOf":[{"type":"number"},{"type":"string","minLength":1,"maxLength":64}]},"unit":{"type":"string","minLength":1,"maxLength":32}}},
+        "N13": {"type":"object","required":["value","unit"],"additionalProperties":false,"properties":{"value":{"oneOf":[{"type":"number"},{"type":"string","minLength":1,"maxLength":64}]},"unit":{"type":"string","minLength":1,"maxLength":32}}},
+        "N14": {"type":"object","required":["value","unit"],"additionalProperties":false,"properties":{"value":{"oneOf":[{"type":"number"},{"type":"string","minLength":1,"maxLength":64}]},"unit":{"type":"string","minLength":1,"maxLength":32}}},
+        "W01": {"type":"object","required":["value","unit"],"additionalProperties":false,"properties":{"value":{"oneOf":[{"type":"number"},{"type":"string","minLength":1,"maxLength":64}]},"unit":{"type":"string","minLength":1,"maxLength":32}}},
+        "W02": {"type":"object","required":["value","unit"],"additionalProperties":false,"properties":{"value":{"oneOf":[{"type":"number"},{"type":"string","minLength":1,"maxLength":64}]},"unit":{"type":"string","minLength":1,"maxLength":32}}},
+        "W03": {"type":"object","required":["value","unit"],"additionalProperties":false,"properties":{"value":{"oneOf":[{"type":"number"},{"type":"string","minLength":1,"maxLength":64}]},"unit":{"type":"string","minLength":1,"maxLength":32}}},
+        "W04": {"type":"object","required":["value","unit"],"additionalProperties":false,"properties":{"value":{"oneOf":[{"type":"number"},{"type":"string","minLength":1,"maxLength":64}]},"unit":{"type":"string","minLength":1,"maxLength":32}}},
+        "T01": {"type":"object","required":["value","unit"],"additionalProperties":false,"properties":{"value":{"oneOf":[{"type":"number"},{"type":"string","minLength":1,"maxLength":64}]},"unit":{"type":"string","minLength":1,"maxLength":32}}},
+        "T02": {"type":"object","required":["value","unit"],"additionalProperties":false,"properties":{"value":{"oneOf":[{"type":"number"},{"type":"string","minLength":1,"maxLength":64}]},"unit":{"type":"string","minLength":1,"maxLength":32}}}
+      }
+    },
+    "cases": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "I01": {"type":"object","required":["value","unit"],"additionalProperties":false,"properties":{"value":{"oneOf":[{"type":"number"},{"type":"string","minLength":1,"maxLength":64}]},"unit":{"type":"string","minLength":1,"maxLength":32}}},
+        "I02": {"type":"object","required":["value","unit"],"additionalProperties":false,"properties":{"value":{"oneOf":[{"type":"number"},{"type":"string","minLength":1,"maxLength":64}]},"unit":{"type":"string","minLength":1,"maxLength":32}}},
+        "I03": {"type":"object","required":["value","unit"],"additionalProperties":false,"properties":{"value":{"oneOf":[{"type":"number"},{"type":"string","minLength":1,"maxLength":64}]},"unit":{"type":"string","minLength":1,"maxLength":32}}},
+        "I04": {"type":"object","required":["value","unit"],"additionalProperties":false,"properties":{"value":{"oneOf":[{"type":"number"},{"type":"string","minLength":1,"maxLength":64}]},"unit":{"type":"string","minLength":1,"maxLength":32}}},
+        "I05": {"type":"object","required":["value","unit"],"additionalProperties":false,"properties":{"value":{"oneOf":[{"type":"number"},{"type":"string","minLength":1,"maxLength":64}]},"unit":{"type":"string","minLength":1,"maxLength":32}}},
+        "I06": {"type":"object","required":["value","unit"],"additionalProperties":false,"properties":{"value":{"oneOf":[{"type":"number"},{"type":"string","minLength":1,"maxLength":64}]},"unit":{"type":"string","minLength":1,"maxLength":32}}},
+        "F01": {"type":"object","required":["value","unit"],"additionalProperties":false,"properties":{"value":{"oneOf":[{"type":"number"},{"type":"string","minLength":1,"maxLength":64}]},"unit":{"type":"string","minLength":1,"maxLength":32}}},
+        "F02": {"type":"object","required":["value","unit"],"additionalProperties":false,"properties":{"value":{"oneOf":[{"type":"number"},{"type":"string","minLength":1,"maxLength":64}]},"unit":{"type":"string","minLength":1,"maxLength":32}}},
+        "F03": {"type":"object","required":["value","unit"],"additionalProperties":false,"properties":{"value":{"oneOf":[{"type":"number"},{"type":"string","minLength":1,"maxLength":64}]},"unit":{"type":"string","minLength":1,"maxLength":32}}},
+        "F04": {"type":"object","required":["value","unit"],"additionalProperties":false,"properties":{"value":{"oneOf":[{"type":"number"},{"type":"string","minLength":1,"maxLength":64}]},"unit":{"type":"string","minLength":1,"maxLength":32}}},
+        "F05": {"type":"object","required":["value","unit"],"additionalProperties":false,"properties":{"value":{"oneOf":[{"type":"number"},{"type":"string","minLength":1,"maxLength":64}]},"unit":{"type":"string","minLength":1,"maxLength":32}}}
+      }
+    },
+    "narrative": {"type": "string", "maxLength": 4000}
+  }
+}

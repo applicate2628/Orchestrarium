@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -15,6 +16,72 @@ def parse_args():
     parser.add_argument("--expect-start-state", action="store_true")
     parser.add_argument("--changed-path", dest="changed_paths", action="append", default=[])
     return parser.parse_args()
+
+
+# --- Perturbation layer (R6/B4/L00) -----------------------------------------
+#
+# oracle/perturbation-contract.json defines input-conditioned variants of the
+# correct cross-phase compatibility gate (non-transcribable: the correct
+# gate/field grounding depends on the CURRENT content of the three read-only
+# upstream artifacts, not a memorized template). The active perturbation is
+# detected by hashing the selector input file(s) and matching against the
+# contract's pinned snapshots -- never an out-of-band flag -- so a candidate
+# cannot special-case on a marker id.
+
+def load_perturbation_contract(root: Path):
+    path = root / "oracle" / "perturbation-contract.json"
+    if not path.exists():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def sha256_of(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def detect_active_perturbation(root: Path, perturbation_contract: dict):
+    input_paths = perturbation_contract["selector"]["input_paths"]
+    current_hashes = {}
+    for rel in input_paths:
+        candidate_path = root / rel
+        if not candidate_path.exists():
+            return None
+        current_hashes[rel] = sha256_of(candidate_path)
+    for entry in perturbation_contract["perturbations"]:
+        if entry.get("input_snapshots", {}) == current_hashes:
+            return entry
+    return None
+
+
+def apply_perturbation_delta(contract: dict, perturbation_entry: dict | None) -> dict:
+    """Return a copy of `contract` with the active perturbation's answer_delta merged in.
+
+    List-valued keys named `add_<key>` / `remove_<key>` in answer_delta are
+    merged into the matching contract marker list (compatibilityMarkers,
+    closureMarkers). `expected_gate` / `expected_qa_may_run` override the
+    gate/qaMayRun values evaluate_gate() checks against (default
+    REVISE_BEFORE_QA / False when unset). Every other contract field
+    (artifactMarkers, ledgerMarkers, required report sections) is left as-is
+    -- perturbations change which FACTS are correct, not the required packet
+    structure.
+    """
+    effective = json.loads(json.dumps(contract))
+    if perturbation_entry is None:
+        return effective
+    delta = perturbation_entry.get("answer_delta", {})
+    for key in ("compatibilityMarkers", "closureMarkers"):
+        base_list = effective.get(key, [])
+        remove = set(delta.get(f"remove_{key}", []))
+        add = delta.get(f"add_{key}", [])
+        effective[key] = [item for item in base_list if item not in remove]
+        for item in add:
+            if item not in effective[key]:
+                effective[key].append(item)
+    if "expected_gate" in delta:
+        effective["expected_gate"] = delta["expected_gate"]
+    if "expected_qa_may_run" in delta:
+        effective["expected_qa_may_run"] = delta["expected_qa_may_run"]
+    return effective
 
 
 def load_json(path: Path):
@@ -133,10 +200,12 @@ def evaluate_gate(root: Path, contract: dict):
     failures = []
     if gate.get("contractId") != contract["contractId"] or gate.get("integrationFingerprint") != contract["integrationFingerprint"]:
         failures.append({"id": "qa-gate", "detail": "contract or fingerprint mismatch"})
-    if gate.get("gate") != "REVISE_BEFORE_QA":
-        failures.append({"id": "qa-gate", "detail": "gate must be REVISE_BEFORE_QA"})
-    if gate.get("qaMayRun") is not False:
-        failures.append({"id": "qa-gate", "detail": "qaMayRun must be false"})
+    expected_gate = contract.get("expected_gate", "REVISE_BEFORE_QA")
+    expected_qa_may_run = contract.get("expected_qa_may_run", False)
+    if gate.get("gate") != expected_gate:
+        failures.append({"id": "qa-gate", "detail": f"gate must be {expected_gate}"})
+    if gate.get("qaMayRun") is not expected_qa_may_run:
+        failures.append({"id": "qa-gate", "detail": f"qaMayRun must be {expected_qa_may_run}"})
     if gate.get("owner") != "integration-owner":
         failures.append({"id": "qa-gate", "detail": "owner must be integration-owner"})
     if not contains_all(text, contract["compatibilityMarkers"]):
@@ -186,7 +255,20 @@ def main():
         print("N67 verifier PASS (bundle shape)")
         return 0
 
-    failures = evaluate_bundle(root, contract)
+    perturbation_contract = load_perturbation_contract(root)
+    active_perturbation = None
+    if perturbation_contract is not None:
+        active_perturbation = detect_active_perturbation(root, perturbation_contract)
+        if active_perturbation is None:
+            print(
+                "ERROR: Unrecognized perturbation state: inputs/artifacts/*.md content does not "
+                "match any entry in oracle/perturbation-contract.json (baseline or perturbed).",
+                file=sys.stderr,
+            )
+            return 1
+    effective_contract = apply_perturbation_delta(contract, active_perturbation)
+
+    failures = evaluate_bundle(root, effective_contract)
     if args.expect_start_state:
         expected = set(contract["expected_start_state_failures"])
         observed = {failure["id"] for failure in failures}

@@ -1,0 +1,13 @@
+{
+  "scenario_id": "V4C04-findings-review",
+  "findings": {
+    "correctness": [{"id": "C1", "file": "src/cache.py", "symbol": "get", "severity": "high"}],
+    "reliability": [{"id": "R1", "file": "src/worker.py", "symbol": "retry", "severity": "medium"}],
+    "performance": [],
+    "security": []
+  },
+  "evidence": {"claims": {"EC1": {"source_ids": ["DIFF-1", "TEST-2"]}, "EC2": {"source_ids": ["TRACE-3"]}}},
+  "non_findings": ["DECOY-LOG", "DECOY-TIMEOUT"],
+  "review_scope": ["src/cache.py", "src/worker.py", "src/query.py", "src/auth.py"],
+  "actions": {"A1": {"outcome": "BLOCK"}, "A2": {"outcome": "FIX-BEFORE-MERGE"}}
+}

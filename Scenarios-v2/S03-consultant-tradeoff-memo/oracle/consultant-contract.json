@@ -169,5 +169,50 @@
     "```tsx",
     "```javascript",
     "apply_patch"
-  ]
+  ],
+  "counterfactual_scoring": {
+    "mechanism": "counterfactual-consequence",
+    "pass_threshold": 70,
+    "max_points": 100,
+    "note": "R4b: the fixed-string recommendation gate + contains_any keyword floor are kept as a floor; on top of that the graded layer requires the DERIVED consequence-of-the-alternative that makes Option A defensible, localized to the Option B rejection so it cannot be satisfied by transcribing input phrases.",
+    "recommended_block_heading": "## Recommended direction",
+    "alternative_block_start": "### Option B - shared memo scaffolding first",
+    "alternative_block_end_markers": ["### Option C", "## Major tradeoffs", "## "],
+    "uncertainty_block_heading": "## Assumptions and uncertainty",
+    "components": {
+      "consequence_of_alternative": {
+        "points": 40,
+        "mandatory_min": 20,
+        "scope": "alternative_block",
+        "conjunction": [
+          {"group": "sibling_role", "any_of": ["s06", "s10", "r06", "r10", "analyst", "algorithm-scientist"]},
+          {"group": "lock_in", "any_of": ["freeze", "harden", "premature", "prematur", "lock-in", "lock in", "calcify", "cement"]},
+          {"group": "unproven_convergence", "any_of": ["not proven", "unproven", "does not yet support", "not yet support", "no proof", "may diverge", "might diverge", "may not want", "might not want", "does not yet", "not converge"]}
+        ]
+      },
+      "reversibility_driver": {
+        "points": 25,
+        "scope": "recommended_block",
+        "conjunction": [
+          {"group": "reversible", "any_of": ["reversible", "smallest safe", "local", "narrow", "one bundle", "bundle-local", "one root"]},
+          {"group": "evidence_first", "any_of": ["evidence", "proof", "signal", "learn", "before shared", "before abstract", "before the shape", "before scaffold"]}
+        ]
+      },
+      "reversal_cost": {
+        "points": 15,
+        "scope": "whole",
+        "any_of": ["re-touch", "retouch", "multiple roots", "several roots", "future roots", "widen", "blast radius", "harder to undo", "expensive to reverse", "reversal cost", "unwind"]
+      },
+      "uncertainty": {
+        "points": 20,
+        "scope": "uncertainty_block",
+        "any_of": ["missing evidence", "unmeasured", "open questions", "uncertain", "not proven", "may diverge", "no measured"]
+      }
+    },
+    "decoy_drivers": {
+      "scope": "recommended_block",
+      "any_of": ["faster", "less work", "quicker", "less code", "saves time", "save time", "speed", "fastest"],
+      "note": "shallow drivers; presence alone does not fail, but a memo that leans on them while earning below mandatory_min on consequence_of_alternative cannot pass."
+    }
+  }
 }

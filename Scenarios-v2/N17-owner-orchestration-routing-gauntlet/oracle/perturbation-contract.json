@@ -1,0 +1,68 @@
+{
+  "schema": "perturbation-v1",
+  "bundle_id": "N17",
+  "purpose": "Non-transcribable owner-oracle layer: the active perturbation is read from the committed content of the selector input file(s). A memorized/copied-template answer that is correct only for the baseline (unperturbed) packet must FAIL when a different perturbation is active, because the perturbed-correct decision is textually different from the baseline-correct decision.",
+  "selector": {
+    "input_paths": [
+      "inputs/interruption-log.md"
+    ],
+    "detection": "sha256 of each selector input file's current bytes must match exactly one perturbation entry's input_snapshots map; no match is a hard verifier error (unrecognized/drifted inputs state)."
+  },
+  "perturbations": [
+    {
+      "id": "baseline",
+      "category": "none",
+      "description": "Unperturbed reference packet: inputs/interruption-log.md is the file committed in this bundle (I2 unresolved N16-promotion request, I4 unresolved premature-QA request).",
+      "input_snapshots": {
+        "inputs/interruption-log.md": "f945605802fe68969a1dcd62f847c56c965349aab91220ce7eea433d57920552"
+      },
+      "answer_delta": {}
+    },
+    {
+      "id": "P1-i2-n16-promotion-approved",
+      "category": "interruption-log-entry-changed",
+      "description": "I2's row is rewritten so the promotion of N16 into the core routing lanes has ALREADY been approved by $architecture-reviewer on 2026-04-25 (the risk column reads 'none — the scoring-policy gate already passed'). Under this perturbation the previously-correct refusal to promote N16 is now wrong: the packet must admit N16 into the routing lanes and cite the approval, not repeat the baseline 'diagnostic rubric only' refusal.",
+      "input_snapshots": {
+        "inputs/interruption-log.md": "ce85a04f67e1ac78501a6417f4d6da6a14e86c37843635e2f52c96e178b357ff"
+      },
+      "answer_delta": {
+        "add_required_exact_phrases": [
+          "Promote N16 into the routing lanes: architecture-reviewer approved 2026-04-25"
+        ],
+        "remove_required_exact_phrases": [
+          "Do not promote N16 into a routing lane yet",
+          "Use N16 as E6 diagnostic rubric only"
+        ],
+        "add_disallowed_markers": [
+          "Do not promote N16 into a routing lane yet",
+          "Use N16 as E6 diagnostic rubric only"
+        ],
+        "remove_disallowed_markers": [
+          "promote N16 into the routing lanes"
+        ]
+      }
+    },
+    {
+      "id": "P2-i4-qa-gate-already-validated",
+      "category": "gate-verdict-inverted",
+      "description": "I4's row is rewritten so the risk that blocked handing off to $qa-engineer no longer applies: the N17 pilot bundle and scorer already passed validation in the prior session. Under this perturbation the baseline 'wait for the pilot bundle and scorer to validate' gate is stale: QA may proceed now, citing the prior-session validation evidence.",
+      "input_snapshots": {
+        "inputs/interruption-log.md": "7cc9143de705bd54c7dbdb34ae6ddb75e3e2cfa9f349f8e9dd00886b12c121a3"
+      },
+      "answer_delta": {
+        "add_required_exact_phrases": [
+          "Send the output to QA now: N17 pilot bundle and scorer already validated"
+        ],
+        "remove_required_exact_phrases": [
+          "QA gate: after the pilot bundle and scorer validate"
+        ],
+        "add_disallowed_markers": [
+          "QA gate: after the pilot bundle and scorer validate"
+        ],
+        "remove_disallowed_markers": [
+          "Send the output to QA now"
+        ]
+      }
+    }
+  ]
+}

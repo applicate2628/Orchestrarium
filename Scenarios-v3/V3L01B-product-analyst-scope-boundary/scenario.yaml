@@ -1,0 +1,15 @@
+id: V3L01B
+surface_id: V3L01B
+pack_id: V3P01
+role_class: factual
+artifact_type: product brief
+modality_family: product scope framing
+allowed_change_surface:
+  - candidate/product-brief.md
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+score_profile: "owner, advisory, factual, design, planning"
+overlay_flags: []

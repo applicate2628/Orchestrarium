@@ -1,0 +1,23 @@
+id: V3L12
+surface_id: V3-W1-F4
+pack_id: V3P03
+role_class: review
+artifact_type: calibrated screenshot grounding visual review
+modality_family: high-resolution screenshot grounding, UI defect review, coordinate evidence, false-positive traps
+rf12_line: L12
+role_trigger: independent-raster-family
+target_separator: n80-shape-independent-scene
+allowed_change_surface:
+  - candidate/answer.json
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+score_profile: screenshot-grounding-v2, exact-visual-defect-tuples, calibrated-coordinate-window, scored-rubric
+overlay_flags:
+  - visual-grounding
+  - actual-screenshot
+  - ui-review
+  - binary-separator-candidate
+  - l12-independent-family

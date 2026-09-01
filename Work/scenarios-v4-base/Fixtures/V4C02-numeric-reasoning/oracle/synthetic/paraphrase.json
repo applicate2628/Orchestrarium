@@ -1,0 +1,7 @@
+{
+  "scenario_id": "V4C02-numeric-reasoning",
+  "results": {"N5": {"value": 99.90, "unit": "PERCENT"}, "N3": {"value": 64.0, "unit": "mib"}, "N1": {"value": 12.0, "unit": "MS"}, "N4": {"value": 3.50, "unit": "S"}, "N2": {"value": 0.1250, "unit": "RATIO"}},
+  "invariants": {"stability": ["FINITE-INPUT", "BOUNDED-MEMORY"], "ordering": ["UNIT-PRESERVING", "STABLE-ORDER"]},
+  "cases": [{"case_id": "F2", "outcome": "PASS"}, {"case_id": "F1", "outcome": "PASS"}],
+  "narrative": "Four shards consume sixty-four mebibytes; order cannot alter the integer sum, and invalid numeric input is refused."
+}

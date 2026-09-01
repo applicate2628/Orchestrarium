@@ -1,0 +1,9 @@
+{
+ "scenario_id": "V4L04HB-hidden-consumer-contract",
+ "verdicts": {},
+ "causes": {},
+ "fixes": {},
+ "breaking_change_ids": [],
+ "release_gate": {},
+ "narrative": "No analysis performed."
+}

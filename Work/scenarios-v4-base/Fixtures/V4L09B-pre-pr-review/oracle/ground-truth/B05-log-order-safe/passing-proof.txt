@@ -1,0 +1,3 @@
+Parser and alert fixtures address log entries by key, not insertion order.
+Observed command: python -m pytest tests/test_log_parser.py tests/test_alert_examples.py -q
+Result: 7 passed; parsed fields event=job.failed level=warning request_id=req-1042.

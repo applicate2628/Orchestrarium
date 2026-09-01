@@ -1,0 +1,6 @@
+schema_version: scenarios-v4-calibration-1
+scenario_id: V4C04-findings-review
+calibration_only: true
+candidate_artifact: candidate/review.json
+allowed_write_paths:
+  - candidate/review.json

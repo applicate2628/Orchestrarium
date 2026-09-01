@@ -134,5 +134,53 @@
     "apply_patch",
     "penetration test",
     "microbenchmark"
+  ],
+  "findings_table_section": "## Findings",
+  "findings_table_header": ["#", "File", "Line", "Category", "Severity", "Title", "Evidence"],
+  "allowed_categories": ["evidence-loss", "logic-defect", "silent-failure"],
+  "allowed_severities": ["blocking", "major", "minor"],
+  "exact_finding_count": 3,
+  "table_findings": [
+    {
+      "id": "F1",
+      "file": "candidate/review-target/src/review_packet_builder.py",
+      "acceptable_lines": [25, 26, 27, 28],
+      "severity": "blocking",
+      "category_terms": ["evidence-loss"],
+      "title_keywords": ["changed-path", "coverage", "added", "renamed", "modified", "status"],
+      "required_evidence_terms": ["collect_changed_paths", "modified"]
+    },
+    {
+      "id": "F2",
+      "file": "candidate/review-target/src/review_packet_builder.py",
+      "acceptable_lines": [33, 34, 35, 36, 37, 38],
+      "severity": "major",
+      "category_terms": ["logic-defect"],
+      "title_keywords": ["dedupe", "collapse", "title-only", "title_key"],
+      "required_evidence_terms": ["collapse_findings", "title_key"]
+    },
+    {
+      "id": "F3",
+      "file": "candidate/review-target/src/review_packet_builder.py",
+      "acceptable_lines": [54, 55, 56, 57, 58, 59, 60, 61],
+      "severity": "major",
+      "category_terms": ["silent-failure"],
+      "title_keywords": ["parse_hunk_lines", "malformed", "hunk", "silent"],
+      "required_evidence_terms": ["parse_hunk_lines", "except"]
+    }
+  ],
+  "forbidden_findings": [
+    {
+      "title_keywords": ["max_changed_paths", "admitted bound", "packet size limit"],
+      "reason": "MAX_CHANGED_PATHS = 12 is an admitted local bound for a tiny packet size, not a performance defect by itself"
+    },
+    {
+      "title_keywords": ["sha1", "stable_fingerprint", "hashing helper"],
+      "reason": "sha1 inside stable_fingerprint is a local deterministic dedupe helper, not a security or auth boundary"
+    },
+    {
+      "title_keywords": ["reviewpacketview", "dataclass", "architecture drift"],
+      "reason": "the ReviewPacketView dataclass is a same-owner local structure, not architecture drift"
+    }
   ]
 }

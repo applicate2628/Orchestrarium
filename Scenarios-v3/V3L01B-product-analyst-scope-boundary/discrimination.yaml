@@ -1,0 +1,12 @@
+schema: discrimination-v1
+target_construct: "holding an accepted, bounded product scope against tempting adjacent asks in a noisy intake - listing only the accepted in-scope items and explicitly parking the scope-inflation asks, rather than pulling them into scope or silently dropping them"
+eligible_profiles:
+  - systemic-mgmt
+  - stamina
+  - ultimate-depth
+  - working-audit
+expected_winner: none-hypothesized
+expected_winner_registered: 2026-07-12
+validated_discrimination: none
+validation_evidence: none
+notes: "A9 product-analyst sub-scenario (F5). Enforced scope-inflation penalty: any scope-inflation term (xlsx/pdf/scheduled/email/dashboard/chart) inside the In Scope or Problem sections fails, and the adjacent asks must be explicitly parked. Separation is scope discipline under intake pressure, not brief length. expected_winner left none-hypothesized: scope-holding is a discipline signal not cleanly predicted to a single profile."

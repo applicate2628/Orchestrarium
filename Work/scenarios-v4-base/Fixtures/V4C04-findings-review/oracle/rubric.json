@@ -1,0 +1,29 @@
+{
+  "schema_version": "v4-rubric-1",
+  "scenario_id": "V4C04-findings-review",
+  "candidate_artifact": "review.json",
+  "score": {"max_points": 100, "pass_threshold": 80, "partial_threshold": 50, "integrity_penalty_cap": 15, "wrong_commitment_cap": 40},
+  "components": [
+    {"id": "findings", "weight": 40, "semantic": true, "atoms": [
+      {"id": "correctness", "type": "findings_f1", "weight": 1, "commitment": true, "candidate_path": "findings.correctness", "match_fields": ["file", "symbol"], "casefold_fields": ["file", "symbol"], "severity_weights": {"high": 3, "medium": 2, "low": 1}, "expected": [{"id": "F-C1", "file": "src/cache.py", "symbol": "get", "severity": "high"}]},
+      {"id": "reliability", "type": "findings_f1", "weight": 1, "commitment": true, "candidate_path": "findings.reliability", "match_fields": ["file", "symbol"], "casefold_fields": ["file", "symbol"], "severity_weights": {"high": 3, "medium": 2, "low": 1}, "expected": [{"id": "F-R1", "file": "src/worker.py", "symbol": "retry", "severity": "medium"}]},
+      {"id": "performance", "type": "findings_f1", "weight": 1, "commitment": true, "candidate_path": "findings.performance", "match_fields": ["file", "symbol"], "casefold_fields": ["file", "symbol"], "severity_weights": {"high": 3, "medium": 2, "low": 1}, "expected": [{"id": "F-P1", "file": "src/query.py", "symbol": "list_items", "severity": "medium"}]},
+      {"id": "security", "type": "findings_f1", "weight": 1, "commitment": true, "candidate_path": "findings.security", "match_fields": ["file", "symbol"], "casefold_fields": ["file", "symbol"], "severity_weights": {"high": 3, "medium": 2, "low": 1}, "expected": [{"id": "F-S1", "file": "src/auth.py", "symbol": "parse_token", "severity": "high"}]}
+    ]},
+    {"id": "binding", "weight": 20, "semantic": true, "atoms": [
+      {"id": "EC1", "type": "source_binding_f1", "weight": 1, "commitment": true, "candidate_path": "evidence.claims", "id_field": "id", "source_ids_field": "source_ids", "casefold_ids": true, "casefold_sources": true, "expected": [{"id": "EC1", "source_ids": ["DIFF-1", "TEST-2"]}]},
+      {"id": "EC2", "type": "source_binding_f1", "weight": 1, "commitment": true, "candidate_path": "evidence.claims", "id_field": "id", "source_ids_field": "source_ids", "casefold_ids": true, "casefold_sources": true, "expected": [{"id": "EC2", "source_ids": ["TRACE-3"]}]}
+    ]},
+    {"id": "precision", "weight": 20, "semantic": true, "atoms": [
+      {"id": "non-findings", "type": "set_f1", "weight": 1, "commitment": true, "candidate_path": "non_findings", "expected": ["DECOY-LOG", "DECOY-TIMEOUT"], "casefold": true},
+      {"id": "review-scope", "type": "set_f1", "weight": 1, "commitment": true, "candidate_path": "review_scope", "expected": ["src/cache.py", "src/worker.py", "src/query.py", "src/auth.py"], "casefold": true}
+    ]},
+    {"id": "actions", "weight": 10, "semantic": true, "atoms": [
+      {"id": "A1-A2", "type": "case_fraction", "weight": 1, "commitment": true, "candidate_path": "actions", "id_field": "action_id", "value_field": "outcome", "casefold_values": true, "expected": {"A1": "BLOCK", "A2": "FIX-BEFORE-MERGE"}}
+    ]},
+    {"id": "schema", "weight": 10, "semantic": false, "atoms": [
+      {"id": "required-fields", "type": "required_fields", "weight": 1, "required_paths": ["scenario_id", "findings", "evidence", "non_findings", "review_scope", "actions"]}
+    ]}
+  ],
+  "integrity_events": []
+}

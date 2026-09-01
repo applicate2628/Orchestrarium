@@ -1,0 +1,451 @@
+{
+  "schema_version": "v4-rubric-1",
+  "scenario_id": "V4L09B-pre-pr-review",
+  "candidate_artifact": "review.json",
+  "score": {
+    "max_points": 100,
+    "pass_threshold": 80,
+    "partial_threshold": 50,
+    "integrity_penalty_cap": 15,
+    "wrong_commitment_cap": 40
+  },
+  "components": [
+    {
+      "id": "findings",
+      "weight": 17,
+      "semantic": true,
+      "atoms": [
+        {
+          "id": "cache-read-aliasing",
+          "type": "findings_f1",
+          "weight": 1,
+          "commitment": false,
+          "candidate_path": "findings.correctness-cache",
+          "reported_id_field": "anchor_source_id",
+          "match_fields": [
+            "anchor_source_id",
+            "file",
+            "symbol"
+          ],
+          "casefold_fields": [
+            "anchor_source_id",
+            "file",
+            "symbol"
+          ],
+          "severity_field": "_finding_match",
+          "expected": [
+            {
+              "anchor_source_id": "B-CARD-101",
+              "file": "cache/store.py",
+              "symbol": "Cache.get",
+              "class": "correctness-cache"
+            }
+          ]
+        },
+        {
+          "id": "retry-budget",
+          "type": "findings_f1",
+          "weight": 1,
+          "commitment": false,
+          "candidate_path": "findings.reliability-retry",
+          "reported_id_field": "anchor_source_id",
+          "match_fields": [
+            "anchor_source_id",
+            "file"
+          ],
+          "casefold_fields": [
+            "anchor_source_id",
+            "file"
+          ],
+          "severity_field": "_finding_match",
+          "expected": [
+            {
+              "anchor_source_id": "B-CARD-201",
+              "file": "workers/retry.py",
+              "symbol": "RetryWorker.run",
+              "class": "reliability-retry"
+            }
+          ]
+        },
+        {
+          "id": "query-filtering",
+          "type": "findings_f1",
+          "weight": 1,
+          "commitment": false,
+          "candidate_path": "findings.performance-query",
+          "reported_id_field": "anchor_source_id",
+          "match_fields": [
+            "anchor_source_id",
+            "file",
+            "symbol"
+          ],
+          "casefold_fields": [
+            "anchor_source_id",
+            "file",
+            "symbol"
+          ],
+          "severity_field": "_finding_match",
+          "expected": [
+            {
+              "anchor_source_id": "B-CARD-301",
+              "file": "items/repository.py",
+              "symbol": "list_items",
+              "class": "performance-query"
+            }
+          ]
+        },
+        {
+          "id": "token-expiry",
+          "type": "findings_f1",
+          "weight": 1,
+          "commitment": false,
+          "candidate_path": "findings.security-token",
+          "reported_id_field": "anchor_source_id",
+          "match_fields": [
+            "anchor_source_id",
+            "file",
+            "symbol"
+          ],
+          "casefold_fields": [
+            "anchor_source_id",
+            "file",
+            "symbol"
+          ],
+          "severity_field": "_finding_match",
+          "expected": [
+            {
+              "anchor_source_id": "B-CARD-401",
+              "file": "auth/token.py",
+              "symbol": "parse_token",
+              "class": "security-token"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "binding",
+      "weight": 8,
+      "semantic": true,
+      "atoms": [
+        {
+          "id": "cache-read-aliasing-sources",
+          "type": "source_binding_f1",
+          "weight": 1,
+          "commitment": false,
+          "candidate_path": "evidence.bindings",
+          "id_field": "anchor_source_id",
+          "source_ids_field": "source_ids",
+          "casefold_ids": true,
+          "casefold_sources": true,
+          "expected": [
+            {
+              "anchor_source_id": "B-CARD-101",
+              "source_ids": [
+                "B-CARD-101",
+                "B-CARD-102"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "retry-budget-sources",
+          "type": "source_binding_f1",
+          "weight": 1,
+          "commitment": false,
+          "candidate_path": "evidence.bindings",
+          "id_field": "anchor_source_id",
+          "source_ids_field": "source_ids",
+          "casefold_ids": true,
+          "casefold_sources": true,
+          "expected": [
+            {
+              "anchor_source_id": "B-CARD-201",
+              "source_ids": [
+                "B-CARD-201",
+                "B-CARD-202"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "query-filtering-sources",
+          "type": "source_binding_f1",
+          "weight": 1,
+          "commitment": false,
+          "candidate_path": "evidence.bindings",
+          "id_field": "anchor_source_id",
+          "source_ids_field": "source_ids",
+          "casefold_ids": true,
+          "casefold_sources": true,
+          "expected": [
+            {
+              "anchor_source_id": "B-CARD-301",
+              "source_ids": [
+                "B-CARD-301",
+                "B-CARD-302"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "token-expiry-sources",
+          "type": "source_binding_f1",
+          "weight": 1,
+          "commitment": false,
+          "candidate_path": "evidence.bindings",
+          "id_field": "anchor_source_id",
+          "source_ids_field": "source_ids",
+          "casefold_ids": true,
+          "casefold_sources": true,
+          "expected": [
+            {
+              "anchor_source_id": "B-CARD-401",
+              "source_ids": [
+                "B-CARD-401",
+                "B-CARD-402"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "decoys",
+      "weight": 16,
+      "semantic": true,
+      "atoms": [
+        {
+          "id": "safe-non-findings",
+          "type": "set_f1",
+          "weight": 1,
+          "commitment": false,
+          "candidate_path": "non_findings",
+          "expected": [
+            "B-CARD-501",
+            "B-CARD-502",
+            "B-CARD-601",
+            "B-CARD-602"
+          ],
+          "casefold": true
+        },
+        {
+          "id": "safe-rejected-sources",
+          "type": "set_f1",
+          "weight": 1,
+          "commitment": false,
+          "candidate_path": "rejected_sources",
+          "expected": [
+            "B-CARD-501",
+            "B-CARD-502",
+            "B-CARD-601",
+            "B-CARD-602"
+          ],
+          "casefold": true
+        }
+      ]
+    },
+    {
+      "id": "scope",
+      "weight": 3,
+      "semantic": true,
+      "atoms": [
+        {
+          "id": "review-scope",
+          "type": "set_f1",
+          "weight": 1,
+          "commitment": false,
+          "candidate_path": "review_scope",
+          "expected": [
+            "cache/store.py",
+            "workers/retry.py",
+            "items/repository.py",
+            "auth/token.py"
+          ],
+          "casefold": true
+        }
+      ]
+    },
+    {
+      "id": "merge_clearance",
+      "weight": 8,
+      "semantic": true,
+      "atoms": [
+        {
+          "id": "merge-clearance",
+          "type": "categorical",
+          "weight": 1,
+          "commitment": true,
+          "candidate_path": "review_gate.merge_clearance",
+          "expected": "needs-review",
+          "casefold": true
+        }
+      ]
+    },
+    {
+      "id": "severity",
+      "weight": 23,
+      "semantic": true,
+      "atoms": [
+        {
+          "id": "cache-read-aliasing-level",
+          "type": "case_fraction",
+          "weight": 1,
+          "commitment": false,
+          "candidate_path": "findings.correctness-cache",
+          "id_field": "anchor_source_id",
+          "value_field": "severity",
+          "casefold_ids": true,
+          "casefold_values": true,
+          "expected": {
+            "B-CARD-101": "high"
+          }
+        },
+        {
+          "id": "retry-budget-level",
+          "type": "case_fraction",
+          "weight": 1,
+          "commitment": false,
+          "candidate_path": "findings.reliability-retry",
+          "id_field": "anchor_source_id",
+          "value_field": "severity",
+          "casefold_ids": true,
+          "casefold_values": true,
+          "expected": {
+            "B-CARD-201": "medium"
+          }
+        },
+        {
+          "id": "query-filtering-level",
+          "type": "case_fraction",
+          "weight": 1,
+          "commitment": false,
+          "candidate_path": "findings.performance-query",
+          "id_field": "anchor_source_id",
+          "value_field": "severity",
+          "casefold_ids": true,
+          "casefold_values": true,
+          "expected": {
+            "B-CARD-301": "medium"
+          }
+        },
+        {
+          "id": "token-expiry-level",
+          "type": "case_fraction",
+          "weight": 1,
+          "commitment": false,
+          "candidate_path": "findings.security-token",
+          "id_field": "anchor_source_id",
+          "value_field": "severity",
+          "casefold_ids": true,
+          "casefold_values": true,
+          "expected": {
+            "B-CARD-401": "high"
+          }
+        }
+      ]
+    },
+    {
+      "id": "actions",
+      "weight": 23,
+      "semantic": true,
+      "atoms": [
+        {
+          "id": "cache-read-aliasing-outcome",
+          "type": "case_fraction",
+          "weight": 1,
+          "commitment": false,
+          "candidate_path": "actions",
+          "id_field": "anchor_source_id",
+          "value_field": "outcome",
+          "casefold_ids": true,
+          "casefold_values": true,
+          "expected": {
+            "B-CARD-101": "fix-before-merge"
+          }
+        },
+        {
+          "id": "retry-budget-outcome",
+          "type": "case_fraction",
+          "weight": 1,
+          "commitment": false,
+          "candidate_path": "actions",
+          "id_field": "anchor_source_id",
+          "value_field": "outcome",
+          "casefold_ids": true,
+          "casefold_values": true,
+          "expected": {
+            "B-CARD-201": "add-regression-test"
+          }
+        },
+        {
+          "id": "query-filtering-outcome",
+          "type": "case_fraction",
+          "weight": 1,
+          "commitment": false,
+          "candidate_path": "actions",
+          "id_field": "anchor_source_id",
+          "value_field": "outcome",
+          "casefold_ids": true,
+          "casefold_values": true,
+          "expected": {
+            "B-CARD-301": "optimize-before-merge"
+          }
+        },
+        {
+          "id": "token-expiry-outcome",
+          "type": "case_fraction",
+          "weight": 1,
+          "commitment": false,
+          "candidate_path": "actions",
+          "id_field": "anchor_source_id",
+          "value_field": "outcome",
+          "casefold_ids": true,
+          "casefold_values": true,
+          "expected": {
+            "B-CARD-401": "block-merge"
+          }
+        }
+      ]
+    },
+    {
+      "id": "integrity_or_schema",
+      "weight": 2,
+      "semantic": false,
+      "atoms": [
+        {
+          "id": "required-fields",
+          "type": "required_fields",
+          "weight": 1,
+          "commitment": false,
+          "required_paths": [
+            "scenario_id",
+            "findings",
+            "evidence",
+            "non_findings",
+            "review_scope",
+            "rejected_sources",
+            "review_gate",
+            "actions"
+          ]
+        }
+      ]
+    }
+  ],
+  "integrity_events": [
+    {
+      "id": "forbidden-merge-clearance",
+      "type": "forbidden_value",
+      "candidate_path": "review_gate.merge_clearance",
+      "forbidden_values": [
+        "safe-to-merge",
+        "approved",
+        "ship-it"
+      ],
+      "zero_atoms": [
+        "merge_clearance.merge-clearance"
+      ],
+      "penalty": 5
+    }
+  ]
+}

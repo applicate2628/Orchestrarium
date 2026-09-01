@@ -1,0 +1,119 @@
+{
+  "required_top_level_entries": [
+    "scenario.yaml",
+    "README.md",
+    "inputs",
+    "candidate",
+    "oracle",
+    "verifiers"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "required_bundle_paths": [
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/accepted-review-constraints.md",
+    "inputs/review-boundary.md",
+    "inputs/scalability-notes.md",
+    "candidate/README.md",
+    "candidate/review-report.md",
+    "candidate/review-target/README.md",
+    "candidate/review-target/routing-matrix/assemble_lane_matrix.py",
+    "candidate/review-target/routing-matrix/lane_basis.py",
+    "candidate/review-target/routing-matrix/lane_catalog.py",
+    "oracle/README.md",
+    "oracle/cross-review-contract.json",
+    "oracle/expected-findings.md",
+    "oracle/false-positive-traps.md",
+    "oracle/scoring-anchors.md",
+    "oracle/severity-anchors.md",
+    "verifiers/README.md",
+    "verifiers/check_cross_review.py"
+  ],
+  "expected_metadata": {
+    "id": "N07",
+    "surface_id": "R26",
+    "pack_id": "P06",
+    "role_class": "review",
+    "artifact_type": "findings-only review report",
+    "modality_family": "scalability and maintainability gate",
+    "allowed_change_surface": [
+      "candidate/review-report.md"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/review-target/**"
+    ],
+    "score_profile": "review, QA",
+    "overlay_flags": []
+  },
+  "editable_report": "candidate/review-report.md",
+  "required_report_sections": [
+    "## Findings",
+    "## False Positives Avoided",
+    "## Maintainability Notes",
+    "## Gate Decision"
+  ],
+  "findings_table_header": ["#", "File", "Line", "Category", "Severity", "Title", "Evidence"],
+  "allowed_categories": ["scalability", "maintainability", "memory", "architecture"],
+  "allowed_severities": ["blocking", "major", "minor"],
+  "exact_finding_count": 3,
+  "required_findings": [
+    {
+      "id": "F1",
+      "file": "candidate/review-target/routing-matrix/assemble_lane_matrix.py",
+      "acceptable_lines": [21, 22, 23, 24, 33, 34, 35, 36],
+      "severity": "blocking",
+      "category_terms": ["scalability", "hot-path", "rescan"],
+      "title_keywords": ["rescan", "full-tree", "scan", "iterate", "every", "lane", "quadratic"],
+      "required_evidence_terms": ["collect_lane_members", "iterdir"]
+    },
+    {
+      "id": "F2",
+      "file": "candidate/review-target/routing-matrix/lane_basis.py",
+      "acceptable_lines": [1, 2, 3, 4],
+      "severity": "blocking",
+      "category_terms": ["maintainability", "architecture", "ownership"],
+      "title_keywords": ["duplicate", "lane-basis", "owner", "drift", "competing", "two"],
+      "required_evidence_terms": ["lane_basis.py", "lane_catalog.py"]
+    },
+    {
+      "id": "F3",
+      "file": "candidate/review-target/routing-matrix/assemble_lane_matrix.py",
+      "acceptable_lines": [7, 48, 49, 50],
+      "severity": "major",
+      "category_terms": ["memory", "scalability", "retention"],
+      "title_keywords": ["snapshot", "unbounded", "history", "retention", "memory", "growth"],
+      "required_evidence_terms": ["history.append", "json.dumps"]
+    }
+  ],
+  "forbidden_findings": [
+    {
+      "title_keywords": ["lane label", "labels presentation", "presentation data", "lane labels"],
+      "reason": "lane labels in lane_catalog.py are harmless presentation data"
+    },
+    {
+      "title_keywords": ["unassigned", "resolve_lane return", "unassigned return"],
+      "reason": "returning unassigned from resolve_lane is not the defect"
+    },
+    {
+      "title_keywords": ["small tuple", "local literal", "tuple literal", "small list"],
+      "reason": "small local literals are acceptable when not competing maintained owners"
+    }
+  ],
+  "required_false_positive_terms": ["lane_catalog", "unassigned"],
+  "prohibited_report_snippets": ["ship it", "looks fine"],
+  "expected_gate_decision": "REVISE"
+}

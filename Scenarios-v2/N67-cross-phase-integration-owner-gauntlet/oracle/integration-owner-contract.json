@@ -27,6 +27,7 @@
     "oracle/README.md",
     "oracle/scoring-anchors.md",
     "oracle/integration-owner-contract.json",
+    "oracle/perturbation-contract.json",
     "verifiers/README.md",
     "verifiers/check_cross_phase_integration.py"
   ],

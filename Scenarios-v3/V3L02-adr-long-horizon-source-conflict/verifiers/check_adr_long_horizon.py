@@ -1,15 +1,25 @@
 #!/usr/bin/env python3
 
+# V3L02 verifier.
+#
+# History: this verifier previously returned a BINARY pass/fail even though its
+# own contract (oracle/adr-long-horizon-contract.json score.max_points/pass_threshold
+# and oracle/scoring-anchors.md) declares a graded 100-point / 85-threshold rubric.
+# That gap (R4a) is fixed here: the completed-candidate path now computes the six
+# declared scoring components, awards partial credit per component, applies the
+# forbidden-claim integrity gate, and passes only when total >= pass_threshold.
+# The bundle-shape gate and every structural check are preserved as a hard floor;
+# grading only runs once the shape floor holds.
+
 import argparse
 import json
-import re
 import sys
 from pathlib import Path
 
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Check the V3L02 bundle shape or completed ADR decision package."
+        description="Check the V3L02 bundle shape or score a completed ADR decision package."
     )
     default_root = Path(__file__).resolve().parents[1]
     parser.add_argument("--bundle-root", type=Path, default=default_root)
@@ -17,9 +27,14 @@ def parse_args():
         "--candidate-root",
         type=Path,
         default=None,
-        help="Optional alternate candidate directory for reference probes.",
+        help="Optional alternate candidate directory (holds adr-decision.json + .md).",
     )
     parser.add_argument("--bundle-shape-only", action="store_true")
+    parser.add_argument(
+        "--json-report",
+        action="store_true",
+        help="Emit the scored component breakdown as JSON on stdout.",
+    )
     return parser.parse_args()
 
 
@@ -82,9 +97,13 @@ def normalize_text(value):
     return json.dumps(value, sort_keys=True).lower()
 
 
-def contains_terms(value, terms):
+def term_fraction(value, terms):
+    """Fraction (0..1) of required terms present in the serialized value."""
+    if not terms:
+        return 1.0
     text = normalize_text(value)
-    return all(term.lower() in text for term in terms)
+    hits = sum(1 for term in terms if term.lower() in text)
+    return hits / len(terms)
 
 
 def ids_by_key(items, key):
@@ -129,125 +148,183 @@ def check_bundle_shape(bundle_root, contract, errors):
         )
 
 
-def check_markdown(markdown_path, contract, errors):
-    require(markdown_path.exists(), "Missing candidate/adr-decision.md", errors)
-    if not markdown_path.exists():
-        return
-    text = markdown_path.read_text(encoding="utf-8")
-    for section in contract["markdown_required_sections"]:
-        require(section in text, f"Markdown missing section: {section}", errors)
-    claim_lines = [
-        line
-        for line in text.splitlines()
-        if "do not claim" not in line.lower() and "not claim" not in line.lower()
-    ]
-    claim_text = "\n".join(claim_lines).lower()
+# ----- graded component scorers -------------------------------------------------
+
+def score_decision(data, contract):
+    # 15 points: choice (8) + status (7).
+    decision = data.get("decision", {}) if isinstance(data.get("decision"), dict) else {}
+    pts = 0.0
+    notes = []
+    if decision.get("choice") == contract["decision"]["choice"]:
+        pts += 8.0
+    else:
+        notes.append("decision.choice wrong")
+    if decision.get("status") == contract["decision"]["status"]:
+        pts += 7.0
+    else:
+        notes.append("decision.status wrong")
+    return pts, 15.0, notes
+
+
+def score_source_authority(data, contract):
+    # 15 points: exact ordering full credit; correct set / wrong order = partial;
+    # the tie-probe here is ranking the stale ADR LAST, so a wrong order (esp. stale
+    # ADR ranked high) must lose most of the credit.
+    expected = contract["source_authority_order"]
+    actual = data.get("source_authority_order", [])
+    if actual == expected:
+        return 15.0, 15.0, []
+    if isinstance(actual, list) and sorted(actual) == sorted(expected):
+        return 6.0, 15.0, ["source_authority_order: right set, wrong ranking"]
+    return 0.0, 15.0, ["source_authority_order mismatch"]
+
+
+def score_id_terms_sources(data, key, expected_items, id_field, terms_field, per_item, errors_label):
+    # Generic scorer for accepted_claims / rejected_options: each item worth
+    # per_item points = present(0.4) + terms(0.3) + sources exact(0.3), scaled.
+    actual_by_id = ids_by_key(data.get(key, []), id_field)
+    total = per_item * len(expected_items)
+    got = 0.0
+    notes = []
+    present_w, terms_w, src_w = 0.4, 0.3, 0.3
+    for expected in expected_items:
+        item_id = expected[id_field]
+        actual = actual_by_id.get(item_id)
+        if actual is None:
+            notes.append(f"{errors_label} missing: {item_id}")
+            continue
+        got += per_item * present_w
+        got += per_item * terms_w * term_fraction(actual, expected[terms_field])
+        if sorted(actual.get("source_ids", [])) == sorted(expected["required_sources"]):
+            got += per_item * src_w
+        else:
+            notes.append(f"{errors_label} {item_id} source_ids wrong")
+    return got, total, notes
+
+
+def score_compat_rollback(data, contract):
+    # 20 points: compatibility_plan (4 items x 3 = 12) + rollback_plan (2 items x 4 = 8).
+    got = 0.0
+    notes = []
+    compat_by_id = ids_by_key(data.get("compatibility_plan", []), "id")
+    for expected in contract["compatibility_plan"]:
+        actual = compat_by_id.get(expected["id"])
+        if actual is None:
+            notes.append(f"compatibility_plan missing: {expected['id']}")
+            continue
+        got += 1.0  # present
+        got += 2.0 * term_fraction(actual, expected["required_terms"])
+    rollback_by_id = ids_by_key(data.get("rollback_plan", []), "id")
+    for expected in contract["rollback_plan"]:
+        actual = rollback_by_id.get(expected["id"])
+        if actual is None:
+            notes.append(f"rollback_plan missing: {expected['id']}")
+            continue
+        got += 1.5  # present
+        got += 2.5 * term_fraction(actual, expected["required_terms"])
+    return got, 20.0, notes
+
+
+def score_nonclaim_markdown(data, contract, md_path):
+    # 10 points: non_claims (3 x 2 = 6) + markdown summary (4).
+    got = 0.0
+    notes = []
+    nc_by_id = ids_by_key(data.get("non_claims", []), "id")
+    for expected in contract["non_claims"]:
+        actual = nc_by_id.get(expected["id"])
+        if actual is None:
+            notes.append(f"non_claims missing: {expected['id']}")
+            continue
+        got += 1.0  # present
+        got += 1.0 * term_fraction(actual, expected["required_terms"])
+    # markdown summary: 2 for all required sections present, 2 for gate_decision correct.
+    if md_path.exists():
+        md_text = md_path.read_text(encoding="utf-8")
+        sections_present = sum(1 for s in contract["markdown_required_sections"] if s in md_text)
+        got += 2.0 * (sections_present / len(contract["markdown_required_sections"]))
+    else:
+        notes.append("markdown summary missing")
+    if data.get("gate_decision") == contract["gate_decision"]:
+        got += 2.0
+    else:
+        notes.append("gate_decision wrong")
+    return got, 10.0, notes
+
+
+def integrity_forbidden(data, contract, md_path):
+    """Return list of forbidden-claim hits across JSON (excluding non_claims) and md."""
+    hits = []
+    claim_checked = dict(data)
+    claim_checked.pop("non_claims", None)
+    serialized = normalize_text(claim_checked)
+    md_text = ""
+    if md_path.exists():
+        md_lines = [
+            line
+            for line in md_path.read_text(encoding="utf-8").splitlines()
+            if "do not claim" not in line.lower() and "not claim" not in line.lower()
+        ]
+        md_text = "\n".join(md_lines).lower()
     for forbidden in contract["forbidden_claims"]:
-        require(
-            forbidden.lower() not in claim_text,
-            f"Markdown contains forbidden claim: {forbidden}",
-            errors,
-        )
+        f = forbidden.lower()
+        if f in serialized:
+            hits.append(f"JSON forbidden claim: {forbidden}")
+        if f in md_text:
+            hits.append(f"markdown forbidden claim: {forbidden}")
+    return hits
 
 
-def check_completed_candidate(bundle_root, candidate_root, contract, errors):
+def score_completed_candidate(bundle_root, candidate_root, contract):
+    """Return (report_dict, fatal_errors)."""
+    fatal = []
     json_path = candidate_root / "adr-decision.json"
     md_path = candidate_root / "adr-decision.md"
 
-    require(json_path.exists(), "Missing candidate/adr-decision.json", errors)
     if not json_path.exists():
-        return
-
+        fatal.append("Missing candidate/adr-decision.json")
+        return None, fatal
     try:
         data = json.loads(json_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
-        errors.append(f"candidate/adr-decision.json is invalid JSON: {exc}")
-        return
+        fatal.append(f"candidate/adr-decision.json is invalid JSON: {exc}")
+        return None, fatal
+    if data.get("scenario_id") != contract["scenario_id"]:
+        fatal.append("scenario_id mismatch")
+        return None, fatal
 
-    require(data.get("scenario_id") == contract["scenario_id"], "scenario_id mismatch", errors)
+    components = {}
+    total = 0.0
+    max_total = 0.0
+    all_notes = []
+    for name, (pts, mx, notes) in {
+        "decision_choice": score_decision(data, contract),
+        "source_authority": score_source_authority(data, contract),
+        "accepted_claims": score_id_terms_sources(
+            data, "accepted_claims", contract["accepted_claims"], "id",
+            "summary_terms", 5.0, "accepted claim"),
+        "rejected_options": score_id_terms_sources(
+            data, "rejected_options", contract["rejected_options"], "option",
+            "reason_terms", 5.0, "rejected option"),
+        "compatibility_rollback": score_compat_rollback(data, contract),
+        "nonclaim_markdown": score_nonclaim_markdown(data, contract, md_path),
+    }.items():
+        components[name] = {"points": round(pts, 2), "max": mx}
+        total += pts
+        max_total += mx
+        all_notes.extend(notes)
 
-    decision = data.get("decision", {})
-    require(
-        decision.get("choice") == contract["decision"]["choice"],
-        "decision.choice mismatch",
-        errors,
-    )
-    require(
-        decision.get("status") == contract["decision"]["status"],
-        "decision.status mismatch",
-        errors,
-    )
+    forbidden_hits = integrity_forbidden(data, contract, md_path)
 
-    require(
-        data.get("source_authority_order") == contract["source_authority_order"],
-        "source_authority_order mismatch",
-        errors,
-    )
-
-    claims = ids_by_key(data.get("accepted_claims", []), "id")
-    for expected in contract["accepted_claims"]:
-        actual = claims.get(expected["id"])
-        require(actual is not None, f"Missing accepted claim: {expected['id']}", errors)
-        if actual is None:
-            continue
-        require(
-            contains_terms(actual, expected["summary_terms"]),
-            f"Accepted claim {expected['id']} missing required terms",
-            errors,
-        )
-        require(
-            sorted(actual.get("source_ids", [])) == sorted(expected["required_sources"]),
-            f"Accepted claim {expected['id']} source_ids mismatch",
-            errors,
-        )
-
-    rejected = ids_by_key(data.get("rejected_options", []), "option")
-    for expected in contract["rejected_options"]:
-        actual = rejected.get(expected["option"])
-        require(actual is not None, f"Missing rejected option: {expected['option']}", errors)
-        if actual is None:
-            continue
-        require(
-            contains_terms(actual, expected["reason_terms"]),
-            f"Rejected option {expected['option']} missing required terms",
-            errors,
-        )
-        require(
-            sorted(actual.get("source_ids", [])) == sorted(expected["required_sources"]),
-            f"Rejected option {expected['option']} source_ids mismatch",
-            errors,
-        )
-
-    for section_name in ["compatibility_plan", "rollback_plan", "non_claims"]:
-        actual_by_id = ids_by_key(data.get(section_name, []), "id")
-        for expected in contract[section_name]:
-            actual = actual_by_id.get(expected["id"])
-            require(actual is not None, f"Missing {section_name} item: {expected['id']}", errors)
-            if actual is None:
-                continue
-            require(
-                contains_terms(actual, expected["required_terms"]),
-                f"{section_name} item {expected['id']} missing required terms",
-                errors,
-            )
-
-    require(
-        data.get("gate_decision") == contract["gate_decision"],
-        "gate_decision mismatch",
-        errors,
-    )
-
-    claim_checked_data = dict(data)
-    claim_checked_data.pop("non_claims", None)
-    serialized = normalize_text(claim_checked_data)
-    for forbidden in contract["forbidden_claims"]:
-        require(
-            forbidden.lower() not in serialized,
-            f"JSON contains forbidden claim: {forbidden}",
-            errors,
-        )
-
-    check_markdown(md_path, contract, errors)
+    report = {
+        "scenario_id": contract["scenario_id"],
+        "components": components,
+        "score": round(total, 2),
+        "max_points": contract["score"]["max_points"],
+        "pass_threshold": contract["score"]["pass_threshold"],
+        "integrity_violations": forbidden_hits,
+        "notes": all_notes,
+    }
+    return report, fatal
 
 
 def main():
@@ -265,17 +342,43 @@ def main():
 
     contract = load_contract(bundle_root)
     check_bundle_shape(bundle_root, contract, errors)
-    if not args.bundle_shape_only:
-        check_completed_candidate(bundle_root, candidate_root, contract, errors)
-
     if errors:
         for error in errors:
             print(f"ERROR: {error}", file=sys.stderr)
         return 1
 
-    mode = "bundle shape" if args.bundle_shape_only else "completed ADR decision"
-    print(f"V3L02 verifier PASS ({mode})")
-    return 0
+    if args.bundle_shape_only:
+        print("V3L02 verifier PASS (bundle shape)")
+        return 0
+
+    report, fatal = score_completed_candidate(bundle_root, candidate_root, contract)
+    if fatal:
+        for f in fatal:
+            print(f"ERROR: {f}", file=sys.stderr)
+        return 1
+
+    threshold = report["pass_threshold"]
+    passed = report["score"] >= threshold and not report["integrity_violations"]
+
+    if args.json_report:
+        print(json.dumps(report, indent=2))
+    else:
+        for name, comp in report["components"].items():
+            print(f"  {name}: {comp['points']}/{comp['max']}")
+        if report["integrity_violations"]:
+            for v in report["integrity_violations"]:
+                print(f"  INTEGRITY: {v}", file=sys.stderr)
+        for note in report["notes"]:
+            print(f"  note: {note}", file=sys.stderr)
+
+    verdict = "PASS" if passed else "FAIL"
+    stream = sys.stdout if passed else sys.stderr
+    print(
+        f"V3L02 graded score {report['score']}/{report['max_points']} "
+        f"(threshold {threshold}) -> {verdict}",
+        file=stream,
+    )
+    return 0 if passed else 1
 
 
 if __name__ == "__main__":

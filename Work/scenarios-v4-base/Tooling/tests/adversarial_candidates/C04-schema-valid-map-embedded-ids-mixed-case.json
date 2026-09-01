@@ -1,0 +1,13 @@
+{
+  "scenario_id": "V4C04-findings-review",
+  "findings": {
+    "correctness": [{"id": "c1", "file": "SRC/CACHE.PY", "symbol": "GET", "severity": "HIGH"}],
+    "reliability": [{"id": "r1", "file": "SRC/WORKER.PY", "symbol": "RETRY", "severity": "MEDIUM"}],
+    "performance": [{"id": "p1", "file": "SRC/QUERY.PY", "symbol": "LIST_ITEMS", "severity": "MEDIUM"}],
+    "security": [{"id": "s1", "file": "SRC/AUTH.PY", "symbol": "PARSE_TOKEN", "severity": "HIGH"}]
+  },
+  "evidence": {"claims": {"EC2": {"id": "ec2", "source_ids": ["trace-3"]}, "EC1": {"id": "ec1", "source_ids": ["test-2", "diff-1"]}}},
+  "non_findings": ["decoy-timeout", "decoy-log"],
+  "review_scope": ["SRC/AUTH.PY", "SRC/QUERY.PY", "SRC/WORKER.PY", "SRC/CACHE.PY"],
+  "actions": {"A2": {"action_id": "a2", "outcome": "fix-before-merge"}, "A1": {"action_id": "a1", "outcome": "block"}}
+}

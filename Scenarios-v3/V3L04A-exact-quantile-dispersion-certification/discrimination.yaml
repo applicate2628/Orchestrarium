@@ -1,0 +1,12 @@
+schema: discrimination-v1
+target_construct: "exact-arithmetic statistical certification under explicitly-declared non-default conventions (upper-rank percentiles, population variance) and catastrophic-cancellation stress, with no physics model to lean on"
+eligible_profiles:
+  - systemic-mgmt
+  - stamina
+  - ultimate-depth
+  - working-audit
+expected_winner: ultimate-depth
+expected_winner_registered: 2026-07-12
+validated_discrimination: none
+validation_evidence: none
+notes: "L04 second pure-algorithmic slot alongside N22 (F5/A5). No EM physics, so a physics-solver strength cannot mask algorithmic weakness. Separation rests on convention adherence and numerical-stability awareness; three cases flip the gate verdict between correct and near-peer-wrong conventions."

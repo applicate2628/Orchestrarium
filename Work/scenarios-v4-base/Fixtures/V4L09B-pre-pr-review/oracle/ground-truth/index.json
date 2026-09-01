@@ -1,0 +1,58 @@
+{
+  "scenario_id": "V4L09B-pre-pr-review",
+  "real_findings": {
+    "B01-cache-read-aliasing": {
+      "file": "cache/store.py",
+      "symbol": "Cache.get",
+      "class": "correctness-cache",
+      "source_ids": ["B-CARD-101", "B-CARD-102"],
+      "proof_files": [
+        "B01-cache-read-aliasing/failing-test.py",
+        "B01-cache-read-aliasing/transcript.txt"
+      ],
+      "summary": "Cache.get returns the stored object, so caller mutation changes the next read."
+    },
+    "B02-retry-budget": {
+      "file": "workers/retry.py",
+      "symbol": "RetryWorker.run",
+      "class": "reliability-retry",
+      "source_ids": ["B-CARD-201", "B-CARD-202"],
+      "proof_files": [
+        "B02-retry-budget/failing-test.py",
+        "B02-retry-budget/transcript.txt"
+      ],
+      "summary": "Transient failures do not advance the attempt counter, allowing calls past the configured budget."
+    },
+    "B03-query-filtering": {
+      "file": "items/repository.py",
+      "symbol": "list_items",
+      "class": "performance-query",
+      "source_ids": ["B-CARD-301", "B-CARD-302"],
+      "proof_files": ["B03-query-filtering/trace-invariant.json"],
+      "summary": "Account selection is applied after fetching the full table."
+    },
+    "B04-token-expiry": {
+      "file": "auth/token.py",
+      "symbol": "parse_token",
+      "class": "security-token",
+      "source_ids": ["B-CARD-401", "B-CARD-402"],
+      "proof_files": [
+        "B04-token-expiry/failing-test.py",
+        "B04-token-expiry/transcript.txt"
+      ],
+      "summary": "Expired tokens are accepted when no clock option is provided."
+    }
+  },
+  "safe_sources": {
+    "B05-log-order-safe": {
+      "source_ids": ["B-CARD-501", "B-CARD-502"],
+      "proof_files": ["B05-log-order-safe/passing-proof.txt"],
+      "summary": "The logging change reorders keys only; parser and alert examples address fields by key."
+    },
+    "B06-doc-only-safe": {
+      "source_ids": ["B-CARD-601", "B-CARD-602"],
+      "proof_files": ["B06-doc-only-safe/passing-proof.txt"],
+      "summary": "The README wording change has no reviewed runtime path."
+    }
+  }
+}

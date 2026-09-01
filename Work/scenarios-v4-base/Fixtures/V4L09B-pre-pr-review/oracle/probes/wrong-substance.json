@@ -1,0 +1,96 @@
+{
+  "scenario_id": "V4L09B-pre-pr-review",
+  "findings": {
+    "correctness-cache": [
+      {
+        "anchor_source_id": "B-CARD-101",
+        "file": "cache/store.py",
+        "symbol": "Cache.set",
+        "severity": "medium"
+      }
+    ],
+    "reliability-retry": [
+      {
+        "anchor_source_id": "B-CARD-502",
+        "file": "workers/retry.py",
+        "symbol": "RetryWorker.backoff",
+        "severity": "medium"
+      }
+    ],
+    "performance-query": [
+      {
+        "anchor_source_id": "B-CARD-302",
+        "file": "items/repository.py",
+        "symbol": "count_items",
+        "severity": "low"
+      }
+    ],
+    "security-token": [
+      {
+        "anchor_source_id": "B-CARD-402",
+        "file": "auth/token.py",
+        "symbol": "TokenExpired.__str__",
+        "severity": "low"
+      }
+    ]
+  },
+  "evidence": {
+    "bindings": {
+      "B-CARD-101": {
+        "source_ids": [
+          "B-CARD-101"
+        ]
+      },
+      "B-CARD-502": {
+        "source_ids": [
+          "B-CARD-502"
+        ]
+      },
+      "B-CARD-302": {
+        "source_ids": [
+          "B-CARD-302"
+        ]
+      },
+      "B-CARD-402": {
+        "source_ids": [
+          "B-CARD-402"
+        ]
+      }
+    }
+  },
+  "non_findings": [
+    "B-CARD-501",
+    "B-CARD-502",
+    "B-CARD-601",
+    "B-CARD-602"
+  ],
+  "review_scope": [
+    "cache/store.py",
+    "workers/retry.py",
+    "items/repository.py",
+    "auth/token.py"
+  ],
+  "rejected_sources": [
+    "B-CARD-501",
+    "B-CARD-502",
+    "B-CARD-601",
+    "B-CARD-602"
+  ],
+  "review_gate": {
+    "merge_clearance": "needs-review"
+  },
+  "actions": {
+    "B-CARD-101": {
+      "outcome": "add-regression-test"
+    },
+    "B-CARD-502": {
+      "outcome": "measure-before-merge"
+    },
+    "B-CARD-302": {
+      "outcome": "measure-before-merge"
+    },
+    "B-CARD-402": {
+      "outcome": "no-action"
+    }
+  }
+}

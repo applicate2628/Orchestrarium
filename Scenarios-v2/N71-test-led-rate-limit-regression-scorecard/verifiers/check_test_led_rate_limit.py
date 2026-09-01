@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import argparse
 import copy
 import fnmatch
@@ -11,6 +12,10 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Any
+
+sys.dont_write_bytecode = True  # keep the tracked bundle tree free of __pycache__ when run in-place
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _mutation_gate  # noqa: E402  bundle-local scorer module beside this verifier
 
 
 CONTRACT_ID = "N71-W49-test-led-rate-limit-regression"
@@ -23,6 +28,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--expect-start-state", action="store_true")
     parser.add_argument("--metrics-out", type=Path)
     parser.add_argument("--changed-path", action="append", default=[])
+    parser.add_argument("--mutation-selftest", action="store_true",
+                        help="run the four-probe mutation-gate regression (reference PASS, vacuous/decoy FAIL)")
     return parser.parse_args()
 
 
@@ -116,7 +123,8 @@ def verify_behavior(root: Path, failures: list[tuple[str, str]]) -> None:
 
 
 def run_visible_tests(root: Path, failures: list[tuple[str, str]]) -> None:
-    workspace = root / "candidate" / "workspace"
+    exec_root = Path(os.environ["BENCH_EXEC_ROOT"]).resolve() if os.environ.get("BENCH_EXEC_ROOT") else root
+    workspace = exec_root / "candidate" / "workspace"
     env_code = "import os,sys,subprocess; os.environ['PYTHONPATH']='src'; raise SystemExit(subprocess.call([sys.executable,'-m','unittest','discover','-s','tests'], cwd=r'%s', env=os.environ.copy()))" % str(workspace)
     completed = subprocess.run([sys.executable, "-c", env_code], text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     if completed.returncode != 0:
@@ -169,7 +177,7 @@ def verify_static_test_and_ledger(root: Path, contract: dict[str, Any], failures
             failures.append(("ledger-term", f"missing {term!r}"))
 
 
-def write_metrics(path: Path | None, failures: list[tuple[str, str]]) -> None:
+def write_metrics(path: Path | None, failures: list[tuple[str, str]], gate_report: dict | None = None) -> None:
     if not path:
         return
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -178,6 +186,14 @@ def write_metrics(path: Path | None, failures: list[tuple[str, str]]) -> None:
         "failure_ids": [item[0] for item in failures],
         "failures": [{"id": item[0], "detail": item[1]} for item in failures],
     }
+    if gate_report is not None:
+        payload["mutation_gate"] = {
+            "status": gate_report["status"],
+            "reason": gate_report["reason"],
+            "failures": [fid for fid, _ in gate_report["failures"]],
+            "variants": gate_report["variants"],
+        }
+        payload["gate_not_satisfiable"] = gate_report["status"] == "not-satisfiable"
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
@@ -187,6 +203,11 @@ def main() -> int:
     failures: list[tuple[str, str]] = []
     contract = assert_bundle_shape(root, failures)
 
+    if args.mutation_selftest:
+        ok, results = _mutation_gate.mutation_selftest(root)
+        print(json.dumps({"mutation_selftest": "PASS" if ok else "FAIL", "probes": results}, indent=2))
+        return 0 if ok else 1
+
     if args.bundle_shape_only:
         if failures:
             for _, detail in failures:
@@ -195,11 +216,16 @@ def main() -> int:
         print("N71 verifier PASS (bundle shape)")
         return 0
 
+    gate_report = None
     if not failures:
         verify_changed_paths(contract, args.changed_path, failures)
         run_visible_tests(root, failures)
         verify_behavior(root, failures)
         verify_static_test_and_ledger(root, contract, failures)
+        if not args.expect_start_state:
+            exec_root = Path(os.environ["BENCH_EXEC_ROOT"]).resolve() if os.environ.get("BENCH_EXEC_ROOT") else root
+            gate_report = _mutation_gate.run_mutation_gate(root, _mutation_gate.candidate_test_path(root, exec_root))
+            failures.extend(gate_report["failures"])
 
     if args.expect_start_state:
         observed = {failure_id for failure_id, _ in failures}
@@ -211,7 +237,9 @@ def main() -> int:
         print(f"N71 expected start-state failure missing; observed {sorted(observed)}")
         return 1
 
-    write_metrics(args.metrics_out, failures)
+    write_metrics(args.metrics_out, failures, gate_report)
+    if gate_report is not None and gate_report["status"] == "not-satisfiable":
+        print(f"N71 mutation-gate NOT-SATISFIABLE (abstain, not a fail-certification): {gate_report['reason']}")
     if failures:
         for failure_id, detail in failures:
             print(f"Failed invariant: {failure_id} :: {detail}")

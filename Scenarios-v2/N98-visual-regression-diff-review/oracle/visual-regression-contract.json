@@ -1,0 +1,113 @@
+{
+  "contractId": "N98-visual-regression-diff",
+  "required_top_level_entries": [
+    "README.md",
+    "candidate",
+    "inputs",
+    "oracle",
+    "scenario.yaml",
+    "verifiers"
+  ],
+  "required_bundle_paths": [
+    "README.md",
+    "scenario.yaml",
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/baseline.png",
+    "inputs/current.png",
+    "candidate/README.md",
+    "candidate/answer.json",
+    "oracle/README.md",
+    "oracle/answer-schema.json",
+    "oracle/visual-regression-contract.json",
+    "verifiers/README.md",
+    "verifiers/check_visual_regression_diff.py"
+  ],
+  "image_id": "N98-visual-regression-diff",
+  "image_dimensions": {
+    "width": 1400,
+    "height": 900
+  },
+  "requiredChangedPaths": [
+    "candidate/answer.json"
+  ],
+  "pass_min_matched": 8,
+  "pass_score_threshold_0_100": 80.0,
+  "coordinate_tolerance_px": 70.0,
+  "expectedFindings": [
+    {
+      "id": "V01",
+      "component_terms": ["search"],
+      "defect_terms": ["overlap", "collision", "intrude", "caret"],
+      "severity": "medium",
+      "target": {"x": 96, "y": 108}
+    },
+    {
+      "id": "V02",
+      "component_terms": ["sync", "primary", "button"],
+      "defect_terms": ["contrast", "low", "faded", "desaturat", "washed", "color", "state"],
+      "severity": "high",
+      "target": {"x": 1230, "y": 108}
+    },
+    {
+      "id": "V03",
+      "component_terms": ["throughput", "kpi", "value"],
+      "defect_terms": ["clip", "truncat", "cut", "divider", "vertical", "mask"],
+      "severity": "high",
+      "target": {"x": 235, "y": 236}
+    },
+    {
+      "id": "V04",
+      "component_terms": ["status", "stable", "chip"],
+      "defect_terms": ["contrast", "low", "missing", "empty", "lost", "label", "text"],
+      "severity": "medium",
+      "target": {"x": 758, "y": 239}
+    },
+    {
+      "id": "V05",
+      "component_terms": ["sort", "status", "header"],
+      "defect_terms": ["overlap", "collision", "over", "misplaced", "misalign"],
+      "severity": "medium",
+      "target": {"x": 704, "y": 424}
+    },
+    {
+      "id": "V06",
+      "component_terms": ["focus", "selected", "row"],
+      "defect_terms": ["offset", "misalign", "misplaced", "trunc", "short", "partial", "span", "width"],
+      "severity": "medium",
+      "target": {"x": 466, "y": 555},
+      "tolerance_px": 230
+    },
+    {
+      "id": "V07",
+      "component_terms": ["timeline", "tab", "underline"],
+      "defect_terms": ["cross", "overlap", "span", "long", "cover", "overrun", "extend", "step"],
+      "severity": "medium",
+      "target": {"x": 535, "y": 811}
+    },
+    {
+      "id": "V08",
+      "component_terms": ["toast", "warning", "action", "sync", "button", "panel", "alert"],
+      "defect_terms": ["overlap", "cover", "occlud", "extra", "line", "height", "content", "expanded", "warning"],
+      "severity": "high",
+      "target": {"x": 1196, "y": 760},
+      "tolerance_px": 220
+    }
+  ],
+  "requiredNonFindings": [
+    "decorative grid/background lines",
+    "disabled Export button",
+    "muted timestamp/meta text",
+    "brand logo/header mark",
+    "skeleton shimmer placeholder"
+  ],
+  "falsePositiveTerms": [
+    ["grid"],
+    ["export"],
+    ["timestamp"],
+    ["brand"],
+    ["logo"],
+    ["skeleton"],
+    ["shimmer"]
+  ]
+}

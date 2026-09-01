@@ -1,0 +1,6 @@
+schema_version: scenarios-v4-calibration-1
+scenario_id: V4C03-implementation-runtime
+calibration_only: true
+candidate_artifact: candidate/implementation-result.json
+allowed_write_paths:
+  - candidate/implementation-result.json

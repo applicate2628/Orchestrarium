@@ -1,0 +1,133 @@
+{
+  "contractId": "F4-V3L12-support-queue-visual-grounding",
+  "image_id": "V3L12-support-queue-visual-grounding",
+  "image_file": "inputs/actual-screenshot.png",
+  "dimensions": {
+    "width": 1600,
+    "height": 1000
+  },
+  "coordinate_tolerance_px": 22,
+  "pass_min_matched": 8,
+  "pass_score_threshold_0_100": 80,
+  "required_top_level_entries": [
+    "README.md",
+    "candidate",
+    "discrimination.yaml",
+    "inputs",
+    "oracle",
+    "scenario.yaml",
+    "verifiers"
+  ],
+  "required_bundle_paths": [
+    "candidate/README.md",
+    "candidate/answer.json",
+    "discrimination.yaml",
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/actual-screenshot.png",
+    "oracle/README.md",
+    "oracle/answer-schema.json",
+    "oracle/scoring-anchors.md",
+    "oracle/visual-review-oracle.json",
+    "verifiers/README.md",
+    "verifiers/check_support_queue_visual_grounding.py"
+  ],
+  "requiredChangedPaths": [
+    "candidate/answer.json"
+  ],
+  "requiredNonFindings": [
+    ["decorative", "grid"],
+    ["disabled", "export"],
+    ["timestamp"],
+    ["sparkline", "trend"],
+    ["skeleton", "shimmer"],
+    ["brand", "logo"]
+  ],
+  "expectedFindings": [
+    {
+      "id": "F01",
+      "severity": "medium",
+      "component_terms": ["search", "input", "field"],
+      "defect_terms": ["clipped", "icon", "overlap", "overflow", "placeholder", "mask"],
+      "target": {"x": 94, "y": 101}
+    },
+    {
+      "id": "F02",
+      "severity": "medium",
+      "component_terms": ["resolve", "batch", "button"],
+      "defect_terms": ["spinner", "overlap", "label", "covered", "occlude"],
+      "target": {"x": 1351, "y": 101}
+    },
+    {
+      "id": "F03",
+      "severity": "high",
+      "component_terms": ["open", "tickets", "kpi", "card", "value"],
+      "defect_terms": ["clipped", "cut", "overflow", "mask", "blank", "hidden", "divider"],
+      "target": {"x": 200, "y": 236}
+    },
+    {
+      "id": "F04",
+      "severity": "medium",
+      "component_terms": ["sla", "stable", "chip", "badge", "pill", "status"],
+      "defect_terms": ["low", "contrast", "invisible", "missing", "label", "same", "green"],
+      "target": {"x": 820, "y": 229}
+    },
+    {
+      "id": "F05",
+      "severity": "medium",
+      "component_terms": ["trend", "chart", "sparkline", "alert", "marker", "breach"],
+      "defect_terms": ["detached", "marker", "dot", "tooltip", "label", "orphan", "connector", "floating", "duplicate"],
+      "target": {"x": 1088, "y": 263}
+    },
+    {
+      "id": "F06",
+      "severity": "medium",
+      "component_terms": ["priority", "header", "column", "table", "queue"],
+      "defect_terms": ["sort", "caret", "arrow", "overlap", "detached", "misplaced"],
+      "target": {"x": 622, "y": 418}
+    },
+    {
+      "id": "F07",
+      "severity": "medium",
+      "component_terms": ["selected", "row", "focus", "checkbox", "ticket", "table"],
+      "defect_terms": ["misaligned", "offset", "focus", "outline", "ring", "selection"],
+      "target": {"x": 78, "y": 506}
+    },
+    {
+      "id": "F08",
+      "severity": "medium",
+      "component_terms": ["tab", "queue", "status", "underline"],
+      "defect_terms": ["underline", "strikethrough", "crosses", "strike", "line", "active"],
+      "target": {"x": 540, "y": 796}
+    },
+    {
+      "id": "F09",
+      "severity": "medium",
+      "component_terms": ["legend", "channel", "escalated", "swatch"],
+      "defect_terms": ["detached", "misaligned", "far", "orphan", "separated", "key"],
+      "target": {"x": 1064, "y": 610}
+    },
+    {
+      "id": "F10",
+      "severity": "high",
+      "component_terms": ["toast", "auto-assign", "button", "banner", "workspace", "actions"],
+      "defect_terms": ["toast", "overlap", "covered", "cover", "occlude", "blocked", "shadow", "sliver", "artifact", "protrudes"],
+      "target": {"x": 1300, "y": 840}
+    }
+  ],
+  "falsePositiveTerms": [
+    "decorative grid",
+    "background grid",
+    "disabled export",
+    "export button",
+    "muted timestamp",
+    "timestamp",
+    "meta text",
+    "decorative sparkline",
+    "response sparkline",
+    "trend sparkline",
+    "skeleton shimmer",
+    "brand logo",
+    "header ornament"
+  ]
+}

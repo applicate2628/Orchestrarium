@@ -1,0 +1,17 @@
+{
+  "contractId": "N36-realrepo-staged-api-migration-gauntlet",
+  "planFingerprint": "",
+  "phases": [],
+  "sourceBindings": [],
+  "staleSourceRejections": [],
+  "interfaceMap": [],
+  "callSiteMigration": [],
+  "compatibilityMatrix": [],
+  "validation": {
+    "commands": []
+  },
+  "patchBudget": {
+    "maxChangedPaths": 12,
+    "requiredChangedPaths": []
+  }
+}

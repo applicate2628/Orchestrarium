@@ -1,0 +1,14 @@
+{
+  "scenario_id": "N58",
+  "plan_fingerprint": "n58-starter-incomplete",
+  "measurements": [
+    {
+      "phase": "01-diagnose-baseline",
+      "case_id": "starter-smoke",
+      "status": "not-optimized"
+    }
+  ],
+  "budgets": {},
+  "scaling": {},
+  "commands": []
+}

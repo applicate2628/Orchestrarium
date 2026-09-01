@@ -1,0 +1,15 @@
+id: N07
+surface_id: R26
+pack_id: P06
+role_class: review
+artifact_type: findings-only review report
+modality_family: scalability and maintainability gate
+allowed_change_surface:
+  - candidate/review-report.md
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/review-target/**
+score_profile: "review, QA"
+overlay_flags: []

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import argparse
 import fnmatch
 import json
@@ -85,7 +86,8 @@ def assert_bundle_shape(root: Path, failures: list[tuple[str, str]]) -> dict[str
 
 
 def run_visible_check(root: Path, failures: list[tuple[str, str]]) -> None:
-    workspace = root / "candidate" / "workspace"
+    exec_root = Path(os.environ["BENCH_EXEC_ROOT"]).resolve() if os.environ.get("BENCH_EXEC_ROOT") else root
+    workspace = exec_root / "candidate" / "workspace"
     completed = subprocess.run(
         ["node", "scripts/verify-visible-render.mjs"],
         cwd=workspace,

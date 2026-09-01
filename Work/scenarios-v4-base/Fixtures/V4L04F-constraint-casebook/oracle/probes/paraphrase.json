@@ -1,0 +1,9 @@
+{
+  "narrative":"Equivalent structured answer; prose and both collection orders deliberately differ.","cases":{
+    "F05":{"unit":"step-id","value":"FL-08"},"F04":{"unit":"case-id","value":"FS-022"},"F03":{"unit":"case-id","value":"FF03-C"},"F02":{"unit":"step-id","value":"FW-03"},"F01":{"unit":"case-id","value":"FF01-B"},
+    "I06":{"unit":"enum","value":"violated"},"I05":{"unit":"enum","value":"violated"},"I04":{"unit":"enum","value":"holds"},"I03":{"unit":"enum","value":"violated"},"I02":{"unit":"enum","value":"holds"},"I01":{"unit":"enum","value":"holds"}
+  },"measurements":{
+    "T02":{"unit":"utility-points","value":1},"T01":{"unit":"utility-points","value":122},"W04":{"unit":"units","value":2},"W03":{"unit":"units","value":0},"W02":{"unit":"units","value":2},"W01":{"unit":"units","value":2},
+    "N14":{"unit":"items","value":4},"N13":{"unit":"mutations","value":8},"N12":{"unit":"cost-credits","value":24},"N11":{"unit":"selections","value":1},"N10":{"unit":"utility-points","value":74},"N09":{"unit":"selections","value":5},"N08":{"unit":"promotions","value":6},"N07":{"unit":"items","value":2},"N06":{"unit":"evictions","value":10},"N05":{"unit":"weight-units","value":7},"N04":{"unit":"ticks","value":17},"N03":{"unit":"records","value":24},"N02":{"unit":"records","value":39},"N01":{"unit":"records","value":71}
+  },"scenario_id":"V4L04F-constraint-casebook"
+}

@@ -1,0 +1,7 @@
+{
+  "authority": "non-owner",
+  "action": "decline",
+  "escalate_to": "none",
+  "reason_code": "none",
+  "reason_evidence": "TODO: read the source package, identify who owns this decision and the single binding reason, then set the fields accordingly."
+}

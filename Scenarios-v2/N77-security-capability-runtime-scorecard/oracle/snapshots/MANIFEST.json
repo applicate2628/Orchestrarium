@@ -1,0 +1,53 @@
+{
+  "schema": "mutation-gate-v1",
+  "bundle": "N77",
+  "package": "capvault",
+  "test_filename": "test_security_regression.py",
+  "mandated_test_relpath": "candidate/workspace/tests/test_security_regression.py",
+  "fixed": "fixed",
+  "buggy": "buggy",
+  "mutants": [
+    {
+      "id": "integrity",
+      "defect_class": "token integrity (HMAC signature + alg enforcement)",
+      "required_behavior": "reject tampered payloads, forged/absent signatures, and alg:none tokens",
+      "detect_hint": "forge the token (flip signature bytes, tamper an unbound field such as exp, or submit alg:none) and assert denial; a 'tamper' that only mutates a bound field is masked by binding"
+    },
+    {
+      "id": "tenant-binding",
+      "defect_class": "tenant binding",
+      "required_behavior": "reject a token whose tenant does not match the expected tenant",
+      "detect_hint": "authorize a valid token against a different expected_tenant and assert denial"
+    },
+    {
+      "id": "user-binding",
+      "defect_class": "user binding",
+      "required_behavior": "reject a token whose user does not match the expected user",
+      "detect_hint": "authorize a valid token against a different expected_user and assert denial"
+    },
+    {
+      "id": "resource-binding",
+      "defect_class": "resource binding",
+      "required_behavior": "reject a token whose resource does not match the expected resource",
+      "detect_hint": "authorize a valid token against a different expected_resource and assert denial"
+    },
+    {
+      "id": "replay",
+      "defect_class": "nonce replay rejection",
+      "required_behavior": "reject a second use of a token whose nonce was already consumed",
+      "detect_hint": "authorize the same token twice with a shared used_nonces set and assert the second call is denied"
+    },
+    {
+      "id": "redirect",
+      "defect_class": "redirect host validation (fail-closed)",
+      "required_behavior": "reject host-suffix / userinfo / CRLF redirect tricks and fail closed to the default download URL",
+      "detect_hint": "sanitize a host-suffix or userinfo redirect trap and assert it equals the default return URL"
+    },
+    {
+      "id": "audit-leak",
+      "defect_class": "audit redaction",
+      "required_behavior": "audit records include a token fingerprint and never leak the raw token, signature, or secret",
+      "detect_hint": "assert the audit text contains a fingerprint and does not contain the raw token or secret"
+    }
+  ]
+}

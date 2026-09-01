@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "v4 candidate output template",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "scenario_id": {"type": "string"},
+    "narrative": {"type": "string"}
+  },
+  "required": ["scenario_id"]
+}

@@ -1,0 +1,213 @@
+{
+ "scenario_id": "V4L04HB-hidden-consumer-contract",
+ "verdicts": {
+  "CONS-01": {
+   "value": "BREAK",
+   "unit": "verdict"
+  },
+  "CONS-02": {
+   "value": "BREAK",
+   "unit": "verdict"
+  },
+  "CONS-03": {
+   "value": "BREAK",
+   "unit": "verdict"
+  },
+  "CONS-04": {
+   "value": "BREAK",
+   "unit": "verdict"
+  },
+  "CONS-05": {
+   "value": "SAFE",
+   "unit": "verdict"
+  },
+  "CONS-06": {
+   "value": "SAFE",
+   "unit": "verdict"
+  },
+  "CONS-07": {
+   "value": "SAFE",
+   "unit": "verdict"
+  },
+  "CONS-08": {
+   "value": "SAFE",
+   "unit": "verdict"
+  },
+  "CONS-09": {
+   "value": "BREAK",
+   "unit": "verdict"
+  },
+  "CONS-10": {
+   "value": "BREAK",
+   "unit": "verdict"
+  },
+  "CONS-11": {
+   "value": "BREAK",
+   "unit": "verdict"
+  },
+  "CONS-12": {
+   "value": "BREAK",
+   "unit": "verdict"
+  },
+  "CONS-13": {
+   "value": "SAFE",
+   "unit": "verdict"
+  },
+  "CONS-14": {
+   "value": "SAFE",
+   "unit": "verdict"
+  },
+  "CONS-15": {
+   "value": "SAFE",
+   "unit": "verdict"
+  },
+  "CONS-16": {
+   "value": "SAFE",
+   "unit": "verdict"
+  }
+ },
+ "causes": {
+  "CONS-01": {
+   "value": "c02",
+   "unit": "change-id"
+  },
+  "CONS-02": {
+   "value": "c03",
+   "unit": "change-id"
+  },
+  "CONS-03": {
+   "value": "c06",
+   "unit": "change-id"
+  },
+  "CONS-04": {
+   "value": "c02",
+   "unit": "change-id"
+  },
+  "CONS-05": {
+   "value": "NONE",
+   "unit": "change-id"
+  },
+  "CONS-06": {
+   "value": "NONE",
+   "unit": "change-id"
+  },
+  "CONS-07": {
+   "value": "NONE",
+   "unit": "change-id"
+  },
+  "CONS-08": {
+   "value": "NONE",
+   "unit": "change-id"
+  },
+  "CONS-09": {
+   "value": "c04",
+   "unit": "change-id"
+  },
+  "CONS-10": {
+   "value": "c08",
+   "unit": "change-id"
+  },
+  "CONS-11": {
+   "value": "c09",
+   "unit": "change-id"
+  },
+  "CONS-12": {
+   "value": "c03",
+   "unit": "change-id"
+  },
+  "CONS-13": {
+   "value": "NONE",
+   "unit": "change-id"
+  },
+  "CONS-14": {
+   "value": "NONE",
+   "unit": "change-id"
+  },
+  "CONS-15": {
+   "value": "NONE",
+   "unit": "change-id"
+  },
+  "CONS-16": {
+   "value": "NONE",
+   "unit": "change-id"
+  }
+ },
+ "fixes": {
+  "CONS-01": {
+   "value": "fix-default",
+   "unit": "fix-id"
+  },
+  "CONS-02": {
+   "value": "fix-units",
+   "unit": "fix-id"
+  },
+  "CONS-03": {
+   "value": "fix-order",
+   "unit": "fix-id"
+  },
+  "CONS-04": {
+   "value": "fix-default",
+   "unit": "fix-id"
+  },
+  "CONS-05": {
+   "value": "fix-none",
+   "unit": "fix-id"
+  },
+  "CONS-06": {
+   "value": "fix-none",
+   "unit": "fix-id"
+  },
+  "CONS-07": {
+   "value": "fix-none",
+   "unit": "fix-id"
+  },
+  "CONS-08": {
+   "value": "fix-none",
+   "unit": "fix-id"
+  },
+  "CONS-09": {
+   "value": "fix-catch",
+   "unit": "fix-id"
+  },
+  "CONS-10": {
+   "value": "fix-precedence",
+   "unit": "fix-id"
+  },
+  "CONS-11": {
+   "value": "fix-fresh",
+   "unit": "fix-id"
+  },
+  "CONS-12": {
+   "value": "fix-units",
+   "unit": "fix-id"
+  },
+  "CONS-13": {
+   "value": "fix-none",
+   "unit": "fix-id"
+  },
+  "CONS-14": {
+   "value": "fix-none",
+   "unit": "fix-id"
+  },
+  "CONS-15": {
+   "value": "fix-none",
+   "unit": "fix-id"
+  },
+  "CONS-16": {
+   "value": "fix-none",
+   "unit": "fix-id"
+  }
+ },
+ "breaking_change_ids": [
+  "c09",
+  "c08",
+  "c06",
+  "c04",
+  "c03",
+  "c02"
+ ],
+ "release_gate": {
+  "migration_clearance": "Block"
+ },
+ "narrative": "Same review, shouted and whispered in different places."
+}

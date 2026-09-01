@@ -23,6 +23,12 @@ def parse_args():
         action="store_true",
         help="Validate only the bundle contract, not a completed candidate run.",
     )
+    parser.add_argument(
+        "--candidate-file",
+        type=Path,
+        default=None,
+        help="Optional alternate advisory memo path (for reference/probe scoring).",
+    )
     return parser.parse_args()
 
 
@@ -109,6 +115,85 @@ def contains_any(text, alternatives):
     return any(option.lower() in lowered for option in alternatives)
 
 
+# ----- R4b counterfactual-consequence graded scorer -----------------------------
+
+def section_block(text, heading):
+    """Body of a '## '-level section (heading -> next '## ' or EOF)."""
+    start = text.find(heading)
+    if start == -1:
+        return ""
+    body_start = start + len(heading)
+    rest = text[body_start:]
+    nxt = rest.find("\n## ")
+    return rest if nxt == -1 else rest[:nxt]
+
+
+def marker_block(text, start_marker, end_markers):
+    start = text.find(start_marker)
+    if start == -1:
+        return ""
+    body_start = start + len(start_marker)
+    rest = text[body_start:]
+    end = len(rest)
+    for marker in end_markers:
+        idx = rest.find(marker)
+        if idx != -1:
+            end = min(end, idx)
+    return rest[:end]
+
+
+def any_hit(text, options):
+    low = text.lower()
+    return any(opt.lower() in low for opt in options)
+
+
+def score_counterfactual(text, spec):
+    """Return (score, mandatory_ok, breakdown, notes)."""
+    scopes = {
+        "whole": text,
+        "recommended_block": section_block(text, spec["recommended_block_heading"]),
+        "uncertainty_block": section_block(text, spec["uncertainty_block_heading"]),
+        "alternative_block": marker_block(
+            text, spec["alternative_block_start"], spec["alternative_block_end_markers"]
+        ),
+    }
+    breakdown = {}
+    notes = []
+    total = 0.0
+    mandatory_ok = True
+
+    for name, comp in spec["components"].items():
+        scope_text = scopes.get(comp.get("scope", "whole"), text)
+        pts = comp["points"]
+        if "conjunction" in comp:
+            groups = comp["conjunction"]
+            hits = sum(1 for g in groups if any_hit(scope_text, g["any_of"]))
+            earned = pts * (hits / len(groups))
+            missing = [g["group"] for g in groups if not any_hit(scope_text, g["any_of"])]
+            if missing:
+                notes.append(f"{name}: missing groups {missing}")
+        else:
+            earned = pts if any_hit(scope_text, comp["any_of"]) else 0.0
+            if earned == 0.0:
+                notes.append(f"{name}: no evidence in scope '{comp.get('scope')}'")
+        breakdown[name] = round(earned, 2)
+        total += earned
+        if "mandatory_min" in comp and earned < comp["mandatory_min"]:
+            mandatory_ok = False
+            notes.append(
+                f"{name}: earned {round(earned, 2)} < mandatory_min {comp['mandatory_min']} "
+                "(the counterfactual consequence is required, not optional)"
+            )
+
+    # decoy-driver diagnostic: a memo leaning on shallow drivers while the mandatory
+    # consequence reasoning is absent is exactly the adversarial decoy this catches.
+    decoy = spec.get("decoy_drivers")
+    if decoy and any_hit(scopes.get(decoy["scope"], text), decoy["any_of"]) and not mandatory_ok:
+        notes.append("decoy-driver: recommendation leans on shallow driver without the derived consequence")
+
+    return round(total, 2), mandatory_ok, breakdown, notes
+
+
 def check_bundle_shape(bundle_root: Path, contract, errors):
     for entry in contract["required_top_level_entries"]:
         require((bundle_root / entry).exists(), f"Missing top-level entry: {entry}", errors)
@@ -142,9 +227,10 @@ def check_bundle_shape(bundle_root: Path, contract, errors):
         )
 
 
-def check_completed_memo(bundle_root: Path, contract, errors):
-    memo_path = bundle_root / "candidate" / "advisory-memo.md"
-    require(memo_path.exists(), "Missing candidate/advisory-memo.md", errors)
+def check_completed_memo(bundle_root: Path, contract, errors, memo_path=None):
+    if memo_path is None:
+        memo_path = bundle_root / "candidate" / "advisory-memo.md"
+    require(memo_path.exists(), f"Missing memo file: {memo_path}", errors)
     if errors:
         return
 
@@ -223,17 +309,45 @@ def main():
 
     contract = load_contract(bundle_root)
     check_bundle_shape(bundle_root, contract, errors)
+    memo_path = args.candidate_file.resolve() if args.candidate_file else None
     if not args.bundle_shape_only:
-        check_completed_memo(bundle_root, contract, errors)
+        check_completed_memo(bundle_root, contract, errors, memo_path=memo_path)
 
+    # Floor gate: structural + fixed-string + keyword checks are a hard prerequisite.
     if errors:
         for error in errors:
             print(f"ERROR: {error}", file=sys.stderr)
         return 1
 
-    mode = "bundle shape" if args.bundle_shape_only else "completed consultant memo"
-    print(f"S03 verifier PASS ({mode})")
-    return 0
+    if args.bundle_shape_only:
+        print("S03 verifier PASS (bundle shape)")
+        return 0
+
+    # R4b graded layer: counterfactual-consequence discrimination above the floor.
+    spec = contract.get("counterfactual_scoring")
+    if spec is None:
+        print("S03 verifier PASS (completed consultant memo; no graded spec)")
+        return 0
+
+    resolved = memo_path if memo_path else bundle_root / "candidate" / "advisory-memo.md"
+    text = resolved.read_text(encoding="utf-8")
+    score, mandatory_ok, breakdown, notes = score_counterfactual(text, spec)
+    threshold = spec["pass_threshold"]
+    passed = score >= threshold and mandatory_ok
+
+    for name, pts in breakdown.items():
+        print(f"  {name}: {pts}")
+    for note in notes:
+        print(f"  note: {note}", file=sys.stderr)
+
+    verdict = "PASS" if passed else "FAIL"
+    stream = sys.stdout if passed else sys.stderr
+    print(
+        f"S03 counterfactual score {score}/{spec['max_points']} "
+        f"(threshold {threshold}, mandatory_ok={mandatory_ok}) -> {verdict}",
+        file=stream,
+    )
+    return 0 if passed else 1
 
 
 if __name__ == "__main__":

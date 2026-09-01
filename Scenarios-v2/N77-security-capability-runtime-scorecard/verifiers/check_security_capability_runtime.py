@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import argparse
 import base64
 import fnmatch
@@ -12,6 +13,10 @@ import sys
 import time
 from pathlib import Path
 from typing import Any
+
+sys.dont_write_bytecode = True  # keep the tracked bundle tree free of __pycache__ when run in-place
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _mutation_gate  # noqa: E402  bundle-local scorer module beside this verifier
 
 
 CONTRACT_ID = "N77-W55-security-capability-runtime"
@@ -24,6 +29,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--expect-start-state", action="store_true")
     parser.add_argument("--metrics-out", type=Path)
     parser.add_argument("--changed-path", action="append", default=[])
+    parser.add_argument("--mutation-selftest", action="store_true",
+                        help="run the four-probe mutation-gate regression (reference PASS, vacuous/decoy FAIL)")
     return parser.parse_args()
 
 
@@ -90,7 +97,8 @@ def import_workspace(root: Path):
 
 
 def run_visible_tests(root: Path, failures: list[tuple[str, str]]) -> None:
-    workspace = root / "candidate" / "workspace"
+    exec_root = Path(os.environ["BENCH_EXEC_ROOT"]).resolve() if os.environ.get("BENCH_EXEC_ROOT") else root
+    workspace = exec_root / "candidate" / "workspace"
     code = (
         "import os,sys,subprocess; "
         "os.environ['PYTHONPATH']='src'; "
@@ -308,7 +316,7 @@ def verify_static_test_and_ledger(root: Path, contract: dict[str, Any], failures
             failures.append(("ledger-term", f"missing {term!r}"))
 
 
-def write_metrics(path: Path | None, failures: list[tuple[str, str]], runtime: float | None, contract: dict[str, Any]) -> None:
+def write_metrics(path: Path | None, failures: list[tuple[str, str]], runtime: float | None, contract: dict[str, Any], gate_report: dict | None = None) -> None:
     if not path:
         return
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -319,6 +327,14 @@ def write_metrics(path: Path | None, failures: list[tuple[str, str]], runtime: f
         "runtime_seconds": round(runtime, 6) if runtime is not None else None,
         "max_seconds": contract.get("runtimeMaxSeconds"),
     }
+    if gate_report is not None:
+        payload["mutation_gate"] = {
+            "status": gate_report["status"],
+            "reason": gate_report["reason"],
+            "failures": [fid for fid, _ in gate_report["failures"]],
+            "variants": gate_report["variants"],
+        }
+        payload["gate_not_satisfiable"] = gate_report["status"] == "not-satisfiable"
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
@@ -327,6 +343,11 @@ def main() -> int:
     root = args.bundle_root.resolve()
     failures: list[tuple[str, str]] = []
     contract = assert_bundle_shape(root, failures)
+
+    if args.mutation_selftest:
+        ok, results = _mutation_gate.mutation_selftest(root)
+        print(json.dumps({"mutation_selftest": "PASS" if ok else "FAIL", "probes": results}, indent=2))
+        return 0 if ok else 1
 
     if args.bundle_shape_only:
         if failures:
@@ -337,11 +358,16 @@ def main() -> int:
         return 0
 
     runtime = None
+    gate_report = None
     if not failures:
         verify_changed_paths(contract, args.changed_path, failures)
         run_visible_tests(root, failures)
         runtime = verify_runtime(root, contract, failures)
         verify_static_test_and_ledger(root, contract, failures)
+        if not args.expect_start_state:
+            exec_root = Path(os.environ["BENCH_EXEC_ROOT"]).resolve() if os.environ.get("BENCH_EXEC_ROOT") else root
+            gate_report = _mutation_gate.run_mutation_gate(root, _mutation_gate.candidate_test_path(root, exec_root))
+            failures.extend(gate_report["failures"])
 
     if args.expect_start_state:
         observed = {failure_id for failure_id, _ in failures}
@@ -353,7 +379,9 @@ def main() -> int:
         print(f"N77 expected start-state failure missing; observed {sorted(observed)}")
         return 1
 
-    write_metrics(args.metrics_out, failures, runtime, contract)
+    write_metrics(args.metrics_out, failures, runtime, contract, gate_report)
+    if gate_report is not None and gate_report["status"] == "not-satisfiable":
+        print(f"N77 mutation-gate NOT-SATISFIABLE (abstain, not a fail-certification): {gate_report['reason']}")
     if failures:
         for failure_id, detail in failures:
             print(f"Failed invariant: {failure_id} :: {detail}")

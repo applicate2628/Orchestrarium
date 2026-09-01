@@ -1,0 +1,4 @@
+event-01 command: python -m pytest tests/test_shutdown_flush.py -q
+4 passed
+final flush observed sequence=90 persisted=true
+The final flush path remains active when log sampling skips intermediate events.

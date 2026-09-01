@@ -1,0 +1,4 @@
+event-01 command: python -m pytest tests/test_fixture_names.py tests/test_hash_runtime.py -q
+9 passed
+runtime hash calls: sha256=0 sha1=0
+Only the fixture name wording changed.

@@ -1,0 +1,106 @@
+{
+  "aspect": "sql-injection",
+  "gate_decision": "REVISE",
+  "findings": [
+    {
+      "file": "corpus/h004.py",
+      "line": 9,
+      "evidence": "fstring-select via req.args.get"
+    },
+    {
+      "file": "corpus/h006.py",
+      "line": 8,
+      "evidence": "percent-delete via payload["
+    },
+    {
+      "file": "corpus/h008.py",
+      "line": 8,
+      "evidence": "format-update via body["
+    },
+    {
+      "file": "corpus/h010.py",
+      "line": 10,
+      "evidence": "concat-select via params["
+    },
+    {
+      "file": "corpus/h012.py",
+      "line": 9,
+      "evidence": "inline-fstring-execute via request.query["
+    },
+    {
+      "file": "corpus/h016.py",
+      "line": 10,
+      "evidence": "fstring-select via req.args.get"
+    },
+    {
+      "file": "corpus/h018.py",
+      "line": 12,
+      "evidence": "percent-delete via payload["
+    },
+    {
+      "file": "corpus/h022.py",
+      "line": 10,
+      "evidence": "format-update via body["
+    },
+    {
+      "file": "corpus/h025.py",
+      "line": 10,
+      "evidence": "concat-select via params["
+    },
+    {
+      "file": "corpus/h032.py",
+      "line": 7,
+      "evidence": "inline-fstring-execute via request.query["
+    },
+    {
+      "file": "corpus/h038.py",
+      "line": 10,
+      "evidence": "fstring-select via req.args.get"
+    },
+    {
+      "file": "corpus/h041.py",
+      "line": 11,
+      "evidence": "percent-delete via payload["
+    },
+    {
+      "file": "corpus/h047.py",
+      "line": 12,
+      "evidence": "format-update via body["
+    },
+    {
+      "file": "corpus/h049.py",
+      "line": 6,
+      "evidence": "concat-select via params["
+    },
+    {
+      "file": "corpus/h051.py",
+      "line": 10,
+      "evidence": "inline-fstring-execute via request.query["
+    },
+    {
+      "file": "corpus/h055.py",
+      "line": 10,
+      "evidence": "fstring-select via req.args.get"
+    },
+    {
+      "file": "corpus/h059.py",
+      "line": 12,
+      "evidence": "percent-delete via payload["
+    },
+    {
+      "file": "corpus/h069.py",
+      "line": 11,
+      "evidence": "format-update via body["
+    },
+    {
+      "file": "corpus/h072.py",
+      "line": 6,
+      "evidence": "concat-select via params["
+    },
+    {
+      "file": "corpus/h080.py",
+      "line": 10,
+      "evidence": "inline-fstring-execute via request.query["
+    }
+  ]
+}

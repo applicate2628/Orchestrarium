@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "scenario_id": {"const": "V4C02-numeric-reasoning"},
+    "results": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "N1": {"$ref": "#/$defs/measurement"}, "N2": {"$ref": "#/$defs/measurement"},
+        "N3": {"$ref": "#/$defs/measurement"}, "N4": {"$ref": "#/$defs/measurement"},
+        "N5": {"$ref": "#/$defs/measurement"}
+      }
+    },
+    "invariants": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "stability": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "ordering": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}
+      },
+      "required": ["stability", "ordering"]
+    },
+    "cases": {
+      "oneOf": [
+        {"type": "array", "items": {"$ref": "#/$defs/case"}},
+        {"type": "object", "additionalProperties": {"type": "object", "properties": {"outcome": {"enum": ["PASS", "FAIL"]}}, "required": ["outcome"]}}
+      ]
+    },
+    "narrative": {"type": "string"}
+  },
+  "required": ["scenario_id", "results", "invariants", "cases"],
+  "$defs": {
+    "measurement": {"type": "object", "additionalProperties": false, "properties": {"value": {"type": "number"}, "unit": {"type": "string"}}, "required": ["value", "unit"]},
+    "case": {"type": "object", "properties": {"case_id": {"enum": ["F1", "F2"]}, "outcome": {"enum": ["PASS", "FAIL"]}}, "required": ["case_id", "outcome"]}
+  }
+}

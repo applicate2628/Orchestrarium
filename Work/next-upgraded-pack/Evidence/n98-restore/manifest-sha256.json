@@ -1,0 +1,29 @@
+{
+  "purpose": "R1 restore N98 (L12) - calibration/reference material moved out of gitignored .scratch per BUILD-PLAN-v2.1.md R1",
+  "source": ".scratch/verifier-probes/2026-04-29-n98/{reference.json,metrics*.json}",
+  "moved_to": "Work/next-upgraded-pack/Evidence/n98-restore/",
+  "generated": "2026-07-12",
+  "note": "reference.json is the reference candidate answer whose rescore against the restored Scenarios-v2/N98-visual-regression-diff-review bundle reproduces the recorded metrics.json exactly (8/8 matched, score 100.0, pass_min_matched 8, threshold 80.0, mean_error_px 0.125, max_error_px 1.0). metrics-v2.json/metrics-v3.json are earlier calibration rescoring snapshots retained for provenance. The three reference-rescoreN-metrics.json files in the source directory did not match the {reference.json,metrics*.json} glob named by the work item and were left in .scratch (disposable scratch, gitignored).",
+  "files": [
+    {
+      "path": "reference.json",
+      "sha256": "718e9eca85561de9ccd763c262f91ddcc9e45b91a5ee13fb806f6c0f9a383596",
+      "size_bytes": 2242
+    },
+    {
+      "path": "metrics.json",
+      "sha256": "1fe6b8ad013569228d12425d3c4047224172b6f389cd3306b6bff51d8a291fdb",
+      "size_bytes": 955
+    },
+    {
+      "path": "metrics-v2.json",
+      "sha256": "42c7b1d0b9390be2adc440232a62cf2a5aa9a3969d75a80b1a22e534c482ee61",
+      "size_bytes": 1512
+    },
+    {
+      "path": "metrics-v3.json",
+      "sha256": "94e07895260f37ac2071938dc2ac5365694029f0a022fe6dd35be8f3b9ec369a",
+      "size_bytes": 1533
+    }
+  ]
+}

@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "scenario_id": {"const": "V4C04-findings-review"},
+    "findings": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "correctness": {"type": "array", "items": {"$ref": "#/$defs/finding"}},
+        "reliability": {"type": "array", "items": {"$ref": "#/$defs/finding"}},
+        "performance": {"type": "array", "items": {"$ref": "#/$defs/finding"}},
+        "security": {"type": "array", "items": {"$ref": "#/$defs/finding"}}
+      },
+      "required": ["correctness", "reliability", "performance", "security"]
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "claims": {
+          "oneOf": [
+            {"type": "array", "items": {"$ref": "#/$defs/claim"}},
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "EC1": {"$ref": "#/$defs/claim_map_value"},
+                "EC2": {"$ref": "#/$defs/claim_map_value"}
+              }
+            }
+          ]
+        }
+      },
+      "required": ["claims"]
+    },
+    "non_findings": {"type": "array", "items": {"$ref": "#/$defs/identifier"}, "uniqueItems": true},
+    "review_scope": {"type": "array", "items": {"$ref": "#/$defs/path"}, "uniqueItems": true},
+    "actions": {
+      "oneOf": [
+        {"type": "array", "items": {"$ref": "#/$defs/action"}},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "A1": {"$ref": "#/$defs/action_map_value"},
+            "A2": {"$ref": "#/$defs/action_map_value"}
+          }
+        }
+      ]
+    }
+  },
+  "required": ["scenario_id", "findings", "evidence", "non_findings", "review_scope", "actions"],
+  "$defs": {
+    "identifier": {"type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"},
+    "finding_id": {"type": "string", "pattern": "^[CRPScrps][0-9]+$"},
+    "path": {"type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*$"},
+    "symbol": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z_][A-Za-z0-9_.:-]*$"},
+    "claim_id": {"type": "string", "pattern": "^[Ee][Cc][12]$"},
+    "action_id": {"type": "string", "pattern": "^[Aa][12]$"},
+    "severity": {"type": "string", "pattern": "^(?:[Hh][Ii][Gg][Hh]|[Mm][Ee][Dd][Ii][Uu][Mm]|[Ll][Oo][Ww])$"},
+    "outcome": {"type": "string", "pattern": "^(?:[Bb][Ll][Oo][Cc][Kk]|[Ff][Ii][Xx]-[Bb][Ee][Ff][Oo][Rr][Ee]-[Mm][Ee][Rr][Gg][Ee]|[Aa][Ll][Ll][Oo][Ww])$"},
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {"$ref": "#/$defs/finding_id"},
+        "file": {"$ref": "#/$defs/path"},
+        "symbol": {"$ref": "#/$defs/symbol"},
+        "severity": {"$ref": "#/$defs/severity"}
+      },
+      "required": ["id", "file", "symbol", "severity"]
+    },
+    "claim": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {"$ref": "#/$defs/claim_id"},
+        "source_ids": {"type": "array", "items": {"$ref": "#/$defs/identifier"}, "uniqueItems": true}
+      },
+      "required": ["id", "source_ids"]
+    },
+    "claim_map_value": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {"$ref": "#/$defs/claim_id"},
+        "source_ids": {"type": "array", "items": {"$ref": "#/$defs/identifier"}, "uniqueItems": true}
+      },
+      "required": ["source_ids"]
+    },
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "action_id": {"$ref": "#/$defs/action_id"},
+        "outcome": {"$ref": "#/$defs/outcome"}
+      },
+      "required": ["action_id", "outcome"]
+    },
+    "action_map_value": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "action_id": {"$ref": "#/$defs/action_id"},
+        "outcome": {"$ref": "#/$defs/outcome"}
+      },
+      "required": ["outcome"]
+    }
+  }
+}

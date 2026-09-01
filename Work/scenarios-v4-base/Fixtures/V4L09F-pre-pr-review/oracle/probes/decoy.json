@@ -1,0 +1,65 @@
+{
+  "scenario_id": "V4L09F-pre-pr-review",
+  "findings": {
+    "correctness-state": [
+      {
+        "anchor_source_id": "F-CARD-101",
+        "file": "ui/save_state.py",
+        "symbol": "apply_ack",
+        "severity": "high"
+      }
+    ],
+    "reliability-retry": [
+      {
+        "anchor_source_id": "F-CARD-501",
+        "file": "tests/fixtures/hash_names.py",
+        "symbol": "FIXTURE_NAME",
+        "severity": "low"
+      }
+    ],
+    "security-auth": [
+      {
+        "anchor_source_id": "F-CARD-601",
+        "file": "runtime/shutdown.py",
+        "symbol": "log_shutdown_event",
+        "severity": "low"
+      }
+    ],
+    "performance-query": []
+  },
+  "evidence": {
+    "bindings": {},
+    "cross_diff_bindings": {},
+    "conflict_resolution": {},
+    "weak_evidence": {},
+    "dependencies": {}
+  },
+  "known_safe_surfaces": [
+    "F-CARD-501",
+    "F-CARD-502",
+    "F-CARD-601",
+    "F-CARD-602"
+  ],
+  "review_scope": [
+    "ui/save_state.py",
+    "ui/save_queue.py",
+    "auth/audience.py",
+    "feed/query.py"
+  ],
+  "rejected_sources": [
+    "F-CARD-501",
+    "F-CARD-502",
+    "F-CARD-601",
+    "F-CARD-602"
+  ],
+  "review_gate": {
+    "merge_clearance": "needs-review"
+  },
+  "actions": {},
+  "profile_measurements": {
+    "permission_lookup_calls": {
+      "value": 1201,
+      "unit": "calls"
+    }
+  }
+}

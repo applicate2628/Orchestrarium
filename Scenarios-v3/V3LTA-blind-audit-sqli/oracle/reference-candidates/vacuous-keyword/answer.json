@@ -1,0 +1,16 @@
+{
+  "aspect": "sql-injection",
+  "gate_decision": "REVISE",
+  "findings": [
+    {
+      "file": "corpus/",
+      "line": 0,
+      "evidence": "SQL injection vulnerability: tainted user input flows unsafely into execute() across the codebase; multiple unsafe string-built queries present"
+    },
+    {
+      "file": "entire-corpus",
+      "line": 1,
+      "evidence": "injection risk, unsanitized input, string concatenation, format, f-string, unsafe"
+    }
+  ]
+}

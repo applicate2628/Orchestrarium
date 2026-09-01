@@ -61,6 +61,7 @@
     "oracle/README.md",
     "oracle/scoring-anchors.md",
     "oracle/owner-recovery-contract.json",
+    "oracle/perturbation-contract.json",
     "verifiers/README.md",
     "verifiers/check_owner_recovery.py",
     "verifiers/check_scope.py"

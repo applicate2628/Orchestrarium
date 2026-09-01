@@ -1,0 +1,15 @@
+id: V3L11A
+surface_id: V3L11A
+pack_id: V3P11
+role_class: review
+artifact_type: findings-only review report
+modality_family: performance and architecture gate
+allowed_change_surface:
+  - candidate/review-report.md
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/review-target/**
+score_profile: "review, QA"
+overlay_flags: []

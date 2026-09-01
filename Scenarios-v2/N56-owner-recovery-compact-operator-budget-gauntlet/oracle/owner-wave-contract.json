@@ -63,6 +63,7 @@
     "oracle/README.md",
     "oracle/scoring-anchors.md",
     "oracle/owner-wave-contract.json",
+    "oracle/perturbation-contract.json",
     "verifiers/README.md",
     "verifiers/check_owner_wave_reconciliation.py",
     "verifiers/check_scope.py",

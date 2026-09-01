@@ -1,0 +1,88 @@
+{
+  "schema": "perturbation-v1",
+  "bundle_id": "N67",
+  "purpose": "Non-transcribable owner-oracle layer. The active perturbation is read from the committed content of the three read-only upstream artifacts, never from an out-of-band flag. A memorized/copied-template answer that is correct only for the baseline (unperturbed) 3-way field mismatch must FAIL once the actual field values in the artifacts change, because the correct gate verdict and/or the correct field-literal grounding differ.",
+  "selector": {
+    "input_paths": [
+      "inputs/artifacts/backend-api-plan.md",
+      "inputs/artifacts/frontend-adapter-plan.md",
+      "inputs/artifacts/qa-plan.md"
+    ],
+    "detection": "sha256 of each selector input file's current bytes must match exactly one perturbation entry's input_snapshots map; no match is a hard verifier error (unrecognized/drifted inputs state)."
+  },
+  "perturbations": [
+    {
+      "id": "baseline",
+      "category": "none",
+      "description": "Unperturbed reference packet: backend uses cursor_token, frontend uses nextCursor, QA uses page_token -- three-way mismatch, QA must be blocked.",
+      "input_snapshots": {
+        "inputs/artifacts/backend-api-plan.md": "ee694927c6a370a4b73bed8315960db8a2a25e582ae708b872c3052b4f006cf0",
+        "inputs/artifacts/frontend-adapter-plan.md": "cc0532c1abbf1711703d04d161b4012aa24e6632fdabf1ac031126d4076aca31",
+        "inputs/artifacts/qa-plan.md": "2de1616bf1d80a59bab16e91e222a9735a722c26698bf4b45645e16a1ef3a39a"
+      },
+      "answer_delta": {}
+    },
+    {
+      "id": "P1-fields-aligned-qa-cleared",
+      "category": "gate-verdict-inverted",
+      "description": "The frontend and QA artifacts are revised so all three boundaries agree on cursor_token end-to-end (frontend consumes cursor_token directly instead of mapping nextCursor; QA fixtures retire page_token for cursor_token). Under this perturbation there is no mismatch: the gate must flip to PROCEED_TO_QA and QA may run.",
+      "input_snapshots": {
+        "inputs/artifacts/backend-api-plan.md": "ee694927c6a370a4b73bed8315960db8a2a25e582ae708b872c3052b4f006cf0",
+        "inputs/artifacts/frontend-adapter-plan.md": "b295d37e211cfa436209114480dde4c6f5550826328a0941bec0d73e749c2368",
+        "inputs/artifacts/qa-plan.md": "f0b90fe2ab54aa7eb5d910644766b9b0c4d541208c1e5cca6bb76ce4ccf62085"
+      },
+      "answer_delta": {
+        "expected_gate": "PROCEED_TO_QA",
+        "expected_qa_may_run": true,
+        "add_compatibilityMarkers": [
+          "PROCEED_TO_QA",
+          "fields-aligned"
+        ],
+        "remove_compatibilityMarkers": [
+          "nextCursor",
+          "page_token",
+          "REVISE_BEFORE_QA",
+          "do-not-run-qa",
+          "repair",
+          "re-entry"
+        ],
+        "add_closureMarkers": [
+          "PROCEED_TO_QA",
+          "fields-aligned"
+        ],
+        "remove_closureMarkers": [
+          "nextCursor",
+          "page_token",
+          "REVISE_BEFORE_QA",
+          "do-not-run-qa",
+          "repair",
+          "re-entry"
+        ]
+      }
+    },
+    {
+      "id": "P2-backend-field-renamed",
+      "category": "interruption-log-entry-changed",
+      "description": "The backend artifact is revised so the continuation field is renamed from cursor_token to next_page_cursor (frontend and QA are untouched, still nextCursor / page_token). The three-way mismatch and the REVISE_BEFORE_QA gate verdict are UNCHANGED, but the specific field literal a correct answer must cite is different from the baseline -- a candidate that transcribes the memorized 'cursor_token / nextCursor / page_token' triple without re-reading the current backend artifact must fail.",
+      "input_snapshots": {
+        "inputs/artifacts/backend-api-plan.md": "c8d814eed8139dfda30947a2f2bd335b0d3119d7e5aba754c9847b6b69c7fa63",
+        "inputs/artifacts/frontend-adapter-plan.md": "cc0532c1abbf1711703d04d161b4012aa24e6632fdabf1ac031126d4076aca31",
+        "inputs/artifacts/qa-plan.md": "2de1616bf1d80a59bab16e91e222a9735a722c26698bf4b45645e16a1ef3a39a"
+      },
+      "answer_delta": {
+        "add_compatibilityMarkers": [
+          "next_page_cursor"
+        ],
+        "remove_compatibilityMarkers": [
+          "cursor_token"
+        ],
+        "add_closureMarkers": [
+          "next_page_cursor"
+        ],
+        "remove_closureMarkers": [
+          "cursor_token"
+        ]
+      }
+    }
+  ]
+}

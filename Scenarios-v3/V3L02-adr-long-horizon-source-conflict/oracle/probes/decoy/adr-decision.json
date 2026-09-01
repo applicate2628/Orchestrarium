@@ -1,0 +1,98 @@
+{
+  "scenario_id": "V3L02",
+  "decision": {
+    "choice": "boundary-owned-compatibility-adapter",
+    "status": "ADOPT"
+  },
+  "source_authority_order": [
+    "SRC-STALE-ADR",
+    "SRC-CODE-API",
+    "SRC-RUNTIME-TRACE",
+    "SRC-DOWNSTREAM-TEST",
+    "SRC-PROPOSAL"
+  ],
+  "accepted_claims": [
+    {
+      "id": "AC-1",
+      "summary": "Accepted: PlanBridge owns translation and producer boundary.",
+      "source_ids": [
+        "SRC-PROPOSAL"
+      ]
+    },
+    {
+      "id": "AC-2",
+      "summary": "Accepted: legacy_plan_id and seat-sync.",
+      "source_ids": [
+        "SRC-PROPOSAL"
+      ]
+    },
+    {
+      "id": "AC-3",
+      "summary": "Accepted: idempotency_key and consumer shim.",
+      "source_ids": [
+        "SRC-PROPOSAL"
+      ]
+    },
+    {
+      "id": "AC-4",
+      "summary": "Accepted: v1 and 90 days.",
+      "source_ids": [
+        "SRC-DOWNSTREAM-TEST"
+      ]
+    }
+  ],
+  "rejected_options": [
+    {
+      "option": "A",
+      "reason": "Rejected because global entitlement bus and audit correlation.",
+      "source_ids": [
+        "SRC-DOWNSTREAM-TEST",
+        "SRC-PROPOSAL"
+      ]
+    },
+    {
+      "option": "C",
+      "reason": "Rejected because consumer-side shims and idempotency.",
+      "source_ids": [
+        "SRC-RUNTIME-TRACE",
+        "SRC-CODE-API"
+      ]
+    }
+  ],
+  "compatibility_plan": [
+    {
+      "id": "CP-1",
+      "detail": "Compat step covering PlanEnvelopeV1, PlanEnvelopeV2, adapter."
+    },
+    {
+      "id": "CP-2",
+      "detail": "Compat step covering legacy_plan_id, 90 days."
+    }
+  ],
+  "rollback_plan": [
+    {
+      "id": "RB-1",
+      "detail": "Rollback step covering disable v2, preserve v1."
+    },
+    {
+      "id": "RB-2",
+      "detail": "Rollback step covering idempotency, audit correlation."
+    }
+  ],
+  "non_claims": [
+    {
+      "id": "NC-1",
+      "statement": "We do not claim: seat-sync / completed."
+    },
+    {
+      "id": "NC-2",
+      "statement": "We do not claim: global entitlement bus / approved."
+    },
+    {
+      "id": "NC-3",
+      "statement": "We do not claim: 14 days / current."
+    }
+  ],
+  "gate_decision": "PASS",
+  "notes": "Decoy: correct-looking shape, degraded substance."
+}

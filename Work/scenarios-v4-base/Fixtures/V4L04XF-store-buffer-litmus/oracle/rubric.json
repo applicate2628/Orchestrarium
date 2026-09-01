@@ -1,0 +1,706 @@
+{
+ "schema_version": "v4-rubric-1",
+ "scenario_id": "V4L04XF-store-buffer-litmus",
+ "candidate_artifact": "litmus-answer.json",
+ "score": {
+  "max_points": 100,
+  "pass_threshold": 80,
+  "partial_threshold": 50,
+  "integrity_penalty_cap": 15,
+  "wrong_commitment_cap": 40
+ },
+ "components": [
+  {
+   "id": "verdicts",
+   "weight": 88.0,
+   "semantic": true,
+   "atoms": [
+    {
+     "id": "P01-O1",
+     "type": "case_fraction",
+     "weight": 2.2,
+     "candidate_path": "verdicts",
+     "id_field": "item_id",
+     "value_field": "value",
+     "casefold_ids": true,
+     "casefold_values": true,
+     "case_weights": {
+      "P01-O1": 1
+     },
+     "expected": {
+      "P01-O1": "b-only"
+     }
+    },
+    {
+     "id": "P01-O2",
+     "type": "case_fraction",
+     "weight": 2.2,
+     "candidate_path": "verdicts",
+     "id_field": "item_id",
+     "value_field": "value",
+     "casefold_ids": true,
+     "casefold_values": true,
+     "case_weights": {
+      "P01-O2": 1
+     },
+     "expected": {
+      "P01-O2": "neither"
+     }
+    },
+    {
+     "id": "P02-O1",
+     "type": "case_fraction",
+     "weight": 2.2,
+     "candidate_path": "verdicts",
+     "id_field": "item_id",
+     "value_field": "value",
+     "casefold_ids": true,
+     "casefold_values": true,
+     "case_weights": {
+      "P02-O1": 1
+     },
+     "expected": {
+      "P02-O1": "neither"
+     }
+    },
+    {
+     "id": "P02-O2",
+     "type": "case_fraction",
+     "weight": 2.2,
+     "candidate_path": "verdicts",
+     "id_field": "item_id",
+     "value_field": "value",
+     "casefold_ids": true,
+     "casefold_values": true,
+     "case_weights": {
+      "P02-O2": 1
+     },
+     "expected": {
+      "P02-O2": "both"
+     }
+    },
+    {
+     "id": "P03-O1",
+     "type": "case_fraction",
+     "weight": 2.2,
+     "candidate_path": "verdicts",
+     "id_field": "item_id",
+     "value_field": "value",
+     "casefold_ids": true,
+     "casefold_values": true,
+     "case_weights": {
+      "P03-O1": 1
+     },
+     "expected": {
+      "P03-O1": "a-only"
+     }
+    },
+    {
+     "id": "P03-O2",
+     "type": "case_fraction",
+     "weight": 2.2,
+     "candidate_path": "verdicts",
+     "id_field": "item_id",
+     "value_field": "value",
+     "casefold_ids": true,
+     "casefold_values": true,
+     "case_weights": {
+      "P03-O2": 1
+     },
+     "expected": {
+      "P03-O2": "b-only"
+     }
+    },
+    {
+     "id": "P04-O1",
+     "type": "case_fraction",
+     "weight": 2.2,
+     "candidate_path": "verdicts",
+     "id_field": "item_id",
+     "value_field": "value",
+     "casefold_ids": true,
+     "casefold_values": true,
+     "case_weights": {
+      "P04-O1": 1
+     },
+     "expected": {
+      "P04-O1": "neither"
+     }
+    },
+    {
+     "id": "P04-O2",
+     "type": "case_fraction",
+     "weight": 2.2,
+     "candidate_path": "verdicts",
+     "id_field": "item_id",
+     "value_field": "value",
+     "casefold_ids": true,
+     "casefold_values": true,
+     "case_weights": {
+      "P04-O2": 1
+     },
+     "expected": {
+      "P04-O2": "a-only"
+     }
+    },
+    {
+     "id": "P05-O1",
+     "type": "case_fraction",
+     "weight": 2.2,
+     "candidate_path": "verdicts",
+     "id_field": "item_id",
+     "value_field": "value",
+     "casefold_ids": true,
+     "casefold_values": true,
+     "case_weights": {
+      "P05-O1": 1
+     },
+     "expected": {
+      "P05-O1": "neither"
+     }
+    },
+    {
+     "id": "P05-O2",
+     "type": "case_fraction",
+     "weight": 2.2,
+     "candidate_path": "verdicts",
+     "id_field": "item_id",
+     "value_field": "value",
+     "casefold_ids": true,
+     "casefold_values": true,
+     "case_weights": {
+      "P05-O2": 1
+     },
+     "expected": {
+      "P05-O2": "both"
+     }
+    },
+    {
+     "id": "P06-O1",
+     "type": "case_fraction",
+     "weight": 2.2,
+     "candidate_path": "verdicts",
+     "id_field": "item_id",
+     "value_field": "value",
+     "casefold_ids": true,
+     "casefold_values": true,
+     "case_weights": {
+      "P06-O1": 1
+     },
+     "expected": {
+      "P06-O1": "neither"
+     }
+    },
+    {
+     "id": "P06-O2",
+     "type": "case_fraction",
+     "weight": 2.2,
+     "candidate_path": "verdicts",
+     "id_field": "item_id",
+     "value_field": "value",
+     "casefold_ids": true,
+     "casefold_values": true,
+     "case_weights": {
+      "P06-O2": 1
+     },
+     "expected": {
+      "P06-O2": "both"
+     }
+    },
+    {
+     "id": "P07-O1",
+     "type": "case_fraction",
+     "weight": 2.2,
+     "candidate_path": "verdicts",
+     "id_field": "item_id",
+     "value_field": "value",
+     "casefold_ids": true,
+     "casefold_values": true,
+     "case_weights": {
+      "P07-O1": 1
+     },
+     "expected": {
+      "P07-O1": "b-only"
+     }
+    },
+    {
+     "id": "P07-O2",
+     "type": "case_fraction",
+     "weight": 2.2,
+     "candidate_path": "verdicts",
+     "id_field": "item_id",
+     "value_field": "value",
+     "casefold_ids": true,
+     "casefold_values": true,
+     "case_weights": {
+      "P07-O2": 1
+     },
+     "expected": {
+      "P07-O2": "neither"
+     }
+    },
+    {
+     "id": "P08-O1",
+     "type": "case_fraction",
+     "weight": 2.2,
+     "candidate_path": "verdicts",
+     "id_field": "item_id",
+     "value_field": "value",
+     "casefold_ids": true,
+     "casefold_values": true,
+     "case_weights": {
+      "P08-O1": 1
+     },
+     "expected": {
+      "P08-O1": "both"
+     }
+    },
+    {
+     "id": "P08-O2",
+     "type": "case_fraction",
+     "weight": 2.2,
+     "candidate_path": "verdicts",
+     "id_field": "item_id",
+     "value_field": "value",
+     "casefold_ids": true,
+     "casefold_values": true,
+     "case_weights": {
+      "P08-O2": 1
+     },
+     "expected": {
+      "P08-O2": "both"
+     }
+    },
+    {
+     "id": "P09-O1",
+     "type": "case_fraction",
+     "weight": 2.2,
+     "candidate_path": "verdicts",
+     "id_field": "item_id",
+     "value_field": "value",
+     "casefold_ids": true,
+     "casefold_values": true,
+     "case_weights": {
+      "P09-O1": 1
+     },
+     "expected": {
+      "P09-O1": "neither"
+     }
+    },
+    {
+     "id": "P09-O2",
+     "type": "case_fraction",
+     "weight": 2.2,
+     "candidate_path": "verdicts",
+     "id_field": "item_id",
+     "value_field": "value",
+     "casefold_ids": true,
+     "casefold_values": true,
+     "case_weights": {
+      "P09-O2": 1
+     },
+     "expected": {
+      "P09-O2": "both"
+     }
+    },
+    {
+     "id": "P10-O1",
+     "type": "case_fraction",
+     "weight": 2.2,
+     "candidate_path": "verdicts",
+     "id_field": "item_id",
+     "value_field": "value",
+     "casefold_ids": true,
+     "casefold_values": true,
+     "case_weights": {
+      "P10-O1": 1
+     },
+     "expected": {
+      "P10-O1": "b-only"
+     }
+    },
+    {
+     "id": "P10-O2",
+     "type": "case_fraction",
+     "weight": 2.2,
+     "candidate_path": "verdicts",
+     "id_field": "item_id",
+     "value_field": "value",
+     "casefold_ids": true,
+     "casefold_values": true,
+     "case_weights": {
+      "P10-O2": 1
+     },
+     "expected": {
+      "P10-O2": "neither"
+     }
+    },
+    {
+     "id": "P11-O1",
+     "type": "case_fraction",
+     "weight": 2.2,
+     "candidate_path": "verdicts",
+     "id_field": "item_id",
+     "value_field": "value",
+     "casefold_ids": true,
+     "casefold_values": true,
+     "case_weights": {
+      "P11-O1": 1
+     },
+     "expected": {
+      "P11-O1": "b-only"
+     }
+    },
+    {
+     "id": "P11-O2",
+     "type": "case_fraction",
+     "weight": 2.2,
+     "candidate_path": "verdicts",
+     "id_field": "item_id",
+     "value_field": "value",
+     "casefold_ids": true,
+     "casefold_values": true,
+     "case_weights": {
+      "P11-O2": 1
+     },
+     "expected": {
+      "P11-O2": "both"
+     }
+    },
+    {
+     "id": "P12-O1",
+     "type": "case_fraction",
+     "weight": 2.2,
+     "candidate_path": "verdicts",
+     "id_field": "item_id",
+     "value_field": "value",
+     "casefold_ids": true,
+     "casefold_values": true,
+     "case_weights": {
+      "P12-O1": 1
+     },
+     "expected": {
+      "P12-O1": "a-only"
+     }
+    },
+    {
+     "id": "P12-O2",
+     "type": "case_fraction",
+     "weight": 2.2,
+     "candidate_path": "verdicts",
+     "id_field": "item_id",
+     "value_field": "value",
+     "casefold_ids": true,
+     "casefold_values": true,
+     "case_weights": {
+      "P12-O2": 1
+     },
+     "expected": {
+      "P12-O2": "neither"
+     }
+    },
+    {
+     "id": "P13-O1",
+     "type": "case_fraction",
+     "weight": 2.2,
+     "candidate_path": "verdicts",
+     "id_field": "item_id",
+     "value_field": "value",
+     "casefold_ids": true,
+     "casefold_values": true,
+     "case_weights": {
+      "P13-O1": 1
+     },
+     "expected": {
+      "P13-O1": "neither"
+     }
+    },
+    {
+     "id": "P13-O2",
+     "type": "case_fraction",
+     "weight": 2.2,
+     "candidate_path": "verdicts",
+     "id_field": "item_id",
+     "value_field": "value",
+     "casefold_ids": true,
+     "casefold_values": true,
+     "case_weights": {
+      "P13-O2": 1
+     },
+     "expected": {
+      "P13-O2": "both"
+     }
+    },
+    {
+     "id": "P14-O1",
+     "type": "case_fraction",
+     "weight": 2.2,
+     "candidate_path": "verdicts",
+     "id_field": "item_id",
+     "value_field": "value",
+     "casefold_ids": true,
+     "casefold_values": true,
+     "case_weights": {
+      "P14-O1": 1
+     },
+     "expected": {
+      "P14-O1": "b-only"
+     }
+    },
+    {
+     "id": "P14-O2",
+     "type": "case_fraction",
+     "weight": 2.2,
+     "candidate_path": "verdicts",
+     "id_field": "item_id",
+     "value_field": "value",
+     "casefold_ids": true,
+     "casefold_values": true,
+     "case_weights": {
+      "P14-O2": 1
+     },
+     "expected": {
+      "P14-O2": "both"
+     }
+    },
+    {
+     "id": "P15-O1",
+     "type": "case_fraction",
+     "weight": 2.2,
+     "candidate_path": "verdicts",
+     "id_field": "item_id",
+     "value_field": "value",
+     "casefold_ids": true,
+     "casefold_values": true,
+     "case_weights": {
+      "P15-O1": 1
+     },
+     "expected": {
+      "P15-O1": "neither"
+     }
+    },
+    {
+     "id": "P15-O2",
+     "type": "case_fraction",
+     "weight": 2.2,
+     "candidate_path": "verdicts",
+     "id_field": "item_id",
+     "value_field": "value",
+     "casefold_ids": true,
+     "casefold_values": true,
+     "case_weights": {
+      "P15-O2": 1
+     },
+     "expected": {
+      "P15-O2": "both"
+     }
+    },
+    {
+     "id": "P16-O1",
+     "type": "case_fraction",
+     "weight": 2.2,
+     "candidate_path": "verdicts",
+     "id_field": "item_id",
+     "value_field": "value",
+     "casefold_ids": true,
+     "casefold_values": true,
+     "case_weights": {
+      "P16-O1": 1
+     },
+     "expected": {
+      "P16-O1": "b-only"
+     }
+    },
+    {
+     "id": "P16-O2",
+     "type": "case_fraction",
+     "weight": 2.2,
+     "candidate_path": "verdicts",
+     "id_field": "item_id",
+     "value_field": "value",
+     "casefold_ids": true,
+     "casefold_values": true,
+     "case_weights": {
+      "P16-O2": 1
+     },
+     "expected": {
+      "P16-O2": "neither"
+     }
+    },
+    {
+     "id": "P17-O1",
+     "type": "case_fraction",
+     "weight": 2.2,
+     "candidate_path": "verdicts",
+     "id_field": "item_id",
+     "value_field": "value",
+     "casefold_ids": true,
+     "casefold_values": true,
+     "case_weights": {
+      "P17-O1": 1
+     },
+     "expected": {
+      "P17-O1": "b-only"
+     }
+    },
+    {
+     "id": "P17-O2",
+     "type": "case_fraction",
+     "weight": 2.2,
+     "candidate_path": "verdicts",
+     "id_field": "item_id",
+     "value_field": "value",
+     "casefold_ids": true,
+     "casefold_values": true,
+     "case_weights": {
+      "P17-O2": 1
+     },
+     "expected": {
+      "P17-O2": "neither"
+     }
+    },
+    {
+     "id": "P18-O1",
+     "type": "case_fraction",
+     "weight": 2.2,
+     "candidate_path": "verdicts",
+     "id_field": "item_id",
+     "value_field": "value",
+     "casefold_ids": true,
+     "casefold_values": true,
+     "case_weights": {
+      "P18-O1": 1
+     },
+     "expected": {
+      "P18-O1": "b-only"
+     }
+    },
+    {
+     "id": "P18-O2",
+     "type": "case_fraction",
+     "weight": 2.2,
+     "candidate_path": "verdicts",
+     "id_field": "item_id",
+     "value_field": "value",
+     "casefold_ids": true,
+     "casefold_values": true,
+     "case_weights": {
+      "P18-O2": 1
+     },
+     "expected": {
+      "P18-O2": "both"
+     }
+    },
+    {
+     "id": "P19-O1",
+     "type": "case_fraction",
+     "weight": 2.2,
+     "candidate_path": "verdicts",
+     "id_field": "item_id",
+     "value_field": "value",
+     "casefold_ids": true,
+     "casefold_values": true,
+     "case_weights": {
+      "P19-O1": 1
+     },
+     "expected": {
+      "P19-O1": "neither"
+     }
+    },
+    {
+     "id": "P19-O2",
+     "type": "case_fraction",
+     "weight": 2.2,
+     "candidate_path": "verdicts",
+     "id_field": "item_id",
+     "value_field": "value",
+     "casefold_ids": true,
+     "casefold_values": true,
+     "case_weights": {
+      "P19-O2": 1
+     },
+     "expected": {
+      "P19-O2": "both"
+     }
+    },
+    {
+     "id": "P20-O1",
+     "type": "case_fraction",
+     "weight": 2.2,
+     "candidate_path": "verdicts",
+     "id_field": "item_id",
+     "value_field": "value",
+     "casefold_ids": true,
+     "casefold_values": true,
+     "case_weights": {
+      "P20-O1": 1
+     },
+     "expected": {
+      "P20-O1": "neither"
+     }
+    },
+    {
+     "id": "P20-O2",
+     "type": "case_fraction",
+     "weight": 2.2,
+     "candidate_path": "verdicts",
+     "id_field": "item_id",
+     "value_field": "value",
+     "casefold_ids": true,
+     "casefold_values": true,
+     "case_weights": {
+      "P20-O2": 1
+     },
+     "expected": {
+      "P20-O2": "b-only"
+     }
+    }
+   ]
+  },
+  {
+   "id": "divergent-programs",
+   "weight": 8,
+   "semantic": true,
+   "atoms": [
+    {
+     "id": "divergent-set",
+     "type": "set_f1",
+     "weight": 8,
+     "candidate_path": "divergent_program_ids",
+     "casefold": true,
+     "expected": [
+      "P01",
+      "P03",
+      "P04",
+      "P07",
+      "P10",
+      "P11",
+      "P12",
+      "P14",
+      "P16",
+      "P17",
+      "P18",
+      "P20"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "equivalence-gate",
+   "weight": 4,
+   "semantic": true,
+   "atoms": [
+    {
+     "id": "machines-verdict",
+     "type": "categorical",
+     "weight": 4,
+     "candidate_path": "equivalence_gate.machines_verdict",
+     "casefold": true,
+     "expected": "diverge",
+     "commitment": true
+    }
+   ]
+  }
+ ],
+ "integrity_events": []
+}

@@ -1,0 +1,220 @@
+{
+  "contractId": "N37-staged-adversarial-review-gate-gauntlet",
+  "planFingerprint": "n37-staged-review-adr-v1",
+  "required_top_level_entries": [
+    "README.md",
+    "candidate",
+    "inputs",
+    "oracle",
+    "scenario.yaml",
+    "verifiers"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "N37",
+    "surface_id": "E27",
+    "pack_id": "E27",
+    "role_class": "review",
+    "artifact_type": "staged adversarial review gate with exact finding tuples and false-positive rejection",
+    "modality_family": "multi-session source arbitration, ADR decision, adversarial review, response gate, hidden exact findings, and patch-quality discipline",
+    "allowed_change_surface": [
+      "candidate/review-state.json",
+      "candidate/decision-adr.md",
+      "candidate/findings.json",
+      "candidate/response-gate.json",
+      "candidate/closure.json"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md",
+      "candidate/review-target/**"
+    ],
+    "score_profile": "staged-review-gate, exact-findings, false-positive-avoidance, re-entry, scored-rubric",
+    "overlay_flags": [
+      "top-pair-role-fit",
+      "staged-runner",
+      "reentry",
+      "review",
+      "advisory-design",
+      "architecture-adr",
+      "adversarial-review",
+      "false-positive-traps",
+      "hidden-finding-tuples",
+      "source-binding",
+      "scored-rubric",
+      "binary-separator-candidate"
+    ]
+  },
+  "required_bundle_paths": [
+    "README.md",
+    "scenario.yaml",
+    "candidate/README.md",
+    "candidate/review-state.json",
+    "candidate/decision-adr.md",
+    "candidate/findings.json",
+    "candidate/response-gate.json",
+    "candidate/closure.json",
+    "candidate/review-target/src/access_control.py",
+    "candidate/review-target/src/cache_policy.py",
+    "candidate/review-target/src/reporting.py",
+    "candidate/review-target/tests/test_access_flow.py",
+    "candidate/review-target/docs/stale-review-notes.md",
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/review-feedback.md",
+    "inputs/decoy-map.md",
+    "inputs/phases/01-source-ledger.md",
+    "inputs/phases/02-adr-decision.md",
+    "inputs/phases/03-review-findings.md",
+    "inputs/phases/04-review-closeout.md",
+    "oracle/README.md",
+    "oracle/scoring-anchors.md",
+    "oracle/review-gate-contract.json",
+    "verifiers/README.md",
+    "verifiers/check_staged_review_gate.py",
+    "verifiers/check_review_scope.py"
+  ],
+  "expectedSourceIds": ["S1", "S2", "S3", "S4", "S5", "S6", "S7", "S8", "S9", "S10", "S11", "S12"],
+  "expectedPhaseIds": [
+    "01-source-ledger",
+    "02-adr-decision",
+    "03-review-findings",
+    "04-review-closeout"
+  ],
+  "requiredChangedPaths": [
+    "candidate/review-state.json",
+    "candidate/decision-adr.md",
+    "candidate/findings.json",
+    "candidate/response-gate.json",
+    "candidate/closure.json"
+  ],
+  "phasePathRules": {
+    "01-source-ledger": {
+      "allowed": ["candidate/review-state.json"],
+      "requiredAny": ["candidate/review-state.json"]
+    },
+    "02-adr-decision": {
+      "allowed": ["candidate/review-state.json", "candidate/decision-adr.md"],
+      "requiredAny": ["candidate/decision-adr.md"]
+    },
+    "03-review-findings": {
+      "allowed": ["candidate/review-state.json", "candidate/findings.json"],
+      "requiredAny": ["candidate/findings.json"]
+    },
+    "04-review-closeout": {
+      "allowed": [
+        "candidate/review-state.json",
+        "candidate/response-gate.json",
+        "candidate/closure.json"
+      ],
+      "requiredAny": ["candidate/closure.json"]
+    }
+  },
+  "requiredStateKeys": [
+    "contractId",
+    "planFingerprint",
+    "phases",
+    "sourceBindings",
+    "staleSourceRejections",
+    "findingLedger",
+    "falsePositiveLedger",
+    "validation",
+    "patchBudget"
+  ],
+  "requiredLedgerRows": {
+    "findings": [
+      "F1-support-tenant-bypass",
+      "F2-cache-key-region-flags",
+      "F3-reporting-retryable-hidden"
+    ],
+    "falsePositives": [
+      "FP1-sql-injection-decoy",
+      "FP2-audit-label-secret-decoy",
+      "FP3-ttl-zero-decoy"
+    ],
+    "staleRejections": [
+      "candidate/review-target/docs/stale-review-notes.md",
+      "support-users-are-safe-across-tenants",
+      "single-region-cache-assumption",
+      "sql-injection-primary-risk"
+    ],
+    "validationMarkers": [
+      "python verifiers/check_staged_review_gate.py",
+      "python verifiers/check_review_scope.py"
+    ],
+    "adrMarkers": [
+      "tenant isolation before support override",
+      "region plus sorted feature flags",
+      "retryable and error counts remain visible",
+      "reject stale review notes"
+    ]
+  },
+  "expectedFindings": {
+    "F1-support-tenant-bypass": {
+      "severity": "high",
+      "owner": "security-reviewer",
+      "file": "candidate/review-target/src/access_control.py",
+      "symbol": "can_read_account",
+      "evidenceCue": "actor_role",
+      "remediationCue": "tenant isolation before support override"
+    },
+    "F2-cache-key-region-flags": {
+      "severity": "medium",
+      "owner": "performance-reviewer",
+      "file": "candidate/review-target/src/cache_policy.py",
+      "symbol": "cache_key",
+      "evidenceCue": "join(feature_flags)",
+      "remediationCue": "include region and sort feature flags"
+    },
+    "F3-reporting-retryable-hidden": {
+      "severity": "medium",
+      "owner": "qa-reviewer",
+      "file": "candidate/review-target/src/reporting.py",
+      "symbol": "summarize_decisions",
+      "evidenceCue": "retryable += 1",
+      "remediationCue": "return retryable and error counts"
+    }
+  },
+  "forbiddenFalsePositiveIds": [
+    "FP1-sql-injection-decoy",
+    "FP2-audit-label-secret-decoy",
+    "FP3-ttl-zero-decoy"
+  ],
+  "responseDecisions": {
+    "A1-support-bypass-intentional": "reject",
+    "A2-cache-sort-without-region": "revise",
+    "A3-report-retryable-count": "accept",
+    "A4-sql-injection-fix": "reject",
+    "A5-downgrade-support-bypass": "reject",
+    "A6-add-regression-tests": "accept"
+  },
+  "requiredNonClaimMarkers": [
+    "no SQL construction in scope",
+    "audit_label is not a secret source",
+    "ttl_seconds has no zero TTL path"
+  ],
+  "requiredClosureMarkers": [
+    "F1-support-tenant-bypass",
+    "F2-cache-key-region-flags",
+    "F3-reporting-retryable-hidden",
+    "A1-support-bypass-intentional",
+    "A2-cache-sort-without-region",
+    "A3-report-retryable-count",
+    "A4-sql-injection-fix",
+    "A5-downgrade-support-bypass",
+    "A6-add-regression-tests"
+  ]
+}

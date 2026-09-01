@@ -23,6 +23,12 @@ def parse_args():
         action="store_true",
         help="Validate only the bundle contract, not a completed candidate run.",
     )
+    parser.add_argument(
+        "--candidate-file",
+        type=Path,
+        default=None,
+        help="Optional alternate phase-plan path (for reference/probe scoring).",
+    )
     return parser.parse_args()
 
 
@@ -109,6 +115,61 @@ def contains_any(text, alternatives):
     return any(option.lower() in lowered for option in alternatives)
 
 
+# ----- R4b derivation (dependency-ordering) graded scorer -----------------------
+
+def block_between(text, start_marker, end_marker):
+    start = text.find(start_marker)
+    if start == -1:
+        return ""
+    body = text[start + len(start_marker):]
+    if end_marker:
+        end = body.find(end_marker)
+        if end != -1:
+            body = body[:end]
+    return body
+
+
+def any_hit(text, options):
+    low = text.lower()
+    return any(opt.lower() in low for opt in options)
+
+
+def score_derivation(text, spec):
+    """Return (score, mandatory_ok, breakdown, notes)."""
+    scopes = {
+        "whole": text,
+        "phase2_block": block_between(text, spec["phase2_block_start"], spec["phase2_block_end"]),
+        "phase3_block": block_between(text, spec["phase3_block_start"], spec["phase3_block_end"]),
+    }
+    breakdown = {}
+    notes = []
+    total = 0.0
+    mandatory_ok = True
+    for name, comp in spec["components"].items():
+        scope_text = scopes.get(comp.get("scope", "whole"), text)
+        pts = comp["points"]
+        if "conjunction" in comp:
+            groups = comp["conjunction"]
+            hits = sum(1 for g in groups if any_hit(scope_text, g["any_of"]))
+            earned = pts * (hits / len(groups))
+            missing = [g["group"] for g in groups if not any_hit(scope_text, g["any_of"])]
+            if missing:
+                notes.append(f"{name}: missing groups {missing}")
+        else:
+            earned = pts if any_hit(scope_text, comp["any_of"]) else 0.0
+            if earned == 0.0:
+                notes.append(f"{name}: no evidence in scope '{comp.get('scope')}'")
+        breakdown[name] = round(earned, 2)
+        total += earned
+        if "mandatory_min" in comp and earned < comp["mandatory_min"]:
+            mandatory_ok = False
+            notes.append(
+                f"{name}: earned {round(earned, 2)} < mandatory_min {comp['mandatory_min']} "
+                "(the derived dependency / shortcut rejection is required, not optional)"
+            )
+    return round(total, 2), mandatory_ok, breakdown, notes
+
+
 def section_positions(text, headings):
     positions = []
     for heading in headings:
@@ -170,9 +231,10 @@ def check_bundle_shape(bundle_root: Path, contract, errors):
         )
 
 
-def check_completed_plan(bundle_root: Path, contract, errors):
-    plan_path = bundle_root / "candidate" / "phase-plan.md"
-    require(plan_path.exists(), "Missing candidate/phase-plan.md", errors)
+def check_completed_plan(bundle_root: Path, contract, errors, plan_path=None):
+    if plan_path is None:
+        plan_path = bundle_root / "candidate" / "phase-plan.md"
+    require(plan_path.exists(), f"Missing phase-plan file: {plan_path}", errors)
     if errors:
         return
 
@@ -253,17 +315,44 @@ def main():
 
     contract = load_contract(bundle_root)
     check_bundle_shape(bundle_root, contract, errors)
+    plan_path = args.candidate_file.resolve() if args.candidate_file else None
     if not args.bundle_shape_only:
-        check_completed_plan(bundle_root, contract, errors)
+        check_completed_plan(bundle_root, contract, errors, plan_path=plan_path)
 
+    # Floor gate: structural + phase-order + phase_expectations are a hard prerequisite.
     if errors:
         for error in errors:
             print(f"ERROR: {error}", file=sys.stderr)
         return 1
 
-    mode = "bundle shape" if args.bundle_shape_only else "completed phase plan"
-    print(f"S09 verifier PASS ({mode})")
-    return 0
+    if args.bundle_shape_only:
+        print("S09 verifier PASS (bundle shape)")
+        return 0
+
+    spec = contract.get("derivation_scoring")
+    if spec is None:
+        print("S09 verifier PASS (completed phase plan; no graded spec)")
+        return 0
+
+    resolved = plan_path if plan_path else bundle_root / "candidate" / "phase-plan.md"
+    text = resolved.read_text(encoding="utf-8")
+    score, mandatory_ok, breakdown, notes = score_derivation(text, spec)
+    threshold = spec["pass_threshold"]
+    passed = score >= threshold and mandatory_ok
+
+    for name, pts in breakdown.items():
+        print(f"  {name}: {pts}")
+    for note in notes:
+        print(f"  note: {note}", file=sys.stderr)
+
+    verdict = "PASS" if passed else "FAIL"
+    stream = sys.stdout if passed else sys.stderr
+    print(
+        f"S09 derivation score {score}/{spec['max_points']} "
+        f"(threshold {threshold}, mandatory_ok={mandatory_ok}) -> {verdict}",
+        file=stream,
+    )
+    return 0 if passed else 1
 
 
 if __name__ == "__main__":

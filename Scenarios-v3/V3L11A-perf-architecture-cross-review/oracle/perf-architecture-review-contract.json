@@ -1,0 +1,131 @@
+{
+  "required_top_level_entries": [
+    "scenario.yaml",
+    "README.md",
+    "discrimination.yaml",
+    "inputs",
+    "candidate",
+    "oracle",
+    "verifiers"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "V3L11A",
+    "surface_id": "V3L11A",
+    "pack_id": "V3P11",
+    "role_class": "review",
+    "artifact_type": "findings-only review report",
+    "modality_family": "performance and architecture gate",
+    "allowed_change_surface": [
+      "candidate/review-report.md"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/review-target/**"
+    ],
+    "score_profile": "review, QA",
+    "overlay_flags": []
+  },
+  "required_bundle_paths": [
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/accepted-performance-budgets.md",
+    "inputs/review-boundary.md",
+    "inputs/architecture-notes.md",
+    "candidate/README.md",
+    "candidate/review-report.md",
+    "candidate/review-target/README.md",
+    "candidate/review-target/lane_aggregator/aggregator.py",
+    "candidate/review-target/lane_aggregator/store.py",
+    "candidate/review-target/lane_aggregator/config.py",
+    "candidate/review-target/lane_aggregator/lane-config.json",
+    "oracle/README.md",
+    "oracle/perf-architecture-review-contract.json",
+    "oracle/expected-findings.md",
+    "oracle/false-positive-traps.md",
+    "oracle/scoring-anchors.md",
+    "oracle/severity-anchors.md",
+    "oracle/reference/review-report.md",
+    "verifiers/README.md",
+    "verifiers/check_perf_architecture_review.py"
+  ],
+  "editable_report": "candidate/review-report.md",
+  "required_report_sections": [
+    "## Findings",
+    "## False Positives Avoided",
+    "## Performance Notes",
+    "## Gate Decision"
+  ],
+  "findings_table_header": ["#", "File", "Line", "Category", "Severity", "Title", "Evidence"],
+  "allowed_categories": ["hot-path", "n-plus-one", "complexity", "scalability", "memory", "serialization", "architecture", "latency"],
+  "allowed_severities": ["blocking", "major", "minor"],
+  "exact_finding_count": 4,
+  "required_findings": [
+    {
+      "id": "F1",
+      "file": "candidate/review-target/lane_aggregator/aggregator.py",
+      "acceptable_lines": [18, 19],
+      "severity": "blocking",
+      "category_terms": ["hot-path", "n-plus-one", "n+1", "per-request", "hot path"],
+      "title_keywords": ["lanestore", "per request", "per-request", "rebuild", "reparse", "reconstruct", "re-instantiat", "index rebuild"],
+      "required_evidence_terms": ["lanestore", "config"]
+    },
+    {
+      "id": "F2",
+      "file": "candidate/review-target/lane_aggregator/aggregator.py",
+      "acceptable_lines": [20],
+      "severity": "blocking",
+      "category_terms": ["complexity", "scalability", "quadratic", "algorithmic"],
+      "title_keywords": ["quadratic", "o(n^2)", "n^2", "sibling", "re-resolve", "rescan", "nested", "recompute"],
+      "required_evidence_terms": ["siblings", "resolve_lane"]
+    },
+    {
+      "id": "F3",
+      "file": "candidate/review-target/lane_aggregator/aggregator.py",
+      "acceptable_lines": [8, 27],
+      "severity": "major",
+      "category_terms": ["memory", "growth", "unbounded", "retention", "leak"],
+      "title_keywords": ["snapshot", "history", "unbounded", "retention", "grows", "memory", "leak"],
+      "required_evidence_terms": ["_snapshot_history"]
+    },
+    {
+      "id": "F4",
+      "file": "candidate/review-target/lane_aggregator/aggregator.py",
+      "acceptable_lines": [26],
+      "severity": "major",
+      "category_terms": ["serialization", "waste", "latency", "hot-path"],
+      "title_keywords": ["serialize", "json.dumps", "dumps", "debug", "unconditional", "waste", "eager"],
+      "required_evidence_terms": ["json.dumps", "debug"]
+    }
+  ],
+  "forbidden_findings": [
+    {
+      "title_keywords": ["known_lanes", "use a set", "tuple lookup", "set for lookup", "set lookup", "o(1) lookup", "membership set"],
+      "reason": "KNOWN_LANES is a fixed 6-element tuple checked at most once per request; converting it to a set is not a performance finding"
+    },
+    {
+      "title_keywords": ["build stamp", "build_stamp", "import-time read", "module-load io", "stamp file", "version file", "io at import"],
+      "reason": "BUILD_STAMP is read once at module import, not per request; import-time I/O is not a hot-path finding"
+    },
+    {
+      "title_keywords": ["backoff", "blocking sleep", "sleep", "retry delay", "time.sleep"],
+      "reason": "the 50ms retry backoff is a mandated upstream rate contract, not a hot-path stall"
+    }
+  ],
+  "required_false_positive_terms": ["known_lanes", "backoff", "build stamp"],
+  "prohibited_report_snippets": ["ship it", "looks fine", "lgtm"],
+  "expected_gate_decision": "REVISE"
+}

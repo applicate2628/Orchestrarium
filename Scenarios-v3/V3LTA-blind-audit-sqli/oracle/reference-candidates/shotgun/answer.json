@@ -1,0 +1,406 @@
+{
+  "aspect": "sql-injection",
+  "gate_decision": "REVISE",
+  "findings": [
+    {
+      "file": "corpus/h004.py",
+      "line": 9,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h006.py",
+      "line": 8,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h008.py",
+      "line": 8,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h010.py",
+      "line": 10,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h012.py",
+      "line": 9,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h016.py",
+      "line": 10,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h018.py",
+      "line": 12,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h022.py",
+      "line": 10,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h025.py",
+      "line": 10,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h032.py",
+      "line": 7,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h038.py",
+      "line": 10,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h041.py",
+      "line": 11,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h047.py",
+      "line": 12,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h049.py",
+      "line": 6,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h051.py",
+      "line": 10,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h055.py",
+      "line": 10,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h059.py",
+      "line": 12,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h069.py",
+      "line": 11,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h072.py",
+      "line": 6,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h080.py",
+      "line": 10,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h003.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h011.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h017.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h027.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h034.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h036.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h046.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h053.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h054.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h060.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h061.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h067.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h076.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h077.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h079.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h001.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h002.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h005.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h007.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h009.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h013.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h014.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h015.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h019.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h020.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h021.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h023.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h024.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h026.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h028.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h029.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h030.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h031.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h033.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h035.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h037.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h039.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h040.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h042.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h043.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h044.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h045.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h048.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h050.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h052.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h056.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h057.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h058.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h062.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h063.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h064.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h065.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h066.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h068.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h070.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h071.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h073.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h074.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h075.py",
+      "line": 1,
+      "evidence": "flagged"
+    },
+    {
+      "file": "corpus/h078.py",
+      "line": 1,
+      "evidence": "flagged"
+    }
+  ]
+}

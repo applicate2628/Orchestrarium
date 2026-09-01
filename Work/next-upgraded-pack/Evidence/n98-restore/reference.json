@@ -1,0 +1,84 @@
+{
+  "image_id": "N98-visual-regression-diff",
+  "findings": [
+    {
+      "id": "V01",
+      "component": "search field",
+      "defect": "icon and caret overlap placeholder text",
+      "severity": "medium",
+      "x": 96,
+      "y": 108,
+      "evidence": "magnifier/caret intrudes into Search runs text in current"
+    },
+    {
+      "id": "V02",
+      "component": "Sync now primary button",
+      "defect": "low contrast label",
+      "severity": "high",
+      "x": 1230,
+      "y": 108,
+      "evidence": "blue text blends into blue button"
+    },
+    {
+      "id": "V03",
+      "component": "Throughput KPI value",
+      "defect": "value clipped",
+      "severity": "high",
+      "x": 235,
+      "y": 236,
+      "evidence": "97.8 percent is cut off by a white mask"
+    },
+    {
+      "id": "V04",
+      "component": "Stable status chip",
+      "defect": "low contrast text",
+      "severity": "medium",
+      "x": 758,
+      "y": 239,
+      "evidence": "Stable label nearly matches green chip fill"
+    },
+    {
+      "id": "V05",
+      "component": "Status column sort header",
+      "defect": "sort icon overlaps header",
+      "severity": "medium",
+      "x": 704,
+      "y": 424,
+      "evidence": "triangle collides with Status text"
+    },
+    {
+      "id": "V06",
+      "component": "selected row focus ring",
+      "defect": "focus outline is offset and too short",
+      "severity": "medium",
+      "x": 466,
+      "y": 554,
+      "evidence": "blue focus rectangle covers only left part of row"
+    },
+    {
+      "id": "V07",
+      "component": "timeline active tab underline",
+      "defect": "underline crosses multiple tabs",
+      "severity": "medium",
+      "x": 535,
+      "y": 811,
+      "evidence": "line spans Deploy and Observe instead of one tab"
+    },
+    {
+      "id": "V08",
+      "component": "warning toast and Sync now action",
+      "defect": "toast overlaps action button",
+      "severity": "high",
+      "x": 1196,
+      "y": 760,
+      "evidence": "warning toast covers the Sync now button area"
+    }
+  ],
+  "non_findings": [
+    "decorative grid/background lines",
+    "disabled Export button",
+    "muted timestamp/meta text",
+    "brand logo/header mark",
+    "skeleton shimmer placeholder"
+  ]
+}

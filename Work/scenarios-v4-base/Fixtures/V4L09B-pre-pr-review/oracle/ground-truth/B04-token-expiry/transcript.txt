@@ -1,0 +1,4 @@
+event-01 command: python oracle/ground-truth/B04-token-expiry/failing-test.py
+Traceback (most recent call last):
+  ...
+AssertionError: expired credential was accepted; payload exp=1700000000 observed sub=user-7

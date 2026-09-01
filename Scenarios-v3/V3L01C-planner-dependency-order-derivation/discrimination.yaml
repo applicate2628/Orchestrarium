@@ -1,0 +1,12 @@
+schema: discrimination-v1
+target_construct: "deriving dependency edges implied by prose constraints (not written in any depends_on list) and folding them into a unique tie-broken topological order, where sorting only the explicit edges yields a plausible-but-wrong order"
+eligible_profiles:
+  - systemic-mgmt
+  - stamina
+  - ultimate-depth
+  - working-audit
+expected_winner: ultimate-depth
+expected_winner_registered: 2026-07-12
+validated_discrimination: none
+validation_evidence: none
+notes: "A9 planner sub-scenario (F5). Hidden-derivation oracle: the correct order is re-derived from explicit edges plus a prose-derived edge (c-cache depends on d-auth). Shares the derivation mechanism with R4(b) S09 (one design, two consumers) but is a self-contained v3 root that does not touch S09. Separation is careful prose reading + derivation, not raw graph size; the derived edge flips two positions."

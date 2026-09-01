@@ -1,0 +1,4 @@
+event-01 command: python oracle/ground-truth/B01-cache-read-aliasing/failing-test.py
+Traceback (most recent call last):
+  ...
+AssertionError: second read returned {'items': ['caller-mutation']}; expected {'items': []}

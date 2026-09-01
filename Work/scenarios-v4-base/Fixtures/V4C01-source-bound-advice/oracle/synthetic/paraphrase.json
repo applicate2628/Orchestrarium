@@ -1,0 +1,17 @@
+{
+  "scenario_id": "V4C01-source-bound-advice",
+  "decision": {"recommendation": "retain", "escalation": "human-review"},
+  "source_authority_order": ["SRC-current", "SRC-runtime", "SRC-legacy"],
+  "claims": [
+    {"id": "C-risk", "source_ids": ["src-legacy", "src-runtime"], "explanation": "The old assertion conflicts with observed reconnect behavior."},
+    {"id": "C-compat", "source_ids": ["src-runtime", "src-current"], "explanation": "Both the contract and the runtime case bind this conclusion."}
+  ],
+  "actions": ["REQUEST-HUMAN-REVIEW", "PLAN-MIGRATION"],
+  "cases": [
+    {"case_id": "A3", "outcome": "ESCALATE"},
+    {"case_id": "A1", "outcome": "REJECT"},
+    {"case_id": "A2", "outcome": "APPROVE"}
+  ],
+  "non_claims": {"safe_to_execute_without_review": false},
+  "narrative": "Do not remove it yet. Preserve compatibility, stage the migration, and obtain a person’s approval before deletion."
+}

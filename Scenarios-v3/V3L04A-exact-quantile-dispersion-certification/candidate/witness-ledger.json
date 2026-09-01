@@ -1,0 +1,7 @@
+{
+  "selected_method": "Method P - linear-interpolation percentiles (R type 7 / library default)",
+  "percentile_convention": "linear interpolation, library default",
+  "variance_convention": "sample divide by n minus 1",
+  "rejected_methods": {},
+  "cases": []
+}

@@ -1,0 +1,16 @@
+{
+  "scenario_id": "V4C04-findings-review",
+  "findings": {
+    "correctness": [
+      {"id": "C1", "file": "src/cache.py", "symbol": "get", "severity": "high"},
+      {"id": "C2", "file": "SRC/CACHE.PY", "symbol": "GET", "severity": "low"}
+    ],
+    "reliability": [{"id": "R1", "file": "src/worker.py", "symbol": "retry", "severity": "medium"}],
+    "performance": [{"id": "P1", "file": "src/query.py", "symbol": "list_items", "severity": "medium"}],
+    "security": [{"id": "S1", "file": "src/auth.py", "symbol": "parse_token", "severity": "high"}]
+  },
+  "evidence": {"claims": [{"id": "EC2", "source_ids": ["TRACE-3"]}, {"id": "EC1", "source_ids": ["TEST-2", "DIFF-1"]}]},
+  "non_findings": ["DECOY-LOG", "DECOY-TIMEOUT"],
+  "review_scope": ["src/cache.py", "src/worker.py", "src/query.py", "src/auth.py"],
+  "actions": {"A1": {"outcome": "BLOCK"}, "A2": {"outcome": "FIX-BEFORE-MERGE"}}
+}

@@ -1,0 +1,148 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "image_id",
+    "points"
+  ],
+  "properties": {
+    "image_id": {
+      "type": "string",
+      "const": "N110-visual-micro-marker-canvas-v1"
+    },
+    "points": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "red",
+        "cyan",
+        "lime",
+        "magenta",
+        "amber",
+        "blue"
+      ],
+      "properties": {
+        "red": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "x",
+            "y"
+          ],
+          "properties": {
+            "x": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2199
+            },
+            "y": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1599
+            }
+          }
+        },
+        "cyan": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "x",
+            "y"
+          ],
+          "properties": {
+            "x": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2199
+            },
+            "y": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1599
+            }
+          }
+        },
+        "lime": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "x",
+            "y"
+          ],
+          "properties": {
+            "x": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2199
+            },
+            "y": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1599
+            }
+          }
+        },
+        "magenta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "x",
+            "y"
+          ],
+          "properties": {
+            "x": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2199
+            },
+            "y": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1599
+            }
+          }
+        },
+        "amber": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "x",
+            "y"
+          ],
+          "properties": {
+            "x": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2199
+            },
+            "y": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1599
+            }
+          }
+        },
+        "blue": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "x",
+            "y"
+          ],
+          "properties": {
+            "x": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2199
+            },
+            "y": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1599
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,11 @@
+schema: discrimination-v1
+target_construct: "Calibrated visual grounding under dense, unfamiliar UI context: locating exactly ten seeded defects by component+defect term and pixel coordinate (22px window) while resisting six visually-plausible false-positive traps, on a scene the model has not seen transcribed anywhere (no DOM/source prose, no reused fixture)."
+eligible_profiles:
+  - systemic-mgmt
+  - stamina
+  - ultimate-depth
+  - working-audit
+expected_winner: ultimate-depth
+expected_winner_registered: 2026-07-12
+validated_discrimination: none
+validation_evidence: none

@@ -1,0 +1,5 @@
+{
+  "aspect": "sql-injection",
+  "gate_decision": "",
+  "findings": []
+}

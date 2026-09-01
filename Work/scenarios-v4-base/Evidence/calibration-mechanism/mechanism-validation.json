@@ -1,0 +1,144 @@
+{
+  "aggregate": {
+    "adapter_checks_passed": 4,
+    "adapter_checks_total": 4,
+    "deterministic_replays_passed": 28,
+    "deterministic_replays_total": 28,
+    "diagnostic_partial_count": 4,
+    "integrity_probe_passed": true,
+    "intermediate_score_count": 16,
+    "max_paraphrase_delta": 0.0,
+    "maximum_score": 100.0,
+    "mean_paraphrase_delta": 0.0,
+    "minimum_score": 0.0,
+    "monotonic_comparisons_passed": 24,
+    "monotonic_comparisons_total": 24,
+    "one_atom_locality_checks_passed": 4,
+    "one_atom_locality_checks_total": 4,
+    "root_count": 4,
+    "score_spread": 100.0,
+    "threshold_neighborhood_checks_passed": 4,
+    "threshold_neighborhood_checks_total": 4,
+    "unique_score_count": 12
+  },
+  "report_version": "v4-calibration-mechanism-1",
+  "roots": {
+    "V4C01-source-bound-advice": {
+      "adapter_matches_common_scorer": true,
+      "monotonic": true,
+      "one_atom_changed_components": [
+        "cases"
+      ],
+      "one_atom_locality": true,
+      "paraphrase_delta": 0.0,
+      "score_spread": 100.0,
+      "scores": {
+        "decoy": 34.0,
+        "paraphrase": 100.0,
+        "partial": 69.67,
+        "reference": 100.0,
+        "strong": 90.0,
+        "threshold": 80.0,
+        "vacuous": 0.0
+      },
+      "statuses": {
+        "decoy": "FAIL",
+        "paraphrase": "PASS",
+        "partial": "PARTIAL",
+        "reference": "PASS",
+        "strong": "PASS",
+        "threshold": "PASS",
+        "vacuous": "FAIL"
+      },
+      "threshold_neighborhood": true
+    },
+    "V4C02-numeric-reasoning": {
+      "adapter_matches_common_scorer": true,
+      "monotonic": true,
+      "one_atom_changed_components": [
+        "numeric"
+      ],
+      "one_atom_locality": true,
+      "paraphrase_delta": 0.0,
+      "score_spread": 100.0,
+      "scores": {
+        "decoy": 44.89,
+        "paraphrase": 100.0,
+        "partial": 59.71,
+        "reference": 100.0,
+        "strong": 90.0,
+        "threshold": 80.0,
+        "vacuous": 0.0
+      },
+      "statuses": {
+        "decoy": "FAIL",
+        "paraphrase": "PASS",
+        "partial": "PARTIAL",
+        "reference": "PASS",
+        "strong": "PASS",
+        "threshold": "PASS",
+        "vacuous": "FAIL"
+      },
+      "threshold_neighborhood": true
+    },
+    "V4C03-implementation-runtime": {
+      "adapter_matches_common_scorer": true,
+      "monotonic": true,
+      "one_atom_changed_components": [
+        "behavior"
+      ],
+      "one_atom_locality": true,
+      "paraphrase_delta": 0.0,
+      "score_spread": 100.0,
+      "scores": {
+        "decoy": 41.67,
+        "paraphrase": 100.0,
+        "partial": 63.34,
+        "reference": 100.0,
+        "strong": 90.0,
+        "threshold": 80.0,
+        "vacuous": 0.0
+      },
+      "statuses": {
+        "decoy": "FAIL",
+        "paraphrase": "PASS",
+        "partial": "PARTIAL",
+        "reference": "PASS",
+        "strong": "PASS",
+        "threshold": "PASS",
+        "vacuous": "FAIL"
+      },
+      "threshold_neighborhood": true
+    },
+    "V4C04-findings-review": {
+      "adapter_matches_common_scorer": true,
+      "monotonic": true,
+      "one_atom_changed_components": [
+        "findings"
+      ],
+      "one_atom_locality": true,
+      "paraphrase_delta": 0.0,
+      "score_spread": 100.0,
+      "scores": {
+        "decoy": 38.34,
+        "paraphrase": 100.0,
+        "partial": 61.67,
+        "reference": 100.0,
+        "strong": 90.0,
+        "threshold": 80.0,
+        "vacuous": 0.0
+      },
+      "statuses": {
+        "decoy": "FAIL",
+        "paraphrase": "PASS",
+        "partial": "PARTIAL",
+        "reference": "PASS",
+        "strong": "PASS",
+        "threshold": "PASS",
+        "vacuous": "FAIL"
+      },
+      "threshold_neighborhood": true
+    }
+  },
+  "scope": "synthetic calibration only; no provider/model runs"
+}

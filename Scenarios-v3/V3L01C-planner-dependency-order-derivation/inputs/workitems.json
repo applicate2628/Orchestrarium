@@ -1,0 +1,14 @@
+{
+  "initiative": "billing-v2 delivery",
+  "tie_break_rule": "ascending slug order among ready items",
+  "items": [
+    {"slug": "a-schema",   "title": "Billing schema migration",        "depends_on": []},
+    {"slug": "b-api",      "title": "Billing API surface",             "depends_on": ["a-schema"]},
+    {"slug": "c-cache",    "title": "Rate-card cache warmer",          "depends_on": ["b-api"]},
+    {"slug": "d-auth",     "title": "Billing auth + token flow",       "depends_on": ["a-schema"]},
+    {"slug": "e-ui",       "title": "Billing console UI",              "depends_on": ["b-api", "d-auth"]},
+    {"slug": "f-tests",    "title": "End-to-end billing tests",        "depends_on": ["c-cache", "e-ui"]},
+    {"slug": "g-docs",     "title": "Operator + API docs",             "depends_on": ["e-ui"]},
+    {"slug": "h-rollout",  "title": "Staged production rollout",       "depends_on": ["f-tests", "g-docs"]}
+  ]
+}

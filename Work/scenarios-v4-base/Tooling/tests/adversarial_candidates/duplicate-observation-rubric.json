@@ -1,0 +1,23 @@
+{
+  "schema_version": "v4-rubric-1",
+  "scenario_id": "DUPLICATE-OBSERVATION",
+  "score": {"max_points": 100, "pass_threshold": 80, "partial_threshold": 50, "integrity_penalty_cap": 15},
+  "components": [{
+    "id": "duplicate",
+    "weight": 100,
+    "semantic": true,
+    "atoms": [
+      {"id": "dup-1", "type": "categorical", "weight": 1, "candidate_path": "token", "expected": "WIN"},
+      {"id": "dup-2", "type": "categorical", "weight": 1, "candidate_path": "token", "expected": "WIN"},
+      {"id": "dup-3", "type": "categorical", "weight": 1, "candidate_path": "token", "expected": "WIN"},
+      {"id": "dup-4", "type": "categorical", "weight": 1, "candidate_path": "token", "expected": "WIN"},
+      {"id": "dup-5", "type": "categorical", "weight": 1, "candidate_path": "token", "expected": "WIN"},
+      {"id": "dup-6", "type": "categorical", "weight": 1, "candidate_path": "token", "expected": "WIN"},
+      {"id": "dup-7", "type": "categorical", "weight": 1, "candidate_path": "token", "expected": "WIN"},
+      {"id": "dup-8", "type": "categorical", "weight": 1, "candidate_path": "token", "expected": "WIN"},
+      {"id": "dup-9", "type": "categorical", "weight": 1, "candidate_path": "token", "expected": "WIN"},
+      {"id": "dup-10", "type": "categorical", "weight": 1, "candidate_path": "token", "expected": "WIN"}
+    ]
+  }],
+  "integrity_events": []
+}

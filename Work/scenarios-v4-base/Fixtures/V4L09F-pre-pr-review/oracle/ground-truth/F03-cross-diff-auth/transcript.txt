@@ -1,0 +1,5 @@
+event-01 command: python oracle/ground-truth/F03-cross-diff-auth/failing-integration-test.py
+Traceback (most recent call last):
+  File "oracle/ground-truth/F03-cross-diff-auth/failing-integration-test.py", line 17, in <module>
+    assert authorized("tenant:alpha:feed", "beta") is False, (
+AssertionError: cross-tenant request beta accepted token audience tenant:alpha:feed

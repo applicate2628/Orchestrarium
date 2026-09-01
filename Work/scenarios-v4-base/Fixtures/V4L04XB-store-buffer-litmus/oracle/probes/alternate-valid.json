@@ -1,0 +1,146 @@
+{
+ "scenario_id": "V4L04XB-store-buffer-litmus",
+ "verdicts": {
+  "P01-O1": {
+   "value": "BOTH",
+   "unit": "Class"
+  },
+  "P01-O2": {
+   "value": "NEITHER",
+   "unit": "Class"
+  },
+  "P02-O1": {
+   "value": "B-ONLY",
+   "unit": "Class"
+  },
+  "P02-O2": {
+   "value": "BOTH",
+   "unit": "Class"
+  },
+  "P03-O1": {
+   "value": "NEITHER",
+   "unit": "Class"
+  },
+  "P03-O2": {
+   "value": "BOTH",
+   "unit": "Class"
+  },
+  "P04-O1": {
+   "value": "B-ONLY",
+   "unit": "Class"
+  },
+  "P04-O2": {
+   "value": "BOTH",
+   "unit": "Class"
+  },
+  "P05-O1": {
+   "value": "NEITHER",
+   "unit": "Class"
+  },
+  "P05-O2": {
+   "value": "B-ONLY",
+   "unit": "Class"
+  },
+  "P06-O1": {
+   "value": "NEITHER",
+   "unit": "Class"
+  },
+  "P06-O2": {
+   "value": "B-ONLY",
+   "unit": "Class"
+  },
+  "P07-O1": {
+   "value": "BOTH",
+   "unit": "Class"
+  },
+  "P07-O2": {
+   "value": "NEITHER",
+   "unit": "Class"
+  },
+  "P08-O1": {
+   "value": "NEITHER",
+   "unit": "Class"
+  },
+  "P08-O2": {
+   "value": "BOTH",
+   "unit": "Class"
+  },
+  "P09-O1": {
+   "value": "NEITHER",
+   "unit": "Class"
+  },
+  "P09-O2": {
+   "value": "BOTH",
+   "unit": "Class"
+  },
+  "P10-O1": {
+   "value": "NEITHER",
+   "unit": "Class"
+  },
+  "P10-O2": {
+   "value": "BOTH",
+   "unit": "Class"
+  },
+  "P11-O1": {
+   "value": "A-ONLY",
+   "unit": "Class"
+  },
+  "P11-O2": {
+   "value": "BOTH",
+   "unit": "Class"
+  },
+  "P12-O1": {
+   "value": "B-ONLY",
+   "unit": "Class"
+  },
+  "P12-O2": {
+   "value": "BOTH",
+   "unit": "Class"
+  },
+  "P13-O1": {
+   "value": "A-ONLY",
+   "unit": "Class"
+  },
+  "P13-O2": {
+   "value": "BOTH",
+   "unit": "Class"
+  },
+  "P14-O1": {
+   "value": "A-ONLY",
+   "unit": "Class"
+  },
+  "P14-O2": {
+   "value": "BOTH",
+   "unit": "Class"
+  },
+  "P15-O1": {
+   "value": "NEITHER",
+   "unit": "Class"
+  },
+  "P15-O2": {
+   "value": "BOTH",
+   "unit": "Class"
+  },
+  "P16-O1": {
+   "value": "NEITHER",
+   "unit": "Class"
+  },
+  "P16-O2": {
+   "value": "BOTH",
+   "unit": "Class"
+  }
+ },
+ "divergent_program_ids": [
+  "p02",
+  "p04",
+  "p05",
+  "p06",
+  "p11",
+  "p12",
+  "p13",
+  "p14"
+ ],
+ "equivalence_gate": {
+  "machines_verdict": "DIVERGE"
+ }
+}

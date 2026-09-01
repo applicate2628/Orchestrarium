@@ -1,0 +1,208 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "scenario_id": {
+      "const": "V4L09B-pre-pr-review"
+    },
+    "findings": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "correctness-cache": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/finding"
+          }
+        },
+        "reliability-retry": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/finding"
+          }
+        },
+        "performance-query": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/finding"
+          }
+        },
+        "security-token": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/finding"
+          }
+        }
+      },
+      "required": [
+        "correctness-cache",
+        "reliability-retry",
+        "performance-query",
+        "security-token"
+      ]
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "bindings": {
+          "type": "object",
+          "propertyNames": {
+            "$ref": "#/$defs/source_id"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/binding_map_value"
+          }
+        }
+      },
+      "required": [
+        "bindings"
+      ]
+    },
+    "non_findings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/source_id"
+      },
+      "uniqueItems": true
+    },
+    "review_scope": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/path"
+      },
+      "uniqueItems": true
+    },
+    "rejected_sources": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/source_id"
+      },
+      "uniqueItems": true
+    },
+    "review_gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "merge_clearance": {
+          "$ref": "#/$defs/merge_clearance"
+        }
+      }
+    },
+    "actions": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/source_id"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/action_map_value"
+      }
+    }
+  },
+  "required": [
+    "scenario_id",
+    "findings",
+    "evidence",
+    "non_findings",
+    "review_scope",
+    "rejected_sources",
+    "review_gate",
+    "actions"
+  ],
+  "$defs": {
+    "source_id": {
+      "type": "string",
+      "enum": [
+        "B-CARD-101",
+        "B-CARD-102",
+        "B-CARD-201",
+        "B-CARD-202",
+        "B-CARD-301",
+        "B-CARD-302",
+        "B-CARD-401",
+        "B-CARD-402",
+        "B-CARD-501",
+        "B-CARD-502",
+        "B-CARD-601",
+        "B-CARD-602"
+      ]
+    },
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*$"
+    },
+    "symbol": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z_][A-Za-z0-9_.:-]*$"
+    },
+    "severity": {
+      "type": "string",
+      "pattern": "^(?:[Hh][Ii][Gg][Hh]|[Mm][Ee][Dd][Ii][Uu][Mm]|[Ll][Oo][Ww])$"
+    },
+    "outcome": {
+      "type": "string",
+      "pattern": "^(?:[Ff][Ii][Xx]\\-[Bb][Ee][Ff][Oo][Rr][Ee]\\-[Mm][Ee][Rr][Gg][Ee]|[Aa][Dd][Dd]\\-[Rr][Ee][Gg][Rr][Ee][Ss][Ss][Ii][Oo][Nn]\\-[Tt][Ee][Ss][Tt]|[Oo][Pp][Tt][Ii][Mm][Ii][Zz][Ee]\\-[Bb][Ee][Ff][Oo][Rr][Ee]\\-[Mm][Ee][Rr][Gg][Ee]|[Mm][Ee][Aa][Ss][Uu][Rr][Ee]\\-[Bb][Ee][Ff][Oo][Rr][Ee]\\-[Mm][Ee][Rr][Gg][Ee]|[Bb][Ll][Oo][Cc][Kk]\\-[Mm][Ee][Rr][Gg][Ee]|[Aa][Ll][Ll][Oo][Ww]|[Nn][Oo]\\-[Aa][Cc][Tt][Ii][Oo][Nn])$"
+    },
+    "merge_clearance": {
+      "type": "string",
+      "pattern": "^(?:[Nn][Ee][Ee][Dd][Ss]\\-[Rr][Ee][Vv][Ii][Ee][Ww]|[Nn][Oo]\\-[Oo][Pp][Ii][Nn][Ii][Oo][Nn]|[Ss][Aa][Ff][Ee]\\-[Tt][Oo]\\-[Mm][Ee][Rr][Gg][Ee]|[Aa][Pp][Pp][Rr][Oo][Vv][Ee][Dd]|[Ss][Hh][Ii][Pp]\\-[Ii][Tt])$"
+    },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "anchor_source_id": {
+          "$ref": "#/$defs/source_id"
+        },
+        "file": {
+          "$ref": "#/$defs/path"
+        },
+        "symbol": {
+          "$ref": "#/$defs/symbol"
+        },
+        "severity": {
+          "$ref": "#/$defs/severity"
+        }
+      },
+      "required": [
+        "anchor_source_id",
+        "file",
+        "symbol",
+        "severity"
+      ]
+    },
+    "binding_map_value": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "source_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/source_id"
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "source_ids"
+      ]
+    },
+    "action_map_value": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "outcome": {
+          "$ref": "#/$defs/outcome"
+        }
+      },
+      "required": [
+        "outcome"
+      ]
+    }
+  }
+}

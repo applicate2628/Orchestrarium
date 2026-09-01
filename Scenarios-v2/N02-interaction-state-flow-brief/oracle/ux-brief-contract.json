@@ -238,5 +238,47 @@
     "```ts",
     "```tsx",
     "apply_patch"
-  ]
+  ],
+  "ordering_scoring": {
+    "mechanism": "derivation-state-sequence",
+    "pass_threshold": 70,
+    "max_points": 100,
+    "note": "R4b: presence-only floor kept; the graded layer requires the DERIVED interruption/return-loop sequence and the publish-gating rule. inputs/interruption-and-return-loop-friction.md #4 states the FAILURE (publish approval can look available while still in a change-return loop) but not the fix; the correct brief must derive that publish stays unavailable until the loop resolves. Mis-sequencing the flow or leaving publish ungated fails.",
+    "scopes": {
+      "flow": ["## Proposed end-to-end interaction flow"],
+      "ladder": ["## Proposed end-to-end interaction flow", "## Proposed state model", "## Resume cues and feedback"]
+    },
+    "components": {
+      "flow_lead": {
+        "type": "lead",
+        "points": 20,
+        "mandatory": true,
+        "scope": "flow",
+        "high": ["local preparation"],
+        "low": ["review handoff", "blocking question", "returned", "ready to re-enter"]
+      },
+      "flow_sequence": {
+        "type": "order_pairs",
+        "points": 40,
+        "scope": "flow",
+        "pairs": [
+          ["local preparation", "review handoff"],
+          ["review handoff", "blocking question"],
+          ["blocking question", "returned"],
+          ["returned", "ready to re-enter"]
+        ]
+      },
+      "publish_gating": {
+        "type": "conjunction",
+        "points": 40,
+        "mandatory": true,
+        "mandatory_min": 40,
+        "scope": "ladder",
+        "conjunction": [
+          {"group": "publish", "any_of": ["publish approval", "publish step", "publish affordance", "publish"]},
+          {"group": "gated", "any_of": ["unavailable until", "not available until", "only after", "gated", "blocked until", "hidden until", "not publishable", "withheld", "cannot publish until"]}
+        ]
+      }
+    }
+  }
 }

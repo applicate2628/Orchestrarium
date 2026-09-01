@@ -1,0 +1,6 @@
+schema_version: scenarios-v4-calibration-1
+scenario_id: V4C02-numeric-reasoning
+calibration_only: true
+candidate_artifact: candidate/numeric-answer.json
+allowed_write_paths:
+  - candidate/numeric-answer.json

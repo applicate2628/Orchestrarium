@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import argparse
 import importlib.util
 import json
@@ -93,7 +94,8 @@ def check_shape(root: Path, contract: dict, errors: list[str]):
 
 
 def import_candidate(root: Path):
-    solver_path = root / "candidate" / "workspace" / "dual_physics.py"
+    exec_root = Path(os.environ["BENCH_EXEC_ROOT"]).resolve() if os.environ.get("BENCH_EXEC_ROOT") else root
+    solver_path = exec_root / "candidate" / "workspace" / "dual_physics.py"
     spec = importlib.util.spec_from_file_location("n32_candidate_dual_physics", solver_path)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"Could not import candidate from {solver_path}")

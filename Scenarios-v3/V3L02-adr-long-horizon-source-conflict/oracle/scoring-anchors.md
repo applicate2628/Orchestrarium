@@ -15,7 +15,11 @@ Status: `ADMITTED`
 
 Pass threshold: `85 / 100`.
 
-Binary pass requires every component in `adr-long-horizon-contract.json`.
+Scoring is graded (R4a): `check_adr_long_horizon.py` awards partial credit per component
+above, sums to `100`, and passes only at `>= 85`. Each component earns present / required-terms /
+source-binding fractions; a forbidden claim in `adr-long-horizon-contract.json` (`forbidden_claims`)
+is an integrity violation that fails the run regardless of the numeric score. The bundle-shape
+contract remains a hard floor checked before any grading.
 
 ## Terms and Abbreviations
 

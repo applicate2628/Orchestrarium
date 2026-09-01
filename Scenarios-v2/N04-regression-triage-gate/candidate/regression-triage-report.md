@@ -14,6 +14,12 @@
 - [major] TODO: describe the `--only-failed` footer-count regression and cite supporting evidence
 - [major] TODO: describe the duplicate `ops-summary` digest regression and cite supporting evidence
 
+### Findings Table
+
+| # | File | Line | Category | Severity | Title | Evidence |
+|---|---|---|---|---|---|---|
+| 1 | [fill in after run] | [fill] | [fill] | [fill] | [fill] | [fill] |
+
 ## Stable Or Deprioritized Signals
 
 - TODO: record at least one nearby stable surface and one deprioritized non-regression signal

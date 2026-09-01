@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import argparse
 import importlib.util
 import json
@@ -96,7 +97,8 @@ def load_truth_table(bundle_root: Path):
 
 
 def import_candidate_module(bundle_root: Path):
-    module_path = bundle_root / "candidate" / "geometry-owned" / "src" / "geometry" / "predicates.py"
+    exec_root = Path(os.environ["BENCH_EXEC_ROOT"]).resolve() if os.environ.get("BENCH_EXEC_ROOT") else bundle_root
+    module_path = exec_root / "candidate" / "geometry-owned" / "src" / "geometry" / "predicates.py"
     spec = importlib.util.spec_from_file_location("s22_candidate_predicates", module_path)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"Unable to import candidate module from {module_path}")
