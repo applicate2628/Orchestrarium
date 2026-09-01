@@ -26,7 +26,8 @@ def run(*args: str, cwd: Path | None = None, env: dict[str, str] | None = None) 
 
 def write(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+    with path.open("w", encoding="utf-8", newline="") as stream:
+        stream.write(text)
 
 
 class BaselineInventoryTests(unittest.TestCase):
@@ -41,7 +42,9 @@ class BaselineInventoryTests(unittest.TestCase):
         write(self.repo / "tests" / "test_alpha.py", "def test_alpha():\n    assert True\n")
         body = "# Method\n\nShared body.\n"
         write(self.repo / "src.codex" / "skills" / "demo" / "SKILL.md", f"---\nname: codex-demo\n---\n{body}")
-        write(self.repo / "src.claude" / "skills" / "demo" / "SKILL.md", f"---\nname: claude-demo\n---\r\n{body.replace(chr(10), chr(13)+chr(10))}")
+        claude_skill = self.repo / "src.claude" / "skills" / "demo" / "SKILL.md"
+        write(claude_skill, f"---\nname: claude-demo\n---\r\n{body.replace(chr(10), chr(13)+chr(10))}")
+        self.assertTrue(claude_skill.read_bytes().endswith(b"# Method\r\n\r\nShared body.\r\n"))
         self.assertEqual(run(os.fspath(REAL_GIT), "add", ".", cwd=self.repo).returncode, 0)
         self.assertEqual(run(os.fspath(REAL_GIT), "commit", "-qm", "baseline", cwd=self.repo).returncode, 0)
         self.ref = run(os.fspath(REAL_GIT), "rev-parse", "HEAD", cwd=self.repo).stdout.strip()

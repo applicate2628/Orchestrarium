@@ -154,7 +154,8 @@ def write_junit(path: Path, cases: list[dict[str, object]]) -> None:
                 child.set("message", str(case["message"]))
             details = case.get("details")
             child.text = None if details is None else str(details)
-    ET.ElementTree(suite).write(path, encoding="unicode")
+    with path.open("w", encoding="utf-8", newline="") as stream:
+        ET.ElementTree(suite).write(stream, encoding="unicode")
 
 
 class PytestComparatorTests(unittest.TestCase):
@@ -360,6 +361,8 @@ class PytestComparatorTests(unittest.TestCase):
                 }
             ],
         )
+        self.assertIn(b"one\r\ntwo\r\n", self.baseline_junit.read_bytes())
+        self.assertNotIn(b"\r\r\n", self.baseline_junit.read_bytes())
         write_junit(
             self.candidate_junit,
             [

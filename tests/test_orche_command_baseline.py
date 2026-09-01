@@ -78,7 +78,9 @@ class CommandComparatorTests(unittest.TestCase):
 
     def test_preserved_success_requires_markers_and_compares_diagnostics(self) -> None:
         self.baseline.write_text(f"root=/work/lane-old ref={A}\nRESULT: PASS\n")
-        self.candidate.write_text(f"root=/work/lane-new ref={B}\r\nRESULT: PASS\r\n")
+        candidate_bytes = f"root=/work/lane-new ref={B}\r\nRESULT: PASS\r\n".encode()
+        self.candidate.write_bytes(candidate_bytes)
+        self.assertEqual(self.candidate.read_bytes(), candidate_bytes)
         result = self.invoke()
         self.assertEqual(result.returncode, 0, result.stderr)
         report = json.loads(self.output.read_text())
@@ -108,7 +110,9 @@ class CommandComparatorTests(unittest.TestCase):
 
     def test_verified_semantic_failure_may_be_preserved(self) -> None:
         self.baseline.write_text("diagnostic\nRESULT: FAIL\n")
-        self.candidate.write_text("diagnostic\r\nRESULT: FAIL\r\n")
+        candidate_bytes = b"diagnostic\r\nRESULT: FAIL\r\n"
+        self.candidate.write_bytes(candidate_bytes)
+        self.assertEqual(self.candidate.read_bytes(), candidate_bytes)
         result = self.invoke(baseline_exit=1, candidate_exit=1)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
