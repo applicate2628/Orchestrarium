@@ -1255,6 +1255,8 @@ def _validate_event(
     errors: list[str],
     *,
     historical_artifact_authorization: HistoricalArtifactAuthorization | None = None,
+    legacy_archived_review_pointer_compat: bool = False,
+    telemetry: dict[str, int] | None = None,
 ) -> bool:
     if event.get("schemaVersion") == 3:
         return validate_v3_event(event, seen, errors)
@@ -1430,6 +1432,7 @@ def _validate_event(
         for key in sorted(migration_fields & set(event)):
             fail(errors, f"{run_id}: {key} requires eventKind {LEGACY_MIGRATION_KIND}")
 
+    compatible_missing_review_pointer = False
     if gate == "PASS":
         if status != "completed":
             fail(errors, f"{run_id}: PASS gate requires completed status")
@@ -1443,7 +1446,13 @@ def _validate_event(
             and historical_artifact_authorization.event_sha256
             == hashlib.sha256(_canonical_projection_bytes(event)).hexdigest()
         )
-        if artifact_path is not None and not artifact_path.exists() and not authorized_missing:
+        missing_artifact = artifact_path is not None and not artifact_path.exists()
+        compatible_missing_review_pointer = (
+            missing_artifact
+            and not authorized_missing
+            and legacy_archived_review_pointer_compat
+        )
+        if missing_artifact and not authorized_missing and not compatible_missing_review_pointer:
             fail(errors, f"{run_id}: artifact does not exist: {artifact}")
         if evidence is None:
             fail(errors, f"{run_id}: PASS gate requires evidence")
@@ -1637,7 +1646,11 @@ def _validate_event(
         )
         validate_security_reviewer_waiver_closer(event, artifact_path, run_id, errors)
 
-    return len(errors) == error_count_on_entry
+    event_is_valid = len(errors) == error_count_on_entry
+    if event_is_valid and compatible_missing_review_pointer and telemetry is not None:
+        key = "archive-legacy-review-pointer-compat"
+        telemetry[key] = telemetry.get(key, 0) + 1
+    return event_is_valid
 
 
 def validate_event(event: dict, item: Path, seen: set[str], errors: list[str]) -> bool:
@@ -1680,6 +1693,7 @@ def derive_archived_event_validity(
     authorizations: dict[int, HistoricalArtifactAuthorization],
     *,
     rows: tuple[LedgerProjectionRowV1, ...],
+    telemetry: dict[str, int] | None = None,
 ) -> tuple[list[bool], list[bool]]:
     """Return diagnostics validity plus the stricter closure-eligibility mask."""
     if len(rows) != len(events):
@@ -1695,6 +1709,7 @@ def derive_archived_event_validity(
             continue
         row = rows[position]
         authorization = authorizations.get(row.raw_line_ordinal)
+        has_historical_authorization = authorization is not None
         if authorization is not None:
             unchanged_raw_position = (
                 row.transformation == "raw"
@@ -1706,8 +1721,28 @@ def derive_archived_event_validity(
             if not unchanged_raw_position:
                 _projection_fail(errors, "identity", "historical artifact authorization cannot apply to projected or migrated event")
                 authorization = None
+        artifact = event.get("artifact")
+        artifact_parts = (
+            PurePosixPath(artifact).parts
+            if isinstance(artifact, str) and _safe_repo_relative(artifact)
+            else ()
+        )
+        legacy_archived_review_pointer_compat = (
+            row.transformation == "raw"
+            and not has_historical_authorization
+            and event.get("gate") == "PASS"
+            and "scratchEvidence" not in event
+            and len(artifact_parts) > 2
+            and artifact_parts[:2] == (".scratch", "reviews")
+        )
         event_is_valid = _validate_event(
-            event, item, seen, errors, historical_artifact_authorization=authorization
+            event,
+            item,
+            seen,
+            errors,
+            historical_artifact_authorization=authorization,
+            legacy_archived_review_pointer_compat=legacy_archived_review_pointer_compat,
+            telemetry=telemetry,
         )
         validity.append(event_is_valid)
         # Historical artifact evidence makes this row diagnostically complete,
@@ -3149,6 +3184,7 @@ def validate_archived_ledger_obligations(
         errors,
         historical_authorizations,
         rows=effective_rows,
+        telemetry=telemetry,
     )
     effective_metadata = _row_metadata(effective_rows)
     inactive = resolve_closure_invalidations(

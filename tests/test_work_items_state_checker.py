@@ -922,6 +922,206 @@ def test_archive_scan_propagates_security_reviewer_waiver_validity(tmp_path: Pat
         assert f"{waiver_id}: field closesRunIds requires schemaVersion 2" not in result.stdout
 
 
+def raw_v2_archived_review_events(item_name: str) -> tuple[dict, dict]:
+    target = ledger_event(
+        schemaVersion=2,
+        runId="run-archive-legacy-target",
+        workItem=item_name,
+        role="qa-engineer",
+        executionRole="internal",
+        status="revise",
+        gate="REVISE",
+        artifact=".scratch/reviews/legacy-qa-pass.md",
+        lane="archive-legacy-review",
+        effort="high",
+        provider="codex",
+        findingClass="correctness",
+    )
+    closer = ledger_event(
+        schemaVersion=2,
+        runId="run-archive-legacy-closer",
+        workItem=item_name,
+        role="qa-engineer",
+        executionRole="internal",
+        status="completed",
+        gate="PASS",
+        artifact=".scratch/reviews/legacy-qa-pass.md",
+        evidence=[{"kind": "review", "ref": "legacy archived review PASS"}],
+        lane="archive-legacy-review",
+        effort="high",
+        provider="codex",
+        closesRunIds=[target["runId"]],
+    )
+    return target, closer
+
+
+def test_archive_scan_accepts_raw_v2_missing_legacy_review_pointer(tmp_path: Path) -> None:
+    item_name = "archived-legacy-review-pointer"
+    item = tmp_path / "work-items" / "archive" / "2026-07" / item_name
+    item.mkdir(parents=True)
+    target, closer = raw_v2_archived_review_events(item_name)
+    ledger = item / "agent-runs.jsonl"
+    ledger.write_text(
+        "\n".join(json.dumps(event) for event in (target, closer)) + "\n",
+        encoding="utf-8",
+    )
+    before = ledger.read_bytes()
+
+    result = run_checker(tmp_path, "--telemetry")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "artifact does not exist" not in result.stdout
+    assert "open REVISE obligation survived archival" not in result.stdout
+    assert "archive-legacy-review-pointer-compat=1" in result.stdout
+    assert ledger.read_bytes() == before
+
+
+def test_archive_review_pointer_closes_only_its_named_revise(tmp_path: Path) -> None:
+    validator = load_validator_module()
+    item_name = "archived-legacy-review-residual"
+    item = tmp_path / "work-items" / "archive" / "2026-07" / item_name
+    (item / "reviews").mkdir(parents=True)
+    (item / "reviews" / "parked.md").write_text("PARKED\n", encoding="utf-8")
+    target, closer = raw_v2_archived_review_events(item_name)
+    parked = ledger_event(
+        schemaVersion=2,
+        runId="run-archive-parked-residual",
+        workItem=item_name,
+        role="qa-engineer",
+        executionRole="internal",
+        status="revise",
+        gate="REVISE",
+        artifact="reviews/parked.md",
+        lane="archive-parked-residual",
+        effort="high",
+        provider="codex",
+        findingClass="correctness",
+    )
+    ledger = item / "agent-runs.jsonl"
+    ledger.write_text(
+        "\n".join(json.dumps(event) for event in (target, parked, closer)) + "\n",
+        encoding="utf-8",
+    )
+    before = ledger.read_bytes()
+    telemetry: dict[str, int] = {}
+
+    errors, open_revise, open_launches = validator.validate_archived_ledger_obligations(
+        item, telemetry=telemetry
+    )
+
+    assert errors == []
+    assert [event["runId"] for event in open_revise] == [parked["runId"]]
+    assert open_launches == []
+    assert telemetry.get("archive-legacy-review-pointer-compat") == 1
+    assert ledger.read_bytes() == before
+
+
+def test_archive_review_pointer_compatibility_is_strictly_bounded(tmp_path: Path) -> None:
+    validator = load_validator_module()
+    item = tmp_path / "work-items" / "archive" / "2026-07" / "bounded-review-pointer"
+    item.mkdir(parents=True)
+    base = ledger_event(
+        schemaVersion=2,
+        runId="run-bounded-review-pointer",
+        workItem=item.name,
+        role="qa-engineer",
+        executionRole="internal",
+        status="completed",
+        gate="PASS",
+        artifact=".scratch/reviews/missing.md",
+        evidence=[{"kind": "review", "ref": "legacy archived review PASS"}],
+    )
+
+    def derive(event: dict, transformation: str = "raw", authorizations=None):
+        encoded = json.dumps(
+            event, ensure_ascii=False, separators=(",", ":"), sort_keys=True
+        ).encode("utf-8")
+        event_sha = hashlib.sha256(encoded).hexdigest()
+        row = validator.LedgerProjectionRowV1(
+            event, 1, event_sha, event_sha, transformation
+        )
+        errors: list[str] = []
+        validity, closure_validity = validator.derive_archived_event_validity(
+            [event], item, errors, authorizations or {}, rows=(row,)
+        )
+        return errors, validity, closure_validity
+
+    for name, update in (
+        ("repository path", {"artifact": "reviews/missing.md"}),
+        ("scratch outside reviews", {"artifact": ".scratch/output/missing.md"}),
+        ("reviews directory itself", {"artifact": ".scratch/reviews"}),
+        ("typed scratch identity", {"scratchEvidence": []}),
+    ):
+        errors, validity, closure_validity = derive({**base, **update})
+        assert any("artifact does not exist" in error for error in errors), name
+        assert validity == [False], name
+        assert closure_validity == [False], name
+
+    for transformation in ("manifest-projected", "migration-replaced"):
+        errors, validity, closure_validity = derive(base, transformation)
+        assert any("artifact does not exist" in error for error in errors), transformation
+        assert validity == [False], transformation
+        assert closure_validity == [False], transformation
+
+    active = tmp_path / "work-items" / "active" / "bounded-review-pointer"
+    active.mkdir(parents=True)
+    active_errors: list[str] = []
+    assert not validator.validate_event(base, active, set(), active_errors)
+    assert any("artifact does not exist" in error for error in active_errors)
+
+    present = item / ".scratch" / "reviews" / "present.md"
+    present.parent.mkdir(parents=True)
+    present.write_text("present but typed identity is malformed\n", encoding="utf-8")
+    existing_mismatch = {
+        **base,
+        "artifact": ".scratch/reviews/present.md",
+        "scratchEvidence": [],
+    }
+    errors, validity, closure_validity = derive(existing_mismatch)
+    assert any("scratchEvidence" in error for error in errors)
+    assert validity == [False]
+    assert closure_validity == [False]
+
+    authorized = {**base, "artifactRevision": "a" * 64}
+    encoded = json.dumps(
+        authorized, ensure_ascii=False, separators=(",", ":"), sort_keys=True
+    ).encode("utf-8")
+    event_sha = hashlib.sha256(encoded).hexdigest()
+    authorization = validator.HistoricalArtifactAuthorization(
+        1,
+        event_sha,
+        event_sha,
+        authorized["runId"],
+        authorized["artifact"],
+        authorized["artifactRevision"],
+    )
+    errors, validity, closure_validity = derive(authorized, authorizations={1: authorization})
+    assert errors == []
+    assert validity == [True]
+    assert closure_validity == [False]
+
+    drifted_authorization = validator.HistoricalArtifactAuthorization(
+        1,
+        "0" * 64,
+        event_sha,
+        authorized["runId"],
+        authorized["artifact"],
+        authorized["artifactRevision"],
+    )
+    errors, validity, closure_validity = derive(
+        authorized, authorizations={1: drifted_authorization}
+    )
+    assert any("artifact does not exist" in error for error in errors)
+    assert validity == [False]
+    assert closure_validity == [False]
+
+    version_three = {"schemaVersion": 3}
+    errors, validity, closure_validity = derive(version_three)
+    assert errors == []
+    assert validity == [False]
+    assert closure_validity == [False]
+
+
 def test_active_only_keeps_periodic_archive_failures_out_of_publication_scope(
     tmp_path: Path,
 ) -> None:
