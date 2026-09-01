@@ -33,7 +33,7 @@ description: "Frontend engineer: implement approved web UI phases."
 
 - Respect the established design system and interaction patterns unless the design package says otherwise.
 - Keep state changes, component changes, and visual changes easy to review.
-- A change touching shared mutable UI state such as scroll position, selection, cache, or animation-driving geometry names the design-approved single writer-owner and the settled or committed event observed by the UI. If the design names neither, return `REVISE` to the architect rather than inventing one.
+- For a dynamic UI transition, follow the [Causal UI Continuity contract](../contracts/ui-transition-continuity.md): map the accepted transition instance to existing web/React owners, own the canonical update path and one authoritative settled adapter, and preserve semantic identity and valid interaction state.
 - For a global style, design token, z-index or stacking-context, or shared-component change, grep and enumerate sibling consumers, smoke-check the top affected surfaces, and list any untested consumer as residual risk.
 - Any new external- or user-content sink is framework-default-escaped or names its sanitizer and test in the notes; a new raw-HTML sink, URL-derived navigation sink, or attribute/style-injection sink without that evidence is `REVISE`.
 - If the specification is ambiguous or the plan conflicts with reality, stop and return `BLOCKED` with the exact gap.

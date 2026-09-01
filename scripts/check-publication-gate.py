@@ -54,7 +54,13 @@ def main(argv: list[str] | None = None) -> int:
     active = root / "work-items" / "active"
     if active.is_dir():
         state = subprocess.run(
-            [sys.executable, str(root / "scripts" / "check-work-items-state.py"), "--root", "."],
+            [
+                sys.executable,
+                str(root / "scripts" / "check-work-items-state.py"),
+                "--root",
+                ".",
+                "--active-only",
+            ],
             cwd=root,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -62,7 +68,7 @@ def main(argv: list[str] | None = None) -> int:
         if state.returncode:
             return _fail(
                 "work-items state check failed (open REVISE obligation or invalid ledger) "
-                "— run: python scripts/check-work-items-state.py"
+                "— run: python scripts/check-work-items-state.py --active-only"
             )
 
     staged_proc = _run(

@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "baseline": "7872d36d",
+  "files": {
+    "external-dispatch.md": "78eb19ae80309ad33849eaaf7122a405f2ab473db1b2e4aa2536df0cfde1f853",
+    "scripts/provider_prompt.py": "54985ea4e35fcaa5e6d660adcab95fcf5c1cd9a6bb593f6e7e4c5808d01438ba",
+    "scripts/validate-provider-prompt-projections.py": "4f0bb9a558b602d998fef6529a6ba60868646ad8da05112d64ffda21d9ab9705",
+    "scripts/validate-skill-pack.py": "efb94ec742146e26fc2ba670544a185687f57289b6bce150736aaca825466316",
+    "scripts/validate-work-item-state.py": "95ccf10b9b25dd51b26d609bd206b036edd6f4ab6789c87faed5e760f724b734",
+    "shared/provider-prompt-projections.v1.json": "7e14945c36bfd8ea2aee6db91e781df5e36365df67c7ef2efa0ffe84edc46190"
+  }
+}

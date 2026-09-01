@@ -73,7 +73,6 @@ PACK_ONLY_SCRIPTS = {
         "invoke-claude-api.py",
         "invoke-claude-prompt.py",
         "invoke-codex-prompt.py",
-        "provider_prompt.py",
         # Claude-line active watcher emitted by the Codex dispatch wrappers;
         # it is provider-specific and has no Codex/canon mirror.
         "await-codex-dispatch.py",

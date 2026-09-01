@@ -33,10 +33,12 @@ description: "QA engineer: verify phases and issue test verdicts."
 - Agreed basic performance checks or performance smoke evidence are included when the phase can affect user-visible or system-visible performance.
 - Deeper bottleneck analysis is escalated to `performance-engineer`, not invented inside QA.
 - Apply the canonical S1 `Receiving-side echo` owned by `subagent-contracts.md`; when the dispatch cited a defect class, the verification report classifies every enumerated participant as `fixed` or `not-affected`.
+- A QA report cannot return `PASS` until it verifies the disposition field against the diff, an old-name/path search, language/repository reachability or static check where available, and focused tests. When the change supersedes a mechanism, a `none` disposition is `REVISE`.
 - Each executed check has command, result counts, wall time, and preserved raw output; prose that coverage ran without counts does not satisfy the gate.
 
 ## Working rules
 
+- Execute the portable schema in the [Causal UI Continuity contract](../contracts/ui-transition-continuity.md) for web/React through the repository browser, component, or end-to-end harness and for native mobile through the repository platform instrumentation/UI harness; a missing required harness is `BLOCKED`/`UNVERIFIED`, never permission to broaden the Qt-only role.
 - Prefer reproducible findings over vague quality feedback.
 - Add or update tests when the phase lacks the planned coverage.
 - Every QA-authored test for a defect or criterion cites a run that fails against pre-fix behavior through a revert, stub, or preserved pre-fix run. A test born green is not regression coverage.

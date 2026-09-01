@@ -12,8 +12,6 @@ CONTRACT_SURFACES = [
     "docs/agents-mode-reference.md",
     "src.codex/skills/init-project/SKILL.md",
     "src.claude/commands/agents-init-project.md",
-    "src.gemini/skills/init-project/SKILL.md",
-    "src.qwen/skills/init-project/SKILL.md",
 ]
 
 

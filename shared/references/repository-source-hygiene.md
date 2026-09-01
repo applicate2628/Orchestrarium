@@ -17,13 +17,13 @@ An entity type is the **kind of work the file does**, classified by:
 
 - **Input/output contract or side effects.** What the file consumes (stdin envelope / argv / config file / file-system state) and produces (structured-deny JSON / exit code / written file / git ref / log entry). Two files with the same contract are the same entity type; two files with different contracts are not.
 
-Language variants of the same command with the same contract count as **one entity**, not multiple. In this monorepo's Codex/Claude production surfaces, Python owns executable-script logic: a `.py` sibling holds all executable decision logic. A `.sh` sibling is permitted only as a thin unconditional launcher that locates Python and `exec`s that named `.py` owner while forwarding stdin, arguments, and exit status. It must not parse inputs, read configuration, implement decisions, or be retained as a rollback copy. `.ps1` implementations and rollback copies are not retained in those production surfaces. This is an Orchestrarium repository policy, not a rule installed into arbitrary target repositories; deprecated Gemini/Qwen example packs remain outside its scope until their separately tracked distribution decision.
+Language variants of the same command with the same contract count as **one entity**, not multiple. In this monorepo's Codex/Claude production surfaces, Python owns executable-script logic: a `.py` sibling holds all executable decision logic. A `.sh` sibling is permitted only as a thin unconditional launcher that locates Python and `exec`s that named `.py` owner while forwarding stdin, arguments, and exit status. It must not parse inputs, read configuration, implement decisions, or be retained as a rollback copy. `.ps1` implementations and rollback copies are not retained in those production surfaces. This is an Orchestrarium repository policy, not a rule installed into arbitrary target repositories.
 
 ## Executable-script ownership (Orchestrarium only)
 
 The owner boundary is **implementation logic**, not filename extension. Python owns the logic so Windows and POSIX execute one maintained decision path. A launcher may do only the platform-neutral mechanics needed to find and `exec` its Python sibling; it cannot acquire fallback policy, duplicate validation, a configuration parser, or any separate behavior.
 
-When an admitted maintenance change finds an independent `.sh` or `.ps1` implementation in a Codex/Claude production surface, it migrates that behavior into the existing Python owner or deletes the dead file in the same change. Do not preserve the old file as a rollback profile: version control already preserves recoverable source history. This rule intentionally does not authorize a mechanical mass rewrite of unrelated files and does not apply to the deprecated Gemini/Qwen example surfaces.
+When an admitted maintenance change finds an independent `.sh` or `.ps1` implementation in a Codex/Claude production surface, it migrates that behavior into the existing Python owner or deletes the dead file in the same change. Do not preserve the old file as a rollback profile: version control already preserves recoverable source history. This rule intentionally does not authorize a mechanical mass rewrite of unrelated files.
 
 ## This repo's grandfathered exceptions
 
@@ -33,7 +33,7 @@ When an admitted maintenance change finds an independent `.sh` or `.ps1` impleme
 
 - `src.codex/skills/lead/scripts/` — Codex pack: same entity-type co-location pattern (minus the prompt-invocation wrappers, which are Claude-side only).
 
-- `scripts/` (repo root) — co-locates installer scripts (`install-{claude,codex,gemini,qwen}.{sh,ps1}`, `install-hypothesis-hook.py`), agents-mode helpers (`normalize-agents-mode.py`, `sync-agents-mode-docs.py`, `validate-agents-mode-{contract,installers}.py`), work-item helpers (`agent-run-ledger.*`, `check-agent-run-ledger-contract.py`, `check-work-items-state.*`, `validate-work-item-state.*`), and the publication gate (`check-publication-gate.{sh,ps1}`).
+- `scripts/` (repo root) — co-locates production installer entrypoints (`install-{claude,codex}.py` plus thin `.sh` launchers and `install-hypothesis-hook.py`), agents-mode helpers (`normalize-agents-mode.py`, `sync-agents-mode-docs.py`, `validate-agents-mode-{contract,installers}.py`), work-item helpers (`agent-run-ledger.*`, `check-agent-run-ledger-contract.py`, `check-work-items-state.*`, `validate-work-item-state.*`), and the publication gate (`check-publication-gate.py` plus its thin `.sh` launcher).
 
 **Rationale.** These directories ship as flat units to user projects via `scripts/install-{claude,codex}.{sh,ps1}`. Install scripts hardcode the source-tree paths and the destination-tree paths. User documentation, hooks.json command paths, settings.json command paths, and operator memory of "where things live" all point at these paths. Splitting the directories into per-entity-type subdirectories would force:
 

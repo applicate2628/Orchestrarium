@@ -39,6 +39,14 @@ class CorrelatedToolResult(NamedTuple):
     execution_status: str
 
 
+class ModelShellCommandOccurrence(NamedTuple):
+    """One provider call whose typed input contains a shell command."""
+
+    call_id: str
+    tool_name: str | None
+    command_text: str
+
+
 class DeliveryActivity(NamedTuple):
     """Content-free current-turn activity correlated by the host call id."""
 
@@ -809,9 +817,14 @@ def correlated_delivery_activity(entries: list[dict], *, event_cap: int = 64) ->
     return activities
 
 
-def extract_model_shell_commands_with_ids(entry: object) -> list[tuple[str, str]]:
-    """Like `extract_model_tool_calls_with_ids`, but returns the RAW SHELL
-    COMMAND STRING for each shell-executing tool call, keyed by call id --
+def extract_model_shell_command_occurrences(
+    entry: object,
+) -> list[ModelShellCommandOccurrence]:
+    """Return typed shell-command occurrences with provider tool identity.
+
+    Like `extract_model_tool_calls_with_ids`, this returns the RAW SHELL
+    COMMAND STRING for each shell-executing tool call, keyed by call id and
+    retaining the actual provider tool name --
     NOT a flattened `"<tool name> <full JSON input>"` blob. A consumer that
     needs to parse the command the same way a live PreToolUse envelope's
     `tool_input["command"]` would be parsed (shlex tokenization, command-
@@ -837,9 +850,9 @@ def extract_model_shell_commands_with_ids(entry: object) -> list[tuple[str, str]
     A call with no id, same as the sibling extractors, is skipped entirely
     -- fail-closed: an uncorrelatable call can never be credited as a scan
     execution by a caller keying off this function's output."""
-    pairs: list[tuple[str, str]] = []
+    occurrences: list[ModelShellCommandOccurrence] = []
     if not isinstance(entry, dict):
-        return pairs
+        return occurrences
     payload = entry.get("payload")
     if isinstance(payload, dict) and payload.get("type") == "function_call":
         call_id = payload.get("call_id")
@@ -854,10 +867,15 @@ def extract_model_shell_commands_with_ids(entry: object) -> list[tuple[str, str]
                 if isinstance(parsed, dict) and isinstance(parsed.get("command"), str):
                     command = parsed["command"]
             if command:
-                pairs.append((call_id, strip_injected_spans(command)))
-        return pairs
+                name = payload.get("name")
+                occurrences.append(ModelShellCommandOccurrence(
+                    call_id,
+                    name if isinstance(name, str) and name else None,
+                    strip_injected_spans(command),
+                ))
+        return occurrences
     if not is_assistant_message(entry):
-        return pairs
+        return occurrences
     content = entry.get("content")
     if content is None:
         msg = entry.get("message")
@@ -872,8 +890,13 @@ def extract_model_shell_commands_with_ids(entry: object) -> list[tuple[str, str]
                 continue
             input_obj = item.get("input")
             if isinstance(input_obj, dict) and isinstance(input_obj.get("command"), str):
-                pairs.append((call_id, strip_injected_spans(input_obj["command"])))
-    return pairs
+                name = item.get("name")
+                occurrences.append(ModelShellCommandOccurrence(
+                    call_id,
+                    name if isinstance(name, str) and name else None,
+                    strip_injected_spans(input_obj["command"]),
+                ))
+    return occurrences
 
 
 # Status vocabulary for `scan_current_turn_boundary` and its two

@@ -128,6 +128,20 @@ def seed_item(
     mutator = load_module(MUTATOR, f"mutator_{slug}_{id(root)}")
     item = root / "work-items" / "active" / slug
     write(item / "status.md", quick_status())
+    write(
+        item / "bug-dispositions.json",
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "workItem": slug,
+                "closedAt": "2026-08-09T01:00:00Z",
+                "bugs": [],
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+    )
     artifact_text = f"# Implementation\n\n{REGENERATION_MARKER}\n"
     write(item / "implementation.md", artifact_text)
     proof = None if disposition == "retain" else {"kind": proof_kind}
@@ -241,7 +255,7 @@ def test_retain_checks_only_root_metadata_and_same_item_pointer(
     assert (evidence_root / "nested-link").is_symlink()
 
 
-def test_readme_failure_archives_but_never_starts_scratch_deletion(
+def test_readme_failure_rolls_back_archive_and_never_starts_scratch_deletion(
     tmp_path: Path,
 ) -> None:
     root = tmp_path / "repo"
@@ -260,7 +274,8 @@ def test_readme_failure_archives_but_never_starts_scratch_deletion(
     assert raised.value.failure_id == "WI-README-STALE"
     assert (evidence_root / "payload.txt").read_bytes() == before
     assert not list(evidence_root.parent.glob(".*.orchestrarium-delete-*"))
-    assert (root / "work-items" / "archive" / "2026-08" / "scratch-owner").is_dir()
+    assert (root / "work-items" / "active" / "scratch-owner").is_dir()
+    assert not (root / "work-items" / "archive" / "2026-08" / "scratch-owner").exists()
 
 
 def test_post_archive_removal_failure_is_pending_and_replay_resumes(
@@ -420,6 +435,20 @@ def test_namespace_coverage_and_legacy_compatibility(tmp_path: Path) -> None:
     legacy = load_module(MUTATOR, "legacy_mutator")
     legacy_item = legacy_root / "work-items" / "active" / "legacy-item"
     write(legacy_item / "status.md", quick_status())
+    write(
+        legacy_item / "bug-dispositions.json",
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "workItem": "legacy-item",
+                "closedAt": instant,
+                "bugs": [],
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+    )
     legacy.refresh_readme(legacy_root, allow_marker_bootstrap=True)
     archived = legacy.close_item(
         legacy_root,
@@ -593,7 +622,11 @@ def test_scratch_evidence_schema_is_bounded_and_terminal_only(tmp_path: Path) ->
 
     schema = json.loads((ROOT / "shared" / "schemas" / "agent-runs.schema.json").read_text(encoding="utf-8"))
     assert schema["properties"]["scratchEvidence"]["maxItems"] == validator.MAX_SCRATCH_EVIDENCE_ENTRIES
-    scratch_condition = schema["allOf"][0]
+    scratch_condition = next(
+        condition
+        for condition in schema["allOf"]
+        if condition.get("if", {}).get("required") == ["scratchEvidence"]
+    )
     assert scratch_condition["if"]["required"] == ["scratchEvidence"]
     assert scratch_condition["then"]["properties"]["eventKind"] == {"const": "terminal"}
 

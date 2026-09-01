@@ -4,38 +4,64 @@
   "title": "Orchestrarium agent run ledger event",
   "x-orchestrarium-jsonl": {
     "maxLineChars": 131072,
+    "maxLineBytes": 131072,
     "maxEvents": 4096,
     "maxNestingDepth": 8
   },
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "schemaVersion",
-    "runId",
-    "workItem",
-    "role",
-    "executionRole",
-    "status",
-    "gate",
-    "scope",
-    "startedAt",
-    "updatedAt"
+    "schemaVersion"
   ],
   "properties": {
     "schemaVersion": {
-      "enum": [1, 2],
-      "$comment": "v2 (2026-07-16, decision 2026-07-16-review-verdict-closure) adds the REVISE-closure relation fields below. v1 events remain valid; closure semantics are evaluated over the typed v2 fields. This is the MINIMAL slice (fable step-back gate): anchor/migration machinery, reconcilesRunIds, blobDigest, protectedLane, reviewScope are DEFERRED until an observed incident or telemetry funds them."
+      "enum": [1, 2, 3],
+      "$comment": "v1/v2 preserve the legacy run and closesRunIds contract. v3 is an expand-only reader floor for discriminated solution-control events; legacy writers must refuse a ledger containing v3."
     },
+    "eventId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+    "operationId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+    "fingerprint": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "priorHead": {
+      "oneOf": [
+        { "const": "GENESIS" },
+        { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      ]
+    },
+    "recordedAt": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,9})?Z$" },
+    "eventType": {
+      "enum": [
+        "solution-bootstrap",
+        "attempt-admission",
+        "revise-binding",
+        "guard-triggered",
+        "reassessment",
+        "dispatch-admitted",
+        "launch-claimed",
+        "spawn-boundary",
+        "launch-started",
+        "launch-terminal",
+        "process-reaped",
+        "template-transition",
+        "projection-settled"
+      ]
+    },
+    "payload": { "type": "object", "maxProperties": 16 },
     "runId": { "type": "string", "minLength": 8 },
     "workItem": { "type": "string", "minLength": 1 },
     "role": { "type": "string", "minLength": 1 },
     "executionRole": {
-      "enum": ["main", "internal", "consultant", "external-worker", "external-reviewer", "external-brigade"],
+      "enum": ["main", "internal", "consultant", "external-worker", "external-reviewer", "external-brigade", "none"],
       "$comment": "Exactly ONE main-conversation identity: 'main' (the main conversation, which also holds the Lead role — orchestration weight lives in status.md 'orchestration: light|full-lead', never here). Ledgers written before 2026-07-11 may carry the legacy value 'lead'; readers map it to 'main' (see scripts/validate-work-item-state.py LEGACY_EXECUTION_ROLES). New writes must use 'main'."
     },
     "assignedRole": { "type": "string" },
     "provider": { "type": "string" },
     "model": { "type": "string" },
+    "launchFlags": {
+      "type": "array",
+      "maxItems": 64,
+      "$comment": "Exact resolved provider argv flags. Optional for backward-compatible V2 reads; current external wrapper launch and terminal events persist it.",
+      "items": { "type": "string", "maxLength": 2048, "pattern": "^[^\\u0000\\r\\n]*$" }
+    },
     "status": { "enum": ["planned", "running", "completed", "revise", "blocked", "cancelled"] },
     "gate": {
       "oneOf": [
@@ -45,7 +71,7 @@
       "$comment": "Typed v2 dispositions require status 'completed', non-empty closesRunIds, and exact target-bound manual-check evidence. WAIVED:user carries the user's explicit authorization and is never legal against a protected or unclassified finding. WAIVED:security-reviewer is legal only when role or assignedRole is security-reviewer, including for protected or unclassified findings (see decision 2026-07-16-review-verdict-closure items 8/10/13)."
     },
     "eventKind": {
-      "enum": ["launch", "terminal", "standalone"],
+      "enum": ["launch", "terminal", "standalone", "closure-invalidation", "legacy-obligation-migration"],
       "$comment": "v2 lifecycle discriminator: 'launch' = a dispatch record (external run started); 'terminal' = its settlement (requires launchRunId); 'standalone' = an event that is not part of a launch/terminal pair (verdicts recorded directly, planning notes)."
     },
     "launchRunId": {
@@ -55,9 +81,59 @@
     },
     "closesRunIds": {
       "type": "array",
-      "minItems": 1,
       "items": { "type": "string", "minLength": 8 },
-      "$comment": "The normalized REVISE-closure relation (decision item 2): the exact runIds of earlier gate:REVISE events this PASS/WAIVED:user/WAIVED:security-reviewer event discharges. Closure is NEVER derived from role/scope/artifact string matching."
+      "$comment": "The normalized REVISE-closure relation. Non-empty only for authorizing PASS/waiver closers; typed external-nonauthorizing terminals require exactly an empty array. Closure is NEVER derived from role/scope/artifact string matching."
+    },
+    "terminalClass": { "enum": ["external-nonauthorizing", "internal-authorizing"] },
+    "authorizing": { "type": "boolean" },
+    "actualExecutionPath": { "enum": ["direct-external-cli", "internal"] },
+    "artifactIdentity": { "type": "string", "minLength": 1 },
+    "externalDispatchId": { "type": "string", "minLength": 1 },
+    "externalEvidenceRunId": { "type": "string", "minLength": 1 },
+    "effortMappingLoss": { "type": "string", "minLength": 1 },
+    "closerRunId": { "type": "string", "minLength": 1 },
+    "targetTuple": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["workItem", "assignedInternalRole", "artifactIdentity"],
+      "properties": {
+        "workItem": { "type": "string", "minLength": 1 },
+        "assignedInternalRole": { "type": "string", "minLength": 1 },
+        "artifactIdentity": { "type": "string", "minLength": 1 },
+        "externalDispatchId": { "type": "string", "minLength": 1 }
+      }
+    },
+    "invalidatesRunId": { "type": "string", "minLength": 8 },
+    "invalidatesEventSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "migrationAction": { "enum": ["apply", "revoke"] },
+    "normalizationKind": { "enum": ["invalid-finding-class", "remove-string-scratch-evidence"] },
+    "migratesRunId": { "type": "string", "minLength": 8 },
+    "migratesEventSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "revokesMigrationRunId": { "type": "string", "minLength": 8 },
+    "revokesMigrationEventSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "replacementEvent": {
+      "allOf": [
+        { "$ref": "#" },
+        {
+          "properties": {
+            "schemaVersion": { "const": 2 },
+            "gate": { "const": "REVISE" }
+          },
+          "not": {
+            "anyOf": [
+              { "required": ["migrationAction"] },
+              { "required": ["migratesRunId"] },
+              { "required": ["migratesEventSha256"] },
+              { "required": ["revokesMigrationRunId"] },
+              { "required": ["revokesMigrationEventSha256"] },
+              { "required": ["replacementEvent"] },
+              { "required": ["normalizationKind"] },
+              { "required": ["invalidatesRunId"] },
+              { "required": ["invalidatesEventSha256"] }
+            ]
+          }
+        }
+      ]
     },
     "artifactRevision": {
       "type": "string",
@@ -70,11 +146,11 @@
       "$comment": "Review angle label (e.g. 'architecture-adversarial'). Closure requires lane equality when both sides carry it; new review events SHOULD carry it."
     },
     "effort": {
-      "enum": ["low", "medium", "high", "xhigh", "max"],
-      "$comment": "Typed declared reasoning-effort tier. When both a REVISE and its closer declare effort and share a provider, the closer's tier must be >= the target's."
+      "enum": ["low", "medium", "high", "xhigh", "max", "unsupported"],
+      "$comment": "Typed declared reasoning-effort tier. unsupported records an external provider with no native effort control and is not an ordered tier. When both a REVISE and its closer declare ordered effort and share a provider, the closer's tier must be >= the target's."
     },
     "findingClass": {
-      "enum": ["publication-safety", "security", "correctness", "performance", "other"],
+      "enum": ["publication-safety", "security", "correctness", "performance", "other", "legacy-unclassified"],
       "$comment": "Classification of a REVISE finding. publication-safety and security are NON-USER-WAIVABLE: WAIVED:user against them is invalid (spine: only $security-reviewer approves a publication-safety exception)."
     },
     "scope": {
@@ -105,7 +181,7 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-          "required": ["entryId", "path", "disposition", "reason", "canonicalPointer"],
+        "required": ["entryId", "path", "disposition", "reason", "canonicalPointer"],
         "properties": {
           "entryId": { "type": "string", "minLength": 1, "maxLength": 96, "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
           "path": { "type": "string", "minLength": 1, "maxLength": 512 },
@@ -132,25 +208,100 @@
                 }
               }
             ]
+          }
+        },
+        "allOf": [
+          {
+            "if": { "properties": { "disposition": { "const": "delete" } }, "required": ["disposition"] },
+            "then": { "required": ["proof"] }
           },
-          "allOf": [
-            {
-              "if": { "properties": { "disposition": { "const": "delete" } }, "required": ["disposition"] },
-              "then": { "required": ["proof"] }
-            },
-            {
-              "if": { "properties": { "disposition": { "const": "retain" } }, "required": ["disposition"] },
-              "then": { "not": { "required": ["proof"] } }
-            }
-          ]
-        }
+          {
+            "if": { "properties": { "disposition": { "const": "retain" } }, "required": ["disposition"] },
+            "then": { "not": { "required": ["proof"] } }
+          }
+        ]
       }
     },
     "startedAt": { "type": "string", "minLength": 10 },
     "updatedAt": { "type": "string", "minLength": 10 },
     "notes": { "type": "string" }
   },
+  "oneOf": [
+    {
+      "required": ["runId", "workItem", "role", "executionRole", "status", "gate", "scope", "startedAt", "updatedAt"],
+      "properties": { "schemaVersion": { "enum": [1, 2] } },
+      "not": {
+        "anyOf": [
+          { "required": ["eventId"] },
+          { "required": ["operationId"] },
+          { "required": ["fingerprint"] },
+          { "required": ["priorHead"] },
+          { "required": ["recordedAt"] },
+          { "required": ["eventType"] },
+          { "required": ["payload"] }
+          ,{ "required": ["invalidatesRunId"] }
+          ,{ "required": ["invalidatesEventSha256"] }
+        ]
+      }
+    },
+    {
+      "required": ["eventId", "operationId", "fingerprint", "priorHead", "recordedAt", "eventType", "payload"],
+      "properties": { "schemaVersion": { "const": 3 } },
+      "not": {
+        "anyOf": [
+          { "required": ["runId"] },
+          { "required": ["workItem"] },
+          { "required": ["role"] },
+          { "required": ["executionRole"] },
+          { "required": ["status"] },
+          { "required": ["gate"] },
+          { "required": ["scope"] },
+          { "required": ["startedAt"] },
+          { "required": ["updatedAt"] }
+        ]
+      }
+    }
+  ],
   "allOf": [
+    {
+      "if": { "properties": { "eventKind": { "const": "closure-invalidation" } }, "required": ["eventKind"] },
+      "then": {
+        "required": ["invalidatesRunId", "invalidatesEventSha256", "evidence"],
+        "properties": {
+          "schemaVersion": { "const": 2 }, "role": { "const": "lead" },
+          "executionRole": { "const": "main" }, "status": { "const": "completed" },
+          "gate": { "const": "none" },
+          "scope": { "const": ["ledger-recovery:closure-invalidation"] }
+        },
+        "not": { "anyOf": [ { "required": ["launchRunId"] }, { "required": ["closesRunIds"] }, { "required": ["artifact"] }, { "required": ["scratchEvidence"] } ] }
+      },
+      "else": { "not": { "anyOf": [ { "required": ["invalidatesRunId"] }, { "required": ["invalidatesEventSha256"] } ] } }
+    },
+    {
+      "if": { "properties": { "eventKind": { "const": "legacy-obligation-migration" } }, "required": ["eventKind"] },
+      "then": {
+        "required": ["migrationAction"],
+        "properties": {
+          "schemaVersion": { "const": 2 }, "role": { "const": "lead" },
+          "executionRole": { "const": "main" }, "status": { "const": "completed" },
+          "gate": { "const": "none" },
+          "scope": { "enum": [["ledger-migration:invalid-finding-class"], ["ledger-migration:remove-string-scratch-evidence"]] }
+        },
+        "oneOf": [
+          {
+            "properties": { "migrationAction": { "const": "apply" } },
+            "required": ["migratesRunId", "migratesEventSha256", "replacementEvent", "evidence"],
+            "not": { "anyOf": [ { "required": ["revokesMigrationRunId"] }, { "required": ["revokesMigrationEventSha256"] }, { "required": ["invalidatesRunId"] }, { "required": ["invalidatesEventSha256"] } ] }
+          },
+          {
+            "properties": { "migrationAction": { "const": "revoke" } },
+            "required": ["revokesMigrationRunId", "revokesMigrationEventSha256", "evidence"],
+            "not": { "anyOf": [ { "required": ["migratesRunId"] }, { "required": ["migratesEventSha256"] }, { "required": ["replacementEvent"] }, { "required": ["normalizationKind"] }, { "required": ["invalidatesRunId"] }, { "required": ["invalidatesEventSha256"] } ] }
+          }
+        ]
+      },
+      "else": { "not": { "anyOf": [ { "required": ["migrationAction"] }, { "required": ["normalizationKind"] }, { "required": ["migratesRunId"] }, { "required": ["migratesEventSha256"] }, { "required": ["revokesMigrationRunId"] }, { "required": ["revokesMigrationEventSha256"] }, { "required": ["replacementEvent"] } ] } }
+    },
     {
       "if": { "required": ["scratchEvidence"] },
       "then": {

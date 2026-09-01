@@ -73,8 +73,6 @@ shared/                  ← shared governance + shared design-reference source
   references/            ← canonical shared design-only references
 references-claude/       ← Claude-specific addenda + compatibility pointers for shared references
 references-codex/        ← Codex-specific addenda + compatibility pointers for shared references
-references-gemini/       ← Gemini-specific addenda + compatibility pointers for shared references
-references-qwen/         ← Qwen-specific addenda + compatibility pointers for shared references
 src.claude/              ← Claude Code pack source (install copies to target .claude/)
   CLAUDE.md              ← product governance (installed to users)
   agents/                ← role definitions + delegate-style common-skill wrappers
@@ -85,8 +83,6 @@ src.claude/              ← Claude Code pack source (install copies to target .
   commands/              ← slash commands (agents-*)
   skills/                ← common skills (workflow-focused, Skill-tool invokable)
 src.codex/               ← Codex pack source; canonical Codex-line implementation
-src.gemini/              ← Gemini provider-pack source tree; example-only
-src.qwen/                ← Qwen provider-pack source tree; example-only
 .claude/                 ← local working install (in .gitignore, NOT committed)
 CLAUDE.md                ← THIS FILE (repo-local dev rules, NOT installed)
 RELEASE_NOTES.md         ← canonical tracked release log for release-relevant changes
@@ -100,10 +96,6 @@ scripts/                 ← platform-specific installers
   install-claude.sh      ← thin POSIX launcher
   install-codex.py       ← Codex production installer owner
   install-codex.sh       ← thin POSIX launcher
-  install-gemini.ps1     ← Gemini PowerShell installer
-  install-gemini.sh      ← Gemini Bash installer
-  install-qwen.ps1       ← Qwen PowerShell installer
-  install-qwen.sh        ← Qwen Bash installer
   check-publication-gate.py  ← repo-local publication gate owner
   check-publication-gate.sh  ← thin POSIX launcher
 ```
@@ -126,10 +118,10 @@ scripts/                 ← platform-specific installers
 - `API`: Application Programming Interface, a programmatic contract exposed by a tool, runtime, or service.
 - `argv`: the command-line argument vector passed to a process.
 - `CLAUDE.md`: the Claude Code-readable instruction file for a repository or installed pack.
-- `CLI`: Command-Line Interface, a terminal command surface such as `claude`, `codex`, or `gemini`.
+- `CLI`: Command-Line Interface, a terminal command surface such as `claude`, `codex`, or `kimi`.
 - `Codex`: the OpenAI Codex runtime and provider pack maintained by this repository.
 - `Claude Code`: Anthropic's Claude Code runtime and matching provider pack.
-- `Gemini`: the Google Gemini runtime/provider family; in this repository it is example-only unless explicitly selected.
+- `Gemini`: a removed provider identifier retained only for fail-closed migration diagnostics.
 - `JSON`: JavaScript Object Notation, a structured data format used by team template files.
 - `MCP`: Model Context Protocol, a protocol used to expose tools and resources to agent runtimes.
 - `QA`: Quality Assurance, verification work focused on tests, regressions, and acceptance criteria.

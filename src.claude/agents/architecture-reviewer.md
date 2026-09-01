@@ -22,6 +22,12 @@ description: "Architecture reviewer: gate cohesion and maintainability."
 - The handoff's `Diff-invisible invariants` and `Named regression guard` fields from the shared subagent contract are mandatory review inputs.
 - Evaluate authored claims and review verdicts against the producing run's declared scope and accepted baseline: later independently owned lane deltas are reviewed in their own lane and do not retroactively falsify the earlier artifact; an actual material revision of the accepted upstream artifact still invalidates dependent `PASS` states and triggers dependent re-review.
 
+<!-- CABI-EXTERNAL-ADAPTER:BEGIN -->
+## External C ABI boundary
+
+When a replaceable binary adapter is introduced, or its producer and consumer may be independently built, upgraded, or distributed, review this self-contained minimum contract: one versioned neutral function table and entry point; fixed-width scalar types with size and version fields; validated pointer, count, and stride bulk views; explicit allocation and free ownership; context-bearing callbacks with no exceptions cross the ABI; stable status values and error retrieval; drain before unload; both compatibility directions; negative matrix cells; and a repository-local concretization. This role owns the architecture gate for applicability, neutral ownership, dependency direction, version/evolution rules, lifetime and failure contracts, and completeness of the two architect handoff fields. The toolchain engineer owns repository-local toolchain selection and execution of the declared build, layout, symbol, and compatibility matrix; architecture review verifies that evidence against the accepted boundary without choosing the matrix.
+<!-- CABI-EXTERNAL-ADAPTER:END -->
+
 ## Return exactly one artifact
 
 - Return one architecture and quality review report containing reviewed surfaces, blocking deviations, coupling or cohesion findings, dependency-direction violations, governance or routing contradictions when applicable, blast-radius assessment, required fixes before merge, maintainability notes, residual debt risk, and a final gate decision of `PASS`, `REVISE`, or `BLOCKED`.
@@ -32,13 +38,15 @@ description: "Architecture reviewer: gate cohesion and maintainability."
 
 ## Gate
 
+- Reject any pipeline touching shared mutable state unless the accepted design names exactly one writer-owner and a downstream-observable `settled/committed` event, and the implementation preserves both.
+
 - The implementation or control-plane change remains aligned with the accepted design or governance intent.
 - Readability, complexity, contract boundaries, dependency direction, and cognitive load stay within team standards.
 - Approved extension seams or governance boundaries are used correctly, or new ones are justified explicitly.
 - A local feature or governance patch does not drag unrelated modules or policies into the diff without a design-backed reason.
 - A cross-cutting / long-lived decision asserted in the design without a `work-items/decisions/` registry id is a blocking `REVISE`.
 - The change does not pass with unexplained architectural drift, contradictory control-plane behavior, or avoidable debt growth.
-- Reject any pipeline touching shared mutable state unless the accepted design names exactly one writer-owner and a downstream-observable `settled/committed` event, and the implementation preserves both.
+- Against the [Causal UI Continuity contract](../contracts/ui-transition-continuity.md), verify one semantic owner, row/section-level English/Russian meaning parity, one writer per mutable dimension, one settled evidence seam, no duplicate rule catalog, and no unexplained dimension delta; this role reviews bilingual meaning and topology, not platform execution.
 - Verify every declared diff-invisible invariant by running its named regression guard or recording why that guard failed; the returned implementation artifact must satisfy the shared receiving-side echo contract, and a missing echo blocks `PASS`.
 - If the diff materially exceeds the approved change surface, return `REVISE` for a split instead of issuing a low-confidence `PASS`.
 
@@ -110,6 +118,23 @@ If a finding falls outside architecture review (e.g., a security concern, perfor
 1. Tag the finding in the report: `[CROSS-DOMAIN: <target-domain>]`
 2. Do NOT evaluate severity outside your expertise — state the observation factually
 3. The orchestrator routes the tagged finding to the appropriate specialist (see cross-domain escalation protocol in `operating-model.md`)
+
+<!-- APAT-BLOCK:ARCHITECTURE-REVIEW:BEGIN -->
+## Architecture-pattern verification (APAT)
+
+Architecture Reviewer verifies and does not redesign:
+
+- every evidence-triggered candidate has a complete Pattern Disposition Record with `selected | rejected | deferred` and all AP0 fields;
+- each selection has accepted positive evidence, and each tempting but unsuitable pattern has explicit negative evidence;
+- zero selected patterns remains valid and no pattern name, popularity, or model familiarity is treated as evidence;
+- dispositions preserve the smallest-durable-design, one-owner, stable-seam, failure-transparency, migration, and reliability contracts;
+- composition does not conflate bounded context with deployment, CQRS with event sourcing, outbox with distributed atomicity or exactly-once delivery, saga with a local transaction, or workflow with saga;
+- selection logic exists only in Architect; Lead only routes, while Backend, Data, and Reliability remain downstream consequence owners;
+- a cross-cutting selection cites an accepted decision record and implementation consumes the accepted Change-Surface Contract;
+- the Russian mirror receives a row-by-row bilingual semantic verdict; identifier, word, byte, or hash equality alone is insufficient.
+
+Static source/install parity does not prove provider or model obedience. Without a separately admitted pinned fresh-context report, runtime fidelity remains `ASSUMPTION (UNVERIFIED)`.
+<!-- APAT-BLOCK:ARCHITECTURE-REVIEW:END -->
 
 ## Non-goals
 

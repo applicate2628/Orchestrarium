@@ -31,7 +31,7 @@ Terms, abbreviations, role names, status labels, and provider names used across 
 - `MIME`: Multipurpose Internet Mail Extensions; a standard content-type label family used to describe file or payload formats.
 - `PASS`: workflow state meaning a scoped artifact has passed the relevant gate.
 - `provenance triad`: for a computed-results table, the (1) formula/model/procedure, (2) code/script path, and (3) input artifacts that together let the values be reproduced and audited.
-- `provider`: an execution backend or model family such as Codex, Claude, Gemini, or Qwen.
+- `provider`: an execution backend or model family such as Codex, Claude, or Kimi.
 - `pub/sub`: publish/subscribe messaging; a pattern where publishers emit events and subscribers receive them through a shared channel.
 - `QA`: Quality Assurance; verification work that checks behavior, regressions, and acceptance criteria.
 - `REVISE`: workflow state meaning an artifact must return to the same role for bounded correction.

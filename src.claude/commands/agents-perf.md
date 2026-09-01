@@ -41,7 +41,7 @@ The user does not need to type `/agents-perf` for this flow to fire. Apply it tr
 
 6. **Handle reviewer verdict:**
    - If performance reviewer returns `PASS` → proceed to report
-   - If performance reviewer returns `REVISE` → route findings back to implementer → re-run QA → re-run performance reviewer. Max 3 iterations (see REVISE iteration cap in `operating-model.md`), then escalate to user.
+   - If performance reviewer returns `REVISE` → route findings back to implementer → re-run QA → re-run performance reviewer under the shared spine's consecutive same-role/same-artifact `REVISE`-cycle cap, then escalate to the user when exhausted.
    - If performance reviewer returns `BLOCKED` → present to user with classification (`BLOCKED:dependency` or `BLOCKED:prerequisite`)
 
 7. **Save.** Persist per artifact persistence protocol (`operating-model.md`):

@@ -28,10 +28,8 @@ description: "External reviewer: run eligible review or QA externally."
 - Honor the contract-resolved `externalPriorityProfile`, `reserveResolver`, `externalPriorityProfiles`, and `externalOpinionCounts`; this role does not reimplement their resolution.
 - Resolve config, provider, model/profile, workdir, fallback, and transport under the shared external-dispatch contract; do not reproduce its resolution logic here.
 - Honor `reserve` only as a supplemental review or QA candidate after primary `claude` / `codex`; it is not a primary-Claude retry and never grants edit or implementation ownership.
-- Explicit Gemini and Qwen routes remain manual `WEAK MODEL / NOT RECOMMENDED` example-only paths.
-- If a repository wants an example-only provider demonstration, use a scalar explicit provider override instead of broadening shipped or repo-local `auto` profiles.
 - Never select `gpt-5.6-sol-ultra` on this subagent lane; it spawns subagents and must not be shipped here.
-- Use file-based prompt delivery for substantive task prompts: write the prompt to a temporary prompt file and feed it through stdin or the provider's supported file-input mechanism; direct prompt argv is only for tiny smoke checks or documented provider limitations.
+- Use file-based prompt delivery for substantive task prompts through the approved thin wrapper: write the prompt to a temporary prompt file and feed it through stdin or the provider's supported file-input mechanism; direct prompt argv is only for a fixed synthetic non-substantive smoke token. If the wrapper is unavailable, fail or reroute honestly.
 - Treat `reserve` as a supplemental reviewer candidate, not a retry for primary Claude and not permission for the reviewer adapter to edit files or take implementation ownership.
 - This adapter is a direct external launch contract. Do not spawn it as an internal Claude agent/helper host for another provider.
 - Apply the availability-probe evidence and route-change rule owned by `contracts/external-dispatch.md`; do not define a local variant.
@@ -39,8 +37,8 @@ description: "External reviewer: run eligible review or QA externally."
 
 ## Execution recipe
 
-- On the Claude line, launch through the canonical prompt wrappers named by the shared external-dispatch contract and record the provider's read-only or sandbox flags; use its transport-neutral fallback only when needed. Preserve the caller-owned prompt and consume the wrapper's single `ORCHESTRARIUM_PROVIDER_RESULT_V1` envelope and complete `resultText`; wrapper-private capture paths are never review evidence.
-- Set the wrapper-owned timeout for the lane, await its terminal return, and validate the envelope's primary outcome, cleanup status, process exit, timeout/cancellation flags, and gate; for a tracked run, read the terminal ledger back separately before accepting the review. Never duplicate a launch; independent standalone watcher polling applies only to caller-managed background captures outside the wrapper.
+- Use the approved thin wrapper owned by `contracts/external-dispatch.md`; that owner supplies the strict V2 parser, full external-nonauthorizing tuple, and untrusted/potentially-sensitive resultText contract. Do not retype the schema, consume wrapper-private captures, or substitute a direct closure/manual sidecar path.
+- Set the wrapper-owned timeout, await its terminal return, and apply the owner's tracked-ledger rules before accepting the review. Never duplicate a launch; independent standalone watcher polling applies only to caller-managed background captures outside the wrapper.
 - Accept completion only when the shared run-completion oracle passes. A failed review run is `UNVERIFIED` under review-loop invariant 7 in `contracts/review-loop.md`; this role cites that lane-accounting owner instead of restating it.
 
 ## Return exactly one artifact

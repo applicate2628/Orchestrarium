@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import json
 import os
 import subprocess
@@ -131,6 +132,29 @@ class TestPassivePollingStop(unittest.TestCase):
             extra_env={"ORCHESTRARIUM_DISPATCHED_REVIEW": "1"},
         )
         self.assert_allowed(result)
+
+    def test_dispatched_review_policy_is_injected_from_composition_root(self) -> None:
+        for script in SCRIPT_PATHS:
+            source = script.read_text(encoding="utf-8")
+            tree = ast.parse(source)
+            functions = {
+                node.name: node
+                for node in tree.body
+                if isinstance(node, ast.FunctionDef)
+            }
+            with self.subTest(script=script):
+                self.assertIn("resolve_runtime_config", functions)
+                self.assertIn("main", functions)
+                main = functions["main"]
+                self.assertEqual([arg.arg for arg in main.args.args], ["config"])
+                main_source = ast.get_source_segment(source, main) or ""
+                self.assertNotIn("os.environ", main_source)
+                self.assertNotIn("os.getenv", main_source)
+                self.assertEqual(source.count("os.environ"), 1)
+                self.assertIn(
+                    "main(resolve_runtime_config(os.environ))",
+                    source,
+                )
 
     def test_strong_phrase_with_relevant_bash_date_probe_allows_stop(self) -> None:
         result = self.run_hook(

@@ -161,7 +161,7 @@ flowchart LR
 - `product-manager` владеет тем, что входит в delivery. `lead` владеет исполнением утверждённой работы.
 - `analyst` и `product-analyst` снижают неопределённость до того, как interpretive роли примут tradeoff-решения.
 - Делегирование передаёт принятые артефакты, не сырые транскрипты.
-- `REVISE` возвращает работу ответственной роли, до 3 итераций; после 3 — эскалация пользователю. `BLOCKED` останавливает progression — классифицируется как `BLOCKED:dependency` (внешний блокер) или `BLOCKED:prerequisite` (нужна смежная работа).
+- `REVISE` возвращает работу ответственной роли в пределах заданного shared spine лимита последовательных циклов одной роли по одному артефакту; после исчерпания лимита — эскалация пользователю. `BLOCKED` останавливает progression — классифицируется как `BLOCKED:dependency` (внешний блокер) или `BLOCKED:prerequisite` (нужна смежная работа).
 - Multi-phase implementation требует одного explicit integration owner до QA.
 - Reviewer'ы остаются независимыми и отчитываются оркестрирующему owner'у.
 - Типы взаимодействий: `LEAD_MED` (дефолт), `DIRECT`, `PARALLEL`, `CLAIMS`, `RETURN`, `ESCALATE`, `ADVISORY`, `NONE`.

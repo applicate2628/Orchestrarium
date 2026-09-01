@@ -7,6 +7,10 @@ description: "External helper fan-out: bounded parallel batch of runs."
 
 Use this utility when a bounded set of external helper runs should launch in parallel instead of being described piecemeal inside ad hoc lead notes.
 
+## Workflow economy projection
+
+Apply the binding shared **Workflow economy (binding)** rule. An external brigade is off by default and may launch only for an explicit user request, enabled configuration, or a documented risk trigger; it does not manufacture optional review or progress artifacts.
+
 ## When to use
 
 - More than one independent external helper lane is ready at the same time.
@@ -77,7 +81,7 @@ The launch table must keep these columns explicit:
 
 | Item | Execution role | Assigned / replaced internal role | Requested provider | Resolved provider | Scope | Result |
 | --- | --- | --- | --- | --- | --- | --- |
-| `<item>` | `<role>` | `<role or none>` | `<internal | codex | claude | gemini | qwen>` | `<provider or none>` | `<one-line scope>` | `<PASS | REVISE | BLOCKED>` |
+| `<item>` | `<role>` | `<role or none>` | `<internal | codex | claude | kimi | grok>` | `<provider or none>` | `<one-line scope>` | `<PASS | REVISE | BLOCKED>` |
 
 ## Gate rules
 

@@ -6,3 +6,7 @@
 # LF -> 39,891. eol=lf prevents an editor/tool from silently re-introducing CRLF.
 shared/AGENTS.shared.md text eol=lf
 shared/references/spine/*.md text eol=lf
+
+# Historical accepted-prior payloads preserve their source blob bytes, including CRLF.
+# Revision manifests remain text; only files inside each skill payload are byte-exact.
+tests/fixtures/canonical-skill-priors/*/*/** -text

@@ -1,7 +1,8 @@
 {
   "version": 1,
   "productionAutoProviders": ["codex", "claude"],
-  "exampleOnlyProviders": ["gemini", "qwen"],
+  "exampleOnlyProviders": [],
+  "explicitOnlyProviders": ["kimi", "grok"],
   "advisoryReviewSupplementalProviders": ["reserve"],
   "scalarKeys": [
     {
@@ -37,7 +38,7 @@
     {
       "name": "externalProvider",
       "default": "auto",
-      "allowed": ["auto", "codex", "claude", "gemini", "qwen"]
+      "allowed": ["auto", "codex", "claude", "kimi", "grok"]
     },
     {
       "name": "externalPriorityProfile",

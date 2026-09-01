@@ -21,7 +21,7 @@ Use this contract when `subagent_type` is `external-worker` or `external-reviewe
 - **Subagent no-spawn-and-wait rule.** A dispatched subagent is NOT re-invoked when a background child it launched (a `run_in_background` shell-out or a background agent) finishes — background-completion notifications go only to the MAIN orchestrating loop. So a subagent must never launch a background child and end its turn "waiting for the notification"; the child strands and the subagent returns an empty result (the recurring `external`-mode consultant role-confusion). A subagent has two compliant paths: complete the work synchronously in-turn (a single blocking shell-out it parses before returning), or return a result telling the orchestrating runtime to own the long-running/background step and feed the outcome back. The orchestrating runtime — which receives background-completion notifications — owns any launch that cannot finish inside one subagent turn.
 - `external-worker` covers the full worker-side lane.
 - `external-reviewer` covers review and QA-side work.
-- `externalProvider: auto` resolves by the active named production priority profile instead of a host-line default; shipped `auto` uses `codex | claude` only. Explicit `codex`, `claude`, `gemini`, or `qwen` may be selected when the route is eligible, but Gemini and Qwen stay `WEAK MODEL / NOT RECOMMENDED` example-only paths rather than shipped production `auto`.
+- `externalProvider: auto` resolves by the active named production priority profile instead of a host-line default; shipped `auto` uses the Codex/Claude pair only. Kimi is explicit-only for policy-admitted read-only research/review, independently verified and nonauthorizing; Grok remains unavailable in 1.x.
 - `parallelMode` is the general rule for whether independent helper lanes should be parallelized by judgment at all. External fan-out follows that rule instead of defining a separate global concurrency model.
 - Independent external adapters may run in parallel when their scopes are disjoint, `parallelMode` permits ordinary parallel fan-out, and provider runtimes support concurrent non-interactive execution. If native internal slot limits would otherwise block more independent eligible lanes, prefer available external adapters instead of silently serializing or dropping them.
 - Same-provider reuse is allowed for independent external fan-out. Do not impose a one-instance-per-provider cap when multiple admitted artifacts or disjoint slices need the same helper/provider combination.
@@ -51,6 +51,11 @@ Diff-invisible invariants:
 - <behavior or contract that must remain true although the diff may not expose it>
 Named regression guard:
 - <test/probe plus expected result that falsifies preservation>
+Dead/superseded code disposition:
+- deleted <files/symbols/paths> | none (probe: <named search/reachability/test>)
+Cleanup disposition:
+- <owned child process trees, temp/capture paths, and isolation worktrees: `cleaned` | `preserved` + reason | `none`>
+- ResourceRowV1 for every selected resource: <category; creator/adopter role + run; exact identity; preexisting flag; settlement probe and current result; disposition>
 Evidence discipline:
 - <cite each decision-driving claim with an in-repo file:line, installed-dependency surface check, versioned official docs/upstream source URL, or target-environment smoke test preserved under .scratch/; otherwise label it ASSUMPTION (UNVERIFIED) with the resolving step; never use "should work", "should be fine", "probably", "likely", "I think", "based on training data", "in general", or "this pattern usually works" as a correctness-driver>
 Defect-class inventory:
@@ -65,11 +70,11 @@ Gate to next stage:
 - <what must be proven>
 ```
 
-Before dispatch, fill `Diff-invisible invariants` and `Named regression guard`; `none` is valid only with a one-line reason. An implementation or review handoff with either field omitted is incomplete.
+Before dispatch, fill `Diff-invisible invariants`, `Named regression guard`, `Dead/superseded code disposition`, and `Cleanup disposition`. For `Dead/superseded code disposition`, `none` is valid only with a one-line reason. When a change supersedes a mechanism, `none` is invalid. For `Cleanup disposition`, `preserved` requires a reason and `none` means the recipient owns no resource in that category. An implementation or review handoff with any field omitted is incomplete.
 
 `Approved inputs` identify the producing run's declared scope and accepted artifact revision when available; no new handoff field is required. Evaluate authored claims and review verdicts against the producing run's declared scope and accepted baseline: later independently owned lane deltas are reviewed in their own lane and do not retroactively falsify the earlier artifact; an actual material revision of the accepted upstream artifact still invalidates dependent `PASS` states and triggers dependent re-review.
 
-Receiving-side echo: the returned artifact MUST (a) report the Named regression guard's actual result (expected vs observed), (b) answer each Diff-invisible invariant as verified or ASSUMPTION (UNVERIFIED), (c) when the dispatch cited a defect class, include the class audit — every enumerated participant classified fixed / not-affected. An artifact missing the echo fails the mechanical acceptance gate.
+Receiving-side echo: the returned artifact MUST (a) report the Named regression guard's actual result (expected vs observed), (b) answer each Diff-invisible invariant as verified or ASSUMPTION (UNVERIFIED), (c) report the Dead/superseded code disposition result and its named probe, (d) report the Cleanup disposition for owned child process trees, temp/capture paths, and isolation worktrees as `cleaned`, `preserved` with its reason, or `none`, and (e) when the dispatch cited a defect class, include the class audit — every enumerated participant classified fixed / not-affected. It also returns a complete current `ResourceRowV1` for every selected owned resource, including branches, locks, handles, generated artifacts, and dead/superseded surfaces; allowed dispositions additionally include `ephemeral-volume-exempt`. An absent/unknown field, ownership/classification gap, invalid exemption, or missing settlement result makes the row `unclassified`; an artifact missing this echo fails the mechanical acceptance gate.
 
 **Class-completeness trigger (mandatory):** when a reviewer, bot, or test cites one instance of a defect class, the dispatch prompt MUST direct the recipient to enumerate every participant of that class, classify each one, and fix every confirmed instance. A prompt scoped only to the named line is invalid.
 
@@ -108,6 +113,10 @@ plain hardcoding, which is a different rule and a different fix.
 ## Artifact gate
 
 A lead MUST NOT delegate recovery-tracked or multi-stage work until the work-item folder contains a verified `brief.md` and full `status.md`.
+
+### Workflow economy projection
+
+Apply the binding shared **Workflow economy (binding)** rule. This contract projects the one-canonical-artifact/concise-root-ledger boundary and forbids progress-only artifacts or progress-only `REVISE`; it does not add a second provider-specific review policy.
 
 - `brief.md` must have explicit scope, out-of-scope, acceptance criteria, required roles, and critical risks with owners.
 - `status.md` must follow the format below and be updated after every stage transition, agent launch, or interruption, including any open obligations that still block closeout.

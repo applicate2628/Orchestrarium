@@ -15,12 +15,16 @@ Use this reference when the lead needs routing, gate, or governance guidance bey
 
 The roadmap loop decides what should enter discovery or delivery. The delivery loop decides how an approved item is executed safely.
 
+## Workflow economy projection
+
+Apply the binding shared **Workflow economy (binding)** rule. This Codex projection adds no default review, consultant, or external-brigade fan-out unless evidence, explicit user/configuration intent, or a documented risk trigger admits it. Kimi may be selected explicitly only for read-only research/review with independent verification and nonauthorizing results; Grok remains disabled and non-executing in 1.x. Preserve every template-required security, performance, or geometry role and the human publication/leak-check gate.
+
 ## Rolling-loop execution
 
 - The system operates as a rolling loop, not a stop-and-wait chain.
 - `PASS` immediately advances to the next approved role.
 - `REVISE` stays inside the same role for a bounded correction.
-- Default `REVISE` cap: no more than 3 consecutive `REVISE` cycles for the same role and artifact before the lead must escalate to the user with a summary of all iterations, remaining findings, and a recommendation.
+- Apply the shared spine's consecutive same-role/same-artifact `REVISE`-cycle cap before the lead must escalate to the user with a summary of all attempts, remaining findings, and a recommendation.
 - A handoff interrupt or worker stall without an artifact is not a completed `REVISE` artifact. Keep the stage open, record the interruption in `status.md`, then either re-dispatch the same role with a narrower slice or route to the proper factual role.
 - `BLOCKED` is reserved for real external blockers, missing decisions, or unavailable prerequisites.
 - A consultant sweep is advisory-only. Run it only when the lead explicitly wants a second opinion or a repo-local lane policy explicitly asks for one and `consultantMode` is not `disabled`.
@@ -64,8 +68,8 @@ The roadmap loop decides what should enter discovery or delivery. The delivery l
 - If the requested work is not advisory consultant work, worker-side work, or review/QA-side work, fail fast instead of probing provider availability.
 - There is no generic external adapter for owner roles such as `$product-manager` or `$lead`.
 - An explicit request for `external` on an unsupported owner role changes the disclosure, not the eligibility. The lead must say the route is unsupported and reroute honestly.
-- `externalProvider: auto` is the ordinary default only; it resolves through the active production profile and uses shipped production providers `codex | claude` only. Explicit user override or documented repo-local heuristics may still choose a different honest provider for the task domain.
-- The shipped shared profiles do not hardwire example-only providers into visual lanes. If a clearly visual worker or review lane should demonstrate Qwen, or deliberately use the weaker/not-recommended Gemini path, do that through a scalar explicit provider override only; do not place Gemini or Qwen inside `externalPriorityProfiles`.
+- `externalProvider: auto` is the ordinary default only; it resolves through the active production profile and uses the shipped Codex/Claude pair only. Explicit user override may choose Kimi for a policy-admitted read-only research/review lane; the fixed Kimi transport remains independently verified and nonauthorizing. Grok remains unavailable and must not be launched or probed in 1.x.
+- Shipped and repo-local production profiles must keep explicit-only and unavailable providers out of `externalPriorityProfiles`.
 - `parallelMode` is the general orchestrator rule for whether independent helper lanes should be parallelized by judgment at all; external fan-out is one overlay on top of that rule.
 - Independent external adapters may run in parallel when their scopes are disjoint, `parallelMode` permits ordinary parallel fan-out, and provider runtimes support it. If native internal slot limits would otherwise block additional independent eligible lanes, prefer available external adapters over silent serialization or dropped lanes.
 - Parallel external routing is not capped at one instance per helper or provider. If multiple admitted artifacts or disjoint slices honestly need the same provider, the lead may launch repeated same-provider external helpers concurrently.
@@ -310,7 +314,7 @@ For critical changes, run both in sequence: Claim-Verify first (fast, catches ex
 - Keep the periodic layer lightweight: if a control is really about whether work may advance, it belongs in the stage-gate path instead.
 - Physical-state reconciliation (`$knowledge-archivist`): every lifecycle state change (create, resume, stage transition, park, close, archive) reconciles physical roots and regenerates `work-items/README.md` in the same transition.
 - Board refresh (`$knowledge-archivist`): every delivery wave, in the same post-wave sync pass, refresh `work-items/README.md` against git and the tree.
-- Registry governance reconciliation (`$knowledge-archivist`): after accepted task-memory governance changes, on an all-registry request, and at milestone-wide cleanup, run one complete structural plus semantic-currency matrix across every current registry; the existing orchestrator-upgrades-to-lessons check is one row of this control, not a separate owner. Non-consistent rows return to their semantic owners through `$lead`; placement-only success is not overall `PASS`.
+- Registry governance reconciliation (`$knowledge-archivist`): after accepted task-memory governance changes, on an all-registry request, and at milestone-wide cleanup, run one complete structural plus semantic-currency matrix across every current registry. Non-consistent rows return to their semantic owners through `$lead`; placement-only success is not overall `PASS`.
 
 Do not let a role that defines a critical constraint act as the only approval gate for that same risk.
 
@@ -386,11 +390,11 @@ When an upstream artifact is revised after downstream artifacts have been accept
 
 ## REVISE iteration cap procedure
 
-The cap is 3 iterations for any single role on a single artifact.
+Use the shared spine's consecutive same-role/same-artifact `REVISE`-cycle cap; this binding does not own or restate its numeric value.
 
-- Iteration 1–3: the role attempts to address findings within its bounded correction scope.
-- After iteration 3 without PASS: the orchestrator escalates to the user with a summary of all 3 iterations, remaining unresolved findings, and a recommendation (continue fixing, re-plan, or accept with known issues).
-- Track the current iteration count in `status.md` under the REVISE loop section.
+- While the cap is not exhausted, the role addresses findings within its bounded correction scope.
+- When the cap is exhausted without `PASS`, the orchestrator escalates to the user with a summary of all attempts, remaining unresolved findings, and a recommendation (continue fixing, re-plan, or accept with known issues).
+- Track consecutive cycles by role and artifact in `status.md` under the REVISE loop section.
 
 ## Artifact persistence protocol
 

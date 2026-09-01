@@ -23,7 +23,7 @@ Codex loads skills statically → contract docs must be self-contained lead guid
 | Cross-domain escalation | §"Cross-domain escalation protocol" | §"Cross-domain escalation protocol" | Identical 4-step protocol; Claude adds target-domain mapping table |
 | Adjacent-issue protocol | §"Adjacent-issue protocol" | §"Adjacent-issue protocol" | Identical semantics; Codex says "configured bug registry path" vs Claude's `work-items/bugs/` |
 | Artifact invalidation | §"Artifact invalidation protocol" | §"Artifact invalidation protocol" | Claude has 3 detailed steps; Codex condensed to 3 points. Same dependency chain. |
-| REVISE iteration cap | §"REVISE iteration cap" | §"REVISE iteration cap procedure" | Identical cap (3), identical escalation procedure |
+| REVISE correction cap | §"REVISE iteration cap" | §"REVISE iteration cap procedure" | Both bindings cite the shared spine's consecutive same-role/same-artifact cap and escalation procedure; neither binding owns its numeric value |
 | Periodic controls | §"Periodic controls" table | §"Periodic controls" | Claude has full 11-row control matrix; Codex defers to repo-defined matrix |
 | How to instruct reviewers | §"How to instruct reviewers" | §"Review strategy selection" | Claude: 2 compact paragraphs. Codex: full strategy A/B with decision table. Semantics identical. |
 | Common alias map | §"Common alias map" | §"Common alias map" | Identical mappings, different formatting |
@@ -53,13 +53,13 @@ Codex loads skills statically → contract docs must be self-contained lead guid
 |-------|-------------------------------------------------------------|-------------------------------------------------------|-------|
 | Config file location | `.claude/.agents-mode.yaml` | `.agents/.agents-mode.yaml` | `agents-mode` is the only supported operator overlay surface on these lines. |
 | Extended config schema | `consultantMode`, `delegationMode`, `parallelMode`, `mcpMode`, `preferExternalWorker`, `preferExternalReviewer`, `externalProvider`, `externalPriorityProfile`, `reserveResolver`, `externalPriorityProfiles`, `externalOpinionCounts`, production-provider workdir keys, shared `externalModelMode`, and any line-specific local fields | `consultantMode`, `delegationMode`, `parallelMode`, `mcpMode`, `preferExternalWorker`, `preferExternalReviewer`, `externalProvider`, `externalPriorityProfile`, `reserveResolver`, `externalPriorityProfiles`, `externalOpinionCounts`, production-provider workdir keys, shared `externalModelMode`, and optional `externalClaudeProfile` | `consultantMode` controls consultant; `reserve` is a symbolic supplemental advisory/review candidate inside `externalPriorityProfiles`, not a scalar provider key; `reserveResolver` binds it to `claude-sonnet`, `claude-wrapper`, `wrapper:<command>`, or `disabled`; `delegationMode`, `parallelMode`, and `mcpMode` are operator-level routing, fan-out, and tooling preferences; `externalProvider` allows explicit example providers but production `auto` uses only `codex | claude`; `externalPriorityProfile` selects the named production provider-order map; `externalPriorityProfiles` stores per-profile lane orderings without example-only providers and may include `reserve` only on advisory/review lanes; `externalOpinionCounts` raises specific lanes above the default single-opinion behavior; production-provider workdir keys stay separate and default `neutral`; shared `externalModelMode` distinguishes provider runtime-default execution from pinned production-provider policy; and `externalClaudeProfile` matters only on Codex when the resolved provider is primary Claude CLI. |
-| Provider dispatch | Production provider universe with profile-driven `auto`; explicit `claude` is self-provider override only on Claude line | Production provider universe with profile-driven `auto`; explicit `codex` is self-provider override only on Codex line | `auto` no longer means a line-specific provider default. It resolves through the active production priority profile, must not silently self-bounce into the current host provider, and must not select example-only providers such as Gemini or Qwen. Explicit example-provider overrides are allowed only as manual demonstration or compatibility paths. |
+| Provider dispatch | Production provider universe with profile-driven `auto`; explicit `claude` is self-provider override only on Claude line | Production provider universe with profile-driven `auto`; explicit `codex` is self-provider override only on Codex line | `auto` no longer means a line-specific provider default. It resolves through the active production priority profile and must not silently self-bounce into the current host provider. Removed Gemini and Qwen scalar values fail closed with `E_EXTERNAL_PROVIDER_REMOVED`; Kimi is explicit read-only, independently verified, and nonauthorizing; Grok remains unavailable in 1.x. |
 | Provenance header | Execution role / assigned-replaced role / requested provider / resolved provider / requested consultant mode / actual execution path / model-profile / deviation reason | Execution role / assigned-replaced role / requested provider / resolved provider / requested consultant mode / actual execution path / model-profile / deviation reason | Keep wording semantically aligned even if command examples differ. |
 | Fallback boundary | Role-level no internal fallback; orchestrator may reroute when the role choice is disabled | Role-level no internal fallback; orchestrator may reroute when the role choice is disabled | Avoid ambiguous bare use of the word `fallback`. |
 
 ## Shared design-only references
 
-These documents should not be copied again into new pack trees. Current example provider packs, including Gemini and Qwen, should reuse them from `shared/references/` as the starting layer and keep only pack-specific overlays, wrappers, or vocabulary mapping locally where the shared text is not yet fully pack-agnostic.
+These documents should not be copied again into new pack trees. Any future provider pack should reuse them from `shared/references/` as the starting layer and keep only pack-specific overlays, wrappers, or vocabulary mapping locally where the shared text is not yet fully pack-agnostic.
 
 | Canonical shared reference | Path | Pack-local expectation |
 |-------|------|------|
@@ -79,9 +79,9 @@ Intentional pack-local exceptions:
 |-------|------|------|
 | Periodic control matrix | `references-codex/periodic-control-matrix.md`, `references-claude/periodic-control-matrix.md` and `ru` variants | Still depends on pack/runtime vocabulary, task-memory layout, and runtime-doc links; move it only after a generic shared skeleton exists |
 
-## Design-panel binding (trunk + Claude + Codex; gemini/qwen deferred)
+## Design-panel binding (trunk + Claude + Codex)
 
-Shipped 2026-07-10, primary packs only (`src.claude`, `src.codex`); the `src.gemini`/`src.qwen` demo mirror is an explicit deferred follow-on, not shipped in this change.
+Shipped 2026-07-10 for the production packs (`src.claude`, `src.codex`).
 
 | Layer | Path | Notes |
 |-------|------|-------|

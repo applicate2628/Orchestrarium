@@ -12,7 +12,7 @@ This file keeps only Claude-specific runtime and repository concretization for t
 
 - Claude runtime uses the Agent tool and the current Claude operator reference surfaces. Treat this file as a local runtime addendum to the shared blueprint, not as the canonical full methodology copy.
 - Consultant config lives in `.claude/.agents-mode.yaml`.
-- Claude-line canonical config does not include `externalClaudeProfile`; Claude-side `externalProvider: auto` resolves by lane type through the active named production priority profile, shipped production `auto` uses `codex | claude` only, and explicit provider selection may still route eligible external work to Codex CLI, Claude CLI, the weaker/not-recommended Gemini CLI path, or Qwen Code as example-only routes when that route is honest.
+- Claude-line canonical config does not include `externalClaudeProfile`; Claude-side `externalProvider: auto` resolves by lane type through the active named production priority profile and shipped production `auto` uses `codex | claude` only. Explicit Kimi selection is limited to policy-admitted read-only work; Grok remains unavailable, and removed Gemini/Qwen scalar values fail closed with `E_EXTERNAL_PROVIDER_REMOVED`.
 - `$external-worker` and `$external-reviewer` dispatch from Claude Code to the provider selected by `.claude/.agents-mode.yaml`.
 
 ## Claude-side repository concretization

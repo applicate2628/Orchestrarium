@@ -11,7 +11,7 @@
 - Codex использует sequential skill invocation для native skills. Нативного internal parallel skill dispatch нет, поэтому internal Codex-role work всё ещё оркестрируется последовательно на Codex-line. Independent external adapters всё ещё могут работать параллельно, когда routing contract и выбранные provider runtimes это разрешают.
 - Consultant config живёт в `.agents/.agents-mode.yaml`.
 - Codex может расширять shared `agents-mode` schema полем `externalClaudeProfile` для выбора Claude CLI execution profile (`sonnet-high`, `opus-xhigh` — shipped default, `opus-max` — max-depth escalation, или `fable-xhigh` — текущий flagship-family best-effort tier), когда `externalProvider` resolves to Claude.
-- `externalProvider: auto` разрешается по active named production priority profile, а не по Codex-line default; shipped production `auto` использует только `codex | claude`, а явный provider override всё ещё может честно отправить eligible external work в Claude CLI, в слабый/не рекомендуемый Gemini CLI path или в Qwen Code как example-only route вместо скрытой shipped-эвристики.
+- `externalProvider: auto` разрешается по active named production priority profile, а не по Codex-line default; shipped production `auto` использует только `codex | claude`. Явный Kimi разрешён только для policy-admitted read-only работы; Grok остаётся unavailable, а удалённые Gemini/Qwen scalar values fail closed с `E_EXTERNAL_PROVIDER_REMOVED`.
 
 ## Codex-side repository concretization
 

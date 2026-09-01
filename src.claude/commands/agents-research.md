@@ -28,7 +28,7 @@ The user does not need to type `/agents-research` for this flow to fire. Apply i
 3. **Handle REVISE.** If the architect returns `REVISE` (research is insufficient or has gaps):
    - Route the architect's specific gaps back to the analyst for a focused follow-up investigation
    - Re-run the architect with the updated research
-   - Max 3 iterations, then present what was found and the remaining gaps to the user
+   - Apply the shared spine's consecutive same-role/same-artifact `REVISE`-cycle cap, then present what was found and the remaining gaps to the user when exhausted
 
 4. **Save.** Persist per artifact persistence protocol (`operating-model.md`):
    - If part of an active work-item → `work-items/active/<slug>/research.md`

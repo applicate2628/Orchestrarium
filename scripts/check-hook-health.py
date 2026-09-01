@@ -10,6 +10,7 @@ import os
 import queue
 import shlex
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -21,9 +22,15 @@ from typing import Any, Iterable
 
 CODEX_TRUST_MODES = frozenset({"report", "require"})
 INVENTORY_NAME = "codex-hook-inventory.json"
+FAILURE_ENVELOPE_MAX_BYTES = 4096
+FAILURE_CAUSE_MAX_BYTES = 2048
+HEALTH_FAILURE_IDS = frozenset(
+    {"E_HOOK_INVENTORY_TARGET_INVALID", "E_HOOK_HEALTH_FAILED"}
+)
 MAX_STDOUT_BYTES = 2 * 1024 * 1024
 MAX_STDOUT_LINE_BYTES = 256 * 1024
 MAX_STDOUT_MESSAGES = 256
+MAX_HOOK_PATH_LINKS = 64
 _CHILD_ENV_KEYS = frozenset(
     {
         "COMSPEC",
@@ -39,6 +46,302 @@ _CHILD_ENV_KEYS = frozenset(
         "WINDIR",
     }
 )
+
+
+class _HookHealthFailure(ValueError):
+    severity = "fatal"
+
+    def __init__(self, stable_id: str, context: str, cause: str) -> None:
+        self.stable_id = stable_id
+        self.context = context
+        self.cause = cause
+        super().__init__(f"{stable_id}: {cause}")
+
+
+class _InventoryAuthority:
+    def __init__(
+        self,
+        *,
+        target: Path,
+        resolved_target: Path,
+        inventory: Path,
+        logical_parent_identity: tuple[int, int, int, int],
+        link_chain: tuple[
+            tuple[str, tuple[int, int, int, int], str, str], ...
+        ],
+        target_identity: tuple[int, int, int, int],
+        parent_identity: tuple[int, int, int, int],
+        inventory_identity: tuple[int, int, int, int] | None,
+    ) -> None:
+        self.target = target
+        self.resolved_target = resolved_target
+        self.inventory = inventory
+        self.logical_parent_identity = logical_parent_identity
+        self.link_chain = link_chain
+        self.target_identity = target_identity
+        self.parent_identity = parent_identity
+        self.inventory_identity = inventory_identity
+
+
+def _failure_envelope_bytes(failure: _HookHealthFailure) -> bytes:
+    stable_id = failure.stable_id
+    context = failure.context
+    cause = failure.cause
+    valid = (
+        stable_id in HEALTH_FAILURE_IDS
+        and context in {"inventory", "health"}
+        and ((stable_id == "E_HOOK_INVENTORY_TARGET_INVALID") == (context == "inventory"))
+        and len(cause.encode("utf-8", errors="strict")) <= FAILURE_CAUSE_MAX_BYTES
+    )
+    if not valid:
+        stable_id = "E_HOOK_HEALTH_FAILED"
+        context = "health"
+        cause = "failure-envelope-limit"
+    payload = json.dumps(
+        {
+            "schemaVersion": 1,
+            "severity": "fatal",
+            "stableId": stable_id,
+            "context": context,
+            "cause": cause,
+        },
+        separators=(",", ":"),
+        sort_keys=True,
+        ensure_ascii=False,
+    ).encode("utf-8", errors="strict") + b"\n"
+    if len(payload) > FAILURE_ENVELOPE_MAX_BYTES:
+        return _failure_envelope_bytes(
+            _HookHealthFailure(
+                "E_HOOK_HEALTH_FAILED", "health", "failure-envelope-limit"
+            )
+        )
+    return payload
+
+
+def _write_failure_envelope(failure: _HookHealthFailure) -> None:
+    payload = _failure_envelope_bytes(failure)
+    binary = getattr(sys.stderr, "buffer", None)
+    if binary is None:
+        sys.stderr.write(payload.decode("utf-8"))
+        sys.stderr.flush()
+        return
+    binary.write(payload)
+    binary.flush()
+
+
+def _lexical_absolute(path: Path) -> Path:
+    value = os.path.abspath(os.path.expanduser(str(path)))
+    if os.name == "nt":
+        if value.startswith("\\\\?\\UNC\\"):
+            value = "\\\\" + value[8:]
+        elif value.startswith("\\\\?\\"):
+            value = value[4:]
+    return Path(value)
+
+
+def _path_identity(path: Path) -> tuple[int, int, int, int]:
+    metadata = path.lstat()
+    return (
+        metadata.st_dev,
+        metadata.st_ino,
+        metadata.st_mode,
+        getattr(metadata, "st_file_attributes", 0),
+    )
+
+
+def _is_link_or_reparse(metadata: os.stat_result) -> bool:
+    return bool(
+        stat.S_ISLNK(metadata.st_mode)
+        or (
+            getattr(metadata, "st_file_attributes", 0)
+            & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+        )
+    )
+
+
+def _same_path(first: Path, second: Path) -> bool:
+    return os.path.normcase(str(first)) == os.path.normcase(str(second))
+
+
+def _path_walk(path: Path) -> tuple[Path, list[str]]:
+    if not path.is_absolute() or not path.anchor:
+        raise ValueError(f"hooks target path is not absolute: {path}")
+    return Path(path.anchor), list(path.parts[1:])
+
+
+def _link_kind(path: Path, metadata: os.stat_result) -> str | None:
+    if stat.S_ISLNK(metadata.st_mode):
+        return "symlink"
+    is_junction = getattr(os.path, "isjunction", lambda _path: False)
+    if is_junction(path):
+        return "junction"
+    if _is_link_or_reparse(metadata):
+        raise ValueError(f"hooks target contains unsupported reparse component: {path}")
+    return None
+
+
+def _resolve_hooks_target(
+    target: Path, *, allow_missing_ordinary: bool
+) -> tuple[
+    Path,
+    tuple[tuple[str, tuple[int, int, int, int], str, str], ...],
+    tuple[int, int, int, int] | None,
+]:
+    selected_target = _lexical_absolute(target)
+    current, pending = _path_walk(selected_target)
+    seen: set[str] = set()
+    links: list[tuple[str, tuple[int, int, int, int], str, str]] = []
+    while pending:
+        candidate = current / pending.pop(0)
+        try:
+            metadata = candidate.lstat()
+        except FileNotFoundError:
+            if allow_missing_ordinary and not links:
+                return selected_target, (), None
+            raise ValueError(f"hooks target link chain is dangling: {selected_target}")
+
+        kind = _link_kind(candidate, metadata)
+        if kind is not None:
+            if len(links) >= MAX_HOOK_PATH_LINKS:
+                raise ValueError("hooks target link chain exceeds bounded depth")
+            key = os.path.normcase(str(candidate))
+            if key in seen:
+                raise ValueError(f"hooks target link cycle detected at {candidate}")
+            seen.add(key)
+            try:
+                raw_target = os.readlink(candidate)
+            except OSError as exc:
+                raise ValueError(f"cannot read hooks target link {candidate}: {exc}") from exc
+            links.append(
+                (str(candidate), _path_identity(candidate), raw_target, kind)
+            )
+            next_target = Path(raw_target)
+            resolved_component = _lexical_absolute(
+                next_target
+                if next_target.is_absolute()
+                else candidate.parent / next_target
+            )
+            combined = resolved_component.joinpath(*pending)
+            current, pending = _path_walk(combined)
+            continue
+        if pending:
+            if not stat.S_ISDIR(metadata.st_mode):
+                raise ValueError(f"hooks target parent is not a directory: {candidate}")
+            current = candidate
+            continue
+        if not stat.S_ISREG(metadata.st_mode):
+            raise ValueError("hooks target link chain does not resolve to an ordinary file")
+        return candidate, tuple(links), _path_identity(candidate)
+
+    if allow_missing_ordinary and not links:
+        return selected_target, (), None
+    raise ValueError(f"hooks target path is incomplete: {selected_target}")
+
+
+def _inventory_authority(
+    target: Path,
+    inventory_path: Path | None,
+    *,
+    for_write: bool,
+) -> _InventoryAuthority:
+    try:
+        selected_target = _lexical_absolute(target)
+        resolved_target, link_chain, target_identity = _resolve_hooks_target(
+            selected_target, allow_missing_ordinary=False
+        )
+        assert target_identity is not None
+        logical_parent = selected_target.parent
+        parent = resolved_target.parent
+        exact_inventory = parent / INVENTORY_NAME
+        selected_inventory = _lexical_absolute(
+            inventory_path if inventory_path is not None else exact_inventory
+        )
+        if os.path.normcase(str(selected_inventory)) != os.path.normcase(
+            str(exact_inventory)
+        ):
+            raise ValueError("inventory must be the exact hooks-target sibling")
+        inventory_identity = None
+        try:
+            inventory_metadata = selected_inventory.lstat()
+        except FileNotFoundError:
+            if not for_write:
+                raise ValueError("hook inventory is missing")
+        else:
+            if _is_link_or_reparse(inventory_metadata) or not stat.S_ISREG(
+                inventory_metadata.st_mode
+            ):
+                raise ValueError("hook inventory is not an ordinary file")
+            inventory_identity = _path_identity(selected_inventory)
+        return _InventoryAuthority(
+            target=selected_target,
+            resolved_target=resolved_target,
+            inventory=selected_inventory,
+            logical_parent_identity=_path_identity(logical_parent),
+            link_chain=link_chain,
+            target_identity=target_identity,
+            parent_identity=_path_identity(parent),
+            inventory_identity=inventory_identity,
+        )
+    except _HookHealthFailure:
+        raise
+    except (OSError, ValueError) as exc:
+        raise _HookHealthFailure(
+            "E_HOOK_INVENTORY_TARGET_INVALID", "inventory", str(exc)
+        ) from exc
+
+
+def _require_same_hook_target_authority(
+    authority: _InventoryAuthority, current: _InventoryAuthority
+) -> None:
+    if current.logical_parent_identity != authority.logical_parent_identity:
+        raise _HookHealthFailure(
+            "E_HOOK_INVENTORY_TARGET_INVALID",
+            "inventory",
+            "hooks target logical parent identity changed",
+        )
+    if current.link_chain != authority.link_chain:
+        raise _HookHealthFailure(
+            "E_HOOK_INVENTORY_TARGET_INVALID",
+            "inventory",
+            "hooks target symlink identity or target changed",
+        )
+    if not _same_path(current.resolved_target, authority.resolved_target):
+        raise _HookHealthFailure(
+            "E_HOOK_INVENTORY_TARGET_INVALID",
+            "inventory",
+            "resolved hooks target changed",
+        )
+    if current.target_identity != authority.target_identity:
+        raise _HookHealthFailure(
+            "E_HOOK_INVENTORY_TARGET_INVALID",
+            "inventory",
+            "resolved hooks target identity changed",
+        )
+    if current.parent_identity != authority.parent_identity:
+        raise _HookHealthFailure(
+            "E_HOOK_INVENTORY_TARGET_INVALID",
+            "inventory",
+            "hooks target parent identity changed",
+        )
+
+
+def _recheck_inventory_authority(
+    authority: _InventoryAuthority, *, for_write: bool
+) -> _InventoryAuthority:
+    current = _inventory_authority(
+        authority.target, authority.inventory, for_write=for_write
+    )
+    _require_same_hook_target_authority(authority, current)
+    if (
+        authority.inventory_identity is not None
+        and current.inventory_identity != authority.inventory_identity
+    ):
+        raise _HookHealthFailure(
+            "E_HOOK_INVENTORY_TARGET_INVALID",
+            "inventory",
+            "hook inventory identity changed",
+        )
+    return current
 
 
 def _event_identity(value: str) -> str:
@@ -449,61 +752,82 @@ def write_codex_inventory(
     host_os: str,
 ) -> None:
     """Atomically persist the generated Codex-only expected registration set."""
-    spec_rows = list(specs)
-    stems = {marker for marker, _script, _event, _matcher in spec_rows}
-    if len(stems) != len(spec_rows):
-        raise ValueError("duplicate Codex hook marker in installer specifications")
-    data = _load(target)
-    rows = list(_iter_owned_hooks(data, stems, "codex", host_os))
-    by_stem: dict[str, list[tuple[str, str, list[str], str | None]]] = {
-        stem: [] for stem in stems
-    }
-    for row in rows:
-        by_stem[row[1]].append(row)
-    invalid = sorted(stem for stem, matches in by_stem.items() if len(matches) != 1)
-    if invalid:
-        raise ValueError("Codex inventory generation requires one registration per marker: " + ", ".join(invalid))
-    hooks = []
-    for marker, _script, expected_event, expected_matcher in spec_rows:
-        event, _stem, argv, matcher = by_stem[marker][0]
-        if _event_identity(event) != _event_identity(expected_event) or matcher != expected_matcher:
-            raise ValueError(f"Codex inventory registration shape mismatch: {marker}")
-        hooks.append(
-            {
-                "stem": marker,
-                "identity": canonical_identity(
-                    event,
-                    argv,
-                    host_os,
-                    matcher=matcher,
-                    source_path=target,
-                ),
-            }
-        )
-    payload = {
-        "schemaVersion": 1,
-        "sourcePath": _source_identity(target, host_os),
-        "hooks": sorted(hooks, key=lambda item: item["stem"]),
-    }
-    inventory_path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary_name = tempfile.mkstemp(
-        prefix=f".{inventory_path.name}.",
-        suffix=".tmp",
-        dir=inventory_path.parent,
-    )
-    temporary = Path(temporary_name)
+    temporary: Path | None = None
     try:
+        authority = _inventory_authority(target, inventory_path, for_write=True)
+        spec_rows = list(specs)
+        stems = {marker for marker, _script, _event, _matcher in spec_rows}
+        if len(stems) != len(spec_rows):
+            raise ValueError("duplicate Codex hook marker in installer specifications")
+        data = _load(authority.target)
+        rows = list(_iter_owned_hooks(data, stems, "codex", host_os))
+        by_stem: dict[str, list[tuple[str, str, list[str], str | None]]] = {
+            stem: [] for stem in stems
+        }
+        for row in rows:
+            by_stem[row[1]].append(row)
+        invalid = sorted(
+            stem for stem, matches in by_stem.items() if len(matches) != 1
+        )
+        if invalid:
+            raise ValueError(
+                "Codex inventory generation requires one registration per marker: "
+                + ", ".join(invalid)
+            )
+        hooks = []
+        for marker, _script, expected_event, expected_matcher in spec_rows:
+            event, _stem, argv, matcher = by_stem[marker][0]
+            if (
+                _event_identity(event) != _event_identity(expected_event)
+                or matcher != expected_matcher
+            ):
+                raise ValueError(
+                    f"Codex inventory registration shape mismatch: {marker}"
+                )
+            hooks.append(
+                {
+                    "stem": marker,
+                    "identity": canonical_identity(
+                        event,
+                        argv,
+                        host_os,
+                        matcher=matcher,
+                        source_path=authority.target,
+                    ),
+                }
+            )
+        payload = {
+            "schemaVersion": 1,
+            "sourcePath": _source_identity(authority.target, host_os),
+            "hooks": sorted(hooks, key=lambda item: item["stem"]),
+        }
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=f".{authority.inventory.name}.",
+            suffix=".tmp",
+            dir=authority.inventory.parent,
+        )
+        temporary = Path(temporary_name)
         with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:
             json.dump(payload, stream, indent=2, sort_keys=True)
             stream.write("\n")
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temporary, inventory_path)
+        _recheck_inventory_authority(authority, for_write=True)
+        os.replace(temporary, authority.inventory)
+        temporary = None
+        written = _inventory_authority(
+            authority.target, authority.inventory, for_write=False
+        )
+        _require_same_hook_target_authority(authority, written)
+    except _HookHealthFailure:
+        raise
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        raise _HookHealthFailure(
+            "E_HOOK_INVENTORY_TARGET_INVALID", "inventory", str(exc)
+        ) from exc
     finally:
-        try:
-            temporary.unlink()
-        except FileNotFoundError:
-            pass
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def _load_codex_inventory(
@@ -512,37 +836,48 @@ def _load_codex_inventory(
     target: Path,
     host_os: str,
 ) -> tuple[set[str], set[str]]:
-    data = _load(inventory_path)
-    if data.get("schemaVersion") != 1:
-        raise ValueError("Codex hook inventory schema is unsupported")
-    if data.get("sourcePath") != _source_identity(target, host_os):
-        raise ValueError("Codex hook inventory sourcePath does not match the selected config")
-    hooks = data.get("hooks")
-    if not isinstance(hooks, list) or not hooks:
-        raise ValueError("Codex hook inventory is empty or malformed")
-    stems: set[str] = set()
-    identities: set[str] = set()
-    for hook in hooks:
-        if not isinstance(hook, dict):
-            raise ValueError("Codex hook inventory entry is malformed")
-        stem = hook.get("stem")
-        identity = hook.get("identity")
-        if not isinstance(stem, str) or not stem or not isinstance(identity, str):
-            raise ValueError("Codex hook inventory entry lacks stem or identity")
-        if stem in stems or identity in identities:
-            raise ValueError("Codex hook inventory contains duplicate entries")
-        payload = json.loads(identity)
-        if not isinstance(payload, dict) or set(payload) != {
-            "command",
-            "event",
-            "handlerType",
-            "matcher",
-            "sourcePath",
-        }:
-            raise ValueError("Codex hook inventory identity is incomplete")
-        stems.add(stem)
-        identities.add(identity)
-    return stems, identities
+    try:
+        authority = _inventory_authority(target, inventory_path, for_write=False)
+        data = _load(authority.inventory)
+        if data.get("schemaVersion") != 1:
+            raise ValueError("Codex hook inventory schema is unsupported")
+        if data.get("sourcePath") != _source_identity(authority.target, host_os):
+            raise ValueError(
+                "Codex hook inventory sourcePath does not match the selected config"
+            )
+        hooks = data.get("hooks")
+        if not isinstance(hooks, list) or not hooks:
+            raise ValueError("Codex hook inventory is empty or malformed")
+        stems: set[str] = set()
+        identities: set[str] = set()
+        for hook in hooks:
+            if not isinstance(hook, dict):
+                raise ValueError("Codex hook inventory entry is malformed")
+            stem = hook.get("stem")
+            identity = hook.get("identity")
+            if not isinstance(stem, str) or not stem or not isinstance(identity, str):
+                raise ValueError("Codex hook inventory entry lacks stem or identity")
+            if stem in stems or identity in identities:
+                raise ValueError("Codex hook inventory contains duplicate entries")
+            payload = json.loads(identity)
+            if not isinstance(payload, dict) or set(payload) != {
+                "command",
+                "event",
+                "handlerType",
+                "matcher",
+                "sourcePath",
+            }:
+                raise ValueError("Codex hook inventory identity is incomplete")
+            stems.add(stem)
+            identities.add(identity)
+        _recheck_inventory_authority(authority, for_write=False)
+        return stems, identities
+    except _HookHealthFailure:
+        raise
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        raise _HookHealthFailure(
+            "E_HOOK_INVENTORY_TARGET_INVALID", "inventory", str(exc)
+        ) from exc
 
 
 def _manifest_stems(repo_root: Path, platform: str) -> set[str]:
@@ -772,7 +1107,11 @@ def verify_config(
             for event, _stem, argv, matcher in rows
         }
         if actual_identities != inventory_identities:
-            raise ValueError("Codex hook registration drifted from generated inventory")
+            raise _HookHealthFailure(
+                "E_HOOK_INVENTORY_TARGET_INVALID",
+                "inventory",
+                "Codex hook registration drifted from generated inventory",
+            )
     counts: dict[str, int] = {stem: 0 for stem in expected}
     messages: list[str] = []
     with tempfile.TemporaryDirectory(prefix="orchestrarium-hook-health-") as scratch:
@@ -883,6 +1222,22 @@ def _default_checks(repo_root: Path) -> list[tuple[Path, str, Path]]:
     ]
 
 
+def _codex_inventory_sidecar(target: Path) -> Path:
+    """Locate the inventory beside the final ordinary Codex hooks target."""
+
+    try:
+        resolved_target, _link_chain, _target_identity = _resolve_hooks_target(
+            target, allow_missing_ordinary=True
+        )
+        return resolved_target.parent / INVENTORY_NAME
+    except _HookHealthFailure:
+        raise
+    except (OSError, ValueError) as exc:
+        raise _HookHealthFailure(
+            "E_HOOK_INVENTORY_TARGET_INVALID", "inventory", str(exc)
+        ) from exc
+
+
 def _leftover_wrappers(
     installed_root: Path,
     repo_root: Path,
@@ -949,17 +1304,12 @@ def main() -> int:
         for target, platform, installed_root in checks:
             inventory_path = Path(args.inventory).expanduser() if args.inventory else None
             if platform == "codex" and args.codex_trust_mode and inventory_path is None:
-                sibling_inventory = Path(__file__).resolve().with_name(INVENTORY_NAME)
-                installed_layout = Path(__file__).resolve().parent.parent.name == "lead"
-                if installed_layout and not sibling_inventory.is_file():
-                    raise ValueError(
-                        f"installed Codex hook inventory is missing: {sibling_inventory}"
-                    )
-                if sibling_inventory.is_file():
-                    inventory_path = sibling_inventory
-                elif not (repo_root / "scripts" / "universal_hooks_manifest.py").is_file():
-                    raise ValueError(
-                        f"installed Codex hook inventory is missing: {sibling_inventory}"
+                inventory_path = _codex_inventory_sidecar(target)
+                if not inventory_path.is_file():
+                    raise _HookHealthFailure(
+                        "E_HOOK_INVENTORY_TARGET_INVALID",
+                        "inventory",
+                        f"installed Codex hook inventory is missing: {inventory_path}",
                     )
             for message in verify_config(
                 target=target,
@@ -979,8 +1329,18 @@ def main() -> int:
                 for wrapper in _leftover_wrappers(installed_root, repo_root, platform):
                     print(f"WARN leftover hook wrapper: {wrapper}")
         return 0
-    except (OSError, ValueError, json.JSONDecodeError, subprocess.TimeoutExpired) as exc:
-        sys.stderr.write(f"FAIL: {exc}\n")
+    except (
+        OSError,
+        ValueError,
+        json.JSONDecodeError,
+        subprocess.TimeoutExpired,
+    ) as exc:
+        failure = (
+            exc
+            if isinstance(exc, _HookHealthFailure)
+            else _HookHealthFailure("E_HOOK_HEALTH_FAILED", "health", str(exc))
+        )
+        _write_failure_envelope(failure)
         return 1
 
 

@@ -30,16 +30,14 @@ Evidence for this direction (load-bearing citations, not a guess):
   - work-items/decisions/2026-07-11-hook-placement-gate-semantics.md:16-21: the
     placement register states copies as "byte-identical to canon", with
     scripts/universal-hooks/ as the referenced canon dir.
-  - scripts/validate-agents-mode-installers.py:90-95 (`universal_hook_helper_paths`):
-    an independent, unrelated validator's own docstring also calls
-    scripts/universal-hooks/ "the pack-neutral canon", derived by glob, and uses it
-    to check the gemini/qwen installer regression.
+  - scripts/validate-agents-mode-installers.py (`universal_hook_helper_paths`):
+    an independent validator's own docstring also calls scripts/universal-hooks/
+    "the pack-neutral canon", derived by glob.
   - scripts/install-claude.sh and scripts/install-codex.sh each copy their OWN pack
     tree (src.claude/agents/*, src.codex/skills/lead/*) to the runtime install target;
     neither reads scripts/universal-hooks/ at install time. That tree exists
-    specifically as the pack-neutral reference the gemini/qwen installers copy FROM
-    (see tests/test_universal_hook_surfaces.py::test_gemini_qwen_installers_copy_
-    universal_hook_helpers) and that every citation above already names as canon.
+    specifically as the pack-neutral reference all installed pack copies derive
+    from, and every citation above names it as canon.
     Canon status is a stated fact of this repository's own governing docs, not
     something this script re-derives from file contents, mtimes, or which copy
     "looks newer".

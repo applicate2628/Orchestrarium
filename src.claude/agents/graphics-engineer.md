@@ -38,7 +38,7 @@ description: "Graphics engineer: implement rendering and shaders."
 - Every new shader or pipeline boundary states its working color space and conversion point plus normalized-device-coordinate depth range, Y direction, and matrix-majority conventions.
 - For the accepted design's P8 fold, shared scene state consumed by multiple passes or threads preserves the design-named single writer-owner and settled event or frame fence. A second unsynchronized mutation path is `REVISE` to the architect.
 - Escalate architecture or frame-budget conflicts instead of patching around them locally.
-- Decorative image generation, icon production, and purely stylistic visual polish do not automatically belong to this role; when the lane is primarily image/icon/decorative work, the orchestrator may use an explicit example-only provider route such as Qwen, or the weaker/not-recommended Gemini path, instead of forcing graphics-engineer ownership.
+- Decorative image generation, icon production, and purely stylistic visual polish do not automatically belong to this role; route primarily image/icon/decorative work to its actual owner instead of forcing graphics-engineer ownership.
 - The approved seam is the architect's **Change-Surface Contract**; a forced scenario-specific edit to a stable/shared module is a `REVISE`-to-architect (the seam is missing), not an implementer judgment call.
 
 ## Adjacent findings protocol

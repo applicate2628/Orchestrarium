@@ -1,0 +1,4 @@
+interface:
+  display_name: "vcpkg Ports Updater"
+  short_description: "Sync vcpkg overlays with each port's official upstream"
+  default_prompt: "Use $vcpkg-ports-updater as a leaf specialist for one admitted overlay-sync task. Discover overlay ownership and scope from the repository, use each port's canonical project upstream for source/version identity, treat builtin vcpkg as comparison-only, preserve proved local deltas, validate patch/anchor and affected-lane contracts, and return one evidence-backed sync package."

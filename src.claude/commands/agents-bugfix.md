@@ -39,7 +39,7 @@ The user does not need to type `/agents-bugfix` for this flow to fire. Apply it 
 
 6. **Handle reviewer verdict** (for templates with reviewer stages — `full-delivery`, `security-sensitive`, `performance-sensitive`):
    - If reviewer returns `PASS` → proceed to report
-   - If reviewer returns `REVISE` → route findings to the appropriate role (see architecture-reviewer REVISE routing for target). Re-run QA after fixes, then re-run reviewer. Max 3 iterations, then escalate to user.
+   - If reviewer returns `REVISE` → route findings to the appropriate role (see architecture-reviewer REVISE routing for target). Re-run QA after fixes, then re-run reviewer. Apply the shared spine's consecutive same-role/same-artifact `REVISE`-cycle cap, then escalate to the user when exhausted.
    - If reviewer returns `BLOCKED` → present to user with classification (`BLOCKED:dependency` or `BLOCKED:prerequisite`)
 
 7. **Save.** Persist per artifact persistence protocol (`operating-model.md`):

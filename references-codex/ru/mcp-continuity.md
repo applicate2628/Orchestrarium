@@ -6,9 +6,9 @@
 
 Codex устанавливает три адаптера под skill Lead:
 
-- `~/.codex/skills/lead/scripts/mcp-usage-reminder.py` на `SessionStart`
-- `~/.codex/skills/lead/scripts/turn-anchor-reminder.py` на `UserPromptSubmit`
-- `~/.codex/skills/lead/hooks/check-mcp-momentum.py` на `PreToolUse`
+- `$HOME/.agents/skills/lead/scripts/mcp-usage-reminder.py` на `SessionStart`
+- `$HOME/.agents/skills/lead/scripts/turn-anchor-reminder.py` на `UserPromptSubmit`
+- `$HOME/.agents/skills/lead/hooks/check-mcp-momentum.py` на `PreToolUse`
 
 Запись momentum использует точный matcher `Grep|Bash|PowerShell|shell_command|exec_command`. Широкий matcher является защитным, поскольку имя инструмента, предоставляемое Codex, менялось между версиями runtime; адаптер всё равно допускает только эти пять имён и применяет общий классификатор к фактическому конверту. Для `exec_command` каноническое поле команды — `cmd`, а `command` принимается как совместимый вход.
 

@@ -2,24 +2,23 @@
 """Git-push publication gate (PreToolUse, BLOCKING) — structural backstop for
 the human-review-before-push rule.
 
-WHAT THIS DENIES: a Bash command that confidently runs `git push` in command
-position, when the current turn shows neither (a) the per-turn user-side
-override marker `[approve-publication]` in the LAST GENUINE USER MESSAGE, nor
-(b) evidence that a publication-safety scan (`check-publication-safety` /
-`check-publication-gate` / `agents-check-safety`) was invoked among the
-model's own tool calls AND that SAME invocation's OWN tool OUTPUT this same
-turn — correlated by call identity, never by mere co-occurrence — reported a
-clean result over a NON-EMPTY tracked staged set, OR a NON-EMPTY published
-commit range bound to the push's own remote and destination (`range` mode,
-2026-07-27 — see the RANGE-MODE BRANCH (b) note below) — combined with an
-explicit push instruction in the last genuine user message.
+WHAT THIS DENIES: a command that confidently runs `git push` when neither the
+genuine user's per-turn approval marker nor one fresh gate-owned canonical
+range scan authorizes the exact pending push. The gate derives the only scanner
+producer as one held gate plus gate-relative four-module closure (`hook_common.py`, the
+machine-path classifier, the POSIX process-group helper, and `check-publication-safety.py`), snapshots and
+executes those bytes directly with its current trusted interpreter, and binds
+the exactly correlated typed result to remote, destination, source, current
+HEAD, and receipt tip. Scanner-
+looking transcript calls and outputs are untrusted diagnostics and never mint
+authorization.
 
 WHY: `git push` is the highest-stakes irreversible action the pack governs —
 "Human review before git push ... must include a leak-check of staged changes"
 was prose-only while lower-stakes edit/stop moments got blocking hooks. This
 hook closes that asymmetry.
 
-WHY BRANCH (b) KEYS ON RESULT, NOT JUST INVOCATION (2026-07-26 hardening,
+HISTORICAL DEFECT CONTEXT FOR THE NOW-DIAGNOSTIC TRANSCRIPT PARSER (2026-07-26,
 `work-items/backlog/2026-07-25-push-gate-blind-to-scan-result/brief.md` §11.5
 D1-D3/S6, admitted from `work-items/bugs/2026-07-25-push-gate-keys-on-scan-
 invocation-not-result.md`, severity high). Invocation alone was satisfied by a
@@ -53,7 +52,7 @@ hardening. The CALL side originally used `hook_common.
 extract_model_tool_calls_with_ids` (a flattened `"<tool name> <full JSON
 input>"` blob per call, fine for a plain-substring regex); the SECOND
 hardening below (MENTION-vs-EXECUTION) replaced it with `hook_common.
-extract_model_shell_commands_with_ids`, which returns the RAW shell command
+extract_model_shell_command_occurrences`, which returns the typed RAW shell command
 string instead, because execution-vs-mention detection needs an actual
 parseable command, not a flattened blob. Only opens the gate when a result
 CARRYING THE SAME ID as a scan-matching call also matches the clean-result
@@ -96,7 +95,7 @@ index to be strictly greater than its call's index. A call and its own real
 answering result can never land in the same transcript entry in either
 provider shape (a `tool_use`/`function_call` entry and its answering
 `tool_result`/`function_call_output` entry are always distinct records — see
-extract_model_shell_commands_with_ids and extract_tool_outputs_with_ids), so
+extract_model_shell_command_occurrences and extract_tool_outputs_with_ids), so
 this ordering check never rejects a genuine pair, only a same-id result that
 could not possibly be answering the call it is being credited against.
 
@@ -105,7 +104,7 @@ CALL-SIDE UNIQUENESS COVERS EVERY ID-CARRYING CALL, NOT ONLY SHELL CALLS
 adversarial-gate review — `work-items/bugs/2026-07-26-non-shell-call-can-
 claim-a-scan-id-and-open-the-push-gate.md`). The COLLISION REJECTION fix
 above computed call-side uniqueness (`call_positions`) by walking
-`extract_model_shell_commands_with_ids` alone, because that was already the
+`extract_model_shell_command_occurrences` alone, because that was already the
 only extractor in scope for scan CALL detection. That conflated two
 separable concerns: what makes an id AMBIGUOUS is any second claimant
 regardless of tool type, while what makes a call a SCAN invocation is its
@@ -127,7 +126,7 @@ scan's own answer always arrives under the scan's own id, which is exactly
 the assumption an interrupted call violates. The fix separates the two
 walks: call-side uniqueness now walks `extract_model_tool_calls_with_ids` —
 every id-carrying call, regardless of tool type — while scan CALL detection
-stays on `extract_model_shell_commands_with_ids`, unchanged, because only a
+stays on `extract_model_shell_command_occurrences`, unchanged, because only a
 shell call can ever execute the scanner. A non-shell call can now never hide
 a second claimant on a scan id.
 
@@ -181,73 +180,35 @@ exception as "fall through to the deny payload", never as "return 0
 why the five pre-existing deliberate fail-open returns inside it are
 unaffected (they are ordinary returns, not exceptions).
 
-RANGE-MODE BRANCH (b) ADDED (2026-07-27, narrow scope — work-items/active/
-2026-07-26-push-gate-range-receipt/, `$lead` disposition overriding a PARK
-recommendation on new operator evidence: "меня задолбали сессии своими
-[approve-publication]", demonstrated live in the same session — an explicit
-plain-language push instruction denied anyway because branch (b) as shipped
-was unreachable). `tracked` mode's subject is `git diff --cached`, which the
-operator's own governance-prescribed workflow (commit early, review rounds,
-push many turns later) leaves EMPTY by push time — the staged index already
-equals HEAD, so a scan run there examines nothing and branch (b) is
-STRUCTURALLY UNREACHABLE, routing every push onto the marker (a) — the one
-branch that needs no leak-check at all. `check-publication-safety.sh --range
-<remote> <dst>` scans a DIFFERENT subject: the commit set about to be
-PUBLISHED, modelled as `<tip> --not --remotes=<remote>` (`tip` resolved as
-the current HEAD at scan time), reading content from the COMMITTED BLOB at
-`tip` — never the working tree, never the index. Its receipt names
-`remote`/`dst`/`tip` (`SCAN_CLEAN_RANGE_REGEX`, whole-line anchored under
-`re.MULTILINE` from the start, with the SAME `[1-9]\\d*` zero-examined armor
-and the SAME `SCAN_FAILURE_MARKER_REGEX` exclusion `SCAN_CLEAN_TRACKED_
-REGEX` already carries — see that regex's own comment for why each of those
-three conditions is load-bearing), and this hook credits a range receipt
-under the IDENTICAL call-id-correlation / collision-rejection / ordering
-machinery as `tracked` — gated on one additional check `tracked` mode has
-never needed: the receipt's declared `remote` and `dst` must equal every
-detected `git push`'s own argv tokens (`_extract_push_remote_and_dst`).
+RANGE MODE AND CLOSED COMMAND GRAMMAR. Tracked-mode output covers the staged
+set; a range receipt covers commits not already present on the named remote
+and carries `remote`/`dst`/`tip`. Both modes share call-id correlation,
+collision rejection, ordering, execution-status, whole-line, non-empty, and
+failure-marker checks. Both also require the same immutable command result to
+admit exactly one solitary direct push: no environment prefix, Git-global
+option, repository redirect, compound sibling, pipeline, unknown push option,
+or extra refspec. Range mode additionally requires its declared `remote` and
+`dst` to equal the admitted command binding.
 
-NARROW BY DELIBERATE SCOPE CUT, NOT OVERSIGHT. The design this predicate is
-drawn from (`work-items/active/2026-07-26-push-gate-range-receipt/design.md`,
-revision 2, `$architecture-reviewer` PASS) specified a much larger grammar on
-top of the same range-scanning idea: an exact-spelling argv allowlist (every
-token after `push` individually admitted or denied), a literal-40-hex-SHA
-refspec-source binding (the push's refspec source compared against the
-receipt's `tip`, closing a TOCTOU window where a command mutates git state —
-e.g. `git commit` — and pushes in the SAME call, before this hook ever
-runs), and a pinned git-config gate (`push.followTags`, `remote.*.mirror`,
-...). `$lead` cut ALL of that from this item after re-scoping to the
-operator's actual, recurring pain — "every push falls to the marker" — which
-none of that wider grammar removes; the SCANNER'S RANGE-COMPUTATION AND
-RECEIPT ALONE do. See that work item's `status.md` "$lead disposition" for
-the full reasoning. What this means concretely, stated as a residual rather
-than left implicit: this predicate binds ONLY `remote` + `dst`. A command
-that runs a git-state-mutating command and `git push` together in one call,
-or that adds a flag the wider (unbuilt) grammar would deny (`--force`, a tag
-refspec, `git -c push.followTags=true`, ...), CAN still be credited here as
-long as `remote`/`dst` match — a SMALLER hole than every push falling to the
-no-scan marker branch (today's actual, structural defect), but a real,
-disclosed residual, not a hidden one. Closing it further is filed as
-separate work, not silently promised here.
+The generic grammar deliberately stops short of the strict PR route's
+source/tip, repository identity, remote freshness, and provider-oracle
+bindings. Those remain explicit residuals of generic receipts, not permission
+for command-visible redirects or payload-expanding options.
 
-HONESTY RULE — THIS IS A BACKSTOP, NOT A GUARANTEE. The generic route under-detects by design
-(a push wrapped in a script the hook only sees as `bash sync.sh`, `eval`,
-command substitution, or another command-wrapper is not modelled — the hook
-cannot see INSIDE a wrapper script's own contents, only the outer command
-line that invokes it). A PLAIN MULTI-LINE command is NOT one of these gaps
+HONESTY RULE — THIS IS A BACKSTOP, NOT A GUARANTEE. The generic route under-detects by design.
+It cannot see inside an opaque wrapper file such as `bash sync.sh`, nor can it
+resolve dynamically supplied `eval` or expansion text whose `git push` bytes
+are absent from the envelope. Exact parser-owned child payloads such as a
+literal `bash -c` or `eval` argument remain visible, but arbitrary adjacent
+argument text is not treated as a separately executed command. A PLAIN
+MULTI-LINE command is NOT one of these gaps
 and IS correctly modelled: `cd /repo` NEWLINE `git add -A` NEWLINE `git
 commit -m x` NEWLINE `git push origin main`, all as one Bash tool call, is
-seen as four separate commands and the `git push` on the last line is found
-(a newline-treated-as-plain-whitespace defect that made this NOT true — the
-canonical publish flow bypassed the gate entirely — was found
-and fixed in the same 2026-07-26 hardening that added the solo-segment rule
-below; see `iter_command_segments`'s NEWLINE-AS-SEPARATOR note and
-`work-items/bugs/2026-07-26-push-gate-never-fires-on-a-multi-line-push-
-command.md`). What remains genuinely unmodelled is a command word that
-ITSELF hides `git push` from view — `bash sync.sh` where `sync.sh`'s own
-file contents run `git push`, `eval "$cmd"`, command substitution
-(`$(...)`), or piping through `xargs` — because the hook only ever sees the
-literal text of the ONE command it was invoked with, never the contents of
-a script file that command happens to run. If the transcript is unavailable,
+seen as four parser-owned command records and the final push is retained.
+What remains genuinely unmodelled is execution supplied from
+outside the literal envelope — wrapper-file contents, `eval "$cmd"`, or an
+expanded variable whose value is not present — because the hook sees command
+text, never the contents or runtime values that text later loads. If the transcript is unavailable,
 a detected non-dry push denies,
 and a model can still fake the scan-evidence signal — it must
 now fake a matching tool CALL and its OWN correlated tool OUTPUT (harder than
@@ -277,11 +238,13 @@ docstring and the module docstring's "A CRASH WHILE DECIDING" note above):
      un-overridable false positive. Governance still forbids delegating a
      push to a subagent to dodge review).
   3. If `tool_input.command` is absent or empty → exit 0 (not a shell command).
-  4. Parse the command with the shared shell-aware command-position parser
-     (shlex tokens, separators, env-assignment prefixes, git global options —
-     the check-no-trash-in-repo.py technique). No `git push` in command
-     position → exit 0. `git push` inside a quoted string is NOT a command.
-  5. Every detected push carrying `--dry-run` → exit 0 (nothing is sent).
+  4. Parse once into the immutable shell result shared by push and scan
+     consumers. Complete proven POSIX heredoc and PowerShell here-string
+     bodies are data; uncertain regions preserve literal push candidates,
+     while prefixes, option roles, operands, repository context, and command
+     boundaries remain explicit provenance. No detected push or candidate → exit 0.
+  5. Every exact direct push proving a standalone positive long `--dry-run`,
+     with no negation, ambiguous option role, or conservative candidate → exit 0.
   6. If `transcript_path` is missing, unreadable, invalid, or exceeds the
      bounded full-history limits → deny with `PRG-TRANSCRIPT-UNAVAILABLE`.
   7. If the LAST GENUINE USER MESSAGE contains `[approve-publication]` AND
@@ -310,10 +273,10 @@ docstring and the module docstring's "A CRASH WHILE DECIDING" note above):
      (i) a clean, non-empty, `tracked`-mode result ON A WHOLE LINE BY ITSELF
      (see the RESULT MATCH IS WHOLE-LINE note above and `SCAN_CLEAN_TRACKED_
      REGEX`'s own comment), OR (ii) a clean, non-empty, `range`-mode result
-     ON A WHOLE LINE BY ITSELF whose declared `remote` and `dst` equal every
-     detected `git push`'s own argv tokens (see the RANGE-MODE BRANCH (b)
-     note above and `SCAN_CLEAN_RANGE_REGEX`'s own comment) — AND in EITHER
-     case does NOT also carry the scanner's own self-reported failure line
+     ON A WHOLE LINE BY ITSELF whose declared `remote` and `dst` equal the
+     admitted push binding — AND the command is one solitary direct push in
+     the closed generic grammar, AND in EITHER case does NOT also carry the
+     scanner's own self-reported failure line
      (`SCAN_FAILURE_MARKER_REGEX`), AND the last genuine user message
      contains an explicit push-instruction signal (`push`, `запушь`,
      `залей`, ...) → exit 0.
@@ -336,39 +299,23 @@ WHAT THE GENERIC NON-PR ROUTE STILL DOES NOT COVER (disclosed, not silently assu
     retype into either shape. Fully closing this needs a per-event nonce or
     an out-of-band confirmation channel; both are larger contract changes
     than this bounded fix makes.
-  - NO WORKTREE / REPOSITORY / DESTINATION BINDING FOR `tracked` MODE; A
-    NARROWER GAP FOR `range` MODE (2026-07-26, adversarial-gate finding,
-    high; refined 2026-07-27 when `range` mode's remote+dst binding shipped
-    — see the RANGE-MODE BRANCH (b) note above). For `tracked`, the
-    clean-result line still carries no repository, worktree, or destination
-    identity at all — it is a plain string. This repository alone runs SIX
-    live worktrees of itself and forward-commits through them. A scan
-    invoked (and correlated) in one worktree's turn and a `git push` issued
-    in a DIFFERENT worktree within the same turn are NOT distinguished by
-    anything in this mechanism for `tracked` mode. For `range` mode, the
-    DESTINATION (remote name + dst ref) IS bound to the push's own argv —
-    but repository/worktree IDENTITY is still not: the gate cannot tell
-    which repository or worktree the scan actually ran in, only that SOME
-    scan somewhere reported a receipt naming this destination. Binding
-    repository identity requires comparing the scan's and the push's own
-    effective working directory (cwd / `-C` argument), which this hook does
-    not currently capture or compare in EITHER mode. Treat this exactly as
-    the multi-commit gap below: real, not hypothetical, explicitly not
-    closed by this change.
-  - Generic `range` mode deliberately does NOT implement the strict PR route's exact-spelling push
-    grammar: force flags, extra positional refspecs, empty-source deletion
-    forms, config/tag expansion, repository redirects, and same-call git-state
-    mutation CAN still be credited when the first extracted remote/destination
-    pair matches. It binds no refspec source, tip, repository/worktree identity,
-    refspec cardinality, scanner authenticity, or remote freshness.
+  - RECEIPTS DO NOT BIND REPOSITORY / WORKTREE IDENTITY. Command-local
+    repository selectors (`GIT_DIR`, `GIT_WORK_TREE`, `-C`, `--git-dir`,
+    `--work-tree`, `--namespace`, and push `--repo`) are retained and denied
+    generic credit, but the transcript still does not prove that the scanner
+    and later ambient push ran in the same repository/worktree. Range mode
+    binds remote name plus destination; tracked mode carries neither.
+  - Generic range mode uses a closed invocation grammar but does not bind the
+    refspec source or current tip, repository/worktree identity, scanner
+    authenticity, or remote freshness. Stronger bindings remain owned by the
+    strict PR route or require a future receipt contract.
   - A model can still forge the evidence: DELIBERATELY type a literal fake
     clean-result line into a real command (`echo "publication-safety: clean
     (tracked, examined 999 files)"`), keyed to a real call id. This remains
     open and is the genuine adversarial-actor-with-a-shell case. It is
-    DISTINCT from the two accident-class vectors this same 2026-07-26
-    hardening closed (execution-vs-mention detection, `find_scan_script_
-    executions`, plus the compound-command solo-segment rule,
-    `_command_is_solely_scan_execution`) — both of those involved a REAL
+    DISTINCT from the two accident-class vectors closed by the parser-owned
+    execution-vs-mention projection plus its compound-command solitary rule;
+    both of those involved a REAL
     call producing REAL output with no forged literal anywhere in the
     command text: an innocent `grep`/`ls`/`Test-Path` that happened to NAME
     the scanner as a target (never ran it), and a real, correctly-zero-file
@@ -391,24 +338,32 @@ WHAT THE GENERIC NON-PR ROUTE STILL DOES NOT COVER (disclosed, not silently assu
 """
 from __future__ import annotations
 
+import base64
 import json
+import hashlib
 import os
 import re
+import secrets
 import shlex
 import shutil
+import stat
 import subprocess
 import sys
 import threading
 import time
+from dataclasses import dataclass, field, replace
+from enum import Enum
 from pathlib import Path
 from typing import NamedTuple
-from urllib.parse import quote, urlsplit
+from urllib.parse import quote, unquote_to_bytes, urlsplit
 
 from hook_common import (
     CURRENT_TURN_BYTE_CAP,
+    HISTORY_STATUS_FOUND,
+    HISTORY_STATUS_LIMIT,
     NO_OBSERVED_FAILURE,
     STATUS_FOUND,
-    extract_model_shell_commands_with_ids,
+    extract_model_shell_command_occurrences,
     extract_model_tool_calls_with_ids,
     extract_tool_outputs_with_ids,
     extract_user_typed_text,
@@ -419,17 +374,34 @@ from hook_common import (
     scan_current_turn_boundary,
 )
 
+
+from git_push_gate_preflight import (
+    PreflightResult,
+    validate_preflight_result,
+    build_preflight_from_stdin,
+    ShellParseResult,
+    PrRouteDenied,
+    resolve_command_dialect,
+    parse_transcript_command,
+    project_scan_range_binding,
+)
+
+
 # Per-turn override marker — honored ONLY from the last genuine user message.
 # User-side only by design: assistant prose can be steered by injected content
 # (see the consultant continuation-prompt untrusted-data rule), so unlike
 # [skip-bugfix-discipline] this marker never counts from the model's own reply.
-APPROVE_MARKER_REGEX = re.compile(r"\[approve-publication\]", re.IGNORECASE)
 
-PR_GRANT_REGEX = re.compile(
-    r"^\[approve-pr-publication:v1 pr=(?P<url>https://github\.com/"
+PR_GRANT_PREFIX = "[approve-pr-publication:v1 pr="
+PR_GRANT_NUMBER_REGEX = re.compile(r"^[1-9][0-9]*$")
+PR_GRANT_MARKDOWN_REGEX = re.compile(
+    r"^\[(?P<label>[^\]]+)\]\((?P<destination>[^)]+)\)$"
+)
+PR_URL_REGEX = re.compile(
+    r"^(?P<url>https://github\.com/"
     r"(?P<owner>[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,98}[A-Za-z0-9])?)/"
     r"(?P<repo>[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,98}[A-Za-z0-9])?)/pull/"
-    r"(?P<number>[1-9][0-9]*))\]$"
+    r"(?P<number>[1-9][0-9]*))$"
 )
 PR_REVOKE_MARKER = "[revoke-pr-publication:v1]"
 PR_RESERVED_PREFIXES = ("[approve-pr-publication:", "[revoke-pr-publication:")
@@ -439,11 +411,75 @@ TRANSCRIPT_HISTORY_LINE_BYTE_CAP = 2 * 1024 * 1024
 PROCESS_OUTPUT_BYTE_CAP = 256 * 1024
 PROCESS_TIMEOUT_SECONDS = 8.0
 ORACLE_TIMEOUT_SECONDS = 45.0
-OID_REGEX = re.compile(r"^[0-9a-fA-F]{40}$")
+SCAN_SNAPSHOT_BYTE_CAP = 1024 * 1024
+SCAN_OUTPUT_BYTE_CAP = 256 * 1024
+SCAN_TIMEOUT_SECONDS = 300.0
+SCAN_SETTLEMENT_ATTEMPT_SECONDS = 3.0
+SCAN_SETTLEMENT_MAX_ENTRIES = 2
 REMOTE_NAME_REGEX = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
 PR_HEAD_REF_REGEX = re.compile(r"^[A-Za-z0-9._/-]{1,255}$", re.ASCII)
 REPO_COMPONENT_REGEX = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$")
 NODE_ID_REGEX = re.compile(r"^[A-Za-z0-9_=-]{1,256}$")
+
+
+@dataclass(frozen=True)
+class GitObjectFormat:
+    name: str
+    hex_length: int
+    oid_re: re.Pattern[str]
+
+    def matches(self, value: str) -> bool:
+        return self.oid_re.fullmatch(value) is not None
+
+
+_SHA1_OBJECT_FORMAT = GitObjectFormat(
+    "sha1", 40, re.compile(r"[0-9a-fA-F]{40}")
+)
+_SHA256_OBJECT_FORMAT = GitObjectFormat(
+    "sha256", 64, re.compile(r"[0-9a-fA-F]{64}")
+)
+_SUPPORTED_OBJECT_FORMATS = {
+    value.name: value for value in (_SHA1_OBJECT_FORMAT, _SHA256_OBJECT_FORMAT)
+}
+_SUPPORTED_OID_REGEX = re.compile(r"^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$")
+_LOWERCASE_OID_PATTERN = r"(?:[0-9a-f]{40}|[0-9a-f]{64})"
+SCAN_DENIAL_REASONS = {
+    "PGG-SCAN-PROVENANCE": "The canonical gate-owned range scanner could not be established.",
+    "PRG-SCAN-PROVENANCE": "The canonical gate-owned range scanner could not be established.",
+    "PGG-SCAN-IDENTITY-DRIFT": "The trusted scanner boundary changed during evaluation.",
+    "PRG-SCAN-IDENTITY-DRIFT": "The trusted scanner boundary changed during evaluation.",
+    "PGG-SCAN-EXECUTION": "The canonical range scanner did not complete and reap within its fixed bounds.",
+    "PRG-SCAN-EXECUTION": "The canonical range scanner did not complete and reap within its fixed bounds.",
+    "PGG-SCAN-FINDING": "The canonical range scanner reported a redacted publication-safety finding.",
+    "PRG-SCAN-FINDING": "The canonical range scanner reported a redacted publication-safety finding.",
+    "PGG-SCAN-REFUSAL": "The canonical range scanner returned a typed fail-closed refusal.",
+    "PRG-SCAN-REFUSAL": "The canonical range scanner returned a typed fail-closed refusal.",
+    "PGG-SCAN-CORRELATION": "The trusted scanner result did not match its exact pending invocation.",
+    "PRG-SCAN-CORRELATION": "The trusted scanner result did not match its exact pending invocation.",
+}
+
+
+def _detect_git_object_format(
+    repository_workdir: str,
+    git_exe: str,
+    failure_id: str,
+    *,
+    deadline: float | None = None,
+) -> GitObjectFormat:
+    active_deadline = deadline or (time.monotonic() + ORACLE_TIMEOUT_SECONDS)
+    _, output = _run_text(
+        [git_exe, "rev-parse", "--show-object-format"],
+        active_deadline,
+        failure_id,
+        repository_workdir,
+    )
+    rows = output.splitlines()
+    if len(rows) != 1:
+        raise PrRouteDenied(failure_id)
+    object_format = _SUPPORTED_OBJECT_FORMATS.get(rows[0])
+    if object_format is None:
+        raise PrRouteDenied(failure_id)
+    return object_format
 
 
 class ActivePrGrant(NamedTuple):
@@ -459,6 +495,267 @@ class ProcessResult(NamedTuple):
     stderr: bytes
 
 
+class PushScanBinding(NamedTuple):
+    route: str
+    remote: str
+    destination: str
+    source_oid: str
+    head_oid: str
+
+
+class TrustedSourceIdentity(NamedTuple):
+    expected_path: str
+    parent_generation: tuple[int, ...]
+    file_identity: tuple[int, ...]
+    link_count: int
+    size: int
+    sha256: str
+
+
+class InterpreterIdentity(NamedTuple):
+    absolute_resolved_path: str
+    file_identity: tuple[int, ...]
+
+
+TrustedInterpreterIdentity = InterpreterIdentity
+
+
+@dataclass(frozen=True)
+class SourceNode:
+    role: str
+    expected_path: str
+    file_identity: tuple[int, ...]
+    link_count: int
+    size: int
+    sha256: str
+    source: bytes
+
+
+@dataclass(frozen=True)
+class SourceLayout:
+    name: str
+    gate_suffix: tuple[str, ...]
+    trust_root_up: int
+
+
+SOURCE_LAYOUTS = (
+    SourceLayout("universal", ("scripts", "universal-hooks", "scripts", "check-git-push-gate.py"), 2),
+    SourceLayout("generated-codex", ("src.codex", "skills", "lead", "scripts", "check-git-push-gate.py"), 1),
+    SourceLayout("generated-claude", ("src.claude", "agents", "scripts", "check-git-push-gate.py"), 1),
+    SourceLayout("global", (".codex", "skills", "lead", "scripts", "check-git-push-gate.py"), 1),
+    SourceLayout("project-local", (".agents", "skills", "lead", "scripts", "check-git-push-gate.py"), 1),
+)
+
+
+@dataclass(frozen=True)
+class PathComponentIdentity:
+    root_relative_name: str
+    kind: str
+    identity: tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class CanonicalSourceClosure:
+    layout: SourceLayout
+    trust_root: PathComponentIdentity
+    components: tuple[PathComponentIdentity, ...]
+    nodes: tuple[SourceNode, ...]
+    digest: str
+    gate_identity: tuple[int, ...]
+    bootstrap_digest: str
+    interpreter_identity: InterpreterIdentity
+
+
+class PendingState(str, Enum):
+    PREPARED = "prepared"
+    CHILD_OWNED = "child-owned"
+    SETTLING = "settling"
+    SETTLED = "settled"
+    CORRELATED = "correlated"
+    CONSUMED = "consumed"
+    FAILED = "failed"
+
+
+@dataclass(eq=False)
+class PendingScanInvocation:
+    invocation_id: str
+    attempt_id: str
+    binding: PushScanBinding
+    closure: CanonicalSourceClosure | None
+    interpreter_identity: InterpreterIdentity
+    exact_argv: tuple[str, ...]
+    result_slot: object
+    created_tick: float = field(default_factory=time.monotonic)
+    authorization_deadline: float | None = None
+    state: PendingState = field(init=False, default=PendingState.PREPARED)
+    child_identity: int | None = field(init=False, default=None)
+    supervisor: object | None = field(init=False, default=None)
+    settlement: object | None = field(init=False, default=None)
+    closure_fresh_tick: float | None = field(init=False, default=None)
+    binding_fresh_tick: float | None = field(init=False, default=None)
+    correlation_id: str | None = field(init=False, default=None)
+    consumption_id: str | None = field(init=False, default=None)
+    _transition_lock: threading.Lock = field(init=False, repr=False, default_factory=threading.Lock)
+    _identity_sealed: bool = field(init=False, repr=False, default=False)
+
+    def __setattr__(self, name, value):
+        if getattr(self, "_identity_sealed", False) and name in {
+            "invocation_id", "attempt_id", "binding", "closure",
+            "interpreter_identity", "exact_argv", "result_slot",
+            "created_tick", "authorization_deadline",
+        }:
+            raise AttributeError("pending invocation identity is immutable")
+        object.__setattr__(self, name, value)
+
+    def __post_init__(self) -> None:
+        if self.authorization_deadline is None:
+            self.authorization_deadline = (
+                self.created_tick + SCAN_TIMEOUT_SECONDS
+                + SCAN_SETTLEMENT_ATTEMPT_SECONDS * SCAN_SETTLEMENT_MAX_ENTRIES
+            )
+        self._identity_sealed = True
+
+    def __copy__(self):
+        raise TypeError("pending invocation is non-copyable")
+
+    def __deepcopy__(self, memo):
+        raise TypeError("pending invocation is non-copyable")
+
+    def correlate_and_consume_once(
+        self,
+        launched: "LaunchedScanInvocation",
+        records: tuple["TrustedExecutionRecord", ...],
+        closure_after: CanonicalSourceClosure,
+        interpreter_after: InterpreterIdentity,
+        binding_after: PushScanBinding,
+        freshness_tick: float,
+    ) -> "ConsumedAuthoritativeEvidence":
+        prefix = "PGG" if self.binding.route == "generic" else "PRG"
+        with self._transition_lock:
+            if self.state is PendingState.CONSUMED:
+                raise PrRouteDenied(prefix + "-RECEIPT-USED")
+            if (
+                self.state is not PendingState.SETTLED
+                or time.monotonic() > float(self.authorization_deadline)
+                or len(records) != 1
+            ):
+                self.state = PendingState.FAILED
+                raise PrRouteDenied(prefix + "-SCAN-CORRELATION")
+            execution = records[0]
+            supervisor = launched.supervisor_token
+            settlement = self.settlement
+            certificate = (
+                settlement.certificate if isinstance(settlement, GateSettlement) else None
+            )
+            actual_pid = getattr(getattr(supervisor, "process", None), "pid", None)
+            if (
+                launched.pending is not self
+                or launched.invocation_id != self.invocation_id
+                or launched.attempt_id != self.attempt_id
+                or launched.binding != self.binding
+                or launched.exact_argv != self.exact_argv
+                or launched.result_slot is not self.result_slot
+                or execution.pending is not self
+                or execution.launched is not launched
+                or execution.result_slot is not self.result_slot
+                or supervisor is not self.supervisor
+                or not isinstance(supervisor, ChildSupervisor)
+                or launched.child_handle != self.child_identity
+                or actual_pid != self.child_identity
+                or supervisor.child_identity != self.child_identity
+                or execution.settlement is not settlement
+                or not isinstance(settlement, GateSettlement)
+                or not settlement.complete
+                or not settlement.execution_eligible
+                or certificate is None
+                or certificate.supervisor_id != supervisor.supervisor_id
+                or certificate.child_identity != self.child_identity
+                or closure_after != self.closure
+                or execution.closure_after != closure_after
+                or interpreter_after != self.interpreter_identity
+                or execution.interpreter_identity_after != interpreter_after
+                or execution.provenance_verdict != "trusted"
+                or binding_after != self.binding
+                or freshness_tick <= certificate.verified_at_monotonic_tick
+            ):
+                self.state = PendingState.FAILED
+                raise PrRouteDenied(prefix + "-SCAN-CORRELATION")
+            self.closure_fresh_tick = freshness_tick
+            self.binding_fresh_tick = freshness_tick
+            self.correlation_id = secrets.token_hex(16)
+            self.state = PendingState.CORRELATED
+            try:
+                if not execution.bounded_completion:
+                    raise PrRouteDenied(prefix + "-SCAN-EXECUTION")
+                combined = execution.stdout + execution.stderr
+                try:
+                    text = combined.decode("utf-8", errors="strict")
+                except UnicodeDecodeError:
+                    raise PrRouteDenied(prefix + "-SCAN-EXECUTION") from None
+                parsed = parse_publication_safety_observation(text)
+                if execution.exit_code == 1:
+                    raise PrRouteDenied(prefix + "-SCAN-FINDING")
+                if execution.exit_code == 2:
+                    raise PrRouteDenied(prefix + "-SCAN-REFUSAL")
+                if execution.exit_code != 0:
+                    raise PrRouteDenied(prefix + "-SCAN-EXECUTION")
+                if parsed.kind != "valid-v3" or parsed.receipt is None:
+                    mismatch = "PGG-RANGE-RECEIPT-VERSION" if prefix == "PGG" else "PRG-RECEIPT-MISMATCH"
+                    raise PrRouteDenied(mismatch)
+                receipt = parsed.receipt
+                if (receipt.remote, receipt.destination) != (
+                    self.binding.remote, self.binding.destination
+                ):
+                    mismatch = "PGG-RANGE-BINDING" if prefix == "PGG" else "PRG-RECEIPT-MISMATCH"
+                    raise PrRouteDenied(mismatch)
+                if (
+                    receipt.source != self.binding.source_oid
+                    or receipt.tip != self.binding.source_oid
+                    or self.binding.source_oid != self.binding.head_oid
+                ):
+                    mismatch = "PGG-RANGE-TIP-BINDING" if prefix == "PGG" else "PRG-RECEIPT-MISMATCH"
+                    raise PrRouteDenied(mismatch)
+            except BaseException:
+                self.state = PendingState.FAILED
+                raise
+            self.consumption_id = secrets.token_hex(16)
+            self.state = PendingState.CONSUMED
+            return ConsumedAuthoritativeEvidence(
+                self.invocation_id, self.binding, parsed, self.consumption_id, execution
+            )
+
+
+class LaunchedScanInvocation(NamedTuple):
+    pending: PendingScanInvocation
+    child_handle: int
+    supervisor_token: object
+    invocation_id: str
+    attempt_id: str
+    binding: PushScanBinding
+    exact_argv: tuple[str, ...]
+    result_slot: object
+
+
+@dataclass(frozen=True)
+class TrustedExecutionRecord:
+    pending: PendingScanInvocation
+    launched: LaunchedScanInvocation
+    result_slot: object
+    bounded_completion: bool
+    exit_code: int
+    stdout: bytes
+    stderr: bytes
+    settlement: object
+    closure_after: CanonicalSourceClosure
+    interpreter_identity_after: InterpreterIdentity
+    provenance_verdict: str
+
+
+# R2 public names remain aliases of the single lifecycle types.
+TrustedScanInvocation = LaunchedScanInvocation
+TrustedScanExecution = TrustedExecutionRecord
+
+
 class PushTarget(NamedTuple):
     remote: str
     destination: str
@@ -471,12 +768,117 @@ class LiteralPushCommand(NamedTuple):
     remote: str
     refspec: str
     target: PushTarget
+    repository_root: str | None = None
 
 
-class PrRouteDenied(Exception):
-    def __init__(self, failure_id: str):
-        super().__init__(failure_id)
-        self.failure_id = failure_id
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+class ParsedTranscriptCommand(NamedTuple):
+    entry_index: int
+    occurrence_index: int
+    call_id: str
+    tool_name: str | None
+    dialect: str
+    dialect_exact: bool
+    parsed: ShellParseResult
+
+
+
+
+
+
+class RangeReceiptV3(NamedTuple):
+    commits: int
+    commit_set: str
+    objects: int
+    object_set: str
+    blobs: int
+    blob_set: str
+    blob_bytes: int
+    text: int
+    binary: int
+    subjects: int
+    subject_set: str
+    paths: int
+    path_set: str
+    remote: str
+    destination: str
+    source: str
+    tip: str
+
+
+class PublicationSafetyObservation(NamedTuple):
+    kind: str
+    receipt: RangeReceiptV3 | None
+
+
+class UntrustedTranscriptScanObservation(NamedTuple):
+    call_id: str
+    call_position: int
+    result_position: int | None
+    correlation: str
+    observation: PublicationSafetyObservation
+
+
+class ConsumedAuthoritativeEvidence(NamedTuple):
+    invocation_id: str
+    binding: PushScanBinding
+    parsed_outcome: PublicationSafetyObservation
+    consumption_id: str
+    execution: TrustedExecutionRecord | None = None
+
+
+AuthoritativeScanObservation = ConsumedAuthoritativeEvidence
+
+
+
+
+
+
+
+
 
 # MARKER-HONORING LENGTH BOUND (2026-07-26, `$security-engineer` contract
 # decision — work-items/bugs/2026-07-26-the-deny-message-teaches-the-marker-
@@ -538,20 +940,13 @@ class PrRouteDenied(Exception):
 # MARKER_MAX_MESSAGE_LENGTH is a tunable judgment call, not a measured
 # physical constant — recalibrate it if it is ever seen rejecting a genuine
 # operator approval in practice.
-MARKER_MAX_MESSAGE_LENGTH = 200
 
 # Explicit user push-instruction signal (English + Russian). Matched against
 # the last genuine user message only; used together with scan evidence.
-PUSH_INSTRUCTION_REGEX = re.compile(
-    r"(?ix)"
-    r"\bpush\b|git\s+push|\bpublish\b|"
-    r"запушь|запушить|запушь?те|пушни|пушь|пуш|пушай|пушить|"
-    r"залей|залить|"
-    r"опубликуй|опубликовать|публикуй"
-)
 
 # Publication-safety scan INVOCATION detection is EXECUTION-based, not a
-# regex over call text — see find_scan_script_executions below (2026-07-26
+# regex over call text; the immutable parser projection below owns the
+# 2026-07-26
 # mention-vs-execution hardening, adversarial-gate finding). A prior
 # `SCAN_INVOCATION_REGEX` here matched the scanner's NAME anywhere in a
 # call's flattened text, which is satisfied just as readily by a command
@@ -565,12 +960,12 @@ PUSH_INSTRUCTION_REGEX = re.compile(
 # machine ever shows it as its own tool-call shape (searched exhaustively);
 # its own documented steps (`src.claude/commands/agents-check-safety.md`
 # step 1) always cause the model to issue a real `bash .../check-
-# publication-safety.sh` call, which find_scan_script_executions recognizes
+# publication-safety.sh` call, which the scan projection recognizes
 # like any other real execution — so dropping the text-mention branch loses
 # no real detection, only the false-positive surface it created.
 
 # Publication-safety scan RESULT — matched narrowly against the CORRELATED
-# tool OUTPUT of a call that itself matched find_scan_script_executions
+# tool OUTPUT of a call whose parser-owned projection proves scan execution
 # (never prose, never an uncorrelated tool result — see extract_tool_outputs_with_ids
 # and the module docstring's CORRELATION note), so a file or tool result
 # merely mentioning the scanner cannot satisfy it either, whether or not it
@@ -651,9 +1046,7 @@ SCAN_FAILURE_MARKER_REGEX = re.compile(
     re.IGNORECASE,
 )
 
-# Publication-safety scan RESULT for `range` mode (2026-07-27 — see the
-# module docstring's RANGE-MODE BRANCH (b) note for the full context and the
-# narrow scope this predicate stays inside). Same THREE load-bearing
+# Publication-safety scan RESULT for `range` mode. Same THREE load-bearing
 # conditions as SCAN_CLEAN_TRACKED_REGEX, applied to the SAME check-
 # publication-safety.sh emission site (.sh's final echo, range branch):
 #   - `range` only, never `tracked` or `path` — a distinct mode word so one
@@ -670,75 +1063,147 @@ SCAN_FAILURE_MARKER_REGEX = re.compile(
 #     comment for why a bare substring search is unsound here (a `git grep`
 #     report line embedding this text as a substring must never be credited).
 # `remote`, `dst`, and `tip` are captured so `evaluate_push` can compare the
-# first two against the push's own argv (`_extract_push_remote_and_dst`,
-# below) — the receipt's binding mechanism this predicate exists to check.
-# `tip` is captured (and its shape validated as 40 hex characters) because it
+# first two against the admitted immutable grammar decision's binding.
+# `tip` is captured (and its shape validated as a supported Git object ID) because it
 # is always part of the real receipt's own text. The legacy generic range
 # branch does not compare it; the strict PR route does compare it to a fresh
 # `git rev-parse --verify HEAD` result.
 SCAN_CLEAN_RANGE_REGEX = re.compile(
     r"^publication-safety:\s*clean\s*\(\s*range\s*,\s*examined\s+(?P<count>[1-9]\d*)\s+files?\s*,"
-    r"\s*remote\s+(?P<remote>\S+)\s*,\s*dst\s+(?P<dst>\S+)\s*,\s*tip\s+(?P<tip>[0-9a-f]{40})\s*\)\s*$",
+    rf"\s*remote\s+(?P<remote>\S+)\s*,\s*dst\s+(?P<dst>\S+)\s*,\s*tip\s+(?P<tip>{_LOWERCASE_OID_PATTERN})\s*\)\s*$",
     re.IGNORECASE | re.MULTILINE,
 )
 
+SCAN_CLEAN_RANGE_V3_REGEX = re.compile(
+    r"^publication-safety: clean \(range, receipt=v3, "
+    r"commits=(?P<commits>[1-9]\d*), "
+    r"commit-set=(?P<commit_set>[0-9a-f]{64}), messages=complete, "
+    r"objects=(?P<objects>[1-9]\d*), object-set=(?P<object_set>[0-9a-f]{64}), "
+    r"blobs=(?P<blobs>0|[1-9]\d*), blob-set=(?P<blob_set>[0-9a-f]{64}), "
+    r"blob-bytes=(?P<blob_bytes>0|[1-9]\d*), text=(?P<text>0|[1-9]\d*), "
+    r"binary=(?P<binary>0|[1-9]\d*), subjects=(?P<subjects>0|[1-9]\d*), "
+    r"subject-set=(?P<subject_set>[0-9a-f]{64}), paths=(?P<paths>0|[1-9]\d*), "
+    r"path-set=(?P<path_set>[0-9a-f]{64}), history=complete, "
+    r"remote=(?P<remote>[A-Za-z0-9._~%-]+), "
+    r"dst=(?P<dst>[A-Za-z0-9._~%-]+), "
+    rf"src=(?P<src>[A-Za-z0-9._~%-]+), tip=(?P<tip>{_LOWERCASE_OID_PATTERN})\)$",
+    re.MULTILINE,
+)
+SCAN_CLEAN_PATH_REGEX = re.compile(
+    r"^publication-safety:\s*clean\s*\(\s*path\s*,\s*examined\s+\d+\s+files?[^\r\n]*\)\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+SCAN_TYPED_FAILURE_REGEX = re.compile(
+    r"\bPS-(?:FINDING-(?:CONTENT|COMMIT-MESSAGE)|MSG-[A-Z-]+|INPUT-REFUSAL)\b"
+)
 
-def _extract_push_remote_and_dst(push_args: list[str]) -> tuple[str, str] | None:
-    """Best-effort (remote, dst) extraction from ONE detected push's argument
-    list (the token list `find_git_push_invocations` returns for that push,
-    i.e. everything after `push` in its command segment) — used ONLY for the
-    narrow `range`-mode binding (see the module docstring's RANGE-MODE
-    BRANCH (b) note and SCAN_CLEAN_RANGE_REGEX's own comment). This is
-    deliberately NOT the exact-spelling argv grammar used by the separate
-    strict PR route: this generic-route helper takes the first TWO
-    tokens that do not start with `-` as (remote, dst_token) and IGNORES any
-    further token, rather than admitting or denying the command shape.
 
-    Two consequences of that leniency, both intentional:
-      - A push carrying a trailing redirection artifact (e.g. the stray
-        file-descriptor digit `iter_command_segments` can leave behind for
-        `2>&1` — see that function's own docstring) does not lose range
-        credit merely because the argv token list is one token longer than
-        the two we need.
-      - This function makes NO admissibility claim about the rest of the
-        command (a force flag, `--follow-tags`, a third positional, ...) --
-        it only extracts what it needs to compare, safely, because the
-        caller falls through to the marker/deny path exactly as it does
-        today when this returns None or when the comparison fails. Ignoring
-        extra tokens never launders anything the comparison itself does not
-        already gate.
-
-    Splits a `<src>:<dst>` refspec on its FIRST `:` to recover the
-    destination (a git ref name cannot itself contain `:`); a bare token with
-    no colon (`git push origin claude`) is used as-is. Empty-source deletion
-    forms such as `:dst` and `+:dst` therefore still extract `dst` and can
-    receive this narrow remote/destination credit. Returns None when fewer
-    than two positional tokens are present (a bare `git push` or `git push
-    origin` alone) or when the text after the colon is actually empty (for
-    example, `src:`) -- either way, range credit is simply not attempted, and
-    the marker/deny fallback is unaffected."""
-    positionals = [tok for tok in push_args if not tok.startswith("-")]
-    if len(positionals) < 2:
+def _decode_canonical_receipt_token(token: str) -> str | None:
+    if not token:
         return None
-    remote, dst_token = positionals[0], positionals[1]
-    dst = dst_token.split(":", 1)[1] if ":" in dst_token else dst_token
-    if not dst:
+    try:
+        value = unquote_to_bytes(token).decode("utf-8", "strict")
+    except (UnicodeDecodeError, ValueError):
         return None
-    return remote, dst
+    if not value or any(ord(char) < 32 or ord(char) == 127 for char in value):
+        return None
+    if quote(value, safe="-._~", encoding="utf-8", errors="strict") != token:
+        return None
+    return value
 
 
-# `git` global options that consume a SEPARATE following token as their value;
-# skipped together with their value when scanning for the subcommand (so
-# `git -C /x push` is still seen as a push).
-_GIT_VALUE_OPTS = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path", "--config-env"}
+def parse_publication_safety_observation(text: str) -> PublicationSafetyObservation:
+    text = text.replace("\r\n", "\n")
+    if "\r" in text:
+        return PublicationSafetyObservation("malformed", None)
+    v3_matches = list(SCAN_CLEAN_RANGE_V3_REGEX.finditer(text))
+    clean_lines = [
+        line for line in text.splitlines()
+        if line.startswith("publication-safety: clean (")
+    ]
+    has_failure = bool(
+        SCAN_FAILURE_MARKER_REGEX.search(text) or SCAN_TYPED_FAILURE_REGEX.search(text)
+    )
+    if len(v3_matches) == 1 and len(clean_lines) == 1 and not has_failure:
+        match = v3_matches[0]
+        remote = _decode_canonical_receipt_token(match.group("remote"))
+        destination = _decode_canonical_receipt_token(match.group("dst"))
+        source = _decode_canonical_receipt_token(match.group("src"))
+        if remote is None or destination is None or source is None:
+            return PublicationSafetyObservation("malformed", None)
+        counts = {
+            name: int(match.group(name))
+            for name in (
+                "commits", "objects", "blobs", "blob_bytes", "text",
+                "binary", "subjects", "paths",
+            )
+        }
+        if (
+            counts["commits"] > counts["objects"]
+            or counts["blobs"] > counts["objects"]
+            or counts["text"] + counts["binary"] != counts["blobs"]
+            or (
+                counts["blobs"] == 0
+                and any(counts[name] != 0 for name in (
+                    "blob_bytes", "text", "binary", "subjects", "paths"
+                ))
+            )
+            or (
+                counts["blobs"] > 0
+                and not (
+                    counts["subjects"] >= counts["paths"] >= counts["blobs"]
+                )
+            )
+        ):
+            return PublicationSafetyObservation("malformed", None)
+        return PublicationSafetyObservation(
+            "valid-v3",
+            RangeReceiptV3(
+                counts["commits"],
+                match.group("commit_set"),
+                counts["objects"],
+                match.group("object_set"),
+                counts["blobs"],
+                match.group("blob_set"),
+                counts["blob_bytes"],
+                counts["text"],
+                counts["binary"],
+                counts["subjects"],
+                match.group("subject_set"),
+                counts["paths"],
+                match.group("path_set"),
+                remote,
+                destination,
+                source,
+                match.group("tip"),
+            ),
+        )
+    if v3_matches or "publication-safety: clean (range, receipt=v3" in text:
+        return PublicationSafetyObservation("malformed", None)
+    if "publication-safety: clean (range, receipt=v2" in text:
+        return (
+            PublicationSafetyObservation("legacy-nonauthorizing", None)
+            if len(clean_lines) == 1 and not has_failure
+            else PublicationSafetyObservation("malformed", None)
+        )
+    if (
+        SCAN_CLEAN_TRACKED_REGEX.search(text)
+        or SCAN_CLEAN_RANGE_REGEX.search(text)
+        or SCAN_CLEAN_PATH_REGEX.search(text)
+    ):
+        return PublicationSafetyObservation("legacy-nonauthorizing", None)
+    if clean_lines or has_failure:
+        return PublicationSafetyObservation("malformed", None)
+    return PublicationSafetyObservation("none", None)
+
+
+# Git global options that consume a separate following value. They are
+# retained in the invocation record; this set only identifies their arity.
 
 # Shell keywords that PRECEDE a command without consuming the command slot
 # (`if ...; then git push; fi`, `for b in x; do git push; done`).
-_SHELL_KEYWORDS = {"if", "then", "elif", "else", "while", "until", "do", "!"}
 
 
-def _is_redirection_operator(token: str) -> bool:
-    return ("<" in token or ">" in token) and all(character in "<>&" for character in token)
 
 
 def _mask_attached_io_numbers(command: str) -> str:
@@ -753,13 +1218,10 @@ def _mask_attached_io_numbers(command: str) -> str:
     left untouched, so positional or quoted ref names such as `2` stay
     ordinary arguments.
 
-    Heredoc syntax has separate lexical rules. This narrow correction does
-    not alter any command containing a heredoc introducer, avoiding changes
-    to heredoc bodies or delimiters.
+    Heredoc and here-string bodies are removed by the data-region owner before
+    this prepass runs, so attached descriptors in executable text are handled
+    without inspecting body data.
     """
-    if "<<" in command:
-        return command
-
     masked = list(command)
     quote: str | None = None
     index = 0
@@ -800,230 +1262,58 @@ def _mask_attached_io_numbers(command: str) -> str:
     return "".join(masked)
 
 
-def iter_command_segments(command: str, *, reject_operators: bool = False) -> list[list[str]] | None:
-    """Tokenize `command` and split it into one raw token list per shell
-    command in the pipeline — the SHARED first half of the shell-aware
-    technique this hook uses for BOTH `git push` detection
-    (find_git_push_invocations) and publication-safety-scan EXECUTION
-    detection (find_scan_script_executions, 2026-07-26 mention-vs-execution
-    hardening). One tokenizer, two consumers, on purpose: an earlier
-    incarnation of this fix used this exact tokenizer for `git push` but a
-    bare substring regex for the scanner side, which is exactly how the
-    scanner side was fooled by a `grep` command that merely NAMED the
-    scanner as a target path instead of running it (reproduced live,
-    2026-07-26 adversarial-gate finding) — two parsers for one shell-command
-    concept is how the halves drift apart, so there is only one here.
-
-    Quotes are honored (`git push` or a scanner path inside a quoted string
-    is data, not a command); command separators (`;`, `&&`, `||`, `|`, `&`,
-    `(`, `)`, and an UNQUOTED NEWLINE) start a new segment; redirection
-    targets (`>`, `>>`, `<`, `2>&1`, ...) are consumed and never appear in
-    any segment (pure stream redirection is not a second command). Returns
-    None on a tokenizer error (unbalanced quotes) — fail open, same as the
-    original inline try/except. Each returned segment still has its own
-    leading env-assignment prefix / shell keywords in place; callers that
-    need the EFFECTIVE command word use `strip_command_prefix`.
-
-    NEWLINE-AS-SEPARATOR (2026-07-26, adversarial-gate finding, root cause
-    of TWO defects in the two consumers of this one function — fixed here
-    once rather than in each consumer separately, which is the entire point
-    of sharing one segmenter). `shlex(..., whitespace_split=True)` treats
-    `\\n` as ordinary WHITESPACE by default (it is part of `self.whitespace`
-    out of the box), never as a token of its own — so a multi-line Bash
-    command (routine in this harness: the model routinely batches several
-    commands into one tool call separated by real newlines, not `;`) was
-    tokenized as if every line had been joined with a single space, with NO
-    way to tell where one line ended and the next began. Two independent
-    consumers broke on this, both reproduced live against these exact bytes
-    before this fix:
-      - `_command_is_solely_scan_execution`'s solo-segment rule (the
-        compound-command hardening two revisions ago) never saw more than
-        one segment for `bash check-publication-safety.sh` NEWLINE `grep -rn
-        'examined' tests/`, so it credited the whole thing as a solitary
-        scan execution — the exact compound-command defect that hardening
-        exists to block, resurrected through a newline instead of `;`.
-      - `find_git_push_invocations` never saw `git push` in command
-        position for `cd /repo` NEWLINE `git add -A` NEWLINE `git commit -m
-        x` NEWLINE `git push origin main` — the canonical multi-line
-        publish sequence — because the whole four-line command collapsed
-        into ONE segment whose first token is `cd`, so the segment is
-        rejected outright and the `git push` tokens buried later in the
-        same (wrongly-unified) segment are never reached. This is a
-        PRE-EXISTING gap (confirmed present before this hardening even
-        started), not a regression from the compound-command fix, but it
-        shares the identical root cause and is fixed by the same change:
-        `work-items/bugs/2026-07-26-push-gate-never-fires-on-a-multi-line-
-        push-command.md`.
-    Fixed by explicitly re-including `\\n` as a punctuation/separator
-    character AND removing it from shlex's own whitespace set post-
-    construction (adding it to `punctuation_chars` alone is not sufficient —
-    shlex checks whitespace before punctuation, so a character present in
-    BOTH is still swallowed as whitespace and never reaches the punctuation
-    path; verified empirically against this exact shlex version before
-    relying on it, not assumed from the docs). A newline INSIDE a quoted
-    string (`echo "line1\\nline2"`) is untouched and stays literal data, not
-    a separator — quote-tracking runs before whitespace/punctuation
-    classification either way."""
-    try:
-        lexer = shlex.shlex(
-            _mask_attached_io_numbers(command),
-            posix=True,
-            punctuation_chars="();<>|&\n",
-        )
-        lexer.whitespace_split = True
-        lexer.whitespace = " \t\r"  # exclude \n so it is emitted as its own token, not swallowed
-        tokens: list[str] = []
-        while True:
-            token = lexer.get_token()
-            if token == lexer.eof:
-                break
-            tokens.append(token)
-    except ValueError:
-        return None  # unbalanced quotes / unparseable -> fail open
-
-    segments: list[list[str]] = []
-    current: list[str] = []
-    skip_redir_target = False
-    for tok in tokens:
-        if not tok:
-            continue
-        if reject_operators and (
-            _is_redirection_operator(tok)
-            or all(c in ";|&()\n" for c in tok)
-        ):
-            return None
-        if skip_redir_target:
-            skip_redir_target = False
-            continue
-        # A redirection operator (`>`, `>>`, `<`, `2>`, `&>`, ...) is not a
-        # command separator; the next token is its target, not a command/arg.
-        if _is_redirection_operator(tok):
-            skip_redir_target = True
-            continue
-        # Command separators (including a bare, unquoted newline) -> the
-        # next token starts a new segment.
-        if all(c in ";|&()\n" for c in tok):
-            if current:
-                segments.append(current)
-            current = []
-            continue
-        current.append(tok)
-    if current:
-        segments.append(current)
-    return segments
 
 
-def strip_command_prefix(segment: list[str]) -> list[str]:
-    """Drop a leading env-assignment prefix (`FOO=bar`) and/or leading shell
-    keywords (`if`, `then`, ...) from one command segment — the same
-    command-slot-transparency rule `find_git_push_invocations` always
-    applied, factored out so `find_scan_script_executions` gets it too
-    without a second copy of the logic. Matches consecutively (`FOO=1 BAR=2
-    if git push` all strip) exactly as the original inline loop did."""
-    i = 0
-    while i < len(segment):
-        tok = segment[i]
-        if "=" in tok and tok.split("=", 1)[0].isidentifier():
-            i += 1
-            continue
-        if tok in _SHELL_KEYWORDS:
-            i += 1
-            continue
-        break
-    return segment[i:]
 
 
-def find_git_push_invocations(command: str) -> list[list[str]]:
-    """Return the argument-token list of each `git push` found in command position.
-
-    Built on `iter_command_segments` (tokenize + split on separators/
-    redirection — see that function's docstring for why it is shared with
-    the scan-execution detector rather than duplicated) plus
-    `strip_command_prefix` (env-assignment / leading shell keywords). Within
-    each segment: the effective first token must be `git` (or end in
-    `/git`), then walk remaining tokens skipping git global options (and the
-    value of value-taking ones) to find the first non-option token — it
-    must be `push`. Each detected push contributes the token list up to the
-    end of its segment, so the caller can check for `--dry-run`. Constructs
-    that hide `git` behind another command word (`bash sync.sh`, `eval`,
-    `$(...)`, `xargs`, ...) are not modelled and under-detect — acceptable
-    for a backstop that must fail open. A tokenizer error returns []
-    (fail open), same as before."""
-    segments = iter_command_segments(command)
-    if segments is None:
-        return []  # unparseable -> fail open
-
-    pushes: list[list[str]] = []
-    for raw_segment in segments:
-        segment = strip_command_prefix(raw_segment)
-        if not segment:
-            continue
-        # Normalized comparison (2026-07-26 hardening) -- see
-        # `_normalized_command_word`'s docstring. The prior exact-match test
-        # (`head == "git" or head.endswith("/git")`) only ever caught a bare
-        # lowercase `git` or a forward-slash path ending in `/git`; measured
-        # live against the shipped detector, it missed `git.exe`, `git.EXE`,
-        # an absolute Windows path ending in `git.exe`, and bare-word case
-        # variants `GIT`/`Git` -- all of which resolve and run identically to
-        # `git` on Windows. The root cause was the exact-match test itself,
-        # not the `.exe` suffix specifically, so the fix normalizes the head
-        # token the same way the scan-script detector already normalizes its
-        # own command word, rather than special-casing `.exe` alone.
-        if _normalized_command_word(segment[0]) != "git":
-            continue  # not a git invocation in this segment
-        current_args: list[str] | None = None  # collecting args of an active `git push`
-        skip_value = False
-        for tok in segment[1:]:
-            if current_args is not None:
-                current_args.append(tok)
-                continue
-            if skip_value:
-                skip_value = False
-                continue
-            if tok in _GIT_VALUE_OPTS:
-                skip_value = True
-                continue
-            if tok.startswith("-"):
-                continue  # other git global option
-            # first non-option token after `git` = the subcommand
-            if tok == "push":
-                current_args = []
-                pushes.append(current_args)
-            else:
-                break  # a different git subcommand -> not our concern, rest of segment skipped
-    return pushes
 
 
-def _find_embedded_git_push_invocations(command: str) -> list[list[str]]:
-    """Find literal adjacent ``git push`` tokens outside command position.
 
-    This is only a discriminator for an already-present exact PR grant.  It
-    lets that strict route reject env/wrapper prefixes instead of treating
-    them as non-push, while the generic detector and no-grant outcomes remain
-    unchanged.
-    """
-    segments = iter_command_segments(command)
-    if segments is None:
-        return []
-    found: list[list[str]] = []
-    for segment in segments:
-        for idx in range(len(segment) - 1):
-            if _normalized_command_word(segment[idx]) == "git" and segment[idx + 1] == "push":
-                found.append(segment[idx + 2:])
-        if not segment:
-            continue
-        head = _normalized_command_word(segment[0])
-        nested: str | None = None
-        if head in ("bash", "sh", "dash", "zsh"):
-            for idx, token in enumerate(segment[1:], start=1):
-                if token in ("-c", "--command") and idx + 1 < len(segment):
-                    nested = segment[idx + 1]
-                    break
-        elif head == "eval" and len(segment) > 1:
-            nested = " ".join(segment[1:])
-        if nested and nested != command:
-            found.extend(_find_embedded_git_push_invocations(nested))
-    return found
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 # --- Publication-safety scan EXECUTION detection (2026-07-26 hardening) ---
@@ -1032,157 +1322,107 @@ def _find_embedded_git_push_invocations(command: str) -> list[list[str]]:
 # insensitively (Windows paths are case-insensitive and real PowerShell/CMD
 # invocations on this machine vary case), so any installed or repo-local
 # copy at any of the pack's own script paths is recognized.
-_SCAN_SCRIPT_BASENAMES = {
-    "check-publication-safety.py", "check-publication-safety.sh",
-    "check-publication-gate.py", "check-publication-gate.sh",
-}
 
 # Interpreters that can be told to run an arbitrary script file as their
 # FIRST operand (`bash x.sh`, `sh x.sh`, `. x.sh` / `source x.sh`). A bare
 # `./x.sh` (or any other path ending in one of the basenames above) with NO
-# interpreter prefix is also recognized — see `_segment_runs_scan_script`'s
+# interpreter prefix is also recognized — see `_record_runs_scan_script`'s
 # direct-exec branch.
-_SHELL_INTERPRETERS = {"bash", "sh", "dash", ".", "source"}
 
 # PowerShell/pwsh flag whose OWN value is the script path to run.
-_PS_FILE_FLAGS = {"-file"}
 # PowerShell/pwsh flag whose OWN value is an arbitrary COMMAND STRING —
 # re-tokenized and re-scanned through this SAME segment machinery
 # (recursion, not a second parser), so `-Command "grep ... x.ps1"` cannot
 # launder a MENTION as an execution the way the old plain-substring regex
 # could.
-_PS_COMMAND_FLAGS = {"-command", "-c"}
 
 
-def _basename(path: str) -> str:
-    return path.replace("\\", "/").rsplit("/", 1)[-1]
 
 
-def _normalized_command_word(token: str) -> str:
-    """Lowercased basename of `token` with a trailing `.exe` suffix stripped.
-
-    This is the SAME normalization `_segment_runs_scan_script` already
-    applied inline when recognizing the PowerShell/pwsh interpreter name
-    (`ps_name`, below) -- extracted here so `find_git_push_invocations`'s
-    git-head test REUSES it instead of growing a second, independently-
-    drifting normalizer for the identical "what shell word is this really"
-    question. Two normalizers for one concept is exactly the defect class
-    this file's own scan-execution detector exists to avoid (see
-    `iter_command_segments`'s docstring: "one tokenizer, two consumers ...
-    two parsers for one shell-command concept is how the halves drift
-    apart") -- this function applies that same discipline one layer down
-    (2026-07-26 hardening, `git.exe`/`GIT`/`Git` head-detection gap,
-    `work-items/bugs/2026-07-26-the-deny-message-teaches-the-marker-that-
-    opens-the-gate.md` §"A second, smaller one from the same review").
-
-    `_basename`'s backslash-to-forward-slash + rsplit handles a Windows
-    absolute path (`C:\\Program Files\\Git\\bin\\git.exe`); `.lower()`
-    handles Windows' case-insensitive command resolution (`GIT push`,
-    `Git push`, `git.EXE push` all resolve and run identically to `git
-    push` -- measured live, 2026-07-26: the pre-fix exact-match head test
-    caught none of these); the `.exe` strip handles the Windows executable
-    suffix both `git` and the PowerShell interpreters ship under, with or
-    without a path prefix."""
-    base = _basename(token).lower()
-    if base.endswith(".exe"):
-        base = base[:-4]
-    return base
 
 
-def _segment_runs_scan_script(raw_segment: list[str]) -> bool:
-    """True if this ONE command segment's own leading command word directly
-    EXECUTES a publication-safety scan script — never merely names one as an
-    argument to some OTHER command. A `grep`/`cat`/`ls`/`Test-Path`/
-    `ParseFile` of the scanner's path is a MENTION, not an execution, and
-    must return False (this is the distinction the prior plain-substring
-    regex could not draw — reproduced live both synthetically and against
-    real historical `Test-Path` / `ls` mentions on this machine, 2026-07-26)."""
-    segment = strip_command_prefix(raw_segment)
-    if not segment:
-        return False
-    head_base = _basename(segment[0]).lower()
-
-    # Direct exec: the command word itself IS the scanner
-    # (`./check-publication-safety.sh`, a bare basename on PATH, or an
-    # absolute/relative path to it).
-    if head_base in _SCAN_SCRIPT_BASENAMES:
-        return True
-
-    # Interpreter + script-path-as-first-operand (`bash check-...sh`, ...).
-    if head_base in _SHELL_INTERPRETERS:
-        return len(segment) > 1 and _basename(segment[1]).lower() in _SCAN_SCRIPT_BASENAMES
-
-    # PowerShell / pwsh, any casing, optional `.exe` suffix -- reuses
-    # `_normalized_command_word` (see its docstring) rather than repeating
-    # the basename/lower/`.exe`-strip sequence inline a second time; the
-    # `find_git_push_invocations` git-head test below now shares this exact
-    # function instead of carrying its own copy.
-    ps_name = _normalized_command_word(segment[0])
-    if ps_name in ("powershell", "pwsh"):
-        i = 1
-        while i < len(segment):
-            flag = segment[i].lower()
-            if flag in _PS_FILE_FLAGS:
-                return i + 1 < len(segment) and _basename(segment[i + 1]).lower() in _SCAN_SCRIPT_BASENAMES
-            if flag in _PS_COMMAND_FLAGS:
-                if i + 1 >= len(segment):
-                    return False
-                # -Command's value is itself a command string — recurse
-                # through the SAME tokenizer/segmenter, not a second parser.
-                nested = " ".join(segment[i + 1:])
-                return _command_is_solely_scan_execution(nested)
-            i += 1
-        return False
-    return False
 
 
-def _command_is_solely_scan_execution(command: str) -> bool:
-    """True if `command` contains EXACTLY ONE shell command segment and that
-    segment EXECUTES a publication-safety scan script. Deliberately rejects
-    ANY additional chained/piped/backgrounded segment (`;`, `&&`, `||`, `|`,
-    `&`) — even a benign-looking one (`| tail`, `; echo done`) — because of
-    the 2026-07-26 adversarial-gate compound-command finding: a command that
-    runs the REAL scanner ALONGSIDE a second, independently-invoked sibling
-    command in the SAME tool call (`bash check-publication-safety.sh; grep
-    -rn 'examined' tests/`) merges both commands' stdout into ONE
-    correlated tool result, so a real, correctly-zero-file scan plus an
-    unrelated sibling command's own real output can together satisfy the
-    clean-result regex with no real clean scan of anything having occurred.
-    There is no way to attribute which OUTPUT LINE came from which SEGMENT
-    once the shell has merged them into one stdout stream, so the only
-    sound rule is: credit an invocation as scan evidence ONLY when the scan
-    is the single, solitary command in that call. Pure stream REDIRECTION
-    (`2>&1`, `> file`) is NOT a second segment — `iter_command_segments`
-    strips redirection targets, never splits on them — and remains allowed
-    (`bash check-publication-safety.sh 2>&1 > out.txt` is still one
-    segment). This is a disclosed, deliberate trade-off (a real scan piped
-    through `| tail` no longer counts as gate evidence), not a silent
-    regression — see the module docstring's WHAT THIS STILL DOES NOT COVER
-    section — and it is the direction that fails safe: it makes the gate
-    under-count real scans, never over-count a compound one."""
-    segments = iter_command_segments(command)
-    if not segments or len(segments) != 1:
-        return False
-    return _segment_runs_scan_script(segments[0])
 
 
-def find_scan_script_executions(command: str) -> bool:
-    """Public entry point: True if `command` is (solely) a real EXECUTION of
-    a publication-safety scan script. Replaces a plain substring regex over
-    a call's flattened text, which matched a MENTION exactly as readily as
-    an execution. `/agents-check-safety` is intentionally not matched as its
-    own shape here — see the comment above SCAN_CLEAN_TRACKED_REGEX's
-    former neighbor for why: no real transcript on this machine ever shows
-    it as a distinct tool-call shape, and its own documented steps always
-    bottom out in a real `bash .../check-publication-safety.sh` call, which
-    this function recognizes like any other real execution."""
-    return _command_is_solely_scan_execution(command)
+def _parse_pr_grant(text: str) -> ActivePrGrant | None:
+    if not text.startswith(PR_GRANT_PREFIX) or not text.endswith("]"):
+        return None
+    target = text[len(PR_GRANT_PREFIX):-1]
+    if PR_GRANT_NUMBER_REGEX.fullmatch(target):
+        return ActivePrGrant(target, "", "", int(target))
+    markdown = PR_GRANT_MARKDOWN_REGEX.fullmatch(target)
+    if markdown:
+        if markdown.group("label") != markdown.group("destination"):
+            return None
+        target = markdown.group("label")
+    match = PR_URL_REGEX.fullmatch(target)
+    if not match:
+        return None
+    owner = match.group("owner")
+    repo = match.group("repo")
+    if owner in (".", "..") or repo in (".", ".."):
+        return None
+    return ActivePrGrant(
+        match.group("url"), owner, repo, int(match.group("number"))
+    )
 
 
-def _derive_pr_grant(entries: list[dict]) -> tuple[str, ActivePrGrant | None]:
+def _canonicalize_numeric_pr_grant(
+    number: int, authorization_workdir: str
+) -> ActivePrGrant:
+    repository_workdir = _normalize_repository_workdir(authorization_workdir)
+    git_exe = _resolve_executable("git", repository_workdir)
+    gh_exe = _resolve_executable("gh", repository_workdir)
+    if git_exe is None or gh_exe is None:
+        raise PrRouteDenied("PRG-PR-UNAVAILABLE")
+    repository_workdir = _prove_repository_root(repository_workdir, git_exe)
+    deadline = time.monotonic() + ORACLE_TIMEOUT_SECONDS
+    _, repo_text = _run_text(
+        [gh_exe, "repo", "view", "--json", "nameWithOwner,url"],
+        deadline, "PRG-PR-UNAVAILABLE", repository_workdir,
+    )
+    repository = _strict_json(repo_text, dict, "PRG-PR-UNAVAILABLE")
+    name = repository.get("nameWithOwner")
+    if not isinstance(name, str) or name.count("/") != 1:
+        raise PrRouteDenied("PRG-PR-UNAVAILABLE")
+    owner, repo = name.split("/", 1)
+    if not REPO_COMPONENT_REGEX.fullmatch(owner) or not REPO_COMPONENT_REGEX.fullmatch(repo):
+        raise PrRouteDenied("PRG-PR-UNAVAILABLE")
+    if repository.get("url") != f"https://github.com/{owner}/{repo}":
+        raise PrRouteDenied("PRG-PR-UNAVAILABLE")
+    _, pr_text = _run_text(
+        [gh_exe, "pr", "view", str(number), "--repo", name, "--json", "number,url"],
+        deadline, "PRG-PR-UNAVAILABLE", repository_workdir,
+    )
+    pr = _strict_json(pr_text, dict, "PRG-PR-UNAVAILABLE")
+    match = PR_URL_REGEX.fullmatch(pr.get("url")) if isinstance(pr.get("url"), str) else None
+    if (
+        match is None or pr.get("number") != number
+        or match.group("owner") != owner or match.group("repo") != repo
+    ):
+        raise PrRouteDenied("PRG-BINDING-DRIFT")
+    if _prove_repository_root(repository_workdir, git_exe) != repository_workdir:
+        raise PrRouteDenied("PRG-BINDING-DRIFT")
+    return ActivePrGrant(match.group("url"), owner, repo, number)
+
+
+def _derive_pr_grant(
+    entries: list[dict], envelope_repository_workdir: str
+) -> tuple[str, ActivePrGrant | None]:
     state = "absent"
     grant: ActivePrGrant | None = None
-    for entry in entries:
+    transcript_workdir: str | None = None
+    genuine_user_indexes = [
+        index for index, entry in enumerate(entries)
+        if is_user_message(entry) and extract_user_typed_text(entry)
+    ]
+    last_user_index = genuine_user_indexes[-1] if genuine_user_indexes else -1
+    for index, entry in enumerate(entries):
+        payload = entry.get("payload") if isinstance(entry, dict) else None
+        if entry.get("type") in ("session_meta", "turn_context"):
+            raw_context = payload.get("cwd") if isinstance(payload, dict) else None
+            transcript_workdir = raw_context if type(raw_context) is str and raw_context else None
         if not is_user_message(entry):
             continue
         text = extract_user_typed_text(entry)
@@ -1191,21 +1431,108 @@ def _derive_pr_grant(entries: list[dict]) -> tuple[str, ActivePrGrant | None]:
         if text == PR_REVOKE_MARKER:
             state, grant = "revoked", None
             continue
-        match = PR_GRANT_REGEX.fullmatch(text)
-        if match:
-            owner = match.group("owner")
-            repo = match.group("repo")
-            if owner in (".", "..") or repo in (".", ".."):
-                state, grant = "malformed", None
-            else:
-                state = "active"
-                grant = ActivePrGrant(
-                    match.group("url"), owner, repo, int(match.group("number"))
+        parsed_grant = _parse_pr_grant(text)
+        if parsed_grant is not None:
+            if not parsed_grant.owner:
+                direct_context = entry.get("cwd")
+                if direct_context is not None and (
+                    type(direct_context) is not str or not direct_context
+                ):
+                    state, grant = "malformed", None
+                    continue
+                contexts = {
+                    value for value in (direct_context, transcript_workdir)
+                    if value is not None
+                }
+                if len(contexts) > 1:
+                    state, grant = "malformed", None
+                    continue
+                authorization_workdir = next(iter(contexts), None)
+                if authorization_workdir is None and index == last_user_index:
+                    authorization_workdir = envelope_repository_workdir
+                if authorization_workdir is None:
+                    state, grant = "malformed", None
+                    continue
+                parsed_grant = _canonicalize_numeric_pr_grant(
+                    parsed_grant.number, authorization_workdir
                 )
+            state, grant = "active", parsed_grant
             continue
         if text.startswith(PR_RESERVED_PREFIXES):
             state, grant = "malformed", None
     return state, grant
+
+
+def _read_stable_transcript_suffix(transcript_path: str) -> tuple[list[dict], str]:
+    """Read one stable complete-record suffix under the history reader's caps."""
+    if not transcript_path:
+        return [], "absent"
+    path = Path(transcript_path)
+    try:
+        with path.open("rb") as stream:
+            before = os.fstat(stream.fileno())
+            eof = before.st_size
+            if eof > TRANSCRIPT_HISTORY_BYTE_CAP:
+                stream.seek(eof - TRANSCRIPT_HISTORY_BYTE_CAP)
+                raw = stream.read(TRANSCRIPT_HISTORY_BYTE_CAP)
+                if len(raw) != TRANSCRIPT_HISTORY_BYTE_CAP:
+                    return [], "unreadable"
+                sentinel, payload = raw[:1], raw[1:]
+                if sentinel != b"\n":
+                    newline = payload.find(b"\n")
+                    if newline < 0:
+                        return [], "limit"
+                    payload = payload[newline + 1 :]
+            else:
+                stream.seek(0)
+                payload = stream.read(eof)
+                if len(payload) != eof:
+                    return [], "unreadable"
+            after = os.fstat(stream.fileno())
+            current = path.stat()
+    except Exception:
+        return [], "unreadable"
+
+    identity_before = (
+        before.st_dev,
+        before.st_ino,
+        before.st_size,
+        before.st_mtime_ns,
+    )
+    if identity_before != (
+        after.st_dev,
+        after.st_ino,
+        after.st_size,
+        after.st_mtime_ns,
+    ) or identity_before != (
+        current.st_dev,
+        current.st_ino,
+        current.st_size,
+        current.st_mtime_ns,
+    ):
+        return [], "unreadable"
+
+    raw_lines = payload.split(b"\n")
+    ended_with_newline = payload.endswith(b"\n")
+    if ended_with_newline:
+        raw_lines.pop()
+    entries: list[dict] = []
+    for index, raw_line in enumerate(raw_lines):
+        if not raw_line.strip():
+            continue
+        line_size = len(raw_line) + (1 if ended_with_newline or index < len(raw_lines) - 1 else 0)
+        if line_size > TRANSCRIPT_HISTORY_LINE_BYTE_CAP:
+            return [], "limit"
+        if len(entries) >= TRANSCRIPT_HISTORY_RECORD_CAP:
+            return [], "limit"
+        try:
+            entry = json.loads(raw_line.decode("utf-8", errors="strict"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return [], "invalid"
+        if not isinstance(entry, dict):
+            return [], "invalid"
+        entries.append(entry)
+    return entries, "found"
 
 
 def _is_within(path: Path, parent: Path) -> bool:
@@ -1216,13 +1543,13 @@ def _is_within(path: Path, parent: Path) -> bool:
         return False
 
 
-def _resolve_executable(name: str) -> str | None:
+def _resolve_executable(name: str, repository_root: str) -> str | None:
     candidate = shutil.which(name)
     if not candidate:
         return None
     try:
         resolved = Path(candidate).resolve(strict=True)
-        workspace = Path.cwd().resolve(strict=True)
+        workspace = Path(repository_root).resolve(strict=True)
     except Exception:
         return None
     if not resolved.is_file() or _is_within(resolved, workspace):
@@ -1233,8 +1560,8 @@ def _resolve_executable(name: str) -> str | None:
 _PR_COMMAND_DIALECT_TEST_OVERRIDE: str | None = None
 
 
-def _pr_command_dialect(tool_name: object) -> str:
-    """Select one production shell contract; never infer it from command text."""
+def _pr_command_dialect(resolved_dialect: str) -> str:
+    """Validate the preflight-resolved production shell contract."""
     if _PR_COMMAND_DIALECT_TEST_OVERRIDE in ("posix", "powershell"):
         return _PR_COMMAND_DIALECT_TEST_OVERRIDE
     try:
@@ -1244,92 +1571,46 @@ def _pr_command_dialect(tool_name: object) -> str:
     if source.endswith((
         "/.claude/agents/scripts/check-git-push-gate.py",
         "/src.claude/agents/scripts/check-git-push-gate.py",
-    )) and tool_name == "Bash":
-        return "posix"
+    )) and resolved_dialect == "posix":
+        return resolved_dialect
     if source.endswith((
+        "/.agents/skills/lead/scripts/check-git-push-gate.py",
         "/.codex/skills/lead/scripts/check-git-push-gate.py",
         "/src.codex/skills/lead/scripts/check-git-push-gate.py",
     )):
-        if os.name == "posix" and tool_name in ("Bash", "shell_command", "exec_command"):
-            return "posix"
-        if os.name == "nt" and tool_name in ("PowerShell", "shell_command", "exec_command"):
-            return "powershell"
+        if os.name == "posix" and resolved_dialect == "posix":
+            return resolved_dialect
+        if os.name == "nt" and resolved_dialect == "powershell":
+            return resolved_dialect
     raise PrRouteDenied("PRG-COMMAND-SHAPE")
 
 
-def _serialize_powershell_literal(argv: tuple[str, str, str, str]) -> str:
-    return "& " + " ".join("'" + word.replace("'", "''") + "'" for word in argv)
 
 
-def _decode_powershell_literal(command: str) -> tuple[str, str, str, str]:
-    if not command.startswith("& "):
-        raise PrRouteDenied("PRG-COMMAND-SHAPE")
-    words: list[str] = []
-    offset = 2
-    for word_index in range(4):
-        if offset >= len(command) or command[offset] != "'":
-            raise PrRouteDenied("PRG-COMMAND-SHAPE")
-        offset += 1
-        decoded: list[str] = []
-        while offset < len(command):
-            char = command[offset]
-            if char != "'":
-                decoded.append(char)
-                offset += 1
-                continue
-            if offset + 1 < len(command) and command[offset + 1] == "'":
-                decoded.append("'")
-                offset += 2
-                continue
-            offset += 1
-            break
-        else:
-            raise PrRouteDenied("PRG-COMMAND-SHAPE")
-        words.append("".join(decoded))
-        if word_index < 3:
-            if offset >= len(command) or command[offset] != " ":
-                raise PrRouteDenied("PRG-COMMAND-SHAPE")
-            offset += 1
-        elif offset != len(command):
-            raise PrRouteDenied("PRG-COMMAND-SHAPE")
-    return tuple(words)  # type: ignore[return-value]
 
 
 def _portable_pr_head_ref(value: str) -> bool:
     return PR_HEAD_REF_REGEX.fullmatch(value) is not None
 
 
-def _parse_pr_literal_command(
-    command: str,
-    resolved_git: str,
-    dialect: str,
+def _parse_pr_literal_shape(
+    parsed: ShellParseResult, dialect: str
 ) -> LiteralPushCommand:
-    if dialect == "posix":
-        try:
-            decoded = shlex.split(command, posix=True)
-        except ValueError:
-            raise PrRouteDenied("PRG-COMMAND-SHAPE") from None
-        if len(decoded) != 4 or shlex.join(decoded) != command:
-            raise PrRouteDenied("PRG-COMMAND-SHAPE")
-    elif dialect == "powershell":
-        decoded = list(_decode_powershell_literal(command))
-        if _serialize_powershell_literal(tuple(decoded)) != command:  # type: ignore[arg-type]
+    if parsed.dialect != dialect or parsed.strict_projection.status != "canonical":
+        raise PrRouteDenied("PRG-COMMAND-SHAPE")
+    if dialect not in ("posix", "powershell"):
+        raise PrRouteDenied("PRG-COMMAND-SHAPE")
+    decoded = list(parsed.strict_projection.argv)
+    if len(decoded) == 4:
+        executable, subcommand, remote, refspec = decoded
+        repository_root = None
+    elif len(decoded) == 6 and decoded[1] == "-C":
+        executable, _option, repository_root, subcommand, remote, refspec = decoded
+        if not Path(repository_root).is_absolute():
             raise PrRouteDenied("PRG-COMMAND-SHAPE")
     else:
         raise PrRouteDenied("PRG-COMMAND-SHAPE")
-
-    executable, subcommand, remote, refspec = decoded
-    if subcommand != "push" or executable != resolved_git or not Path(executable).is_absolute():
-        raise PrRouteDenied("PRG-COMMAND-SHAPE")
-    try:
-        executable_path = Path(executable).resolve(strict=True)
-        resolved_path = Path(resolved_git).resolve(strict=True)
-        same_identity = executable_path.is_file() and resolved_path.is_file() and os.path.samefile(
-            executable_path, resolved_path
-        )
-    except Exception:
-        same_identity = False
-    if not same_identity:
+    if subcommand != "push" or not Path(executable).is_absolute():
         raise PrRouteDenied("PRG-COMMAND-SHAPE")
     if not REMOTE_NAME_REGEX.fullmatch(remote):
         raise PrRouteDenied("PRG-COMMAND-SHAPE")
@@ -1340,10 +1621,40 @@ def _parse_pr_literal_command(
     if not _portable_pr_head_ref(head_ref):
         raise PrRouteDenied("PRG-COMMAND-SHAPE")
     target = PushTarget(remote, f"refs/heads/{head_ref}", head_ref)
-    return LiteralPushCommand(dialect, executable, remote, refspec, target)
+    return LiteralPushCommand(
+        dialect, executable, remote, refspec, target, repository_root
+    )
 
 
-def _run_process(argv: list[str], timeout: float) -> ProcessResult | None:
+def _bind_pr_literal_executable(
+    literal: LiteralPushCommand, resolved_git: str
+) -> LiteralPushCommand:
+    try:
+        executable_path = Path(literal.executable).resolve(strict=True)
+        resolved_path = Path(resolved_git).resolve(strict=True)
+        same_identity = executable_path.is_file() and resolved_path.is_file() and os.path.samefile(
+            executable_path, resolved_path
+        )
+    except Exception:
+        same_identity = False
+    if not same_identity:
+        raise PrRouteDenied("PRG-COMMAND-SHAPE")
+    return literal
+
+
+def _parse_pr_literal_command(
+    parsed: ShellParseResult,
+    resolved_git: str,
+    dialect: str,
+) -> LiteralPushCommand:
+    return _bind_pr_literal_executable(
+        _parse_pr_literal_shape(parsed, dialect), resolved_git
+    )
+
+
+def _run_process(
+    argv: list[str], timeout: float, repository_workdir: str
+) -> ProcessResult | None:
     env = os.environ.copy()
     env.pop("GH_REPO", None)
     env["GH_PROMPT_DISABLED"] = "1"
@@ -1355,6 +1666,7 @@ def _run_process(argv: list[str], timeout: float) -> ProcessResult | None:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             env=env,
+            cwd=repository_workdir,
         )
     except OSError:
         return None
@@ -1407,23 +1719,851 @@ def _run_process(argv: list[str], timeout: float) -> ProcessResult | None:
     return ProcessResult(process.returncode, bytes(stdout), bytes(stderr))
 
 
+_SCAN_BOOTSTRAP = r'''import base64,builtins,json,sys,types
+bundle=json.loads(sys.stdin.buffer.read().decode("ascii"))
+sources={key:base64.b64decode(value,validate=True) for key,value in bundle.items()}
+allowed=set(sys.stdlib_module_names)|{"hook_common"}
+original_import=builtins.__import__
+def guarded_import(name,globals=None,locals=None,fromlist=(),level=0):
+    if not level and name.split(".",1)[0] not in allowed:
+        raise ImportError("non-standard import denied")
+    return original_import(name,globals,locals,fromlist,level)
+builtins.__import__=guarded_import
+common=types.ModuleType("hook_common")
+common.__file__="<closure>/hook_common.py"
+sys.modules["hook_common"]=common
+exec(compile(sources["hook_common"],common.__file__,"exec"),common.__dict__,common.__dict__)
+classifier={"__name__":"_publication_path_owner","__file__":"<closure>/check-machine-local-path.py","__package__":None,"__cached__":None}
+exec(compile(sources["classifier"],classifier["__file__"],"exec"),classifier,classifier)
+finder=classifier.get("find_machine_paths")
+if not callable(finder):
+    raise RuntimeError("classifier contract")
+posix_helper_name="_orchestrarium_posix_process_group_v1"
+posix_helper=types.ModuleType(posix_helper_name)
+posix_helper.__file__="<closure>/process_supervision/posix_process_group.py"
+sys.modules[posix_helper_name]=posix_helper
+exec(compile(sources["posix_helper"],posix_helper.__file__,"exec"),posix_helper.__dict__,posix_helper.__dict__)
+if len(sys.argv)<3 or sys.argv[1]!="--gate-git-executable":
+    raise RuntimeError("git executable contract")
+git_executable=sys.argv[2]
+scanner_path="<closure>/check-publication-safety.py"
+scanner={"__name__":"__main__","__file__":scanner_path,"__package__":None,"__cached__":None,"__injected_find_machine_paths__":finder,"__injected_git_executable__":git_executable,"__injected_posix_process_group_module__":posix_helper}
+sys.argv=[scanner_path,*sys.argv[3:]]
+exec(compile(sources["scanner"],scanner_path,"exec"),scanner,scanner)
+'''
+
+
+def _stat_identity(value: os.stat_result) -> tuple[int, ...]:
+    return (
+        int(value.st_dev), int(value.st_ino), int(value.st_mode),
+        int(value.st_nlink), int(value.st_size),
+        int(getattr(value, "st_mtime_ns", int(value.st_mtime * 1_000_000_000))),
+    )
+
+
+def _is_link_or_reparse(value: os.stat_result) -> bool:
+    attributes = int(getattr(value, "st_file_attributes", 0))
+    return stat.S_ISLNK(value.st_mode) or bool(attributes & 0x400)
+
+
+def _regular_identity(path: Path, *, single_link: bool) -> tuple[int, ...]:
+    value = os.lstat(path)
+    if _is_link_or_reparse(value) or not stat.S_ISREG(value.st_mode):
+        raise ValueError("object-kind")
+    if single_link and value.st_nlink != 1:
+        raise ValueError("link-count")
+    return _stat_identity(value)
+
+
+def _directory_identity(value: os.stat_result) -> tuple[int, ...]:
+    if _is_link_or_reparse(value) or not stat.S_ISDIR(value.st_mode):
+        raise ValueError("parent-kind")
+    return _stat_identity(value)
+
+
+def _directory_generation(path: Path) -> tuple[int, ...]:
+    return _directory_identity(os.lstat(path))
+
+
+def _interpreter_identity() -> TrustedInterpreterIdentity:
+    raw = Path(sys.executable)
+    if not raw.is_absolute():
+        raise ValueError("interpreter-path")
+    resolved = raw.resolve(strict=True)
+    identity = _regular_identity(resolved, single_link=False)
+    return TrustedInterpreterIdentity(str(resolved), identity)
+
+
+def _open_windows_path(path: Path, *, directory: bool) -> int:
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    create_file = ctypes.WinDLL("kernel32", use_last_error=True).CreateFileW
+    create_file.argtypes = (
+        wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
+        wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE,
+    )
+    create_file.restype = wintypes.HANDLE
+    desired_access = 0 if directory else 0x80000000
+    share_mode = 0x00000001 | (0x00000002 | 0x00000004 if directory else 0)
+    flags = 0x00200000 | (0x02000000 if directory else 0x00000080)
+    handle = create_file(str(path), desired_access, share_mode, None, 3, flags, None)
+    invalid = ctypes.c_void_p(-1).value
+    if handle in (None, invalid):
+        raise OSError(ctypes.get_last_error(), "CreateFileW")
+    try:
+        return msvcrt.open_osfhandle(
+            int(handle), os.O_RDONLY | getattr(os, "O_BINARY", 0)
+        )
+    except Exception:
+        ctypes.WinDLL("kernel32", use_last_error=True).CloseHandle(handle)
+        raise
+
+
+def _open_windows_source(path: Path) -> int:
+    return _open_windows_path(path, directory=False)
+
+
+def _capture_directory(path: Path) -> tuple[int, tuple[int, ...]]:
+    path_identity = _directory_generation(path)
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+    if os.name == "posix":
+        nofollow = getattr(os, "O_NOFOLLOW", None)
+        directory_flag = getattr(os, "O_DIRECTORY", None)
+        if nofollow is None or directory_flag is None:
+            raise ValueError("directory-open-unavailable")
+        flags |= nofollow | directory_flag
+    fd = (
+        _open_windows_path(path, directory=True)
+        if os.name == "nt"
+        else os.open(path, flags)
+    )
+    try:
+        opened_identity = _directory_identity(os.fstat(fd))
+        if opened_identity != path_identity:
+            raise ValueError("directory-open-identity")
+        return fd, opened_identity
+    except Exception:
+        os.close(fd)
+        raise
+
+
+def _capture_source_node(path: Path, role: str) -> tuple[int, SourceNode]:
+    path_identity = _regular_identity(path, single_link=True)
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_CLOEXEC", 0)
+    nofollow = getattr(os, "O_NOFOLLOW", None)
+    if os.name == "posix":
+        if nofollow is None:
+            raise ValueError("nofollow-unavailable")
+        flags |= nofollow
+    fd = _open_windows_source(path) if os.name == "nt" else os.open(path, flags)
+    try:
+        opened = os.fstat(fd)
+        opened_identity = _stat_identity(opened)
+        if (
+            _is_link_or_reparse(opened)
+            or not stat.S_ISREG(opened.st_mode)
+            or opened.st_nlink != 1
+            or opened_identity != path_identity
+        ):
+            raise ValueError("open-identity")
+        chunks: list[bytes] = []
+        total = 0
+        while True:
+            chunk = os.read(fd, min(65_536, SCAN_SNAPSHOT_BYTE_CAP + 1 - total))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            total += len(chunk)
+            if total > SCAN_SNAPSHOT_BYTE_CAP:
+                raise ValueError("snapshot-limit")
+        source = b"".join(chunks)
+        if len(source) != opened.st_size:
+            raise ValueError("snapshot-size")
+        return fd, SourceNode(
+            role, str(path), opened_identity,
+            int(opened.st_nlink), len(source), hashlib.sha256(source).hexdigest(), source,
+        )
+    except Exception:
+        os.close(fd)
+        raise
+
+
+def _capture_interpreter_handle(
+    identity: InterpreterIdentity,
+) -> int:
+    path = Path(identity.absolute_resolved_path)
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_CLOEXEC", 0)
+    nofollow = getattr(os, "O_NOFOLLOW", None)
+    if os.name == "posix":
+        if nofollow is None:
+            raise ValueError("nofollow-unavailable")
+        flags |= nofollow
+    fd = _open_windows_source(path) if os.name == "nt" else os.open(path, flags)
+    try:
+        opened = os.fstat(fd)
+        opened_identity = _stat_identity(opened)
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or opened_identity[:2] != identity.file_identity[:2]
+            or opened_identity[3:] != identity.file_identity[3:]
+        ):
+            raise ValueError("interpreter-open-identity")
+        return fd
+    except Exception:
+        os.close(fd)
+        raise
+
+
+def _layout_for_gate(gate: Path) -> tuple[SourceLayout, Path]:
+    parts = gate.parts
+    matches = [
+        layout for layout in SOURCE_LAYOUTS
+        if len(parts) >= len(layout.gate_suffix)
+        and tuple(parts[-len(layout.gate_suffix):]) == layout.gate_suffix
+    ]
+    if len(matches) != 1:
+        raise ValueError("layout")
+    layout = matches[0]
+    trust_root = gate.parent
+    for _index in range(layout.trust_root_up):
+        trust_root = trust_root.parent
+    return layout, trust_root
+
+
+def _component_paths(trust_root: Path, paths: tuple[Path, ...]) -> tuple[tuple[str, Path], ...]:
+    observed: dict[str, Path] = {".": trust_root}
+    for path in paths:
+        relative = path.relative_to(trust_root)
+        cursor = trust_root
+        for part in relative.parts[:-1]:
+            cursor = cursor / part
+            name = cursor.relative_to(trust_root).as_posix()
+            observed[name] = cursor
+    return tuple((name, observed[name]) for name in sorted(observed))
+
+
+def _capture_path_components(
+    trust_root: Path, paths: tuple[Path, ...],
+) -> tuple[tuple[int, ...], tuple[PathComponentIdentity, ...]]:
+    fds: list[int] = []
+    components: list[PathComponentIdentity] = []
+    by_name: dict[str, int] = {}
+    try:
+        for name, path in _component_paths(trust_root, paths):
+            if name == "." or os.name != "posix":
+                fd, identity = _capture_directory(path)
+            else:
+                parent_name, _separator, basename = name.rpartition("/")
+                parent_fd = by_name[parent_name or "."]
+                expected_identity = _directory_generation(path)
+                flags = (
+                    os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+                    | getattr(os, "O_NOFOLLOW") | getattr(os, "O_DIRECTORY")
+                )
+                fd = os.open(basename, flags, dir_fd=parent_fd)
+                try:
+                    identity = _directory_identity(os.fstat(fd))
+                    named_identity = _directory_identity(os.stat(
+                        basename, dir_fd=parent_fd, follow_symlinks=False
+                    ))
+                    if identity != expected_identity or named_identity != identity:
+                        raise ValueError("directory-open-identity")
+                except Exception:
+                    os.close(fd)
+                    raise
+            fds.append(fd)
+            by_name[name] = fd
+            components.append(PathComponentIdentity(name, "directory", identity))
+        return tuple(fds), tuple(components)
+    except Exception:
+        for fd in fds:
+            os.close(fd)
+        raise
+
+
+def _capture_source_closure() -> tuple[tuple[int, ...], CanonicalSourceClosure]:
+    gate = Path(os.path.abspath(__file__))
+    layout, trust_root_path = _layout_for_gate(gate)
+    parent = gate.parent
+    posix_helper = (
+        gate.parents[2] / "process_supervision" / "posix_process_group.py"
+        if layout.name == "universal"
+        else parent / "process_supervision" / "posix_process_group.py"
+    )
+    paths = (
+        ("gate", gate),
+        ("hook_common", parent / "hook_common.py"),
+        ("classifier", parent.parent / "hooks" / "check-machine-local-path.py"),
+        ("posix_helper", posix_helper),
+        ("scanner", parent / "check-publication-safety.py"),
+    )
+    fds: list[int] = []
+    nodes: list[SourceNode] = []
+    try:
+        component_paths = (gate,) + tuple(path for _role, path in paths)
+        component_fds, components = _capture_path_components(
+            trust_root_path, component_paths
+        )
+        fds.extend(component_fds)
+        for role, path in paths:
+            fd, node = _capture_source_node(path, role)
+            fds.append(fd)
+            nodes.append(node)
+        bootstrap_digest = hashlib.sha256(_SCAN_BOOTSTRAP.encode("utf-8")).hexdigest()
+        interpreter_identity = _interpreter_identity()
+        fds.append(_capture_interpreter_handle(interpreter_identity))
+        digest_owner = hashlib.sha256(b"publication-safety-closure-v2\0")
+        digest_owner.update(layout.name.encode("ascii") + b"\0")
+        digest_owner.update(bootstrap_digest.encode("ascii"))
+        for component in components:
+            digest_owner.update(b"\0" + component.root_relative_name.encode("utf-8") + b"\0")
+            digest_owner.update(repr(component.identity).encode("ascii"))
+        for node in nodes:
+            digest_owner.update(b"\0" + node.role.encode("ascii") + b"\0")
+            digest_owner.update(node.sha256.encode("ascii"))
+        trust_root = components[0]
+        gate_identity = nodes[0].file_identity
+        return tuple(fds), CanonicalSourceClosure(
+            layout, trust_root, components, tuple(nodes), digest_owner.hexdigest(),
+            gate_identity, bootstrap_digest, interpreter_identity,
+        )
+    except Exception:
+        for fd in fds:
+            os.close(fd)
+        raise
+
+
+def _recheck_source_closure(
+    fds: tuple[int, ...], before: CanonicalSourceClosure,
+) -> CanonicalSourceClosure:
+    component_count = len(before.components)
+    if len(fds) != component_count + len(before.nodes) + 1:
+        raise ValueError("closure-cardinality")
+    component_fds = fds[:component_count]
+    node_fds = fds[component_count:component_count + len(before.nodes)]
+    interpreter_fd = fds[-1]
+    gate = Path(os.path.abspath(__file__))
+    layout, trust_root_path = _layout_for_gate(gate)
+    if layout != before.layout:
+        raise ValueError("layout-drift")
+    current_component_paths = _component_paths(
+        trust_root_path, (gate,) + tuple(Path(node.expected_path) for node in before.nodes)
+    )
+    if tuple(name for name, _path in current_component_paths) != tuple(
+        component.root_relative_name for component in before.components
+    ):
+        raise ValueError("component-cardinality-drift")
+    component_fd_by_name = {
+        component.root_relative_name: fd
+        for fd, component in zip(component_fds, before.components, strict=True)
+    }
+    for fd, component, (name, path) in zip(
+        component_fds, before.components, current_component_paths, strict=True
+    ):
+        opened_identity = _directory_identity(os.fstat(fd))
+        if os.name == "posix" and name != ".":
+            parent_name, _separator, basename = name.rpartition("/")
+            live_identity = _directory_identity(os.stat(
+                basename,
+                dir_fd=component_fd_by_name[parent_name or "."],
+                follow_symlinks=False,
+            ))
+        else:
+            live_identity = _directory_generation(path)
+        if (
+            opened_identity != component.identity
+            or live_identity != opened_identity
+        ):
+            raise ValueError("component-drift")
+    for fd, node in zip(node_fds, before.nodes, strict=True):
+        path = Path(node.expected_path)
+        opened = os.fstat(fd)
+        opened_identity = _stat_identity(opened)
+        if (
+            opened_identity != node.file_identity
+            or opened.st_nlink != 1
+            or _regular_identity(path, single_link=True) != opened_identity
+        ):
+            raise ValueError("identity-drift")
+        os.lseek(fd, 0, os.SEEK_SET)
+        source = b""
+        while len(source) <= SCAN_SNAPSHOT_BYTE_CAP:
+            chunk = os.read(fd, min(65_536, SCAN_SNAPSHOT_BYTE_CAP + 1 - len(source)))
+            if not chunk:
+                break
+            source += chunk
+        if source != node.source or hashlib.sha256(source).hexdigest() != node.sha256:
+            raise ValueError("source-drift")
+    interpreter_opened = os.fstat(interpreter_fd)
+    interpreter_opened_identity = _stat_identity(interpreter_opened)
+    if (
+        not stat.S_ISREG(interpreter_opened.st_mode)
+        or interpreter_opened_identity[:2] != before.interpreter_identity.file_identity[:2]
+        or interpreter_opened_identity[3:] != before.interpreter_identity.file_identity[3:]
+        or _interpreter_identity() != before.interpreter_identity
+    ):
+        raise ValueError("interpreter-drift")
+    if (
+        _regular_identity(gate, single_link=True)
+        != before.gate_identity
+        or hashlib.sha256(_SCAN_BOOTSTRAP.encode("utf-8")).hexdigest()
+        != before.bootstrap_digest
+    ):
+        raise ValueError("gate-drift")
+    return before
+
+
+def _closure_payload(closure: CanonicalSourceClosure) -> bytes:
+    return json.dumps(
+        {
+            node.role: base64.b64encode(node.source).decode("ascii")
+            for node in closure.nodes if node.role != "gate"
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("ascii")
+
+
+class GateSettlementState(str, Enum):
+    SETTLED = "settled"
+    FAILED_UNSETTLED = "failed-unsettled"
+
+
+@dataclass(frozen=True)
+class GateTransportObservation:
+    name: str
+    ownership: str
+    closed_observed: bool
+    failure_phase: str | None
+    observed_at_monotonic_tick: float
+
+
+@dataclass(frozen=True)
+class GateWorkerObservation:
+    worker_identity: int
+    start: str
+    terminal: str
+    observed_at_monotonic_tick: float
+
+
+@dataclass(frozen=True)
+class GateSettlementCertificate:
+    supervisor_id: str
+    child_identity: int
+    observed_return_code: int | None
+    streams: tuple[GateTransportObservation, ...]
+    workers: tuple[GateWorkerObservation, ...]
+    operation_errors: tuple[str, ...]
+    attempts_used: int
+    verified_at_monotonic_tick: float
+
+    @property
+    def complete(self) -> bool:
+        ticks = tuple(row.observed_at_monotonic_tick for row in self.streams + self.workers)
+        return (
+            self.observed_return_code is not None
+            and 1 <= self.attempts_used <= SCAN_SETTLEMENT_MAX_ENTRIES
+            and all(row.ownership != "owned" or row.closed_observed for row in self.streams)
+            and all(row.terminal in {"not-started", "joined"} for row in self.workers)
+            and (not ticks or self.verified_at_monotonic_tick > max(ticks))
+        )
+
+
+@dataclass(frozen=True)
+class GateSettlement:
+    state: GateSettlementState
+    certificate: GateSettlementCertificate | None
+    execution_eligible: bool
+
+    @property
+    def complete(self) -> bool:
+        return (
+            self.state is GateSettlementState.SETTLED
+            and self.certificate is not None
+            and self.certificate.complete
+        )
+
+
+@dataclass
+class _OwnedWorker:
+    worker: threading.Thread
+    start: str = "not-started"
+
+
+class ChildSupervisor:
+    """Single immediate owner for a launched scanner child and its workers."""
+
+    def __init__(
+        self, process, *, attempt_seconds: float = SCAN_SETTLEMENT_ATTEMPT_SECONDS,
+    ) -> None:
+        self.process = process
+        self.supervisor_id = f"supervisor:{id(self)}"
+        self.child_identity = int(process.pid)
+        self.workers: list[_OwnedWorker] = []
+        self._attempt_seconds = attempt_seconds
+        self._attempts_used = 0
+        self._operation_errors: list[str] = []
+        self._settlement: GateSettlement | None = None
+
+    def start_worker(self, worker: threading.Thread) -> None:
+        owned = _OwnedWorker(worker)
+        self.workers.append(owned)
+        try:
+            worker.start()
+            owned.start = "started"
+        except BaseException:
+            self._operation_errors.append("worker-start")
+            raise
+
+    @property
+    def settled(self) -> bool:
+        return self._settlement is not None and self._settlement.complete
+
+    @property
+    def settlement(self) -> GateSettlement | None:
+        return self._settlement
+
+    def _remaining(self, deadline: float) -> float:
+        return max(0.0, deadline - time.monotonic())
+
+    def settle(self) -> GateSettlement:
+        if self._settlement is not None and self._settlement.complete:
+            return self._settlement
+        if self._attempts_used >= SCAN_SETTLEMENT_MAX_ENTRIES:
+            return self._settlement or GateSettlement(
+                GateSettlementState.FAILED_UNSETTLED, None, False
+            )
+        self._attempts_used += 1
+        deadline = time.monotonic() + self._attempt_seconds
+        process = self.process
+        return_code = None
+        try:
+            return_code = process.poll()
+        except BaseException:
+            self._operation_errors.append("poll")
+
+        stream_rows: list[GateTransportObservation] = []
+        stdin = process.stdin
+        if stdin is not None:
+            try:
+                stdin.close()
+                stream_rows.append(GateTransportObservation("stdin", "owned", True, None, time.monotonic()))
+            except BaseException:
+                self._operation_errors.append("stdin-close")
+                stream_rows.append(GateTransportObservation("stdin", "owned", False, "stdin-close", time.monotonic()))
+        else:
+            stream_rows.append(GateTransportObservation("stdin", "absent", True, None, time.monotonic()))
+
+        if return_code is None:
+            try:
+                process.terminate()
+            except BaseException:
+                self._operation_errors.append("terminate")
+            try:
+                return_code = process.wait(timeout=self._remaining(deadline))
+            except BaseException:
+                self._operation_errors.append("wait")
+            if return_code is None:
+                try:
+                    process.kill()
+                except BaseException:
+                    self._operation_errors.append("kill")
+                try:
+                    return_code = process.wait(timeout=self._remaining(deadline))
+                except BaseException:
+                    self._operation_errors.append("kill-wait")
+
+        for name, stream in (("stdout", process.stdout), ("stderr", process.stderr)):
+            if stream is None:
+                stream_rows.append(GateTransportObservation(name, "absent", True, None, time.monotonic()))
+                continue
+            try:
+                stream.close()
+                stream_rows.append(GateTransportObservation(name, "owned", True, None, time.monotonic()))
+            except BaseException:
+                self._operation_errors.append(name + "-close")
+                stream_rows.append(GateTransportObservation(name, "owned", False, name + "-close", time.monotonic()))
+
+        worker_rows: list[GateWorkerObservation] = []
+        for owned in self.workers:
+            worker = owned.worker
+            terminal = "not-started" if owned.start != "started" else "unobserved"
+            if owned.start == "started":
+                try:
+                    worker.join(timeout=self._remaining(deadline))
+                except BaseException:
+                    self._operation_errors.append("worker-join")
+                try:
+                    terminal = "live" if worker.is_alive() else "joined"
+                except BaseException:
+                    self._operation_errors.append("worker-observe")
+            worker_rows.append(GateWorkerObservation(id(worker), owned.start, terminal, time.monotonic()))
+
+        try:
+            observed = process.poll()
+            if observed is not None:
+                return_code = observed
+        except BaseException:
+            self._operation_errors.append("final-poll")
+        participant_ticks = tuple(row.observed_at_monotonic_tick for row in stream_rows + worker_rows)
+        verified = max(time.monotonic(), (max(participant_ticks) + 1e-9) if participant_ticks else 0.0)
+        certificate = GateSettlementCertificate(
+            self.supervisor_id, self.child_identity, return_code,
+            tuple(stream_rows), tuple(worker_rows), tuple(self._operation_errors),
+            self._attempts_used, verified,
+        )
+        state = GateSettlementState.SETTLED if certificate.complete else GateSettlementState.FAILED_UNSETTLED
+        self._settlement = GateSettlement(
+            state, certificate, certificate.complete and not certificate.operation_errors
+        )
+        return self._settlement
+
+
+def _run_snapshot_child(
+    pending: PendingScanInvocation, payload: bytes, repository_workdir: str,
+) -> tuple[LaunchedScanInvocation, tuple[TrustedExecutionRecord, ...]]:
+    prefix = "PGG" if pending.binding.route == "generic" else "PRG"
+    try:
+        process = subprocess.Popen(
+            list(pending.exact_argv), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, shell=False,
+            cwd=repository_workdir,
+        )
+    except OSError:
+        raise PrRouteDenied(prefix + "-SCAN-EXECUTION") from None
+    supervisor = ChildSupervisor(process)
+    launched = LaunchedScanInvocation(
+        pending, process.pid, supervisor, pending.invocation_id,
+        pending.attempt_id, pending.binding, pending.exact_argv,
+        pending.result_slot,
+    )
+    with pending._transition_lock:
+        if pending.state is not PendingState.PREPARED:
+            pending.state = PendingState.FAILED
+            raise PrRouteDenied(prefix + "-SCAN-CORRELATION")
+        pending.child_identity = process.pid
+        pending.supervisor = supervisor
+        pending.state = PendingState.CHILD_OWNED
+    output = {"stdout": bytearray(), "stderr": bytearray()}
+    overflow = threading.Event()
+    lock = threading.Lock()
+
+    def drain(name: str, stream) -> None:
+        try:
+            while not overflow.is_set():
+                chunk = stream.read(8192)
+                if not chunk:
+                    return
+                with lock:
+                    total = len(output["stdout"]) + len(output["stderr"])
+                    if total + len(chunk) > SCAN_OUTPUT_BYTE_CAP:
+                        overflow.set()
+                        return
+                    output[name].extend(chunk)
+        except (OSError, ValueError):
+            overflow.set()
+
+    def feed() -> None:
+        try:
+            assert process.stdin is not None
+            process.stdin.write(payload)
+            process.stdin.close()
+        except (BrokenPipeError, OSError, ValueError):
+            pass
+
+    assert process.stdout is not None and process.stderr is not None
+    workers = (
+        threading.Thread(target=feed),
+        threading.Thread(target=drain, args=("stdout", process.stdout)),
+        threading.Thread(target=drain, args=("stderr", process.stderr)),
+    )
+    bounded = False
+    setup_failure = False
+    try:
+        for worker in workers:
+            supervisor.start_worker(worker)
+        deadline = time.monotonic() + SCAN_TIMEOUT_SECONDS
+        while (
+            process.poll() is None
+            and not overflow.is_set()
+            and time.monotonic() < deadline
+        ):
+            time.sleep(0.01)
+        bounded = process.poll() is not None and not overflow.is_set()
+    except Exception:
+        setup_failure = True
+    finally:
+        with pending._transition_lock:
+            if pending.state is PendingState.CHILD_OWNED:
+                pending.state = PendingState.SETTLING
+        settlement = supervisor.settle()
+        if not settlement.complete:
+            settlement = supervisor.settle()
+        with pending._transition_lock:
+            pending.settlement = settlement
+            pending.state = (
+                PendingState.SETTLED if settlement.complete else PendingState.FAILED
+            )
+    if setup_failure:
+        raise PrRouteDenied(prefix + "-SCAN-EXECUTION")
+    execution = TrustedExecutionRecord(
+        pending, launched, pending.result_slot,
+        bounded,
+        process.returncode if process.returncode is not None else -1,
+        bytes(output["stdout"]), bytes(output["stderr"]), settlement,
+        pending.closure, pending.interpreter_identity, "pending",
+    )
+    return launched, (execution,)
+
+
+def _refresh_scan_binding(
+    binding: PushScanBinding, repository_workdir: str, git_exe: str
+) -> PushScanBinding:
+    if binding.route == "generic":
+        return _resolve_generic_scan_binding(
+            binding.remote, binding.destination, binding.source_oid,
+            repository_workdir, git_exe,
+        )
+    object_format = _detect_git_object_format(
+        repository_workdir, git_exe, "PRG-RECEIPT-MISMATCH"
+    )
+    head_proc = subprocess.run(
+        [git_exe, "rev-parse", "--verify", "HEAD^{commit}"],
+        capture_output=True, text=True, encoding="utf-8", errors="strict",
+        cwd=repository_workdir,
+    )
+    rows = head_proc.stdout.splitlines()
+    if head_proc.returncode or len(rows) != 1 or not object_format.matches(rows[0]):
+        raise PrRouteDenied("PRG-RECEIPT-MISMATCH")
+    head = rows[0].lower()
+    return PushScanBinding("strict", binding.remote, binding.destination, head, head)
+
+
+def _run_authoritative_scan(
+    binding: PushScanBinding, repository_workdir: str, git_exe: str
+) -> ConsumedAuthoritativeEvidence:
+    prefix = "PGG" if binding.route == "generic" else "PRG"
+    fds: tuple[int, ...] = ()
+    try:
+        fds, closure_before = _capture_source_closure()
+        interpreter_before = _interpreter_identity()
+        if closure_before.interpreter_identity != interpreter_before:
+            raise ValueError("interpreter-capture")
+    except Exception:
+        for fd in fds:
+            os.close(fd)
+        raise PrRouteDenied(prefix + "-SCAN-PROVENANCE") from None
+    invocation_id = secrets.token_hex(32)
+    attempt_id = secrets.token_hex(16)
+    argv = (
+        interpreter_before.absolute_resolved_path, "-I", "-c", _SCAN_BOOTSTRAP,
+        "--gate-git-executable", git_exe,
+        "--range", binding.remote, binding.destination,
+        "--range-source", binding.source_oid,
+    )
+    pending = PendingScanInvocation(
+        invocation_id, attempt_id, binding, closure_before,
+        interpreter_before, argv, object(),
+    )
+    try:
+        launched, records = _run_snapshot_child(
+            pending, _closure_payload(closure_before), repository_workdir
+        )
+        try:
+            closure_after = _recheck_source_closure(fds, closure_before)
+            interpreter_after = _interpreter_identity()
+        except Exception:
+            raise PrRouteDenied(prefix + "-SCAN-IDENTITY-DRIFT") from None
+        if interpreter_after != interpreter_before:
+            raise PrRouteDenied(prefix + "-SCAN-IDENTITY-DRIFT")
+        records = tuple(replace(record,
+            closure_after=closure_after,
+            interpreter_identity_after=interpreter_after,
+            provenance_verdict="trusted",
+        ) for record in records)
+        try:
+            binding_after = _refresh_scan_binding(
+                binding, repository_workdir, git_exe
+            )
+        except PrRouteDenied:
+            raise
+        except Exception:
+            mismatch = "PGG-RANGE-TIP-BINDING" if prefix == "PGG" else "PRG-RECEIPT-MISMATCH"
+            raise PrRouteDenied(mismatch) from None
+        settlement = pending.settlement
+        certificate_tick = (
+            settlement.certificate.verified_at_monotonic_tick
+            if isinstance(settlement, GateSettlement) and settlement.certificate is not None
+            else 0.0
+        )
+        freshness_tick = max(time.monotonic(), certificate_tick + 1e-9)
+        return pending.correlate_and_consume_once(
+            launched, records, closure_after, interpreter_after,
+            binding_after, freshness_tick,
+        )
+    finally:
+        for fd in fds:
+            os.close(fd)
+
+
 def _run_text(
     argv: list[str],
     deadline: float,
     failure_id: str,
+    repository_workdir: str,
     *,
     accepted_codes: tuple[int, ...] = (0,),
 ) -> tuple[int, str]:
     remaining = deadline - time.monotonic()
     if remaining <= 0:
         raise PrRouteDenied(failure_id)
-    result = _run_process(argv, min(PROCESS_TIMEOUT_SECONDS, remaining))
+    result = _run_process(argv, remaining, repository_workdir)
     if result is None or result.returncode not in accepted_codes:
         raise PrRouteDenied(failure_id)
     try:
         return result.returncode, result.stdout.decode("utf-8", errors="strict")
     except UnicodeDecodeError:
         raise PrRouteDenied(failure_id) from None
+
+
+def _normalize_repository_workdir(repository_workdir: str) -> str:
+    if type(repository_workdir) is not str or not repository_workdir:
+        raise PrRouteDenied("PRG-WORKDIR-INVALID")
+    try:
+        selected = Path(repository_workdir).resolve(strict=True)
+    except (OSError, RuntimeError):
+        raise PrRouteDenied("PRG-WORKDIR-INVALID") from None
+    if not selected.is_dir() or str(selected) != repository_workdir:
+        raise PrRouteDenied("PRG-WORKDIR-INVALID")
+    return repository_workdir
+
+
+def _prove_repository_root(repository_workdir: str, git_exe: str) -> str:
+    selected = Path(repository_workdir)
+    _, top_text = _run_text(
+        [git_exe, "rev-parse", "--show-toplevel"],
+        time.monotonic() + PROCESS_TIMEOUT_SECONDS,
+        "PRG-WORKDIR-INVALID",
+        repository_workdir,
+    )
+    rows = top_text.splitlines()
+    if len(rows) != 1:
+        raise PrRouteDenied("PRG-WORKDIR-INVALID")
+    try:
+        top = Path(rows[0]).resolve(strict=True)
+    except (OSError, RuntimeError):
+        raise PrRouteDenied("PRG-WORKDIR-INVALID") from None
+    if top != selected:
+        raise PrRouteDenied("PRG-WORKDIR-INVALID")
+    return repository_workdir
+
+
+def _validate_repository_workdir(repository_workdir: str, git_exe: str) -> str:
+    return _prove_repository_root(
+        _normalize_repository_workdir(repository_workdir), git_exe
+    )
 
 
 def _strict_json(text: str, expected_type: type, failure_id: str):
@@ -1450,9 +2590,18 @@ def _required_text(value: object, failure_id: str, *, cap: int = 512) -> str:
     return value
 
 
-def _required_oid(value: object, failure_id: str) -> str:
-    text = _required_text(value, failure_id, cap=40)
-    if not OID_REGEX.fullmatch(text):
+def _required_oid(
+    value: object,
+    failure_id: str,
+    object_format: GitObjectFormat | None = None,
+) -> str:
+    cap = object_format.hex_length if object_format is not None else 64
+    text = _required_text(value, failure_id, cap=cap)
+    if not (
+        object_format.matches(text)
+        if object_format is not None
+        else _SUPPORTED_OID_REGEX.fullmatch(text)
+    ):
         raise PrRouteDenied(failure_id)
     return text.lower()
 
@@ -1516,13 +2665,21 @@ def _repo_record(value: object, expected: str, failure_id: str) -> tuple[str, st
     return repo_id, default_name
 
 
-def _verify_pr_oracle(grant: ActivePrGrant, literal: LiteralPushCommand) -> tuple[PushTarget, str]:
+def _verify_pr_oracle(
+    grant: ActivePrGrant, literal: LiteralPushCommand, repository_workdir: str
+) -> tuple[PushTarget, str]:
     deadline = time.monotonic() + ORACLE_TIMEOUT_SECONDS
     git_exe = literal.executable
-    gh_exe = _resolve_executable("gh")
+    gh_exe = _resolve_executable("gh", repository_workdir)
     if gh_exe is None:
         raise PrRouteDenied("PRG-PR-UNAVAILABLE")
     target = literal.target
+    object_format = _detect_git_object_format(
+        repository_workdir,
+        git_exe,
+        "PRG-BINDING-DRIFT",
+        deadline=deadline,
+    )
 
     fields = (
         "id,number,url,state,closed,mergedAt,baseRefName,baseRefOid,"
@@ -1532,21 +2689,28 @@ def _verify_pr_oracle(grant: ActivePrGrant, literal: LiteralPushCommand) -> tupl
         [gh_exe, "pr", "view", grant.url, "--json", fields],
         deadline,
         "PRG-PR-UNAVAILABLE",
+        repository_workdir,
     )
     pr = _strict_json(pr_text, dict, "PRG-PR-UNAVAILABLE")
-    if pr.get("number") != grant.number or pr.get("url") != grant.url:
+    pr_url = pr.get("url")
+    url_match = PR_URL_REGEX.fullmatch(pr_url) if isinstance(pr_url, str) else None
+    if url_match is None or pr.get("number") != grant.number:
         raise PrRouteDenied("PRG-BINDING-DRIFT")
+    if grant.owner and pr_url != grant.url:
+        raise PrRouteDenied("PRG-BINDING-DRIFT")
+    owner = url_match.group("owner")
+    repo = url_match.group("repo")
     pr_id = _required_text(pr.get("id"), "PRG-BINDING-DRIFT", cap=256)
     if not NODE_ID_REGEX.fullmatch(pr_id):
         raise PrRouteDenied("PRG-BINDING-DRIFT")
     if pr.get("state") != "OPEN" or pr.get("closed") is not False or pr.get("mergedAt") is not None:
         raise PrRouteDenied("PRG-PR-STATE")
     base_ref = _required_text(pr.get("baseRefName"), "PRG-BINDING-DRIFT", cap=255)
-    _required_oid(pr.get("baseRefOid"), "PRG-BINDING-DRIFT")
+    _required_oid(pr.get("baseRefOid"), "PRG-BINDING-DRIFT", object_format)
     head_ref = _required_text(pr.get("headRefName"), "PRG-BINDING-DRIFT", cap=255)
     if not _portable_pr_head_ref(head_ref):
         raise PrRouteDenied("PRG-COMMAND-SHAPE")
-    head_oid = _required_oid(pr.get("headRefOid"), "PRG-BINDING-DRIFT")
+    head_oid = _required_oid(pr.get("headRefOid"), "PRG-BINDING-DRIFT", object_format)
     head_repo = pr.get("headRepository")
     head_owner = pr.get("headRepositoryOwner")
     if not isinstance(head_repo, dict) or not isinstance(head_owner, dict):
@@ -1562,24 +2726,27 @@ def _verify_pr_oracle(grant: ActivePrGrant, literal: LiteralPushCommand) -> tupl
 
     repo_fields = "id,nameWithOwner,defaultBranchRef,url"
     _, base_repo_text = _run_text(
-        [gh_exe, "repo", "view", f"{grant.owner}/{grant.repo}", "--json", repo_fields],
+        [gh_exe, "repo", "view", f"{owner}/{repo}", "--json", repo_fields],
         deadline,
         "PRG-PR-UNAVAILABLE",
+        repository_workdir,
     )
     _, head_repo_text = _run_text(
         [gh_exe, "repo", "view", head_name, "--json", repo_fields],
         deadline,
         "PRG-PR-UNAVAILABLE",
+        repository_workdir,
     )
     base_record = _strict_json(base_repo_text, dict, "PRG-PR-UNAVAILABLE")
     head_record = _strict_json(head_repo_text, dict, "PRG-PR-UNAVAILABLE")
-    _, base_default = _repo_record(base_record, f"{grant.owner}/{grant.repo}", "PRG-BINDING-DRIFT")
+    _, base_default = _repo_record(base_record, f"{owner}/{repo}", "PRG-BINDING-DRIFT")
     current_head_repo_id, head_default = _repo_record(head_record, head_name, "PRG-BINDING-DRIFT")
     if current_head_repo_id != head_repo_id:
         raise PrRouteDenied("PRG-BINDING-DRIFT")
 
     _, ref_check = _run_text(
-        [git_exe, "check-ref-format", "--branch", head_ref], deadline, "PRG-DESTINATION-UNSAFE"
+        [git_exe, "check-ref-format", "--branch", head_ref], deadline,
+        "PRG-DESTINATION-UNSAFE", repository_workdir,
     )
     if ref_check.strip() != head_ref:
         raise PrRouteDenied("PRG-DESTINATION-UNSAFE")
@@ -1591,6 +2758,7 @@ def _verify_pr_oracle(grant: ActivePrGrant, literal: LiteralPushCommand) -> tupl
         [gh_exe, "api", "--hostname", "github.com", f"repos/{head_name}/branches/{encoded_ref}"],
         deadline,
         "PRG-PR-UNAVAILABLE",
+        repository_workdir,
     )
     branch = _strict_json(branch_text, dict, "PRG-PR-UNAVAILABLE")
     if branch.get("name") != head_ref or branch.get("protected") is not False:
@@ -1599,6 +2767,7 @@ def _verify_pr_oracle(grant: ActivePrGrant, literal: LiteralPushCommand) -> tupl
         [gh_exe, "api", "--hostname", "github.com", f"repos/{head_name}/rules/branches/{encoded_ref}"],
         deadline,
         "PRG-PR-UNAVAILABLE",
+        repository_workdir,
     )
     rules = _strict_json(rules_text, list, "PRG-PR-UNAVAILABLE")
     if rules:
@@ -1608,6 +2777,7 @@ def _verify_pr_oracle(grant: ActivePrGrant, literal: LiteralPushCommand) -> tupl
         [git_exe, "remote", "get-url", "--push", "--all", target.remote],
         deadline,
         "PRG-REMOTE-MISMATCH",
+        repository_workdir,
     )
     urls = expanded_urls.splitlines()
     if len(urls) != 1 or not urls[0]:
@@ -1621,6 +2791,7 @@ def _verify_pr_oracle(grant: ActivePrGrant, literal: LiteralPushCommand) -> tupl
         [git_exe, "config", "--get-all", config_key],
         deadline,
         "PRG-REMOTE-MISMATCH",
+        repository_workdir,
         accepted_codes=(0, 1),
     )
     if code == 1:
@@ -1628,6 +2799,7 @@ def _verify_pr_oracle(grant: ActivePrGrant, literal: LiteralPushCommand) -> tupl
             [git_exe, "config", "--get-all", f"remote.{target.remote}.url"],
             deadline,
             "PRG-REMOTE-MISMATCH",
+            repository_workdir,
         )
     raw_urls = raw_pushurl.splitlines()
     if len(raw_urls) != 1 or raw_urls[0] != urls[0]:
@@ -1637,87 +2809,216 @@ def _verify_pr_oracle(grant: ActivePrGrant, literal: LiteralPushCommand) -> tupl
         [git_exe, "ls-remote", "--heads", target.remote, target.destination],
         deadline,
         "PRG-BRANCH-DRIFT",
+        repository_workdir,
     )
     remote_rows = remote_head_text.splitlines()
     if len(remote_rows) != 1:
         raise PrRouteDenied("PRG-BRANCH-DRIFT")
     remote_parts = remote_rows[0].split("\t")
-    if len(remote_parts) != 2 or remote_parts[1] != target.destination or not OID_REGEX.fullmatch(remote_parts[0]):
+    if (
+        len(remote_parts) != 2
+        or remote_parts[1] != target.destination
+        or not object_format.matches(remote_parts[0])
+    ):
         raise PrRouteDenied("PRG-BRANCH-DRIFT")
     if remote_parts[0].lower() != head_oid:
         raise PrRouteDenied("PRG-BRANCH-DRIFT")
 
     _, local_head_text = _run_text(
-        [git_exe, "rev-parse", "--verify", "HEAD"], deadline, "PRG-RECEIPT-MISMATCH"
+        [git_exe, "rev-parse", "--verify", "HEAD"], deadline,
+        "PRG-RECEIPT-MISMATCH", repository_workdir,
     )
     local_head_rows = local_head_text.splitlines()
-    if len(local_head_rows) != 1 or not OID_REGEX.fullmatch(local_head_rows[0]):
+    if len(local_head_rows) != 1 or not object_format.matches(local_head_rows[0]):
         raise PrRouteDenied("PRG-RECEIPT-MISMATCH")
     return target, local_head_rows[0].lower()
 
 
-def _verify_pr_range_receipt(
-    entries: list[dict], target: PushTarget, local_head: str
-) -> None:
+def _build_parsed_transcript_commands(
+    entries: list[dict],
+) -> tuple[ParsedTranscriptCommand, ...]:
+    parsed_commands: list[ParsedTranscriptCommand] = []
+    for entry_index, entry in enumerate(entries):
+        for occurrence_index, occurrence in enumerate(
+            extract_model_shell_command_occurrences(entry)
+        ):
+            resolution = resolve_command_dialect(occurrence.tool_name)
+            root_occurrence = (
+                f"transcript:{entry_index}:{occurrence_index}:{occurrence.call_id}"
+            )
+            parsed_commands.append(ParsedTranscriptCommand(
+                entry_index,
+                occurrence_index,
+                occurrence.call_id,
+                occurrence.tool_name,
+                resolution.dialect,
+                resolution.exact,
+                parse_transcript_command(
+                    occurrence.command_text, occurrence.tool_name,
+                    root_occurrence, occurrence_index,
+                ),
+            ))
+    return tuple(parsed_commands)
+
+
+def _correlate_publication_safety_observations(
+    entries: list[dict],
+    parsed_commands: tuple[ParsedTranscriptCommand, ...],
+) -> tuple[UntrustedTranscriptScanObservation, ...]:
     call_positions: dict[str, list[int]] = {}
-    scan_calls: list[tuple[str, int]] = []
-    for idx, entry in enumerate(entries):
+    for index, entry in enumerate(entries):
         for call_id, _text in extract_model_tool_calls_with_ids(entry):
-            call_positions.setdefault(call_id, []).append(idx)
-        for call_id, command_text in extract_model_shell_commands_with_ids(entry):
-            if find_scan_script_executions(command_text):
-                scan_calls.append((call_id, idx))
-    if len(scan_calls) != 1:
-        raise PrRouteDenied("PRG-RECEIPT-MISSING")
-    call_id, call_pos = scan_calls[0]
-    if len(call_positions.get(call_id, [])) != 1 or call_positions[call_id][0] != call_pos:
-        raise PrRouteDenied("PRG-RECEIPT-MISMATCH")
-
-    results: list[tuple[int, object]] = []
-    for idx, entry in enumerate(entries):
+            call_positions.setdefault(call_id, []).append(index)
+    results: dict[str, list[tuple[int, object]]] = {}
+    for index, entry in enumerate(entries):
         for result in extract_tool_outputs_with_ids(entry):
-            if result.call_id == call_id:
-                results.append((idx, result))
-    if len(results) != 1:
-        raise PrRouteDenied("PRG-RECEIPT-MISMATCH")
-    result_pos, result = results[0]
-    if result_pos <= call_pos or result.execution_status != NO_OBSERVED_FAILURE:
-        raise PrRouteDenied("PRG-RECEIPT-MISMATCH")
-    result_text = result.output_text
-    if SCAN_FAILURE_MARKER_REGEX.search(result_text) or SCAN_CLEAN_TRACKED_REGEX.search(result_text):
-        raise PrRouteDenied("PRG-RECEIPT-MISMATCH")
-    matches = list(SCAN_CLEAN_RANGE_REGEX.finditer(result_text))
-    if len(matches) != 1:
-        raise PrRouteDenied("PRG-RECEIPT-MISSING" if not matches else "PRG-RECEIPT-MISMATCH")
-    receipt = matches[0]
-    if (
-        receipt.group("remote") != target.remote
-        or receipt.group("dst") != target.destination
-        or receipt.group("tip").lower() != local_head
-    ):
-        raise PrRouteDenied("PRG-RECEIPT-MISMATCH")
+            results.setdefault(result.call_id, []).append((index, result))
+    scan_calls: dict[tuple[str, int], ParsedTranscriptCommand] = {}
+    for parsed_command in parsed_commands:
+        if parsed_command.parsed.scan_execution:
+            scan_calls[(parsed_command.call_id, parsed_command.entry_index)] = parsed_command
+    observations: list[UntrustedTranscriptScanObservation] = []
+    for (call_id, call_position), parsed_command in scan_calls.items():
+        if call_positions.get(call_id) != [call_position]:
+            observations.append(UntrustedTranscriptScanObservation(
+                call_id, call_position, None, "call-collision",
+                PublicationSafetyObservation("none", None),
+            ))
+            continue
+        matching = results.get(call_id, [])
+        if len(matching) != 1:
+            observations.append(UntrustedTranscriptScanObservation(
+                call_id, call_position, None,
+                "result-missing" if not matching else "result-collision",
+                PublicationSafetyObservation("none", None),
+            ))
+            continue
+        result_position, result = matching[0]
+        if result_position <= call_position:
+            observations.append(UntrustedTranscriptScanObservation(
+                call_id, call_position, result_position, "result-order",
+                PublicationSafetyObservation("none", None),
+            ))
+            continue
+        if result.execution_status != NO_OBSERVED_FAILURE:
+            observations.append(UntrustedTranscriptScanObservation(
+                call_id, call_position, result_position, "result-status",
+                PublicationSafetyObservation("none", None),
+            ))
+            continue
+        observation = parse_publication_safety_observation(result.output_text)
+        if observation.kind == "valid-v3":
+            receipt = observation.receipt
+            range_binding = project_scan_range_binding(parsed_command.parsed)
+            if (
+                receipt is None
+                or range_binding is None
+                or range_binding != (receipt.remote, receipt.destination)
+            ):
+                observation = PublicationSafetyObservation("malformed", None)
+        observations.append(UntrustedTranscriptScanObservation(
+            call_id,
+            call_position,
+            result_position,
+            "valid",
+            observation,
+        ))
+    return tuple(observations)
 
-    for entry in entries[result_pos + 1:]:
-        for _prior_id, prior_command in extract_model_shell_commands_with_ids(entry):
-            prior_pushes = find_git_push_invocations(prior_command)
-            if prior_pushes and not all("--dry-run" in args for args in prior_pushes):
-                raise PrRouteDenied("PRG-RECEIPT-USED")
+
+def _resolve_generic_scan_binding(
+    remote: str, destination: str, source: str, repository_workdir: str,
+    git_exe: str,
+) -> PushScanBinding:
+    if not source:
+        raise PrRouteDenied("PGG-RANGE-TIP-BINDING")
+    object_format = _detect_git_object_format(
+        repository_workdir, git_exe, "PGG-RANGE-TIP-BINDING"
+    )
+    source_proc = subprocess.run(
+        [git_exe, "rev-parse", "--verify", source],
+        capture_output=True, text=True, encoding="utf-8", errors="strict",
+        cwd=repository_workdir,
+    )
+    source_rows = source_proc.stdout.splitlines()
+    if (
+        source_proc.returncode
+        or len(source_rows) != 1
+        or not object_format.matches(source_rows[0])
+    ):
+        raise PrRouteDenied("PGG-RANGE-TIP-BINDING")
+    source_oid = source_rows[0].lower()
+    type_proc = subprocess.run(
+        [git_exe, "cat-file", "-t", source_oid],
+        capture_output=True, text=True, encoding="utf-8", errors="strict",
+        cwd=repository_workdir,
+    )
+    if type_proc.returncode or type_proc.stdout.strip() != "commit":
+        raise PrRouteDenied("PGG-RANGE-TIP-BINDING")
+    head_proc = subprocess.run(
+        [git_exe, "rev-parse", "--verify", "HEAD^{commit}"],
+        capture_output=True, text=True, encoding="utf-8", errors="strict",
+        cwd=repository_workdir,
+    )
+    head_rows = head_proc.stdout.splitlines()
+    if (
+        head_proc.returncode
+        or len(head_rows) != 1
+        or not object_format.matches(head_rows[0])
+    ):
+        raise PrRouteDenied("PGG-RANGE-TIP-BINDING")
+    return PushScanBinding(
+        "generic", remote, destination, source_oid, head_rows[0].lower()
+    )
 
 
 def _evaluate_active_pr_route(
     grant: ActivePrGrant,
     command: str,
-    after_user_entries: list[dict],
-    tool_name: object,
+    dialect: str,
+    parsed: ShellParseResult,
+    repository_workdir: str,
+    repository_workdir_source: str,
 ) -> bool:
     try:
-        dialect = _pr_command_dialect(tool_name)
-        git_exe = _resolve_executable("git")
+        effective = parsed.effective_publications
+        if (
+            parsed.strict_projection.status != "canonical"
+            or len(effective.records) != 1
+            or effective.records[0].kind != "DIRECT"
+        ):
+            raise PrRouteDenied("PRG-COMMAND-SHAPE")
+        dialect = _pr_command_dialect(dialect)
+        literal = _parse_pr_literal_shape(parsed, dialect)
+        if literal.repository_root is None:
+            repository_workdir = _normalize_repository_workdir(
+                repository_workdir
+            )
+        else:
+            command_root = _normalize_repository_workdir(
+                literal.repository_root
+            )
+            if repository_workdir_source == "tool":
+                tool_root = _normalize_repository_workdir(repository_workdir)
+                if tool_root != command_root:
+                    raise PrRouteDenied("PRG-WORKDIR-INVALID")
+            elif repository_workdir_source != "envelope":
+                raise PrRouteDenied("PRG-WORKDIR-INVALID")
+            repository_workdir = command_root
+        git_exe = _resolve_executable("git", repository_workdir)
         if git_exe is None:
             raise PrRouteDenied("PRG-REMOTE-MISMATCH")
-        literal = _parse_pr_literal_command(command, git_exe, dialect)
-        target, local_head = _verify_pr_oracle(grant, literal)
-        _verify_pr_range_receipt(after_user_entries, target, local_head)
+        literal = _bind_pr_literal_executable(literal, git_exe)
+        repository_workdir = _prove_repository_root(
+            repository_workdir, git_exe
+        )
+        target, local_head = _verify_pr_oracle(
+            grant, literal, repository_workdir
+        )
+        binding = PushScanBinding(
+            "strict", target.remote, target.destination, local_head, local_head
+        )
+        _run_authoritative_scan(binding, repository_workdir, git_exe)
         return True
     except PrRouteDenied:
         raise
@@ -1725,282 +3026,144 @@ def _evaluate_active_pr_route(
         raise PrRouteDenied("PRG-INTERNAL") from None
 
 
-def evaluate_push(envelope: dict) -> bool:
-    """The decision algorithm after envelope parsing (see the module docstring): return
-    True to ALLOW the push (`main()` then exits 0 with no payload), False to
-    fall through to the deny payload. MAY RAISE — `main()` wraps the call to
-    this function in one try/except and treats a raised exception exactly
-    like a False return (fall through to deny), never like True.
 
-    Split out of `main()` (2026-07-26 HIGH-severity hardening — `work-items/
-    bugs/2026-07-26-push-gate-new-paths-fail-open-because-the-wrapper-
-    discards-the-exit-code.md`; see the module docstring's "A CRASH WHILE
-    DECIDING" note for the full defect this closes). Before this split, an
-    uncaught exception ANYWHERE in this logic propagated out of `main()` and
-    produced no deny payload, so the host could not distinguish a crash from a
-    legitimate allow.
-    Fail-open is the deliberate posture for a non-command, non-push,
-    subagent context, or dry run. A detected non-dry push with no readable
-    transcript now fails closed; it is not
-    defensible for a hook that CRASHED WHILE DECIDING, because those two are
-    indistinguishable to everything downstream.
 
-    The bug report's own count of "five" fail-open paths refers to the five
-    NUMBERED steps 2-6 in the module docstring's decision algorithm (step 3
-    there bundles two code-level checks — non-dict `tool_input` and a
-    missing/non-string `command` — under one label, "tool_input.command is
-    absent or empty"). The ordinary `return True` paths below remain subagent
-    context, non-dict `tool_input`, no/empty command, no detected push,
-    all-dry-run, and a suspicious wrapper/prefix with no active PR grant.
-    Each is an ordinary return reached without any
-    exception being raised, so `main()`'s try/except never intercepts them —
-    only a genuinely raised exception is redirected to deny."""
-    # Subagent context: mirrors check-bugfix-discipline.py. The subagent's
-    # envelope points at the MAIN session transcript, and the subagent cannot
-    # put the user-side [approve-publication] marker there — gating it here is
-    # an un-overridable false block. Governance still forbids delegating a
-    # push to a subagent to dodge review; this hook stays a backstop.
-    if envelope.get("agent_id"):
-        return True
-
-    tool_input = envelope.get("tool_input")
-    if not isinstance(tool_input, dict):
-        return True
-
-    command = tool_input.get("command")
-    if not isinstance(command, str) or not command:
-        return True
-
-    pushes = find_git_push_invocations(command)
-    embedded_pushes = [] if pushes else _find_embedded_git_push_invocations(command)
-    if not pushes and not embedded_pushes:
-        return True  # no `git push` in command position
-
-    detected_pushes = pushes or embedded_pushes
-    if all("--dry-run" in args for args in detected_pushes):
-        return True  # every push is a dry run; nothing is sent
-
-    transcript_path = envelope.get("transcript_path") or ""
-    if not transcript_path:
-        raise PrRouteDenied("PRG-TRANSCRIPT-UNAVAILABLE")
-
-    last_user_entry, after_user_entries, current_turn_status = scan_current_turn_boundary(
-        transcript_path, byte_cap=CURRENT_TURN_BYTE_CAP
-    )
-    user_text = (
-        extract_user_typed_text(last_user_entry)
-        if current_turn_status == STATUS_FOUND and last_user_entry is not None
-        else ""
-    )
-    if current_turn_status != STATUS_FOUND:
-        after_user_entries = []
-
-    # (a) Per-turn user-side override — the marker counts ONLY from the last
-    # genuine user message, never from assistant prose / tool calls / output.
-    # ALSO bounded by MARKER_MAX_MESSAGE_LENGTH (see that constant's comment
-    # for the full contract decision, measurements, and disclosed residual):
-    # a marker riding inside a long message — the shape of a copied deny
-    # block, not a one-line approval — does not open the gate here; it falls
-    # through to branch (b) and then to deny, same as no marker at all.
-    if APPROVE_MARKER_REGEX.search(user_text) and len(user_text) <= MARKER_MAX_MESSAGE_LENGTH:
-        return True
-
+def evaluate_heavy(preflight: PreflightResult) -> bool:
+    """Evaluate only transcript history, PR, scan, receipt and deny policy."""
+    validate_preflight_result(preflight)
     history_entries, history_status = read_transcript_history(
-        transcript_path,
+        preflight.transcript_path,
         byte_cap=TRANSCRIPT_HISTORY_BYTE_CAP,
         record_cap=TRANSCRIPT_HISTORY_RECORD_CAP,
         line_byte_cap=TRANSCRIPT_HISTORY_LINE_BYTE_CAP,
     )
-    if history_status != "found":
+    suffix_recovery = history_status == HISTORY_STATUS_LIMIT
+    if suffix_recovery:
+        history_entries, history_status = _read_stable_transcript_suffix(
+            preflight.transcript_path
+        )
+    if history_status != HISTORY_STATUS_FOUND:
         raise PrRouteDenied("PRG-TRANSCRIPT-UNAVAILABLE")
-    pr_state, pr_grant = _derive_pr_grant(history_entries)
+    pr_state, pr_grant = _derive_pr_grant(
+        history_entries, preflight.repository_workdir
+    )
     if pr_state == "malformed":
         raise PrRouteDenied("PRG-AUTH-MALFORMED")
     if pr_state == "active" and pr_grant is not None:
         return _evaluate_active_pr_route(
-            pr_grant, command, after_user_entries, envelope.get("tool_name")
+            pr_grant, preflight.command, preflight.dialect, preflight.parsed,
+            preflight.repository_workdir, preflight.repository_workdir_source,
         )
+    if suffix_recovery:
+        raise PrRouteDenied("PRG-TRANSCRIPT-UNAVAILABLE")
+    grammar = preflight.generic_decision
+    if preflight.push_instruction:
+        if grammar.status != "PGG-ADMISSIBLE" or grammar.binding is None:
+            raise PrRouteDenied(grammar.status)
+        remote, destination, source = grammar.binding
+        repository_workdir = _normalize_repository_workdir(
+            preflight.repository_workdir
+        )
+        git_exe = _resolve_executable("git", repository_workdir)
+        if git_exe is None:
+            raise PrRouteDenied("PRG-WORKDIR-INVALID")
+        repository_workdir = _prove_repository_root(
+            repository_workdir, git_exe
+        )
+        binding = _resolve_generic_scan_binding(
+            remote, destination, source, repository_workdir, git_exe
+        )
+        _run_authoritative_scan(binding, repository_workdir, git_exe)
+        return True
+    return False
 
-    if not pushes:
-        return True  # suspicious wrapper/prefix without an active grant: preserve generic behavior
-
-    # (b) Publication-safety scan EXECUTED this turn (find_scan_script_
-    # executions — real execution, never a mere MENTION of the scanner's
-    # name as some other command's argument; see that function's docstring
-    # and the 2026-07-26 mention-vs-execution hardening) AND that SAME
-    # invocation's OWN tool OUTPUT (correlated by the provider's own
-    # call-identity field — never by mere co-occurrence anywhere in the
-    # turn: see the module docstring's CORRELATION note) reports a clean
-    # result over a non-empty `tracked` set, AND the user explicitly
-    # instructed a push in their last message. Correlation is load-bearing:
-    # an unrelated tool call (a Read, a Grep, anything) whose OWN output
-    # happens to contain text shaped like the scanner's clean-result line
-    # must NOT satisfy this — only the specific call that itself EXECUTED
-    # the scanner gets to have its own answering output checked against
-    # SCAN_CLEAN_TRACKED_REGEX.
-    if PUSH_INSTRUCTION_REGEX.search(user_text):
-        # COLLISION REJECTION (see the module docstring's COLLISION REJECTION
-        # note): correlating by id is only sound while an id is unique. Track
-        # every entry INDEX a call id / result id was seen at (not just
-        # whether it was seen) so a same id claimed by more than one call, or
-        # more than one output, can be detected and excluded — never
-        # resolved by guessing which claimant is "the real one". The same
-        # index doubles as ORDERING evidence: `after_user_entries` is forward
-        # chronological, so a credited result must be found at a strictly
-        # LATER index than the call it answers.
-        #
-        # CALL-SIDE UNIQUENESS COVERS EVERY ID-CARRYING CALL (see the module
-        # docstring's CALL-SIDE UNIQUENESS COVERS EVERY ID-CARRYING CALL note):
-        # `call_positions` is built from `extract_model_tool_calls_with_ids` --
-        # ANY tool call with an id, not only shell calls -- because what makes
-        # an id ambiguous is any second claimant regardless of tool type. Scan
-        # CALL detection stays a SEPARATE walk over
-        # `extract_model_shell_commands_with_ids`, because what makes a call a
-        # scan invocation is its command text, and only a shell call can ever
-        # execute the scanner.
-        call_positions: dict[str, list[int]] = {}
-        scan_call_ids: set[str] = set()
-        for idx, entry in enumerate(after_user_entries):
-            for call_id, _call_text in extract_model_tool_calls_with_ids(entry):
-                call_positions.setdefault(call_id, []).append(idx)
-            for call_id, command_text in extract_model_shell_commands_with_ids(entry):
-                if find_scan_script_executions(command_text):
-                    scan_call_ids.add(call_id)
-
-        # A scan-matching id claimed by more than one call in this turn is
-        # ambiguous — exclude it entirely rather than crediting either call.
-        unambiguous_scan_call_ids = {
-            call_id
-            for call_id in scan_call_ids
-            if len(call_positions.get(call_id, [])) == 1
-        }
-
-        if unambiguous_scan_call_ids:
-            result_positions: dict[str, list[int]] = {}
-            clean_result_ids: set[str] = set()
-            # RANGE-MODE binding (2026-07-27 — see the module docstring's
-            # RANGE-MODE BRANCH (b) note). Maps a correlated result's OWN id
-            # to the (remote, dst) its range receipt declared, so branch (b)
-            # below can credit a `range`-mode clean receipt the SAME way it
-            # already credits a `tracked`-mode one — same correlation,
-            # collision-rejection, ordering, and failure-marker exclusion —
-            # gated on the ADDITIONAL remote/dst comparison against argv that
-            # `tracked` mode has never needed (it names no destination).
-            clean_range_bindings: dict[str, tuple[str, str]] = {}
-            for idx, entry in enumerate(after_user_entries):
-                for result in extract_tool_outputs_with_ids(entry):
-                    result_id = result.call_id
-                    result_positions.setdefault(result_id, []).append(idx)
-                    if result.execution_status != NO_OBSERVED_FAILURE:
-                        continue
-                    result_text = result.output_text
-                    # WHOLE-LINE match AND no co-occurring scanner FAILURE
-                    # line (2026-07-26 critical hardening — see
-                    # SCAN_CLEAN_TRACKED_REGEX's and SCAN_FAILURE_MARKER_
-                    # REGEX's own comments): a scan's honest report of its
-                    # OWN block must never be credited as its own clean pass.
-                    # The SAME exclusion applies to a range receipt, for the
-                    # identical reason (2026-07-27) — checked ONCE, ahead of
-                    # both mode-specific matches below, so neither can be
-                    # credited from a result that also reports its own block.
-                    if SCAN_FAILURE_MARKER_REGEX.search(result_text):
-                        continue
-                    if SCAN_CLEAN_TRACKED_REGEX.search(result_text):
-                        clean_result_ids.add(result_id)
-                    range_match = SCAN_CLEAN_RANGE_REGEX.search(result_text)
-                    if range_match:
-                        clean_range_bindings[result_id] = (
-                            range_match.group("remote"),
-                            range_match.group("dst"),
-                        )
-
-            # Every detected push in this command must extract to the SAME
-            # (remote, dst) the range receipt declared — mirrors the existing
-            # `all(... for args in pushes)` posture the `--dry-run` check
-            # above already uses: an ambiguous or partially-unextractable
-            # push list is never credited by range mode, it simply falls
-            # through (the marker and `tracked`-mode evidence are still
-            # available). `_extract_push_remote_and_dst` returning None for
-            # ANY push makes range credit impossible for this command.
-            push_bindings = [_extract_push_remote_and_dst(args) for args in pushes]
-            range_binding_uniform = (
-                all(binding is not None for binding in push_bindings)
-                and len(set(push_bindings)) == 1
-            )
-
-            for call_id in unambiguous_scan_call_ids:
-                positions = result_positions.get(call_id, [])
-                # Mirror collision rule, result side: an id claimed by more
-                # than one tool output cannot be trusted to be THIS call's
-                # own answer either — exclude rather than pick one.
-                if len(positions) != 1:
-                    continue
-                # ORDERING: the credited result must sit strictly AFTER the
-                # call it is answering. A call and its own real answering
-                # result can never share one transcript entry (see the
-                # module docstring's COLLISION REJECTION note), so `>` never
-                # rejects a genuine pair.
-                if positions[0] <= call_positions[call_id][0]:
-                    continue
-                if call_id in clean_result_ids:
-                    return True
-                if (
-                    range_binding_uniform
-                    and call_id in clean_range_bindings
-                    and clean_range_bindings[call_id] == push_bindings[0]
-                ):
-                    return True
-
-    return False  # no allow condition satisfied -> caller falls through to deny
+def _format_gate_denial(failure_id: str) -> str:
+    if failure_id not in SCAN_DENIAL_REASONS:
+        failure_id = "PRG-INTERNAL"
+    remediation = SCAN_DENIAL_REASONS.get(
+        failure_id,
+        "Retry only after the publication gate can complete its checks normally.",
+    )
+    scope = (
+        "Generic scan-derived publication denied"
+        if failure_id.startswith("PGG-")
+        else "PR-scoped publication denied"
+    )
+    return f"{failure_id}: {scope}. {remediation}"
 
 
-def main() -> int:
+def compose_gate_result(preflight: PreflightResult) -> int:
+    """Compose one validated preflight into the stable gate result payload."""
     try:
-        envelope = parse_envelope(read_stdin_utf8())
+        result = validate_preflight_result(preflight)
     except Exception:
-        return 0  # malformed envelope -> fail open
+        result = PreflightResult(
+            "DEFER", "PFP-DENY-INTERNAL", "RENDER_DENY", None, None, "",
+            None, None, None, False, None,
+        )
+    if result.outcome == "ALLOW_FINAL":
+        return 0
 
-    failure_id: str | None = None
-    try:
-        if evaluate_push(envelope):
-            return 0
-    except PrRouteDenied as exc:
-        failure_id = exc.failure_id
-    except Exception:
-        # A crash WHILE DECIDING is a decision not made, not a decision to
-        # allow — fall through to the deny payload below rather than
-        # returning 0 silently (2026-07-26 hardening; see evaluate_push's
-        # own docstring and the module docstring's "A CRASH WHILE DECIDING"
-        # note for the full defect this closes).
-        pass
+    failure_id: str | None = result.failure_id
+    if result.continuation == "EVALUATE_HEAVY":
+        try:
+            if evaluate_heavy(result):
+                return 0
+        except PrRouteDenied as exc:
+            failure_id = exc.failure_id
+        except Exception:
+            pass
 
     # Deny. PR-route failures intentionally expose only a stable identifier
     # and safe remediation; subprocess output, command text, paths, remotes,
     # and exception details never enter this payload.
     pr_reasons = {
+        **SCAN_DENIAL_REASONS,
         "PRG-AUTH-MALFORMED": "Use the exact version-1 PR approval or revocation line in a genuine user message.",
         "PRG-TRANSCRIPT-UNAVAILABLE": "Retry from a readable current session transcript; summaries cannot authorize publication.",
-        "PRG-COMMAND-SHAPE": "Use exactly one ordinary `git push <remote> HEAD:refs/heads/<current-head-ref>` command.",
+        "PRG-COMMAND-SHAPE": "Use one exact absolute Git literal: `git push <remote> HEAD:refs/heads/<head>` or `git -C <absolute-root> push <remote> HEAD:refs/heads/<head>`.",
         "PRG-PR-UNAVAILABLE": "Restore authenticated GitHub state access, then retry so the pull request can be checked afresh.",
         "PRG-PR-STATE": "The pull request is not open; obtain a new grant only for an open pull request.",
         "PRG-BINDING-DRIFT": "Refresh the pull-request binding and retry with a current exact grant if needed.",
         "PRG-DESTINATION-UNSAFE": "Choose the current unprotected non-default pull-request head branch.",
         "PRG-REMOTE-MISMATCH": "Use one direct GitHub remote for the current pull-request head repository.",
-        "PRG-BRANCH-DRIFT": "Refresh remote branch state and rerun the publication-safety range scan.",
-        "PRG-RECEIPT-MISSING": "Run a fresh standalone non-empty publication-safety range scan for this push.",
-        "PRG-RECEIPT-MISMATCH": "Rerun the range scan for the exact remote, destination, and current HEAD tip.",
-        "PRG-RECEIPT-USED": "The prior receipt is consumed; run a new standalone range scan before retrying.",
+        "PRG-WORKDIR-INVALID": "Use one explicit absolute repository root for the current push tool call.",
+        "PRG-BRANCH-DRIFT": "Refresh remote branch state, then retry the same push for a fresh gate-owned check.",
+        "PRG-RECEIPT-MISSING": "Retry the push so the gate owns a fresh non-empty publication-safety check.",
+        "PRG-RECEIPT-MISMATCH": "Correct the remote, destination, current HEAD, and tip binding, then retry the same push.",
+        "PRG-RECEIPT-USED": "The prior receipt is consumed; retry the push for a fresh gate-owned check.",
         "PRG-INTERNAL": "Retry only after the publication gate can complete its checks normally.",
+        "PGG-COMPOUND-CONTEXT": "Run one direct push as a solitary shell command before using scan-derived credit.",
+        "PGG-LEXICAL-NORMALIZATION": "Use one literal unnormalized push command.",
+        "PGG-OPTION-ARITY": "Use only complete documented push option forms.",
+        "PGG-PARSE-UNCERTAIN": "Use one exact solitary direct push command.",
+        "PGG-REPOSITORY-REDIRECT": "Use the ambient repository without command-local repository redirection.",
+        "PGG-ENV-PREFIX": "Run the push without an environment-assignment prefix.",
+        "PGG-GIT-GLOBAL-OPTION": "Run the push without Git global options before the push subcommand.",
+        "PGG-PUSH-OPTION": "Use only the documented output-only push options with scan-derived credit.",
+        "PGG-REMOTE-CARDINALITY": "Name exactly one remote and one refspec.",
+        "PGG-REFSPEC-CARDINALITY": "Name exactly one remote and one refspec.",
+        "PGG-DESTINATION-SHAPE": "Use a refspec with a non-empty destination.",
+        "PGG-RANGE-BINDING": "Correct the remote and destination binding, then retry the same push.",
+        "PGG-RANGE-TIP-BINDING": "Push the current HEAD commit directly and retry for a fresh gate-owned check.",
+        "PGG-RANGE-RECEIPT-VERSION": "Retry the push so the gate emits one complete-history version-3 receipt.",
+        "PGG-RECEIPT-USED": "The prior receipt is consumed; retry the push for a fresh gate-owned check.",
     }
     if failure_id is not None:
-        remediation = pr_reasons.get(failure_id, pr_reasons["PRG-INTERNAL"])
-        reason = f"{failure_id}: PR-scoped publication denied. {remediation}"
+        if failure_id not in pr_reasons:
+            failure_id = "PRG-INTERNAL"
+        if failure_id in SCAN_DENIAL_REASONS:
+            reason = _format_gate_denial(failure_id)
+        else:
+            remediation = pr_reasons.get(failure_id, pr_reasons["PRG-INTERNAL"])
+            scope = "Generic scan-derived publication denied" if failure_id.startswith("PGG-") else "PR-scoped publication denied"
+            reason = f"{failure_id}: {scope}. {remediation}"
     else:
         reason = (
         "Git-push publication gate: this Bash command runs `git push` (an "
         "irreversible publication), but this turn shows neither the per-turn "
-        "user approval marker nor a publication-safety scan that reported a "
-        "clean result.\n\n"
+        "user approval marker nor a successful gate-owned canonical range "
+        "scan for this pending push.\n\n"
         "Publication requires human review PLUS a leak-check of the content "
         "being published (Publication safety governance). Pick one before "
         "retrying:\n\n"
@@ -2011,29 +3174,16 @@ def main() -> int:
         "message and only for that turn. It is an exception, not the ordinary "
         "recovery route for an already-committed change.\n\n"
         "  (b) If the user already instructed you to push in their last "
-        "message: run a publication-safety scan (check-publication-safety.sh, "
-        "its POSIX launcher, check-publication-gate.py/.sh, or /agents-check-safety "
-        "— ANY installed or repo-local copy counts; no specific path is "
-        "required) YOURSELF, as your OWN tool call, in THIS turn. A scan the "
-        "OPERATOR runs in their own terminal does not count — only a scan you "
-        "invoke, in this turn, is visible to this gate. Run it ALONE: a "
-        "standalone command with nothing chained or piped after it in the "
-        "same call (`bash check-publication-safety.sh` — not `... ; grep ...` "
-        "or `... | tail ...`) — this gate can no longer credit a scan that "
-        "shares its call with any other command, because their output "
-        "cannot be told apart afterward. The scan must also report a clean "
-        "result over a NON-EMPTY set. For staged work, use the ordinary "
-        "standalone scan so its `tracked` receipt examines the staged files. "
-        "For work that is already committed, use a standalone scan with "
-        "`--range <remote> <dst>` so its clean, non-empty `range` receipt names "
-        "the same remote and destination as every detected push. A zero-file "
-        "receipt satisfies neither route, and neither receipt proves that a "
-        "push is safe. If you already ran the correct scan and this still "
-        "denies, the scan-and-result pair may simply be too far back in this "
-        "turn for the gate to see (only the most recent transcript entries "
-        "are read) — re-run the scan closer to the push, or use marker (a).\n\n"
+        "message, retry one admissible solitary push. The gate itself runs one "
+        "fresh non-empty version-3 complete-history range scan from the canonical sibling "
+        "scanner, using an immutable in-memory source snapshot and its current "
+        "trusted interpreter. Manual or transcript-visible scanner calls are "
+        "diagnostic only and cannot authorize publication. If this route "
+        "denies, use its stable failure identifier and fixed remediation; do "
+        "not supply raw findings, command text, paths, or scanner output.\n\n"
         "  (c) To test what would be sent without publishing, use "
-        "`git push --dry-run` — it is always allowed.\n\n"
+        "a standalone, unambiguous long `git push --dry-run`; option values, "
+        "negated/short forms, and uncertain spellings are not fast-allowed.\n\n"
         "This hook is a BACKSTOP for the human-review-before-push rule, not a "
         "replacement for it. Do not work around it by wrapping the push in a "
         "script or delegating it to a subagent — that violates the same rule "
@@ -2051,5 +3201,20 @@ def main() -> int:
     return 0
 
 
+def main(preflight: PreflightResult | None = None) -> int:
+    try:
+        result = (
+            build_preflight_from_stdin()
+            if preflight is None
+            else validate_preflight_result(preflight)
+        )
+    except Exception:
+        result = PreflightResult(
+            "DEFER", "PFP-DENY-INTERNAL", "RENDER_DENY", None, None, "",
+            None, None, None, False, None,
+        )
+    return compose_gate_result(result)
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())

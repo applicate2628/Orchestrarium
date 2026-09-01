@@ -33,14 +33,14 @@ EXPECTED_PAYLOADS: dict[str, tuple[int, str]] = {
         "488c41acb051ccf6100422b28b3d4ded846e8d9cdd88fb937fb9b383f8d70319",
     ),
     "hook-behavior-contracts": (
-        13_632,
-        "bc66fdc758617b33daf45a2c77f5b78740d03c2f2169ca9e1b2802544a92fac0",
+        17_113,
+        "1257c115a1fd1f60683f83fc8cd60f4ef38df20defaeca4652d108365d2f462f",
     ),
     # Payload pins force deliberate review of current hook behavior, placement,
     # and installer truth before a canonical-reference edit can pass.
     "hook-entrypoints-placement": (
-        785,
-        "6bff24491968f08061763e68b24876ba95d75e8b0c79766387b97c62ac6372a0",
+        924,
+        "98017e791601949a09f1d0ba4e32c7a429195dcdff99cca1b7f0df52a66d45ee",
     ),
     "installer-removal-json-path": (
         5_254,
@@ -73,10 +73,10 @@ EXPECTED_MANIFEST: dict[str, tuple[str, ...]] = {
     "structural-enforcement teeth": (
         "They are backstops; they do not replace the text rules above.",
         "prompts should allow relevant MCP use",
-        "the binding rule remains the governance text (human review + leak-check before any push)",
+        "gate captures and directly executes the verified",
         "a subagent must never be blocked",
         "This exemption never transfers ownership: the dispatching main conversation still owns diagnostic discipline and publication authorization",
-        "requires the publication-safety scan in the current turn",
+        "Transcript/manual results cannot authorize",
         "Stop hooks do not replace the main conversation's current-turn status checks or work-item close/archive ownership",
         "Reminder hooks re-anchor Model Context Protocol (MCP) discovery/use after compaction, active delegation/recovery, scratch preservation, and every-turn continuity",
         "AUDIT mode",
@@ -88,8 +88,7 @@ EXPECTED_MANIFEST: dict[str, tuple[str, ...]] = {
     ),
     "delegation and recovery teeth": (
         "/agents-init-project",
-        "externalProvider: auto | codex | claude | gemini | qwen",
-        "Gemini and Qwen are `WEAK MODEL / NOT RECOMMENDED`",
+        "externalProvider: auto | codex | claude | kimi | grok",
         "never a provider entry inside `externalPriorityProfiles`",
         "Every specialist invocation MUST use the Agent tool",
         "Lead is never spawned as a subagent",
@@ -159,12 +158,12 @@ def test_live_claude_md_passes_at_post_extraction_cap_and_reports_exact_counts()
     result = _run()
     assert result.returncode == 0, result.stdout + result.stderr
     for expected in (
-            "Code points: 35951",
-            "UTF-8 bytes: 36133",
-            "Binding size: 36133",
+            "Code points: 36573",
+            "UTF-8 bytes: 36751",
+            "Binding size: 36751",
         "Size cap: 36771",
         "Warning threshold: 36521",
-        "Manifest: 47/47",
+        "Manifest: 46/46",
         "RESULT: PASS",
     ):
         assert expected in result.stdout, result.stdout
@@ -173,7 +172,7 @@ def test_live_claude_md_passes_at_post_extraction_cap_and_reports_exact_counts()
 def test_tiny_size_cap_fails_closed() -> None:
     result = _run("--size-cap", "1000")
     assert result.returncode == 1, result.stdout + result.stderr
-    assert "FAIL: Claude Markdown binding size 36133 > size cap 1000" in result.stdout
+    assert "FAIL: Claude Markdown binding size 36751 > size cap 1000" in result.stdout
     assert "RESULT: FAIL" in result.stdout
 
 
@@ -235,7 +234,7 @@ def test_manifest_matches_the_complete_lose_nothing_contract() -> None:
 def test_unchanged_copy_passes_and_every_manifest_token_removal_fails(tmp_path: Path) -> None:
     manifest = _production_manifest()
     tokens = [token for group in manifest.values() for token in group]
-    assert len(tokens) == 47
+    assert len(tokens) == 46
     assert len(tokens) == len(set(tokens)), "manifest tokens must be unique"
 
     source = CLAUDE_MD.read_text(encoding="utf-8", errors="strict")

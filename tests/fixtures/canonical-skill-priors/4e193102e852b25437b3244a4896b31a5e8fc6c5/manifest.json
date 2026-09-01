@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "baseline": "4e193102e852b25437b3244a4896b31a5e8fc6c5",
+  "files": {
+    "architect/SKILL.md": "d90d1f4fb649faa0bd631da8426a932eb0c04f8158b0e72fc5a84570f03b11a9",
+    "architect/agents/openai.yaml": "6f8ea8fc5c7bcb46e00fd5fb001faa260d4a6d790fca3c31339b02678072bb18",
+    "architecture-reviewer/SKILL.md": "6040ac1e889bfb22dcae55cf8bcf90bc1fdd7a7e4f8a9cf5acaea26e731243c4",
+    "architecture-reviewer/agents/openai.yaml": "f4f222f72eb7fbd721c53c387a1ab4e799c6b7e26706c62cbdf2ac175a36ecb2",
+    "toolchain-engineer/SKILL.md": "8365bbdec024bccbef2f8d67e14b97d3c6cff74d70d57d55087aec0843d8cc47",
+    "toolchain-engineer/agents/openai.yaml": "65f52b89807aabf933c03f5446a5904db38ca7679d0a984644cac3d1f8ceb611"
+  }
+}

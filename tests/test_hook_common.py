@@ -106,6 +106,42 @@ def _write_transcript(entries: list) -> Path:
     return tmp
 
 
+class TestTypedShellCommandOccurrences(unittest.TestCase):
+    def test_claude_and_codex_preserve_actual_tool_name(self) -> None:
+        claude = _tool_use_entry("claude-call", "echo claude")
+        codex = {
+            "type": "response_item",
+            "payload": {
+                "type": "function_call",
+                "call_id": "codex-call",
+                "name": "shell_command",
+                "arguments": json.dumps({"command": "echo codex"}),
+            },
+        }
+        self.assertEqual(
+            hook_common.extract_model_shell_command_occurrences(claude),
+            [hook_common.ModelShellCommandOccurrence(
+                "claude-call", "Bash", "echo claude"
+            )],
+        )
+        self.assertEqual(
+            hook_common.extract_model_shell_command_occurrences(codex),
+            [hook_common.ModelShellCommandOccurrence(
+                "codex-call", "shell_command", "echo codex"
+            )],
+        )
+
+    def test_missing_tool_name_is_retained_as_typed_unsupported(self) -> None:
+        entry = _tool_use_entry("missing-name", "git push origin main")
+        del entry["message"]["content"][0]["name"]
+        self.assertEqual(
+            hook_common.extract_model_shell_command_occurrences(entry),
+            [hook_common.ModelShellCommandOccurrence(
+                "missing-name", None, "git push origin main"
+            )],
+        )
+
+
 class TestSharedProjectionsAgree(unittest.TestCase):
     """Both public functions must agree on the SAME boundary for the SAME
     transcript + byte_cap across all four statuses."""

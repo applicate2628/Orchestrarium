@@ -32,7 +32,6 @@ Use it together with:
 - [../README.md](../README.md) for the repository overview
 - [../src.claude/README.md](../src.claude/README.md) for the Claude source subtree
 - [../src.codex/README.md](../src.codex/README.md) for the Codex source subtree
-- [../references-qwen/README.md](../references-qwen/README.md) for Qwen refs
 - [anchored](agents-mode-reference.md#lanes) into a shipped doc with a fragment
 
 Current docs in this branch:
@@ -51,7 +50,7 @@ Current docs in this branch:
 class RegenerateDocsReadmeTest(unittest.TestCase):
     def setUp(self) -> None:
         # a standalone CLAUDE branch tree: ships README + docs/{shipped} +
-        # src.claude/ + references-claude/, but NOT src.codex/ or references-qwen/
+        # src.claude/ + references-claude/, but NOT src.codex/
         self.out = ROOT / ".scratch" / "test-regenerate-readme-out"
         if self.out.exists():
             shutil.rmtree(self.out)
@@ -87,10 +86,9 @@ class RegenerateDocsReadmeTest(unittest.TestCase):
         self.assertIn("[anchored](agents-mode-reference.md#lanes)", self.text)
 
     def test_dead_cross_provider_links_are_delinked(self) -> None:
-        # src.codex/ + references-qwen/ do NOT ship on the claude branch -> the
-        # link target is dropped (descriptive text kept), no dead link
+        # src.codex/ does NOT ship on the claude branch -> the link target is
+        # dropped (descriptive text kept), no dead link
         self.assertNotIn("](../src.codex/README.md)", self.text)
-        self.assertNotIn("](../references-qwen/README.md)", self.text)
         self.assertIn("../src.codex/README.md for the Codex source subtree", self.text)
 
     def test_delinks_excluded_targets_in_prose(self) -> None:

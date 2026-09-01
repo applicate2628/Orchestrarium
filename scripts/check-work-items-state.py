@@ -33,16 +33,12 @@ def load_lifecycle_owner():
 
 REQUIRED_SENTINEL_DEPENDENCY_ID = "required-sentinel-dependency-unavailable"
 REQUIRED_SENTINEL_CONTRACT_ID = "required-sentinel-contract-mismatch"
-REQUIRED_SENTINEL_CALL_ID = "required-sentinel-call-failed"
-
-
 @dataclass(frozen=True)
 class RequiredSentinelDependency:
     """One composition-root result for every verdict-bearing sentinel use."""
 
     module: Any | None
     resolve_epic_locations: Any | None
-    delivery_action_validation_errors: Any | None
     failure_id: str | None
     candidate_labels: tuple[str, ...]
     candidate_failures: tuple[str, ...]
@@ -89,9 +85,6 @@ def load_required_sentinels() -> RequiredSentinelDependency:
 
         required = {
             "resolve_epic_locations": getattr(module, "resolve_epic_locations", None),
-            "delivery_action_validation_errors": getattr(
-                module, "delivery_action_validation_errors", None
-            ),
         }
         missing = sorted(name for name, capability in required.items() if not callable(capability))
         if missing:
@@ -101,7 +94,6 @@ def load_required_sentinels() -> RequiredSentinelDependency:
         return RequiredSentinelDependency(
             module=module,
             resolve_epic_locations=required["resolve_epic_locations"],
-            delivery_action_validation_errors=required["delivery_action_validation_errors"],
             failure_id=None,
             candidate_labels=tuple(label for label, _path in candidates),
             candidate_failures=(),
@@ -115,7 +107,6 @@ def load_required_sentinels() -> RequiredSentinelDependency:
     return RequiredSentinelDependency(
         module=None,
         resolve_epic_locations=None,
-        delivery_action_validation_errors=None,
         failure_id=failure_id,
         candidate_labels=tuple(label for label, _path in candidates),
         candidate_failures=tuple(failures),
@@ -149,14 +140,41 @@ def read_events(item: Path) -> list[dict[str, Any]]:
     return events
 
 
-def stale_running_errors(item: Path, now: datetime, stale_after: timedelta) -> list[str]:
+def unsettled_launch_run_ids(item: Path, events: list[dict[str, Any]], validator: Any) -> set[str]:
+    """Return valid lifecycle launches without a valid terminal settlement.
+
+    ``validate_closure`` owns the terminal-to-launch relation.  The stale check
+    consumes that reduction instead of maintaining a second interpretation of
+    ``eventKind`` and ``launchRunId``.
+    """
+    validity_errors: list[str] = []
+    event_validity = validator.derive_event_validity(events, item, validity_errors)
+    _open_revise, open_launches = validator.validate_closure(
+        events, [], event_validity=event_validity
+    )
+    return {
+        run_id
+        for event in open_launches
+        if isinstance((run_id := event.get("runId")), str)
+    }
+
+
+def stale_running_errors(
+    item: Path, now: datetime, stale_after: timedelta, validator: Any
+) -> list[str]:
     if stale_after.total_seconds() <= 0:
         return []
     errors: list[str] = []
-    for event in read_events(item):
+    events = read_events(item)
+    unsettled_launches = unsettled_launch_run_ids(item, events, validator)
+    for event in events:
         if event.get("status") != "running":
             continue
         run_id = event.get("runId", "<unknown>")
+        # V2 launch rows are stale only until their valid terminal settlement.
+        # Rows without eventKind retain the legacy stale-running behavior.
+        if event.get("eventKind") == "launch" and run_id not in unsettled_launches:
+            continue
         updated_at = event.get("updatedAt")
         if not isinstance(updated_at, str) or not updated_at.strip():
             errors.append(f"{run_id}: running event has no updatedAt for stale check")
@@ -401,23 +419,10 @@ def command_check(args: argparse.Namespace) -> int:
         print(f"FAIL category lifecycle: {exc.failure_id}: {exc}")
     global_notes = epic_adoption_notes(items, active_dir)
     sentinel_dependency = load_required_sentinels()
-    delivery_errors: dict[str, list[str]] = {}
     if not sentinel_dependency.available:
         failed += 1
         print("FAIL checker dependency:")
         print(f"  - {sentinel_dependency.diagnostic()}")
-    else:
-        delivery_validator = sentinel_dependency.delivery_action_validation_errors
-        assert callable(delivery_validator)
-        try:
-            delivery_errors = delivery_validator(active_dir)
-        except Exception as exc:
-            failed += 1
-            print("FAIL checker dependency:")
-            print(
-                f"  - {REQUIRED_SENTINEL_CALL_ID}: "
-                f"delivery_action_validation_errors failed: {type(exc).__name__}: {exc}"
-            )
 
     telemetry: dict[str, int] = {}
     for item in items:
@@ -426,8 +431,7 @@ def command_check(args: argparse.Namespace) -> int:
             strict_revise=not args.no_strict_revise,
             telemetry=telemetry,
         )
-        errors.extend(stale_running_errors(item, now, stale_after))
-        errors.extend(delivery_errors.get(item.name, []))
+        errors.extend(stale_running_errors(item, now, stale_after, validator))
         resolver = sentinel_dependency.resolve_epic_locations
         if callable(resolver):
             errors.extend(epic_link_notes(item, active_dir, resolver, is_valid_slug))
@@ -488,27 +492,13 @@ def command_check(args: argparse.Namespace) -> int:
                     f"{type(exc).__name__}: {exc}"
                 )
 
-    # Archival must not launder open obligations (decision item 3; fable impl gate
-    # REVISE-1): an archived item's ledger is still scanned for open v2 REVISEs.
-    # v2-scoping keeps historical v1 archives quiet.
-    if not args.no_strict_revise:
+    # The default periodic audit prevents archival laundering. Publication uses
+    # --active-only because local historical hygiene is not part of a tracked
+    # delta's current-task gate; lifecycle close already validates its own move.
+    if not args.no_strict_revise and not args.active_only:
         for ledger in sorted(archive_dir.rglob("agent-runs.jsonl")):
-            arch_errors: list[str] = []
-            events = validator.load_jsonl(ledger, arch_errors)
-            # Canonical position-aligned validation, scoped to schemaVersion-2 events.
-            # The validator marks skipped legacy positions ineligible without adding
-            # diagnostics, preserving the archive epoch while avoiding caller drift.
-            event_validity = validator.derive_event_validity(
-                events,
-                ledger.parent,
-                arch_errors,
-                validate_schema_version=2,
-            )
-            open_revise, _open_launches = validator.validate_closure(
-                events,
-                arch_errors,
-                telemetry,
-                event_validity=event_validity,
+            arch_errors, open_revise, _open_launches = validator.validate_archived_ledger_obligations(
+                ledger.parent, telemetry=telemetry
             )
             if open_revise or arch_errors:
                 failed += 1
@@ -541,8 +531,16 @@ def command_check(args: argparse.Namespace) -> int:
         return 1
 
     if not items:
+        if args.active_only:
+            print(
+                f"RESULT: PASS (no active work-items: {active_dir}; "
+                "archive obligation scan skipped)"
+            )
+            return 0
         print(f"RESULT: PASS (no active work-items: {active_dir}; archive scan clean)")
         return 0
+    if args.active_only:
+        print("info: publication scope active-only; archive obligation scan skipped")
     print(
         f"RESULT: PASS - valid state only, NOT completion: {len(items)} active work-item(s) "
         f"STILL OPEN (see 'STILL OPEN' list above; a done-claim must reconcile each one's Next action)"
@@ -570,6 +568,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-strict-revise",
         action="store_true",
         help="Do not FAIL on open v2 REVISE obligations (triage sessions only; the default is strict per decision 2026-07-16-review-verdict-closure).",
+    )
+    parser.add_argument(
+        "--active-only",
+        action="store_true",
+        help=(
+            "Validate current active items without the periodic archived-ledger "
+            "obligation scan. Intended for the repository publication gate; the "
+            "default remains the full active+archive audit."
+        ),
     )
     parser.add_argument(
         "--max-age-days",

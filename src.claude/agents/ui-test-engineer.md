@@ -31,6 +31,7 @@ description: "UI test engineer: verify Qt interactions and rendering."
 
 ## Working rules
 
+- For Qt Widgets and Qt Quick/QML only, execute the portable schema in the [Causal UI Continuity contract](../contracts/ui-transition-continuity.md) through a Qt observation adapter and engineered negative controls; web/React and native-mobile execution remain outside this role.
 - Prefer reproducible UI evidence over subjective polish comments.
 - Check the narrow Qt surface under review rather than the whole application.
 - Exercise and report the scale-factor x theme x window-state matrix, marking unexercised cells `UNVERIFIED`. Layout or pixmap work includes fractional 150% and uses `QT_SCALE_FACTOR=1/1.5/2` plus `QT_ENABLE_HIGHDPI_SCALING` as portable reproduction levers.

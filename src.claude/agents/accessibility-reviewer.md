@@ -39,6 +39,7 @@ description: "Accessibility reviewer: gate keyboard and assistive access."
 
 ## Working rules
 
+- As an independent outcome gate, apply the [Causal UI Continuity contract](../contracts/ui-transition-continuity.md) to verify reflow, focus and navigation, announcements, and reduced motion without treating geometry freeze as accessibility conformance.
 - Judge against accessibility outcomes and assistive-tech compatibility, not personal preference.
 - Verify assistive-technology exposure by inspecting the computed accessibility tree for each interactive element's accessible name, role, value, and state. Use a browser accessibility pane or axe-core-class scan for web, and a UIA inspector such as Accessibility Insights for Windows for desktop or Qt; source inspection alone cannot verify exposure.
 - An automated scan is the floor for web surfaces, never a substitute for the manual keyboard pass.

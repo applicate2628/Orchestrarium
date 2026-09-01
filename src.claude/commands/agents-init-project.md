@@ -111,7 +111,7 @@ Routing conventions (not persisted as keys):
       - `externalClaudeWorkdirMode: neutral`
       - `externalModelMode: runtime-default`
       - `externalCodexProfile: gpt-5.6-sol-xhigh`
-    - `externalProvider: auto` resolves by lane type through the active named production priority profile rather than a Claude-line default provider. Shipped `auto` stays on `codex | claude`; explicit `codex`, `claude`, `gemini`, or `qwen` may still be selected when the route is eligible, but Gemini and Qwen stay explicit `WEAK MODEL / NOT RECOMMENDED` example-only paths.
+    - `externalProvider: auto` resolves by lane type through the active named production priority profile rather than a Claude-line default provider. Shipped `auto` stays on the Codex/Claude pair. Kimi is explicit-only, policy-admitted read-only exploration, research, planning, or review through fixed `kimi-code/k3` with no tools or subagents, independently verified and nonauthorizing, while Grok remains unavailable in 1.x.
     - Accept shorthand answers such as `force`, `external reviewer only`, or `defaults for the rest`.
 
 6. **Confirm choices.**
@@ -137,7 +137,7 @@ Routing conventions (not persisted as keys):
    mcpMode: {value}  # allowed: auto | force; default: auto
    preferExternalWorker: {value}  # allowed: false | true; default: false
    preferExternalReviewer: {value}  # allowed: false | true; default: false
-   externalProvider: {value}  # allowed here: auto | codex | claude | gemini | qwen; default: auto; gemini/qwen are explicit example-only and not recommended
+   externalProvider: {value}  # selectable here: auto | codex | claude; default: auto; kimi requires explicit global Windows enrollment and is not initialized as a project-local scalar; grok remains unavailable in 1.x; removed gemini/qwen values fail closed with E_EXTERNAL_PROVIDER_REMOVED
    externalPriorityProfile: {value}  # allowed: balanced | quality-first | <repo-local production profile>; default: balanced
    reserveResolver: {value}  # allowed: disabled | claude-sonnet | claude-wrapper | wrapper:<command>; default: claude-sonnet
    externalPriorityProfiles: {value}  # allowed: structured profile map

@@ -1,9 +1,9 @@
 """dispatch_sentinels.py — the dispatch-time invariant registry (extension
 seam: dispatch-time invariants get a registry, not a new hook).
 
-WHY THIS MODULE EXISTS. This repository's own review-loop contract caps a
-review family at 3 rounds (`src.claude/agents/contracts/review-loop.md:45`,
-`shared/AGENTS.shared.md:40`), and one family ran eight rounds with nothing
+WHY THIS MODULE EXISTS. The review-loop runtime owner caps a review family at
+3 rounds (`scripts/review_loop_state.py::REVIEW_LOOP_ROUND_CAP`), and one
+family ran eight rounds with nothing
 firing. The structural reason: the schema validator's only input is a ledger
 the observed party itself writes, so a run that writes nothing presents the
 validator with nothing to reject (`work-items/bugs/2026-07-26-nothing-
@@ -140,16 +140,16 @@ SUBAGENT_TYPE_KEY = "subagent_type"
 # constant.
 TURN_ENTRIES_BYTE_CAP = 8 * 1024 * 1024
 
-# cap 3 (review-loop.md:45, shared/AGENTS.shared.md:40) + 1: fire on the
+# review-loop round cap 3 (review_loop_state.py::REVIEW_LOOP_ROUND_CAP) + 1:
+# fire on the
 # DISPATCH that would make this the 4th round for one role in one turn. This
 # is a NEW, separately named quantity (turn-scoped same-role dispatch depth)
-# -- NOT a tenth copy of the byte-unchanged "3" at its nine existing sites
-# (2026-07-25-cap-three-no-single-owner.md:90-93's named requirement).
+# -- NOT the generic Lead same-role/same-artifact correction-cycle limit.
 ROUND_DEPTH_ADVISORY_THRESHOLD = 4
 
 # The shipped round cap, cited in the advisory MESSAGE TEXT only -- never
-# re-owned or re-enforced here. review-loop.md:45 remains the single owner of
-# the enforced value; this module only quotes it for the model's benefit.
+# re-owned or re-enforced here. ``REVIEW_LOOP_ROUND_CAP`` remains the runtime
+# owner; the dedicated drift guard checks this hard-boundary duplicate.
 CITED_ROUND_CAP = 3
 
 

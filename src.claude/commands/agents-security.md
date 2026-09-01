@@ -28,7 +28,7 @@ The user does not need to type `/agents-security` for this flow to fire. Apply i
 
 3. **Handle reviewer verdict:**
    - If security reviewer returns `PASS` → proceed to report
-   - If security reviewer returns `REVISE` → route findings back to security engineer for updated threat model or constraints → re-run security reviewer. Max 3 iterations (see REVISE iteration cap in `operating-model.md`), then escalate to user.
+   - If security reviewer returns `REVISE` → route findings back to security engineer for updated threat model or constraints → re-run security reviewer under the shared spine's consecutive same-role/same-artifact `REVISE`-cycle cap, then escalate to the user when exhausted.
    - If security reviewer returns `BLOCKED` → present to user with classification
 
 4. **Save.** Persist per artifact persistence protocol (`operating-model.md`):

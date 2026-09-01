@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import json
 import os
 import shutil
 import subprocess
@@ -11,19 +12,10 @@ import tempfile
 from pathlib import Path
 
 import pytest
+from tests.fixtures.runtime_capabilities import codex_hook_host_env
 
 
 ROOT = Path(__file__).resolve().parents[1]
-EXCLUDED_PS1 = {
-    "scripts/install-gemini.ps1",
-    "scripts/install-qwen.ps1",
-    "src.gemini/scripts/validate-pack.ps1",
-    "src.qwen/scripts/validate-pack.ps1",
-}
-EXAMPLE_SHELL_ENTRYPOINTS = {
-    "scripts/install-gemini.sh",
-    "scripts/install-qwen.sh",
-}
 DEPRECATED_EXAMPLE_COMPATIBILITY_SHELL_ENTRYPOINTS = frozenset(
     {"scripts/universal-hooks/scripts/mcp-usage-reminder.sh"}
 )
@@ -50,17 +42,6 @@ PRODUCTION_SHELL_ENTRYPOINTS = frozenset(
 )
 BASH = shutil.which("bash")
 BASH_SMOKE_AVAILABLE = BASH is not None and os.name != "nt"
-EARLY_AGENT_INSTRUCTIONS = {
-    "default.toml": """General-purpose fallback agent.
-Inherit the parent session's task context and focus on the assigned subtask.
-Stay within the requested scope and return a concise, usable result.""",
-    "explorer.toml": """Read-heavy codebase exploration agent.
-Stay in exploration mode, gather evidence efficiently, and return factual findings with clear pointers.
-Do not drift into implementation unless the parent explicitly asks for it.""",
-    "worker.toml": """Execution-focused agent for implementation and fixes.
-Carry out the assigned implementation task directly, stay within scope, and avoid redesign unless the parent explicitly asks for it.
-Return concrete progress and outcomes for the requested slice.""",
-}
 
 
 def _load(path: Path, name: str):
@@ -111,15 +92,15 @@ exit 0
 """
 
 
-def test_only_deprecated_example_powershell_files_remain() -> None:
+def test_no_powershell_implementation_files_remain() -> None:
     relative_paths = (path.relative_to(ROOT) for path in ROOT.rglob("*.ps1"))
     actual = {
         path.as_posix() for path in relative_paths if ".scratch" not in path.parts
     }
-    assert actual == EXCLUDED_PS1
+    assert actual == set()
 
 
-def test_python_ownership_policy_is_repo_local_and_excludes_example_packs() -> None:
+def test_python_ownership_policy_is_repo_local() -> None:
     agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
     hygiene = (
         ROOT / "shared" / "references" / "repository-source-hygiene.md"
@@ -131,23 +112,30 @@ def test_python_ownership_policy_is_repo_local_and_excludes_example_packs() -> N
         assert "thin unconditional launcher" in text
         assert "rollback copy" in text
         assert "not shared installed governance for arbitrary target projects" in text or "not a rule installed into arbitrary target repositories" in text
-        assert "deprecated Gemini/Qwen example packs remain outside" in text
-
     assert "Python as the sole owner of executable script logic" in release_notes
-    assert "deprecated Gemini/Qwen example packs remain unchanged" in release_notes
 
 
-def _production_shell_entrypoints() -> frozenset[str]:
+def _production_shell_entrypoints(root: Path = ROOT) -> frozenset[str]:
     return frozenset(
-        path.relative_to(ROOT).as_posix()
-        for path in ROOT.rglob("*.sh")
-        if ".scratch" not in path.parts
-        and ".git" not in path.parts
-        and path.relative_to(ROOT).parts[0] not in {"src.gemini", "src.qwen"}
-        and path.relative_to(ROOT).as_posix() not in EXAMPLE_SHELL_ENTRYPOINTS
-        and path.relative_to(ROOT).as_posix()
+        relative.as_posix()
+        for path in root.rglob("*.sh")
+        if ".scratch" not in (relative := path.relative_to(root)).parts
+        and ".git" not in relative.parts
+        and relative.as_posix()
         not in DEPRECATED_EXAMPLE_COMPATIBILITY_SHELL_ENTRYPOINTS
     )
+
+
+def test_shell_census_does_not_filter_a_worktree_because_its_ancestor_is_scratch(
+    tmp_path: Path,
+) -> None:
+    """Only a repo-relative .scratch segment is excluded from shell census."""
+
+    worktree = tmp_path / ".scratch" / "detached-worktree"
+    script = worktree / "scripts" / "probe.sh"
+    script.parent.mkdir(parents=True)
+    script.write_text("#!/bin/sh\n", encoding="utf-8")
+    assert _production_shell_entrypoints(worktree) == frozenset({"scripts/probe.sh"})
 
 
 def _assert_thin_python_launcher(text: str) -> None:
@@ -195,6 +183,30 @@ exec \"$PYTHON\" \"$SCRIPT_DIR/owner.py\" \"$@\"
         _assert_thin_python_launcher(bad_launcher)
 
 
+def test_global_home_selection_uses_home_when_posix_lacks_userprofile() -> None:
+    assert INSTALLER._select_global_home_environment(
+        None, "/tmp/orchestrarium-home", platform="posix"
+    ) == ("HOME", "/tmp/orchestrarium-home", None)
+
+
+def test_global_home_selection_ignores_userprofile_on_posix() -> None:
+    assert INSTALLER._select_global_home_environment(
+        "/ignored-userprofile",
+        "/tmp/orchestrarium-home",
+        platform="posix",
+    ) == ("HOME", "/tmp/orchestrarium-home", None)
+
+
+def test_install_docs_match_platform_global_home_contract() -> None:
+    install = (ROOT / "INSTALL.md").read_text(encoding="utf-8")
+
+    assert (
+        "For global installs, POSIX requires `HOME` and ignores `USERPROFILE`; "
+        "Windows requires `USERPROFILE` and does not fall back to `HOME`."
+        in install
+    )
+
+
 @pytest.mark.skipif(
     not BASH_SMOKE_AVAILABLE,
     reason="POSIX bash launcher smoke is unavailable on this host",
@@ -210,14 +222,19 @@ def test_posix_launcher_forwards_stdin_argv_and_exit_code(entrypoint: str) -> No
     shell = ROOT / entrypoint
     with tempfile.TemporaryDirectory() as td:
         temp = Path(td)
-        fake_python = temp / "python3"
         argv_path = temp / "argv.txt"
         stdin_path = temp / "stdin.txt"
-        fake_python.write_text(
-            "#!/usr/bin/env bash\nprintf '%s\\n' \"$@\" > \"$LAUNCHER_ARGV\"\ncat > \"$LAUNCHER_STDIN\"\nexit 23\n",
-            encoding="utf-8",
-        )
-        fake_python.chmod(0o755)
+        for executable in ("python", "python3"):
+            fake_python = temp / executable
+            fake_python.write_text(
+                "#!/usr/bin/env bash\n"
+                'if [ "$#" -eq 2 ] && [ "$1" = "-c" ]; then exit 0; fi\n'
+                "printf '%s\\n' \"$@\" > \"$LAUNCHER_ARGV\"\n"
+                "cat > \"$LAUNCHER_STDIN\"\n"
+                "exit 23\n",
+                encoding="utf-8",
+            )
+            fake_python.chmod(0o755)
         env = os.environ.copy()
         env["PATH"] = str(temp) + os.pathsep + env.get("PATH", "")
         env["LAUNCHER_ARGV"] = str(argv_path)
@@ -238,10 +255,59 @@ def test_posix_launcher_forwards_stdin_argv_and_exit_code(entrypoint: str) -> No
         assert stdin_path.read_text(encoding="utf-8") == "stdin payload\n"
 
 
+@pytest.mark.skipif(
+    not BASH_SMOKE_AVAILABLE,
+    reason="POSIX bash installer dry-run is unavailable on this host",
+)
+@pytest.mark.parametrize("entrypoint", ("scripts/install-codex.sh", "scripts/install-claude.sh"))
+def test_posix_global_dry_run_uses_home_without_userprofile(entrypoint: str) -> None:
+    with tempfile.TemporaryDirectory() as td:
+        home = Path(td) / "home"
+        home.mkdir()
+        env = os.environ.copy()
+        env.pop("USERPROFILE", None)
+        env["HOME"] = str(home)
+        result = subprocess.run(
+            [BASH, str(ROOT / entrypoint), "--global", "--dry-run", "--no-hypothesis-hook"],
+            cwd=ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    provider = "codex" if "codex" in entrypoint else "claude"
+    assert f"Target: {home / f'.{provider}'}" in result.stdout
+
+
 def test_publication_scanner_python_mirrors_match_canon() -> None:
     canon = (ROOT / "scripts/universal-hooks/scripts/check-publication-safety.py").read_bytes()
     assert (ROOT / "src.claude/agents/scripts/check-publication-safety.py").read_bytes() == canon
     assert (ROOT / "src.codex/skills/lead/scripts/check-publication-safety.py").read_bytes() == canon
+
+
+@pytest.mark.parametrize(
+    "manifest,source,relative",
+    (
+        (
+            INSTALLER._CODEX_RETIRED_PS1,
+            ROOT / "src.codex/skills/lead/scripts/check-publication-safety.ps1",
+            "skills/lead/scripts/check-publication-safety.ps1",
+        ),
+        (
+            INSTALLER._CLAUDE_RETIRED_PS1,
+            ROOT / "src.claude/agents/scripts/check-publication-safety.ps1",
+            "agents/scripts/check-publication-safety.ps1",
+        ),
+    ),
+)
+def test_publication_scanner_powershell_wrapper_is_retired_not_shipped(
+    manifest: dict[str, str], source: Path, relative: str
+) -> None:
+    assert relative in manifest
+    assert not source.exists()
+    assert source.with_suffix(".py").is_file()
 
 
 @pytest.mark.parametrize(
@@ -274,99 +340,42 @@ def test_retired_cleanup_removes_only_exact_pack_bytes(
     assert target.read_bytes() == RETIRED_PASSIVE_POLLING_PS1 + b"\ncustom"
 
 
-def _replace_model(text: str, model: str) -> str:
-    marker = 'model = "gpt-5.6-sol"'
-    assert text.count(marker) == 1
-    return text.replace(marker, f'model = "{model}"', 1)
-
-
-def _replace_instructions(text: str, instructions: str) -> str:
-    prefix, separator, remainder = text.partition('developer_instructions = """\n')
-    assert separator
-    _, closing, suffix = remainder.partition('\n"""\n')
-    assert closing
-    return prefix + separator + instructions + closing + suffix
-
-
-def _historical_agent_fixtures(name: str) -> tuple[str, ...]:
-    current = (ROOT / "src.codex" / "agents" / name).read_text(encoding="utf-8")
-    gpt_55 = _replace_model(current, "gpt-5.5")
-    gpt_54 = _replace_model(current, "gpt-5.4")
-    early_gpt_54 = _replace_instructions(
-        gpt_54, EARLY_AGENT_INSTRUCTIONS[name]
-    )
-    return gpt_55, gpt_54, early_gpt_54
-
-
-@pytest.mark.parametrize("name", tuple(INSTALLER.HISTORICAL_CODEX_AGENT_SHA256))
-def test_historical_agent_manifest_matches_exact_shipped_fixtures(name: str) -> None:
-    actual = {
-        INSTALLER._agent_override_sha256(fixture)
-        for fixture in _historical_agent_fixtures(name)
-    }
-    assert actual == INSTALLER.HISTORICAL_CODEX_AGENT_SHA256[name]
-
-
-@pytest.mark.parametrize("name", tuple(INSTALLER.HISTORICAL_CODEX_AGENT_SHA256))
-@pytest.mark.parametrize("template_index", range(4))
-def test_reclaim_codex_presets_removes_only_known_pack_templates(
-    tmp_path: Path, name: str, template_index: int
-) -> None:
-    source = tmp_path / "source"
-    target = tmp_path / "target"
-    source.mkdir()
-    target.mkdir()
-    current = (ROOT / "src.codex" / "agents" / name).read_text(encoding="utf-8")
-    (source / name).write_text(current, encoding="utf-8")
-    pack_owned = (current, *_historical_agent_fixtures(name))[template_index]
-    (target / name).write_bytes(pack_owned.replace("\n", "\r\n").encode("utf-8"))
-
-    INSTALLER._reclaim_codex_presets(source, target, False)
-
-    assert not (target / name).exists()
-
-
-def test_reclaim_codex_presets_preserves_model_only_explorer_customization(
+def test_codex_production_entrypoint_creates_only_source_manifest_roles(
     tmp_path: Path,
 ) -> None:
-    name = "explorer.toml"
-    source = tmp_path / "source"
-    target = tmp_path / "target"
-    source.mkdir()
-    target.mkdir()
-    current = (ROOT / "src.codex" / "agents" / name).read_text(encoding="utf-8")
-    custom = _replace_model(current, "custom/explorer-model")
-    (source / name).write_text(current, encoding="utf-8")
-    installed = target / name
-    custom_bytes = custom.encode("utf-8")
-    installed.write_bytes(custom_bytes)
+    """The source manifest validates payload bytes but is never an installed receipt."""
 
-    INSTALLER._reclaim_codex_presets(source, target, False)
-
-    assert installed.read_bytes() == custom_bytes
-
-
-def test_reclaim_codex_presets_preserves_body_custom_worker_byte_for_byte(
-    tmp_path: Path,
-) -> None:
-    name = "worker.toml"
-    source = tmp_path / "source"
-    target = tmp_path / "target"
-    source.mkdir()
-    target.mkdir()
-    current = (ROOT / "src.codex" / "agents" / name).read_text(encoding="utf-8")
-    custom = _replace_instructions(
-        current,
-        "User-customized worker override.\nPreserve this body exactly.",
+    project = tmp_path / "project"
+    project.mkdir()
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts" / "install-codex.py"),
+            "--target",
+            str(project),
+            "--force",
+            "--allow-unsafe-target",
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env=codex_hook_host_env(os.environ, ROOT),
     )
-    (source / name).write_text(current, encoding="utf-8")
-    installed = target / name
-    custom_bytes = custom.encode("utf-8")
-    installed.write_bytes(custom_bytes)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "RESULT: OK - Codex pack installed" in result.stdout
 
-    INSTALLER._reclaim_codex_presets(source, target, False)
-
-    assert installed.read_bytes() == custom_bytes
+    source_manifest = json.loads(
+        (ROOT / "src.codex" / "agents" / "orchestrarium-role-manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    installed_agents = project / ".codex" / "agents"
+    assert len(source_manifest["roles"]) == 17
+    assert not (installed_agents / "orchestrarium-role-manifest.json").exists()
+    for role_name, source_record in source_manifest["roles"].items():
+        assert (installed_agents / source_record["relativePath"]).is_file()
+    assert not hasattr(INSTALLER, "_reclaim_codex_presets")
 
 
 @pytest.mark.parametrize("script", ("scripts/install-codex.py", "scripts/install-claude.py"))

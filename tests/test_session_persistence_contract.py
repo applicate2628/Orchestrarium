@@ -15,8 +15,6 @@ CORE_PROJECTIONS = (
 VAK_PROJECTIONS = (
     ROOT / "src.codex" / "skills" / "vak-dissertation-review" / "SKILL.md",
     ROOT / "src.claude" / "skills" / "vak-dissertation-review" / "SKILL.md",
-    ROOT / "src.gemini" / "skills" / "vak-dissertation-review" / "SKILL.md",
-    ROOT / "src.qwen" / "skills" / "vak-dissertation-review" / "SKILL.md",
 )
 CURRENT_TRUTH_PROJECTIONS = (
     SHARED,
@@ -121,7 +119,7 @@ class SessionPersistenceContractTest(unittest.TestCase):
         self.assertIn("root records the concise lane result/provenance in `agent-runs.jsonl`", text)
         self.assertIn("Do not duplicate either in `.reports/` or `.plans/`.", text)
 
-    def test_vak_four_pack_projection_uses_conditional_persistence(self) -> None:
+    def test_vak_live_pack_projection_uses_conditional_persistence(self) -> None:
         for path in VAK_PROJECTIONS:
             text = path.read_text(encoding="utf-8")
             with self.subTest(path=path):
