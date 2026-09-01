@@ -918,6 +918,7 @@ class ProjectTopology:
     work_items: Path
     auxiliary_roots: frozenset[str]
     read_model_roots: frozenset[str] = frozenset()
+    root_contract_present: bool = False
 
     @property
     def canonical_roots(self) -> frozenset[str]:
@@ -938,6 +939,21 @@ class ProjectTopology:
         roots = set(self.reserved_roots)
         roots.update(self.auxiliary_roots)
         return frozenset(roots)
+
+    def assert_known_top_level_roots(self) -> None:
+        if not self.work_items.is_dir():
+            return
+        unknown_roots = sorted(
+            path.name
+            for path in self.work_items.iterdir()
+            if path.is_dir() and path.name not in self.allowed_roots
+        )
+        if unknown_roots:
+            noun = "directory" if len(unknown_roots) == 1 else "directories"
+            raise LifecycleError(
+                "WI-CATEGORY-UNKNOWN-ROOT",
+                f"unknown top-level work-items {noun}: " + ", ".join(unknown_roots),
+            )
 
     def with_read_model_roots(self) -> ProjectTopology:
         if self.read_model_roots:
@@ -962,6 +978,7 @@ class ProjectTopology:
             work_items=self.work_items,
             auxiliary_roots=self.auxiliary_roots,
             read_model_roots=frozenset({historical_storage}),
+            root_contract_present=self.root_contract_present,
         )
 
 
@@ -971,26 +988,32 @@ def _resolve_project_topology(
     root_failure_id: str = ROOT_CONTRACT_FAILURE,
 ) -> ProjectTopology:
     unresolved = _lifecycle_unresolved_absolute(Path(root))
+    resolved = unresolved.resolve()
+    work_items = resolved if resolved.name == "work-items" else resolved / "work-items"
+    contract_path = work_items / ROOT_CONTRACT_FILE
+    try:
+        contract_path.lstat()
+    except FileNotFoundError:
+        return ProjectTopology(work_items=work_items, auxiliary_roots=frozenset())
+    except OSError as exc:
+        raise LifecycleError(
+            ROOT_CONTRACT_FAILURE, "root contract entry cannot be inspected"
+        ) from exc
     _lifecycle_reject_unreduced_reparse(
         unresolved,
         failure_id=root_failure_id,
         message="repository root or parent contains a link or reparse point",
     )
-    resolved = unresolved.resolve()
-    work_items = resolved if resolved.name == "work-items" else resolved / "work-items"
     _lifecycle_reject_unreduced_reparse(
         work_items,
         failure_id=root_failure_id,
         message="work-items root contains a link or reparse point",
     )
-    contract_path = work_items / ROOT_CONTRACT_FILE
     _lifecycle_reject_unreduced_reparse(
         contract_path,
         failure_id=ROOT_CONTRACT_FAILURE,
         message="root contract contains a link or reparse point",
     )
-    if not contract_path.exists():
-        return ProjectTopology(work_items=work_items, auxiliary_roots=frozenset())
     if not contract_path.is_file():
         raise LifecycleError(ROOT_CONTRACT_FAILURE, "root contract must be a regular file")
     try:
@@ -1012,6 +1035,7 @@ def _resolve_project_topology(
     topology = ProjectTopology(
         work_items=work_items,
         auxiliary_roots=frozenset(),
+        root_contract_present=True,
     ).with_read_model_roots()
     auxiliary_roots: set[str] = set()
     for name, definition in contract["auxiliaryRoots"].items():
@@ -1033,11 +1057,14 @@ def _resolve_project_topology(
         if auxiliary_path.exists() and not auxiliary_path.is_dir():
             raise LifecycleError(ROOT_CONTRACT_FAILURE, f"auxiliary root is not a directory: {name}")
         auxiliary_roots.add(name)
-    return ProjectTopology(
+    topology = ProjectTopology(
         work_items=topology.work_items,
         auxiliary_roots=frozenset(auxiliary_roots),
         read_model_roots=topology.read_model_roots,
+        root_contract_present=True,
     )
+    topology.assert_known_top_level_roots()
+    return topology
 
 
 def _work_items_root(
@@ -4408,19 +4435,8 @@ def reopen_item(
 def audit_categories(root: Path) -> tuple[str, ...]:
     topology = _resolve_project_topology(root).with_read_model_roots()
     work_items = topology.work_items
-    allowed_roots = set(topology.allowed_roots)
-    if work_items.is_dir():
-        unknown_roots = sorted(
-            path.name
-            for path in work_items.iterdir()
-            if path.is_dir() and path.name not in allowed_roots
-        )
-        if unknown_roots:
-            noun = "directory" if len(unknown_roots) == 1 else "directories"
-            raise LifecycleError(
-                "WI-CATEGORY-UNKNOWN-ROOT",
-                f"unknown top-level work-items {noun}: " + ", ".join(unknown_roots),
-            )
+    if not topology.root_contract_present:
+        topology.assert_known_top_level_roots()
     decision_v0_records = _preflight_current_decision_v0(root)
     decision_h1_records = _preflight_current_decision_h1(root)
     legacy_read_compatible: list[str] = []

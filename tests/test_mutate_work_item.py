@@ -4002,6 +4002,71 @@ def test_audit_rejects_unknown_top_level_directory(tmp_path: Path) -> None:
         raise AssertionError("audit accepted an unknown top-level work-items directory")
 
 
+def test_no_contract_preserves_linked_repository_and_work_items_read_compatibility(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    repository = tmp_path / "repository"
+    (repository / "work-items").mkdir(parents=True)
+    repository_link = tmp_path / "repository-link"
+    work_items_link_repository = tmp_path / "work-items-link-repository"
+    work_items_target = tmp_path / "work-items-target"
+    work_items_target.mkdir()
+    try:
+        os.symlink(repository, repository_link, target_is_directory=True)
+        work_items_link_repository.mkdir()
+        os.symlink(
+            work_items_target,
+            work_items_link_repository / "work-items",
+            target_is_directory=True,
+        )
+    except OSError as exc:
+        if os.name == "nt":
+            import pytest
+
+            pytest.skip(f"symlink creation unavailable: {exc}")
+        raise
+
+    assert module._work_items_root(repository_link) == repository / "work-items"
+    assert module._work_items_root(work_items_link_repository).resolve() == work_items_target
+
+
+def test_contract_unknown_root_rejects_lifecycle_and_read_model_before_work_items_mutation(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    write_root_contract(root, {})
+    (root / "work-items" / "unknown-category").mkdir()
+    candidate = b"Status: candidate\nTask: reject unknown root\nNext action: none\n"
+
+    for operation in (
+        lambda: module.create_candidate(root, "unknown-root-candidate", candidate),
+        lambda: module.refresh_readme(root),
+        lambda: module.audit_categories(root),
+    ):
+        try:
+            operation()
+        except module.LifecycleError as exc:
+            assert exc.failure_id == "WI-CATEGORY-UNKNOWN-ROOT"
+        else:
+            raise AssertionError("contracted unknown root reached a lifecycle or read-model operation")
+        assert not (root / "work-items" / "backlog").exists()
+        assert not (root / "work-items" / "README.md").exists()
+
+
+def test_unknown_root_validation_has_one_topology_owner(tmp_path: Path) -> None:
+    source = SCRIPT.read_text(encoding="utf-8")
+    audit_start = source.index("def audit_categories(")
+    audit_end = source.index("\ndef audit(", audit_start)
+    audit_source = source[audit_start:audit_end]
+
+    assert source.count("def assert_known_top_level_roots(") == 1
+    assert source.count('"WI-CATEGORY-UNKNOWN-ROOT"') == 1
+    assert "topology.assert_known_top_level_roots()" in audit_source
+    assert "work_items.iterdir()" not in audit_source
+
+
 def test_root_contract_topology_is_shared_by_audit_close_reopen_and_refresh(
     tmp_path: Path,
 ) -> None:
