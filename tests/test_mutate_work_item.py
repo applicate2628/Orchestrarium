@@ -4181,6 +4181,26 @@ def test_root_contract_rejects_malformed_and_unconfined_roots(tmp_path: Path) ->
             raise AssertionError(f"invalid root contract passed: {name}")
 
 
+def test_root_contract_rejects_duplicate_json_keys(tmp_path: Path) -> None:
+    module = load_module()
+    cases = {
+        "schema": '{"schema":"work-items-root-contract","schema":"work-items-root-contract","version":2,"auxiliaryRoots":{}}',
+        "version": '{"schema":"work-items-root-contract","version":2,"version":2,"auxiliaryRoots":{}}',
+        "auxiliary-roots": '{"schema":"work-items-root-contract","version":2,"auxiliaryRoots":{},"auxiliaryRoots":{}}',
+        "auxiliary-root-name": '{"schema":"work-items-root-contract","version":2,"auxiliaryRoots":{"receipts":{"kind":"flat-json"},"receipts":{"kind":"flat-json"}}}',
+    }
+
+    for name, contract in cases.items():
+        root = tmp_path / name
+        write(root / "work-items" / "root-contract.json", contract + "\n")
+        try:
+            module._resolve_project_topology(root)
+        except module.LifecycleError as exc:
+            assert exc.failure_id == "WI-CATEGORY-ROOT-CONTRACT-INVALID", name
+        else:
+            raise AssertionError(f"duplicate JSON key passed: {name}")
+
+
 def test_root_contract_rejects_linked_contract_and_repository_root(tmp_path: Path) -> None:
     module = load_module()
     target_contract = tmp_path / "contract-target.json"

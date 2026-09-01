@@ -901,6 +901,18 @@ ROOT_CONTRACT_VERSION = 2
 ROOT_CONTRACT_FAILURE = "WI-CATEGORY-ROOT-CONTRACT-INVALID"
 
 
+def _root_contract_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    value: dict[str, object] = {}
+    for key, item in pairs:
+        if key in value:
+            raise LifecycleError(
+                ROOT_CONTRACT_FAILURE,
+                f"root contract repeats JSON key: {key}",
+            )
+        value[key] = item
+    return value
+
+
 @dataclass(frozen=True)
 class ProjectTopology:
     work_items: Path
@@ -982,7 +994,10 @@ def _resolve_project_topology(
     if not contract_path.is_file():
         raise LifecycleError(ROOT_CONTRACT_FAILURE, "root contract must be a regular file")
     try:
-        contract = json.loads(contract_path.read_text(encoding="utf-8"))
+        contract = json.loads(
+            contract_path.read_text(encoding="utf-8"),
+            object_pairs_hook=_root_contract_json_object,
+        )
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise LifecycleError(ROOT_CONTRACT_FAILURE, "root contract must be valid UTF-8 JSON") from exc
     if (
