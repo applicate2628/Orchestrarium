@@ -1,0 +1,137 @@
+{
+  "baseline": {
+    "commitSha": "ce2052fb773576fd6e3206c2a7e21e01852d556b",
+    "repository": "applicate2628/Orchestrarium",
+    "requestedRef": "ce2052fb773576fd6e3206c2a7e21e01852d556b",
+    "sourceBranch": "main",
+    "sourceBranchHeadAtCapture": "ce2052fb773576fd6e3206c2a7e21e01852d556b",
+    "treeSha": "04dccf4575f17c9c5533474d2e0fd1503bfeceb7"
+  },
+  "evidence": {
+    "commitGeneratedOutputs": false,
+    "generatedOutputDirectory": ".scratch/orche-stage0/reviewed-runs",
+    "requiredGeneratedOutputs": [
+      "summary.json",
+      "reports/capability-comparison.json",
+      "reports/pytest-comparison.json",
+      "reports/target-effect-baseline.json"
+    ],
+    "verificationMode": "local-only"
+  },
+  "schemaVersion": 6,
+  "signedTag": {
+    "name": "orchestrarium-v1-parity-baseline",
+    "required": true,
+    "status": "human-gate-pending"
+  },
+  "status": "baseline-identity-complete-trusted-tree-and-differential-pinned",
+  "tooling": {
+    "capabilityComparator": {
+      "deterministic": true,
+      "gitBlobSha": "4df5117a3ab44c446d3a5b0d4345854f87efed51",
+      "materialization": "git-cat-file-reviewed-tree-blob",
+      "path": "baseline/orchestrarium-v1/tooling/compare_capability_baseline.py",
+      "runtimeMutation": false,
+      "sourcePath": "scripts/baseline/compare_capability_baseline.py"
+    },
+    "commandComparator": {
+      "deterministic": true,
+      "gitBlobSha": "0d590e564ef80401f85234728bbc429bd9caf985",
+      "materialization": "git-cat-file-reviewed-tree-blob",
+      "path": "baseline/orchestrarium-v1/tooling/compare_command_baseline.py",
+      "runtimeMutation": false,
+      "sourcePath": "scripts/baseline/compare_command_baseline.py"
+    },
+    "inventoryGenerator": {
+      "deterministic": true,
+      "gitBlobSha": "d06ef6d646898d98ab7b434b542cf0c123cf6763",
+      "materialization": "git-cat-file-reviewed-tree-blob",
+      "path": "baseline/orchestrarium-v1/tooling/build_inventory.py",
+      "runtimeMutation": false,
+      "sourcePath": "scripts/baseline/build_inventory.py"
+    },
+    "pytestComparator": {
+      "deterministic": true,
+      "gitBlobSha": "1367613738de092164e81696b9cd4de3f85346a7",
+      "materialization": "git-cat-file-reviewed-tree-blob",
+      "path": "baseline/orchestrarium-v1/tooling/compare_pytest_baseline.py",
+      "runtimeMutation": false,
+      "sourcePath": "scripts/baseline/compare_pytest_baseline.py"
+    },
+    "stage0Evidence": {
+      "deterministic": true,
+      "gitBlobSha": "c9e428da1496c7200928ccd7b952fe6ac4f52a44",
+      "materialization": "git-cat-file-reviewed-tree-blob",
+      "path": "baseline/orchestrarium-v1/tooling/stage0_evidence.py",
+      "runtimeMutation": false,
+      "sourcePath": "scripts/baseline/stage0_evidence.py"
+    },
+    "stage0Orchestrator": {
+      "deterministic": true,
+      "gitBlobSha": "e6b0c9fa373934fc6b3364748f0ae98cbf71a60a",
+      "materialization": "git-cat-file-reviewed-tree-blob",
+      "path": "baseline/orchestrarium-v1/tooling/stage0_orchestrator.py",
+      "runtimeMutation": false,
+      "sourcePath": "scripts/baseline/stage0_orchestrator.py"
+    },
+    "stage0Runtime": {
+      "deterministic": true,
+      "gitBlobSha": "2e4a6b7e9422467cf0320563b798e8e82d677722",
+      "materialization": "git-cat-file-reviewed-tree-blob",
+      "path": "baseline/orchestrarium-v1/tooling/stage0_runtime.py",
+      "runtimeMutation": false,
+      "sourcePath": "scripts/baseline/stage0_runtime.py"
+    },
+    "stage0Verifier": {
+      "deterministic": true,
+      "gitBlobSha": "157c030c1e780e6e675526451cd2398df24a4c2a",
+      "materialization": "git-cat-file-reviewed-tree-blob",
+      "path": "baseline/orchestrarium-v1/tooling/verify_stage0.py",
+      "runtimeMutation": false,
+      "sourcePath": "scripts/baseline/verify_stage0.py",
+      "fragments": [
+        {
+          "path": "baseline/orchestrarium-v1/tooling/verify_stage0.part-00.pyfrag",
+          "gitBlobSha": "40d5d117f12ef9f7bb27912ee9989cd92f65d492"
+        },
+        {
+          "path": "baseline/orchestrarium-v1/tooling/verify_stage0.part-01.pyfrag",
+          "gitBlobSha": "24a8cb22480d03c03a7b177ea3fcba553dcd380b"
+        },
+        {
+          "path": "baseline/orchestrarium-v1/tooling/verify_stage0.part-02.pyfrag",
+          "gitBlobSha": "ccd04766a67ccf40b31de385005cb0d6a751fbf1"
+        },
+        {
+          "path": "baseline/orchestrarium-v1/tooling/verify_stage0.part-03.pyfrag",
+          "gitBlobSha": "f6839cc46a4109d128e141f143e6ae54beed1727"
+        },
+        {
+          "path": "baseline/orchestrarium-v1/tooling/verify_stage0.part-04.pyfrag",
+          "gitBlobSha": "36545db5ccce1a07cf14947e5c6b6ab098144d24"
+        },
+        {
+          "path": "baseline/orchestrarium-v1/tooling/verify_stage0.part-05.pyfrag",
+          "gitBlobSha": "bb60ef66bb8a875ed25836f7cd59c2d0209a0389"
+        },
+        {
+          "path": "baseline/orchestrarium-v1/tooling/verify_stage0.part-06.pyfrag",
+          "gitBlobSha": "89b295146e22619cad1b449baa07d1cfb890660d"
+        }
+      ]
+    },
+    "targetEffectGenerator": {
+      "deterministic": true,
+      "gitBlobSha": "2aa964ea3aac2fa64ab16e60bf79b2ee7ebb93ec",
+      "materialization": "git-cat-file-reviewed-tree-blob",
+      "path": "baseline/orchestrarium-v1/tooling/build_target_effect_baseline.py",
+      "runtimeMutation": false,
+      "sourcePath": "scripts/baseline/build_target_effect_baseline.py"
+    }
+  },
+  "toolingAnchor": {
+    "kind": "reviewed-tree-frozen-paths",
+    "pathPrefix": "baseline/orchestrarium-v1/tooling/",
+    "requiresOwningCommitLookup": false
+  }
+}

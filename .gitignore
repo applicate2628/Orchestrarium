@@ -10,6 +10,10 @@
 /.reports/
 /work-items/
 
+# Local-only PR verification workflows
+/.github/workflows/_orche_pr2_verify*.yml
+/.github/workflows/_orche_pr2_review*.yml
+
 # Tool and plugin local state
 /.serena/
 /.codegraph/
