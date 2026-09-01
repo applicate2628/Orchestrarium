@@ -2,6 +2,10 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-09-01
+
+- **The SessionStart scratch watchdog now prefers an explicit repository root over a containing outer repository.** It selects the current directory when that directory is a repository, otherwise selects exactly one safe immediate child repository or reports ambiguity, and falls back to a containing ancestor only when neither applies. **Why it matters:** temporary and fixture workspaces nested under a larger repository scan their intended child repository instead of the outer repository's `.scratch/`, preserving the startup budget. The existing read-only behavior, shared deadline, link and reparse-point rejection, fail-open reminder behavior, and hook registration identity remain unchanged.
+
 ## 2026-08-31
 
 - **Production installer entrypoints can recover through an alternate Python 3.11-or-newer interpreter.** When the initially selected interpreter cannot load the installer, the bootstrap selects a separately verified compatible interpreter while preserving the same installer arguments and failure boundary. **Why it matters:** supported installs can recover from an unsuitable ambient Python without weakening the minimum-version contract.

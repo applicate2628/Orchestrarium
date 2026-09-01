@@ -43,7 +43,8 @@ def test_repository_root_resolution_is_bounded_and_unambiguous(
     tmp_path: Path, hook_index: int
 ) -> None:
     hook = load_hook(HOOKS[hook_index], str(hook_index))
-    workspace = tmp_path / "workspace"
+    outer = make_repo(tmp_path / "outer")
+    workspace = outer / "workspace"
     repo = make_repo(workspace / "repo", git_file=hook_index % 2 == 1)
     nested = repo / "nested" / "work"
     nested.mkdir(parents=True)

@@ -832,10 +832,11 @@ def _git_root_state(path: Path) -> str:
 def resolve_repository_root(envelope: dict, deadline: float) -> RepositoryRootResolution:
     """Resolve exactly one containing or direct-child Git repository, read-only.
 
-    A containing repository always wins. Outside a repository, only immediate
-    children are considered and the enumeration must finish within the SAME
-    deadline later consumed by the valuables scan. Links, junctions, and other
-    reparse points are never followed.
+    The current directory wins when it is itself a repository. Otherwise,
+    immediate child repositories take precedence over a containing ancestor,
+    and their enumeration must finish within the SAME deadline later consumed
+    by the valuables scan. Links, junctions, and other reparse points are never
+    followed.
     """
 
     cwd_value = envelope.get("cwd") if isinstance(envelope, dict) else None
@@ -857,17 +858,11 @@ def resolve_repository_root(envelope: dict, deadline: float) -> RepositoryRootRe
         return RepositoryRootResolution("unsafe", None)
 
     current = candidate.absolute()
-    while True:
-        if time.monotonic() >= deadline:
-            return RepositoryRootResolution("budget-limited", None)
-        marker_state = _git_root_state(current)
-        if marker_state == "repo":
-            return RepositoryRootResolution("selected", current, 1)
-        if marker_state == "unsafe":
-            return RepositoryRootResolution("unsafe", None)
-        if current.parent == current:
-            break
-        current = current.parent
+    marker_state = _git_root_state(current)
+    if marker_state == "repo":
+        return RepositoryRootResolution("selected", current, 1)
+    if marker_state == "unsafe":
+        return RepositoryRootResolution("unsafe", None)
 
     candidates: list[Path] = []
     unsafe_child = False
@@ -901,6 +896,16 @@ def resolve_repository_root(envelope: dict, deadline: float) -> RepositoryRootRe
         return RepositoryRootResolution("unsafe", None, len(candidates))
     if len(candidates) == 1:
         return RepositoryRootResolution("selected", candidates[0], 1)
+
+    while current.parent != current:
+        if time.monotonic() >= deadline:
+            return RepositoryRootResolution("budget-limited", None)
+        current = current.parent
+        marker_state = _git_root_state(current)
+        if marker_state == "repo":
+            return RepositoryRootResolution("selected", current, 1)
+        if marker_state == "unsafe":
+            return RepositoryRootResolution("unsafe", None)
     return RepositoryRootResolution("none", None)
 
 
