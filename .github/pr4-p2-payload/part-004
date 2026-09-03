@@ -1,0 +1,64 @@
+d its thread, resolve that thread, and leave unrelated or still-valid threads open. One new head gets at most one active review trigger.
++Treat bot text as a hypothesis until reproduced or verified in source/runtime. Do not bulk-resolve. After the exact fix is present on the hosted head, re-read its thread, resolve that thread, and leave unrelated or still-valid threads open. One new head gets at most one active review trigger. Before posting any trigger, complete hosted preflight must find no unresolved exact trigger on the same `(repository, pull request, headRefOid)`; poll one existing run, or classify multiple overlapping runs as `indeterminate`, instead of adding another trigger.
+ 
+ There is no automatic retry. A `failed` run permits at most one subsequent retry, only when its exact-listed record says `retryable=true` and `retryAttemptCount=0`, after explicit user authorization, and after confirming through complete hosted collections that no newer trigger or bot run is active. Preserve one active run for the head and never create a duplicate review thread for the failed trigger.
+ 
+diff --git a/tests/test_github_pr_review_bot_skill_contract.py b/tests/test_github_pr_review_bot_skill_contract.py
+--- a/tests/test_github_pr_review_bot_skill_contract.py
++++ b/tests/test_github_pr_review_bot_skill_contract.py
+@@ -1,5 +1,5 @@
+         "Do not trim individual lines, collapse blank lines, case-fold, or use substring or prefix matching",
+-        "`IssueCommentOrder` is greater than the newest exact trigger's order",
++        "`IssueCommentOrder` is greater than the bound exact trigger's order",
+         "current `headRefOid`",
+         "`retryable=true`",
+         "| failed |",
+@@ -12,4 +12,23 @@
+     assert "Generic bot-authored terminal error" not in body
+ 
+ 
++def test_uncorrelated_terminal_failure_refuses_overlapping_same_head_runs() -> None:
++    bodies = [path.read_text(encoding="utf-8") for path in SKILL_PATHS]
++
++    assert bodies[0] == bodies[1]
++    body = bodies[0]
++    required_contract = (
++        "Ordering proves only that an issue comment is later",
++        "Never bind an uncorrelated terminal comment by selecting the newest trigger",
++        "same `(repository, pull request, headRefOid)`",
++        "exactly one unresolved exact trigger candidate",
++        "Two or more unresolved same-head trigger candidates",
++        "do not record `failed`, dismiss a run, mutate a retry lineage, or authorize another trigger",
++        "has no trigger or provider run identifier",
++        "complete hosted preflight must find no unresolved exact trigger",
++    )
++    for clause in required_contract:
++        assert clause in body, f"missing overlapping-run ambiguity guard: {clause}"
++
++
+ def test_unlisted_error_like_prose_fails_closed_and_failure_record_is_bound() -> None:
+diff --git a/src.codex/skills/lead/scripts/validate-skill-pack.py b/src.codex/skills/lead/scripts/validate-skill-pack.py
+--- a/src.codex/skills/lead/scripts/validate-skill-pack.py
++++ b/src.codex/skills/lead/scripts/validate-skill-pack.py
+@@ -1,5 +1,9 @@
+  ('check_common_skill_body_pin',
+   'github-pr-review-bot',
+-  '399fe518c15c8de75fc70e2068af1e87145aa58f0dbb1a369d2ea70328a4d9d6',
++  '05fd254b5835f2fd1a2ae059f52498bf4bcd3c03f37066606df1b72d45f010d2',
+   '@ROOT/src.codex/skills/github-pr-review-bot/SKILL.md'),
+  ('check_contains',
++  '@ROOT/src.codex/skills/github-pr-review-bot/SKILL.md',
++  'Two or more unresolved same-head trigger candidates',
++  'github-pr-review-bot refuses ambiguous same-head terminal ownership'),
++ ('check_contains',
+diff --git a/src.claude/agents/scripts/validate-skill-pack.py b/src.claude/agents/scripts/validate-skill-pack.py
+--- a/src.claude/agents/scripts/validate-skill-pack.py
++++ b/src.claude/agents/scripts/validate-skill-pack.py
+@@ -1,5 +1,9 @@
+  ('check_common_skill_body_pin',
+   'github-pr-review-bot',
+-  '399fe518c15c8de75fc70e2068af1e87145aa58f0dbb1a369d2ea70328a4d9d6',
++  '05fd254b5835f2fd1a2ae059f52498bf4bcd3c03f37066606df1b72d45f010d2',
+   'src.claude/skills/github-pr-review-bot/SKILL.md'),
+  ('check_contains',
++  

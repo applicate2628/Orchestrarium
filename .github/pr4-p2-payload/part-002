@@ -1,0 +1,22 @@
+like prose is otherwise `indeterminate`; never infer either classification from error-like prose.
+ 
+@@ -71,7 +73,7 @@
+ 
+ ## Finding lifecycle
+ 
+-Treat bot text as a hypothesis until reproduced or verified in source/runtime. Do not bulk-resolve. After the exact fix is present on the hosted head, re-read its thread, resolve that thread, and leave unrelated or still-valid threads open. One new head gets at most one active review trigger.
++Treat bot text as a hypothesis until reproduced or verified in source/runtime. Do not bulk-resolve. After the exact fix is present on the hosted head, re-read its thread, resolve that thread, and leave unrelated or still-valid threads open. One new head gets at most one active review trigger. Before posting any trigger, complete hosted preflight must find no unresolved exact trigger on the same `(repository, pull request, headRefOid)`; poll one existing run, or classify multiple overlapping runs as `indeterminate`, instead of adding another trigger.
+ 
+ There is no automatic retry. A `failed` run permits at most one subsequent retry, only when its exact-listed record says `retryable=true` and `retryAttemptCount=0`, after explicit user authorization, and after confirming through complete hosted collections that no newer trigger or bot run is active. Preserve one active run for the head and never create a duplicate review thread for the failed trigger.
+ 
+diff --git a/src.claude/skills/github-pr-review-bot/SKILL.md b/src.claude/skills/github-pr-review-bot/SKILL.md
+--- a/src.claude/skills/github-pr-review-bot/SKILL.md
++++ b/src.claude/skills/github-pr-review-bot/SKILL.md
+@@ -12,7 +12,8 @@
+ - Use hosted GitHub state, never local ancestry or remembered status.
+ - Bind every request and result to the current `headRefOid` and the exact `@codex review` comment ID.
+ - On the Representational State Transfer (REST) issue-comment surface, define `IssueCommentOrder = (parsed UTC created_at, numeric stable REST issue-comment ID)`. This is an Orchestrarium repo-local total-order convention, not a GitHub chronological guarantee; the numeric ID is only the stable tie-breaker for equal parsed timestamps on that one surface.
+-- Use `IssueCommentOrder` after complete pagination to select the newest exact `@codex review` trigger and to classify post-trigger terminal and finding issue-comment evidence. Malformed, missing, duplicate, or incomplete ordering fields make the run `indeterminate`; do not discard the malformed candidate and continue.
++- Use `IssueCommentOrder` after complete pagination to select the newest exact `@codex review` trigger and to order post-trigger terminal and finding issue-comment evidence. Ordering proves only that an issue comment is later; it does not identify which overlapping same-head run produced an uncorrelated terminal comment. Malformed, missing, duplicate, or incomplete ordering fields make the run `indeterminate`; do not discard the malformed candidate and continue.
++- Never bind an uncorrelated terminal comment by selecting the newest trigger. For terminal-failure classification, enumerate exact triggers on the same `(repository, pull request, headRefOid)` that precede the terminal comment and remain without an unambiguously bound terminal result. Ordering alone may bind the signature only when exactly one unresolved exact trigger candidate exists. Two or more unresolved same-head trigger candidates make the terminal evidence and affected runs `indeterminate`; do not record `failed`, dismiss a run, mutate a retry lineage, or authorize another trigger.
+ - Accept a reaction only when it is bot-authored and attached to that newest exact trigger. Accept a review, review comment, or review thread only when it is bound to the current head and its own authoritative timestamp is strictly later than the trigger timestamp. Because the REST issue-comment tie-breaker does not transfer to another surface, same-time evidence from different surfaces is incomparable, including between REST issue comments and either REST reviews or GraphQL threads; the run remains `indeterminate`. An earlier 

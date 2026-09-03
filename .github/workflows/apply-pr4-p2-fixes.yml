@@ -1,0 +1,98 @@
+name: Apply PR 4 P2 fixes
+
+on:
+  push:
+    branches:
+      - automation/pr4-p2-push-20260903-14fc38c4
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pr4-p2-push-20260903
+  cancel-in-progress: false
+
+jobs:
+  apply-and-push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      EXPECTED_HEAD: 9136a2a8b01363bab32d29e99ee03e6b1e1f1db1
+      TARGET_BRANCH: hotfix/1x-final-followups-20260901
+      PATCH_SHA256: 14fc38c4fe75af6437dedaeb34183d54228c2ea811d6417d425545b81d5519be
+    steps:
+      - name: Check out automation payload
+        uses: actions/checkout@v4
+        with:
+          ref: automation/pr4-p2-push-20260903-14fc38c4
+          path: automation
+          persist-credentials: false
+
+      - name: Check out the exact reviewed head
+        uses: actions/checkout@v4
+        with:
+          ref: 9136a2a8b01363bab32d29e99ee03e6b1e1f1db1
+          fetch-depth: 0
+          path: target
+
+      - name: Refuse a moved target branch
+        working-directory: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "refs/heads/${TARGET_BRANCH}"
+          actual_head="$(git rev-parse FETCH_HEAD)"
+          test "${actual_head}" = "${EXPECTED_HEAD}"
+          test "$(git rev-parse HEAD)" = "${EXPECTED_HEAD}"
+
+      - name: Reconstruct and verify the reviewed patch
+        working-directory: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat ../automation/.github/pr4-p2-payload/part-* > /tmp/pr4-p2.patch
+          echo "${PATCH_SHA256}  /tmp/pr4-p2.patch" | sha256sum --check --strict
+          git apply --check /tmp/pr4-p2.patch
+          git apply /tmp/pr4-p2.patch
+          git diff --check
+
+          cat > /tmp/expected-files <<'EXPECTED_FILES'
+          RELEASE_NOTES.md
+          scripts/mutate-work-item.py
+          shared/references/ru/work-items-root-contract.md
+          shared/references/work-items-root-contract.md
+          src.claude/agents/scripts/validate-skill-pack.py
+          src.claude/skills/github-pr-review-bot/SKILL.md
+          src.codex/skills/github-pr-review-bot/SKILL.md
+          src.codex/skills/lead/scripts/validate-skill-pack.py
+          tests/test_github_pr_review_bot_skill_contract.py
+          tests/test_mutate_work_item.py
+          EXPECTED_FILES
+          sed -i 's/^          //' /tmp/expected-files
+          git diff --name-only | LC_ALL=C sort > /tmp/actual-files
+          diff --unified /tmp/expected-files /tmp/actual-files
+
+      - name: Install focused test dependency
+        run: python -m pip install --disable-pip-version-check pytest
+
+      - name: Run regression coverage
+        working-directory: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pytest -q \
+            tests/test_mutate_work_item.py::test_root_contract_rejects_generated_readme_alias_before_refresh_mutation \
+            tests/test_github_pr_review_bot_skill_contract.py
+
+      - name: Commit and push without force
+        working-directory: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add --all
+          git diff --cached --check
+          git commit -m "fix: harden README roots and review run attribution"
+          git push origin "HEAD:refs/heads/${TARGET_BRANCH}"
+          echo "Pushed $(git rev-parse HEAD) to ${TARGET_BRANCH}" >> "${GITHUB_STEP_SUMMARY}"

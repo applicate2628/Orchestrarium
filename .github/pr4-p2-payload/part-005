@@ -1,0 +1,44 @@
+'src.claude/skills/github-pr-review-bot/SKILL.md',
++  'Two or more unresolved same-head trigger candidates',
++  'github-pr-review-bot refuses ambiguous same-head terminal ownership'),
++ ('check_contains',
+diff --git a/shared/references/work-items-root-contract.md b/shared/references/work-items-root-contract.md
+--- a/shared/references/work-items-root-contract.md
++++ b/shared/references/work-items-root-contract.md
+@@ -2,4 +2,10 @@
+ `active`, `archive`, and the current roots of built-in flat categories; they
+ MUST NOT be redeclared in `auxiliaryRoots`.
+ 
++The generated top-level file `work-items/README.md` is also reserved. An
++auxiliary name MUST NOT collide with `README.md` under case-insensitive name
++comparison. This rule is host-independent, so a contract accepted on a
++case-sensitive filesystem cannot alias the generated file on a
++case-insensitive filesystem.
++
+ Each declared auxiliary root is confined to
+diff --git a/shared/references/ru/work-items-root-contract.md b/shared/references/ru/work-items-root-contract.md
+--- a/shared/references/ru/work-items-root-contract.md
++++ b/shared/references/ru/work-items-root-contract.md
+@@ -1,4 +1,10 @@
+ корни встроенных плоских категорий; их НЕЛЬЗЯ повторно объявлять в
+ `auxiliaryRoots`.
+ 
++Генерируемый файл верхнего уровня `work-items/README.md` также
++зарезервирован. Имя вспомогательного корня НЕ ДОЛЖНО совпадать с `README.md`
++при регистронезависимом сравнении. Это правило не зависит от хост-системы,
++поэтому контракт, принятый в регистрозависимой файловой системе, не сможет
++создать псевдоним генерируемого файла в регистронезависимой файловой системе.
++
+ Каждый объявленный вспомогательный корень ограничен путём
+diff --git a/RELEASE_NOTES.md b/RELEASE_NOTES.md
+--- a/RELEASE_NOTES.md
++++ b/RELEASE_NOTES.md
+@@ -1,3 +1,8 @@
+ This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
+ 
++## 2026-09-02
++
++- **Work-item root contracts now reserve the generated `work-items/README.md` name with host-independent case-insensitive semantics.** A declared auxiliary root such as `readme.md` fails with `WI-CATEGORY-ROOT-CONTRACT-INVALID` before README refresh or any other topology-dependent mutation. **Why it matters:** one contract cannot be accepted on a case-sensitive host and later alias or corrupt the generated README on a case-insensitive host.
++- **GitHub pull-request review failure attribution now refuses overlapping same-head ownership ambiguity.** An uncorrelated exact-listed terminal issue comment can produce `failed` only when complete hosted state leaves exactly one unresolved exact trigger candidate for the same repository, pull request, and `headRefOid`; multiple candidates remain `indeterminate`, cannot dismiss or fail the newest run, cannot mutate retry lineage, and cannot authorize another trigger. Trigger preflight also serializes new reviews behind any unresolved same-head run. **Why it matters:** an older run's generic failure can no longer be assigned to a newer in-flight review merely because the newer trigger is chronologically last.
++
+ ## 2026-09-01

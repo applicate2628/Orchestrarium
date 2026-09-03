@@ -1,0 +1,52 @@
+diff --git a/scripts/mutate-work-item.py b/scripts/mutate-work-item.py
+--- a/scripts/mutate-work-item.py
++++ b/scripts/mutate-work-item.py
+@@ -3,5 +3,10 @@
+                 ROOT_CONTRACT_FAILURE,
+                 f"auxiliary root collides with a reserved root: {name}",
+             )
++        if name.casefold() == "README.md".casefold():
++            raise LifecycleError(
++                ROOT_CONTRACT_FAILURE,
++                f"auxiliary root collides with generated README: {name}",
++            )
+         if not isinstance(definition, dict) or definition != {"kind": "flat-json"}:
+             raise LifecycleError(ROOT_CONTRACT_FAILURE, f"auxiliary root definition is invalid: {name}")
+diff --git a/tests/test_mutate_work_item.py b/tests/test_mutate_work_item.py
+--- a/tests/test_mutate_work_item.py
++++ b/tests/test_mutate_work_item.py
+@@ -2,4 +2,23 @@
+     assert not (root / "work-items" / "README.md").exists()
+ 
+ 
++def test_root_contract_rejects_generated_readme_alias_before_refresh_mutation(
++    tmp_path: Path,
++) -> None:
++    module = load_module()
++    root = tmp_path / "repo"
++    write_root_contract(root, {"readme.md": {"kind": "flat-json"}})
++
++    try:
++        module.refresh_readme(root, allow_marker_bootstrap=True)
++    except module.LifecycleError as exc:
++        assert exc.failure_id == "WI-CATEGORY-ROOT-CONTRACT-INVALID"
++        assert "generated README" in str(exc)
++    else:
++        raise AssertionError("root contract admitted generated README alias")
++
++    assert not (root / "work-items" / "README.md").exists()
++    assert not (root / "work-items" / "readme.md").exists()
++
++
+ def test_root_contract_rejects_malformed_and_unconfined_roots(tmp_path: Path) -> None:
+diff --git a/src.codex/skills/github-pr-review-bot/SKILL.md b/src.codex/skills/github-pr-review-bot/SKILL.md
+--- a/src.codex/skills/github-pr-review-bot/SKILL.md
++++ b/src.codex/skills/github-pr-review-bot/SKILL.md
+@@ -12,7 +12,8 @@
+ - Use hosted GitHub state, never local ancestry or remembered status.
+ - Bind every request and result to the current `headRefOid` and the exact `@codex review` comment ID.
+ - On the Representational State Transfer (REST) issue-comment surface, define `IssueCommentOrder = (parsed UTC created_at, numeric stable REST issue-comment ID)`. This is an Orchestrarium repo-local total-order convention, not a GitHub chronological guarantee; the numeric ID is only the stable tie-breaker for equal parsed timestamps on that one surface.
+-- Use `IssueCommentOrder` after complete pagination to select the newest exact `@codex review` trigger and to classify post-trigger terminal and finding issue-comment evidence. Malformed, missing, duplicate, or incomplete ordering fields make the run `indeterminate`; do not discard the malformed candidate and continue.
++- Use `IssueCommentOrder` after complete pagination to select the newest exact `@codex review` trigger and to order post-trigger terminal and finding issue-comment evidence. Ordering proves only that an issue comment is later; it does not identify which overlapping same-head run produced an uncorrelated terminal comment. Malformed, missing, duplicate, or incomplete ordering fields make the run `indeterminate`; do not discard the malformed candidate and continue.
++- Never bind an uncorrelated terminal comment by selecting the newest trigger. For terminal-failure classification, enumerate exact triggers on the same `(repository, pull request, headRefOid)` that precede the terminal comment and remain without an unambiguously bound terminal result. Ordering alone may bind the signature only when exactly one unresolved exact trigger candidate exists. Two or more unresolved same-head trigger candidates make the terminal evidence and affected runs `indeterminate`; do not record `failed`, dismiss a run, mutate a retry lineage, or authorize another trigger.
+ - Accept a reaction only when it is bot-authored and attached to that newest exact trigger. Accept a review, review comment, or review thread only when it is bound to the current head and its own authoritative timestamp is strictly
