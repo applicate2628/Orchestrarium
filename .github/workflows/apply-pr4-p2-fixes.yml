@@ -52,8 +52,8 @@ jobs:
           set -euo pipefail
           cat ../automation/.github/pr4-p2-payload/part-* > /tmp/pr4-p2.patch
           echo "${PATCH_SHA256}  /tmp/pr4-p2.patch" | sha256sum --check --strict
-          git apply --check /tmp/pr4-p2.patch
-          git apply /tmp/pr4-p2.patch
+          patch --batch --forward --fuzz=0 --strip=1 --no-backup-if-mismatch --dry-run < /tmp/pr4-p2.patch
+          patch --batch --forward --fuzz=0 --strip=1 --no-backup-if-mismatch < /tmp/pr4-p2.patch
           git diff --check
 
           cat > /tmp/expected-files <<'EXPECTED_FILES'
