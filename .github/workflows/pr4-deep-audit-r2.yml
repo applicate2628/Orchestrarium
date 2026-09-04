@@ -1,0 +1,189 @@
+name: PR 4 deep-audit candidate r2
+
+on:
+  push:
+    branches:
+      - automation/pr4-self-audit-20260904-3dbfb9fa
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pr4-deep-audit-candidate-r2
+  cancel-in-progress: false
+
+env:
+  SOURCE_HEAD: 3dbfb9faf824365f5898fe52dd10093f4d75da9c
+  BASE_HEAD: ece04040627fcc0d0988128e44d401de53ff01fb
+  CONTROL_BRANCH: automation/pr4-self-audit-20260904-3dbfb9fa
+  CANDIDATE_BRANCH: automation/pr4-deep-audit-fixes-20260904-r2
+  SHARD_TOTAL: '6'
+  PYTHONUTF8: '1'
+  PYTHONDONTWRITEBYTECODE: '1'
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    outputs:
+      sha: ${{ steps.commit.outputs.sha }}
+    steps:
+      - name: Check out exact PR source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          fetch-depth: 0
+          path: target
+
+      - name: Check out audit control
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.CONTROL_BRANCH }}
+          path: control
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Apply exact-source patch
+        working-directory: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${SOURCE_HEAD}"
+          python ../control/.github/audit/pr4-r2.py
+          git diff --check
+          git status --short
+
+      - name: Focused regression verification
+        working-directory: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check pytest PyYAML jsonschema ruff
+          python -m py_compile \
+            scripts/check-hook-health.py \
+            scripts/production_installer.py \
+            tests/test_hook_health.py \
+            tests/test_sessionstart_reminder_python_hooks.py \
+            tests/test_install_hypothesis_hook.py \
+            tests/test_text_eol_contract.py
+          ruff check --select E9,F63,F7,F82 \
+            scripts/check-hook-health.py \
+            scripts/production_installer.py \
+            tests/test_hook_health.py \
+            tests/test_sessionstart_reminder_python_hooks.py \
+            tests/test_install_hypothesis_hook.py \
+            tests/test_text_eol_contract.py
+          python -m pytest -q \
+            tests/test_hook_health.py::test_hook_health_report_allows_only_touched_pending \
+            tests/test_sessionstart_reminder_python_hooks.py \
+            tests/test_claude_reference_mirror.py \
+            tests/test_install_hypothesis_hook.py \
+            tests/test_text_eol_contract.py
+          python src.codex/skills/lead/scripts/validate-skill-pack.py
+          python src.claude/agents/scripts/validate-skill-pack.py
+          git diff --check
+
+      - name: Commit isolated candidate
+        id: commit
+        working-directory: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${SOURCE_HEAD}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "${CANDIDATE_BRANCH}"
+          git add --all
+          git diff --cached --check
+          git commit -m "fix: close cross-platform deep-audit gaps"
+          candidate_sha="$(git rev-parse HEAD)"
+          git push origin "HEAD:refs/heads/${CANDIDATE_BRANCH}"
+          echo "sha=${candidate_sha}" >> "$GITHUB_OUTPUT"
+          echo "Candidate: ${candidate_sha}" >> "$GITHUB_STEP_SUMMARY"
+
+  static-and-contracts:
+    needs: patch
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.patch.outputs.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --disable-pip-version-check pytest PyYAML jsonschema ruff bandit
+      - name: Compile, lint, collect, validate, and security-scan
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ needs.patch.outputs.sha }}"
+          mapfile -d '' files < <(git ls-files -z '*.py')
+          test "${#files[@]}" -gt 0
+          python -m py_compile "${files[@]}"
+          ruff check --select E9,F63,F7,F82 scripts src.codex src.claude tests install.py
+          python -m pytest --collect-only -q
+          python src.codex/skills/lead/scripts/validate-skill-pack.py
+          python src.claude/agents/scripts/validate-skill-pack.py
+          git diff --check "${BASE_HEAD}..${{ needs.patch.outputs.sha }}"
+          mapfile -t changed < <(git diff --name-only --diff-filter=ACMR "${BASE_HEAD}..${{ needs.patch.outputs.sha }}" -- '*.py' | grep -v '^tests/' || true)
+          if ((${#changed[@]})); then bandit -q -lll "${changed[@]}"; fi
+
+  tests:
+    needs: patch
+    name: ${{ matrix.os }} shard ${{ matrix.shard }}/6
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 100
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+        shard: [0, 1, 2, 3, 4, 5]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.patch.outputs.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --disable-pip-version-check pytest PyYAML jsonschema
+
+      - name: Run deterministic Linux shard
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          SHARD_INDEX: ${{ matrix.shard }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ needs.patch.outputs.sha }}"
+          mapfile -t files < <(find tests -maxdepth 1 -type f -name 'test_*.py' -print | LC_ALL=C sort)
+          selected=()
+          for index in "${!files[@]}"; do
+            if (( index % SHARD_TOTAL == SHARD_INDEX )); then selected+=("${files[$index]}"); fi
+          done
+          test "${#selected[@]}" -gt 0
+          printf '%s\n' "${selected[@]}"
+          python -m pytest -q "${selected[@]}"
+
+      - name: Run deterministic Windows shard
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          SHARD_INDEX: ${{ matrix.shard }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ((git rev-parse HEAD).Trim() -ne '${{ needs.patch.outputs.sha }}') { throw 'candidate HEAD mismatch' }
+          $files = @(Get-ChildItem tests -File -Filter 'test_*.py' | Sort-Object Name)
+          $selected = @()
+          for ($index = 0; $index -lt $files.Count; $index++) {
+            if (($index % [int]$env:SHARD_TOTAL) -eq [int]$env:SHARD_INDEX) { $selected += $files[$index].FullName }
+          }
+          if ($selected.Count -eq 0) { throw 'empty test shard' }
+          $selected | ForEach-Object { Write-Host $_ }
+          python -m pytest -q @selected
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
