@@ -3,21 +3,21 @@
 
 from __future__ import annotations
 
-import argparse
 import json
 import os
 import re
 import stat
-import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any
 
 SCHEMA_VERSION = 1
 MAX_CATALOG_BYTES = 256 * 1024
 MAX_POLICY_BYTES = 128 * 1024
 MAX_CONFIG_BYTES = 64 * 1024
 MAX_RENDERED_BYTES = 256 * 1024
+MAX_JSON_DEPTH = 32
+MAX_JSON_NODES = 8192
 OVERLAY_ID = re.compile(r"[a-z0-9][a-z0-9-]{0,63}\Z")
 LANE_ID = re.compile(r"[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*\Z")
 PROVIDERS = frozenset({"codex", "claude", "kimi"})
@@ -58,6 +58,14 @@ class PolicyOverlayError(RuntimeError):
     """Fail-closed overlay input or projection error."""
 
 
+class DuplicateJsonKeyError(ValueError):
+    """Raised when a catalog object repeats a key."""
+
+
+class InvalidJsonStructureError(ValueError):
+    """Raised when catalog JSON is non-standard or exceeds shape limits."""
+
+
 @dataclass(frozen=True)
 class ResolvedPolicyOverlay:
     overlay_id: str
@@ -85,6 +93,18 @@ def _ordinary_dir(path: Path) -> bool:
     return stat.S_ISDIR(info.st_mode) and not stat.S_ISLNK(info.st_mode) and not _is_reparse(info)
 
 
+def _file_signature(info: os.stat_result) -> tuple[int, ...]:
+    return (
+        info.st_dev,
+        info.st_ino,
+        info.st_mode,
+        info.st_size,
+        getattr(info, "st_mtime_ns", 0),
+        getattr(info, "st_ctime_ns", 0),
+        getattr(info, "st_file_attributes", 0),
+    )
+
+
 def _read_regular(path: Path, limit: int, *, label: str) -> bytes:
     fd = -1
     try:
@@ -99,8 +119,7 @@ def _read_regular(path: Path, limit: int, *, label: str) -> bytes:
         flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
         fd = os.open(path, flags)
         opened = os.fstat(fd)
-        identity = lambda item: (item.st_dev, item.st_ino, item.st_mode, item.st_size)
-        if identity(before) != identity(opened):
+        if _file_signature(before) != _file_signature(opened):
             raise PolicyOverlayError(f"{label} changed while opening: {path}")
         chunks: list[bytes] = []
         size = 0
@@ -112,7 +131,10 @@ def _read_regular(path: Path, limit: int, *, label: str) -> bytes:
             size += len(chunk)
             if size > limit:
                 raise PolicyOverlayError(f"{label} exceeds {limit} bytes: {path}")
-        if identity(opened) != identity(os.fstat(fd)) or identity(opened) != identity(path.lstat()):
+        if (
+            _file_signature(opened) != _file_signature(os.fstat(fd))
+            or _file_signature(opened) != _file_signature(path.lstat())
+        ):
             raise PolicyOverlayError(f"{label} changed while reading: {path}")
         return b"".join(chunks)
     except OSError as exc:
@@ -203,11 +225,56 @@ def _ids(value: Any, *, label: str, allowed: frozenset[str] | None = None, patte
     return result
 
 
+def _strict_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise DuplicateJsonKeyError(key)
+        result[key] = value
+    return result
+
+
+def _parse_json(text: str) -> object:
+    def reject_constant(value: str) -> None:
+        raise InvalidJsonStructureError(f"non-standard JSON constant: {value}")
+
+    try:
+        parsed = json.loads(
+            text,
+            object_pairs_hook=_strict_object,
+            parse_constant=reject_constant,
+        )
+    except RecursionError as exc:
+        raise InvalidJsonStructureError("maximum parser depth exceeded") from exc
+
+    stack: list[tuple[object, int]] = [(parsed, 1)]
+    observed_nodes = 0
+    while stack:
+        value, depth = stack.pop()
+        observed_nodes += 1
+        if depth > MAX_JSON_DEPTH or observed_nodes > MAX_JSON_NODES:
+            raise InvalidJsonStructureError("catalog JSON shape exceeds limits")
+        if isinstance(value, dict):
+            stack.extend((item, depth + 1) for item in value.values())
+        elif isinstance(value, list):
+            stack.extend((item, depth + 1) for item in value)
+    return parsed
+
+
 def _load_catalog(root: Path) -> dict[str, dict[str, Any]]:
     _, raw = _contained(root, "policy-overlays.v1.json", label="policy overlay catalog", limit=MAX_CATALOG_BYTES)
     try:
-        data = json.loads(raw.decode("utf-8", errors="strict"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        data = _parse_json(raw.decode("utf-8", errors="strict"))
+    except DuplicateJsonKeyError as exc:
+        raise PolicyOverlayError(
+            f"invalid policy overlay catalog: duplicate JSON key {exc.args[0]!r}"
+        ) from exc
+    except (
+        UnicodeDecodeError,
+        json.JSONDecodeError,
+        InvalidJsonStructureError,
+        ValueError,
+    ) as exc:
         raise PolicyOverlayError(f"invalid policy overlay catalog: {exc}") from exc
     if not isinstance(data, dict) or set(data) != {
         "schemaVersion", "defaultSelection", "selectionSyntax", "conflictPolicy",
@@ -289,4 +356,42 @@ def _load_catalog(root: Path) -> dict[str, dict[str, Any]]:
     return result
 
 
-__all__ = tuple(name for name in globals() if not name.startswith("__"))
+__all__ = (
+    "SCHEMA_VERSION",
+    "MAX_CATALOG_BYTES",
+    "MAX_POLICY_BYTES",
+    "MAX_CONFIG_BYTES",
+    "MAX_RENDERED_BYTES",
+    "MAX_JSON_DEPTH",
+    "MAX_JSON_NODES",
+    "OVERLAY_ID",
+    "LANE_ID",
+    "PROVIDERS",
+    "TARGETS",
+    "PROVIDER_TARGETS",
+    "PROPAGATION_KEY",
+    "PRECEDENCE",
+    "FRAME_BEGIN",
+    "FRAME_END",
+    "RESERVED_MARKERS",
+    "USER_KEY",
+    "ALLOW_KEY",
+    "DENY_KEY",
+    "LIST_LINE",
+    "KEY_LINE",
+    "PolicyOverlayError",
+    "DuplicateJsonKeyError",
+    "InvalidJsonStructureError",
+    "ResolvedPolicyOverlay",
+    "_is_reparse",
+    "_ordinary_dir",
+    "_file_signature",
+    "_read_regular",
+    "_root",
+    "_contained",
+    "_optional",
+    "_ids",
+    "_strict_object",
+    "_parse_json",
+    "_load_catalog",
+)
