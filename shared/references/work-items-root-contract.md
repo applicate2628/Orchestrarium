@@ -30,6 +30,12 @@ root. Built-in roots remain owned by `ProjectTopology` and include `backlog`,
 `active`, `archive`, and the current roots of built-in flat categories; they
 MUST NOT be redeclared in `auxiliaryRoots`.
 
+The generated top-level file `work-items/README.md` is also reserved. An
+auxiliary name MUST NOT collide with `README.md` under case-insensitive name
+comparison. This rule is host-independent, so a contract accepted on a
+case-sensitive filesystem cannot alias the generated file on a
+case-insensitive filesystem.
+
 Each declared auxiliary root is confined to
 `work-items/<name>`. It may be absent, but if present it MUST be a directory.
 The repository root, `work-items/`, the contract file, and each declared root

@@ -75,7 +75,7 @@ def test_retryable_terminal_failure_uses_the_exact_incident_predicate() -> None:
         "Convert Carriage Return followed by Line Feed (CRLF) to Line Feed (LF)",
         "trim whitespace only from the end of the entire body",
         "Do not trim individual lines, collapse blank lines, case-fold, or use substring or prefix matching",
-        "`IssueCommentOrder` is greater than the newest exact trigger's order",
+        "`IssueCommentOrder` is greater than the bound exact trigger's order",
         "current `headRefOid`",
         "`retryable=true`",
         "| failed |",
@@ -86,6 +86,25 @@ def test_retryable_terminal_failure_uses_the_exact_incident_predicate() -> None:
 
     assert f"```text\n{RETRYABLE_TERMINAL_BODY}\n```" in body
     assert "Generic bot-authored terminal error" not in body
+
+
+def test_uncorrelated_terminal_failure_refuses_overlapping_same_head_runs() -> None:
+    bodies = [path.read_text(encoding="utf-8") for path in SKILL_PATHS]
+
+    assert bodies[0] == bodies[1]
+    body = bodies[0]
+    required_contract = (
+        "Ordering proves only that an issue comment is later",
+        "Never bind an uncorrelated terminal comment by selecting the newest trigger",
+        "same `(repository, pull request, headRefOid)`",
+        "exactly one unresolved exact trigger candidate",
+        "Two or more unresolved same-head trigger candidates",
+        "do not record `failed`, dismiss a run, mutate a retry lineage, or authorize another trigger",
+        "has no trigger or provider run identifier",
+        "complete hosted preflight must find no unresolved exact trigger",
+    )
+    for clause in required_contract:
+        assert clause in body, f"missing overlapping-run ambiguity guard: {clause}"
 
 
 def test_unlisted_error_like_prose_fails_closed_and_failure_record_is_bound() -> None:

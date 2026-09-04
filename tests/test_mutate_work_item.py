@@ -4193,6 +4193,25 @@ def test_root_contract_collision_fails_before_candidate_mutation(tmp_path: Path)
     assert not (root / "work-items" / "README.md").exists()
 
 
+def test_root_contract_rejects_generated_readme_alias_before_refresh_mutation(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    write_root_contract(root, {"readme.md": {"kind": "flat-json"}})
+
+    try:
+        module.refresh_readme(root, allow_marker_bootstrap=True)
+    except module.LifecycleError as exc:
+        assert exc.failure_id == "WI-CATEGORY-ROOT-CONTRACT-INVALID"
+        assert "generated README" in str(exc)
+    else:
+        raise AssertionError("root contract admitted generated README alias")
+
+    assert not (root / "work-items" / "README.md").exists()
+    assert not (root / "work-items" / "readme.md").exists()
+
+
 def test_root_contract_rejects_malformed_and_unconfined_roots(tmp_path: Path) -> None:
     module = load_module()
     cases = {

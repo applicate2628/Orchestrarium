@@ -1046,6 +1046,11 @@ def _resolve_project_topology(
                 ROOT_CONTRACT_FAILURE,
                 f"auxiliary root collides with a reserved root: {name}",
             )
+        if name.casefold() == "README.md".casefold():
+            raise LifecycleError(
+                ROOT_CONTRACT_FAILURE,
+                f"auxiliary root collides with generated README: {name}",
+            )
         if not isinstance(definition, dict) or definition != {"kind": "flat-json"}:
             raise LifecycleError(ROOT_CONTRACT_FAILURE, f"auxiliary root definition is invalid: {name}")
         auxiliary_path = work_items / name
