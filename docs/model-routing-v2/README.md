@@ -8,10 +8,11 @@
 2. [Stable architecture](#2-stable-architecture)
 3. [Dynamic model registry](#3-dynamic-model-registry)
 4. [Adaptive portfolio routing](#4-adaptive-portfolio-routing)
-5. [Fallback and Lead continuity](#5-fallback-and-lead-continuity)
-6. [Files in this surface](#6-files-in-this-surface)
-7. [Migration boundary](#7-migration-boundary)
-8. [Terms and abbreviations](#8-terms-and-abbreviations)
+5. [Operational execution boundary](#5-operational-execution-boundary)
+6. [Fallback and Lead continuity](#6-fallback-and-lead-continuity)
+7. [Files in this surface](#7-files-in-this-surface)
+8. [Migration boundary](#8-migration-boundary)
+9. [Terms and abbreviations](#9-terms-and-abbreviations)
 
 ## 1. Purpose
 
@@ -38,11 +39,11 @@ The stable invariants are:
 
 - exactly one active logical Lead owns a work item;
 - the active Lead is represented by an exclusive lease with a monotonically increasing epoch;
-- Lead Host adapter, worker runtime, provider family, lineage, exact model identity, and effort are separate facts;
+- Lead Host adapter, worker runtime, provider family, lineage, exact model identity, effort, and orchestration mode are separate facts;
 - one worker receives one role, one bounded scope, one artifact contract, and one gate contract;
 - a worker cannot delegate recursively or authorize acceptance, merge, release, publication, or Lead transfer;
 - a worker result is a claim and an artifact, not accepted proof;
-- no fallback may silently change role, scope, tools, mutation rights, artifact, gate, or independence requirements.
+- no fallback may silently change role, scope, tools, mutation rights, artifact, gate, data policy, quality floor, or independence requirements.
 
 ## 3. Dynamic model registry
 
@@ -87,40 +88,85 @@ hard admissibility
   -> stable identifier
 ```
 
-This is a lexicographic decision after hard gates, not a single scalar score. A lower price cannot compensate for a missing critical capability, stale evidence, an unmet quality floor, or falsely claimed model diversity.
+This is a lexicographic decision after hard gates, not a single scalar score. A lower price cannot compensate for a missing critical capability, stale evidence, an unmet quality floor, forbidden data egress, or falsely claimed model diversity.
 
 For complex work, the recommended flow is independent initial proposals, explicit scope expansion, controlled cross-model critique, Lead synthesis, and empirical arbitration. The router should prefer the next worker that is expected to add new information, not merely another similar answer.
 
-## 5. Fallback and Lead continuity
+Capability, effort, and orchestration are independent axes. Each portfolio slot has a provider-neutral effort intent and quality floor. A provider adapter records how that intent maps to its concrete runtime setting; an inability to expose a higher setting does not waive the quality floor. A provider-native internal multi-agent mode is separately admitted and never inferred from effort.
 
-A worker provider being absent or unpaid is ordinary scheduler input. `not-configured`, `not-entitled`, `quota-exhausted`, temporary transport failure, and ordinary unavailability may advance to the next explicit candidate. Authentication failure, contract violation, unsafe output, and quality failure have different dispositions and must not be collapsed into one retry loop.
+## 5. Operational execution boundary
 
-The logical Lead may survive a host change. A Lead Host transfer requires a new exclusive lease epoch, durable work-item state, and revalidation of outstanding dispatches. Two Lead Hosts may not mutate orchestration state concurrently.
+The two schema bundles have different owners:
 
-Diversity is preferred but not fabricated. When fewer independent provider families are available than requested, the route reports `degraded`; critical work requires the human gate specified by policy instead of pretending that several models from one family are independent.
+```text
+adaptive-routing-contracts.v2.schema.json
+  = semantic routing records
 
-## 6. Files in this surface
+adaptive-routing-operational.v2.schema.json
+  = execution, fencing, egress, budget, retry, settlement, and feedback envelopes
+```
+
+The operational layer requires:
+
+- a self-contained Lead fence with lease, epoch, holder, trusted snapshot identifiers and digests, digest profile, and expiry observation;
+- a verified-complete candidate-set digest and evidence reference;
+- provider policy for family, region, retention, sensitive source code, external web access, and secret exclusion;
+- hard portfolio, parallelism, call, attempt, prompt-byte, result-byte, time, and accepted-result-cost budgets;
+- slot-specific effort intent and evidence-backed provider mapping;
+- isolated write boundaries with precondition, allowed-path, rollback, commit, and destructive-operation policy;
+- cancellation, process supervision, terminal receipts, and idempotent attempts;
+- typed fallback, rejection, contradiction, and human-gate records;
+- a terminal result envelope bound to the exact dispatch attempt and Lead fence;
+- a nonauthorizing route outcome bound to the selected portfolio and objective evidence.
+
+The operational schema does not implement a second router. A future cross-record validator validates the core records and their operational envelopes together, then a scheduler executes only admitted dispatches.
+
+Detailed findings, implementation order, and explicitly rejected overengineering are recorded in [`deep-review-operational-hardening.md`](deep-review-operational-hardening.md).
+
+## 6. Fallback and Lead continuity
+
+A worker provider being absent or unpaid is ordinary scheduler input. `not-configured`, `not-entitled`, `quota-exhausted`, temporary transport failure, and ordinary unavailability may advance to the next explicit candidate. Authentication failure, contract violation, unsafe output, quality failure, budget exhaustion, and stale-fence results have different dispositions and must not be collapsed into one retry loop.
+
+The logical Lead may survive a host change. A Lead Host transfer requires a new exclusive lease epoch, durable work-item state, cancellation or revalidation of outstanding dispatches, and a fencing check before any terminal result can enter synthesis. Two Lead Hosts may not mutate orchestration state concurrently.
+
+Diversity is preferred but not fabricated. When fewer independent provider families or approach groups are available than requested, the route reports `degraded`; critical work requires the human gate specified by policy instead of pretending that several models from one family are independent.
+
+## 7. Files in this surface
+
+### Core contracts
 
 - [`adaptive-routing-contracts.v2.schema.json`](adaptive-routing-contracts.v2.schema.json) — Draft 2020-12 JavaScript Object Notation Schema bundle for Lead lease, registry snapshot, route request, dispatch, route decision, and worker result.
-- [`examples.v2.json`](examples.v2.json) — nonauthorizing examples that validate against the contract bundle.
+- [`examples.v2.json`](examples.v2.json) — nonauthorizing examples that validate against the core bundle.
+
+### Operational hardening
+
+- [`adaptive-routing-operational.v2.schema.json`](adaptive-routing-operational.v2.schema.json) — operational envelopes for fencing, effort mapping, data policy, budgets, write safety, fallback, process settlement, contradictions, and routing outcomes.
+- [`operational-examples.v2.json`](operational-examples.v2.json) — validating operational examples.
+- [`deep-review-operational-hardening.md`](deep-review-operational-hardening.md) — deep-review findings, cross-record obligations, implementation order, and non-goals.
+
+### Review and implementation documents
+
 - [`../adaptive-model-routing-v2-audit-2026-09-04.md`](../adaptive-model-routing-v2-audit-2026-09-04.md) — repository review and identified migration gaps.
 - [`../superpowers/specs/2026-09-04-adaptive-lead-model-routing-v2-design.md`](../superpowers/specs/2026-09-04-adaptive-lead-model-routing-v2-design.md) — normative design specification.
 - [`../superpowers/plans/2026-09-04-adaptive-lead-model-routing-v2-implementation.md`](../superpowers/plans/2026-09-04-adaptive-lead-model-routing-v2-implementation.md) — implementation plan; runtime tasks remain open.
 
-## 7. Migration boundary
+## 8. Migration boundary
 
 This surface is intentionally separate from Version 1. Version 1 retains its fixed compatibility provider set and one-worker resolver. GLM enters only through the Version 2 dynamic registry. Existing provider adapters, role taxonomy, `agents-mode`, native role files, and `agent-runs.jsonl` remain unchanged until their dedicated migration tasks pass tests and review.
 
-The Version 1 dispatch may migrate into one Version 2 portfolio slot only when role, scope, capability, mutation class, required tools, provider-family exclusions, artifact contract, gate contract, and nonauthorizing authority are preserved exactly.
+The Version 1 dispatch may migrate into one Version 2 portfolio slot only when role, scope, capability, mutation class, required tools, provider-family exclusions, artifact contract, gate contract, nonauthorizing authority, and request fingerprint provenance are preserved. The Version 2 owner then adds trusted snapshot digests, a Lead fence, slot effort intent, data policy, resource budget, and execution envelope; it must not invent these facts for historical V1 events.
 
-## 8. Terms and abbreviations
+## 9. Terms and abbreviations
 
 - **CLI — Command-Line Interface:** command-line execution surface for a provider worker.
 - **Lead Host adapter:** provider-specific implementation of the stable logical Lead contract.
 - **Lead lease:** exclusive, epoch-numbered ownership record preventing two active Leads from mutating one work item.
+- **Lead fence:** self-contained lease, epoch, holder, snapshot, and digest binding used to reject stale work.
 - **Model registry snapshot:** immutable observation of available runtimes, models, admission, evidence, and route metrics.
 - **Capability slot:** stable required ability independent of a model name.
 - **Model portfolio:** set of workers assigned different roles in one routed task.
+- **Effort intent:** provider-neutral requested reasoning depth for one portfolio slot.
 - **Admission:** verified permission for a runtime to perform a class of work or mutation.
 - **Fallback:** explicit move to a later admitted candidate after a classified failure.
+- **Terminal receipt:** trusted process-supervision evidence that a launched process reached a terminal state.
 - **Empirical arbitration:** resolution of a disagreement through tests, measurements, proofs, or other objective evidence.
