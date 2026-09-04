@@ -44,7 +44,7 @@ diff --git a/src.codex/skills/lead/scripts/validate-skill-pack.py b/src.codex/sk
   ('check_common_skill_body_pin',
    'github-pr-review-bot',
 -  '399fe518c15c8de75fc70e2068af1e87145aa58f0dbb1a369d2ea70328a4d9d6',
-+  '05fd254b5835f2fd1a2ae059f52498bf4bcd3c03f37066606df1b72d45f010d2',
++  'ec490509a48df90abd0024d0c563b16ef51bd4191248396c08dfffabe332f605',
    '@ROOT/src.codex/skills/github-pr-review-bot/SKILL.md'),
   ('check_contains',
 +  '@ROOT/src.codex/skills/github-pr-review-bot/SKILL.md',
@@ -58,7 +58,7 @@ diff --git a/src.claude/agents/scripts/validate-skill-pack.py b/src.claude/agent
   ('check_common_skill_body_pin',
    'github-pr-review-bot',
 -  '399fe518c15c8de75fc70e2068af1e87145aa58f0dbb1a369d2ea70328a4d9d6',
-+  '05fd254b5835f2fd1a2ae059f52498bf4bcd3c03f37066606df1b72d45f010d2',
++  'ec490509a48df90abd0024d0c563b16ef51bd4191248396c08dfffabe332f605',
    'src.claude/skills/github-pr-review-bot/SKILL.md'),
   ('check_contains',
 +  
