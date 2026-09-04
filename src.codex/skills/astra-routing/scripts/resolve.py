@@ -114,19 +114,22 @@ def _decision(
 def _normalize_models(value: Any) -> frozenset[str] | None:
     if isinstance(value, (str, bytes)) or not isinstance(value, Collection):
         return None
+    models: set[str] = set()
     try:
-        items = tuple(value)
+        # Bound consumption, not just the completed snapshot. Do not trust a
+        # collection's length hint or iterate its changing contents a second time.
+        for index, item in enumerate(value):
+            if (
+                index >= 128
+                or not isinstance(item, str)
+                or not MODEL_ID.fullmatch(item)
+                or item in models
+            ):
+                return None
+            models.add(item)
+        return frozenset(models)
     except Exception:
         return None
-    if (
-        len(items) > 128
-        or not all(
-            isinstance(item, str) and MODEL_ID.fullmatch(item) for item in items
-        )
-        or len(items) != len(set(items))
-    ):
-        return None
-    return frozenset(items)
 
 
 def _valid_optional_text(value: Any, limit: int) -> bool:
@@ -232,12 +235,10 @@ def resolve_v1_astra_route(
 ) -> dict[str, Any]:
     """Return one nonauthorizing Astra route or a typed non-success decision."""
 
-    normalized_models = _normalize_models(available_models)
     valid = (
         isinstance(task_class, str)
         and 0 < len(task_class) <= 128
         and "\x00" not in task_class
-        and normalized_models is not None
         and _valid_optional_text(route_evidence, 128)
         and _valid_optional_cost(astra_cost_microusd)
         and _valid_optional_cost(legacy_cost_microusd)
@@ -246,14 +247,21 @@ def resolve_v1_astra_route(
         and type(allow_max_effort) is bool
         and type(requested_fanout) is int
     )
-    if not valid:
-        safe_task = task_class if isinstance(task_class, str) else ""
+    normalized_models = _normalize_models(available_models) if valid else None
+    if normalized_models is None:
+        safe_task = (
+            task_class
+            if isinstance(task_class, str) and _valid_optional_text(task_class, 128)
+            else ""
+        )
         return _decision(
             "denied",
             "E_ASTRA_V1_REQUEST_INVALID",
-            safe_task[:128],
+            safe_task,
             selection_basis="request-denial",
-            route_evidence=route_evidence if isinstance(route_evidence, str) else None,
+            route_evidence=(
+                route_evidence if _valid_optional_text(route_evidence, 128) else None
+            ),
         )
     if task_class not in TASK_DEFAULTS:
         return _decision(
