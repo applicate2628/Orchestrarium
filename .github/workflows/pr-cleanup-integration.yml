@@ -1,122 +1,142 @@
-name: Exact-source Windows diagnosis
+name: Verify metadata compatibility candidates
 on:
   push:
     branches: [automation/pr-cleanup-integration-20260905-a068e79e]
+    paths: ['.github/workflows/pr-cleanup-integration.yml']
 permissions:
   contents: read
 concurrency:
-  group: pr-cleanup-integration-20260905-a068e79e
+  group: pr-cleanup-metadata-candidates-20260905
   cancel-in-progress: false
 jobs:
-  diagnose:
-    name: ${{ matrix.surface.name }} Windows diagnosis
-    runs-on: windows-2025
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        surface:
-          - name: routing-v2
-            sha: a5a7a2cdae7db67bbb95c6ce90d763874d5dc9f9
-          - name: policy-overlays
-            sha: 8279b8fdb51984a0eff3d0eb005c0c0ced5d8568
-    env:
-      PYTHONUTF8: '1'
-      PYTHONDONTWRITEBYTECODE: '1'
-      AUDIT_SOURCE_SHA: ${{ matrix.surface.sha }}
-      AUDIT_SURFACE: ${{ matrix.surface.name }}
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    outputs:
+      targets: ${{ steps.candidates.outputs.targets }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: ${{ matrix.surface.sha }}
+          ref: ${{ github.sha }}
+          path: control
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 8279b8fdb51984a0eff3d0eb005c0c0ced5d8568
+          path: policy
           fetch-depth: 1
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 838feaa92ea972e0785465e2d3a1a8ff490cffae
+          path: worker
+          fetch-depth: 1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --disable-pip-version-check pytest==8.3.5 pytest-subtests==0.14.2 PyYAML==6.0.2 "jsonschema[format]==4.23.0"
+      - name: Prepare and publish isolated candidates only
+        id: candidates
+        shell: python
+        run: |
+          import glob, json, os, subprocess, sys
+          from pathlib import Path
+          control = Path('control/.github/audit/metadata-compatibility.py').resolve()
+          targets = []
+          for surface, number in [('policy', 5), ('worker', 7)]:
+              root = Path(surface).resolve()
+              subprocess.run([sys.executable, str(control), surface, str(root)], check=True, timeout=180)
+              patterns = ['tests/test_policy_overlay*.py'] if surface == 'policy' else ['tests/test_astra_routing_v1*.py', 'tests/test_lead_worker_routing_v1*.py']
+              files = sorted({str(p.relative_to(root)) for pattern in patterns for p in root.glob(pattern)})
+              subprocess.run([sys.executable, '-m', 'pytest', '-q', *files], cwd=root, check=True, timeout=180)
+              subprocess.run(['git', 'config', 'user.name', 'github-actions[bot]'], cwd=root, check=True)
+              subprocess.run(['git', 'config', 'user.email', '41898282+github-actions[bot]@users.noreply.github.com'], cwd=root, check=True)
+              branch = f'automation/pr{number}-windows-metadata-20260905'
+              subprocess.run(['git', 'switch', '-c', branch], cwd=root, check=True)
+              subprocess.run(['git', 'commit', '-m', f'fix({surface}): compare metadata within the correct stat interface', '-m', 'Preserve full same-interface before/after checks, inode/device/type/size/mtime/attribute binding, and Unix cross-interface ctime comparison. Bind birthtime when exposed. Add metadata regressions and a dated release note. This isolated candidate requires native Linux/Windows verification before PR integration. No provider admission or launch changes.'], cwd=root, check=True)
+              sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip()
+              subprocess.run(['git', 'push', 'origin', 'HEAD:refs/heads/' + branch], cwd=root, check=True, timeout=60)
+              targets.append({'surface': surface, 'sha': sha, 'branch': branch})
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+              output.write('targets=' + json.dumps(targets) + '\n')
+  tests:
+    needs: prepare
+    name: ${{ matrix.target.surface }} regression on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+        target: ${{ fromJSON(needs.prepare.outputs.targets) }}
+    env:
+      PYTHONUTF8: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+      AUDIT_SOURCE_SHA: ${{ matrix.target.sha }}
+      AUDIT_SURFACE: ${{ matrix.target.surface }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ matrix.target.sha }}
           persist-credentials: false
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: '3.12'
       - run: python -m pip install --disable-pip-version-check pytest==8.3.5 pytest-subtests==0.14.2 PyYAML==6.0.2 "jsonschema[format]==4.23.0"
-      - name: Observe native stat and supervised-child metadata without changing source
+      - name: Repeat all affected suites against the exact candidate
         shell: python
         run: |
-          import dataclasses, importlib.util, json, os, subprocess, sys, tempfile
+          import glob, json, os, subprocess, sys
+          from pathlib import Path
+          out = Path(os.environ['RUNNER_TEMP']) / 'metadata-verification'
+          out.mkdir()
+          head = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          assert head == os.environ['AUDIT_SOURCE_SHA']
+          surface = os.environ['AUDIT_SURFACE']
+          patterns = ['tests/test_policy_overlay*.py'] if surface == 'policy' else ['tests/test_astra_routing_v1*.py', 'tests/test_lead_worker_routing_v1*.py']
+          files = sorted({p for pattern in patterns for p in glob.glob(pattern)})
+          results = []
+          for repetition in range(3):
+              command = [sys.executable, '-m', 'pytest', '-q', '-ra', '--tb=short', f'--junitxml={out / (str(repetition) + ".xml")}', *files]
+              result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=180)
+              (out / f'tests-{repetition}.log').write_bytes(result.stdout)
+              print(result.stdout.decode('utf-8', errors='replace'))
+              results.append(result.returncode)
+          (out / 'results.json').write_text(json.dumps({'head': head, 'surface': surface, 'platform': sys.platform, 'results': results}, indent=2), encoding='utf-8')
+          raise SystemExit(1 if any(results) else 0)
+      - name: Locate inherited Windows supervisor rejection without logging request data
+        if: runner.os == 'Windows' && always()
+        shell: python
+        run: |
+          import importlib.util, json, os, sys
           from pathlib import Path
           root = Path.cwd()
-          out = Path(os.environ['RUNNER_TEMP']) / 'orchestrarium-diagnosis'
-          out.mkdir()
-          actual = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
-          assert actual == os.environ['AUDIT_SOURCE_SHA']
-          fields = ['st_dev','st_ino','st_mode','st_size','st_mtime_ns','st_ctime_ns','st_birthtime_ns','st_file_attributes','st_reparse_tag']
-          def metadata(value):
-              return {key: getattr(value, key, None) for key in fields}
-          samples, mismatches = [], 0
-          with tempfile.TemporaryDirectory() as temp:
-              for index in range(128):
-                  path = Path(temp) / f'ordinary-{index}.json'
-                  path.write_text('[' * 2000 + '0' + ']' * 2000, encoding='utf-8')
-                  before = metadata(path.lstat())
-                  descriptor = os.open(path, os.O_RDONLY | os.O_BINARY)
-                  try:
-                      opened = metadata(os.fstat(descriptor))
-                      os.read(descriptor, 8192)
-                      closed = metadata(os.fstat(descriptor))
-                      after = metadata(path.lstat())
-                  finally:
-                      os.close(descriptor)
-                  if before != opened or opened != closed or before != after:
-                      mismatches += 1
-                      if len(samples) < 12:
-                          samples.append({'before': before, 'opened': opened, 'after_descriptor': closed, 'after_path': after})
-          report = {'head': actual, 'python': sys.version, 'stat_samples': 128, 'mismatches': mismatches, 'samples': samples}
+          out = Path(os.environ['RUNNER_TEMP']) / 'metadata-verification'
           spec = importlib.util.spec_from_file_location('audit_pack', root / 'src.codex/skills/lead/scripts/validate-skill-pack.py')
           pack = importlib.util.module_from_spec(spec)
           sys.modules[spec.name] = pack
           spec.loader.exec_module(pack)
           engine = pack._ENGINE
+          events = []
+          def trace(frame, event, arg):
+              if event == 'exception' and len(events) < 25:
+                  kind, error, traceback = arg
+                  if kind.__name__ == 'ProcessSupervisionError':
+                      events.append({'file': Path(frame.f_code.co_filename).name, 'function': frame.f_code.co_name, 'line': frame.f_lineno})
+              return trace
           validator = engine.Validator(engine.detect_layout(root / 'src.codex/skills/lead/scripts/validate-skill-pack.py', 'codex'))
           try:
+              sys.settrace(trace)
               result = validator._run_python(root / 'scripts/validate-agents-mode-contract.py', '--root', str(root))
-              report['supervised_contract'] = dataclasses.asdict(result)
-              with tempfile.TemporaryDirectory() as temp:
-                  target = Path(temp) / 'overlay.yaml'
-                  target.write_text('externalProvider: auto\nreserveResolver: disabled\n', encoding='utf-8')
-                  result = validator._run_python(root / 'scripts/normalize-agents-mode.py', '--template', str(root / 'shared/agents-mode.defaults.yaml'), '--target', str(target), '--provider', 'shared')
-                  report['supervised_normalizer'] = dataclasses.asdict(result)
           finally:
+              sys.settrace(None)
               validator.close()
-          (out / 'diagnosis.json').write_text(json.dumps(report, indent=2, default=str), encoding='utf-8')
-          print(json.dumps(report, indent=2, default=str))
-      - name: Repeat real tests and direct contract checker
-        if: always()
-        shell: python
-        run: |
-          import glob, json, os, subprocess, sys
-          from pathlib import Path
-          out = Path(os.environ['RUNNER_TEMP']) / 'orchestrarium-diagnosis'
-          out.mkdir(exist_ok=True)
-          surface = os.environ['AUDIT_SURFACE']
-          patterns = ['tests/test_policy_overlay*.py'] if surface == 'policy-overlays' else ['tests/test_astra_routing_v1*.py', 'tests/test_lead_worker_routing_v1*.py', 'tests/test_adaptive_model_routing_v2*.py']
-          files = sorted({path for pattern in patterns for path in glob.glob(pattern)})
-          checks = [
-              ('tests', [sys.executable, '-m', 'pytest', '-q', '-ra', '--tb=short', *files]),
-              ('installer-fixture', [sys.executable, '-m', 'pytest', '-q', '--tb=short', 'tests/test_agents_mode_installer_regression.py']),
-              ('direct-contract', [sys.executable, 'scripts/validate-agents-mode-contract.py', '--root', '.']),
-          ]
-          results = []
-          for name, command in checks:
-              try:
-                  result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=300, check=False)
-                  data, status = result.stdout, result.returncode
-              except subprocess.TimeoutExpired as exc:
-                  data, status = (exc.stdout or b'') + b'\nTIMEOUT\n', 124
-              (out / (name + '.log')).write_bytes(data)
-              results.append({'check': name, 'returncode': status})
-              print(name, status, data.decode('utf-8', errors='replace')[-20000:])
-          (out / 'results.json').write_text(json.dumps(results, indent=2), encoding='utf-8')
-          raise SystemExit(1 if any(row['returncode'] for row in results) else 0)
+          (out / 'supervisor-trace.json').write_text(json.dumps({'failure_id': result.failure_id, 'trace': events}, indent=2), encoding='utf-8')
       - if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: diagnosis-${{ matrix.surface.name }}-windows
-          path: ${{ runner.temp }}/orchestrarium-diagnosis/
+          name: metadata-${{ matrix.target.surface }}-${{ matrix.os }}
+          path: ${{ runner.temp }}/metadata-verification/
           if-no-files-found: error
           retention-days: 3
