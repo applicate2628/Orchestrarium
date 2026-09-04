@@ -63,6 +63,8 @@ This means an overlay can prefer a smaller implementation but cannot delete a ma
 
 Every projection is resolved against an exact provider, lane, and target.
 
+The callable resolver requires `explicit` to be a boolean: a string such as `"false"`, an integer, or `None` cannot enable an `explicit-only` projection. Rendering requires `authorizing` to be exactly `False`, not merely a false-like value. These flags do not grant execution or publication authority.
+
 | Target | Lean implementation | Complexity review |
 | --- | --- | --- |
 | Main agent | Selected implementation lanes | Selected review lanes |

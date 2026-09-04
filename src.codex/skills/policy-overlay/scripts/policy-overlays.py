@@ -120,6 +120,8 @@ def _instructions(text: str, *, label: str) -> str:
 
 
 def _resolve(root: Path, catalog: Mapping[str, Mapping[str, Any]], selection: Any, *, lane: str, target: str, provider: str, explicit: bool) -> tuple[ResolvedPolicyOverlay, ...]:
+    if type(explicit) is not bool:
+        raise PolicyOverlayError("explicit overlay selection must be a boolean")
     if provider not in PROVIDERS or target not in TARGETS or target not in PROVIDER_TARGETS.get(provider, ()):
         raise PolicyOverlayError(f"unsupported provider/target combination: {provider}/{target}")
     if not isinstance(lane, str) or not LANE_ID.fullmatch(lane):
@@ -179,7 +181,7 @@ def render_overlay_instructions(overlays: Iterable[ResolvedPolicyOverlay]) -> st
     ids = tuple(item.overlay_id for item in items)
     if any(not OVERLAY_ID.fullmatch(item) for item in ids) or len(ids) != len(set(ids)):
         raise PolicyOverlayError("rendered policy overlays must have unique valid ids")
-    if any(item.authorizing or item.source_kind != "builtin" for item in items):
+    if any(item.authorizing is not False or item.source_kind != "builtin" for item in items):
         raise PolicyOverlayError("optional policy overlays are non-authorizing built-ins in Version 1")
     contexts = {(item.provider, item.lane, item.target) for item in items}
     if len(contexts) != 1:
