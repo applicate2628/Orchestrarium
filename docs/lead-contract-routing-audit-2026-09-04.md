@@ -16,6 +16,8 @@
 
 The audit covers the frozen Version 1 baseline, Astra point route, provider-neutral Lead/worker branch, shared subagent operating model, Codex and Claude projections, provider prompt transports, Kimi and Grok admission boundaries, role and mutation contracts, and the new resolver tests.
 
+One logical Lead retains ownership of the role, scope, artifact, and gate while an optional worker is selected; candidate selection never transfers that ownership.
+
 The provider-neutral route remains stacked on the Astra route. It is a compatibility feature and does not rewrite native role TOML, the role manifest, `role-routing-policy.v1.json`, `agents-mode`, provider adapters, or the parity baseline.
 
 ## 2. Angles reviewed
@@ -74,6 +76,10 @@ The public `resolve.py` facade added native-host binding, request fingerprints, 
 - Kept `resolve.py` as the only supported command-line entrypoint.
 - Reduced `_resolver_base.py` to an import-only selection core whose direct execution returns typed denial `E_LEAD_WORKER_V1_PRIVATE_ENTRYPOINT` without reading the supplied request.
 - Added a regression test that passes a fully selectable request to the private path and verifies that no candidate is selected.
+
+Availability fallback retains its exact cause: `not-configured`, `not-entitled`, `quota-exhausted`, `temporary-transport-failure`, and `unavailable` are ordinary availability states. `auth-invalid` and `contract-violation` remain hard provider failures; selecting a later candidate does not clear `hardFailureObserved` or `requiresOperatorAttention`.
+
+Input acquisition is a separate failure class. An operating-system failure while reading standard input now returns typed denial `E_LEAD_WORKER_V1_REQUEST_IO_FAILED`, with no selected worker, fingerprint, adapter admission, or raw diagnostic. It does not authorize provider fallback; `KeyboardInterrupt` still propagates instead of being reported as ordinary input failure.
 
 ## 5. Rejected overengineering
 
