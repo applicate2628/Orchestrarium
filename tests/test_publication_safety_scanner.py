@@ -2748,10 +2748,11 @@ class TestPublicationSafetyScannerV3(unittest.TestCase):
             self.assertNotIsInstance(binding, module.Refusal)
             alias, child_env = binding
             self.assertEqual(alias, "publication-safety-probe://" + ("d" * 64))
-            self.assertEqual(child_env["GIT_CONFIG_COUNT"], "1")
-            self.assertEqual(child_env["GIT_CONFIG_KEY_0"], f"url.{destination}.insteadOf")
-            self.assertEqual(child_env["GIT_CONFIG_VALUE_0"], alias)
-            self.assertNotIn("discarded.synthetic", child_env.values())
+            self.assertEqual(child_env["GIT_CONFIG_COUNT"], "2")
+            self.assertEqual(child_env["GIT_CONFIG_KEY_0"], "discarded.synthetic")
+            self.assertEqual(child_env["GIT_CONFIG_VALUE_0"], "discarded")
+            self.assertEqual(child_env["GIT_CONFIG_KEY_1"], f"url.{destination}.insteadOf")
+            self.assertEqual(child_env["GIT_CONFIG_VALUE_1"], alias)
 
             for key, expected in (
                 ("credential.helper", "synthetic-helper"),
@@ -2778,6 +2779,49 @@ class TestPublicationSafetyScannerV3(unittest.TestCase):
                 check=True,
             )
             self.assertEqual(parsed_self_map.stdout.strip(), alias)
+
+
+    def test_range_remote_probe_binding_preserves_inherited_command_scope_config(self) -> None:
+        module = _load_canonical_scanner("_scanner_v3_remote_probe_inherited_command_scope")
+        ambient = {
+            "GIT_CONFIG_COUNT": "2",
+            "GIT_CONFIG_KEY_0": "credential.useHttpPath",
+            "GIT_CONFIG_VALUE_0": "true",
+            "GIT_CONFIG_KEY_1": "protocol.file.allow",
+            "GIT_CONFIG_VALUE_1": "never",
+        }
+        with (
+            mock.patch.dict(os.environ, ambient, clear=False),
+            mock.patch.object(module.secrets, "token_hex", return_value="e" * 64),
+        ):
+            binding = module._remote_probe_binding("https://example.invalid/repository.git")
+
+        self.assertNotIsInstance(binding, module.Refusal)
+        alias, child_env = binding
+        self.assertEqual(child_env["GIT_CONFIG_COUNT"], "3")
+        self.assertEqual(child_env["GIT_CONFIG_KEY_0"], "credential.useHttpPath")
+        self.assertEqual(child_env["GIT_CONFIG_VALUE_0"], "true")
+        self.assertEqual(child_env["GIT_CONFIG_KEY_1"], "protocol.file.allow")
+        self.assertEqual(child_env["GIT_CONFIG_VALUE_1"], "never")
+        self.assertEqual(child_env["GIT_CONFIG_KEY_2"], "url.https://example.invalid/repository.git.insteadOf")
+        self.assertEqual(child_env["GIT_CONFIG_VALUE_2"], alias)
+
+    def test_range_remote_probe_binding_refuses_malformed_command_scope_config(self) -> None:
+        module = _load_canonical_scanner("_scanner_v3_remote_probe_malformed_command_scope")
+        cases = (
+            {"GIT_CONFIG_COUNT": "bogus"},
+            {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "only-key"},
+            {"GIT_CONFIG_COUNT": "0", "GIT_CONFIG_KEY_0": "orphan", "GIT_CONFIG_VALUE_0": "orphan"},
+        )
+        for ambient in cases:
+            with self.subTest(ambient=ambient), mock.patch.dict(os.environ, ambient, clear=False):
+                for key in tuple(os.environ):
+                    if key.startswith("GIT_CONFIG_") and key not in ambient:
+                        os.environ.pop(key, None)
+                outcome = module._remote_probe_binding("https://example.invalid/repository.git")
+                self.assertIsInstance(outcome, module.Refusal)
+                self.assertEqual(outcome.failure_id, "PS-MSG-RANGE")
+                self.assertEqual(outcome.reason, "remote-binding")
 
     def test_range_remote_probe_rng_failure_refuses_before_git(self) -> None:
         module = _load_canonical_scanner("_scanner_v3_remote_probe_rng_failure")

@@ -107,6 +107,24 @@ def test_uncorrelated_terminal_failure_refuses_overlapping_same_head_runs() -> N
         assert clause in body, f"missing overlapping-run ambiguity guard: {clause}"
 
 
+def test_uncorrelated_clean_result_refuses_overlapping_same_head_runs() -> None:
+    bodies = [path.read_text(encoding="utf-8") for path in SKILL_PATHS]
+
+    assert bodies[0] == bodies[1]
+    body = bodies[0]
+    required_contract = (
+        "Apply the same ownership rule to uncorrelated clean evidence",
+        "submitted-review or REST issue-comment no-findings result",
+        "exactly one unresolved exact trigger candidate",
+        "Two or more unresolved same-head exact trigger candidates",
+        "clean evidence remains `indeterminate`",
+        "no other unresolved exact trigger on the same",
+        "An intrinsically correlated reaction does not erase another unresolved same-head run",
+    )
+    for clause in required_contract:
+        assert clause in body, f"missing overlapping-run clean guard: {clause}"
+
+
 def test_unlisted_error_like_prose_fails_closed_and_failure_record_is_bound() -> None:
     bodies = [path.read_text(encoding="utf-8") for path in SKILL_PATHS]
 

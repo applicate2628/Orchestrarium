@@ -1321,15 +1321,30 @@ def _remote_probe_binding(
             return _refusal("PS-MSG-RANGE", "remote-binding")
         remote_alias = _REMOTE_PROBE_ALIAS_PREFIX + nonce
         child_env = os.environ.copy()
-        for key in tuple(child_env):
-            if key == "GIT_CONFIG_COUNT" or re.fullmatch(
-                r"GIT_CONFIG_(?:KEY|VALUE)_\d+", key
+        raw_count = child_env.get("GIT_CONFIG_COUNT")
+        if raw_count is None:
+            config_count = 0
+        elif not re.fullmatch(r"(?:0|[1-9][0-9]{0,3})", raw_count):
+            return _refusal("PS-MSG-RANGE", "remote-binding")
+        else:
+            config_count = int(raw_count, 10)
+        if config_count > 1024:
+            return _refusal("PS-MSG-RANGE", "remote-binding")
+        for index in range(config_count):
+            if (
+                f"GIT_CONFIG_KEY_{index}" not in child_env
+                or f"GIT_CONFIG_VALUE_{index}" not in child_env
             ):
-                del child_env[key]
+                return _refusal("PS-MSG-RANGE", "remote-binding")
+        if (
+            f"GIT_CONFIG_KEY_{config_count}" in child_env
+            or f"GIT_CONFIG_VALUE_{config_count}" in child_env
+        ):
+            return _refusal("PS-MSG-RANGE", "remote-binding")
         child_env.update({
-            "GIT_CONFIG_COUNT": "1",
-            "GIT_CONFIG_KEY_0": f"url.{push_destination}.insteadOf",
-            "GIT_CONFIG_VALUE_0": remote_alias,
+            "GIT_CONFIG_COUNT": str(config_count + 1),
+            f"GIT_CONFIG_KEY_{config_count}": f"url.{push_destination}.insteadOf",
+            f"GIT_CONFIG_VALUE_{config_count}": remote_alias,
         })
     except Exception:
         return _refusal("PS-MSG-RANGE", "remote-binding")

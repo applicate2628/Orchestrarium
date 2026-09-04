@@ -2,7 +2,10 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
-## 2026-09-02
+## 2026-09-04
+
+- **GitHub pull-request clean-result attribution now fails closed across overlapping same-head review runs.** Uncorrelated submitted-review and REST issue-comment no-findings results require exactly one unresolved exact trigger candidate; a trigger-bound `+1` cannot make the head clean while another same-head trigger remains unresolved. **Why it matters:** a late success from an older run can no longer close a newer or still-active review by timestamp alone.
+- **Publication remote probes now preserve inherited command-scope Git configuration while appending their fresh exact alias binding.** Existing `GIT_CONFIG_*` entries such as credential or protocol hardening remain visible; malformed or non-contiguous inherited config refuses instead of being silently discarded. The random exact probe alias still wins over preconfigured broader rewrite prefixes without exposing the frozen destination in argv. **Why it matters:** preventing a second `insteadOf` rewrite no longer weakens caller-supplied Git security policy.
 
 - **Work-item root contracts now reserve the generated `work-items/README.md` name with host-independent case-insensitive semantics.** A declared auxiliary root such as `readme.md` fails with `WI-CATEGORY-ROOT-CONTRACT-INVALID` before README refresh or any other topology-dependent mutation. **Why it matters:** one contract cannot be accepted on a case-sensitive host and later alias or corrupt the generated README on a case-insensitive host.
 - **GitHub pull-request review failure attribution now refuses overlapping same-head ownership ambiguity.** An uncorrelated exact-listed terminal issue comment can produce `failed` only when complete hosted state leaves exactly one unresolved exact trigger candidate for the same repository, pull request, and `headRefOid`; multiple candidates remain `indeterminate`, cannot dismiss or fail the newest run, cannot mutate retry lineage, and cannot authorize another trigger. Trigger preflight also serializes new reviews behind any unresolved same-head run. **Why it matters:** an older run's generic failure can no longer be assigned to a newer in-flight review merely because the newer trigger is chronologically last.
