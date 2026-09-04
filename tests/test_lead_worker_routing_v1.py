@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -36,11 +37,13 @@ def _candidate(
     delegation_depth: int = 0,
     authorizing: bool = False,
     model: str | None = None,
+    runtime: str | None = None,
+    evidence_snapshot_id: str | None = None,
 ) -> dict[str, object]:
     return {
         "candidateId": candidate_id,
         "provider": provider,
-        "runtime": f"{provider}-cli",
+        "runtime": runtime or f"{provider}-cli",
         "providerFamily": family,
         "model": model or f"{provider}-runtime-observed",
         "effort": "high",
@@ -52,6 +55,7 @@ def _candidate(
         "isolatedFromLead": isolated,
         "maxDelegationDepth": delegation_depth,
         "authorizing": authorizing,
+        "evidenceSnapshotId": evidence_snapshot_id or f"evidence-{candidate_id}",
     }
 
 
@@ -61,13 +65,21 @@ def _request(
     capability: str = "engineering-challenge",
     mutation: str = "read-only",
     tools: tuple[str, ...] = (),
+    excluded_families: tuple[str, ...] = (),
 ) -> dict[str, object]:
     return {
         "schemaVersion": 1,
+        "dispatchId": "dispatch-test-1",
+        "policySnapshotId": "policy-test-1",
         "leadHost": lead_host,
+        "assignedRole": "engineering-challenger",
+        "scopeId": "scope-test-1",
         "capabilitySlot": capability,
         "mutationClass": mutation,
         "requiredTools": list(tools),
+        "excludedProviderFamilies": list(excluded_families),
+        "artifactContract": "challenge-report-v1",
+        "gateContract": "lead-verifies-artifact-v1",
         "candidates": list(candidates),
     }
 
@@ -106,6 +118,22 @@ def test_lead_host_is_separate_from_worker_provider_and_model(lead_host: str) ->
     assert result["selectedCandidate"]["providerFamily"] == "xai"
 
 
+def test_route_binds_role_scope_artifact_gate_and_policy_snapshot() -> None:
+    module = _load()
+    candidate = _candidate(
+        "worker", provider="kimi", family="moonshot", priority=1
+    )
+    result = module.resolve_v1_worker_route(_request(candidate))
+    assert result["status"] == "selected"
+    assert result["dispatchId"] == "dispatch-test-1"
+    assert result["policySnapshotId"] == "policy-test-1"
+    assert result["assignedRole"] == "engineering-challenger"
+    assert result["scopeId"] == "scope-test-1"
+    assert result["artifactContract"] == "challenge-report-v1"
+    assert result["gateContract"] == "lead-verifies-artifact-v1"
+    assert result["selectedCandidate"]["evidenceSnapshotId"] == "evidence-worker"
+
+
 def test_exact_request_and_candidate_shapes_fail_closed() -> None:
     module = _load()
     request = _request(_candidate("worker", provider="claude", family="anthropic", priority=1))
@@ -117,6 +145,11 @@ def test_exact_request_and_candidate_shapes_fail_closed() -> None:
     bad_candidate = _candidate("worker", provider="claude", family="anthropic", priority=1)
     bad_candidate.pop("runtime")
     result = module.resolve_v1_worker_route(_request(bad_candidate))
+    assert result["stableId"] == "E_LEAD_WORKER_V1_REQUEST_INVALID"
+
+    missing_contract = _request()
+    missing_contract.pop("artifactContract")
+    result = module.resolve_v1_worker_route(missing_contract)
     assert result["stableId"] == "E_LEAD_WORKER_V1_REQUEST_INVALID"
 
 
@@ -137,10 +170,34 @@ def test_provider_family_is_canonical_and_cannot_be_spoofed() -> None:
     ]
 
 
+def test_provider_runtime_identity_cannot_be_spoofed() -> None:
+    module = _load()
+    spoofed = _candidate(
+        "spoofed-runtime",
+        provider="kimi",
+        family="moonshot",
+        priority=1,
+        runtime="codex-cli",
+    )
+    result = module.resolve_v1_worker_route(_request(spoofed))
+    assert result["status"] == "denied"
+    assert result["rejections"] == [
+        {
+            "candidateId": "spoofed-runtime",
+            "stableId": "E_LEAD_WORKER_V1_PROVIDER_RUNTIME_MISMATCH",
+        }
+    ]
+
+
 def test_unhashable_json_values_fail_closed_instead_of_raising() -> None:
     module = _load()
     bad_request = _request()
     bad_request["mutationClass"] = []
+    result = module.resolve_v1_worker_route(bad_request)
+    assert result["stableId"] == "E_LEAD_WORKER_V1_REQUEST_INVALID"
+
+    bad_request = _request()
+    bad_request["excludedProviderFamilies"] = [[]]
     result = module.resolve_v1_worker_route(bad_request)
     assert result["stableId"] == "E_LEAD_WORKER_V1_REQUEST_INVALID"
 
@@ -182,14 +239,36 @@ def test_unpaid_or_quota_exhausted_candidate_falls_back_explicitly() -> None:
     assert result["fallbackEvents"] == [
         {
             "candidateId": "codex-first",
+            "provider": "codex",
+            "evidenceSnapshotId": "evidence-codex-first",
             "availability": "not-entitled",
             "stableId": "E_LEAD_WORKER_V1_CANDIDATE_NOT_ENTITLED",
+            "failureClass": "availability-fallback",
         }
     ]
 
     codex["availability"] = "quota-exhausted"
     result = module.resolve_v1_worker_route(_request(codex, kimi, lead_host="claude"))
     assert result["fallbackEvents"][0]["stableId"] == "E_LEAD_WORKER_V1_CANDIDATE_QUOTA_EXHAUSTED"
+
+
+def test_hard_provider_failure_is_visible_after_fallback() -> None:
+    module = _load()
+    failed = _candidate(
+        "kimi-failed",
+        provider="kimi",
+        family="moonshot",
+        priority=1,
+        availability="contract-violation",
+    )
+    selected = _candidate(
+        "grok-selected", provider="grok", family="xai", priority=2
+    )
+    result = module.resolve_v1_worker_route(_request(failed, selected))
+    assert result["status"] == "selected"
+    assert result["hardFailureObserved"] is True
+    assert result["requiresOperatorAttention"] is True
+    assert result["fallbackEvents"][0]["failureClass"] == "provider-hard-failure"
 
 
 def test_priority_is_caller_supplied_and_ties_are_deterministic() -> None:
@@ -199,6 +278,27 @@ def test_priority_is_caller_supplied_and_ties_are_deterministic() -> None:
     result = module.resolve_v1_worker_route(_request(later_name, earlier_name))
     assert result["selectedCandidate"]["candidateId"] == "a-worker"
     assert result["selectionBasis"] == "explicit-priority-available-admitted"
+
+
+def test_independent_family_requirement_is_enforced() -> None:
+    module = _load()
+    same_family = _candidate(
+        "same-family", provider="codex", family="openai", priority=1
+    )
+    independent = _candidate(
+        "independent", provider="grok", family="xai", priority=2
+    )
+    result = module.resolve_v1_worker_route(
+        _request(same_family, independent, excluded_families=("openai",))
+    )
+    assert result["status"] == "selected"
+    assert result["selectedCandidate"]["candidateId"] == "independent"
+    assert result["rejections"] == [
+        {
+            "candidateId": "same-family",
+            "stableId": "E_LEAD_WORKER_V1_INDEPENDENCE_REQUIRED",
+        }
+    ]
 
 
 def test_capability_mutation_tools_and_same_host_isolation_are_enforced() -> None:
@@ -320,17 +420,17 @@ def test_worker_cannot_authorize_or_delegate() -> None:
 
 
 @pytest.mark.parametrize(
-    ("availability", "stable_id"),
+    ("availability", "stable_id", "failure_class"),
     [
-        ("not-configured", "E_LEAD_WORKER_V1_CANDIDATE_NOT_CONFIGURED"),
-        ("temporary-transport-failure", "E_LEAD_WORKER_V1_CANDIDATE_TRANSPORT_FAILURE"),
-        ("unavailable", "E_LEAD_WORKER_V1_CANDIDATE_UNAVAILABLE"),
-        ("auth-invalid", "E_LEAD_WORKER_V1_CANDIDATE_AUTH_INVALID"),
-        ("contract-violation", "E_LEAD_WORKER_V1_CANDIDATE_CONTRACT_VIOLATION"),
+        ("not-configured", "E_LEAD_WORKER_V1_CANDIDATE_NOT_CONFIGURED", "availability-fallback"),
+        ("temporary-transport-failure", "E_LEAD_WORKER_V1_CANDIDATE_TRANSPORT_FAILURE", "availability-fallback"),
+        ("unavailable", "E_LEAD_WORKER_V1_CANDIDATE_UNAVAILABLE", "availability-fallback"),
+        ("auth-invalid", "E_LEAD_WORKER_V1_CANDIDATE_AUTH_INVALID", "provider-hard-failure"),
+        ("contract-violation", "E_LEAD_WORKER_V1_CANDIDATE_CONTRACT_VIOLATION", "provider-hard-failure"),
     ],
 )
 def test_availability_failures_are_recorded_before_fallback(
-    availability: str, stable_id: str
+    availability: str, stable_id: str, failure_class: str
 ) -> None:
     module = _load()
     first = _candidate(
@@ -344,6 +444,7 @@ def test_availability_failures_are_recorded_before_fallback(
     result = module.resolve_v1_worker_route(_request(first, second))
     assert result["selectedCandidate"]["candidateId"] == "second"
     assert result["fallbackEvents"][0]["stableId"] == stable_id
+    assert result["fallbackEvents"][0]["failureClass"] == failure_class
 
 
 def test_no_selectable_candidate_distinguishes_unavailable_from_policy_denial() -> None:
@@ -409,6 +510,53 @@ def test_cli_reads_file_or_stdin_and_is_deterministic(tmp_path: Path) -> None:
     assert stdin_run.stdout == first.stdout
 
 
+def test_cli_rejects_duplicate_json_keys(tmp_path: Path) -> None:
+    request_path = tmp_path / "duplicate.json"
+    request_path.write_text('{"schemaVersion":1,"schemaVersion":1}', encoding="utf-8")
+    run = subprocess.run(
+        [sys.executable, "-S", str(MODULE), "--request-file", str(request_path)],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert run.returncode == 2
+    assert json.loads(run.stdout)["stableId"] == "E_LEAD_WORKER_V1_REQUEST_JSON_DUPLICATE_KEY"
+
+
+def test_cli_rejects_symlink_request_file(tmp_path: Path) -> None:
+    request_path = tmp_path / "request.json"
+    request_path.write_text(json.dumps(_request()), encoding="utf-8")
+    link = tmp_path / "request-link.json"
+    try:
+        os.symlink(request_path, link)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks unavailable on this host")
+    run = subprocess.run(
+        [sys.executable, "-S", str(MODULE), "--request-file", str(link)],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert run.returncode == 2
+    assert json.loads(run.stdout)["stableId"] == "E_LEAD_WORKER_V1_REQUEST_FILE_UNSAFE"
+
+
+def test_cli_rejects_oversized_request(tmp_path: Path) -> None:
+    request_path = tmp_path / "large.json"
+    request_path.write_bytes(b" " * (1024 * 1024 + 1))
+    run = subprocess.run(
+        [sys.executable, "-S", str(MODULE), "--request-file", str(request_path)],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert run.returncode == 2
+    assert json.loads(run.stdout)["stableId"] == "E_LEAD_WORKER_V1_REQUEST_TOO_LARGE"
+
+
 def test_cli_returns_nonzero_for_denied_or_invalid_json(tmp_path: Path) -> None:
     denied_path = tmp_path / "denied.json"
     denied_path.write_text(json.dumps(_request()), encoding="utf-8")
@@ -447,6 +595,7 @@ def test_skill_metadata_and_docs_preserve_v1_boundaries() -> None:
     assert "Codex or Claude" in body
     assert "GLM" in body and "Version 2" in body
     assert "does not launch" in body
+    assert "artifactContract" in body and "gateContract" in body
     assert "Lead Worker Routing" in metadata
     assert "logical Lead" in audit
     assert "not-entitled" in audit
