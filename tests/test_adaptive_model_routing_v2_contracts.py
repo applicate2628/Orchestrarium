@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 
 import jsonschema
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 V2 = ROOT / "docs" / "model-routing-v2"
@@ -27,7 +28,9 @@ def _validate_definition(schema: dict[str, object], name: str, instance: object)
         "$defs": schema["$defs"],
         "$ref": f"#/$defs/{name}",
     }
-    jsonschema.Draft202012Validator(wrapper).validate(instance)
+    jsonschema.Draft202012Validator(
+        wrapper, format_checker=jsonschema.FormatChecker(),
+    ).validate(instance)
 
 
 def test_v2_documentation_surface_exists() -> None:
@@ -221,3 +224,87 @@ def test_route_decision_binds_same_snapshots_as_dispatches() -> None:
         assert all(dispatch[key] == decision[key] for key in keys)
         assert dispatch["maxDelegationDepth"] == 0
         assert dispatch["authorizing"] is False
+
+
+@pytest.mark.parametrize("status", ["selected", "degraded"])
+def test_dispatching_decision_requires_a_worker(status: str) -> None:
+    schema = _load(SCHEMA)
+    decision = _load(EXAMPLES)["routeDecision"]
+    decision["status"] = status
+    decision["selectedPortfolio"] = []
+    decision["independentFamilyCount"] = 0
+    decision["approachTagCount"] = 0
+    with pytest.raises(jsonschema.ValidationError):
+        _validate_definition(schema, "routeDecision", decision)
+    decision["status"] = "blocked"
+    _validate_definition(schema, "routeDecision", decision)
+
+
+def test_selected_decision_cannot_hide_unresolved_contradictions() -> None:
+    schema = _load(SCHEMA)
+    decision = _load(EXAMPLES)["routeDecision"]
+    decision["unresolvedContradictions"] = ["finding-open"]
+    decision["humanGateRequired"] = True
+    with pytest.raises(jsonschema.ValidationError):
+        _validate_definition(schema, "routeDecision", decision)
+    decision["status"] = "degraded"
+    _validate_definition(schema, "routeDecision", decision)
+    decision["humanGateRequired"] = False
+    with pytest.raises(jsonschema.ValidationError):
+        _validate_definition(schema, "routeDecision", decision)
+
+
+def test_degraded_diversity_cannot_report_selected_status() -> None:
+    schema = _load(SCHEMA)
+    decision = _load(EXAMPLES)["routeDecision"]
+    decision["diversityStatus"] = "degraded"
+    decision["degradationReasons"] = ["independent-family-shortfall"]
+    with pytest.raises(jsonschema.ValidationError):
+        _validate_definition(schema, "routeDecision", decision)
+    decision["status"] = "degraded"
+    _validate_definition(schema, "routeDecision", decision)
+
+
+@pytest.mark.parametrize("status", ["revise", "blocked", "failed"])
+def test_worker_pass_requires_completed_execution(status: str) -> None:
+    schema = _load(SCHEMA)
+    worker = _load(EXAMPLES)["workerResult"]
+    worker["status"] = status
+    worker["gateClaim"] = "PASS"
+    with pytest.raises(jsonschema.ValidationError):
+        _validate_definition(schema, "workerResult", worker)
+    worker["gateClaim"] = "none"
+    _validate_definition(schema, "workerResult", worker)
+
+
+def test_completed_worker_can_request_revision_without_claiming_pass() -> None:
+    schema = _load(SCHEMA)
+    worker = _load(EXAMPLES)["workerResult"]
+    worker["status"] = "completed"
+    for gate in ("REVISE", "BLOCKED", "advisory", "none", "PASS"):
+        worker["gateClaim"] = gate
+        _validate_definition(schema, "workerResult", worker)
+
+
+@pytest.mark.parametrize("timestamp", [
+    "not-a-timestamp", "2026-02-30T15:00:00Z", "2026-09-04T25:00:00Z",
+])
+def test_example_validator_enforces_calendar_formats(timestamp: str) -> None:
+    schema = _load(SCHEMA)
+    lease = _load(EXAMPLES)["leadLease"]
+    lease["acquiredAt"] = timestamp
+    with pytest.raises(jsonschema.ValidationError):
+        _validate_definition(schema, "leadLease", lease)
+
+
+@pytest.mark.parametrize("timestamp", [
+    "2026-09-04T18:00:00+03:00", "2026-09-04t15:00:00z",
+])
+def test_core_timestamp_uses_the_same_utc_wire_form_as_operational_contract(
+    timestamp: str,
+) -> None:
+    schema = _load(SCHEMA)
+    lease = _load(EXAMPLES)["leadLease"]
+    lease["acquiredAt"] = timestamp
+    with pytest.raises(jsonschema.ValidationError):
+        _validate_definition(schema, "leadLease", lease)
