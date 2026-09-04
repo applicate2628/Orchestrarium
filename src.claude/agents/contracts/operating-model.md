@@ -77,7 +77,7 @@ Claude-line keeps one shared local config file at `.claude/.agents-mode.yaml`.
 - Treat same-lane multi-opinion collection and general external fan-out as different mechanisms: `externalOpinionCounts` governs distinct opinions for one lane, while brigade-style fan-out covers multiple independent lanes or slices on top of the general `parallelMode` rule.
 - If native internal slot limits would otherwise block additional independent eligible lanes, prefer available external adapters instead of silently serializing or dropping them.
 - Once a provider or subagent run is launched, a later preference change to effort, model, or framing applies to the next dispatch. Do not stop and replace the in-flight run: spent reasoning is sunk and redispatch adds cost. Stop only when the run is orphaned, no longer needed, or its prompt is broken/wrong.
-- Choose effort before launch from task complexity and the lane's mandated floor; do not reflexively escalate to `max`/`xhigh` where no floor requires it.
+- Record route complexity before launch without inventing execution values. Claude internal Agent model and effort are host-selected; role definitions declare no fixed model, effort, or floor. Unless returned actual runtime metadata proves the effective values, record `unspecified by runtime`.
 
 ## Batch-close consultant check
 
@@ -233,6 +233,14 @@ Use the shared spine's consecutive same-role/same-artifact `REVISE`-cycle cap. T
 4. Track consecutive cycles by role and artifact in `status.md` under the REVISE loop section.
 
 ## Parallel execution protocol
+
+Rolling admission is evaluated from current state, not from a stored numeric cap:
+
+- **Ready set.** A lane is ready only when its approved inputs and external prerequisites are accepted, its owner, scope, one artifact, and gate are explicit, its mandatory risk owners are known, its marginal benefit is positive, and it has no unresolved stop condition, human gate, integration conflict, or overlapping resource surface.
+- **Admission choice.** From the current ready set, admit the largest useful pairwise-compatible subset. Rank candidates by priority, critical-path or unblocking value, mandatory risk coverage, marginal benefit, merge cost, and pairwise resource isolation. `parallelMode: force` requires eligible refill; it does not require maximum fan-out when no additional compatible lane has positive marginal benefit.
+- **Capacity discovery.** When the runtime exposes free capacity, treat that current value as authoritative. Otherwise, launch one ranked candidate at a time until the runtime explicitly refuses capacity; never infer or cache a numeric concurrency cap. Recompute admission after every launch and every lane-settled event.
+- **Release and refill.** Completed, `BLOCKED`, cancelled, and parked lanes release capacity; refill in the same turn unless a stop condition, human gate, integration conflict, or nonpositive marginal benefit prevents it. A waiting or long-running lane does not head-of-line block independent ready work. A lane waiting on an external prerequisite is parked or closed with a durable recovery point rather than occupying active admission indefinitely.
+- **Integration serialization.** Integration-owner and shared integration-surface work is serialized.
 
 Before launching work in parallel:
 

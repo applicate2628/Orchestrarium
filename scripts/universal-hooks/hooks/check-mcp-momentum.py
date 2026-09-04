@@ -16,7 +16,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 from hook_common import emit_advisory, parse_envelope, read_stdin_utf8
 from mcp_continuity_policy import (
     classify_tool_choice,
-    configured_code_intel_servers,
     render_momentum_advisory,
 )
 
@@ -32,10 +31,7 @@ def main() -> int:
         tool_name = str(envelope.get("tool_name") or "")
         if not classify_tool_choice(tool_name, tool_input, envelope.get("cwd")):
             return 0
-        servers = configured_code_intel_servers()
-        if not servers:
-            return 0
-        emit_advisory(envelope, render_momentum_advisory(servers))
+        emit_advisory(envelope, render_momentum_advisory())
     except Exception:
         return 0
     return 0

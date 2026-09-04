@@ -73,6 +73,20 @@ def write(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
+def write_root_contract(root: Path, auxiliary_roots: dict[str, dict[str, str]]) -> None:
+    write(
+        root / "work-items" / "root-contract.json",
+        json.dumps(
+            {
+                "schema": "work-items-root-contract",
+                "version": 2,
+                "auxiliaryRoots": auxiliary_roots,
+            }
+        )
+        + "\n",
+    )
+
+
 def quick_status(task: str = "Complete bounded repair.") -> str:
     return f"""---
 template: quick-fix
@@ -3986,6 +4000,345 @@ def test_audit_rejects_unknown_top_level_directory(tmp_path: Path) -> None:
         assert "unknown-category" in str(exc)
     else:
         raise AssertionError("audit accepted an unknown top-level work-items directory")
+
+
+def test_no_contract_preserves_linked_repository_and_work_items_read_compatibility(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    repository = tmp_path / "repository"
+    (repository / "work-items").mkdir(parents=True)
+    repository_link = tmp_path / "repository-link"
+    work_items_link_repository = tmp_path / "work-items-link-repository"
+    work_items_target = tmp_path / "work-items-target"
+    work_items_target.mkdir()
+    try:
+        os.symlink(repository, repository_link, target_is_directory=True)
+        work_items_link_repository.mkdir()
+        os.symlink(
+            work_items_target,
+            work_items_link_repository / "work-items",
+            target_is_directory=True,
+        )
+    except OSError as exc:
+        if os.name == "nt":
+            import pytest
+
+            pytest.skip(f"symlink creation unavailable: {exc}")
+        raise
+
+    assert module._work_items_root(repository_link) == repository / "work-items"
+    assert module._work_items_root(work_items_link_repository).resolve() == work_items_target
+
+
+def test_contract_unknown_root_rejects_lifecycle_and_read_model_before_work_items_mutation(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    write_root_contract(root, {})
+    (root / "work-items" / "unknown-category").mkdir()
+    candidate = b"Status: candidate\nTask: reject unknown root\nNext action: none\n"
+
+    for operation in (
+        lambda: module.create_candidate(root, "unknown-root-candidate", candidate),
+        lambda: module.refresh_readme(root),
+        lambda: module.audit_categories(root),
+    ):
+        try:
+            operation()
+        except module.LifecycleError as exc:
+            assert exc.failure_id == "WI-CATEGORY-UNKNOWN-ROOT"
+        else:
+            raise AssertionError("contracted unknown root reached a lifecycle or read-model operation")
+        assert not (root / "work-items" / "backlog").exists()
+        assert not (root / "work-items" / "README.md").exists()
+
+
+def test_unknown_root_validation_has_one_topology_owner(tmp_path: Path) -> None:
+    source = SCRIPT.read_text(encoding="utf-8")
+    audit_start = source.index("def audit_categories(")
+    audit_end = source.index("\ndef audit(", audit_start)
+    audit_source = source[audit_start:audit_end]
+
+    assert source.count("def assert_known_top_level_roots(") == 1
+    assert source.count('"WI-CATEGORY-UNKNOWN-ROOT"') == 1
+    assert "topology.assert_known_top_level_roots()" in audit_source
+    assert "work_items.iterdir()" not in audit_source
+
+
+def test_root_contract_topology_is_shared_by_audit_close_reopen_and_refresh(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    declared = ("repair-receipts", "status-repair-receipts")
+    write_root_contract(root, {name: {"kind": "flat-json"} for name in declared})
+    for name in declared:
+        write(root / "work-items" / name / "receipt.json", "{}\n")
+
+    slug = "contract-topology"
+    seed_active(module, root, slug)
+    module.audit_categories(root)
+
+    instant = "2026-09-01T00:00:00Z"
+    write_empty_bug_dispositions(root, slug, instant)
+    archived = module.close_item(root, slug, closure(instant).encode(), instant)
+    module.audit(root)
+    successor = module.reopen_item(
+        root,
+        slug,
+        "contract-topology-successor",
+        staged_status(slug).encode(),
+    )
+    module.audit(root)
+    first_readme = (root / "work-items" / "README.md").read_bytes()
+    module.refresh_readme(root)
+
+    assert archived == root / "work-items" / "archive" / "2026-09" / slug
+    assert successor == root / "work-items" / "active" / "contract-topology-successor"
+    assert (root / "work-items" / "README.md").read_bytes() == first_readme
+    assert all((root / "work-items" / name / "receipt.json").is_file() for name in declared)
+
+
+def test_root_contract_has_one_shared_documentation_owner_and_pack_pointers(
+    tmp_path: Path,
+) -> None:
+    root = Path(__file__).resolve().parents[1]
+    shared = root / "shared" / "references" / "work-items-root-contract.md"
+    shared_text = shared.read_text(encoding="utf-8")
+    for token in (
+        "ProjectTopology",
+        '"version": 2',
+        "auxiliaryRoots",
+        "flat-json",
+        "MUST NOT be redeclared",
+        "non-reparse",
+        "audit, close, reopen",
+        "WI-CATEGORY-ROOT-CONTRACT-INVALID",
+    ):
+        assert token in shared_text
+
+    pointer = "work-items-root-contract.md"
+    for relative in (
+        "shared/references/README.md",
+        "docs/work-item-execution-tracking.md",
+        "references-codex/repository-task-memory.md",
+        "references-claude/repository-task-memory.md",
+    ):
+        assert pointer in (root / relative).read_text(encoding="utf-8")
+
+
+def test_root_contract_does_not_admit_undeclared_root(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    write_root_contract(root, {"repair-receipts": {"kind": "flat-json"}})
+    (root / "work-items" / "repair-receipts").mkdir()
+    (root / "work-items" / "performance").mkdir()
+
+    try:
+        module.audit_categories(root)
+    except module.LifecycleError as exc:
+        assert exc.failure_id == "WI-CATEGORY-UNKNOWN-ROOT"
+        assert "performance" in str(exc)
+    else:
+        raise AssertionError("contract admitted an undeclared work-items root")
+
+
+def test_root_contract_rejects_lifecycle_and_read_model_root_collisions(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    reserved_roots = (
+        "active",
+        "archive",
+        "backlog",
+        "bugs",
+        "decisions",
+        "epics",
+        "legacy-ledger-historical-dispositions",
+        "lessons",
+        "roadmaps",
+    )
+
+    for name in reserved_roots:
+        root = tmp_path / name
+        write_root_contract(root, {name: {"kind": "flat-json"}})
+        try:
+            module._resolve_project_topology(root)
+        except module.LifecycleError as exc:
+            assert exc.failure_id == "WI-CATEGORY-ROOT-CONTRACT-INVALID", name
+            assert name in str(exc), name
+        else:
+            raise AssertionError(f"root contract admitted reserved root: {name}")
+
+
+def test_root_contract_collision_fails_before_candidate_mutation(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    write_root_contract(root, {"backlog": {"kind": "flat-json"}})
+
+    try:
+        module.create_candidate(
+            root,
+            "collision-must-not-mutate",
+            b"Status: candidate\nTask: reject collision\nNext action: none\n",
+        )
+    except module.LifecycleError as exc:
+        assert exc.failure_id == "WI-CATEGORY-ROOT-CONTRACT-INVALID"
+    else:
+        raise AssertionError("candidate mutation accepted a colliding root contract")
+
+    assert not (root / "work-items" / "backlog").exists()
+    assert not (root / "work-items" / "README.md").exists()
+
+
+def test_root_contract_rejects_generated_readme_alias_before_refresh_mutation(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    write_root_contract(root, {"readme.md": {"kind": "flat-json"}})
+
+    try:
+        module.refresh_readme(root, allow_marker_bootstrap=True)
+    except module.LifecycleError as exc:
+        assert exc.failure_id == "WI-CATEGORY-ROOT-CONTRACT-INVALID"
+        assert "generated README" in str(exc)
+    else:
+        raise AssertionError("root contract admitted generated README alias")
+
+    assert not (root / "work-items" / "README.md").exists()
+    assert not (root / "work-items" / "readme.md").exists()
+
+
+def test_root_contract_rejects_malformed_and_unconfined_roots(tmp_path: Path) -> None:
+    module = load_module()
+    cases = {
+        "malformed-json": "{\n",
+        "wrong-schema": json.dumps(
+            {"schema": "other", "version": 2, "auxiliaryRoots": {}}
+        ),
+        "wrong-version": json.dumps(
+            {"schema": "work-items-root-contract", "version": 1, "auxiliaryRoots": {}}
+        ),
+        "wrong-roots-shape": json.dumps(
+            {"schema": "work-items-root-contract", "version": 2, "auxiliaryRoots": []}
+        ),
+        "wrong-kind": json.dumps(
+            {
+                "schema": "work-items-root-contract",
+                "version": 2,
+                "auxiliaryRoots": {"receipts": {"kind": "directory"}},
+            }
+        ),
+        "traversal": json.dumps(
+            {
+                "schema": "work-items-root-contract",
+                "version": 2,
+                "auxiliaryRoots": {"../escape": {"kind": "flat-json"}},
+            }
+        ),
+        "absolute-posix": json.dumps(
+            {
+                "schema": "work-items-root-contract",
+                "version": 2,
+                "auxiliaryRoots": {"/absolute": {"kind": "flat-json"}},
+            }
+        ),
+        "absolute-windows": json.dumps(
+            {
+                "schema": "work-items-root-contract",
+                "version": 2,
+                "auxiliaryRoots": {"C:\\absolute": {"kind": "flat-json"}},
+            }
+        ),
+    }
+    for name, contract in cases.items():
+        root = tmp_path / name
+        write(root / "work-items" / "root-contract.json", contract + "\n")
+        try:
+            module.audit_categories(root)
+        except module.LifecycleError as exc:
+            assert exc.failure_id == "WI-CATEGORY-ROOT-CONTRACT-INVALID", name
+        else:
+            raise AssertionError(f"invalid root contract passed: {name}")
+
+
+def test_root_contract_rejects_duplicate_json_keys(tmp_path: Path) -> None:
+    module = load_module()
+    cases = {
+        "schema": '{"schema":"work-items-root-contract","schema":"work-items-root-contract","version":2,"auxiliaryRoots":{}}',
+        "version": '{"schema":"work-items-root-contract","version":2,"version":2,"auxiliaryRoots":{}}',
+        "auxiliary-roots": '{"schema":"work-items-root-contract","version":2,"auxiliaryRoots":{},"auxiliaryRoots":{}}',
+        "auxiliary-root-name": '{"schema":"work-items-root-contract","version":2,"auxiliaryRoots":{"receipts":{"kind":"flat-json"},"receipts":{"kind":"flat-json"}}}',
+    }
+
+    for name, contract in cases.items():
+        root = tmp_path / name
+        write(root / "work-items" / "root-contract.json", contract + "\n")
+        try:
+            module._resolve_project_topology(root)
+        except module.LifecycleError as exc:
+            assert exc.failure_id == "WI-CATEGORY-ROOT-CONTRACT-INVALID", name
+        else:
+            raise AssertionError(f"duplicate JSON key passed: {name}")
+
+
+def test_root_contract_rejects_linked_contract_and_repository_root(tmp_path: Path) -> None:
+    module = load_module()
+    target_contract = tmp_path / "contract-target.json"
+    write_root_contract(tmp_path / "contract-source", {})
+    shutil.copyfile(
+        tmp_path / "contract-source" / "work-items" / "root-contract.json",
+        target_contract,
+    )
+    linked_contract_root = tmp_path / "linked-contract"
+    (linked_contract_root / "work-items").mkdir(parents=True)
+    try:
+        os.symlink(target_contract, linked_contract_root / "work-items" / "root-contract.json")
+    except OSError as exc:
+        if os.name == "nt":
+            import pytest
+
+            pytest.skip(f"symlink creation unavailable: {exc}")
+        raise
+    try:
+        module.audit_categories(linked_contract_root)
+    except module.LifecycleError as exc:
+        assert exc.failure_id == "WI-CATEGORY-ROOT-CONTRACT-INVALID"
+    else:
+        raise AssertionError("linked root contract passed")
+
+    linked_auxiliary_root = tmp_path / "linked-auxiliary"
+    write_root_contract(
+        linked_auxiliary_root,
+        {"repair-receipts": {"kind": "flat-json"}},
+    )
+    auxiliary_target = tmp_path / "auxiliary-target"
+    auxiliary_target.mkdir()
+    os.symlink(
+        auxiliary_target,
+        linked_auxiliary_root / "work-items" / "repair-receipts",
+        target_is_directory=True,
+    )
+    try:
+        module.audit_categories(linked_auxiliary_root)
+    except module.LifecycleError as exc:
+        assert exc.failure_id == "WI-CATEGORY-ROOT-CONTRACT-INVALID"
+    else:
+        raise AssertionError("linked contract-declared root passed")
+
+    repository_target = tmp_path / "repository-target"
+    write_root_contract(repository_target, {})
+    repository_link = tmp_path / "repository-link"
+    os.symlink(repository_target, repository_link, target_is_directory=True)
+    try:
+        module.audit_categories(repository_link)
+    except module.LifecycleError as exc:
+        assert exc.failure_id == "WI-LIFECYCLE-LOCK-IDENTITY"
+    else:
+        raise AssertionError("linked repository root passed")
 
 
 def test_noncanonical_archive_is_physical_read_compat_only(tmp_path: Path) -> None:

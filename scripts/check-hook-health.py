@@ -1132,12 +1132,6 @@ def verify_config(
                 if stem == "check-mcp-momentum":
                     synthetic_home = scratch_root / "synthetic-mcp-home"
                     synthetic_home.mkdir(exist_ok=True)
-                    (synthetic_home / ".claude.json").write_text(
-                        json.dumps(
-                            {"mcpServers": {"synthetic-codegraph-health": {}}}
-                        ),
-                        encoding="utf-8",
-                    )
                     if platform == "claude":
                         (synthetic_home / ".agents-mode.yaml").write_text(
                             "mcpMode: force\n", encoding="utf-8"
