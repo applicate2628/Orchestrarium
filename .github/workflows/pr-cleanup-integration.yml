@@ -1,4 +1,4 @@
-name: Exact-source PR integration audit
+name: Exact-source Windows diagnosis
 on:
   push:
     branches: [automation/pr-cleanup-integration-20260905-a068e79e]
@@ -8,98 +8,115 @@ concurrency:
   group: pr-cleanup-integration-20260905-a068e79e
   cancel-in-progress: false
 jobs:
-  audit:
-    name: ${{ matrix.surface.name }} on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+  diagnose:
+    name: ${{ matrix.surface.name }} Windows diagnosis
+    runs-on: windows-2025
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, windows-2025]
         surface:
           - name: routing-v2
-            sha: a068e79e6ce4c2db5dce7f5bb8c067df3b380c8e
+            sha: a5a7a2cdae7db67bbb95c6ce90d763874d5dc9f9
           - name: policy-overlays
             sha: 8279b8fdb51984a0eff3d0eb005c0c0ced5d8568
-          - name: main-baseline
-            sha: ece04040627fcc0d0988128e44d401de53ff01fb
     env:
       PYTHONUTF8: '1'
       PYTHONDONTWRITEBYTECODE: '1'
       AUDIT_SOURCE_SHA: ${{ matrix.surface.sha }}
       AUDIT_SURFACE: ${{ matrix.surface.name }}
     steps:
-      - name: Check out immutable source without persisted credentials
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: ${{ matrix.surface.sha }}
           fetch-depth: 1
           persist-credentials: false
-      - name: Select Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: '3.12'
-      - name: Install pinned test dependencies
-        run: python -m pip install --disable-pip-version-check pytest==8.3.5 pytest-subtests==0.14.2 PyYAML==6.0.2 "jsonschema[format]==4.23.0"
-      - name: Capture source identity and optional source archive
+      - run: python -m pip install --disable-pip-version-check pytest==8.3.5 pytest-subtests==0.14.2 PyYAML==6.0.2 "jsonschema[format]==4.23.0"
+      - name: Observe native stat and supervised-child metadata without changing source
         shell: python
         run: |
-          import hashlib, json, os, platform, subprocess, sys
+          import dataclasses, importlib.util, json, os, subprocess, sys, tempfile
           from pathlib import Path
-          out = Path(os.environ['RUNNER_TEMP']) / 'orchestrarium-audit'
+          root = Path.cwd()
+          out = Path(os.environ['RUNNER_TEMP']) / 'orchestrarium-diagnosis'
           out.mkdir()
           actual = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
-          assert actual == os.environ['AUDIT_SOURCE_SHA'], (actual, os.environ['AUDIT_SOURCE_SHA'])
-          (out / 'source.json').write_text(json.dumps({'head': actual, 'surface': os.environ['AUDIT_SURFACE'], 'python': sys.version, 'platform': platform.platform()}, indent=2), encoding='utf-8')
-          (out / 'tree.txt').write_bytes(subprocess.check_output(['git', 'ls-tree', '-r', 'HEAD']))
-          if os.environ['RUNNER_OS'] == 'Linux' and os.environ['AUDIT_SURFACE'] != 'main-baseline':
-              archive = out / 'source.zip'
-              subprocess.run(['git', 'archive', '--format=zip', f'--output={archive}', 'HEAD'], check=True, timeout=120)
-              (out / 'source.sha256').write_text(hashlib.sha256(archive.read_bytes()).hexdigest() + '\n', encoding='ascii')
-      - name: Run integration and pack checks independently
+          assert actual == os.environ['AUDIT_SOURCE_SHA']
+          fields = ['st_dev','st_ino','st_mode','st_size','st_mtime_ns','st_ctime_ns','st_birthtime_ns','st_file_attributes','st_reparse_tag']
+          def metadata(value):
+              return {key: getattr(value, key, None) for key in fields}
+          samples, mismatches = [], 0
+          with tempfile.TemporaryDirectory() as temp:
+              for index in range(128):
+                  path = Path(temp) / f'ordinary-{index}.json'
+                  path.write_text('[' * 2000 + '0' + ']' * 2000, encoding='utf-8')
+                  before = metadata(path.lstat())
+                  descriptor = os.open(path, os.O_RDONLY | os.O_BINARY)
+                  try:
+                      opened = metadata(os.fstat(descriptor))
+                      os.read(descriptor, 8192)
+                      closed = metadata(os.fstat(descriptor))
+                      after = metadata(path.lstat())
+                  finally:
+                      os.close(descriptor)
+                  if before != opened or opened != closed or before != after:
+                      mismatches += 1
+                      if len(samples) < 12:
+                          samples.append({'before': before, 'opened': opened, 'after_descriptor': closed, 'after_path': after})
+          report = {'head': actual, 'python': sys.version, 'stat_samples': 128, 'mismatches': mismatches, 'samples': samples}
+          spec = importlib.util.spec_from_file_location('audit_pack', root / 'src.codex/skills/lead/scripts/validate-skill-pack.py')
+          pack = importlib.util.module_from_spec(spec)
+          sys.modules[spec.name] = pack
+          spec.loader.exec_module(pack)
+          engine = pack._ENGINE
+          validator = engine.Validator(engine.detect_layout(root / 'src.codex/skills/lead/scripts/validate-skill-pack.py', 'codex'))
+          try:
+              result = validator._run_python(root / 'scripts/validate-agents-mode-contract.py', '--root', str(root))
+              report['supervised_contract'] = dataclasses.asdict(result)
+              with tempfile.TemporaryDirectory() as temp:
+                  target = Path(temp) / 'overlay.yaml'
+                  target.write_text('externalProvider: auto\nreserveResolver: disabled\n', encoding='utf-8')
+                  result = validator._run_python(root / 'scripts/normalize-agents-mode.py', '--template', str(root / 'shared/agents-mode.defaults.yaml'), '--target', str(target), '--provider', 'shared')
+                  report['supervised_normalizer'] = dataclasses.asdict(result)
+          finally:
+              validator.close()
+          (out / 'diagnosis.json').write_text(json.dumps(report, indent=2, default=str), encoding='utf-8')
+          print(json.dumps(report, indent=2, default=str))
+      - name: Repeat real tests and direct contract checker
+        if: always()
         shell: python
         run: |
           import glob, json, os, subprocess, sys
           from pathlib import Path
-          out = Path(os.environ['RUNNER_TEMP']) / 'orchestrarium-audit'
+          out = Path(os.environ['RUNNER_TEMP']) / 'orchestrarium-diagnosis'
+          out.mkdir(exist_ok=True)
           surface = os.environ['AUDIT_SURFACE']
-          patterns = {'routing-v2': ['tests/test_astra_routing_v1*.py', 'tests/test_lead_worker_routing_v1*.py', 'tests/test_adaptive_model_routing_v2*.py'], 'policy-overlays': ['tests/test_policy_overlay*.py'], 'main-baseline': []}[surface]
-          checks = []
-          if patterns:
-              files = []
-              for pattern in patterns:
-                  matches = sorted(glob.glob(pattern))
-                  if not matches:
-                      raise SystemExit('Missing expected test surface: ' + pattern)
-                  files.extend(matches)
-              checks.append(('tests', [sys.executable, '-m', 'pytest', '-q', '-ra', '--tb=short', f'--junitxml={out / "pytest.xml"}', *files], 300))
-          checks.extend([
-              ('codex-validator', [sys.executable, 'src.codex/skills/lead/scripts/validate-skill-pack.py'], 240),
-              ('claude-validator', [sys.executable, 'src.claude/agents/scripts/validate-skill-pack.py'], 240),
-              ('universal-hook-parity', [sys.executable, 'scripts/sync-universal-hooks.py', '--check'], 120),
-              ('installer-contracts', [sys.executable, 'scripts/validate-agents-mode-installers.py', '--root', '.'], 180),
-          ])
+          patterns = ['tests/test_policy_overlay*.py'] if surface == 'policy-overlays' else ['tests/test_astra_routing_v1*.py', 'tests/test_lead_worker_routing_v1*.py', 'tests/test_adaptive_model_routing_v2*.py']
+          files = sorted({path for pattern in patterns for path in glob.glob(pattern)})
+          checks = [
+              ('tests', [sys.executable, '-m', 'pytest', '-q', '-ra', '--tb=short', *files]),
+              ('installer-fixture', [sys.executable, '-m', 'pytest', '-q', '--tb=short', 'tests/test_agents_mode_installer_regression.py']),
+              ('direct-contract', [sys.executable, 'scripts/validate-agents-mode-contract.py', '--root', '.']),
+          ]
           results = []
-          for name, command, timeout in checks:
+          for name, command in checks:
               try:
-                  run = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=timeout, check=False)
-                  data, code = run.stdout, run.returncode
+                  result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=300, check=False)
+                  data, status = result.stdout, result.returncode
               except subprocess.TimeoutExpired as exc:
-                  data, code = (exc.stdout or b'') + b'\nAUDIT_COMMAND_TIMEOUT\n', 124
+                  data, status = (exc.stdout or b'') + b'\nTIMEOUT\n', 124
               (out / (name + '.log')).write_bytes(data)
-              results.append({'name': name, 'command': command, 'returncode': code})
-              print(f'::group::{name} exit={code}')
-              print(data.decode('utf-8', errors='replace')[-18000:])
-              print('::endgroup::')
-              (out / 'results.json').write_text(json.dumps(results, indent=2), encoding='utf-8')
-          summary = Path(os.environ['GITHUB_STEP_SUMMARY'])
-          summary.write_text('# Exact-source audit\n\nSource: `' + os.environ['AUDIT_SOURCE_SHA'] + '`\n\n' + '\n'.join(f'- {row["name"]}: exit {row["returncode"]}' for row in results), encoding='utf-8')
+              results.append({'check': name, 'returncode': status})
+              print(name, status, data.decode('utf-8', errors='replace')[-20000:])
+          (out / 'results.json').write_text(json.dumps(results, indent=2), encoding='utf-8')
           raise SystemExit(1 if any(row['returncode'] for row in results) else 0)
-      - name: Preserve bounded audit evidence
-        if: always()
+      - if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: audit-${{ matrix.surface.name }}-${{ matrix.os }}
-          path: ${{ runner.temp }}/orchestrarium-audit/
+          name: diagnosis-${{ matrix.surface.name }}-windows
+          path: ${{ runner.temp }}/orchestrarium-diagnosis/
           if-no-files-found: error
           retention-days: 3
