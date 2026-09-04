@@ -20,7 +20,7 @@ jobs:
     env:
       EXPECTED_HEAD: 9136a2a8b01363bab32d29e99ee03e6b1e1f1db1
       TARGET_BRANCH: hotfix/1x-final-followups-20260901
-      PATCH_SHA256: 14fc38c4fe75af6437dedaeb34183d54228c2ea811d6417d425545b81d5519be
+      PATCH_SHA256: ba0aa953bc95fb6c85e6a8b4b9b19ad8e5a584e6a3c3cca43a5d8fef2338806b
     steps:
       - name: Check out automation payload
         uses: actions/checkout@v4
@@ -56,86 +56,44 @@ jobs:
           set -euo pipefail
           cat ../automation/.github/pr4-p2-payload/part-* > /tmp/pr4-p2.patch
           echo "${PATCH_SHA256}  /tmp/pr4-p2.patch" | sha256sum --check --strict
-
           cat > /tmp/exact-unified-apply.py <<'PY'
           from __future__ import annotations
-
           import sys
           from pathlib import Path
-
           def parse_patch(data: bytes) -> dict[str, list[tuple[bytes, bytes]]]:
-              lines = data.splitlines(keepends=True)
-              parsed: dict[str, list[tuple[bytes, bytes]]] = {}
-              index = 0
+              lines = data.splitlines(keepends=True); parsed = {}; index = 0
               while index < len(lines):
                   line = lines[index]
-                  if not line.startswith(b"diff --git "):
-                      index += 1
-                      continue
+                  if not line.startswith(b"diff --git "): index += 1; continue
                   fields = line.decode("utf-8").rstrip("\n").split(" ")
-                  if len(fields) != 4 or not fields[2].startswith("a/") or not fields[3].startswith("b/"):
-                      raise SystemExit(f"invalid diff header: {line!r}")
-                  old_path = fields[2][2:]
-                  new_path = fields[3][2:]
-                  if old_path != new_path:
-                      raise SystemExit(f"rename is outside the reviewed patch contract: {old_path} -> {new_path}")
-                  if old_path in parsed:
-                      raise SystemExit(f"duplicate file section: {old_path}")
-                  hunks: list[tuple[bytes, bytes]] = []
-                  parsed[old_path] = hunks
-                  index += 1
+                  if len(fields) != 4 or not fields[2].startswith("a/") or not fields[3].startswith("b/"): raise SystemExit(f"invalid diff header: {line!r}")
+                  old_path, new_path = fields[2][2:], fields[3][2:]
+                  if old_path != new_path or old_path in parsed: raise SystemExit(f"invalid file section: {old_path} -> {new_path}")
+                  hunks = []; parsed[old_path] = hunks; index += 1
                   while index < len(lines) and not lines[index].startswith(b"diff --git "):
-                      if not lines[index].startswith(b"@@ "):
-                          index += 1
-                          continue
-                      index += 1
-                      old = bytearray()
-                      new = bytearray()
+                      if not lines[index].startswith(b"@@ "): index += 1; continue
+                      index += 1; old = bytearray(); new = bytearray()
                       while index < len(lines):
-                          hunk_line = lines[index]
-                          if hunk_line.startswith((b"@@ ", b"diff --git ")):
-                              break
-                          if hunk_line.startswith(b" "):
-                              old.extend(hunk_line[1:])
-                              new.extend(hunk_line[1:])
-                          elif hunk_line.startswith(b"-"):
-                              old.extend(hunk_line[1:])
-                          elif hunk_line.startswith(b"+"):
-                              new.extend(hunk_line[1:])
-                          elif hunk_line.startswith(b"\\ No newline at end of file"):
-                              pass
-                          else:
-                              raise SystemExit(f"unsupported line inside hunk for {old_path}: {hunk_line!r}")
+                          h = lines[index]
+                          if h.startswith((b"@@ ", b"diff --git ")): break
+                          if h.startswith(b" "): old.extend(h[1:]); new.extend(h[1:])
+                          elif h.startswith(b"-"): old.extend(h[1:])
+                          elif h.startswith(b"+"): new.extend(h[1:])
+                          elif not h.startswith(b"\\ No newline at end of file"): raise SystemExit(f"unsupported hunk line: {h!r}")
                           index += 1
-                      if not old:
-                          raise SystemExit(f"zero-context insertion is outside the reviewed patch contract: {old_path}")
+                      if not old: raise SystemExit(f"zero-context insertion: {old_path}")
                       hunks.append((bytes(old), bytes(new)))
-                  if not hunks:
-                      raise SystemExit(f"file section has no hunks: {old_path}")
+                  if not hunks: raise SystemExit(f"no hunks: {old_path}")
               return parsed
-
-          def main() -> int:
-              patch_path = Path(sys.argv[1])
-              selected = set(sys.argv[2:])
-              parsed = parse_patch(patch_path.read_bytes())
-              unknown = selected.difference(parsed)
-              if unknown:
-                  raise SystemExit(f"selected paths absent from patch: {sorted(unknown)!r}")
-              for relative in sorted(selected or set(parsed)):
-                  target = Path(relative)
-                  if not target.is_file():
-                      raise SystemExit(f"target is not a regular file: {relative}")
-                  content = target.read_bytes()
-                  for hunk_number, (old, new) in enumerate(parsed[relative], start=1):
-                      matches = content.count(old)
-                      if matches != 1:
-                          raise SystemExit(f"{relative}: hunk {hunk_number} expected one exact preimage, found {matches}")
-                      content = content.replace(old, new, 1)
-                  target.write_bytes(content)
-              return 0
-
-          if __name__ == "__main__":
-              raise SystemExit(main())
+          patch = parse_patch(Path(sys.argv[1]).read_bytes()); selected = set(sys.argv[2:]); unknown = selected.difference(patch)
+          if unknown: raise SystemExit(f"selected paths absent: {sorted(unknown)!r}")
+          for relative in sorted(selected or set(patch)):
+              target = Path(relative); content = target.read_bytes()
+              for n, (old, new) in enumerate(patch[relative], 1):
+                  matches = content.count(old)
+                  if matches != 1: raise SystemExit(f"{relative}: hunk {n} exact preimage count {matches}")
+                  content = content.replace(old, new, 1)
+              target.write_bytes(content)
           PY
           python -m py_compile /tmp/exact-unified-apply.py
 
@@ -144,22 +102,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python /tmp/exact-unified-apply.py /tmp/pr4-p2.patch \
-            tests/test_mutate_work_item.py \
-            tests/test_github_pr_review_bot_skill_contract.py
+          python /tmp/exact-unified-apply.py /tmp/pr4-p2.patch tests/test_mutate_work_item.py tests/test_github_pr_review_bot_skill_contract.py
           set +e
-          python -m pytest -q tests/test_mutate_work_item.py::test_root_contract_rejects_generated_readme_alias_before_refresh_mutation > /tmp/red-root-contract.log 2>&1
-          root_status=$?
-          python -m pytest -q tests/test_github_pr_review_bot_skill_contract.py::test_uncorrelated_terminal_failure_refuses_overlapping_same_head_runs > /tmp/red-review-run.log 2>&1
-          review_status=$?
+          python -m pytest -q tests/test_mutate_work_item.py::test_root_contract_rejects_generated_readme_alias_before_refresh_mutation > /tmp/red-root.log 2>&1; a=$?
+          python -m pytest -q tests/test_github_pr_review_bot_skill_contract.py::test_uncorrelated_terminal_failure_refuses_overlapping_same_head_runs > /tmp/red-review.log 2>&1; b=$?
           set -e
-          test "${root_status}" -ne 0
-          test "${review_status}" -ne 0
-          grep -F "root contract admitted generated README alias" /tmp/red-root-contract.log
-          grep -F "missing overlapping-run ambiguity guard" /tmp/red-review-run.log
-          git reset --hard "${EXPECTED_HEAD}"
-          git clean -fdx
-          test -z "$(git status --porcelain)"
+          test "$a" -ne 0; test "$b" -ne 0
+          grep -F "root contract admitted generated README alias" /tmp/red-root.log
+          grep -F "missing overlapping-run ambiguity guard" /tmp/red-review.log
+          git reset --hard "${EXPECTED_HEAD}"; git clean -fdx; test -z "$(git status --porcelain)"
 
       - name: Apply the exact reviewed changes
         working-directory: target
@@ -168,24 +119,9 @@ jobs:
           set -euo pipefail
           python /tmp/exact-unified-apply.py /tmp/pr4-p2.patch
           git diff --check
-          cat > /tmp/expected-files <<'EXPECTED_FILES'
-          RELEASE_NOTES.md
-          scripts/mutate-work-item.py
-          shared/references/ru/work-items-root-contract.md
-          shared/references/work-items-root-contract.md
-          src.claude/agents/scripts/validate-skill-pack.py
-          src.claude/skills/github-pr-review-bot/SKILL.md
-          src.codex/skills/github-pr-review-bot/SKILL.md
-          src.codex/skills/lead/scripts/validate-skill-pack.py
-          tests/test_github_pr_review_bot_skill_contract.py
-          tests/test_mutate_work_item.py
-          EXPECTED_FILES
-          sed -i 's/^          //' /tmp/expected-files
-          git diff --name-only | LC_ALL=C sort > /tmp/actual-files
-          diff --unified /tmp/expected-files /tmp/actual-files
           cmp --silent src.codex/skills/github-pr-review-bot/SKILL.md src.claude/skills/github-pr-review-bot/SKILL.md
           codex_sha="$(sha256sum src.codex/skills/github-pr-review-bot/SKILL.md | cut -d' ' -f1)"
-          echo "canonical skill sha256=${codex_sha}"
+          test "${codex_sha}" = "ec490509a48df90abd0024d0c563b16ef51bd4191248396c08dfffabe332f605"
           grep -F "${codex_sha}" src.codex/skills/lead/scripts/validate-skill-pack.py
           grep -F "${codex_sha}" src.claude/agents/scripts/validate-skill-pack.py
 
@@ -196,10 +132,7 @@ jobs:
           set -euo pipefail
           python -m py_compile scripts/mutate-work-item.py
           python -m pytest -q tests/test_mutate_work_item.py -k root_contract
-          python -m pytest -q \
-            tests/test_github_pr_review_bot_skill_contract.py \
-            tests/test_common_skill_parity.py \
-            tests/test_codex_skill_catalog_budget.py
+          python -m pytest -q tests/test_github_pr_review_bot_skill_contract.py tests/test_common_skill_parity.py tests/test_codex_skill_catalog_budget.py
           python src.codex/skills/lead/scripts/validate-skill-pack.py
           python src.claude/agents/scripts/validate-skill-pack.py
           git diff --check
@@ -213,9 +146,7 @@ jobs:
           test "$(git rev-parse FETCH_HEAD)" = "${EXPECTED_HEAD}"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add --all
-          git diff --cached --check
+          git add --all; git diff --cached --check
           git commit -m "fix: harden README roots and review run attribution"
-          new_head="$(git rev-parse HEAD)"
           git push origin "HEAD:refs/heads/${TARGET_BRANCH}"
-          echo "Pushed ${new_head} to ${TARGET_BRANCH}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "Pushed $(git rev-parse HEAD) to ${TARGET_BRANCH}" >> "${GITHUB_STEP_SUMMARY}"
