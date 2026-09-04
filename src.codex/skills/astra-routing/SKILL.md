@@ -30,7 +30,11 @@ For `measured-cost-to-pass`, provide positive integer
 `astra_cost_microusd` and `legacy_cost_microusd` values. The resolver selects
 Astra only when the complete expected Astra route costs strictly less than the
 complete legacy route. Include retries, repeated context, tool calls, review,
-rework, and latency monetization in the caller-owned estimates.
+rework, and any explicitly agreed latency monetization in the caller-owned estimates.
+The estimates must describe the exact requested model-effort pair and the same
+acceptance criterion, tools, prompt policy, and billing basis. The selector does
+not authenticate these observations or bind a measured cohort; that remains a
+caller/adapter obligation, not a runtime guarantee from two cost numbers.
 
 Route evidence is not effort evidence. A failed medium run can justify an
 effort escalation only after the Astra route has independently been admitted.
@@ -43,8 +47,10 @@ effort escalation only after the Astra route has independently been admitted.
 - `xhigh` requires `high-objective-failure`, `high-contradictory`, or
   `measured-xhigh-gain`.
 - `max` requires explicit human approval for that run.
-- A downshift below the task default requires `migration-evaluation` or
-  `measured-sufficient`.
+- The operator-admitted minimum is `medium`. Provider support for `low` does
+  not admit it here, even for `migration-evaluation` or `measured-sufficient`.
+- Recovery may downshift from `high` to `medium` only with `migration-evaluation`
+  or `measured-sufficient`; neither evidence permits going below `medium`.
 - GPT-6 Astra does not support `none`.
 
 Effort is model-local. Sol `xhigh` does not automatically dominate Astra

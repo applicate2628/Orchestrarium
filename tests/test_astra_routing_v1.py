@@ -232,7 +232,6 @@ def test_noneligible_work_returns_to_legacy_v1_policy() -> None:
 @pytest.mark.parametrize(
     ("effort", "evidence"),
     (
-        ("low", "migration-evaluation"),
         ("high", "medium-objective-failure"),
         ("xhigh", "high-objective-failure"),
     ),
