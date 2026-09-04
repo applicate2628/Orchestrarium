@@ -1,0 +1,53 @@
+name: Final full audit PR 4
+
+on:
+  push:
+    branches: [automation/pr4-p2-push-20260903-14fc38c4]
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    env:
+      EXPECTED_HEAD: 3dbfb9faf824365f5898fe52dd10093f4d75da9c
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.EXPECTED_HEAD }}
+          fetch-depth: 0
+      - name: Install pytest
+        run: python -m pip install --disable-pip-version-check pytest
+      - name: Static and syntax checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${EXPECTED_HEAD}"
+          python -m compileall -q scripts src.codex src.claude tests
+          find scripts src.codex src.claude -type f -name '*.sh' -print0 | xargs -0 -n1 bash -n
+          git diff --check
+      - name: Full repository test suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pytest -q tests
+      - name: Provider validators
+        shell: bash
+        run: |
+          set -euo pipefail
+          python src.codex/skills/lead/scripts/validate-skill-pack.py
+          python src.claude/agents/scripts/validate-skill-pack.py
+      - name: Critical mirror equality
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmp --silent scripts/universal-hooks/scripts/check-publication-safety.py src.codex/skills/lead/scripts/check-publication-safety.py
+          cmp --silent scripts/universal-hooks/scripts/check-publication-safety.py src.claude/agents/scripts/check-publication-safety.py
+          cmp --silent scripts/universal-hooks/scripts/hook_common.py src.codex/skills/lead/scripts/hook_common.py
+          cmp --silent scripts/universal-hooks/scripts/hook_common.py src.claude/agents/scripts/hook_common.py
+          cmp --silent scripts/universal-hooks/scripts/mcp_continuity_policy.py src.codex/skills/lead/scripts/mcp_continuity_policy.py
+          cmp --silent scripts/universal-hooks/scripts/mcp_continuity_policy.py src.claude/agents/scripts/mcp_continuity_policy.py
+          cmp --silent src.codex/skills/github-pr-review-bot/SKILL.md src.claude/skills/github-pr-review-bot/SKILL.md
+          git status --short
