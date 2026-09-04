@@ -119,6 +119,8 @@ The operational layer requires:
 - a terminal result envelope bound to the exact dispatch attempt and Lead fence;
 - a nonauthorizing route outcome bound to the selected portfolio and objective evidence.
 
+Both schema bundles require whitespace-free identifiers, Secure Hash Algorithm 256-bit (SHA-256) digest fields, and Coordinated Universal Time (UTC) timestamp fields. A trailing line break is rejected, not trimmed or silently normalized into another identity. Existing alphabet, length, uppercase UTC spelling, and fractional-second constraints still apply. Timestamp validation must also enable the date-time format checker to reject impossible calendar dates. These local field checks do not compute digests, bind separate records, or grant runtime admission.
+
 The operational schema does not implement a second router. A future cross-record validator validates the core records and their operational envelopes together, then a scheduler executes only admitted dispatches.
 
 Detailed findings, implementation order, and explicitly rejected overengineering are recorded in [`deep-review-operational-hardening.md`](deep-review-operational-hardening.md).
@@ -133,6 +135,8 @@ Diversity is preferred but not fabricated. When fewer independent provider famil
 
 ## 7. Files in this surface
 
+The two example files illustrate individual record shapes, not one cross-record-consistent executable stage trace. Schema success alone does not establish matching ownership, real digest contents, stage readiness, or provider admission; use the runtime handoff documents below for the separate obligations.
+
 ### Core contracts
 
 - [`adaptive-routing-contracts.v2.schema.json`](adaptive-routing-contracts.v2.schema.json) — Draft 2020-12 JavaScript Object Notation Schema bundle for Lead lease, registry snapshot, route request, dispatch, route decision, and worker result.
@@ -146,6 +150,8 @@ Diversity is preferred but not fabricated. When fewer independent provider famil
 
 ### Review and implementation documents
 
+- [`runtime-validation-obligations.md`](runtime-validation-obligations.md) — future cross-record, ownership, input-stage, admission, and result-verification obligations; not implemented runtime enforcement.
+- [`review-loop-closure.md`](review-loop-closure.md) — review conclusions, safe implementation slices, and deliberately deferred mechanisms.
 - [`../adaptive-model-routing-v2-audit-2026-09-04.md`](../adaptive-model-routing-v2-audit-2026-09-04.md) — repository review and identified migration gaps.
 - [`../superpowers/specs/2026-09-04-adaptive-lead-model-routing-v2-design.md`](../superpowers/specs/2026-09-04-adaptive-lead-model-routing-v2-design.md) — normative design specification.
 - [`../superpowers/plans/2026-09-04-adaptive-lead-model-routing-v2-implementation.md`](../superpowers/plans/2026-09-04-adaptive-lead-model-routing-v2-implementation.md) — implementation plan; runtime tasks remain open.
@@ -168,5 +174,5 @@ The Version 1 dispatch may migrate into one Version 2 portfolio slot only when r
 - **Effort intent:** provider-neutral requested reasoning depth for one portfolio slot.
 - **Admission:** verified permission for a runtime to perform a class of work or mutation.
 - **Fallback:** explicit move to a later admitted candidate after a classified failure.
-- **Terminal receipt:** trusted process-supervision evidence that a launched process reached a terminal state.
+- **Terminal receipt:** trusted terminal-state evidence appropriate to local-process, in-process, or remote-job execution.
 - **Empirical arbitration:** resolution of a disagreement through tests, measurements, proofs, or other objective evidence.

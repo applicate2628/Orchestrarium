@@ -39,7 +39,7 @@ The core schema remains the semantic record model. The operational schema binds 
 | P1 | Provider-native multi-agent execution could be confused with reasoning depth | More agents and deeper reasoning are different resource and authority choices | `orchestrationMode` is separate and provider-native mode requires admission evidence |
 | P1 | Model ranking lacked an explicit data-egress policy contract | Fallback could send sensitive context to an otherwise high-ranked but forbidden provider | `providerPolicy` binds allowed/forbidden families, regions, retention, source-code, web, and secret constraints; dispatch binds its digest |
 | P1 | Unresolved contradictions could coexist with a selected decision | A route could appear accepted while a material dispute remained open | `decisionControl` forbids selected status with unresolved contradictions and requires a human gate otherwise |
-| P1 | Terminal worker output was not independently bound to attempt, fence, supervision, or process settlement | A stale, replayed, orphaned, or partially cleaned result could be accepted | `workerResultControl` binds the result to the exact dispatch attempt and requires terminal receipt, process reaping, cleanup, contract validation, and fence disposition |
+| P1 | Terminal worker output was not independently bound to attempt, fence, supervision, or process settlement | A stale, replayed, orphaned, or partially cleaned result could be accepted | `workerResultControl` binds the result to the exact dispatch attempt, execution and admitting fences, and requires execution-kind-specific terminal settlement, cleanup, contract validation, and fence disposition |
 | P1 | Fallback and rejection arrays were structurally generic | Availability, quality, safety, budget, and contract failures could collapse into one retry path | Typed `fallbackEvent` and `candidateRejection` records |
 | P2 | Portfolio size, parallelism, retries, calls, wall time, and cost had no hard envelope | Optional model diversity could become an unbounded swarm | `resourceBudget` |
 | P2 | Prompt and result payloads lacked route-level byte ceilings | A bounded number of calls could still create excessive cost or memory pressure | Per-dispatch prompt and result byte budgets |
@@ -88,7 +88,7 @@ provider-native
 
 ## 4. Lead fencing and immutable content
 
-A lease identifier alone is insufficient for a self-contained dispatch. Every route, dispatch, decision, terminal-result envelope, and outcome binds the current:
+A lease identifier alone is insufficient for a self-contained dispatch. Every route, dispatch, decision, and outcome binds the current:
 
 - work item;
 - lease identifier;
@@ -99,6 +99,8 @@ A lease identifier alone is insufficient for a self-contained dispatch. Every ro
 - named digest/canonicalization profile;
 - fencing-token digest;
 - active state and observed expiry.
+
+A terminal-result envelope separately records the execution owner and the admitting owner; [result admission](#9-result-admission-and-process-settlement) defines their transfer relationship.
 
 The epoch and fencing token are authoritative against stale writes. Wall-clock expiry is a recovery input, not a substitute for atomic ownership. A transferred Lead must revalidate or cancel outstanding dispatches before using their results.
 
@@ -182,19 +184,22 @@ The core `workerResult` describes the provider-produced artifact. The operationa
 
 - result-control and result digests;
 - dispatch identifier and dispatch-spec digest;
-- exact Lead fence;
+- `executionLeadFence`, identifying the ownership under which execution began;
+- `admittingLeadFence`, identifying the ownership responsible for result admission;
 - attempt ordinal and idempotency key;
 - runtime entry;
 - artifact and evidence-manifest digests;
 - terminal receipt;
 - supervision and cancellation identities;
-- process-reaped proof;
+- `executionKind`, `executionSettled`, and `processDisposition`, identifying the kind and disposition of terminal settlement;
 - cleanup status;
 - contract validation;
 - fence disposition and revalidation evidence;
 - output usability.
 
-A result under the current fence needs no transfer revalidation. A result completed after Lead transfer is usable only through an explicit `revalidated-after-transfer` path. A stale-rejected or quarantined result is structurally unusable. The result envelope remains nonauthorizing: Lead or a later gate still verifies the artifact itself.
+For `process` execution, `processDisposition` is `reaped` or `quarantined`. For `in-process` and `remote-job` execution it is `not-applicable` or `quarantined`; these kinds require their own trusted terminal evidence, not a fabricated local-process reaping record. The schema requires `executionSettled = true` but does not itself establish that the receipt is trustworthy.
+
+A `current-fence` result requires the future runtime validator to establish matching execution and admitting ownership. A result completed after Lead transfer is usable only through an explicit `revalidated-after-transfer` path and bound revalidation evidence. The execution fence is retained rather than rewritten to impersonate the new owner. A stale-rejected or quarantined result is structurally unusable. The result envelope remains nonauthorizing: the responsible owner must still validate cross-record identities, receipt evidence, and the artifact itself.
 
 ## 10. Disagreement and outcome feedback
 
@@ -236,7 +241,7 @@ Schema validation is necessary but insufficient. The runtime validator and persi
 13. required slots are filled exactly once;
 14. required independence and approach coverage are actually achieved;
 15. budgets are internally consistent and not exceeded;
-16. every dispatch, attempt, terminal result, and outcome matches the current Lead fence and bound digests;
+16. every dispatch, attempt, and outcome binds its applicable Lead ownership and exact digests; terminal results preserve execution ownership and validate current admitting ownership, with explicit evidence for the `revalidated-after-transfer` path;
 17. write preconditions, postconditions, rollback, allowed paths, cancellation, and idempotency rules hold;
 18. every launched process reaches a terminal receipt and is reaped or quarantined;
 19. unresolved contradictions, quality failures, and human gates have consistent status;
@@ -292,6 +297,6 @@ The companion schema is an operational boundary and developer handoff, not a sec
 - **Orchestration mode:** choice between one worker, a Lead-managed portfolio, and explicitly admitted provider-native orchestration.
 - **Data egress:** transfer of task context outside the current trusted environment.
 - **Idempotency:** property that a controlled retry does not create an unintended second effect.
-- **Terminal receipt:** trusted process-supervision record that a launched process reached a terminal state.
+- **Terminal receipt:** trusted evidence that execution reached a terminal state, specific to local-process, in-process, or remote-job execution.
 - **Route outcome:** nonauthorizing objective record used to evaluate a completed route.
 - **P1/P2:** review severities for correctness/security and operability/reproducibility gaps.
