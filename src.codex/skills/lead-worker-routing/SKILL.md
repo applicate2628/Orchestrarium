@@ -105,7 +105,7 @@ The public CLI accepts one UTF-8 JSON object from standard input or a stable ord
 - symbolic links, Windows reparse points, junctions, non-regular leaves, and linked ancestors;
 - replacement of the file or any path component during acquisition.
 
-Input read failures return `E_LEAD_WORKER_V1_REQUEST_IO_FAILED` with no selected candidate or fingerprint. They are not provider failures and must not trigger worker fallback. Raw operating-system diagnostics are not emitted in that decision; user interruption still propagates.
+Operating-system errors while reading standard input return `E_LEAD_WORKER_V1_REQUEST_IO_FAILED` with no selected candidate or fingerprint. They are not provider failures and must not trigger worker fallback. Raw operating-system diagnostics are not emitted in that decision; user interruption still propagates.
 
 Directory snapshots bind identity and type only, so unrelated sibling creation does not produce a false rejection. The leaf additionally binds size, modification time, and status-change time.
 
