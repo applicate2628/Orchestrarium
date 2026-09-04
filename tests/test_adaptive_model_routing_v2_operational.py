@@ -45,6 +45,7 @@ def test_schema_is_valid_and_defines_operational_boundaries() -> None:
         "leadFence",
         "providerPolicy",
         "resourceBudget",
+        "effortIntentBinding",
         "effortMapping",
         "writeBoundary",
         "fallbackEvent",
@@ -76,7 +77,8 @@ def test_route_control_binds_effort_orchestration_data_and_budget() -> None:
     route = schema["$defs"]["routeControl"]
     assert {
         "leadFence",
-        "effortIntent",
+        "defaultEffortIntent",
+        "slotEffortIntents",
         "orchestrationMode",
         "providerPolicy",
         "resourceBudget",
@@ -84,13 +86,30 @@ def test_route_control_binds_effort_orchestration_data_and_budget() -> None:
         "candidateSetEvidenceRef",
         "candidateSetCompleteness",
     } <= set(route["required"])
-    assert set(route["properties"]["effortIntent"]["enum"]) == {
+    assert set(route["properties"]["defaultEffortIntent"]["enum"]) == {
         "minimal",
         "balanced",
         "deep",
         "extended",
         "maximum",
     }
+
+
+def test_each_portfolio_slot_can_bind_its_own_effort_intent() -> None:
+    schema = _load(SCHEMA)
+    route = copy.deepcopy(_load(EXAMPLES)["routeControl"])
+    bindings = route["slotEffortIntents"]
+    assert {binding["slotId"] for binding in bindings} == {
+        "primary",
+        "challenge",
+        "implementation",
+    }
+    assert {binding["effortIntent"] for binding in bindings} >= {
+        "deep",
+        "extended",
+    }
+    route["slotEffortIntents"] = []
+    assert list(_validator(schema, "routeControl").iter_errors(route))
 
 
 def test_provider_native_orchestration_requires_separate_admission() -> None:
@@ -132,6 +151,16 @@ def test_resource_budget_bounds_portfolio_and_retries() -> None:
     } <= required
 
 
+def test_lead_fence_binds_snapshot_content_not_only_snapshot_names() -> None:
+    schema = _load(SCHEMA)
+    fence = schema["$defs"]["leadFence"]
+    assert {
+        "policySnapshotDigest",
+        "registrySnapshotDigest",
+        "evaluationSnapshotDigest",
+    } <= set(fence["required"])
+
+
 def test_write_dispatch_requires_execution_boundary() -> None:
     schema = _load(SCHEMA)
     dispatch = copy.deepcopy(_load(EXAMPLES)["dispatchControl"])
@@ -145,7 +174,13 @@ def test_write_dispatch_requires_execution_boundary() -> None:
     assert list(_validator(schema, "dispatchControl").iter_errors(write_dispatch))
 
 
-def test_effort_mapping_cannot_silently_round_down() -> None:
+def test_dispatch_binds_the_exact_data_policy_content() -> None:
+    schema = _load(SCHEMA)
+    dispatch = schema["$defs"]["dispatchControl"]
+    assert {"dataPolicyId", "dataPolicyDigest"} <= set(dispatch["required"])
+
+
+def test_effort_mapping_cannot_silently_round_down_or_miss_quality_floor() -> None:
     schema = _load(SCHEMA)
     mapping = schema["$defs"]["effortMapping"]
     assert set(mapping["properties"]["mappingDisposition"]["enum"]) == {
@@ -153,6 +188,8 @@ def test_effort_mapping_cannot_silently_round_down() -> None:
         "rounded-up",
         "saturated",
     }
+    assert mapping["properties"]["qualityFloorSatisfied"]["const"] is True
+    assert "qualityFloorEvidenceRef" in mapping["required"]
 
 
 def test_unresolved_contradiction_cannot_be_selected_without_human_gate() -> None:
@@ -213,6 +250,12 @@ def test_accepted_outcome_requires_quality_and_resolved_human_gate() -> None:
 
     outcome["humanGateResolved"] = True
     _validate(schema, "routeOutcome", outcome)
+
+
+def test_outcome_is_bound_to_the_actual_selected_portfolio() -> None:
+    schema = _load(SCHEMA)
+    outcome = schema["$defs"]["routeOutcome"]
+    assert "selectedPortfolioDigest" in outcome["required"]
 
 
 def test_operational_contracts_are_generation_neutral() -> None:
