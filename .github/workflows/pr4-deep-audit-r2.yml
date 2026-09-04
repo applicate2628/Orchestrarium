@@ -1,4 +1,4 @@
-name: PR 4 deep-audit candidate r2
+name: PR 4 deep-audit candidate r3
 
 on:
   push:
@@ -9,14 +9,14 @@ permissions:
   contents: write
 
 concurrency:
-  group: pr4-deep-audit-candidate-r2
+  group: pr4-deep-audit-candidate-r3
   cancel-in-progress: false
 
 env:
   SOURCE_HEAD: 3dbfb9faf824365f5898fe52dd10093f4d75da9c
   BASE_HEAD: ece04040627fcc0d0988128e44d401de53ff01fb
   CONTROL_BRANCH: automation/pr4-self-audit-20260904-3dbfb9fa
-  CANDIDATE_BRANCH: automation/pr4-deep-audit-fixes-20260904-r2
+  CANDIDATE_BRANCH: automation/pr4-deep-audit-fixes-20260904-r3
   SHARD_TOTAL: '6'
   PYTHONUTF8: '1'
   PYTHONDONTWRITEBYTECODE: '1'
@@ -52,8 +52,21 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "${SOURCE_HEAD}"
-          python ../control/.github/audit/pr4-r4.py
+          python ../control/.github/audit/pr4-r5.py
           git diff --check
+          cat > /tmp/pr4-r3-expected-files <<'EOF'
+          RELEASE_NOTES.md
+          references-claude/ru/claude-md-structural-enforcement.md
+          scripts/check-hook-health.py
+          scripts/production_installer.py
+          scripts/validate-claude-md.py
+          src.codex/skills/lead/scripts/validate-skill-pack.py
+          tests/test_hook_health.py
+          tests/test_install_hypothesis_hook.py
+          tests/test_sessionstart_reminder_python_hooks.py
+          EOF
+          git diff --name-only | LC_ALL=C sort > /tmp/pr4-r3-actual-files
+          diff -u /tmp/pr4-r3-expected-files /tmp/pr4-r3-actual-files
           git status --short
 
       - name: Focused regression verification
@@ -67,21 +80,19 @@ jobs:
             scripts/production_installer.py \
             tests/test_hook_health.py \
             tests/test_sessionstart_reminder_python_hooks.py \
-            tests/test_install_hypothesis_hook.py \
-            tests/test_text_eol_contract.py
+            tests/test_install_hypothesis_hook.py
           ruff check --select E9,F63,F7,F82 \
             scripts/check-hook-health.py \
             scripts/production_installer.py \
             tests/test_hook_health.py \
             tests/test_sessionstart_reminder_python_hooks.py \
-            tests/test_install_hypothesis_hook.py \
-            tests/test_text_eol_contract.py
+            tests/test_install_hypothesis_hook.py
           python -m pytest -q \
             tests/test_hook_health.py::test_hook_health_report_allows_only_touched_pending \
             tests/test_sessionstart_reminder_python_hooks.py \
             tests/test_claude_reference_mirror.py \
             tests/test_install_hypothesis_hook.py \
-            tests/test_text_eol_contract.py
+            tests/test_orchestration_discipline_contract.py::TestOrchestrationDisciplineContract::test_release_note_does_not_overclaim_native_execution_truth
           python src.codex/skills/lead/scripts/validate-skill-pack.py
           python src.claude/agents/scripts/validate-skill-pack.py
           git diff --check
@@ -98,7 +109,7 @@ jobs:
           git switch -c "${CANDIDATE_BRANCH}"
           git add --all
           git diff --cached --check
-          git commit -m "fix: close cross-platform deep-audit gaps"
+          git commit -m "fix: close narrow cross-platform audit gaps"
           candidate_sha="$(git rev-parse HEAD)"
           git push origin "HEAD:refs/heads/${CANDIDATE_BRANCH}"
           echo "sha=${candidate_sha}" >> "$GITHUB_OUTPUT"
