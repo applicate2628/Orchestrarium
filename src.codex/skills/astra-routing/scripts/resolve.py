@@ -105,20 +105,28 @@ def _decision(
         "fallback": "none",
         "automaticFanoutLimit": 1,
         "requiresIndependentReview": selected,
+        "requiresAdapterAdmission": selected,
+        "executionAuthorized": False,
         "authorizing": False,
     }
 
 
-def _valid_models(value: Any) -> bool:
+def _normalize_models(value: Any) -> frozenset[str] | None:
     if isinstance(value, (str, bytes)) or not isinstance(value, Collection):
-        return False
+        return None
     try:
-        items = list(value)
-    except (TypeError, ValueError):
-        return False
-    return len(items) <= 128 and all(
-        isinstance(item, str) and MODEL_ID.fullmatch(item) for item in items
-    )
+        items = tuple(value)
+    except Exception:
+        return None
+    if (
+        len(items) > 128
+        or not all(
+            isinstance(item, str) and MODEL_ID.fullmatch(item) for item in items
+        )
+        or len(items) != len(set(items))
+    ):
+        return None
+    return frozenset(items)
 
 
 def _valid_optional_text(value: Any, limit: int) -> bool:
@@ -224,11 +232,12 @@ def resolve_v1_astra_route(
 ) -> dict[str, Any]:
     """Return one nonauthorizing Astra route or a typed non-success decision."""
 
+    normalized_models = _normalize_models(available_models)
     valid = (
         isinstance(task_class, str)
         and 0 < len(task_class) <= 128
         and "\x00" not in task_class
-        and _valid_models(available_models)
+        and normalized_models is not None
         and _valid_optional_text(route_evidence, 128)
         and _valid_optional_cost(astra_cost_microusd)
         and _valid_optional_cost(legacy_cost_microusd)
@@ -280,7 +289,8 @@ def resolve_v1_astra_route(
             route_evidence_class=route_class,
         )
 
-    if ASTRA_MODEL not in set(available_models):
+    assert normalized_models is not None
+    if ASTRA_MODEL not in normalized_models:
         return _decision(
             "unavailable",
             "E_ASTRA_V1_UNAVAILABLE",
