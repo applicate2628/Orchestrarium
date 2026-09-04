@@ -86,7 +86,10 @@ def test_route_control_binds_effort_orchestration_data_and_budget() -> None:
         "candidateSetEvidenceRef",
         "candidateSetCompleteness",
     } <= set(route["required"])
-    assert set(route["properties"]["defaultEffortIntent"]["enum"]) == {
+    assert route["properties"]["defaultEffortIntent"] == {
+        "$ref": "#/$defs/effortIntent"
+    }
+    assert set(schema["$defs"]["effortIntent"]["enum"]) == {
         "minimal",
         "balanced",
         "deep",
