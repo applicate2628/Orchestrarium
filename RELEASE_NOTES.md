@@ -2,6 +2,10 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-09-05
+
+- **Worker routing file reads now compare Windows timestamps within their originating metadata interface.** Path-based and descriptor-based status can report different `st_ctime_ns` meanings for the same unchanged file. Cross-interface checks still bind identity, type, size, modification time, attributes, and creation time when available; each interface retains its own complete before/after stability checks. Unix checks remain exact. **Why it matters:** ordinary Windows inputs no longer produce false unsafe-file errors, while replacement and metadata changes remain rejected.
+
 ## 2026-09-04
 
 - **GitHub pull-request clean-result attribution now fails closed across overlapping same-head review runs.** Uncorrelated submitted-review and REST issue-comment no-findings results require exactly one unresolved exact trigger candidate; a trigger-bound `+1` cannot make the head clean while another same-head trigger remains unresolved. **Why it matters:** a late success from an older run can no longer close a newer or still-active review by timestamp alone.

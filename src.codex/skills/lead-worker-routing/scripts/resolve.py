@@ -219,6 +219,7 @@ def _entry_signature(metadata: os.stat_result, *, leaf: bool) -> tuple[int, ...]
     return identity + (
         metadata.st_size,
         getattr(metadata, "st_mtime_ns", 0),
+        getattr(metadata, "st_birthtime_ns", 0),
         getattr(metadata, "st_ctime_ns", 0),
     )
 
@@ -295,9 +296,13 @@ def _read_file_bytes(path: Path) -> bytes:
     try:
         descriptor = os.open(absolute_path, flags)
         opened = os.fstat(descriptor)
+        opened_signature = _entry_signature(opened, leaf=True)
+        # Windows path and descriptor APIs can give ctime different meanings.
+        # Full same-API snapshots below still bind it independently on both sides.
+        comparable = slice(None, -1) if os.name == "nt" else slice(None)
         if (
             not stat.S_ISREG(opened.st_mode)
-            or _entry_signature(opened, leaf=True) != before_signature
+            or opened_signature[comparable] != before_signature[comparable]
         ):
             raise UnsafeRequestFileError(str(path))
         chunks: list[bytes] = []
