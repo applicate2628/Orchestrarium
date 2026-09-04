@@ -1,50 +1,147 @@
-name: Deep audit PR 4
+name: Apply deep-audit fixes to PR 4
 
 on:
   push:
     branches: [automation/pr4-p2-push-20260903-14fc38c4]
 
 permissions:
-  contents: read
+  contents: write
+
+concurrency:
+  group: pr4-deep-audit-fix
+  cancel-in-progress: false
 
 jobs:
-  audit:
+  fix:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
       EXPECTED_HEAD: d30398ce559265bd79b12a021bddaea373f251fa
+      TARGET_BRANCH: hotfix/1x-final-followups-20260901
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ env.EXPECTED_HEAD }}
           fetch-depth: 0
-      - name: Install test dependency
-        run: python -m pip install --disable-pip-version-check pytest
-      - name: Static Python checks
+      - name: Verify exact target and install pytest
         shell: bash
         run: |
           set -euo pipefail
-          python -m compileall -q scripts src.codex src.claude tests
+          git fetch --no-tags origin "refs/heads/${TARGET_BRANCH}"
+          test "$(git rev-parse FETCH_HEAD)" = "${EXPECTED_HEAD}"
+          python -m pip install --disable-pip-version-check pytest
+      - name: Build deterministic patcher
+        shell: bash
+        run: |
+          cat > /tmp/fix.py <<'PY'
+          from __future__ import annotations
+          import hashlib, re, sys
+          from pathlib import Path
+
+          ROOT=Path('.')
+          REVIEW_TEST=ROOT/'tests/test_github_pr_review_bot_skill_contract.py'
+          SCANNER_TEST=ROOT/'tests/test_publication_safety_scanner.py'
+          SKILLS=[ROOT/'src.codex/skills/github-pr-review-bot/SKILL.md',ROOT/'src.claude/skills/github-pr-review-bot/SKILL.md']
+          SCANNERS=[ROOT/'scripts/universal-hooks/scripts/check-publication-safety.py',ROOT/'src.codex/skills/lead/scripts/check-publication-safety.py',ROOT/'src.claude/agents/scripts/check-publication-safety.py']
+          VALIDATORS=[ROOT/'src.codex/skills/lead/scripts/validate-skill-pack.py',ROOT/'src.claude/agents/scripts/validate-skill-pack.py']
+
+          def once(path:Path, old:str, new:str):
+              text=path.read_text(encoding='utf-8')
+              n=text.count(old)
+              if n!=1: raise SystemExit(f'{path}: expected one preimage, found {n}')
+              path.write_text(text.replace(old,new,1),encoding='utf-8')
+
+          review_test='''\n\ndef test_uncorrelated_clean_result_refuses_overlapping_same_head_runs() -> None:\n    bodies = [path.read_text(encoding="utf-8") for path in SKILL_PATHS]\n\n    assert bodies[0] == bodies[1]\n    body = bodies[0]\n    required_contract = (\n        "Apply the same ownership rule to uncorrelated clean evidence",\n        "submitted-review or REST issue-comment no-findings result",\n        "exactly one unresolved exact trigger candidate",\n        "Two or more unresolved same-head exact trigger candidates",\n        "clean evidence remains `indeterminate`",\n        "no other unresolved exact trigger on the same",\n        "An intrinsically correlated reaction does not erase another unresolved same-head run",\n    )\n    for clause in required_contract:\n        assert clause in body, f"missing overlapping-run clean guard: {clause}"\n'''
+          marker='\n\ndef test_unlisted_error_like_prose_fails_closed_and_failure_record_is_bound() -> None:\n'
+          once(REVIEW_TEST,marker,review_test+marker)
+
+          scanner_test='''\n\n    def test_range_remote_probe_binding_preserves_inherited_command_scope_config(self) -> None:\n        module = _load_canonical_scanner("_scanner_v3_remote_probe_inherited_command_scope")\n        ambient = {\n            "GIT_CONFIG_COUNT": "2",\n            "GIT_CONFIG_KEY_0": "credential.useHttpPath",\n            "GIT_CONFIG_VALUE_0": "true",\n            "GIT_CONFIG_KEY_1": "protocol.file.allow",\n            "GIT_CONFIG_VALUE_1": "never",\n        }\n        with (\n            mock.patch.dict(os.environ, ambient, clear=False),\n            mock.patch.object(module.secrets, "token_hex", return_value="e" * 64),\n        ):\n            binding = module._remote_probe_binding("https://example.invalid/repository.git")\n\n        self.assertNotIsInstance(binding, module.Refusal)\n        alias, child_env = binding\n        self.assertEqual(child_env["GIT_CONFIG_COUNT"], "3")\n        self.assertEqual(child_env["GIT_CONFIG_KEY_0"], "credential.useHttpPath")\n        self.assertEqual(child_env["GIT_CONFIG_VALUE_0"], "true")\n        self.assertEqual(child_env["GIT_CONFIG_KEY_1"], "protocol.file.allow")\n        self.assertEqual(child_env["GIT_CONFIG_VALUE_1"], "never")\n        self.assertEqual(child_env["GIT_CONFIG_KEY_2"], "url.https://example.invalid/repository.git.insteadOf")\n        self.assertEqual(child_env["GIT_CONFIG_VALUE_2"], alias)\n\n    def test_range_remote_probe_binding_refuses_malformed_command_scope_config(self) -> None:\n        module = _load_canonical_scanner("_scanner_v3_remote_probe_malformed_command_scope")\n        cases = (\n            {"GIT_CONFIG_COUNT": "bogus"},\n            {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "only-key"},\n            {"GIT_CONFIG_COUNT": "0", "GIT_CONFIG_KEY_0": "orphan", "GIT_CONFIG_VALUE_0": "orphan"},\n        )\n        for ambient in cases:\n            with self.subTest(ambient=ambient), mock.patch.dict(os.environ, ambient, clear=False):\n                for key in tuple(os.environ):\n                    if key.startswith("GIT_CONFIG_") and key not in ambient:\n                        os.environ.pop(key, None)\n                outcome = module._remote_probe_binding("https://example.invalid/repository.git")\n                self.assertIsInstance(outcome, module.Refusal)\n                self.assertEqual(outcome.failure_id, "PS-MSG-RANGE")\n                self.assertEqual(outcome.reason, "remote-binding")\n'''
+          smarker='\n    def test_range_remote_probe_rng_failure_refuses_before_git(self) -> None:\n'
+          once(SCANNER_TEST,smarker,scanner_test+smarker)
+
+          if sys.argv[1]=='tests':
+              raise SystemExit(0)
+
+          ownership='''- Never bind an uncorrelated terminal comment by selecting the newest trigger. For terminal-failure classification, enumerate exact triggers on the same `(repository, pull request, headRefOid)` that precede the terminal comment and remain without an unambiguously bound terminal result. Ordering alone may bind the signature only when exactly one unresolved exact trigger candidate exists. Two or more unresolved same-head trigger candidates make the terminal evidence and affected runs `indeterminate`; do not record `failed`, dismiss a run, mutate a retry lineage, or authorize another trigger.\n'''
+          ownership_new=ownership+'''- Apply the same ownership rule to uncorrelated clean evidence. A submitted-review or REST issue-comment no-findings result may bind to a run only when complete hosted state leaves exactly one unresolved exact trigger candidate on the same `(repository, pull request, headRefOid)`. Two or more unresolved same-head exact trigger candidates mean that uncorrelated clean evidence remains `indeterminate`, even when its timestamp/order is later and its reviewed commit matches the head.\n'''
+          reaction='''- Accept a reaction only when it is bot-authored and attached to that newest exact trigger. Accept a review, review comment, or review thread only when it is bound to the current head and its own authoritative timestamp is strictly later than the trigger timestamp. Because the REST issue-comment tie-breaker does not transfer to another surface, same-time evidence from different surfaces is incomparable, including between REST issue comments and either REST reviews or GraphQL threads; the run remains `indeterminate`. An earlier same-head review or reaction can never produce `clean`.\n'''
+          reaction_new='''- Accept a reaction only when it is bot-authored and attached to that newest exact trigger. A reaction is intrinsically correlated to that trigger, but head-level `clean` additionally requires no other unresolved exact trigger on the same `(repository, pull request, headRefOid)`. An intrinsically correlated reaction does not erase another unresolved same-head run. Accept a review, review comment, or review thread only when it is bound to the current head and its own authoritative timestamp is strictly later than the trigger timestamp. Because the REST issue-comment tie-breaker does not transfer to another surface, same-time evidence from different surfaces is incomparable, including between REST issue comments and either REST reviews or GraphQL threads; the run remains `indeterminate`. An earlier same-head review or reaction can never produce `clean`.\n'''
+          semantic='''- A substantive bot-authored current-head review-result may arrive on the submitted-review or REST issue-comment surface. It qualifies for `clean` only with verified bot identity on that surface, explicit and unambiguous final no-findings meaning, and a reviewed-commit binding that matches the full `headRefOid` or an unambiguous commit prefix that uniquely resolves to that same hosted head. A REST issue-comment review-result uses `IssueCommentOrder` and must be ordered after the newest exact trigger. Wording, emoji, and boilerplate may vary; clean classification must not use an exact body, signature, or phrase allowlist. Exact-body allowlisting remains exclusive to the failure classifier below.\n'''
+          semantic_new='''- A substantive bot-authored current-head review-result may arrive on the submitted-review or REST issue-comment surface. Because that evidence carries no exact trigger identity, it qualifies for `clean` only when complete hosted state leaves exactly one unresolved exact trigger candidate on the same `(repository, pull request, headRefOid)`, with verified bot identity on that surface, explicit and unambiguous final no-findings meaning, and a reviewed-commit binding that matches the full `headRefOid` or an unambiguous commit prefix that uniquely resolves to that same hosted head. A REST issue-comment review-result uses `IssueCommentOrder` and must be ordered after that bound exact trigger. Wording, emoji, and boilerplate may vary; clean classification must not use an exact body, signature, or phrase allowlist. Exact-body allowlisting remains exclusive to the failure classifier below.\n'''
+          cleanreaction='''| Bot `+1` on the newest exact trigger, head unchanged, no current finding comment, and no unresolved current bot thread | clean | Record bot PASS; continue any separate human/publication gates. |\n'''
+          cleanreaction_new='''| Bot `+1` on the newest exact trigger, head unchanged, no current finding comment, no unresolved current bot thread, and no other unresolved exact trigger on the same current head | clean | Record bot PASS; continue any separate human/publication gates. |\n'''
+          cleanreview='''| Substantive bot-authored current-head review-result on the submitted-review surface strictly after the newest exact trigger, or on the REST issue-comment surface after it by `IssueCommentOrder`, with verified bot identity, matching reviewed commit, explicit final no-findings meaning, complete collections, no current finding comments, and no unresolved current bot threads | clean | Record bot PASS; continue any separate human/publication gates. |\n'''
+          cleanreview_new='''| Substantive bot-authored current-head review-result, unambiguously attributable because exactly one unresolved exact trigger candidate remains on the same current head, with verified bot identity, matching reviewed commit, explicit final no-findings meaning, complete collections, no current finding comments, and no unresolved current bot threads | clean | Record bot PASS; continue any separate human/publication gates. |\n'''
+          for p in SKILLS:
+              once(p,ownership,ownership_new); once(p,reaction,reaction_new); once(p,semantic,semantic_new); once(p,cleanreaction,cleanreaction_new); once(p,cleanreview,cleanreview_new)
+
+          old_binding='''        child_env = os.environ.copy()\n        for key in tuple(child_env):\n            if key == "GIT_CONFIG_COUNT" or re.fullmatch(\n                r"GIT_CONFIG_(?:KEY|VALUE)_\\d+", key\n            ):\n                del child_env[key]\n        child_env.update({\n            "GIT_CONFIG_COUNT": "1",\n            "GIT_CONFIG_KEY_0": f"url.{push_destination}.insteadOf",\n            "GIT_CONFIG_VALUE_0": remote_alias,\n        })\n'''
+          new_binding='''        child_env = os.environ.copy()\n        raw_count = child_env.get("GIT_CONFIG_COUNT")\n        if raw_count is None:\n            config_count = 0\n        elif not re.fullmatch(r"(?:0|[1-9][0-9]{0,3})", raw_count):\n            return _refusal("PS-MSG-RANGE", "remote-binding")\n        else:\n            config_count = int(raw_count, 10)\n        if config_count > 1024:\n            return _refusal("PS-MSG-RANGE", "remote-binding")\n        for index in range(config_count):\n            if (\n                f"GIT_CONFIG_KEY_{index}" not in child_env\n                or f"GIT_CONFIG_VALUE_{index}" not in child_env\n            ):\n                return _refusal("PS-MSG-RANGE", "remote-binding")\n        if (\n            f"GIT_CONFIG_KEY_{config_count}" in child_env\n            or f"GIT_CONFIG_VALUE_{config_count}" in child_env\n        ):\n            return _refusal("PS-MSG-RANGE", "remote-binding")\n        child_env.update({\n            "GIT_CONFIG_COUNT": str(config_count + 1),\n            f"GIT_CONFIG_KEY_{config_count}": f"url.{push_destination}.insteadOf",\n            f"GIT_CONFIG_VALUE_{config_count}": remote_alias,\n        })\n'''
+          for p in SCANNERS: once(p,old_binding,new_binding)
+
+          # Reconcile the older test with the corrected command-scope preservation contract.
+          old_vis='''            self.assertEqual(child_env["GIT_CONFIG_COUNT"], "1")\n            self.assertEqual(child_env["GIT_CONFIG_KEY_0"], f"url.{destination}.insteadOf")\n            self.assertEqual(child_env["GIT_CONFIG_VALUE_0"], alias)\n            self.assertNotIn("discarded.synthetic", child_env.values())\n'''
+          new_vis='''            self.assertEqual(child_env["GIT_CONFIG_COUNT"], "2")\n            self.assertEqual(child_env["GIT_CONFIG_KEY_0"], "discarded.synthetic")\n            self.assertEqual(child_env["GIT_CONFIG_VALUE_0"], "discarded")\n            self.assertEqual(child_env["GIT_CONFIG_KEY_1"], f"url.{destination}.insteadOf")\n            self.assertEqual(child_env["GIT_CONFIG_VALUE_1"], alias)\n'''
+          once(SCANNER_TEST,old_vis,new_vis)
+
+          # The two Sep-2 bullets were introduced by the Sep-4 hosted fix; correct the release date and document this audit pass.
+          rn=ROOT/'RELEASE_NOTES.md'
+          once(rn,'## 2026-09-02\n','''## 2026-09-04\n\n- **GitHub pull-request clean-result attribution now fails closed across overlapping same-head review runs.** Uncorrelated submitted-review and REST issue-comment no-findings results require exactly one unresolved exact trigger candidate; a trigger-bound `+1` cannot make the head clean while another same-head trigger remains unresolved. **Why it matters:** a late success from an older run can no longer close a newer or still-active review by timestamp alone.\n- **Publication remote probes now preserve inherited command-scope Git configuration while appending their fresh exact alias binding.** Existing `GIT_CONFIG_*` entries such as credential or protocol hardening remain visible; malformed or non-contiguous inherited config refuses instead of being silently discarded. The random exact probe alias still wins over preconfigured broader rewrite prefixes without exposing the frozen destination in argv. **Why it matters:** preventing a second `insteadOf` rewrite no longer weakens caller-supplied Git security policy.\n''')
+
+          def body_sha(path:Path)->str:
+              data=path.read_bytes().replace(b'\r\n',b'\n').replace(b'\r',b'\n')
+              lines=data.splitlines(keepends=True); start=0
+              if lines and lines[0].strip()==b'---':
+                  for i in range(1,len(lines)):
+                      if lines[i].strip()==b'---': start=i+1; break
+              return hashlib.sha256(b''.join(lines[start:])).hexdigest()
+          digest=body_sha(SKILLS[0])
+          if body_sha(SKILLS[1])!=digest: raise SystemExit('provider skill body mismatch')
+          old_digest='05fd254b5835f2fd1a2ae059f52498bf4bcd3c03f37066606df1b72d45f010d2'
+          for p in VALIDATORS:
+              text=p.read_text(encoding='utf-8')
+              if text.count(old_digest)!=1: raise SystemExit(f'{p}: expected one old body pin')
+              p.write_text(text.replace(old_digest,digest,1),encoding='utf-8')
+          print(digest)
+          PY
+          python -m py_compile /tmp/fix.py
+      - name: Red phase for newly found regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python /tmp/fix.py tests
+          set +e
+          python -m pytest -q tests/test_github_pr_review_bot_skill_contract.py::test_uncorrelated_clean_result_refuses_overlapping_same_head_runs >/tmp/red-review 2>&1; a=$?
+          python -m pytest -q tests/test_publication_safety_scanner.py::TestPublicationSafetyScannerRangeMode::test_range_remote_probe_binding_preserves_inherited_command_scope_config >/tmp/red-scanner 2>&1; b=$?
+          set -e
+          test "$a" -ne 0; test "$b" -ne 0
+          grep -F 'missing overlapping-run clean guard' /tmp/red-review
+          grep -F 'GIT_CONFIG_COUNT' /tmp/red-scanner
+          git reset --hard "${EXPECTED_HEAD}"
+          git clean -fdx
+      - name: Apply fixes and run focused verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          python /tmp/fix.py full
           git diff --check
-      - name: Full test suite
-        shell: bash
-        run: |
-          set -euo pipefail
-          python -m pytest -q tests
-      - name: Provider validators
-        shell: bash
-        run: |
-          set -euo pipefail
-          python src.codex/skills/lead/scripts/validate-skill-pack.py
-          python src.claude/agents/scripts/validate-skill-pack.py
-      - name: Mirror and critical-file equality
-        shell: bash
-        run: |
-          set -euo pipefail
+          cmp --silent src.codex/skills/github-pr-review-bot/SKILL.md src.claude/skills/github-pr-review-bot/SKILL.md
           cmp --silent scripts/universal-hooks/scripts/check-publication-safety.py src.codex/skills/lead/scripts/check-publication-safety.py
           cmp --silent scripts/universal-hooks/scripts/check-publication-safety.py src.claude/agents/scripts/check-publication-safety.py
-          cmp --silent scripts/universal-hooks/scripts/hook_common.py src.codex/skills/lead/scripts/hook_common.py
-          cmp --silent scripts/universal-hooks/scripts/hook_common.py src.claude/agents/scripts/hook_common.py
-          cmp --silent scripts/universal-hooks/scripts/mcp_continuity_policy.py src.codex/skills/lead/scripts/mcp_continuity_policy.py
-          cmp --silent scripts/universal-hooks/scripts/mcp_continuity_policy.py src.claude/agents/scripts/mcp_continuity_policy.py
-          cmp --silent src.codex/skills/github-pr-review-bot/SKILL.md src.claude/skills/github-pr-review-bot/SKILL.md
+          python -m pytest -q tests/test_github_pr_review_bot_skill_contract.py
+          python -m pytest -q tests/test_publication_safety_scanner.py -k 'remote_probe or remote_ref'
+          python src.codex/skills/lead/scripts/validate-skill-pack.py
+          python src.claude/agents/scripts/validate-skill-pack.py
+          git diff --check
+      - name: Push verified fix without force
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "refs/heads/${TARGET_BRANCH}"
+          test "$(git rev-parse FETCH_HEAD)" = "${EXPECTED_HEAD}"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add --all
+          git diff --cached --check
+          git commit -m 'fix: close deep-audit attribution and probe gaps'
+          git push origin "HEAD:refs/heads/${TARGET_BRANCH}"
