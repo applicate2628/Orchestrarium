@@ -30,6 +30,7 @@ Interchangeability is contractual rather than capability equivalence: a fallback
 - Do not silently change provider, model, effort, runtime, role, scope, artifact, gate, tools, or mutation rights.
 - Do not grant a worker acceptance, merge, release, publication, or Lead-transfer authority.
 - Do not permit recursive delegation.
+- Do not expose a second command-line path that bypasses the public resolver facade.
 
 ## 3. Architecture
 
@@ -46,7 +47,7 @@ resolve.py compatibility facade
   - explicit no-execution-authority result
         |
         v
-_resolver_base.py reviewed V1 selection core
+_resolver_base.py private V1 selection core
   - candidate validation
   - explicit priority and fallback
   - capability, mutation, tools, independence
@@ -58,7 +59,7 @@ selected candidate only
 separately approved provider adapter
 ```
 
-The facade preserves the accepted selection behavior instead of rewriting it during a security hardening pass. `_resolver_base.py` is internal implementation material, not an alternative public entrypoint. The supported public Python and CLI entrypoint remains `resolve.py`.
+The facade preserves the accepted selection behavior instead of rewriting it during a security hardening pass. `_resolver_base.py` is import-only implementation material, not an alternative public entrypoint. Direct execution ignores the supplied request and returns typed denial `E_LEAD_WORKER_V1_PRIVATE_ENTRYPOINT`; the supported public Python and CLI entrypoint remains `resolve.py`.
 
 The resolver remains pure: it does not probe credentials, launch processes, mutate configuration, apply a patch, or authorize execution.
 
@@ -174,7 +175,7 @@ Thus `status = selected` means only that the candidate satisfies the resolver's 
 
 ## 8. Strict command-line input
 
-The CLI reads a maximum of one mebibyte from standard input or one ordinary file. It rejects duplicate JSON keys, non-standard numeric constants, parser recursion, more than 32 nesting levels, and more than 8192 parsed nodes.
+The public CLI reads a maximum of one mebibyte from standard input or one ordinary file. It rejects duplicate JSON keys, non-standard numeric constants, parser recursion, more than 32 nesting levels, and more than 8192 parsed nodes.
 
 For a file request, the complete lexical absolute path is checked before and after reading. Symbolic links, reparse points, junctions, non-directory ancestors, and non-regular leaves fail closed. The opened descriptor must match the leaf identity observed before opening. Leaf size, modification time, and status-change time must remain stable.
 
@@ -184,13 +185,14 @@ These checks reduce path substitution and time-of-check/time-of-use risk. They d
 
 ## 9. Review conclusions and non-goals
 
-Deep review retained five proportionate changes:
+Deep review retained six proportionate changes:
 
 1. canonical request fingerprint;
 2. explicit separation of candidate selection from execution authorization;
 3. rejection of foreign provider-native runtimes;
 4. bounded, standards-compliant JSON structure;
-5. stable no-follow path-chain acquisition without timestamp-sensitive ancestor false positives.
+5. stable no-follow path-chain acquisition without timestamp-sensitive ancestor false positives;
+6. one public command-line entrypoint, with fail-closed direct execution of the private core.
 
 The review deliberately rejected a proposed ban on duplicate provider/model/effort tuples. Such a ban broke legitimate candidate variants and belongs in a trusted Version 2 runtime registry, not this caller-supplied Version 1 candidate list.
 
@@ -208,11 +210,12 @@ The focused and deep-review suites cover:
 - review-family exclusion;
 - mutation, tools, isolation, delegation, and authority;
 - Kimi/Grok read-only ceilings and GLM exclusion;
-- deterministic CLI output;
+- deterministic public CLI output;
 - duplicate-key, non-standard constant, deep-structure, oversized, linked-file, linked-ancestor, and file-replacement refusal;
 - request fingerprint sensitivity;
 - explicit `executionAuthorized = false`;
-- absence of false rejection after unrelated ancestor-directory activity.
+- absence of false rejection after unrelated ancestor-directory activity;
+- fail-closed direct execution of `_resolver_base.py` with no candidate selection.
 
 Full repository validators, installer projection checks, and publication gates remain required before leaving draft status.
 

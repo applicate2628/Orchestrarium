@@ -25,7 +25,7 @@ This is an additive Version 1 compatibility surface. It does not change native r
 1. Classify the role, bounded scope, capability, mutation class, exact required tools, artifact contract, gate contract, and any provider families excluded for independent review.
 2. Bind the request to a unique `dispatchId` and current `policySnapshotId`.
 3. Build an explicit candidate list from trusted caller-owned runtime evidence. Give every candidate an exact runtime, canonical provider family, runtime-observed model, effort, priority, availability, admission ceiling, capabilities, tools, and `evidenceSnapshotId`.
-4. Invoke the pure resolver:
+4. Invoke the only supported command-line entrypoint:
 
 ```text
 python scripts/resolve.py --request-file <ordinary-request.json>
@@ -36,6 +36,8 @@ Use standard input for generated requests:
 ```text
 producer | python scripts/resolve.py --request-file -
 ```
+
+`_resolver_base.py` is a private import-only selection core. Direct execution always returns typed denial `E_LEAD_WORKER_V1_PRIVATE_ENTRYPOINT`; do not invoke or document it as an alternate CLI.
 
 5. Recompute or compare `requestFingerprint` before forwarding the decision to an adapter or ledger writer.
 6. Treat `status = selected` as candidate selection only. The returned decision always has:
@@ -94,7 +96,7 @@ Routing metadata cannot widen provider admission.
 
 ## Strict input handling
 
-The CLI accepts one UTF-8 JSON object from standard input or a stable ordinary file. It rejects:
+The public CLI accepts one UTF-8 JSON object from standard input or a stable ordinary file. It rejects:
 
 - duplicate keys at any object depth;
 - `NaN`, positive infinity, and negative infinity;
