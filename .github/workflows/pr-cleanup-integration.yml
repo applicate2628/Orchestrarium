@@ -1,4 +1,4 @@
-name: Verify metadata compatibility candidates
+name: Verify current routing stack
 on:
   push:
     branches: [automation/pr-cleanup-integration-20260905-a068e79e]
@@ -6,7 +6,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: pr-cleanup-metadata-candidates-20260905
+  group: pr-current-stack-verification-20260905
   cancel-in-progress: false
 jobs:
   prepare:
@@ -15,56 +15,44 @@ jobs:
     permissions:
       contents: write
     outputs:
-      targets: ${{ steps.candidates.outputs.targets }}
+      targets: ${{ steps.merge.outputs.targets }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: ${{ github.sha }}
-          path: control
-          persist-credentials: false
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          ref: 8279b8fdb51984a0eff3d0eb005c0c0ced5d8568
-          path: policy
-          fetch-depth: 1
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          ref: 838feaa92ea972e0785465e2d3a1a8ff490cffae
-          path: worker
-          fetch-depth: 1
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
-        with:
-          python-version: '3.12'
-      - run: python -m pip install --disable-pip-version-check pytest==8.3.5 pytest-subtests==0.14.2 PyYAML==6.0.2 "jsonschema[format]==4.23.0"
-      - name: Prepare and publish isolated candidates only
-        id: candidates
+          ref: a5a7a2cdae7db67bbb95c6ce90d763874d5dc9f9
+          fetch-depth: 0
+      - name: Merge only into an isolated verification branch
+        id: merge
         shell: python
         run: |
-          import glob, json, os, subprocess, sys
-          from pathlib import Path
-          control = Path('control/.github/audit/metadata-compatibility.py').resolve()
-          targets = []
-          for surface, number in [('policy', 5), ('worker', 7)]:
-              root = Path(surface).resolve()
-              subprocess.run([sys.executable, str(control), surface, str(root)], check=True, timeout=180)
-              patterns = ['tests/test_policy_overlay*.py'] if surface == 'policy' else ['tests/test_astra_routing_v1*.py', 'tests/test_lead_worker_routing_v1*.py']
-              files = sorted({str(p.relative_to(root)) for pattern in patterns for p in root.glob(pattern)})
-              subprocess.run([sys.executable, '-m', 'pytest', '-q', *files], cwd=root, check=True, timeout=180)
-              subprocess.run(['git', 'config', 'user.name', 'github-actions[bot]'], cwd=root, check=True)
-              subprocess.run(['git', 'config', 'user.email', '41898282+github-actions[bot]@users.noreply.github.com'], cwd=root, check=True)
-              branch = f'automation/pr{number}-windows-metadata-20260905'
-              subprocess.run(['git', 'switch', '-c', branch], cwd=root, check=True)
-              subprocess.run(['git', 'commit', '-m', f'fix({surface}): compare metadata within the correct stat interface', '-m', 'Preserve full same-interface before/after checks, inode/device/type/size/mtime/attribute binding, and Unix cross-interface ctime comparison. Bind birthtime when exposed. Add metadata regressions and a dated release note. This isolated candidate requires native Linux/Windows verification before PR integration. No provider admission or launch changes.'], cwd=root, check=True)
-              sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip()
-              subprocess.run(['git', 'push', 'origin', 'HEAD:refs/heads/' + branch], cwd=root, check=True, timeout=60)
-              targets.append({'surface': surface, 'sha': sha, 'branch': branch})
+          import json, os, subprocess
+          base = 'a5a7a2cdae7db67bbb95c6ce90d763874d5dc9f9'
+          worker = 'f9ff39d3412ce66520e91dafe6836f4ca911ee7f'
+          old_worker = '838feaa92ea972e0785465e2d3a1a8ff490cffae'
+          branch = 'automation/pr8-windows-metadata-current-20260905'
+          def git(*args):
+              return subprocess.check_output(['git', *args], text=True).strip()
+          assert git('rev-parse', 'HEAD') == base
+          git('fetch', '--no-tags', 'origin', worker)
+          v2_paths = git('diff', '--name-only', old_worker, base).splitlines()
+          identities = {path: git('rev-parse', base + ':' + path) for path in v2_paths}
+          git('config', 'user.name', 'github-actions[bot]')
+          git('config', 'user.email', '41898282+github-actions[bot]@users.noreply.github.com')
+          git('switch', '-c', branch)
+          git('merge', '--no-ff', worker, '-m', 'merge: retain V2 contracts while integrating current worker fixes')
+          assert git('diff', '--name-only', worker, 'HEAD').splitlines() == v2_paths
+          assert all(git('rev-parse', 'HEAD:' + path) == digest for path, digest in identities.items())
+          git('diff', '--check', base, 'HEAD')
+          merged = git('rev-parse', 'HEAD')
+          git('push', 'origin', 'HEAD:refs/heads/' + branch)
+          targets = [{'surface': 'worker', 'sha': worker}, {'surface': 'v2', 'sha': merged}]
           with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
               output.write('targets=' + json.dumps(targets) + '\n')
   tests:
     needs: prepare
-    name: ${{ matrix.target.surface }} regression on ${{ matrix.os }}
+    name: ${{ matrix.target.surface }} integration on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
+    timeout-minutes: 12
     strategy:
       fail-fast: false
       matrix:
@@ -84,59 +72,58 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m pip install --disable-pip-version-check pytest==8.3.5 pytest-subtests==0.14.2 PyYAML==6.0.2 "jsonschema[format]==4.23.0"
-      - name: Repeat all affected suites against the exact candidate
+      - name: Verify exact current integration
         shell: python
         run: |
           import glob, json, os, subprocess, sys
           from pathlib import Path
-          out = Path(os.environ['RUNNER_TEMP']) / 'metadata-verification'
+          out = Path(os.environ['RUNNER_TEMP']) / 'current-stack'
           out.mkdir()
           head = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
           assert head == os.environ['AUDIT_SOURCE_SHA']
-          surface = os.environ['AUDIT_SURFACE']
-          patterns = ['tests/test_policy_overlay*.py'] if surface == 'policy' else ['tests/test_astra_routing_v1*.py', 'tests/test_lead_worker_routing_v1*.py']
-          files = sorted({p for pattern in patterns for p in glob.glob(pattern)})
+          patterns = ['tests/test_astra_routing_v1*.py', 'tests/test_lead_worker_routing_v1*.py']
+          if os.environ['AUDIT_SURFACE'] == 'v2':
+              patterns.append('tests/test_adaptive_model_routing_v2*.py')
+          files = sorted({path for pattern in patterns for path in glob.glob(pattern)})
           results = []
-          for repetition in range(3):
-              command = [sys.executable, '-m', 'pytest', '-q', '-ra', '--tb=short', f'--junitxml={out / (str(repetition) + ".xml")}', *files]
-              result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=180)
+          for repetition in range(2):
+              result = subprocess.run([sys.executable, '-m', 'pytest', '-q', '-ra', '--tb=short', f'--junitxml={out / (str(repetition) + ".xml")}', *files], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=180)
               (out / f'tests-{repetition}.log').write_bytes(result.stdout)
-              print(result.stdout.decode('utf-8', errors='replace'))
               results.append(result.returncode)
-          (out / 'results.json').write_text(json.dumps({'head': head, 'surface': surface, 'platform': sys.platform, 'results': results}, indent=2), encoding='utf-8')
+              print(result.stdout.decode('utf-8', errors='replace'))
+          (out / 'results.json').write_text(json.dumps({'head': head, 'surface': os.environ['AUDIT_SURFACE'], 'platform': sys.platform, 'results': results}, indent=2), encoding='utf-8')
+          if os.environ['RUNNER_OS'] == 'Linux' and os.environ['AUDIT_SURFACE'] == 'v2':
+              subprocess.run(['git', 'archive', '--format=zip', '--output=' + str(out / 'source.zip'), 'HEAD'], check=True)
+              (out / 'tree.txt').write_bytes(subprocess.check_output(['git', 'ls-tree', '-r', 'HEAD']))
           raise SystemExit(1 if any(results) else 0)
-      - name: Locate inherited Windows supervisor rejection without logging request data
+      - name: Diagnose inherited validator cwd requirement without relaxing ownership
         if: runner.os == 'Windows' && always()
         shell: python
         run: |
-          import importlib.util, json, os, sys
+          import dataclasses, importlib.util, json, os, sys, tempfile
           from pathlib import Path
           root = Path.cwd()
-          out = Path(os.environ['RUNNER_TEMP']) / 'metadata-verification'
+          out = Path(os.environ['RUNNER_TEMP']) / 'current-stack'
           spec = importlib.util.spec_from_file_location('audit_pack', root / 'src.codex/skills/lead/scripts/validate-skill-pack.py')
           pack = importlib.util.module_from_spec(spec)
           sys.modules[spec.name] = pack
           spec.loader.exec_module(pack)
           engine = pack._ENGINE
-          events = []
-          def trace(frame, event, arg):
-              if event == 'exception' and len(events) < 25:
-                  kind, error, traceback = arg
-                  if kind.__name__ == 'ProcessSupervisionError':
-                      events.append({'file': Path(frame.f_code.co_filename).name, 'function': frame.f_code.co_name, 'line': frame.f_lineno})
-              return trace
-          validator = engine.Validator(engine.detect_layout(root / 'src.codex/skills/lead/scripts/validate-skill-pack.py', 'codex'))
-          try:
-              sys.settrace(trace)
-              result = validator._run_python(root / 'scripts/validate-agents-mode-contract.py', '--root', str(root))
-          finally:
-              sys.settrace(None)
-              validator.close()
-          (out / 'supervisor-trace.json').write_text(json.dumps({'failure_id': result.failure_id, 'trace': events}, indent=2), encoding='utf-8')
+          reports = []
+          with tempfile.TemporaryDirectory(prefix='orchestrarium-owned-validator-') as temp:
+              layout = engine.detect_layout(root / 'src.codex/skills/lead/scripts/validate-skill-pack.py', 'codex')
+              for location in (root, Path(temp)):
+                  validator = engine.Validator(dataclasses.replace(layout, root=location))
+                  try:
+                      result = validator._run_python(root / 'scripts/validate-agents-mode-contract.py', '--root', str(root))
+                      reports.append({'private_cwd': location != root, 'result': dataclasses.asdict(result)})
+                  finally:
+                      validator.close()
+          (out / 'cwd-diagnosis.json').write_text(json.dumps(reports, indent=2), encoding='utf-8')
       - if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: metadata-${{ matrix.target.surface }}-${{ matrix.os }}
-          path: ${{ runner.temp }}/metadata-verification/
+          name: current-${{ matrix.target.surface }}-${{ matrix.os }}
+          path: ${{ runner.temp }}/current-stack/
           if-no-files-found: error
           retention-days: 3
