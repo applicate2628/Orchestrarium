@@ -1,4 +1,4 @@
 interface:
   display_name: "Lead Worker Routing"
-  short_description: "Select an optional CLI worker under Codex or Claude Lead"
-  default_prompt: "Use $lead-worker-routing to keep Codex or Claude as the one logical Lead, select one explicit nonauthorizing CLI worker from the currently available Codex, Claude, Kimi, or Grok candidates, record subscription or quota fallback without silently changing provider or model, preserve provider admission and sandbox limits, and require Lead verification of the returned artifact."
+  short_description: "Choose one interchangeable CLI worker under Codex or Claude Lead"
+  default_prompt: "Use $lead-worker-routing to bind one provider-neutral worker dispatch to an exact role, scope, capability, artifact, gate, policy snapshot, and candidate-evidence snapshot; preserve provider admission and review independence, record subscription or quota fallback explicitly, reject recursive or authorizing workers, and keep the Codex or Claude Lead responsible for verification and synthesis."
