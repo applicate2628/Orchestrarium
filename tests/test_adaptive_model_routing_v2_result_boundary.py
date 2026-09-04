@@ -22,7 +22,8 @@ def _validator(schema: dict[str, object], definition: str):
             "$schema": schema["$schema"],
             "$defs": schema["$defs"],
             "$ref": f"#/$defs/{definition}",
-        }
+        },
+        format_checker=jsonschema.FormatChecker(),
     )
 
 

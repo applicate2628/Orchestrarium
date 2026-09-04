@@ -22,7 +22,8 @@ def _validator(schema: dict[str, object], definition: str):
             "$schema": schema["$schema"],
             "$defs": schema["$defs"],
             "$ref": f"#/$defs/{definition}",
-        }
+        },
+        format_checker=jsonschema.FormatChecker(),
     )
 
 
@@ -141,3 +142,10 @@ def test_operational_examples_do_not_share_retry_identity_between_dispatches() -
     result = examples["workerResultControl"]
     assert result["dispatchId"] == primary["dispatchId"]
     assert result["idempotencyKey"] == primary["idempotencyKey"]
+
+
+def test_timestamp_validation_checks_calendar_not_only_shape() -> None:
+    validator = _validator(_load(SCHEMA), "timestamp")
+    for timestamp in ("2026-02-30T16:00:00Z", "2026-09-04T25:00:00Z"):
+        assert list(validator.iter_errors(timestamp))
+    validator.validate("2028-02-29T16:00:00Z")
