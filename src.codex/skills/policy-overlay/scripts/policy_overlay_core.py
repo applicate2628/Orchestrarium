@@ -116,7 +116,10 @@ def _read_regular(path: Path, limit: int, *, label: str) -> bytes:
             or before.st_size > limit
         ):
             raise PolicyOverlayError(f"{label} must be a bounded ordinary file: {path}")
-        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        flags = (
+            os.O_RDONLY | getattr(os, "O_BINARY", 0)
+            | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        )
         fd = os.open(path, flags)
         opened = os.fstat(fd)
         if _file_signature(before) != _file_signature(opened):
@@ -281,7 +284,11 @@ def _load_catalog(root: Path) -> dict[str, dict[str, Any]]:
         "precedence", "overlays", "compatibilityPackages",
     }:
         raise PolicyOverlayError("policy overlay catalog fields are invalid")
-    if data["schemaVersion"] != SCHEMA_VERSION or data["defaultSelection"] != "none":
+    if (
+        type(data["schemaVersion"]) is not int
+        or data["schemaVersion"] != SCHEMA_VERSION
+        or data["defaultSelection"] != "none"
+    ):
         raise PolicyOverlayError("policy overlay catalog version/default is invalid")
     if data["selectionSyntax"] != "comma-separated-identifiers-v1" or data["conflictPolicy"] != "reject-selection":
         raise PolicyOverlayError("policy overlay selection/conflict contract is invalid")
@@ -325,7 +332,11 @@ def _load_catalog(root: Path) -> dict[str, dict[str, Any]]:
         if (
             not isinstance(propagation, dict)
             or set(propagation) != set(PROPAGATION_KEY.values())
-            or any(value not in {"lane-filtered", "explicit-only", "never"} for value in propagation.values())
+            or any(
+                not isinstance(value, str)
+                or value not in {"lane-filtered", "explicit-only", "never"}
+                for value in propagation.values()
+            )
         ):
             raise PolicyOverlayError(f"invalid propagation contract: {overlay_id}")
         if any((target in targets) == (propagation[key] == "never") for target, key in PROPAGATION_KEY.items()):
