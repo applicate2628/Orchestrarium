@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import importlib.util
+import json
+import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 CODEX_ROOT = ROOT / "src.codex" / "skills" / "astra-routing"
@@ -24,39 +28,74 @@ def test_skill_has_codex_metadata_and_projection_safe_provider_neutral_body() ->
     assert "name: astra-routing" in body
     assert "existing approved external Codex wrapper" in body
     assert "Astra Routing" in metadata
+    assert "97.6% FrontierMath result is specifically" in body
     assert MODULE.is_file()
 
 
-def test_math_science_and_cross_system_default_to_astra_medium() -> None:
-    module = _load()
-    for task_class in (
+@pytest.mark.parametrize(
+    "task_class",
+    (
         "mathematical-research",
         "scientific-agentic-workflow",
         "cross-system-synthesis",
-    ):
-        result = module.resolve_v1_astra_route(
-            task_class=task_class,
-            available_models={"gpt-6-astra"},
-        )
-        assert result["status"] == "selected"
-        assert result["model"] == "gpt-6-astra"
-        assert result["effort"] == "medium"
-        assert result["codexFlags"] == [
-            "--model",
-            "gpt-6-astra",
-            "-c",
-            "model_reasoning_effort=medium",
-        ]
-
-
-def test_recovery_defaults_high_and_max_requires_explicit_approval() -> None:
+    ),
+)
+def test_deep_math_science_and_cross_system_default_to_astra_medium(
+    task_class: str,
+) -> None:
     module = _load()
-    recovery = module.resolve_v1_astra_route(
+    result = module.resolve_v1_astra_route(
+        task_class=task_class,
+        available_models={"gpt-6-astra"},
+    )
+    assert result["status"] == "selected"
+    assert result["model"] == "gpt-6-astra"
+    assert result["effort"] == "medium"
+    assert result["effortBasis"] == "task-default-medium"
+    assert result["effortEvidence"] is None
+    assert result["codexFlags"] == [
+        "--model",
+        "gpt-6-astra",
+        "-c",
+        "model_reasoning_effort=medium",
+    ]
+    assert result["requiresIndependentReview"] is True
+    assert result["authorizing"] is False
+
+
+def test_recovery_defaults_high() -> None:
+    module = _load()
+    result = module.resolve_v1_astra_route(
         task_class="critical-recovery",
         available_models={"gpt-6-astra"},
     )
-    assert recovery["effort"] == "high"
+    assert result["status"] == "selected"
+    assert result["effort"] == "high"
+    assert result["effortBasis"] == "task-default-high"
 
+
+def test_recovery_downshift_to_medium_requires_evidence() -> None:
+    module = _load()
+    denied = module.resolve_v1_astra_route(
+        task_class="critical-recovery",
+        available_models={"gpt-6-astra"},
+        requested_effort="medium",
+    )
+    assert denied["stableId"] == "E_ASTRA_V1_EFFORT_EVIDENCE_REQUIRED"
+
+    selected = module.resolve_v1_astra_route(
+        task_class="critical-recovery",
+        available_models={"gpt-6-astra"},
+        requested_effort="medium",
+        effort_evidence="measured-sufficient",
+    )
+    assert selected["status"] == "selected"
+    assert selected["effort"] == "medium"
+    assert selected["economicsEvidence"] == "caller-measured"
+
+
+def test_max_requires_explicit_human_approval() -> None:
+    module = _load()
     denied = module.resolve_v1_astra_route(
         task_class="mathematical-research",
         available_models={"gpt-6-astra"},
@@ -73,6 +112,7 @@ def test_recovery_defaults_high_and_max_requires_explicit_approval() -> None:
     )
     assert admitted["status"] == "selected"
     assert admitted["effort"] == "max"
+    assert admitted["effortBasis"] == "explicit-human-approval"
 
 
 def test_unavailable_astra_has_no_silent_fallback() -> None:
@@ -99,34 +139,38 @@ def test_noneligible_work_returns_to_legacy_v1_policy() -> None:
     assert result["selectionBasis"] == "legacy-v1-routing"
 
 
-def test_low_high_and_xhigh_require_matching_effort_evidence() -> None:
+@pytest.mark.parametrize(
+    ("effort", "evidence"),
+    (
+        ("low", "migration-evaluation"),
+        ("high", "medium-objective-failure"),
+        ("xhigh", "high-objective-failure"),
+    ),
+)
+def test_nondefault_efforts_require_matching_evidence(
+    effort: str, evidence: str
+) -> None:
     module = _load()
-    cases = (
-        ("low", None, "migration-evaluation"),
-        ("high", None, "medium-objective-failure"),
-        ("xhigh", None, "high-objective-failure"),
+    denied = module.resolve_v1_astra_route(
+        task_class="mathematical-research",
+        available_models={"gpt-6-astra"},
+        requested_effort=effort,
     )
-    for effort, _unused, evidence in cases:
-        denied = module.resolve_v1_astra_route(
-            task_class="mathematical-research",
-            available_models={"gpt-6-astra"},
-            requested_effort=effort,
-        )
-        assert denied["status"] == "denied"
-        assert denied["stableId"] == "E_ASTRA_V1_EFFORT_EVIDENCE_REQUIRED"
+    assert denied["status"] == "denied"
+    assert denied["stableId"] == "E_ASTRA_V1_EFFORT_EVIDENCE_REQUIRED"
 
-        selected = module.resolve_v1_astra_route(
-            task_class="mathematical-research",
-            available_models={"gpt-6-astra"},
-            requested_effort=effort,
-            effort_evidence=evidence,
-        )
-        assert selected["status"] == "selected"
-        assert selected["effort"] == effort
-        assert selected["effortEvidence"] == evidence
+    selected = module.resolve_v1_astra_route(
+        task_class="mathematical-research",
+        available_models={"gpt-6-astra"},
+        requested_effort=effort,
+        effort_evidence=evidence,
+    )
+    assert selected["status"] == "selected"
+    assert selected["effort"] == effort
+    assert selected["effortEvidence"] == evidence
 
 
-def test_orphan_or_unknown_effort_evidence_is_denied() -> None:
+def test_orphan_unknown_or_unneeded_effort_evidence_is_denied() -> None:
     module = _load()
     orphan = module.resolve_v1_astra_route(
         task_class="mathematical-research",
@@ -143,13 +187,100 @@ def test_orphan_or_unknown_effort_evidence_is_denied() -> None:
     )
     assert unknown["stableId"] == "E_ASTRA_V1_EFFORT_EVIDENCE_INVALID"
 
-
-def test_automatic_astra_fanout_is_one() -> None:
-    module = _load()
-    result = module.resolve_v1_astra_route(
-        task_class="scientific-agentic-workflow",
+    default_with_evidence = module.resolve_v1_astra_route(
+        task_class="mathematical-research",
         available_models={"gpt-6-astra"},
-        requested_fanout=2,
+        requested_effort="medium",
+        effort_evidence="migration-evaluation",
     )
-    assert result["status"] == "denied"
-    assert result["stableId"] == "E_ASTRA_V1_FANOUT_LIMIT"
+    assert default_with_evidence["stableId"] == "E_ASTRA_V1_EFFORT_EVIDENCE_INVALID"
+
+
+def test_automatic_astra_fanout_is_exactly_one() -> None:
+    module = _load()
+    for fanout in (0, 2, True):
+        result = module.resolve_v1_astra_route(
+            task_class="scientific-agentic-workflow",
+            available_models={"gpt-6-astra"},
+            requested_fanout=fanout,
+        )
+        expected = (
+            "E_ASTRA_V1_REQUEST_INVALID"
+            if fanout is True
+            else "E_ASTRA_V1_FANOUT_LIMIT"
+        )
+        assert result["status"] == "denied"
+        assert result["stableId"] == expected
+
+
+def test_request_shape_rejects_string_model_inventory_and_bad_types() -> None:
+    module = _load()
+    invalid_inventory = module.resolve_v1_astra_route(
+        task_class="mathematical-research",
+        available_models="gpt-6-astra",
+    )
+    assert invalid_inventory["stableId"] == "E_ASTRA_V1_REQUEST_INVALID"
+
+    invalid_approval = module.resolve_v1_astra_route(
+        task_class="mathematical-research",
+        available_models={"gpt-6-astra"},
+        allow_max_effort=1,
+    )
+    assert invalid_approval["stableId"] == "E_ASTRA_V1_REQUEST_INVALID"
+
+
+def test_cli_emits_deterministic_json_and_nonzero_for_denial() -> None:
+    selected = subprocess.run(
+        [
+            sys.executable,
+            str(MODULE),
+            "--task-class",
+            "mathematical-research",
+            "--available-model",
+            "gpt-6-astra",
+        ],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert selected.returncode == 0
+    assert json.loads(selected.stdout)["effort"] == "medium"
+    assert selected.stderr == ""
+
+    denied = subprocess.run(
+        [
+            sys.executable,
+            str(MODULE),
+            "--task-class",
+            "mathematical-research",
+            "--available-model",
+            "gpt-6-astra",
+            "--effort",
+            "xhigh",
+        ],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert denied.returncode == 2
+    assert json.loads(denied.stdout)["stableId"] == "E_ASTRA_V1_EFFORT_EVIDENCE_REQUIRED"
+
+
+def test_provider_prompt_accepts_returned_astra_flags_when_full_repo_is_present() -> None:
+    provider_prompt = ROOT / "scripts" / "provider_prompt.py"
+    if not provider_prompt.is_file():
+        pytest.skip("partial fixture does not include provider_prompt.py")
+    spec = importlib.util.spec_from_file_location(
+        "provider_prompt_astra_v1_test", provider_prompt
+    )
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    flags = ["--model", "gpt-6-astra", "-c", "model_reasoning_effort=medium"]
+    frozen, model, effort = module.normalize_launch_profile("codex", flags)
+    assert frozen == tuple(flags)
+    assert model == "gpt-6-astra"
+    assert effort == "medium"

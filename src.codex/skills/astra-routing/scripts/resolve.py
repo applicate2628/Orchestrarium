@@ -1,177 +1,216 @@
 #!/usr/bin/env python3
-"""Resolve the narrow Orchestrarium 1.x Astra route without launching a provider."""
+"""Resolve the narrow Orchestrarium 1.x Astra route without launching it."""
 
 from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
+from collections.abc import Collection
 from typing import Any
 
-SCHEMA_VERSION = 1
 ASTRA_MODEL = "gpt-6-astra"
-SUPPORTED_EFFORTS = ("low", "medium", "high", "xhigh", "max")
-TASK_DEFAULT_EFFORT = {
+EFFORTS = ("low", "medium", "high", "xhigh", "max")
+EFFORT_RANK = {name: rank for rank, name in enumerate(EFFORTS)}
+TASK_DEFAULTS = {
     "mathematical-research": "medium",
     "scientific-agentic-workflow": "medium",
     "cross-system-synthesis": "medium",
     "critical-recovery": "high",
 }
-LOW_EVIDENCE = frozenset({"migration-evaluation", "measured-sufficient"})
-HIGH_EVIDENCE = frozenset({"medium-objective-failure", "measured-high-gain"})
-XHIGH_EVIDENCE = frozenset(
-    {"high-objective-failure", "high-contradictory", "measured-xhigh-gain"}
-)
-KNOWN_EVIDENCE = LOW_EVIDENCE | HIGH_EVIDENCE | XHIGH_EVIDENCE
+DOWNSHIFT_EVIDENCE = {"migration-evaluation", "measured-sufficient"}
+UPSHIFT_EVIDENCE = {
+    "high": {"medium-objective-failure", "measured-high-gain"},
+    "xhigh": {
+        "high-objective-failure",
+        "high-contradictory",
+        "measured-xhigh-gain",
+    },
+}
+KNOWN_EVIDENCE = DOWNSHIFT_EVIDENCE | set().union(*UPSHIFT_EVIDENCE.values())
+MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,127}\Z", re.ASCII)
 
 
-def _result(
-    *,
+def _decision(
     status: str,
     stable_id: str | None,
     task_class: str,
-    effort: str | None,
+    *,
+    effort: str | None = None,
     selection_basis: str,
+    effort_basis: str | None = None,
     effort_evidence: str | None = None,
 ) -> dict[str, Any]:
     selected = status == "selected"
-    flags = (
-        ["--model", ASTRA_MODEL, "-c", f"model_reasoning_effort={effort}"]
-        if selected and effort is not None
-        else []
-    )
     return {
-        "schemaVersion": SCHEMA_VERSION,
+        "schemaVersion": 1,
         "status": status,
         "stableId": stable_id,
         "taskClass": task_class,
+        "routeClass": "explicit-astra-v1",
         "model": ASTRA_MODEL if selected else None,
+        "providerFamily": "openai" if selected else None,
         "effort": effort if selected else None,
-        "codexFlags": flags,
+        "codexFlags": (
+            ["--model", ASTRA_MODEL, "-c", f"model_reasoning_effort={effort}"]
+            if selected
+            else []
+        ),
         "selectionBasis": selection_basis,
+        "effortBasis": effort_basis if selected else None,
         "effortEvidence": effort_evidence if selected else None,
+        "economicsObjective": "expected-cost-and-steps-to-accepted-result",
+        "economicsEvidence": (
+            "caller-measured"
+            if selected and effort_evidence and effort_evidence.startswith("measured-")
+            else "migration-evaluation"
+            if selected and effort_evidence == "migration-evaluation"
+            else "objective-insufficiency"
+            if selected and effort_evidence
+            else "policy-default"
+            if selected
+            else "not-evaluated"
+        ),
         "fallback": "none",
         "automaticFanoutLimit": 1,
+        "requiresIndependentReview": selected,
         "authorizing": False,
     }
 
 
-def _effort_evidence_gate(
-    *,
-    task_class: str,
-    requested_effort: str | None,
-    effort: str,
-    effort_evidence: str | None,
-    allow_max_effort: bool,
+def _valid_models(value: Any) -> bool:
+    if isinstance(value, (str, bytes)) or not isinstance(value, Collection):
+        return False
+    try:
+        items = list(value)
+    except (TypeError, ValueError):
+        return False
+    return len(items) <= 128 and all(
+        isinstance(item, str) and MODEL_ID.fullmatch(item) for item in items
+    )
+
+
+def _effort_basis(
+    default: str,
+    requested: str | None,
+    evidence: str | None,
+    max_approved: bool,
 ) -> tuple[str | None, str | None]:
-    if effort_evidence is not None and effort_evidence not in KNOWN_EVIDENCE:
+    effort = requested or default
+    if effort not in EFFORTS:
+        return "E_ASTRA_V1_EFFORT_UNSUPPORTED", None
+    if evidence is not None and evidence not in KNOWN_EVIDENCE:
         return "E_ASTRA_V1_EFFORT_EVIDENCE_INVALID", None
-    if requested_effort is None:
-        if effort_evidence is not None:
-            return "E_ASTRA_V1_EFFORT_EVIDENCE_INVALID", None
-        return None, "task-default"
-    if effort == "low":
+    if requested is None:
         return (
-            (None, effort_evidence)
-            if effort_evidence in LOW_EVIDENCE
-            else ("E_ASTRA_V1_EFFORT_EVIDENCE_REQUIRED", None)
-        )
-    if effort == "medium":
-        if effort_evidence is not None:
-            return "E_ASTRA_V1_EFFORT_EVIDENCE_INVALID", None
-        return None, "explicit-medium"
-    if effort == "high":
-        if task_class == "critical-recovery" and effort_evidence is None:
-            return None, "critical-recovery-default"
-        return (
-            (None, effort_evidence)
-            if effort_evidence in HIGH_EVIDENCE
-            else ("E_ASTRA_V1_EFFORT_EVIDENCE_REQUIRED", None)
-        )
-    if effort == "xhigh":
-        return (
-            (None, effort_evidence)
-            if effort_evidence in XHIGH_EVIDENCE
-            else ("E_ASTRA_V1_EFFORT_EVIDENCE_REQUIRED", None)
+            ("E_ASTRA_V1_EFFORT_EVIDENCE_INVALID", None)
+            if evidence is not None
+            else (None, f"task-default-{default}")
         )
     if effort == "max":
-        if not allow_max_effort:
-            return "E_ASTRA_V1_MAX_APPROVAL_REQUIRED", None
-        if effort_evidence is not None:
+        if evidence is not None:
             return "E_ASTRA_V1_EFFORT_EVIDENCE_INVALID", None
-        return None, "explicit-human-approval"
-    return "E_ASTRA_V1_EFFORT_UNSUPPORTED", None
+        return (
+            (None, "explicit-human-approval")
+            if max_approved
+            else ("E_ASTRA_V1_MAX_APPROVAL_REQUIRED", None)
+        )
+    if effort == default:
+        return (
+            ("E_ASTRA_V1_EFFORT_EVIDENCE_INVALID", None)
+            if evidence is not None
+            else (None, f"explicit-default-{effort}")
+        )
+    if EFFORT_RANK[effort] < EFFORT_RANK[default]:
+        allowed = DOWNSHIFT_EVIDENCE
+    else:
+        allowed = UPSHIFT_EVIDENCE.get(effort, set())
+    return (
+        (None, evidence)
+        if evidence in allowed
+        else ("E_ASTRA_V1_EFFORT_EVIDENCE_REQUIRED", None)
+    )
 
 
 def resolve_v1_astra_route(
     *,
     task_class: str,
-    available_models: set[str],
+    available_models: Collection[str],
     requested_effort: str | None = None,
     effort_evidence: str | None = None,
     allow_max_effort: bool = False,
     requested_fanout: int = 1,
 ) -> dict[str, Any]:
-    """Resolve one explicit Astra overlay while leaving legacy V1 routing unchanged."""
+    """Return one nonauthorizing Astra route or a typed non-success decision."""
 
-    if task_class not in TASK_DEFAULT_EFFORT:
-        return _result(
-            status="not-applicable",
-            stable_id="E_ASTRA_V1_ROUTE_NOT_APPLICABLE",
-            task_class=task_class,
-            effort=None,
+    valid = (
+        isinstance(task_class, str)
+        and 0 < len(task_class) <= 128
+        and "\x00" not in task_class
+        and _valid_models(available_models)
+        and (
+            requested_effort is None
+            or isinstance(requested_effort, str)
+            and 0 < len(requested_effort) <= 32
+            and "\x00" not in requested_effort
+        )
+        and (
+            effort_evidence is None
+            or isinstance(effort_evidence, str)
+            and 0 < len(effort_evidence) <= 128
+            and "\x00" not in effort_evidence
+        )
+        and type(allow_max_effort) is bool
+        and type(requested_fanout) is int
+    )
+    if not valid:
+        safe_task = task_class if isinstance(task_class, str) else ""
+        return _decision(
+            "denied",
+            "E_ASTRA_V1_REQUEST_INVALID",
+            safe_task[:128],
+            selection_basis="request-denial",
+        )
+    if task_class not in TASK_DEFAULTS:
+        return _decision(
+            "not-applicable",
+            "E_ASTRA_V1_ROUTE_NOT_APPLICABLE",
+            task_class,
             selection_basis="legacy-v1-routing",
         )
-    if type(requested_fanout) is not int or requested_fanout != 1:
-        return _result(
-            status="denied",
-            stable_id="E_ASTRA_V1_FANOUT_LIMIT",
-            task_class=task_class,
-            effort=None,
+    if requested_fanout != 1:
+        return _decision(
+            "denied",
+            "E_ASTRA_V1_FANOUT_LIMIT",
+            task_class,
             selection_basis="policy-denial",
         )
-    if ASTRA_MODEL not in available_models:
-        return _result(
-            status="unavailable",
-            stable_id="E_ASTRA_V1_UNAVAILABLE",
-            task_class=task_class,
-            effort=None,
+    if ASTRA_MODEL not in set(available_models):
+        return _decision(
+            "unavailable",
+            "E_ASTRA_V1_UNAVAILABLE",
+            task_class,
             selection_basis="runtime-availability",
         )
 
-    effort = requested_effort or TASK_DEFAULT_EFFORT[task_class]
-    if effort not in SUPPORTED_EFFORTS:
-        return _result(
-            status="denied",
-            stable_id="E_ASTRA_V1_EFFORT_UNSUPPORTED",
-            task_class=task_class,
-            effort=None,
-            selection_basis="policy-denial",
-        )
-    stable_id, accepted_evidence = _effort_evidence_gate(
-        task_class=task_class,
-        requested_effort=requested_effort,
-        effort=effort,
-        effort_evidence=effort_evidence,
-        allow_max_effort=allow_max_effort,
+    default = TASK_DEFAULTS[task_class]
+    effort = requested_effort or default
+    stable_id, basis = _effort_basis(
+        default, requested_effort, effort_evidence, allow_max_effort
     )
-    if stable_id is not None:
-        return _result(
-            status="denied",
-            stable_id=stable_id,
-            task_class=task_class,
-            effort=None,
-            selection_basis="policy-denial",
+    if stable_id:
+        return _decision(
+            "denied", stable_id, task_class, selection_basis="policy-denial"
         )
-    return _result(
-        status="selected",
-        stable_id=None,
-        task_class=task_class,
+    return _decision(
+        "selected",
+        None,
+        task_class,
         effort=effort,
-        selection_basis=(
-            "explicit-effort" if requested_effort is not None else "task-default"
-        ),
-        effort_evidence=accepted_evidence,
+        selection_basis="explicit-effort" if requested_effort else "task-default",
+        effort_basis=basis,
+        effort_evidence=effort_evidence,
     )
 
 
@@ -184,10 +223,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--allow-max-effort", action="store_true")
     parser.add_argument("--fanout", type=int, default=1)
     args = parser.parse_args(argv)
-
     result = resolve_v1_astra_route(
         task_class=args.task_class,
-        available_models=set(args.available_model),
+        available_models=tuple(args.available_model),
         requested_effort=args.effort,
         effort_evidence=args.effort_evidence,
         allow_max_effort=args.allow_max_effort,

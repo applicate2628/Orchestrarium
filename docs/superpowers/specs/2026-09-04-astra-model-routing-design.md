@@ -2,26 +2,60 @@
 
 ## Goal
 
-Deliver an immediately usable, additive Orchestrarium 1.x Astra route without changing pinned native-role defaults, then define a full Version 2 model-selection contract that treats model capability, reasoning effort, route economics, availability, safety, and fallback as separate dimensions.
+Deliver an immediately usable, additive Orchestrarium Version 1 Astra route without changing pinned native-role defaults, then define a separate Version 2 model-selection contract that treats model capability, reasoning effort, complete-route economics, availability, safety, fallback, and review authority as separate dimensions.
 
-## V1 architecture
+## Version 1 architecture
 
-V1 adds one new provider-neutral canonical skill tree under `src.codex`; the existing installer projects that tree into the Claude Code pack. Its pure resolver accepts an admitted Astra-eligible task class, observed model availability, requested effort, stable effort evidence, maximum-effort approval, and fan-out. It returns exact Codex launch flags or a typed non-success decision. It neither launches a provider nor mutates existing configuration.
+Version 1 adds one provider-neutral canonical skill under `src.codex/skills/astra-routing/`; the existing installer projects canonical Codex skill trees to Claude Code. Its pure resolver accepts an admitted task class, observed model inventory, requested effort, stable effort evidence, maximum-effort approval, and requested fan-out. It returns exact Codex launch flags or a typed non-success decision. It neither launches a provider nor mutates operator configuration.
 
-The V1 change deliberately does not edit `role-routing-policy.v1.json`, native role TOML, or the role manifest. Those objects are pinned into the create-only installer migration contract; changing them would turn a quick feature into a broad installer migration.
-
-## V2 architecture
-
-V2 owns three versioned files: model catalog, role-routing policy, and dated economics snapshot. A pure Python resolver validates exact schemas, applies hard admissibility gates first, and may minimize expected cost per accepted result only when the caller supplies a complete comparable candidate set. No model is selected by a single scalar score that could override security or role constraints.
+The Version 1 change does not edit `role-routing-policy.v1.json`, native role TOML, or the role manifest. Those objects are pinned into the create-only installer migration contract; changing them would turn a targeted upgrade into a broad migration.
 
 ## Effort semantics
 
-Effort is profile-local. Astra supports `low`, `medium`, `high`, `xhigh`, and `max`; Terra, Sol, and Luna also support `none`. A higher effort on a lower capability model does not automatically dominate a lower effort on a higher capability model. Mathematical and connected scientific routes start at Astra `medium`; `low`, `high`, and `xhigh` require stable evidence matched to their purpose, while `max` requires explicit approval.
+The exact profile is the pair `model + effort`.
+
+- mathematics, connected scientific work, and cross-system synthesis start at Astra `medium`;
+- critical recovery starts at Astra `high`;
+- an effort below the task default requires evaluation or measured-sufficient evidence;
+- `high` above a medium default requires objective-failure or measured-gain evidence;
+- `xhigh` requires evidence from high;
+- `max` requires explicit human approval;
+- `none` is forbidden for Astra.
+
+Published maximum benchmark results are not treated as medium-effort measurements. The route may be selected because Astra is expected to reduce total calls, output tokens, tool steps, retries, rework, or latency, but savings are recorded as measured or forecast evidence rather than asserted from model identity alone.
+
+## Version 2 architecture
+
+Version 2 owns:
+
+1. a strict model catalog;
+2. a strict role/task routing policy;
+3. a pure resolver and command-line interface;
+4. a route-estimate schema that prices each model request separately;
+5. a migration map preserving old Version 1 semantics.
+
+Hard admissibility gates run before optimization. Automatic economics ranking requires the exact comparable candidate set declared by the task policy. The resolver rejects stale pricing, incomplete estimates, unknown availability, forbidden effort, unapproved maximum effort, unsafe critical-capability use, and Astra fan-out greater than one.
+
+After hard gates and acceptance floors, selection is deterministic and transparent. It minimizes expected cost to an accepted result, then expected model calls, rework cycles, review cycles, tool calls, elapsed seconds, and finally profile name. The decision returns the complete comparison evidence and remains nonauthorizing.
+
+## Migration semantics
+
+The old Version 1 `apex-max` profile is Sol `max` despite its name. Its Version 2 migration alias therefore maps to `frontier-max`, not Astra `max`. Likewise, the old `pinned-top-pro` operator meaning remains a frontier/Sol policy until the operator explicitly selects an Astra-aware policy.
 
 ## Safety and independence
 
-Astra may reduce iterations but never collapses author/reviewer or human publication gates. Sol and Astra share the OpenAI evidence-independence group. Critical security use requires explicit safety admission. Missing availability or evidence fails closed, and fallback is explicit.
+Astra may compress intellectual iteration, but it never removes independent review, security, QA, or human publication approval. Sol and Astra share the OpenAI evidence-independence group. Critical-security use of a critical-capability model requires explicit safety approval.
 
-## Testing
+## Pull-request structure
 
-Tests cover exact provider parity for the V1 skill, effort defaults and escalation, unavailable/no-fallback behavior, fan-out, strict V2 schema handling, mechanical isolation, complete route economics, long-context pricing, safety, maximum effort, explicit fallback, and independence groups.
+- Version 1 PR: based on the current PR 4 hotfix branch.
+- Version 2 PR: based on the final Version 1 branch.
+- PR 5 policy overlays remain independent.
+- No GitHub Actions workflow is added or used.
+
+## Terms and Abbreviations
+
+- **API — Application Programming Interface:** the programmatic model-access surface.
+- **CLI — Command-Line Interface:** the terminal interface for the resolver.
+- **QA — Quality Assurance:** independent implementation verification.
+- **TOML — Tom's Obvious Minimal Language:** the native-role configuration format.
