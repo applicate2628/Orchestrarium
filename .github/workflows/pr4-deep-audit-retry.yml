@@ -1,0 +1,84 @@
+name: Retry deep-audit fixes to PR 4
+
+on:
+  push:
+    branches: [automation/pr4-p2-push-20260903-14fc38c4]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pr4-deep-audit-retry
+  cancel-in-progress: false
+
+jobs:
+  fix:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      EXPECTED_HEAD: d30398ce559265bd79b12a021bddaea373f251fa
+      TARGET_BRANCH: hotfix/1x-final-followups-20260901
+    steps:
+      - name: Check out automation payload
+        uses: actions/checkout@v4
+        with:
+          ref: automation/pr4-p2-push-20260903-14fc38c4
+          path: automation
+          persist-credentials: false
+      - name: Check out exact reviewed head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.EXPECTED_HEAD }}
+          fetch-depth: 0
+          path: target
+      - name: Verify target and install pytest
+        working-directory: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "refs/heads/${TARGET_BRANCH}"
+          test "$(git rev-parse FETCH_HEAD)" = "${EXPECTED_HEAD}"
+          python -m pip install --disable-pip-version-check pytest
+          python -m py_compile ../automation/.github/pr4-deep-audit-fix.py
+      - name: Red phase
+        working-directory: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          python ../automation/.github/pr4-deep-audit-fix.py tests
+          set +e
+          python -m pytest -q tests/test_github_pr_review_bot_skill_contract.py::test_uncorrelated_clean_result_refuses_overlapping_same_head_runs >/tmp/red-review 2>&1; a=$?
+          python -m pytest -q tests/test_publication_safety_scanner.py::TestPublicationSafetyScannerRangeMode::test_range_remote_probe_binding_preserves_inherited_command_scope_config >/tmp/red-scanner 2>&1; b=$?
+          set -e
+          test "$a" -ne 0
+          test "$b" -ne 0
+          git reset --hard "${EXPECTED_HEAD}"
+          git clean -fdx
+      - name: Green phase
+        working-directory: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          python ../automation/.github/pr4-deep-audit-fix.py full
+          git diff --check
+          cmp --silent src.codex/skills/github-pr-review-bot/SKILL.md src.claude/skills/github-pr-review-bot/SKILL.md
+          cmp --silent scripts/universal-hooks/scripts/check-publication-safety.py src.codex/skills/lead/scripts/check-publication-safety.py
+          cmp --silent scripts/universal-hooks/scripts/check-publication-safety.py src.claude/agents/scripts/check-publication-safety.py
+          python -m pytest -q tests/test_github_pr_review_bot_skill_contract.py
+          python -m pytest -q tests/test_publication_safety_scanner.py -k 'remote_probe or remote_ref'
+          python src.codex/skills/lead/scripts/validate-skill-pack.py
+          python src.claude/agents/scripts/validate-skill-pack.py
+          git diff --check
+      - name: Commit and push without force
+        working-directory: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "refs/heads/${TARGET_BRANCH}"
+          test "$(git rev-parse FETCH_HEAD)" = "${EXPECTED_HEAD}"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add --all
+          git diff --cached --check
+          git commit -m 'fix: close deep-audit attribution and probe gaps'
+          git push origin "HEAD:refs/heads/${TARGET_BRANCH}"
