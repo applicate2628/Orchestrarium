@@ -1,98 +1,53 @@
 #!/usr/bin/env python3
-"""Resolve one provider-neutral Orchestrarium Version 1 worker route."""
+"""Resolve one provider-neutral Orchestrarium Version 1 worker route.
+
+This compatibility facade preserves the reviewed Version 1 selection core while
+adding request identity, launch-boundary, native-host, JSON-shape, and safe-file
+hardening. It remains a pure resolver and never launches a provider.
+"""
 
 from __future__ import annotations
 
 import argparse
+import hashlib
+import importlib.util
 import json
 import os
-import re
 import stat
 import sys
 from pathlib import Path
 from typing import Any
 
-REQUEST_FIELDS = frozenset(
-    {
-        "schemaVersion",
-        "dispatchId",
-        "policySnapshotId",
-        "leadHost",
-        "assignedRole",
-        "scopeId",
-        "capabilitySlot",
-        "mutationClass",
-        "requiredTools",
-        "excludedProviderFamilies",
-        "artifactContract",
-        "gateContract",
-        "candidates",
-    }
+_BASE_PATH = Path(__file__).with_name("_resolver_base.py")
+_BASE_SPEC = importlib.util.spec_from_file_location(
+    "_orchestrarium_lead_worker_routing_v1_base", _BASE_PATH
 )
-CANDIDATE_FIELDS = frozenset(
-    {
-        "candidateId",
-        "provider",
-        "runtime",
-        "providerFamily",
-        "model",
-        "effort",
-        "priority",
-        "availability",
-        "maxMutationClass",
-        "capabilities",
-        "tools",
-        "isolatedFromLead",
-        "maxDelegationDepth",
-        "authorizing",
-        "evidenceSnapshotId",
-    }
-)
-LEAD_HOSTS = frozenset({"codex", "claude"})
-V1_PROVIDERS = frozenset({"codex", "claude", "kimi", "grok"})
-PROVIDER_FAMILIES = {
-    "codex": "openai",
-    "claude": "anthropic",
-    "kimi": "moonshot",
-    "grok": "xai",
-}
-PROVIDER_RUNTIMES = {
-    "codex": frozenset({"codex-cli", "codex-native"}),
-    "claude": frozenset({"claude-cli", "claude-native"}),
-    "kimi": frozenset({"kimi-cli"}),
-    "grok": frozenset({"grok-cli"}),
-}
-MUTATION_CLASSES = ("read-only", "bounded-write", "workspace-write")
-MUTATION_RANK = {name: index for index, name in enumerate(MUTATION_CLASSES)}
-PROVIDER_MUTATION_CEILING = {
-    "codex": "workspace-write",
-    "claude": "workspace-write",
-    "kimi": "read-only",
-    "grok": "read-only",
-}
-AVAILABILITY_IDS = {
-    "not-configured": "E_LEAD_WORKER_V1_CANDIDATE_NOT_CONFIGURED",
-    "not-entitled": "E_LEAD_WORKER_V1_CANDIDATE_NOT_ENTITLED",
-    "quota-exhausted": "E_LEAD_WORKER_V1_CANDIDATE_QUOTA_EXHAUSTED",
-    "temporary-transport-failure": "E_LEAD_WORKER_V1_CANDIDATE_TRANSPORT_FAILURE",
-    "auth-invalid": "E_LEAD_WORKER_V1_CANDIDATE_AUTH_INVALID",
-    "contract-violation": "E_LEAD_WORKER_V1_CANDIDATE_CONTRACT_VIOLATION",
-    "unavailable": "E_LEAD_WORKER_V1_CANDIDATE_UNAVAILABLE",
-}
-AVAILABILITY_FAILURE_CLASS = {
-    "not-configured": "availability-fallback",
-    "not-entitled": "availability-fallback",
-    "quota-exhausted": "availability-fallback",
-    "temporary-transport-failure": "availability-fallback",
-    "unavailable": "availability-fallback",
-    "auth-invalid": "provider-hard-failure",
-    "contract-violation": "provider-hard-failure",
-}
-AVAILABILITIES = frozenset({"available", *AVAILABILITY_IDS})
-TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}\Z", re.ASCII)
-MAX_CANDIDATES = 128
-MAX_PRIORITY = 2**31 - 1
-MAX_REQUEST_BYTES = 1024 * 1024
+if _BASE_SPEC is None or _BASE_SPEC.loader is None:
+    raise RuntimeError(f"cannot load {_BASE_PATH}")
+_BASE = importlib.util.module_from_spec(_BASE_SPEC)
+sys.modules[_BASE_SPEC.name] = _BASE
+_BASE_SPEC.loader.exec_module(_BASE)
+
+REQUEST_FIELDS = _BASE.REQUEST_FIELDS
+CANDIDATE_FIELDS = _BASE.CANDIDATE_FIELDS
+LEAD_HOSTS = _BASE.LEAD_HOSTS
+V1_PROVIDERS = _BASE.V1_PROVIDERS
+PROVIDER_FAMILIES = _BASE.PROVIDER_FAMILIES
+PROVIDER_RUNTIMES = _BASE.PROVIDER_RUNTIMES
+MUTATION_CLASSES = _BASE.MUTATION_CLASSES
+MUTATION_RANK = _BASE.MUTATION_RANK
+PROVIDER_MUTATION_CEILING = _BASE.PROVIDER_MUTATION_CEILING
+AVAILABILITY_IDS = _BASE.AVAILABILITY_IDS
+AVAILABILITY_FAILURE_CLASS = _BASE.AVAILABILITY_FAILURE_CLASS
+AVAILABILITIES = _BASE.AVAILABILITIES
+TOKEN = _BASE.TOKEN
+MAX_CANDIDATES = _BASE.MAX_CANDIDATES
+MAX_PRIORITY = _BASE.MAX_PRIORITY
+MAX_REQUEST_BYTES = _BASE.MAX_REQUEST_BYTES
+
+MAX_JSON_DEPTH = 32
+MAX_JSON_NODES = 8192
+REQUEST_FINGERPRINT_ALGORITHM = "sha256-canonical-json-v1"
 
 
 class DuplicateJsonKeyError(ValueError):
@@ -107,314 +62,105 @@ class RequestTooLargeError(ValueError):
     """Raised when the request exceeds the fixed byte budget."""
 
 
-def _request_context(request: object) -> dict[str, object | None]:
-    fields = (
-        "dispatchId",
-        "policySnapshotId",
-        "leadHost",
-        "assignedRole",
-        "scopeId",
-        "capabilitySlot",
-        "mutationClass",
-        "artifactContract",
-        "gateContract",
-    )
-    source = request if isinstance(request, dict) else {}
-    context: dict[str, object | None] = {}
-    for field in fields:
-        value = source.get(field)
-        context[field] = value if _is_token(value) else None
-    tools = source.get("requiredTools")
-    excluded = source.get("excludedProviderFamilies")
-    context["requiredTools"] = sorted(tools) if _valid_string_list(tools) else []
-    context["excludedProviderFamilies"] = (
-        sorted(excluded) if _valid_string_list(excluded) else []
-    )
-    return context
+class InvalidJsonStructureError(ValueError):
+    """Raised when JSON uses non-standard constants or exceeds shape limits."""
 
 
-def _decision(
+def _request_fingerprint(request: dict[str, object]) -> str:
+    canonical = json.dumps(
+        request,
+        ensure_ascii=True,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("ascii")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def _decorate_decision(
+    decision: dict[str, object],
     *,
-    status: str,
-    stable_id: str | None,
-    context: dict[str, object | None],
-    selected_candidate: dict[str, object] | None = None,
-    fallback_events: list[dict[str, object]] | None = None,
-    rejections: list[dict[str, str]] | None = None,
-    selection_basis: str,
+    request_fingerprint: str | None,
 ) -> dict[str, object]:
-    selected = status == "selected"
-    events = fallback_events or []
-    hard_failure = any(
-        event.get("failureClass") == "provider-hard-failure" for event in events
-    )
-    return {
-        "schemaVersion": 1,
-        "status": status,
-        "stableId": stable_id,
-        "dispatchId": context["dispatchId"],
-        "policySnapshotId": context["policySnapshotId"],
-        "leadHost": context["leadHost"],
-        "assignedRole": context["assignedRole"],
-        "scopeId": context["scopeId"],
-        "capabilitySlot": context["capabilitySlot"],
-        "mutationClass": context["mutationClass"],
-        "requiredTools": context["requiredTools"],
-        "excludedProviderFamilies": context["excludedProviderFamilies"],
-        "artifactContract": context["artifactContract"],
-        "gateContract": context["gateContract"],
-        "selectedCandidate": selected_candidate if selected else None,
-        "fallbackApplied": selected and bool(events),
-        "fallbackEvents": events,
-        "rejections": rejections or [],
-        "selectionBasis": selection_basis,
-        "fallbackPolicy": "explicit-candidate-order",
-        "hardFailureObserved": hard_failure,
-        "requiresOperatorAttention": hard_failure,
-        "requiresLeadVerification": selected,
-        "maxDelegationDepth": 0,
-        "authorizing": False,
-    }
+    selected = decision.get("status") == "selected"
+    result = dict(decision)
+    result["requestFingerprintAlgorithm"] = REQUEST_FINGERPRINT_ALGORITHM
+    result["requestFingerprint"] = request_fingerprint
+    result["requiresAdapterAdmission"] = selected
+    result["executionAuthorized"] = False
+    return result
 
 
-def _invalid_request(request: object, stable_id: str) -> dict[str, object]:
-    return _decision(
-        status="denied",
-        stable_id=stable_id,
-        context=_request_context(request),
-        selection_basis="request-denial",
-    )
+def _prepare_selection_request(
+    request: dict[str, object],
+) -> tuple[dict[str, object], set[str]]:
+    """Return a base-compatible copy plus candidates needing a typed rejection."""
+
+    prepared = dict(request)
+    prepared_candidates: list[dict[str, object]] = []
+    foreign_native: set[str] = set()
+    lead_host = request.get("leadHost")
+    candidates = request.get("candidates")
+    if not isinstance(candidates, list):
+        return prepared, foreign_native
+
+    for candidate_value in candidates:
+        if not isinstance(candidate_value, dict):
+            prepared_candidates.append(candidate_value)
+            continue
+        candidate = dict(candidate_value)
+        provider = candidate.get("provider")
+        runtime = candidate.get("runtime")
+        candidate_id = candidate.get("candidateId")
+        if (
+            isinstance(provider, str)
+            and isinstance(runtime, str)
+            and isinstance(candidate_id, str)
+            and runtime.endswith("-native")
+            and provider != lead_host
+        ):
+            foreign_native.add(candidate_id)
+            candidate["runtime"] = f"{provider}-foreign-native-denied"
+        prepared_candidates.append(candidate)
+    prepared["candidates"] = prepared_candidates
+    return prepared, foreign_native
 
 
-def _is_token(value: object) -> bool:
-    return isinstance(value, str) and bool(TOKEN.fullmatch(value))
-
-
-def _valid_string_list(value: object, *, maximum: int = 128) -> bool:
-    if not isinstance(value, list) or len(value) > maximum:
-        return False
-    if not all(_is_token(item) for item in value):
-        return False
-    return len(value) == len(set(value))
-
-
-def _valid_candidate(candidate: object) -> bool:
-    if not isinstance(candidate, dict) or set(candidate) != CANDIDATE_FIELDS:
-        return False
-    if not all(
-        _is_token(candidate[field])
-        for field in (
-            "candidateId",
-            "provider",
-            "runtime",
-            "providerFamily",
-            "model",
-            "effort",
-            "evidenceSnapshotId",
-        )
-    ):
-        return False
-    priority = candidate["priority"]
-    if type(priority) is not int or not 0 <= priority <= MAX_PRIORITY:
-        return False
-    if (
-        not _is_token(candidate["availability"])
-        or candidate["availability"] not in AVAILABILITIES
-    ):
-        return False
-    if (
-        not _is_token(candidate["maxMutationClass"])
-        or candidate["maxMutationClass"] not in MUTATION_RANK
-    ):
-        return False
-    if not _valid_string_list(candidate["capabilities"]):
-        return False
-    if not _valid_string_list(candidate["tools"]):
-        return False
-    if type(candidate["isolatedFromLead"]) is not bool:
-        return False
-    delegation_depth = candidate["maxDelegationDepth"]
-    if type(delegation_depth) is not int or delegation_depth < 0:
-        return False
-    return type(candidate["authorizing"]) is bool
-
-
-def _normalize_candidate(candidate: dict[str, object]) -> dict[str, object]:
-    return {
-        "candidateId": candidate["candidateId"],
-        "provider": candidate["provider"],
-        "runtime": candidate["runtime"],
-        "providerFamily": candidate["providerFamily"],
-        "model": candidate["model"],
-        "effort": candidate["effort"],
-        "priority": candidate["priority"],
-        "availability": candidate["availability"],
-        "maxMutationClass": candidate["maxMutationClass"],
-        "capabilities": sorted(candidate["capabilities"]),
-        "tools": sorted(candidate["tools"]),
-        "isolatedFromLead": candidate["isolatedFromLead"],
-        "maxDelegationDepth": candidate["maxDelegationDepth"],
-        "authorizing": candidate["authorizing"],
-        "evidenceSnapshotId": candidate["evidenceSnapshotId"],
-    }
-
-
-def _validate_request(request: object) -> bool:
-    if not isinstance(request, dict) or set(request) != REQUEST_FIELDS:
-        return False
-    if type(request["schemaVersion"]) is not int or request["schemaVersion"] != 1:
-        return False
-    if not all(
-        _is_token(request[field])
-        for field in (
-            "dispatchId",
-            "policySnapshotId",
-            "leadHost",
-            "assignedRole",
-            "scopeId",
-            "capabilitySlot",
-            "artifactContract",
-            "gateContract",
-        )
-    ):
-        return False
-    if (
-        not _is_token(request["mutationClass"])
-        or request["mutationClass"] not in MUTATION_RANK
-    ):
-        return False
-    if not _valid_string_list(request["requiredTools"]):
-        return False
-    if not _valid_string_list(request["excludedProviderFamilies"]):
-        return False
-    candidates = request["candidates"]
-    if not isinstance(candidates, list) or len(candidates) > MAX_CANDIDATES:
-        return False
-    if not all(_valid_candidate(candidate) for candidate in candidates):
-        return False
-    identities = [candidate["candidateId"] for candidate in candidates]
-    return len(identities) == len(set(identities))
-
-
-def _policy_rejection(
-    candidate: dict[str, object],
-    *,
-    lead_host: str,
-    capability_slot: str,
-    mutation_class: str,
-    required_tools: set[str],
-    excluded_provider_families: set[str],
-) -> str | None:
-    provider = candidate["provider"]
-    if provider not in V1_PROVIDERS:
-        return "E_LEAD_WORKER_V1_PROVIDER_NOT_ADMITTED"
-    if candidate["providerFamily"] != PROVIDER_FAMILIES[provider]:
-        return "E_LEAD_WORKER_V1_PROVIDER_FAMILY_MISMATCH"
-    if candidate["runtime"] not in PROVIDER_RUNTIMES[provider]:
-        return "E_LEAD_WORKER_V1_PROVIDER_RUNTIME_MISMATCH"
-    if candidate["providerFamily"] in excluded_provider_families:
-        return "E_LEAD_WORKER_V1_INDEPENDENCE_REQUIRED"
-    if candidate["authorizing"]:
-        return "E_LEAD_WORKER_V1_WORKER_AUTHORITY_FORBIDDEN"
-    if candidate["maxDelegationDepth"] != 0:
-        return "E_LEAD_WORKER_V1_RECURSIVE_DELEGATION_FORBIDDEN"
-    if capability_slot not in candidate["capabilities"]:
-        return "E_LEAD_WORKER_V1_CAPABILITY_MISSING"
-
-    declared_mutation = candidate["maxMutationClass"]
-    provider_ceiling = PROVIDER_MUTATION_CEILING[provider]
-    if MUTATION_RANK[declared_mutation] > MUTATION_RANK[provider_ceiling]:
-        return "E_LEAD_WORKER_V1_PROVIDER_MUTATION_CEILING"
-    if MUTATION_RANK[declared_mutation] < MUTATION_RANK[mutation_class]:
-        return "E_LEAD_WORKER_V1_MUTATION_NOT_ADMITTED"
-    if not required_tools.issubset(set(candidate["tools"])):
-        return "E_LEAD_WORKER_V1_TOOL_MISSING"
-    if provider == lead_host and not candidate["isolatedFromLead"]:
-        return "E_LEAD_WORKER_V1_SAME_HOST_NOT_ISOLATED"
-    return None
+def _restore_typed_native_rejections(
+    decision: dict[str, object],
+    foreign_native: set[str],
+) -> None:
+    rejections = decision.get("rejections")
+    if not isinstance(rejections, list):
+        return
+    for rejection in rejections:
+        if (
+            isinstance(rejection, dict)
+            and rejection.get("candidateId") in foreign_native
+            and rejection.get("stableId")
+            == "E_LEAD_WORKER_V1_PROVIDER_RUNTIME_MISMATCH"
+        ):
+            rejection["stableId"] = (
+                "E_LEAD_WORKER_V1_NATIVE_RUNTIME_HOST_MISMATCH"
+            )
 
 
 def resolve_v1_worker_route(request: dict[str, object]) -> dict[str, object]:
-    """Return one exact nonauthorizing worker route or a typed decision."""
+    """Return one exact nonauthorizing candidate route or a typed decision."""
 
-    context = _request_context(request)
-    if not _validate_request(request):
-        return _invalid_request(request, "E_LEAD_WORKER_V1_REQUEST_INVALID")
-
-    lead_host = request["leadHost"]
-    capability_slot = request["capabilitySlot"]
-    mutation_class = request["mutationClass"]
-    if lead_host not in LEAD_HOSTS:
-        return _decision(
-            status="denied",
-            stable_id="E_LEAD_WORKER_V1_LEAD_HOST_UNSUPPORTED",
-            context=context,
-            selection_basis="lead-host-denial",
+    if not _BASE._validate_request(request):
+        return _decorate_decision(
+            _BASE.resolve_v1_worker_route(request),
+            request_fingerprint=None,
         )
 
-    candidates = sorted(
-        (_normalize_candidate(candidate) for candidate in request["candidates"]),
-        key=lambda item: (item["priority"], item["candidateId"]),
-    )
-    required_tools = set(request["requiredTools"])
-    excluded_provider_families = set(request["excludedProviderFamilies"])
-    rejections: list[dict[str, str]] = []
-    fallback_events: list[dict[str, object]] = []
-
-    for candidate in candidates:
-        rejection = _policy_rejection(
-            candidate,
-            lead_host=lead_host,
-            capability_slot=capability_slot,
-            mutation_class=mutation_class,
-            required_tools=required_tools,
-            excluded_provider_families=excluded_provider_families,
-        )
-        if rejection is not None:
-            rejections.append(
-                {"candidateId": str(candidate["candidateId"]), "stableId": rejection}
-            )
-            continue
-
-        availability = candidate["availability"]
-        if availability != "available":
-            fallback_events.append(
-                {
-                    "candidateId": candidate["candidateId"],
-                    "provider": candidate["provider"],
-                    "evidenceSnapshotId": candidate["evidenceSnapshotId"],
-                    "availability": availability,
-                    "stableId": AVAILABILITY_IDS[availability],
-                    "failureClass": AVAILABILITY_FAILURE_CLASS[availability],
-                }
-            )
-            continue
-
-        return _decision(
-            status="selected",
-            stable_id=None,
-            context=context,
-            selected_candidate=candidate,
-            fallback_events=fallback_events,
-            rejections=rejections,
-            selection_basis="explicit-priority-available-admitted",
-        )
-
-    if fallback_events:
-        return _decision(
-            status="unavailable",
-            stable_id="E_LEAD_WORKER_V1_NO_AVAILABLE_CANDIDATE",
-            context=context,
-            fallback_events=fallback_events,
-            rejections=rejections,
-            selection_basis="explicit-candidates-unavailable",
-        )
-    return _decision(
-        status="denied",
-        stable_id="E_LEAD_WORKER_V1_NO_ADMITTED_CANDIDATE",
-        context=context,
-        rejections=rejections,
-        selection_basis="explicit-candidates-policy-denial",
+    request_fingerprint = _request_fingerprint(request)
+    prepared, foreign_native = _prepare_selection_request(request)
+    decision = _BASE.resolve_v1_worker_route(prepared)
+    _restore_typed_native_rejections(decision, foreign_native)
+    return _decorate_decision(
+        decision,
+        request_fingerprint=request_fingerprint,
     )
 
 
@@ -428,7 +174,30 @@ def _strict_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 
 
 def _parse_json(text: str) -> object:
-    return json.loads(text, object_pairs_hook=_strict_object)
+    def reject_constant(value: str) -> None:
+        raise InvalidJsonStructureError(value)
+
+    try:
+        parsed = json.loads(
+            text,
+            object_pairs_hook=_strict_object,
+            parse_constant=reject_constant,
+        )
+    except RecursionError as exc:
+        raise InvalidJsonStructureError("maximum parser depth exceeded") from exc
+
+    stack: list[tuple[object, int]] = [(parsed, 1)]
+    observed_nodes = 0
+    while stack:
+        value, depth = stack.pop()
+        observed_nodes += 1
+        if depth > MAX_JSON_DEPTH or observed_nodes > MAX_JSON_NODES:
+            raise InvalidJsonStructureError("request JSON shape exceeds limits")
+        if isinstance(value, dict):
+            stack.extend((item, depth + 1) for item in value.values())
+        elif isinstance(value, list):
+            stack.extend((item, depth + 1) for item in value)
+    return parsed
 
 
 def _is_reparse_metadata(metadata: os.stat_result) -> bool:
@@ -438,40 +207,106 @@ def _is_reparse_metadata(metadata: os.stat_result) -> bool:
     )
 
 
-def _file_signature(metadata: os.stat_result) -> tuple[int, int, int, int, int]:
-    return (
-        stat.S_IFMT(metadata.st_mode),
+def _entry_signature(metadata: os.stat_result, *, leaf: bool) -> tuple[int, ...]:
+    identity = (
+        metadata.st_mode,
         metadata.st_dev,
         metadata.st_ino,
+        getattr(metadata, "st_file_attributes", 0),
+    )
+    if not leaf:
+        return identity
+    return identity + (
         metadata.st_size,
         getattr(metadata, "st_mtime_ns", 0),
+        getattr(metadata, "st_ctime_ns", 0),
     )
 
 
-def _read_file_bytes(path: Path) -> bytes:
-    try:
-        before = os.lstat(path)
-    except OSError as exc:
-        raise UnsafeRequestFileError(str(path)) from exc
-    if (
-        not stat.S_ISREG(before.st_mode)
-        or stat.S_ISLNK(before.st_mode)
-        or _is_reparse_metadata(before)
-    ):
-        raise UnsafeRequestFileError(str(path))
+def _is_junction(path: Path) -> bool:
+    checker = getattr(os.path, "isjunction", None)
+    return bool(checker and checker(path))
 
-    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_CLOEXEC", 0)
-    flags |= getattr(os, "O_NOFOLLOW", 0)
+
+def _lexical_absolute_chain(path: Path) -> list[Path]:
+    absolute = Path(os.path.abspath(os.fspath(path)))
+    anchor = Path(absolute.anchor)
+    chain = [anchor]
+    cursor = anchor
+    for component in absolute.parts[1:]:
+        cursor /= component
+        chain.append(cursor)
+    return chain
+
+
+def _snapshot_request_path(path: Path) -> list[tuple[Path, tuple[int, ...]]]:
+    chain = _lexical_absolute_chain(path)
+    snapshots: list[tuple[Path, tuple[int, ...]]] = []
+    for index, component in enumerate(chain):
+        try:
+            metadata = os.lstat(component)
+        except OSError as exc:
+            raise UnsafeRequestFileError(str(path)) from exc
+        is_leaf = index == len(chain) - 1
+        if (
+            stat.S_ISLNK(metadata.st_mode)
+            or _is_reparse_metadata(metadata)
+            or _is_junction(component)
+            or (is_leaf and not stat.S_ISREG(metadata.st_mode))
+            or (not is_leaf and not stat.S_ISDIR(metadata.st_mode))
+        ):
+            raise UnsafeRequestFileError(str(path))
+        snapshots.append(
+            (component, _entry_signature(metadata, leaf=is_leaf))
+        )
+    return snapshots
+
+
+def _assert_path_snapshot(
+    snapshots: list[tuple[Path, tuple[int, ...]]],
+    original_path: Path,
+) -> None:
+    for index, (component, expected) in enumerate(snapshots):
+        try:
+            metadata = os.lstat(component)
+        except OSError as exc:
+            raise UnsafeRequestFileError(str(original_path)) from exc
+        is_leaf = index == len(snapshots) - 1
+        if (
+            stat.S_ISLNK(metadata.st_mode)
+            or _is_reparse_metadata(metadata)
+            or _is_junction(component)
+            or _entry_signature(metadata, leaf=is_leaf) != expected
+        ):
+            raise UnsafeRequestFileError(str(original_path))
+
+
+def _read_file_bytes(path: Path) -> bytes:
+    snapshots = _snapshot_request_path(path)
+    absolute_path = snapshots[-1][0]
+    before_signature = snapshots[-1][1]
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_BINARY", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
     descriptor: int | None = None
     try:
-        descriptor = os.open(path, flags)
+        descriptor = os.open(absolute_path, flags)
         opened = os.fstat(descriptor)
-        if not stat.S_ISREG(opened.st_mode) or _file_signature(opened) != _file_signature(before):
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or _entry_signature(opened, leaf=True) != before_signature
+        ):
             raise UnsafeRequestFileError(str(path))
         chunks: list[bytes] = []
         observed = 0
         while observed <= MAX_REQUEST_BYTES:
-            chunk = os.read(descriptor, min(64 * 1024, MAX_REQUEST_BYTES + 1 - observed))
+            chunk = os.read(
+                descriptor,
+                min(64 * 1024, MAX_REQUEST_BYTES + 1 - observed),
+            )
             if not chunk:
                 break
             chunks.append(chunk)
@@ -479,18 +314,13 @@ def _read_file_bytes(path: Path) -> bytes:
         if observed > MAX_REQUEST_BYTES:
             raise RequestTooLargeError(str(path))
         after_opened = os.fstat(descriptor)
-        after_path = os.lstat(path)
-        if (
-            _file_signature(after_opened) != _file_signature(opened)
-            or _file_signature(after_path) != _file_signature(before)
-            or stat.S_ISLNK(after_path.st_mode)
-            or _is_reparse_metadata(after_path)
+        if _entry_signature(after_opened, leaf=True) != _entry_signature(
+            opened, leaf=True
         ):
             raise UnsafeRequestFileError(str(path))
+        _assert_path_snapshot(snapshots, path)
         return b"".join(chunks)
-    except RequestTooLargeError:
-        raise
-    except UnsafeRequestFileError:
+    except (RequestTooLargeError, UnsafeRequestFileError):
         raise
     except OSError as exc:
         raise UnsafeRequestFileError(str(path)) from exc
@@ -516,15 +346,31 @@ def main(argv: list[str] | None = None) -> int:
     try:
         request = _read_request(args.request_file)
     except DuplicateJsonKeyError:
-        result = _invalid_request(
+        result = _BASE._invalid_request(
             {}, "E_LEAD_WORKER_V1_REQUEST_JSON_DUPLICATE_KEY"
         )
+        result = _decorate_decision(result, request_fingerprint=None)
     except UnsafeRequestFileError:
-        result = _invalid_request({}, "E_LEAD_WORKER_V1_REQUEST_FILE_UNSAFE")
+        result = _decorate_decision(
+            _BASE._invalid_request({}, "E_LEAD_WORKER_V1_REQUEST_FILE_UNSAFE"),
+            request_fingerprint=None,
+        )
     except RequestTooLargeError:
-        result = _invalid_request({}, "E_LEAD_WORKER_V1_REQUEST_TOO_LARGE")
-    except (UnicodeError, json.JSONDecodeError, ValueError):
-        result = _invalid_request({}, "E_LEAD_WORKER_V1_REQUEST_JSON_INVALID")
+        result = _decorate_decision(
+            _BASE._invalid_request({}, "E_LEAD_WORKER_V1_REQUEST_TOO_LARGE"),
+            request_fingerprint=None,
+        )
+    except (
+        UnicodeError,
+        json.JSONDecodeError,
+        InvalidJsonStructureError,
+        RecursionError,
+        ValueError,
+    ):
+        result = _decorate_decision(
+            _BASE._invalid_request({}, "E_LEAD_WORKER_V1_REQUEST_JSON_INVALID"),
+            request_fingerprint=None,
+        )
     else:
         result = resolve_v1_worker_route(request)
     json.dump(result, sys.stdout, sort_keys=True, separators=(",", ":"))
