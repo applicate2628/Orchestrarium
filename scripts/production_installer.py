@@ -22,7 +22,7 @@ import threading
 import time
 import tomllib
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 try:
     from provider_prompt import enroll_kimi_executable, replace_kimi_enrollment

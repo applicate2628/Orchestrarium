@@ -33,8 +33,8 @@ USER_CONTROL_MARKER = re.compile(
     r"\[(?:approve|skip|acknowledge|revoke)[^\]\r\n]*\]"
 )
 RU_HOOK_BEHAVIOR_PAYLOAD_PIN = (
-    22_849,
-    "37bcf9b3f9d904eb0f1d3235b515e2c1dfa29508883002b9b9c55bf3ebc97aea",
+    23_364,
+    "4b3d74d32ee4855ec2e631b48d84724d67d1535c98706fc0d36c5a67c7f489c2",
 )
 
 INSTALL_ANCHORS = (

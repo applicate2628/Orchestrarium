@@ -399,6 +399,11 @@ def test_hook_health_report_allows_only_touched_pending(
         for index, (event, _stem, argv, matcher) in enumerate(rows)
     ]
     monkeypatch.setattr(CHECKER, "_codex_hooks_list", lambda **_kwargs: records)
+
+    def unexpected_codex_resolution(_value: str | None = None) -> list[str]:
+        raise AssertionError("injected inventory must not resolve Codex")
+
+    monkeypatch.setattr(CHECKER, "resolve_codex_command", unexpected_codex_resolution)
     messages = CHECKER.verify_config(
         target=target,
         platform="codex",
