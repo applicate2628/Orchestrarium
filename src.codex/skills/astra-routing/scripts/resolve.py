@@ -186,6 +186,9 @@ def _effort_basis(
     effort = requested or default
     if effort not in EFFORTS:
         return "E_ASTRA_V1_EFFORT_UNSUPPORTED", None
+    # Provider support does not override the operator-admitted minimum.
+    if EFFORT_RANK[effort] < EFFORT_RANK["medium"]:
+        return "E_ASTRA_V1_EFFORT_BELOW_MINIMUM", None
     if max_approved and effort != "max":
         return "E_ASTRA_V1_MAX_APPROVAL_INVALID", None
     if evidence is not None and evidence not in KNOWN_EFFORT_EVIDENCE:
