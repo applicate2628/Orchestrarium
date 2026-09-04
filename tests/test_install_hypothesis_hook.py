@@ -44,6 +44,43 @@ sys.modules[SPEC.name] = HOOK_MODULE
 SPEC.loader.exec_module(HOOK_MODULE)
 
 
+
+def _test_python_executable(host_os: str) -> Path:
+    if host_os != "windows" or os.name == "nt":
+        return Path(sys.executable)
+    executable = Path(tempfile.gettempdir()) / (
+        f"orchestrarium-test-python-{os.getpid()}.exe"
+    )
+    if not executable.exists():
+        executable.write_bytes(b"MZ-test-only")
+    return executable.absolute()
+
+
+def _installer_command_prefix(host_os: str) -> list[str]:
+    if host_os != "windows" or os.name == "nt":
+        return [sys.executable, str(HOOK_INSTALLER)]
+    driver = (
+        "import runpy,sys;"
+        "fake,script,*forwarded=sys.argv[1:];"
+        "sys.executable=fake;"
+        "sys.argv=[script,*forwarded];"
+        "runpy.run_path(script,run_name='__main__')"
+    )
+    return [
+        sys.executable,
+        "-c",
+        driver,
+        str(_test_python_executable("windows")),
+        str(HOOK_INSTALLER),
+    ]
+
+
+def _assert_registered_python(
+    case: unittest.TestCase, value: str, host_os: str = "posix"
+) -> None:
+    case.assertEqual(Path(value), _test_python_executable(host_os))
+
+
 def run_installer(
     target: Path,
     *extra: str,
@@ -53,8 +90,7 @@ def run_installer(
     env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess:
     cmd = [
-        sys.executable,
-        str(HOOK_INSTALLER),
+        *_installer_command_prefix(host_os),
         "--target",
         str(target),
         "--platform",
@@ -93,7 +129,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
         self.assertEqual(len(pretool), 1)
         hook = pretool[0]["hooks"][0]
         # Claude POSIX = direct exec form (args array, no shell interpretation).
-        self.assertEqual(Path(hook["command"]), Path(sys.executable).resolve())
+        _assert_registered_python(self, hook["command"])
         self.assertEqual(hook["args"], [str(PY_SCRIPT_PATH.resolve())])
         # Matcher fires on code-mutating tool calls (script self-filters on
         # bug-context from session transcript). No `if` filter anymore — the
@@ -110,7 +146,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         data = load_json(self.target)
         hook = data["hooks"]["PreToolUse"][0]["hooks"][0]
-        self.assertEqual(Path(hook["command"]), Path(sys.executable).resolve())
+        _assert_registered_python(self, hook["command"], "windows")
         self.assertEqual(hook["args"], [str(PY_SCRIPT_PATH.resolve())])
         self.assertNotIn("bash", hook["command"])
         self.assertNotIn("powershell", hook["command"].casefold())
@@ -166,7 +202,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
         entry = data["hooks"]["PreToolUse"][0]
         hook = entry["hooks"][0]
         self.assertEqual(entry["matcher"], "Edit|Write|NotebookEdit|apply_patch")
-        self.assertEqual(Path(hook["command"]), Path(sys.executable).resolve())
+        _assert_registered_python(self, hook["command"])
         self.assertEqual(hook["args"], [str(PY_SCRIPT_PATH.resolve())])
         self.assertNotIn("if", hook)
 
@@ -182,7 +218,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
         data = load_json(self.target)
         hook = data["hooks"]["PreToolUse"][0]["hooks"][0]
         self.assertNotIn("args", hook)
-        self.assertIn(Path(sys.executable).name.casefold(), hook["command"].casefold())
+        self.assertIn(_test_python_executable("windows").name.casefold(), hook["command"].casefold())
         self.assertIn(".py", hook["command"].casefold())
         self.assertIn("check-bugfix-discipline", hook["command"])
         self.assertNotIn("powershell", hook["command"].casefold())
@@ -217,7 +253,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
         self.assertEqual(len(entries), 1)
         self.assertNotIn("matcher", entries[0])
         hook = entries[0]["hooks"][0]
-        self.assertEqual(Path(hook["command"]), Path(sys.executable).resolve())
+        _assert_registered_python(self, hook["command"])
         self.assertEqual(hook["args"], [str(REMINDER_PY_SCRIPT_PATH.resolve())])
         self.assertIn("mcp-usage-reminder", hook["args"][0])
 
@@ -243,7 +279,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
                     self.assertNotIn("args", hook)
                     self.assertIn("mcp-usage-reminder", hook["command"])
                 else:
-                    self.assertEqual(Path(hook["command"]), Path(sys.executable).resolve())
+                    _assert_registered_python(self, hook["command"])
                     self.assertEqual(hook["args"], [str(REMINDER_PY_SCRIPT_PATH.resolve())])
 
     def test_install_posttooluse_hook_uses_custom_matcher_for_all_platforms(self) -> None:
@@ -312,7 +348,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
         self.assertEqual(data["hooks"]["PreToolUse"][0]["hooks"][0]["command"], "echo user-other-hook")
         our_hook = data["hooks"]["PreToolUse"][1]["hooks"][0]
         # Direct Python exec form: marker lives in args[0], not in command.
-        self.assertEqual(Path(our_hook["command"]), Path(sys.executable).resolve())
+        _assert_registered_python(self, our_hook["command"])
         self.assertIn("check-bugfix-discipline", our_hook["args"][0])
         self.assertEqual(data["hooks"]["Stop"], [{"hooks": [{"type": "command", "command": "echo stop"}]}])
 
@@ -331,7 +367,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
         self.assertEqual(len(stop_entries), 1)
         self.assertNotIn("matcher", stop_entries[0])
         hook = stop_entries[0]["hooks"][0]
-        self.assertEqual(Path(hook["command"]), Path(sys.executable).resolve())
+        _assert_registered_python(self, hook["command"])
         self.assertEqual(hook["args"], [str(STOP_PY_SCRIPT_PATH.resolve())])
         self.assertIn("check-passive-polling-stop", hook["args"][0])
 
@@ -445,7 +481,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
         self.assertEqual(len(data["hooks"]["PreToolUse"]), 1)
         # After collapse, the remaining entry uses the direct Python form.
         hook = data["hooks"]["PreToolUse"][0]["hooks"][0]
-        self.assertEqual(Path(hook["command"]), Path(sys.executable).resolve())
+        _assert_registered_python(self, hook["command"])
         self.assertEqual(hook["args"], [str(PY_SCRIPT_PATH.resolve())])
 
     def test_duplicates_all_removed_on_uninstall(self) -> None:
@@ -602,7 +638,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
                             str(python_target),
                             host_os,
                             platform,
-                            python_executable=sys.executable,
+                            python_executable=str(_test_python_executable(host_os)),
                         )
                         entry = (
                             HOOK_MODULE.build_claude_entry(target)
@@ -639,7 +675,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
                                 str(candidate),
                                 host_os,
                             platform,
-                                python_executable=sys.executable,
+                                python_executable=str(_test_python_executable(host_os)),
                             )
                             for candidate in candidates
                         )
@@ -650,7 +686,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
             str(PY_SCRIPT_PATH),
             "windows",
             "claude",
-            python_executable=sys.executable,
+            python_executable=str(_test_python_executable("windows")),
         )
         self.assertTrue(Path(target.executable).is_absolute())
         self.assertEqual(len(target.args), 1)
@@ -682,7 +718,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
             str(PY_SCRIPT_PATH),
             "windows",
             "codex",
-            python_executable=sys.executable,
+            python_executable=str(_test_python_executable("windows")),
         )
         entry = HOOK_MODULE.build_codex_entry(target, "windows")
         command = entry["hooks"][0]["command"]
@@ -691,7 +727,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
         # Codex hashes entry content for trust, so this byte shape is what lets
         # a reinstall match the stored trusted_hash instead of raising a modal.
         expected = (
-            f"{PureWindowsPath(sys.executable).as_posix()} "
+            f"{PureWindowsPath(_test_python_executable("windows")).as_posix()} "
             f"{PureWindowsPath(PY_SCRIPT_PATH).as_posix()}"
         )
         self.assertEqual(command, expected)
@@ -708,7 +744,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
                 str(spaced_target),
                 "windows",
                 "codex",
-                python_executable=sys.executable,
+                python_executable=str(_test_python_executable("windows")),
             )
 
     def test_hook_target_layers_are_separable(self) -> None:

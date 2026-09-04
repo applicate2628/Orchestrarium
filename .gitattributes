@@ -7,6 +7,19 @@
 shared/AGENTS.shared.md text eol=lf
 shared/references/spine/*.md text eol=lf
 
+# Source, test, manifest, and human-contract files participate in exact
+# SHA-256 byte pins. Keep their checkout bytes host-independent.
+.gitattributes text eol=lf
+*.py text eol=lf
+*.json text eol=lf
+*.jsonl text eol=lf
+*.md text eol=lf
+*.toml text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.sh text eol=lf
+*.ps1 text eol=lf
+
 # Historical accepted-prior payloads preserve their source blob bytes, including CRLF.
 # Revision manifests remain text; only files inside each skill payload are byte-exact.
 tests/fixtures/canonical-skill-priors/*/*/** -text
