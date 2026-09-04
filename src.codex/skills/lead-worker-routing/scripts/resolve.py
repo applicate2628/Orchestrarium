@@ -360,6 +360,11 @@ def main(argv: list[str] | None = None) -> int:
             _BASE._invalid_request({}, "E_LEAD_WORKER_V1_REQUEST_TOO_LARGE"),
             request_fingerprint=None,
         )
+    except OSError:
+        result = _decorate_decision(
+            _BASE._invalid_request({}, "E_LEAD_WORKER_V1_REQUEST_IO_FAILED"),
+            request_fingerprint=None,
+        )
     except (
         UnicodeError,
         json.JSONDecodeError,
