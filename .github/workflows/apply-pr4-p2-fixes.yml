@@ -1,112 +1,50 @@
-name: Apply PR 4 P2 fixes
+name: Deep audit PR 4
 
 on:
   push:
     branches: [automation/pr4-p2-push-20260903-14fc38c4]
 
 permissions:
-  contents: write
-
-concurrency:
-  group: pr4-p2-push-20260903
-  cancel-in-progress: false
+  contents: read
 
 jobs:
-  apply-and-push:
+  audit:
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 60
     env:
-      EXPECTED_HEAD: 9136a2a8b01363bab32d29e99ee03e6b1e1f1db1
-      TARGET_BRANCH: hotfix/1x-final-followups-20260901
+      EXPECTED_HEAD: d30398ce559265bd79b12a021bddaea373f251fa
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: automation/pr4-p2-push-20260903-14fc38c4
-          path: automation
-          persist-credentials: false
       - uses: actions/checkout@v4
         with:
           ref: ${{ env.EXPECTED_HEAD }}
           fetch-depth: 0
-          path: target
-      - name: Verify target and prepare patch
-        working-directory: target
+      - name: Install test dependency
+        run: python -m pip install --disable-pip-version-check pytest
+      - name: Static Python checks
         shell: bash
         run: |
           set -euo pipefail
-          git fetch --no-tags origin "refs/heads/${TARGET_BRANCH}"
-          test "$(git rev-parse FETCH_HEAD)" = "${EXPECTED_HEAD}"
-          cat ../automation/.github/pr4-p2-payload/part-* > /tmp/pr4-p2.patch
-          sha256sum /tmp/pr4-p2.patch
-          cat > /tmp/apply.py <<'PY'
-          import sys
-          from pathlib import Path
-          lines=Path(sys.argv[1]).read_bytes().splitlines(keepends=True); p={}; i=0
-          while i<len(lines):
-              if not lines[i].startswith(b'diff --git '): i+=1; continue
-              f=lines[i].decode().rstrip('\n').split(' '); path=f[2][2:]
-              if len(f)!=4 or f[3][2:]!=path or path in p: raise SystemExit('invalid diff section')
-              p[path]=[]; i+=1
-              while i<len(lines) and not lines[i].startswith(b'diff --git '):
-                  if not lines[i].startswith(b'@@ '): i+=1; continue
-                  i+=1; old=bytearray(); new=bytearray()
-                  while i<len(lines) and not lines[i].startswith((b'@@ ',b'diff --git ')):
-                      h=lines[i]
-                      if h.startswith(b' '): old+=h[1:]; new+=h[1:]
-                      elif h.startswith(b'-'): old+=h[1:]
-                      elif h.startswith(b'+'): new+=h[1:]
-                      elif not h.startswith(b'\\ No newline'): raise SystemExit('unsupported hunk line')
-                      i+=1
-                  if not old: raise SystemExit('zero-context hunk')
-                  p[path].append((bytes(old),bytes(new)))
-          selected=set(sys.argv[2:]); paths=selected or set(p)
-          if selected-set(p): raise SystemExit('selected path absent')
-          for path in sorted(paths):
-              q=Path(path); data=q.read_bytes()
-              for n,(old,new) in enumerate(p[path],1):
-                  if data.count(old)!=1: raise SystemExit(f'{path}: hunk {n} preimage count {data.count(old)}')
-                  data=data.replace(old,new,1)
-              q.write_bytes(data)
-          PY
-          python -m py_compile /tmp/apply.py
-          python -m pip install --disable-pip-version-check pytest
-      - name: Red phase
-        working-directory: target
-        shell: bash
-        run: |
-          set -euo pipefail
-          python /tmp/apply.py /tmp/pr4-p2.patch tests/test_mutate_work_item.py tests/test_github_pr_review_bot_skill_contract.py
-          set +e
-          python -m pytest -q tests/test_mutate_work_item.py::test_root_contract_rejects_generated_readme_alias_before_refresh_mutation >/tmp/red1 2>&1; a=$?
-          python -m pytest -q tests/test_github_pr_review_bot_skill_contract.py::test_uncorrelated_terminal_failure_refuses_overlapping_same_head_runs >/tmp/red2 2>&1; b=$?
-          set -e
-          test "$a" -ne 0; test "$b" -ne 0
-          grep -F 'root contract admitted generated README alias' /tmp/red1
-          grep -F 'missing overlapping-run ambiguity guard' /tmp/red2
-          git reset --hard "${EXPECTED_HEAD}"; git clean -fdx
-      - name: Green phase and adjacent verification
-        working-directory: target
-        shell: bash
-        run: |
-          set -euo pipefail
-          python /tmp/apply.py /tmp/pr4-p2.patch
+          python -m compileall -q scripts src.codex src.claude tests
           git diff --check
-          cmp --silent src.codex/skills/github-pr-review-bot/SKILL.md src.claude/skills/github-pr-review-bot/SKILL.md
-          python -m py_compile scripts/mutate-work-item.py
-          python -m pytest -q tests/test_mutate_work_item.py -k root_contract
-          python -m pytest -q tests/test_github_pr_review_bot_skill_contract.py tests/test_common_skill_parity.py tests/test_codex_skill_catalog_budget.py
+      - name: Full test suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pytest -q tests
+      - name: Provider validators
+        shell: bash
+        run: |
+          set -euo pipefail
           python src.codex/skills/lead/scripts/validate-skill-pack.py
           python src.claude/agents/scripts/validate-skill-pack.py
-          git diff --check
-      - name: Commit and push without force
-        working-directory: target
+      - name: Mirror and critical-file equality
         shell: bash
         run: |
           set -euo pipefail
-          git fetch --no-tags origin "refs/heads/${TARGET_BRANCH}"
-          test "$(git rev-parse FETCH_HEAD)" = "${EXPECTED_HEAD}"
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add --all; git diff --cached --check
-          git commit -m 'fix: harden README roots and review run attribution'
-          git push origin "HEAD:refs/heads/${TARGET_BRANCH}"
+          cmp --silent scripts/universal-hooks/scripts/check-publication-safety.py src.codex/skills/lead/scripts/check-publication-safety.py
+          cmp --silent scripts/universal-hooks/scripts/check-publication-safety.py src.claude/agents/scripts/check-publication-safety.py
+          cmp --silent scripts/universal-hooks/scripts/hook_common.py src.codex/skills/lead/scripts/hook_common.py
+          cmp --silent scripts/universal-hooks/scripts/hook_common.py src.claude/agents/scripts/hook_common.py
+          cmp --silent scripts/universal-hooks/scripts/mcp_continuity_policy.py src.codex/skills/lead/scripts/mcp_continuity_policy.py
+          cmp --silent scripts/universal-hooks/scripts/mcp_continuity_policy.py src.claude/agents/scripts/mcp_continuity_policy.py
+          cmp --silent src.codex/skills/github-pr-review-bot/SKILL.md src.claude/skills/github-pr-review-bot/SKILL.md
