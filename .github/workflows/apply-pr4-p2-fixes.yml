@@ -14,12 +14,14 @@ concurrency:
 
 jobs:
   apply-and-push:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    if: github.repository == 'applicate2628/Orchestrarium'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
     env:
       EXPECTED_HEAD: 9136a2a8b01363bab32d29e99ee03e6b1e1f1db1
       TARGET_BRANCH: hotfix/1x-final-followups-20260901
       PATCH_SHA256: 14fc38c4fe75af6437dedaeb34183d54228c2ea811d6417d425545b81d5519be
+      EXPECTED_SKILL_SHA256: 05fd254b5835f2fd1a2ae059f52498bf4bcd3c03f37066606df1b72d45f010d2
     steps:
       - name: Check out automation payload
         uses: actions/checkout@v4
@@ -31,7 +33,7 @@ jobs:
       - name: Check out the exact reviewed head
         uses: actions/checkout@v4
         with:
-          ref: 9136a2a8b01363bab32d29e99ee03e6b1e1f1db1
+          ref: ${{ env.EXPECTED_HEAD }}
           fetch-depth: 0
           path: target
 
@@ -45,6 +47,9 @@ jobs:
           test "${actual_head}" = "${EXPECTED_HEAD}"
           test "$(git rev-parse HEAD)" = "${EXPECTED_HEAD}"
 
+      - name: Install focused test dependency
+        run: python -m pip install --disable-pip-version-check pytest
+
       - name: Reconstruct and verify the reviewed patch
         working-directory: target
         shell: bash
@@ -52,8 +57,135 @@ jobs:
           set -euo pipefail
           cat ../automation/.github/pr4-p2-payload/part-* > /tmp/pr4-p2.patch
           echo "${PATCH_SHA256}  /tmp/pr4-p2.patch" | sha256sum --check --strict
-          patch --batch --forward --fuzz=0 --strip=1 --no-backup-if-mismatch --dry-run < /tmp/pr4-p2.patch
-          patch --batch --forward --fuzz=0 --strip=1 --no-backup-if-mismatch < /tmp/pr4-p2.patch
+
+          cat > /tmp/exact-unified-apply.py <<'PY'
+          from __future__ import annotations
+
+          import sys
+          from pathlib import Path
+
+
+          def parse_patch(data: bytes) -> dict[str, list[tuple[bytes, bytes]]]:
+              lines = data.splitlines(keepends=True)
+              parsed: dict[str, list[tuple[bytes, bytes]]] = {}
+              index = 0
+              while index < len(lines):
+                  line = lines[index]
+                  if not line.startswith(b"diff --git "):
+                      index += 1
+                      continue
+                  fields = line.decode("utf-8").rstrip("\n").split(" ")
+                  if len(fields) != 4 or not fields[2].startswith("a/") or not fields[3].startswith("b/"):
+                      raise SystemExit(f"invalid diff header: {line!r}")
+                  old_path = fields[2][2:]
+                  new_path = fields[3][2:]
+                  if old_path != new_path:
+                      raise SystemExit(f"rename is outside the reviewed patch contract: {old_path} -> {new_path}")
+                  if old_path in parsed:
+                      raise SystemExit(f"duplicate file section: {old_path}")
+                  hunks: list[tuple[bytes, bytes]] = []
+                  parsed[old_path] = hunks
+                  index += 1
+                  while index < len(lines) and not lines[index].startswith(b"diff --git "):
+                      if not lines[index].startswith(b"@@ "):
+                          index += 1
+                          continue
+                      index += 1
+                      old = bytearray()
+                      new = bytearray()
+                      while index < len(lines):
+                          hunk_line = lines[index]
+                          if hunk_line.startswith((b"@@ ", b"diff --git ")):
+                              break
+                          if hunk_line.startswith(b" "):
+                              old.extend(hunk_line[1:])
+                              new.extend(hunk_line[1:])
+                          elif hunk_line.startswith(b"-"):
+                              old.extend(hunk_line[1:])
+                          elif hunk_line.startswith(b"+"):
+                              new.extend(hunk_line[1:])
+                          elif hunk_line.startswith(b"\\ No newline at end of file"):
+                              pass
+                          else:
+                              raise SystemExit(
+                                  f"unsupported line inside hunk for {old_path}: {hunk_line!r}"
+                              )
+                          index += 1
+                      if not old:
+                          raise SystemExit(f"zero-context insertion is outside the reviewed patch contract: {old_path}")
+                      hunks.append((bytes(old), bytes(new)))
+                  if not hunks:
+                      raise SystemExit(f"file section has no hunks: {old_path}")
+              return parsed
+
+
+          def main() -> int:
+              if len(sys.argv) < 2:
+                  raise SystemExit("usage: exact-unified-apply.py PATCH [PATH ...]")
+              patch_path = Path(sys.argv[1])
+              selected = set(sys.argv[2:])
+              parsed = parse_patch(patch_path.read_bytes())
+              unknown = selected.difference(parsed)
+              if unknown:
+                  raise SystemExit(f"selected paths absent from patch: {sorted(unknown)!r}")
+              paths = selected or set(parsed)
+              for relative in sorted(paths):
+                  target = Path(relative)
+                  if not target.is_file():
+                      raise SystemExit(f"target is not a regular file: {relative}")
+                  content = target.read_bytes()
+                  for hunk_number, (old, new) in enumerate(parsed[relative], start=1):
+                      matches = content.count(old)
+                      if matches != 1:
+                          raise SystemExit(
+                              f"{relative}: hunk {hunk_number} expected one exact preimage, found {matches}"
+                          )
+                      content = content.replace(old, new, 1)
+                  target.write_bytes(content)
+              return 0
+
+
+          if __name__ == "__main__":
+              raise SystemExit(main())
+          PY
+          python -m py_compile /tmp/exact-unified-apply.py
+
+      - name: Prove both regressions fail on the reviewed head
+        working-directory: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          python /tmp/exact-unified-apply.py /tmp/pr4-p2.patch \
+            tests/test_mutate_work_item.py \
+            tests/test_github_pr_review_bot_skill_contract.py
+
+          set +e
+          python -m pytest -q \
+            tests/test_mutate_work_item.py::test_root_contract_rejects_generated_readme_alias_before_refresh_mutation \
+            > /tmp/red-root-contract.log 2>&1
+          root_status=$?
+          python -m pytest -q \
+            tests/test_github_pr_review_bot_skill_contract.py::test_uncorrelated_terminal_failure_refuses_overlapping_same_head_runs \
+            > /tmp/red-review-run.log 2>&1
+          review_status=$?
+          set -e
+
+          test "${root_status}" -ne 0
+          test "${review_status}" -ne 0
+          grep -F "root contract admitted generated README alias" /tmp/red-root-contract.log
+          grep -F "missing overlapping-run ambiguity guard" /tmp/red-review-run.log
+
+          git reset --hard "${EXPECTED_HEAD}"
+          git clean -fdx
+          test "$(git rev-parse HEAD)" = "${EXPECTED_HEAD}"
+          test -z "$(git status --porcelain)"
+
+      - name: Apply the exact reviewed changes
+        working-directory: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          python /tmp/exact-unified-apply.py /tmp/pr4-p2.patch
           git diff --check
 
           cat > /tmp/expected-files <<'EXPECTED_FILES'
@@ -72,27 +204,43 @@ jobs:
           git diff --name-only | LC_ALL=C sort > /tmp/actual-files
           diff --unified /tmp/expected-files /tmp/actual-files
 
-      - name: Install focused test dependency
-        run: python -m pip install --disable-pip-version-check pytest
+          codex_sha="$(sha256sum src.codex/skills/github-pr-review-bot/SKILL.md | cut -d' ' -f1)"
+          claude_sha="$(sha256sum src.claude/skills/github-pr-review-bot/SKILL.md | cut -d' ' -f1)"
+          test "${codex_sha}" = "${EXPECTED_SKILL_SHA256}"
+          test "${claude_sha}" = "${EXPECTED_SKILL_SHA256}"
+          cmp --silent \
+            src.codex/skills/github-pr-review-bot/SKILL.md \
+            src.claude/skills/github-pr-review-bot/SKILL.md
+          grep -F "${EXPECTED_SKILL_SHA256}" src.codex/skills/lead/scripts/validate-skill-pack.py
+          grep -F "${EXPECTED_SKILL_SHA256}" src.claude/agents/scripts/validate-skill-pack.py
 
-      - name: Run regression coverage
+      - name: Run focused and adjacent verification
         working-directory: target
         shell: bash
         run: |
           set -euo pipefail
+          python -m py_compile scripts/mutate-work-item.py
+          python -m pytest -q tests/test_mutate_work_item.py -k root_contract
           python -m pytest -q \
-            tests/test_mutate_work_item.py::test_root_contract_rejects_generated_readme_alias_before_refresh_mutation \
-            tests/test_github_pr_review_bot_skill_contract.py
+            tests/test_github_pr_review_bot_skill_contract.py \
+            tests/test_common_skill_parity.py \
+            tests/test_codex_skill_catalog_budget.py
+          python src.codex/skills/lead/scripts/validate-skill-pack.py
+          python src.claude/agents/scripts/validate-skill-pack.py
+          git diff --check
 
       - name: Commit and push without force
         working-directory: target
         shell: bash
         run: |
           set -euo pipefail
+          git fetch --no-tags origin "refs/heads/${TARGET_BRANCH}"
+          test "$(git rev-parse FETCH_HEAD)" = "${EXPECTED_HEAD}"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add --all
           git diff --cached --check
           git commit -m "fix: harden README roots and review run attribution"
+          new_head="$(git rev-parse HEAD)"
           git push origin "HEAD:refs/heads/${TARGET_BRANCH}"
-          echo "Pushed $(git rev-parse HEAD) to ${TARGET_BRANCH}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "Pushed ${new_head} to ${TARGET_BRANCH}" >> "${GITHUB_STEP_SUMMARY}"
