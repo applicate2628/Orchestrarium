@@ -52,7 +52,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "${SOURCE_HEAD}"
-          python ../control/.github/audit/pr4-r3.py
+          python ../control/.github/audit/pr4-r4.py
           git diff --check
           git status --short
 
