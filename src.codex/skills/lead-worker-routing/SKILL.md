@@ -72,6 +72,29 @@ A candidate is selectable only when it:
 
 Fallback changes only the worker realization. It cannot alter role, scope, capability, mutation, tools, provider-family exclusions, artifact, gate, or Lead ownership.
 
+## Model-local effort admission
+
+For exact known Codex model identities, the operator minima are `medium` for
+`gpt-6-astra` and `high` for `gpt-5.6-sol` and `gpt-5.6-terra`. Unsupported effort
+tokens and settings below these floors are rejected before candidate selection.
+This is not a cross-model effort ranking: Astra medium may retain priority over
+Sol extra-high when the caller's qualified task-specific policy selects it.
+
+`gpt-5.6-luna` cannot use this general worker selector at any effort. It belongs
+to the separate native-only mechanical contract, which retains its high minimum,
+exact operation constraints, and zero decision authority.
+
+These narrow compatibility checks do not map unknown aliases or future model
+identifiers. The adapter must resolve and admit their actual identities and
+supported controls before launch; unknown strings are not evidence of support.
+Other providers do not inherit Codex's effort vocabulary. A provider without
+native effort control retains that explicit absence rather than a fictional high.
+
+Astra routing still requires its separate task/effort evidence, maximum-effort
+approval when applicable, and adapter admission. This generic selector never
+turns an acceptable pair into launch permission. Existing native-role defaults,
+including the legacy Terra-medium archivist, are not migrated by this addition.
+
 ## Request identity and execution boundary
 
 For a valid request, the resolver returns:

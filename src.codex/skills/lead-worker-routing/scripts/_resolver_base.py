@@ -94,6 +94,13 @@ MAX_CANDIDATES = 128
 MAX_PRIORITY = 2**31 - 1
 MAX_REQUEST_BYTES = 1024 * 1024
 PRIVATE_ENTRYPOINT_STABLE_ID = "E_LEAD_WORKER_V1_PRIVATE_ENTRYPOINT"
+# These are operator floors for exact known models, not a capability ordering.
+CODEX_EFFORT_ORDER = ("low", "medium", "high", "xhigh", "max")
+CODEX_MODEL_EFFORT_FLOORS = {
+    "gpt-6-astra": "medium",
+    "gpt-5.6-sol": "high",
+    "gpt-5.6-terra": "high",
+}
 
 
 def _request_context(request: object) -> dict[str, object | None]:
@@ -309,6 +316,18 @@ def _policy_rejection(
         return "E_LEAD_WORKER_V1_RECURSIVE_DELEGATION_FORBIDDEN"
     if capability_slot not in candidate["capabilities"]:
         return "E_LEAD_WORKER_V1_CAPABILITY_MISSING"
+
+    if provider == "codex":
+        if candidate["model"] == "gpt-5.6-luna":
+            # Luna is native-only under its separate exact mechanical contract.
+            return "E_LEAD_WORKER_V1_MECHANICAL_ROUTE_REQUIRED"
+        minimum = CODEX_MODEL_EFFORT_FLOORS.get(candidate["model"])
+        if minimum is not None:
+            effort = candidate["effort"]
+            if effort not in CODEX_EFFORT_ORDER:
+                return "E_LEAD_WORKER_V1_EFFORT_UNSUPPORTED"
+            if CODEX_EFFORT_ORDER.index(effort) < CODEX_EFFORT_ORDER.index(minimum):
+                return "E_LEAD_WORKER_V1_EFFORT_BELOW_MINIMUM"
 
     declared_mutation = candidate["maxMutationClass"]
     provider_ceiling = PROVIDER_MUTATION_CEILING[provider]
