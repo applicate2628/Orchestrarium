@@ -1,0 +1,30 @@
+name: PR4 audit workspace r4
+on:
+  push:
+    branches: [automation/pr4-audit-r4-20260904]
+permissions:
+  contents: read
+jobs:
+  source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 2ff0eef397f4ac1ea48433507e9f1ddca8a61670
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Export reviewed source and history without credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 2ff0eef397f4ac1ea48433507e9f1ddca8a61670
+          git branch audit-source HEAD
+          git bundle create /tmp/orchestrarium-audit-source.bundle audit-source
+          sha256sum /tmp/orchestrarium-audit-source.bundle
+      - uses: actions/upload-artifact@v4
+        with:
+          name: orchestrarium-audit-source-r4
+          path: /tmp/orchestrarium-audit-source.bundle
+          retention-days: 7
+          if-no-files-found: error
