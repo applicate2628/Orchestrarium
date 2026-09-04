@@ -97,7 +97,7 @@ A worker provider being absent or unpaid is ordinary scheduler input. `not-confi
 
 The logical Lead may survive a host change. A Lead Host transfer requires a new exclusive lease epoch, durable work-item state, and revalidation of outstanding dispatches. Two Lead Hosts may not mutate orchestration state concurrently.
 
-Diversity is preferred but not fabricated. When fewer independent provider families are available than requested, the route reports `degraded`; critical work requires the human gate specified by policy instead of pretending that several models from one family are independ.
+Diversity is preferred but not fabricated. When fewer independent provider families are available than requested, the route reports `degraded`; critical work requires the human gate specified by policy instead of pretending that several models from one family are independent.
 
 ## 6. Files in this surface
 
@@ -120,7 +120,7 @@ The Version 1 dispatch may migrate into one Version 2 portfolio slot only when r
 - **Lead lease:** exclusive, epoch-numbered ownership record preventing two active Leads from mutating one work item.
 - **Model registry snapshot:** immutable observation of available runtimes, models, admission, evidence, and route metrics.
 - **Capability slot:** stable required ability independent of a model name.
-- **Model portfolio#ª* set of workers assigned different roles in one routed task.
+- **Model portfolio:** set of workers assigned different roles in one routed task.
 - **Admission:** verified permission for a runtime to perform a class of work or mutation.
-- **Fallback:** explicit selection of a later admitted candidate after a typed failure.
+- **Fallback:** explicit move to a later admitted candidate after a classified failure.
 - **Empirical arbitration:** resolution of a disagreement through tests, measurements, proofs, or other objective evidence.

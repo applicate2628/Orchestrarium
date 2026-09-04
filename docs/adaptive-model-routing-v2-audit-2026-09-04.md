@@ -76,7 +76,7 @@ Current model names are observations, not stable concepts. A policy tying a prof
 
 1. Keep one logical Lead contract with provider-specific Lead Host adapters.
 2. Enforce one active Lead lease per work item and monotonically increasing epochs.
-3. Keep worker providers optional and availabily-aware.
+3. Keep worker providers optional and availability-aware.
 4. Store exact model identity only in immutable registry and execution snapshots.
 5. Route stable capability slots, roles, scopes, artifacts, and gates rather than model brands.
 6. Build role-specific portfolios for primary proposal, scope expansion, challenge, implementation, review, and visual validation.
