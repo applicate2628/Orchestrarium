@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""Resolve one provider-neutral Orchestrarium Version 1 worker route."""
+"""Private selection core for provider-neutral Orchestrarium Version 1 routing.
+
+This module is import-only. The supported command-line entrypoint is resolve.py,
+which adds request fingerprinting, native-host binding, strict JSON parsing, and
+safe request-file handling before delegating to this selection core.
+"""
 
 from __future__ import annotations
 
-import argparse
 import json
-import os
 import re
-import stat
 import sys
-from pathlib import Path
-from typing import Any
 
 REQUEST_FIELDS = frozenset(
     {
@@ -93,18 +93,7 @@ TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}\Z", re.ASCII)
 MAX_CANDIDATES = 128
 MAX_PRIORITY = 2**31 - 1
 MAX_REQUEST_BYTES = 1024 * 1024
-
-
-class DuplicateJsonKeyError(ValueError):
-    """Raised when a request JSON object repeats a key."""
-
-
-class UnsafeRequestFileError(ValueError):
-    """Raised when the request path is not a stable ordinary file."""
-
-
-class RequestTooLargeError(ValueError):
-    """Raised when the request exceeds the fixed byte budget."""
+PRIVATE_ENTRYPOINT_STABLE_ID = "E_LEAD_WORKER_V1_PRIVATE_ENTRYPOINT"
 
 
 def _request_context(request: object) -> dict[str, object | None]:
@@ -418,118 +407,14 @@ def resolve_v1_worker_route(request: dict[str, object]) -> dict[str, object]:
     )
 
 
-def _strict_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-    result: dict[str, Any] = {}
-    for key, value in pairs:
-        if key in result:
-            raise DuplicateJsonKeyError(key)
-        result[key] = value
-    return result
-
-
-def _parse_json(text: str) -> object:
-    return json.loads(text, object_pairs_hook=_strict_object)
-
-
-def _is_reparse_metadata(metadata: os.stat_result) -> bool:
-    return bool(
-        getattr(metadata, "st_file_attributes", 0)
-        & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
-    )
-
-
-def _file_signature(metadata: os.stat_result) -> tuple[int, int, int, int, int]:
-    return (
-        stat.S_IFMT(metadata.st_mode),
-        metadata.st_dev,
-        metadata.st_ino,
-        metadata.st_size,
-        getattr(metadata, "st_mtime_ns", 0),
-    )
-
-
-def _read_file_bytes(path: Path) -> bytes:
-    try:
-        before = os.lstat(path)
-    except OSError as exc:
-        raise UnsafeRequestFileError(str(path)) from exc
-    if (
-        not stat.S_ISREG(before.st_mode)
-        or stat.S_ISLNK(before.st_mode)
-        or _is_reparse_metadata(before)
-    ):
-        raise UnsafeRequestFileError(str(path))
-
-    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_CLOEXEC", 0)
-    flags |= getattr(os, "O_NOFOLLOW", 0)
-    descriptor: int | None = None
-    try:
-        descriptor = os.open(path, flags)
-        opened = os.fstat(descriptor)
-        if not stat.S_ISREG(opened.st_mode) or _file_signature(opened) != _file_signature(before):
-            raise UnsafeRequestFileError(str(path))
-        chunks: list[bytes] = []
-        observed = 0
-        while observed <= MAX_REQUEST_BYTES:
-            chunk = os.read(descriptor, min(64 * 1024, MAX_REQUEST_BYTES + 1 - observed))
-            if not chunk:
-                break
-            chunks.append(chunk)
-            observed += len(chunk)
-        if observed > MAX_REQUEST_BYTES:
-            raise RequestTooLargeError(str(path))
-        after_opened = os.fstat(descriptor)
-        after_path = os.lstat(path)
-        if (
-            _file_signature(after_opened) != _file_signature(opened)
-            or _file_signature(after_path) != _file_signature(before)
-            or stat.S_ISLNK(after_path.st_mode)
-            or _is_reparse_metadata(after_path)
-        ):
-            raise UnsafeRequestFileError(str(path))
-        return b"".join(chunks)
-    except RequestTooLargeError:
-        raise
-    except UnsafeRequestFileError:
-        raise
-    except OSError as exc:
-        raise UnsafeRequestFileError(str(path)) from exc
-    finally:
-        if descriptor is not None:
-            os.close(descriptor)
-
-
-def _read_request(path: str) -> object:
-    if path == "-":
-        data = sys.stdin.buffer.read(MAX_REQUEST_BYTES + 1)
-        if len(data) > MAX_REQUEST_BYTES:
-            raise RequestTooLargeError("stdin")
-    else:
-        data = _read_file_bytes(Path(path))
-    return _parse_json(data.decode("utf-8"))
-
-
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--request-file", required=True)
-    args = parser.parse_args(argv)
-    try:
-        request = _read_request(args.request_file)
-    except DuplicateJsonKeyError:
-        result = _invalid_request(
-            {}, "E_LEAD_WORKER_V1_REQUEST_JSON_DUPLICATE_KEY"
-        )
-    except UnsafeRequestFileError:
-        result = _invalid_request({}, "E_LEAD_WORKER_V1_REQUEST_FILE_UNSAFE")
-    except RequestTooLargeError:
-        result = _invalid_request({}, "E_LEAD_WORKER_V1_REQUEST_TOO_LARGE")
-    except (UnicodeError, json.JSONDecodeError, ValueError):
-        result = _invalid_request({}, "E_LEAD_WORKER_V1_REQUEST_JSON_INVALID")
-    else:
-        result = resolve_v1_worker_route(request)
+    """Fail closed when the private core is invoked as a CLI."""
+
+    del argv
+    result = _invalid_request({}, PRIVATE_ENTRYPOINT_STABLE_ID)
     json.dump(result, sys.stdout, sort_keys=True, separators=(",", ":"))
     sys.stdout.write("\n")
-    return 0 if result["status"] == "selected" else 2
+    return 2
 
 
 if __name__ == "__main__":
