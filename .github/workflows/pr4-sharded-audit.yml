@@ -1,0 +1,36 @@
+name: Sharded full audit PR 4
+
+on:
+  push:
+    branches: [automation/pr4-p2-push-20260903-14fc38c4]
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0,1,2,3,4,5,6,7]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      EXPECTED_HEAD: 3dbfb9faf824365f5898fe52dd10093f4d75da9c
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.EXPECTED_HEAD }}
+      - run: python -m pip install --disable-pip-version-check pytest
+      - name: Run shard
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t all < <(find tests -maxdepth 1 -type f -name 'test_*.py' -print | LC_ALL=C sort)
+          selected=()
+          for i in "${!all[@]}"; do
+            if (( i % 8 == ${{ matrix.shard }} )); then selected+=("${all[$i]}"); fi
+          done
+          printf 'Shard %s: %s files\n' '${{ matrix.shard }}' "${#selected[@]}"
+          ((${#selected[@]} > 0))
+          python -m pytest -q "${selected[@]}"
