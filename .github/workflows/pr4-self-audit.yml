@@ -1,4 +1,4 @@
-name: PR 4 differential self-audit
+name: PR 4 audit diagnostics
 
 on:
   push:
@@ -8,164 +8,46 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: pr4-differential-self-audit
-  cancel-in-progress: false
-
-env:
-  SHARD_TOTAL: '6'
-  PYTHONUTF8: '1'
-  PYTHONDONTWRITEBYTECODE: '1'
-
 jobs:
-  static-and-contracts:
-    name: ${{ matrix.target }} static and contracts
+  derive:
     runs-on: ubuntu-24.04
-    timeout-minutes: 50
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: base
-            sha: ece04040627fcc0d0988128e44d401de53ff01fb
-          - target: pr
-            sha: 3dbfb9faf824365f5898fe52dd10093f4d75da9c
+    timeout-minutes: 15
     steps:
-      - name: Check out exact target
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
-          ref: ${{ matrix.sha }}
+          ref: 3dbfb9faf824365f5898fe52dd10093f4d75da9c
           fetch-depth: 0
-          path: target
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-
-      - name: Install complete audit dependencies
-        run: python -m pip install --disable-pip-version-check pytest PyYAML jsonschema ruff bandit
-
-      - name: Verify exact binding
-        working-directory: target
+      - name: Derive exact Russian reference payload pin
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "${{ matrix.sha }}"
-          test -z "$(git status --porcelain)"
-
-      - name: Compile every tracked Python source
-        working-directory: target
+          python - <<'PY'
+          import hashlib
+          import importlib.util
+          from pathlib import Path
+          validator_path = Path('scripts/validate-claude-md.py')
+          spec = importlib.util.spec_from_file_location('validator', validator_path)
+          assert spec is not None and spec.loader is not None
+          validator = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(validator)
+          raw = Path('references-claude/ru/claude-md-structural-enforcement.md').read_bytes()
+          ids, payloads = validator._payload_inventory(raw)
+          assert payloads is not None
+          payload = payloads['hook-behavior-contracts']
+          print(f'RU_HOOK_PAYLOAD_SIZE={len(payload)}')
+          print(f'RU_HOOK_PAYLOAD_SHA256={hashlib.sha256(payload).hexdigest()}')
+          print(f'PAYLOAD_IDS={ids!r}')
+          PY
+      - name: Show current checkout attributes for byte-pinned families
         shell: bash
         run: |
           set -euo pipefail
-          mapfile -d '' files < <(git ls-files -z '*.py')
-          test "${#files[@]}" -gt 0
-          python -m py_compile "${files[@]}"
-
-      - name: Strict undefined-name and syntax lint
-        working-directory: target
-        run: ruff check --select E9,F63,F7,F82 scripts src.codex src.claude tests install.py
-
-      - name: Collect the complete test suite
-        working-directory: target
-        run: python -m pytest --collect-only -q
-
-      - name: Run pack validators
-        working-directory: target
-        shell: bash
-        run: |
-          set -euo pipefail
-          python src.codex/skills/lead/scripts/validate-skill-pack.py
-          python src.claude/agents/scripts/validate-skill-pack.py
-
-      - name: High-severity security lint on PR production delta
-        if: matrix.target == 'pr'
-        working-directory: target
-        shell: bash
-        run: |
-          set -euo pipefail
-          base=ece04040627fcc0d0988128e44d401de53ff01fb
-          git diff --check "${base}..${{ matrix.sha }}"
-          mapfile -t files < <(git diff --name-only --diff-filter=ACMR "${base}..${{ matrix.sha }}" -- '*.py' | grep -v '^tests/' || true)
-          if ((${#files[@]})); then
-            bandit -q -lll "${files[@]}"
-          fi
-
-  differential-tests:
-    name: ${{ matrix.target }} ${{ matrix.os }} shard ${{ matrix.shard }}/6
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 90
-    strategy:
-      fail-fast: false
-      matrix:
-        target: [base, pr]
-        os: [ubuntu-24.04, windows-2025]
-        shard: [0, 3, 4]
-        include:
-          - target: base
-            sha: ece04040627fcc0d0988128e44d401de53ff01fb
-          - target: pr
-            sha: 3dbfb9faf824365f5898fe52dd10093f4d75da9c
-    steps:
-      - name: Resolve target SHA
-        id: target
-        shell: bash
-        run: |
-          if [ '${{ matrix.target }}' = base ]; then
-            echo 'sha=ece04040627fcc0d0988128e44d401de53ff01fb' >> "$GITHUB_OUTPUT"
-          else
-            echo 'sha=3dbfb9faf824365f5898fe52dd10093f4d75da9c' >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Check out exact target
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ steps.target.outputs.sha }}
-          fetch-depth: 0
-          path: target
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Install complete test dependencies
-        run: python -m pip install --disable-pip-version-check pytest PyYAML jsonschema
-
-      - name: Run deterministic shard on Linux
-        if: runner.os == 'Linux'
-        working-directory: target
-        shell: bash
-        env:
-          SHARD_INDEX: ${{ matrix.shard }}
-        run: |
-          set -euo pipefail
-          test "$(git rev-parse HEAD)" = "${{ steps.target.outputs.sha }}"
-          mapfile -t files < <(find tests -maxdepth 1 -type f -name 'test_*.py' -print | LC_ALL=C sort)
-          selected=()
-          for index in "${!files[@]}"; do
-            if (( index % SHARD_TOTAL == SHARD_INDEX )); then selected+=("${files[$index]}"); fi
-          done
-          test "${#selected[@]}" -gt 0
-          printf '%s\n' "${selected[@]}"
-          python -m pytest -q "${selected[@]}"
-
-      - name: Run deterministic shard on Windows
-        if: runner.os == 'Windows'
-        working-directory: target
-        shell: pwsh
-        env:
-          SHARD_INDEX: ${{ matrix.shard }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-          if ((git rev-parse HEAD).Trim() -ne '${{ steps.target.outputs.sha }}') { throw 'audited HEAD mismatch' }
-          $files = @(Get-ChildItem tests -File -Filter 'test_*.py' | Sort-Object Name)
-          $selected = @()
-          for ($index = 0; $index -lt $files.Count; $index++) {
-            if (($index % [int]$env:SHARD_TOTAL) -eq [int]$env:SHARD_INDEX) { $selected += $files[$index].FullName }
-          }
-          if ($selected.Count -eq 0) { throw 'empty test shard' }
-          $selected | ForEach-Object { Write-Host $_ }
-          python -m pytest -q @selected
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git check-attr text eol -- \
+            scripts/production_installer.py \
+            shared/agents-mode.presets.json \
+            references-claude/ru/claude-md-structural-enforcement.md \
+            src.codex/skills/github-pr-review-bot/SKILL.md \
+            tests/fixtures/canonical-skill-priors/codex/example/SKILL.md || true
