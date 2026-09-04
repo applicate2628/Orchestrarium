@@ -128,3 +128,28 @@ def test_documented_repository_command_points_to_the_actual_entrypoint():
     assert command is not None
     assert (ROOT / command.group(1)).resolve() == ENTRY.resolve()
     assert (ROOT / command.group(1)).is_file()
+
+
+@pytest.mark.parametrize("key", ["policyOverlays", "allowedPolicyOverlays", "deniedPolicyOverlays"])
+@pytest.mark.parametrize("quote", ["'", '"'])
+def test_quoted_root_owned_key_is_rejected_not_silently_ignored(tmp_path, key, quote):
+    path = tmp_path / "config.yaml"
+    path.write_text(f"{quote}{key}{quote}: []\n", encoding="utf-8")
+    with pytest.raises(OVERLAY.PolicyOverlayError, match="inline YAML list"):
+        OVERLAY._config(path, frozenset({key}))
+
+
+@pytest.mark.parametrize("quote", ["'", '"'])
+@pytest.mark.parametrize("explicit", [False, True])
+@pytest.mark.parametrize("key,values", [
+    ("allowedPolicyOverlays", ""),
+    ("deniedPolicyOverlays", "lean-implementation"),
+])
+def test_quoted_project_restriction_cannot_become_success(layout, quote, explicit, key, values):
+    policy = layout["project_root"] / ".orche/policy.yaml"
+    policy.write_text(f"{quote}{key}{quote}: [{values}]\n", encoding="utf-8")
+    with pytest.raises(OVERLAY.PolicyOverlayError, match="inline YAML list"):
+        OVERLAY.resolve_from_config(
+            **layout, provider="codex", lane="implementation", target="main-agent",
+            explicit_selection="lean-implementation" if explicit else None,
+        )

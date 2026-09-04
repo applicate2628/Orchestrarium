@@ -48,6 +48,8 @@ The resolver accepts only the documented top-level inline lists. It rejects unkn
 
 Configuration files use UTF-8 (Unicode Transformation Format, 8-bit), with or without one leading byte-order mark. Spaces or tabs before the key delimiter `:` are accepted; duplicate owned keys and non-list values still fail rather than being silently ignored.
 
+Top-level owned keys must be bare identifiers. A quoted `policyOverlays`, `allowedPolicyOverlays`, or `deniedPolicyOverlays` is rejected as unsupported, rather than silently treated as absent. Unrelated and indented nested settings remain outside this selector and are ignored. This is not a general YAML (YAML Ain't Markup Language) loader.
+
 The fixed precedence is:
 
 1. hard governance and safety;
@@ -99,7 +101,7 @@ The compatibility fixture is based on Ponytail package version `4.9.0` at upstre
 
 Install Ponytail with its own provider-supported plugin mechanism. Install Orchestrarium with its existing Codex or Claude installer. Both installation orders, reinstall, update, and owned removal must preserve third-party state. This remains an installer integration acceptance requirement; resolver and catalog tests alone do not establish it. Ponytail remains responsible for its own host/plugin-manager mutations and for preserving unrelated Orchestrarium state.
 
-Orchestrarium does not create optional policy configuration and Version 1.x does not add an always-on overlay hook. Activate the installed `$policy-overlay` skill explicitly; it resolves the user selection, applies project restrictions, and emits only the exact provider/lane/target projection. From the repository root, the resolver may also be invoked directly:
+Orchestrarium does not create optional policy configuration and Version 1.x does not add an always-on overlay hook. Activate the installed `$policy-overlay` skill explicitly; it resolves the user selection, applies project restrictions, and emits only the exact provider/lane/target projection. The resolver may also be invoked directly from the repository root:
 
 ```bash
 python src.codex/skills/policy-overlay/scripts/policy-overlays.py \

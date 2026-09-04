@@ -51,7 +51,10 @@ USER_KEY = "policyOverlays"
 ALLOW_KEY = "allowedPolicyOverlays"
 DENY_KEY = "deniedPolicyOverlays"
 LIST_LINE = re.compile(r"^(?P<key>[A-Za-z][A-Za-z0-9]*)[ \t]*:\s*\[(?P<items>[^\]]*)\]\s*(?:#.*)?$")
-KEY_LINE = re.compile(r"^(?P<key>[A-Za-z][A-Za-z0-9]*)[ \t]*:")
+# Recognize quoted root keys so unsupported managed syntax cannot disappear.
+KEY_LINE = re.compile(
+    r"""^(?P<quote>['"]?)(?P<key>[A-Za-z][A-Za-z0-9]*)(?P=quote)[ \t]*:"""
+)
 
 
 class PolicyOverlayError(RuntimeError):
