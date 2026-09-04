@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 2,
+  "catalogId": "orchestrarium.openai-model-catalog.v2",
+  "pricing": {
+    "observedAt": "2026-09-04",
+    "reviewBy": "2026-09-18",
+    "channel": "openai-api-standard",
+    "unit": "nanoUsdPerToken",
+    "longContext": {
+      "promptTokenThresholdExclusive": 272000,
+      "inputAndCacheMultiplier": {"numerator": 2, "denominator": 1},
+      "outputMultiplier": {"numerator": 3, "denominator": 2},
+      "application": "per-call"
+    }
+  },
+  "capabilityOrder": ["balanced", "frontier", "apex"],
+  "effortOrder": ["none", "low", "medium", "high", "xhigh", "max"],
+  "availabilityStates": ["available", "unavailable", "unknown", "not-admitted"],
+  "models": {
+    "luna": {
+      "provider": "openai",
+      "providerModel": "gpt-5.6-luna",
+      "executionClass": "mechanical",
+      "capability": null,
+      "supportedEfforts": ["none", "low", "medium", "high", "xhigh", "max"],
+      "defaultEffort": "high",
+      "price": {"uncachedInput": 200, "cachedInput": 20, "cacheWrite": 250, "output": 1200},
+      "automaticFanoutLimit": 64,
+      "safetyClass": "standard",
+      "availabilityPolicy": "runtime-inventory",
+      "evidenceIndependenceGroup": "openai"
+    },
+    "terra": {
+      "provider": "openai",
+      "providerModel": "gpt-5.6-terra",
+      "executionClass": "general",
+      "capability": "balanced",
+      "supportedEfforts": ["none", "low", "medium", "high", "xhigh", "max"],
+      "defaultEffort": "medium",
+      "price": {"uncachedInput": 2000, "cachedInput": 200, "cacheWrite": 2500, "output": 12000},
+      "automaticFanoutLimit": 32,
+      "safetyClass": "standard",
+      "availabilityPolicy": "runtime-inventory",
+      "evidenceIndependenceGroup": "openai"
+    },
+    "sol": {
+      "provider": "openai",
+      "providerModel": "gpt-5.6-sol",
+      "executionClass": "general",
+      "capability": "frontier",
+      "supportedEfforts": ["none", "low", "medium", "high", "xhigh", "max"],
+      "defaultEffort": "medium",
+      "price": {"uncachedInput": 4000, "cachedInput": 400, "cacheWrite": 5000, "output": 20000},
+      "automaticFanoutLimit": 16,
+      "safetyClass": "standard",
+      "availabilityPolicy": "runtime-inventory",
+      "evidenceIndependenceGroup": "openai"
+    },
+    "astra": {
+      "provider": "openai",
+      "providerModel": "gpt-6-astra",
+      "executionClass": "general",
+      "capability": "apex",
+      "supportedEfforts": ["low", "medium", "high", "xhigh", "max"],
+      "defaultEffort": "medium",
+      "price": {"uncachedInput": 10000, "cachedInput": 1000, "cacheWrite": 12500, "output": 50000},
+      "automaticFanoutLimit": 1,
+      "safetyClass": "critical-capability",
+      "availabilityPolicy": "runtime-inventory",
+      "evidenceIndependenceGroup": "openai"
+    }
+  }
+}

@@ -1,0 +1,98 @@
+{
+  "schemaVersion": 2,
+  "policyId": "orchestrarium.model-routing.v2",
+  "catalogId": "orchestrarium.openai-model-catalog.v2",
+  "profiles": {
+    "luna-high": {"model": "luna", "effort": "high"},
+    "terra-medium": {"model": "terra", "effort": "medium"},
+    "terra-high": {"model": "terra", "effort": "high"},
+    "sol-high": {"model": "sol", "effort": "high"},
+    "sol-xhigh": {"model": "sol", "effort": "xhigh"},
+    "sol-max": {"model": "sol", "effort": "max"},
+    "astra-low": {"model": "astra", "effort": "low"},
+    "astra-medium": {"model": "astra", "effort": "medium"},
+    "astra-high": {"model": "astra", "effort": "high"},
+    "astra-xhigh": {"model": "astra", "effort": "xhigh"},
+    "astra-max": {"model": "astra", "effort": "max"}
+  },
+  "effortPolicy": {
+    "maxRequiresHumanApproval": true,
+    "astra": {
+      "downshiftEvidence": ["migration-evaluation", "measured-sufficient"],
+      "upshiftEvidence": {
+        "high": ["medium-objective-failure", "measured-high-gain"],
+        "xhigh": ["high-objective-failure", "high-contradictory", "measured-xhigh-gain"]
+      }
+    }
+  },
+  "routeEvidenceClasses": {
+    "mathematics-quality-floor": "quality-floor",
+    "connected-science-workflow": "workflow-coupling",
+    "cross-system-context-retention": "context-retention",
+    "verified-frontier-recovery": "objective-recovery",
+    "critical-capability-approved": "safety-admission",
+    "measured-api-cost-to-pass": "measured-api-economics",
+    "measured-route-efficiency": "measured-route-efficiency"
+  },
+  "taskClasses": {
+    "micro": {"executionClass": "mechanical", "minimumCapability": null, "minimumEffortByModel": {"luna": "high"}, "comparisonProfiles": ["luna-high"], "defaultProfile": "luna-high", "defaultRouteEvidence": null, "routeEvidence": [], "requiresIndependentReview": false, "criticalAstraApproval": false},
+    "mechanical-read": {"executionClass": "mechanical", "minimumCapability": null, "minimumEffortByModel": {"luna": "high"}, "comparisonProfiles": ["luna-high"], "defaultProfile": "luna-high", "defaultRouteEvidence": null, "routeEvidence": [], "requiresIndependentReview": false, "criticalAstraApproval": false},
+    "mechanical": {"executionClass": "mechanical", "minimumCapability": null, "minimumEffortByModel": {"luna": "high"}, "comparisonProfiles": ["luna-high"], "defaultProfile": "luna-high", "defaultRouteEvidence": null, "routeEvidence": [], "requiresIndependentReview": true, "criticalAstraApproval": false},
+    "exploration": {"executionClass": "general", "minimumCapability": "balanced", "minimumEffortByModel": {"terra": "high", "sol": "high"}, "comparisonProfiles": ["terra-high", "sol-high"], "defaultProfile": "terra-high", "defaultRouteEvidence": null, "routeEvidence": ["measured-api-cost-to-pass", "measured-route-efficiency"], "requiresIndependentReview": false, "criticalAstraApproval": false},
+    "engineering": {"executionClass": "general", "minimumCapability": "balanced", "minimumEffortByModel": {"terra": "high", "sol": "high"}, "comparisonProfiles": ["terra-high", "sol-high"], "defaultProfile": "terra-high", "defaultRouteEvidence": null, "routeEvidence": ["measured-api-cost-to-pass", "measured-route-efficiency"], "requiresIndependentReview": true, "criticalAstraApproval": false},
+    "planning": {"executionClass": "general", "minimumCapability": "balanced", "minimumEffortByModel": {"terra": "high", "sol": "high"}, "comparisonProfiles": ["terra-high", "sol-high"], "defaultProfile": "terra-high", "defaultRouteEvidence": null, "routeEvidence": ["measured-api-cost-to-pass", "measured-route-efficiency"], "requiresIndependentReview": false, "criticalAstraApproval": false},
+    "review": {"executionClass": "general", "minimumCapability": "balanced", "minimumEffortByModel": {"terra": "high", "sol": "high", "astra": "medium"}, "comparisonProfiles": ["terra-high", "sol-high", "astra-medium"], "defaultProfile": "terra-high", "defaultRouteEvidence": null, "routeEvidence": ["measured-api-cost-to-pass", "measured-route-efficiency"], "requiresIndependentReview": true, "criticalAstraApproval": false},
+    "scientific-routine": {"executionClass": "general", "minimumCapability": "balanced", "minimumEffortByModel": {"terra": "high", "sol": "high", "astra": "medium"}, "comparisonProfiles": ["terra-high", "sol-high", "astra-medium"], "defaultProfile": "sol-high", "defaultRouteEvidence": null, "routeEvidence": ["measured-api-cost-to-pass", "measured-route-efficiency"], "requiresIndependentReview": true, "criticalAstraApproval": false},
+    "mathematical-research": {"executionClass": "general", "minimumCapability": "frontier", "minimumEffortByModel": {"sol": "xhigh", "astra": "medium"}, "comparisonProfiles": ["sol-xhigh", "astra-medium"], "defaultProfile": "astra-medium", "defaultRouteEvidence": "mathematics-quality-floor", "routeEvidence": ["mathematics-quality-floor", "measured-api-cost-to-pass", "measured-route-efficiency"], "requiresIndependentReview": true, "criticalAstraApproval": false},
+    "scientific-agentic-workflow": {"executionClass": "general", "minimumCapability": "frontier", "minimumEffortByModel": {"sol": "xhigh", "astra": "medium"}, "comparisonProfiles": ["sol-xhigh", "astra-medium"], "defaultProfile": "astra-medium", "defaultRouteEvidence": "connected-science-workflow", "routeEvidence": ["connected-science-workflow", "measured-api-cost-to-pass", "measured-route-efficiency"], "requiresIndependentReview": true, "criticalAstraApproval": false},
+    "cross-system-synthesis": {"executionClass": "general", "minimumCapability": "frontier", "minimumEffortByModel": {"sol": "xhigh", "astra": "medium"}, "comparisonProfiles": ["sol-xhigh", "astra-medium"], "defaultProfile": "astra-medium", "defaultRouteEvidence": "cross-system-context-retention", "routeEvidence": ["cross-system-context-retention", "measured-api-cost-to-pass", "measured-route-efficiency"], "requiresIndependentReview": true, "criticalAstraApproval": false},
+    "critical-design": {"executionClass": "general", "minimumCapability": "frontier", "minimumEffortByModel": {"sol": "xhigh", "astra": "medium"}, "comparisonProfiles": ["sol-xhigh", "astra-medium"], "defaultProfile": "astra-medium", "defaultRouteEvidence": "cross-system-context-retention", "routeEvidence": ["cross-system-context-retention", "measured-api-cost-to-pass", "measured-route-efficiency"], "requiresIndependentReview": true, "criticalAstraApproval": false},
+    "critical-security": {"executionClass": "general", "minimumCapability": "frontier", "minimumEffortByModel": {"sol": "xhigh", "astra": "high"}, "comparisonProfiles": ["sol-xhigh", "astra-high"], "defaultProfile": "sol-xhigh", "defaultRouteEvidence": null, "routeEvidence": ["critical-capability-approved", "measured-api-cost-to-pass", "measured-route-efficiency"], "requiresIndependentReview": true, "criticalAstraApproval": true},
+    "recovery": {"executionClass": "general", "minimumCapability": "frontier", "minimumEffortByModel": {"sol": "high", "astra": "high"}, "comparisonProfiles": ["sol-high", "sol-xhigh", "astra-high"], "defaultProfile": "sol-high", "defaultRouteEvidence": null, "routeEvidence": ["measured-api-cost-to-pass", "measured-route-efficiency"], "requiresIndependentReview": true, "criticalAstraApproval": false},
+    "critical-recovery": {"executionClass": "general", "minimumCapability": "frontier", "minimumEffortByModel": {"sol": "xhigh", "astra": "high"}, "comparisonProfiles": ["sol-xhigh", "astra-high"], "defaultProfile": "astra-high", "defaultRouteEvidence": "verified-frontier-recovery", "routeEvidence": ["verified-frontier-recovery", "measured-api-cost-to-pass", "measured-route-efficiency"], "requiresIndependentReview": true, "criticalAstraApproval": false}
+  },
+  "roles": {
+    "mechanical-scout": {"defaultProfile": "luna-high", "allowedProfiles": ["luna-high"]},
+    "mechanical-worker": {"defaultProfile": "luna-high", "allowedProfiles": ["luna-high"]},
+    "default": {"defaultProfile": "sol-xhigh", "allowedProfiles": ["terra-high", "sol-high", "sol-xhigh", "sol-max", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]},
+    "explorer": {"defaultProfile": "terra-high", "allowedProfiles": ["terra-medium", "terra-high", "sol-high"]},
+    "worker": {"defaultProfile": "sol-high", "allowedProfiles": ["terra-medium", "terra-high", "sol-high", "sol-xhigh"]},
+    "analyst": {"defaultProfile": "terra-high", "allowedProfiles": ["terra-high", "sol-high", "sol-xhigh", "astra-medium"]},
+    "planner": {"defaultProfile": "terra-high", "allowedProfiles": ["terra-high", "sol-high", "sol-xhigh"]},
+    "architect": {"defaultProfile": "sol-xhigh", "allowedProfiles": ["sol-high", "sol-xhigh", "sol-max", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]},
+    "architecture-reviewer": {"defaultProfile": "sol-xhigh", "allowedProfiles": ["sol-xhigh", "sol-max", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]},
+    "algorithm-scientist": {"defaultProfile": "sol-xhigh", "allowedProfiles": ["sol-high", "sol-xhigh", "sol-max", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]},
+    "computational-scientist": {"defaultProfile": "sol-xhigh", "allowedProfiles": ["terra-high", "sol-high", "sol-xhigh", "sol-max", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]},
+    "security-engineer": {"defaultProfile": "sol-xhigh", "allowedProfiles": ["sol-high", "sol-xhigh", "astra-medium", "astra-high"]},
+    "security-reviewer": {"defaultProfile": "sol-xhigh", "allowedProfiles": ["sol-xhigh", "sol-max", "astra-medium", "astra-high", "astra-xhigh"]},
+    "backend-engineer": {"defaultProfile": "terra-high", "allowedProfiles": ["terra-medium", "terra-high", "sol-high", "sol-xhigh"]},
+    "platform-engineer": {"defaultProfile": "sol-high", "allowedProfiles": ["terra-medium", "terra-high", "sol-high", "sol-xhigh"]},
+    "qa-engineer": {"defaultProfile": "terra-high", "allowedProfiles": ["terra-high", "sol-high", "sol-xhigh"]},
+    "knowledge-archivist": {"defaultProfile": "terra-medium", "allowedProfiles": ["terra-medium", "terra-high"]}
+  },
+  "taskRoleEligibility": {
+    "micro": ["mechanical-scout"],
+    "mechanical-read": ["mechanical-scout"],
+    "mechanical": ["mechanical-worker"],
+    "exploration": ["explorer", "analyst"],
+    "engineering": ["worker", "backend-engineer", "platform-engineer"],
+    "planning": ["analyst", "planner", "architect"],
+    "review": ["qa-engineer", "architecture-reviewer", "security-reviewer"],
+    "scientific-routine": ["algorithm-scientist", "computational-scientist"],
+    "mathematical-research": ["algorithm-scientist", "computational-scientist", "architect"],
+    "scientific-agentic-workflow": ["computational-scientist", "algorithm-scientist"],
+    "cross-system-synthesis": ["default", "architect", "architecture-reviewer"],
+    "critical-design": ["architect", "architecture-reviewer", "algorithm-scientist", "computational-scientist"],
+    "critical-security": ["security-engineer", "security-reviewer"],
+    "recovery": ["default", "worker", "platform-engineer"],
+    "critical-recovery": ["default", "architect"]
+  },
+  "reviewRoles": ["qa-engineer", "architecture-reviewer", "security-reviewer"],
+  "migrationAliases": {
+    "apex-max": "sol-max",
+    "pinned-top-pro": "sol-xhigh",
+    "gpt-5.6-sol-max": "sol-max",
+    "gpt-5.6-sol-xhigh": "sol-xhigh",
+    "gpt-5.6-terra": "terra-high"
+  }
+}
