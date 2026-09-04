@@ -15,6 +15,7 @@ Use it together with:
 Current docs in this branch:
 
 - [agents-mode-reference.md](agents-mode-reference.md) for the shared operator schema
+- [policy-overlays.md](policy-overlays.md) for optional non-authorizing behavior policies and Ponytail coexistence
 - [external-worker-design.md](external-worker-design.md) for external execution adapter design notes
 - [new-session-guide.md](new-session-guide.md) for new-session orientation and source-first maintenance rules
 - [provider-runtime-layouts.md](provider-runtime-layouts.md) for cross-provider runtime path mapping
@@ -39,4 +40,5 @@ Current docs in this branch:
 - `Depends-on`: standing cross-work-item dependency edge declared in `status.md`; drives the derived blocked-by / ready-set views.
 - `lessons registry`: flat in-repo store of durable delivery lessons under `work-items/lessons/` (a recurring miss, wrong assumption, or process gap), captured so it survives a work-item's archival.
 - `MCP`: Model Context Protocol; a protocol for exposing tools and resources to agent runtimes.
+- `policy overlay`: an optional non-authorizing instruction layer filtered by provider, lane, and agent target.
 - `runtime`: installed provider-facing files and directories used by an agent tool.

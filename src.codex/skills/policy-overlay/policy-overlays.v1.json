@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "defaultSelection": "none",
+  "selectionSyntax": "comma-separated-identifiers-v1",
+  "conflictPolicy": "reject-selection",
+  "precedence": [
+    "hard-governance-and-safety",
+    "explicit-user-requirements",
+    "role-contract",
+    "project-policy",
+    "optional-policy-overlays",
+    "task-prompt"
+  ],
+  "overlays": {
+    "lean-implementation": {
+      "source": {
+        "kind": "builtin",
+        "path": "policies/lean-implementation.md"
+      },
+      "providers": ["codex", "claude"],
+      "lanes": [
+        "worker.default-implementation",
+        "worker.systems-performance-implementation",
+        "worker.ui-implementation",
+        "worker.visual-graphics-visualization"
+      ],
+      "targets": ["main-agent", "internal-subagent", "external-worker"],
+      "propagation": {
+        "mainAgent": "lane-filtered",
+        "internalSubagent": "lane-filtered",
+        "externalWorker": "lane-filtered",
+        "externalReviewer": "never",
+        "consultant": "never"
+      },
+      "conflicts": [],
+      "order": 100,
+      "authorizing": false
+    },
+    "complexity-review": {
+      "source": {
+        "kind": "builtin",
+        "path": "policies/complexity-review.md"
+      },
+      "providers": ["codex", "claude", "kimi"],
+      "lanes": ["review.pre-pr", "review.performance-architecture"],
+      "targets": ["main-agent", "internal-subagent", "external-reviewer"],
+      "propagation": {
+        "mainAgent": "lane-filtered",
+        "internalSubagent": "lane-filtered",
+        "externalWorker": "never",
+        "externalReviewer": "lane-filtered",
+        "consultant": "never"
+      },
+      "conflicts": [],
+      "order": 200,
+      "authorizing": false
+    }
+  },
+  "compatibilityPackages": {
+    "ponytail": {
+      "repository": "DietrichGebert/ponytail",
+      "ownership": "external-host-managed",
+      "required": false
+    }
+  }
+}

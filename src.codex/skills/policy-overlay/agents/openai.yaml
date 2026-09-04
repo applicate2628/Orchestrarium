@@ -1,0 +1,4 @@
+interface:
+  display_name: "Policy Overlay"
+  short_description: "Resolve optional behavior policy for one exact agent lane"
+  default_prompt: "Use $policy-overlay to resolve the configured non-authorizing policies for the exact provider, lane, and target; preserve hard governance, the assigned role, project restrictions, explicit user requirements, and mandatory verification; render only the applicable bounded instruction frame."
