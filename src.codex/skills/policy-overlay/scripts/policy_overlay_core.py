@@ -50,8 +50,8 @@ RESERVED_MARKERS = (FRAME_BEGIN, FRAME_END, "BEGIN_POLICY_OVERLAY", "END_POLICY_
 USER_KEY = "policyOverlays"
 ALLOW_KEY = "allowedPolicyOverlays"
 DENY_KEY = "deniedPolicyOverlays"
-LIST_LINE = re.compile(r"^(?P<key>[A-Za-z][A-Za-z0-9]*):\s*\[(?P<items>[^\]]*)\]\s*(?:#.*)?$")
-KEY_LINE = re.compile(r"^(?P<key>[A-Za-z][A-Za-z0-9]*):")
+LIST_LINE = re.compile(r"^(?P<key>[A-Za-z][A-Za-z0-9]*)[ \t]*:\s*\[(?P<items>[^\]]*)\]\s*(?:#.*)?$")
+KEY_LINE = re.compile(r"^(?P<key>[A-Za-z][A-Za-z0-9]*)[ \t]*:")
 
 
 class PolicyOverlayError(RuntimeError):

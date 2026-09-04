@@ -40,7 +40,7 @@ def parse_selection(value: Any) -> tuple[str, ...]:
 def _config(path: Path | None, keys: frozenset[str]) -> dict[str, tuple[str, ...]]:
     if path is None:
         return {}
-    text = _read_regular(path, MAX_CONFIG_BYTES, label="policy configuration").decode("utf-8", errors="strict")
+    text = _read_regular(path, MAX_CONFIG_BYTES, label="policy configuration").decode("utf-8-sig", errors="strict")
     result: dict[str, tuple[str, ...]] = {}
     for number, line in enumerate(text.splitlines(), start=1):
         if not line.strip() or line.lstrip().startswith("#") or line.startswith((" ", "\t")):

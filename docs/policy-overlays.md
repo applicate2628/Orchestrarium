@@ -46,6 +46,8 @@ deniedPolicyOverlays: []
 
 The resolver accepts only the documented top-level inline lists. It rejects unknown identifiers, duplicates, allow/deny overlap, linked configuration files, unsafe catalog paths, and conflicting overlays.
 
+Configuration files use UTF-8 (Unicode Transformation Format, 8-bit), with or without one leading byte-order mark. Spaces or tabs before the key delimiter `:` are accepted; duplicate owned keys and non-list values still fail rather than being silently ignored.
+
 The fixed precedence is:
 
 1. hard governance and safety;
@@ -93,12 +95,12 @@ The compatibility fixture is based on Ponytail package version `4.9.0` at upstre
 
 ## Installation and operation
 
-Install Ponytail with its own provider-supported plugin mechanism. Install Orchestrarium with its existing Codex or Claude installer. Orchestrarium supports either order on its side: its install, reinstall, and hook-removal paths preserve Ponytail-shaped third-party state. Ponytail remains responsible for its own host/plugin-manager mutations and for preserving unrelated Orchestrarium state.
+Install Ponytail with its own provider-supported plugin mechanism. Install Orchestrarium with its existing Codex or Claude installer. Both installation orders, reinstall, update, and owned removal must preserve third-party state. This remains an installer integration acceptance requirement; resolver and catalog tests alone do not establish it. Ponytail remains responsible for its own host/plugin-manager mutations and for preserving unrelated Orchestrarium state.
 
-Orchestrarium does not create optional policy configuration and Version 1.x does not add an always-on overlay hook. Activate the installed `$policy-overlay` skill explicitly; it resolves the user selection, applies project restrictions, and emits only the exact provider/lane/target projection. The resolver may also be invoked directly:
+Orchestrarium does not create optional policy configuration and Version 1.x does not add an always-on overlay hook. Activate the installed `$policy-overlay` skill explicitly; it resolves the user selection, applies project restrictions, and emits only the exact provider/lane/target projection. From the repository root, the resolver may also be invoked directly:
 
 ```bash
-python scripts/policy-overlays.py \
+python src.codex/skills/policy-overlay/scripts/policy-overlays.py \
   --provider claude \
   --project-root /path/to/project \
   --home /path/to/home \
@@ -118,7 +120,7 @@ Version 1.x includes:
 - deterministic provider/lane/target filtering;
 - explicit skill or command-line activation;
 - bounded instruction rendering for caller-controlled internal and external prompt composition;
-- Ponytail-focused installer compatibility regressions;
+- Ponytail-focused installer compatibility regressions as a required integration gate;
 - no new runtime dependency.
 
 Deferred to Version 2.x unless independently justified:
@@ -144,4 +146,5 @@ Before publication, revert the feature commit or delete the feature branch. Afte
 - **Provider:** the host or external execution system used for a task lane.
 - **SessionStart:** a lifecycle event emitted when a provider session starts or resumes.
 - **Subagent:** a child agent assigned a narrower task.
+- **UTF-8 — Unicode Transformation Format, 8-bit:** Unicode text encoding; an optional leading byte-order mark identifies the encoding, not a configuration key.
 - **YAGNI — You Aren't Gonna Need It:** avoiding speculative implementation before a demonstrated requirement.
