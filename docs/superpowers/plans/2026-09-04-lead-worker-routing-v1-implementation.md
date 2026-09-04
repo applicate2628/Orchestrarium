@@ -1,118 +1,88 @@
 # Provider-Neutral Lead and Worker Routing V1 Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: use test-driven development and a fresh independent review gate for each rejected-or-accepted slice.
 
-**Goal:** Add a pure Version 1 resolver that keeps Codex or Claude as the single logical Lead and selects one admitted optional CLI worker with explicit fallback provenance while preserving the exact role, scope, artifact, and gate contract.
+**Goal:** keep Codex or Claude as the one logical Lead and select one optional Command-Line Interface (CLI) worker with explicit fallback while preserving role, scope, artifact, gate, and execution authority.
 
-**Architecture:** Add one provider-neutral Codex-canonical skill projected by the existing installer. The resolver consumes a strict request, filters explicit candidates by availability, capability, provider/runtime identity, mutation, tools, independence, isolation, delegation, and authority, then returns one deterministic nonauthorizing route or a typed failure. Existing native roles, role policy, manifests, provider adapters, Astra routing, and operator defaults remain unchanged.
+**Architecture:** the public `resolve.py` compatibility facade adds strict input, request identity, native-host, and adapter-admission boundaries around the preserved reviewed selection core in `_resolver_base.py`. Existing native roles, policy, manifests, provider adapters, Astra routing, and operator defaults remain unchanged.
 
 **Tech Stack:** Python 3.11+, JavaScript Object Notation (JSON), Markdown, Pytest.
 
 **Spec:** `docs/superpowers/specs/2026-09-04-lead-worker-routing-v1-design.md`
 
-## Global Constraints
+## Global constraints
 
-- Do not modify the frozen Version 1 parity baseline, native role TOML, role manifest, `role-routing-policy.v1.json`, or `agents-mode` defaults.
+- Do not modify the frozen Version 1 parity baseline, native role Tom's Obvious Minimal Language (TOML) files, role manifest, `role-routing-policy.v1.json`, or `agents-mode` defaults.
 - Do not add General Language Model (GLM) providers to Version 1.
 - Do not launch providers from the resolver.
-- Do not allow silent fallback, recursive delegation, worker authorization, provider-family spoofing, or provider/runtime spoofing.
+- Do not allow silent fallback, recursive delegation, worker authorization, provider-family spoofing, provider/runtime spoofing, or cross-host native routing.
 - Preserve current Kimi and Grok execution admission boundaries.
-- Bind every decision to one dispatch, policy snapshot, role, scope, artifact contract, gate contract, and candidate evidence snapshot.
+- Bind decisions to dispatch, policy, role, scope, artifact, gate, candidate evidence, and complete request identity.
 - Do not add or use a GitHub Actions workflow.
 
----
+## Completed implementation slices
 
-### Task 1: Strict request and candidate contract
+### Slice 1 — strict request and candidate contract
 
-**Files:**
-- Create: `tests/test_lead_worker_routing_v1.py`
-- Create: `src.codex/skills/lead-worker-routing/scripts/resolve.py`
+- [x] Exact request and candidate shapes.
+- [x] Codex/Claude Lead Host restriction.
+- [x] Non-authorizing leaf constraints.
 
-**Interfaces:**
-- Produces: `resolve_v1_worker_route(request: dict[str, object]) -> dict[str, object]`.
-- Produces: compact deterministic CLI JSON through `main(argv: list[str] | None = None) -> int`.
+### Slice 2 — role, scope, artifact, gate, and evidence binding
 
-- [x] **Step 1: Write failing tests for Lead Host, exact fields, provider scope, model independence, and nonauthorizing leaf constraints.**
-- [x] **Step 2: Run the focused tests and verify failure because the resolver module is absent.**
-- [x] **Step 3: Implement strict validation and typed decisions with no candidate selection beyond the minimum needed by the tests.**
-- [x] **Step 4: Run the focused tests and verify they pass.**
-- [x] **Step 5: Commit the contract and tests.**
+- [x] Bind `dispatchId`, `policySnapshotId`, `assignedRole`, `scopeId`, `artifactContract`, and `gateContract`.
+- [x] Bind candidate `evidenceSnapshotId`.
+- [x] Preserve all contract fields across fallback.
 
-### Task 2: Role, scope, artifact, gate, and evidence binding
+### Slice 3 — capability, mutation, tools, identity, and isolation
 
-**Files:**
-- Modify: `tests/test_lead_worker_routing_v1.py`
-- Modify: `src.codex/skills/lead-worker-routing/scripts/resolve.py`
+- [x] Provider-family and runtime mapping.
+- [x] Independent-family exclusion.
+- [x] Capability, tool, mutation, provider ceiling, same-host isolation, delegation, and authority checks.
 
-**Interfaces:**
-- Adds request and decision fields: `dispatchId`, `policySnapshotId`, `assignedRole`, `scopeId`, `artifactContract`, `gateContract`, and `excludedProviderFamilies`.
-- Adds candidate field: `evidenceSnapshotId`.
+### Slice 4 — availability fallback and strict CLI
 
-- [x] **Step 1: Add failing tests proving that a selected fallback preserves the exact role, scope, policy snapshot, artifact contract, gate contract, and evidence identity.**
-- [x] **Step 2: Run the tests and verify failure because the first resolver does not bind those fields.**
-- [x] **Step 3: Implement exact validation and deterministic decision projection for the new contract fields.**
-- [x] **Step 4: Run the focused tests and verify they pass.**
-- [x] **Step 5: Commit the reviewed contract correction.**
+- [x] Typed ordinary and hard-failure availability classes.
+- [x] Deterministic priority and fallback evidence.
+- [x] Duplicate-key, ordinary-file, no-follow leaf, size-limit, file/stdin CLI handling.
 
-### Task 3: Capability, mutation, tool, identity, and isolation filtering
+### Slice 5 — deep-review hardening
 
-**Files:**
-- Modify: `tests/test_lead_worker_routing_v1.py`
-- Modify: `src.codex/skills/lead-worker-routing/scripts/resolve.py`
+**Tests first:** `tests/test_lead_worker_routing_v1_deep_review.py`
 
-**Interfaces:**
-- Produces: `selectedCandidate`, `rejections`, and stable IDs for provider family, runtime, capability, independence, mutation, tool, isolation, delegation, and authority denials.
+- [x] Add failing tests for request fingerprint, no execution authority, foreign native runtime, non-standard JSON constants, excessive JSON shape, linked ancestors, and non-flaky ancestor snapshots.
+- [x] Observe the expected red failures against the pre-hardening resolver.
+- [x] Preserve the reviewed Version 1 selection implementation as `_resolver_base.py`.
+- [x] Implement the public hardening facade in `resolve.py`.
+- [x] Reject cross-host provider-native workers.
+- [x] Add Secure Hash Algorithm 256-bit canonical request fingerprint.
+- [x] Add `requiresAdapterAdmission = true` and `executionAuthorized = false` for selected decisions.
+- [x] Bound JSON depth and node count and reject non-standard constants.
+- [x] Validate the complete path chain while ignoring unrelated directory timestamp changes.
+- [x] Pass focused deep-review and compatibility tests in the isolated test checkout.
 
-- [x] **Step 1: Add failing tests for provider/runtime spoofing, excluded provider family, missing capability, insufficient mutation level, missing tools, same-host non-isolation, recursive delegation, and authorizing candidates.**
-- [x] **Step 2: Run the focused tests and confirm each new test fails for the missing behavior.**
-- [x] **Step 3: Implement deterministic candidate filtering and stable rejection reasons.**
-- [x] **Step 4: Run the focused tests and verify all pass.**
-- [x] **Step 5: Commit filtering behavior with Task 2.**
+## Remaining integration gate
 
-### Task 4: Explicit availability fallback and strict CLI input
+- [ ] Run `pytest -q tests/test_lead_worker_routing_v1.py tests/test_lead_worker_routing_v1_deep_review.py tests/test_astra_routing_v1.py` in a full checkout.
+- [ ] Run `python -m compileall -q src.codex/skills/lead-worker-routing`.
+- [ ] Run both provider-pack validators.
+- [ ] Verify installer projection includes `_resolver_base.py`.
+- [ ] Run installer regressions, documentation checks, `git diff --check`, and publication-safety checks.
+- [ ] Obtain independent review on the final head.
+- [ ] Update the Pull Request with exact full-checkout evidence before leaving draft state.
 
-**Files:**
-- Modify: `tests/test_lead_worker_routing_v1.py`
-- Modify: `src.codex/skills/lead-worker-routing/scripts/resolve.py`
+## Explicitly deferred to Version 2
 
-**Interfaces:**
-- Produces: `fallbackApplied`, `fallbackEvents`, `hardFailureObserved`, `requiresOperatorAttention`, and deterministic compact CLI output.
+- trusted dynamic registry and signed or hash-bound evidence stores;
+- Lead lease and stale-epoch fencing;
+- adaptive portfolio selection and structured model disagreement;
+- GLM and future provider admission;
+- quality replan, quarantine, budget, and evidence-expiry policy;
+- ledger schema migration and cross-record semantic validator.
 
-- [x] **Step 1: Add failing tests for subscription absence, quota exhaustion, transport failure, hard auth/contract failures, no selectable candidate, duplicate JSON keys, symbolic-link input, input-size limit, and stdin/file CLI behavior.**
-- [x] **Step 2: Run the focused tests and verify expected failures.**
-- [x] **Step 3: Implement explicit candidate-order fallback, hard-failure classification, strict JSON parsing, and no-follow ordinary-file input.**
-- [x] **Step 4: Run the focused tests and verify pass plus clean stderr.**
-- [x] **Step 5: Commit fallback and CLI behavior with Tasks 2 and 3.**
+## Terms and abbreviations
 
-### Task 5: Installable skill and documentation
-
-**Files:**
-- Modify: `src.codex/skills/lead-worker-routing/SKILL.md`
-- Modify: `src.codex/skills/lead-worker-routing/agents/openai.yaml`
-- Modify: `docs/lead-contract-routing-audit-2026-09-04.md`
-- Modify: `docs/superpowers/specs/2026-09-04-lead-worker-routing-v1-design.md`
-- Modify: `docs/superpowers/plans/2026-09-04-lead-worker-routing-v1-implementation.md`
-
-**Interfaces:**
-- Consumes: the resolver command and stable result fields.
-- Produces: provider-neutral operator instructions projected by the existing installer.
-
-- [x] **Step 1: Add failing metadata/documentation assertions to the focused test.**
-- [x] **Step 2: Run the test and verify failure because the reviewed contract fields are absent from the docs.**
-- [x] **Step 3: Update the skill, metadata, audit, spec, and plan without changing existing routing defaults.**
-- [x] **Step 4: Run focused tests and Python compilation in the available isolated checkout.**
-- [x] **Step 5: Commit documentation and implementation together so the public contract matches the code.**
-
-### Task 6: Integration verification and pull request
-
-**Files:**
-- Verify only; update Pull Request body after evidence is available.
-
-**Interfaces:**
-- Produces: final branch evidence and a stacked Pull Request targeting `feature/astra-routing-v1`.
-
-- [ ] **Step 1: Run `pytest -q tests/test_lead_worker_routing_v1.py tests/test_astra_routing_v1.py` in a full checkout.**
-- [ ] **Step 2: Run `python -m compileall -q src.codex/skills/lead-worker-routing` and `git diff --check` in a full checkout.**
-- [ ] **Step 3: Run repository provider-pack validators, installer projection checks, and publication safety checks.**
-- [ ] **Step 4: Review the final diff against the spec, especially baseline non-mutation and no hidden provider admission.**
-- [ ] **Step 5: Open a draft stacked Pull Request and record exact verification evidence and remaining unavailable checks.**
+- **CLI — Command-Line Interface:** provider command-line execution surface.
+- **JSON — JavaScript Object Notation:** request serialization format.
+- **SHA-256 — Secure Hash Algorithm 256-bit:** fingerprint algorithm.
+- **Compatibility facade:** public entrypoint that adds bounded checks while preserving the reviewed selection core.
