@@ -1,4 +1,4 @@
 interface:
   display_name: "Astra Routing"
-  short_description: "Choose an explicit Astra model and effort route"
-  default_prompt: "Use $astra-routing to decide whether this admitted task merits the narrow Orchestrarium 1.x GPT-6 Astra route, choose the minimum sufficient reasoning effort, require exact runtime availability and complete launch flags, forbid silent fallback and broad Astra fan-out, and preserve all independent review and publication gates."
+  short_description: "Choose an explicit evidence-gated Astra route"
+  default_prompt: "Use $astra-routing to decide whether this admitted task has separate route evidence for GPT-6 Astra, compare complete expected cost-to-PASS when economics is the basis, choose a separately evidence-gated reasoning effort, require exact runtime availability, forbid silent fallback and broad Astra fan-out, and preserve independent review and publication gates."

@@ -2,92 +2,215 @@
 
 ## Contents
 
-- [Audit baseline](#audit-baseline)
-- [Current Version 1 findings](#current-version-1-findings)
-- [Astra and reasoning effort](#astra-and-reasoning-effort)
-- [Version 1 decision](#version-1-decision)
-- [Version 2 decision](#version-2-decision)
-- [Pull-request interaction](#pull-request-interaction)
-- [Terms and Abbreviations](#terms-and-abbreviations)
+1. [Audited state](#1-audited-state)
+2. [Repository-wide findings](#2-repository-wide-findings)
+3. [Version 1 point upgrade](#3-version-1-point-upgrade)
+4. [Version 2 correction](#4-version-2-correction)
+5. [Reasoning-effort policy](#5-reasoning-effort-policy)
+6. [Pull-request interaction](#6-pull-request-interaction)
+7. [Verification obligations](#7-verification-obligations)
+8. [Terms and abbreviations](#8-terms-and-abbreviations)
 
-## Audit baseline
+## 1. Audited state
 
-- Repository: `applicate2628/Orchestrarium`.
-- Audited `main`: `ece04040627fcc0d0988128e44d401de53ff01fb`.
-- Audited hotfix Pull Request (PR) 4 head: `3dbfb9faf824365f5898fe52dd10093f4d75da9c`; its current inline review threads are resolved.
-- Audited policy-overlay PR 5 head: `ea7a9cfc21f7f5b8e78ec9681fd458917ff7aea1`; it has no model-routing file overlap.
-- Official model sources: OpenAI model pages for GPT-5.6 Luna, Terra, Sol, GPT-6 Astra, and the GPT-6 Astra launch report, checked on 2026-09-04.
+The audit covers:
 
-## Current Version 1 findings
+- `main` at `ece04040627fcc0d0988128e44d401de53ff01fb`;
+- Pull Request (PR) 4 at `3dbfb9faf824365f5898fe52dd10093f4d75da9c`;
+- PR 5 at `ea7a9cfc21f7f5b8e78ec9681fd458917ff7aea1`;
+- the pre-correction PR 6 head at `8787a1ae9a993fdbef116437019c921ce8682bd7`;
+- current OpenAI model and reasoning-effort documentation observed on 2026-09-04.
 
-1. `shared/role-routing-policy.v1.json` places `mechanical`, `balanced`, `frontier`, and `apex` in one order even though Luna is a zero-authority mechanical execution class rather than a lower general-reasoning tier.
-2. `apex-max` names the `apex` tier but still binds `gpt-5.6-sol`; Version 1 therefore has no distinct apex model.
-3. Model and effort are separate fields, but runtime selection is incomplete: native roles are static Tom's Obvious Minimal Language (TOML) bindings, while `allowedProfiles` is not a general per-dispatch model selector.
-4. Exact model identifiers are repeated across role policy, native TOML, provider profile configuration, tests, and documentation.
-5. There is no owner for expected cost, tokens, steps, retries, review, rework, and latency to an accepted result. Price per token alone cannot represent Astra's documented reduction in output tokens, elapsed task time, and repeated iterations.
-6. Availability, explicit fallback, maximum-effort approval, safety admission, automatic fan-out, and evidence-independence are not one coherent decision.
-7. Changing existing native-role TOML or the pinned Version 1 policy requires exact stock-prior installer migration. A quick Version 1 upgrade must not bypass that ownership boundary.
+PR 4 does not change the model-routing policy, native model bindings, or
+provider-profile schema. PR 5 adds policy overlays and Ponytail compatibility;
+its current files do not overlap the model catalog, role policy, or Astra
+resolver. PR 6 is stacked on PR 4 and is the Version 1 point-upgrade branch.
 
-## Astra and reasoning effort
+## 2. Repository-wide findings
 
-GPT-6 Astra supports `low`, `medium`, `high`, `xhigh`, and `max`; unlike Luna, Terra, and Sol, it does not support `none`. A model and an effort level form one exact profile. Sol `xhigh` does not automatically dominate Astra `medium`, and Astra `medium` does not automatically prove lower total cost.
+### 2.1 Current ownership surfaces
 
-OpenAI reports the published benchmark table as the maximum score at any tested effort. Therefore the published FrontierMath result cannot be attributed specifically to `medium` without separate measured evidence. At the same time, the launch report states that Astra can require fewer iterations, use fewer output tokens, and complete some agentic tasks at lower estimated task cost than Sol despite a higher per-token price. This supports Astra `medium` as the initial default for deep mathematics and connected scientific workflows, followed by measured escalation rather than automatic `xhigh` or `max`.
+Model and effort semantics are distributed across:
 
-Effort policy for the narrow Version 1 route:
+1. `shared/role-routing-policy.v1.json`;
+2. `src.codex/agents/*.toml`;
+3. `src.codex/agents/orchestrarium-role-manifest.json`;
+4. `shared/agents-mode.schema.json`;
+5. `shared/agents-mode.defaults.yaml`;
+6. `shared/agents-mode.presets.json`;
+7. `scripts/resolve-agents-mode.py`;
+8. `scripts/provider_prompt.py`;
+9. provider skills, references, validators, and tests.
 
-- `medium`: default for mathematical research, scientific agentic workflows, and cross-system synthesis;
-- `high`: default for critical recovery, otherwise requires objective evidence that medium is insufficient or measured evidence that high improves the route;
-- `xhigh`: requires objective failure or contradiction at high, or measured gain;
-- `max`: requires explicit human approval for the individual run;
-- `low`: evaluation or measured-sufficient route only;
-- `none`: invalid for Astra.
+The Version 1 role manifest hash-binds the role policy and every native role
+file. A quick upgrade that rewrites those objects would require exact
+stock-prior migration and would no longer be a point change.
 
-## Version 1 decision
+### 2.2 Semantic defects
 
-Add one installable, create-only `astra-routing` skill instead of changing existing native roles, the pinned Version 1 routing policy, or operator defaults.
+1. Version 1 orders `mechanical < balanced < frontier < apex`, although Luna is
+   a zero-decision-authority mechanical execution class, not the lowest general
+   reasoning tier.
+2. `apex-max` still binds `gpt-5.6-sol`; Version 1 therefore has a named apex
+   tier without an apex model.
+3. `allowedProfiles` is validated but is not a general runtime selector.
+   Native roles use static model and effort values from Tom's Obvious Minimal
+   Language (TOML) files.
+4. Exact model identifiers and effort choices are duplicated across policy,
+   native roles, operator presets, transport parsing, tests, and docs.
+5. Version 1 has no owner for complete-route economics: input, cached input,
+   cache writes, output, repeated calls, tool costs, retries, rework, review,
+   and elapsed time.
+6. Model capability and reasoning effort are partially separated but still
+   compared as though one global effort ladder had the same meaning for every
+   model.
+7. Sol and Astra belong to the same OpenAI evidence-independence group and
+   cannot supply two provider-independent opinions.
 
-The pure resolver:
+### 2.3 Official model constraints used by the design
 
-- accepts only four admitted task classes;
-- requires observed `gpt-6-astra` availability;
-- resolves an exact effort with typed evidence gates;
-- returns complete external Codex flags;
-- permits one automatic Astra instance;
-- never silently falls back;
-- never authorizes acceptance, merge, or publication;
-- preserves independent review and Quality Assurance (QA) gates.
+- Luna, Terra, and Sol admit `none`, `low`, `medium`, `high`, `xhigh`, and
+  `max`; Astra admits `low`, `medium`, `high`, `xhigh`, and `max`.
+- Astra is priced above Sol per token, but published evidence also reports
+  fewer iterations, fewer written steps in some work, lower elapsed time in
+  some agentic tasks, and up to 20% fewer tokens in one partner workflow.
+- Published evaluation scores are the maximum at any tested effort. They do
+  not prove that a reported maximum is specifically a `medium` result.
+- The long-context price multiplier applies per request, so a three-call Sol
+  route and a one-call Astra route must be priced call by call.
 
-This is a targeted compatibility upgrade. Existing Terra, Sol, Luna, role, sandbox, and review defaults remain unchanged.
+## 3. Version 1 point upgrade
 
-## Version 2 decision
+Version 1 keeps all existing native roles, policy hashes, operator defaults,
+and installed ownership rules unchanged. It adds one explicit `astra-routing`
+skill and pure resolver.
 
-Version 2 must replace the linear model ranking with:
+The corrected resolver requires two independent decisions:
 
-- execution class: `mechanical | general`;
-- general capability: `balanced < frontier < apex`;
-- exact model-effort profiles;
-- one model catalog containing supported and admitted efforts;
-- complete route estimates measured as expected cost and work to an accepted result;
-- hard availability, fallback, maximum-effort, safety, fan-out, and evidence-independence gates;
-- a pure deterministic resolver that never launches a provider.
+1. **Route admission:** why Astra is used at all.
+2. **Effort admission:** why the selected Astra effort differs from the task
+   default.
 
-Luna remains mechanical-only. Terra maps to balanced, Sol to frontier, and Astra to apex. Deep mathematics and connected scientific workflows default to Astra `medium`; routine or cleanly decomposable work remains on Terra or Sol unless a complete comparable estimate proves another admitted route better or an objective quality floor requires escalation.
+Accepted route evidence is task-specific:
 
-The Version 2 optimizer must compare a complete declared candidate set. It must price every model call separately, because the long-context multiplier applies per request, and it must never let a scalar cost score override role, effort, safety, review, or availability constraints.
+| Task class | Route evidence | Default effort |
+|---|---|---|
+| `mathematical-research` | `mathematics-quality-floor` or `measured-cost-to-pass` | `medium` |
+| `scientific-agentic-workflow` | `connected-science-workflow` or `measured-cost-to-pass` | `medium` |
+| `cross-system-synthesis` | `cross-system-context-retention` or `measured-cost-to-pass` | `medium` |
+| `critical-recovery` | `verified-frontier-recovery` or `measured-cost-to-pass` | `high` |
 
-## Pull-request interaction
+`measured-cost-to-pass` requires positive integer Astra and legacy route costs,
+and Astra is selected only when its complete expected route cost is strictly
+lower. This prevents effort-failure evidence from silently authorizing an
+otherwise unjustified Astra route.
 
-- PR 4 owns late Version 1 lifecycle, review, and publication hotfixes. The Version 1 Astra branch is stacked on its current head to avoid losing those corrections and to keep release-note/doc integration conflict-visible.
-- PR 5 owns generic instruction overlays and Ponytail coexistence. It has no current file overlap and is not a dependency of either model-routing version.
-- Version 2 is stacked on the final Version 1 Astra branch because it adds the full catalog and router while preserving the usable Version 1 route during migration.
-- No GitHub Actions workflow is introduced or used by this work.
+Version 1 remains:
 
-## Terms and Abbreviations
+- explicit rather than automatic;
+- limited to one Astra instance;
+- nonauthorizing;
+- unavailable without silent fallback;
+- independent of native role TOML and `agents-mode`.
 
-- **Astra:** GPT-6 Astra, the apex general-purpose model in the proposed system.
-- **Effort:** the provider reasoning-effort setting: `low`, `medium`, `high`, `xhigh`, or `max` for Astra.
-- **PR — Pull Request:** a request to merge a branch.
-- **QA — Quality Assurance:** independent verification of implementation quality.
-- **TOML — Tom's Obvious Minimal Language:** the native-role configuration format.
-- **Version 1 / Version 2:** the current compatibility contract and the redesigned model-routing contract.
+## 4. Version 2 correction
+
+Version 2 introduces parallel, versioned artifacts rather than mutating
+Version 1:
+
+- `shared/model-catalog.v2.json`;
+- `shared/role-routing-policy.v2.json`;
+- `scripts/model_routing/resolve_v2.py`;
+- `tests/test_model_routing_v2.py`;
+- `docs/model-routing-v2.md`.
+
+The corrected model:
+
+```text
+mechanical execution: Luna
+
+general capability:
+balanced -> Terra
+frontier -> Sol
+apex    -> Astra
+```
+
+Version 2 uses exact `model + effort` profiles, model-local effort admission,
+runtime availability states, explicit maximum-effort approval, Astra security
+approval where required, a one-instance Astra fan-out ceiling, and no implicit
+fallback.
+
+For deep mathematics, connected scientific workflows, cross-system synthesis,
+and critical design, the policy default is Astra `medium`. Critical recovery
+defaults to Astra `high`. Routine science remains Sol `high`.
+
+Automatic comparison mode evaluates the complete available policy-declared
+candidate set. Every route estimate contains all calls, raw token buckets,
+route wall time, coordination steps, retry calls, rework cycles, independent
+review, and an acceptance probability. The caller selects one explicit
+objective: OpenAI Application Programming Interface (API) cost, total tokens,
+steps, or latency. The resolver:
+
+1. prices each call independently and applies long-context multipliers per call;
+2. computes expected cost, total tokens, model calls, retries, rework cycles,
+   steps, and wall time to an accepted result;
+3. removes routes that fail the quality floor or hard admission gates;
+4. minimizes the selected objective with deterministic secondary tie-breaks;
+5. records the exact objective and API pricing channel in the decision.
+
+This allows Astra `medium` to win when one stronger pass uses fewer tokens or
+steps than a multi-call Sol `xhigh` route, even when the single Astra call has a
+higher API price. An API-cost objective can independently keep Sol when the
+complete accepted Sol route remains cheaper.
+
+No scalar score can override availability, role eligibility, effort support,
+maximum-effort approval, safety admission, review requirements, or fan-out.
+
+## 5. Reasoning-effort policy
+
+Effort is model-local, not a universal quality rank.
+
+For Astra:
+
+- `low`: migration evaluation or measured sufficiency;
+- `medium`: default for deep mathematics, connected science, and cross-system
+  synthesis;
+- `high`: objective medium failure or measured gain; also the critical-recovery
+  default;
+- `xhigh`: objective high failure, contradiction, or measured gain;
+- `max`: explicit human approval only;
+- `none`: invalid.
+
+Astra `medium` may outperform Sol `xhigh`, but the router does not assume that
+from labels. It uses policy defaults for known task classes and complete
+measured route estimates for economic optimization.
+
+## 6. Pull-request interaction
+
+- PR 6 remains the narrow Version 1 point upgrade stacked on PR 4.
+- The Version 2 branch is stacked on the corrected PR 6 head.
+- PR 5 remains independent; it should be merged or rebased by merge commit
+  according to its own ownership contract rather than copied into either
+  model-routing branch.
+- No GitHub Actions workflow is added or used.
+
+## 7. Verification obligations
+
+Before either branch leaves draft state:
+
+1. run the focused Version 1 and Version 2 tests;
+2. run Python compilation and `git diff --check`;
+3. run both provider-pack validators in a full checkout;
+4. run installer and publication-gate checks;
+5. run Codex review on each final head;
+6. add the repository-required release-note and public-index updates when the
+   owning integration branch is ready for publication.
+
+## 8. Terms and abbreviations
+
+- **Astra:** GPT-6 Astra, the apex general-purpose model.
+- **Effort:** model-local reasoning effort.
+- **PR — Pull Request:** a proposed branch merge.
+- **QA — Quality Assurance:** independent implementation verification.
+- **TOML — Tom's Obvious Minimal Language:** native Codex role configuration.
+- **Version 1 / Version 2:** compatibility contract and redesigned routing contract.
