@@ -1,0 +1,4 @@
+interface:
+  display_name: "Lead Worker Pool"
+  short_description: "Select an interchangeable CLI worker with explicit fallback"
+  default_prompt: "Use $lead-worker-pool from the Codex or Claude main-session Lead to preserve the assigned role, scope, artifact, and gate while selecting an admitted CLI worker from a caller-ranked evidence snapshot. Record every skipped provider, allow cross-vendor fallback only when policy permits it, keep reviewers provider-family independent when required, and never authorize acceptance or publication."
