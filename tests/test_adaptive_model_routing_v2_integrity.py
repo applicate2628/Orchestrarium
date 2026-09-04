@@ -115,3 +115,29 @@ def test_unneeded_human_gate_cannot_be_reported_as_resolved() -> None:
     outcome["humanGateRequired"] = False
     outcome["humanGateResolved"] = True
     assert list(_validator(schema, "routeOutcome").iter_errors(outcome))
+
+
+def test_operational_examples_preserve_each_slots_reasoning_intent() -> None:
+    examples = _load(EXAMPLES)
+    bindings = {
+        item["slotId"]: item
+        for item in examples["routeControl"]["slotEffortIntents"]
+    }
+    for name, slot in (
+        ("dispatchControl", "primary"),
+        ("writeDispatchControl", "implementation"),
+    ):
+        mapping = examples[name]["effortMapping"]
+        assert mapping["effortIntent"] == bindings[slot]["effortIntent"]
+        assert mapping["reasoningRequired"] == bindings[slot]["reasoningRequired"]
+
+
+def test_operational_examples_do_not_share_retry_identity_between_dispatches() -> None:
+    examples = _load(EXAMPLES)
+    primary = examples["dispatchControl"]
+    implementation = examples["writeDispatchControl"]
+    assert primary["dispatchId"] != implementation["dispatchId"]
+    assert primary["idempotencyKey"] != implementation["idempotencyKey"]
+    result = examples["workerResultControl"]
+    assert result["dispatchId"] == primary["dispatchId"]
+    assert result["idempotencyKey"] == primary["idempotencyKey"]
