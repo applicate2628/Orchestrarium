@@ -59,20 +59,23 @@ def test_worker_result_is_bound_to_dispatch_attempt_fence_and_cleanup() -> None:
     assert {
         "dispatchId",
         "dispatchSpecDigest",
-        "leadFence",
+        "executionLeadFence",
+        "admittingLeadFence",
         "attemptOrdinal",
         "idempotencyKey",
         "terminalReceiptRef",
         "supervisionPolicyId",
         "cancellationId",
-        "processReaped",
+        "executionKind",
+        "executionSettled",
+        "processDisposition",
         "cleanupStatus",
         "contractValidated",
         "fenceDisposition",
         "outputUsable",
         "authorizing",
     } <= set(result_schema["required"])
-    assert result_schema["properties"]["processReaped"]["const"] is True
+    assert result_schema["properties"]["executionSettled"]["const"] is True
     assert result_schema["properties"]["contractValidated"]["const"] is True
     assert result_schema["properties"]["authorizing"]["const"] is False
 
