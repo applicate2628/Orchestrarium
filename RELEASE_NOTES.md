@@ -2,6 +2,10 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-09-05
+
+- **Policy overlay file reads now compare Windows timestamps within their originating metadata interface.** Path-based and descriptor-based status can report different `st_ctime_ns` meanings for the same unchanged file. Cross-interface checks still bind identity, type, size, modification time, attributes, and creation time when available; each interface retains its own complete before/after stability checks. Unix checks remain exact. **Why it matters:** ordinary Windows inputs no longer produce false unsafe-file errors, while replacement and metadata changes remain rejected.
+
 ## 2026-09-01
 
 - **Stage 0 verifier modules can now be imported on Windows without pretending that Windows implements the Linux trust model.** Effective user ID discovery is deferred until private temporary-parent validation begins; non-Linux hosts then return a typed `requires Linux` verification error before interpreting filesystem metadata, while Linux retains the root-or-effective-user ownership, sticky `/tmp`, child-subreaper, and `/proc` containment checks. **Why it matters:** Windows can collect and review the frozen verifier and its pin/hash contracts, while actual Stage 0 execution remains explicitly Linux-only.

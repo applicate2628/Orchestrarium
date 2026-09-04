@@ -103,8 +103,9 @@ def _file_signature(info: os.stat_result) -> tuple[int, ...]:
         info.st_mode,
         info.st_size,
         getattr(info, "st_mtime_ns", 0),
-        getattr(info, "st_ctime_ns", 0),
         getattr(info, "st_file_attributes", 0),
+        getattr(info, "st_birthtime_ns", 0),
+        getattr(info, "st_ctime_ns", 0),
     )
 
 
@@ -125,7 +126,12 @@ def _read_regular(path: Path, limit: int, *, label: str) -> bytes:
         )
         fd = os.open(path, flags)
         opened = os.fstat(fd)
-        if _file_signature(before) != _file_signature(opened):
+        before_signature = _file_signature(before)
+        opened_signature = _file_signature(opened)
+        # Windows path and descriptor APIs can give ctime different meanings.
+        # Compare it within each API below, never discard either stability check.
+        comparable = slice(None, -1) if os.name == "nt" else slice(None)
+        if before_signature[comparable] != opened_signature[comparable]:
             raise PolicyOverlayError(f"{label} changed while opening: {path}")
         chunks: list[bytes] = []
         size = 0
@@ -138,8 +144,8 @@ def _read_regular(path: Path, limit: int, *, label: str) -> bytes:
             if size > limit:
                 raise PolicyOverlayError(f"{label} exceeds {limit} bytes: {path}")
         if (
-            _file_signature(opened) != _file_signature(os.fstat(fd))
-            or _file_signature(opened) != _file_signature(path.lstat())
+            opened_signature != _file_signature(os.fstat(fd))
+            or before_signature != _file_signature(path.lstat())
         ):
             raise PolicyOverlayError(f"{label} changed while reading: {path}")
         return b"".join(chunks)
