@@ -1,130 +1,113 @@
-# Provider-Neutral Lead and Worker Routing Audit
+# Provider-Neutral Lead and Worker Routing — Deep Review Audit
 
 ## Contents
 
-1. [Audited state](#1-audited-state)
-2. [Established repository constraints](#2-established-repository-constraints)
-3. [Defects in the previous routing model](#3-defects-in-the-previous-routing-model)
-4. [Version 1 decision](#4-version-1-decision)
-5. [Full-review findings and corrections](#5-full-review-findings-and-corrections)
-6. [Fallback and subscription semantics](#6-fallback-and-subscription-semantics)
-7. [Provider admission boundary](#7-provider-admission-boundary)
-8. [Version 2 direction](#8-version-2-direction)
-9. [Verification obligations](#9-verification-obligations)
-10. [Terms and abbreviations](#10-terms-and-abbreviations)
+1. [Reviewed state](#1-reviewed-state)
+2. [Angles reviewed](#2-angles-reviewed)
+3. [Confirmed findings](#3-confirmed-findings)
+4. [Corrections applied](#4-corrections-applied)
+5. [Rejected overengineering](#5-rejected-overengineering)
+6. [Residual Version 1 limits](#6-residual-version-1-limits)
+7. [Verification obligations](#7-verification-obligations)
+8. [Version 2 handoff](#8-version-2-handoff)
+9. [Terms and abbreviations](#9-terms-and-abbreviations)
 
-## 1. Audited state
+## 1. Reviewed state
 
-The review covers the Version 1 baseline on `main`, the open lifecycle hotfix branch, the policy-overlay work, the Astra routing Pull Request, the shared subagent operating model, native Codex role bindings, provider prompt transports, agents-mode schemas, and the current Kimi and Grok admission paths.
+The audit covers the frozen Version 1 baseline, Astra point route, provider-neutral Lead/worker branch, shared subagent operating model, Codex and Claude projections, provider prompt transports, Kimi and Grok admission boundaries, role and mutation contracts, and the new resolver tests.
 
-The Astra route remains a narrow point upgrade. The provider-neutral Lead/worker route is stacked on it so that the new behavior can be reviewed without rewriting the frozen Version 1 policy or folding Version 2 architecture into a compatibility patch.
+The provider-neutral route remains stacked on the Astra route. It is a compatibility feature and does not rewrite native role TOML, the role manifest, `role-routing-policy.v1.json`, `agents-mode`, provider adapters, or the parity baseline.
 
-## 2. Established repository constraints
+## 2. Angles reviewed
 
-Version 1 model and provider semantics are distributed across native role Tom's Obvious Minimal Language (TOML) files, a hash-bound role manifest, `role-routing-policy.v1.json`, agents-mode schema/default/preset files, provider prompt transport, installer ownership, skills, references, and tests. Rewriting native model bindings would require a broad exact-prior installer migration.
+The review used separate passes for:
 
-The shared operating model already establishes that the root conversation holding Lead is the only dispatcher and work-item lifecycle owner. A worker returns one artifact and evidence, cannot become Lead, cannot launch another wrapper, and cannot treat its own `PASS` claim as accepted proof.
+- semantic preservation across fallback;
+- authority and adapter admission;
+- provider/runtime/family identity;
+- same-host and native-host isolation;
+- independent review requirements;
+- malformed and adversarial JSON;
+- file-system race and link handling on POSIX and Windows-relevant metadata;
+- determinism and replay identity;
+- denial/fallback observability;
+- backward compatibility with existing Version 1 tests;
+- installer and documentation projection risk;
+- scope control and unnecessary abstraction.
 
-## 3. Defects in the previous routing model
+## 3. Confirmed findings
 
-The previous discussion and implementation surfaces mixed four independent concepts:
+### 3.1 A selected route could be mistaken for execution permission
 
-1. the runtime hosting the logical Lead;
-2. the runtime launching a worker;
-3. the provider family used to assess evidence independence;
-4. the exact runtime-observed model and effort.
+The resolver correctly described itself as nonauthorizing, but the machine result did not explicitly say that provider adapter admission remained required. A caller could incorrectly treat `status = selected` as launch approval.
 
-It also treated provider availability as a binary implementation failure. That is unsuitable when Codex, Claude, Kimi, and Grok subscriptions may independently be absent or quota-exhausted.
+### 3.2 The decision lacked a digest of the complete request
 
-Finally, one permanent provider order cannot serve every capability slot. Interchangeability means a common contract and honest fallback; it does not mean equal task competence or identical tool and mutation support.
+The output repeated important fields but had no compact identity for the complete candidate set and contract. This weakened ledger correlation and made contract substitution harder to detect.
 
-## 4. Version 1 decision
+### 3.3 Provider-native runtime identity was not host-bound
 
-Version 1 adds the provider-neutral `lead-worker-routing` skill and a pure resolver. The logical Lead may be hosted only by Codex or Claude. Eligible worker identifiers are Codex, Claude, Kimi, and Grok; General Language Model (GLM) providers are intentionally reserved for Version 2.
+Provider/runtime mapping admitted `codex-native` and `claude-native`, but did not prevent a Codex Lead from selecting `claude-native` or a Claude Lead from selecting `codex-native`. Native execution belongs to the matching host; cross-host execution must use an admitted external CLI adapter.
 
-The resolver accepts an exact candidate list whose ordering is supplied by current operator or repository policy. It validates capability, mutation class, tools, provider/runtime identity, review independence, same-host isolation, leaf-only delegation, nonauthorizing authority, and explicit availability. It returns one exact worker route or a typed non-success decision and does not launch a process.
+### 3.4 JSON input had bounded bytes but unbounded shape
 
-The change does not modify native roles, the role manifest, `role-routing-policy.v1.json`, agents-mode defaults, the frozen parity baseline, or provider credentials.
+Duplicate keys were rejected, but Python's JSON extension values `NaN` and infinity remained accepted, and deeply nested input could trigger parser recursion or excessive post-parse traversal.
 
-## 5. Full-review findings and corrections
+### 3.5 File safety covered the leaf but not the full path chain
 
-The first implementation selected a capability but did not bind the assigned role, bounded scope, artifact contract, gate contract, dispatch identity, or policy snapshot. A fallback worker therefore had no machine-readable obligation to return the same artifact under the same acceptance gate. The corrected request and decision include:
+A non-linked leaf below a linked or replaced ancestor could pass the prior check. Conversely, binding ancestor directory timestamps would be too strict and could fail on unrelated file activity.
 
-```text
-dispatchId
-policySnapshotId
-assignedRole
-scopeId
-artifactContract
-gateContract
-```
+## 4. Corrections applied
 
-The first implementation also trusted caller-declared runtime identity after checking only provider family. The corrected resolver admits only the Version 1 runtime identifiers declared for each provider.
+- Added `requestFingerprintAlgorithm` and `requestFingerprint` for every valid request.
+- Added `requiresAdapterAdmission` and invariant `executionAuthorized = false`.
+- Added typed `E_LEAD_WORKER_V1_NATIVE_RUNTIME_HOST_MISMATCH` rejection.
+- Added JSON constant, depth, and node limits with typed CLI failure.
+- Added full lexical path-chain link/reparse/junction/type checks before and after the read.
+- Added descriptor identity plus leaf size, modification-time, and status-change-time stability.
+- Kept ancestor checks identity-based, preventing unrelated sibling changes from invalidating a safe request.
+- Preserved the reviewed selection core behind one public compatibility facade rather than mixing security changes into every selection branch.
 
-Independent review was described in prose but could not be enforced. The corrected request adds `excludedProviderFamilies`, allowing a reviewer route to reject the author's provider family.
+## 5. Rejected overengineering
 
-Candidate availability and model observations were not tied to evidence provenance. Every candidate now requires `evidenceSnapshotId`, which is preserved in selected routes and fallback events.
+A proposed uniqueness rule for `(provider, runtime, model, effort)` was tested and rejected. Version 1 candidates may intentionally represent different availability or admission observations for the same execution identity. Enforcing registry-style uniqueness in a caller-supplied compatibility list broke valid test scenarios without eliminating a concrete launch vulnerability.
 
-The first command-line reader used ordinary `json.loads()` and `Path.open()`. It therefore accepted duplicate object keys and followed symbolic links. The corrected reader:
+The audit also did not add signed snapshots, entitlement probes, automatic rankings, provider admission transitions, scheduler state, or a Lead lease. Those require trusted owners and cross-record validation and belong in Version 2.
 
-- rejects duplicate keys at any object depth;
-- accepts only a stable ordinary request file or standard input;
-- rejects symbolic links, reparse points, non-regular files, replacement during reading, and inputs larger than 1 mebibyte;
-- emits separate stable identifiers for duplicate-key, unsafe-file, oversized, and malformed requests.
+## 6. Residual Version 1 limits
 
-## 6. Fallback and subscription semantics
+- `policySnapshotId` and `evidenceSnapshotId` are references, not validated signatures.
+- The request fingerprint detects mismatch but does not itself prevent replay.
+- The pure resolver does not prove that an executable, subscription, credential, or sandbox is currently usable.
+- Kimi remains read-only and Grok remains unavailable until their independent adapters say otherwise.
+- A privileged local attacker is outside the file-reader threat model.
+- The compatibility facade and preserved selection core should be consolidated only in a deliberate later migration, not during this point release.
 
-The following are normal availability fallback states:
+## 7. Verification obligations
 
-- `not-configured`;
-- `not-entitled`;
-- `quota-exhausted`;
-- `temporary-transport-failure`;
-- `unavailable`.
+Before publication:
 
-`auth-invalid` and `contract-violation` are provider hard failures. A later explicit candidate may still be selected because no result from the failed provider is trusted, but the decision records `hardFailureObserved = true` and `requiresOperatorAttention = true`.
+1. run both Version 1 resolver suites and the Astra route suite in a full checkout;
+2. run Python compilation;
+3. run Codex and Claude skill-pack validators;
+4. verify installer projection includes `_resolver_base.py` and the public entrypoint remains `resolve.py`;
+5. run installer regressions, `git diff --check`, and publication-safety checks;
+6. obtain independent review when review quota or another admitted reviewer is available.
 
-Fallback never changes the requested role, scope, capability, mutation class, tool set, provider-family exclusion, artifact contract, gate contract, or Lead ownership. It changes only the selected worker realization. There is no ambient or silent fallback.
+The deep-review local red/green cycle proved the new regressions against the pre-hardening behavior and then passed them against the hardened facade. Full repository verification remains a separate draft gate.
 
-## 7. Provider admission boundary
+## 8. Version 2 handoff
 
-The resolver represents routing candidates but does not grant execution authority. Existing adapters remain authoritative.
+Version 2 must replace caller-supplied evidence references with trusted immutable registry, policy, evaluation, and contract snapshots; add exclusive Lead lease fencing; validate cross-record identities; distinguish availability fallback from quality replan and quarantine; and select role portfolios rather than one worker.
 
-- Codex and Claude can be candidates for read or write work only within their actual sandbox and wrapper contracts.
-- Kimi remains constrained by its policy-bound Version 1 read-only path.
-- Grok remains unavailable while its containment path returns a typed refusal.
-- Kimi or Grok metadata claiming write access is rejected by the resolver.
+GLM and future providers remain absent from Version 1 and enter only through Version 2 admission.
 
-This distinction prevents routing configuration from bypassing provider containment.
+## 9. Terms and abbreviations
 
-## 8. Version 2 direction
-
-Version 2 replaces the fixed provider set with a dynamic model registry and separates:
-
-```text
-logical Lead contract
-Lead Host adapter
-worker runtime
-provider family
-model identity and effort
-provider admission
-availability and entitlement
-evidence freshness
-```
-
-It selects a portfolio of roles such as primary, scope-expander, challenger, implementer, reviewer, and visual validator. Hard admission and quality gates run before scope coverage, independent challenge, evidence quality, accepted-result cost, and latency ranking. Exact model generation numbers live only in runtime registry snapshots, not in stable role policy. GLM enters only through this Version 2 registry.
-
-## 9. Verification obligations
-
-Before publication, the implementation must pass focused resolver tests, Python compilation, repository skill-pack validators, installer projection checks, and publication-safety checks in a full checkout. The branch must remain stacked on the exact reviewed Astra routing head until its base changes are merged or rebased deliberately.
-
-## 10. Terms and abbreviations
-
-- **CLI — Command-Line Interface:** command-line provider runtime.
-- **GLM — General Language Model:** future external model lineage reserved for Version 2.
-- **Lead Host:** Codex or Claude environment hosting the logical Lead.
+- **CLI — Command-Line Interface:** command-line provider execution surface.
 - **TOML — Tom's Obvious Minimal Language:** native role configuration format.
-- **Fallback:** explicit selection of a later admitted candidate after a typed failure.
-- **Admission:** verified provider permission for a class of execution.
-- **Capability slot:** stable required ability independent of a specific model version.
-- **Provider family:** vendor/model family used when assessing evidence independence.
+- **SHA-256 — Secure Hash Algorithm 256-bit:** request fingerprint algorithm.
+- **Admission:** verified permission to use a runtime for a class of work.
+- **Compatibility facade:** stable public entrypoint adding checks around a preserved implementation core.
+- **Replay:** reuse of a previously valid decision outside its intended dispatch context.
+- **Time-of-check/time-of-use:** race between checking and using a file-system object.

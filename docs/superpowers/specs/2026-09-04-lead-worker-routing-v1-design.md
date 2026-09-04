@@ -2,239 +2,233 @@
 
 ## Contents
 
-1. [Goal](#1-goal)
-2. [Constraints](#2-constraints)
+1. [Decision](#1-decision)
+2. [Compatibility constraints](#2-compatibility-constraints)
 3. [Architecture](#3-architecture)
-4. [Resolver contract](#4-resolver-contract)
+4. [Request and decision contract](#4-request-and-decision-contract)
 5. [Candidate admission](#5-candidate-admission)
 6. [Fallback semantics](#6-fallback-semantics)
-7. [Safety, authority, and evidence](#7-safety-authority-and-evidence)
-8. [Command-line input](#8-command-line-input)
-9. [Version 1 provider scope](#9-version-1-provider-scope)
+7. [Request identity and execution authority](#7-request-identity-and-execution-authority)
+8. [Strict command-line input](#8-strict-command-line-input)
+9. [Review conclusions and non-goals](#9-review-conclusions-and-non-goals)
 10. [Testing](#10-testing)
 11. [Migration to Version 2](#11-migration-to-version-2)
 12. [Terms and abbreviations](#12-terms-and-abbreviations)
 
-## 1. Goal
+## 1. Decision
 
-Add an immediately usable, additive Orchestrarium Version 1 routing surface in which one logical Lead is hosted by either Codex or Claude, while one bounded Command-Line Interface (CLI) worker is selected from an explicitly supplied optional provider pool. A missing subscription, unavailable CLI, exhausted quota, or disabled provider is normal routing input rather than a failure of the Lead workflow.
+Orchestrarium Version 1 adds one provider-neutral routing surface in which a logical Lead is hosted by Codex or Claude and selects one bounded optional Command-Line Interface (CLI) worker from explicit Codex, Claude, Kimi, or Grok candidates. Missing configuration, entitlement, quota, or temporary availability is normal routing input.
 
-The route must preserve the same assigned role, bounded scope, artifact contract, gate contract, tool requirements, mutation class, and review-independence requirement when it falls back from one provider to another. Interchangeability means a common contract and explicit fallback; it does not mean equal competence or equal execution authority.
+Interchangeability is contractual rather than capability equivalence: a fallback worker must satisfy the same role, scope, capability, tools, mutation ceiling, artifact contract, gate contract, and independence requirement.
 
-## 2. Constraints
+## 2. Compatibility constraints
 
 - Do not modify `shared/role-routing-policy.v1.json`, native role Tom's Obvious Minimal Language (TOML) files, the native role manifest, `agents-mode` defaults, or the frozen Version 1 parity baseline.
-- Keep the existing Astra point route intact and independently reviewable.
+- Keep the Astra point route separately reviewable.
 - Do not add General Language Model (GLM) providers to Version 1.
-- Do not make Kimi or Grok writable merely because the resolver can represent them; actual execution remains limited by existing provider admission and containment contracts.
-- Do not silently fall back to an ambient provider, model, effort, runtime, role, scope, artifact, gate, or tool set.
-- Do not let a worker authorize acceptance, merge, release, publication, or Lead transfer.
-- Do not recursively delegate from a worker.
-- Do not treat caller-declared provider family or runtime identity as freely spoofable metadata.
+- Do not widen Kimi or Grok admission.
+- Do not silently change provider, model, effort, runtime, role, scope, artifact, gate, tools, or mutation rights.
+- Do not grant a worker acceptance, merge, release, publication, or Lead-transfer authority.
+- Do not permit recursive delegation.
 
 ## 3. Architecture
 
-Version 1 adds a provider-neutral `lead-worker-routing` skill with a pure resolver. The resolver does not launch a process, inspect credentials, mutate configuration, grant provider admission, or write repository state. It consumes one exact request and returns either one exact nonauthorizing worker route or a typed non-success decision.
+The implementation deliberately separates the already reviewed selection core from the deep-review compatibility facade:
 
 ```text
-Logical Lead Contract
-  ├── Codex Lead Host
-  └── Claude Lead Host
-          │
-          ▼
-Pure Version 1 worker resolver
-          │
-          ├── Codex CLI/native isolated worker
-          ├── Claude CLI/native isolated worker
-          ├── Kimi CLI worker, only at its admitted mutation level
-          └── Grok CLI worker, only when containment is admitted
+Lead Host: Codex or Claude
+        |
+        v
+resolve.py compatibility facade
+  - strict input acquisition
+  - request fingerprint
+  - native-host boundary
+  - explicit no-execution-authority result
+        |
+        v
+_resolver_base.py reviewed V1 selection core
+  - candidate validation
+  - explicit priority and fallback
+  - capability, mutation, tools, independence
+        |
+        v
+selected candidate only
+        |
+        v
+separately approved provider adapter
 ```
 
-The Lead Host and worker runtime are separate facts. A Codex-hosted Lead may select a Claude, Kimi, Grok, or explicitly isolated Codex worker. A Claude-hosted Lead may select a Codex, Kimi, Grok, or explicitly isolated Claude worker.
+The facade preserves the accepted selection behavior instead of rewriting it during a security hardening pass. `_resolver_base.py` is internal implementation material, not an alternative public entrypoint. The supported public Python and CLI entrypoint remains `resolve.py`.
 
-## 4. Resolver contract
+The resolver remains pure: it does not probe credentials, launch processes, mutate configuration, apply a patch, or authorize execution.
 
-The Python interface is:
+## 4. Request and decision contract
+
+The public Python interface is:
 
 ```python
 resolve_v1_worker_route(request: dict[str, object]) -> dict[str, object]
 ```
 
-The request has these exact top-level fields:
+The exact request fields are:
 
-```json
-{
-  "schemaVersion": 1,
-  "dispatchId": "dispatch-2026-09-04-001",
-  "policySnapshotId": "policy-snapshot-001",
-  "leadHost": "codex",
-  "assignedRole": "engineering-challenger",
-  "scopeId": "scope-kernel-layout-001",
-  "capabilitySlot": "engineering-challenge",
-  "mutationClass": "read-only",
-  "requiredTools": [],
-  "excludedProviderFamilies": ["openai"],
-  "artifactContract": "challenge-report-v1",
-  "gateContract": "lead-verifies-artifact-v1",
-  "candidates": []
-}
+```text
+schemaVersion
+dispatchId
+policySnapshotId
+leadHost
+assignedRole
+scopeId
+capabilitySlot
+mutationClass
+requiredTools
+excludedProviderFamilies
+artifactContract
+gateContract
+candidates
 ```
 
-The identity fields bind the decision to one dispatch, policy snapshot, role, scope, artifact, and gate. `excludedProviderFamilies` lets a review lane require evidence from a different provider family than the author. An empty list means that the caller does not require provider-family independence for this one worker route.
+Each candidate binds:
 
-Each candidate has these exact fields:
-
-```json
-{
-  "candidateId": "grok-review-1",
-  "provider": "grok",
-  "runtime": "grok-cli",
-  "providerFamily": "xai",
-  "model": "runtime-observed-model",
-  "effort": "high",
-  "priority": 10,
-  "availability": "available",
-  "maxMutationClass": "read-only",
-  "capabilities": ["engineering-challenge"],
-  "tools": [],
-  "isolatedFromLead": true,
-  "maxDelegationDepth": 0,
-  "authorizing": false,
-  "evidenceSnapshotId": "runtime-evidence-001"
-}
+```text
+candidateId
+provider
+runtime
+providerFamily
+model
+effort
+priority
+availability
+maxMutationClass
+capabilities
+tools
+isolatedFromLead
+maxDelegationDepth
+authorizing
+evidenceSnapshotId
 ```
 
-`capabilitySlot` is a stable capability name, not a model name. `model` is runtime-observed provenance and may change without changing the resolver. `priority` is supplied by the current operator policy or measured routing snapshot; Version 1 does not embed one universal vendor order. `evidenceSnapshotId` binds the candidate's availability, model, effort, runtime, and admission observations to caller-owned evidence without making the resolver a probe owner.
-
-A selected decision repeats the dispatch, policy, role, scope, capability, mutation, tool, independence, artifact, and gate fields. Fallback therefore changes only the selected worker realization.
+A selected decision repeats the request contract and returns one normalized candidate. It also returns fallback and rejection evidence, request identity, and explicit authority boundaries.
 
 ## 5. Candidate admission
 
-The resolver rejects a candidate that:
-
-- belongs to a provider not admitted in Version 1;
-- supplies a provider family inconsistent with its provider identity;
-- supplies a runtime inconsistent with the admitted provider runtime set;
-- belongs to a provider family excluded by the request;
-- lacks the required capability or tool;
-- cannot satisfy the requested mutation class;
-- exceeds the Version 1 provider mutation ceiling;
-- is not isolated from an active Lead of the same provider;
-- has nonzero delegation depth;
-- claims authorizing authority.
-
-The provider/runtime mapping admitted by this compatibility resolver is:
+The Version 1 compatibility map is:
 
 ```text
-codex  -> codex-cli | codex-native
-claude -> claude-cli | claude-native
-kimi   -> kimi-cli
-grok   -> grok-cli
+codex  -> openai     -> codex-cli | codex-native
+claude -> anthropic  -> claude-cli | claude-native
+kimi   -> moonshot   -> kimi-cli
+grok   -> xai        -> grok-cli
 ```
 
-The mapping prevents route metadata from relabeling one execution surface as another. It does not prove that the executable is installed or trusted; the provider adapter remains responsible for executable identity and containment.
+A `*-native` runtime is an in-host execution surface. It is legal only when the provider equals `leadHost`; cross-host native routing is rejected with `E_LEAD_WORKER_V1_NATIVE_RUNTIME_HOST_MISMATCH`. A same-provider CLI or native worker also requires `isolatedFromLead = true`.
+
+The resolver rejects provider-family or runtime spoofing, excluded families, missing capabilities or tools, insufficient mutation admission, provider-ceiling claims, recursive delegation, and authorizing workers.
+
+A candidate identifier is unique within a request. Multiple candidate configurations may intentionally refer to the same provider, model, and effort because they can represent different admission or availability observations; Version 1 does not add a global runtime-registry uniqueness rule. Version 2 owns that stronger registry invariant.
 
 ## 6. Fallback semantics
 
-The resolver evaluates candidates by ascending `priority`, then `candidateId`. The first fully admitted and available candidate is selected.
+Candidates are evaluated by ascending `priority`, then `candidateId`.
 
-Availability values are:
+Ordinary fallback states are:
 
 ```text
-available
 not-configured
 not-entitled
 quota-exhausted
 temporary-transport-failure
-auth-invalid
-contract-violation
 unavailable
 ```
 
-`not-configured`, `not-entitled`, `quota-exhausted`, `temporary-transport-failure`, and `unavailable` are classified as `availability-fallback`. `auth-invalid` and `contract-violation` are classified as `provider-hard-failure`. A later explicit candidate may still be selected because no output from the failed candidate is accepted, but the final decision sets:
+Provider hard failures are:
 
 ```text
-hardFailureObserved = true
-requiresOperatorAttention = true
+auth-invalid
+contract-violation
 ```
 
-Every fallback event records candidate identity, provider, evidence snapshot, availability, stable error identifier, and failure class. If no candidate is selectable, the resolver returns a typed `unavailable` or `denied` result and no worker route.
+A hard failure does not authorize trusting any output from that candidate. A later explicit candidate may still be selected, but the decision remains marked for operator attention. Quality failure, unsafe output, budget exhaustion, and adapter containment failure are not invented as V1 availability states; they remain responsibilities of the adapter, Lead, or Version 2 policy.
 
-## 7. Safety, authority, and evidence
+## 7. Request identity and execution authority
 
-Every selected route has:
+For every structurally valid request, the resolver computes:
 
 ```text
-authorizing = false
-maxDelegationDepth = 0
-requiresLeadVerification = true
-fallbackPolicy = explicit-candidate-order
+requestFingerprintAlgorithm = sha256-canonical-json-v1
+requestFingerprint = SHA-256(canonical JSON request)
 ```
 
-The resolver never transfers the Lead role or lease. The Lead verifies the returned artifact, diff, logs, test output, and gate evidence before forwarding or accepting it. Same-family or same-provider workers may be useful, but they do not count as independent provider review. The caller uses `excludedProviderFamilies` when independence is required.
+Object-key order is normalized; array order remains significant. The fingerprint changes when the role, scope, artifact, gate, candidate set, availability evidence, or other request content changes. It lets adapters and ledger writers bind their records to the exact resolver input.
 
-`policySnapshotId` and candidate `evidenceSnapshotId` are references, not signatures. Version 1 binds them into the deterministic decision but does not validate the external evidence store. Version 2 owns a first-class signed or hash-bound evidence registry.
+The digest is not a signature. It does not establish trust in caller-provided snapshots and does not prevent reuse unless the caller or ledger enforces dispatch uniqueness.
 
-## 8. Command-line input
-
-The command-line interface reads one UTF-8 JavaScript Object Notation (JSON) request from:
+A selected decision always says:
 
 ```text
---request-file <ordinary-file>
---request-file -
+requiresAdapterAdmission = true
+executionAuthorized = false
 ```
 
-`-` means standard input. A request file must be a stable ordinary file. Symbolic links, reparse points, non-regular files, file replacement during reading, and requests larger than 1 mebibyte fail closed. Process substitution and named pipes are intentionally not request-file inputs; use standard input instead.
+Thus `status = selected` means only that the candidate satisfies the resolver's compatibility contract. Executable identity, current credentials, containment, sandbox, tools, and provider admission must still be checked by the adapter.
 
-The parser rejects duplicate keys at any JSON object depth. Output is one deterministic compact JSON object. Selected results exit with code `0`; denied, unavailable, malformed, duplicate-key, unsafe-file, and oversized requests exit with code `2`.
+## 8. Strict command-line input
 
-## 9. Version 1 provider scope
+The CLI reads a maximum of one mebibyte from standard input or one ordinary file. It rejects duplicate JSON keys, non-standard numeric constants, parser recursion, more than 32 nesting levels, and more than 8192 parsed nodes.
 
-Version 1 admits exactly these provider identifiers in the resolver contract:
+For a file request, the complete lexical absolute path is checked before and after reading. Symbolic links, reparse points, junctions, non-directory ancestors, and non-regular leaves fail closed. The opened descriptor must match the leaf identity observed before opening. Leaf size, modification time, and status-change time must remain stable.
 
-```text
-codex
-claude
-kimi
-grok
-```
+Ancestor directories are bound by type, device, inode, mode, and reparse metadata—not by directory size or timestamps—so unrelated sibling file activity does not create spurious failures.
 
-This is a compatibility boundary, not a permanent vendor list. GLM and future providers enter through Version 2's dynamic registry. Existing execution restrictions remain authoritative: representing Kimi or Grok as a candidate does not bypass their current read-only or unavailable execution states.
+These checks reduce path substitution and time-of-check/time-of-use risk. They do not claim protection against a privileged attacker able to alter the process, kernel view, or trusted installer payload.
+
+## 9. Review conclusions and non-goals
+
+Deep review retained five proportionate changes:
+
+1. canonical request fingerprint;
+2. explicit separation of candidate selection from execution authorization;
+3. rejection of foreign provider-native runtimes;
+4. bounded, standards-compliant JSON structure;
+5. stable no-follow path-chain acquisition without timestamp-sensitive ancestor false positives.
+
+The review deliberately rejected a proposed ban on duplicate provider/model/effort tuples. Such a ban broke legitimate candidate variants and belongs in a trusted Version 2 runtime registry, not this caller-supplied Version 1 candidate list.
+
+This patch does not add entitlement probing, signed evidence, dynamic rankings, a Lead lease, a scheduler, provider admission transitions, or automatic model debate. Those are Version 2 responsibilities.
 
 ## 10. Testing
 
-Focused tests must prove:
+The focused and deep-review suites cover:
 
-- only Codex and Claude can host the Lead;
-- provider, runtime, provider family, and model identity remain distinct;
-- the decision preserves role, scope, policy snapshot, artifact, and gate contracts;
-- arbitrary runtime-observed model identifiers are accepted;
-- an unpaid or quota-exhausted first candidate falls back to the next admitted candidate;
-- hard provider failures remain visible after fallback;
-- a different provider family can be required for independent review;
-- same-host recursion is denied unless the worker is explicitly isolated;
-- mutation and tool requirements are enforced;
-- Kimi and Grok do not gain write authority from routing metadata;
-- GLM is rejected in Version 1;
-- no worker can be authorizing or delegate recursively;
-- duplicate JSON keys, symbolic-link request files, and oversized requests fail closed;
-- input and output are deterministic and strict;
-- the CLI returns nonzero for denied or unavailable decisions.
+- Codex/Claude Lead Host restriction;
+- provider, runtime, family, and model separation;
+- role/scope/artifact/gate preservation;
+- explicit subscription and quota fallback;
+- hard-failure visibility;
+- review-family exclusion;
+- mutation, tools, isolation, delegation, and authority;
+- Kimi/Grok read-only ceilings and GLM exclusion;
+- deterministic CLI output;
+- duplicate-key, non-standard constant, deep-structure, oversized, linked-file, linked-ancestor, and file-replacement refusal;
+- request fingerprint sensitivity;
+- explicit `executionAuthorized = false`;
+- absence of false rejection after unrelated ancestor-directory activity.
+
+Full repository validators, installer projection checks, and publication gates remain required before leaving draft status.
 
 ## 11. Migration to Version 2
 
-Version 2 supersedes the fixed Version 1 provider set with a dynamic registry and selects a portfolio of role-specific workers rather than a single worker. The Version 1 request can migrate into one Version 2 portfolio slot without changing its role, scope, capability, mutation, tool, independence, authority, artifact, or gate constraints.
+One Version 1 decision may map to one Version 2 portfolio slot only if role, scope, capability, tools, mutation, provider-family exclusions, artifact, gate, leaf-only delegation, and nonauthorizing authority are preserved. The Version 1 `requestFingerprint` may be recorded as migration provenance but is not a substitute for the Version 2 request, registry, policy, evaluation, and contract digests.
 
-Version 2 must not hardcode generation numbers into stable routing policy. Exact model identifiers live in runtime snapshots; stable policy refers to capability slots, admission levels, evidence freshness, quality floors, diversity requirements, accepted-result cost, and latency.
+Version 2 replaces the fixed provider map with a dynamic registry and adds Lead lease fencing, portfolio routing, structured challenge, typed fallback, evidence freshness, and provider admission lifecycle.
 
 ## 12. Terms and abbreviations
 
-- **CLI — Command-Line Interface:** provider command-line runtime used for a worker invocation.
-- **JSON — JavaScript Object Notation:** serialized request and decision format.
-- **Lead Host:** Codex or Claude runtime holding the logical Lead role and durable orchestration state.
-- **Capability slot:** stable task ability required from a worker, independent of model naming.
-- **Fallback:** explicit selection of a later admitted candidate after an earlier candidate is unavailable.
-- **Admission:** verified permission for a runtime to perform a class of work or mutation.
-- **Provenance:** exact record of the selected provider, runtime, model, effort, evidence snapshot, and decision basis.
-- **Artifact contract:** identifier of the required worker output structure.
-- **Gate contract:** identifier of the verification required before the artifact may advance.
+- **CLI — Command-Line Interface:** command-line provider execution surface.
+- **JSON — JavaScript Object Notation:** request and decision serialization format.
+- **SHA-256 — Secure Hash Algorithm 256-bit:** digest algorithm used for request identity.
+- **Lead Host:** Codex or Claude runtime holding the logical Lead role.
+- **Native runtime:** worker execution surface inside the matching Lead Host runtime.
+- **Fallback:** explicit selection of a later admitted candidate after a classified failure.
+- **Admission:** verified permission for a runtime to perform a class of execution.
+- **Time-of-check/time-of-use:** race between validation of a resource and its later use.
