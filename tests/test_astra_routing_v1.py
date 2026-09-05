@@ -99,6 +99,7 @@ def test_measured_cost_to_pass_requires_complete_strictly_better_costs() -> None
         route_evidence="measured-cost-to-pass",
         astra_cost_microusd=2500,
         legacy_cost_microusd=2500,
+        measured_effort="medium",
     )
     assert not_better["stableId"] == "E_ASTRA_V1_ECONOMICS_NOT_BETTER"
 
@@ -108,9 +109,11 @@ def test_measured_cost_to_pass_requires_complete_strictly_better_costs() -> None
         route_evidence="measured-cost-to-pass",
         astra_cost_microusd=2400,
         legacy_cost_microusd=3000,
+        measured_effort="medium",
     )
     assert selected["status"] == "selected"
     assert selected["costComparison"] == {
+        "astraEffort": "medium",
         "astraCostMicroUsd": 2400,
         "legacyCostMicroUsd": 3000,
         "savingsMicroUsd": 600,
