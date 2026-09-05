@@ -1,0 +1,76 @@
+name: Diagnose Windows default ownership
+on:
+  push:
+    branches: [automation/pr-sequential-audit-20260905]
+    paths: ['.github/workflows/pr-owner-diagnostic.yml']
+permissions:
+  contents: read
+jobs:
+  owner:
+    runs-on: windows-2025
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 3dbfb9faf824365f5898fe52dd10093f4d75da9c
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Observe owner relations without publishing account identifiers
+        shell: python
+        run: |
+          import ctypes, importlib.util, json, sys, tempfile
+          from ctypes import wintypes as w
+          from pathlib import Path
+          spec = importlib.util.spec_from_file_location('owner_diagnostic', Path('scripts/process_supervision/process_runner.py'))
+          module = importlib.util.module_from_spec(spec)
+          sys.modules[spec.name] = module
+          spec.loader.exec_module(module)
+          a = ctypes.WinDLL('advapi32', use_last_error=True)
+          k = ctypes.WinDLL('kernel32', use_last_error=True)
+          k.GetCurrentProcess.argtypes = []
+          k.GetCurrentProcess.restype = w.HANDLE
+          a.OpenProcessToken.argtypes = [w.HANDLE, w.DWORD, ctypes.POINTER(w.HANDLE)]
+          a.OpenProcessToken.restype = w.BOOL
+          a.GetTokenInformation.argtypes = [w.HANDLE, ctypes.c_int, ctypes.c_void_p, w.DWORD, ctypes.POINTER(w.DWORD)]
+          a.GetTokenInformation.restype = w.BOOL
+          a.GetNamedSecurityInfoW.argtypes = [w.LPWSTR, ctypes.c_int, w.DWORD, ctypes.POINTER(ctypes.c_void_p), ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)]
+          a.GetNamedSecurityInfoW.restype = w.DWORD
+          a.EqualSid.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+          a.EqualSid.restype = w.BOOL
+          k.CloseHandle.argtypes = [w.HANDLE]
+          k.CloseHandle.restype = w.BOOL
+          k.LocalFree.argtypes = [ctypes.c_void_p]
+          k.LocalFree.restype = ctypes.c_void_p
+          token = w.HANDLE()
+          assert a.OpenProcessToken(k.GetCurrentProcess(), 8, ctypes.byref(token))
+          buffers = []
+          try:
+              for kind in [1, 4]:
+                  n = w.DWORD()
+                  a.GetTokenInformation(token, kind, None, 0, ctypes.byref(n))
+                  assert n.value > 0
+                  b = ctypes.create_string_buffer(n.value)
+                  assert a.GetTokenInformation(token, kind, b, n.value, ctypes.byref(n))
+                  buffers.append(b)
+              user, default_owner = [ctypes.cast(b, ctypes.POINTER(ctypes.c_void_p))[0] for b in buffers]
+              reports = []
+              with tempfile.TemporaryDirectory(prefix='orche-owner-diagnostic-') as temporary:
+                  for name, path in [('checkout', Path.cwd()), ('new-directory', Path(temporary))]:
+                      owner = ctypes.c_void_p()
+                      descriptor = ctypes.c_void_p()
+                      status = a.GetNamedSecurityInfoW(str(path), 1, 1, ctypes.byref(owner), None, None, None, ctypes.byref(descriptor))
+                      try:
+                          assert status == 0 and owner.value
+                          try:
+                              module._windows_owner_digest(path)
+                              admitted = True
+                          except module.ProcessSupervisionError:
+                              admitted = False
+                          reports.append({'location': name, 'owner_matches_user': bool(a.EqualSid(owner, user)), 'owner_matches_token_default': bool(a.EqualSid(owner, default_owner)), 'current_admission': admitted})
+                      finally:
+                          if descriptor: k.LocalFree(descriptor)
+              print(json.dumps(reports, indent=2))
+          finally:
+              k.CloseHandle(token)
