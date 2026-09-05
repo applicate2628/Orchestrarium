@@ -1,0 +1,87 @@
+name: PR4 Windows boundary diagnostics
+on:
+  push:
+    branches: [automation/pr4-audit-20260905-d6388462]
+    paths: [.github/workflows/pr4-windows-diagnostics.yml]
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: d63884623f73b748618f47cba142faea537338be
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install pytest==9.0.2 PyYAML==6.0.2 jsonschema==4.25.1
+      - name: Observe original failure causes without changing admission policies
+        shell: python
+        run: |
+          import dataclasses, importlib.util, json, os, shutil, subprocess, sys, tempfile, traceback
+          from pathlib import Path
+          sys.path.insert(0, str(Path.cwd()))
+          out = Path(os.environ['RUNNER_TEMP']) / 'boundary-diagnostics'
+          out.mkdir()
+          log = (out / 'diagnostics.txt').open('w', encoding='utf-8')
+          def emit(*args):
+              print(*args, file=log, flush=True)
+          def load(path, name):
+              spec = importlib.util.spec_from_file_location(name, path)
+              module = importlib.util.module_from_spec(spec)
+              sys.modules[name] = module
+              spec.loader.exec_module(module)
+              return module
+          def traced(frame, event, arg):
+              if event == 'exception' and any(s in frame.f_code.co_filename for s in ('process_runner.py', 'provider_prompt.py')):
+                  typ, exc, _ = arg
+                  if issubclass(typ, (OSError, ValueError)):
+                      emit('EXCEPTION', Path(frame.f_code.co_filename).name, frame.f_code.co_name, frame.f_lineno, typ.__name__, str(exc))
+              return traced
+          emit('HEAD', subprocess.check_output(['git','rev-parse','HEAD'], text=True).strip())
+          emit('PYTHON', sys.version, sys.executable, str(Path(sys.executable).resolve()))
+          for path in (Path.cwd(), Path(sys.executable), Path(shutil.which('git'))):
+              info = path.lstat()
+              emit('PATH', str(path), 'REAL', str(path.resolve()), 'META', info.st_dev, info.st_ino, info.st_mode, getattr(info,'st_file_attributes',None), getattr(info,'st_reparse_tag',None))
+          fixture = load(Path('tests/test_process_runner_windows_runtime.py'), 'audit_windows_fixture')
+          runner = fixture._load_runner()
+          with tempfile.TemporaryDirectory(prefix='orche-boundary-audit-') as td:
+              root = Path(td)
+              emit('TEMP_ROOT', str(root), str(root.resolve()))
+              sys.settrace(traced)
+              try:
+                  req = fixture._request(runner, (str(Path(sys.executable).resolve()), str(fixture.CHILD), 'marker', '--marker', str(root/'marker.txt'), '--token', 'test'))
+                  result = runner.ProcessRunnerV1().run(req)
+                  emit('PROCESS_RESULT', repr(result))
+              except Exception:
+                  traceback.print_exc(file=log)
+              finally:
+                  sys.settrace(None)
+              provider = load(Path('scripts/provider_prompt.py'), 'audit_provider_prompt')
+              receipt = None
+              sys.settrace(traced)
+              try:
+                  receipt = provider.TerminalReceiptV1.reserve(root/'terminal.receipt')
+                  emit('RECEIPT_RESERVED', type(receipt).__name__)
+              except Exception:
+                  traceback.print_exc(file=log)
+              finally:
+                  sys.settrace(None)
+                  if receipt is not None:
+                      emit('RECEIPT_OBJECT_FIELDS', list(vars(receipt)))
+              for relative in ('src.codex/skills/lead/scripts/validate-skill-pack.py', 'src.claude/agents/scripts/validate-skill-pack.py'):
+                  result = subprocess.run([sys.executable, relative], capture_output=True, text=True, encoding='utf-8', timeout=120)
+                  emit('VALIDATOR', relative, result.returncode)
+                  emit('\n'.join(line for line in (result.stdout+'\n'+result.stderr).splitlines() if 'FAIL' in line or 'WARN' in line or 'Summary' in line or 'ERROR' in line))
+          log.close()
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pr4-windows-boundary-diagnostics
+          path: ${{ runner.temp }}/boundary-diagnostics/
+          retention-days: 5
+          if-no-files-found: error
