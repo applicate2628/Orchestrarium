@@ -1,0 +1,94 @@
+name: PR4 complete source audit
+
+on:
+  push:
+    branches: [automation/pr4-audit-20260905-d6388462]
+    paths: [.github/workflows/pr4-complete-tests.yml]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr4-complete-source-audit
+  cancel-in-progress: false
+
+env:
+  SOURCE_HEAD: d63884623f73b748618f47cba142faea537338be
+  PYTHONUTF8: '1'
+  PYTHONDONTWRITEBYTECODE: '1'
+
+jobs:
+  tests:
+    name: ${{ matrix.os }} shard ${{ matrix.shard }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+        shard: [0, 1, 2, 3, 4, 5]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install recorded audit dependencies
+        run: python -m pip install pytest==9.0.2 PyYAML==6.0.2 jsonschema==4.25.1 pytest-timeout==2.4.0
+      - name: Collect all repository tests and execute one disjoint shard
+        shell: python
+        env:
+          AUDIT_SHARD: ${{ matrix.shard }}
+        run: |
+          import json
+          import os
+          import platform
+          import subprocess
+          import sys
+          from pathlib import Path
+          import pytest
+
+          source = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          assert source == os.environ['SOURCE_HEAD'], 'source revision drifted'
+          out = Path(os.environ['RUNNER_TEMP']) / 'pr4-audit-evidence'
+          out.mkdir(parents=True, exist_ok=True)
+          shard = int(os.environ['AUDIT_SHARD'])
+          metadata = {'source': source, 'shard': shard, 'shards': 6, 'python': sys.version, 'platform': platform.platform()}
+          (out / 'environment.json').write_text(json.dumps(metadata, indent=2), encoding='utf-8')
+          with (out / 'dependencies.txt').open('w', encoding='utf-8') as stream:
+              subprocess.run([sys.executable, '-m', 'pip', 'freeze'], stdout=stream, check=True)
+
+          class Audit:
+              def pytest_collection_modifyitems(self, session, config, items):
+                  files = sorted({item.path.relative_to(config.rootpath).as_posix() for item in items})
+                  admitted = set(files[shard::6])
+                  selected = [item for item in items if item.path.relative_to(config.rootpath).as_posix() in admitted]
+                  deselected = [item for item in items if item.path.relative_to(config.rootpath).as_posix() not in admitted]
+                  manifest = dict(metadata, files=files, all_nodeids=[item.nodeid for item in items], selected_nodeids=[item.nodeid for item in selected])
+                  (out / 'collection.json').write_text(json.dumps(manifest, indent=2), encoding='utf-8')
+                  if not selected:
+                      raise pytest.UsageError('empty audit shard')
+                  config.hook.pytest_deselected(items=deselected)
+                  items[:] = selected
+
+              def pytest_runtest_logreport(self, report):
+                  row = {'nodeid': report.nodeid, 'when': report.when, 'outcome': report.outcome, 'duration': report.duration}
+                  if report.failed or report.skipped:
+                      row['longrepr'] = str(report.longrepr)
+                  with (out / 'outcomes.jsonl').open('a', encoding='utf-8') as stream:
+                      stream.write(json.dumps(row) + '\n')
+
+          code = pytest.main(['-q', '-ra', '--tb=short', '--timeout=150', '--durations=20', '--junitxml=' + str(out / 'junit.xml')], plugins=[Audit()])
+          (out / 'exit-code.txt').write_text(str(int(code)) + '\n', encoding='ascii')
+          raise SystemExit(code)
+      - name: Preserve per-test results even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr4-${{ env.SOURCE_HEAD }}-${{ matrix.os }}-${{ matrix.shard }}
+          path: ${{ runner.temp }}/pr4-audit-evidence/
+          if-no-files-found: error
+          retention-days: 5
