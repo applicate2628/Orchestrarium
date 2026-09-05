@@ -52,13 +52,16 @@ The core schema remains the semantic record model. The operational schema binds 
 
 ## 3. Stable semantic axes
 
-Version 2 must keep three axes separate:
+Version 2 must keep four axes separate:
 
 ```text
+execution class
 capability requirement
 effort intent
 orchestration mode
 ```
+
+Execution class distinguishes mechanical from general work; it is not a model rank or a mutation permission. [Effort-specific profile evidence](effort-profile-evidence.md) binds that class, the concrete effort, task, and evaluation context without changing the existing ownership or orchestration boundary.
 
 A role policy states capability floors and a provider-neutral effort intent:
 
@@ -229,14 +232,14 @@ Schema validation is necessary but insufficient. The runtime validator and persi
 1. one active Lead lease per work item;
 2. monotonic epochs and valid lease transitions;
 3. snapshot existence, content identity, digest profile, freshness, and trust source;
-4. unique runtime entries, slots, effort bindings, dispatches, attempts, terminal results, and outcomes;
+4. unique runtime entries, profile evaluations, slots, effort bindings, dispatches, attempts, terminal results, and outcomes;
 5. `admittedEfforts` is a subset of `supportedEfforts`;
 6. admission state is compatible with mutation ceiling and route impact;
 7. allowed and forbidden provider sets are disjoint;
 8. selected adapters satisfy region, retention, source-code, web, endpoint, and secret policy;
 9. candidate runtime references exist and candidate sets are complete for the declared policy;
 10. every route slot has exactly one applicable effort-intent binding or an explicitly defined default application;
-11. each concrete effort mapping matches the slot intent and has valid quality-floor evidence;
+11. dispatch, effort mapping, and result bind one exact `profileEvaluationId` for the selected runtime, effort, execution class, task, and context; its quality-floor and economic evidence satisfy the [profile validation obligations](effort-profile-evidence.md#5-semantic-validation);
 12. challenge and independence edges reference existing non-self slots;
 13. required slots are filled exactly once;
 14. required independence and approach coverage are actually achieved;
@@ -292,6 +295,7 @@ The companion schema is an operational boundary and developer handoff, not a sec
 
 - **CLI — Command-Line Interface:** provider command-line execution surface.
 - **Lead fence:** lease, epoch, holder, snapshots, and digest tuple used to reject stale work.
+- **Execution class:** mechanical or general work category, separate from capability and mutation authority.
 - **Effort intent:** provider-neutral requested reasoning depth for a portfolio slot.
 - **Effort mapping:** adapter record translating intent to a concrete provider setting.
 - **Orchestration mode:** choice between one worker, a Lead-managed portfolio, and explicitly admitted provider-native orchestration.

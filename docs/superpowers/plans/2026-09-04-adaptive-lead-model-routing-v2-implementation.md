@@ -8,6 +8,8 @@
 
 **Documentation contract:** `docs/superpowers/specs/2026-09-04-adaptive-lead-model-routing-v2-design.md`
 
+**Effort contract:** [effort-profile evidence](../../model-routing-v2/effort-profile-evidence.md).
+
 ## Global constraints
 
 - Exact model generation numbers appear only in runtime/evaluation snapshots, never stable role policy.
@@ -53,7 +55,9 @@
 
 - [ ] Write failing tests for arbitrary future provider/model identifiers, unique runtime entries, evidence expiry, model/harness invalidation, and admission regression.
 - [ ] Implement immutable registry snapshot generation from trusted provider probes and admission records.
-- [ ] Separate availability, entitlement, authentication, containment, admission, capability, and route metrics.
+- [ ] Separate runtime admission from nested model/effort/task/context profile evaluations.
+- [ ] Validate supported/admitted effort intersection, execution-class equality, profile-reference identity, freshness, and matching task/acceptance/harness context before selection.
+- [ ] Reject unknown-as-zero metrics, accepted-count/quotient errors, and incompatible accounting units; retain all-attempt evidence without inventing historical measurements.
 - [ ] Add lineage priors without inherited production admission.
 - [ ] Add discovered, shadow, read-only, bounded-write, production, degraded, and quarantined transitions.
 
@@ -65,7 +69,7 @@
 - [ ] Implement hard admissibility and quality-floor filters.
 - [ ] Implement scope coverage, approach diversity, independence, and evidence-quality comparisons.
 - [ ] Implement Pareto filtering within stages and the normative lexicographic order.
-- [ ] Compare accepted-result cost and latency only after prior stages.
+- [ ] Compare exact model/effort profiles and whole-route accepted-result cost only after prior stages; do not sum per-worker ratios or charge retries twice.
 - [ ] Return selected, degraded, or blocked portfolio decisions with full rejection/fallback evidence.
 
 ## Phase 4: Portfolio scheduler and structured disagreement
@@ -115,7 +119,9 @@
 **Planned owners:** evaluation owner, domain specialists, statistical reviewer.
 
 - [ ] Define task-specific NablaCAD evaluation lanes for mathematics, numerical methods, C++, adapters, kernels, CAD, interface work, tooling, review, and recovery.
-- [ ] Record acceptance, post-review defects, scope omissions, successful challenges, tool failures, rework, cost, and latency.
+- [ ] Record acceptance, post-review defects, scope omissions, successful challenges, tool failures, rework, cost, and latency for each bound model/effort/task/harness profile.
+- [ ] Compare paired held-out tasks with the same acceptance gates and retry budget; record sample size, uncertainty, uncached/cache-read/cache-write/output tokens, and the reasoning-token subset.
+- [ ] Treat effort changes as explicitly linked attempts sharing the task budget; separately admit any future in-request effort-change capability.
 - [ ] Track correlated failures through approach and independence groups.
 - [ ] Expire evidence after material model, harness, tool, or repository changes.
 - [ ] Keep vendor benchmarks as priors below internal accepted-work evidence.

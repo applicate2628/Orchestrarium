@@ -76,10 +76,16 @@ The `modelRegistrySnapshot` is immutable input to one routing decision. Each run
 - availability and entitlement state;
 - admission state and mutation ceiling;
 - supported and admitted effort values;
-- tools and capability evidence;
+- tools and nested, effort-specific capability evidence;
 - approach tags and independence groups;
 - evidence freshness;
-- expected accepted-result cost and latency.
+- per-profile accepted-result cost and latency, bound to task and evaluation context.
+
+The normative [effort-profile evidence contract](../../model-routing-v2/effort-profile-evidence.md)
+replaces model-wide `capabilities` and `routeMetrics` with `profileEvaluations`.
+Selection, effort mapping, and returned results bind the same exact profile
+identifier. Execution class is separate from effort and mutation rights. Schema
+shape checks do not replace the required cross-record evidence validator.
 
 Availability states distinguish ordinary scheduler conditions from hard failures. Admission progresses through `discovered`, `shadow`, `read-only`, `bounded-write`, and `production`; regressions may move an entry to `degraded` or `quarantined`.
 
@@ -181,6 +187,7 @@ This documentation slice does not implement schedulers, provider launchers, ledg
 Runtime implementation may begin only when:
 
 - all six schemas pass Draft 2020-12 validation;
+- model/effort/task/context joins and whole-route accounting meet the effort-profile contract;
 - normative examples validate;
 - stable contracts contain no model generation pins;
 - one active Lead lease and stale-epoch rejection are testable;

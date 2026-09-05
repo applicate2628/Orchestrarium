@@ -97,16 +97,18 @@ Before route selection and again immediately before launch, the registry/admissi
 - every runtime entry identifier is unique;
 - model identity evidence records exact, aliased, or provider-undisclosed status; provider alias drift invalidates or degrades evidence tied to the prior observed deployment;
 - `admittedEfforts` is a subset of `supportedEfforts`;
-- capability identifiers are unique per entry;
-- the selected worker exactly matches its registry entry, including provider, runtime, model, harness, tool surface, entry digest, effort, and independence groups;
+- every `profileEvaluationId` is unique within the bound registry and resolves to its exact runtime; capability identifiers are unique within each profile evaluation;
+- the selected worker exactly matches its registry entry, including provider, runtime, model, tool surface, entry digest, and independence groups; dispatch, effort mapping, and result bind the same `profileEvaluationId`, whose effort, execution class, task, and evaluation context match the admitted selection;
 - the selected entry is currently available, worker-capable, unexpired, and admitted for the requested mutation;
-- its tools and capabilities satisfy the slot;
+- the runtime tools and the selected profile's evaluated capabilities satisfy the slot; a model-wide aggregate or another effort's score cannot substitute for that evidence;
 - read-only and bounded-write admission do not exceed their mutation ceilings;
 - degraded entries follow explicit policy; quarantined, shadow, or discovered entries cannot enter production selection;
 - executable identity, credentials, entitlement, account, region, endpoint, retention terms, applicable provider terms, sandbox, and containment are checked by the provider adapter;
 - exact harness/tool identities, versions, permissions, and side effects match the registry tool surface; a tool name is never sufficient admission;
 - model or provider substitution creates a new decision rather than mutating an admitted dispatch;
 - every route is charged against the exact entitlement/quota/billing/concurrency pool it consumes; shared pools prevent false capacity diversity, self-starvation, and retry storms.
+
+Profile lookup, freshness, quality, and economic comparability follow the same [effort-specific evidence contract](effort-profile-evidence.md#5-semantic-validation). These are future cross-record checks, not authority supplied by a shape-valid profile identifier.
 
 ## 6. Portfolio graph and coverage
 

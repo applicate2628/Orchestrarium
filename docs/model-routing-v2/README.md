@@ -57,10 +57,17 @@ Each registry entry records:
 - availability and entitlement state;
 - admission state and mutation ceiling;
 - supported and admitted effort values;
-- tools and capability evidence;
+- tools and effort-specific capability evidence in `profileEvaluations`;
 - approach tags and independence groups;
 - evidence freshness;
-- expected accepted-result cost, calls, rework, and latency.
+- profile-level accepted-result cost, calls, rework, and latency bound to task and context.
+
+The [effort-profile evidence contract](effort-profile-evidence.md) defines the
+model/effort/task/context comparison unit, separates admitted execution classes,
+and forbids model-wide scores or unknown-as-zero costs. Dispatches, effort
+mappings, and results carry the same exact `profileEvaluationId`. These are draft
+record-shape guarantees; cross-record authentication and scheduler admission
+remain separate runtime obligations.
 
 A new Kimi, Grok, GLM, Codex-line, Claude-line, or future model may inherit only a lineage prior. It does not inherit production admission or benchmark results automatically. It progresses through observed admission states such as `discovered`, `shadow`, `read-only`, `bounded-write`, and `production`; regressions may move it to `degraded` or `quarantined`.
 
@@ -193,6 +200,8 @@ The two example files illustrate individual record shapes, not one cross-record-
 
 - [`runtime-validation-obligations.md`](runtime-validation-obligations.md) — future cross-record, ownership, input-stage, admission, and result-verification obligations; not implemented runtime enforcement.
 - [`review-loop-closure.md`](review-loop-closure.md) — review conclusions, safe implementation slices, and deliberately deferred mechanisms.
+- [`effort-profile-evidence.md`](effort-profile-evidence.md) — normative effort-specific evidence, accounting, semantic validation, and migration.
+
 - [`../adaptive-model-routing-v2-audit-2026-09-04.md`](../adaptive-model-routing-v2-audit-2026-09-04.md) — repository review and identified migration gaps.
 - [`../superpowers/specs/2026-09-04-adaptive-lead-model-routing-v2-design.md`](../superpowers/specs/2026-09-04-adaptive-lead-model-routing-v2-design.md) — normative design specification.
 - [`../superpowers/plans/2026-09-04-adaptive-lead-model-routing-v2-implementation.md`](../superpowers/plans/2026-09-04-adaptive-lead-model-routing-v2-implementation.md) — implementation plan; runtime tasks remain open.
