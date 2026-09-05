@@ -1,0 +1,13 @@
+diff --git a/shared/provider-prompt-projections.v1.json b/shared/provider-prompt-projections.v1.json
+index 363ab73..4b996d3 100644
+--- a/shared/provider-prompt-projections.v1.json
++++ b/shared/provider-prompt-projections.v1.json
+@@ -4,7 +4,7 @@
+   "files": {
+     "provider_prompt.py": {
+       "source": "scripts/provider_prompt.py",
+-      "sha256": "ec4f1529714c85d9152d1bbbe716aa96630506cfee2c6c284edd2d94b267dcad",
++      "sha256": "74c50557ec916abc853a49106e2098ebd79718133a92ee2eceef831c2ebe0b2b",
+       "destination": "scripts/provider_prompt.py"
+     },
+     "process_supervision/process_runner.py": {
