@@ -1,0 +1,167 @@
+name: PR 4 complete audit v2
+on:
+  push:
+    branches: [automation/pr4-audit-20260905-final]
+    paths:
+      - .github/workflows/pr4-full-audit-v2.yml
+      - .github/audit/pr4-v2-repairs.json
+permissions:
+  contents: read
+concurrency:
+  group: pr4-full-audit-v2
+  cancel-in-progress: false
+env:
+  PYTHONUTF8: '1'
+  PYTHONDONTWRITEBYTECODE: '1'
+  PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    outputs:
+      sha: ${{ steps.commit.outputs.sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: c605a46bf40055f6d8c296594230cd8c70c18cc2
+          path: target
+          fetch-depth: 0
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          path: control
+          persist-credentials: false
+      - name: Verify complete patch bytes and exact preimage
+        working-directory: target
+        shell: python
+        run: |
+          import base64, hashlib, json, subprocess, zlib
+          from pathlib import Path
+          assert subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip() == 'c605a46bf40055f6d8c296594230cd8c70c18cc2'
+          control=Path('../control/.github/audit')
+          encoded=(control/'pr4-v2.patch.b64').read_text().strip()
+          repair=control/'pr4-v2-repairs.json'
+          if repair.exists():
+              for old,new in json.loads(repair.read_text()):
+                  assert encoded.count(old)==1, 'ambiguous transport repair'
+                  encoded=encoded.replace(old,new,1)
+          patch=zlib.decompress(base64.b64decode(encoded,validate=True))
+          assert hashlib.sha256(patch).hexdigest() == 'e648f38ed53e9c8a7f24b96331f72f1369dd810f8346807429196ff3514a2787', 'patch checksum mismatch'
+          Path('../verified-v2.patch').write_bytes(patch)
+          subprocess.run(['git','apply','--check','../verified-v2.patch'],check=True)
+          subprocess.run(['git','apply','../verified-v2.patch'],check=True)
+          subprocess.run(['git','diff','--check'],check=True)
+          expected={'RELEASE_NOTES.md','scripts/provider_prompt.py','shared/provider-prompt-projections.v1.json','tests/test_global_lead_accepted_prior.py','tests/test_install_hypothesis_hook.py','tests/test_mutate_work_item.py','tests/test_native_role_slice_a.py','tests/test_orchestration_discipline_contract.py','tests/test_repository_local_boundaries.py','tests/test_slice_a_detached_validation.py','tests/test_work_item_state_validator.py','tests/test_wrapper_model_effort_guard.py','tests/test_windows_private_object_owner.py'}
+          changed=set(subprocess.check_output(['git','diff','--name-only'],text=True).splitlines())
+          changed.update(subprocess.check_output(['git','ls-files','--others','--exclude-standard'],text=True).splitlines())
+          assert changed==expected,(changed-expected,expected-changed)
+      - name: Commit isolated candidate without updating PR
+        id: commit
+        working-directory: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git switch -c automation/pr4-audit-candidate-20260905-v2
+          git add --all
+          git diff --cached --check
+          git commit -m 'fix: canonicalize Windows DACLs and repair cross-host audit fixtures'
+          git push origin HEAD:refs/heads/automation/pr4-audit-candidate-20260905-v2
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          git show --stat --oneline HEAD
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: pr4-v2-patch-transport
+          path: |
+            control/.github/audit/pr4-v2.patch.b64
+            verified-v2.patch
+          if-no-files-found: error
+          retention-days: 1
+  static:
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --disable-pip-version-check pytest==9.0.2 PyYAML jsonschema ruff bandit
+      - name: Static and complete pack validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir reports
+          python src.codex/skills/lead/scripts/validate-skill-pack.py | tee reports/codex.txt
+          python src.claude/agents/scripts/validate-skill-pack.py | tee reports/claude.txt
+          python scripts/sync-universal-hooks.py --check | tee reports/mirrors.txt
+          python scripts/validate-provider-prompt-projections.py --require --scope source --source-root . | tee reports/projections.txt
+          ruff check --select E9,F63,F7,F82 scripts src.codex src.claude tests install.py | tee reports/ruff.txt
+          bandit -q -lll scripts/provider_prompt.py scripts/production_installer.py | tee reports/bandit.txt
+          git diff --check d63884623f73b748618f47cba142faea537338be..HEAD
+          git rev-parse HEAD > reports/head.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: pr4-v2-static
+          path: reports/
+          if-no-files-found: error
+          retention-days: 7
+  full-tests:
+    needs: prepare
+    name: ${{ matrix.os }} tests ${{ matrix.shard }}/16
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      max-parallel: 32
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+    env:
+      AUDIT_SHARDS: '16'
+      AUDIT_INDEX: ${{ matrix.shard }}
+      AUDIT_EXPECTED_HEAD: ${{ needs.prepare.outputs.sha }}
+      AUDIT_REPORT_DIR: ${{ github.workspace }}/reports
+      PYTHONPATH: ${{ github.workspace }}/control/.github/audit
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          path: target
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          path: control
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --disable-pip-version-check pytest==9.0.2 PyYAML jsonschema
+      - name: Prepare owner on this disposable Windows checkout only
+        if: runner.os == 'Windows'
+        working-directory: target
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+          & icacls.exe . /setowner "*$sid" /T /C /Q
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to prepare current-user-owned test checkout' }
+      - name: Exercise all selected tests with exact coverage accounting
+        working-directory: target
+        run: python ../control/.github/audit/owned_windows_pytest.py -q -rA --tb=short -p audit_shard --junitxml=../reports/junit.xml
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: pr4-v2-${{ runner.os }}-${{ matrix.shard }}
+          path: ${{ github.workspace }}/reports/
+          if-no-files-found: error
+          retention-days: 7
