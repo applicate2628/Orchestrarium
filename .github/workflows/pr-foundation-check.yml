@@ -1,0 +1,123 @@
+name: Verify sequential foundation candidate
+on:
+  push:
+    branches: [automation/pr-sequential-audit-20260905]
+    paths: ['.github/workflows/pr-foundation-check.yml']
+permissions:
+  contents: read
+concurrency:
+  group: pr-foundation-check-20260905
+  cancel-in-progress: false
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    permissions:
+      contents: write
+    outputs:
+      sha: ${{ steps.candidate.outputs.sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 3dbfb9faf824365f5898fe52dd10093f4d75da9c
+          fetch-depth: 0
+          path: source
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          path: control
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Apply only the checksum-bound reviewed patch
+        id: candidate
+        working-directory: source
+        shell: python
+        run: |
+          import base64, gzip, hashlib, os, subprocess
+          from pathlib import Path
+          def git(*args):
+              return subprocess.check_output(['git', *args], text=True).strip()
+          assert git('rev-parse', 'HEAD') == '3dbfb9faf824365f5898fe52dd10093f4d75da9c'
+          encoded = Path('../control/.github/audit/pr4-foundation.patch.gz.b64').read_text().strip()
+          # Correct two transcription-only transport segments; the final patch
+          # must still equal the independently recorded complete SHA-256.
+          encoded = encoded.replace('SQdkbHQsTJzPMExmsy', 'SQdkbHQsSzPMExmsy')
+          encoded = encoded.replace('ATLz8l5IHxl6OnjPk6On3kOY', 'ATLz8l5IHxl6OnjPk6d3kOY')
+          patch = gzip.decompress(base64.b64decode(encoded, validate=True))
+          assert hashlib.sha256(patch).hexdigest() == 'ac0e8b8aeed6cddba89ddb3486e3fa0ec53487fc2b58a8ec946c2809a89cb98a'
+          path = Path(os.environ['RUNNER_TEMP']) / 'foundation.patch'
+          path.write_bytes(patch)
+          git('apply', '--check', '--index', '--unidiff-zero', str(path))
+          git('apply', '--index', '--unidiff-zero', str(path))
+          expected = sorted(['.gitattributes', 'README.md', 'INSTALL.md', 'RELEASE_NOTES.md', 'scripts/process_supervision/process_runner.py', 'scripts/production_installer.py', 'shared/provider-prompt-projections.v1.json', 'tests/test_pinned_checkout_bytes.py', 'tests/test_process_runner_windows_owner.py', 'tests/test_provider_prompt_projections.py'])
+          assert git('diff', '--cached', '--name-only').splitlines() == expected
+          git('diff', '--cached', '--check')
+          subprocess.run(['python', 'scripts/check-publication-gate.py'], check=True)
+          git('config', 'user.name', 'github-actions[bot]')
+          git('config', 'user.email', '41898282+github-actions[bot]@users.noreply.github.com')
+          git('commit', '-m', 'fix: preserve Windows token ownership and pinned checkout bytes')
+          sha = git('rev-parse', 'HEAD')
+          git('push', 'origin', 'HEAD:refs/heads/automation/pr4-foundation-20260905')
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+              output.write('sha=' + sha + '\n')
+          print('Exact candidate: ' + sha)
+  native:
+    needs: prepare
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 28
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    env:
+      PYTHONUTF8: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --disable-pip-version-check pytest==8.3.5 pytest-subtests==0.14.2 PyYAML==6.0.2 "jsonschema[format]==4.23.0"
+      - name: Verify real source, validators, installer and projections
+        shell: python
+        run: |
+          import json, os, subprocess, sys
+          from pathlib import Path
+          out = Path(os.environ['RUNNER_TEMP']) / 'foundation-evidence'
+          out.mkdir()
+          head = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          assert head == '${{ needs.prepare.outputs.sha }}'
+          commands = {
+              'owner-and-pins': [sys.executable, '-m', 'pytest', '-q', '-ra', '--tb=short', 'tests/test_pinned_checkout_bytes.py', 'tests/test_process_runner_windows_owner.py', 'tests/test_process_runner_core.py', 'tests/test_provider_prompt_projections.py::test_source_manifest_binds_the_generated_governance_capsule', 'tests/test_provider_prompt_projections.py::test_pre_owner_fix_transport_is_exactly_migratable'],
+              'codex-pack': [sys.executable, 'src.codex/skills/lead/scripts/validate-skill-pack.py'],
+              'claude-pack': [sys.executable, 'src.claude/agents/scripts/validate-skill-pack.py'],
+              'installers': [sys.executable, '-m', 'pytest', '-q', '-ra', '--tb=short', 'tests/test_agents_mode_installer_regression.py'],
+              'projections': [sys.executable, '-m', 'pytest', '-q', '-ra', '--tb=short', 'tests/test_provider_prompt_projections.py'],
+          }
+          results = {}
+          for name, command in commands.items():
+              print('START ' + name, flush=True)
+              try:
+                  result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=600)
+                  payload, code = result.stdout, result.returncode
+              except subprocess.TimeoutExpired as error:
+                  payload, code = (error.stdout or b'') + b'\nAUDIT_TIMEOUT\n', 124
+              (out / (name + '.log')).write_bytes(payload)
+              results[name] = code
+              print(name + ' exit=' + str(code), flush=True)
+              print(payload.decode('utf-8', errors='replace')[-20000:], flush=True)
+          (out / 'results.json').write_text(json.dumps({'head': head, 'platform': sys.platform, 'results': results}, indent=2), encoding='utf-8')
+          raise SystemExit(1 if any(results.values()) else 0)
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: foundation-${{ matrix.os }}
+          path: ${{ runner.temp }}/foundation-evidence/
+          if-no-files-found: warn
+          retention-days: 3
