@@ -1,0 +1,76 @@
+name: Diagnose native ownership and byte contracts
+on:
+  push:
+    branches: [automation/pr-final-audit-20260905]
+    paths: [.github/workflows/pr-native-boundaries.yml]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 3dbfb9faf824365f5898fe52dd10093f4d75da9c
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Observe native file owner relationships without changing ownership
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force evidence | Out-Null
+          $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+          $temporary = Join-Path $env:RUNNER_TEMP 'orche-owner-probe'
+          New-Item -ItemType Directory -Force $temporary | Out-Null
+          $rows = foreach ($path in @((Get-Location).Path, $temporary)) {
+            $owner = (Get-Acl -LiteralPath $path).GetOwner([System.Security.Principal.SecurityIdentifier])
+            [ordered]@{
+              kind = $(if ($path -eq $temporary) {'temporary'} else {'checkout'})
+              ownerMatchesUser = $owner.Equals($identity.User)
+              ownerMatchesDefaultOwner = $owner.Equals($identity.Owner)
+              defaultOwnerIsUser = $identity.Owner.Equals($identity.User)
+            }
+          }
+          $rows | ConvertTo-Json | Set-Content -Encoding utf8 evidence/owner-relationships.json
+          $rows | ConvertTo-Json
+      - name: Probe unchanged canonical owner checks and pinned payloads
+        shell: python
+        run: |
+          import hashlib, json, os, subprocess, sys, tempfile
+          from pathlib import Path
+          sys.path.insert(0, str(Path.cwd()))
+          from scripts.process_supervision.process_runner import bind_cwd_identity
+          out = Path('evidence'); out.mkdir(exist_ok=True)
+          rows = []
+          with tempfile.TemporaryDirectory() as temporary:
+              for kind, path in [('checkout', Path.cwd()), ('temporary', Path(temporary))]:
+                  try:
+                      bound = bind_cwd_identity(str(path))
+                      rows.append({'kind': kind, 'accepted': True})
+                  except Exception as exc:
+                      rows.append({'kind': kind, 'accepted': False, 'error': type(exc).__name__, 'diagnostic': str(exc)})
+          payloads = []
+          names = ['shared/role-routing-policy.v1.json']
+          names += [str(p).replace('\\', '/') for p in sorted(Path('src.codex/agents').glob('*.toml'))]
+          for name in names:
+              tracked = subprocess.check_output(['git', 'show', 'HEAD:' + name])
+              work = Path(name).read_bytes()
+              payloads.append({'path': name, 'sameBytes': tracked == work, 'trackedSha256': hashlib.sha256(tracked).hexdigest(), 'workingSha256': hashlib.sha256(work).hexdigest(), 'workingCRLF': work.count(b'\r\n')})
+          result = {'head': subprocess.check_output(['git','rev-parse','HEAD'], text=True).strip(), 'python':sys.version, 'platform':os.name, 'cwd':rows, 'payloads':payloads}
+          (out/'native-boundaries.json').write_text(json.dumps(result,indent=2)+'\n',encoding='utf-8')
+          print(json.dumps(result,indent=2))
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-boundaries-${{ matrix.os }}
+          path: evidence/
+          retention-days: 3
+          if-no-files-found: error
