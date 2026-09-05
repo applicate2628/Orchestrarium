@@ -1,0 +1,175 @@
+name: Verify common PR cleanup on Linux and Windows
+on:
+  push:
+    branches: [automation/pr-cleanup-finish-20260905]
+    paths: ['.github/workflows/pr4-common-native.yml']
+permissions:
+  contents: read
+concurrency:
+  group: pr4-common-native-20260905
+  cancel-in-progress: false
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    permissions:
+      contents: write
+    outputs:
+      sha: ${{ steps.prepare.outputs.sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: a05a99461c8984fd94efed6e6ec651c22e755bf1
+          path: control
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 3dbfb9faf824365f5898fe52dd10093f4d75da9c
+          path: target
+          fetch-depth: 0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --disable-pip-version-check pytest==8.3.5 pytest-subtests==0.14.2 PyYAML==6.0.2 "jsonschema[format]==4.23.0"
+      - name: Verify exact patch and complete resulting tree
+        id: prepare
+        working-directory: target
+        shell: python
+        run: |
+          import base64, gzip, hashlib, os, subprocess, sys
+          from pathlib import Path
+          def git(*args):
+              return subprocess.check_output(['git', *args], text=True).strip()
+          assert git('rev-parse', 'HEAD') == '3dbfb9faf824365f5898fe52dd10093f4d75da9c'
+          encoded = ''.join((Path('../control/.github/audit') / f'common-{i:02d}.b64').read_text().strip() for i in range(4))
+          payload = gzip.decompress(base64.b64decode(encoded, validate=True))
+          assert hashlib.sha256(payload).hexdigest() == 'ebb56dbb2e725c8cc4301816e15ec89adcccfb003eac2140268b66d96daad8bf'
+          patch = Path(os.environ['RUNNER_TEMP']) / 'common-reviewed.patch'
+          patch.write_bytes(payload)
+          git('apply', '--unidiff-zero', '--check', str(patch))
+          git('apply', '--unidiff-zero', str(patch))
+          git('add', '--all')
+          assert git('write-tree') == 'bf350d6f8315b89f091277dc2a7cef3cca4bbdc6'
+          git('diff', '--cached', '--check')
+          subprocess.run([sys.executable, '-m', 'pytest', '-q', '-ra',
+              'tests/test_installer_readonly_cleanup.py', 'tests/test_installer_global_home_platform.py',
+              'tests/test_process_runner_windows_owner.py', 'tests/test_byte_pinned_checkout.py',
+              'tests/test_claude_md_size.py', 'tests/test_claude_reference_mirror.py',
+              'tests/test_hook_health.py', 'tests/test_sessionstart_reminder_python_hooks.py',
+              'tests/test_install_hypothesis_hook.py', 'tests/test_orchestration_discipline_contract.py'],
+              check=True, timeout=180)
+          subprocess.run([sys.executable, 'scripts/check-publication-gate.py'], check=True, timeout=90)
+          git('config', 'user.name', 'github-actions[bot]')
+          git('config', 'user.email', '41898282+github-actions[bot]@users.noreply.github.com')
+          git('switch', '-c', 'automation/pr4-common-candidate-20260905')
+          git('commit', '-m', 'fix: repair native ownership and installer recovery contracts')
+          sha = git('rev-parse', 'HEAD')
+          git('push', 'origin', 'HEAD:refs/heads/automation/pr4-common-candidate-20260905')
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+              output.write('sha=' + sha + '\n')
+          print('CANDIDATE=' + sha)
+  native:
+    needs: prepare
+    name: ${{ matrix.os }} shard ${{ matrix.shard }}/4
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+        shard: [0, 1, 2, 3]
+    env:
+      PYTHONUTF8: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+      EXPECTED_HEAD: ${{ needs.prepare.outputs.sha }}
+      SHARD: ${{ matrix.shard }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --disable-pip-version-check pytest==8.3.5 pytest-subtests==0.14.2 PyYAML==6.0.2 "jsonschema[format]==4.23.0"
+      - name: Execute every test module once with bounded individual runs
+        shell: python
+        run: |
+          import json, os, signal, subprocess, sys, time
+          from pathlib import Path
+          assert subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip() == os.environ['EXPECTED_HEAD']
+          out = Path(os.environ['RUNNER_TEMP']) / 'common-native'
+          out.mkdir()
+          files = sorted(Path('tests').glob('test_*.py'))
+          selected = files[int(os.environ['SHARD'])::4]
+          assert selected
+          reports = []
+          for file in selected:
+              start = time.monotonic()
+              with (out / (file.stem + '.log')).open('wb') as log:
+                  process = subprocess.Popen([sys.executable,'-m','pytest','-q','-ra','--tb=short',str(file)], stdout=log,stderr=subprocess.STDOUT,start_new_session=(os.name != 'nt'))
+                  try:
+                      status = process.wait(timeout=300)
+                  except subprocess.TimeoutExpired:
+                      if os.name == 'nt':
+                          subprocess.run(['taskkill','/PID',str(process.pid),'/T','/F'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=15,check=False)
+                      else:
+                          os.killpg(process.pid, signal.SIGKILL)
+                      process.wait(timeout=15)
+                      status = 124
+              text = (out / (file.stem + '.log')).read_text(encoding='utf-8',errors='replace')
+              summary = next((line for line in reversed(text.splitlines()) if any(word in line for word in [' passed',' failed',' skipped'])), '')
+              row = {'file':str(file),'status':status,'seconds':round(time.monotonic()-start,2),'summary':summary}
+              reports.append(row)
+              print(json.dumps(row),flush=True)
+              (out / 'results.json').write_text(json.dumps({'head':os.environ['EXPECTED_HEAD'],'platform':sys.platform,'files':reports},indent=2),encoding='utf-8')
+          raise SystemExit(1 if any(row['status'] for row in reports) else 0)
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: common-${{ matrix.os }}-${{ matrix.shard }}
+          path: ${{ runner.temp }}/common-native/
+          if-no-files-found: error
+          retention-days: 3
+  packs:
+    needs: prepare
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    env:
+      PYTHONUTF8: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --disable-pip-version-check pytest==8.3.5 pytest-subtests==0.14.2 PyYAML==6.0.2 "jsonschema[format]==4.23.0"
+      - name: Run both unrelaxed package validators and canonical hook parity
+        shell: python
+        run: |
+          import json, os, subprocess, sys
+          from pathlib import Path
+          out=Path(os.environ['RUNNER_TEMP'])/'packs';out.mkdir()
+          commands={'codex':['src.codex/skills/lead/scripts/validate-skill-pack.py'], 'claude':['src.claude/agents/scripts/validate-skill-pack.py'], 'hook-parity':['scripts/sync-universal-hooks.py','--check']}
+          statuses={}
+          for name,args in commands.items():
+              result=subprocess.run([sys.executable,*args],stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=240)
+              (out/(name+'.log')).write_bytes(result.stdout)
+              print(name,result.returncode,result.stdout.decode('utf-8',errors='replace')[-2500:])
+              statuses[name]=result.returncode
+          (out/'results.json').write_text(json.dumps(statuses,indent=2),encoding='utf-8')
+          raise SystemExit(1 if any(statuses.values()) else 0)
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: common-pack-${{ matrix.os }}
+          path: ${{ runner.temp }}/packs/
+          if-no-files-found: error
+          retention-days: 3
