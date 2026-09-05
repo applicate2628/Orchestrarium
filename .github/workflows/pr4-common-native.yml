@@ -50,6 +50,14 @@ jobs:
           git('apply', '--unidiff-zero', str(patch))
           git('add', '--all')
           assert git('write-tree') == 'bf350d6f8315b89f091277dc2a7cef3cca4bbdc6'
+          target = Path('tests/test_install_hypothesis_hook.py')
+          text = target.read_text(encoding='utf-8')
+          old = 'self.assertEqual(Path(hook["command"]).resolve(), Path(sys.executable).absolute())'
+          new = 'self.assertEqual(Path(hook["command"]).absolute(), Path(sys.executable).absolute())'
+          assert text.count(old) == 1
+          target.write_text(text.replace(old, new), encoding='utf-8', newline='\n')
+          git('add', '--all')
+          assert git('write-tree') == '91231c449facb9130872f13829576a5ab93e9f30'
           git('diff', '--cached', '--check')
           subprocess.run([sys.executable, '-m', 'pytest', '-q', '-ra',
               'tests/test_installer_readonly_cleanup.py', 'tests/test_installer_global_home_platform.py',
