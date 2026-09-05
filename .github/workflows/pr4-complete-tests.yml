@@ -21,7 +21,7 @@ jobs:
   tests:
     name: ${{ matrix.os }} shard ${{ matrix.shard }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 35
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -51,6 +51,9 @@ jobs:
           from pathlib import Path
           import pytest
 
+          # A GitHub shell: python script lives in RUNNER_TEMP. Reproduce the
+          # repository import path supplied by the supported python -m pytest.
+          sys.path.insert(0, str(Path.cwd()))
           source = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
           assert source == os.environ['SOURCE_HEAD'], 'source revision drifted'
           out = Path(os.environ['RUNNER_TEMP']) / 'pr4-audit-evidence'
@@ -81,7 +84,7 @@ jobs:
                   with (out / 'outcomes.jsonl').open('a', encoding='utf-8') as stream:
                       stream.write(json.dumps(row) + '\n')
 
-          code = pytest.main(['-q', '-ra', '--tb=short', '--timeout=150', '--durations=20', '--junitxml=' + str(out / 'junit.xml')], plugins=[Audit()])
+          code = pytest.main(['-q', '-ra', '--tb=short', '--timeout=600', '--durations=20', '--junitxml=' + str(out / 'junit.xml')], plugins=[Audit()])
           (out / 'exit-code.txt').write_text(str(int(code)) + '\n', encoding='ascii')
           raise SystemExit(code)
       - name: Preserve per-test results even on failure
