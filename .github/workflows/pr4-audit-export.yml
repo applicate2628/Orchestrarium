@@ -1,0 +1,42 @@
+name: PR4 exact source export
+
+on:
+  push:
+    branches: [automation/pr4-audit-20260905-d6388462]
+    paths: [.github/workflows/pr4-audit-export.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Read the frozen PR source without persistent credentials
+        uses: actions/checkout@v4
+        with:
+          ref: d63884623f73b748618f47cba142faea537338be
+          fetch-depth: 0
+          persist-credentials: false
+          path: source
+      - name: Export only the frozen source and its required Git objects
+        working-directory: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = d63884623f73b748618f47cba142faea537338be
+          mkdir -p ../audit-source
+          git branch pr4-audit-source HEAD
+          git bundle create ../audit-source/source.bundle refs/heads/pr4-audit-source
+          git bundle verify ../audit-source/source.bundle
+          git rev-parse HEAD > ../audit-source/source.commit
+          git ls-tree -r HEAD > ../audit-source/source-tree.txt
+          sha256sum ../audit-source/source.bundle > ../audit-source/source-bundle.sha256
+      - name: Retain exact-source evidence for this audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr4-source-d6388462
+          path: audit-source/
+          if-no-files-found: error
+          retention-days: 3
