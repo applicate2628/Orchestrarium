@@ -317,6 +317,12 @@ def _policy_rejection(
     if capability_slot not in candidate["capabilities"]:
         return "E_LEAD_WORKER_V1_CAPABILITY_MISSING"
 
+    # Exact known model identities cannot be re-labelled as another provider.
+    if provider != "codex" and (
+        candidate["model"] in CODEX_MODEL_EFFORT_FLOORS
+        or candidate["model"] == "gpt-5.6-luna"
+    ):
+        return "E_LEAD_WORKER_V1_MODEL_PROVIDER_MISMATCH"
     if provider == "codex":
         if candidate["model"] == "gpt-5.6-luna":
             # Luna is native-only under its separate exact mechanical contract.
