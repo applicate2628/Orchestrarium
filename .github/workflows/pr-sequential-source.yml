@@ -1,0 +1,40 @@
+name: Export sequential audit sources
+on:
+  push:
+    branches: [automation/pr-sequential-audit-20260905]
+    paths: ['.github/workflows/pr-sequential-source.yml']
+permissions:
+  contents: read
+concurrency:
+  group: pr-sequential-source-20260905
+  cancel-in-progress: false
+jobs:
+  source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Export Git objects only, excluding configuration and credentials
+        shell: python
+        run: |
+          import json, os, subprocess
+          from pathlib import Path
+          root = Path(os.environ['RUNNER_TEMP']) / 'sequential-source'
+          root.mkdir()
+          branches = ['main', 'hotfix/1x-final-followups-20260901', 'feature/policy-overlays-ponytail-compat', 'feature/astra-routing-v1', 'feature/lead-contract-routing-v1', 'feature/adaptive-lead-model-routing-v2']
+          refs = ['refs/remotes/origin/' + branch for branch in branches]
+          heads = {branch: subprocess.check_output(['git', 'rev-parse', ref], text=True).strip() for branch, ref in zip(branches, refs)}
+          subprocess.run(['git', 'bundle', 'create', str(root / 'source.bundle'), *refs], check=True)
+          subprocess.run(['git', 'bundle', 'verify', str(root / 'source.bundle')], check=True)
+          (root / 'heads.json').write_text(json.dumps(heads, indent=2) + '\n', encoding='utf-8')
+          print(json.dumps(heads, indent=2))
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: sequential-full-git-source
+          path: ${{ runner.temp }}/sequential-source/
+          if-no-files-found: error
+          retention-days: 3
