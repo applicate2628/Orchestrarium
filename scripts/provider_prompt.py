@@ -1155,7 +1155,33 @@ class WindowsPrivateObjectOwnerV1:
                 ctypes.get_last_error(),
                 "ConvertStringSecurityDescriptorToSecurityDescriptorW",
             )
-        return descriptor, sddl
+        # Windows can render a numeric SID with a well-known alias (for
+        # example LA). Compare native canonical forms, not caller spelling;
+        # the protected flag and the complete ACE remain part of the check.
+        advapi32.ConvertSecurityDescriptorToStringSecurityDescriptorW.argtypes = [
+            ctypes.c_void_p,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            ctypes.POINTER(wintypes.LPWSTR),
+            ctypes.POINTER(wintypes.DWORD),
+        ]
+        advapi32.ConvertSecurityDescriptorToStringSecurityDescriptorW.restype = wintypes.BOOL
+        rendered = wintypes.LPWSTR()
+        try:
+            if not advapi32.ConvertSecurityDescriptorToStringSecurityDescriptorW(
+                descriptor, 1, 0x00000004, ctypes.byref(rendered), None
+            ) or not rendered.value:
+                raise OSError(
+                    ctypes.get_last_error(),
+                    "ConvertSecurityDescriptorToStringSecurityDescriptorW(expected DACL)",
+                )
+            return descriptor, rendered.value
+        except BaseException:
+            kernel32.LocalFree(descriptor)
+            raise
+        finally:
+            if rendered:
+                kernel32.LocalFree(rendered)
 
     @staticmethod
     def verify_handle_dacl(handle: int, expected_sddl: str) -> None:

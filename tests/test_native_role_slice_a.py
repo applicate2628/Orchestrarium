@@ -1617,7 +1617,8 @@ def test_post_materialization_runtime_census_matches_declared_destinations(
 ) -> None:
     """The actual two-provider writer calls must echo every declared destination."""
 
-    monkeypatch.setenv("CODEX_BIN", codex_hook_host_env(os.environ, ROOT)["CODEX_BIN"])
+    for name, value in codex_hook_host_env({}, ROOT).items():
+        monkeypatch.setenv(name, value)
 
     artifact_class = {
         "claude-skill-projection": "claude-skill-projection",
@@ -1974,7 +1975,8 @@ def test_codex_hooks_inventory_is_outside_lead_and_rolls_back_with_registration(
 ) -> None:
     """The generated registration sidecar has config-root ownership and rollback."""
 
-    monkeypatch.setenv("CODEX_BIN", codex_hook_host_env(os.environ, ROOT)["CODEX_BIN"])
+    for name, value in codex_hook_host_env({}, ROOT).items():
+        monkeypatch.setenv(name, value)
 
     project = tmp_path / "project"
     project.mkdir()
@@ -3466,6 +3468,7 @@ def test_global_codex_install_uses_shared_agents_skills_root(tmp_path: Path) -> 
     env = os.environ.copy()
     env["USERPROFILE"] = str(home)
     env["HOME"] = str(home)
+    env = codex_hook_host_env(env, ROOT)
     result = subprocess.run(
         [sys.executable, str(INSTALL_CODEX), "--global", "--force"],
         cwd=ROOT,

@@ -54,8 +54,16 @@ def _projected_entrypoint(tmp_path: Path, provider: str) -> Path:
     entrypoint.write_bytes(ENTRYPOINTS[provider].read_bytes())
     support = tmp_path / "scripts"
     support.mkdir(exist_ok=True)
-    for name in ("check-hook-health.py", "universal_hooks_manifest.py", "agent-run-ledger.py"):
+    for name in (
+        "check-hook-health.py", "universal_hooks_manifest.py", "agent-run-ledger.py",
+        "validate-work-item-state.py", "mutate-work-item.py", "resolve-agents-mode.py",
+        "solution_attempt/reducer.py",
+    ):
+        (support / name).parent.mkdir(parents=True, exist_ok=True)
         (support / name).write_bytes((ROOT / "scripts" / name).read_bytes())
+    ledger_schema = tmp_path / "shared" / "schemas" / "agent-runs.schema.json"
+    ledger_schema.parent.mkdir(parents=True, exist_ok=True)
+    ledger_schema.write_bytes((ROOT / "shared/schemas/agent-runs.schema.json").read_bytes())
     shared = scripts.parent.parent / "shared"
     shared.mkdir(exist_ok=True)
     (scripts.parent / "shared").mkdir(exist_ok=True)
@@ -73,6 +81,9 @@ def _projected_entrypoint(tmp_path: Path, provider: str) -> Path:
     )
     (scripts / "check-hook-health.py").write_bytes(
         (ROOT / "scripts" / "check-hook-health.py").read_bytes()
+    )
+    (scripts / "universal_hooks_manifest.py").write_bytes(
+        (ROOT / "scripts/universal_hooks_manifest.py").read_bytes()
     )
     return entrypoint
 
@@ -469,6 +480,7 @@ def test_partial_override_fails_before_fake_provider_launch(
 
 
 @pytest.mark.parametrize("provider", ("codex", "claude"))
+@requires_windows_process_runner
 def test_launch_and_terminal_ledger_events_record_resolved_profile(
     tmp_path: Path, provider: str
 ) -> None:
@@ -524,6 +536,7 @@ def test_launch_and_terminal_ledger_events_record_resolved_profile(
     assert provider_prompt.parse_provider_result(result.stdout)["launchFlags"] == expected_flags
 
 
+@requires_windows_process_runner
 def test_equal_model_effort_with_different_sandbox_flags_remain_distinguishable(
     tmp_path: Path,
 ) -> None:
@@ -638,3 +651,20 @@ def test_resolved_profile_rejects_unpersistable_provider_arguments(
 ) -> None:
     with pytest.raises(ValueError, match="E_EXTERNAL_LAUNCH_FLAGS_UNSAFE"):
         provider_prompt.resolved_profile(provider, flags)
+
+
+def test_detached_fixture_materializes_owned_helper_dependencies(tmp_path: Path) -> None:
+    """A fixture must not depend on helper files accidentally found in the repo."""
+    import runpy
+
+    entrypoint = _projected_entrypoint(tmp_path, 'claude')
+    ledger = runpy.run_path(str(tmp_path / 'scripts' / 'agent-run-ledger.py'))
+    validator = ledger['load_validator']()
+    assert callable(validator.decode_json_object)
+    assert callable(validator.load_lifecycle_owner()._parse_fields)
+    assert validator.load_solution_attempt_owner().OK == "SOL-OK"
+    health = subprocess.run(
+        [sys.executable, str(entrypoint.parent / 'check-hook-health.py'), '--help'],
+        cwd=tmp_path, capture_output=True, text=True, timeout=15,
+    )
+    assert health.returncode == 0, health.stderr

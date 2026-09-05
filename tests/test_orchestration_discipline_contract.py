@@ -439,7 +439,9 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
             "Native role profiles and effort floors are reported as fixed execution truth",
             release_notes,
         )
-        self.assertIn("route-authoritative evidence", release_notes)
+        self.assertIn("provider-authoritative runtime evidence", release_notes)
+        self.assertIn("Codex TOMLs declare installed defaults", release_notes)
+        self.assertIn("Claude internal Agent selection is host-owned", release_notes)
         self.assertIn("`unspecified by runtime`", release_notes)
 
     def test_handoff_requires_fresh_exact_tool_selection_on_both_packs(self) -> None:

@@ -1,6 +1,7 @@
 import importlib.util
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -1004,8 +1005,32 @@ def test_closure_recovery_schema_contract_runbook_and_rollup_parity(tmp_path: Pa
             checker.check_recovery_documentation(duplicate_procedure)
 
 
+def _implementation_lane_evidence_root() -> Path:
+    """Historical run attestation is optional input, not a clean-checkout fixture."""
+    selected = os.environ.get("ORCHESTRARIUM_IMPLEMENTATION_LANE_EVIDENCE")
+    if not selected:
+        pytest.skip(
+            "optional historical attestation: set ORCHESTRARIUM_IMPLEMENTATION_LANE_EVIDENCE"
+        )
+    root = Path(selected).expanduser().resolve(strict=True)
+    assert root.is_dir(), "historical evidence root must be a directory"
+    return root
+
+
+def test_historical_lane_evidence_is_opt_in_but_invalid_explicit_input_fails() -> None:
+    with pytest.MonkeyPatch.context() as environment:
+        environment.delenv("ORCHESTRARIUM_IMPLEMENTATION_LANE_EVIDENCE", raising=False)
+        with pytest.raises(pytest.skip.Exception, match="optional historical attestation"):
+            _implementation_lane_evidence_root()
+        with tempfile.TemporaryDirectory() as temporary:
+            missing = Path(temporary) / "missing-evidence"
+            environment.setenv("ORCHESTRARIUM_IMPLEMENTATION_LANE_EVIDENCE", str(missing))
+            with pytest.raises(FileNotFoundError):
+                _implementation_lane_evidence_root()
+
+
 def test_implementation_lane_replays_dirty_declared_producer_delta() -> None:
-    root = ROOT / ".scratch" / "work-items" / "2026-08-17-fix-append-only-invalid-ledger-event-recovery" / "lead-append-only-scratch-retain-20260821-r1-terminal" / "implementation-lane-baseline"
+    root = _implementation_lane_evidence_root()
     manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["schemaVersion"] == 2
     assert len(manifest["entries"]) == 77
@@ -1018,7 +1043,7 @@ def test_implementation_lane_replays_dirty_declared_producer_delta() -> None:
 
 
 def test_implementation_lane_forbids_external_side_effects() -> None:
-    root = ROOT / ".scratch" / "work-items" / "2026-08-17-fix-append-only-invalid-ledger-event-recovery" / "lead-append-only-scratch-retain-20260821-r1-terminal" / "implementation-lane-baseline"
+    root = _implementation_lane_evidence_root()
     commands = json.loads((root / "commands.jsonl").read_text(encoding="utf-8"))
     processes = json.loads((root / "process-network-attempts.jsonl").read_text(encoding="utf-8"))
     call_path = json.loads((root / "call-path-observation.json").read_text(encoding="utf-8"))

@@ -8222,7 +8222,8 @@ class _UnittestAdapter(unittest.TestCase):
 def _adapt_test(function):
     def method(self):
         with tempfile.TemporaryDirectory() as directory:
-            function(Path(directory))
+            # Match pytest tmp_path: native Windows short aliases are not canonical.
+            function(Path(directory).resolve())
 
     method.__name__ = function.__name__
     return method

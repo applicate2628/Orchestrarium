@@ -448,10 +448,12 @@ def _load_installer():
     return module
 
 
+# Historical fixture archives use the baseline LF checkout contract explicitly.
+# git archive also applies checkout conversion; host autocrlf must not repin history.
 def _seed_revision_staged_lead(revision: str, destination: Path) -> Path:
     source = destination.parent / "historical-source"
     archive = subprocess.run(
-        ["git", "archive", "--format=tar", revision],
+        ["git", "-c", "core.autocrlf=false", "-c", "core.eol=lf", "archive", "--format=tar", revision],
         cwd=ROOT,
         check=True,
         capture_output=True,
@@ -541,7 +543,7 @@ def _remove_historical_members(lead: Path, relatives: tuple[str, ...]) -> None:
 def _extract_8521_skill(name: str, destination: Path) -> Path:
     if name == "lead":
         archive = subprocess.run(
-            ["git", "archive", "--format=tar", "8521b638"],
+            ["git", "-c", "core.autocrlf=false", "-c", "core.eol=lf", "archive", "--format=tar", "8521b638"],
             cwd=ROOT,
             check=True,
             capture_output=True,
@@ -566,7 +568,7 @@ def _extract_8521_skill(name: str, destination: Path) -> Path:
         assert result.returncode == 0, result.stdout + result.stderr
         return target / ".agents" / "skills" / "lead"
     archive = subprocess.run(
-        ["git", "archive", "--format=tar", "8521b638", f"src.codex/skills/{name}"],
+        ["git", "-c", "core.autocrlf=false", "-c", "core.eol=lf", "archive", "--format=tar", "8521b638", f"src.codex/skills/{name}"],
         cwd=ROOT,
         check=True,
         capture_output=True,
@@ -580,6 +582,8 @@ def _extract_7872_skill(name: str, destination: Path) -> Path:
     archive = subprocess.run(
         [
             "git",
+            "-c", "core.autocrlf=false",
+            "-c", "core.eol=lf",
             "archive",
             "--format=tar",
             PRE_KIMI_GLOBAL_LEAD_REVISION,
@@ -630,6 +634,8 @@ def _extract_additional_stock_skill(
     archive = subprocess.run(
         [
             "git",
+            "-c", "core.autocrlf=false",
+            "-c", "core.eol=lf",
             "archive",
             "--format=tar",
             revision,
@@ -648,6 +654,8 @@ def _extract_stock_consultant(destination: Path, revision: str) -> Path:
     archive = subprocess.run(
         [
             "git",
+            "-c", "core.autocrlf=false",
+            "-c", "core.eol=lf",
             "archive",
             "--format=tar",
             revision,
@@ -1854,3 +1862,19 @@ def test_only_exact_observed_global_lead_tree_is_an_accepted_prior(
         installer._preflight_canonical_skills(
             ROOT / "src.codex" / "skills", skills_root, root=ROOT
         )
+
+
+@pytest.mark.parametrize('autocrlf', ['true', 'false'])
+def test_historical_archive_preserves_pinned_bytes_under_host_eol_conversion(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, autocrlf: str
+) -> None:
+    """Archive fixture inputs must not inherit the host's checkout conversion."""
+    import os
+
+    count = int(os.environ.get('GIT_CONFIG_COUNT', '0'))
+    for offset, (key, value) in enumerate((('core.autocrlf', autocrlf), ('core.eol', 'crlf'))):
+        monkeypatch.setenv(f'GIT_CONFIG_KEY_{count + offset}', key)
+        monkeypatch.setenv(f'GIT_CONFIG_VALUE_{count + offset}', value)
+    monkeypatch.setenv('GIT_CONFIG_COUNT', str(count + 2))
+    tree = _extract_stock_consultant(tmp_path, STOCK_CONSULTANT_REVISION)
+    assert _load_installer()._tree_sha256(tree) == STOCK_CONSULTANT_TREE_SHA256
