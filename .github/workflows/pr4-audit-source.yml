@@ -1,0 +1,31 @@
+name: PR 4 isolated audit source
+on:
+  push:
+    branches: [automation/pr4-audit-local-20260905-d6388462]
+    paths: [.github/workflows/pr4-audit-source.yml]
+permissions:
+  contents: read
+jobs:
+  export-source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: d63884623f73b748618f47cba142faea537338be
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Bundle committed source only
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = d63884623f73b748618f47cba142faea537338be
+          mkdir -p "${RUNNER_TEMP}/audit-source"
+          git bundle create "${RUNNER_TEMP}/audit-source/source.bundle" HEAD
+          sha256sum "${RUNNER_TEMP}/audit-source/source.bundle"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pr4-source-d6388462
+          path: ${{ runner.temp }}/audit-source/source.bundle
+          retention-days: 3
+          if-no-files-found: error
