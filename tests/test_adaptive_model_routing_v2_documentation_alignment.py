@@ -36,3 +36,21 @@ def test_contract_index_exposes_the_committed_runtime_handoff_documents():
     for name in ("runtime-validation-obligations.md", "review-loop-closure.md"):
         assert (V2 / name).is_file()
         assert f"]({name})" in guide, f"contract index has no link to {name}"
+
+
+def test_implementation_plan_requires_operational_admission_before_launch():
+    root = V2.parents[1]
+    plan = (root / "docs/superpowers/plans/2026-09-04-adaptive-lead-model-routing-v2-implementation.md").read_text(encoding="utf-8")
+    scheduler = plan.split("## Phase 4:", 1)[1].split("\n## Phase 5:", 1)[0]
+    assert "`dispatchSpec`" in scheduler
+    assert "`dispatchControl`" in scheduler
+    assert "launch revalidation" in scheduler
+
+
+def test_normative_spec_uses_the_existing_all_contradictions_gate():
+    root = V2.parents[1]
+    spec = (root / "docs/superpowers/specs/2026-09-04-adaptive-lead-model-routing-v2-design.md").read_text(encoding="utf-8")
+    section = spec.split("## 6. Structured disagreement\n", 1)[1].split("\n## 7.", 1)[0]
+    assert "every unresolved contradiction" in section
+    assert "`humanGateRequired = true`" in section
+    assert "`selected`" in section

@@ -34,7 +34,7 @@
 - [x] Define Lead lease, registry snapshot, dispatch, route request, route decision, and worker result schemas.
 - [x] Add examples and validate them with Draft 2020-12 JavaScript Object Notation Schema.
 - [x] Document adaptive portfolio, structured disagreement, fallback, diversity, and migration boundaries.
-- [ ] Run the tests and documentation validators in a full repository checkout.
+- [ ] Run all `tests/test_adaptive_model_routing_v2_*.py` suites and documentation validators in a full repository checkout. Include both schema/example bundles, [operational hardening](../../model-routing-v2/deep-review-operational-hardening.md), and [runtime obligations](../../model-routing-v2/runtime-validation-obligations.md); the initial file list above is not the complete later review surface.
 - [ ] Obtain independent architecture review of the contracts.
 
 ## Phase 1: Lead lease and durable ownership
@@ -42,7 +42,7 @@
 **Planned owners:** persistence/reliability specialist, Lead contract owner, independent reviewer.
 
 - [ ] Write failing tests for one active lease, monotonic epoch, stale-writer fencing, expiry, release, supersession, crash recovery, and host failover.
-- [ ] Implement a pure lease reducer and atomic persistence owner.
+- [ ] Implement a pure lease reducer and atomic persistence owner. Admit a bounded read-only single-worker slice only after its acquisition, paired-contract validation, fencing, adapter, and result checks pass; unrelated future portfolio or adaptive-evaluation features need not be implemented first.
 - [ ] Project the provider-neutral Lead contract into Codex and Claude adapters.
 - [ ] Add recovery tooling that revalidates unresolved dispatches after host transfer.
 - [ ] Prove that two host adapters cannot concurrently mutate one work item.
@@ -61,7 +61,7 @@
 
 **Planned owners:** routing-policy owner, algorithm specialist, independent architecture reviewer.
 
-- [ ] Write failing tests for complete candidate sets and deterministic decisions from exact snapshots.
+- [ ] Write failing tests for complete candidate sets and deterministic decisions from exact snapshots, including equality between semantic records and their subordinate operational identifiers and digests.
 - [ ] Implement hard admissibility and quality-floor filters.
 - [ ] Implement scope coverage, approach diversity, independence, and evidence-quality comparisons.
 - [ ] Implement Pareto filtering within stages and the normative lexicographic order.
@@ -73,7 +73,7 @@
 **Planned owners:** Lead/scheduler owner, provider adapters, evidence owner.
 
 - [ ] Write failing tests for blind proposal isolation, scope-expansion boundaries, named cross-critique targets, and Lead-only synthesis.
-- [ ] Launch only `dispatchSpec` instances admitted by the pure resolver.
+- [ ] Launch only ready `dispatchSpec` records paired with their exact `dispatchControl`, after semantic/operational validation, current-fence checks, and adapter launch revalidation. Candidate selection alone is not execution admission.
 - [ ] Prevent worker-to-worker task assignment and recursive delegation.
 - [ ] Normalize worker artifacts and preserve exact scope/artifact/gate identities.
 - [ ] Add empirical arbitration tasks for proofs, tests, benchmarks, and visual evidence.

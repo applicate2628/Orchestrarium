@@ -112,7 +112,7 @@ Uncontrolled peer chat is not the debate mechanism. The Lead manages an artifact
 
 Additional workers are selected by expected **marginal information gain**: new scope, a distinct approach, or a new failure class. Another highly correlated answer has lower value than a qualified worker with different approach tags and evidence independence.
 
-Majority agreement is not truth. Unresolved critical contradictions block acceptance or require the explicitly configured human gate.
+Majority agreement is not truth. In the current machine contracts, every unresolved contradiction prevents `selected` status and requires `humanGateRequired = true` in a degraded or blocked decision; the operational envelope also requires the human-gate contract. This is stricter than a critical-only rule. A gate request is not acceptance or execution permission; the trusted owner must verify the corresponding evidence.
 
 ## 7. Adaptive selection
 

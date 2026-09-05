@@ -125,6 +125,47 @@ The operational schema does not implement a second router. A future cross-record
 
 Detailed findings, implementation order, and explicitly rejected overengineering are recorded in [`deep-review-operational-hardening.md`](deep-review-operational-hardening.md).
 
+### Validating one declared record
+
+These files are **definition bundles**, not root-level record validators. Their
+`$defs` entries are inert until a caller selects the expected definition through
+`$ref`. Passing an instance to a bundle root can accept even an empty object;
+checking that the bundle is a valid schema checks the schema, not the instance.
+
+After trusted acquisition, the consuming owner chooses the expected record type
+from its own contract, never from an untrusted record's claim. This example uses
+the same local-reference pattern as the tests and enables calendar-format checks:
+
+```python
+from jsonschema import Draft202012Validator, FormatChecker
+
+
+def validate_record(bundle: dict, expected_definition: str, record: object) -> None:
+    if expected_definition not in bundle["$defs"]:
+        raise ValueError("unknown record definition")
+    wrapper = {
+        "$schema": bundle["$schema"],
+        "$defs": bundle["$defs"],
+        "$ref": f"#/$defs/{expected_definition}",
+    }
+    checker = FormatChecker()
+    if "date-time" not in checker.checkers:
+        raise RuntimeError("date-time format checker is unavailable")
+    Draft202012Validator.check_schema(wrapper)
+    Draft202012Validator(wrapper, format_checker=checker).validate(record)
+```
+
+For example, use `leadLease` with the semantic bundle and `dispatchControl` with
+the operational bundle. An unknown definition is an error, not a fallback to root
+validation. The already acquired bundle is trusted input here; this snippet does
+not replace the bounded, duplicate-key-rejecting reader required by
+[runtime validation obligations](runtime-validation-obligations.md#4-snapshot-and-digest-trust).
+The environment must supply the `date-time` checker and its optional dependency;
+merely constructing `FormatChecker()` does not establish that this check exists.
+The example refuses a missing checker instead of accepting unchecked dates.
+It validates local record shape only, not cross-record consistency, admission, or
+authority to launch. The snippet is tested directly from this guide.
+
 ## 6. Fallback and Lead continuity
 
 A worker provider being absent or unpaid is ordinary scheduler input. `not-configured`, `not-entitled`, `quota-exhausted`, temporary transport failure, and ordinary unavailability may advance to the next explicit candidate. Authentication failure, contract violation, unsafe output, quality failure, budget exhaustion, and stale-fence results have different dispositions and must not be collapsed into one retry loop.
@@ -164,6 +205,8 @@ The Version 1 dispatch may migrate into one Version 2 portfolio slot only when r
 
 ## 9. Terms and abbreviations
 
+- **Definition bundle:** a library of schema definitions under `$defs`; a caller applies an expected definition through `$ref`.
+- **Record validation:** checking one acquired record against its expected schema, without claiming execution admission.
 - **CLI — Command-Line Interface:** command-line execution surface for a provider worker.
 - **Lead Host adapter:** provider-specific implementation of the stable logical Lead contract.
 - **Lead lease:** exclusive, epoch-numbered ownership record preventing two active Leads from mutating one work item.
