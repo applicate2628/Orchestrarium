@@ -1,0 +1,90 @@
+name: PR4 remaining native gap diagnostics
+on:
+  push:
+    branches: [automation/pr4-audit-20260905-final]
+    paths: [.github/workflows/pr4-native-gap-diagnostics.yml]
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    env:
+      PYTHONUTF8: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 7d96ea759f78c37ea2f039460320d97117509877
+          path: target
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          path: control
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --disable-pip-version-check pytest==9.0.2 PyYAML jsonschema
+      - name: Prepare this disposable checkout owner
+        working-directory: target
+        shell: pwsh
+        run: |
+          $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+          icacls.exe . /setowner "*$sid" /T /C /Q
+          if ($LASTEXITCODE -ne 0) { throw 'owner precondition' }
+      - name: Capture native failure evidence without altering validation policy
+        working-directory: target
+        shell: python
+        run: |
+          import dataclasses,json,os,sys,tempfile,traceback
+          from pathlib import Path
+          sys.path[:0]=[str(Path.cwd()),str(Path('../control/.github/audit').resolve())]
+          from owned_windows_pytest import owned_test_objects
+          from tests import test_slice_a_detached_validation as detached
+          from tests import test_native_role_slice_a as native
+          from unittest.mock import patch
+          results={}
+          def capture(name,fn):
+              try: results[name]=fn()
+              except Exception as exc: results[name]={'error':str(exc),'traceback':traceback.format_exc()}
+          with owned_test_objects(),tempfile.TemporaryDirectory(prefix='pr4-native-gaps-') as tmp:
+              root=Path(tmp).resolve()
+              def detached_attempt(local_eol):
+                  base=root/('explicit-eol' if local_eol else 'ambient-eol');base.mkdir()
+                  module=detached._load();repo,baseline,digest=detached._repo(base)
+                  if local_eol:
+                      detached._git(repo,'config','core.autocrlf','false')
+                      detached._git(repo,'config','core.eol','lf')
+                  run=repo/'.scratch'/'run-diagnostic'
+                  value=detached._validate(module,repo,run,baseline,digest,detached._command(module,'pass'))
+                  return {'result':str(value),'evidence':{p.relative_to(run).as_posix():p.read_text(encoding='utf-8') for p in run.rglob('*.json')},'status':detached._git(repo,'status','--short').stdout}
+              capture('detached_ambient',lambda:detached_attempt(False))
+              capture('detached_explicit_eol',lambda:detached_attempt(True))
+              def linked_attempt():
+                  home=root/'home';home.mkdir();backing=root/'backing';backing.mkdir()
+                  logical=home/'.codex'/'agents';native._make_runtime_directory_link(logical,backing,'symlink')
+                  inst=native.installer
+                  owner_module=inst._linked_runtime_subroots_module(native.ROOT)
+                  cls=owner_module.LinkedRuntimeSubrootAuthority
+                  original=cls.assert_current
+                  observations=[]
+                  def observed(self):
+                      current=self.bind(self.logical_root,scope='global',trusted_global_roots=self.trusted_global_roots,allow_linked_ancestors=self.allow_linked_ancestors)
+                      try: return original(self)
+                      except Exception:
+                          observations.append({'before':dataclasses.asdict(self),'after':dataclasses.asdict(current) if current else None})
+                          raise
+                  with patch.object(inst,'_linked_runtime_subroots_module',return_value=owner_module),patch.object(cls,'assert_current',observed),patch.dict(os.environ,{'HOME':str(home),'USERPROFILE':str(home),'ORCHESTRARIUM_NO_HYPOTHESIS_HOOK':'1'}):
+                      rc=inst.install('codex',['--global','--force'])
+                  return {'returncode':rc,'identity_changes':observations}
+              capture('linked_subroot',linked_attempt)
+          Path('../native-gap-diagnostics.json').write_text(json.dumps(results,indent=2,default=str)+'\n',encoding='utf-8')
+          print(json.dumps(results,indent=2,default=str))
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: pr4-native-gap-diagnostics
+          path: native-gap-diagnostics.json
+          if-no-files-found: error
+          retention-days: 1
