@@ -15,7 +15,9 @@ Use it together with:
 Current docs in this branch:
 
 - [agents-mode-reference.md](agents-mode-reference.md) for the shared operator schema
+- [routing-v1-operator-guide.md](routing-v1-operator-guide.md) for source-tested selector examples and the separate installation/admission gates
 - [external-worker-design.md](external-worker-design.md) for external execution adapter design notes
+- [lead-contract-routing-audit-2026-09-04.md](lead-contract-routing-audit-2026-09-04.md) for the provider-neutral Lead Host, optional CLI worker, and explicit fallback audit
 - [new-session-guide.md](new-session-guide.md) for new-session orientation and source-first maintenance rules
 - [provider-runtime-layouts.md](provider-runtime-layouts.md) for cross-provider runtime path mapping
 - [work-item-execution-tracking.md](work-item-execution-tracking.md) for the execution ledger helper and periodic active work-item checker
