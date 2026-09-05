@@ -1,0 +1,132 @@
+name: PR 4 self-audit r4
+on:
+  push:
+    branches: [automation/pr4-audit-local-20260905-d6388462]
+    paths: [.github/workflows/pr4-audit-r4.yml, .github/audit/pr4-r4.patch, .github/audit/run-pr4-tests.py]
+permissions:
+  contents: read
+concurrency:
+  group: pr4-self-audit-r4
+  cancel-in-progress: false
+env:
+  SOURCE_HEAD: d63884623f73b748618f47cba142faea537338be
+  EXPECTED_TREE: a09dccd399af5006f700df714ca5c08f57dc165b
+  PATCH_SHA256: d87c191750015d0a0d4d0af5b1aa164a191fcf665670295cbc152b70d00a9f13
+  PYTHONUTF8: '1'
+  PYTHONDONTWRITEBYTECODE: '1'
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    outputs:
+      candidate: ${{ steps.commit.outputs.candidate }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: control
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          fetch-depth: 0
+          path: target
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply exact local candidate and check publication gate
+        working-directory: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${SOURCE_HEAD}"
+          echo "${PATCH_SHA256}  ../control/.github/audit/pr4-r4.patch" | sha256sum --check --strict
+          git apply --check --index ../control/.github/audit/pr4-r4.patch
+          git apply --index ../control/.github/audit/pr4-r4.patch
+          git diff --cached --check
+          test "$(git write-tree)" = "${EXPECTED_TREE}"
+          python scripts/check-publication-gate.py
+      - name: Commit isolated candidate without changing PR
+        id: commit
+        working-directory: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix: close installer cleanup and cross-platform audit gaps'
+          test "$(git rev-parse HEAD^{tree})" = "${EXPECTED_TREE}"
+          candidate="$(git rev-parse HEAD)"
+          git push origin "HEAD:refs/heads/automation/pr4-audit-candidate-20260905-r4"
+          echo "candidate=${candidate}" >> "$GITHUB_OUTPUT"
+          echo "Exact candidate ${candidate}, tree ${EXPECTED_TREE}; PR not updated." >> "$GITHUB_STEP_SUMMARY"
+  tests:
+    needs: prepare
+    name: ${{ matrix.os }} shard ${{ matrix.shard }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+        shard: [0, 1, 2, 3, 4, 5]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: control
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          path: target
+          ref: ${{ needs.prepare.outputs.candidate }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --disable-pip-version-check pytest PyYAML jsonschema
+      - name: Check exact source identity
+        working-directory: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = '${{ needs.prepare.outputs.candidate }}'
+          test "$(git rev-parse HEAD^{tree})" = "${EXPECTED_TREE}"
+      - name: Run every assigned test file
+        working-directory: target
+        run: python ../control/.github/audit/run-pr4-tests.py --shard ${{ matrix.shard }} --total 6 --output "${{ runner.temp }}/audit-results"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: r4-${{ matrix.os }}-${{ matrix.shard }}
+          path: ${{ runner.temp }}/audit-results
+          retention-days: 5
+          if-no-files-found: error
+  static:
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.candidate }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --disable-pip-version-check pytest PyYAML jsonschema ruff bandit
+      - name: Compile and check contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^{tree})" = "${EXPECTED_TREE}"
+          mapfile -d '' files < <(git ls-files -z '*.py')
+          python -m py_compile "${files[@]}"
+          ruff check --select E9,F63,F7,F82 scripts src.codex src.claude tests install.py
+          python scripts/sync-universal-hooks.py --check
+          python src.codex/skills/lead/scripts/validate-skill-pack.py
+          python src.claude/agents/scripts/validate-skill-pack.py
+          git diff --check "${SOURCE_HEAD}..HEAD"
+          bandit -q -lll scripts/production_installer.py scripts/check-hook-health.py
