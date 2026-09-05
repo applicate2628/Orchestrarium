@@ -1,0 +1,25 @@
+name: PR4 baseline evidence bundle
+on:
+  push:
+    branches: [automation/pr4-audit-20260905-d6388462]
+    paths: [.github/workflows/pr4-collect-baseline.yml]
+permissions:
+  actions: read
+  contents: read
+jobs:
+  collect:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 33968036803
+          pattern: pr4-d63884623f73b748618f47cba142faea537338be-*
+          path: baseline-evidence
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pr4-all-baseline-evidence
+          path: baseline-evidence/
+          if-no-files-found: error
+          retention-days: 5
