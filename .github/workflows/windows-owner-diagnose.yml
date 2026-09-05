@@ -1,0 +1,95 @@
+name: Diagnose Windows directory ownership
+on:
+  push:
+    branches: [automation/pr-cleanup-finish-20260905]
+    paths: ['.github/workflows/windows-owner-diagnose.yml']
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: windows-2025
+    timeout-minutes: 10
+    env:
+      PYTHONUTF8: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 2a00a4f70b19db5c04bb52f1b103b69bd635df67
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Compare owner identities without changing production validation
+        shell: python
+        run: |
+          import ctypes, hashlib, json, os, sys, tempfile
+          from ctypes import wintypes as w
+          from pathlib import Path
+          sys.path.insert(0, str(Path.cwd()))
+          from scripts.process_supervision import process_runner as runner
+          out = Path(os.environ['RUNNER_TEMP']) / 'owner-diagnosis'
+          out.mkdir()
+          api = ctypes.WinDLL('advapi32', use_last_error=True)
+          kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+          kernel.GetCurrentProcess.argtypes = []
+          kernel.GetCurrentProcess.restype = w.HANDLE
+          api.OpenProcessToken.argtypes = [w.HANDLE, w.DWORD, ctypes.POINTER(w.HANDLE)]
+          api.OpenProcessToken.restype = w.BOOL
+          api.GetTokenInformation.argtypes = [w.HANDLE, ctypes.c_int, ctypes.c_void_p, w.DWORD, ctypes.POINTER(w.DWORD)]
+          api.GetTokenInformation.restype = w.BOOL
+          api.GetNamedSecurityInfoW.argtypes = [w.LPWSTR, ctypes.c_int, w.DWORD, ctypes.POINTER(ctypes.c_void_p), ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)]
+          api.GetNamedSecurityInfoW.restype = w.DWORD
+          api.GetLengthSid.argtypes = [ctypes.c_void_p]
+          api.GetLengthSid.restype = w.DWORD
+          kernel.CloseHandle.argtypes = [w.HANDLE]
+          kernel.CloseHandle.restype = w.BOOL
+          kernel.LocalFree.argtypes = [ctypes.c_void_p]
+          kernel.LocalFree.restype = ctypes.c_void_p
+          token = w.HANDLE()
+          assert api.OpenProcessToken(kernel.GetCurrentProcess(), 8, ctypes.byref(token))
+          def sid_hash(pointer):
+              length = api.GetLengthSid(pointer)
+              assert length
+              return hashlib.sha256(ctypes.string_at(pointer, length)).hexdigest()
+          def token_sid(kind):
+              size = w.DWORD()
+              api.GetTokenInformation(token, kind, None, 0, ctypes.byref(size))
+              assert size.value
+              data = ctypes.create_string_buffer(size.value)
+              assert api.GetTokenInformation(token, kind, data, size, ctypes.byref(size))
+              return sid_hash(ctypes.cast(data, ctypes.POINTER(ctypes.c_void_p))[0])
+          report = {'python': sys.version, 'observations': []}
+          try:
+              user, default_owner = token_sid(1), token_sid(4)
+              report['default_owner_equals_user'] = default_owner == user
+              with tempfile.TemporaryDirectory(prefix='orchestrarium-owner-audit-') as temp:
+                  for label, path in [('repository', Path.cwd()), ('fresh-temporary', Path(temp))]:
+                      owner = ctypes.c_void_p()
+                      descriptor = ctypes.c_void_p()
+                      code = api.GetNamedSecurityInfoW(str(path), 1, 1, ctypes.byref(owner), None, None, None, ctypes.byref(descriptor))
+                      observation = {'kind': label, 'get_security_status': code}
+                      try:
+                          if code == 0:
+                              digest = sid_hash(owner)
+                              observation.update(owner_equals_user=digest == user, owner_equals_default_owner=digest == default_owner)
+                          try:
+                              runner.bind_cwd_identity(str(path))
+                              observation['production_bind'] = 'accepted'
+                          except Exception as exc:
+                              observation['production_bind'] = type(exc).__name__
+                              observation['production_message'] = str(exc)
+                      finally:
+                          if descriptor: kernel.LocalFree(descriptor)
+                      report['observations'].append(observation)
+          finally:
+              kernel.CloseHandle(token)
+          print(json.dumps(report, indent=2))
+          (out / 'owner.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: precise-windows-owner-diagnosis
+          path: ${{ runner.temp }}/owner-diagnosis/
+          if-no-files-found: error
+          retention-days: 3
