@@ -30,7 +30,9 @@ def test_pinned_source_bytes_survive_checkout_settings(tmp_path, autocrlf, eol):
     original = tmp_path / "origin"
     original.mkdir()
     paths = {".gitattributes", "shared/role-routing-policy.v1.json",
-             "src.codex/agents/orchestrarium-role-manifest.json"}
+             "src.codex/agents/orchestrarium-role-manifest.json",
+             "references-claude/claude-md-structural-enforcement.md",
+             "references-claude/ru/claude-md-structural-enforcement.md"}
     roles = json.loads((ROOT / "src.codex/agents/orchestrarium-role-manifest.json").read_text())
     paths.update("src.codex/agents/" + record["relativePath"] for record in roles["roles"].values())
     transport = json.loads((ROOT / "shared/provider-prompt-projections.v1.json").read_text())

@@ -2,6 +2,12 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-09-05
+
+- **Installer cleanup now retries owned read-only directories after bounded permission repair rather than replaying a failed filesystem callback.** Nested inaccessible directories are revisited only after actual permission progress; unrelated errors and persistent denials still abort, and link or reparse-point referents are not made writable. **Why it matters:** rollback and migration can remove their own read-only trees without silently abandoning children or modifying external link targets.
+- **Hook-health executable discovery is deferred to the real host-inventory query.** An injected inventory is route-authoritative evidence for that call; the production query still resolves and validates the real Codex executable, and a missing host remains an explicit error. Platform-specific home-resolution and installer tests use explicit operating-system inputs or a controlled host fixture rather than an ambient provider. **Why it matters:** deterministic verification no longer depends on a developer's installed Codex, without treating a fixture as proof of native host execution.
+- **Byte-pinned Claude reference files now preserve their committed bytes through Git checkout, and document contracts match the shipped runtime.** Exact reference payload lengths and hashes have been refreshed after review, Russian orientation and routing guidance now describes structured standard-output warnings with successful hook exit, and the always-loaded Claude document remains below the unchanged byte budget. Runtime-discovery reminder assertions stay literal; Windows executable-registration checks run on Windows while pure serialization checks remain cross-platform. **Why it matters:** newline conversion, stale translations, and host-dependent test setup no longer create false corruption reports or require relaxing installer validation.
+
 ## 2026-09-04
 
 - **GitHub pull-request clean-result attribution now fails closed across overlapping same-head review runs.** Uncorrelated submitted-review and REST issue-comment no-findings results require exactly one unresolved exact trigger candidate; a trigger-bound `+1` cannot make the head clean while another same-head trigger remains unresolved. **Why it matters:** a late success from an older run can no longer close a newer or still-active review by timestamp alone.

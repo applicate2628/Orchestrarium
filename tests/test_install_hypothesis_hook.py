@@ -52,6 +52,8 @@ def run_installer(
     script_path: str = str(PY_SCRIPT_PATH),
     env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess:
+    if host_os == "windows" and os.name != "nt" and "--remove" not in extra:
+        raise unittest.SkipTest("Windows CLI registration requires a native Python .exe")
     cmd = [
         sys.executable,
         str(HOOK_INSTALLER),
@@ -84,6 +86,15 @@ class TestInstallHypothesisHook(unittest.TestCase):
 
     def tearDown(self) -> None:
         shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _registration_python(self, host_os: str) -> str:
+        """Exercise Windows registration shape without pretending to run Windows."""
+        if host_os != "windows" or os.name == "nt":
+            return sys.executable
+        # Only path validation/serialization uses this ordinary file, never execution.
+        executable = self.tmpdir / "synthetic-python.exe"
+        executable.write_bytes(b"non-executed Windows registration fixture\n")
+        return str(executable)
 
     def test_install_into_empty_posix_claude_exec_form(self) -> None:
         result = run_installer(self.target)
@@ -602,7 +613,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
                             str(python_target),
                             host_os,
                             platform,
-                            python_executable=sys.executable,
+                            python_executable=self._registration_python(host_os),
                         )
                         entry = (
                             HOOK_MODULE.build_claude_entry(target)
@@ -639,7 +650,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
                                 str(candidate),
                                 host_os,
                             platform,
-                                python_executable=sys.executable,
+                                python_executable=self._registration_python(host_os),
                             )
                             for candidate in candidates
                         )
@@ -650,7 +661,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
             str(PY_SCRIPT_PATH),
             "windows",
             "claude",
-            python_executable=sys.executable,
+            python_executable=self._registration_python("windows"),
         )
         self.assertTrue(Path(target.executable).is_absolute())
         self.assertEqual(len(target.args), 1)
@@ -682,7 +693,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
             str(PY_SCRIPT_PATH),
             "windows",
             "codex",
-            python_executable=sys.executable,
+            python_executable=self._registration_python("windows"),
         )
         entry = HOOK_MODULE.build_codex_entry(target, "windows")
         command = entry["hooks"][0]["command"]
@@ -691,7 +702,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
         # Codex hashes entry content for trust, so this byte shape is what lets
         # a reinstall match the stored trusted_hash instead of raising a modal.
         expected = (
-            f"{PureWindowsPath(sys.executable).as_posix()} "
+            f"{PureWindowsPath(self._registration_python('windows')).as_posix()} "
             f"{PureWindowsPath(PY_SCRIPT_PATH).as_posix()}"
         )
         self.assertEqual(command, expected)
@@ -708,7 +719,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
                 str(spaced_target),
                 "windows",
                 "codex",
-                python_executable=sys.executable,
+                python_executable=self._registration_python("windows"),
             )
 
     def test_hook_target_layers_are_separable(self) -> None:

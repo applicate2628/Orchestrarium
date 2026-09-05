@@ -399,6 +399,10 @@ def test_hook_health_report_allows_only_touched_pending(
         for index, (event, _stem, argv, matcher) in enumerate(rows)
     ]
     monkeypatch.setattr(CHECKER, "_codex_hooks_list", lambda **_kwargs: records)
+    monkeypatch.setattr(
+        CHECKER, "resolve_codex_command",
+        lambda *_args: pytest.fail("injected inventory must not resolve a real host"),
+    )
     messages = CHECKER.verify_config(
         target=target,
         platform="codex",
@@ -1166,3 +1170,13 @@ def test_installed_require_derives_target_sidecar_and_ignores_helper_sibling(
     assert installed.main() == 0
     inventory.unlink()
     assert installed.main() == 1
+
+
+def test_real_inventory_probe_still_requires_a_codex_executable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("CODEX_BIN", str(tmp_path / "missing-codex"))
+    with pytest.raises(ValueError, match="CODEX_HOOK_LIST_UNAVAILABLE"):
+        CHECKER._codex_hooks_list(
+            codex_command=None, codex_home=tmp_path, query_cwd=tmp_path,
+        )

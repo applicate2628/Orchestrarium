@@ -33,8 +33,8 @@ EXPECTED_PAYLOADS: dict[str, tuple[int, str]] = {
         "488c41acb051ccf6100422b28b3d4ded846e8d9cdd88fb937fb9b383f8d70319",
     ),
     "hook-behavior-contracts": (
-        17_113,
-        "1257c115a1fd1f60683f83fc8cd60f4ef38df20defaeca4652d108365d2f462f",
+        17_290,
+        "4e0e2792a05abb65882ffeda38479273339da7fc5f906217fa18f3c91c160530",
     ),
     # Payload pins force deliberate review of current hook behavior, placement,
     # and installer truth before a canonical-reference edit can pass.
@@ -158,9 +158,9 @@ def test_live_claude_md_passes_at_post_extraction_cap_and_reports_exact_counts()
     result = _run()
     assert result.returncode == 0, result.stdout + result.stderr
     for expected in (
-            "Code points: 36573",
-            "UTF-8 bytes: 36751",
-            "Binding size: 36751",
+            "Code points: 36581",
+            "UTF-8 bytes: 36759",
+            "Binding size: 36759",
         "Size cap: 36771",
         "Warning threshold: 36521",
         "Manifest: 46/46",
@@ -172,7 +172,7 @@ def test_live_claude_md_passes_at_post_extraction_cap_and_reports_exact_counts()
 def test_tiny_size_cap_fails_closed() -> None:
     result = _run("--size-cap", "1000")
     assert result.returncode == 1, result.stdout + result.stderr
-    assert "FAIL: Claude Markdown binding size 36751 > size cap 1000" in result.stdout
+    assert "FAIL: Claude Markdown binding size 36759 > size cap 1000" in result.stdout
     assert "RESULT: FAIL" in result.stdout
 
 

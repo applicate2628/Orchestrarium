@@ -6,6 +6,8 @@
 /src.codex/** -text
 /src.claude/** -text
 /baseline/** -text
+/references-claude/claude-md-structural-enforcement.md -text
+/references-claude/ru/claude-md-structural-enforcement.md -text
 
 # Keep the always-loaded governance spine LF-only. CRLF line endings inflate its
 # on-disk character count past Claude Code's 40,000-char context-file warning

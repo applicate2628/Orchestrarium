@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import errno
 from collections import Counter
 from dataclasses import dataclass
 import hashlib
@@ -22,7 +23,7 @@ import threading
 import time
 import tomllib
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 try:
     from provider_prompt import enroll_kimi_executable, replace_kimi_enrollment
@@ -1162,15 +1163,70 @@ def _rmtree_callback_kwargs(
 
 
 def _remove_readonly_tree(path: Path) -> None:
-    """Remove a transaction-owned tree after making only failed entries writable."""
+    """Remove an owned tree; repair permissions without following link referents.
 
-    def retry_writable(function: Callable[..., Any], value: str, _exc: Any) -> None:
-        candidate = Path(value)
-        os.chmod(candidate, candidate.lstat().st_mode | stat.S_IWRITE)
-        function(value)
+    A failed scandir/open cannot be retried as a one-argument deletion. Let
+    rmtree finish its pass, then retraverse only after actual permission progress.
+    Persistent denials and unrelated errors remain visible to the transaction.
+    """
 
-    callback = _rmtree_callback_kwargs(shutil.rmtree, retry_writable)
-    shutil.rmtree(path, **callback)
+    root = Path(os.path.abspath(path))
+    metadata = root.lstat()
+    if stat.S_ISLNK(metadata.st_mode) or _is_reparse_metadata(metadata):
+        raise OSError(errno.ELOOP, "refusing a reparse-point cleanup root", str(root))
+    repaired: set[Path] = set()
+    progress = False
+
+    def make_accessible(candidate: Path) -> bool:
+        relative = candidate.relative_to(root)
+        ancestor = root
+        for component in relative.parts[:-1]:
+            ancestor /= component
+            info = ancestor.lstat()
+            if stat.S_ISLNK(info.st_mode) or _is_reparse_metadata(info):
+                raise OSError(errno.ELOOP, "reparse point in cleanup path", str(ancestor))
+        info = candidate.lstat()
+        if stat.S_ISLNK(info.st_mode) or _is_reparse_metadata(info):
+            return False
+        mode = stat.S_IMODE(info.st_mode)
+        wanted = mode | stat.S_IRUSR | stat.S_IWUSR
+        if stat.S_ISDIR(info.st_mode):
+            wanted |= stat.S_IXUSR
+        if wanted == mode or candidate in repaired:
+            return False
+        # Windows Python 3.11/3.12 does not support chmod(follow_symlinks=False).
+        # Reparse entries were excluded above; the tree is transaction-owned.
+        if os.name == "nt":
+            os.chmod(candidate, wanted)
+        else:
+            os.chmod(candidate, wanted, follow_symlinks=False)
+        repaired.add(candidate)
+        return True
+
+    def repair_permission(_function: Callable[..., Any], value: str, exc: BaseException) -> None:
+        nonlocal progress
+        if isinstance(exc, OSError) and exc.errno == errno.ENOTEMPTY and progress:
+            return  # A skipped child will be visited again on the next pass.
+        if not isinstance(exc, PermissionError):
+            raise exc
+        candidate = Path(os.path.abspath(value))
+        candidate.relative_to(root)  # Never repair outside the owned tree.
+        changed = False
+        if candidate != root:
+            changed = make_accessible(candidate.parent)
+        changed = make_accessible(candidate) or changed
+        if not changed:
+            raise exc
+        progress = True
+
+    callback = _rmtree_callback_kwargs(shutil.rmtree, repair_permission)
+    while True:
+        progress = False
+        shutil.rmtree(root, **callback)
+        if not os.path.lexists(root):
+            return
+        if not progress:
+            raise OSError(errno.ENOTEMPTY, "cleanup made no permission progress", str(root))
 
 
 class _CreateOnlyMutablePath:
@@ -1774,7 +1830,7 @@ def _select_global_home_environment(
     raise ValueError("E_GLOBAL_HOME_AMBIGUOUS: HOME is required")
 
 
-def _resolve_global_home() -> Path:
+def _resolve_global_home(*, platform: str | None = None) -> Path:
     """Select the one explicit, non-reparse global home; never fall back."""
 
     def require_non_reparse(path: Path) -> None:
@@ -1788,7 +1844,7 @@ def _resolve_global_home() -> Path:
             raise
 
     primary_name, primary_value, alternate_value = _select_global_home_environment(
-        os.environ.get("USERPROFILE"), os.environ.get("HOME")
+        os.environ.get("USERPROFILE"), os.environ.get("HOME"), platform=platform
     )
     primary = Path(os.path.abspath(os.path.expanduser(primary_value)))
     if not primary.is_dir():
