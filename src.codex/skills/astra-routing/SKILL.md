@@ -27,14 +27,21 @@ supply separate evidence for:
 | `critical-recovery` | `verified-frontier-recovery` or `measured-cost-to-pass` | `high` |
 
 For `measured-cost-to-pass`, provide positive integer
-`astra_cost_microusd` and `legacy_cost_microusd` values. The resolver selects
-Astra only when the complete expected Astra route costs strictly less than the
-complete legacy route. Include retries, repeated context, tool calls, review,
-rework, and any explicitly agreed latency monetization in the caller-owned estimates.
-The estimates must describe the exact requested model-effort pair and the same
-acceptance criterion, tools, prompt policy, and billing basis. The selector does
-not authenticate these observations or bind a measured cohort; that remains a
-caller/adapter obligation, not a runtime guarantee from two cost numbers.
+`astra_cost_microusd` and `legacy_cost_microusd` values and `measured_effort`.
+The measured Astra effort must equal the effective selected effort, including a
+task default. Missing, unknown, or mismatched measurement effort denies the
+comparison; measurements for `medium` cannot justify `high`, `xhigh`, or `max`.
+The command-line option is `--measured-effort medium` for a medium measurement.
+
+Both amounts describe the complete comparable route in micro-US dollars, with
+the same task cohort, acceptance criteria, tool policy, and accounting basis.
+Count all failed attempts, repeated context, tool calls, independent review, and
+rework exactly once. Keep time and subscription credits separate from cash;
+conversion requires an explicit recorded policy. Costs are caller observations,
+not authenticated benchmark evidence or permission to execute. The caller must
+retain the source comparison, including every legacy model/effort pair and its
+route shape. This small V1 resolver binds the selected Astra effort, not that
+external evidence store. The adapter still owns execution admission.
 
 Route evidence is not effort evidence. A failed medium run can justify an
 effort escalation only after the Astra route has independently been admitted.
@@ -64,7 +71,8 @@ does not prove that a published maximum belongs to `medium`.
 2. Run `scripts/resolve.py` with:
    - exact task class;
    - route evidence;
-   - measured route costs when that evidence is `measured-cost-to-pass`;
+   - measured route costs and their exact `--measured-effort` when that evidence
+     is `measured-cost-to-pass`;
    - requested effort and separate effort evidence when deviating from default.
 3. Launch through the existing approved external Codex wrapper using the
    returned complete flags, for example:
@@ -92,6 +100,8 @@ does not prove that a published maximum belongs to `medium`.
 - **Astra:** GPT-6 Astra, the apex general-purpose model used by this route.
 - **Codex:** OpenAI's coding-agent runtime and command-line environment.
 - **Effort:** provider reasoning effort: `low`, `medium`, `high`, `xhigh`, or `max`.
+- **USD — United States dollar:** currency used by the V1 cost fields; one
+  micro-US dollar is one millionth of a US dollar.
 - **Fallback:** an alternate route after a primary route cannot run.
 - **Quality Assurance (QA):** independent verification kept outside model selection.
 - **TOML — Tom's Obvious Minimal Language:** configuration format used by native roles.

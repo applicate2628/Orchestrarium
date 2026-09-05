@@ -1,3 +1,12 @@
+# Installer manifests and accepted-prior skill trees bind the exact source bytes.
+# Disable checkout/clean newline conversion for these owned source surfaces.
+# This preserves existing LF and CRLF blobs; it does not rewrite pinned payloads.
+/scripts/** -text
+/shared/** -text
+/src.codex/** -text
+/src.claude/** -text
+/baseline/** -text
+
 # Keep the always-loaded governance spine LF-only. CRLF line endings inflate its
 # on-disk character count past Claude Code's 40,000-char context-file warning
 # even though the rule content is well under the cap and the spine validator
