@@ -14,6 +14,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.fixtures.git_history import archive_revision
+
 
 ROOT = Path(__file__).resolve().parents[1]
 INSTALLER_PATH = ROOT / "scripts" / "production_installer.py"
@@ -450,12 +452,7 @@ def _load_installer():
 
 def _seed_revision_staged_lead(revision: str, destination: Path) -> Path:
     source = destination.parent / "historical-source"
-    archive = subprocess.run(
-        ["git", "archive", "--format=tar", revision],
-        cwd=ROOT,
-        check=True,
-        capture_output=True,
-    ).stdout
+    archive = archive_revision(ROOT, revision)
     with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as package:
         package.extractall(source, filter="data")
 
@@ -540,12 +537,7 @@ def _remove_historical_members(lead: Path, relatives: tuple[str, ...]) -> None:
 
 def _extract_8521_skill(name: str, destination: Path) -> Path:
     if name == "lead":
-        archive = subprocess.run(
-            ["git", "archive", "--format=tar", "8521b638"],
-            cwd=ROOT,
-            check=True,
-            capture_output=True,
-        ).stdout
+        archive = archive_revision(ROOT, "8521b638")
         with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as package:
             package.extractall(destination, filter="data")
         target = destination / "installed"
@@ -565,12 +557,7 @@ def _extract_8521_skill(name: str, destination: Path) -> Path:
         )
         assert result.returncode == 0, result.stdout + result.stderr
         return target / ".agents" / "skills" / "lead"
-    archive = subprocess.run(
-        ["git", "archive", "--format=tar", "8521b638", f"src.codex/skills/{name}"],
-        cwd=ROOT,
-        check=True,
-        capture_output=True,
-    ).stdout
+    archive = archive_revision(ROOT, "8521b638", f"src.codex/skills/{name}")
     with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as package:
         package.extractall(destination, filter="data")
     return destination / "src.codex" / "skills" / name

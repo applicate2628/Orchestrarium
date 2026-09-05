@@ -455,6 +455,7 @@ def test_luna_path_kind_missing_leaf_preserves_path_and_parent_guards(
                 st_mtime_ns=metadata.st_mtime_ns,
                 st_ctime_ns=metadata.st_ctime_ns,
                 st_file_attributes=0x400,
+                st_reparse_tag=getattr(metadata, "st_reparse_tag", 0),
             )
 
     def reparsed_lstat(path: object, *args: object, **kwargs: object) -> object:
@@ -491,6 +492,7 @@ def test_luna_path_kind_accepts_stable_special_leaf_as_other_without_content_rea
                 st_mtime_ns=metadata.st_mtime_ns,
                 st_ctime_ns=metadata.st_ctime_ns,
                 st_file_attributes=getattr(metadata, "st_file_attributes", 0),
+                st_reparse_tag=getattr(metadata, "st_reparse_tag", 0),
             )
 
     def special_lstat(path: object, *args: object, **kwargs: object) -> object:
@@ -801,6 +803,7 @@ def test_luna_worker_target_must_be_existing_ordinary_file_below_exact_root(
                 st_mtime_ns=metadata.st_mtime_ns,
                 st_ctime_ns=metadata.st_ctime_ns,
                 st_file_attributes=getattr(metadata, "st_file_attributes", 0),
+                st_reparse_tag=getattr(metadata, "st_reparse_tag", 0),
             )
 
     def raced_lstat(path: object, *args: object, **kwargs: object) -> object:
@@ -841,6 +844,7 @@ def test_luna_target_walk_rejects_reparse_component_and_metadata_error(
                 st_mtime_ns=metadata.st_mtime_ns,
                 st_ctime_ns=metadata.st_ctime_ns,
                 st_file_attributes=0x400,
+                st_reparse_tag=getattr(metadata, "st_reparse_tag", 0),
             )
 
     def reparsed_lstat(path: object, *args: object, **kwargs: object) -> object:
@@ -913,6 +917,7 @@ def test_luna_exact_root_walk_rejects_reparse_ancestor_for_literal_plan(
                 st_mtime_ns=metadata.st_mtime_ns,
                 st_ctime_ns=metadata.st_ctime_ns,
                 st_file_attributes=0x400,
+                st_reparse_tag=getattr(metadata, "st_reparse_tag", 0),
             )
 
     def reparsed_lstat(path: object, *args: object, **kwargs: object) -> object:

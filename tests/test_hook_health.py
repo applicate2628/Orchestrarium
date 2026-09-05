@@ -405,6 +405,7 @@ def test_hook_health_report_allows_only_touched_pending(
         host_os="posix",
         repo_root=ROOT,
         verify_fires=False,
+        codex_command=[str(Path(sys.executable).resolve())],
         codex_trust_mode="report",
         touched_identities={touched},
     )
@@ -418,6 +419,7 @@ def test_hook_health_report_allows_only_touched_pending(
             host_os="posix",
             repo_root=ROOT,
             verify_fires=False,
+            codex_command=[str(Path(sys.executable).resolve())],
             codex_trust_mode="require",
         )
     with pytest.raises(ValueError, match="CODEX_HOOK_TRUST_PREEXISTING_DRIFT"):
@@ -427,6 +429,7 @@ def test_hook_health_report_allows_only_touched_pending(
             host_os="posix",
             repo_root=ROOT,
             verify_fires=False,
+            codex_command=[str(Path(sys.executable).resolve())],
             codex_trust_mode="report",
         )
 

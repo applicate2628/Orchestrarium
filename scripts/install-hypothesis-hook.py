@@ -232,7 +232,12 @@ def resolve_hook_target(
         raise ValueError(f"hook script path must be absolute: {requested_script}")
 
     executable = _validate_spawnable_executable(
-        python_executable if python_executable is not None else sys.executable,
+        # A public launcher may already be running through an interpreter alias.
+        # Bind that running interpreter to its physical file. Explicit overrides
+        # still reach the strict reparse/shim validator without normalization.
+        python_executable
+        if python_executable is not None
+        else str(Path(sys.executable).resolve(strict=True)),
         host_os,
     )
     script = _absolute_file(str(requested_script), "hook Python target")
