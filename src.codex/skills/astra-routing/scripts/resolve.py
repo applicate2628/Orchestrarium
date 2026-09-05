@@ -69,7 +69,7 @@ def _decision(
     selection_basis: str,
     route_evidence: str | None = None,
     route_evidence_class: str | None = None,
-    cost_comparison: dict[str, int] | None = None,
+    cost_comparison: dict[str, int | str] | None = None,
     effort_basis: str | None = None,
     effort_evidence: str | None = None,
 ) -> dict[str, Any]:
@@ -151,7 +151,9 @@ def _route_basis(
     route_evidence: str | None,
     astra_cost_microusd: int | None,
     legacy_cost_microusd: int | None,
-) -> tuple[str | None, str | None, dict[str, int] | None]:
+    measured_effort: str | None,
+    selected_effort: str,
+) -> tuple[str | None, str | None, dict[str, int | str] | None]:
     if route_evidence is None:
         return "E_ASTRA_V1_ROUTE_EVIDENCE_REQUIRED", None, None
     evidence_class = ROUTE_EVIDENCE_CLASS.get(route_evidence)
@@ -161,15 +163,26 @@ def _route_basis(
         return "E_ASTRA_V1_ROUTE_EVIDENCE_MISMATCH", evidence_class, None
 
     if route_evidence != "measured-cost-to-pass":
-        if astra_cost_microusd is not None or legacy_cost_microusd is not None:
+        if (
+            astra_cost_microusd is not None
+            or legacy_cost_microusd is not None
+            or measured_effort is not None
+        ):
             return "E_ASTRA_V1_ECONOMICS_INVALID", evidence_class, None
         return None, evidence_class, None
 
     if astra_cost_microusd is None or legacy_cost_microusd is None:
         return "E_ASTRA_V1_ECONOMICS_REQUIRED", evidence_class, None
+    if measured_effort is None:
+        return "E_ASTRA_V1_ECONOMICS_EFFORT_REQUIRED", evidence_class, None
+    if measured_effort not in EFFORTS or EFFORT_RANK[measured_effort] < EFFORT_RANK["medium"]:
+        return "E_ASTRA_V1_ECONOMICS_EFFORT_INVALID", evidence_class, None
+    if measured_effort != selected_effort:
+        return "E_ASTRA_V1_ECONOMICS_EFFORT_MISMATCH", evidence_class, None
     if astra_cost_microusd >= legacy_cost_microusd:
         return "E_ASTRA_V1_ECONOMICS_NOT_BETTER", evidence_class, None
     comparison = {
+        "astraEffort": measured_effort,
         "astraCostMicroUsd": astra_cost_microusd,
         "legacyCostMicroUsd": legacy_cost_microusd,
         "savingsMicroUsd": legacy_cost_microusd - astra_cost_microusd,
@@ -231,6 +244,7 @@ def resolve_v1_astra_route(
     route_evidence: str | None = None,
     astra_cost_microusd: int | None = None,
     legacy_cost_microusd: int | None = None,
+    measured_effort: str | None = None,
     requested_effort: str | None = None,
     effort_evidence: str | None = None,
     allow_max_effort: bool = False,
@@ -245,6 +259,7 @@ def resolve_v1_astra_route(
         and _valid_optional_text(route_evidence, 128)
         and _valid_optional_cost(astra_cost_microusd)
         and _valid_optional_cost(legacy_cost_microusd)
+        and _valid_optional_text(measured_effort, 32)
         and _valid_optional_text(requested_effort, 32)
         and _valid_optional_text(effort_evidence, 128)
         and type(allow_max_effort) is bool
@@ -289,6 +304,8 @@ def resolve_v1_astra_route(
         route_evidence,
         astra_cost_microusd,
         legacy_cost_microusd,
+        measured_effort,
+        requested_effort or TASK_DEFAULTS[task_class],
     )
     if route_id:
         return _decision(
@@ -348,6 +365,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--route-evidence")
     parser.add_argument("--astra-cost-microusd", type=int)
     parser.add_argument("--legacy-cost-microusd", type=int)
+    parser.add_argument("--measured-effort")
     parser.add_argument("--effort")
     parser.add_argument("--effort-evidence")
     parser.add_argument("--allow-max-effort", action="store_true")
@@ -359,6 +377,7 @@ def main(argv: list[str] | None = None) -> int:
         route_evidence=args.route_evidence,
         astra_cost_microusd=args.astra_cost_microusd,
         legacy_cost_microusd=args.legacy_cost_microusd,
+        measured_effort=args.measured_effort,
         requested_effort=args.effort,
         effort_evidence=args.effort_evidence,
         allow_max_effort=args.allow_max_effort,
