@@ -1,0 +1,183 @@
+name: PR4 full audit candidate v1
+on:
+  push:
+    branches: [automation/pr4-audit-20260905-d6388462]
+    paths: [.github/workflows/pr4-candidate-v1.yml]
+permissions:
+  contents: read
+concurrency:
+  group: pr4-full-audit-candidate-v1
+  cancel-in-progress: false
+env:
+  ORIGINAL_HEAD: d63884623f73b748618f47cba142faea537338be
+  CONTROL_HEAD: 4a399cc74ebefe597a8ec5f16582ad67b55e9583
+  PYTHONUTF8: '1'
+  PYTHONDONTWRITEBYTECODE: '1'
+jobs:
+  candidate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    outputs:
+      sha: ${{ steps.prepare.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.ORIGINAL_HEAD }}
+          fetch-depth: 0
+      - name: Decode, verify and commit only the exact candidate tree
+        id: prepare
+        shell: python
+        run: |
+          import base64, gzip, hashlib, os, subprocess, tempfile
+          from pathlib import Path
+          def git(*args):
+              return subprocess.check_output(['git', *args])
+          control = os.environ['CONTROL_HEAD']
+          assert git('rev-parse','HEAD').decode().strip() == os.environ['ORIGINAL_HEAD']
+          git('fetch','--no-tags','origin','refs/heads/hotfix/1x-final-followups-20260901')
+          assert git('rev-parse','FETCH_HEAD').decode().strip() == os.environ['ORIGINAL_HEAD'], 'PR moved'
+          encoded = b''.join(git('show',f'{control}:.github/audit/candidate-v1/part-{i}').strip() for i in range(6))
+          patch = gzip.decompress(base64.b64decode(encoded, validate=True))
+          assert hashlib.sha256(patch).hexdigest() == '9f28780a2cec1d43b57217c59334285eb13dcaf37c84baa97ff375bed92427f5'
+          addon = git('show',f'{control}:.github/audit/candidate-v1/projection-manifest.patch')
+          with tempfile.TemporaryDirectory() as directory:
+              for i, payload in enumerate((patch, addon)):
+                  path=Path(directory)/f'patch-{i}.diff'; path.write_bytes(payload)
+                  git('apply','--check',str(path)); git('apply',str(path))
+          git('diff','--check')
+          git('add','--all')
+          tree=git('write-tree').decode().strip()
+          assert tree == '96709bf26bdcc9430c69e1395e73c4b531caef82', f'exact tree mismatch: {tree}'
+          git('diff','--cached','--check')
+          git('config','user.name','github-actions[bot]')
+          git('config','user.email','41898282+github-actions[bot]@users.noreply.github.com')
+          git('switch','-c','automation/pr4-complete-candidate-20260905-v1')
+          git('commit','-m','fix: address full cross-platform audit findings')
+          sha=git('rev-parse','HEAD').decode().strip()
+          git('push','origin','HEAD:refs/heads/automation/pr4-complete-candidate-20260905-v1')
+          with open(os.environ['GITHUB_OUTPUT'],'a') as stream: stream.write('sha='+sha+'\n')
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as stream: stream.write('Exact candidate: '+sha+'; tree: '+tree+'\n')
+  tests:
+    needs: candidate
+    name: ${{ matrix.os }} shard ${{ matrix.shard }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+        shard: [0, 1, 2, 3, 4, 5]
+    env:
+      SOURCE_HEAD: ${{ needs.candidate.outputs.sha }}
+      AUDIT_SHARD: ${{ matrix.shard }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install pytest==9.0.2 PyYAML==6.0.2 jsonschema==4.25.1 pytest-timeout==2.4.0
+      - name: Execute unchanged admission contracts in a current-user-owned checkout
+        shell: python
+        run: |
+          import os, subprocess, sys
+          from pathlib import Path
+          driver = Path(os.environ['RUNNER_TEMP'])/'pr4-audit-driver'
+          driver.mkdir()
+          for name in ('windows_owned_workspace.py','run_complete_audit.py'):
+              source=subprocess.check_output(['git','show',os.environ['CONTROL_HEAD']+':.github/audit/'+name])
+              (driver/name).write_bytes(source)
+          raise SystemExit(subprocess.call([sys.executable,str(driver/'run_complete_audit.py')]))
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: candidate-v1-${{ matrix.os }}-${{ matrix.shard }}
+          path: ${{ runner.temp }}/pr4-audit-evidence/
+          if-no-files-found: error
+          retention-days: 5
+  static:
+    needs: candidate
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    env:
+      SOURCE_HEAD: ${{ needs.candidate.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install pytest==9.0.2 PyYAML==6.0.2 jsonschema==4.25.1 ruff==0.12.11 bandit==1.8.6
+      - name: Verify syntax, safety checks, package validators and canonical mirrors
+        shell: python
+        run: |
+          import importlib.util, json, os, subprocess, sys
+          from pathlib import Path
+          sys.path.insert(0,str(Path.cwd()))
+          out=Path(os.environ['RUNNER_TEMP'])/'pr4-static-evidence';out.mkdir()
+          helper=out/'windows_owned_workspace.py'
+          helper.write_bytes(subprocess.check_output(['git','show',os.environ['CONTROL_HEAD']+':.github/audit/windows_owned_workspace.py']))
+          spec=importlib.util.spec_from_file_location('audit_ownership',helper)
+          module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+          assert subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()==os.environ['SOURCE_HEAD']
+          (out/'source.commit').write_text(os.environ['SOURCE_HEAD']+'\n')
+          files=subprocess.check_output(['git','ls-files','-z','*.py']).decode().split('\0')[:-1]
+          commands=[
+              [sys.executable,'-m','py_compile',*files],
+              [sys.executable,'-m','ruff','check','--select','E9,F63,F7,F82','scripts','src.codex','src.claude','tests','install.py'],
+              [sys.executable,'scripts/sync-universal-hooks.py','--check'],
+              [sys.executable,'scripts/validate-provider-prompt-projections.py','--scope','source','--source-root','.'],
+              [sys.executable,'src.codex/skills/lead/scripts/validate-skill-pack.py'],
+              [sys.executable,'src.claude/agents/scripts/validate-skill-pack.py'],
+              ['git','diff','--check',os.environ['ORIGINAL_HEAD']+'..'+os.environ['SOURCE_HEAD']],
+          ]
+          changed=subprocess.check_output(['git','diff','--name-only','--diff-filter=ACMR',os.environ['ORIGINAL_HEAD']+'..'+os.environ['SOURCE_HEAD'],'--','*.py'],text=True).splitlines()
+          changed=[p for p in changed if not p.startswith('tests/')]
+          if changed: commands.append([sys.executable,'-m','bandit','-q','-lll',*changed])
+          results=[]
+          with module.current_user_owned_workspace(Path.cwd()) as setup:
+              (out/'ownership.json').write_text(json.dumps(setup,indent=2))
+              for i,command in enumerate(commands):
+                  with (out/f'check-{i}.log').open('w',encoding='utf-8') as stream:
+                      result=subprocess.run(command,stdout=stream,stderr=subprocess.STDOUT,timeout=900)
+                  results.append({'command':command,'exit_code':result.returncode})
+                  print('CHECK',i,'EXIT',result.returncode,command[:4],flush=True)
+          (out/'results.json').write_text(json.dumps(results,indent=2),encoding='utf-8')
+          raise SystemExit(1 if any(row['exit_code'] for row in results) else 0)
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: candidate-v1-static-${{ matrix.os }}
+          path: ${{ runner.temp }}/pr4-static-evidence/
+          if-no-files-found: error
+          retention-days: 5
+  evidence:
+    needs: [candidate, tests, static]
+    if: always() && needs.candidate.result == 'success'
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: candidate-v1-*
+          path: evidence
+      - uses: actions/upload-artifact@v4
+        with:
+          name: candidate-v1-complete-evidence
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 5
