@@ -1,0 +1,233 @@
+diff --git a/docs/model-routing-v2/README.md b/docs/model-routing-v2/README.md
+index e2566934..e16ba372 100644
+--- a/docs/model-routing-v2/README.md
++++ b/docs/model-routing-v2/README.md
+@@ -125,6 +125,47 @@ The operational schema does not implement a second router. A future cross-record
+ 
+ Detailed findings, implementation order, and explicitly rejected overengineering are recorded in [`deep-review-operational-hardening.md`](deep-review-operational-hardening.md).
+ 
++### Validating one declared record
++
++These files are **definition bundles**, not root-level record validators. Their
++`$defs` entries are inert until a caller selects the expected definition through
++`$ref`. Passing an instance to a bundle root can accept even an empty object;
++checking that the bundle is a valid schema checks the schema, not the instance.
++
++After trusted acquisition, the consuming owner chooses the expected record type
++from its own contract, never from an untrusted record's claim. This example uses
++the same local-reference pattern as the tests and enables calendar-format checks:
++
++```python
++from jsonschema import Draft202012Validator, FormatChecker
++
++
++def validate_record(bundle: dict, expected_definition: str, record: object) -> None:
++    if expected_definition not in bundle["$defs"]:
++        raise ValueError("unknown record definition")
++    wrapper = {
++        "$schema": bundle["$schema"],
++        "$defs": bundle["$defs"],
++        "$ref": f"#/$defs/{expected_definition}",
++    }
++    checker = FormatChecker()
++    if "date-time" not in checker.checkers:
++        raise RuntimeError("date-time format checker is unavailable")
++    Draft202012Validator.check_schema(wrapper)
++    Draft202012Validator(wrapper, format_checker=checker).validate(record)
++```
++
++For example, use `leadLease` with the semantic bundle and `dispatchControl` with
++the operational bundle. An unknown definition is an error, not a fallback to root
++validation. The already acquired bundle is trusted input here; this snippet does
++not replace the bounded, duplicate-key-rejecting reader required by
++[runtime validation obligations](runtime-validation-obligations.md#4-snapshot-and-digest-trust).
++The environment must supply the `date-time` checker and its optional dependency;
++merely constructing `FormatChecker()` does not establish that this check exists.
++The example refuses a missing checker instead of accepting unchecked dates.
++It validates local record shape only, not cross-record consistency, admission, or
++authority to launch. The snippet is tested directly from this guide.
++
+ ## 6. Fallback and Lead continuity
+ 
+ A worker provider being absent or unpaid is ordinary scheduler input. `not-configured`, `not-entitled`, `quota-exhausted`, temporary transport failure, and ordinary unavailability may advance to the next explicit candidate. Authentication failure, contract violation, unsafe output, quality failure, budget exhaustion, and stale-fence results have different dispositions and must not be collapsed into one retry loop.
+@@ -164,6 +205,8 @@ The Version 1 dispatch may migrate into one Version 2 portfolio slot only when r
+ 
+ ## 9. Terms and abbreviations
+ 
++- **Definition bundle:** a library of schema definitions under `$defs`; a caller applies an expected definition through `$ref`.
++- **Record validation:** checking one acquired record against its expected schema, without claiming execution admission.
+ - **CLI — Command-Line Interface:** command-line execution surface for a provider worker.
+ - **Lead Host adapter:** provider-specific implementation of the stable logical Lead contract.
+ - **Lead lease:** exclusive, epoch-numbered ownership record preventing two active Leads from mutating one work item.
+ diff --git a/docs/superpowers/plans/2026-09-04-adaptive-lead-model-routing-v2-implementation.md b/docs/superpowers/plans/2026-09-04-adaptive-lead-model-routing-v2-implementation.md
+index 1fc97497..383caec6 100644
+--- a/docs/superpowers/plans/2026-09-04-adaptive-lead-model-routing-v2-implementation.md
++++ b/docs/superpowers/plans/2026-09-04-adaptive-lead-model-routing-v2-implementation.md
+@@ -34,7 +34,7 @@
+ - [x] Define Lead lease, registry snapshot, dispatch, route request, route decision, and worker result schemas.
+ - [x] Add examples and validate them with Draft 2020-12 JavaScript Object Notation Schema.
+ - [x] Document adaptive portfolio, structured disagreement, fallback, diversity, and migration boundaries.
+-- [ ] Run the tests and documentation validators in a full repository checkout.
++- [ ] Run all `tests/test_adaptive_model_routing_v2_*.py` suites and documentation validators in a full repository checkout. Include both schema/example bundles, [operational hardening](../../model-routing-v2/deep-review-operational-hardening.md), and [runtime obligations](../../model-routing-v2/runtime-validation-obligations.md); the initial file list above is not the complete later review surface.
+ - [ ] Obtain independent architecture review of the contracts.
+ 
+ ## Phase 1: Lead lease and durable ownership
+@@ -42,7 +42,7 @@
+ **Planned owners:** persistence/reliability specialist, Lead contract owner, independent reviewer.
+ 
+ - [ ] Write failing tests for one active lease, monotonic epoch, stale-writer fencing, expiry, release, supersession, crash recovery, and host failover.
+-- [ ] Implement a pure lease reducer and atomic persistence owner.
++- [ ] Implement a pure lease reducer and atomic persistence owner. Admit a bounded read-only single-worker slice only after its acquisition, paired-contract validation, fencing, adapter, and result checks pass; unrelated future portfolio or adaptive-evaluation features need not be implemented first.
+ - [ ] Project the provider-neutral Lead contract into Codex and Claude adapters.
+ - [ ] Add recovery tooling that revalidates unresolved dispatches after host transfer.
+ - [ ] Prove that two host adapters cannot concurrently mutate one work item.
+@@ -61,7 +61,7 @@
+ 
+ **Planned owners:** routing-policy owner, algorithm specialist, independent architecture reviewer.
+ 
+-- [ ] Write failing tests for complete candidate sets and deterministic decisions from exact snapshots.
++- [ ] Write failing tests for complete candidate sets and deterministic decisions from exact snapshots, including equality between semantic records and their subordinate operational identifiers and digests.
+ - [ ] Implement hard admissibility and quality-floor filters.
+ - [ ] Implement scope coverage, approach diversity, independence, and evidence-quality comparisons.
+ - [ ] Implement Pareto filtering within stages and the normative lexicographic order.
+@@ -73,7 +73,7 @@
+ **Planned owners:** Lead/scheduler owner, provider adapters, evidence owner.
+ 
+ - [ ] Write failing tests for blind proposal isolation, scope-expansion boundaries, named cross-critique targets, and Lead-only synthesis.
+-- [ ] Launch only `dispatchSpec` instances admitted by the pure resolver.
++- [ ] Launch only ready `dispatchSpec` records paired with their exact `dispatchControl`, after semantic/operational validation, current-fence checks, and adapter launch revalidation. Candidate selection alone is not execution admission.
+ - [ ] Prevent worker-to-worker task assignment and recursive delegation.
+ - [ ] Normalize worker artifacts and preserve exact scope/artifact/gate identities.
+ - [ ] Add empirical arbitration tasks for proofs, tests, benchmarks, and visual evidence.
+diff --git a/docs/superpowers/specs/2026-09-04-adaptive-lead-model-routing-v2-design.md b/docs/superpowers/specs/2026-09-04-adaptive-lead-model-routing-v2-design.md
+index 791201d4..fceb8364 100644
+--- a/docs/superpowers/specs/2026-09-04-adaptive-lead-model-routing-v2-design.md
++++ b/docs/superpowers/specs/2026-09-04-adaptive-lead-model-routing-v2-design.md
+@@ -112,7 +112,7 @@ Uncontrolled peer chat is not the debate mechanism. The Lead manages an artifact
+ 
+ Additional workers are selected by expected **marginal information gain**: new scope, a distinct approach, or a new failure class. Another highly correlated answer has lower value than a qualified worker with different approach tags and evidence independence.
+ 
+-Majority agreement is not truth. Unresolved critical contradictions block acceptance or require the explicitly configured human gate.
++Majority agreement is not truth. In the current machine contracts, every unresolved contradiction prevents `selected` status and requires `humanGateRequired = true` in a degraded or blocked decision; the operational envelope also requires the human-gate contract. This is stricter than a critical-only rule. A gate request is not acceptance or execution permission; the trusted owner must verify the corresponding evidence.
+ 
+ ## 7. Adaptive selection
+ 
+diff --git a/tests/test_adaptive_model_routing_v2_documentation_alignment.py b/tests/test_adaptive_model_routing_v2_documentation_alignment.py
+index 5e304fd8..ef15264a 100644
+--- a/tests/test_adaptive_model_routing_v2_documentation_alignment.py
++++ b/tests/test_adaptive_model_routing_v2_documentation_alignment.py
+@@ -36,3 +36,21 @@ def test_contract_index_exposes_the_committed_runtime_handoff_documents():
+     for name in ("runtime-validation-obligations.md", "review-loop-closure.md"):
+         assert (V2 / name).is_file()
+         assert f"]({name})" in guide, f"contract index has no link to {name}"
++
++
++def test_implementation_plan_requires_operational_admission_before_launch():
++    root = V2.parents[1]
++    plan = (root / "docs/superpowers/plans/2026-09-04-adaptive-lead-model-routing-v2-implementation.md").read_text(encoding="utf-8")
++    scheduler = plan.split("## Phase 4:", 1)[1].split("\n## Phase 5:", 1)[0]
++    assert "`dispatchSpec`" in scheduler
++    assert "`dispatchControl`" in scheduler
++    assert "launch revalidation" in scheduler
++
++
++def test_normative_spec_uses_the_existing_all_contradictions_gate():
++    root = V2.parents[1]
++    spec = (root / "docs/superpowers/specs/2026-09-04-adaptive-lead-model-routing-v2-design.md").read_text(encoding="utf-8")
++    section = spec.split("## 6. Structured disagreement\n", 1)[1].split("\n## 7.", 1)[0]
++    assert "every unresolved contradiction" in section
++    assert "`humanGateRequired = true`" in section
++    assert "`selected`" in section
+diff --git a/tests/test_adaptive_model_routing_v2_validation_example.py b/tests/test_adaptive_model_routing_v2_validation_example.py
+new file mode 100644
+index 00000000..dc37649b
+--- /dev/null
++++ b/tests/test_adaptive_model_routing_v2_validation_example.py
+@@ -0,0 +1,87 @@
++"""Execute the guide's schema-validation example; no runtime or provider is launched."""
++from __future__ import annotations
++
++import copy
++import json
++import re
++from pathlib import Path
++
++import jsonschema
++import pytest
++
++V2 = Path(__file__).resolve().parents[1] / "docs/model-routing-v2"
++BUNDLES = {
++    "core": "adaptive-routing-contracts.v2.schema.json",
++    "operational": "adaptive-routing-operational.v2.schema.json",
++}
++
++
++def _example():
++    guide = (V2 / "README.md").read_text(encoding="utf-8")
++    blocks = re.findall(r"```python\n(.*?)\n```", guide, re.DOTALL)
++    blocks = [block for block in blocks if "def validate_record(" in block]
++    assert len(blocks) == 1, "guide must supply one executable record-validation example"
++    namespace = {}
++    exec(compile(blocks[0], str(V2 / "README.md"), "exec"), namespace)
++    return namespace["validate_record"]
++
++
++def _bundle(kind):
++    return json.loads((V2 / BUNDLES[kind]).read_text(encoding="utf-8"))
++
++
++@pytest.mark.parametrize("kind,example_file,name,definition", [
++    ("core", "examples.v2.json", "leadLease", "leadLease"),
++    ("core", "examples.v2.json", "registrySnapshot", "modelRegistrySnapshot"),
++    ("core", "examples.v2.json", "routeRequest", "routeRequest"),
++    ("core", "examples.v2.json", "routeDecision", "routeDecision"),
++    ("core", "examples.v2.json", "workerResult", "workerResult"),
++    ("operational", "operational-examples.v2.json", "routeControl", "routeControl"),
++    ("operational", "operational-examples.v2.json", "dispatchControl", "dispatchControl"),
++    ("operational", "operational-examples.v2.json", "writeDispatchControl", "dispatchControl"),
++    ("operational", "operational-examples.v2.json", "decisionControl", "decisionControl"),
++    ("operational", "operational-examples.v2.json", "workerResultControl", "workerResultControl"),
++    ("operational", "operational-examples.v2.json", "routeOutcome", "routeOutcome"),
++])
++def test_documented_validator_accepts_record_shapes_but_rejects_an_empty_record(kind, example_file, name, definition):
++    validate = _example()
++    bundle = _bundle(kind)
++    record = json.loads((V2 / example_file).read_text(encoding="utf-8"))[name]
++    before = copy.deepcopy(record)
++    validate(bundle, definition, record)
++    assert record == before
++    with pytest.raises(jsonschema.ValidationError):
++        validate(bundle, definition, {})
++
++
++@pytest.mark.parametrize("kind,definition", [("core", "leadLease"), ("operational", "dispatchControl")])
++def test_documented_validator_rejects_a_wrong_record_type(kind, definition):
++    with pytest.raises(jsonschema.ValidationError):
++        _example()(_bundle(kind), definition, [])
++
++
++@pytest.mark.parametrize("kind", BUNDLES)
++def test_documented_validator_refuses_unknown_contract_names(kind):
++    with pytest.raises(ValueError, match="unknown record definition"):
++        _example()(_bundle(kind), "missing-record", {})
++
++
++@pytest.mark.parametrize("timestamp", ["2026-02-30T16:00:00Z", "2026-09-05T25:00:00Z"])
++def test_documented_validator_checks_calendar_formats(timestamp):
++    record = json.loads((V2 / "examples.v2.json").read_text(encoding="utf-8"))["leadLease"]
++    record["acquiredAt"] = timestamp
++    with pytest.raises(jsonschema.ValidationError):
++        _example()(_bundle("core"), "leadLease", record)
++
++
++def test_documented_validator_uses_the_callers_expected_contract():
++    record = json.loads((V2 / "examples.v2.json").read_text(encoding="utf-8"))["workerResult"]
++    with pytest.raises(jsonschema.ValidationError):
++        _example()(_bundle("core"), "leadLease", record)
++
++
++def test_documented_validator_refuses_missing_calendar_support(monkeypatch):
++    record = json.loads((V2 / "examples.v2.json").read_text(encoding="utf-8"))["leadLease"]
++    monkeypatch.delitem(jsonschema.FormatChecker.checkers, "date-time", raising=False)
++    with pytest.raises(RuntimeError, match="date-time format checker is unavailable"):
++        _example()(_bundle("core"), "leadLease", record)
