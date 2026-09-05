@@ -1,0 +1,41 @@
+name: PR 4 Windows contract diagnosis
+on:
+  push:
+    branches: [automation/pr4-audit-local-20260905-d6388462]
+    paths: [.github/audit/windows-triage.py, .github/workflows/pr4-windows-triage.yml]
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: control
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          path: target
+          ref: b0ee4eba9b60cef6a839b221f52c3e6fd39d387b
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --disable-pip-version-check pytest PyYAML jsonschema
+      - name: Run structural diagnostics without provider access
+        working-directory: target
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python ../control/.github/audit/windows-triage.py *> "$env:RUNNER_TEMP/windows-diagnosis.log"
+          $status = $LASTEXITCODE
+          Get-Content "$env:RUNNER_TEMP/windows-diagnosis.log"
+          exit $status
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-structural-diagnosis
+          path: ${{ runner.temp }}/windows-diagnosis.log
+          retention-days: 5
+          if-no-files-found: error
