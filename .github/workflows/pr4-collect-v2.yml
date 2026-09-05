@@ -1,0 +1,59 @@
+name: PR4 complete v2 evidence collection
+on:
+  push:
+    branches: [automation/pr4-audit-20260905-final]
+    paths: [.github/workflows/pr4-collect-v2.yml]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  collect:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          run-id: 33973504412
+          github-token: ${{ github.token }}
+          path: evidence
+      - name: Verify complete per-platform selection and terminal coverage
+        shell: python
+        run: |
+          import collections,json
+          from pathlib import Path
+          rows=[]
+          for inv in sorted(Path('evidence').rglob('inventory.json')):
+              record=json.loads(inv.read_text())
+              exit_file=inv.parent/'exit.json'
+              reports=[json.loads(line) for line in (inv.parent/'reports.jsonl').read_text().splitlines()]
+              terminal={r['nodeid'] for r in reports if r['when']=='teardown' and not r.get('subtest')}
+              rows.append({'artifact':str(inv.parent),'head':record['head'],'os':record['os'],'index':record['index'],'selected':len(record['selected']),'terminal':len(terminal),'exit':json.loads(exit_file.read_text()) if exit_file.exists() else None,'complete':exit_file.exists() and terminal==set(record['selected'])})
+          Path('evidence/coverage.json').write_text(json.dumps(rows,indent=2)+'\n')
+          print(json.dumps(rows,indent=2))
+          assert len(rows)==32, 'incomplete artifact set'
+          assert all(r['complete'] for r in rows), 'unfinished selected test'
+          assert {r['head'] for r in rows}=={'7d96ea759f78c37ea2f039460320d97117509877'}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: pr4-complete-v2-evidence
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 7d96ea759f78c37ea2f039460320d97117509877
+          path: source
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Export tested candidate Git objects for exact continuation
+        working-directory: source
+        run: |
+          git branch audit-v2 7d96ea759f78c37ea2f039460320d97117509877
+          git bundle create ../candidate-v2.bundle audit-v2
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: pr4-v2-source
+          path: candidate-v2.bundle
+          if-no-files-found: error
+          retention-days: 1
