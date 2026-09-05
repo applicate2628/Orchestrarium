@@ -1,0 +1,79 @@
+name: PR4 native identity replay and DACL regression
+on:
+  push:
+    branches: [automation/pr4-audit-20260905-final]
+    paths: [.github/workflows/pr4-linked-root-replay.yml]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    env:
+      PYTHONUTF8: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 7d96ea759f78c37ea2f039460320d97117509877
+          path: target
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          path: control
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --disable-pip-version-check pytest==9.0.2 PyYAML jsonschema
+      - name: Prepare owned disposable checkout
+        working-directory: target
+        shell: pwsh
+        run: |
+          $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+          icacls.exe . /setowner "*$sid" /T /C /Q
+          if ($LASTEXITCODE -ne 0) { throw 'owner precondition' }
+      - name: Prove native canonical-DACL regression and capture exact linked-root replay
+        working-directory: target
+        shell: python
+        run: |
+          import json,subprocess,sys
+          from pathlib import Path
+          out=Path('../replay-reports');out.mkdir()
+          runner=str(Path('../control/.github/audit/owned_windows_pytest.py').resolve())
+          def run(name,tests):
+              completed=subprocess.run([sys.executable,runner,'-q','--tb=long',*tests],stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,encoding='utf-8')
+              (out/(name+'.txt')).write_text(completed.stdout,encoding='utf-8')
+              print(name,completed.returncode,completed.stdout[-400:],flush=True)
+              return completed.returncode
+          source=Path('scripts/provider_prompt.py');original=source.read_bytes()
+          try:
+              source.write_bytes(subprocess.check_output(['git','show','c605a46bf40055f6d8c296594230cd8c70c18cc2:scripts/provider_prompt.py']))
+              red=run('dacl-red',['tests/test_windows_private_object_owner.py'])
+          finally:
+              source.write_bytes(original)
+          green=run('dacl-green',['tests/test_windows_private_object_owner.py'])
+          assert red!=0 and green==0, 'native DACL red-green regression was not demonstrated'
+          target='tests/test_native_role_slice_a.py::test_global_codex_linked_agents_preserves_link_and_resolves_native_dispatch[symlink]'
+          outcomes=[run('linked-original-'+str(i),[target]) for i in range(5)]
+          # Add diagnostic detail only in this disposable checkout, without changing
+          # conditions, return values, or committed source.
+          linked=Path('scripts/linked_runtime_subroots.py');raw=linked.read_bytes()
+          anchor=b'raise ValueError("E_RUNTIME_SUBROOT_IDENTITY_CHANGED")'
+          replacement=b'raise ValueError(f"E_RUNTIME_SUBROOT_IDENTITY_CHANGED before={self!r} after={current!r}")'
+          assert raw.count(anchor)==1
+          try:
+              linked.write_bytes(raw.replace(anchor,replacement))
+              detailed=[run('linked-detailed-'+str(i),[target]) for i in range(5)]
+          finally:
+              linked.write_bytes(raw)
+          (out/'summary.json').write_text(json.dumps({'source':'7d96ea759f78c37ea2f039460320d97117509877','dacl_red':red,'dacl_green':green,'linked_original':outcomes,'linked_detailed':detailed},indent=2)+'\n')
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: pr4-native-identity-replay
+          path: replay-reports/
+          if-no-files-found: error
+          retention-days: 7
