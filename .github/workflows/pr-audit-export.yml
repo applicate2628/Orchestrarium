@@ -1,0 +1,45 @@
+name: Export exact PR audit history
+on:
+  push:
+    branches: [automation/pr-final-audit-20260905]
+    paths: [.github/workflows/pr-audit-export.yml]
+permissions:
+  contents: read
+jobs:
+  export:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+          path: source
+      - name: Export only main and review branch histories
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir evidence
+          cd source
+          git fetch --no-tags origin \
+            refs/heads/main:refs/heads/audit-main \
+            refs/heads/hotfix/1x-final-followups-20260901:refs/heads/audit-pr4 \
+            refs/heads/feature/policy-overlays-ponytail-compat:refs/heads/audit-pr5 \
+            refs/heads/feature/astra-routing-v1:refs/heads/audit-pr6 \
+            refs/heads/feature/lead-contract-routing-v1:refs/heads/audit-pr7 \
+            refs/heads/feature/adaptive-lead-model-routing-v2:refs/heads/audit-pr8
+          git for-each-ref --format='%(refname) %(objectname)' refs/heads/audit- > ../evidence/refs.txt
+          git bundle create ../evidence/review-branches.bundle \
+            refs/heads/audit-main refs/heads/audit-pr4 refs/heads/audit-pr5 \
+            refs/heads/audit-pr6 refs/heads/audit-pr7 refs/heads/audit-pr8
+          git bundle verify ../evidence/review-branches.bundle
+          cd ../evidence
+          sha256sum review-branches.bundle > SHA256SUMS
+          cat refs.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: exact-review-history
+          path: evidence/
+          retention-days: 3
+          if-no-files-found: error
