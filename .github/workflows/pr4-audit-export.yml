@@ -1,0 +1,38 @@
+name: PR 4 exact-source audit export
+
+on:
+  push:
+    branches: [automation/pr4-audit-20260905-final]
+    paths: [.github/workflows/pr4-audit-export.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  export-source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: d63884623f73b748618f47cba142faea537338be
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Export tracked source and reachable Git objects only
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = d63884623f73b748618f47cba142faea537338be
+          mkdir -p "$RUNNER_TEMP/pr4-source"
+          git archive --format=tar.gz --output="$RUNNER_TEMP/pr4-source/source.tar.gz" HEAD
+          git bundle create "$RUNNER_TEMP/pr4-source/source.bundle" HEAD
+          git rev-parse HEAD > "$RUNNER_TEMP/pr4-source/HEAD.txt"
+          git ls-tree -r HEAD > "$RUNNER_TEMP/pr4-source/tree.txt"
+          cd "$RUNNER_TEMP/pr4-source"
+          sha256sum source.tar.gz source.bundle HEAD.txt tree.txt > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pr4-source-d6388462
+          path: ${{ runner.temp }}/pr4-source/
+          if-no-files-found: error
+          retention-days: 7
