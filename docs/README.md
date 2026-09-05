@@ -15,6 +15,7 @@ Use it together with:
 Current docs in this branch:
 
 - [agents-mode-reference.md](agents-mode-reference.md) for the shared operator schema
+- [routing-v1-operator-guide.md](routing-v1-operator-guide.md) for source-tested selector examples and the separate installation/admission gates
 - [external-worker-design.md](external-worker-design.md) for external execution adapter design notes
 - [lead-contract-routing-audit-2026-09-04.md](lead-contract-routing-audit-2026-09-04.md) for the provider-neutral Lead Host, optional CLI worker, and explicit fallback audit
 - [adaptive-model-routing-v2-audit-2026-09-04.md](adaptive-model-routing-v2-audit-2026-09-04.md) for the Version 2 adaptive Lead, registry, portfolio, diversity, and ledger-gap audit
