@@ -469,6 +469,7 @@ def test_partial_override_fails_before_fake_provider_launch(
 
 
 @pytest.mark.parametrize("provider", ("codex", "claude"))
+@requires_windows_process_runner
 def test_launch_and_terminal_ledger_events_record_resolved_profile(
     tmp_path: Path, provider: str
 ) -> None:
@@ -524,6 +525,7 @@ def test_launch_and_terminal_ledger_events_record_resolved_profile(
     assert provider_prompt.parse_provider_result(result.stdout)["launchFlags"] == expected_flags
 
 
+@requires_windows_process_runner
 def test_equal_model_effort_with_different_sandbox_flags_remain_distinguishable(
     tmp_path: Path,
 ) -> None:

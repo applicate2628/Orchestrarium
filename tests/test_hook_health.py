@@ -399,6 +399,10 @@ def test_hook_health_report_allows_only_touched_pending(
         for index, (event, _stem, argv, matcher) in enumerate(rows)
     ]
     monkeypatch.setattr(CHECKER, "_codex_hooks_list", lambda **_kwargs: records)
+    monkeypatch.setattr(
+        CHECKER, "resolve_codex_command",
+        lambda *_args: pytest.fail("an injected inventory must not resolve a real host"),
+    )
     messages = CHECKER.verify_config(
         target=target,
         platform="codex",

@@ -7,6 +7,15 @@
 shared/AGENTS.shared.md text eol=lf
 shared/references/spine/*.md text eol=lf
 
+# These files participate in exact content hashes or loaded-document byte budgets.
+# Scope LF checkout to their owners; do not renormalize unrelated source files.
+shared/role-routing-policy.v1.json text eol=lf
+src.codex/agents/*.toml text eol=lf
+shared/agents-mode.presets.json text eol=lf
+src.claude/CLAUDE.md text eol=lf
+references-claude/claude-md-structural-enforcement.md text eol=lf
+references-claude/ru/claude-md-structural-enforcement.md text eol=lf
+
 # Historical accepted-prior payloads preserve their source blob bytes, including CRLF.
 # Revision manifests remain text; only files inside each skill payload are byte-exact.
 tests/fixtures/canonical-skill-priors/*/*/** -text

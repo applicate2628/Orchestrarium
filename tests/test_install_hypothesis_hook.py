@@ -93,7 +93,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
         self.assertEqual(len(pretool), 1)
         hook = pretool[0]["hooks"][0]
         # Claude POSIX = direct exec form (args array, no shell interpretation).
-        self.assertEqual(Path(hook["command"]), Path(sys.executable).resolve())
+        self.assertEqual(Path(hook["command"]), Path(sys.executable).absolute())
         self.assertEqual(hook["args"], [str(PY_SCRIPT_PATH.resolve())])
         # Matcher fires on code-mutating tool calls (script self-filters on
         # bug-context from session transcript). No `if` filter anymore — the
@@ -101,6 +101,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
         self.assertEqual(data["hooks"]["PreToolUse"][0]["matcher"], "Edit|Write|NotebookEdit|apply_patch")
         self.assertNotIn("if", hook)
 
+    @unittest.skipUnless(os.name == "nt", "requires a native Windows Python executable")
     def test_install_claude_windows_python_exec_form(self) -> None:
         result = run_installer(
             self.target,
@@ -110,7 +111,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         data = load_json(self.target)
         hook = data["hooks"]["PreToolUse"][0]["hooks"][0]
-        self.assertEqual(Path(hook["command"]), Path(sys.executable).resolve())
+        self.assertEqual(Path(hook["command"]), Path(sys.executable).absolute())
         self.assertEqual(hook["args"], [str(PY_SCRIPT_PATH.resolve())])
         self.assertNotIn("bash", hook["command"])
         self.assertNotIn("powershell", hook["command"].casefold())
@@ -166,10 +167,11 @@ class TestInstallHypothesisHook(unittest.TestCase):
         entry = data["hooks"]["PreToolUse"][0]
         hook = entry["hooks"][0]
         self.assertEqual(entry["matcher"], "Edit|Write|NotebookEdit|apply_patch")
-        self.assertEqual(Path(hook["command"]), Path(sys.executable).resolve())
+        self.assertEqual(Path(hook["command"]), Path(sys.executable).absolute())
         self.assertEqual(hook["args"], [str(PY_SCRIPT_PATH.resolve())])
         self.assertNotIn("if", hook)
 
+    @unittest.skipUnless(os.name == "nt", "requires a native Windows Python executable")
     def test_codex_windows_writes_direct_python_entry(self) -> None:
         result = run_installer(
             self.target,
@@ -188,6 +190,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
         self.assertNotIn("powershell", hook["command"].casefold())
         self.assertNotIn(".ps1", hook["command"].casefold())
 
+    @unittest.skipUnless(os.name == "nt", "requires a native Windows Python executable")
     def test_codex_windows_rejects_unsupported_unquoted_python_path(self) -> None:
         quoted_dir = self.tmpdir / "O'Brien"
         quoted_dir.mkdir()
@@ -217,7 +220,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
         self.assertEqual(len(entries), 1)
         self.assertNotIn("matcher", entries[0])
         hook = entries[0]["hooks"][0]
-        self.assertEqual(Path(hook["command"]), Path(sys.executable).resolve())
+        self.assertEqual(Path(hook["command"]), Path(sys.executable).absolute())
         self.assertEqual(hook["args"], [str(REMINDER_PY_SCRIPT_PATH.resolve())])
         self.assertIn("mcp-usage-reminder", hook["args"][0])
 
@@ -243,7 +246,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
                     self.assertNotIn("args", hook)
                     self.assertIn("mcp-usage-reminder", hook["command"])
                 else:
-                    self.assertEqual(Path(hook["command"]), Path(sys.executable).resolve())
+                    self.assertEqual(Path(hook["command"]), Path(sys.executable).absolute())
                     self.assertEqual(hook["args"], [str(REMINDER_PY_SCRIPT_PATH.resolve())])
 
     def test_install_posttooluse_hook_uses_custom_matcher_for_all_platforms(self) -> None:
@@ -312,7 +315,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
         self.assertEqual(data["hooks"]["PreToolUse"][0]["hooks"][0]["command"], "echo user-other-hook")
         our_hook = data["hooks"]["PreToolUse"][1]["hooks"][0]
         # Direct Python exec form: marker lives in args[0], not in command.
-        self.assertEqual(Path(our_hook["command"]), Path(sys.executable).resolve())
+        self.assertEqual(Path(our_hook["command"]), Path(sys.executable).absolute())
         self.assertIn("check-bugfix-discipline", our_hook["args"][0])
         self.assertEqual(data["hooks"]["Stop"], [{"hooks": [{"type": "command", "command": "echo stop"}]}])
 
@@ -331,7 +334,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
         self.assertEqual(len(stop_entries), 1)
         self.assertNotIn("matcher", stop_entries[0])
         hook = stop_entries[0]["hooks"][0]
-        self.assertEqual(Path(hook["command"]), Path(sys.executable).resolve())
+        self.assertEqual(Path(hook["command"]), Path(sys.executable).absolute())
         self.assertEqual(hook["args"], [str(STOP_PY_SCRIPT_PATH.resolve())])
         self.assertIn("check-passive-polling-stop", hook["args"][0])
 
@@ -445,7 +448,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
         self.assertEqual(len(data["hooks"]["PreToolUse"]), 1)
         # After collapse, the remaining entry uses the direct Python form.
         hook = data["hooks"]["PreToolUse"][0]["hooks"][0]
-        self.assertEqual(Path(hook["command"]), Path(sys.executable).resolve())
+        self.assertEqual(Path(hook["command"]), Path(sys.executable).absolute())
         self.assertEqual(hook["args"], [str(PY_SCRIPT_PATH.resolve())])
 
     def test_duplicates_all_removed_on_uninstall(self) -> None:
@@ -564,6 +567,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("json", result.stderr.lower())
 
+    @unittest.skipUnless(os.name == "nt", "requires a native Windows Python executable")
     def test_codex_windows_creates_parent_directory(self) -> None:
         # Codex+Windows now writes the entry like POSIX. Verify the helper
         # creates any missing parent directory for the target file.
@@ -581,7 +585,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
         result = run_installer(self.target)
         self.assertEqual(result.returncode, 0, result.stderr)
         hook = load_json(self.target)["hooks"]["PreToolUse"][0]["hooks"][0]
-        self.assertEqual(Path(hook["command"]).resolve(), Path(sys.executable).resolve())
+        self.assertEqual(Path(hook["command"]).absolute(), Path(sys.executable).absolute())
         self.assertEqual(hook["args"], [str(PY_SCRIPT_PATH)])
         self.assertTrue(Path(hook["command"]).is_absolute())
         self.assertTrue(Path(hook["args"][0]).is_absolute())
@@ -591,7 +595,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
         for platform in ("claude", "codex"):
             python_targets = [PY_SCRIPT_PATH]
             self.assertTrue(python_targets)
-            for host_os in ("posix", "windows"):
+            for host_os in (("posix", "windows") if os.name == "nt" else ("posix",)):
                 for python_target in python_targets:
                     with self.subTest(
                         platform=platform,
@@ -630,7 +634,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
             owned = [PY_SCRIPT_PATH]
             self.assertTrue(owned)
             missing = self.tmpdir / platform / "missing-last-owned-hook.py"
-            for host_os in ("posix", "windows"):
+            for host_os in (("posix", "windows") if os.name == "nt" else ("posix",)):
                 with self.subTest(platform=platform, host_os=host_os):
                     candidates = [*owned, missing]
                     with self.assertRaisesRegex(ValueError, "hook Python target"):
@@ -648,7 +652,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
     def test_registered_script_arg_is_absolute(self) -> None:
         target = HOOK_MODULE.resolve_hook_target(
             str(PY_SCRIPT_PATH),
-            "windows",
+            "windows" if os.name == "nt" else "posix",
             "claude",
             python_executable=sys.executable,
         )
@@ -677,6 +681,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
                 python_executable=str(self.tmpdir / "missing-python.exe"),
             )
 
+    @unittest.skipUnless(os.name == "nt", "requires a native Windows Python executable")
     def test_windows_unquoted_shape_and_unsupported_path_rejection(self) -> None:
         target = HOOK_MODULE.resolve_hook_target(
             str(PY_SCRIPT_PATH),
@@ -744,7 +749,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
         result = run_installer(
             self.target,
             platform="codex",
-            host_os="windows",
+            host_os="windows" if os.name == "nt" else "posix",
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         entries = load_json(self.target)["hooks"]["PreToolUse"]
@@ -779,7 +784,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
         result = run_installer(
             self.target,
             platform="codex",
-            host_os="windows",
+            host_os="windows" if os.name == "nt" else "posix",
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         entries = load_json(self.target)["hooks"]["PreToolUse"]

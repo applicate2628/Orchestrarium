@@ -1617,6 +1617,8 @@ def test_post_materialization_runtime_census_matches_declared_destinations(
 ) -> None:
     """The actual two-provider writer calls must echo every declared destination."""
 
+    monkeypatch.setenv("CODEX_BIN", codex_hook_host_env(os.environ, ROOT)["CODEX_BIN"])
+
     artifact_class = {
         "claude-skill-projection": "claude-skill-projection",
         "runtime-outside": "runtime-outside",
@@ -3241,7 +3243,7 @@ def test_global_home_reparse_is_rejected_with_global_stable_error(
     monkeypatch.delenv("HOME", raising=False)
 
     with pytest.raises(ValueError, match="E_GLOBAL_HOME_REPARSE"):
-        installer._resolve_global_home()
+        installer._resolve_global_home(platform="nt")
 
 
 def test_global_home_missing_matching_and_mismatch_rules(
@@ -3261,11 +3263,11 @@ def test_global_home_missing_matching_and_mismatch_rules(
         )
 
     monkeypatch.setenv("USERPROFILE", str(primary))
-    assert installer._resolve_global_home() == primary
+    assert installer._resolve_global_home(platform="nt") == primary
 
     monkeypatch.setenv("HOME", str(alternate))
     with pytest.raises(ValueError, match="E_GLOBAL_HOME_AMBIGUOUS"):
-        installer._resolve_global_home()
+        installer._resolve_global_home(platform="nt")
 
 
 def test_canonical_skill_and_projection_matrix_is_create_only(tmp_path: Path) -> None:
@@ -3454,7 +3456,7 @@ def test_global_codex_install_uses_shared_agents_skills_root(tmp_path: Path) -> 
     home.mkdir()
     import os
 
-    env = os.environ.copy()
+    env = codex_hook_host_env(os.environ, ROOT)
     env["USERPROFILE"] = str(home)
     env["HOME"] = str(home)
     result = subprocess.run(
