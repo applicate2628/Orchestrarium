@@ -1,0 +1,119 @@
+name: PR 4 audit evidence and Windows diagnostics
+
+on:
+  push:
+    branches: [automation/pr4-audit-20260905-final]
+    paths: [.github/workflows/pr4-audit-collect-v1.yml]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  collect:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          run-id: 33966443337
+          github-token: ${{ github.token }}
+          path: evidence/v1
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          run-id: 33966721784
+          github-token: ${{ github.token }}
+          path: evidence/v1b
+      - name: Record availability without declaring a partial run complete
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          rows = []
+          for inv in sorted(Path('evidence').rglob('inventory.json')):
+              record = json.loads(inv.read_text())
+              exit_file = inv.parent / 'exit.json'
+              reports_file = inv.parent / 'reports.jsonl'
+              reports = [json.loads(line) for line in reports_file.read_text().splitlines()] if reports_file.exists() else []
+              terminal = {row['nodeid'] for row in reports if row['when'] == 'teardown' and not row.get('subtest')}
+              rows.append({'artifact': str(inv.parent), 'head': record['head'],
+                           'selected': len(record['selected']), 'terminal': len(terminal),
+                           'exit': json.loads(exit_file.read_text()) if exit_file.exists() else None,
+                           'complete': exit_file.exists() and terminal == set(record['selected'])})
+          Path('evidence/availability.json').write_text(json.dumps(rows, indent=2)+'\n')
+          print(json.dumps(rows, indent=2))
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: pr4-audit-evidence-v1-v1b
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 7
+
+  windows-diagnostic:
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: c605a46bf40055f6d8c296594230cd8c70c18cc2
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Inspect only newly-created disposable fixtures
+        shell: python
+        run: |
+          import ctypes, json, os, tempfile
+          from ctypes import wintypes as w
+          from pathlib import Path
+          from scripts.provider_prompt import WindowsPrivateObjectOwnerV1 as Owner
+          from scripts.process_supervision.process_runner import bind_cwd_identity
+          a = ctypes.WinDLL('advapi32', use_last_error=True)
+          k = ctypes.WinDLL('kernel32', use_last_error=True)
+          k.LocalFree.argtypes=[ctypes.c_void_p]
+          k.CloseHandle.argtypes=[w.HANDLE]
+          a.GetNamedSecurityInfoW.argtypes=[w.LPWSTR,ctypes.c_int,w.DWORD,ctypes.POINTER(ctypes.c_void_p),ctypes.c_void_p,ctypes.POINTER(ctypes.c_void_p),ctypes.c_void_p,ctypes.POINTER(ctypes.c_void_p)]
+          a.GetNamedSecurityInfoW.restype=w.DWORD
+          a.ConvertSecurityDescriptorToStringSecurityDescriptorW.argtypes=[ctypes.c_void_p,w.DWORD,w.DWORD,ctypes.POINTER(w.LPWSTR),ctypes.POINTER(w.DWORD)]
+          a.ConvertSecurityDescriptorToStringSecurityDescriptorW.restype=w.BOOL
+          def describe(path):
+              sd=ctypes.c_void_p(); owner=ctypes.c_void_p(); acl=ctypes.c_void_p(); rendered=w.LPWSTR()
+              status=a.GetNamedSecurityInfoW(str(path),1,5,ctypes.byref(owner),None,ctypes.byref(acl),None,ctypes.byref(sd))
+              if status: return {'read_status':status}
+              try:
+                  if not a.ConvertSecurityDescriptorToStringSecurityDescriptorW(sd,1,5,ctypes.byref(rendered),None):
+                      return {'render_error':ctypes.get_last_error()}
+                  return {'security_descriptor':rendered.value}
+              finally:
+                  if rendered: k.LocalFree(rendered)
+                  if sd: k.LocalFree(sd)
+          result={}
+          with tempfile.TemporaryDirectory(prefix='pr4-audit-owned-') as tmp:
+              root=Path(tmp).resolve(); target=root/'private'; target.mkdir()
+              desc,expected=Owner.current_user_security_descriptor()
+              k.LocalFree(desc)
+              result['expected_dacl']=expected
+              result['before']=describe(target)
+              try:
+                  bind_cwd_identity(str(target)); result['cwd_binding']='accepted'
+              except Exception as exc: result['cwd_binding']=str(exc)
+              try:
+                  Owner.protect_and_verify(target,directory=True); result['protection']='accepted'
+              except Exception as exc: result['protection']=str(exc)
+              result['after']=describe(target)
+              fixture=root/'sample'; fixture.write_bytes(b'fixture')
+              before=fixture.stat()
+              with fixture.open('rb') as stream: by_handle=os.fstat(stream.fileno())
+              result['metadata']={field:[getattr(before,field,None),getattr(by_handle,field,None)] for field in ('st_dev','st_ino','st_ctime_ns','st_birthtime_ns','st_mtime_ns','st_file_attributes')}
+          Path('windows-diagnostic.json').write_text(json.dumps(result,indent=2)+'\n')
+          print(json.dumps(result,indent=2))
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: pr4-windows-diagnostic-v1
+          path: windows-diagnostic.json
+          if-no-files-found: error
+          retention-days: 7
