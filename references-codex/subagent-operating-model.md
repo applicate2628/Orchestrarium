@@ -8,7 +8,8 @@ This file keeps only Codex-specific runtime and repository concretization for th
 
 ## Codex-specific runtime notes
 
-- Codex uses sequential skill invocation for native skills. There is no native internal parallel skill dispatch, so internal Codex-role work is still orchestrated sequentially on the Codex line. Independent external adapters may still run in parallel when the routing contract and selected provider runtimes allow it.
+- Codex native subagent dispatch is available when the current host exposes it. Admit those native lanes through the shared rolling lane-ready-set contract; do not assume sequential-only internal execution, and do not infer a numeric concurrency cap from an earlier refusal or another runtime.
+- Codex native role TOMLs declare the installed default profile; role policy owns every effort floor and corridor. Claim an override only when the host explicitly supports it and returned actual runtime metadata confirms the effective model and effort; otherwise record `unspecified by runtime`.
 - Consultant config lives in `.agents/.agents-mode.yaml`.
 - Codex may extend the shared `agents-mode` schema with `externalClaudeProfile` to select the Claude CLI execution profile (`sonnet-high`, `opus-xhigh` shipped default, `opus-max` max-depth escalation, or `fable-xhigh` current flagship-family best-effort tier) when `externalProvider` resolves to Claude.
 - `externalProvider: auto` resolves by lane type through the active named production priority profile rather than by Codex-line default. Shipped production `auto` uses `codex | claude` only. Explicit Kimi selection is limited to policy-admitted read-only work; Grok remains unavailable, and removed Gemini/Qwen scalar values fail closed with `E_EXTERNAL_PROVIDER_REMOVED`.
@@ -23,5 +24,5 @@ This file keeps only Codex-specific runtime and repository concretization for th
 ## Shared core now owns
 
 - Main rule, core management rules, delivery loops, routing patterns, role map, prompts, gates, and team composition
-- Shared review/gate semantics, periodic-controls model, parallel-work guidance, and generic task-memory expectations
+- Shared review/gate semantics, periodic-controls model, rolling lane-ready admission, parallel-work guidance, and generic task-memory expectations
 - The generic lead memo and final wording

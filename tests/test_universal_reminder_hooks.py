@@ -106,9 +106,10 @@ class McpContinuityContract(unittest.TestCase):
         self.assertEqual(output["hookEventName"], "SessionStart")
         self.assertEqual(output["additionalContext"], policy.SESSION_START_CONTEXT)
         self.assertIn(
-            "CodeGraph `status -> sync -> fresh status -> repeat query`",
+            "CodeGraph follows `status -> sync -> fresh status -> repeat query`",
             output["additionalContext"],
         )
+        self.assertIn("Non-normative workflow examples only", output["additionalContext"])
 
 
 class TestMcpMomentumDiscrimination(unittest.TestCase):
@@ -118,9 +119,9 @@ class TestMcpMomentumDiscrimination(unittest.TestCase):
     ignore the whole class."""
 
     def setUp(self) -> None:
-        # The hook only nudges when a code-intelligence MCP is actually configured for
-        # this user. Point it at a synthetic config so the test does not depend on the
-        # developer's real ~/.claude.json (which may or may not have one).
+        # The hook must use runtime discovery rather than infer availability from
+        # HOME configuration. Keep an adversarial config here to prove that its
+        # names and values never drive or enter the advisory.
         self._home = tempfile.mkdtemp()
         (Path(self._home) / ".claude.json").write_text(
             json.dumps(
@@ -171,7 +172,16 @@ class TestMcpMomentumDiscrimination(unittest.TestCase):
             self.assertEqual(specific["hookEventName"], "PreToolUse")
             self.assertNotIn("SECRET-COMMAND", result.stdout)
             self.assertNotIn("TOP-SECRET", result.stdout)
-            self.assertIn("(+2 more)", specific["additionalContext"])
+            self.assertNotIn("codegraph", specific["additionalContext"].casefold())
+            self.assertNotIn("serena", specific["additionalContext"].casefold())
+            self.assertIn("runtime tool discovery", specific["additionalContext"])
+
+    def test_qualifying_search_nudges_without_home_mcp_configuration(self) -> None:
+        (Path(self._home) / ".claude.json").unlink()
+        self.assert_nudges(
+            {"tool_name": "Grep", "tool_input": {"pattern": "def parse_config"}},
+            True,
+        )
 
     def test_mcp_continuity_current_host_shape_matrix(self) -> None:
         positives = (
@@ -587,8 +597,7 @@ class TestMcpMomentumDiscrimination(unittest.TestCase):
                 self.assertEqual(bool(root.stdout), should_nudge)
                 self.assertEqual(bool(agent.stdout), should_nudge)
 
-    def test_no_code_intel_server_configured_stays_silent(self) -> None:
-        # A nudge on a machine without a code-intelligence MCP would be a lie.
+    def test_home_configured_names_do_not_control_generic_runtime_checkpoint(self) -> None:
         home = tempfile.mkdtemp()
         (Path(home) / ".claude.json").write_text(
             json.dumps({"mcpServers": {"time": {}, "fetch": {}}}), encoding="utf-8"
@@ -600,8 +609,9 @@ class TestMcpMomentumDiscrimination(unittest.TestCase):
             capture_output=True, text=True, encoding="utf-8", env=env,
         )
         self.assertEqual(result.returncode, 0)
-        self.assertEqual(result.stdout, "")
-        self.assertNotIn("mcp-momentum", result.stdout)
+        self.assertIn("mcp-momentum", result.stdout)
+        self.assertNotIn('"time"', result.stdout)
+        self.assertNotIn('"fetch"', result.stdout)
         shutil.rmtree(home, ignore_errors=True)
 
     def test_malformed_envelope_fails_open(self) -> None:
@@ -613,12 +623,9 @@ class TestMcpMomentumDiscrimination(unittest.TestCase):
         self.assertEqual(result.stdout, "")
         self.assertEqual(result.stderr, "")
 
-    # --- Codex-awareness (2nd-round fix): the hook must not be silently inert
-    # on the Codex pack it also ships into. Codex stores MCP config in
-    # ~/.codex/config.toml under [mcp_servers.<name>] TOML tables (verified:
-    # https://learn.chatgpt.com/codex/extend/mcp), not Claude's ~/.claude.json.
-    # Codex's shell tool_name is "Bash" too (verified via the Codex hooks
-    # reference), so these drive the already-working Bash branch.
+    # HOME configuration is untrusted availability evidence. These fixtures
+    # prove valid, irrelevant, and malformed Codex config all produce the same
+    # generic checkpoint for the same qualifying protocol-bound tool input.
 
     def test_codex_config_toml_mcp_server_nudges(self) -> None:
         home = tempfile.mkdtemp()
@@ -637,10 +644,10 @@ class TestMcpMomentumDiscrimination(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stderr, "")
         self.assertIn("mcp-momentum", result.stdout)
-        self.assertIn("codegraph", result.stdout)
+        self.assertNotIn("codegraph", result.stdout.casefold())
         shutil.rmtree(home, ignore_errors=True)
 
-    def test_codex_config_toml_without_code_intel_server_stays_silent(self) -> None:
+    def test_codex_config_toml_without_code_intel_name_still_nudges(self) -> None:
         home = tempfile.mkdtemp()
         codex_dir = Path(home) / ".codex"
         codex_dir.mkdir()
@@ -655,11 +662,11 @@ class TestMcpMomentumDiscrimination(unittest.TestCase):
             capture_output=True, text=True, encoding="utf-8", env=env,
         )
         self.assertEqual(result.returncode, 0)
-        self.assertEqual(result.stdout, "")
-        self.assertNotIn("mcp-momentum", result.stdout)
+        self.assertIn("mcp-momentum", result.stdout)
+        self.assertNotIn('"time"', result.stdout)
         shutil.rmtree(home, ignore_errors=True)
 
-    def test_malformed_codex_config_toml_fails_open(self) -> None:
+    def test_malformed_codex_config_toml_does_not_affect_checkpoint(self) -> None:
         home = tempfile.mkdtemp()
         codex_dir = Path(home) / ".codex"
         codex_dir.mkdir()
@@ -672,7 +679,7 @@ class TestMcpMomentumDiscrimination(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.stderr, "")
-        self.assertEqual(result.stdout, "")
+        self.assertIn("mcp-momentum", result.stdout)
         shutil.rmtree(home, ignore_errors=True)
 
 

@@ -75,7 +75,7 @@ Apply the binding shared **Workflow economy (binding)** rule. This Codex project
 - Parallel external routing is not capped at one instance per helper or provider. If multiple admitted artifacts or disjoint slices honestly need the same provider, the lead may launch repeated same-provider external helpers concurrently.
 - Treat same-lane multi-opinion collection and general external fan-out as different mechanisms: `externalOpinionCounts` governs distinct opinions for one lane, while brigade-style fan-out covers multiple independent lanes or slices on top of the general `parallelMode` rule.
 - Once a provider or subagent run is launched, a later preference change to effort, model, or framing applies to the next dispatch. Do not stop and replace the in-flight run: spent reasoning is sunk and redispatch adds cost. Stop only when the run is orphaned, no longer needed, or its prompt is broken/wrong.
-- Choose effort before launch from task complexity and the lane's mandated floor; do not reflexively escalate to `max`/`xhigh` where no floor requires it.
+- Resolve the requested route before launch without treating the request as execution evidence. Codex native role TOMLs declare the installed default profile; role policy owns every effort floor and corridor. Claim an override only when the host explicitly supports it and returned actual runtime metadata confirms the effective model and effort; otherwise record `unspecified by runtime`. Do not reflexively request `max`/`xhigh` where no policy floor or corridor requires it.
 
 ## Canonical routing patterns
 
@@ -431,9 +431,17 @@ When NOT to save:
 ## Parallelism guidance
 
 - Parallelize read-heavy work such as research, triage, and test analysis when scopes are independent.
-- `parallelMode: manual` keeps ordinary fan-out explicit-only, `auto` leaves safe parallelism enabled by routing judgment, and `force` makes safe parallel launch a standing instruction whenever scopes are independent and the merge cost is justified.
+- `parallelMode: manual` keeps ordinary fan-out explicit-only, `auto` leaves safe parallelism enabled by routing judgment, and `force` makes eligible refill a standing instruction whenever scopes are independent and the merge cost is justified.
 - Parallelize write-heavy work only after contracts and phase boundaries are frozen.
 - Do not run two writing roles in the same area without explicit ownership boundaries.
+
+Rolling admission is evaluated from current state, not from a stored numeric cap:
+
+- **Ready set.** A lane is ready only when its approved inputs and external prerequisites are accepted, its owner, scope, one artifact, and gate are explicit, its mandatory risk owners are known, its marginal benefit is positive, and it has no unresolved stop condition, human gate, integration conflict, or overlapping resource surface.
+- **Admission choice.** From the current ready set, admit the largest useful pairwise-compatible subset. Rank candidates by priority, critical-path or unblocking value, mandatory risk coverage, marginal benefit, merge cost, and pairwise resource isolation. `parallelMode: force` requires eligible refill; it does not require maximum fan-out when no additional compatible lane has positive marginal benefit.
+- **Capacity discovery.** When the runtime exposes free capacity, treat that current value as authoritative. Otherwise, launch one ranked candidate at a time until the runtime explicitly refuses capacity; never infer or cache a numeric concurrency cap. Recompute admission after every launch and every lane-settled event.
+- **Release and refill.** Completed, `BLOCKED`, cancelled, and parked lanes release capacity; refill in the same turn unless a stop condition, human gate, integration conflict, or nonpositive marginal benefit prevents it. A waiting or long-running lane does not head-of-line block independent ready work. A lane waiting on an external prerequisite is parked or closed with a durable recovery point rather than occupying active admission indefinitely.
+- **Integration serialization.** Integration-owner and shared integration-surface work is serialized.
 
 Before launching work in parallel:
 

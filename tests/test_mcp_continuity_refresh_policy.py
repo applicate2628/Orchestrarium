@@ -21,7 +21,9 @@ REFERENCE_CONTRACTS = {
         "confirm freshness again, then repeat the",
         "stateless or live MCP does not need a refresh",
         "stale output is not presented as current",
-        "CodeGraph this is `status -> sync -> fresh status -> repeat",
+        "explicitly non-normative workflow example",
+        "CodeGraph uses",
+        "this name never selects a tool",
     ),
     ROOT / "shared" / "references" / "ru" / "mcp-continuity.md": (
         "## Свежесть stateful и индексных MCP",
@@ -30,7 +32,9 @@ REFERENCE_CONTRACTS = {
         "снова подтвердить свежесть и только затем повторить",
         "MCP без сохраняемого состояния или live MCP не требует refresh",
         "устаревший вывод не представляется как актуальный",
-        "CodeGraph последовательность такая: `status -> sync -> fresh status -> repeat",
+        "ненормативный пример workflow",
+        "для CodeGraph это",
+        "это имя никогда не выбирает инструмент",
     ),
 }
 
@@ -58,7 +62,9 @@ class StatefulMcpRefreshPolicyTests(unittest.TestCase):
     def test_codegraph_stale_sync_fresh_repeat_query_fixture(self) -> None:
         """An indexed server must prove freshness before reusing a query result."""
         required_order = (
-            "CodeGraph `status -> sync -> fresh status -> repeat query`",
+            "Non-normative workflow examples only",
+            "CodeGraph follows `status -> sync -> fresh status -> repeat query`",
+            "These names never select a tool",
             "If refresh fails, report it explicitly",
             "do not present stale output as current",
         )

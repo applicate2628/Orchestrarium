@@ -19,6 +19,10 @@ The immediate failure mode this policy addresses is simple: a lead can plan well
 `shared/references/` is the canonical home for stable repository-wide design methodology. `references-claude/` keeps Claude-specific reference material plus compatibility pointers. `work-items/` is the home for local item-specific execution memory. Trivial work with no recovery or preservation value writes nothing; work needing stages, recovery, or continuation is admitted as a work-item.
 `docs/agents-mode-reference.md` is the shared operator reference when `.claude/.agents-mode.yaml` behavior matters.
 
+For optional project-owned `work-items/` auxiliary roots, the shared
+[`work-items root contract`](../shared/references/work-items-root-contract.md)
+is authoritative. This Claude addendum adds no alternate topology or schema.
+
 ## Mandatory artifact set
 
 For any non-trivial work routed through `$lead`, the item folder must contain these artifacts:

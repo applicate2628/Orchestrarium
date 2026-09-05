@@ -48,4 +48,9 @@ Two design-only trunks own independence techniques at different stages: `review-
 Intentional pack-local exceptions:
 - `periodic-control-matrix` stays pack-local because it still embeds provider/runtime vocabulary, task-memory layout, and runtime-doc links rather than a generic shared skeleton.
 
+The shared Physical Lifecycle V1 topology contract for optional project-owned
+`work-items/` auxiliary roots is
+[`work-items-root-contract.md`](work-items-root-contract.md). Provider task-memory
+references keep only pointers to this shared owner.
+
 Provider packs should reuse these shared cross-provider references as a foundation instead of creating another duplicated reference set, but may still need provider-local overlays, wrappers, or vocabulary mapping where a document is not yet fully pack-agnostic.

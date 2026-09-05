@@ -64,6 +64,21 @@ def _load_hook_common():
 hook_common = _load_hook_common()
 
 
+def test_dormant_delivery_activity_pipeline_is_retired() -> None:
+    source = (CANON_DIR / "hook_common.py").read_text(encoding="utf-8")
+    for retired in (
+        "DeliveryActivity",
+        "correlated_delivery_activity",
+        "_classify_delivery_call",
+        "_extract_delivery_calls_with_ids",
+        "_delivery_result_flags",
+        "mcp__serena__",
+        "serena.",
+    ):
+        assert retired not in source
+    assert hasattr(hook_common, "extract_tool_outputs_with_ids")
+
+
 # ---------------------------------------------------------------------------
 # Transcript fixture builders -- Claude Code entry shapes.
 # ---------------------------------------------------------------------------

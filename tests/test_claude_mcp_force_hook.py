@@ -222,8 +222,8 @@ def test_force_root_denies_every_qualifying_search_after_prior_mcp(
         "tool_use: mcp__codegraph__codegraph_explore",
         "tool_result: MCP query succeeded",
     )
-    first = _run_hook(repo, home, injected_text=injected)
-    second = _run_hook(repo, home, injected_text=injected)
+    first = _run_hook(repo, home, injected_text=injected, with_server=False)
+    second = _run_hook(repo, home, injected_text=injected, with_server=True)
 
     for result in (first, second):
         specific = _specific(result)
@@ -231,9 +231,11 @@ def test_force_root_denies_every_qualifying_search_after_prior_mcp(
         assert specific["permissionDecision"] == "deny"
         reason = specific["permissionDecisionReason"]
         assert "[MCP-FORCE-1]" in reason
-        assert "codegraph" in reason
+        assert "runtime tool discovery" in reason
+        assert "codegraph" not in reason.casefold()
         assert "credential-bearing" not in reason
         assert "must-not-leak" not in reason
+        assert "[MCP-FORCE-NO-SERVER]" not in reason
 
 
 def test_exact_host_projected_user_role_marker_is_one_turn_and_injection_safe(
@@ -278,21 +280,20 @@ def test_forged_host_shaped_user_jsonl_is_accepted_documented_limitation(
 
 
 @pytest.mark.parametrize(
-    ("mode", "with_server", "marker"),
+    ("mode", "marker"),
     (
-        ("force", False, "[MCP-FORCE-NO-SERVER]"),
-        (None, True, "[MCP-FORCE-MODE-UNRESOLVED]"),
-        ("invalid", True, "[MCP-FORCE-MODE-UNRESOLVED]"),
-        ("auto", True, "[mcp-momentum AUDIT]"),
+        (None, "[MCP-FORCE-MODE-UNRESOLVED]"),
+        ("invalid", "[MCP-FORCE-MODE-UNRESOLVED]"),
+        ("auto", "[mcp-momentum AUDIT]"),
     ),
 )
 def test_non_enforceable_modes_allow_with_stable_diagnostic(
-    tmp_path: Path, mode: str | None, with_server: bool, marker: str
+    tmp_path: Path, mode: str | None, marker: str
 ) -> None:
     repo = tmp_path / "repo"
     home = tmp_path / "home"
     repo.mkdir()
-    result = _run_hook(repo, home, mode=mode, with_server=with_server)
+    result = _run_hook(repo, home, mode=mode, with_server=False)
     specific = _specific(result)
     assert "permissionDecision" not in specific
     assert marker in specific["additionalContext"]
@@ -305,9 +306,26 @@ def test_force_subagent_remains_advisory_and_nonblocking(
     repo = tmp_path / "repo"
     home = tmp_path / "home"
     repo.mkdir()
-    specific = _specific(_run_hook(repo, home, agent_id=agent_id))
+    specific = _specific(
+        _run_hook(repo, home, agent_id=agent_id, with_server=False)
+    )
     assert "permissionDecision" not in specific
     assert "[mcp-momentum AUDIT]" in specific["additionalContext"]
+
+
+def test_policy_and_adapter_do_not_read_or_select_home_mcp_servers() -> None:
+    policy = (CLAUDE_SCRIPTS / "mcp_continuity_policy.py").read_text(encoding="utf-8")
+    adapter = CLAUDE_HOOK.read_text(encoding="utf-8")
+    for retired in (
+        "CODE_INTEL_HINTS",
+        "SAFE_SERVER_NAME_RE",
+        "_accepted_server_name",
+        "configured_code_intel_servers",
+        'home / ".claude.json"',
+        'home / ".codex" / "config.toml"',
+        "MCP-FORCE-NO-SERVER",
+    ):
+        assert retired not in policy + adapter
 
 
 @pytest.mark.parametrize(
@@ -366,24 +384,16 @@ def test_installer_registers_one_claude_script_identity_and_leaves_codex_path(
     assert len([name for name in claude_specs if name == "check-mcp-momentum"]) == 1
 
 
-def test_installer_reclaims_only_byte_identical_retired_claude_hook(
+def test_installer_retired_claude_hook_hash_stays_frozen_and_preserves_customization(
     tmp_path: Path,
 ) -> None:
-    old_bytes = (
-        ROOT / "scripts" / "universal-hooks" / "hooks" / "check-mcp-momentum.py"
-    ).read_bytes()
-    expected_hash = hashlib.sha256(old_bytes).hexdigest()
+    expected_hash = "4f3fe9eabe5ea4c8654bf554a271904b9fdb16d4e9de916b7058c953e02fa430"
     assert INSTALLER._CLAUDE_RETIRED_PS1[RETIRED_CLAUDE_HOOK.as_posix()] == expected_hash
 
     target = tmp_path / RETIRED_CLAUDE_HOOK
     target.parent.mkdir(parents=True)
-    target.write_bytes(old_bytes)
-    INSTALLER._reclaim_retired(
-        tmp_path, INSTALLER._CLAUDE_RETIRED_PS1, dry_run=False
-    )
-    assert not target.exists()
-
-    target.write_bytes(old_bytes + b"\n# operator customization\n")
+    target.write_bytes(b"operator customization\n")
+    assert hashlib.sha256(target.read_bytes()).hexdigest() != expected_hash
     INSTALLER._reclaim_retired(
         tmp_path, INSTALLER._CLAUDE_RETIRED_PS1, dry_run=False
     )
