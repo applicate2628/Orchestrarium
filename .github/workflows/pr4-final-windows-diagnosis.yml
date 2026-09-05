@@ -1,0 +1,67 @@
+name: PR4 residual Windows diagnosis
+on:
+  push:
+    branches: [automation/pr4-audit-20260905-d6388462]
+    paths: [.github/workflows/pr4-final-windows-diagnosis.yml]
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: e3e122c9baec6f0083436ee431162e9ee422804e
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install pytest==9.0.2 PyYAML==6.0.2
+      - name: Read owned diagnostic records for original and local-EOL fixtures
+        shell: python
+        run: |
+          import importlib.util,json,os,subprocess,sys,tempfile,traceback
+          from pathlib import Path
+          sys.path.insert(0,str(Path.cwd()))
+          out=Path(os.environ['RUNNER_TEMP'])/'residual-diagnostics';out.mkdir()
+          helper=out/'ownership.py'
+          helper.write_bytes(subprocess.check_output(['git','show','4a399cc74ebefe597a8ec5f16582ad67b55e9583:.github/audit/windows_owned_workspace.py']))
+          spec=importlib.util.spec_from_file_location('ownership',helper);mod=importlib.util.module_from_spec(spec);spec.loader.exec_module(mod)
+          from tests import test_slice_a_detached_validation as fixture
+          with (out/'details.txt').open('w',encoding='utf-8') as stream, mod.current_user_owned_workspace(Path.cwd()):
+              print('SOURCE',subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),file=stream)
+              for pinned in (False,True):
+                  with tempfile.TemporaryDirectory() as tmp:
+                      root=Path(tmp).resolve()
+                      original=fixture._git
+                      if pinned:
+                          def local_git(repo,*args,**kwargs):
+                              result=original(repo,*args,**kwargs)
+                              if args and args[0]=='init': original(repo,'config','core.autocrlf','false')
+                              return result
+                          fixture._git=local_git
+                      try:
+                          repo,baseline,digest=fixture._repo(root)
+                          module=fixture._load()
+                          run_dir=repo/'.scratch'/'runs'/'diagnose'
+                          result=fixture._validate(module,repo,run_dir,baseline,digest,fixture._command(module,'pass'))
+                          print('LOCAL_EOL',pinned,'RESULT',str(result),file=stream,flush=True)
+                          for path in sorted(run_dir.rglob('*.json')):
+                              if path.name=='supervisor-error.json' or path.name.endswith('.receipt.json'):
+                                  data=json.loads(path.read_text(encoding='utf-8'))
+                                  if path.name.endswith('.receipt.json'):
+                                      data={key:data.get(key) for key in ('failureId','outcome','terminalStage','argv','exitCode','treeEmpty','resourcesClosed')}
+                                  print(path.relative_to(run_dir),json.dumps(data),file=stream,flush=True)
+                      except Exception:
+                          traceback.print_exc(file=stream)
+                      finally:
+                          fixture._git=original
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pr4-residual-windows-diagnostics
+          path: ${{ runner.temp }}/residual-diagnostics/
+          retention-days: 5
+          if-no-files-found: error
