@@ -40,6 +40,12 @@ def test_pinned_source_bytes_survive_checkout_settings(tmp_path, autocrlf, eol):
     paths.update({"src.codex/skills/architect/agents/openai.yaml",
                   "src.claude/agents/hooks/dispatch_sentinels.py",
                   "scripts/arch-layering-slices.stamp"})
+    paths.update({"tests/test_codex_skill_catalog_budget.py",
+                  "tests/fixtures/provider-prompt-priors/pre-e7/provider_prompt.py",
+                  "tests/fixtures/legacy-obligation-migration/baseline.json"})
+    paths.update(p.relative_to(ROOT).as_posix() for p in
+                 (ROOT / "tests/fixtures/global-lead-priors/pre-rebase").rglob("*")
+                 if p.is_file())
     expected = {}
     for relative in sorted(paths):
         data = (ROOT / relative).read_bytes()

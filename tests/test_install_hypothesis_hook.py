@@ -585,7 +585,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
         result = run_installer(self.target)
         self.assertEqual(result.returncode, 0, result.stderr)
         hook = load_json(self.target)["hooks"]["PreToolUse"][0]["hooks"][0]
-        self.assertEqual(Path(hook["command"]).resolve(), Path(sys.executable))
+        self.assertEqual(Path(hook["command"]), Path(sys.executable))
         self.assertEqual(hook["args"], [str(PY_SCRIPT_PATH)])
         self.assertTrue(Path(hook["command"]).is_absolute())
         self.assertTrue(Path(hook["args"][0]).is_absolute())

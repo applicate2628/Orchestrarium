@@ -267,7 +267,7 @@ class LegacyLedgerProjectionReadTests(unittest.TestCase):
     def test_canonical_apply_projects_before_strict_validation_without_changing_raw_bytes(self):
         module = load_validator()
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             item, ledger, work_items = self._make_item(root)
             raw = self._canonical_raw()
             raw_line = canonical_bytes(raw) + b"\r\n"
@@ -284,7 +284,7 @@ class LegacyLedgerProjectionReadTests(unittest.TestCase):
         """The manifest path stays canonical while validation reads candidate bytes."""
         module = load_validator()
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             item, ledger, work_items = self._make_item(root)
             raw = self._canonical_raw()
             candidate_bytes = canonical_bytes(raw) + b"\n"
@@ -310,7 +310,7 @@ class LegacyLedgerProjectionReadTests(unittest.TestCase):
     def test_unknown_or_drifted_profile_is_rejected_without_falling_back_to_legacy_shape(self):
         module = load_validator()
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             item, ledger, work_items = self._make_item(root)
             raw = self._canonical_raw()
             raw_line = canonical_bytes(raw) + b"\n"
@@ -326,7 +326,7 @@ class LegacyLedgerProjectionReadTests(unittest.TestCase):
     def test_current_malformed_v1_v2_rows_remain_invalid_without_an_admitted_projection(self):
         module = load_validator()
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             item, ledger, _ = self._make_item(root)
             malformed_v1 = {
                 "schemaVersion": 1, "runId": "current-v1-001", "workItem": "legacy-item",
@@ -342,7 +342,7 @@ class LegacyLedgerProjectionReadTests(unittest.TestCase):
     def test_manifest_ledger_and_physical_raw_line_drift_are_all_rejected(self):
         module = load_validator()
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             item, ledger, work_items = self._make_item(root)
             raw = self._canonical_raw()
             raw_line = canonical_bytes(raw) + b"\r\n"
@@ -357,7 +357,7 @@ class LegacyLedgerProjectionReadTests(unittest.TestCase):
     def test_arbitrary_sibling_and_external_ledger_candidates_are_rejected(self):
         module = load_validator()
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             item, ledger, work_items = self._make_item(root)
             raw = self._canonical_raw()
             raw_line = canonical_bytes(raw) + b"\n"
@@ -382,7 +382,7 @@ class LegacyLedgerProjectionReadTests(unittest.TestCase):
     def test_in_memory_projection_candidate_validates_without_live_files_or_tree_mutation(self):
         module = load_validator()
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             item, ledger, work_items = self._make_item(root)
             raw = self._canonical_raw()
             raw_line = canonical_bytes(raw) + b"\n"
@@ -410,7 +410,7 @@ class LegacyLedgerProjectionReadTests(unittest.TestCase):
     def test_in_memory_projection_candidate_fails_closed_on_manifest_drift(self):
         module = load_validator()
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             item, ledger, work_items = self._make_item(root)
             raw = self._canonical_raw()
             raw_line = canonical_bytes(raw) + b"\n"
@@ -432,7 +432,7 @@ class LegacyLedgerProjectionReadTests(unittest.TestCase):
     def test_candidate_projection_rejects_non_scalar_profile_values_without_type_error(self):
         module = load_validator()
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             item, ledger, work_items = self._make_item(root)
             raw = self._canonical_raw()
             raw_line = canonical_bytes(raw) + b"\n"
@@ -473,7 +473,7 @@ class LegacyLedgerProjectionReadTests(unittest.TestCase):
                 self.assertTrue(any("WI-LEDGER-MIGRATION-PROFILE-UNSUPPORTED" in error for error in errors))
 
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             item, ledger, work_items = self._make_item(root)
             raw = self._canonical_raw()
             self._install_apply(item, ledger, work_items, canonical_bytes(raw) + b"\n", self._projected_canonical(raw))
@@ -489,7 +489,7 @@ class LegacyLedgerProjectionReadTests(unittest.TestCase):
             self.assertTrue(any("WI-LEDGER-MIGRATION-MANIFEST-INVALID" in error for error in errors))
 
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             item, ledger, work_items = self._make_item(root)
             raw = self._canonical_raw()
             self._install_apply(item, ledger, work_items, canonical_bytes(raw) + b"\n", self._projected_canonical(raw))
@@ -503,7 +503,7 @@ class LegacyLedgerProjectionReadTests(unittest.TestCase):
     def test_unreferenced_invalid_manifest_entry_and_profile_still_fail_the_global_registry(self):
         module = load_validator()
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             item, ledger, work_items = self._make_item(root)
             raw = self._canonical_raw()
             raw_line = canonical_bytes(raw) + b"\n"
@@ -527,7 +527,7 @@ class LegacyLedgerProjectionReadTests(unittest.TestCase):
     def test_global_registry_ignores_valid_projection_rows_for_another_work_item(self):
         module = load_validator()
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             item, ledger, work_items = self._make_item(root)
             raw = self._canonical_raw()
             raw_line = canonical_bytes(raw) + b"\n"
@@ -563,7 +563,7 @@ class LegacyLedgerProjectionReadTests(unittest.TestCase):
     def test_revoke_cannot_remove_a_different_active_raw_line(self):
         module = load_validator()
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             item, ledger, work_items = self._make_item(root)
             first = self._canonical_raw()
             second = {**self._canonical_raw(), "runId": "legacy-run-002"}
@@ -595,7 +595,7 @@ class LegacyLedgerProjectionReadTests(unittest.TestCase):
     def test_projection_cannot_settle_revise_or_open_launches(self):
         module = load_validator()
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             item, ledger, work_items = self._make_item(root)
             raw = self._canonical_raw(gate="REVISE", status="revise")
             raw_line = canonical_bytes(raw) + b"\n"
@@ -605,7 +605,7 @@ class LegacyLedgerProjectionReadTests(unittest.TestCase):
             self.assertTrue(any("open REVISE obligation" in error for error in revise_errors))
 
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             item, ledger, work_items = self._make_item(root)
             raw = self._canonical_raw(gate="none", status="running")
             raw["eventKind"] = "launch"
@@ -620,7 +620,7 @@ class LegacyLedgerProjectionReadTests(unittest.TestCase):
     def test_review_pass_requires_existing_exact_digest_bound_artifact(self):
         module = load_validator()
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             item, ledger, work_items = self._make_item(root)
             raw = {
                 "stage": "review", "role": "qa", "task": "legacy review task",
@@ -648,7 +648,7 @@ class LegacyLedgerProjectionReadTests(unittest.TestCase):
     def test_archive_projection_keeps_archive_tree_byte_identical(self):
         module = load_validator()
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             item, ledger, work_items = self._make_item(root, archived=True)
             raw = self._canonical_raw()
             raw_line = canonical_bytes(raw) + b"\n"
@@ -666,7 +666,7 @@ class LegacyLedgerProjectionReadTests(unittest.TestCase):
     def test_archive_obligation_epoch_ignores_unprojected_legacy_rows(self):
         module = load_validator()
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             item, ledger, _work_items = self._make_item(root, archived=True)
             raw = {"legacy": "not admitted into the V2 epoch"}
             ledger.write_bytes(canonical_bytes(raw) + b"\n")
@@ -682,7 +682,7 @@ class LegacyLedgerProjectionReadTests(unittest.TestCase):
     def test_archive_obligation_validator_rejects_non_monthly_archive_shape(self):
         module = load_validator()
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             item = root / "work-items" / "archive" / "legacy-item"
             item.mkdir(parents=True)
             (item / "agent-runs.jsonl").write_text("{}\n", encoding="utf-8")
@@ -694,7 +694,7 @@ class LegacyLedgerProjectionReadTests(unittest.TestCase):
     def test_irrecoverable_disposition_requires_exact_manifest_bound_archive_path_and_unknown_digest(self):
         module = load_validator()
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             item, _, _ = self._make_item(root, archived=True)
             closure = item / "closure.md"
             closure.write_text("canonical outcome\n", encoding="utf-8")
@@ -718,7 +718,7 @@ class LegacyLedgerProjectionReadTests(unittest.TestCase):
     def test_v2_recovered_disposition_authorizes_only_its_exact_raw_v2_pass_artifact(self):
         module = load_validator()
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             item, disposition = self._v2_archived_missing_artifact(root)
             self._write_v2_disposition(root, disposition)
 
@@ -744,7 +744,7 @@ class LegacyLedgerProjectionReadTests(unittest.TestCase):
             {"rawLineSha256": ["not-a-string"]},
         ):
             with self.subTest(update=update), tempfile.TemporaryDirectory() as directory:
-                root = Path(directory)
+                root = Path(directory).resolve()
                 item, disposition = self._v2_archived_missing_artifact(root)
                 self._write_v2_disposition(root, {**disposition, **update})
 
@@ -763,7 +763,7 @@ class LegacyLedgerProjectionReadTests(unittest.TestCase):
             ({"approvedAt": "2026-08-01T00:00:03Z"}, False),
         ):
             with self.subTest(update=update), tempfile.TemporaryDirectory() as directory:
-                root = Path(directory)
+                root = Path(directory).resolve()
                 item, disposition = self._v2_archived_missing_artifact(root, state="irrecoverable-approved")
                 self._write_v2_disposition(root, {**disposition, **update})
 
@@ -774,7 +774,7 @@ class LegacyLedgerProjectionReadTests(unittest.TestCase):
     def test_v1_disposition_is_non_authorizing_and_active_item_is_denied(self):
         module = load_validator()
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             item, disposition = self._v2_archived_missing_artifact(root)
             directory_path = root / "work-items" / "legacy-ledger-historical-dispositions"
             directory_path.mkdir(parents=True)
@@ -831,7 +831,7 @@ class LegacyLedgerProjectionReadTests(unittest.TestCase):
     def test_manifest_shape_projection_chains_into_both_existing_legacy_normalizations(self):
         module = load_validator()
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             item, ledger, work_items = self._make_item(root)
             launch_a = {
                 "schemaVersion": 2, "runId": "launch-chain-a", "workItem": "legacy-item",

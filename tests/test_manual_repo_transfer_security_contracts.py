@@ -230,7 +230,7 @@ class IoBoundaryTests(unittest.TestCase):
             module._INPUT_FILE_OPTIONS,
         )
         with tempfile.TemporaryDirectory(prefix="repo-transfer-core-policy-") as temp:
-            root = Path(temp)
+            root = Path(temp).resolve()
             document = root / "document.json"
             document.write_bytes(b"{}")
             for options in policies:
@@ -815,7 +815,7 @@ class IoBoundaryTests(unittest.TestCase):
     def test_source_hash_verification_uses_bound_payload_sessions(self) -> None:
         module = load_transfer_module()
         with tempfile.TemporaryDirectory(prefix="repo-transfer-source-binding-") as temp:
-            root = Path(temp)
+            root = Path(temp).resolve()
             good = b"bound source bytes"
             (root / "good.bin").write_bytes(good)
             (root / "mismatch.bin").write_bytes(b"wrong bytes")
@@ -850,7 +850,7 @@ class IoBoundaryTests(unittest.TestCase):
             ("unknown", 0o170000),
         )
         with tempfile.TemporaryDirectory(prefix="repo-transfer-special-mode-") as temp:
-            root = Path(temp)
+            root = Path(temp).resolve()
             special = root / "special-entry"
             special.write_bytes(b"must not be hashed")
             original_lstat = module.Path.lstat
@@ -897,7 +897,7 @@ class IoBoundaryTests(unittest.TestCase):
     def test_json_input_rejects_directory_and_link_before_read(self) -> None:
         module = load_transfer_module()
         with tempfile.TemporaryDirectory(prefix="repo-transfer-json-types-") as temp:
-            root = Path(temp)
+            root = Path(temp).resolve()
             target = root / "inventory.json"
             target.write_bytes(b"{}")
             link = root / "linked.json"
@@ -1064,7 +1064,7 @@ class IoBoundaryTests(unittest.TestCase):
     def test_standard_and_zip64_central_directory_limits_fail_before_zipfile_open(self) -> None:
         module = load_transfer_module()
         with tempfile.TemporaryDirectory(prefix="repo-transfer-zip-preflight-") as temp:
-            root = Path(temp)
+            root = Path(temp).resolve()
             standard = root / "standard.zip"
             with zipfile.ZipFile(standard, "w") as archive:
                 archive.writestr(MANIFEST, b"{}")
@@ -1161,7 +1161,7 @@ class IoBoundaryTests(unittest.TestCase):
     def test_bounded_subprocess_reaps_timed_out_child_as_contract_error(self) -> None:
         module = load_transfer_module()
         with tempfile.TemporaryDirectory(prefix="repo-transfer-git-timeout-") as temp:
-            root = Path(temp)
+            root = Path(temp).resolve()
             repository = root / "repo"
             repository.mkdir()
             subprocess.run(
@@ -1208,7 +1208,7 @@ class IoBoundaryTests(unittest.TestCase):
         descendant_pid: int | None = None
         descendant_start_identity: str | None = None
         with tempfile.TemporaryDirectory(prefix="repo-transfer-git-descendant-") as temp:
-            root = Path(temp)
+            root = Path(temp).resolve()
             repository = root / "repo"
             repository.mkdir()
             subprocess.run(
@@ -1286,7 +1286,7 @@ class IoBoundaryTests(unittest.TestCase):
     def test_trusted_verify_uses_one_zipfile_instance_for_all_archive_reads(self) -> None:
         module = load_transfer_module()
         with tempfile.TemporaryDirectory(prefix="repo-transfer-trusted-zip-") as temp:
-            root = Path(temp)
+            root = Path(temp).resolve()
             bundle_path = root / "transfer.zip"
             git_evidence = {"path": str(GIT_EXECUTABLE), "sha256": "0" * 64}
             inventory = {"snapshot": {"digest": "0" * 64}, "repository": {"head": "head", "gitExecutable": git_evidence}, "entries": []}
@@ -1339,11 +1339,15 @@ class SecurityContractTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory(prefix="repo-transfer-security-")
-        self.root = Path(self.temp.name)
+        self.root = Path(self.temp.name).resolve()
         self.repo = self.root / "repo"
         self.remote = self.root / "origin.git"
         self.repo.mkdir()
         git(self.repo, "init", "--initial-branch=main")
+        # The transfer owner deliberately ignores host Git config. Bind fixture
+        # conversion locally so setup and read-only transfer observe identical bytes.
+        git(self.repo, "config", "core.autocrlf", "false")
+        git(self.repo, "config", "core.eol", "lf")
         git(self.repo, "config", "user.name", "Security QA")
         git(self.repo, "config", "user.email", "security-qa@example.invalid")
         (self.repo / ".gitignore").write_text(".scratch/\ncache/\n", encoding="utf-8")

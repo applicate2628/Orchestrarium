@@ -23,9 +23,9 @@ import importlib.util
 import json
 import sys
 import tempfile
-import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 MODULE_PATH = REPO_ROOT / "src.claude" / "agents" / "hooks" / "dispatch_sentinels.py"
@@ -367,35 +367,62 @@ class TestLatencyAndReaderChoice(unittest.TestCase):
         source = MODULE_PATH.read_text(encoding="utf-8")
         self.assertNotIn("read_transcript_tail", source)
 
-    def test_bounded_read_stays_fast_on_a_large_transcript(self) -> None:
-        # >=100 MB synthetic transcript, boundary near the very end so the
-        # doubling reader still has to grow past its 1 MiB starting chunk --
-        # matches design.md §3.6's own measurement shape (8 MiB cap).
-        entries = []
-        filler_line = json.dumps({"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "x" * 900}]}})
-        target_bytes = 100 * 1024 * 1024
-        approx_line_bytes = len(filler_line) + 1
-        n_filler = target_bytes // approx_line_bytes
-        tmp = Path(tempfile.mktemp(suffix=".jsonl"))
-        with tmp.open("w", encoding="utf-8") as f:
-            for _ in range(n_filler):
-                f.write(filler_line + "\n")
-            f.write(json.dumps(_user_entry("boundary near the end")) + "\n")
-            # 7 PRIOR dispatches -> the pending (8th) is design-depth 8 -> FIRES.
-            for i in range(7):
-                f.write(json.dumps(_agent_dispatch_entry("backend-engineer", f"c{i}")) + "\n")
-                f.write(json.dumps(_tool_result_entry(f"c{i}")) + "\n")
-        try:
-            self.assertGreaterEqual(tmp.stat().st_size, target_bytes)
-            start = time.perf_counter()
-            ctx = dispatch_sentinels.build_context(_envelope("backend-engineer", tmp))
-            elapsed_ms = (time.perf_counter() - start) * 1000
+    def test_bounded_read_respects_io_cap_on_a_large_transcript(self) -> None:
+        # Check the actual I/O budget, not scheduler latency on a shared runner.
+        # The owner now reads one bounded suffix, not the former doubling scan.
+        cap = dispatch_sentinels.TURN_ENTRIES_BYTE_CAP
+        real_open = Path.open
+        reads = []
+
+        class BudgetedReader:
+            def __init__(self, stream):
+                self.stream = stream
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return self.stream.__exit__(*args)
+
+            def seek(self, *args):
+                return self.stream.seek(*args)
+
+            def tell(self):
+                return self.stream.tell()
+
+            def read(self, size=-1):
+                if size < 0 or sum(reads) + size > cap:
+                    raise AssertionError("transcript read exceeds the aggregate byte cap")
+                data = self.stream.read(size)
+                reads.append(len(data))
+                return data
+
+        with tempfile.TemporaryDirectory(prefix="dispatch-io-budget-") as directory:
+            transcript = Path(directory) / "transcript.jsonl"
+            filler = (json.dumps({"type": "assistant", "message": {
+                "role": "assistant", "content": [{"type": "text", "text": "x" * 900}]
+            }}) + "\n").encode("utf-8")
+            target_bytes = 100 * 1024 * 1024
+            with transcript.open("wb") as stream:
+                for _ in range(target_bytes // len(filler) + 1):
+                    stream.write(filler)
+                stream.write((json.dumps(_user_entry("boundary")) + "\n").encode())
+                for i in range(7):
+                    for entry in (_agent_dispatch_entry("backend-engineer", f"c{i}"),
+                                  _tool_result_entry(f"c{i}")):
+                        stream.write((json.dumps(entry) + "\n").encode())
+            self.assertGreaterEqual(transcript.stat().st_size, target_bytes)
+
+            def observed_open(path, *args, **kwargs):
+                stream = real_open(path, *args, **kwargs)
+                return BudgetedReader(stream) if path == transcript else stream
+
+            with mock.patch.object(Path, "open", new=observed_open):
+                ctx = dispatch_sentinels.build_context(_envelope("backend-engineer", transcript))
             self.assertEqual(ctx["entries_status"], "found")
-            findings = dispatch_sentinels.evaluate_all(ctx, event="PreToolUse")
-            self.assertEqual(len(findings), 1)
-            self.assertLess(elapsed_ms, 150, f"bounded read took {elapsed_ms:.1f} ms, expected < 150 ms")
-        finally:
-            tmp.unlink()
+            self.assertEqual(len(dispatch_sentinels.evaluate_all(ctx, event="PreToolUse")), 1)
+            self.assertTrue(reads, "fixture must exercise real bounded file reads")
+            self.assertLessEqual(sum(reads), cap)
 
 
 class TestEncoding(unittest.TestCase):

@@ -82,11 +82,15 @@ def covered_set_digest(inventory: dict, path: str) -> str:
 class RepoTransferTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
-        self.root = Path(self.temp.name)
+        self.root = Path(self.temp.name).resolve()
         self.repo = self.root / "repo"
         self.remote = self.root / "remote.git"
         self.repo.mkdir()
         git(self.repo, "init", "--initial-branch=main")
+        # The transfer owner deliberately ignores host Git config. Bind fixture
+        # conversion locally so setup and read-only transfer observe identical bytes.
+        git(self.repo, "config", "core.autocrlf", "false")
+        git(self.repo, "config", "core.eol", "lf")
         git(self.repo, "config", "user.name", "Transfer Test")
         git(self.repo, "config", "user.email", "transfer@example.invalid")
 
@@ -667,10 +671,14 @@ class RepoTransferTests(unittest.TestCase):
 class UnbornRepoTransferTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
-        self.root = Path(self.temp.name)
+        self.root = Path(self.temp.name).resolve()
         self.repo = self.root / "repo"
         self.repo.mkdir()
         git(self.repo, "init", "--initial-branch=main")
+        # The transfer owner deliberately ignores host Git config. Bind fixture
+        # conversion locally so setup and read-only transfer observe identical bytes.
+        git(self.repo, "config", "core.autocrlf", "false")
+        git(self.repo, "config", "core.eol", "lf")
         self.inventory_path = self.root / "inventory.json"
         self.selection_path = self.root / "selection.json"
         self.bundle_path = self.root / "transfer.zip"

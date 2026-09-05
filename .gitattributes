@@ -19,6 +19,7 @@ shared/references/spine/*.md text eol=lf
 # These exact-reference checks and maintained documents explicitly require LF.
 # Keep this list narrow; do not normalize whole source or fixture families.
 /tests/test_claude_md_size.py text eol=lf
+/tests/test_codex_skill_catalog_budget.py text eol=lf
 /references-claude/claude-md-structural-enforcement.md text eol=lf
 /references-claude/ru/claude-md-structural-enforcement.md text eol=lf
 /references-claude/README.md text eol=lf
@@ -27,3 +28,8 @@ shared/references/spine/*.md text eol=lf
 # Historical accepted-prior payloads preserve their source blob bytes, including CRLF.
 # Revision manifests remain text; only files inside each skill payload are byte-exact.
 tests/fixtures/canonical-skill-priors/*/*/** -text
+
+# Additional exact historical payloads: preserve existing blob bytes, not LF-normalize.
+/tests/fixtures/global-lead-priors/pre-rebase/** -text
+/tests/fixtures/provider-prompt-priors/pre-e7/provider_prompt.py -text
+/tests/fixtures/legacy-obligation-migration/baseline.json -text

@@ -45,19 +45,21 @@ def _repo(tmp_path: Path) -> tuple[Path, Path, str]:
     repo = tmp_path / "repo"
     repo.mkdir()
     _git(repo, "init", "-q")
+    _git(repo, "config", "core.autocrlf", "false")
+    _git(repo, "config", "core.eol", "lf")
     _git(repo, "config", "user.email", "slice-a@example.invalid")
     _git(repo, "config", "user.name", "Slice A Test")
-    (repo / "tracked.txt").write_text("head\n", encoding="utf-8")
-    (repo / "excluded.txt").write_text("head-excluded\n", encoding="utf-8")
-    (repo / "probe.sh").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-    (repo / ".gitignore").write_text("/.scratch/\n", encoding="utf-8")
+    (repo / "tracked.txt").write_text("head\n", encoding="utf-8", newline="\n")
+    (repo / "excluded.txt").write_text("head-excluded\n", encoding="utf-8", newline="\n")
+    (repo / "probe.sh").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8", newline="\n")
+    (repo / ".gitignore").write_text("/.scratch/\n", encoding="utf-8", newline="\n")
     _git(repo, "add", ".gitignore", "tracked.txt", "excluded.txt", "probe.sh")
     _git(repo, "commit", "-qm", "fixture")
-    (repo / "tracked.txt").write_text("overlay\n", encoding="utf-8")
-    (repo / "excluded.txt").write_text("concurrent\n", encoding="utf-8")
+    (repo / "tracked.txt").write_text("overlay\n", encoding="utf-8", newline="\n")
+    (repo / "excluded.txt").write_text("concurrent\n", encoding="utf-8", newline="\n")
     baseline = repo / ".scratch" / "legacy-obligation-migration" / "baseline.json"
     baseline.parent.mkdir(parents=True)
-    baseline.write_text('{"schemaVersion":1}\n', encoding="utf-8")
+    baseline.write_text('{"schemaVersion":1}\n', encoding="utf-8", newline="\n")
     digest = hashlib.sha256(baseline.read_bytes()).hexdigest()
     return repo, baseline, digest
 

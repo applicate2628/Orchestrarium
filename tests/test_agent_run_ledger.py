@@ -1258,3 +1258,36 @@ def test_internal_closer_binds_actual_codex_terminal_and_launch_without_extended
     revised = run_validator(item)
     assert revised.returncode != 0
     assert "internal closer does not bind" in revised.stdout
+
+
+def test_concurrent_process_appends_preserve_each_complete_event(tmp_path: Path):
+    """Two real writers contend on one ledger without losing an admitted row."""
+    item = prepare_valid_work_item(tmp_path)
+    children = []
+    expected_ids = {"concurrent-writer-0", "concurrent-writer-1"}
+    try:
+        for run_id in sorted(expected_ids):
+            children.append(subprocess.Popen(
+                [sys.executable, str(LEDGER), "--work-item", str(item), "append",
+                 "--run-id", run_id, "--role", "qa-engineer", "--execution-role", "internal",
+                 "--status", "completed", "--gate", "PASS", "--scope", "ledger serialization",
+                 "--artifact", "reviews/qa.md", "--evidence", "command:concurrent-ledger-fixture",
+                 "--started-at", "2026-09-05T00:00:00Z",
+                 "--updated-at", "2026-09-05T00:00:00Z"],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            ))
+        for child in children:
+            stdout, stderr = child.communicate(timeout=40)
+            assert child.returncode == 0, stdout + stderr
+        rows = [json.loads(line) for line in (item / "agent-runs.jsonl").read_text(encoding="utf-8").splitlines()]
+        assert len(rows) == len(expected_ids)
+        assert {row["runId"] for row in rows} == expected_ids
+        assert not (item / "agent-runs.jsonl.lock").exists()
+        assert not (item / "agent-runs.jsonl.tmp").exists()
+        checked = run_validator(item)
+        assert checked.returncode == 0, checked.stdout + checked.stderr
+    finally:
+        for child in children:
+            if child.poll() is None:
+                child.kill()
+            child.communicate(timeout=10)

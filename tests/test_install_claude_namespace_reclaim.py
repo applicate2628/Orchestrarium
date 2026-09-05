@@ -12,6 +12,7 @@ The prefix IS the ownership marker (every agents-* command/flow ships under it â
 common skills in skills/ are role-named, not agents-*-prefixed), so there is no manifest.
 """
 import shutil
+import sys
 import subprocess
 import unittest
 from pathlib import Path
@@ -42,7 +43,7 @@ def _run(target: Path, *extra: str) -> subprocess.CompletedProcess:
     # bash needs forward-slash paths â€” a Windows backslash path is mangled as
     # escape sequences (returncode 127).
     return subprocess.run(
-        [BASH, INSTALLER.as_posix(), "--target", target.as_posix(),
+        [sys.executable, str(INSTALLER.with_suffix(".py")), "--target", str(target),
          "--allow-unsafe-target", *extra],
         cwd=ROOT, text=True, capture_output=True,
     )

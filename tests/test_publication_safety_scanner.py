@@ -703,6 +703,7 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
             check=True,
             capture_output=True,
         )
+        subprocess.run([git, "-C", str(repo), "config", "core.autocrlf", "false"], check=True, capture_output=True)
         subprocess.run([git, "-C", str(repo), "config", "user.email", "t@t"], check=True, capture_output=True)
         subprocess.run([git, "-C", str(repo), "config", "user.name", "t"], check=True, capture_output=True)
         subprocess.run(
@@ -2828,7 +2829,7 @@ class TestPublicationSafetyScannerV3(unittest.TestCase):
         for ambient in cases:
             with self.subTest(ambient=ambient), mock.patch.dict(os.environ, ambient, clear=False):
                 for key in tuple(os.environ):
-                    if key.startswith("GIT_CONFIG_") and key not in ambient:
+                    if key.upper().startswith("GIT_CONFIG_") and key.upper() not in {name.upper() for name in ambient}:
                         os.environ.pop(key, None)
                 outcome = module._remote_probe_binding("https://example.invalid/repository.git")
                 self.assertTrue(

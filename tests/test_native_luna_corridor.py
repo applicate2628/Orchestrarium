@@ -454,6 +454,7 @@ def test_luna_path_kind_missing_leaf_preserves_path_and_parent_guards(
                 st_size=metadata.st_size,
                 st_mtime_ns=metadata.st_mtime_ns,
                 st_ctime_ns=metadata.st_ctime_ns,
+                st_reparse_tag=getattr(metadata, "st_reparse_tag", 0),
                 st_file_attributes=0x400,
             )
 
@@ -490,6 +491,7 @@ def test_luna_path_kind_accepts_stable_special_leaf_as_other_without_content_rea
                 st_size=metadata.st_size,
                 st_mtime_ns=metadata.st_mtime_ns,
                 st_ctime_ns=metadata.st_ctime_ns,
+                st_reparse_tag=getattr(metadata, "st_reparse_tag", 0),
                 st_file_attributes=getattr(metadata, "st_file_attributes", 0),
             )
 
@@ -800,6 +802,7 @@ def test_luna_worker_target_must_be_existing_ordinary_file_below_exact_root(
                 st_size=metadata.st_size,
                 st_mtime_ns=metadata.st_mtime_ns,
                 st_ctime_ns=metadata.st_ctime_ns,
+                st_reparse_tag=getattr(metadata, "st_reparse_tag", 0),
                 st_file_attributes=getattr(metadata, "st_file_attributes", 0),
             )
 
@@ -840,6 +843,7 @@ def test_luna_target_walk_rejects_reparse_component_and_metadata_error(
                 st_size=metadata.st_size,
                 st_mtime_ns=metadata.st_mtime_ns,
                 st_ctime_ns=metadata.st_ctime_ns,
+                st_reparse_tag=getattr(metadata, "st_reparse_tag", 0),
                 st_file_attributes=0x400,
             )
 
@@ -912,6 +916,7 @@ def test_luna_exact_root_walk_rejects_reparse_ancestor_for_literal_plan(
                 st_size=metadata.st_size,
                 st_mtime_ns=metadata.st_mtime_ns,
                 st_ctime_ns=metadata.st_ctime_ns,
+                st_reparse_tag=getattr(metadata, "st_reparse_tag", 0),
                 st_file_attributes=0x400,
             )
 

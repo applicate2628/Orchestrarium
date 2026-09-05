@@ -1784,7 +1784,8 @@ def test_e7_six_tree_upgrade_rolls_back_after_middle_replacement(
     snapshot = tmp_path / "e7-source"
     snapshot.mkdir()
     archive = subprocess.run(
-        ["git", "archive", "--format=tar", "e7a691dea4f1d3cb154d338c63b274ebcd74ee4c"],
+        ["git", "-c", "core.autocrlf=false", "-c", "core.eol=lf",
+         "archive", "--format=tar", "e7a691dea4f1d3cb154d338c63b274ebcd74ee4c"],
         cwd=ROOT,
         check=True,
         capture_output=True,
@@ -1845,7 +1846,8 @@ def test_e7_claude_transport_replacement_rolls_back_trees_trio_and_manifest(
     snapshot = tmp_path / "e7-source"
     snapshot.mkdir()
     archive = subprocess.run(
-        ["git", "archive", "--format=tar", "e7a691dea4f1d3cb154d338c63b274ebcd74ee4c"],
+        ["git", "-c", "core.autocrlf=false", "-c", "core.eol=lf",
+         "archive", "--format=tar", "e7a691dea4f1d3cb154d338c63b274ebcd74ee4c"],
         cwd=ROOT, check=True, capture_output=True,
     ).stdout
     with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as package:
