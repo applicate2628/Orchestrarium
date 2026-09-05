@@ -15,6 +15,8 @@ def _pinned_sources():
         "shared/provider-prompt-projections.v1.json", "shared/role-routing-policy.v1.json",
         "src.codex/agents/orchestrarium-role-manifest.json", "src.claude/CLAUDE.md",
         "shared/agents-mode.presets.json", "scripts/validate-claude-md.py",
+        "scripts/linked_runtime_subroots.py",
+        "tests/fixtures/provider-prompt-priors/pre-e7/provider_prompt.py",
         "tests/test_claude_md_size.py", "references-claude/README.md", "RELEASE_NOTES.md",
         "references-claude/claude-md-structural-enforcement.md",
         "references-claude/ru/claude-md-structural-enforcement.md",

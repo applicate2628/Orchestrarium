@@ -22,7 +22,7 @@ import threading
 import time
 import tomllib
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 try:
     from provider_prompt import enroll_kimi_executable, replace_kimi_enrollment
@@ -1174,15 +1174,110 @@ def _rmtree_callback_kwargs(
 
 
 def _remove_readonly_tree(path: Path) -> None:
-    """Remove a transaction-owned tree after making only failed entries writable."""
+    """Remove an owned tree; repair permission failures without following links."""
 
-    def retry_writable(function: Callable[..., Any], value: str, _exc: Any) -> None:
-        candidate = Path(value)
-        os.chmod(candidate, candidate.lstat().st_mode | stat.S_IWRITE)
-        function(value)
+    root = Path(os.path.abspath(path))
+    original = root.lstat()
+    if (
+        not stat.S_ISDIR(original.st_mode)
+        or stat.S_ISLNK(original.st_mode)
+        or _is_reparse_metadata(original)
+    ):
+        raise OSError(f"refusing readonly cleanup of a non-directory or link: {root}")
+    root_identity = (original.st_dev, original.st_ino)
+    repaired: set[Path] = set()
+
+    class RetryPermissionRepair(Exception):
+        """Restart rmtree, rather than invoking an incompatible callback target."""
+
+    def repair(candidate: Path, failure: PermissionError) -> bool:
+        # A failed unlink can require write permission on its parent, but never
+        # grant permissions to the parent outside this transaction-owned root.
+        root_metadata = root.lstat()
+        if (
+            (root_metadata.st_dev, root_metadata.st_ino) != root_identity
+            or not stat.S_ISDIR(root_metadata.st_mode)
+            or stat.S_ISLNK(root_metadata.st_mode)
+            or _is_reparse_metadata(root_metadata)
+        ):
+            raise failure
+        relative = candidate.relative_to(root)
+        current = root
+        for part in relative.parts[:-1]:
+            current /= part
+            metadata = current.lstat()
+            if (
+                not stat.S_ISDIR(metadata.st_mode)
+                or stat.S_ISLNK(metadata.st_mode)
+                or _is_reparse_metadata(metadata)
+            ):
+                raise failure
+        metadata = candidate.lstat()
+        if stat.S_ISLNK(metadata.st_mode) or _is_reparse_metadata(metadata):
+            return False
+        if stat.S_ISDIR(metadata.st_mode):
+            desired = metadata.st_mode | stat.S_IRWXU
+        elif os.name == "nt" and stat.S_ISREG(metadata.st_mode):
+            # A hard link may share the readonly attribute with a file outside
+            # the owned tree. Do not modify such a file's shared metadata.
+            if metadata.st_nlink > 1:
+                raise failure
+            desired = metadata.st_mode | stat.S_IWRITE
+        else:
+            # POSIX file deletion is governed by its parent directory; changing
+            # the file itself would needlessly affect external hard links.
+            return False
+        if desired == metadata.st_mode or candidate in repaired:
+            return False
+        if os.name != "nt" or os.chmod in os.supports_follow_symlinks:
+            os.chmod(candidate, desired, follow_symlinks=False)
+        else:
+            # Windows Python before 3.13 has no follow_symlinks chmod option.
+            # Reparse entries were explicitly excluded above.
+            os.chmod(candidate, desired)
+        repaired.add(candidate)
+        return True
+
+    def retry_writable(
+        function: Callable[..., Any], value: str, failure: BaseException
+    ) -> None:
+        if not isinstance(failure, PermissionError):
+            raise failure
+        candidate = Path(os.path.abspath(value))
+        if not candidate.is_relative_to(root):
+            raise failure
+        changed = False
+        if candidate != root:
+            changed = repair(candidate.parent, failure)
+        try:
+            changed = repair(candidate, failure) or changed
+        except FileNotFoundError:
+            if not changed:
+                raise failure
+        if not changed:
+            raise failure
+        if function is os.unlink or function is os.rmdir:
+            # These two operations have a known single-path signature. Resume
+            # the current traversal instead of rescanning for each readonly leaf.
+            function(value)
+            return
+        raise RetryPermissionRepair from failure
 
     callback = _rmtree_callback_kwargs(shutil.rmtree, retry_writable)
-    shutil.rmtree(path, **callback)
+    while True:
+        metadata = root.lstat()
+        if (
+            (metadata.st_dev, metadata.st_ino) != root_identity
+            or not stat.S_ISDIR(metadata.st_mode)
+            or stat.S_ISLNK(metadata.st_mode)
+            or _is_reparse_metadata(metadata)
+        ):
+            raise OSError(f"readonly cleanup root changed identity: {root}")
+        try:
+            shutil.rmtree(root, **callback)
+            return
+        except RetryPermissionRepair:
+            continue
 
 
 class _CreateOnlyMutablePath:
@@ -1786,7 +1881,7 @@ def _select_global_home_environment(
     raise ValueError("E_GLOBAL_HOME_AMBIGUOUS: HOME is required")
 
 
-def _resolve_global_home() -> Path:
+def _resolve_global_home(*, platform: str | None = None) -> Path:
     """Select the one explicit, non-reparse global home; never fall back."""
 
     def require_non_reparse(path: Path) -> None:
@@ -1800,7 +1895,7 @@ def _resolve_global_home() -> Path:
             raise
 
     primary_name, primary_value, alternate_value = _select_global_home_environment(
-        os.environ.get("USERPROFILE"), os.environ.get("HOME")
+        os.environ.get("USERPROFILE"), os.environ.get("HOME"), platform=platform
     )
     primary = Path(os.path.abspath(os.path.expanduser(primary_value)))
     if not primary.is_dir():

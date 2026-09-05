@@ -442,12 +442,14 @@ def _minimal_codex_env(codex_home: Path) -> dict[str, str]:
 
 def _codex_hooks_list(
     *,
-    codex_command: list[str],
+    codex_command: list[str] | None,
     codex_home: Path,
     query_cwd: Path,
     timeout: float = 15,
 ) -> list[dict[str, Any]]:
     """Ask the Codex host for its current hook admission inventory, read-only."""
+    if codex_command is None:
+        codex_command = resolve_codex_command(os.environ.get("CODEX_BIN"))
     if not codex_command or not Path(codex_command[0]).is_absolute():
         raise ValueError("FAIL CODEX_HOOK_LIST_UNAVAILABLE: Codex command is not absolute")
     initialize = {
@@ -625,7 +627,7 @@ def _reconcile_codex_trust(
     host_os: str,
     mode: str,
     touched_identities: set[str],
-    codex_command: list[str],
+    codex_command: list[str] | None,
     codex_home: Path,
     query_cwd: Path,
 ) -> list[str]:
@@ -1199,8 +1201,7 @@ def verify_config(
                 host_os=host_os,
                 mode=codex_trust_mode,
                 touched_identities=touched_identities or set(),
-                codex_command=codex_command
-                or resolve_codex_command(os.environ.get("CODEX_BIN")),
+                codex_command=codex_command,
                 codex_home=(codex_home or target.parent).expanduser().resolve(),
                 query_cwd=(query_cwd or Path.cwd()).expanduser().resolve(),
             )

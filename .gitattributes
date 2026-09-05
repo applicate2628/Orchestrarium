@@ -51,3 +51,7 @@ RELEASE_NOTES.md text eol=lf
 # Historical accepted-prior payloads preserve their source blob bytes, including CRLF.
 # Revision manifests remain text; only files inside each skill payload are byte-exact.
 tests/fixtures/canonical-skill-priors/*/*/** -text
+
+# Directly attested linked-runtime authority and byte-exact historical predecessor.
+/scripts/linked_runtime_subroots.py text eol=lf
+/tests/fixtures/provider-prompt-priors/pre-e7/provider_prompt.py -text

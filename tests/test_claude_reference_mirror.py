@@ -91,3 +91,13 @@ def test_reference_mirror_refuses_unreviewed_russian_payload_byte_drift(
 
     assert not ok
     assert any("CRM-RU-HOOK-PAYLOAD-PIN" in message for message in messages), messages
+
+
+@pytest.mark.parametrize("heading", ("Аудит Repository-orientation", "Аудит Typed-routing"))
+def test_russian_audit_delivery_matches_the_nonblocking_hook_channel(heading):
+    text = RU_REFERENCE.read_text(encoding="utf-8")
+    section = text.split(f"**{heading}.**", 1)[1].split("\n\n", 1)[0]
+    assert "hookSpecificOutput.additionalContext" in section
+    assert "stdout" in section
+    assert "кодом 0" in section
+    assert "кодом 1" not in section
