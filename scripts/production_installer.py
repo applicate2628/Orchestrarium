@@ -22,7 +22,7 @@ import threading
 import time
 import tomllib
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 try:
     from provider_prompt import enroll_kimi_executable, replace_kimi_enrollment
@@ -1162,12 +1162,58 @@ def _rmtree_callback_kwargs(
 
 
 def _remove_readonly_tree(path: Path) -> None:
-    """Remove a transaction-owned tree after making only failed entries writable."""
+    """Remove an owned tree, repairing permission failures without following links."""
 
-    def retry_writable(function: Callable[..., Any], value: str, _exc: Any) -> None:
-        candidate = Path(value)
-        os.chmod(candidate, candidate.lstat().st_mode | stat.S_IWRITE)
-        function(value)
+    root = Path(os.path.abspath(path))
+    retried: set[Path] = set()
+    removed: set[Path] = set()
+
+    def retry_writable(
+        function: Callable[..., Any], value: str, exc: BaseException
+    ) -> None:
+        candidate = Path(os.path.abspath(value))
+        # A traversal retry can already have removed this entry. Do not hide a
+        # missing original root or an unrelated filesystem failure.
+        if isinstance(exc, FileNotFoundError) and candidate in removed:
+            return
+        if not isinstance(exc, PermissionError) or candidate in retried:
+            raise exc
+        try:
+            candidate.relative_to(root)
+        except ValueError:
+            raise exc
+        retried.add(candidate)
+
+        # On POSIX, unlink/rmdir require write and search permission on the
+        # containing directory, not write permission on the child. The parent
+        # of the supplied root is outside this cleanup owner's authority.
+        if candidate != root:
+            parent = candidate.parent
+            metadata = parent.lstat()
+            if (
+                not stat.S_ISDIR(metadata.st_mode)
+                or stat.S_ISLNK(metadata.st_mode)
+                or _is_reparse_metadata(metadata)
+            ):
+                raise exc
+            os.chmod(parent, metadata.st_mode | stat.S_IRWXU)
+
+        metadata = candidate.lstat()
+        if stat.S_ISLNK(metadata.st_mode) or _is_reparse_metadata(metadata):
+            # chmod follows links on some supported hosts. Remove only the
+            # entry itself; never chmod or traverse its target.
+            if function not in (os.unlink, os.rmdir):
+                raise exc
+            function(value)
+        elif stat.S_ISDIR(metadata.st_mode):
+            os.chmod(candidate, metadata.st_mode | stat.S_IRWXU)
+            # Repeating scandir/open alone neither visits the entries nor
+            # supplies open's required flags. Retry the complete subtree once.
+            shutil.rmtree(candidate, **callback)
+        else:
+            os.chmod(candidate, metadata.st_mode | stat.S_IWUSR)
+            function(value)
+        removed.add(candidate)
 
     callback = _rmtree_callback_kwargs(shutil.rmtree, retry_writable)
     shutil.rmtree(path, **callback)
@@ -1774,7 +1820,7 @@ def _select_global_home_environment(
     raise ValueError("E_GLOBAL_HOME_AMBIGUOUS: HOME is required")
 
 
-def _resolve_global_home() -> Path:
+def _resolve_global_home(*, platform: str | None = None) -> Path:
     """Select the one explicit, non-reparse global home; never fall back."""
 
     def require_non_reparse(path: Path) -> None:
@@ -1788,7 +1834,7 @@ def _resolve_global_home() -> Path:
             raise
 
     primary_name, primary_value, alternate_value = _select_global_home_environment(
-        os.environ.get("USERPROFILE"), os.environ.get("HOME")
+        os.environ.get("USERPROFILE"), os.environ.get("HOME"), platform=platform
     )
     primary = Path(os.path.abspath(os.path.expanduser(primary_value)))
     if not primary.is_dir():

@@ -2812,6 +2812,18 @@ class TestPublicationSafetyScannerV3(unittest.TestCase):
             {"GIT_CONFIG_COUNT": "bogus"},
             {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "only-key"},
             {"GIT_CONFIG_COUNT": "0", "GIT_CONFIG_KEY_0": "orphan", "GIT_CONFIG_VALUE_0": "orphan"},
+            {"GIT_CONFIG_COUNT": "0", "GIT_CONFIG_KEY_7": "orphan"},
+            {"GIT_CONFIG_VALUE_9": "orphan"},
+            {"GIT_CONFIG_COUNT": "0", "GIT_CONFIG_KEY_01": "noncanonical"},
+            {"GIT_CONFIG_COUNT": "0", "GIT_CONFIG_VALUE_-1": "negative"},
+            {"GIT_CONFIG_COUNT": "0", "GIT_CONFIG_KEY_bad": "nonnumeric"},
+            {
+                "GIT_CONFIG_COUNT": "1",
+                "GIT_CONFIG_KEY_0": "protocol.file.allow",
+                "GIT_CONFIG_VALUE_0": "never",
+                "GIT_CONFIG_KEY_3": "stray",
+                "GIT_CONFIG_VALUE_3": "stray",
+            },
         )
         for ambient in cases:
             with self.subTest(ambient=ambient), mock.patch.dict(os.environ, ambient, clear=False):
@@ -2819,7 +2831,10 @@ class TestPublicationSafetyScannerV3(unittest.TestCase):
                     if key.startswith("GIT_CONFIG_") and key not in ambient:
                         os.environ.pop(key, None)
                 outcome = module._remote_probe_binding("https://example.invalid/repository.git")
-                self.assertIsInstance(outcome, module.Refusal)
+                self.assertTrue(
+                    isinstance(outcome, module.Refusal),
+                    "invalid command-scope configuration was accepted",
+                )
                 self.assertEqual(outcome.failure_id, "PS-MSG-RANGE")
                 self.assertEqual(outcome.reason, "remote-binding")
 

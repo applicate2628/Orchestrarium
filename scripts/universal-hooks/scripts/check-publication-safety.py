@@ -1330,16 +1330,16 @@ def _remote_probe_binding(
             config_count = int(raw_count, 10)
         if config_count > 1024:
             return _refusal("PS-MSG-RANGE", "remote-binding")
-        for index in range(config_count):
-            if (
-                f"GIT_CONFIG_KEY_{index}" not in child_env
-                or f"GIT_CONFIG_VALUE_{index}" not in child_env
-            ):
-                return _refusal("PS-MSG-RANGE", "remote-binding")
-        if (
-            f"GIT_CONFIG_KEY_{config_count}" in child_env
-            or f"GIT_CONFIG_VALUE_{config_count}" in child_env
-        ):
+        expected_entries = {
+            f"GIT_CONFIG_{field}_{index}"
+            for index in range(config_count)
+            for field in ("KEY", "VALUE")
+        }
+        actual_entries = {
+            key for key in child_env
+            if key.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_"))
+        }
+        if actual_entries != expected_entries:
             return _refusal("PS-MSG-RANGE", "remote-binding")
         child_env.update({
             "GIT_CONFIG_COUNT": str(config_count + 1),

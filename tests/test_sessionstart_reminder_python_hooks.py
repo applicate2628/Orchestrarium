@@ -28,34 +28,12 @@ MCP_POLICY_SCRIPTS = (
 )
 
 STATEFUL_REPOSITORY_TOOL_CONTEXT = (
-    "For any stateful or indexed repository-understanding tool - whether MCP, CLI, or "
-    "skill-backed - repository/project/branch/worktree/indexed-input changes invalidate "
-    "any earlier answer: use the tool's own status/freshness probe; when it reports stale "
-    "or pending, run its documented sync/update/reindex, confirm fresh, then repeat the "
-    "intended query. Graphify, including standalone CLI or skill-backed use, follows "
-    "`status/freshness -> sync/update/reindex -> confirm fresh -> repeat intended query`. "
-    "Example: CodeGraph `status -> sync -> fresh status -> repeat query`. If the tool "
-    "is needed now, stale state does not justify skipping it or deferring refresh to an "
-    "authorizer or later concurrent work. If refresh fails, report it explicitly. Use an "
-    "alternate tool only when refresh genuinely fails, the tool is unavailable, the user "
-    "forbids it, or refresh exceeds an explicit approved resource bound; report the reason; "
-    "do not present stale output as current or any stale evidence as current. Stateless or "
-    "live MCPs need no refresh. "
-    "Other stateless or live tools likewise need no refresh."
+    "For any stateful or indexed repository-understanding tool - whether MCP, CLI, or skill-backed - repository/project/branch/worktree/indexed-input changes invalidate any earlier answer: use the tool's own status/freshness probe; when it reports stale or pending, run its documented sync/update/reindex, confirm fresh, then repeat the intended query. Non-normative workflow examples only: Graphify follows `status/freshness -> sync/update/reindex -> confirm fresh -> repeat intended query`; CodeGraph follows `status -> sync -> fresh status -> repeat query`. These names never select a tool. If the tool is needed now, stale state does not justify skipping it or deferring refresh to an authorizer or later concurrent work. If refresh fails, report it explicitly. Use an alternate tool only when refresh genuinely fails, the tool is unavailable, the user forbids it, or refresh exceeds an explicit approved resource bound; report the reason; do not present stale output as current or any stale evidence as current. Stateless or live MCPs need no refresh. Other stateless or live tools likewise need no refresh."
 )
 
 TURN_ANCHOR_FRESHNESS_CONTEXT = (
-    "Repository-understanding freshness: any stateful/indexed tool (MCP, CLI, or "
-    "skill-backed), explicitly Graphify, is invalidated by repository/project/branch/"
-    "worktree/indexed-input changes; use status/freshness, then sync/update/reindex, fresh "
-    "recheck, then repeat the query - explicitly, Graphify follows `status/freshness -> "
-    "sync/update/reindex -> confirm fresh -> repeat intended query`. If the tool is needed "
-    "now, stale does not justify "
-    "skipping or deferring refresh to an authorizer or later concurrent work. Use an "
-    "alternate only after refresh genuinely fails, the tool is unavailable, the user "
-    "forbids it, or refresh exceeds an explicit approved resource bound; report why and "
-    "never present stale evidence; stateless/live MCPs are exempt. Other stateless/live "
-    "tools need no refresh."
+    'Repository-understanding freshness: '
+    'any stateful/indexed tool (MCP, CLI, or skill-backed) is invalidated by repository/project/branch/worktree/indexed-input changes; use status/freshness, then sync/update/reindex, fresh recheck, then repeat the query. Non-normative workflow example only: Graphify follows `status/freshness -> sync/update/reindex -> confirm fresh -> repeat intended query`; this name never selects a tool. If the tool is needed now, stale does not justify skipping or deferring refresh to an authorizer or later concurrent work. Use an alternate only after refresh genuinely fails, the tool is unavailable, the user forbids it, or refresh exceeds an explicit approved resource bound; report why and never present stale evidence; stateless/live MCPs are exempt. Other stateless/live tools need no refresh.'
 )
 
 # (script, config subdir under cwd, expected-context-dict-key)
@@ -65,15 +43,15 @@ AGENTS_MODE_PY = (
 )
 
 MCP_CONTEXT = "\n".join((
-    "[MCP / tools reminder - re-shown at session start and after every compaction]",
-    "MCP servers may be connected in this environment. For codebase, architecture, API/docs, search, browser, debugger, profiler, or repository-understanding tasks, make MCP/tool-discovery an explicit checkpoint before falling back to ad-hoc shell reads.",
-    "MCP tools load on demand: use the platform's tool discovery (e.g. ToolSearch) to see the connected servers and load a tool's schema, then call the relevant tool. If a relevant MCP is unavailable or broken, say so briefly instead of silently substituting a weaker path.",
-    "CONNECTED but uninitialized is not unavailable: do NOT skip a connected MCP reporting \"not initialized\", \"no index\", \"empty\", or \"no data yet\". Many servers require or build their own index/state on first use — when they report no index, INITIALIZE them per the server's own instructions (e.g. run a code-graph server's init / check its status; codegraph builds its initial index via `codegraph init`, then a file-watcher keeps it fresh) and use or await the result — never silently substitute ad-hoc shell/grep. Only a genuinely absent server (not connected, not installed, or absent from tool discovery) may be skipped with an explanation.",
-    "When mcpMode: force is active, relevant MCP use is a standing instruction. Under mcpMode: auto, still consider MCP first when it fits the task and record why it was skipped if the task explicitly asked for MCP.",
+    '[MCP / tools reminder - re-shown at session start and after every compaction]',
+    'MCP servers may be connected in this environment. For codebase, architecture, API/docs, search, browser, debugger, profiler, or repository-understanding tasks, make MCP/tool-discovery an explicit checkpoint before falling back to ad-hoc shell reads.',
+    "MCP tools load on demand: use the platform's runtime tool discovery to see the connected servers and load a tool's schema, then call the relevant tool. Non-normative interface example only: ToolSearch may provide that discovery on some hosts; its name never selects a tool. If a relevant MCP is unavailable or broken, say so briefly instead of silently substituting a weaker path.",
+    'CONNECTED but uninitialized is not unavailable: do NOT skip a connected MCP reporting "not initialized", "no index", "empty", or "no data yet". Many servers require or build their own index/state on first use — when they report no index, INITIALIZE them per the server\'s own instructions and use or await the result — never silently substitute ad-hoc shell/grep. Only a genuinely absent server (not connected, not installed, or absent from runtime tool discovery) may be skipped with an explanation.',
+    'When mcpMode: force is active, relevant MCP use is a standing instruction. Under mcpMode: auto, still consider MCP first when it fits the task and record why it was skipped if the task explicitly asked for MCP.',
     STATEFUL_REPOSITORY_TOOL_CONTEXT,
-    "High-value categories when present: semantic code navigation and code-graph, Repomix or repository packers, language-server / LSP, current library / framework / API docs (use these instead of answering API questions from memory), debuggers and profilers, browser automation, memory, search, and fetch utilities.",
-    "This STILL APPLIES AFTER COMPACTION - do not forget MCP just because the context was summarized.",
-    "SUBAGENTS: dispatched agents inherit the runtime tool surface. In the dispatch prompt, explicitly allow relevant MCP discovery/use within the assigned role, scope, and safety limits; do not accidentally hide MCP availability, but keep any deliberate tool limits honest.",
+    'Non-normative capability examples only, never selection logic: semantic code navigation and code-graph, Repomix or repository packers, language-server / LSP, current library / framework / API docs (use these instead of answering API questions from memory), debuggers and profilers, browser automation, memory, search, and fetch utilities.',
+    'This STILL APPLIES AFTER COMPACTION - do not forget MCP just because the context was summarized.',
+    'SUBAGENTS: dispatched agents inherit the runtime tool surface. In the dispatch prompt, explicitly allow relevant MCP discovery/use within the assigned role, scope, and safety limits; do not accidentally hide MCP availability, but keep any deliberate tool limits honest.',
 ))
 
 DELEGATION_HEADING = (

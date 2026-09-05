@@ -1617,6 +1617,8 @@ def test_post_materialization_runtime_census_matches_declared_destinations(
 ) -> None:
     """The actual two-provider writer calls must echo every declared destination."""
 
+    monkeypatch.setenv("CODEX_BIN", codex_hook_host_env(os.environ, ROOT)["CODEX_BIN"])
+
     artifact_class = {
         "claude-skill-projection": "claude-skill-projection",
         "runtime-outside": "runtime-outside",
@@ -1972,10 +1974,16 @@ def test_codex_hooks_inventory_is_outside_lead_and_rolls_back_with_registration(
 ) -> None:
     """The generated registration sidecar has config-root ownership and rollback."""
 
+    monkeypatch.setenv("CODEX_BIN", codex_hook_host_env(os.environ, ROOT)["CODEX_BIN"])
+
     project = tmp_path / "project"
     project.mkdir()
 
+    reached_failure = False
+
     def fail_after_hook_transaction(*_args: object, **_kwargs: object) -> None:
+        nonlocal reached_failure
+        reached_failure = True
         raise RuntimeError("forced post-hook failure")
 
     monkeypatch.setattr(installer, "_reclaim_retired", fail_after_hook_transaction)
@@ -1985,6 +1993,7 @@ def test_codex_hooks_inventory_is_outside_lead_and_rolls_back_with_registration(
     )
 
     assert result == 1
+    assert reached_failure, "the injected post-hook rollback checkpoint was not reached"
     assert not (project / ".codex" / "hooks.json").exists()
     assert not (project / ".codex" / "codex-hook-inventory.json").exists()
     assert not (
@@ -3241,7 +3250,7 @@ def test_global_home_reparse_is_rejected_with_global_stable_error(
     monkeypatch.delenv("HOME", raising=False)
 
     with pytest.raises(ValueError, match="E_GLOBAL_HOME_REPARSE"):
-        installer._resolve_global_home()
+        installer._resolve_global_home(platform="nt")
 
 
 def test_global_home_missing_matching_and_mismatch_rules(
@@ -3261,11 +3270,11 @@ def test_global_home_missing_matching_and_mismatch_rules(
         )
 
     monkeypatch.setenv("USERPROFILE", str(primary))
-    assert installer._resolve_global_home() == primary
+    assert installer._resolve_global_home(platform="nt") == primary
 
     monkeypatch.setenv("HOME", str(alternate))
     with pytest.raises(ValueError, match="E_GLOBAL_HOME_AMBIGUOUS"):
-        installer._resolve_global_home()
+        installer._resolve_global_home(platform="nt")
 
 
 def test_canonical_skill_and_projection_matrix_is_create_only(tmp_path: Path) -> None:
