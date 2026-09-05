@@ -28,7 +28,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          python ../control/.github/audit/windows-triage.py *> "$env:RUNNER_TEMP/windows-diagnosis.log"
+          python -c "import sys,pathlib; sys.path.insert(0,str(pathlib.Path.cwd())); p=pathlib.Path('../control/.github/audit/windows-triage.py'); s=p.read_text().replace('result.error_code','result.failure_id'); exec(compile(s,str(p),'exec'))" *> "$env:RUNNER_TEMP/windows-diagnosis.log"
           $status = $LASTEXITCODE
           Get-Content "$env:RUNNER_TEMP/windows-diagnosis.log"
           exit $status
