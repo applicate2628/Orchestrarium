@@ -1,0 +1,172 @@
+name: Sequential recovery and full test audit
+on:
+  push:
+    branches: [automation/pr-sequential-audit-20260905]
+    paths: ['.github/workflows/pr-recovery-full.yml']
+permissions:
+  contents: read
+concurrency:
+  group: pr-recovery-full-20260905
+  cancel-in-progress: false
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    permissions:
+      contents: write
+    outputs:
+      sha: ${{ steps.candidate.outputs.sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 97e41b7aee6a37b5c3f61cb9e98e5a15307dce71
+          fetch-depth: 0
+          path: source
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          path: control
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Apply exact reviewed recovery changes
+        id: candidate
+        working-directory: source
+        shell: python
+        run: |
+          import base64, gzip, hashlib, os, subprocess
+          from pathlib import Path
+          def git(*args): return subprocess.check_output(['git', *args], text=True).strip()
+          assert git('rev-parse', 'HEAD') == '97e41b7aee6a37b5c3f61cb9e98e5a15307dce71'
+          assert git('rev-parse', 'HEAD^{tree}') == '3966c6428c84bad996108a4d8e28d2069b2bd55f'
+          parts = [Path('../control/.github/audit/recovery-part-' + str(index) + '.b64').read_text().strip() for index in range(3)]
+          patch = gzip.decompress(base64.b64decode(''.join(parts), validate=True))
+          assert hashlib.sha256(patch).hexdigest() == 'ac73c0893870253650431683d95748d9638b960fd84fc71b4b91638d7f075fad'
+          path = Path(os.environ['RUNNER_TEMP']) / 'recovery.patch'
+          path.write_bytes(patch)
+          git('apply', '--check', '--index', '--unidiff-zero', str(path))
+          git('apply', '--index', '--unidiff-zero', str(path))
+          git('diff', '--cached', '--check')
+          assert git('write-tree') == '463afc61af473ccd513ae11b2e6eec9693dfc10f'
+          subprocess.run(['python', 'scripts/check-publication-gate.py'], check=True)
+          git('config', 'user.name', 'github-actions[bot]')
+          git('config', 'user.email', '41898282+github-actions[bot]@users.noreply.github.com')
+          git('commit', '-m', 'fix: recover owned read-only installs and align bounded source contracts')
+          sha = git('rev-parse', 'HEAD')
+          git('push', 'origin', 'HEAD:refs/heads/automation/pr4-recovery-20260905')
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as f: f.write('sha=' + sha + '\n')
+          print('Exact candidate: ' + sha)
+  tests:
+    needs: prepare
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+        shard: [0, 1, 2, 3, 4, 5]
+    env:
+      PYTHONUTF8: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+      AUDIT_SHARD: ${{ matrix.shard }}
+      AUDIT_SHARDS: '6'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --disable-pip-version-check pytest==8.3.5 pytest-subtests==0.14.2 pytest-timeout==2.3.1 PyYAML==6.0.2 "jsonschema[format]==4.23.0"
+      - name: Run a disjoint shard of all collected repository tests
+        shell: python
+        run: |
+          import hashlib, json, os, subprocess, sys
+          from pathlib import Path
+          out = Path(os.environ['RUNNER_TEMP']) / 'complete-evidence'
+          out.mkdir()
+          head = subprocess.check_output(['git','rev-parse','HEAD'], text=True).strip()
+          assert head == '${{ needs.prepare.outputs.sha }}'
+          module = out / 'audit_shard.py'
+          module.write_text('''import hashlib, json, os
+          from pathlib import Path
+          def pytest_collection_modifyitems(config, items):
+              total = int(os.environ['AUDIT_SHARDS'])
+              index = int(os.environ['AUDIT_SHARD'])
+              identities = [item.nodeid for item in items]
+              selected = [item for offset, item in enumerate(items) if offset % total == index]
+              deselected = [item for offset, item in enumerate(items) if offset % total != index]
+              report = {'collected': len(items), 'collection_sha256': hashlib.sha256('\\n'.join(identities).encode()).hexdigest(), 'selected': [item.nodeid for item in selected]}
+              Path(os.environ['AUDIT_OUT'], 'collection.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
+              config.hook.pytest_deselected(items=deselected)
+              items[:] = selected
+          '''.replace('\n          ', '\n'), encoding='utf-8')
+          env = os.environ.copy()
+          env['PYTHONPATH'] = str(out) + os.pathsep + str(Path.cwd())
+          env['AUDIT_OUT'] = str(out)
+          command = [sys.executable,'-m','pytest','-q','-ra','--tb=short','--timeout=120','--junitxml='+str(out/'junit.xml'),'-p','audit_shard']
+          with (out/'pytest.log').open('wb') as log:
+              result = subprocess.run(command, env=env, stdout=log, stderr=subprocess.STDOUT)
+          (out/'result.json').write_text(json.dumps({'head':head,'platform':sys.platform,'shard':os.environ['AUDIT_SHARD'],'exit':result.returncode,'command':command}, indent=2), encoding='utf-8')
+          print((out/'pytest.log').read_text(encoding='utf-8', errors='replace')[-28000:])
+          raise SystemExit(result.returncode)
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: complete-${{ matrix.os }}-${{ matrix.shard }}
+          path: ${{ runner.temp }}/complete-evidence/
+          if-no-files-found: warn
+          retention-days: 3
+  focused:
+    needs: prepare
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 18
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    env:
+      PYTHONUTF8: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --disable-pip-version-check pytest==8.3.5 pytest-subtests==0.14.2 PyYAML==6.0.2 "jsonschema[format]==4.23.0"
+      - name: Check integrated recovery, both provider packs and transport projections
+        shell: python
+        run: |
+          import json, os, subprocess, sys
+          from pathlib import Path
+          out = Path(os.environ['RUNNER_TEMP']) / 'focus-evidence'
+          out.mkdir()
+          commands = {
+              'recovery': [sys.executable,'-m','pytest','-q','-ra','--tb=short','tests/test_installer_readonly_cleanup.py','tests/test_installer_global_home_platform.py','tests/test_pinned_checkout_bytes.py','tests/test_process_runner_windows_owner.py','tests/test_hook_health.py','tests/test_claude_md_size.py','tests/test_claude_reference_mirror.py','tests/test_agents_mode_installer_regression.py','tests/test_provider_prompt_projections.py'],
+              'codex-pack': [sys.executable,'src.codex/skills/lead/scripts/validate-skill-pack.py'],
+              'claude-pack': [sys.executable,'src.claude/agents/scripts/validate-skill-pack.py'],
+          }
+          results = {}
+          for name, command in commands.items():
+              with (out/(name+'.log')).open('wb') as log:
+                  result = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT)
+              results[name] = result.returncode
+              print(name + ': ' + str(result.returncode))
+              print((out/(name+'.log')).read_text(encoding='utf-8',errors='replace')[-22000:])
+          head = subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()
+          (out/'results.json').write_text(json.dumps({'head':head,'platform':sys.platform,'results':results},indent=2), encoding='utf-8')
+          raise SystemExit(1 if any(results.values()) else 0)
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: integrated-${{ matrix.os }}
+          path: ${{ runner.temp }}/focus-evidence/
+          if-no-files-found: warn
+          retention-days: 3
