@@ -7,6 +7,47 @@
 shared/AGENTS.shared.md text eol=lf
 shared/references/spine/*.md text eol=lf
 
+# Exact-byte manifests, native role payloads, transport projections and Claude
+# entrypoint/reference pins must survive Windows checkout. Deliberately scoped;
+# unrelated files and historical accepted-prior payloads keep their own policy.
+references-claude/claude-md-structural-enforcement.md text eol=lf
+references-claude/ru/claude-md-structural-enforcement.md text eol=lf
+scripts/invoke-claude-prompt.py text eol=lf
+scripts/invoke-codex-prompt.py text eol=lf
+scripts/invoke-grok-prompt.py text eol=lf
+scripts/invoke-kimi-prompt.py text eol=lf
+scripts/process_supervision/process_runner.py text eol=lf
+scripts/provider_prompt.py text eol=lf
+shared/agents-mode.presets.json text eol=lf
+shared/external-prompt-governance.md text eol=lf
+shared/external-role-taxonomy.v1.json text eol=lf
+shared/provider-prompt-projections.v1.json text eol=lf
+shared/role-routing-policy.v1.json text eol=lf
+src.claude/CLAUDE.md text eol=lf
+src.codex/agents/algorithm-scientist.toml text eol=lf
+src.codex/agents/analyst.toml text eol=lf
+src.codex/agents/architect.toml text eol=lf
+src.codex/agents/architecture-reviewer.toml text eol=lf
+src.codex/agents/backend-engineer.toml text eol=lf
+src.codex/agents/computational-scientist.toml text eol=lf
+src.codex/agents/default.toml text eol=lf
+src.codex/agents/explorer.toml text eol=lf
+src.codex/agents/knowledge-archivist.toml text eol=lf
+src.codex/agents/mechanical-scout.toml text eol=lf
+src.codex/agents/mechanical-worker.toml text eol=lf
+src.codex/agents/orchestrarium-role-manifest.json text eol=lf
+src.codex/agents/planner.toml text eol=lf
+src.codex/agents/platform-engineer.toml text eol=lf
+src.codex/agents/qa-engineer.toml text eol=lf
+src.codex/agents/security-engineer.toml text eol=lf
+src.codex/agents/security-reviewer.toml text eol=lf
+src.codex/agents/worker.toml text eol=lf
+
+scripts/validate-claude-md.py text eol=lf
+tests/test_claude_md_size.py text eol=lf
+references-claude/README.md text eol=lf
+RELEASE_NOTES.md text eol=lf
+
 # Historical accepted-prior payloads preserve their source blob bytes, including CRLF.
 # Revision manifests remain text; only files inside each skill payload are byte-exact.
 tests/fixtures/canonical-skill-priors/*/*/** -text

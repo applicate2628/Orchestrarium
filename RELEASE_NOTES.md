@@ -2,6 +2,11 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-09-05
+
+- **Windows protected child checks admit the current token's real default owner.** Working-directory ownership now accepts the exact token user or default-owner identity, retaining rejection of other owners, links and incomplete identity acquisition. Native Windows diagnosis reproduced freshly created directories whose owner differs from the token user. Descriptor/token cleanup is retained on failures; the transport manifest and exact previous-stock upgrade witness accompany the source change. **Why it matters:** provider-pack checks no longer reject an ordinary directory created by their own elevated process, without disabling ownership validation.
+- **Exact-byte installation contracts survive Windows checkout.** Explicit LF (Line Feed) attributes cover the role-policy manifest and payloads, transport sources, selected configuration and Claude entrypoint/reference pins. No global text conversion or historical payload rewrite is introduced. **Why it matters:** an unchanged checkout no longer appears corrupt solely because newline conversion changed byte digests; unrelated files keep their existing policy.
+
 ## 2026-09-04
 
 - **GitHub pull-request clean-result attribution now fails closed across overlapping same-head review runs.** Uncorrelated submitted-review and REST issue-comment no-findings results require exactly one unresolved exact trigger candidate; a trigger-bound `+1` cannot make the head clean while another same-head trigger remains unresolved. **Why it matters:** a late success from an older run can no longer close a newer or still-active review by timestamp alone.

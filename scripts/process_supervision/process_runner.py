@@ -1115,26 +1115,37 @@ def _windows_owner_digest(path: Path) -> str:
     local_free = kernel32.LocalFree
     local_free.argtypes = [ctypes.c_void_p]
     local_free.restype = ctypes.c_void_p
+    current_process = kernel32.GetCurrentProcess
+    current_process.argtypes = []
+    current_process.restype = wintypes.HANDLE
     owner_sid = ctypes.c_void_p()
     descriptor = ctypes.c_void_p()
-    status = get_named(str(path), 1, 1, ctypes.byref(owner_sid), None, None, None, ctypes.byref(descriptor))
-    if status != 0 or not owner_sid.value:
-        raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
     token = wintypes.HANDLE()
     try:
+        status = get_named(str(path), 1, 1, ctypes.byref(owner_sid), None, None, None, ctypes.byref(descriptor))
+        if status != 0 or not owner_sid.value:
+            raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
         if not open_process_identity(
-            kernel32.GetCurrentProcess(), 0x0008, ctypes.byref(token)
+            current_process(), 0x0008, ctypes.byref(token)
         ):
             raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
-        needed = wintypes.DWORD()
-        read_process_identity(token, 1, None, 0, ctypes.byref(needed))
-        if not needed.value:
-            raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
-        buffer = ctypes.create_string_buffer(needed.value)
-        if not read_process_identity(token, 1, buffer, needed, ctypes.byref(needed)):
-            raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
-        token_sid = ctypes.cast(buffer, ctypes.POINTER(ctypes.c_void_p))[0]
-        if not equal_sid(owner_sid, token_sid):
+        # TokenUser and TokenOwner: elevated Windows processes can create
+        # directories owned by the token's default owner rather than its user.
+        # Accept only these exact identities, never an arbitrary group SID.
+        for information_class in (1, 4):
+            needed = wintypes.DWORD()
+            read_process_identity(token, information_class, None, 0, ctypes.byref(needed))
+            if needed.value < ctypes.sizeof(ctypes.c_void_p):
+                raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
+            buffer = ctypes.create_string_buffer(needed.value)
+            if not read_process_identity(token, information_class, buffer, needed, ctypes.byref(needed)):
+                raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
+            token_sid = ctypes.cast(buffer, ctypes.POINTER(ctypes.c_void_p))[0]
+            if not token_sid:
+                raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
+            if equal_sid(owner_sid, token_sid):
+                break
+        else:
             raise ProcessSupervisionError("PSV1-REQUEST-INVALID", "request-validation")
         length = sid_length(owner_sid)
         if not length:

@@ -235,7 +235,19 @@ STOCK_FFB8_CLAUDE_TRANSPORT_PROJECTION_SHA256 = (
     ("external-role-taxonomy.v1.json", "51192eca72784dfcbc2d53596e143ea25856db9e7336031a25d89e9e4fdf85ce"),
     (TRANSPORT_PROJECTION_MANIFEST, "2e57f75fad4a63fb93057a8036ca5cbbdbb3417c94efb3894d14d33982dd5635"),
 )
+STOCK_3DBF_CLAUDE_TRANSPORT_PROJECTION_SHA256 = (
+    ('provider_prompt.py', 'ec4f1529714c85d9152d1bbbe716aa96630506cfee2c6c284edd2d94b267dcad'),
+    ('process_supervision/process_runner.py', 'fb1c34d2eb56882f4af50baba385507437f66177666b31ae4edafb254dee1e33'),
+    ('invoke-codex-prompt.py', '0b085a6fd0e28a5a486c8ef25bf52d4c69123d94cc8712d63dd30deadcc5f665'),
+    ('invoke-claude-prompt.py', '3250c9a85e36ab2e57a218688c5d7d3cfed59552c1f2bad7eb52f45370df80f3'),
+    ('invoke-kimi-prompt.py', '480af94ce089d5a6340e92d00239a5762c9c1374375a8c12c921afdcfcaa6e47'),
+    ('invoke-grok-prompt.py', '1f0f4f6bb03d816b3f40ff56ebe71973301d2d7104ef1d7f335b1ffa0b248559'),
+    ('external-prompt-governance.md', 'c7a59ccec7d6e46be76584a107b0a5b30b249368b4f0958cb78177962dc34b00'),
+    ('external-role-taxonomy.v1.json', '51192eca72784dfcbc2d53596e143ea25856db9e7336031a25d89e9e4fdf85ce'),
+    ('provider-prompt-projections.v1.json', '6a015482d17811c5cb6cbced13081e633895e4dc93fd84d3dc26e433a55ba2e5'),
+)
 ACCEPTED_CLAUDE_TRANSPORT_PROJECTION_PRIORS = {
+    "3dbfb9fa": STOCK_3DBF_CLAUDE_TRANSPORT_PROJECTION_SHA256,
     "8521b638": STOCK_8521_CLAUDE_TRANSPORT_PROJECTION_SHA256,
     "7872d36d": STOCK_7872_CLAUDE_TRANSPORT_PROJECTION_SHA256,
     "8f92dc73": STOCK_8F92_CLAUDE_TRANSPORT_PROJECTION_SHA256,

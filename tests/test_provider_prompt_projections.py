@@ -2173,3 +2173,29 @@ def test_only_exact_historical_claude_skill_tree_may_migrate_to_projection(
         installer._preflight_claude_skill_projections(
             canonical_source, historical_source, canonical_target, projection_root
         )
+
+
+@pytest.mark.parametrize("altered", (False, True))
+def test_pre_owner_fix_transport_is_exactly_migratable(tmp_path: Path, altered: bool):
+    installer = _load_installer()
+    canonical = tmp_path / "canonical" / "scripts"
+    projection = tmp_path / "claude" / "agents" / "scripts"
+    for name in TRANSPORT_FILES:
+        _copy_transport(ROOT, canonical, name)
+    manifest_name = "provider-prompt-projections.v1.json"
+    old_manifest = subprocess.run(
+        ["git", "show", "3dbfb9fa:shared/" + manifest_name],
+        cwd=ROOT, check=True, capture_output=True,
+    ).stdout
+    expected = {name: item["sha256"] for name, item in json.loads(old_manifest)["files"].items()}
+    expected[manifest_name] = _sha(old_manifest)
+    paths = _seed_historical_transport(projection, "3dbfb9fa", expected)
+    if altered:
+        paths["process_supervision/process_runner.py"].write_bytes(b"unowned custom reader\n")
+        with pytest.raises(ValueError, match="atomic projection state"):
+            installer._stage_claude_transport_projection(ROOT, canonical, projection)
+    else:
+        stage = installer._stage_claude_transport_projection(ROOT, canonical, projection)
+        assert stage.accepted_prior_set == "3dbfb9fa"
+        assert {name for name, _ in stage.pending_files} == {"process_supervision/process_runner.py"}
+        assert stage.manifest_pending is True
