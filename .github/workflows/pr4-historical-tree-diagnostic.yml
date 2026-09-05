@@ -1,0 +1,61 @@
+name: PR4 historical tree byte diagnostic
+on:
+  push:
+    branches: [automation/pr4-audit-20260905-final]
+    paths: [.github/workflows/pr4-historical-tree-diagnostic.yml]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: c605a46bf40055f6d8c296594230cd8c70c18cc2
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --disable-pip-version-check pytest PyYAML jsonschema
+      - name: Reproduce exact historical installer output without changing expectations
+        shell: python
+        run: |
+          import hashlib, json, sys, tempfile
+          from pathlib import Path
+          sys.path.insert(0, str(Path.cwd()))
+          from tests.test_global_lead_accepted_prior import _load_installer, _seed_revision_staged_lead, _extract_stock_consultant, STOCK_CONSULTANT_REVISION
+          installer = _load_installer()
+          rows = {}
+          with tempfile.TemporaryDirectory(prefix='pr4-byte-fixture-') as temp:
+              root = Path(temp).resolve()
+              cases = {
+                  'staged-6aa': _seed_revision_staged_lead('6aa0e234e43f639a70f6f46311ab535e49039ad4', root / 'staged' / 'lead'),
+                  'stock-consultant': _extract_stock_consultant(root / 'stock', STOCK_CONSULTANT_REVISION),
+              }
+              for name, tree in cases.items():
+                  files = {}
+                  for p in sorted(tree.rglob('*')):
+                      rel = p.relative_to(tree).as_posix()
+                      if p.is_file():
+                          raw = p.read_bytes()
+                          files[rel] = {'type':'file', 'sha256':hashlib.sha256(raw).hexdigest(), 'bytes':len(raw), 'crlf':raw.count(b'\r\n'), 'lf':raw.count(b'\n')}
+                      elif p.is_dir(): files[rel] = {'type':'directory'}
+                  rows[name] = {'tree_sha256':installer._tree_sha256(tree),'files':files}
+          Path('historical-tree-bytes.json').write_text(json.dumps(rows,indent=2)+'\n',encoding='utf-8')
+          print(json.dumps({name:value['tree_sha256'] for name,value in rows.items()},indent=2))
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: pr4-historical-bytes-${{ runner.os }}
+          path: historical-tree-bytes.json
+          if-no-files-found: error
+          retention-days: 1
