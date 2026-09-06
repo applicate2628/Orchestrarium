@@ -1,0 +1,21 @@
+name: PR4 audit transport verification
+on:
+  push:
+    branches: [automation/pr4-audit-20260906-d6388462]
+    paths: [.github/workflows/pr4-payload-verification.yml]
+permissions:
+  contents: read
+jobs:
+  export:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/upload-artifact@v4
+        with:
+          name: audit-payload-prefix
+          path: .github/audit/pr4-20260906/patch.*.b64
+          retention-days: 2
+          include-hidden-files: true
+          if-no-files-found: error
