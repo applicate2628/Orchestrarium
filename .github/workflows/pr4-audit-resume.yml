@@ -1,4 +1,4 @@
-name: PR 4 exact-source audit transfer
+name: PR 4 full native audit
 
 on:
   push:
@@ -11,30 +11,106 @@ concurrency:
   group: pr4-audit-resume-20260906
   cancel-in-progress: false
 
+env:
+  SOURCE_HEAD: d63884623f73b748618f47cba142faea537338be
+  PYTHONUTF8: '1'
+  PYTHONDONTWRITEBYTECODE: '1'
+
 jobs:
-  source:
+  contracts:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: d63884623f73b748618f47cba142faea537338be
-          fetch-depth: 0
+          ref: ${{ github.sha }}
+          path: control
           persist-credentials: false
-      - name: Export only the exact source and its Git object history
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          fetch-depth: 0
+          path: target
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --disable-pip-version-check pytest PyYAML jsonschema ruff
+      - run: python control/.github/audit/pr4_runner.py target evidence contracts
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pr4-native-contracts
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 7
+
+  tests:
+    name: ${{ matrix.os }} tests ${{ matrix.shard }}/6
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+        shard: [0, 1, 2, 3, 4, 5]
+    env:
+      ORCH_SHARD_TOTAL: '6'
+      ORCH_SHARD_INDEX: ${{ matrix.shard }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: control
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          fetch-depth: 0
+          path: target
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --disable-pip-version-check pytest PyYAML jsonschema
+      - run: python control/.github/audit/pr4_runner.py target evidence tests
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pr4-native-${{ matrix.os }}-${{ matrix.shard }}
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 7
+
+  verified-candidate:
+    needs: [contracts, tests]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: control
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          fetch-depth: 0
+          path: target
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --disable-pip-version-check PyYAML jsonschema
+      - run: python control/.github/audit/pr4_runner.py target evidence prepare
+      - name: Publish isolated verified candidate, not the PR branch
+        working-directory: target
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = d63884623f73b748618f47cba142faea537338be
-          test -z "$(git status --porcelain)"
-          mkdir -p "${RUNNER_TEMP}/pr4-source"
-          git bundle create "${RUNNER_TEMP}/pr4-source/source.bundle" HEAD
-          git bundle verify "${RUNNER_TEMP}/pr4-source/source.bundle"
-          git rev-parse HEAD > "${RUNNER_TEMP}/pr4-source/head.txt"
-          sha256sum "${RUNNER_TEMP}/pr4-source/source.bundle" > "${RUNNER_TEMP}/pr4-source/bundle.sha256"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: pr4-exact-source-d6388462
-          path: ${{ runner.temp }}/pr4-source/
-          if-no-files-found: error
-          retention-days: 2
+          git fetch --no-tags origin refs/heads/hotfix/1x-final-followups-20260901
+          test "$(git rev-parse FETCH_HEAD)" = "${SOURCE_HEAD}"
+          test "$(git rev-parse HEAD^{tree})" = 65e505d0866ba615b1911d9688cae5ebfdfb3507
+          git push origin HEAD:refs/heads/automation/pr4-verified-fixes-20260906
+          echo "Verified candidate: $(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
