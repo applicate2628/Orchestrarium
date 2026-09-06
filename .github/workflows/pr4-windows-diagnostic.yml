@@ -1,0 +1,86 @@
+name: PR4 Windows ownership diagnostic
+on:
+  push:
+    branches: [automation/pr4-audit-20260906-d6388462]
+    paths: [.github/workflows/pr4-windows-diagnostic.yml]
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    env:
+      PYTHONUTF8: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: d63884623f73b748618f47cba142faea537338be
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --disable-pip-version-check pytest pytest-subtests pytest-timeout PyYAML jsonschema
+      - name: Diagnose real ownership without weakening production checks
+        shell: python
+        run: |
+          import ctypes, importlib.util, os, pathlib, subprocess, sys, tempfile
+          from ctypes import wintypes
+          import pytest
+          root = pathlib.Path.cwd()
+          def load(name, path):
+              spec = importlib.util.spec_from_file_location(name, path)
+              module = importlib.util.module_from_spec(spec)
+              sys.modules[name] = module
+              spec.loader.exec_module(module)
+              return module
+          runner = load('audit_process_runner', root/'scripts/process_supervision/process_runner.py')
+          try:
+              runner.bind_cwd_identity(str(root))
+              print('Original checkout owner accepted')
+          except Exception as exc:
+              print('Original checkout owner refused:', type(exc).__name__, str(exc))
+          adv = ctypes.WinDLL('advapi32', use_last_error=True)
+          kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+          kernel.GetCurrentProcess.restype = wintypes.HANDLE
+          adv.OpenProcessToken.argtypes = [wintypes.HANDLE, wintypes.DWORD, ctypes.POINTER(wintypes.HANDLE)]
+          adv.OpenProcessToken.restype = wintypes.BOOL
+          adv.GetTokenInformation.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(wintypes.DWORD)]
+          adv.GetTokenInformation.restype = wintypes.BOOL
+          adv.SetTokenInformation.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD]
+          adv.SetTokenInformation.restype = wintypes.BOOL
+          adv.SetNamedSecurityInfoW.argtypes = [wintypes.LPWSTR, ctypes.c_int, wintypes.DWORD, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+          adv.SetNamedSecurityInfoW.restype = wintypes.DWORD
+          kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+          kernel.CloseHandle.restype = wintypes.BOOL
+          token = wintypes.HANDLE()
+          assert adv.OpenProcessToken(kernel.GetCurrentProcess(), 0x0008 | 0x0080, ctypes.byref(token)), ctypes.get_last_error()
+          try:
+              needed = wintypes.DWORD()
+              adv.GetTokenInformation(token, 1, None, 0, ctypes.byref(needed))
+              data = ctypes.create_string_buffer(needed.value)
+              assert adv.GetTokenInformation(token, 1, data, needed.value, ctypes.byref(needed)), ctypes.get_last_error()
+              sid = ctypes.cast(data, ctypes.POINTER(ctypes.c_void_p))[0]
+              owner = ctypes.c_void_p(sid)
+              assert adv.SetTokenInformation(token, 4, ctypes.byref(owner), ctypes.sizeof(owner)), ctypes.get_last_error()
+              code = adv.SetNamedSecurityInfoW(str(root), 1, 1, sid, None, None, None)
+              assert code == 0, code
+          finally:
+              kernel.CloseHandle(token)
+          runner.bind_cwd_identity(str(root))
+          with tempfile.TemporaryDirectory() as directory:
+              runner.bind_cwd_identity(directory)
+          print('Exact current-user owner accepted for checkout and new temporary directories')
+          status = pytest.main(['-q', '--tb=short', '--timeout=60', 'tests/test_process_runner_core.py', 'tests/test_process_runner_r5_delta.py'])
+          print('NATIVE_PROCESS_TEST_EXIT', status)
+          # Archive byte conversion is tested independently of the runtime owner.
+          historical = load('audit_historical_tests', root/'tests/test_global_lead_accepted_prior.py')
+          installer = historical._load_installer()
+          for autocrlf in ('true', 'false'):
+              subprocess.run(['git','config','core.autocrlf',autocrlf],check=True)
+              with tempfile.TemporaryDirectory() as directory:
+                  tree = historical._extract_stock_consultant(pathlib.Path(directory), historical.STOCK_CONSULTANT_REVISION)
+                  digest = installer._tree_sha256(tree)
+                  print('ARCHIVE',autocrlf,digest,'EXPECTED',historical.STOCK_CONSULTANT_TREE_SHA256)
+          sys.exit(int(status))
