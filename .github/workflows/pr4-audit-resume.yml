@@ -1,4 +1,4 @@
-name: PR 4 full native audit
+name: PR 4 native admission diagnostic
 
 on:
   push:
@@ -7,19 +7,10 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: pr4-audit-resume-20260906
-  cancel-in-progress: false
-
-env:
-  SOURCE_HEAD: d63884623f73b748618f47cba142faea537338be
-  PYTHONUTF8: '1'
-  PYTHONDONTWRITEBYTECODE: '1'
-
 jobs:
-  contracts:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
+  diagnostic:
+    runs-on: windows-2025
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
@@ -28,89 +19,28 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.SOURCE_HEAD }}
-          fetch-depth: 0
+          ref: d63884623f73b748618f47cba142faea537338be
           path: target
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python -m pip install --disable-pip-version-check pytest PyYAML jsonschema ruff
-      - run: python control/.github/audit/pr4_runner.py target evidence contracts
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: pr4-native-contracts
-          path: evidence/
-          if-no-files-found: error
-          retention-days: 7
-
-  tests:
-    name: ${{ matrix.os }} tests ${{ matrix.shard }}/6
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 50
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-24.04, windows-2025]
-        shard: [0, 1, 2, 3, 4, 5]
-    env:
-      ORCH_SHARD_TOTAL: '6'
-      ORCH_SHARD_INDEX: ${{ matrix.shard }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.sha }}
-          path: control
-          persist-credentials: false
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ env.SOURCE_HEAD }}
-          fetch-depth: 0
-          path: target
-          persist-credentials: false
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - run: python -m pip install --disable-pip-version-check pytest PyYAML jsonschema
-      - run: python control/.github/audit/pr4_runner.py target evidence tests
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: pr4-native-${{ matrix.os }}-${{ matrix.shard }}
-          path: evidence/
-          if-no-files-found: error
-          retention-days: 7
-
-  verified-candidate:
-    needs: [contracts, tests]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.sha }}
-          path: control
-          persist-credentials: false
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ env.SOURCE_HEAD }}
-          fetch-depth: 0
-          path: target
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - run: python -m pip install --disable-pip-version-check PyYAML jsonschema
-      - run: python control/.github/audit/pr4_runner.py target evidence prepare
-      - name: Publish isolated verified candidate, not the PR branch
-        working-directory: target
-        shell: bash
+      - run: python -m pip install --disable-pip-version-check pytest
+      - name: Inspect source and runtime directory ownership
+        shell: pwsh
         run: |
-          set -euo pipefail
-          git fetch --no-tags origin refs/heads/hotfix/1x-final-followups-20260901
-          test "$(git rev-parse FETCH_HEAD)" = "${SOURCE_HEAD}"
-          test "$(git rev-parse HEAD^{tree})" = 65e505d0866ba615b1911d9688cae5ebfdfb3507
-          git push origin HEAD:refs/heads/automation/pr4-verified-fixes-20260906
-          echo "Verified candidate: $(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
+          $ErrorActionPreference = 'Stop'
+          [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+          (Get-Acl target).Owner
+          $temporary = Join-Path $env:RUNNER_TEMP 'pr4-owner-diagnostic'
+          New-Item -ItemType Directory -Path $temporary | Out-Null
+          (Get-Acl $temporary).Owner
+          python control/.github/audit/pr4_diagnostic.py target evidence
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pr4-native-admission-diagnostic
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 7
