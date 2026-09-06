@@ -1,0 +1,245 @@
+name: PR 4 full-source verification
+
+on:
+  push:
+    branches:
+      - automation/pr4-audit-verify-20260906-d6388462
+    paths:
+      - .github/workflows/pr4-full-source-verification.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr4-full-source-verification-20260906
+  cancel-in-progress: false
+
+env:
+  SOURCE_HEAD: d63884623f73b748618f47cba142faea537338be
+  PATCH_SHA256: 1646b787fb174576e0721817a58ffe6a75462c47e7224c200f252bff5cf25171
+  PAYLOAD_SHA256: 94b9c6f6195c8d4d20d4e639ac999f1fe9052d94b9ea301d389e3fcc8ee9b738
+  PYTHONUTF8: '1'
+  PYTHONDONTWRITEBYTECODE: '1'
+
+jobs:
+  prepare:
+    if: github.repository == 'applicate2628/Orchestrarium'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    outputs:
+      sha: ${{ steps.candidate.outputs.sha }}
+    steps:
+      - name: Read the exact control revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: control
+          persist-credentials: false
+      - name: Read the exact PR source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          fetch-depth: 0
+          path: source
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Authenticate the payload and apply the exact patch
+        working-directory: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${SOURCE_HEAD}"
+          test -z "$(git status --porcelain)"
+          mkdir -p ../candidate-artifact
+          python - <<'PY'
+          import base64
+          import hashlib
+          import lzma
+          import os
+          from pathlib import Path
+          parts = sorted(Path('../control/.github/audit/pr4-20260906').glob('part-*.b64'))
+          assert [p.name for p in parts] == ['part-00.b64', 'part-01.b64']
+          encoded = ''.join(''.join(p.read_text(encoding='ascii').split()) for p in parts)
+          packed = base64.b64decode(encoded, validate=True)
+          assert hashlib.sha256(packed).hexdigest() == os.environ['PAYLOAD_SHA256']
+          patch = lzma.decompress(packed)
+          assert hashlib.sha256(patch).hexdigest() == os.environ['PATCH_SHA256']
+          Path('../candidate-artifact/candidate.patch').write_bytes(patch)
+          PY
+          git apply --check ../candidate-artifact/candidate.patch
+          git apply ../candidate-artifact/candidate.patch
+          python - <<'PY'
+          import subprocess
+          expected = {
+              '.gitattributes', 'RELEASE_NOTES.md',
+              'references-claude/ru/claude-md-structural-enforcement.md',
+              'scripts/production_installer.py',
+              'scripts/universal-hooks/scripts/check-publication-safety.py',
+              'scripts/validate-claude-md.py', 'src.claude/CLAUDE.md',
+              'src.claude/agents/scripts/check-publication-safety.py',
+              'src.codex/skills/lead/scripts/check-publication-safety.py',
+              'tests/test_claude_checkout_contract.py', 'tests/test_claude_md_size.py',
+              'tests/test_claude_reference_mirror.py', 'tests/test_codex_host_injection_contract.py',
+              'tests/test_hook_health.py', 'tests/test_installer_global_home_platform.py',
+              'tests/test_installer_readonly_cleanup.py', 'tests/test_native_role_slice_a.py',
+              'tests/test_publication_probe_environment.py',
+          }
+          changed = set(subprocess.check_output(['git', 'diff', '--name-only'], text=True).splitlines())
+          untracked = set(subprocess.check_output(['git', 'ls-files', '--others', '--exclude-standard'], text=True).splitlines())
+          assert changed | untracked == expected, (changed | untracked) ^ expected
+          subprocess.run(['git', 'add', '--', *sorted(expected)], check=True)
+          PY
+          git diff --cached --check
+          git diff --cached --stat
+          python scripts/check-publication-gate.py | tee ../candidate-artifact/publication-gate.log
+      - name: Create a local candidate object without publishing a branch
+        id: candidate
+        working-directory: source
+        shell: bash
+        env:
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_AUTHOR_DATE: '2026-09-06T13:30:00Z'
+          GIT_COMMITTER_DATE: '2026-09-06T13:30:00Z'
+        run: |
+          set -euo pipefail
+          git commit -m "fix: close installer, scanner, and reference audit regressions"
+          sha="$(git rev-parse HEAD)"
+          test "$(git rev-parse HEAD^)" = "${SOURCE_HEAD}"
+          test -z "$(git status --porcelain)"
+          git bundle create ../candidate-artifact/candidate.bundle HEAD
+          git bundle verify ../candidate-artifact/candidate.bundle
+          echo "${sha}" > ../candidate-artifact/HEAD.txt
+          git rev-parse HEAD^{tree} > ../candidate-artifact/TREE.txt
+          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+          echo "Unpublished candidate object: ${sha}" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pr4-candidate-object
+          path: candidate-artifact/
+          retention-days: 3
+          if-no-files-found: error
+
+  contracts:
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: pr4-candidate-object
+          path: bundle
+      - name: Materialize exact candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --no-checkout bundle/candidate.bundle source
+          git -C source checkout --detach '${{ needs.prepare.outputs.sha }}'
+          test "$(git -C source rev-parse HEAD)" = '${{ needs.prepare.outputs.sha }}'
+          mkdir -p evidence
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --disable-pip-version-check pytest PyYAML jsonschema ruff
+      - name: Compile, lint, and validate both full packs
+        working-directory: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import py_compile
+          import subprocess
+          files = subprocess.check_output(['git', 'ls-files', '-z', '*.py']).decode().split('\0')
+          for file in filter(None, files):
+              py_compile.compile(file, doraise=True)
+          PY
+          ruff check --select E9,F63,F7,F82 scripts src.codex src.claude tests install.py | tee ../evidence/ruff.log
+          python scripts/sync-universal-hooks.py --check | tee ../evidence/mirrors.log
+          python src.codex/skills/lead/scripts/validate-skill-pack.py | tee ../evidence/codex-validator.log
+          python src.claude/agents/scripts/validate-skill-pack.py | tee ../evidence/claude-validator.log
+          git diff --check HEAD^
+          test -z "$(git status --porcelain --untracked-files=no)"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pr4-contract-evidence
+          path: evidence/
+          retention-days: 3
+          if-no-files-found: warn
+
+  tests:
+    needs: prepare
+    name: ${{ matrix.os }} full collection shard ${{ matrix.shard }}/6
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+        shard: [0, 1, 2, 3, 4, 5]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: control
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: pr4-candidate-object
+          path: bundle
+      - name: Materialize the same candidate with native checkout semantics
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --no-checkout bundle/candidate.bundle source
+          git -C source checkout --detach '${{ needs.prepare.outputs.sha }}'
+          test "$(git -C source rev-parse HEAD)" = '${{ needs.prepare.outputs.sha }}'
+          mkdir -p evidence
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --disable-pip-version-check pytest pytest-timeout PyYAML jsonschema
+      - name: Execute complete recursively collected shard
+        working-directory: source
+        shell: python
+        env:
+          AUDIT_SHARD: ${{ matrix.shard }}
+          AUDIT_SHARDS: '6'
+        run: |
+          import json
+          import os
+          import subprocess
+          import sys
+          from pathlib import Path
+          evidence = Path('../evidence').resolve()
+          control = Path('../control/.github/audit/pr4-20260906').resolve()
+          os.environ['AUDIT_EVIDENCE'] = str(evidence)
+          os.environ['PYTHONPATH'] = str(control) + (os.pathsep + os.environ['PYTHONPATH'] if os.environ.get('PYTHONPATH') else '')
+          command = [sys.executable, '-m', 'pytest', '-p', 'audit_capture', '-q', '--tb=short', '-ra', '--timeout=180', '--junitxml=' + str(evidence / 'junit.xml')]
+          (evidence / 'invocation.json').write_text(json.dumps({'candidate': '${{ needs.prepare.outputs.sha }}', 'command': command, 'python': sys.version, 'platform': sys.platform}), encoding='utf-8')
+          with (evidence / 'pytest.log').open('w', encoding='utf-8') as log:
+              process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace')
+              for line in process.stdout:
+                  print(line, end='', flush=True)
+                  log.write(line)
+                  log.flush()
+              status = process.wait()
+          dirty = subprocess.check_output(['git', 'status', '--porcelain', '--untracked-files=no'], text=True)
+          (evidence / 'source-status.txt').write_text(dirty, encoding='utf-8')
+          if dirty:
+              print('Tracked source changed during verification:', dirty)
+              status = status or 1
+          (evidence / 'exit-code.txt').write_text(str(status), encoding='ascii')
+          raise SystemExit(status)
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pr4-tests-${{ matrix.os }}-${{ matrix.shard }}
+          path: evidence/
+          retention-days: 3
+          if-no-files-found: error
