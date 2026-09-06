@@ -2812,6 +2812,19 @@ class TestPublicationSafetyScannerV3(unittest.TestCase):
             {"GIT_CONFIG_COUNT": "bogus"},
             {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "only-key"},
             {"GIT_CONFIG_COUNT": "0", "GIT_CONFIG_KEY_0": "orphan", "GIT_CONFIG_VALUE_0": "orphan"},
+            {"GIT_CONFIG_COUNT": "0", "GIT_CONFIG_KEY_2": "sparse-orphan"},
+            {"GIT_CONFIG_COUNT": "0", "GIT_CONFIG_VALUE_999": "sparse-orphan"},
+            {"GIT_CONFIG_KEY_2": "count-missing"},
+            {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "credential.useHttpPath",
+             "GIT_CONFIG_VALUE_0": "true", "GIT_CONFIG_KEY_3": "sparse-orphan"},
+            {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "credential.useHttpPath",
+             "GIT_CONFIG_VALUE_0": "true", "GIT_CONFIG_VALUE_3": "sparse-orphan"},
+            {"GIT_CONFIG_COUNT": "0", "GIT_CONFIG_KEY_00": "noncanonical-index"},
+            {"GIT_CONFIG_COUNT": "0", "GIT_CONFIG_VALUE_-1": "negative-index"},
+            {"GIT_CONFIG_COUNT": "0", "GIT_CONFIG_KEY_suffix": "malformed-index"},
+            {"GIT_CONFIG_COUNT": "1025"},
+            {"GIT_CONFIG_COUNT": "-1"},
+            {"GIT_CONFIG_COUNT": "01"},
         )
         for ambient in cases:
             with self.subTest(ambient=ambient), mock.patch.dict(os.environ, ambient, clear=False):
@@ -2819,7 +2832,8 @@ class TestPublicationSafetyScannerV3(unittest.TestCase):
                     if key.startswith("GIT_CONFIG_") and key not in ambient:
                         os.environ.pop(key, None)
                 outcome = module._remote_probe_binding("https://example.invalid/repository.git")
-                self.assertIsInstance(outcome, module.Refusal)
+                self.assertTrue(isinstance(outcome, module.Refusal),
+                                "malformed indexed Git configuration must refuse")
                 self.assertEqual(outcome.failure_id, "PS-MSG-RANGE")
                 self.assertEqual(outcome.reason, "remote-binding")
 

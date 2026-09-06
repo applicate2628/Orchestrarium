@@ -1155,7 +1155,35 @@ class WindowsPrivateObjectOwnerV1:
                 ctypes.get_last_error(),
                 "ConvertStringSecurityDescriptorToSecurityDescriptorW",
             )
-        return descriptor, sddl
+        # Windows renders recognized SIDs with aliases (for example the local
+        # administrator as LA). Compare two OS-rendered descriptors, not a raw
+        # numeric SID against its equivalent alias. Keep the exact protected
+        # DACL, access mask, ACE count, and principal checks intact.
+        render = advapi32.ConvertSecurityDescriptorToStringSecurityDescriptorW
+        render.argtypes = [
+            ctypes.c_void_p,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            ctypes.POINTER(wintypes.LPWSTR),
+            ctypes.POINTER(wintypes.DWORD),
+        ]
+        render.restype = wintypes.BOOL
+        rendered = wintypes.LPWSTR()
+        try:
+            if not render(descriptor, 1, 0x00000004, ctypes.byref(rendered), None):
+                raise OSError(
+                    ctypes.get_last_error(),
+                    "ConvertSecurityDescriptorToStringSecurityDescriptorW(expected)",
+                )
+            if not rendered.value:
+                raise OSError("empty private security descriptor")
+            return descriptor, rendered.value
+        except BaseException:
+            kernel32.LocalFree(descriptor)
+            raise
+        finally:
+            if rendered:
+                kernel32.LocalFree(rendered)
 
     @staticmethod
     def verify_handle_dacl(handle: int, expected_sddl: str) -> None:

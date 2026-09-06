@@ -14,6 +14,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.fixtures.git_history import archive_revision
+
 
 ROOT = Path(__file__).resolve().parents[1]
 VALIDATOR_PATH = ROOT / "scripts" / "validate-provider-prompt-projections.py"
@@ -1783,12 +1785,7 @@ def test_e7_six_tree_upgrade_rolls_back_after_middle_replacement(
     installer = _load_installer()
     snapshot = tmp_path / "e7-source"
     snapshot.mkdir()
-    archive = subprocess.run(
-        ["git", "archive", "--format=tar", "e7a691dea4f1d3cb154d338c63b274ebcd74ee4c"],
-        cwd=ROOT,
-        check=True,
-        capture_output=True,
-    ).stdout
+    archive = archive_revision(ROOT, "e7a691dea4f1d3cb154d338c63b274ebcd74ee4c")
     with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as package:
         package.extractall(snapshot, filter="data")
     target = tmp_path / "target"
@@ -1844,10 +1841,7 @@ def test_e7_claude_transport_replacement_rolls_back_trees_trio_and_manifest(
     installer = _load_installer()
     snapshot = tmp_path / "e7-source"
     snapshot.mkdir()
-    archive = subprocess.run(
-        ["git", "archive", "--format=tar", "e7a691dea4f1d3cb154d338c63b274ebcd74ee4c"],
-        cwd=ROOT, check=True, capture_output=True,
-    ).stdout
+    archive = archive_revision(ROOT, "e7a691dea4f1d3cb154d338c63b274ebcd74ee4c")
     with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as package:
         package.extractall(snapshot, filter="data")
     target = tmp_path / "target"

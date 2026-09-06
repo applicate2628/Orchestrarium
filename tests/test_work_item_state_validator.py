@@ -1004,8 +1004,18 @@ def test_closure_recovery_schema_contract_runbook_and_rollup_parity(tmp_path: Pa
             checker.check_recovery_documentation(duplicate_procedure)
 
 
-def test_implementation_lane_replays_dirty_declared_producer_delta() -> None:
+def _historical_implementation_lane_receipts() -> Path:
+    """Optional local historical evidence, not fresh product execution coverage."""
     root = ROOT / ".scratch" / "work-items" / "2026-08-17-fix-append-only-invalid-ledger-event-recovery" / "lead-append-only-scratch-retain-20260821-r1-terminal" / "implementation-lane-baseline"
+    if not root.exists():
+        raise unittest.SkipTest(
+            "optional 2026-08-21 implementation-lane receipts are absent from this checkout"
+        )
+    return root
+
+
+def test_implementation_lane_replays_dirty_declared_producer_delta() -> None:
+    root = _historical_implementation_lane_receipts()
     manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["schemaVersion"] == 2
     assert len(manifest["entries"]) == 77
@@ -1018,7 +1028,7 @@ def test_implementation_lane_replays_dirty_declared_producer_delta() -> None:
 
 
 def test_implementation_lane_forbids_external_side_effects() -> None:
-    root = ROOT / ".scratch" / "work-items" / "2026-08-17-fix-append-only-invalid-ledger-event-recovery" / "lead-append-only-scratch-retain-20260821-r1-terminal" / "implementation-lane-baseline"
+    root = _historical_implementation_lane_receipts()
     commands = json.loads((root / "commands.jsonl").read_text(encoding="utf-8"))
     processes = json.loads((root / "process-network-attempts.jsonl").read_text(encoding="utf-8"))
     call_path = json.loads((root / "call-path-observation.json").read_text(encoding="utf-8"))

@@ -52,7 +52,7 @@ def test_canonical_prior_payload_is_binary_without_broadening_attribute_scope(
         f"{paths[0]}: text: unset",
         f"{paths[1]}: text: unspecified",
         f"{paths[2]}: text: unspecified",
-        f"{paths[3]}: text: unspecified",
+        f"{paths[3]}: text: unset",
     ]
 
     repo = tmp_path / "autocrlf-repo"

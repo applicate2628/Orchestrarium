@@ -8222,7 +8222,7 @@ class _UnittestAdapter(unittest.TestCase):
 def _adapt_test(function):
     def method(self):
         with tempfile.TemporaryDirectory() as directory:
-            function(Path(directory))
+            function(Path(directory).resolve())
 
     method.__name__ = function.__name__
     return method

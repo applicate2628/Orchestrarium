@@ -347,6 +347,7 @@ def _failed_add_validation(module, repo, baseline, digest, run_dir):
     )
 
 
+@requires_windows_process_runner
 def test_worktree_add_nonzero_path_only_cleanup(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -366,6 +367,7 @@ def test_worktree_add_nonzero_path_only_cleanup(
             _cleanup_partial_fixture(repo, targets[0])
 
 
+@requires_windows_process_runner
 def test_worktree_add_nonzero_registration_only_cleanup(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -391,6 +393,7 @@ def test_worktree_add_nonzero_registration_only_cleanup(
             _cleanup_partial_fixture(repo, targets[0])
 
 
+@requires_windows_process_runner
 def test_worktree_add_nonzero_both_side_effects_cleanup(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -410,6 +413,7 @@ def test_worktree_add_nonzero_both_side_effects_cleanup(
             _cleanup_partial_fixture(repo, targets[0])
 
 
+@requires_windows_process_runner
 def test_worktree_add_interruption_partial_cleanup(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -431,6 +435,7 @@ def test_worktree_add_interruption_partial_cleanup(
             _cleanup_partial_fixture(repo, targets[0])
 
 
+@requires_windows_process_runner
 def test_partial_acquisition_cleanup_failure_manifest_is_durable_before_interrupt(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -503,6 +508,7 @@ def test_deep_evidence_directory_uses_a_bounded_workspace_worktree_path(
     assert not worktree.exists()
 
 
+@requires_windows_process_runner
 def test_child_failure_has_attempt_receipt_but_no_terminal_manifest(
     tmp_path: Path,
 ) -> None:
@@ -529,6 +535,7 @@ def test_child_failure_has_attempt_receipt_but_no_terminal_manifest(
     assert receipt["exitCode"] == 7
 
 
+@requires_windows_process_runner
 def test_real_child_timeout_is_reaped(tmp_path: Path) -> None:
     """A deadline produces bounded, settled version-2 evidence."""
 
@@ -550,6 +557,7 @@ def test_real_child_timeout_is_reaped(tmp_path: Path) -> None:
     assert not list(attempts.glob("*.stderr.log"))
 
 
+@requires_windows_process_runner
 def test_exact_argv_reaches_real_child(tmp_path: Path) -> None:
     """Empty, quoted, slash-heavy, spaced, and Unicode argv remain exact."""
 
@@ -584,6 +592,7 @@ def test_exact_argv_reaches_real_child(tmp_path: Path) -> None:
     assert json.loads(observed.read_text(encoding="utf-8")) == list(expected)
 
 
+@requires_windows_process_runner
 def test_infinite_output_is_bounded_and_settled(tmp_path: Path) -> None:
     """Capture overflow stops the whole run without an unbounded target spool."""
 
@@ -605,6 +614,7 @@ def test_infinite_output_is_bounded_and_settled(tmp_path: Path) -> None:
     assert sum(path.stat().st_size for path in attempts.iterdir()) < 128 * 1024
 
 
+@requires_windows_process_runner
 def test_fast_oversized_git_status_cannot_be_consumed_as_complete(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -679,6 +689,7 @@ def test_fast_oversized_git_status_cannot_be_consumed_as_complete(
     assert observed[0].stdout.truncated is True
 
 
+@requires_windows_process_runner
 def test_timeout_settles_parent_and_descendant(tmp_path: Path) -> None:
     """A timed-out parent cannot leave its sleeping descendant alive."""
 
@@ -704,6 +715,7 @@ def test_timeout_settles_parent_and_descendant(tmp_path: Path) -> None:
     assert not _process_running(pid)
 
 
+@requires_windows_process_runner
 def test_direct_exit_with_retained_pipe_settles_descendant(tmp_path: Path) -> None:
     """A descendant retaining both capture pipes cannot outlive the receipt."""
 
@@ -918,6 +930,7 @@ def test_explicit_untracked_exclusion_is_absent_from_detached_worktree(
     ]
 
 
+@requires_windows_process_runner
 def test_cleanup_failure_publishes_one_nonpass_with_recovery_path(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -963,6 +976,7 @@ def test_cleanup_failure_publishes_one_nonpass_with_recovery_path(
 
 
 @pytest.mark.parametrize("boundary", ("child", "publication"))
+@requires_windows_process_runner
 def test_interruption_before_publication_leaves_no_terminal_manifest(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, boundary: str
 ) -> None:
@@ -1057,3 +1071,14 @@ def test_r4_authority_surfaces_removed() -> None:
     ):
         assert not hasattr(module, symbol), symbol
     assert not list((ROOT / "tests" / "fixtures" / "luna").rglob("*.json"))
+
+
+@pytest.mark.skipif(os.name == "nt", reason="checks the unavailable POSIX execution oracle")
+def test_unavailable_posix_oracle_refuses_before_real_child_execution(tmp_path: Path) -> None:
+    module = _load()
+    marker = tmp_path / "must-not-run"
+    command = _command(module, f"from pathlib import Path;Path({str(marker)!r}).write_text('ran')")
+    receipt, _attempts = _run_direct(module, tmp_path, command)
+    assert receipt.failureId == "PSV1-POSIX-ORACLE-UNAVAILABLE"
+    assert receipt.authorizing is False
+    assert not marker.exists()

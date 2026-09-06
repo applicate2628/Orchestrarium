@@ -52,6 +52,8 @@ def run_installer(
     script_path: str = str(PY_SCRIPT_PATH),
     env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess:
+    if host_os == "windows" and os.name != "nt":
+        raise unittest.SkipTest("Windows installer integration requires a native Python .exe")
     cmd = [
         sys.executable,
         str(HOOK_INSTALLER),
@@ -84,6 +86,32 @@ class TestInstallHypothesisHook(unittest.TestCase):
 
     def tearDown(self) -> None:
         shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _interpreter_alias(self) -> tuple[Path, Path]:
+        canonical = self.tmpdir / "python-real.exe"
+        canonical.write_bytes(b"synthetic serialization target; never executed")
+        alias = self.tmpdir / "python3.exe"
+        try:
+            alias.symlink_to(canonical)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"symlink creation is required: {exc}")
+        return alias, canonical
+
+    def test_default_running_interpreter_alias_is_canonicalized(self) -> None:
+        from unittest.mock import patch
+        alias, canonical = self._interpreter_alias()
+        with patch.object(HOOK_MODULE.sys, "executable", str(alias)):
+            target = HOOK_MODULE.resolve_hook_target(
+                SCRIPT_PATH, "windows", "claude"
+            )
+        self.assertEqual(Path(target.executable), canonical.resolve())
+
+    def test_explicit_interpreter_reparse_target_still_refuses(self) -> None:
+        alias, _canonical = self._interpreter_alias()
+        with self.assertRaisesRegex(ValueError, "reparse target"):
+            HOOK_MODULE.resolve_hook_target(
+                SCRIPT_PATH, "windows", "claude", python_executable=str(alias)
+            )
 
     def test_install_into_empty_posix_claude_exec_form(self) -> None:
         result = run_installer(self.target)
@@ -591,7 +619,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
         for platform in ("claude", "codex"):
             python_targets = [PY_SCRIPT_PATH]
             self.assertTrue(python_targets)
-            for host_os in ("posix", "windows"):
+            for host_os in (("posix", "windows") if os.name == "nt" else ("posix",)):
                 for python_target in python_targets:
                     with self.subTest(
                         platform=platform,
@@ -630,7 +658,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
             owned = [PY_SCRIPT_PATH]
             self.assertTrue(owned)
             missing = self.tmpdir / platform / "missing-last-owned-hook.py"
-            for host_os in ("posix", "windows"):
+            for host_os in (("posix", "windows") if os.name == "nt" else ("posix",)):
                 with self.subTest(platform=platform, host_os=host_os):
                     candidates = [*owned, missing]
                     with self.assertRaisesRegex(ValueError, "hook Python target"):
@@ -648,7 +676,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
     def test_registered_script_arg_is_absolute(self) -> None:
         target = HOOK_MODULE.resolve_hook_target(
             str(PY_SCRIPT_PATH),
-            "windows",
+            "windows" if os.name == "nt" else "posix",
             "claude",
             python_executable=sys.executable,
         )
@@ -677,6 +705,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
                 python_executable=str(self.tmpdir / "missing-python.exe"),
             )
 
+    @unittest.skipUnless(os.name == "nt", "native Windows unquoted command admission")
     def test_windows_unquoted_shape_and_unsupported_path_rejection(self) -> None:
         target = HOOK_MODULE.resolve_hook_target(
             str(PY_SCRIPT_PATH),
