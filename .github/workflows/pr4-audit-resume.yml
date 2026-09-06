@@ -1,0 +1,40 @@
+name: PR 4 exact-source audit transfer
+
+on:
+  push:
+    branches: [automation/pr4-audit-resume-20260906]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr4-audit-resume-20260906
+  cancel-in-progress: false
+
+jobs:
+  source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: d63884623f73b748618f47cba142faea537338be
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Export only the exact source and its Git object history
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = d63884623f73b748618f47cba142faea537338be
+          test -z "$(git status --porcelain)"
+          mkdir -p "${RUNNER_TEMP}/pr4-source"
+          git bundle create "${RUNNER_TEMP}/pr4-source/source.bundle" HEAD
+          git bundle verify "${RUNNER_TEMP}/pr4-source/source.bundle"
+          git rev-parse HEAD > "${RUNNER_TEMP}/pr4-source/head.txt"
+          sha256sum "${RUNNER_TEMP}/pr4-source/source.bundle" > "${RUNNER_TEMP}/pr4-source/bundle.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pr4-exact-source-d6388462
+          path: ${{ runner.temp }}/pr4-source/
+          if-no-files-found: error
+          retention-days: 2
