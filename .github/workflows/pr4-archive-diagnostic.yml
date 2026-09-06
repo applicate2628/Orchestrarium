@@ -1,0 +1,50 @@
+name: PR4 historical archive byte diagnostic
+on:
+  push:
+    branches: [automation/pr4-audit-20260906-d6388462]
+    paths: [.github/workflows/pr4-archive-diagnostic.yml]
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    env:
+      PYTHONUTF8: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: d63884623f73b748618f47cba142faea537338be
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --disable-pip-version-check pytest PyYAML jsonschema
+      - name: Compare historical archive bytes with conversion toggled
+        shell: python
+        run: |
+          import importlib.util, pathlib, subprocess, sys, tempfile
+          root = pathlib.Path.cwd()
+          sys.path.insert(0, str(root))
+          def load(name, path):
+              spec = importlib.util.spec_from_file_location(name, path)
+              module = importlib.util.module_from_spec(spec)
+              sys.modules[name] = module
+              spec.loader.exec_module(module)
+              return module
+          historical = load('audit_historical_tests', root/'tests/test_global_lead_accepted_prior.py')
+          installer = historical._load_installer()
+          for autocrlf in ('true', 'false'):
+              subprocess.run(['git', 'config', 'core.autocrlf', autocrlf], check=True)
+              with tempfile.TemporaryDirectory() as directory:
+                  tree = historical._extract_stock_consultant(pathlib.Path(directory), historical.STOCK_CONSULTANT_REVISION)
+                  digest = installer._tree_sha256(tree)
+                  print('ARCHIVE', autocrlf, digest, 'EXPECTED', historical.STOCK_CONSULTANT_TREE_SHA256, flush=True)
+                  for path in sorted(tree.rglob('*')):
+                      if path.is_file():
+                          data = path.read_bytes()
+                          original = subprocess.check_output(['git', 'show', historical.STOCK_CONSULTANT_REVISION + ':src.codex/skills/consultant/' + path.relative_to(tree).as_posix()])
+                          if data != original:
+                              print('DIFFERENT',path.relative_to(tree),len(data),len(original),'CRLF',data.count(b'\r\n'),original.count(b'\r\n'), flush=True)
