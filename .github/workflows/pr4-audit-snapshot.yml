@@ -1,0 +1,98 @@
+name: PR4 exact-source audit 2026-09-06
+
+on:
+  push:
+    branches: [automation/pr4-audit-20260906-d6388462]
+    paths: [.github/workflows/pr4-audit-snapshot.yml]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr4-audit-20260906
+  cancel-in-progress: false
+
+env:
+  SOURCE_HEAD: d63884623f73b748618f47cba142faea537338be
+  PYTHONUTF8: '1'
+  PYTHONDONTWRITEBYTECODE: '1'
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Export frozen tracked source and ancestry
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_HEAD"
+          mkdir -p "$RUNNER_TEMP/audit-snapshot"
+          git bundle create "$RUNNER_TEMP/audit-snapshot/source.bundle" HEAD
+          git bundle verify "$RUNNER_TEMP/audit-snapshot/source.bundle"
+          git ls-tree -r HEAD > "$RUNNER_TEMP/audit-snapshot/tree.txt"
+          git rev-parse HEAD > "$RUNNER_TEMP/audit-snapshot/HEAD.txt"
+          cd "$RUNNER_TEMP/audit-snapshot"
+          sha256sum source.bundle tree.txt HEAD.txt > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pr4-source-d6388462
+          path: ${{ runner.temp }}/audit-snapshot/
+          retention-days: 2
+          if-no-files-found: error
+
+  baseline:
+    name: baseline ${{ matrix.os }} ${{ matrix.shard }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+        shard: [0, 1, 2, 3, 4, 5]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install test-only dependencies
+        run: python -m pip install --disable-pip-version-check pytest pytest-subtests pytest-timeout PyYAML jsonschema
+      - name: Run one deterministic full-suite shard
+        shell: python
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          import json, os, pathlib, platform, subprocess, sys
+          head = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          assert head == os.environ['SOURCE_HEAD'], head
+          out = pathlib.Path(os.environ['RUNNER_TEMP']) / 'audit-evidence'
+          out.mkdir()
+          files = sorted(pathlib.Path('tests').glob('test_*.py'))
+          selected = [str(path) for i, path in enumerate(files) if i % 6 == int(os.environ['SHARD'])]
+          assert selected
+          (out/'selection.json').write_text(json.dumps(selected, indent=2), encoding='utf-8')
+          (out/'environment.json').write_text(json.dumps({'head':head, 'python':sys.version, 'platform':platform.platform()}, indent=2), encoding='utf-8')
+          with (out/'dependencies.txt').open('w', encoding='utf-8') as stream:
+              subprocess.run([sys.executable,'-m','pip','freeze'], stdout=stream, check=True)
+          command = [sys.executable,'-m','pytest','-q','--tb=short','--timeout=120','--junitxml='+str(out/'junit.xml'), *selected]
+          (out/'command.json').write_text(json.dumps(command), encoding='utf-8')
+          with (out/'pytest.log').open('w', encoding='utf-8') as stream:
+              result = subprocess.run(command, stdout=stream, stderr=subprocess.STDOUT, check=False)
+          print((out/'pytest.log').read_text(encoding='utf-8', errors='replace')[-30000:])
+          sys.exit(result.returncode)
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: baseline-${{ matrix.os }}-${{ matrix.shard }}-d6388462
+          path: ${{ runner.temp }}/audit-evidence/
+          retention-days: 2
+          if-no-files-found: warn
