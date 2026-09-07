@@ -2,6 +2,12 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-09-07
+
+- **Pinned installer, shared, provider-pack, and frozen-baseline sources now survive Git checkout without newline rewriting.** Root `.gitattributes` disables automatic text conversion on those byte-owned surfaces while retaining the explicit Line Feed rules for the compact governance spine and the historical fixture rule. The checkout regression exercises `core.autocrlf=true`, `input`, and `false` together with contrasting `core.eol` values and verifies every role-policy, native-role, and provider-transport digest. **Why it matters:** a Windows-friendly Git configuration can no longer silently change bytes that installer manifests and transport projections authenticate.
+- **GitHub pull-request review coordination now has one canonical methodology and one connector-author predicate across outcomes.** The shared reference owns REST `IssueCommentOrder`, overlapping same-head attribution, semantic clean evidence, exact failure signatures, and retry lineage; both installed skill copies retain the complete operative rule and require the actual Codex connector login/type pair on REST or login/typename pair on GraphQL for success, failure, findings, and progress. Numeric REST author IDs remain recorded evidence, not a guessed allowlist, and clean meaning remains semantic rather than phrase-pinned. **Why it matters:** an unrelated bot or ambiguous overlapping run cannot be mistaken for a clean or failed Codex review.
+- **Codex operating-model diagrams and the Russian addendum now describe host-capacity rolling dispatch.** Independent lane-ready work may use native subagents when the current host exposes capacity, admission is recomputed after launches and settled lanes, and dependency or shared integration surfaces remain serialized. **Why it matters:** maintainers no longer receive sequential-only guidance that contradicts the current Codex runtime and Lead contract.
+
 ## 2026-09-04
 
 - **GitHub pull-request clean-result attribution now fails closed across overlapping same-head review runs.** Uncorrelated submitted-review and REST issue-comment no-findings results require exactly one unresolved exact trigger candidate; a trigger-bound `+1` cannot make the head clean while another same-head trigger remains unresolved. **Why it matters:** a late success from an older run can no longer close a newer or still-active review by timestamp alone.

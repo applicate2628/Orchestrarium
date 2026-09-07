@@ -8,7 +8,7 @@
 
 ## Codex-specific runtime notes
 
-- Codex использует sequential skill invocation для native skills. Нативного internal parallel skill dispatch нет, поэтому internal Codex-role work всё ещё оркестрируется последовательно на Codex-line. Independent external adapters всё ещё могут работать параллельно, когда routing contract и выбранные provider runtimes это разрешают.
+- Native subagent dispatch в Codex доступен, когда его предоставляет текущий host. Такие lanes допускаются по shared rolling lane-ready-set contract: нельзя считать internal execution только последовательным или выводить numeric concurrency cap из более раннего отказа либо поведения другого runtime. Dependency и shared integration surfaces по-прежнему сериализуются.
 - Consultant config живёт в `.agents/.agents-mode.yaml`.
 - Codex может расширять shared `agents-mode` schema полем `externalClaudeProfile` для выбора Claude CLI execution profile (`sonnet-high`, `opus-xhigh` — shipped default, `opus-max` — max-depth escalation, или `fable-xhigh` — текущий flagship-family best-effort tier), когда `externalProvider` resolves to Claude.
 - `externalProvider: auto` разрешается по active named production priority profile, а не по Codex-line default; shipped production `auto` использует только `codex | claude`. Явный Kimi разрешён только для policy-admitted read-only работы; Grok остаётся unavailable, а удалённые Gemini/Qwen scalar values fail closed с `E_EXTERNAL_PROVIDER_REMOVED`.
