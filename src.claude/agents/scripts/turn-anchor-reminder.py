@@ -1,12 +1,6 @@
 #!/usr/bin/env python3
 """UserPromptSubmit hook -- re-anchors the TURN-BOUNDARY postures at the start of every user turn.
 
-Python twin of `turn-anchor-reminder.ps1`. The anchor text is byte-identical to the
-PowerShell version's here-string; the emitted JSON is byte-identical to what
-`ConvertTo-Json -Compress` produces for the same payload. It was the LAST of the
-thirteen registered hooks with no Python twin, which is the only reason its entry
-could not be re-registered away from `powershell.exe` with the other twelve.
-
 WHAT THIS SURFACE CANNOT REACH: it fires at TURN START, so a rule whose failure moment is
 MID-TURN (which tool to reach for) belongs on PreToolUse instead -- first-person evidence:
 ~100 consecutive bash calls inside one turn, all succeeding, and the tool choice came from
@@ -32,24 +26,17 @@ KEEP IT SHORT. This text is paid for on every single turn. Detail lives in the
 SessionStart reminders and in the spine; this is the anchor, not the manual.
 ASCII-only output so it never mojibakes across console codepages. Fail-open; exits 0.
 
-STDIN IS NEVER READ, deliberately and for the same reason the `.ps1` sibling's blocking
-read is a defect: `check-scratch-valuables.ps1` calls `[Console]::In.ReadToEnd()`, which
-returns only at end-of-file, so a caller that never closes the write end leaves the process
-blocked forever at `cpu=0`. Eight such processes were found alive on a real machine. This
-hook needs no input, so it takes none.
+STDIN IS NEVER READ. This hook needs no input, and avoiding a blocking read keeps startup
+bounded when a caller does not close the write end.
 """
 
 import sys
 
-from mcp_continuity_policy import TURN_ANCHOR_CONTEXT
-
 
 def main() -> int:
     try:
-        # `separators` reproduces PowerShell's `ConvertTo-Json -Compress` spacing exactly;
-        # `ensure_ascii=True` (the default) keeps the output ASCII-only, matching the
-        # docstring's contract and the .ps1's behaviour across console codepages.
         import json
+        from mcp_continuity_policy import TURN_ANCHOR_CONTEXT
 
         payload = {
             "hookSpecificOutput": {
@@ -61,8 +48,7 @@ def main() -> int:
         if line:
             sys.stdout.write(line + "\n")
     except Exception:
-        # Fail open, exactly like the .ps1's empty catch block: a reminder that cannot be
-        # emitted must never cost the operator a turn.
+        # A reminder that cannot be emitted must never cost the operator a turn.
         pass
     return 0
 

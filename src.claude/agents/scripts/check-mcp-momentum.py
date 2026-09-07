@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Claude PreToolUse binding for the shared MCP-continuity policy.
 
-The shared policy remains the sole owner of server discovery and confident
-source-navigation classification.  This provider adapter binds only Claude
+The shared policy remains the sole owner of confident source-navigation
+classification.  This provider adapter binds only Claude
 root conversations in effective ``mcpMode: force``.  Auto, unresolved modes,
 and subagents preserve the existing advisory behavior.  Every failure remains
 fail-open so a malformed envelope or unreadable config cannot create a retry
@@ -27,7 +27,6 @@ from hook_common import (
 from agents_mode_runtime import resolve_scalar
 from mcp_continuity_policy import (
     classify_tool_choice,
-    configured_code_intel_servers,
     render_momentum_advisory,
 )
 
@@ -36,20 +35,14 @@ RECOVERY_MARKER = "[approve-mcp-fallback:v1]"
 TRANSCRIPT_BYTE_CAP = 4 * 1024 * 1024
 
 
-def _server_summary(servers: tuple[str, ...]) -> str:
-    shown = ", ".join(servers[:3])
-    remaining = len(servers) - min(3, len(servers))
-    return f"{shown} (+{remaining} more)" if remaining else shown
-
-
-def _emit_deny(envelope: dict, servers: tuple[str, ...]) -> None:
+def _emit_deny(envelope: dict) -> None:
     event = envelope.get("hook_event_name")
     if not isinstance(event, str) or not event:
         event = "PreToolUse"
     reason = (
         "[MCP-FORCE-1] Effective mcpMode is force and this root source-"
-        "navigation choice has a configured code-intelligence MCP owner: "
-        f"{_server_summary(servers)}. Use MCP discovery/query now. If the MCP "
+        "navigation choice requires an MCP checkpoint. Use runtime tool discovery "
+        "as the only availability source and query the relevant tool now. If the MCP "
         "path is unavailable or inappropriate, the exact host-projected "
         f"user-role message {RECOVERY_MARKER} enables one recovery turn; it "
         "is not authenticated authorization."
@@ -84,15 +77,6 @@ def _emit_mode_unresolved(envelope: dict) -> None:
     )
 
 
-def _emit_no_server(envelope: dict) -> None:
-    emit_advisory(
-        envelope,
-        "[MCP-FORCE-NO-SERVER] Effective mcpMode is force, but no configured "
-        "code-intelligence MCP server was discoverable. The hook is allowing "
-        "the choice to avoid an impossible retry loop.",
-    )
-
-
 def _exact_projected_user_recovery_marker(envelope: dict) -> bool:
     transcript_path = envelope.get("transcript_path")
     if not isinstance(transcript_path, str) or not transcript_path:
@@ -115,27 +99,21 @@ def main() -> int:
         if not classify_tool_choice(tool_name, tool_input, envelope.get("cwd")):
             return 0
 
-        servers = configured_code_intel_servers()
         if "agent_id" in envelope:
-            if servers:
-                emit_advisory(envelope, render_momentum_advisory(servers))
+            emit_advisory(envelope, render_momentum_advisory())
             return 0
 
         mode = resolve_scalar("mcpMode")
         if mode == "auto":
-            if servers:
-                emit_advisory(envelope, render_momentum_advisory(servers))
+            emit_advisory(envelope, render_momentum_advisory())
             return 0
         if mode != "force":
             _emit_mode_unresolved(envelope)
             return 0
-        if not servers:
-            _emit_no_server(envelope)
-            return 0
         if _exact_projected_user_recovery_marker(envelope):
             _emit_recovery(envelope)
             return 0
-        _emit_deny(envelope, servers)
+        _emit_deny(envelope)
     except Exception:
         return 0
     return 0

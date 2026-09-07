@@ -3,7 +3,7 @@
 Этот файл — визуальное дополнение к [subagent-operating-model.md](subagent-operating-model.md).
 Справочник по стратегиям: [shared/references/ru/workflow-strategy-comparison.md](../../shared/references/ru/workflow-strategy-comparison.md).
 
-**Platform note:** Orchestrarium targets Codex, а Codex использует sequential skill invocation. В отличие от parallel Agent tool dispatch в Claude Code, Codex обрабатывает один skill за раз. Диаграммы ниже отражают эту sequential execution model.
+**Platform note:** native subagent dispatch в Codex доступен, когда его предоставляет текущий host. Диаграммы показывают rolling admission независимых lane-ready работ с учётом текущей host capacity; dependency edges и shared integration surfaces по-прежнему сериализуются.
 
 > **Узел `lead` / `M` / `L` обозначает оркестрирующую роль, которую главная сессия Codex держит с активным skill `$lead`, а НЕ отдельно запускаемого агента.** По стадиям активируются только листовые роли-специалисты; `lead` — это главная сессия, исполняющая оркестрацию.
 
@@ -28,9 +28,9 @@ flowchart LR
     M -. "needs product facts" .-> PA
 ```
 
-## 2. Hub-and-spoke Topology (Sequential)
+## 2. Rolling Hub-and-spoke Topology
 
-Lead вызывает одну роль за раз. Каждая роль завершает работу и возвращает artifact до вызова следующей. Native parallel dispatch отсутствует.
+Lead владеет admission и handoff. Он запускает largest useful pairwise-compatible subset готовых lanes, который допускает текущая host capacity, пересчитывает admission после каждого launch или settled lane и в том же turn заполняет освободившуюся capacity. Dependency по-прежнему должна вернуть accepted artifact до запуска consumer.
 
 ```mermaid
 flowchart TB
@@ -50,17 +50,19 @@ flowchart TB
     L -. "advisory (optional)" .-> CO["consultant"]
 ```
 
-## 3. Sequential Handoff Chain
+## 3. Dependency and Independent-lane Dispatch
 
-В отличие от Claude Code, Codex не dispatch'ит несколько skills одновременно. Constraint roles запускаются sequentially, а не in parallel. Lead управляет порядком.
+После принятия architecture независимые constraint lanes могут выполняться concurrently, когда их полные resource surfaces не пересекаются и host допускает запуск. Lead сериализует dependencies, integration-owner work и overlapping resource surfaces.
 
 ```mermaid
 flowchart LR
     AR("architect") --> SE("security-eng")
-    SE --> PE("performance-eng")
-    PE --> RE("reliability-eng")
+    AR --> PE("performance-eng")
+    AR --> RE("reliability-eng")
 
-    RE --> PL("planner")
+    SE --> PL("planner")
+    PE --> PL
+    RE --> PL
 
     PL -->|"CLAIMS"| IM("implementers")
     IM -->|"CLAIMS"| QA("qa-engineer")
@@ -71,7 +73,7 @@ flowchart LR
     RV -. "RETURN" .-> IM
 ```
 
-Если project требует `algorithm-scientist`, `computational-scientist` или `ux-designer` constraints, они вызываются sequentially до planner, а не параллельно с security/performance/reliability.
+Если project требует constraints от `algorithm-scientist`, `computational-scientist` или `ux-designer`, каждая из них входит в тот же lane-ready admission set, когда остаётся независимой. Planner ждёт все обязательные accepted constraint artifacts.
 
 ## 4. Artifact Progression
 
@@ -110,16 +112,16 @@ flowchart TB
 | Ситуация | Стратегия | Key roles |
 |---|---|---|
 | Что должно войти в delivery next? | Roadmap / Intake loop | `$product-manager`, `$product-analyst` |
-| Approved item needs execution | Delivery loop (sequential) | `$lead` -> research -> design -> plan -> implement -> QA/review |
+| Approved item needs execution | Delivery loop (rolling) | `$lead` допускает готовые research, design, plan, implement и QA/review lanes по мере закрытия prerequisites |
 | Next decision blocked by missing facts | Fact-first routing | `$analyst`, `$product-analyst`, specialist evidence lane |
-| Domain risk can independently fail result | Risk-owner routing (sequential) | Relevant constraint role, then corresponding reviewer |
+| Domain risk can independently fail result | Risk-owner routing | Relevant independent constraint lanes, затем соответствующие reviewers после implementation |
 | Admitted item changed mid-delivery | Re-intake loop | `$lead` -> `$product-manager` -> `$lead` |
 | Multiple phases must land together | Integration ownership | `$lead` + one integration owner |
 | Known risk needs checking | Claim-Verify review | Builder with claims list + reviewer |
 | Novel risk needs blind-spot hunting | Adversarial review | Reviewer only, no design package |
 | Need non-blocking second opinion | Consultant advisory | `$lead` -> `$consultant` |
-| Independent read-heavy scopes | Sequential fact-gathering | Research roles invoked one at a time |
-| Independent write-heavy scopes with fixed contracts | Sequential implementation | Implementers invoked one at a time with disjoint ownership |
+| Independent read-heavy scopes | Rolling fact-gathering | Largest useful compatible ready subset в пределах текущей host capacity |
+| Independent write-heavy scopes with fixed contracts | Isolated rolling implementation | Только disjoint или явно isolated lanes; shared integration surfaces сериализуются |
 
 ## 7. Role Map
 
@@ -155,7 +157,7 @@ flowchart LR
 Lifecycle of `constraints/claims.md` in the work-item folder:
 
 1. **Created** after design acceptance — architect seeds initial constraints.
-2. **Populated** by each constraint role as they complete sequentially.
+2. **Populated** по мере settled обязательных constraint lanes; независимые lanes могут overlap, а dependencies сохраняют порядок.
 3. **Frozen** by the planner before implementation. The plan references the claims list.
 4. **Annotated** by each implementer — verification notes only; implementers cannot modify claims.
 5. **Verified** by QA — each claim receives a verification status.
@@ -167,11 +169,11 @@ Lifecycle of `constraints/claims.md` in the work-item folder:
 - `product-manager` owns what enters delivery. `lead` owns execution of approved work.
 - `analyst` и `product-analyst` reduce uncertainty before interpretive roles make tradeoff decisions.
 - Delegation passes accepted artifacts, not raw transcripts.
-- **Codex sequential model:** one skill invocation at a time. No native parallel dispatch. If independent work could theoretically run in parallel, lead still invokes roles sequentially and manages the ordering.
+- **Codex rolling model:** native subagents могут выполняться concurrently, когда текущий host предоставляет capacity. Lead допускает pairwise-compatible lane-ready work, пересчитывает admission после каждого launch или settlement и не кэширует numeric concurrency limit.
 - `REVISE` returns work to the responsible role under the shared spine's consecutive same-role/same-artifact cycle cap; escalate to the user when it is exhausted. `BLOCKED` stops progression and is classified as `BLOCKED:dependency` or `BLOCKED:prerequisite`.
 - Multi-phase implementation requires one explicit integration owner before QA.
 - Reviewers stay independent and report to the orchestrating owner.
-- Interaction types: `LEAD_MED` (default), `DIRECT` (sequential, lead-authorized), `CLAIMS`, `RETURN`, `ESCALATE`, `ADVISORY`, `NONE`. `PARALLEL` is not natively supported in Codex; independent scopes are handled sequentially.
+- Interaction types: `LEAD_MED` (default), `DIRECT`, `PARALLEL` (independent, lane-ready, host-admitted), `CLAIMS`, `RETURN`, `ESCALATE`, `ADVISORY`, `NONE`.
 - Reviewers tag cross-domain findings with `[CROSS-DOMAIN: <target-domain>]`; the orchestrator routes them to the appropriate specialist.
 - Any role files adjacent findings in `work-items/bugs/` without expanding scope.
 - An active task persists canonical artifacts only in `work-items/active/<slug>/` plus its root ledger; `.reports/` and `.plans/` are optional standalone surfaces when no active item exists.

@@ -16,6 +16,14 @@ Each active work item should keep these files together:
 
 `status.md` remains the readable recovery surface. `agent-runs.jsonl` is the state that validators can inspect.
 
+## Project root topology
+
+Optional project-owned auxiliary roots are defined only by the shared
+[`work-items root contract`](../shared/references/work-items-root-contract.md).
+Use that reference for the exact JSON schema, reserved built-in roots,
+non-reparse confinement, compatibility, and lifecycle failure/recovery rules;
+do not infer topology from `README.md` or create an auxiliary root ad hoc.
+
 ## Canonical Staged Start
 
 `python scripts/mutate-work-item.py start` creates a staged `candidate -> active`

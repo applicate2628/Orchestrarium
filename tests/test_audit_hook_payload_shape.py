@@ -34,7 +34,6 @@ identically whether the code reads the envelope or hardcodes the same string).
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 import tempfile
@@ -85,25 +84,6 @@ def assert_payload_shape(
     case.assertIsInstance(specific["additionalContext"], str)
     case.assertEqual(specific["hookEventName"], expected_event)
     case.assertIn(warning_marker, specific["additionalContext"])
-
-
-def _mcp_home() -> str:
-    """A temp HOME with a code-intelligence MCP server configured, so
-    check-mcp-momentum's own predicate (a configured code-intel server) is
-    satisfied independent of the developer's real ~/.claude.json."""
-    home = tempfile.mkdtemp()
-    (Path(home) / ".claude.json").write_text(
-        json.dumps({"mcpServers": {"codegraph": {}}}), encoding="utf-8"
-    )
-    return home
-
-
-def _mcp_env() -> dict:
-    env = dict(os.environ)
-    home = _mcp_home()
-    env["HOME"] = home
-    env["USERPROFILE"] = home
-    return env
 
 
 def _repo_orientation_fixture() -> tuple[Path, dict]:
@@ -180,7 +160,7 @@ SIMPLE_CASES = (
     ("check-stale-relation-residue.py", SHARED_AUDIT_TREES, _stale_relation_envelope,
      "[stale-relation-residue AUDIT]", None),
     ("check-mcp-momentum.py", MCP_AUDIT_TREES, _mcp_momentum_envelope,
-     "[mcp-momentum AUDIT]", "mcp_env"),
+     "[mcp-momentum AUDIT]", None),
     ("check-typed-routing.py", CLAUDE_ONLY_TREES, _typed_routing_envelope,
      "[typed-routing AUDIT]", None),
 )
@@ -191,7 +171,7 @@ class SimpleAuditPayloadShapeTests(unittest.TestCase):
 
     def test_default_event_name_is_pretooluse_when_envelope_omits_it(self) -> None:
         for name, trees, build, marker, env_kind in SIMPLE_CASES:
-            env = _mcp_env() if env_kind == "mcp_env" else None
+            env = None
             for tree in trees:
                 script = tree / name
                 with self.subTest(script=str(script.relative_to(REPO_ROOT))):
@@ -205,7 +185,7 @@ class SimpleAuditPayloadShapeTests(unittest.TestCase):
         emitter fails this test; a pass-through emitter (hook_common.emit_advisory)
         passes it."""
         for name, trees, build, marker, env_kind in SIMPLE_CASES:
-            env = _mcp_env() if env_kind == "mcp_env" else None
+            env = None
             for tree in trees:
                 script = tree / name
                 with self.subTest(script=str(script.relative_to(REPO_ROOT))):
@@ -215,7 +195,7 @@ class SimpleAuditPayloadShapeTests(unittest.TestCase):
     def test_stdout_is_the_only_output_channel(self) -> None:
         """Locks the channel migration itself: nothing rides on stderr any more."""
         for name, trees, build, marker, env_kind in SIMPLE_CASES:
-            env = _mcp_env() if env_kind == "mcp_env" else None
+            env = None
             for tree in trees:
                 script = tree / name
                 with self.subTest(script=str(script.relative_to(REPO_ROOT))):

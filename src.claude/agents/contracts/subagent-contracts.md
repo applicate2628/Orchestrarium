@@ -37,8 +37,8 @@ Role:
 Goal:
 Approved inputs:
 - <accepted artifact or fact>
-Allowed tools (affirmatively name repo-relevant MCP servers/skills, or state "runtime default surface"):
-- <allowed tool, MCP server, skill, or "runtime default surface">
+Allowed tools:
+- <exact task-scoped tool or MCP identifier discovered immediately before this spawn, or none>
 Scope:
 - <allowed area>
 Out of scope:
@@ -71,6 +71,8 @@ Gate to next stage:
 ```
 
 Before dispatch, fill `Diff-invisible invariants`, `Named regression guard`, `Dead/superseded code disposition`, and `Cleanup disposition`. For `Dead/superseded code disposition`, `none` is valid only with a one-line reason. When a change supersedes a mechanism, `none` is invalid. For `Cleanup disposition`, `preserved` requires a reason and `none` means the recipient owns no resource in that category. An implementation or review handoff with any field omitted is incomplete.
+
+The caller performs fresh discovery before every subagent spawn and records only the exact task-scoped identifiers selected for that run, or `none`. An inherited but unlisted tool remains behaviorally forbidden; blanket Model Context Protocol or whole-runtime authorization is invalid.
 
 `Approved inputs` identify the producing run's declared scope and accepted artifact revision when available; no new handoff field is required. Evaluate authored claims and review verdicts against the producing run's declared scope and accepted baseline: later independently owned lane deltas are reviewed in their own lane and do not retroactively falsify the earlier artifact; an actual material revision of the accepted upstream artifact still invalidates dependent `PASS` states and triggers dependent re-review.
 

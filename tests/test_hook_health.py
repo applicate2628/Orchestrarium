@@ -131,8 +131,9 @@ def test_hook_health_uses_force_mode_and_requires_claude_deny_decision(
         observed["env"] = env
         if isinstance(env, dict):
             synthetic_home = Path(env["HOME"])
-            observed["config"] = json.loads(
-                (synthetic_home / ".claude.json").read_text(encoding="utf-8")
+            observed["mcp_config_exists"] = (synthetic_home / ".claude.json").exists()
+            observed["mode"] = (synthetic_home / ".agents-mode.yaml").read_text(
+                encoding="utf-8"
             )
         completed = real_run(*args, **kwargs)
         observed["stdout"] = completed.stdout
@@ -148,9 +149,8 @@ def test_hook_health_uses_force_mode_and_requires_claude_deny_decision(
     )
     assert messages == ["PASS claude PreToolUse check-mcp-momentum"]
     assert "[MCP-FORCE-1]" in str(observed.get("stdout", ""))
-    assert observed.get("config") == {
-        "mcpServers": {"synthetic-codegraph-health": {}}
-    }
+    assert observed.get("mcp_config_exists") is False
+    assert observed.get("mode") == "mcpMode: force\n"
 
 
 def test_hook_health_rejects_silent_mcp_positive_probe(

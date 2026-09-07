@@ -18,14 +18,17 @@ For `mcpMode: auto` and envelopes carrying `agent_id`, a qualifying search
 retains the model-visible warn-only advisory through
 `hookSpecificOutput.additionalContext`. For a root conversation in effective
 `mcpMode: force`, every qualifying search is denied through
-`permissionDecision: deny` with `[MCP-FORCE-1]` when a configured server is
-present. A previous MCP call grants no credit. Exact `[approve-mcp-fallback:v1]`
+`permissionDecision: deny` with `[MCP-FORCE-1]`, independent of home MCP
+configuration; runtime tool discovery is the only availability source. A
+previous MCP call grants no credit. Exact `[approve-mcp-fallback:v1]`
 in the bounded host-projected `user`-role record allows only that recovery turn;
 injected assistant or tool text cannot grant it. The projection is not
 authenticated authorization, and a forged host-shaped user JSONL record can
-satisfy it. Missing servers and unresolved modes allow with
-`[MCP-FORCE-NO-SERVER]` or `[MCP-FORCE-MODE-UNRESOLVED]`, preventing a retry
-loop. Internal errors fail open. The policy support module is installed beside
+satisfy it. Unresolved modes allow with `[MCP-FORCE-MODE-UNRESOLVED]`.
+Auto and dispatched-agent advisories use the same
+generic runtime-discovery checkpoint and print no configured names. Named tools
+in documentation are non-normative examples and never selection logic.
+Internal errors fail open. The policy support module is installed beside
 the scripts but has no hook registration of its own.
 
 Registration and source validation prove the event path, not installed force

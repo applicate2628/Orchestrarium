@@ -895,9 +895,189 @@ PARTIAL_MIGRATION_RECOVERY_UNCHANGED_ROWS = {
 }
 
 
-def _work_items_root(root: Path) -> Path:
-    root = root.resolve()
-    return root if root.name == "work-items" else root / "work-items"
+ROOT_CONTRACT_FILE = "root-contract.json"
+ROOT_CONTRACT_SCHEMA = "work-items-root-contract"
+ROOT_CONTRACT_VERSION = 2
+ROOT_CONTRACT_FAILURE = "WI-CATEGORY-ROOT-CONTRACT-INVALID"
+
+
+def _root_contract_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    value: dict[str, object] = {}
+    for key, item in pairs:
+        if key in value:
+            raise LifecycleError(
+                ROOT_CONTRACT_FAILURE,
+                f"root contract repeats JSON key: {key}",
+            )
+        value[key] = item
+    return value
+
+
+@dataclass(frozen=True)
+class ProjectTopology:
+    work_items: Path
+    auxiliary_roots: frozenset[str]
+    read_model_roots: frozenset[str] = frozenset()
+    root_contract_present: bool = False
+
+    @property
+    def canonical_roots(self) -> frozenset[str]:
+        roots = {"backlog", "active", "archive"}
+        roots.update(
+            category.current_root
+            for category in CATEGORIES.values()
+            if category.current_kind == "flat"
+        )
+        return frozenset(roots)
+
+    @property
+    def reserved_roots(self) -> frozenset[str]:
+        return self.canonical_roots | self.read_model_roots
+
+    @property
+    def allowed_roots(self) -> frozenset[str]:
+        roots = set(self.reserved_roots)
+        roots.update(self.auxiliary_roots)
+        return frozenset(roots)
+
+    def assert_known_top_level_roots(self) -> None:
+        if not self.work_items.is_dir():
+            return
+        unknown_roots = sorted(
+            path.name
+            for path in self.work_items.iterdir()
+            if path.is_dir() and path.name not in self.allowed_roots
+        )
+        if unknown_roots:
+            noun = "directory" if len(unknown_roots) == 1 else "directories"
+            raise LifecycleError(
+                "WI-CATEGORY-UNKNOWN-ROOT",
+                f"unknown top-level work-items {noun}: " + ", ".join(unknown_roots),
+            )
+
+    def with_read_model_roots(self) -> ProjectTopology:
+        if self.read_model_roots:
+            return self
+        try:
+            validator = _load_agent_run_ledger().load_validator()
+            historical_storage = validator.historical_artifact_disposition_storage_identity()
+            historical_storage = validator.confine_legacy_projection_identifier(
+                historical_storage,
+                failure_id="WI-LEDGER-MIGRATION-MANIFEST-INVALID",
+            )
+        except (FileNotFoundError, ImportError, OSError):
+            # Standalone checker bundles intentionally omit the optional
+            # lifecycle writer and retain their legacy category set.
+            return self
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise LifecycleError(
+                "WI-LEDGER-MIGRATION-MANIFEST-INVALID",
+                "historical disposition storage identity is unavailable or invalid",
+            ) from exc
+        return ProjectTopology(
+            work_items=self.work_items,
+            auxiliary_roots=self.auxiliary_roots,
+            read_model_roots=frozenset({historical_storage}),
+            root_contract_present=self.root_contract_present,
+        )
+
+
+def _resolve_project_topology(
+    root: Path,
+    *,
+    root_failure_id: str = ROOT_CONTRACT_FAILURE,
+) -> ProjectTopology:
+    unresolved = _lifecycle_unresolved_absolute(Path(root))
+    resolved = unresolved.resolve()
+    work_items = resolved if resolved.name == "work-items" else resolved / "work-items"
+    contract_path = work_items / ROOT_CONTRACT_FILE
+    try:
+        contract_path.lstat()
+    except FileNotFoundError:
+        return ProjectTopology(work_items=work_items, auxiliary_roots=frozenset())
+    except OSError as exc:
+        raise LifecycleError(
+            ROOT_CONTRACT_FAILURE, "root contract entry cannot be inspected"
+        ) from exc
+    _lifecycle_reject_unreduced_reparse(
+        unresolved,
+        failure_id=root_failure_id,
+        message="repository root or parent contains a link or reparse point",
+    )
+    _lifecycle_reject_unreduced_reparse(
+        work_items,
+        failure_id=root_failure_id,
+        message="work-items root contains a link or reparse point",
+    )
+    _lifecycle_reject_unreduced_reparse(
+        contract_path,
+        failure_id=ROOT_CONTRACT_FAILURE,
+        message="root contract contains a link or reparse point",
+    )
+    if not contract_path.is_file():
+        raise LifecycleError(ROOT_CONTRACT_FAILURE, "root contract must be a regular file")
+    try:
+        contract = json.loads(
+            contract_path.read_text(encoding="utf-8"),
+            object_pairs_hook=_root_contract_json_object,
+        )
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise LifecycleError(ROOT_CONTRACT_FAILURE, "root contract must be valid UTF-8 JSON") from exc
+    if (
+        not isinstance(contract, dict)
+        or set(contract) != {"schema", "version", "auxiliaryRoots"}
+        or contract.get("schema") != ROOT_CONTRACT_SCHEMA
+        or type(contract.get("version")) is not int
+        or contract.get("version") != ROOT_CONTRACT_VERSION
+        or not isinstance(contract.get("auxiliaryRoots"), dict)
+    ):
+        raise LifecycleError(ROOT_CONTRACT_FAILURE, "root contract schema is invalid")
+    topology = ProjectTopology(
+        work_items=work_items,
+        auxiliary_roots=frozenset(),
+        root_contract_present=True,
+    ).with_read_model_roots()
+    auxiliary_roots: set[str] = set()
+    for name, definition in contract["auxiliaryRoots"].items():
+        if not isinstance(name, str) or SLUG_RE.fullmatch(name) is None:
+            raise LifecycleError(ROOT_CONTRACT_FAILURE, "auxiliary root name is not a bare root")
+        if name in topology.reserved_roots:
+            raise LifecycleError(
+                ROOT_CONTRACT_FAILURE,
+                f"auxiliary root collides with a reserved root: {name}",
+            )
+        if name.casefold() == "README.md".casefold():
+            raise LifecycleError(
+                ROOT_CONTRACT_FAILURE,
+                f"auxiliary root collides with generated README: {name}",
+            )
+        if not isinstance(definition, dict) or definition != {"kind": "flat-json"}:
+            raise LifecycleError(ROOT_CONTRACT_FAILURE, f"auxiliary root definition is invalid: {name}")
+        auxiliary_path = work_items / name
+        _lifecycle_reject_unreduced_reparse(
+            auxiliary_path,
+            failure_id=ROOT_CONTRACT_FAILURE,
+            message=f"auxiliary root contains a link or reparse point: {name}",
+        )
+        if auxiliary_path.exists() and not auxiliary_path.is_dir():
+            raise LifecycleError(ROOT_CONTRACT_FAILURE, f"auxiliary root is not a directory: {name}")
+        auxiliary_roots.add(name)
+    topology = ProjectTopology(
+        work_items=topology.work_items,
+        auxiliary_roots=frozenset(auxiliary_roots),
+        read_model_roots=topology.read_model_roots,
+        root_contract_present=True,
+    )
+    topology.assert_known_top_level_roots()
+    return topology
+
+
+def _work_items_root(
+    root: Path,
+    *,
+    root_failure_id: str = ROOT_CONTRACT_FAILURE,
+) -> Path:
+    return _resolve_project_topology(root, root_failure_id=root_failure_id).work_items
 
 
 def is_valid_slug(slug: str) -> bool:
@@ -4258,46 +4438,10 @@ def reopen_item(
 
 
 def audit_categories(root: Path) -> tuple[str, ...]:
-    work_items = _work_items_root(root)
-    try:
-        validator = _load_agent_run_ledger().load_validator()
-        historical_storage = validator.historical_artifact_disposition_storage_identity()
-        historical_storage = validator.confine_legacy_projection_identifier(
-            historical_storage, failure_id="WI-LEDGER-MIGRATION-MANIFEST-INVALID"
-        )
-    except (FileNotFoundError, ImportError, OSError):
-        # Standalone checker bundles intentionally omit the optional lifecycle
-        # writer; without its directory they retain their legacy category set.
-        historical_storage = None
-    except (AttributeError, TypeError, ValueError) as exc:
-        raise LifecycleError(
-            "WI-LEDGER-MIGRATION-MANIFEST-INVALID",
-            "historical disposition storage identity is unavailable or invalid",
-        ) from exc
-    allowed_roots = {
-        "backlog",
-        "active",
-        "archive",
-    }
-    if historical_storage is not None:
-        allowed_roots.add(historical_storage)
-    allowed_roots.update(
-        category.current_root
-        for category in CATEGORIES.values()
-        if category.current_kind == "flat"
-    )
-    if work_items.is_dir():
-        unknown_roots = sorted(
-            path.name
-            for path in work_items.iterdir()
-            if path.is_dir() and path.name not in allowed_roots
-        )
-        if unknown_roots:
-            noun = "directory" if len(unknown_roots) == 1 else "directories"
-            raise LifecycleError(
-                "WI-CATEGORY-UNKNOWN-ROOT",
-                f"unknown top-level work-items {noun}: " + ", ".join(unknown_roots),
-            )
+    topology = _resolve_project_topology(root).with_read_model_roots()
+    work_items = topology.work_items
+    if not topology.root_contract_present:
+        topology.assert_known_top_level_roots()
     decision_v0_records = _preflight_current_decision_v0(root)
     decision_h1_records = _preflight_current_decision_h1(root)
     legacy_read_compatible: list[str] = []
@@ -5392,7 +5536,10 @@ def _normalization_fail(failure_id: str, message: str) -> LifecycleError:
 def _normalization_bound_source(
     root: Path, category: Category, relative: str, *, must_exist: bool = True
 ) -> Path:
-    work_items = _work_items_root(root)
+    work_items = _work_items_root(
+        root,
+        root_failure_id="WI-IDENTITY-NORMALIZE-SOURCE",
+    )
     relative_path = Path(relative)
     if (
         relative_path.is_absolute()
