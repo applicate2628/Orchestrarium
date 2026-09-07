@@ -23,7 +23,7 @@ Do NOT auto-invoke for single-module additive design, or when the design problem
 
 2. **Pinned-input gate.** Confirm one admitted objective, scope, and evidence/constraint package exist (per `DP1`). If the problem statement is unverified, verify it first — a panel multiplies an unverified premise across every lane.
 
-3. **Choose N and framings.** Default `N=2`. Pick a distinct, bounded framing per lane and pre-register them (lane id, framing, assigned role) in the work-item `status.md` `## Active agents` table BEFORE dispatch.
+3. **Choose N and framings.** Default `N=2`. Pick a distinct, bounded framing per lane and pre-register them through existing carriers BEFORE dispatch: `Current step` names panel preparation, `Last result` records the accepted pinned-input gate, `Next action` names candidate dispatch, and root-owned `agent-runs.jsonl` receives one running launch event per lane whose existing run identity, role/assigned-role, and scope carry the lane id, assigned role, and framing. Do not add a status table or ledger field.
 
 4. **Dispatch the candidate lanes in parallel**, per the contract's Claude dispatch mapping, via the Agent tool with `run_in_background: true`:
    - Internal lane → `subagent_type: architect` with an explicit `model:` override.

@@ -124,6 +124,52 @@ def test_lead_and_receiving_contracts_fail_closed_on_self_residue() -> None:
         assert "Dead/superseded code disposition" in text
 
 
+def test_lead_intermediate_acceptance_uses_producer_owned_resource_echo() -> None:
+    for relative in (
+        "src.codex/skills/lead/SKILL.md",
+        "src.claude/skills/lead/SKILL.md",
+    ):
+        text = (ROOT / relative).read_text(encoding="utf-8")
+        acceptance = text.split(
+            "Lead acceptance is a mechanical completeness gate:", 1
+        )[1].split("When an accepted artifact asserts a root cause", 1)[0]
+        for bounded_control in (
+            "producing artifact's current receiving-side echo",
+            "`Cleanup disposition`",
+            "`ResourceRowV1`",
+            "no selected owned resources",
+            "without a fresh repository-wide `RepoCleanupReportV1`",
+            "the label alone is not evidence",
+            "unsettled owned resources",
+            "`none` claim contradicted by a row or current evidence",
+            "`REVISE:self-residue`",
+        ):
+            assert bounded_control in acceptance
+
+        for full_cleanup_trigger in (
+            "is required only when",
+            "`$repo-cleanup` is selected",
+            "a transfer contract requires it",
+            "concrete evidence makes the bounded owner inventory insufficient",
+        ):
+            assert full_cleanup_trigger in acceptance
+
+        for preserved_full_report_control in (
+            "current-invocation `RepoCleanupReportV1` with status `PASS`",
+            "same physical repository identity and `HEAD`/unborn state",
+            "missing, stale, incomplete, null, non-`PASS`, or non-zero "
+            "residue/unclassified rows",
+            "Valid `ephemeral-volume-exempt` rows",
+            "never authorizes cleanup or substitutes for an owner verdict",
+        ):
+            assert preserved_full_report_control in acceptance
+
+        assert (
+            "For every Lead-managed acceptance, require one complete "
+            "current-invocation `RepoCleanupReportV1`"
+        ) not in acceptance
+
+
 def test_transfer_receiving_contract_enforces_one_ordered_cleanup_chain() -> None:
     expected = (
         "cleanup PASS -> final inventory -> bundle -> trusted verify -> "

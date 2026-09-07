@@ -6,16 +6,16 @@ Resume an interrupted agent chain from its saved state.
 
 1. **Find interrupted work.** Check `$ARGUMENTS`:
    - If a slug is given, load that work-item from `work-items/active/`
-   - If empty, scan `work-items/active/` for all items. Display each with: slug, template, current stage, last completed agent, next action.
+   - If empty, scan `work-items/active/` for all items. Display each with: slug, template, current step, last result, and next action; read agent execution state from the existing ledger as described below.
    - Also scan `work-items/epics/` for active epics and show each epic's roll-up (k/n children done), so a mid-epic resume restores the epic context, not just the single item.
-   - For each item, read the optional `Depends-on: <slug>, <slug>` line in its `status.md` and resolve each target across physical `work-items/active/`, `work-items/archive/YYYY-MM/`, and `work-items/backlog/` locations (done-predicate as in `/agents-status`; a backlog match is existence, not done). Show open targets as `blocked-by` — a target that resolves nowhere is ALSO shown as `blocked-by`, never treated as satisfied — so the resume picture reflects standing blockers, not just the next action. Treat `work-items/index.md` as a compatibility snapshot only.
+   - For each item, read the optional top-level `Depends-on: <slug>, <slug>` scalar in its current staged `status.md` and resolve each target across physical `work-items/active/`, `work-items/archive/YYYY-MM/`, and `work-items/backlog/` locations (done-predicate as in `/agents-status`; a backlog match is existence, not done). Use a legacy section lookup only through the compatibility fallback below. Show open targets as `blocked-by` — a target that resolves nowhere is ALSO shown as `blocked-by`, never treated as satisfied — so the resume picture reflects standing blockers, not just the next action. Treat `work-items/index.md` as a compatibility snapshot only.
    - If no active work-items found, say "Nothing to resume."
 
 2. **Load state.** Read `status.md` from the selected work-item:
-   - Template and orchestration weight (`orchestration: light | full-lead`; legacy `orchestrator:` values read main→light, lead→full-lead — the main conversation holds Lead either way)
-   - Current stage and main conv role
-   - Completed agents and their results
-   - Next action
+   - For a current staged record, read `template` and `status` from frontmatter plus the top-level `Task`, `Current step`, `Last result`, and `Next action` scalars. For a current quick-fix record, read the same four recovery facts from its list items.
+   - Read `agent-runs.jsonl` for launched/running/terminal roles, completed results, and model/effort only when reported; do not require an Active agents table or infer absent values.
+   - Legacy sectioned fallback: only when the record is neither current staged nor quick-fix, read the old Current state, Active agents, Completed agents, and orchestration fields. This may maintain the existing legacy record; it does not make those fields current requirements.
+   - Read optional top-level relations such as `Depends-on:` when present; none is mandatory.
 
 3. **Validate.** Before resuming:
    - Check that referenced artifacts still exist

@@ -20,6 +20,38 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 SPINE = "shared/AGENTS.shared.md"
 CLAUDE_QUICK_FIX_TEMPLATE = "src.claude/agents/team-templates/quick-fix.json"
+CLAUDE_RESEARCH_TEMPLATE = "src.claude/agents/team-templates/research.json"
+
+ROUTING_ENTRYPOINTS = ("src.codex/AGENTS.codex.md", "src.claude/CLAUDE.md")
+HANDOFF_CONTRACTS = (
+    "src.codex/skills/lead/subagent-contracts.md",
+    "src.claude/agents/contracts/subagent-contracts.md",
+)
+
+FACT_ROUTING_FRAGMENTS = (
+    "Standalone bounded fact lookup is answered inline with no artifact.",
+    "defaults to one `$analyst`",
+    "recovery only when continuation is needed",
+    "explicitly user-named role or narrower factual domain specialist remains valid",
+    "Architecture Decision Record (ADR)",
+    "add `$planner` only when the user explicitly requests an execution plan",
+)
+SIDE_QUESTION_CONTINUITY_FRAGMENTS = (
+    "answer a side question briefly in commentary",
+    "next authorized primary-task action in the same turn",
+    "never end the turn with a final-only answer",
+)
+HANDOFF_ACCEPTANCE_ECHO_FRAGMENTS = (
+    "same accepted `Acceptance criteria` and `Named regression guard`",
+    "guard's expected and observed result",
+    "do not add a Primary Acceptance Oracle identifier, status field, ledger field, or file",
+)
+STATUS_ACCEPTANCE_CARRIER_FRAGMENTS = (
+    "quick-fix writes the objective in `Task`",
+    "criteria and guard reference in `Last result`",
+    "Quality Assurance (QA) in `Next action`",
+    "the oracle in `Evidence gate`",
+)
 
 # --- per-gap normative substrings and the owner files that MUST contain them ---
 # (gap-id, substring, [owner files])
@@ -498,8 +530,10 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
             self.assertLess(text.index("**Classify before full task-memory recovery**"), text.index("**Verify work-items"))
             self.assertIn("route `implementation -> QA`", text)
             self.assertIn("create the minimal `work-items/active/<slug>/status.md`", text)
-        self.assertIn("For recovery-tracked `requiresLead: false` chains with 2+ stages (`research`, `review`)",
-                      self._read("src.claude/CLAUDE.md"))
+        self.assertIn(
+            "For `requiresLead: false` routes that need continuation",
+            self._read("src.claude/CLAUDE.md"),
+        )
         self.assertIn("Evaluate the shared `quick-fix` predicate before invoking a process skill",
                       self._read("src.claude/CLAUDE.md"))
 
@@ -595,6 +629,270 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
         spine = self._read(SPINE)
         self.assertIn("ownership/contracts", spine)
         self.assertIn("Failed/unclear => re-classify/enrich same item", spine)
+
+    def test_fact_lookup_routes_by_decision_need_and_preserves_active_task_continuity(self) -> None:
+        direct_role_priority = {
+            "src.codex/AGENTS.codex.md": "1. User explicitly names a role: invoke it directly.",
+            "src.claude/CLAUDE.md": "1. Did the user explicitly name a role? → invoke that role directly",
+        }
+        for entrypoint in ROUTING_ENTRYPOINTS:
+            with self.subTest(entrypoint=entrypoint):
+                text = self._read(entrypoint)
+                for fragment in FACT_ROUTING_FRAGMENTS + SIDE_QUESTION_CONTINUITY_FRAGMENTS:
+                    self.assertTrue(
+                        fragment in text,
+                        f"{entrypoint}: missing routing fragment {fragment!r}",
+                    )
+                self.assertTrue(
+                    direct_role_priority[entrypoint] in text,
+                    f"{entrypoint}: explicit user role must precede default factual routing",
+                )
+
+        template = json.loads(self._read(CLAUDE_RESEARCH_TEMPLATE))
+        roles = {role["agentType"]: role for role in template["roles"]}
+        self.assertEqual(template["requiredRoles"], ["analyst"])
+        self.assertEqual(template["minRoles"], 1)
+        self.assertIs(roles["analyst"].get("required"), True)
+        for agent_type, required_triggers in (
+            ("architect", ("decision", "adr", "material alternatives")),
+            ("planner", ("explicit", "execution plan")),
+        ):
+            with self.subTest(agent_type=agent_type):
+                role = roles[agent_type]
+                self.assertIsNot(role.get("required"), True)
+                trigger = role.get("whenNeeded", "").lower()
+                for expected in required_triggers:
+                    self.assertIn(expected, trigger)
+        self.assertTrue(
+            "A bounded factual investigation defaults to the analyst only" in template["notes"],
+            "research template must keep the bounded factual route analyst-only by default",
+        )
+
+    def test_handoff_and_status_docs_reuse_existing_acceptance_carriers(self) -> None:
+        expected_staged_status = [
+            "---",
+            "template: staged",
+            "status: active",
+            "started: <YYYY-MM-DDTHH:MM:SSZ>",
+            "updated: <YYYY-MM-DDTHH:MM:SSZ>",
+            "---",
+            "Task: <active objective>",
+            "Current step: <current execution step>",
+            "Last result: <accepted result or criteria/guard reference>",
+            "Next action: <next implementation or QA step>",
+            "Scope boundary: <approved scope and exclusions>",
+            "Owner: <current artifact owner>",
+            "Integration owner: <integration owner>",
+            "Evidence gate: <accepted oracle and required evidence>",
+        ]
+        for contract in HANDOFF_CONTRACTS:
+            with self.subTest(contract=contract):
+                text = self._read(contract)
+                for fragment in (
+                    HANDOFF_ACCEPTANCE_ECHO_FRAGMENTS
+                    + STATUS_ACCEPTANCE_CARRIER_FRAGMENTS
+                ):
+                    self.assertTrue(
+                        fragment in text,
+                        f"{contract}: missing handoff/status fragment {fragment!r}",
+                    )
+                section = text.split("### status.md format", 1)[1].split(
+                    "### agent-runs.jsonl format", 1
+                )[0]
+                code = section.split("```markdown", 1)[1].split("```", 1)[0]
+                self.assertEqual(
+                    [line for line in code.splitlines() if line.strip()],
+                    expected_staged_status,
+                )
+                legacy_fragment = (
+                    "Legacy sectioned `status.md` records remain readable compatibility input"
+                )
+                self.assertTrue(
+                    legacy_fragment in section,
+                    f"{contract}: missing legacy-status compatibility statement",
+                )
+
+    def test_current_status_projections_use_scalar_fields_and_the_existing_ledger(self) -> None:
+        response_heading = {
+            "src.codex/skills/lead/subagent-contracts.md": "## Shared response format",
+            "src.claude/agents/contracts/subagent-contracts.md": "## Response format",
+        }
+        for contract in HANDOFF_CONTRACTS:
+            text = self._read(contract)
+            interruption = text.split("No-artifact interruption rule:", 1)[1].split(
+                response_heading[contract], 1
+            )[0]
+            with self.subTest(contract=contract):
+                for field in ("Current step", "Last result", "Next action"):
+                    self.assertTrue(
+                        field in interruption,
+                        f"{contract}: interruption recovery omits current scalar {field}",
+                    )
+                for retired in ("Primary task status:", "Interruption marker:"):
+                    self.assertTrue(
+                        retired not in interruption,
+                        f"{contract}: current interruption writer still requires {retired}",
+                    )
+                self.assertTrue(
+                    "explicit user pause" in interruption and "same-turn" in interruption,
+                    f"{contract}: interruption rule loses pause authority or same-turn continuity",
+                )
+
+        for lead_skill in (
+            "src.codex/skills/lead/SKILL.md",
+            "src.claude/skills/lead/SKILL.md",
+        ):
+            dispatch_line = next(
+                line
+                for line in self._read(lead_skill).splitlines()
+                if "**Dispatch economics**" in line
+            )
+            with self.subTest(lead_skill=lead_skill):
+                self.assertTrue(
+                    "agent-runs.jsonl" in dispatch_line,
+                    f"{lead_skill}: dispatch metadata does not use the existing ledger",
+                )
+                self.assertTrue(
+                    "status.md` Active agents" not in dispatch_line,
+                    f"{lead_skill}: dispatch still mandates the legacy Active agents table",
+                )
+
+        status_command = self._read("src.claude/commands/agents-status.md")
+        current_status = status_command.split("1. **Active work-items.**", 1)[1].split(
+            "2. **Project policies.**", 1
+        )[0]
+        for fragment in (
+            "Current step",
+            "Last result",
+            "Next action",
+            "agent-runs.jsonl",
+            "Legacy sectioned",
+            "quick-fix four-fact",
+        ):
+            self.assertTrue(
+                fragment in current_status,
+                f"agents-status current reader missing {fragment!r}",
+            )
+        for retired in (
+            "orchestration weight (light/full-lead",
+            "Priority (if the `## Current state` block",
+        ):
+            self.assertTrue(
+                retired not in current_status,
+                f"agents-status current reader still requires {retired!r}",
+            )
+        dashboard = status_command.split("11. **Format.**", 1)[1]
+        self.assertTrue(
+            "(orchestration: <light|full-lead>)" not in dashboard,
+            "agents-status dashboard still requires orchestration metadata",
+        )
+
+        resume = self._read("src.claude/commands/agents-resume.md")
+        load_state = resume.split("2. **Load state.**", 1)[1].split(
+            "3. **Validate.**", 1
+        )[0]
+        for fragment in (
+            "Current step",
+            "Last result",
+            "Next action",
+            "agent-runs.jsonl",
+            "Legacy sectioned",
+        ):
+            self.assertTrue(
+                fragment in load_state,
+                f"agents-resume current reader missing {fragment!r}",
+            )
+        self.assertTrue(
+            "Template and orchestration weight" not in load_state,
+            "agents-resume current reader still requires orchestration metadata",
+        )
+
+        panel = self._read("src.claude/commands/agents-design-panel.md")
+        preregistration = next(
+            line for line in panel.splitlines() if "pre-register" in line
+        )
+        for fragment in ("agent-runs.jsonl", "Current step", "Last result", "Next action"):
+            self.assertTrue(
+                fragment in preregistration,
+                f"design-panel preregistration missing existing carrier {fragment!r}",
+            )
+        self.assertTrue(
+            "## Active agents" not in preregistration,
+            "design-panel preregistration still requires the legacy table",
+        )
+
+        dependencies = self._read("docs/dependencies.md").split(
+            "## How an edge is declared", 1
+        )[1].split("## Derived views", 1)[0]
+        self.assertTrue(
+            "top-level optional scalar field" in dependencies,
+            "dependency declaration does not name the current scalar owner",
+        )
+        self.assertTrue(
+            "`## Current state` block" not in dependencies,
+            "dependency declaration still requires the legacy section",
+        )
+
+        tracking = self._read("docs/work-item-execution-tracking.md")
+        self.assertTrue(
+            "Current dashboards and resume flows read staged scalar status plus `agent-runs.jsonl`" in tracking,
+            "tracking guide does not define the current scalar-plus-ledger read path",
+        )
+        self.assertTrue(
+            "orchestration weight lives in the `status.md`" not in tracking,
+            "tracking guide still requires orchestration metadata",
+        )
+
+        ledger = self._read("scripts/agent-run-ledger.py")
+        retired_role_rejection = ledger.split("def build_event", 1)[1].split(
+            "started_at =", 1
+        )[0]
+        for fragment in (
+            "if args.execution_role in LEGACY_EXECUTION_ROLES:",
+            "raise ValueError(",
+            "retired legacy value",
+            "routing belongs to the selected workflow, not executionRole",
+        ):
+            self.assertTrue(
+                fragment in retired_role_rejection,
+                f"agent-run-ledger retired-role rejection missing {fragment!r}",
+            )
+        self.assertTrue(
+            "orchestration weight belongs in status.md 'orchestration:'" not in retired_role_rejection,
+            "agent-run-ledger still recommends retired orchestration metadata",
+        )
+
+    def test_runtime_and_tracking_docs_name_current_owners(self) -> None:
+        guide = self._read("docs/new-session-guide.md")
+        for runtime_row in (
+            "| `$HOME/.agents/skills/` | Live canonical global Codex skill surface. |",
+            "| `$HOME/.agents/contracts/` | Live canonical global Codex contract surface. |",
+            "| `$HOME/.codex/` | Codex configuration, hooks, native-role metadata, and retained "
+            "provider-root compatibility outputs; not the canonical skills/contracts tree. |",
+        ):
+            with self.subTest(runtime_row=runtime_row):
+                self.assertTrue(
+                    runtime_row in guide,
+                    f"new-session runtime map missing row {runtime_row!r}",
+                )
+        retired_runtime_claim = "| `~/.agents` | Legacy or stale personal skill surface."
+        self.assertTrue(
+            retired_runtime_claim not in guide,
+            "new-session runtime map still labels the live global .agents surface as legacy",
+        )
+
+        tracking = self._read("docs/work-item-execution-tracking.md")
+        for fragment in (
+            "Only the root main conversation holding Lead writes `agent-runs.jsonl`",
+            "Classify new work before creating recovery state",
+            "quick-fix four-fact status or the staged lifecycle owner",
+            "`agent-run-ledger init` is compatibility-only",
+            "not a creation path for newly admitted work",
+        ):
+            self.assertTrue(
+                fragment in tracking,
+                f"work-item tracking guide missing ownership fragment {fragment!r}",
+            )
 
     def test_live_shared_references_do_not_restore_the_retired_fast_lane(self) -> None:
         owners = (

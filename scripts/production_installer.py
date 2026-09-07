@@ -2643,7 +2643,15 @@ def _installer_mutation_paths(
         manifest_target = helper_target.parent / "shared" / TRANSPORT_PROJECTION_MANIFEST
         if Path(os.path.abspath(manifest_target)) not in retained_transport_witnesses:
             paths.append(manifest_target)
-    paths.append(agents_root / UI_CONTINUITY_CONTRACT_TARGET)
+    canonical_contract_target = (
+        canonical_skills_target.parent / UI_CONTINUITY_CONTRACT_TARGET
+    )
+    provider_contract_target = agents_root / UI_CONTINUITY_CONTRACT_TARGET
+    paths.append(canonical_contract_target)
+    if Path(os.path.abspath(provider_contract_target)) != Path(
+        os.path.abspath(canonical_contract_target)
+    ):
+        paths.append(provider_contract_target)
     paths.extend(
         helper_target.parent / destination
         for _source, destination in RUNTIME_RESOURCES
@@ -5251,11 +5259,13 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                     dry_run=args.dry_run,
                     linked_authority=codex_agents_authority,
                 )
+            # Canonical roles resolve the neutral contract through .agents.
+            # Publish that leaf before the canonical skills tree, while the
+            # transaction still owns both canonical and provider destinations.
+            _install_ui_continuity_contract(
+                root, canonical_agents_root, args.dry_run
+            )
             if provider == "codex":
-                # The create-only lead tree records .agents as its containment
-                # root.  All independent .agents writers run before that tree
-                # is staged so a later rollback never sees a sibling mutation.
-                _install_ui_continuity_contract(root, agents_root, args.dry_run)
                 _normalize_agents_mode(
                     root,
                     root / "shared" / "agents-mode.defaults.yaml",

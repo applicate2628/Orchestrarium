@@ -1,5 +1,6 @@
 """Regression contract for the evidence-triggered workflow economy policy."""
 
+import json
 from pathlib import Path
 import unittest
 
@@ -65,6 +66,10 @@ PROVENANCE_PROVIDER_TEMPLATES = (
     "src.codex/skills/consultant/SKILL.md",
     "src.claude/agents/contracts/external-dispatch.md",
 )
+ARCHITECTURE_REVIEWER_PROJECTIONS = (
+    "src.codex/skills/architecture-reviewer/SKILL.md",
+    "src.claude/agents/architecture-reviewer.md",
+)
 
 
 class TestWorkflowEconomyContract(unittest.TestCase):
@@ -72,6 +77,20 @@ class TestWorkflowEconomyContract(unittest.TestCase):
         path = REPO_ROOT / relative
         self.assertTrue(path.is_file(), f"workflow-economy owner missing: {relative}")
         return path.read_text(encoding="utf-8")
+
+    def _section(self, relative: str, start: str, end: str) -> str:
+        text = self._read(relative)
+        start_offset = text.find(start)
+        self.assertNotEqual(start_offset, -1, f"{relative} missing section start: {start!r}")
+        end_offset = text.find(end, start_offset + len(start))
+        self.assertNotEqual(end_offset, -1, f"{relative} missing section end: {end!r}")
+        return text[start_offset:end_offset]
+
+    def _assert_contract_marker(self, relative: str, text: str, marker: str) -> None:
+        self.assertTrue(marker in text, f"{relative} missing contract marker: {marker!r}")
+
+    def _assert_retired_rule_absent(self, relative: str, text: str, retired: str) -> None:
+        self.assertTrue(retired not in text, f"{relative} retains retired rule: {retired!r}")
 
     def test_role_index_and_reference_provenance_remain_truthful(self) -> None:
         spine = self._read(SPINE)
@@ -255,6 +274,96 @@ class TestWorkflowEconomyContract(unittest.TestCase):
     def test_methodology_defers_to_the_shared_rule(self) -> None:
         methodology = self._read(METHODOLOGY)
         self.assertIn("Workflow economy is owned by `shared/AGENTS.shared.md`", methodology)
+
+    def test_generic_review_keeps_risk_roles_conditional_and_critical_templates_strict(self) -> None:
+        template = json.loads(self._read("src.claude/agents/team-templates/review.json"))
+        roles = {role["agentType"]: role for role in template["roles"]}
+
+        self.assertEqual(template["requiredRoles"], [])
+        self.assertEqual(template["minRoles"], 1)
+        for agent_type, triggers in (
+            ("analyst", ("unresolved factual baseline", "explicitly requested factual investigation outcome")),
+            ("qa-engineer", ("missing accepted verification evidence", "explicitly requested quality assurance outcome")),
+            ("architecture-reviewer", ("code-quality objective",)),
+            ("security-reviewer", ("authentication",)),
+            ("performance-reviewer", ("hard latency",)),
+            ("accessibility-reviewer", ("user-facing ui",)),
+        ):
+            with self.subTest(template="review", agent_type=agent_type):
+                self.assertIsNot(roles[agent_type].get("required"), True)
+                condition = roles[agent_type].get("whenNeeded", "").lower()
+                for trigger in triggers:
+                    self.assertIn(trigger, condition)
+        for retired_label in ("documentation review", "project audit", "post-implementation validation"):
+            with self.subTest(template="review", retired_label=retired_label):
+                self.assertNotIn(
+                    retired_label,
+                    " ".join(role.get("whenNeeded", "").lower() for role in template["roles"]),
+                )
+        for marker in (
+            "named by the objective",
+            "triggered role",
+            "missing triggered verdict",
+            "critical templates",
+        ):
+            with self.subTest(template="review", marker=marker):
+                self._assert_contract_marker("src.claude/agents/team-templates/review.json", template["notes"], marker)
+
+    def test_provider_review_entrypoints_keep_objective_selection_and_triggered_risk_gates(self) -> None:
+        for relative in ("src.codex/AGENTS.codex.md", "src.claude/CLAUDE.md"):
+            rows = [line for line in self._read(relative).splitlines() if line.startswith("| `review` |")]
+            self.assertEqual(len(rows), 1, f"{relative} must contain exactly one review routing row")
+            row = rows[0]
+            for marker in ("objective-named reviewer", "evidence-triggered helpers", "when present"):
+                with self.subTest(relative=relative, marker=marker):
+                    self._assert_contract_marker(relative, row, marker)
+            for retired in (
+                "chains `$analyst` then `$qa-engineer` then reviewer(s)",
+                "analyst → QA → reviewers",
+            ):
+                with self.subTest(relative=relative, retired=retired):
+                    self._assert_retired_rule_absent(relative, row, retired)
+
+        for relative, required_role in (
+            ("src.claude/agents/team-templates/security-sensitive.json", "security-reviewer"),
+            ("src.claude/agents/team-templates/performance-sensitive.json", "performance-reviewer"),
+        ):
+            critical = json.loads(self._read(relative))
+            critical_roles = {role["agentType"]: role for role in critical["roles"]}
+            with self.subTest(template=relative, agent_type=required_role):
+                self.assertIn(required_role, critical["requiredRoles"])
+                self.assertIs(critical_roles[required_role].get("required"), True)
+
+    def test_review_loop_admission_is_evidence_triggered_across_provider_reviewers(self) -> None:
+        required_markers = (
+            "**Simple exact-delta route.**",
+            "verified one-owner cause",
+            "one clear falsifying oracle",
+            "one independent exact-delta review",
+            "without review-loop state",
+            "**Mandatory review-loop triggers.**",
+            "genuine complexity or ambiguity",
+            "materially competing owner/seam solutions",
+            "repeated review/fix failure",
+            "newly discovered complexity",
+            "user explicitly requests the loop",
+            "**Insufficient triggers.**",
+            "`design-decision` tag",
+            "file count",
+            "identical cross-provider projections alone",
+        )
+        retired_rules = (
+            "existing loop-to-PASS re-verification remains mandatory",
+            "requires a separate `/agents-review-loop` fix-design pass before re-implementation",
+        )
+        for relative in ARCHITECTURE_REVIEWER_PROJECTIONS:
+            text = self._section(relative, "## REVISE routing", "## Cross-domain escalation")
+            for marker in required_markers:
+                with self.subTest(relative=relative, marker=marker):
+                    self._assert_contract_marker(relative, text, marker)
+            for retired in retired_rules:
+                with self.subTest(relative=relative, retired=retired):
+                    self._assert_retired_rule_absent(relative, text, retired)
 
     def test_dead_code_disposition_markers_fail_closed_if_removed(self) -> None:
         """Catches a handoff or QA surface that silently drops dead-code disposition."""

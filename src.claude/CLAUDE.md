@@ -90,6 +90,10 @@ If `## Project policies` is missing, or if no `.agents-mode.yaml` file exists at
 
 When subagent delegation is appropriate, classify the task and pick the matching team template from `.claude/agents/team-templates/`.
 
+**Factual routing.** Standalone bounded fact lookup is answered inline with no artifact. A non-trivial factual investigation defaults to one `$analyst` and adds recovery only when continuation is needed; an explicitly user-named role or narrower factual domain specialist remains valid. A decision, Architecture Decision Record (ADR), or material alternatives adds `$architect`; add `$planner` only when the user explicitly requests an execution plan.
+
+**Active-task side questions.** When a primary task is active, answer a side question briefly in commentary and continue the next authorized primary-task action in the same turn; never end the turn with a final-only answer or defer continuation to the next turn. This projects the existing same-turn control; it does not claim a new runtime guarantee.
+
 External adapter preferences live in `.claude/.agents-mode.yaml`, with `~/.claude/.agents-mode.yaml` as the global fallback when the project-local overlay is absent. The file keeps `consultantMode` for consultant behavior, adds `delegationMode`, `parallelMode`, and `mcpMode` for operator-level routing/tooling preference, keeps `preferExternalWorker` / `preferExternalReviewer` for eligible implement and review-side substitutions, and uses `externalProvider: auto | codex | claude | kimi | grok` for provider-backed execution through the active named production priority profile. Shipped production `auto` routing stays on the Codex/Claude pair. Kimi is an explicit read-only broad-research/review route using fixed model `kimi-code/k3` and a neutral captured prompt-file reference; it is independently verified, nonauthorizing, and never a provider entry inside `externalPriorityProfiles`. Grok remains unavailable and must not be launched or probed in 1.x. `parallelMode` is the general helper fan-out rule across internal and external lanes; external opinion counts and brigade routing stay overlays on top of it. Claude-line canonical config may also include the shared `externalModelMode` and `externalCodexProfile`, while `externalClaudeProfile` remains Codex-line only. On the Claude line, plain Claude CLI stays plain; `reserve` is a symbolic supplemental read-only candidate in `advisory.*` and `review.*` profile orders, after primary `claude`/`codex`, and is independent of the primary provider candidate. `reserveResolver` binds that symbolic candidate to `claude-sonnet`, `claude-wrapper`, `wrapper:<command>`, or `disabled`; `wrapper:<command>` must be a PATH-resolved command or repo-relative wrapper path. Worker, mutating implementation, code-generation, file-editing, installer, publication, or write-producing repository-hygiene routes must not use `reserve`. `externalProvider: auto` is lane-driven, not host-default-driven; Kimi is explicit-only and Grok is unavailable.
 If the effective Claude overlay exists but is stale, comment-free, or from an older pack version, decision-driving reads must normalize that file to the current canonical format before trusting its flags.
 
@@ -97,18 +101,22 @@ If the effective Claude overlay exists but is stale, comment-free, or from an ol
 
 **Decision tree:**
 
-1. Does the task need parallel risk owners (security + performance + ...)? → `requiresLead: true` template
-2. Does it need implementation? No → `research` or `review`
-3. Satisfies the shared `quick-fix` predicate? → `quick-fix`
-4. Otherwise → `full-delivery`
+1. Did the user explicitly name a role? → invoke that role directly
+2. Does the task need parallel risk owners (security + performance + ...)? → `requiresLead: true` template
+3. Is it a standalone bounded fact lookup? → answer inline with no artifact
+4. Is it a non-trivial factual investigation without a decision? → one `analyst` by default, unless a narrower factual domain specialist owns it
+5. Is it a decision, Architecture Decision Record, or material-alternatives task without implementation? → `research`, adding `architect`; add `planner` only for an explicitly requested execution plan
+6. Is it a review or quality gate with no implementation? → `review`
+7. Satisfies the shared `quick-fix` predicate? → `quick-fix`
+8. Otherwise → `full-delivery`
 
 **Templates:**
 
 | Template | When | Full lead pipeline? | Routing |
 | --- | --- | --- | --- |
 | `quick-fix` | Shared `quick-fix` predicate | No | Main conv → implementer → QA |
-| `research` | Investigation, ADR, alternatives — no implementation | No | Main conv → analyst → architect → planner |
-| `review` | Architecture/code quality gate, project audit, post-impl validation | No | Main conv → analyst → QA → reviewers |
+| `research` | Non-trivial factual investigation or decision/ADR/alternatives — no implementation | No | Main conv → analyst; add architect for a decision/ADR/material alternatives and planner only for a requested execution plan |
+| `review` | Architecture/code quality gate, project audit, post-impl validation | No | Main conv selects the objective-named reviewer and only evidence-triggered helpers; when present, order helpers as research → QA → review |
 | `full-delivery` | New feature, substantial change, multi-stage pipeline | Yes | Main conv (as Lead) coordinates full pipeline |
 | `security-sensitive` | Auth, trust boundaries, credentials, vulnerability | Yes | Main conv (as Lead) coordinates, security-reviewer mandatory |
 | `performance-sensitive` | Hard budgets, SLAs, latency targets | Yes | Main conv (as Lead) coordinates, performance-reviewer mandatory |
@@ -131,7 +139,7 @@ If the effective Claude overlay exists but is stale, comment-free, or from an ol
 
 - Every admitted `quick-fix` creates a minimal `work-items/active/<slug>/status.md` before its first repository mutation. That file contains only ordinary lifecycle fields plus task, current step, last result, and next action; no `roadmap.md`, `brief.md`, Research, Design, Plan, consultant, pre-implementation review, or report is required before that mutation. Re-classification enriches the same work-item instead of creating a late unrelated item, and delivery applies the normal immediate closure/archive rule.
 - The main conversation owns `work-items/` recovery after routing selects recovery-tracked or heavier orchestration. For `requiresLead: true` (heavier-orchestration) chains it runs the full lead pipeline in the `/lead` skill, maintaining `roadmap.md`, `brief.md`, `status.md` (and `plan.md`) throughout.
-- For recovery-tracked `requiresLead: false` chains with 2+ stages (`research`, `review`), the main conversation must save recovery state in `work-items/active/<date>-<slug>/` after each stage transition: `status.md` (format defined in `subagent-contracts.md` — includes template, orchestration weight, active/completed agents, next action) and the accepted artifact itself (e.g. `research.md`, `design.md`, `plan.md`). This allows any future session to resume from the last accepted artifact without replaying the chain.
+- For `requiresLead: false` routes that need continuation, the main conversation saves recovery state in `work-items/active/<date>-<slug>/` after each accepted stage: the existing `status.md` format plus the accepted artifact. A one-Analyst factual investigation creates recovery only when continuation is needed; a decision/ADR route records the accepted Analyst artifact before Architect, and records Planner only when an execution plan was requested. This allows a future session to resume from the last accepted artifact without replaying the chain.
 - **Close is mandatory.** For a delivered, parked, cancelled, or reprioritized item, Lead writes `closure.md` and exact `bug-dispositions.json`: every current bug whose parsed `context` equals the item slug is declared `terminalize` or `preserve-current`. The lifecycle owner applies those dispositions, archives the item, writes `bug-dispositions-receipt.json`, and refreshes `work-items/README.md` atomically; an active manifest is pending close. Routine single-item mechanics stay inline; drift or multi-item closure routes to `$knowledge-archivist`. Only archive placement is terminal; `work-items/index.md` is compatibility-only and lessons use `work-items/lessons/`.
 - **Epics.** Child roll-up uses physical active/archive locations. After every child is archived and the goal is met, `$lead` records closure and `$knowledge-archivist` uses the lifecycle owner to move the epic from `work-items/epics/<slug>.md` to `work-items/epics/archive/<YYYY-MM>/<slug>.md`; reopening reverses that move. Duplicate locations fail closed. Details: the lead skill `## Epics`.
 - **Dependencies & decisions.** A work-item that needs prior work declares `Depends-on: <slug>, <slug>` (work-item slugs) in its `status.md` — a standing, planned inter-work-item dependency edge (distinct from the runtime `BLOCKED:*` gate verdicts); `/agents-status` derives `blocked-by` (open targets) and the ready-set from these lines. Durable cross-cutting architecture decisions go in the `work-items/decisions/` registry (a flat `<date>-<slug>.md`, `status: proposed | accepted | dropped | superseded | reverted`), referenced from a work-item's `design.md` rather than buried in it. Full rules: the lead skill `## Dependencies` + `## Decisions` + `docs/decisions.md` + `docs/dependencies.md` (the two `docs/` files are maintainer references; not installed at runtime).

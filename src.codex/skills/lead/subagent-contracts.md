@@ -53,6 +53,8 @@ Populate `Allowed tools` under the caller-owned tool selection contract in insta
 
 Receiving-side echo: the returned artifact MUST (a) report the Named regression guard's actual result (expected vs observed), (b) answer each Diff-invisible invariant as verified or ASSUMPTION (UNVERIFIED), (c) report the Dead/superseded code disposition result and its named probe, (d) report the Cleanup disposition for owned child process trees, temp/capture paths, and isolation worktrees as `cleaned`, `preserved` with its reason, or `none`, and (e) when the dispatch cited a defect class, include the class audit — every enumerated participant classified fixed / not-affected. It also returns a complete current `ResourceRowV1` for every selected owned resource, including branches, locks, handles, generated artifacts, and dead/superseded surfaces; allowed dispositions additionally include `ephemeral-volume-exempt`. An absent/unknown field, ownership/classification gap, invalid exemption, or missing settlement result makes the row `unclassified`; an artifact missing this echo fails the mechanical acceptance gate.
 
+Implementation and Quality Assurance (QA) receive the same accepted `Acceptance criteria` and `Named regression guard`; each returned artifact echoes both and records the guard's expected and observed result. Reuse these existing fields; do not add a Primary Acceptance Oracle identifier, status field, ledger field, or file.
+
 **Class-completeness trigger (mandatory):** when a reviewer, bot, or test cites one instance of a defect class, the dispatch prompt MUST direct the recipient to enumerate every participant of that class, classify each one, and fix every confirmed instance. A prompt scoped only to the named line is invalid.
 
 **Object-axis trigger (mandatory for C1-based clean verdicts, PRE-verdict).** The class-completeness
@@ -120,59 +122,29 @@ updated: <YYYY-MM-DD HH:MM>
 
 An admitted `quick-fix` does not add `roadmap.md`, `brief.md`, Research, Design, Plan, consultant, pre-implementation review, or a report before its first mutation. If it is re-classified, keep this work-item and enrich its recovery state to the full format below instead of creating a late unrelated item. After delivery, apply the normal immediate closure/archive rule.
 
+Use existing fields as acceptance carriers: quick-fix writes the objective in `Task`, the accepted criteria and guard reference in `Last result`, and Quality Assurance (QA) in `Next action`; staged work writes the objective in `Task`, the accepted result or reference in `Last result`, the oracle in `Evidence gate`, and the next implementation or QA step in `Next action`.
+
 ### status.md format
 
 ```markdown
 ---
-template: <template name>
-orchestration: light | full-lead
-started: <YYYY-MM-DD>
-updated: <YYYY-MM-DD HH:MM>
+template: staged
+status: active
+started: <YYYY-MM-DDTHH:MM:SSZ>
+updated: <YYYY-MM-DDTHH:MM:SSZ>
 ---
 
-## Current state
-
-- **Primary task**: <one active objective, e.g. "full-impact review of current change set">
-- **Primary task status**: <active | side-interrupted | parked | closed>
-- **Interruption marker**: <none | INTERRUPTED(no-artifact)>
-- **Stage**: <current stage name or number>
-- **Main conv role**: <what main conversation is doing: orchestrating | waiting for agents | reviewing artifact | idle>
-- **Last accepted artifact**: <filename or "none">
-- **Open obligations before closeout**: <none | remaining required work still inside admitted scope>
-- **Epic**: <parent epic slug, or none> — present only when this work-item belongs to an epic; a single bare `Epic: <slug>` line is the join key the epic roll-up reads (see the lead skill `## Epics`)
-- **Depends-on**: <comma-separated work-item slugs, or none> — other work-items this one needs completed first; a single bare `Depends-on: <slug>, <slug>` line is what the derivation reads. A standing, planned inter-work-item dependency edge (distinct from the runtime `BLOCKED:*` gate verdicts). Targets are work-items only, resolved across physical `active/`, `archive/YYYY-MM/`, and `backlog/` locations (a backlog match is existence, not done). A target that resolves nowhere is folded into `blocked-by`, never treated as satisfied. The lead derives `blocked-by` (open targets) and the ready-set from these lines (see the lead skill `## Dependencies`)
-- **Priority**: <high | medium | low, or none> — scheduling urgency set by `$product-manager` at admission; distinct from bug/perf SEVERITY (defect impact). A low-severity bug can still be high-priority.
-
-## Active agents
-
-| Agent | Role | Model/effort | Status | Launched |
-| --- | --- | --- | --- | --- |
-| <description> | <role> | <model/profile + effort — one-line complexity rationale> | running | <HH:MM> |
-
-## Completed agents
-
-| Agent | Role | Result | Artifact |
-| --- | --- | --- | --- |
-| <description> | <role> | PASS/REVISE/BLOCKED | <filename> |
-
-## REVISE loop
-
-| Field | Value |
-| --- | --- |
-| **Stage** | <stage name where REVISE occurred> |
-| **Iteration** | <1-3, or "escalated"> |
-| **Gate role** | <qa-engineer, security-reviewer, etc.> |
-| **Last finding summary** | <one-line summary of what the gate found> |
-| **Owner of next action** | <implementer role that must fix, or "user" if escalated> |
-
-## Next action
-
-<What happens next: which role to invoke, what artifact to review, or what decision to make.>
+Task: <active objective>
+Current step: <current execution step>
+Last result: <accepted result or criteria/guard reference>
+Next action: <next implementation or QA step>
+Scope boundary: <approved scope and exclusions>
+Owner: <current artifact owner>
+Integration owner: <integration owner>
+Evidence gate: <accepted oracle and required evidence>
 ```
 
-Legacy handling: older `status.md` files may carry `orchestrator: main | lead`. Read `main` as `orchestration: light` and `lead` as `orchestration: full-lead`; do not rewrite old files in bulk. The orchestrator is ALWAYS the main conversation (holding the Lead role) — the retired field encoded orchestration weight, not a different owner, which is why it is renamed. New/updated files write `orchestration:`.
-
-The REVISE loop section is optional — include it only when a stage has returned REVISE and the loop is active. Remove it when the loop resolves (PASS or escalation).
+Legacy sectioned `status.md` records remain readable compatibility input; do not rewrite them in bulk or use their shape for new work. Older records may carry `orchestrator: main | lead`; read `main` as light orchestration and `lead` as full Lead orchestration. The orchestrator remains the root main conversation holding Lead. New work is classified first and uses either the exact quick-fix form or the staged scalar form above.
 
 ### agent-runs.jsonl format
 
@@ -188,8 +160,9 @@ Before closeout, run `scripts/validate-work-item-state.* --work-item <path>` or 
 
 No-artifact interruption rule:
 - A handoff interrupt or worker stall without an artifact does not count as a substantive REVISE artifact.
-- Set `Primary task status: side-interrupted` and `Interruption marker: INTERRUPTED(no-artifact)` in `status.md` for orchestrator bookkeeping.
-- Keep the stage open, and either rerun the same role with a tighter slice or route to the proper factual role.
+- Record the interruption through the existing staged scalars: `Current step` names the interrupted stage, `Last result` records that no artifact was returned, and `Next action` names the rerun, factual route, or explicit wait.
+- Without an explicit user pause, preserve same-turn continuation: keep the stage open and either rerun the same role with a tighter slice or route to the proper factual role.
+- An explicit user pause, stop, or cancel remains authoritative: preserve the concrete resume action in `Next action` and resume only when the user authorizes it.
 - The lead must not synthesize the missing artifact or replace missing factual work inline.
 - If the interrupted stage belongs to a full-impact review or verification pass, keep that review as the primary task until a review artifact is emitted or the user explicitly parks/cancels it.
 

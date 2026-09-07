@@ -80,6 +80,8 @@ lead -> research -> design -> plan -> implement -> QA/review -> lead
 
 Workflow economy is owned by `shared/AGENTS.shared.md` under **Workflow economy (binding)**. This methodology does not create a second review, fan-out, or artifact policy; provider contracts project that shared rule for their native runtime.
 
+The existing review loop is mandatory only for genuine complexity or ambiguity, materially competing owner/seam solutions, repeated review/fix failure, newly discovered complexity, or an explicit user request. A `design-decision` tag, file count, or identical cross-provider projections alone do not establish that trigger; a verified one-owner cause with one clear falsifying oracle proceeds through tests and one independent exact-delta review.
+
 Re-intake loop for an in-flight item whose admitted shape has changed:
 
 ```text
@@ -192,6 +194,7 @@ A subagent `PASS` still requires verification by the orchestrating owner or the 
 - When non-trivial work is interrupted, record a durable resume point: current stage, last accepted artifact, next concrete action, and any open obligations that still block closeout.
 - After context compaction or resume from a summary, restore the active task, next unchecked step, and open evidence gates before acting. Continue from that point unless the user or persisted status says the task is parked, blocked, or complete.
 - If the user corrects the session with `stop closeout`, `завязывай с closeout`, `работай`, `дальше`, `go`, `продолжай`, `по плану`, or an equivalent continue-working signal, take the next concrete action inside the active task immediately instead of only acknowledging the correction.
+- When a primary task is active, answer a side factual question briefly and continue the next authorized primary-task action in the same turn; do not end with a final-only answer or defer that continuation to the next turn.
 - Before marking a task, batch, or user-facing answer complete, reconcile the current result against the original request, accepted scope, required checks, canonical-source updates, and any still-open required follow-up.
 - Do not treat one completed sub-batch as completion when a known required next action still exists inside the admitted scope.
 
@@ -540,6 +543,10 @@ It should now be confirmed:
 
 ## 9. Practical routing patterns
 
+### Factual lookup or investigation
+
+A standalone bounded fact lookup is answered inline with no artifact. A non-trivial factual investigation uses one `analyst` by default and creates recovery only when continuation is needed. A decision, Architecture Decision Record (ADR), or material alternatives adds `architect`; add `planner` only when an execution plan is requested.
+
 ### Quick-fix
 
 Use this when the target and execution steps are fully specified, ownership and contracts are resolved, no new dependency or risk owner appears, rollback or backup is explicit, and a verification oracle is named. Before the first repository mutation, create only a minimal `work-items/active/<slug>/status.md` with ordinary lifecycle fields plus task, current step, last result, and next action. Do not add `roadmap.md`, `brief.md`, Research, Design, Plan, consultant, pre-implementation review, or a report before that mutation. Allow at most one preflight, then implement and verify. If any predicate fails, re-classify by enriching the same work-item rather than creating a late unrelated item. After delivery, close and archive it immediately under the normal rule.
@@ -718,9 +725,10 @@ At minimum, it is useful to keep these artifacts near the repository:
   this owner: conversion preserves source text and digests in one flat
   candidate, while direct rejection preserves source bytes and link inventory
   in the monthly archive without fabricating active or closure history.
-- `status.md` has a defined format with YAML frontmatter (template, orchestration, started, updated) and sections: Current state, Active agents, Completed agents, REVISE loop (optional), Next action. The full format is defined in `subagent-contracts.md`.
+- `status.md` has two existing forms defined in `subagent-contracts.md`: quick-fix uses only the four recovery facts (task, current step, last result, next action); staged work uses its existing lifecycle fields and validation owner. Do not introduce a third status schema; legacy sectioned statuses remain readable.
 - `agent-runs.jsonl` is the machine-readable execution ledger for the work item. It records each launched or accepted agent run, assigned role, execution path, status, gate, artifact, and evidence. The lead must use it to reconcile active, completed, blocked, and revise states before closeout. When `scripts/agent-run-ledger.*` or an installed equivalent is available, use it to initialize legacy work items and append validated events instead of hand-editing JSONL. Use `scripts/check-work-items-state.* --root <repo>` or an installed equivalent for periodic scans of all active work items before broad closeout, interruption recovery, or publication review. The sole invalid-closure recovery procedure is maintained in the [execution-tracking operator runbook](../../docs/work-item-execution-tracking.md).
 - `status.md` and `agent-runs.jsonl` must agree at stage boundaries: no closed task with running ledger entries, no accepted `PASS` without evidence, no missing artifact for a completed gate, and no dependent downstream `PASS` left untouched after a material upstream revision.
+- Implementation and QA receive and echo the same accepted criteria, named regression guard, and observed result through the existing handoff and status carriers; no separate acceptance-record schema is created.
 
 ### 11.3 What should be automated
 

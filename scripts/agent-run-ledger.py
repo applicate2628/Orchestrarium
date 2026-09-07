@@ -132,7 +132,7 @@ def build_event(args: argparse.Namespace, validator: Any | None = None) -> dict[
         raise ValueError(
             f"--execution-role {args.execution_role!r} is a retired legacy value; "
             f"new events must use {canonical!r} (the one main-conversation identity — "
-            "orchestration weight belongs in status.md 'orchestration:', not here)"
+            "routing belongs to the selected workflow, not executionRole)"
         )
     started_at = args.started_at or utc_timestamp()
     updated_at = args.updated_at or started_at

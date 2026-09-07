@@ -915,6 +915,11 @@ def test_global_provider_linked_canonical_agents_root_preserves_link_and_vendor_
     assert installer._CreateOnlyMutablePath._identity(logical) == link_identity
     assert os.readlink(logical) == raw_target
     assert vendor.read_bytes() == b"preserve vendor content\n"
+    contract_bytes = (ROOT / installer.UI_CONTINUITY_CONTRACT_SOURCE).read_bytes()
+    canonical_leaf = backing / installer.UI_CONTINUITY_CONTRACT_TARGET
+    provider_leaf = home / f".{provider}" / installer.UI_CONTINUITY_CONTRACT_TARGET
+    assert canonical_leaf.read_bytes() == contract_bytes
+    assert provider_leaf.read_bytes() == contract_bytes
     assert (backing / "skills" / "lead" / "SKILL.md").is_file()
 
     reinstalled = _run_global_installer(provider, home)
@@ -922,6 +927,8 @@ def test_global_provider_linked_canonical_agents_root_preserves_link_and_vendor_
     assert installer._CreateOnlyMutablePath._identity(logical) == link_identity
     assert os.readlink(logical) == raw_target
     assert vendor.read_bytes() == b"preserve vendor content\n"
+    assert canonical_leaf.read_bytes() == contract_bytes
+    assert provider_leaf.read_bytes() == contract_bytes
 
 
 @pytest.mark.parametrize("provider", ("codex", "claude"))
@@ -938,6 +945,14 @@ def test_global_provider_linked_canonical_agents_root_rolls_back_after_fault(
     backing.mkdir()
     vendor = backing / "vendor-sentinel.txt"
     vendor.write_bytes(b"preserve vendor content\n")
+    canonical_leaf = backing / installer.UI_CONTINUITY_CONTRACT_TARGET
+    provider_leaf = home / f".{provider}" / installer.UI_CONTINUITY_CONTRACT_TARGET
+    canonical_prior = b"preserve canonical contract prior\n"
+    provider_prior = b"preserve provider contract prior\n"
+    canonical_leaf.parent.mkdir(parents=True)
+    provider_leaf.parent.mkdir(parents=True)
+    canonical_leaf.write_bytes(canonical_prior)
+    provider_leaf.write_bytes(provider_prior)
     logical = home / ".agents"
     try:
         _make_runtime_directory_link(logical, backing, kind)
@@ -950,13 +965,16 @@ def test_global_provider_linked_canonical_agents_root_rolls_back_after_fault(
     monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.setenv("HOME", str(home))
     original = installer._install_ui_continuity_contract
+    contract_bytes = (ROOT / installer.UI_CONTINUITY_CONTRACT_SOURCE).read_bytes()
     calls = 0
 
     def fail_after_canonical_skills(*args: object, **kwargs: object) -> None:
         nonlocal calls
         calls += 1
         original(*args, **kwargs)
-        if calls == (2 if provider == "codex" else 1):
+        if calls == 2:
+            assert canonical_leaf.read_bytes() == contract_bytes
+            assert provider_leaf.read_bytes() == contract_bytes
             raise RuntimeError("injected post-canonical-skills failure")
 
     monkeypatch.setattr(
@@ -968,9 +986,12 @@ def test_global_provider_linked_canonical_agents_root_rolls_back_after_fault(
     )
 
     assert result == 1
+    assert calls == 2
     assert installer._CreateOnlyMutablePath._identity(logical) == link_identity
     assert os.readlink(logical) == raw_target
     assert _no_follow_inventory(backing) == before
+    assert canonical_leaf.read_bytes() == canonical_prior
+    assert provider_leaf.read_bytes() == provider_prior
 
 
 @pytest.mark.parametrize("kind", ("symlink", "junction"))

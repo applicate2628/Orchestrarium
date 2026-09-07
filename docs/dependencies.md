@@ -13,9 +13,9 @@ live on your machine; only the rules (in the role files and `CLAUDE.md` /
 
 ## How an edge is declared
 
-An optional `Depends-on:` line in the dependent item's `status.md`
-`## Current state` block (the same place the `Epic:` join-key lives), but
-**multi-valued** — a work-item may depend on several:
+`Depends-on:` is a top-level optional scalar field in the dependent item's
+current staged `status.md`, alongside other optional relations such as `Epic:`.
+It is **multi-valued** — a work-item may depend on several:
 
 ```
 Depends-on: <slug>, <slug>

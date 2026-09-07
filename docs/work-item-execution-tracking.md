@@ -4,17 +4,21 @@ This runbook describes the operator path for tracking real agent work in Orchest
 
 Use it when a repository keeps active task memory under `work-items/active/<slug>/` and the main session (as Lead) must prove which roles ran, what they accepted, and which gates remain open.
 
+Only the root main conversation holding Lead writes `agent-runs.jsonl`; a validated helper or wrapper may perform that write on the root's behalf. Specialists return their artifact, evidence, and gate result to that owner rather than appending their own events.
+
 ## Files
 
 Each active work item should keep these files together:
 
 | File | Purpose |
 | --- | --- |
-| `status.md` | Human-readable recovery state: current stage, active agents, completed agents, next action. |
+| `status.md` | Human-readable recovery state in the existing quick-fix four-fact or staged scalar form. |
 | `agent-runs.jsonl` | Machine-readable append-only ledger for each launched or accepted role result. |
 | `reviews/`, `design.md`, `plan.md`, or role artifacts | Accepted artifacts referenced by ledger events. |
 
 `status.md` remains the readable recovery surface. `agent-runs.jsonl` is the state that validators can inspect.
+
+Current dashboards and resume flows read staged scalar status plus `agent-runs.jsonl`: `status.md` supplies `Task`, `Current step`, `Last result`, `Next action`, and other optional top-level scalar relations, while the ledger supplies launched/running/terminal role state and reported model or effort. The quick-fix four-fact form remains current for admitted quick fixes. Legacy sectioned `status.md` records remain readable through an explicit compatibility fallback; maintaining one does not make its sections current-write requirements.
 
 ## Project root topology
 
@@ -26,6 +30,8 @@ do not infer topology from `README.md` or create an auxiliary root ad hoc.
 
 ## Canonical Staged Start
 
+Classify new work before creating recovery state: use the existing quick-fix four-fact status or the staged lifecycle owner. `agent-run-ledger init` is compatibility-only for a legacy or manual recovery surface; it is not a creation path for newly admitted work.
+
 `python scripts/mutate-work-item.py start` creates a staged `candidate -> active`
 item with `admission.md`, `status.md`, and one schema-version 2 settled
 `standalone` admission event in `agent-runs.jsonl` as one directory publication.
@@ -36,8 +42,8 @@ valid, so do not run `init` just to create an empty ledger afterward.
 
 ## Initialize A Work Item
 
-Use the helper when migrating a legacy work item that already has `status.md`,
-or when a manual recovery requires the helper before the first ledger event.
+Use the helper only when migrating a legacy work item that already has `status.md`,
+or when a manual recovery requires compatibility initialization before the first ledger event.
 Canonical staged starts already have their admission event; the undelegated
 quick-fix path remains ledger-free until real delegated work needs a ledger.
 
@@ -49,7 +55,7 @@ python scripts/agent-run-ledger.py --work-item work-items/active/<slug> init --p
 python .\scripts\agent-run-ledger.py --work-item work-items\active\<slug> init --primary-task "Implement accepted plan" --stage "Plan"
 ```
 
-The init command creates missing status sections and `agent-runs.jsonl` without replacing existing task-memory content.
+The init command creates missing legacy status sections and `agent-runs.jsonl` without replacing existing task-memory content. It does not admit a new work item or select its quick-fix versus staged lifecycle.
 
 ## Append A Gate Event
 
@@ -81,7 +87,7 @@ The append command validates the work item after writing the event. If the new e
 
 Current external provider wrappers record the exact resolved model, effort, and policy-admitted sandbox, input/output, permission, or tool flags in both their `launch` and `terminal` events. The flags use the bounded provider-specific `launchFlags` string array on the wire and `--launch-flags-json` at the append command boundary. Positional prompts, arbitrary configuration, path-bearing, credential-bearing, malformed, or oversized flag bindings are rejected before launch or append. Older Version 2 events without `launchFlags` remain valid compatibility input; `realization` remains unsupported and is not inferred from this field.
 
-`--execution-role` takes one of the canonical values from `shared/schemas/agent-runs.schema.json`: `main` (the main conversation — the ONE main-conversation identity; it also holds the Lead role, and orchestration weight lives in the `status.md` `orchestration: light | full-lead` field, never in this value), `internal`, `consultant`, `external-worker`, `external-reviewer`, or `external-brigade`. Ledgers written before 2026-07-11 may carry the legacy value `lead`; validators and rollups read it as `main` (same owner), but a new append with `lead` is rejected — write `main`.
+`--execution-role` takes one of the canonical values from `shared/schemas/agent-runs.schema.json`: `main` (the one main-conversation identity, which also holds the Lead role), `internal`, `consultant`, `external-worker`, `external-reviewer`, or `external-brigade`. Orchestration weight belongs to the selected template and routing process; current staged status does not require a separate `orchestration: light | full-lead` field. Ledgers written before 2026-07-11 may carry the legacy value `lead`; validators and rollups read it as `main` (same owner), but a new append with `lead` is rejected — write `main`.
 
 ## Validate One Work Item
 

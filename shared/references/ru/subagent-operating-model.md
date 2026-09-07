@@ -74,6 +74,8 @@ product-manager -> product-analyst -> lead
 lead -> research -> design -> plan -> implement -> QA/review -> lead
 ```
 
+Существующий review-loop обязателен только при реальной сложности или неоднозначности, существенно конкурирующих вариантах owner/seam, повторяющемся review/fix failure, вновь обнаруженной сложности или явном запросе пользователя. Сам по себе тег `design-decision`, число файлов или идентичные cross-provider projections не создают этот триггер; проверенная причина с одним owner и ясным falsifying oracle проходит tests и одно независимое exact-delta review.
+
 Петля re-intake для in-flight item, у которого изменилась принятая форма:
 
 ```text
@@ -185,6 +187,7 @@ AI gates не заменяют внешнюю engineering policy.
 - Держите handoff latency низким и не делайте пауз между принятыми артефактами, если только не нужен настоящий gate failure или policy-required human/CI check.
 - После context compaction или resume из summary восстановите active task, next unchecked step и open evidence gates до действий. Продолжайте с этой точки, если user или persisted status не говорят, что задача parked, blocked или complete.
 - Если user поправляет сессию фразами вроде `stop closeout`, `завязывай с closeout`, `работай`, `дальше`, `go`, `продолжай`, `по плану` или equivalent continue-working signal, сразу выполните next concrete action внутри active task вместо одного только acknowledgment.
+- Когда primary task активна, кратко ответьте на побочный factual question и в том же turn продолжите next authorized primary-task action; не завершайте ход final-only ответом и не переносите continuation на следующий turn.
 
 ## 3.10 Периодические controls
 
@@ -527,6 +530,10 @@ Decision-making roles должны явно разделять подтверж�
 
 ## 9. Практические routing patterns
 
+### Фактический lookup или investigation
+
+Standalone bounded fact lookup отвечайте inline без artifact. Для non-trivial factual investigation по умолчанию используйте одного `analyst` и создавайте recovery только если нужно continuation. Decision, Architecture Decision Record (ADR) или material alternatives добавляют `architect`; `planner` добавляйте только когда запрошен execution plan.
+
 ### Quick-fix
 
 Используйте этот маршрут, когда target и execution steps полностью заданы, ownership и contracts разрешены, новая dependency или risk owner не появляются, rollback либо backup указаны явно и назван verification oracle. До первой repository mutation создайте только минимальный `work-items/active/<slug>/status.md` с обычными lifecycle fields и полями task, current step, last result и next action. До этой mutation не добавляйте `roadmap.md`, `brief.md`, Research, Design, Plan, consultant, pre-implementation review или report. Допустите не более одного preflight, затем выполните и проверьте изменение. Если любой predicate не выполнен, re-classify, обогатив тот же work-item, а не создавая поздний несвязанный item. После delivery немедленно закройте и архивируйте его по обычному правилу.
@@ -694,9 +701,10 @@ lead -> product-manager -> lead
 - Если обязательные task-memory artifacts для конфигурируемого workflow отсутствуют или устарели, остановитесь и восстановите их до продолжения delivery.
 - `notes.md` или `notes/` хранит technical findings и discoveries; принятые долгоживущие решения по-прежнему должны жить в design или ADR artifact.
 - `closure.md` обязателен перед перемещением item в конфигурируемую archive location. Содержит финальную запись о закрытии: outcome, residual risk и archive location.
-- `status.md` имеет определённый формат с YAML frontmatter (template, orchestration, started, updated) и разделами: Current state, Active agents, Completed agents, REVISE loop (опционально), Next action. Полный формат определён в `subagent-contracts.md`.
+- `status.md` имеет две существующие формы, определённые в `subagent-contracts.md`: quick-fix использует только четыре recovery facts (task, current step, last result, next action); staged work использует свои существующие lifecycle fields и validation owner. Не вводите третью status schema; legacy sectioned statuses остаются читаемыми.
 - `agent-runs.jsonl` — машиночитаемый журнал исполнения work-item. Он фиксирует каждый запуск или приём результата агента: роль, execution path, статус, gate, artifact и evidence. Lead обязан использовать его для сверки active, completed, blocked и revise состояний перед closeout. Если доступны `scripts/agent-run-ledger.*` или installed equivalent, используйте их для инициализации legacy work items и добавления validated events вместо ручного редактирования JSONL. Используйте `scripts/check-work-items-state.* --root <repo>` или installed equivalent для периодической проверки всех active work items перед broad closeout, interruption recovery или publication review.
 - `status.md` и `agent-runs.jsonl` должны совпадать на границах стадий: нельзя закрывать задачу при running ledger entries, принимать `PASS` без evidence, принимать completed gate без artifact или оставлять downstream `PASS` без re-review после существенной правки upstream artifact.
+- Implementation и QA получают и повторяют одни и те же accepted criteria, named regression guard и observed result через существующие handoff и status carriers; отдельная acceptance-record schema не создаётся.
 
 ### 11.3 Что стоит автоматизировать
 

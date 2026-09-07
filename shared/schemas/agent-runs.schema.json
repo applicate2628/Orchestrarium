@@ -51,7 +51,7 @@
     "role": { "type": "string", "minLength": 1 },
     "executionRole": {
       "enum": ["main", "internal", "consultant", "external-worker", "external-reviewer", "external-brigade", "none"],
-      "$comment": "Exactly ONE main-conversation identity: 'main' (the main conversation, which also holds the Lead role — orchestration weight lives in status.md 'orchestration: light|full-lead', never here). Ledgers written before 2026-07-11 may carry the legacy value 'lead'; readers map it to 'main' (see scripts/validate-work-item-state.py LEGACY_EXECUTION_ROLES). New writes must use 'main'."
+      "$comment": "Exactly ONE main-conversation identity: 'main' (the main conversation, which also holds the Lead role). Current recovery state — Task, Current step, Last result, Next action, and staged lifecycle fields — is owned by status.md, not executionRole; its older 'orchestration: light|full-lead' scalar remains legacy-compatible. Ledgers written before 2026-07-11 may carry the legacy value 'lead'; readers map it to 'main' (see scripts/validate-work-item-state.py LEGACY_EXECUTION_ROLES). New writes must use 'main'."
     },
     "assignedRole": { "type": "string" },
     "provider": { "type": "string" },

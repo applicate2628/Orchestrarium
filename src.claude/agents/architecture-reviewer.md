@@ -109,7 +109,13 @@ When returning REVISE, specify the target:
 
 If a single REVISE report contains findings at multiple levels, group them by target. The orchestrator routes each group to the correct role.
 
-A finding's `fix-class` controls design-versus-implementation routing. An `inline-sufficient` finding keeps the Code→Implementer route with its advisory HOW attached: no separate fix-design/HOW-review pass is required before implementation; the existing loop-to-PASS re-verification remains mandatory. A `design-decision` finding keeps the Design→Architect route and requires a separate `/agents-review-loop` fix-design pass before re-implementation; the review report's HOW remains advisory. A plan-level finding keeps its Planner routing; the tag and ratchet still apply. `fix-class` is an `escalate-only one-way ratchet: inline-sufficient may be reclassified to design-decision, never the reverse`: any downstream owner or later reviewer may escalate, and none may downgrade.
+A finding's `fix-class` controls design-versus-implementation routing. An `inline-sufficient` finding keeps the Code→Implementer route with its advisory HOW attached: no separate fix-design/HOW-review pass is required before implementation. A `design-decision` finding keeps the Design→Architect route; the review report's HOW remains advisory. A plan-level finding keeps its Planner routing; the tag and ratchet still apply.
+
+- **Simple exact-delta route.** A verified one-owner cause with one clear falsifying oracle proceeds through tests and one independent exact-delta review without review-loop state.
+- **Mandatory review-loop triggers.** Use the existing review loop for genuine complexity or ambiguity, materially competing owner/seam solutions, repeated review/fix failure, newly discovered complexity, or when the user explicitly requests the loop.
+- **Insufficient triggers.** A `design-decision` tag, file count, or identical cross-provider projections alone do not establish complexity and do not trigger the loop.
+
+`fix-class` is an `escalate-only one-way ratchet: inline-sufficient may be reclassified to design-decision, never the reverse`: any downstream owner or later reviewer may escalate, and none may downgrade.
 
 ## Cross-domain escalation
 

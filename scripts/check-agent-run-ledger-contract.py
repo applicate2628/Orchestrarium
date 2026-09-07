@@ -87,8 +87,8 @@ MIGRATION_ACCEPTED_CURRENT_BYTES = {
 
 
 # Legacy status shape: older work items carry `orchestrator: main | lead`. Kept as a
-# labeled legacy fixture (the validator does not rewrite old files). STATUS_TEXT_CANONICAL
-# below covers the current `orchestration: light | full-lead` field so both are exercised.
+# labeled legacy compatibility fixture; STATUS_TEXT_CANONICAL below is also a legacy
+# compatibility fixture. Current quick-fix/staged forms are covered by existing tests.
 STATUS_TEXT = """---
 template: full-delivery
 orchestrator: lead
@@ -122,7 +122,7 @@ updated: 2026-05-03 14:24
 Close the stage after publication gate.
 """
 
-# Canonical status shape: current field is `orchestration: light | full-lead`.
+# Legacy compatibility fixture for `orchestration: light | full-lead`.
 STATUS_TEXT_CANONICAL = STATUS_TEXT.replace("orchestrator: lead", "orchestration: full-lead")
 
 

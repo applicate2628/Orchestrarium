@@ -7,7 +7,7 @@ Use this guide at the start of a new Orchestrarium maintenance session. Its purp
 | Rule | Operational meaning |
 |---|---|
 | This repository is the source of truth | Fix Orchestrarium source first: `shared/`, `src.codex/`, `src.claude/`, `scripts/`, `docs/`, and root docs. |
-| Installed copies are runtime outputs | `~/.codex/`, `~/.claude/`, project `.agents/`, and project `.claude/` are installed/runtime surfaces. Patch them only after the source owner is updated, and only when current sessions need the behavior before reinstall. |
+| Installed copies are runtime outputs | `$HOME/.agents/skills/` and `$HOME/.agents/contracts/` are the live canonical global Codex skill/contract surfaces; `$HOME/.codex/` holds Codex configuration and runtime metadata. `~/.claude/`, project `.agents/`, and project `.claude/` are also installed/runtime surfaces. Patch them only after the source owner is updated, and only when current sessions need the behavior before reinstall. |
 | Do not treat stale installs as canon | A broken or stale global/local install can explain a symptom, but the durable fix belongs in the owning source file unless the problem is purely local state. |
 | Do not create source from runtime guesses | Before adding a new path or mechanism, identify the owning source surface and installer propagation path. |
 | Keep provider boundaries explicit | Codex-specific runtime metadata belongs in `src.codex/`; Claude Agent-tool wrappers belong in `src.claude/`; shared semantics belong in `shared/` plus affected provider addenda. |
@@ -49,13 +49,14 @@ Use this guide at the start of a new Orchestrarium maintenance session. Its purp
 
 | Runtime surface | Meaning |
 |---|---|
-| `~/.codex/` | Global installed Codex pack and live Codex runtime state. |
+| `$HOME/.agents/skills/` | Live canonical global Codex skill surface. |
+| `$HOME/.agents/contracts/` | Live canonical global Codex contract surface. |
+| `$HOME/.codex/` | Codex configuration, hooks, native-role metadata, and retained provider-root compatibility outputs; not the canonical skills/contracts tree. |
 | `~/.claude/` | Global installed Claude Code pack and live Claude runtime state. |
 | `.agents/` in a target project | Project-local installed Codex runtime output. Not normally committed. |
 | `.claude/` in a target project | Project-local installed Claude Code runtime output. Not normally committed except project policy files when intentionally initialized. |
-| `~/.agents` | Legacy or stale personal skill surface. Do not treat it as Orchestrarium canon. If it explains a symptom, remove or migrate it explicitly. |
 
-Inside this monorepo, a missing local `.agents/` tree is not a misconfiguration. Maintainers may rely on the global `~/.codex/` install while editing source.
+Inside this monorepo, a missing project-local `.agents/` tree is not a misconfiguration. Maintainers may rely on the global `$HOME/.agents/` skill/contract tree plus `$HOME/.codex/` configuration while editing source.
 
 ## Common Maintenance Patterns
 
