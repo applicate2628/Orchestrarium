@@ -1,0 +1,4 @@
+interface:
+  display_name: "Astra Routing"
+  short_description: "Choose an explicit evidence-gated Astra route"
+  default_prompt: "Use $astra-routing to decide whether this admitted task has separate route evidence for GPT-6 Astra, compare complete expected cost-to-PASS when economics is the basis, choose a separately evidence-gated reasoning effort, require exact runtime availability, forbid silent fallback and broad Astra fan-out, and preserve independent review and publication gates."
