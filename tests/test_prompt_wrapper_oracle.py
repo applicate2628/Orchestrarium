@@ -2720,6 +2720,47 @@ def test_recovery_write_failure_after_successful_purge_returns_bounded_cleanup_r
     assert not any(lifecycle.root.glob(".capture-tombstone-*"))
 
 
+@pytest.mark.parametrize(
+    ("exit_code", "status", "gate", "token", "expected_exit"),
+    (
+        (0, "completed", "PASS", "COMPLETE:PASS", 0),
+        (0, "revise", "REVISE", "COMPLETE:REVISE", 0),
+        (0, "blocked", "BLOCKED", "COMPLETE:BLOCKED", 1),
+        (0, "blocked", "none", "UNVERIFIED:no-gate-line", 1),
+        (37, "blocked", "none", "UNVERIFIED:no-gate-line", 37),
+    ),
+)
+def test_clean_cleanup_exit_mapping_preserves_terminal_semantics(
+    exit_code: int,
+    status: str,
+    gate: str,
+    token: str,
+    expected_exit: int,
+) -> None:
+    terminal = owner.TerminalResult(
+        Path("<fixture>"), status, gate, "fixture note", token, 0
+    )
+
+    outcome = owner.combine_terminal_outcomes(
+        exit_code, terminal, owner.CleanupResult(()), None, external=True
+    )
+
+    assert outcome.exit_code == expected_exit
+    assert (outcome.token, outcome.status, outcome.gate, outcome.note) == (
+        token,
+        status,
+        gate,
+        "fixture note",
+    )
+    assert (
+        outcome.primary_exit_code,
+        outcome.primary_token,
+        outcome.primary_status,
+        outcome.primary_gate,
+        outcome.primary_note,
+    ) == (exit_code, token, status, gate, "fixture note")
+
+
 def test_settle_once_converts_unexpected_cleanup_failure_to_combined_terminal(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -3100,10 +3141,20 @@ def test_envelope_contains_no_prompt_raw_stderr_or_capture_paths(
         )
     encoded = stream.getvalue()
     payload = owner.parse_provider_result(encoded)
-    assert code == 0
+    assert code == 1
     assert payload["token"] == "UNVERIFIED:err-markers"
+    assert payload["status"] == "blocked"
     assert payload["gate"] == "none"
+    assert payload["note"] == "oracle: err markers present (1)"
+    assert payload["primaryOutcome"] == {
+        "exitCode": 0,
+        "token": "UNVERIFIED:err-markers",
+        "status": "blocked",
+        "gate": "none",
+        "note": "oracle: err markers present (1)",
+    }
     assert payload["stderrMarkerCount"] == 1
+    assert receipt_path.read_text(encoding="utf-8") == encoded
     assert "credential-like-secret" not in encoded
     assert "fixture prompt" not in encoded
     assert str(lifecycle.root) not in encoded
@@ -3133,7 +3184,7 @@ def test_finalizer_counts_fatal_stderr_markers_after_first_64_kib(
         )
 
     payload = owner.parse_provider_result(stream.getvalue())
-    assert code == 0
+    assert code == 1
     assert payload["token"] == "UNVERIFIED:err-markers"
     assert payload["gate"] == "none"
     assert payload["stderrMarkerCount"] == 2

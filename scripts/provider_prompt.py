@@ -5312,7 +5312,11 @@ def combine_terminal_outcomes(
     cleanup_status = "complete" if cleanup.clean else "incomplete"
     cleanup_diagnostic = _sanitized_diagnostic("; ".join(cleanup.issues), lifecycle)
     if cleanup.clean:
-        combined_exit = exit_code
+        combined_exit = (
+            exit_code
+            if exit_code != 0
+            else 1 if terminal.status == "blocked" else 0
+        )
         token, status, gate, note = (
             terminal.token,
             terminal.status,
