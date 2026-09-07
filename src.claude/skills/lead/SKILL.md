@@ -300,7 +300,7 @@ Periodic controls (drift detection between gates) are in [operating-model.md](..
 ## Primary-task lock
 
 - Maintain exactly one primary in-progress task at a time.
-- Side requests may refine or temporarily interrupt the primary task, but do not replace it unless the user explicitly reprioritizes.
+- For a question, status check, or clarification, follow the shared primary-task rule: answer briefly in the available update channel, then in the same turn take the next authorized concrete action. Do not final/close out because the answer is complete; explicit stop/pause/cancel or a genuine user-required decision overrides continuation, and standalone questions with no active task may end normally.
 - When interrupting non-trivial work, record a durable resume point: current stage, last accepted artifact, next concrete step, and open obligations before switching away.
 - After context compaction or resume from a summary, restore the active task, next unchecked step, and open evidence gates before acting; continue from that point unless the user or persisted status says the task is parked, blocked, or complete.
 - If the user corrects the session with `stop closeout`, `завязывай с closeout`, `работай`, `дальше`, `go`, `продолжай`, `по плану`, or an equivalent continue-working signal, take the next concrete action in the active task immediately instead of only acknowledging the correction.

@@ -727,6 +727,22 @@ class TestTurnAnchorEmitsValidContext(unittest.TestCase):
         self.assertIn("Root main conversation", out["additionalContext"])
         self.assertIn("Dispatched subagent", out["additionalContext"])
 
+    def test_missing_policy_dependency_fails_open(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            isolated_hook = Path(td) / TURN_ANCHOR_PY.name
+            shutil.copyfile(TURN_ANCHOR_PY, isolated_hook)
+            result = subprocess.run(
+                [sys.executable, str(isolated_hook)],
+                input="",
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(result.stderr, "")
+
     def test_turn_anchor_never_exits_two(self) -> None:
         for stdin_text in ("", "not json", "x" * 1_000_000):
             with self.subTest(size=len(stdin_text)):

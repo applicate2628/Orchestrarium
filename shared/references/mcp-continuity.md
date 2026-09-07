@@ -9,7 +9,7 @@ One dependency-free policy module, `scripts/universal-hooks/scripts/mcp_continui
 | Event | Adapter | Shared behavior |
 | --- | --- | --- |
 | `SessionStart` | `mcp-usage-reminder.py` | Reintroduces the full MCP discovery and use guidance after a new session or compaction. |
-| `UserPromptSubmit` | `turn-anchor-reminder.py` | Adds a short checkpoint requiring runtime discovery of relevant MCP tools before ad hoc repository search. |
+| `UserPromptSubmit` | `turn-anchor-reminder.py` | Adds a short checkpoint for active-task continuity and runtime discovery of relevant MCP tools before ad hoc repository search. |
 | `PreToolUse` | `check-mcp-momentum.py` | Classifies a qualifying code-navigation search before provider-specific advisory or force-mode enforcement. |
 
 The policy admits exactly `Grep`, `Bash`, `PowerShell`, `shell_command`, and `exec_command`. Shell-shaped inputs read `tool_input.command`; `exec_command` reads `tool_input.cmd` and accepts `command` as a compatibility shape. Shell text is untrusted data: the policy tokenizes it and never executes it.
@@ -61,8 +61,11 @@ Qualifying advisory paths emit one generic runtime-discovery checkpoint. Named
 tools in documentation are explicitly non-normative examples and never
 selection logic.
 
-Advisory paths influence the next model action and cannot prove obedience. The
-Claude root-force denial is an action-level guard only for searches admitted by
+Advisory paths influence the next model action and cannot prove obedience. In
+particular, the turn anchor tells the root conversation to answer a side question
+briefly and resume the next authorized concrete action in the same turn, but a
+synthetic payload test proves only delivery of that context, not model compliance.
+The Claude root-force denial is an action-level guard only for searches admitted by
 the shared classifier; it does not prove MCP success or cover tools outside its
 matcher. Installed-source identity and long-turn behavior require separate
 post-install verification.
