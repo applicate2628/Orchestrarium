@@ -409,15 +409,20 @@ def _run_claude_installer(project: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
-def _run_codex_global_installer(
-    home: Path, *, install_hooks: bool = False, dry_run: bool = False
+def _run_global_installer(
+    provider: str,
+    home: Path,
+    *,
+    install_hooks: bool = False,
+    dry_run: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     env["USERPROFILE"] = str(home)
     env["HOME"] = str(home)
     if not install_hooks:
         env["ORCHESTRARIUM_NO_HYPOTHESIS_HOOK"] = "1"
-    arguments = [sys.executable, str(INSTALL_CODEX), "--global", "--force"]
+    installer_path = INSTALL_CODEX if provider == "codex" else INSTALL_CLAUDE
+    arguments = [sys.executable, str(installer_path), "--global", "--force"]
     if dry_run:
         arguments.append("--dry-run")
     return subprocess.run(
@@ -427,6 +432,14 @@ def _run_codex_global_installer(
         text=True,
         encoding="utf-8",
         env=env,
+    )
+
+
+def _run_codex_global_installer(
+    home: Path, *, install_hooks: bool = False, dry_run: bool = False
+) -> subprocess.CompletedProcess[str]:
+    return _run_global_installer(
+        "codex", home, install_hooks=install_hooks, dry_run=dry_run
     )
 
 
@@ -866,6 +879,98 @@ def test_global_codex_and_claude_provider_paths_keep_role_registration_owned(
     claude_result = _run_claude_installer(project)
     assert claude_result.returncode == 0, claude_result.stdout + claude_result.stderr
     assert not (project / ".codex" / "config.toml").exists()
+
+
+@pytest.mark.parametrize("provider", ("codex", "claude"))
+@pytest.mark.parametrize("kind", ("symlink", "junction"))
+def test_global_provider_linked_canonical_agents_root_preserves_link_and_vendor_content(
+    tmp_path: Path, provider: str, kind: str
+) -> None:
+    """A user-global canonical skills root may be a bound directory link."""
+
+    home = tmp_path / "home"
+    home.mkdir()
+    backing = tmp_path / "backing-agents"
+    backing.mkdir()
+    vendor = backing / "vendor-sentinel.txt"
+    vendor.write_bytes(b"preserve vendor content\n")
+    logical = home / ".agents"
+    try:
+        _make_runtime_directory_link(logical, backing, kind)
+        raw_target = os.readlink(logical)
+    except OSError as exc:
+        pytest.skip(f"directory {kind} unavailable: {exc}")
+
+    link_identity = installer._CreateOnlyMutablePath._identity(logical)
+    before = _no_follow_inventory(backing)
+
+    dry_run = _run_global_installer(provider, home, dry_run=True)
+    assert dry_run.returncode == 0, dry_run.stdout + dry_run.stderr
+    assert installer._CreateOnlyMutablePath._identity(logical) == link_identity
+    assert os.readlink(logical) == raw_target
+    assert _no_follow_inventory(backing) == before
+
+    installed = _run_global_installer(provider, home)
+    assert installed.returncode == 0, installed.stdout + installed.stderr
+    assert installer._CreateOnlyMutablePath._identity(logical) == link_identity
+    assert os.readlink(logical) == raw_target
+    assert vendor.read_bytes() == b"preserve vendor content\n"
+    assert (backing / "skills" / "lead" / "SKILL.md").is_file()
+
+    reinstalled = _run_global_installer(provider, home)
+    assert reinstalled.returncode == 0, reinstalled.stdout + reinstalled.stderr
+    assert installer._CreateOnlyMutablePath._identity(logical) == link_identity
+    assert os.readlink(logical) == raw_target
+    assert vendor.read_bytes() == b"preserve vendor content\n"
+
+
+@pytest.mark.parametrize("provider", ("codex", "claude"))
+@pytest.mark.parametrize("kind", ("symlink", "junction"))
+def test_global_provider_linked_canonical_agents_root_rolls_back_after_fault(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    provider: str,
+    kind: str,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    backing = tmp_path / "backing-agents"
+    backing.mkdir()
+    vendor = backing / "vendor-sentinel.txt"
+    vendor.write_bytes(b"preserve vendor content\n")
+    logical = home / ".agents"
+    try:
+        _make_runtime_directory_link(logical, backing, kind)
+        raw_target = os.readlink(logical)
+    except OSError as exc:
+        pytest.skip(f"directory {kind} unavailable: {exc}")
+
+    link_identity = installer._CreateOnlyMutablePath._identity(logical)
+    before = _no_follow_inventory(backing)
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setenv("HOME", str(home))
+    original = installer._install_ui_continuity_contract
+    calls = 0
+
+    def fail_after_canonical_skills(*args: object, **kwargs: object) -> None:
+        nonlocal calls
+        calls += 1
+        original(*args, **kwargs)
+        if calls == (2 if provider == "codex" else 1):
+            raise RuntimeError("injected post-canonical-skills failure")
+
+    monkeypatch.setattr(
+        installer, "_install_ui_continuity_contract", fail_after_canonical_skills
+    )
+
+    result = installer.install(
+        provider, ["--global", "--force", "--no-hypothesis-hook"]
+    )
+
+    assert result == 1
+    assert installer._CreateOnlyMutablePath._identity(logical) == link_identity
+    assert os.readlink(logical) == raw_target
+    assert _no_follow_inventory(backing) == before
 
 
 @pytest.mark.parametrize("kind", ("symlink", "junction"))

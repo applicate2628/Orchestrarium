@@ -2576,6 +2576,7 @@ def _installer_mutation_paths(
     docs_target: Path,
     source_tree: Path,
     target_tree: Path,
+    canonical_skills_target: Path,
     mode_target: Path,
     registration: Path,
     shared_mode_target: Path | None,
@@ -2595,11 +2596,7 @@ def _installer_mutation_paths(
         Path(os.path.abspath(path)) for path in claude_transport_migration_paths
     }
     # Accepted-prior e7 canonical skill trees are transaction-restored if upgraded.
-    paths.append(
-        target_tree
-        if provider == "codex"
-        else target.parent / ".agents" / "skills"
-    )
+    paths.append(canonical_skills_target)
     if provider == "codex":
         # Slice-A skills and native-role/config records use the create/migration
         # ledger, never snapshot restoration, so accepted-prior inode recovery
@@ -4975,6 +4972,17 @@ def install(provider: str, argv: list[str] | None = None) -> int:
         canonical_agents_root = (
             target.parent / ".agents" if mode == "global" else project / ".agents"
         )
+        canonical_agents_authority: Any | None = None
+        if mode == "global":
+            canonical_agents_authority = _linked_runtime_subroots_module(
+                root
+            ).LinkedRuntimeSubrootAuthority.bind(
+                canonical_agents_root,
+                scope="global",
+                trusted_global_roots=(canonical_agents_root,),
+            )
+            if canonical_agents_authority is not None:
+                canonical_agents_root = canonical_agents_authority.resolved_root
         canonical_skills_target = canonical_agents_root / "skills"
         claude_link_authorities: tuple[Any, ...] = ()
         codex_agents_authority: Any | None = None
@@ -5136,6 +5144,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
             docs_target=docs_target,
             source_tree=source_tree,
             target_tree=target_tree,
+            canonical_skills_target=canonical_skills_target,
             mode_target=mode_target,
             registration=registration,
             shared_mode_target=shared_mode_target,
@@ -5177,6 +5186,8 @@ def install(provider: str, argv: list[str] | None = None) -> int:
             _assert_global_claude_linked_subroot_authority(root, authority)
         if codex_agents_authority is not None:
             codex_agents_authority.assert_current()
+        if canonical_agents_authority is not None:
+            canonical_agents_authority.assert_current()
         with transaction:
             mutable_anchor = project if project is not None else _resolve_global_home()
             if not mutable_anchor.is_dir():
@@ -5194,6 +5205,16 @@ def install(provider: str, argv: list[str] | None = None) -> int:
             claude_agents_owner: _CreateOnlyMutablePath | None = None
             claude_skills_owner: _CreateOnlyMutablePath | None = None
             codex_agents_owner: _CreateOnlyMutablePath | None = None
+            canonical_skills_owner = (
+                _CreateOnlyMutablePath(
+                    canonical_agents_authority.resolved_root,
+                    transaction,
+                    dry_run=args.dry_run,
+                    linked_authority=canonical_agents_authority,
+                )
+                if canonical_agents_authority is not None
+                else create_only
+            )
             if provider == "claude":
                 assert claude_commands_target is not None
                 assert claude_skills_projection_target is not None
@@ -5251,7 +5272,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                         args.dry_run,
                     )
                 _install_canonical_skills(
-                    source_tree, target_tree, create_only, root=root
+                    source_tree, target_tree, canonical_skills_owner, root=root
                 )
             else:
                 # The canonical skill trees plus the paired Claude transport
@@ -5306,7 +5327,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                     _apply_canonical_skills_plan(
                         canonical_plan,
                         canonical_skills_target,
-                        create_only,
+                        canonical_skills_owner,
                         root=root,
                         claude_transport_root=target_tree / "scripts",
                         claude_transport_owner=claude_agents_owner,
