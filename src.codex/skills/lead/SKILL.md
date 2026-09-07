@@ -23,6 +23,9 @@ Execute in order:
    - Restore from persisted accepted artifacts and the repository-defined recovery sources only.
    - Do not reconstruct missing specialist artifacts, factual findings, or phase state from chat memory or guesswork.
    - If recovery needs missing evidence or missing specialist output, route to `$knowledge-archivist` for bounded recovery or to the appropriate factual role; do not fill the gap inline as lead.
+   - **Formulation alignment.** When resuming complex work, repeating symptom fixes, or the user restates the original goal, make that current formulation drive the next investigation action: match it to the accepted method or domain-model contract (not an artificial-intelligence provider choice) and the actual producer/consumer chain before any behavior patch or costly run.
+   - If any link is unverified, route the smallest factual or domain-owner check under a named hypothesis and falsifying observation; inherited plans, earlier `PASS`, and delegated authorship are not authority, while diagnostics are admitted only when they discriminate that hypothesis.
+   - Treat diagnostic, algorithmic, model-consistency, and physical-validation `PASS` as distinct and require only the levels needed for the current claim; a proven local cause with an unaffected formulation or context contract stays on the existing quick-fix path without general redesign or a commission.
 4. **Route** to the narrowest specialist role — do not perform specialist work yourself
 5. **Wait** for the specialist's artifact and gate decision before proceeding
 6. **Close** the specialist session once the artifact is accepted
