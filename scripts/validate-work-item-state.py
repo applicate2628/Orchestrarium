@@ -2273,7 +2273,14 @@ def _validate_closure_authority(
                                 "classified non-protected findingClass "
                                 f"{finding_class!r}",
                             )
-                            bump("security-waiver-finding-class-fail")
+                        else:
+                            fail(
+                                errors,
+                                f"{rid}: {SECURITY_REVIEWER_WAIVER_GATE} "
+                                f"findingClass dimension cannot discharge {target_id}: "
+                                f"unsupported findingClass {finding_class!r}",
+                            )
+                        bump("security-waiver-finding-class-fail")
                         preflight_failed = True
                         continue
                 eligible_targets.append(target_id)
@@ -5184,7 +5191,22 @@ def _reduce_effective_current_state(
         position for position in range(len(rows)) if position not in inactive
     )
     active_rows = tuple(rows[position] for position in active_positions)
-    active_validity = tuple(validity[position] for position in active_positions)
+    active_current_validity = tuple(
+        validity[position].current_schema_valid for position in active_positions
+    )
+    active_masks = _derive_authority_masks(active_rows, active_current_validity, item)
+    active_validity = tuple(
+        LedgerEventValidityV1(current_schema_valid, authority)
+        for current_schema_valid, authority in zip(
+            active_current_validity, active_masks
+        )
+    )
+    effective_validity = [
+        LedgerEventValidityV1(entry.current_schema_valid, _NO_LEDGER_AUTHORITY)
+        for entry in validity
+    ]
+    for position, row_validity in zip(active_positions, active_validity):
+        effective_validity[position] = row_validity
     open_revise, open_launches = _validate_closure_authority(
         active_rows, errors, telemetry, validity=active_validity
     )
@@ -5199,7 +5221,7 @@ def _reduce_effective_current_state(
             telemetry["recovery-reopened-launch"] = (
                 telemetry.get("recovery-reopened-launch", 0) + reopened_launch
             )
-    return active_positions, validity, open_revise, open_launches
+    return active_positions, tuple(effective_validity), open_revise, open_launches
 
 
 def validate_work_item(

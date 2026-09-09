@@ -14,6 +14,7 @@ from pathlib import Path
 from tests.test_ledger_h1_effective_view import (
     canonical,
     digest,
+    event,
     load_validator,
     materialize_live_artifacts,
     synthetic_artifacts,
@@ -233,6 +234,197 @@ class ActiveC3RecoveryTests(unittest.TestCase):
             unsettled = checker.unsettled_launch_run_ids(item, context, module)
 
             self.assertEqual(unsettled, {"launch-c-0001"})
+
+    def test_later_cancellation_settles_after_original_terminal_is_invalidated(self):
+        module = load_validator()
+        checker = load_checker()
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            artifacts, items, paths, _expected = synthetic_artifacts(
+                module,
+                root,
+                sealed_closer_artifact="other.md",
+                sealed_closer_is_terminal=True,
+            )
+            path = paths[0]
+            item = items[0]
+            rows = artifacts.ledger_bytes_by_path[path].splitlines(keepends=True)
+            closer_ordinal = next(
+                index
+                for index, line in enumerate(rows, start=1)
+                if json.loads(line).get("runId") == "bad-closer-a1"
+            )
+            closer_body = rows[closer_ordinal - 1].rstrip(b"\r\n")
+            recovery = {
+                "schemaVersion": 2,
+                "runId": "recover-terminal-before-cancellation",
+                "workItem": "reader-a",
+                "role": "lead",
+                "executionRole": "main",
+                "status": "completed",
+                "gate": "none",
+                "scope": ["ledger-recovery:closure-invalidation"],
+                "eventKind": "closure-invalidation",
+                "invalidatesRunId": "bad-closer-a1",
+                "invalidatesEventSha256": digest(closer_body),
+                "evidence": [
+                    {
+                        "kind": "manual-check",
+                        "ref": f"bad-closer-a1 {digest(closer_body)}",
+                    }
+                ],
+                "startedAt": "2026-09-09T00:00:00Z",
+                "updatedAt": "2026-09-09T00:00:00Z",
+            }
+            cancellation = event(
+                "cancel-launch-c-0001",
+                "reader-a",
+                eventKind="terminal",
+                launchRunId="launch-c-0001",
+                status="cancelled",
+                startedAt="2026-09-09T00:01:00Z",
+                updatedAt="2026-09-09T00:01:00Z",
+            )
+            ledgers = dict(artifacts.ledger_bytes_by_path)
+            ledgers[path] += canonical(recovery) + b"\n" + canonical(cancellation) + b"\n"
+            candidate = module.LedgerCompatibilityArtifactSetV1(
+                **{**artifacts.__dict__, "ledger_bytes_by_path": ledgers}
+            )
+            context = module._load_effective_ledger_group(
+                root, compatibility_artifacts=candidate
+            )[path]
+            reduction_errors: list[str] = []
+            active_positions, validity, open_revise, open_launches = (
+                module._reduce_effective_current_state(
+                    context.rows,
+                    item,
+                    reduction_errors,
+                    None,
+                    context=context,
+                )
+            )
+
+            self.assertEqual(reduction_errors, [])
+            self.assertEqual(checker.unsettled_launch_run_ids(item, context, module), set())
+            self.assertEqual(open_launches, [])
+            self.assertEqual(
+                [row.get("runId") for row in open_revise], ["revise-a-0001"]
+            )
+            self.assertNotIn(
+                "bad-closer-a1",
+                [context.rows[position].event.get("runId") for position in active_positions],
+            )
+            authoritative_terminals = [
+                row.event.get("runId")
+                for row, row_validity in zip(context.rows, validity)
+                if row_validity.authority.terminal_eligible
+                and row.event.get("launchRunId") == "launch-c-0001"
+            ]
+            self.assertEqual(authoritative_terminals, ["cancel-launch-c-0001"])
+            expected_view_sha256 = json.loads(artifacts.ledger_manifest_bytes)[
+                "entries"
+            ][0]["projectedViewSha256"]
+            self.assertEqual(context.view.projected_view_sha256, expected_view_sha256)
+            strict_errors = module.validate_work_item(
+                item,
+                compatibility_artifacts=candidate,
+                validate_status_file=False,
+            )
+            self.assertFalse(
+                any("unsettled launch: launch-c-0001" in error for error in strict_errors),
+                strict_errors,
+            )
+            self.assertTrue(
+                any("open REVISE obligation: revise-a-0001" in error for error in strict_errors),
+                strict_errors,
+            )
+
+    def test_unsupported_sealed_finding_class_reports_atomic_waiver_failure(self):
+        module = load_validator()
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            item = root / "work-items" / "active" / "reader-a"
+            item.mkdir(parents=True)
+            (item / "target.md").write_text("synthetic artifact\n", encoding="utf-8")
+            target = event(
+                "revise-a-0001",
+                "reader-a",
+                gate="REVISE",
+                status="revise",
+                artifact="target.md",
+                findingClass="architecture",
+            )
+            waiver = event(
+                "waive-unsupported-sealed-class",
+                "reader-a",
+                role="security-reviewer",
+                executionRole="internal",
+                gate="WAIVED:security-reviewer",
+                artifact="target.md",
+                closesRunIds=["revise-a-0001"],
+                evidence=[
+                    {
+                        "kind": "manual-check",
+                        "ref": "security-reviewer waives revise-a-0001",
+                    }
+                ],
+            )
+            authority = module.LedgerAuthorityV1
+            rows = (
+                module.RuntimeLedgerRowV1(
+                    target,
+                    1,
+                    "1" * 64,
+                    "1" * 64,
+                    "2" * 64,
+                    "sealed-prefix",
+                    authority(False, False, True, False, True),
+                ),
+                module.RuntimeLedgerRowV1(
+                    waiver,
+                    2,
+                    "3" * 64,
+                    "3" * 64,
+                    "4" * 64,
+                    "strict-suffix",
+                    module._NO_LEDGER_AUTHORITY,
+                ),
+            )
+            ledger_path = "work-items/active/reader-a/agent-runs.jsonl"
+            context = module.LedgerValidationContextV1(
+                ledger_path,
+                rows,
+                module.LedgerCompatibilityViewV1(
+                    {"ledgerPath": ledger_path}, "5" * 64, {}
+                ),
+                module.LedgerCompatibilityObservationV1("active", (), ()),
+                ("reader-a\0revise-a-0001",),
+                (),
+                module._LedgerInvocationTokenV1({ledger_path: rows}),
+            )
+            telemetry: dict[str, int] = {}
+            errors: list[str] = []
+
+            _positions, _validity, open_revise, _open_launches = (
+                module._reduce_effective_current_state(
+                    rows,
+                    item,
+                    errors,
+                    telemetry,
+                    context=context,
+                )
+            )
+
+            self.assertIn(
+                "waive-unsupported-sealed-class: WAIVED:security-reviewer "
+                "findingClass dimension cannot discharge revise-a-0001: "
+                "unsupported findingClass 'architecture'",
+                errors,
+            )
+            self.assertEqual(
+                [row.get("runId") for row in open_revise], ["revise-a-0001"]
+            )
+            self.assertEqual(telemetry.get("closure-accepted", 0), 0)
 
 
 if __name__ == "__main__":
