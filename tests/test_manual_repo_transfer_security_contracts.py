@@ -45,6 +45,50 @@ def load_transfer_module():
     return module
 
 
+@contextlib.contextmanager
+def windows_writer(path: Path, share_mode: int):
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    create_file = kernel32.CreateFileW
+    create_file.argtypes = (
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.HANDLE,
+    )
+    create_file.restype = wintypes.HANDLE
+    handle = create_file(str(path), 0x40000000, share_mode, None, 3, 0x80, None)
+    invalid = ctypes.c_void_p(-1).value
+    value = int(handle) if handle else 0
+    if not value or value == invalid:
+        error = ctypes.get_last_error()
+        raise OSError(error, os.strerror(error), str(path))
+    descriptor = None
+    stream = None
+    try:
+        descriptor = msvcrt.open_osfhandle(
+            value,
+            os.O_WRONLY
+            | getattr(os, "O_BINARY", 0)
+            | getattr(os, "O_NOINHERIT", 0),
+        )
+        stream = os.fdopen(descriptor, "ab", buffering=0)
+        yield stream
+    finally:
+        if stream is not None:
+            stream.close()
+        elif descriptor is not None:
+            os.close(descriptor)
+        else:
+            kernel32.CloseHandle(ctypes.c_void_p(value))
+
+
 def _linux_process_state_and_start_identity(pid: int) -> tuple[str, str] | None:
     try:
         raw = Path(f"/proc/{pid}/stat").read_text(encoding="ascii")
@@ -153,6 +197,37 @@ def directory_alias(alias: Path, target: Path) -> None:
 
 
 class IoBoundaryTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == "nt", "Windows ctypes binding contract")
+    def test_windows_identity_factories_initialize_once_per_process(self) -> None:
+        import ctypes
+
+        module = load_transfer_module()
+        self.assertTrue(hasattr(module._windows_kernel32, "cache_clear"))
+        self.assertTrue(
+            hasattr(module._windows_handle_information_binding, "cache_clear")
+        )
+        module._windows_handle_information_binding.cache_clear()
+        module._windows_kernel32.cache_clear()
+
+        with (
+            mock.patch.object(ctypes, "WinDLL", wraps=ctypes.WinDLL) as win_dll,
+            mock.patch.object(ctypes, "POINTER", wraps=ctypes.POINTER) as pointer,
+        ):
+            kernel_a = module._windows_kernel32()
+            kernel_b = module._windows_kernel32()
+            information_a, get_information_a = (
+                module._windows_handle_information_binding()
+            )
+            information_b, get_information_b = (
+                module._windows_handle_information_binding()
+            )
+
+        self.assertIs(kernel_a, kernel_b)
+        self.assertIs(information_a, information_b)
+        self.assertIs(get_information_a, get_information_b)
+        self.assertEqual(1, win_dll.call_count)
+        self.assertEqual(1, pointer.call_count)
+
     def test_one_ordinary_file_core_owns_open_rebind_stability_and_close(self) -> None:
         tree = ast.parse(SCRIPT.read_text(encoding="utf-8"))
         classes = {
@@ -222,6 +297,11 @@ class IoBoundaryTests(unittest.TestCase):
             module.TRANSFER_INPUT_BINDING_INVALID,
             module._INPUT_FILE_OPTIONS.errors.binding,
         )
+        self.assertTrue(module._INVENTORY_FILE_OPTIONS.windows_share_write)
+        self.assertFalse(module._PAYLOAD_FILE_OPTIONS.windows_share_write)
+        self.assertFalse(module._INPUT_FILE_OPTIONS.windows_share_write)
+        self.assertFalse(module._ARCHIVE_FILE_OPTIONS.windows_share_write)
+        self.assertFalse(module._OUTPUT_FILE_OPTIONS.windows_share_write)
 
     def test_ordinary_file_core_parameterizes_path_drift_rollback_and_close_errors(self) -> None:
         module = load_transfer_module()
@@ -3662,6 +3742,99 @@ class SecurityContractTests(unittest.TestCase):
             self.skipTest(f"file symlink unavailable: {error}")
         with self.assertRaisesRegex(module.ContractError, "inventory drift"):
             module.BoundPayloadInputSession(link)
+
+    @unittest.skipUnless(os.name == "nt", "Windows inventory sharing contract")
+    def test_inventory_census_allows_stable_write_shared_file(self) -> None:
+        module = load_transfer_module()
+        source = self.root / "stable-write-shared.bin"
+        payload = b"stable inventory bytes"
+        source.write_bytes(payload)
+
+        with windows_writer(source, 0x00000001 | 0x00000002):
+            size, digest = module.inventory_regular_file(source)
+
+        self.assertEqual(len(payload), size)
+        self.assertEqual(sha256(payload), digest)
+        probe = self.root / "stable-write-shared-probe.bin"
+        os.replace(source, probe)
+        os.replace(probe, source)
+
+    def test_nested_git_reparse_is_metadata_only_and_not_followed(self) -> None:
+        module = load_transfer_module()
+        target = self.root / "nested-git-external-target"
+        target.mkdir()
+        (target / "must-not-be-inventoried.txt").write_text(
+            "external bytes\n", encoding="utf-8"
+        )
+        nested_git = self.repo / "vendor" / ".git"
+        nested_git.mkdir(parents=True)
+        link = nested_git / "external-link"
+        directory_alias(link, target)
+
+        inventory = self.inventory()
+        entries = {entry["path"]: entry for entry in inventory["entries"]}
+
+        reparse = entries["vendor/.git/external-link"]
+        self.assertEqual("reparse", reparse["entryType"])
+        self.assertTrue(reparse["hostile"])
+        self.assertTrue(reparse["metadataOnly"])
+        self.assertNotIn(
+            "vendor/.git/external-link/must-not-be-inventoried.txt", entries
+        )
+
+    @unittest.skipUnless(os.name == "nt", "Windows inventory sharing contract")
+    def test_inventory_census_rejects_mutation_while_write_shared(self) -> None:
+        module = load_transfer_module()
+        source = self.root / "mutated-write-shared.bin"
+        source.write_bytes(b"stable before mutation")
+
+        with windows_writer(source, 0x00000001 | 0x00000002) as writer:
+            session = module.BoundPayloadInputSession(
+                source, inventory_write_sharing=True
+            )
+            try:
+                writer.write(b"!")
+                writer.flush()
+                os.fsync(writer.fileno())
+                with self.assertRaisesRegex(module.ContractError, "inventory drift"):
+                    session.consume_census(session.eof)
+            finally:
+                session.close(validate=False)
+
+        probe = self.root / "mutated-write-shared-probe.bin"
+        os.replace(source, probe)
+        os.replace(probe, source)
+
+    @unittest.skipUnless(os.name == "nt", "Windows inventory sharing contract")
+    def test_bundle_payload_still_denies_write_shared_leaf(self) -> None:
+        module = load_transfer_module()
+        source = self.root / "payload-write-shared.bin"
+        source.write_bytes(b"payload bytes")
+
+        with windows_writer(source, 0x00000001 | 0x00000002):
+            with self.assertRaisesRegex(module.ContractError, "inventory drift"):
+                module.BoundPayloadInputSession(source)
+
+        probe = self.root / "payload-write-shared-probe.bin"
+        os.replace(source, probe)
+        os.replace(probe, source)
+
+    @unittest.skipUnless(os.name == "nt", "Windows inventory sharing contract")
+    def test_inventory_exclusive_holder_reports_open_share_failure(self) -> None:
+        module = load_transfer_module()
+        source = self.root / "exclusive-holder.bin"
+        source.write_bytes(b"exclusive bytes")
+
+        with windows_writer(source, 0):
+            with self.assertRaisesRegex(
+                module.ContractError,
+                module.TRANSFER_INVENTORY_OPEN_SHARE_FAILED,
+            ):
+                module.inventory_regular_file(source)
+
+        probe = self.root / "exclusive-holder-probe.bin"
+        os.replace(source, probe)
+        os.replace(probe, source)
 
     def test_payload_zip_stream_uses_the_already_bound_descriptor(self) -> None:
         module = load_transfer_module()

@@ -707,18 +707,17 @@ class ClosureFixture(unittest.TestCase):
             f"requires exactly one ledger event for {target_id}; found 2",
             errors,
         )
-        self.assertIn(
-            "open REVISE obligation: run-atomic-duplicate-target "
-            "(lane='duplicate-protected-position', artifact='a.md') — closes only on "
-            "re-verification PASS (closesRunIds) or a typed disposition, never on "
-            "author belief or validator green",
-            errors,
-        )
-        self.assertIn(
-            "open REVISE obligation: run-atomic-duplicate-target "
-            "(lane='duplicate-correctness-position', artifact='design.md') — closes only on "
-            "re-verification PASS (closesRunIds) or a typed disposition, never on "
-            "author belief or validator green",
+        # A nonunique identity is denied before it can enter the typed
+        # revise-target authority set. The duplicate and exact waiver target-count
+        # diagnostics remain fail-closed; inventing two open-authority positions
+        # would contradict the five-axis reader contract.
+        self.assertFalse(
+            any(
+                error.startswith(
+                    "open REVISE obligation: run-atomic-duplicate-target"
+                )
+                for error in errors
+            ),
             errors,
         )
         self.assertEqual(telemetry.get("closure-accepted", 0), 0, telemetry)

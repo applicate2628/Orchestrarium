@@ -28,6 +28,28 @@ HANDOFF_CONTRACTS = (
     "src.claude/agents/contracts/subagent-contracts.md",
 )
 
+IMPLEMENTATION_PROFESSIONS = (
+    "backend-engineer",
+    "frontend-engineer",
+    "qt-ui-engineer",
+    "model-view-engineer",
+    "data-engineer",
+    "platform-engineer",
+    "toolchain-engineer",
+    "geometry-engineer",
+    "graphics-engineer",
+    "visualization-engineer",
+)
+
+IMPLEMENTATION_PROFESSION_FILES = tuple(
+    path
+    for role in IMPLEMENTATION_PROFESSIONS
+    for path in (
+        f"src.codex/skills/{role}/SKILL.md",
+        f"src.claude/agents/{role}.md",
+    )
+)
+
 FACT_ROUTING_FRAGMENTS = (
     "Standalone bounded fact lookup is answered inline with no artifact.",
     "defaults to one `$analyst`",
@@ -223,8 +245,8 @@ PINS = [
     ("A3", "lifecycle state change (create, resume, stage transition, park, close, archive)",
      ["src.claude/agents/contracts/operating-model.md", "src.codex/skills/lead/operating-model.md"]),
 
-    # A9 — GitHub thread HEAD + API rule
-    ("A9", "When the user authorizes GitHub review-thread resolution, resolve a thread only after the fix commit is on `HEAD`",
+    # A9 — GitHub thread hosted-head owner rule
+    ("A9", "Delegate authorized GitHub review-thread resolution to `$github-pr-review-bot`",
      ["src.claude/commands/agents-review.md", "src.codex/skills/review-changes/SKILL.md"]),
 
     # A11 — mechanical Lead acceptance
@@ -914,6 +936,51 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
             "additive impact alone does not admit `quick-fix`",
             self._read("shared/references/workflow-strategy-comparison.md"),
         )
+
+    def test_implementation_professions_consume_only_selected_workflow_inputs(self) -> None:
+        required = (
+            "Take the approved execution scope, acceptance criteria and oracle, named regression "
+            "guard, applicable domain constraints, and only the artifacts required by the selected "
+            "workflow. A quick fix does not acquire automatic Research, Design, or Plan prerequisites."
+        )
+        refusal = (
+            "Refuse implementation when an artifact or risk-owner constraint required by the selected "
+            "workflow is missing, stale, or outside its accepted scope; do not manufacture or waive it."
+        )
+        for path in IMPLEMENTATION_PROFESSION_FILES:
+            with self.subTest(path=path):
+                text = self._read(path)
+                self.assertIn(required, text)
+                self.assertIn(refusal, text)
+                self.assertNotIn("Require accepted research, design", text)
+
+    def test_implementation_professions_do_not_treat_plan_as_cross_owner_authority(self) -> None:
+        for path in IMPLEMENTATION_PROFESSION_FILES:
+            with self.subTest(path=path):
+                text = self._read(path)
+                self.assertIn(
+                    "inclusion in a Plan schedules accepted work but grants no authority",
+                    text,
+                )
+                self.assertNotIn("unless the plan explicitly includes", text)
+
+    def test_data_profession_requires_owner_contract_and_user_authorization_for_destructive_ddl(
+        self,
+    ) -> None:
+        data_roles = (
+            "src.codex/skills/data-engineer/SKILL.md",
+            "src.claude/agents/data-engineer.md",
+        )
+        for path in data_roles:
+            with self.subTest(path=path):
+                text = self._read(path)
+                self.assertIn(
+                    "requires an accepted migration contract from the owning architecture or data authority plus "
+                    "explicit user authorization for the destructive action",
+                    text,
+                )
+                self.assertIn("Plan inclusion alone grants no destructive authority", text)
+                self.assertNotIn("requires explicit plan approval", text)
 
 
 if __name__ == "__main__":

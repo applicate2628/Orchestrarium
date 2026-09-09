@@ -6,8 +6,8 @@
 
 ## 1. Основное правило для lead
 
-> **Разделяйте субагентов по стадии работы и по типу риска.**  
-> У любого фактора, который может независимо провалить результат — архитектура, алгоритмы, численная устойчивость, производительность, безопасность, качество, сопровождаемость, гигиена репозитория или целостность toolchain — должен быть свой владелец, свой артефакт и свой gate.  
+> **Разделяйте субагентов по стадиям, выбранным для задачи, и по типам сработавших рисков.**
+> У каждой выбранной стадии или сработавшего риска, которые могут независимо провалить результат — архитектура, алгоритмы, численная устойчивость, производительность, безопасность, качество, сопровождаемость, гигиена репозитория или целостность toolchain — должен быть свой владелец, свой артефакт и свой gate.
 > Субагент не должен получать задачу уровня «собери всю фичу». Он должен получать роль, минимальный контекст, ограниченные инструменты, один артефакт и явный критерий приемки.
 
 Короткая версия:
@@ -38,10 +38,10 @@ Lead назначает задачу такого вида:
 1. **Не смешивайте роли.** Один субагент владеет одной профессией, а не всем жизненным циклом.
 2. **Не передавайте лишний контекст.** Каждому субагенту давайте только то, что нужно его роли.
 3. **Ограничивайте инструменты по роли.** Research остаётся read-only; implementation остаётся внутри утверждённой фазы; reviewer не заменяет implementer'а.
-4. **Не пропускайте gates.** Пока артефакт не принят, следующая стадия не стартует.
+4. **Не пропускайте допущенные gates.** Пока обязательный артефакт не принят, зависящая от него стадия не стартует.
 5. **Проверяйте результаты субагентов перед доверием к ним.** `PASS`, отчёт или заявленный test result от субагента - это claim, а не proof; orchestrating owner или следующий gate сверяет artifact, diff, logs, command output или другое repo-standard evidence перед acceptance или forwarding.
 6. **Не допускайте тихого роста scope.** Субагент не меняет архитектуру, план или требования сам по себе.
-7. **Разделяйте delivery и ownership рисков.** Хороший патч всё равно неполон, если критичный риск не проверен.
+7. **Разделяйте delivery и ownership рисков.** Хороший патч всё равно неполон, если сработавший критичный риск не проверен.
 8. **QA проверяет интегрированный результат, включая базовую acceptance для производительности, когда это уместно, но не заменяет algorithm, performance, security или reliability специалистов.**
 9. **Принятые решения должны жить рядом с кодом как один source of truth.**
 10. **Предпочитайте факты мнениям.** Используйте factual-роли, чтобы снизить неопределённость, прежде чем просить interpretive-роли делать tradeoff'ы или принимать решения.
@@ -50,7 +50,7 @@ Lead назначает задачу такого вида:
 13. **Сбрасывайте derived `PASS` состояния при материальной правке upstream.** Если принятый upstream artifact был materially revised после того, как downstream artifacts уже получили `PASS`, lead отмечает затронутые derived artifacts на re-review до продолжения delivery. `PASS` не сохраняется автоматически после material upstream change.
 14. **Классифицируйте изменение перед routing.** Используйте `cosmetic`, `additive`, `behavioral` или `breaking-or-cross-cutting`, чтобы определить, насколько сильно lead должен маршрутизировать и gate'ить работу; `breaking-or-cross-cutting` должен усиливать routing, re-review затронутых downstream artifacts и ownership интеграции, когда это нужно.
 15. **Считайте core role map каноническим, но не исчерпывающим.** Role index называет только core team. Lead может выбрать narrower installed specialist вне core team, если он лучше подходит для scoped work, и может выбрать repo-local specialist только когда текущий repo/workspace явно задаёт или явно подразумевает его. Такое использование не добавляет специалиста в canonical team map автоматически.
-16. **Поддерживайте durable task memory для lead-routed работы.** Храните roadmap, brief, status и plan artifacts в repo-local storage, чтобы после прерывания можно было продолжить работу без зависимости от памяти сессии.
+16. **Поддерживайте durable task memory, когда выбранный template требует recovery.** Храните в repo-local storage только обязательные для этого template артефакты, чтобы после прерывания можно было продолжить работу без зависимости от памяти сессии.
 
 ---
 
@@ -68,11 +68,13 @@ roadmap/intake -> delivery
 product-manager -> product-analyst -> lead
 ```
 
-Петля delivery:
+Пример full-delivery; его стадии выбираются, а не образуют универсальную прелюдию:
 
 ```text
 lead -> research -> design -> plan -> implement -> QA/review -> lead
 ```
+
+Выбранный template определяет допустимые стадии и артефакты. Обязательные сработавшие risk owners, evidence и review gates сохраняются; `quick-fix` использует свой focused implementation-and-QA путь и не приобретает Research, Design, Plan или pre-implementation review только потому, что задача нетривиальна.
 
 Существующий review-loop обязателен только при реальной сложности или неоднозначности, существенно конкурирующих вариантах owner/seam, повторяющемся review/fix failure, вновь обнаруженной сложности или явном запросе пользователя. Сам по себе тег `design-decision`, число файлов или идентичные cross-provider projections не создают этот триггер; проверенная причина с одним owner и ясным falsifying oracle проходит tests и одно независимое exact-delta review.
 
@@ -340,7 +342,7 @@ Decision-making roles должны явно разделять подтверж�
 
 Ваша задача — не писать код. Ваша задача — маршрутизировать работу через роли и артефакты.
 
-Сначала превратите запрос в canonical brief:
+Для staged или full-delivery route превратите запрос в canonical brief:
 - goal
 - scope
 - constraints
@@ -350,7 +352,7 @@ Decision-making roles должны явно разделять подтверж�
 - required reviewers
 
 Вызывайте только те роли, которые действительно нужны.
-Не направляйте работу в implementation, пока research, design, specialist constraints и plan-артефакты не приняты, если задача нетривиальна.
+Не направляйте работу в implementation, пока не принят каждый upstream artifact, допущенный выбранным template. Нетривиальность задачи сама по себе не требует Research, Design, specialist constraints и Plan как универсальную прелюдию.
 Передавайте каждому subagent только минимальный контекст, только approved inputs, только разрешённые инструменты и ровно один ожидаемый артефакт.
 Если gate провалился, верните работу в правильную предыдущую стадию с bounded correction.
 ```
@@ -530,6 +532,8 @@ Decision-making roles должны явно разделять подтверж�
 
 ## 9. Практические routing patterns
 
+Если focused template не указан явно, приведённые ниже цепочки являются примерами full-delivery. Выбирайте только стадии и risk owners, необходимые выбранному template и текущим evidence; эти примеры не переопределяют правила `quick-fix` или factual routing.
+
 ### Фактический lookup или investigation
 
 Standalone bounded fact lookup отвечайте inline без artifact. Для non-trivial factual investigation по умолчанию используйте одного `analyst` и создавайте recovery только если нужно continuation. Decision, Architecture Decision Record (ADR) или material alternatives добавляют `architect`; `planner` добавляйте только когда запрошен execution plan.
@@ -667,7 +671,7 @@ lead -> product-manager -> lead
 
 ### 11.1 Что должно жить рядом с кодом
 
-Минимально полезно держать рядом с репозиторием такие артефакты:
+Ниже приведён каталог артефактов, которые могут быть полезны рядом с репозиторием, а не универсальный минимум. Храните только артефакты, обязательные для выбранного template, сработавших gates и recovery contract:
 
 - roadmap decision package
 - canonical brief
@@ -694,9 +698,9 @@ lead -> product-manager -> lead
 - Используйте конфигурируемый task-memory directory, когда этот репозиторий использует optional tracked task memory.
 - Держите активные admitted items в конфигурируемой active-item directory и начинайте восстановление после прерывания с repository-defined recovery entry point.
 - Каждый admitted `quick-fix` создаёт минимальный `work-items/active/<slug>/status.md` до первой repository mutation; его focused format определён в provider-specific `subagent-contracts.md`.
-- Для recovery-tracked или multi-stage lead routes `roadmap.md`, `brief.md` и `status.md` обязательны, когда tracked task memory включён.
+- Для full-delivery и других lead-managed templates, чей recovery contract требует эти файлы, `roadmap.md`, `brief.md` и `status.md` обязательны, когда tracked task memory включён; другие templates используют свой точный набор артефактов.
 - При re-classification `quick-fix` обогащайте тот же work-item новыми обязательными recovery artifacts вместо создания отдельного позднего item.
-- `plan.md` становится обязательным до implementation или review только когда selected route допускает Plan либо upstream specialist stage.
+- `plan.md` становится обязательным до implementation или review только когда selected route допускает стадию Plan.
 - Если текущая стадия зависит от upstream artifacts, таких как research, design, specialist constraints, phase plan или required review reports, эти артефакты должны существовать и быть актуальными до продолжения работы.
 - Если обязательные task-memory artifacts для конфигурируемого workflow отсутствуют или устарели, остановитесь и восстановите их до продолжения delivery.
 - `notes.md` или `notes/` хранит technical findings и discoveries; принятые долгоживущие решения по-прежнему должны жить в design или ADR artifact.

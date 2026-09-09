@@ -234,6 +234,354 @@ class RepoTransferTests(unittest.TestCase):
         )
         self.assertEqual(credentialed["url"], "https://example.invalid/repo.git")
 
+    def test_inventory_validation_streams_the_version_one_snapshot_digest(self) -> None:
+        inventory = self.inventory()
+        snapshot = {
+            "entries": inventory["entries"],
+            "repository": inventory["repository"],
+        }
+        expected = hashlib.sha256(
+            json.dumps(
+                snapshot,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+            ).encode("utf-8")
+        ).hexdigest()
+        self.assertEqual(expected, inventory["snapshot"]["digest"])
+
+        module = load_transfer_module()
+
+        def whole_buffer_forbidden(_value):
+            raise AssertionError("whole canonical JSON buffer reached")
+
+        module.canonical_json = whole_buffer_forbidden
+        module.validate_inventory(inventory)
+
+    def test_git_metadata_batches_are_byte_identical_and_runner_bounded(self) -> None:
+        module = load_transfer_module()
+        repository = module.bind_repository(self.repo, GIT_EXECUTABLE)
+        for setting, value in (
+            ("clean", "cat"),
+            ("smudge", "cat"),
+            ("process", "cat"),
+            ("required", "true"),
+        ):
+            git(self.repo, "config", f"filter.fixture.{setting}", value)
+        deleted = self.repo / "staged-delete.txt"
+        deleted.write_text("delete me\n", encoding="utf-8")
+        git(self.repo, "add", deleted.name)
+        git(self.repo, "commit", "-m", "add staged-delete fixture")
+        deleted.unlink()
+        git(self.repo, "add", "-u", deleted.name)
+        staged = self.repo / "staged add [literal].txt"
+        staged.write_text("staged\n", encoding="utf-8")
+        git(self.repo, "add", staged.name)
+        special = self.repo / "untracked ! [literal].txt"
+        special.write_text("special\n", encoding="utf-8")
+        paths = [
+            ".scratch/evidence.txt",
+            "node_modules/cache.bin",
+            staged.name,
+            deleted.name,
+            special.name,
+            "tracked.txt",
+            "untracked.txt",
+        ]
+        if os.name == "posix":
+            posix_special = self.repo / ":(glob)*\n.txt"
+            posix_special.write_text("literal pathspec bytes\n", encoding="utf-8")
+            paths.append(posix_special.name)
+        expected = module.git_metadata(repository, paths)
+        runner = module._load_process_runner()
+        original_count = runner.MAX_ARGV_COUNT
+        original_run = module.run_bound_git_process
+        observed: list[tuple[str, ...]] = []
+
+        def recording_run(bound, command, stdin_bytes=None):
+            if "--" in command and any(
+                name in command for name in ("status", "diff")
+            ):
+                observed.append(tuple(command))
+            return original_run(bound, command, stdin_bytes=stdin_bytes)
+
+        module.run_bound_git_process = recording_run
+        runner.MAX_ARGV_COUNT = len(module.git_command_prefix(repository)) + 9
+        try:
+            actual = module.git_metadata(repository, paths)
+        finally:
+            runner.MAX_ARGV_COUNT = original_count
+            module.run_bound_git_process = original_run
+
+        self.assertEqual(expected, actual)
+        self.assertGreater(len(observed), 3)
+        for command in observed:
+            encoded = [len(argument.encode("utf-8")) for argument in command]
+            self.assertLessEqual(len(command), runner.MAX_ARGV_COUNT)
+            self.assertLessEqual(sum(size + 1 for size in encoded), runner.MAX_ARGV_BYTES)
+            self.assertLessEqual(max(encoded), runner.MAX_ARG_BYTES)
+            if os.name == "nt":
+                units = len(
+                    runner.serialize_msvcrt_argv(command).encode("utf-16-le")
+                ) // 2
+                self.assertLessEqual(units, runner.MAX_WINDOWS_COMMAND_LINE_UNITS)
+
+    def test_git_metadata_rejects_one_unadmittable_path_before_metadata_launch(self) -> None:
+        module = load_transfer_module()
+        repository = module.bind_repository(self.repo, GIT_EXECUTABLE)
+        runner = module._load_process_runner()
+        original_arg_bytes = runner.MAX_ARG_BYTES
+        original_run = module.run_bound_git_process
+        metadata_launches = 0
+
+        def recording_run(bound, command, stdin_bytes=None):
+            nonlocal metadata_launches
+            if "--" in command and any(
+                name in command for name in ("status", "diff")
+            ):
+                metadata_launches += 1
+            return original_run(bound, command, stdin_bytes=stdin_bytes)
+
+        module.run_bound_git_process = recording_run
+        runner.MAX_ARG_BYTES = 64
+        try:
+            with self.assertRaisesRegex(
+                module.ContractError,
+                "git metadata path exceeds bounded command",
+            ):
+                module.git_metadata(repository, ["x" * 100])
+        finally:
+            runner.MAX_ARG_BYTES = original_arg_bytes
+            module.run_bound_git_process = original_run
+        self.assertEqual(0, metadata_launches)
+
+    def test_git_metadata_aggregate_output_cap_is_not_multiplied_by_batches(self) -> None:
+        module = load_transfer_module()
+        repository = module.bind_repository(self.repo, GIT_EXECUTABLE)
+        runner = module._load_process_runner()
+        original_count = runner.MAX_ARGV_COUNT
+        original_run = module.run_git_command
+        calls = 0
+
+        def large_batch(_bound, command, **_kwargs):
+            nonlocal calls
+            calls += 1
+            return subprocess.CompletedProcess(
+                command, 0, b"x" * (module.MAX_JSON_BYTES // 2 + 1), b""
+            )
+
+        runner.MAX_ARGV_COUNT = len(module.git_command_prefix(repository)) + 8
+        module.run_git_command = large_batch
+        try:
+            with self.assertRaisesRegex(
+                module.ContractError, "git output exceeds JSON limit"
+            ):
+                module.git_metadata(repository, ["one.txt", "two.txt"])
+        finally:
+            runner.MAX_ARGV_COUNT = original_count
+            module.run_git_command = original_run
+        self.assertEqual(3, calls)
+
+    def test_later_git_metadata_batch_failure_leaves_no_bundle_or_temporary(self) -> None:
+        module = load_transfer_module()
+        inventory = self.inventory()
+        self.write_selection(inventory)
+        repository = module.bind_repository(self.repo, GIT_EXECUTABLE)
+        runner = module._load_process_runner()
+        original_count = runner.MAX_ARGV_COUNT
+        original_run = module.run_git_command
+        metadata_batches = 0
+
+        def fail_second_batch(bound, command, **kwargs):
+            nonlocal metadata_batches
+            if "--" in command and any(
+                name in command for name in ("status", "diff")
+            ):
+                metadata_batches += 1
+                if metadata_batches == 2:
+                    raise module.ContractError("later metadata batch failure")
+            return original_run(bound, command, **kwargs)
+
+        runner.MAX_ARGV_COUNT = len(module.git_command_prefix(repository)) + 8
+        module.run_git_command = fail_second_batch
+        try:
+            with self.assertRaisesRegex(
+                module.ContractError, "later metadata batch failure"
+            ):
+                module.bundle(
+                    repository,
+                    self.inventory_path,
+                    self.selection,
+                    self.bundle,
+                )
+        finally:
+            runner.MAX_ARGV_COUNT = original_count
+            module.run_git_command = original_run
+        self.assertEqual(2, metadata_batches)
+        self.assertFalse(self.bundle.exists())
+        self.assertEqual([], list(self.bundle.parent.glob(f".{self.bundle.name}.*.tmp")))
+
+    def test_inventory_uses_nul_safe_batched_check_ignore(self) -> None:
+        module = load_transfer_module()
+        original_run_git = module.run_git
+        invocations: list[tuple[tuple[str, ...], bytes | None]] = []
+
+        def recording_run_git(repository, *arguments, **kwargs):
+            result = original_run_git(repository, *arguments, **kwargs)
+            invocations.append((arguments, kwargs.get("stdin_bytes")))
+            return result
+
+        module.run_git = recording_run_git
+        module.MAX_GIT_CHECK_IGNORE_PATHS = 2
+        (self.repo / ".scratch" / "more evidence.txt").write_text(
+            "more evidence\n", encoding="utf-8"
+        )
+        if os.name == "posix":
+            (self.repo / ".scratch" / "line\nbreak.txt").write_text(
+                "newline evidence\n", encoding="utf-8"
+            )
+
+        inventory = module.build_inventory(
+            module.bind_repository(self.repo, GIT_EXECUTABLE)
+        )
+
+        check_ignore = [
+            (arguments, stdin_bytes)
+            for arguments, stdin_bytes in invocations
+            if "check-ignore" in arguments
+        ]
+        self.assertGreaterEqual(len(check_ignore), 2)
+        for arguments, stdin_bytes in check_ignore:
+            self.assertIn("--stdin", arguments)
+            self.assertIn("-z", arguments)
+            self.assertIsNotNone(stdin_bytes)
+            records = stdin_bytes.removesuffix(b"\0").split(b"\0")
+            self.assertLessEqual(len(records), 2)
+            self.assertTrue(all(record.startswith(b"./") for record in records))
+        self.assertFalse(
+            any(
+                arguments[:3] == ("ls-files", "--others", "--ignored")
+                for arguments, _stdin_bytes in invocations
+            )
+        )
+        entries = {entry["path"]: entry for entry in inventory["entries"]}
+        self.assertEqual("ignored", entries[".scratch/evidence.txt"]["gitClass"])
+        if os.name == "posix":
+            self.assertEqual(
+                "ignored", entries[".scratch/line\nbreak.txt"]["gitClass"]
+            )
+        self.assertEqual("ignored", entries[".scratch/more evidence.txt"]["gitClass"])
+
+        before_single_batch = len(check_ignore)
+        module.MAX_GIT_CHECK_IGNORE_PATHS = 100_000
+        single_batch_inventory = module.build_inventory(
+            module.bind_repository(self.repo, GIT_EXECUTABLE)
+        )
+        later_check_ignore = [
+            arguments
+            for arguments, _stdin_bytes in invocations
+            if "check-ignore" in arguments
+        ][before_single_batch:]
+        self.assertEqual(1, len(later_check_ignore))
+        self.assertEqual(
+            module.canonical_json(inventory),
+            module.canonical_json(single_batch_inventory),
+        )
+
+    def test_ignore_protocol_preserves_magic_wildcard_and_surrogateescape(self) -> None:
+        module = load_transfer_module()
+        raw_path = b"non-utf8-\x80.bin"
+        paths = [":(glob)literal.txt", "wild*card.txt", "line\nbreak.txt"]
+        if os.name == "posix":
+            paths.append(raw_path.decode(sys.getfilesystemencoding(), "surrogateescape"))
+        submitted: list[bytes] = []
+
+        def echo_ignored(_repository, *arguments, **kwargs):
+            self.assertEqual(
+                ("check-ignore", "--no-index", "--stdin", "-z"), arguments
+            )
+            payload = kwargs["stdin_bytes"]
+            submitted.extend(payload.removesuffix(b"\0").split(b"\0"))
+            return subprocess.CompletedProcess(arguments, 0, payload, b"")
+
+        module.run_git = echo_ignored
+        ignored = module.ignored_census_paths(object(), paths)
+
+        self.assertEqual(set(paths), ignored)
+        self.assertEqual([os.fsencode(f"./{path}") for path in paths], submitted)
+
+    def test_inventory_output_cap_is_atomic_and_control_json_cap_is_unchanged(self) -> None:
+        module = load_transfer_module()
+        value = {"payload": "x" * 64}
+        exact_cap = len(module.canonical_json(value)) + 1
+        exact_output = self.root / "exact-cap.json"
+        module.publish_canonical_json(
+            module.bind_output(exact_output, self.repo, force=False),
+            value,
+            exact_cap,
+            "inventory cap",
+            final_newline=True,
+        )
+        self.assertEqual(exact_cap, exact_output.stat().st_size)
+
+        oversized_output = self.root / "cap-plus-one.json"
+        with self.assertRaisesRegex(module.ContractError, "inventory cap"):
+            module.publish_canonical_json(
+                module.bind_output(oversized_output, self.repo, force=False),
+                value,
+                exact_cap - 1,
+                "inventory cap",
+                final_newline=True,
+            )
+        self.assertFalse(oversized_output.exists())
+
+        document = json.dumps(
+            {"payload": "x" * module.MAX_JSON_BYTES}, separators=(",", ":")
+        ).encode("utf-8")
+        with self.assertRaisesRegex(module.ContractError, "invalid selection"):
+            module.read_json_bytes(document, "selection")
+        self.assertEqual(
+            len(document) - len(b'{"payload":""}'),
+            len(
+                module.read_json_bytes(
+                    document, "inventory", module.MAX_INVENTORY_JSON_BYTES
+                )["payload"]
+            ),
+        )
+
+    def test_later_ignore_batch_failure_does_not_commit_inventory(self) -> None:
+        module = load_transfer_module()
+        original_run_git = module.run_git
+        check_ignore_calls = 0
+
+        def fail_second_batch(repository, *arguments, **kwargs):
+            nonlocal check_ignore_calls
+            if "check-ignore" in arguments:
+                check_ignore_calls += 1
+                if check_ignore_calls == 2:
+                    return subprocess.CompletedProcess(
+                        arguments, 2, b"", b"classification failed"
+                    )
+            return original_run_git(repository, *arguments, **kwargs)
+
+        module.run_git = fail_second_batch
+        module.MAX_GIT_CHECK_IGNORE_PATHS = 2
+        result = module.main(
+            [
+                "inventory",
+                "--repo",
+                str(self.repo),
+                "--git-executable",
+                str(GIT_EXECUTABLE),
+                "--output",
+                str(self.inventory_path),
+            ]
+        )
+
+        self.assertEqual(2, result)
+        self.assertEqual(2, check_ignore_calls)
+        self.assertFalse(self.inventory_path.exists())
+
     def test_explicit_git_executable_ignores_cwd_and_path_impostor(self) -> None:
         impostor = self.repo / "git.exe"
         sentinel = self.root / "impostor-ran.txt"
@@ -651,17 +999,84 @@ class RepoTransferTests(unittest.TestCase):
         finally:
             session.close(validate=False)
 
-    def test_nested_git_history_marker_blocks_inventory(self) -> None:
+    def test_nested_git_content_is_hostile_external_only_without_child_git(self) -> None:
         module = load_transfer_module()
         nested_git = self.repo / "vendor" / ".git"
         nested_git.mkdir(parents=True)
         (nested_git / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+        (self.repo / "vendor" / "source.txt").write_text(
+            "vendored source\n", encoding="utf-8"
+        )
+        repository = module.bind_repository(self.repo, GIT_EXECUTABLE)
+        original_run_git = module.run_git
+        calls: list[tuple[Path, tuple[str, ...], bytes | None]] = []
 
+        def recording_run_git(bound, *arguments, **kwargs):
+            result = original_run_git(bound, *arguments, **kwargs)
+            calls.append((bound.root, arguments, kwargs.get("stdin_bytes")))
+            return result
+
+        module.run_git = recording_run_git
+        inventory = module.build_inventory(repository)
+        entries = {entry["path"]: entry for entry in inventory["entries"]}
+
+        self.assertNotIn(".git/config", entries)
+        self.assertIn("vendor/.git/HEAD", entries)
+        self.assertTrue(entries["vendor/.git/HEAD"]["hostile"])
+        self.assertTrue(entries["vendor/.git/HEAD"]["metadataOnly"])
+        self.assertTrue(all(root == repository.root for root, _args, _input in calls))
+        self.assertTrue(
+            any(
+                stdin_bytes is not None
+                and b"./vendor/.git/HEAD\0" in stdin_bytes
+                for _root, arguments, stdin_bytes in calls
+                if "check-ignore" in arguments
+            )
+        )
+
+        self.write_selection(inventory)
+        selection = json.loads(self.selection.read_text(encoding="utf-8"))
+        external_row = {
+            "path": "vendor",
+            "disposition": "external",
+            "reason": "nested repository metadata",
+            "receipt": {
+                "artifact": "external:nested-repository",
+                "setSha256": covered_set_digest(inventory, "vendor"),
+            },
+        }
+        selection["items"].append(external_row)
+        rows = module.validate_selection(self.repo, inventory, selection)
+        self.assertEqual("external", next(row for row in rows if row["path"] == "vendor")["disposition"])
+
+        for disposition in ("include", "delete"):
+            invalid = json.loads(json.dumps(selection))
+            row = next(item for item in invalid["items"] if item["path"] == "vendor")
+            row.clear()
+            row.update(
+                path="vendor",
+                disposition=disposition,
+                reason="must remain external",
+            )
+            with self.subTest(disposition=disposition), self.assertRaisesRegex(
+                module.ContractError,
+                "reparse or hostile entries require external disposition",
+            ):
+                module.validate_selection(self.repo, inventory, invalid)
+
+        direct = json.loads(json.dumps(selection))
+        row = next(item for item in direct["items"] if item["path"] == "vendor")
+        row.update(
+            path="vendor/.git/HEAD",
+            receipt={
+                "artifact": "external:nested-repository-head",
+                "setSha256": covered_set_digest(inventory, "vendor/.git/HEAD"),
+            },
+        )
         with self.assertRaisesRegex(
-            module.ContractError,
-            r"^unsupported repository entry: vendor/\.git$",
+            module.ContractError, "selection path escapes repository"
         ):
-            list(module.walk_repository(self.repo))
+            module.validate_selection(self.repo, inventory, direct)
 
 
 class UnbornRepoTransferTests(unittest.TestCase):

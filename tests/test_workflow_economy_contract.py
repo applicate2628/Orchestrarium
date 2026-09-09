@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+import re
 import unittest
 
 
@@ -103,8 +104,14 @@ class TestWorkflowEconomyContract(unittest.TestCase):
             with self.subTest(heading=heading):
                 self.assertEqual(spine.count(heading), 1)
         self.assertNotIn("\nRoadmap:", spine)
-        self.assertIn("Source-only/maintainer-only, NOT installed: `shared/references/`", spine)
-        self.assertIn("these rules are self-sufficient", spine)
+        intro = spine.split("## Role index", 1)[0]
+        normalized_intro = " ".join(re.findall(r"[a-z0-9/]+", intro.casefold()))
+        self.assertIn("maintainer only", normalized_intro)
+        self.assertIn("shared/references/ is not installed", normalized_intro)
+        self.assertRegex(
+            normalized_intro,
+            r"\b(?:rules suffice|(?:these )?rules are self sufficient)\b",
+        )
 
     def test_canonical_rule_keeps_evidence_gates_and_minimizes_ceremony(self) -> None:
         spine = self._read(SPINE)

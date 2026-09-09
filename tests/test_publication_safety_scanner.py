@@ -238,6 +238,34 @@ def block_rows() -> dict[str, str]:
         # blocks; see the matching pass_rows() pin for the 9-char value that
         # stays clean. Assembled per MF6.
         "b41_token_centered_digit_floor_ten": _join("to", "ken", " = ", "abcd5efghi"),
+        "b42_callable_then_later_leak": _join(
+            "to", "ken", " = ", "FactoryV1", "(); ",
+            "pass", "word", " = ", "A1B2C3D4E5F6",
+        ),
+        "b43_public_key_token_identity": _join(
+            "publicKey", "To", "ken", "=", '"', "0011223344556677", '"',
+        ),
+        "b44_low_entropy_token": _join("to", "ken", "=", "'", "A" * 12, "'"),
+        "b45_low_entropy_access_token": _join(
+            "access", "To", "ken", "=", "'", "A" * 12, "'",
+        ),
+        "b46_tab_token": _join("to", "ken", "\t=\t", "'", "A" * 12, "'"),
+        "b47_near_name_token": _join(
+            "myPublicKey", "To", "ken", "=", "'", "A" * 12, "'",
+        ),
+        "b48_bearer": _join("Bea", "rer ", "abcdefghijklmnop"),
+        "b49_tab_bearer": _join("Bea", "rer\t", "abcdefghijklmnop"),
+        "b50_key_envelope": _join("BEGIN ", "PRIVATE ", "KEY"),
+        "b51_binary_machine_path": _join(
+            "D", ":", BS, "dev", BS, "synthetic", BS, "build.txt",
+        ),
+        "b52_nonidentifier_plus_call_suffix": _join(
+            "to", "ken", " = ", "A1B2C3D4E5F6", "+", "(", ")",
+        ),
+        "b53_callable_then_same_family_leak": _join(
+            "to", "ken", " = ", "FactoryV1", "(); ",
+            "to", "ken", " = ", "A1B2C3D4E5F6",
+        ),
     }
 
 
@@ -355,6 +383,12 @@ def pass_rows() -> dict[str, str]:
         # no underscore -- this row is the same member-access shape with the
         # underscore the admission fixture happened to omit.
         "p55_csharp_di_underscored_member_access": "apiKey = _configuration.ApiKey;",
+        "p56_digit_bearing_callable": _join(
+            "to", "ken", " = ", "_LedgerInvocationTokenV1", "(", "...", ")",
+        ),
+        "p57_digit_bearing_member_callable": _join(
+            "to", "ken", " = ", "FactoryV1", ".", "make", "(", ")",
+        ),
     }
 
 
@@ -472,6 +506,28 @@ class TestPublicationSafetyScanner(unittest.TestCase):
         for scanner in SCANNERS:
             with self.subTest(scanner=scanner.parent.parent.name):
                 self._assert_cached_pass_batch(scanner, pass_rows())
+
+    def test_digit_bearing_callable_passes_text_scan(self) -> None:
+        fixture = pass_rows()["p56_digit_bearing_callable"]
+        rc, out = self._run_cached_full(CANONICAL_SCANNER, fixture)
+        self.assertEqual(rc, 0, out)
+
+    def test_callable_does_not_hide_later_same_line_text_leak(self) -> None:
+        fixture = block_rows()["b53_callable_then_same_family_leak"]
+        proc = self._run_cached_process(CANONICAL_SCANNER, fixture)
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        self.assertIn("PS-FINDING-CONTENT", proc.stderr)
+
+    def test_digit_bearing_member_callable_passes_text_scan(self) -> None:
+        fixture = pass_rows()["p57_digit_bearing_member_callable"]
+        rc, out = self._run_cached_full(CANONICAL_SCANNER, fixture)
+        self.assertEqual(rc, 0, out)
+
+    def test_nonidentifier_value_with_call_suffix_blocks_text_scan(self) -> None:
+        fixture = block_rows()["b52_nonidentifier_plus_call_suffix"]
+        proc = self._run_cached_process(CANONICAL_SCANNER, fixture)
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        self.assertIn("PS-FINDING-CONTENT", proc.stderr)
 
     def test_clean_repo_exits_0(self) -> None:
         for scanner in SCANNERS:
@@ -743,6 +799,20 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
         )
         return proc.returncode, proc.stdout, proc.stderr
 
+    def _run_binary_payload(self, payload: bytes) -> tuple[int, str, str]:
+        with tempfile.TemporaryDirectory() as td:
+            repo = self._init_range_repo(Path(td))
+            (repo / "binary-fixture.bin").write_bytes(payload)
+            subprocess.run(
+                [_git(), "-C", str(repo), "add", "binary-fixture.bin"],
+                check=True,
+            )
+            subprocess.run(
+                [_git(), "-C", str(repo), "commit", "-q", "-m", "binary fixture"],
+                check=True,
+            )
+            return self._run_range(CANONICAL_SCANNER, repo, "origin", "claude")
+
     def test_range_mode_clean_scan_reports_remote_dst_tip_receipt(self) -> None:
         # The exact receipt shape check-git-push-gate.py's SCAN_CLEAN_RANGE_
         # REGEX matches: mode word "range", a non-empty examined count, and
@@ -968,6 +1038,98 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
             self.assertEqual(rc, 1, out + err)
             self.assertIn("PS-FINDING-CONTENT", err)
             self.assertNotIn(sentinel, out + err)
+
+    def test_range_mode_binary_public_key_identity_and_text_heuristics_are_clean(self) -> None:
+        public_key_token = block_rows()["b43_public_key_token_identity"]
+        payload = _join(
+            "\0", public_key_token, "\0", "private", "_key", "\0",
+            "secret", "_key", "\0", "$ explain",
+        ).encode("ascii")
+
+        rc, out, err = self._run_binary_payload(payload)
+
+        self.assertEqual(rc, 0, out + err)
+        self.assertIn("text=0, binary=1", out)
+        self.assertNotIn("PS-FINDING", out + err)
+
+    def test_range_mode_binary_digit_bearing_callable_is_clean(self) -> None:
+        fixture = pass_rows()["p56_digit_bearing_callable"]
+        payload = b"\0" + fixture.replace("(", "   (", 1).encode("ascii")
+
+        rc, out, err = self._run_binary_payload(payload)
+
+        self.assertEqual(rc, 0, out + err)
+        self.assertNotIn("PS-FINDING", out + err)
+
+    def test_range_mode_binary_callable_does_not_hide_later_same_line_leak(self) -> None:
+        fixture = block_rows()["b53_callable_then_same_family_leak"]
+
+        rc, out, err = self._run_binary_payload(b"\0" + fixture.encode("ascii"))
+
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("PS-FINDING-CONTENT", err)
+
+    def test_range_mode_binary_digit_bearing_member_callable_is_clean(self) -> None:
+        fixture = pass_rows()["p57_digit_bearing_member_callable"]
+
+        rc, out, err = self._run_binary_payload(b"\0" + fixture.encode("ascii"))
+
+        self.assertEqual(rc, 0, out + err)
+        self.assertNotIn("PS-FINDING", out + err)
+
+    def test_range_mode_binary_nonidentifier_value_with_call_suffix_blocks(self) -> None:
+        fixture = block_rows()["b52_nonidentifier_plus_call_suffix"]
+
+        rc, out, err = self._run_binary_payload(b"\0" + fixture.encode("ascii"))
+
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("PS-FINDING-CONTENT", err)
+
+    def test_range_mode_binary_strong_credentials_and_machine_paths_still_block(self) -> None:
+        cases = {
+            name: b"\0" + block_rows()[row].encode("ascii")
+            for name, row in {
+                "low-entropy-token": "b44_low_entropy_token",
+                "low-entropy-access-token": "b45_low_entropy_access_token",
+                "tab-token": "b46_tab_token",
+                "near-name-token": "b47_near_name_token",
+                "bearer": "b48_bearer",
+                "tab-bearer": "b49_tab_bearer",
+                "private-key-envelope": "b50_key_envelope",
+                "machine-path": "b51_binary_machine_path",
+            }.items()
+        }
+        for name, payload in cases.items():
+            with self.subTest(name=name):
+                rc, out, err = self._run_binary_payload(payload)
+                self.assertEqual(rc, 1, out + err)
+                self.assertIn("PS-FINDING-CONTENT", err)
+
+    def test_range_mode_binary_public_key_token_exclusion_is_per_match(self) -> None:
+        payload = _join(
+            "\0", block_rows()["b43_public_key_token_identity"], " ",
+            block_rows()["b45_low_entropy_access_token"],
+        ).encode("ascii")
+
+        rc, out, err = self._run_binary_payload(payload)
+
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("PS-FINDING-CONTENT", err)
+
+    def test_range_mode_text_public_key_token_still_uses_full_text_rules(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = self._init_range_repo(Path(td))
+            self._commit_file(
+                repo,
+                "metadata.txt",
+                block_rows()["b43_public_key_token_identity"],
+                message="text metadata fixture",
+            )
+
+            rc, out, err = self._run_range(CANONICAL_SCANNER, repo, "origin", "claude")
+
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("PS-FINDING-CONTENT", err)
 
     def test_range_mode_decoy_scanner_basename_has_no_exemption(self) -> None:
         content = CANONICAL_SCANNER.read_text(encoding="utf-8")
@@ -4151,6 +4313,15 @@ class TestThisTestFileIsGateSafe(unittest.TestCase):
             if hits:
                 offenders.append((n, hits, line.strip()[:80]))
         self.assertEqual(offenders, [], f"flaggable literals in test source: {offenders}")
+
+        scanner = _load_canonical_scanner("scanner_source_self_gate")
+        relative_path = Path(__file__).relative_to(REPO_ROOT).as_posix()
+        text_findings = scanner._content_hits(src, relative_path, find_machine_paths)
+        binary_findings = scanner._binary_content_hits(
+            src.encode("utf-8"), relative_path, find_machine_paths
+        )
+        self.assertEqual(text_findings, [], f"content findings in test source: {text_findings}")
+        self.assertEqual(binary_findings, [], f"binary findings in test source: {binary_findings}")
 
 
 if __name__ == "__main__":

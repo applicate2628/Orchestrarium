@@ -1284,14 +1284,10 @@ def test_luna_policy_profiles_tasks_and_exclusive_corridors(tmp_path: Path) -> N
         if luna_profiles.intersection(role["allowedProfiles"])
     }
     assert luna_consumers == {"mechanical-scout", "mechanical-worker"}
-    assert policy["roles"]["explorer"] == {
-        "defaultProfile": "balanced-high",
-        "allowedProfiles": [
-            "balanced-medium",
-            "balanced-high",
-            "frontier-high",
-        ],
-    }
+    assert policy["roles"]["explorer"]["defaultProfile"] == "balanced-high"
+    assert not luna_profiles.intersection(
+        policy["roles"]["explorer"]["allowedProfiles"]
+    )
     assert "mechanical-scout" not in policy["taskRoleEligibility"]["review"]
     assert "mechanical-worker" not in policy["taskRoleEligibility"]["engineering"]
 

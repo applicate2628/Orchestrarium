@@ -13,9 +13,10 @@ description: "Geometry kernels: transforms, predicates, meshes, topology, tolera
 
 ## Input contract
 
-- Require accepted research, design, relevant computational or algorithmic constraints, and the phase plan.
+- Take the approved execution scope, acceptance criteria and oracle, named regression guard, applicable domain constraints, and only the artifacts required by the selected workflow. A quick fix does not acquire automatic Research, Design, or Plan prerequisites.
+- Refuse implementation when an artifact or risk-owner constraint required by the selected workflow is missing, stale, or outside its accepted scope; do not manufacture or waive it.
 - Take only the geometry kernels, transforms, predicates, meshes, indexes, and tolerances needed for that phase.
-- Treat broad rendering changes, scientific-model redesign, and unrelated data-pipeline changes as out of scope unless the plan explicitly includes them.
+- Treat broad rendering changes, scientific-model redesign, and unrelated data-pipeline changes as out of scope unless the accepted owning contract authorizes them; inclusion in a Plan schedules accepted work but grants no authority.
 
 ## Return exactly one artifact
 

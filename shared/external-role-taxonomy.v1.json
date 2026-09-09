@@ -23,6 +23,7 @@
     "data-engineer": "external-worker",
     "platform-engineer": "external-worker",
     "toolchain-engineer": "external-worker",
+    "scientific-software-engineer": "external-worker",
     "geometry-engineer": "external-worker",
     "graphics-engineer": "external-worker",
     "visualization-engineer": "external-worker",

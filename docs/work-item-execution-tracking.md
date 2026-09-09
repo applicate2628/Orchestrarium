@@ -167,6 +167,20 @@ The writer holds the existing ledger lock, builds and validates a temporary cand
 
 Invalidation removes every closure edge contributed by the target event. It can therefore reopen a `REVISE` obligation or a launch. Append an ordinary independently authorized replacement terminal or closure event through the normal writer; the invalidation itself never satisfies the reopened obligation.
 
+## Dispose one invalid-current suffix row
+
+Use this only after the user admits one exact current-schema-invalid suffix row. This mode is separate from `recover-invalid-closure`: an individually valid relation-invalid closer continues to use that existing command, while `dispose-invalid-current` preserves one invalid target's exact bytes and makes no closure, gate, launch, terminal, `PASS`, or evidence authority claim.
+
+Bind the target through the supplied Version 2 ledger manifest's exact sealed prefix. Its physical raw-line ordinal must be strictly greater than the manifest's `prefixLineCount`; the ordinal, `runId`, and SHA-256 must identify one unique suffix row. Hash the exact physical raw line including its terminal `LF`; do not parse and reserialize it.
+
+```powershell
+python -B scripts/agent-run-ledger.py --work-item work-items/active/<slug> dispose-invalid-current --run-id <new-disposition-run-id> --target-run-id <invalid-run-id> --target-raw-line-ordinal <positive-physical-line-ordinal> --target-event-sha256 <64-lowercase-hex> --ledger-manifest <ledger-manifest-v2.json> --evidence "manual-check:<invalid-run-id> <64-lowercase-hex-raw-line-sha256> <reason>"
+```
+
+The `manual-check` evidence must contain the exact target run ID and exact raw-line digest as standalone whitespace-delimited tokens. Forms such as `target=<id>` or `sha256=<digest>` do not satisfy that binding. The target must remain invalid under the unchanged current event validator. An exact replay is a no-op; a reused disposition `runId`, conflicting disposition, identity mismatch, target inside the sealed prefix, or target that is now valid fails closed. `RESULT: PASS dispose-invalid-current` proves only the append transaction and exact readback and names the target ordinal, run ID, and raw-line digest; it does not claim `fsync`, crash durability, compatibility activation, or suppression.
+
+Appending the disposition does not activate compatibility. Before an active compatibility receipt exists, the raw target errors remain. Only the active receipt-gated effective-view reader may suppress errors for that exact target, keep all authority axes false, and expose the ordered `disposition_notices` through the public read model. Every other row remains under unchanged validation.
+
 ## Migrate one legacy obligation
 
 This is the sole operator procedure for exactly two closed normalizations of a

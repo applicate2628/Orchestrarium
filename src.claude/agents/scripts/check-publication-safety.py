@@ -133,30 +133,41 @@ _SCANNER_EXEMPT_PATHS = frozenset({
     "src.codex/skills/lead/scripts/check-publication-safety.py",
     "src.claude/agents/scripts/check-publication-safety.py",
 })
-_SIMPLE_PATTERNS = (
-    re.compile(r"AKIA[0-9A-Z]{16}"),
-    re.compile(r"ghp_[A-Za-z0-9]{36}"),
-    re.compile(r"sk-[A-Za-z0-9]{20,}"),
-    re.compile(r"sk-ant-[A-Za-z0-9_-]{20,}"),
-    re.compile(r"ANTHROPIC_[A-Z_]*(?:KEY|TOKEN)[^A-Za-z0-9_]?\s*[:=]"),
-    re.compile(r"Bearer\s+[A-Za-z0-9._~+/=-]+"),
-    re.compile(r"BEGIN RSA PRIVATE KEY"),
-    re.compile(r"BEGIN OPENSSH PRIVATE KEY"),
-    re.compile(r"BEGIN PRIVATE KEY"),
-    re.compile(r"private_key"),
-    re.compile(r"secret_key"),
-    re.compile(r"/private/var/folders/"),
-    re.compile(r"/var/folders/"),
-    re.compile(r"^Human:\s*"),
-    re.compile(r"^Assistant:\s*"),
-    re.compile(r"^\$\s+"),
-    re.compile(r"^>>>\s+"),
-    re.compile(r"\[[0-9]{2}:[0-9]{2}:[0-9]{2}\]"),
+_SIMPLE_RULES = (
+    (True, re.compile(r"AKIA[0-9A-Z]{16}")),
+    (True, re.compile(r"ghp_[A-Za-z0-9]{36}")),
+    (True, re.compile(r"sk-[A-Za-z0-9]{20,}")),
+    (True, re.compile(r"sk-ant-[A-Za-z0-9_-]{20,}")),
+    (True, re.compile(r"ANTHROPIC_[A-Z_]*(?:KEY|TOKEN)[^A-Za-z0-9_]?\s*[:=]")),
+    (True, re.compile(r"Bearer\s+[A-Za-z0-9._~+/=-]+")),
+    (True, re.compile(r"BEGIN RSA PRIVATE KEY")),
+    (True, re.compile(r"BEGIN OPENSSH PRIVATE KEY")),
+    (True, re.compile(r"BEGIN PRIVATE KEY")),
+    (False, re.compile(r"private_key")),
+    (False, re.compile(r"secret_key")),
+    (True, re.compile(r"/private/var/folders/")),
+    (True, re.compile(r"/var/folders/")),
+    (False, re.compile(r"^Human:\s*")),
+    (False, re.compile(r"^Assistant:\s*")),
+    (False, re.compile(r"^\$\s+")),
+    (False, re.compile(r"^>>>\s+")),
+    (False, re.compile(r"\[[0-9]{2}:[0-9]{2}:[0-9]{2}\]")),
 )
+_SIMPLE_PATTERNS = tuple(pattern for _binary_rule, pattern in _SIMPLE_RULES)
+_BINARY_SIMPLE_PATTERNS = tuple(
+    (index, pattern)
+    for index, (binary_rule, pattern) in enumerate(_SIMPLE_RULES, 1)
+    if binary_rule
+)
+_BINARY_ASCII_RUN = re.compile(rb"[\x09\x20-\x7e]+")
+_IDENTIFIER_PREFIX = re.compile(r"[A-Za-z_][A-Za-z0-9_]*$")
 _VALUE = r"[A-Za-z0-9_./+=-]"
 _DIGIT_SHAPE = rf"(?:{_VALUE}{{5,}}[0-9]{_VALUE}*|{_VALUE}*[0-9]{_VALUE}{{5,}})"
 _QUOTED = rf"""["'`!@#$%^&*?|](?:{_VALUE}{{12,}}|{_DIGIT_SHAPE})["'`!@#$%^&*?|]"""
 _BARE = rf"(?:[A-Za-z0-9_+/=-]{{5,}}[0-9][A-Za-z0-9_+/=-]*|[A-Za-z0-9_+/=-]*[0-9][A-Za-z0-9_+/=-]{{5,}})"
+_CALLABLE_RHS = re.compile(
+    r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*\s*\("
+)
 _KEYWORDS = (
     ("password", r"password", "Password", "PASSWORD"),
     ("secret", r"secret", "Secret", "SECRET"),
@@ -169,14 +180,14 @@ _VALUE_RULES = tuple(
         re.compile(
             rf"(?:(?<![A-Za-z])(?i:{keyword})|(?<=[a-z]){title}|"
             rf"(?<=[A-Z]){title}|(?<=[A-Za-z]){upper})"
-            rf"\s*[:=]\s*(?:{_QUOTED}|{_BARE})",
+            rf"\s*[:=]\s*(?P<rhs_value>{_QUOTED}|{_BARE})",
         ),
     )
     for family, keyword, title, upper in _KEYWORDS
 )
 _VALUE_PATTERNS = tuple(pattern for _family, pattern in _VALUE_RULES)
 _SCANNER_REGEX_CATALOG_LINE = re.compile(
-    r"""re\.compile\([rubfRUBF]*(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')\),?"""
+    r"""(?P<binary_rule>\((?:True|False),\s*)?re\.compile\([rubfRUBF]*(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')\)(?(binary_rule)\)),?"""
 )
 
 _MAX_COMMITS = 10_000
@@ -1066,7 +1077,15 @@ def _content_hits(
                 break
         else:
             for family, pattern in _VALUE_RULES:
-                if pattern.search(line):
+                match = next(
+                    (
+                        candidate
+                        for candidate in pattern.finditer(line)
+                        if not _is_callable_rhs(line, candidate)
+                    ),
+                    None,
+                )
+                if match is not None:
                     findings.append(Finding(
                         "PS-FINDING-COMMIT-MESSAGE" if subject_kind == "commit-message" else "PS-FINDING-CONTENT",
                         subject_kind,
@@ -1092,6 +1111,80 @@ def _content_hits(
 
 def _is_binary(raw: bytes) -> bool:
     return b"\0" in raw
+
+
+def _is_callable_rhs(line: str, match: re.Match[str]) -> bool:
+    return _CALLABLE_RHS.match(line, match.start("rhs_value")) is not None
+
+
+def _is_public_key_token_match(line: str, family: str, match: re.Match[str]) -> bool:
+    if family != "token":
+        return False
+    prefix = _IDENTIFIER_PREFIX.search(line[:match.start()])
+    identifier = (prefix.group(0) if prefix is not None else "") + line[
+        match.start():match.start() + len("Token")
+    ]
+    return identifier == "publicKeyToken"
+
+
+def _binary_content_hits(
+    raw: bytes,
+    path: str,
+    find_machine_paths,
+    *,
+    max_findings: int | None = None,
+) -> list[Finding]:
+    findings: list[Finding] = []
+    locator = _safe_locator(path, "history-blob")
+    for line_number, raw_line in enumerate(raw.splitlines(), 1):
+        for raw_run in _BINARY_ASCII_RUN.findall(raw_line):
+            if max_findings is not None and len(findings) >= max_findings:
+                return findings
+            line = raw_run.decode("ascii")
+            for index, pattern in _BINARY_SIMPLE_PATTERNS:
+                if pattern.search(line):
+                    findings.append(Finding(
+                        "PS-FINDING-CONTENT",
+                        "history-blob",
+                        locator,
+                        line_number,
+                        f"simple-{index}",
+                    ))
+                    break
+            else:
+                value_finding = None
+                for family, pattern in _VALUE_RULES:
+                    match = next(
+                        (
+                            candidate
+                            for candidate in pattern.finditer(line)
+                            if not _is_callable_rhs(line, candidate)
+                            and not _is_public_key_token_match(line, family, candidate)
+                        ),
+                        None,
+                    )
+                    if match is not None:
+                        value_finding = Finding(
+                            "PS-FINDING-CONTENT",
+                            "history-blob",
+                            locator,
+                            line_number,
+                            f"value-{family}",
+                        )
+                        break
+                if value_finding is not None:
+                    findings.append(value_finding)
+            if max_findings is not None and len(findings) >= max_findings:
+                return findings
+            if find_machine_paths(line):
+                findings.append(Finding(
+                    "PS-FINDING-CONTENT",
+                    "history-blob",
+                    locator,
+                    line_number,
+                    "machine-path",
+                ))
+    return findings
 
 
 def _tracked_files() -> tuple[list[str], dict[str, bytes]]:
@@ -2773,13 +2866,22 @@ async def _acquire_history(
         line_refusal = _line_limit_refusal(raw)
         if line_refusal is not None:
             return line_refusal
-        _append_findings(findings, _content_hits(
-            raw.decode("utf-8", "replace"),
-            decoded_path,
-            find_machine_paths,
-            subject_kind="history-blob",
-            max_findings=max(0, _MAX_FINDINGS - len(findings)),
-        ))
+        if blob_oid in binary_blobs:
+            content_findings = _binary_content_hits(
+                raw,
+                decoded_path,
+                find_machine_paths,
+                max_findings=max(0, _MAX_FINDINGS - len(findings)),
+            )
+        else:
+            content_findings = _content_hits(
+                raw.decode("utf-8", "replace"),
+                decoded_path,
+                find_machine_paths,
+                subject_kind="history-blob",
+                max_findings=max(0, _MAX_FINDINGS - len(findings)),
+            )
+        _append_findings(findings, content_findings)
 
     canonical_subjects = tuple(sorted(subjects))
     canonical_paths = tuple(sorted((blob, path) for path, blob in blob_paths))

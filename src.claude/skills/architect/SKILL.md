@@ -12,19 +12,20 @@ This skill runs two ways:
 - **Inline** (`Skill` tool, `/architect`): loads this contract into the CURRENT conversation, preserving accumulated context. It runs in-session — it does NOT claim isolation or independence from the conversation that invoked it. Use it for the seam and blast-radius decisions the quick-fix/fast-lane flow already makes inline today, now with the Change-Surface Contract and claims discipline instead of an ad hoc call. Model-initiated inline adoption is permitted for this bounded decision only when announced in-chat before executing and scoped to that one decision (CLAUDE.md curated inline role-skills exception).
 - **Dispatched** (`Agent` tool, `subagent_type: architect`): the fresh-context delegate wrapper at `.claude/agents/architect.md` loads this same skill inside an isolated subagent context, for a non-trivial design.
 
-Adopting this role inline approves nothing — the `architecture-reviewer` independent gate remains a separate dispatch regardless of invocation mode.
+Adopting this role inline approves nothing — when the architecture-reviewer gate is triggered, it remains a separate dispatch regardless of invocation mode.
 
 ## Core stance
 
-- Work only from accepted research output.
+- Work from accepted research output or accepted inputs exposing one bounded unresolved structural choice at the pre-`Implement` gate.
 - Turn facts into design decisions, tradeoffs, and boundaries.
 - Keep design explicit so implementation and review do not redefine architecture later.
 - Design for local change by preferring stable contracts, clear dependency direction, and explicit extension seams.
 
 ## Input contract
 
-- Require an accepted research memo as the source of truth.
+- Require an accepted research memo for research-backed design. For an early structural gate, accepted inputs and the exact unresolved structural choice are sufficient; do not manufacture a Research stage.
 - Take only the requirements, constraints, and repo context needed for the design decision.
+- Domain-only model, mathematics, or units uncertainty belongs to the existing domain owner unless it exposes a structural choice.
 - Challenge gaps in the research artifact instead of filling them with speculation.
 - Spot-check that the accepted research memo's load-bearing `file:line` citations still match the current tree before designing. A moved or materially changed citation is `REVISE`-to-analyst, not permission to redo the research silently.
 - Make the intended change surface, approved extension seams, and protected surfaces explicit before handing work to the planner.
@@ -42,7 +43,8 @@ If the trigger does not apply, record the evidence that the boundary remains ins
 
 ## Return exactly one artifact
 
-- Return one design package containing the chosen approach, one to three realistic alternatives with tradeoffs, boundaries of change, approved extension seams, dependency direction, stable internal and external contracts, components and interactions, data model changes, failure modes paired with observable discriminators, observability expectations, security-by-design requirements, and test strategy.
+- A bounded early decision package contains: decision, owner, seam, protected surface, any material alternative, and falsifying probe. State `material alternative: none` when none exists.
+- Otherwise return one design package containing the chosen approach, one to three realistic alternatives with tradeoffs, boundaries of change, approved extension seams, dependency direction, stable internal and external contracts, components and interactions, data model changes, failure modes paired with observable discriminators, observability expectations, security-by-design requirements, and test strategy; use the full design package and Design Panel or review loop only when their existing complexity triggers apply.
 - Include a required named **Change-Surface Contract** sub-field — `{ intended change surface, approved extension seam(s), protected / must-not-touch surfaces, declared blast radius }` — as a named field (not prose). You OWN this seam / blast-radius decision; the planner and implementers CONSUME it and may flag a conflict (`REVISE`-to-architect) but MAY NOT redefine it.
 - Include a numbered **claims section**: falsifiable guarantees this design makes, each claim a fixed three-field shape — `{ guarantee, single-owner, enforcement-probe }` (what is guaranteed, the single owner that holds it, the falsifying probe — a `file:line`, command, test id, or gate). Example: "1. `{ guarantee: Module A is not modified — all changes attach at seam S; single-owner: seam S; enforcement-probe: grep shows no diff in module A }`. 2. `{ guarantee: Interface I remains stable; single-owner: interface I contract owner; enforcement-probe: compatibility test for every existing consumer passes }`. 3. `{ guarantee: No new shared dependencies are introduced; single-owner: dependency manifest; enforcement-probe: dependency-graph diff contains no added edge }`." This list is the primary input to `architecture-reviewer`, which maps each claim 1:1 to a review finding.
 - For every pipeline touching shared mutable state (for example scroll, geometry, or cache), the Change-Surface Contract MUST name exactly one writer-owner and one downstream-observable `settled/committed` event. Missing either is `REVISE` at design input.
@@ -52,8 +54,8 @@ If the trigger does not apply, record the evidence that the boundary remains ins
 
 ## Gate
 
-- The design is traceable to accepted research facts and constraints.
-- Alternatives, interfaces, extension seams, dependency direction, expected blast radius, failure modes, observability, and test strategy are explicit.
+- The design is traceable to accepted research facts and constraints, or to the accepted inputs and unresolved choice that triggered the bounded early route.
+- For a bounded early package, the decision, owner, seam, protected surface, material-alternative disposition, and falsifying probe are explicit. For a full package, alternatives, interfaces, extension seams, dependency direction, expected blast radius, failure modes, observability, and test strategy are explicit.
 - Contract and persisted-state migration impact is explicit, and every failure mode has an observable discriminator.
 - Every cross-cutting / long-lived decision in the claims section carries a `work-items/decisions/` id (you author it as `status: proposed`); a local single-work-item decision stays inline in `design.md`.
 - No implementation code is included.

@@ -64,10 +64,11 @@ Include gate assessments in the research memo under a "Research admission gates"
 
 When scope investigation reveals issues outside the admitted scope:
 
-1. File the issue in `work-items/bugs/` using the bug registry format, with `context: adjacent-finding` and `status: open`
-2. Mention it in the current artifact under an "Adjacent findings" section.
-3. Do NOT include it in the current research or design — scope expansion is the orchestrator's decision.
-4. If the adjacent issue blocks the current task, return `BLOCKED:prerequisite` instead of working around it.
+1. Include a proposed registry record in-band in the returned artifact for the root or lifecycle owner, using `work-items/bugs/` and the bug registry format, with `context: adjacent-finding` and `status: open`.
+2. Write the proposed registry record directly only when the dispatcher explicitly grants registry-write authority and the sandbox permits that path. A direct registry write is a narrow canonical-artifact exception and does not otherwise broaden this role's write posture.
+3. Mention it in the current artifact under an "Adjacent findings" section.
+4. Do NOT include it in the current research or design — scope expansion is the orchestrator's decision.
+5. If the adjacent issue blocks the current task, return `BLOCKED:prerequisite` instead of working around it.
 
 ## Non-goals
 

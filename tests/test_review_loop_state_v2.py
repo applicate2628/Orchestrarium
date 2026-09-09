@@ -225,7 +225,17 @@ def _begin(repo: Path, operation_id: str = "begin-1") -> tuple[Path, dict]:
     return state, receipt
 
 
-def _record(repo: Path, state: Path, receipt: dict, lane: str, verdict: str) -> subprocess.CompletedProcess[str]:
+def _record_round(
+    repo: Path,
+    state: Path,
+    receipt: dict,
+    round_number: int,
+    lane: str,
+    verdict: str,
+    *,
+    findings: list | None = None,
+    reconciliation: list | None = None,
+) -> subprocess.CompletedProcess[str]:
     payload = {
         "verdict": verdict,
         "rationale": "specific evidence-backed result",
@@ -234,9 +244,12 @@ def _record(repo: Path, state: Path, receipt: dict, lane: str, verdict: str) -> 
         "verification_adequate": "yes",
     }
     if lane == "scout":
-        payload = {"findings": [], "reconciliation": []}
+        payload = {
+            "findings": [] if findings is None else findings,
+            "reconciliation": [] if reconciliation is None else reconciliation,
+        }
     result_file = _text(
-        repo / ".scratch" / f"{lane}.json",
+        repo / ".scratch" / f"round-{round_number}-{lane}.json",
         json.dumps(payload),
     )
     attempt = receipt["attempts"][lane]
@@ -244,13 +257,77 @@ def _record(repo: Path, state: Path, receipt: dict, lane: str, verdict: str) -> 
         repo,
         "record-result",
         "--state", state,
-        "--operation-id", f"result-{lane}-{verdict.lower()}",
-        "--round", 1,
+        "--operation-id", f"result-r{round_number}-{lane}-{verdict.lower()}",
+        "--round", round_number,
         "--lane", lane,
         "--attempt-id", attempt,
         "--artifact-revision", receipt["artifact_revision"],
         "--result-file", result_file,
     )
+
+
+def _record(
+    repo: Path,
+    state: Path,
+    receipt: dict,
+    lane: str,
+    verdict: str,
+) -> subprocess.CompletedProcess[str]:
+    return _record_round(repo, state, receipt, 1, lane, verdict)
+
+
+def _complete_initial_revise(
+    repo: Path,
+    state: Path,
+    receipt: dict,
+    *,
+    scout_findings: list | None = None,
+    scout_reconciliation: list | None = None,
+) -> None:
+    assert _record_round(repo, state, receipt, 1, "surgical", "REVISE").returncode == 0
+    assert _record_round(repo, state, receipt, 1, "deep", "PASS").returncode == 0
+    assert _record_round(
+        repo,
+        state,
+        receipt,
+        1,
+        "scout",
+        "PASS",
+        findings=scout_findings,
+        reconciliation=scout_reconciliation,
+    ).returncode == 0
+    completed = _run(
+        repo,
+        "complete-round",
+        "--state", state,
+        "--operation-id", "complete-1",
+        "--round", 1,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+
+def _next_round_arguments(
+    repo: Path,
+    state: Path,
+    operation_id: str,
+    *,
+    affected_lanes: tuple[str, ...] = (),
+    full_review: bool = False,
+) -> list[object]:
+    artifact = _text(repo / f"{operation_id}.md", f"{operation_id} artifact\n")
+    diff = _text(repo / ".scratch" / f"{operation_id}-diff.txt", f"{operation_id} diff\n")
+    args: list[object] = [
+        "next-round",
+        "--state", state,
+        "--operation-id", operation_id,
+        "--diff-file", diff,
+        "--artifact-file", artifact,
+    ]
+    if full_review:
+        args.append("--full-review")
+    for lane in affected_lanes:
+        args.extend(("--affected-lane", lane))
+    return args
 
 
 def test_begin_persists_and_reads_back_before_receipt(tmp_path: Path) -> None:
@@ -586,6 +663,303 @@ def test_next_round_accepts_new_frozen_revision_after_revise(tmp_path: Path) -> 
     assert second["artifact_revision"] != receipt["artifact_revision"]
     persisted = json.loads(state.read_text(encoding="utf-8"))
     assert persisted["rounds"][0]["artifact"]["revision"] == receipt["artifact_revision"]
+
+
+def test_full_next_round_replay_preserves_legacy_shape_and_fingerprint(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path)
+    state, first = _begin(repo)
+    _complete_initial_revise(repo, state, first)
+    args = _next_round_arguments(repo, state, "round-2-full")
+
+    created = _run(repo, *args)
+
+    assert created.returncode == 0, created.stderr
+    receipt = json.loads(created.stdout)
+    assert set(receipt["attempts"]) == {"surgical", "deep", "scout"}
+    assert "coverage" not in receipt
+    persisted = json.loads(state.read_text(encoding="utf-8"))
+    assert "coverage" not in persisted["rounds"][1]
+    assert all(
+        persisted["rounds"][1][lane]["state"] == "admitted"
+        for lane in ("surgical", "deep", "scout")
+    )
+
+    replay = _run(repo, *args, "--full-review")
+
+    assert replay.returncode == 0, replay.stderr
+    assert json.loads(replay.stdout) == receipt
+
+
+def test_delta_round_retains_passed_lanes_and_closes_from_effective_results(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path)
+    state, first = _begin(repo)
+    _complete_initial_revise(repo, state, first)
+    created = _run(
+        repo,
+        *_next_round_arguments(
+            repo,
+            state,
+            "round-2-delta",
+            affected_lanes=("surgical",),
+        ),
+    )
+
+    assert created.returncode == 0, created.stderr
+    second = json.loads(created.stdout)
+    assert set(second["attempts"]) == {"surgical"}
+    persisted = json.loads(state.read_text(encoding="utf-8"))
+    round_two = persisted["rounds"][1]
+    assert "coverage" not in persisted["rounds"][0]
+    expected_coverage = {
+        "mode": "delta",
+        "affected_lanes": ["surgical"],
+        "source_round": 1,
+        "source_revision": first["artifact_revision"],
+    }
+    assert second["coverage"] == expected_coverage
+    assert round_two["coverage"] == expected_coverage
+    for lane in ("deep", "scout"):
+        assert round_two[lane] == {
+            "state": "retained",
+            "applies_to_revision": second["artifact_revision"],
+            "retained_from": {
+                "round": 1,
+                "artifact_revision": first["artifact_revision"],
+            },
+        }
+
+    before = state.read_bytes()
+    retained_attempt = _run(
+        repo,
+        "mark-running",
+        "--state", state,
+        "--operation-id", "run-retained-deep",
+        "--round", 2,
+        "--lane", "deep",
+        "--attempt-id", first["attempts"]["deep"],
+    )
+    assert retained_attempt.returncode != 0
+    assert "RLSTATE_ATTEMPT_MISMATCH" in retained_attempt.stderr
+    assert state.read_bytes() == before
+
+    assert _record_round(repo, state, second, 2, "surgical", "PASS").returncode == 0
+    completed = _run(
+        repo,
+        "complete-round",
+        "--state", state,
+        "--operation-id", "complete-2",
+        "--round", 2,
+    )
+    assert completed.returncode == 0, completed.stderr
+    closed = _run(
+        repo,
+        "close",
+        "--state", state,
+        "--operation-id", "close-delta",
+        "--outcome", "converged",
+    )
+    assert closed.returncode == 0, closed.stderr
+
+
+def test_delta_round_rejects_retaining_revise_or_unreconciled_scout(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path)
+    state, first = _begin(repo)
+    _complete_initial_revise(
+        repo,
+        state,
+        first,
+        scout_findings=[{"id": "finding-1"}],
+        scout_reconciliation=[],
+    )
+    before = state.read_bytes()
+
+    retained_revise = _run(
+        repo,
+        *_next_round_arguments(
+            repo,
+            state,
+            "round-2-retain-revise",
+            affected_lanes=("deep",),
+        ),
+    )
+    retained_scout = _run(
+        repo,
+        *_next_round_arguments(
+            repo,
+            state,
+            "round-2-retain-scout",
+            affected_lanes=("surgical",),
+        ),
+    )
+
+    assert retained_revise.returncode != 0
+    assert "RLSTATE_INVALID" in retained_revise.stderr
+    assert retained_scout.returncode != 0
+    assert "RLSTATE_INVALID" in retained_scout.stderr
+    assert state.read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    "affected_lanes",
+    (
+        ("surgical", "deep", "scout"),
+        ("surgical", "surgical"),
+    ),
+)
+def test_delta_round_requires_unique_nonempty_strict_subset(
+    tmp_path: Path,
+    affected_lanes: tuple[str, ...],
+) -> None:
+    repo = _repo(tmp_path)
+    state, first = _begin(repo)
+    _complete_initial_revise(repo, state, first)
+    before = state.read_bytes()
+
+    result = _run(
+        repo,
+        *_next_round_arguments(
+            repo,
+            state,
+            "round-2-invalid-coverage",
+            affected_lanes=affected_lanes,
+        ),
+    )
+
+    assert result.returncode != 0
+    assert "RLSTATE_INVALID" in result.stderr
+    assert state.read_bytes() == before
+
+
+def test_delta_coverage_validation_rejects_copied_or_mismatched_retention(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path)
+    state, first = _begin(repo)
+    _complete_initial_revise(repo, state, first)
+    created = _run(
+        repo,
+        *_next_round_arguments(
+            repo,
+            state,
+            "round-2-valid-for-validation",
+            affected_lanes=("surgical",),
+        ),
+    )
+    assert created.returncode == 0, created.stderr
+    valid = json.loads(state.read_text(encoding="utf-8"))
+    module = _engine_module()
+    assert module.validate_v2(valid) == []
+
+    mutations = (
+        ("coverage: expected object", lambda rnd: rnd.__setitem__("coverage", None)),
+        ("source_revision", lambda rnd: rnd["coverage"].__setitem__("source_revision", "sha256:" + "0" * 64)),
+        ("retained_from", lambda rnd: rnd["deep"]["retained_from"].__setitem__("round", 0)),
+        ("applies_to_revision", lambda rnd: rnd["deep"].__setitem__("applies_to_revision", "sha256:" + "0" * 64)),
+        ("unexpected field", lambda rnd: rnd["deep"].__setitem__("verdict", "PASS")),
+    )
+    for expected, mutate in mutations:
+        candidate = json.loads(json.dumps(valid))
+        mutate(candidate["rounds"][1])
+        assert any(expected in error for error in module.validate_v2(candidate))
+
+
+@pytest.mark.parametrize(
+    ("target", "value", "expected"),
+    (
+        ("lane_failures", None, "lane_failures: expected list"),
+        ("coverage_round", True, "coverage.source_round"),
+        ("coverage_round", 1.0, "coverage.source_round"),
+        ("retained_round", True, "deep.retained_from"),
+        ("retained_round", 1.0, "deep.retained_from"),
+    ),
+    ids=("null-failures", "coverage-bool", "coverage-float", "retained-bool", "retained-float"),
+)
+def test_delta_validation_rejects_null_failures_and_round_lookalikes(
+    tmp_path: Path,
+    target: str,
+    value: object,
+    expected: str,
+) -> None:
+    repo = _repo(tmp_path)
+    state, first = _begin(repo)
+    _complete_initial_revise(repo, state, first)
+    created = _run(
+        repo,
+        *_next_round_arguments(
+            repo,
+            state,
+            "round-2-malformed-validation",
+            affected_lanes=("surgical",),
+        ),
+    )
+    assert created.returncode == 0, created.stderr
+    candidate = json.loads(state.read_text(encoding="utf-8"))
+    round_two = candidate["rounds"][1]
+    if target == "lane_failures":
+        round_two["lane_failures"] = value
+    elif target == "coverage_round":
+        round_two["coverage"]["source_round"] = value
+    else:
+        round_two["deep"]["retained_from"]["round"] = value
+
+    errors = _engine_module().validate_v2(candidate)
+
+    assert any(expected in error for error in errors)
+
+
+def test_delta_round_keeps_three_round_cap(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    state, first = _begin(repo)
+    _complete_initial_revise(repo, state, first)
+    previous = first
+    for round_number in (2, 3):
+        created = _run(
+            repo,
+            *_next_round_arguments(
+                repo,
+                state,
+                f"round-{round_number}-delta",
+                affected_lanes=("surgical",),
+            ),
+        )
+        assert created.returncode == 0, created.stderr
+        previous = json.loads(created.stdout)
+        assert _record_round(
+            repo,
+            state,
+            previous,
+            round_number,
+            "surgical",
+            "REVISE",
+        ).returncode == 0
+        completed = _run(
+            repo,
+            "complete-round",
+            "--state", state,
+            "--operation-id", f"complete-{round_number}",
+            "--round", round_number,
+        )
+        assert completed.returncode == 0, completed.stderr
+
+    before = state.read_bytes()
+    fourth = _run(
+        repo,
+        *_next_round_arguments(
+            repo,
+            state,
+            "round-4-delta",
+            affected_lanes=("surgical",),
+        ),
+    )
+    assert fourth.returncode != 0
+    assert "round cap exceeded" in fourth.stderr
+    assert state.read_bytes() == before
 
 
 def test_v1_read_compat_and_explicit_migration_required(tmp_path: Path) -> None:

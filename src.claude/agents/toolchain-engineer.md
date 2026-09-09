@@ -13,9 +13,10 @@ description: "Toolchain engineer: implement builds and packaging."
 
 ## Input contract
 
-- Require accepted research, design, applicable specialist constraints, and plan artifacts.
+- Take the approved execution scope, acceptance criteria and oracle, named regression guard, applicable domain constraints, and only the artifacts required by the selected workflow. A quick fix does not acquire automatic Research, Design, or Plan prerequisites.
+- Refuse implementation when an artifact or risk-owner constraint required by the selected workflow is missing, stale, or outside its accepted scope; do not manufacture or waive it.
 - Take only the build scripts, generators, manifests, compiler or SDK settings, CI build graph, cache settings, and packaging surfaces needed for the phase.
-- Treat runtime infrastructure, deployment topology, and feature logic changes as out of scope unless explicitly approved.
+- Treat runtime infrastructure, deployment topology, and feature logic changes as out of scope unless the accepted owning contract authorizes them; inclusion in a Plan schedules accepted work but grants no authority.
 
 <!-- CABI-EXTERNAL-ADAPTER:BEGIN -->
 ## External C ABI boundary

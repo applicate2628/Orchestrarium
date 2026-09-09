@@ -10,8 +10,8 @@ Transfer Git history when it exists plus a verified local-state overlay. Size, a
 ## Invariants
 
 - For a committed repository, Git covers required commits/refs; the overlay covers selected local state. An unborn repository has no `HEAD` history to claim, so its overlay and Git metadata are evidence only.
-- Inventory is all-or-nothing: traverse ordinary directories, record reparse entries as metadata without descending, and admit only non-reparse regular files. An unreadable subtree or entry, named pipe, socket, device, or unknown filesystem type blocks inventory before output.
-- Inventory and selection JSON inputs are each one identity-bound ordinary file from classification through bounded parse. POSIX opens the no-follow leaf nonblocking before `fstat`, so a FIFO without a writer cannot stall classification; Windows rejects reparse points, directories, devices, alternate data streams, and namespace aliases before reading. Type, size, held identity, parent identity, and pathname binding must remain stable through parse.
+- Inventory is all-or-nothing: the no-follow census is the sole enumerator and classifies its exact `./`-prefixed NUL-delimited paths in bounded `git check-ignore --stdin -z` batches. Traverse ordinary directories, record reparse entries as metadata without descending, and admit only non-reparse regular files. An unreadable subtree or entry, named pipe, socket, device, or unknown filesystem type blocks inventory before output.
+- Inventory and selection JSON inputs are each one identity-bound ordinary file from classification through bounded parse. The inventory alone has a 256 MiB cap and is canonically streamed to its output; selection and every other control document retain the 8 MiB cap. POSIX opens the no-follow leaf nonblocking before `fstat`, so a FIFO without a writer cannot stall classification; Windows rejects reparse points, directories, devices, alternate data streams, and namespace aliases before reading. Type, size, held identity, parent identity, and pathname binding must remain stable through parse.
 - Each selected ZIP payload is one identity-bound ordinary file from no-follow, nonblocking classification through chunked hashing and ZIP emission. The helper streams the already-open descriptor, never reopens the pathname for content, and requires the held leaf, parents, size, digest, and final pathname binding to remain stable before close; FIFOs, sockets, links, directories, devices, alternate data streams, and reparse points fail promptly.
 - One manifest assigns every local file or link one non-overlapping disposition.
 - ZIP contains regular-file bytes. Restricted data and links use content-bound external receipts.
@@ -24,19 +24,21 @@ Transfer Git history when it exists plus a verified local-state overlay. Size, a
 
 ## Receiving from repository cleanup
 
-When `$repo-cleanup` transfer mode invokes this skill, accept only a current-invocation `RepoCleanupReportV1` with `PASS`, bound to the same physical repository identity and `HEAD`/unborn state. Then own exactly `cleanup PASS -> final inventory -> bundle -> trusted verify -> post-transfer classification`. This skill does not run cleanup again, and the cleanup report does not authorize bundle creation, copying, deletion, wipe, or publication. A direct explicit `$manual-repo-transfer` request without cleanup intent continues to enter this skill directly.
+When `$repo-cleanup` transfer mode invokes this skill, accept a current-invocation `RepoCleanupReportV1`, bound to the same physical repository identity and `HEAD`/unborn state, only when it has `PASS` or its sole nonpassing cause is the shared host-policy-denial exception for explicitly deferred, freshly proven harmless empty agent-owned directory residue. In the exception case, cleanup and zero-residue predicates remain `fail`; every transfer gate must independently pass, transfer must not depend on the directory, and the final inventory and selection process must explicitly account for the deferred target and prove that no valuable data is silently omitted. Then own exactly `cleanup PASS or qualifying deferred residue accounted -> final inventory -> bundle -> trusted verify -> post-transfer classification`. This skill does not run cleanup again, and neither the cleanup report nor the exception authorizes bundle creation, copying, deletion, wipe, publication, or removal. Report the exact residue and resume condition in the transfer handoff. A direct explicit `$manual-repo-transfer` request without cleanup intent continues to enter this skill directly.
 
 ## Workflow
 
-1. Read repository governance and validation docs. Inventory dot-directories, ignored/untracked state, and self-ignored workspaces. A clean `git status` is insufficient. Query owning tools through API/MCP; validate stored config/memory against the active project. Use [local-state categories](references/manifest-schema.md#local-state-categories).
-2. Quiesce writers. Record the repository history state, `HEAD` when committed, refs, credential-redacted remotes, dirty/index state, reparse points, lifecycle state, stashes, registered worktrees, and Git recovery surfaces. The helper excludes `.git`; audit it separately.
-3. Generate an inventory outside the worktree:
+1. Read repository governance and validation docs. Discover dot-directories, ignored/untracked state, and self-ignored workspaces. A clean `git status` is insufficient. Query owning tools through API/MCP; validate stored config/memory against the active project. Use [local-state categories](references/manifest-schema.md#local-state-categories).
+2. Discover requested project indices, project settings, and configuration through their available owner, Model Context Protocol (MCP), or tool. Record whether each is portable, requires an external backup receipt, or must be rebuilt on the receiver. Do not create indices, install providers, or transfer global authentication or provider credentials as project state.
+3. Have the owning roles finish or explicitly freeze all authorized source, Git, lifecycle, and recovery changes that must reach the receiver. Preserve selected dirty, staged, untracked, and local-only Git state; do not clean, reset, commit, or publish merely to simplify transfer. Run an earlier full inventory, bundle, and verification rehearsal only when a recorded actual risk justifies it; its output is non-handoff evidence, and every later mutation invalidates it.
+4. Quiesce writers. After the last source, Git, or lifecycle change, refresh or revalidate each requested index, project setting, and configuration with its documented owner command; require fresh successful output and settle its writers. Preserve fresh portable state in the overlay. Preserve nonportable state through its appropriate backup plus an explicit receiver rebuild. A failed refresh is not fresh, and any change after freeze invalidates index freshness and the inventory snapshot. Freeze this state, then record repository history state, `HEAD` when committed, refs, credential-redacted remotes, dirty/index state, reparse points, lifecycle state, stashes, registered worktrees, and Git recovery surfaces. The helper excludes `.git`; audit it separately. Launch every inventory, bundle, verification, and diagnostic import with `python -B` and with `PYTHONDONTWRITEBYTECODE=1` set in that subprocess before imports; do not change an interpreter, process-global, or user environment. `-B` prevents new bytecode but does not remove existing caches; classification and cleanup ownership are unchanged.
+5. Generate the final inventory outside the worktree:
 
    ```text
-   python <skill>/scripts/repo_transfer.py inventory --repo <repo> --git-executable <absolute-git-executable> --output <inventory.json> [--force]
+   python -B <skill>/scripts/repo_transfer.py inventory --repo <repo> --git-executable <absolute-git-executable> --output <inventory.json> [--force]
    ```
 
-4. Create a selection using [the manifest schema](references/manifest-schema.md). Assign every required entry exactly one disposition:
+6. Create a selection using [the manifest schema](references/manifest-schema.md). Assign every required entry exactly one disposition:
 
    | Disposition | Meaning |
    | --- | --- |
@@ -45,17 +47,16 @@ When `$repo-cleanup` transfer mode invokes this skill, accept only a current-inv
    | `delete` | Add a content-bound, evidence-backed item to the preview-only deletion plan. |
 
    Rows may not overlap. Ambiguity means `include`. Never follow a link; classify its target separately.
-5. For a committed repository, use the selected remote's local-tracking evidence plus policy-required server probes. Otherwise create and verify a Git bundle; copying `.git` is not the default. For an unborn repository, select only `gitStrategy.mode: none`: no remote can cover a nonexistent `HEAD`, and a standard Git bundle cannot preserve nonexistent history.
-6. Build and source-verify the overlay:
+7. For a committed repository, use the selected remote's local-tracking evidence plus policy-required server probes. Otherwise create and verify a Git bundle; copying `.git` is not the default. For an unborn repository, select only `gitStrategy.mode: none`: no remote can cover a nonexistent `HEAD`, and a standard Git bundle cannot preserve nonexistent history.
+8. Build and source-verify the overlay from that final inventory:
 
    ```text
-   python <skill>/scripts/repo_transfer.py bundle --repo <repo> --git-executable <absolute-git-executable> --inventory <inventory.json> --selection <selection.json> --output <transfer.zip> [--force]
-   python <skill>/scripts/repo_transfer.py verify --bundle <transfer.zip> --git-executable <absolute-git-executable> --inventory <inventory.json> --selection <selection.json> --source <repo>
+   python -B <skill>/scripts/repo_transfer.py bundle --repo <repo> --git-executable <absolute-git-executable> --inventory <inventory.json> --selection <selection.json> --output <transfer.zip> [--force]
+   python -B <skill>/scripts/repo_transfer.py verify --bundle <transfer.zip> --git-executable <absolute-git-executable> --inventory <inventory.json> --selection <selection.json> --source <repo>
    ```
 
-7. Store the artifact independently from the source PC. If the receiver is unavailable, rehearse a clean local restore before authorizing a wipe. Generate the deletion preview with `cleanup`; after separate authorization, the owner applies it and proves the resulting census.
-8. Finish lifecycle and Git recovery cleanup, quiesce again, inventory again, rebuild, and reverify. Only this post-finalization artifact is the handoff.
-9. On the receiver: verify the ZIP against its separate SHA-256; restore Git and regular-file overlay entries; run payload/source verification; restore external artifacts through receipts; regenerate dependencies/caches; run repository checks. For an unborn inventory, the ZIP preserves file bytes plus staged/unstaged/status evidence but does not recreate index equivalence or fabricate an initial commit. Retain artifacts until acceptance.
+9. Store the artifact independently from the source PC. If the receiver is unavailable, rehearse a clean local restore of the final artifact before authorizing a wipe. Generate the deletion preview with `cleanup`; after separate authorization, the owner applies it and proves the resulting census. Only this post-freeze, verified artifact is the handoff.
+10. On the receiver: verify the ZIP against its separate SHA-256; restore Git and regular-file overlay entries; run payload/source verification; restore external artifacts through receipts; regenerate dependencies/caches; run repository checks. For an unborn inventory, the ZIP preserves file bytes plus staged/unstaged/status evidence but does not recreate index equivalence or fabricate an initial commit. Retain artifacts until acceptance.
 
 ## Stop conditions
 

@@ -17,7 +17,8 @@ description: "Keyboard, focus, screen-reader, contrast, WCAG A/AA."
 - Visual criteria require captured evidence even when no screenshot or recording arrived with the input; absence of a capture is not evidence of conformance.
 - Take only the surfaces and flows in scope for the phase.
 - Default to read-only review unless a different role is explicitly assigned elsewhere.
-- Tag every finding with the `fix-class: {inline-sufficient | design-decision}` triage owned by `architecture-reviewer`; `inline HOW stays advisory (non-binding)`, and the tag follows an `escalate-only one-way ratchet: inline-sufficient may be reclassified to design-decision, never the reverse`. An `inline-sufficient` finding keeps the existing implementation route. A `design-decision` finding routes through `$lead` to the correct design owner (`$ux-designer` for interaction or accessibility design; `$architect` for the owning seam or contract) and requires a separate `/agents-review-loop` fix-design pass before implementation.
+- Tag every finding with the `fix-class: {inline-sufficient | design-decision}` triage owned by `architecture-reviewer`; `inline HOW stays advisory (non-binding)`, and the tag follows an `escalate-only one-way ratchet: inline-sufficient may be reclassified to design-decision, never the reverse`. An `inline-sufficient` finding keeps the existing implementation route. A `design-decision` finding routes through `$lead` to the correct design owner (`$ux-designer` for interaction or accessibility design; `$architect` for the owning seam or contract).
+- Follow architecture-reviewer's `Simple exact-delta route`, `Mandatory review-loop triggers`, and `Insufficient triggers` when selecting correction review: the `design-decision` tag alone does not trigger the loop. Use the existing loop for genuine complexity or ambiguity, materially competing owner/seam solutions, repeated review/fix failure, newly discovered complexity, or when the user explicitly requests the loop. Otherwise the design owner corrects the design and the original reviewer re-verifies the finding and changed delta.
 
 ## Return exactly one artifact
 
@@ -29,6 +30,7 @@ description: "Keyboard, focus, screen-reader, contrast, WCAG A/AA."
 - Blocking accessibility issues are called out explicitly and tied to observed behavior.
 - Approval is explicit and evidence-based.
 - Run a scripted keyboard pass on every scoped surface: complete the full `Tab` / `Shift+Tab` cycle without a trap; verify a visible focus indicator at every stop; verify `Esc` dismisses modals and returns focus to the invoker; verify composite widgets follow the Accessible Rich Internet Applications Authoring Practices Guide (ARIA APG) arrow-key pattern or platform equivalent; and verify every pointer-only action has a keyboard path under criterion 2.1.1. Record each step as pass or fail.
+- Any accepted mandatory gate criterion that is unchecked, `not-run`, `UNVERIFIED`, or blocked prevents `PASS`. Continue every accepted mandatory check that remains runnable even when another check is unfinished or blocked. An optional non-gate check that is not run is reported as residual risk and does not prevent `PASS`. This classification does not add or promote any check; the accepted criteria and scoped gate remain the only source of mandatory checks.
 
 ## Standards anchor
 
@@ -49,7 +51,7 @@ description: "Keyboard, focus, screen-reader, contrast, WCAG A/AA."
 
 ## Accessibility finding registry
 
-- On `REVISE` or `BLOCKED`, file each finding in `work-items/bugs/<date>-<slug>.md` using the format owned by `qa-engineer`, with `found-by: accessibility-reviewer`, before returning the verdict.
+- On `REVISE` or `BLOCKED`, include a proposed registry record in-band in the returned artifact for the root or lifecycle owner, using `work-items/bugs/<date>-<slug>.md`, the format owned by `qa-engineer`, and `found-by: accessibility-reviewer`. Write the proposed registry record directly only when the dispatcher explicitly grants registry-write authority and the sandbox permits that path. A direct registry write is a narrow canonical-artifact exception and does not otherwise broaden this role's write posture.
 
 ## Cross-domain escalation
 

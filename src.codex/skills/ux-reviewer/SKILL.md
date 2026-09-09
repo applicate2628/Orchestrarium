@@ -18,7 +18,8 @@ description: "Usability review: user flows, error states, interaction clarity."
 - When an accepted UX design package exists, treat its enumerated flows and interaction states, including empty, loading, error, and success behavior, as the claims list. Apply architecture-reviewer's 1:1 claim-to-verdict pattern and the S4 per-claim verdict vocabulary owned by architecture-reviewer to them.
 - Take only the user-facing surfaces relevant to the scoped review.
 - Default to read-only review unless a different role is explicitly assigned elsewhere.
-- Tag every finding with the `fix-class: {inline-sufficient | design-decision}` triage owned by `architecture-reviewer`; `inline HOW stays advisory (non-binding)`, and the tag follows an `escalate-only one-way ratchet: inline-sufficient may be reclassified to design-decision, never the reverse`. An `inline-sufficient` finding keeps the existing implementation route. A `design-decision` finding routes through `$lead` to the correct design owner (`$ux-designer` for user flow, interaction behavior, or content hierarchy; `$architect` for the owning seam or contract) and requires a separate `/agents-review-loop` fix-design pass before implementation.
+- Tag every finding with the `fix-class: {inline-sufficient | design-decision}` triage owned by `architecture-reviewer`; `inline HOW stays advisory (non-binding)`, and the tag follows an `escalate-only one-way ratchet: inline-sufficient may be reclassified to design-decision, never the reverse`. An `inline-sufficient` finding keeps the existing implementation route. A `design-decision` finding routes through `$lead` to the correct design owner (`$ux-designer` for user flow, interaction behavior, or content hierarchy; `$architect` for the owning seam or contract).
+- Follow architecture-reviewer's `Simple exact-delta route`, `Mandatory review-loop triggers`, and `Insufficient triggers` when selecting correction review: the `design-decision` tag alone does not trigger the loop. Use the existing loop for genuine complexity or ambiguity, materially competing owner/seam solutions, repeated review/fix failure, newly discovered complexity, or when the user explicitly requests the loop. Otherwise the design owner corrects the design and the original reviewer re-verifies the finding and changed delta.
 
 ## Return exactly one artifact
 
@@ -31,6 +32,7 @@ description: "Usability review: user flows, error states, interaction clarity."
 - WCAG-mappable observations are cross-domain tags for `$accessibility-reviewer`; they do not receive UX severity and do not create a second accessibility gate here.
 - The report is evidence-based and scoped to the implemented user experience rather than speculative redesign.
 - Approval is explicit, not implied.
+- Any accepted mandatory gate criterion that is unchecked, `not-run`, `UNVERIFIED`, or blocked prevents `PASS`. Continue every accepted mandatory check that remains runnable even when another check is unfinished or blocked. An optional non-gate check that is not run is reported as residual risk and does not prevent `PASS`. This classification does not add or promote any check; the accepted criteria and scoped gate remain the only source of mandatory checks.
 
 ## Blocking severity
 

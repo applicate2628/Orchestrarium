@@ -721,11 +721,67 @@ class TestTurnAnchorEmitsValidContext(unittest.TestCase):
         payload = json.loads(result.stdout)
         out = payload["hookSpecificOutput"]
         self.assertEqual(out["hookEventName"], "UserPromptSubmit")
-        # The anchor's load-bearing sentence must actually be present.
-        self.assertIn("passed slice is not completion", out["additionalContext"])
-        self.assertIn("next unchecked action", out["additionalContext"])
         self.assertIn("Root main conversation", out["additionalContext"])
         self.assertIn("Dispatched subagent", out["additionalContext"])
+
+    def test_root_pre_final_decision_covers_ready_incident_and_stop_exceptions(self) -> None:
+        result = subprocess.run(
+            [sys.executable, str(TURN_ANCHOR_PY)],
+            input="", capture_output=True, text=True, encoding="utf-8",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        context = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"]
+        root_context = context.split("Dispatched subagent:", 1)[0]
+        sentences = [
+            sentence.casefold().strip()
+            for sentence in root_context.replace("\n", " ").split(".")
+            if sentence.strip()
+        ]
+
+        def has_clause(*facts: str) -> bool:
+            return any(
+                all(fact.casefold() in sentence for fact in facts)
+                for sentence in sentences
+            )
+
+        scenarios = {
+            "ready work after an earlier milestone": (
+                ("work completed earlier", "ready work remains", "permission to stop"),
+                ("any action is ready", "highest-priority", "now"),
+            ),
+            "primary goal may end only at a terminal condition": (
+                (
+                    "end only if",
+                    "selected primary goal",
+                    "reconciled complete",
+                    "explicitly stops",
+                    "every remaining authorized action",
+                    "concretely blocked",
+                ),
+            ),
+            "one blocked lane leaves independent work ready": (
+                ("block pauses only", "dependent lane"),
+                ("reload", "unavailable agent", "independent work"),
+            ),
+            "user decision pauses only dependent actions": (
+                ("decision only the user can make", "dependent actions", "independent ready work"),
+            ),
+            "milestones and questions stay non-final": (
+                ("milestones", "progress", "questions", "commentary", "not a final response"),
+            ),
+            "standalone question has no active goal": (
+                ("standalone question", "no active task", "end normally"),
+            ),
+            "continuation never invents work": (
+                ("do not invent work", "useless tool calls"),
+            ),
+        }
+        for scenario, clauses in scenarios.items():
+            with self.subTest(scenario=scenario):
+                self.assertTrue(
+                    all(has_clause(*clause) for clause in clauses),
+                    f"turn anchor does not cover scenario: {scenario}",
+                )
 
     def test_missing_policy_dependency_fails_open(self) -> None:
         with tempfile.TemporaryDirectory() as td:

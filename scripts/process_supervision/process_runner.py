@@ -3318,6 +3318,7 @@ class ProcessRunnerV1:
         environment: tuple[EnvironmentRowV1, ...],
         deadline_seconds: float = 60.0,
         capture_limit_bytes: int,
+        stdin_bytes: bytes | None = None,
     ) -> tuple[ProcessRequestV1, CaptureSinkBindingV1]:
         """Build the sealed request used by the repository-transfer Git adapter."""
 
@@ -3335,6 +3336,13 @@ class ProcessRunnerV1:
                 or not 0 < deadline_seconds <= 60.0
                 or not isinstance(capture_limit_bytes, int)
                 or not 0 < capture_limit_bytes <= MAX_CAPTURE_BYTES // 2
+                or (
+                    stdin_bytes is not None
+                    and (
+                        type(stdin_bytes) is not bytes
+                        or len(stdin_bytes) > MAX_STDIN_BYTES
+                    )
+                )
             ):
                 raise ProcessSupervisionError(
                     "PSV1-REQUEST-INVALID", "request-validation"
@@ -3353,7 +3361,7 @@ class ProcessRunnerV1:
             resolved_executable=executable,
             cwd=canonical_cwd,
             environment=environment,
-            stdin_bytes=None,
+            stdin_bytes=stdin_bytes,
             deadline_monotonic=time.monotonic() + float(deadline_seconds),
             capture_policy=RepositoryTransferCapturePolicyV1(
                 "repository-transfer-git-v1",

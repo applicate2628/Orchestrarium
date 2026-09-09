@@ -2,6 +2,26 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-09-09
+
+- **Publication scanning now distinguishes digit-bearing callable identifiers from bare credential values.** A captured right-hand-side start and one shared exact identifier/member-call classifier skip only the callable candidate while continuing to scan the same line; non-identifier values with call-like suffixes, quoted and bare credentials, and later same-line leaks still block in text and binary scans. The scanner test source is also checked by the canonical content detectors. **Why it matters:** staged implementation code no longer false-blocks publication while credential detection remains fail-closed.
+
+- **A host-policy-denied harmless empty directory no longer blocks every independent delivery action forever.** Cleanup still records the preserved target, keeps its predicates failed, and never claims `PASS` or zero residue. A delivery, handoff, commit, or transfer may proceed only after fresh ownership, emptiness (including hidden children), link and active-resource checks, with every receiving gate passed, no dependency on the directory, and explicit residue and transfer-inventory accounting. Operating-system lock or permission failures, unknown or valuable data, correctness-affecting state, configuration relaxation, alternate removal paths, and blind retry loops remain excluded. **Why it matters:** an inert empty directory cannot strand otherwise verified work, while permission boundaries, cleanup truthfulness, and transfer completeness remain fail-closed.
+
+## 2026-09-08
+
+- **Invalid current ledger records can receive exact append-only nonauthorizing dispositions.** The existing recovery owner binds each target by physical ordinal, raw-line hash and run ID; original records and evidence remain unchanged. Only receipt-activated compatibility suppresses the disposed record's schema errors, exposes an explicit notice and removes its lifecycle authority. Old recovery behavior, unrelated malformed-event rejection and historical obligations remain intact; replay does not append duplicates.
+
+- **Manifest-bound legacy decisions accept the historical heading-plus-list metadata form.** The lifecycle parser retains exact identity, status, cutover and manifest checks and keeps historical records read-only. This parser correction does not activate ledger compatibility or reinterpret malformed current events.
+
+- **Cleanup handoffs now distinguish a host-policy refusal from target-side failure.** The existing cleanup report preserves the exact resource and redacted refusal, routes one explicit operator action, and rechecks afterward. Independent work continues without falsely marking cleanup or dependent zero-residue checks complete; no alternate deletion engine or permission bypass is introduced.
+
+- **Push-hook diagnostics distinguish oversized readable history from an unreadable transcript.** When bounded recovery finds no active pull-request grant, the denial now names the history limit and explains the fresh user-approval action. Authorization rules, read limits and publication checks are unchanged.
+
+- **Publication range scans distinguish embedded credentials from binary metadata.** Binary payloads retain filename checks, credential checks and complete version-3 coverage, while text-only symbol/transcript heuristics no longer flag native libraries. The exact public assembly identity field `publicKeyToken` is not treated as a secret in binary content; other credentials in the same payload still block publication. Text and commit-message checks remain unchanged, with no vendor hash/path exemptions or changes to publication approval.
+
+- **Scientific model implementation now has a dedicated, model-agnostic executor role in both provider catalogs.** `$scientific-software-engineer` implements an accepted mathematical or numerical model, while an independent `$computational-scientist` owns scientific-conformance review and an independent `$qa-engineer` owns quality assurance; eligible external execution uses the worker adapter. **Why it matters:** numerical implementation is no longer conflated with scientific model ownership or its independent gates.
+
 ## 2026-09-07
 
 - **Workflow routing and recovery guidance now use the narrowest proven path while retaining mandatory risk gates and the existing review loop for genuine complexity.** Bounded factual lookup stays inline, non-trivial factual investigation starts with one analyst, active-task side questions resume authorized work in the same turn, ordinary acceptance uses scoped owned-resource evidence, and existing quick-fix/staged handoff carriers preserve the criteria, regression guard, and observed result. Codex UI-transition contracts now project to the canonical `.agents/contracts` leaf while retained `.codex/contracts` copies continue serving legacy consumers. **Why it matters:** operators avoid unnecessary review, cleanup, and status-schema ceremony without weakening triggered review, continuity, or installed-runtime compatibility.

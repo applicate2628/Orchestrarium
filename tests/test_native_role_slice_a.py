@@ -310,6 +310,14 @@ def test_resolver_exposes_componentwise_role_policy_without_changing_agents_mode
         "requiredModelTier": "frontier",
         "requiredEffort": "xhigh",
         "mutationClass": "read-only",
+        "admissibleProfiles": [
+            "frontier-high",
+            "frontier-xhigh",
+            "apex-max",
+            "astra-high",
+            "astra-xhigh",
+            "astra-max",
+        ],
     }
     assert policy["roles"]["architect"]["defaultProfile"] == "frontier-xhigh"
     assert "frontier-xhigh" in policy["roles"]["architect"]["allowedProfiles"]
@@ -470,7 +478,7 @@ def _assert_callable_native_role_mappings(config_path: Path) -> None:
         name for name, value in agents.items() if isinstance(value, dict)
     }
     assert actual_role_names == set(expected)
-    assert len(actual_role_names) == 17
+    assert len(actual_role_names) == 18
     for name, mapping in expected.items():
         assert agents[name] == mapping
         installed = config_path.parent / mapping["config_file"]

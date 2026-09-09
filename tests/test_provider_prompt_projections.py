@@ -5,6 +5,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import subprocess
 import tarfile
 import shutil
@@ -500,6 +501,94 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
         source / "scripts" / "validate-provider-prompt-projections.py",
     )
     return source, canonical, claude, manifest
+
+
+def _write_fixture_taxonomy(source: Path, roles: dict[str, str]) -> None:
+    payload = (
+        json.dumps({"schemaVersion": 1, "roles": roles}, indent=2) + "\n"
+    ).encode("utf-8")
+    (source / "shared" / "external-role-taxonomy.v1.json").write_bytes(payload)
+    digest = hashlib.sha256(payload).hexdigest()
+    (source / "scripts" / "provider_prompt.py").write_text(
+        f'EXTERNAL_ROLE_TAXONOMY_SHA256 = "{digest}"\n', encoding="utf-8"
+    )
+
+
+def test_external_role_taxonomy_accepts_current_34_indexed_and_35_mapped_roles(
+    tmp_path: Path,
+) -> None:
+    validator = _load_validator()
+    source, _canonical, _claude, _manifest = _fixture(tmp_path)
+    taxonomy = json.loads(
+        (source / "shared" / "external-role-taxonomy.v1.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    role_index = (source / "shared" / "AGENTS.shared.md").read_text(
+        encoding="utf-8"
+    ).split("\n## Common skills", 1)[0]
+
+    assert len(set(re.findall(r"\$([a-z][a-z0-9-]+)", role_index))) == 34
+    assert len(taxonomy["roles"]) == 35
+    validator._validate_external_role_taxonomy(source)
+
+
+@pytest.mark.parametrize("mutation", ("missing", "extraneous"))
+def test_external_role_taxonomy_rejects_role_set_drift(
+    tmp_path: Path, mutation: str
+) -> None:
+    validator = _load_validator()
+    source, _canonical, _claude, _manifest = _fixture(tmp_path)
+    taxonomy_path = source / "shared" / "external-role-taxonomy.v1.json"
+    roles = json.loads(taxonomy_path.read_text(encoding="utf-8"))["roles"]
+    if mutation == "missing":
+        del roles["scientific-software-engineer"]
+    else:
+        roles["synthetic-worker"] = "external-worker"
+    _write_fixture_taxonomy(source, roles)
+
+    with pytest.raises(
+        validator.ProjectionParityError,
+        match="E_TRANSPORT_PROJECTION_PARITY: external role taxonomy parity",
+    ):
+        validator._validate_external_role_taxonomy(source)
+
+
+def test_external_role_taxonomy_rejects_duplicate_indexed_role(tmp_path: Path) -> None:
+    validator = _load_validator()
+    source, _canonical, _claude, _manifest = _fixture(tmp_path)
+    governance = source / "shared" / "AGENTS.shared.md"
+    text = governance.read_text(encoding="utf-8")
+    text = text.replace(
+        "- Implementation:",
+        "- Implementation: `$scientific-software-engineer`,",
+        1,
+    )
+    governance.write_bytes(text.encode("utf-8"))
+
+    with pytest.raises(
+        validator.ProjectionParityError,
+        match="E_TRANSPORT_PROJECTION_PARITY: shared role index membership",
+    ):
+        validator._validate_external_role_taxonomy(source)
+
+
+def test_external_role_taxonomy_reports_changed_category_label(tmp_path: Path) -> None:
+    validator = _load_validator()
+    source, _canonical, _claude, _manifest = _fixture(tmp_path)
+    governance = source / "shared" / "AGENTS.shared.md"
+    text = governance.read_text(encoding="utf-8")
+    assert "- Roadmap and orchestration:" in text
+    text = text.replace(
+        "- Roadmap and orchestration:", "- Roadmap/orchestration:", 1
+    )
+    governance.write_bytes(text.encode("utf-8"))
+
+    with pytest.raises(
+        validator.ProjectionParityError,
+        match="E_TRANSPORT_PROJECTION_PARITY: shared role index categories",
+    ):
+        validator._validate_external_role_taxonomy(source)
 
 
 def _run_scoped_validator(
@@ -1008,6 +1097,7 @@ def test_exact_8f92_transport_set_is_one_atomic_prior_plan(tmp_path: Path) -> No
     assert tuple(name for name, _payload in staged.pending_files) == (
         "provider_prompt.py",
         "process_supervision/process_runner.py",
+        "invoke-codex-prompt.py",
         "invoke-kimi-prompt.py",
         "external-role-taxonomy.v1.json",
     )
@@ -1025,31 +1115,34 @@ def test_exact_8f92_transport_set_is_one_atomic_prior_plan(tmp_path: Path) -> No
         (
             "d1309ee5",
             STOCK_D130_PROJECTION_SHA256,
-                (
-                    "provider_prompt.py",
-                    "process_supervision/process_runner.py",
-                    "invoke-kimi-prompt.py",
-                    "external-role-taxonomy.v1.json",
+            (
+                "provider_prompt.py",
+                "process_supervision/process_runner.py",
+                "invoke-codex-prompt.py",
+                "invoke-kimi-prompt.py",
+                "external-role-taxonomy.v1.json",
             ),
         ),
         (
             "f87414e7",
             STOCK_F874_PROJECTION_SHA256,
-                (
-                    "provider_prompt.py",
-                    "process_supervision/process_runner.py",
-                    "invoke-kimi-prompt.py",
-                    "external-role-taxonomy.v1.json",
+            (
+                "provider_prompt.py",
+                "process_supervision/process_runner.py",
+                "invoke-codex-prompt.py",
+                "invoke-kimi-prompt.py",
+                "external-role-taxonomy.v1.json",
             ),
         ),
         (
             "9a637574",
             STOCK_9A63_PROJECTION_SHA256,
-                (
-                    "provider_prompt.py",
-                    "process_supervision/process_runner.py",
-                    "invoke-kimi-prompt.py",
-                    "external-role-taxonomy.v1.json",
+            (
+                "provider_prompt.py",
+                "process_supervision/process_runner.py",
+                "invoke-codex-prompt.py",
+                "invoke-kimi-prompt.py",
+                "external-role-taxonomy.v1.json",
             ),
         ),
         (
@@ -1058,6 +1151,8 @@ def test_exact_8f92_transport_set_is_one_atomic_prior_plan(tmp_path: Path) -> No
             (
                 "provider_prompt.py",
                 "process_supervision/process_runner.py",
+                "invoke-codex-prompt.py",
+                "external-role-taxonomy.v1.json",
             ),
         ),
         (
@@ -1066,16 +1161,20 @@ def test_exact_8f92_transport_set_is_one_atomic_prior_plan(tmp_path: Path) -> No
             (
                 "provider_prompt.py",
                 "process_supervision/process_runner.py",
+                "invoke-codex-prompt.py",
+                "external-role-taxonomy.v1.json",
             ),
         ),
+        (
+            "7192c914",
+            STOCK_7192_PROJECTION_SHA256,
             (
-                "7192c914",
-                STOCK_7192_PROJECTION_SHA256,
-                (
-                    "provider_prompt.py",
-                    "process_supervision/process_runner.py",
-                ),
+                "provider_prompt.py",
+                "process_supervision/process_runner.py",
+                "invoke-codex-prompt.py",
+                "external-role-taxonomy.v1.json",
             ),
+        ),
     ),
 )
 def test_exact_published_transport_set_is_one_atomic_prior_plan(
@@ -1302,6 +1401,14 @@ def test_immediate_448e_prior_applies_only_changed_transport_members_and_manifes
             STOCK_448E_PROJECTION_SHA256["process_supervision/process_runner.py"],
         ),
         (
+            "scripts/invoke-codex-prompt.py",
+            STOCK_448E_PROJECTION_SHA256["invoke-codex-prompt.py"],
+        ),
+        (
+            "scripts/external-role-taxonomy.v1.json",
+            STOCK_448E_PROJECTION_SHA256["external-role-taxonomy.v1.json"],
+        ),
+        (
             "shared/provider-prompt-projections.v1.json",
             STOCK_448E_PROJECTION_SHA256["provider-prompt-projections.v1.json"],
         ),
@@ -1337,6 +1444,7 @@ def test_exact_8521_transport_set_is_one_atomic_prior_plan(tmp_path: Path) -> No
     assert tuple(name for name, _payload in staged.pending_files) == (
         "provider_prompt.py",
         "process_supervision/process_runner.py",
+        "invoke-codex-prompt.py",
         "invoke-kimi-prompt.py",
         "external-role-taxonomy.v1.json",
     )
@@ -1348,7 +1456,7 @@ def test_exact_8521_transport_set_is_one_atomic_prior_plan(tmp_path: Path) -> No
     } == STOCK_8521_PROJECTION_SHA256
 
 
-def test_exact_7872_six_member_transport_is_one_atomic_seven_member_plan(
+def test_exact_7872_six_member_transport_is_one_atomic_nine_member_plan(
     tmp_path: Path,
 ) -> None:
     installer = _load_installer()
@@ -1365,6 +1473,7 @@ def test_exact_7872_six_member_transport_is_one_atomic_seven_member_plan(
     assert tuple(name for name, _payload in staged.pending_files) == (
         "provider_prompt.py",
         "process_supervision/process_runner.py",
+        "invoke-codex-prompt.py",
         "invoke-kimi-prompt.py",
         "external-role-taxonomy.v1.json",
     )
@@ -1637,7 +1746,7 @@ def test_8521_transport_final_parity_failure_restores_original_identities(
     assert not tuple(projection.parent.rglob("*.prior"))
 
 
-def test_8521_transport_real_install_replaces_five_members_then_is_noop(
+def test_8521_transport_real_install_replaces_six_members_then_is_noop(
     tmp_path: Path,
 ) -> None:
     installer = _load_installer()
@@ -1672,7 +1781,10 @@ def test_8521_transport_real_install_replaces_five_members_then_is_noop(
     assert after_first[current_manifest.name][1] != before_identities[current_manifest.name]
     for name in set(paths) - {
         "provider_prompt.py",
+        "process_supervision/process_runner.py",
+        "invoke-codex-prompt.py",
         "invoke-kimi-prompt.py",
+        "external-role-taxonomy.v1.json",
         current_manifest.name,
     }:
         assert after_first[name][1] == before_identities[name]
@@ -1688,7 +1800,7 @@ def test_8521_transport_real_install_replaces_five_members_then_is_noop(
     } == after_first
 
 
-def test_8521_transport_dry_run_reports_five_replacements_without_mutation(
+def test_8521_transport_dry_run_reports_six_replacements_without_mutation(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     installer = _load_installer()
@@ -1706,7 +1818,7 @@ def test_8521_transport_dry_run_reports_five_replacements_without_mutation(
 
     assert installer.install("claude", [*args, "--dry-run"]) == 0
     output = capsys.readouterr().out
-    assert "transport prior 8521b638: 5 replacements" in output
+    assert "transport prior 8521b638: 6 replacements" in output
     assert {
         name: (
             path.read_bytes(),
@@ -1809,6 +1921,12 @@ def test_e7_six_tree_upgrade_rolls_back_after_middle_replacement(
         path.relative_to(canonical).as_posix(): path.read_bytes()
         for path in canonical.rglob("*") if path.is_file()
     }
+    e7_current_skill_priors = {
+        skill.name: installer._tree_sha256(skill, ignore_runtime_cache=True)
+        for skill in canonical.iterdir()
+        if skill.is_dir() and (ROOT / "src.codex" / "skills" / skill.name).is_dir()
+    }
+    assert installer.E7_CANONICAL_SKILL_TREE_SHA256 == e7_current_skill_priors
     original = installer._CreateOnlyMutablePath.replace_exact_tree
     calls = 0
 

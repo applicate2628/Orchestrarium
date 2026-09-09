@@ -72,6 +72,33 @@ def test_repo_cleanup_contract_is_transient_coordinator_only() -> None:
         "REVISE:cleanup-capacity-unresolved",
     ):
         assert required in body
+
+
+def test_host_refusal_preserves_target_without_bypass_or_false_pass() -> None:
+    surfaces = (CODEX_SKILL, CLAUDE_SKILL, REFERENCE)
+    required = (
+        "host refuses a validated owner action before execution",
+        "disposition `preserved`",
+        "redacted refusal reason",
+        "pre-action and post-refusal settlement probe results",
+        "no alternate shell, API, provider, command shape, retry, or allow-rule",
+        "same validated action",
+        "root main conversation and its existing current work-item",
+        "independent non-overlapping work continues",
+        "dependent zero-residue predicates remain `fail`",
+    )
+    for path in surfaces:
+        text = path.read_text(encoding="utf-8")
+        for fragment in required:
+            assert fragment.casefold() in text.casefold(), (
+                f"{path.relative_to(ROOT)} missing {fragment!r}"
+            )
+
+    body = _body(CODEX_SKILL)
+    assert "owner-action-refused" not in body
+    assert "new refusal disposition" not in body
+
+
 def test_repo_cleanup_fixed_hysteresis_and_report_rows_are_complete() -> None:
     body = _body(CODEX_SKILL)
     for boundary in (
@@ -172,7 +199,7 @@ def test_lead_intermediate_acceptance_uses_producer_owned_resource_echo() -> Non
 
 def test_transfer_receiving_contract_enforces_one_ordered_cleanup_chain() -> None:
     expected = (
-        "cleanup PASS -> final inventory -> bundle -> trusted verify -> "
+        "cleanup PASS or qualifying deferred residue accounted -> final inventory -> bundle -> trusted verify -> "
         "post-transfer classification"
     )
     for relative in (

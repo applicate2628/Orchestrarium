@@ -12,7 +12,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 
 STATUS_SECTIONS = {
@@ -33,6 +33,7 @@ STATUS_SECTIONS = {
 # append from a rejected or rolled-back attempt. Keep the text in this writer.
 APPEND_SUCCESS_MARKER = "RESULT: PASS append"
 RECOVERY_SUCCESS_MARKER = "RESULT: PASS recover-invalid-closure"
+INVALID_CURRENT_DISPOSITION_SUCCESS_MARKER = "RESULT: PASS dispose-invalid-current"
 
 
 def load_validator():
@@ -667,6 +668,37 @@ def command_recover_invalid_closure(args: argparse.Namespace) -> int:
         "updatedAt": args.updated_at or started_at,
     }
     ledger_path = item / "agent-runs.jsonl"
+    decoded, _ = _read_ledger(item, validator)
+    if any(event.get("schemaVersion") == 3 for event in decoded):
+        print("FAIL: legacy V1/V2 writer refuses a ledger containing schemaVersion 3")
+        return 1
+
+    def validate_candidate(candidate: Path, _expected: bytes) -> list[str]:
+        return validator.validate_work_item(
+            item, ledger_path=candidate, strict_revise=False
+        )
+
+    return _commit_recovery_append(
+        item,
+        event,
+        validate_candidate,
+        RECOVERY_SUCCESS_MARKER,
+        args.inject_failure,
+    )
+
+
+def _commit_recovery_append(
+    item: Path,
+    event: dict[str, Any],
+    validate_candidate: Callable[[Path, bytes], list[str] | tuple[str, ...]],
+    success_marker: str,
+    inject_failure: str | None,
+    *,
+    replay_detector: Callable[[bytes], bool] | None = None,
+) -> int:
+    """Commit one validated recovery row through the existing atomic append path."""
+
+    ledger_path = item / "agent-runs.jsonl"
     lock_path = item / "agent-runs.jsonl.lock"
     lock_fd = None
     for _attempt in range(50):
@@ -683,28 +715,27 @@ def command_recover_invalid_closure(args: argparse.Namespace) -> int:
     replaced = False
     try:
         previous = ledger_path.read_bytes() if ledger_path.exists() else b""
-        decoded, _ = _read_ledger(item, validator)
-        if any(event.get("schemaVersion") == 3 for event in decoded):
-            print("FAIL: legacy V1/V2 writer refuses a ledger containing schemaVersion 3")
-            return 1
+        if replay_detector is not None and replay_detector(previous):
+            print(f"{success_marker} ({ledger_path})")
+            return 0
         line = (serialize_event(event) + "\n").encode("utf-8")
         prefix = b"" if not previous or previous.endswith(b"\n") else b"\n"
         expected = previous + prefix + line
         with candidate.open("xb") as stream:
             stream.write(expected)
             stream.flush()
-        errors = validator.validate_work_item(item, ledger_path=candidate, strict_revise=False)
+        errors = validate_candidate(candidate, expected)
         if errors:
             for error in errors:
                 print(f"FAIL: {error}")
             print(f"RESULT: FAIL ({len(errors)} errors)")
             return 1
-        if args.inject_failure == "pre-replace":
+        if inject_failure == "pre-replace":
             print("FAIL: ledger-recovery:pre-replace-injected")
             return 1
         os.replace(candidate, ledger_path)
         replaced = True
-        if args.inject_failure == "post-replace-readback":
+        if inject_failure == "post-replace-readback":
             print("FAIL: ledger-recovery:post-commit-readback-indeterminate")
             return 1
         try:
@@ -728,8 +759,86 @@ def command_recover_invalid_closure(args: argparse.Namespace) -> int:
             candidate.unlink(missing_ok=True)
         os.close(lock_fd)
         lock_path.unlink(missing_ok=True)
-    print(f"{RECOVERY_SUCCESS_MARKER} ({ledger_path})")
+    print(f"{success_marker} ({ledger_path})")
     return 0
+
+
+def command_dispose_invalid_current(args: argparse.Namespace) -> int:
+    item = active_work_item(args, "dispose-invalid-current")
+    if item is None or not item.exists():
+        print(f"FAIL: missing work item: {item}")
+        return 1
+    validator = load_validator()
+    try:
+        manifest_bytes = args.ledger_manifest.read_bytes()
+    except OSError as exc:
+        print(f"FAIL: WI-LEDGER-COMPAT-SUFFIX-DISPOSITION-TARGET: {exc}")
+        return 1
+    decoded, _malformed = _read_ledger(item, validator)
+    existing = [event for event in decoded if event.get("runId") == args.run_id]
+    existing_disposition = existing[0] if len(existing) == 1 else None
+    if (
+        isinstance(existing_disposition, dict)
+        and existing_disposition.get("invalidationMode")
+        == "invalid-current-nonauthorizing"
+        and args.started_at is None
+        and args.updated_at is None
+    ):
+        started_at = existing_disposition.get("startedAt")
+        updated_at = existing_disposition.get("updatedAt")
+    else:
+        started_at = args.started_at or utc_timestamp()
+        updated_at = args.updated_at or started_at
+    event = {
+        "schemaVersion": 2,
+        "runId": args.run_id,
+        "workItem": item.name,
+        "role": "lead",
+        "executionRole": "main",
+        "status": "completed",
+        "gate": "none",
+        "scope": ["ledger-recovery:invalid-current-nonauthorizing"],
+        "eventKind": "closure-invalidation",
+        "invalidationMode": "invalid-current-nonauthorizing",
+        "invalidatesRawLineOrdinal": args.target_raw_line_ordinal,
+        "invalidatesRunId": args.target_run_id,
+        "invalidatesEventSha256": args.target_event_sha256,
+        "authorizing": False,
+        "evidence": [parse_evidence(value) for value in args.evidence],
+        "startedAt": started_at,
+        "updatedAt": updated_at,
+    }
+
+    def validate_candidate(_candidate: Path, expected: bytes) -> tuple[str, ...]:
+        return validator.validate_invalid_current_disposition_candidate(
+            item,
+            expected,
+            event,
+            ledger_manifest_bytes=manifest_bytes,
+        )
+
+    def is_replay(previous: bytes) -> bool:
+        replay_errors: list[str] = []
+        current = validator.load_jsonl(
+            item / "agent-runs.jsonl", replay_errors, None, previous
+        )
+        return not replay_errors and any(candidate == event for candidate in current) and not (
+            validator.validate_invalid_current_disposition_candidate(
+                item,
+                previous,
+                event,
+                ledger_manifest_bytes=manifest_bytes,
+            )
+        )
+
+    return _commit_recovery_append(
+        item,
+        event,
+        validate_candidate,
+        INVALID_CURRENT_DISPOSITION_SUCCESS_MARKER,
+        args.inject_failure,
+        replay_detector=is_replay,
+    )
 
 
 def _fmt_counts(counts: dict[str, int]) -> str:
@@ -881,6 +990,25 @@ def build_parser() -> argparse.ArgumentParser:
     recovery.add_argument("--updated-at")
     recovery.add_argument("--inject-failure", choices=["pre-replace", "post-replace-readback"], help=argparse.SUPPRESS)
     recovery.set_defaults(func=command_recover_invalid_closure)
+
+    disposition = subparsers.add_parser(
+        "dispose-invalid-current",
+        help="Append one exact nonauthorizing invalid-current suffix disposition",
+    )
+    disposition.add_argument("--run-id", required=True)
+    disposition.add_argument("--target-run-id", required=True)
+    disposition.add_argument("--target-raw-line-ordinal", type=int, required=True)
+    disposition.add_argument("--target-event-sha256", required=True)
+    disposition.add_argument("--ledger-manifest", type=Path, required=True)
+    disposition.add_argument("--evidence", action="append", required=True)
+    disposition.add_argument("--started-at")
+    disposition.add_argument("--updated-at")
+    disposition.add_argument(
+        "--inject-failure",
+        choices=["pre-replace", "post-replace-readback"],
+        help=argparse.SUPPRESS,
+    )
+    disposition.set_defaults(func=command_dispose_invalid_current)
 
     rollup = subparsers.add_parser("rollup", help="Aggregate ledger events (one work-item via --work-item, or all active via --root)")
     rollup.add_argument("--root", type=Path, default=Path("."), help="Repository root for an all-active rollup (when --work-item is omitted).")

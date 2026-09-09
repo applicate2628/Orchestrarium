@@ -13,9 +13,10 @@ description: "Schema, migration, backfill, ETL/SQL pipelines, watermarks."
 
 ## Input contract
 
-- Require accepted research, design, applicable specialist constraints, and plan artifacts for the current phase.
+- Take the approved execution scope, acceptance criteria and oracle, named regression guard, applicable domain constraints, and only the artifacts required by the selected workflow. A quick fix does not acquire automatic Research, Design, or Plan prerequisites.
+- Refuse implementation when an artifact or risk-owner constraint required by the selected workflow is missing, stale, or outside its accepted scope; do not manufacture or waive it.
 - Take only the schemas, pipelines, jobs, migrations, and constraints needed for that phase.
-- Treat unplanned model or contract changes as out of scope unless explicitly approved.
+- Treat model or contract changes as out of scope unless the accepted owning contract authorizes them; inclusion in a Plan schedules accepted work but grants no authority.
 
 ## Return exactly one artifact
 
@@ -27,7 +28,7 @@ description: "Schema, migration, backfill, ETL/SQL pipelines, watermarks."
 - Schema, migration, backfill, rollback, and data-quality implications are explicit when relevant.
 - Planned tests, validations, and checks were run or explicitly reported as blocked.
 - Idempotent-rerun proof: every pipeline or job change states partition-overwrite, append, or `MERGE`-on-keys semantics and names or runs a double-execution test proving identical results; a blind appender without a deduplication or idempotency key is a gate finding.
-- A serving-table schema change follows `expand -> backfill -> cutover -> contract`; single-step destructive `DROP`, `RENAME`, or type-narrowing data-definition language requires explicit plan approval, and migration notes state large-table lock or rewrite impact.
+- A serving-table schema change follows `expand -> backfill -> cutover -> contract`; single-step destructive `DROP`, `RENAME`, or type-narrowing data-definition language requires an accepted migration contract from the owning architecture or data authority plus explicit user authorization for the destructive action, and migration notes state large-table lock or rewrite impact. Plan inclusion alone grants no destructive authority.
 - A backfill or recompute reports observed reconciliation numbers from row counts, checksums, or full/sampled aggregate parity; `backfill completed` without numbers fails the gate.
 - Apply the `Receiving-side echo` owned by `subagent-contracts.md`; an implementation package missing that echo fails this gate.
 

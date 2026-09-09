@@ -245,8 +245,10 @@ docstring and the module docstring's "A CRASH WHILE DECIDING" note above):
      boundaries remain explicit provenance. No detected push or candidate → exit 0.
   5. Every exact direct push proving a standalone positive long `--dry-run`,
      with no negation, ambiguous option role, or conservative candidate → exit 0.
-  6. If `transcript_path` is missing, unreadable, invalid, or exceeds the
-     bounded full-history limits → deny with `PRG-TRANSCRIPT-UNAVAILABLE`.
+  6. Missing, unreadable, or invalid transcript data denies with
+     `PRG-TRANSCRIPT-UNAVAILABLE`. When full history exceeds its bound, a
+     readable stable suffix with no active grant denies with
+     `PRG-TRANSCRIPT-HISTORY-LIMIT`; an active suffix grant keeps its strict route.
   7. If the LAST GENUINE USER MESSAGE contains `[approve-publication]` AND
      that message is no longer than MARKER_MAX_MESSAGE_LENGTH characters →
      exit 0. The marker is honored ONLY from the user's own text — never from
@@ -3055,7 +3057,7 @@ def evaluate_heavy(preflight: PreflightResult) -> bool:
             preflight.repository_workdir, preflight.repository_workdir_source,
         )
     if suffix_recovery:
-        raise PrRouteDenied("PRG-TRANSCRIPT-UNAVAILABLE")
+        raise PrRouteDenied("PRG-TRANSCRIPT-HISTORY-LIMIT")
     grammar = preflight.generic_decision
     if preflight.push_instruction:
         if grammar.status != "PGG-ADMISSIBLE" or grammar.binding is None:
@@ -3121,6 +3123,7 @@ def compose_gate_result(preflight: PreflightResult) -> int:
         **SCAN_DENIAL_REASONS,
         "PRG-AUTH-MALFORMED": "Use the exact version-1 PR approval or revocation line in a genuine user message.",
         "PRG-TRANSCRIPT-UNAVAILABLE": "Retry from a readable current session transcript; summaries cannot authorize publication.",
+        "PRG-TRANSCRIPT-HISTORY-LIMIT": "History exceeds the bounded PR-grant window and the readable suffix has no active grant. For one generic push, the user must send a new genuine message containing `[approve-publication]`; older approvals, summaries, assistant text, and tool output do not authorize.",
         "PRG-COMMAND-SHAPE": "Use one exact absolute Git literal: `git push <remote> HEAD:refs/heads/<head>` or `git -C <absolute-root> push <remote> HEAD:refs/heads/<head>`.",
         "PRG-PR-UNAVAILABLE": "Restore authenticated GitHub state access, then retry so the pull request can be checked afresh.",
         "PRG-PR-STATE": "The pull request is not open; obtain a new grant only for an open pull request.",

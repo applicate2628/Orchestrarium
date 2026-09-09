@@ -13,9 +13,10 @@ description: "Backend engineer: implement approved server-side phases."
 
 ## Input contract
 
-- Require accepted research, design, applicable specialist constraints, and plan artifacts for the current phase.
+- Take the approved execution scope, acceptance criteria and oracle, named regression guard, applicable domain constraints, and only the artifacts required by the selected workflow. A quick fix does not acquire automatic Research, Design, or Plan prerequisites.
+- Refuse implementation when an artifact or risk-owner constraint required by the selected workflow is missing, stale, or outside its accepted scope; do not manufacture or waive it.
 - Take only the files, interfaces, and constraints needed for that phase.
-- Treat architecture changes as out of scope unless the plan explicitly includes them.
+- Treat architecture changes as out of scope unless the accepted architecture contract authorizes them; inclusion in a Plan schedules accepted work but grants no authority.
 
 ## Return exactly one artifact
 

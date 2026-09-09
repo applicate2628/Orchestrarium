@@ -4,7 +4,7 @@
 New formal loops use schema V2 and cannot expose launch receipts until a
 frozen artifact and the complete round admission have been atomically written,
 read back, and validated.  Legacy V1 records remain readable by the repository
-validator but are never mutated implicitly.
+validator but are never mutated implicitly.  Delta-round fields extend V2; older owners intentionally reject them.
 """
 from __future__ import annotations
 
@@ -39,10 +39,11 @@ TOP_FIELDS = {
     "schema_version", "loop_id", "objective", "scope", "runtime_root",
     "status", "operations", "rounds",
 }
-ROUND_FIELDS = {
+ROUND_REQUIRED_FIELDS = {
     "round", "phase", "diff", "artifact", "surgical", "deep", "scout",
     "lane_failures", "evidence",
 }
+ROUND_FIELDS = ROUND_REQUIRED_FIELDS | {"coverage"}
 ARTIFACT_FIELDS = {"kind", "revision", "snapshot", "source"}
 ATTEMPT_BASE_FIELDS = {"attempt_id", "artifact_revision", "state"}
 VERDICT_RESULT_FIELDS = {
@@ -50,6 +51,9 @@ VERDICT_RESULT_FIELDS = {
     "verification_adequate",
 }
 SCOUT_RESULT_FIELDS = {"findings", "reconciliation"}
+COVERAGE_FIELDS = {"mode", "affected_lanes", "source_round", "source_revision"}
+RETAINED_FIELDS = {"state", "applies_to_revision", "retained_from"}
+RETAINED_FROM_FIELDS = {"round", "artifact_revision"}
 FAILURE_FIELDS = {
     "lane", "attempt_id", "artifact_revision", "failure", "redispatched_as",
 }
@@ -293,6 +297,36 @@ def _analyze_lane_retry_chain(
     return errors, frozenset(nodes), edge_count
 
 
+def _effective_lane(rounds: list[Any], round_index: int, lane: str) -> dict[str, Any] | None:
+    for _ in rounds:
+        if not 0 <= round_index < len(rounds) or not isinstance(rounds[round_index], dict):
+            return None
+        rnd = rounds[round_index]
+        block = rnd.get(lane)
+        if not isinstance(block, dict):
+            return None
+        if block.get("state") != "retained":
+            return block
+        retained_from = block.get("retained_from")
+        if not isinstance(retained_from, dict):
+            return None
+        source_round = retained_from.get("round")
+        if type(source_round) is not int or not 1 <= source_round <= round_index:
+            return None
+        round_index = source_round - 1
+    return None
+
+
+def _scout_reconciled(block: dict[str, Any] | None) -> bool:
+    findings = block.get("findings") if isinstance(block, dict) else None
+    reconciliation = block.get("reconciliation") if isinstance(block, dict) else None
+    return bool(
+        isinstance(block, dict) and block.get("state") == "complete"
+        and isinstance(findings, list) and isinstance(reconciliation, list)
+        and len(reconciliation) >= len(findings)
+    )
+
+
 def validate_v2(data: Any, cap: int = REVIEW_LOOP_ROUND_CAP, require_terminal: bool = False) -> list[str]:
     errors: list[str] = []
     if not isinstance(data, dict):
@@ -341,7 +375,7 @@ def validate_v2(data: Any, cap: int = REVIEW_LOOP_ROUND_CAP, require_terminal: b
             errors.append(f"{label}: expected object")
             continue
         _fields(rnd, ROUND_FIELDS, label, errors)
-        if set(rnd) != ROUND_FIELDS:
+        if not ROUND_REQUIRED_FIELDS <= set(rnd):
             errors.append(f"{label}: required round fields are missing")
         if rnd.get("round") != index:
             errors.append(f"{label}.round: expected {index}")
@@ -370,12 +404,81 @@ def validate_v2(data: Any, cap: int = REVIEW_LOOP_ROUND_CAP, require_terminal: b
                     errors.append(f"{label}.artifact.snapshot: forbidden for git commit")
             else:
                 errors.append(f"{label}.artifact.kind: invalid value")
+        has_coverage = "coverage" in rnd
+        coverage = rnd.get("coverage")
+        affected_lanes = set(LANES)
+        prior = rounds[index - 2] if index > 1 else None
+        prior_artifact = prior.get("artifact") if isinstance(prior, dict) else None
+        prior_revision = prior_artifact.get("revision") if isinstance(prior_artifact, dict) else None
+        if has_coverage:
+            if not isinstance(coverage, dict):
+                errors.append(f"{label}.coverage: expected object")
+                affected_lanes = set()
+            else:
+                _fields(coverage, COVERAGE_FIELDS, f"{label}.coverage", errors)
+                lanes = coverage.get("affected_lanes")
+                canonical_lanes = [lane for lane in LANES if isinstance(lanes, list) and lane in lanes]
+                if set(coverage) != COVERAGE_FIELDS:
+                    errors.append(f"{label}.coverage: required fields are missing")
+                if (
+                    coverage.get("mode") != "delta"
+                    or lanes != canonical_lanes
+                    or not canonical_lanes
+                    or len(canonical_lanes) == len(LANES)
+                ):
+                    errors.append(f"{label}.coverage.affected_lanes: expected unique canonical strict subset")
+                affected_lanes = set(canonical_lanes)
+                if type(coverage.get("source_round")) is not int or coverage.get("source_round") != index - 1:
+                    errors.append(f"{label}.coverage.source_round: must be immediate previous round")
+                if coverage.get("source_revision") != prior_revision:
+                    errors.append(f"{label}.coverage.source_revision: mismatch")
+                if not isinstance(prior, dict) or prior.get("phase") != "complete":
+                    errors.append(f"{label}.coverage: source round must be complete")
+        failures = rnd.get("lane_failures")
+        if not isinstance(failures, list):
+            errors.append(f"{label}.lane_failures: expected list")
+            failures = []
         current_attempts: dict[str, str] = {}
         for lane in LANES:
             block = rnd.get(lane)
             lane_label = f"{label}.{lane}"
             if not isinstance(block, dict):
                 errors.append(f"{lane_label}: expected object")
+                continue
+            if has_coverage and lane not in affected_lanes:
+                _fields(block, RETAINED_FIELDS, lane_label, errors)
+                if set(block) != RETAINED_FIELDS or block.get("state") != "retained":
+                    errors.append(f"{lane_label}: expected retained reference only")
+                    continue
+                if block.get("applies_to_revision") != revision:
+                    errors.append(f"{lane_label}.applies_to_revision: mismatch")
+                retained_from = block.get("retained_from")
+                if not isinstance(retained_from, dict):
+                    errors.append(f"{lane_label}.retained_from: expected object")
+                    continue
+                _fields(retained_from, RETAINED_FROM_FIELDS, f"{lane_label}.retained_from", errors)
+                if (
+                    set(retained_from) != RETAINED_FROM_FIELDS
+                    or type(retained_from.get("round")) is not int
+                    or retained_from.get("round") != index - 1
+                    or retained_from.get("artifact_revision") != prior_revision
+                ):
+                    errors.append(f"{lane_label}.retained_from: immediate source mismatch")
+                effective = _effective_lane(rounds, index - 2, lane)
+                if lane in VERDICT_LANES:
+                    if not (
+                        isinstance(effective, dict)
+                        and effective.get("state") == "complete"
+                        and effective.get("verdict") == "PASS"
+                    ):
+                        errors.append(f"{lane_label}: retained verdict must resolve to PASS")
+                elif not _scout_reconciled(effective):
+                    errors.append(f"{lane_label}: retained scout must be reconciled")
+                if any(
+                    isinstance(item, dict) and item.get("lane") == lane
+                    for item in failures
+                ):
+                    errors.append(f"{lane_label}: retained lane cannot have failures")
                 continue
             allowed = ATTEMPT_BASE_FIELDS | (VERDICT_RESULT_FIELDS if lane in VERDICT_LANES else SCOUT_RESULT_FIELDS)
             _fields(block, allowed, lane_label, errors)
@@ -406,10 +509,7 @@ def validate_v2(data: Any, cap: int = REVIEW_LOOP_ROUND_CAP, require_terminal: b
                 errors.append(f"{lane_label}: result fields are legal only when complete")
         if len(set(current_attempts.values())) != len(current_attempts):
             errors.append(f"{label}: attempt IDs must be unique")
-        failures = rnd.get("lane_failures")
-        if not isinstance(failures, list):
-            errors.append(f"{label}.lane_failures: expected list")
-        else:
+        if isinstance(rnd.get("lane_failures"), list):
             for failure_index, failure in enumerate(failures):
                 failure_label = f"{label}.lane_failures[{failure_index}]"
                 if not isinstance(failure, dict):
@@ -428,6 +528,8 @@ def validate_v2(data: Any, cap: int = REVIEW_LOOP_ROUND_CAP, require_terminal: b
                     errors.append(f"{failure_label}.redispatched_as: expected non-empty attempt id")
         chain_owners: dict[str, str] = {}
         for lane in LANES:
+            if isinstance(rnd.get(lane), dict) and rnd[lane].get("state") == "retained":
+                continue
             chain_errors, attempts, _edge_count = _analyze_lane_retry_chain(rnd, lane)
             for error in chain_errors:
                 errors.append(f"{label}.{lane}: {error}")
@@ -440,7 +542,8 @@ def validate_v2(data: Any, cap: int = REVIEW_LOOP_ROUND_CAP, require_terminal: b
                     )
         if not isinstance(rnd.get("evidence"), list):
             errors.append(f"{label}.evidence: expected list")
-        if phase == "complete" and any(isinstance(rnd.get(lane), dict) and rnd[lane].get("state") != "complete" for lane in LANES):
+        effective = [_effective_lane(rounds, index - 1, lane) for lane in LANES]
+        if phase == "complete" and any(not isinstance(block, dict) or block.get("state") != "complete" for block in effective):
             errors.append(f"{label}: complete round has incomplete lane")
     return errors
 
@@ -939,9 +1042,9 @@ def _freeze_git(revision_arg: str, root: Path) -> dict[str, Any]:
     return {"kind": "git-commit", "revision": f"git:{object_id}"}
 
 
-def _new_round(number: int, diff: str, artifact: dict[str, Any]) -> dict[str, Any]:
+def _new_round(number: int, diff: str, artifact: dict[str, Any], *, prior: dict[str, Any] | None = None, affected_lanes: tuple[str, ...] | None = None) -> dict[str, Any]:
     revision = artifact["revision"]
-    return {
+    rnd = {
         "round": number,
         "phase": "admitted",
         "diff": diff,
@@ -957,6 +1060,29 @@ def _new_round(number: int, diff: str, artifact: dict[str, Any]) -> dict[str, An
         "lane_failures": [],
         "evidence": [],
     }
+    if affected_lanes is None:
+        return rnd
+    if prior is None:
+        raise StateError("RLSTATE_INVALID", "delta round requires a source round")
+    source_revision = prior["artifact"]["revision"]
+    affected = set(affected_lanes)
+    rnd["coverage"] = {
+        "mode": "delta",
+        "affected_lanes": list(affected_lanes),
+        "source_round": prior["round"],
+        "source_revision": source_revision,
+    }
+    for lane in LANES:
+        if lane not in affected:
+            rnd[lane] = {
+                "state": "retained",
+                "applies_to_revision": revision,
+                "retained_from": {
+                    "round": prior["round"],
+                    "artifact_revision": source_revision,
+                },
+            }
+    return rnd
 
 
 def _round(data: dict[str, Any], number: int) -> dict[str, Any]:
@@ -965,10 +1091,19 @@ def _round(data: dict[str, Any], number: int) -> dict[str, Any]:
     return data["rounds"][number - 1]
 
 
+def _resolved_lane(data: dict[str, Any], rnd: dict[str, Any], lane: str) -> dict[str, Any]:
+    block = _effective_lane(data["rounds"], rnd["round"] - 1, lane)
+    if block is None:
+        raise StateError("RLSTATE_INVALID", f"round={rnd['round']} lane={lane} retention is invalid")
+    return block
+
+
 def _attempt(rnd: dict[str, Any], lane: str, attempt_id: str) -> dict[str, Any]:
     if lane not in LANES:
         raise StateError("RLSTATE_ATTEMPT_MISMATCH", "lane is invalid")
     block = rnd[lane]
+    if block.get("state") == "retained":
+        raise StateError("RLSTATE_ATTEMPT_MISMATCH", f"round={rnd['round']} lane={lane} is retained")
     if block["attempt_id"] != attempt_id:
         raise StateError("RLSTATE_ATTEMPT_MISMATCH", f"round={rnd['round']} lane={lane}")
     return block
@@ -1170,7 +1305,7 @@ def command_complete_round(args: argparse.Namespace) -> dict[str, Any]:
     payload = {"round": args.round}
     def transition(data: dict[str, Any], root: Path, _reviews: Path, state: Path) -> dict[str, Any]:
         rnd = _round(data, args.round)
-        if any(rnd[lane]["state"] != "complete" for lane in LANES):
+        if any(_resolved_lane(data, rnd, lane)["state"] != "complete" for lane in LANES):
             raise StateError("RLSTATE_UNRESOLVED_FAILURE", "not every lane has a substantive result")
         if any(not _nonempty(item.get("redispatched_as")) for item in rnd["lane_failures"]):
             raise StateError("RLSTATE_UNRESOLVED_FAILURE", "failed lane lacks a successful retry")
@@ -1182,13 +1317,21 @@ def command_complete_round(args: argparse.Namespace) -> dict[str, Any]:
 def command_next_round(args: argparse.Namespace) -> dict[str, Any]:
     diff = _read_input(args.diff_file, "diff")
     root, reviews, state = _state_context(args.state)
+    requested = tuple(lane for lane in LANES if lane in args.affected_lane)
+    if len(args.affected_lane) != len(requested) or len(requested) == len(LANES):
+        raise StateError("RLSTATE_INVALID", "affected lanes must be a unique non-empty strict subset")
     source_identity = {"artifact_file": _sha256(Path(args.artifact_file))} if args.artifact_file else {"git_revision": args.git_revision}
     payload = {"diff": diff, **source_identity}
+    if requested:
+        payload["affected_lanes"] = list(requested)
     created: Path | None = None
     def transition(data: dict[str, Any], root: Path, reviews: Path, state: Path) -> dict[str, Any]:
         nonlocal created
         prior = data["rounds"][-1]
-        if prior["phase"] != "complete" or not any(prior[lane].get("verdict") == "REVISE" for lane in VERDICT_LANES):
+        if prior["phase"] != "complete" or not any(
+            _resolved_lane(data, prior, lane).get("verdict") == "REVISE"
+            for lane in VERDICT_LANES
+        ):
             raise StateError("RLSTATE_INVALID", "next round requires a complete REVISE round")
         number = len(data["rounds"]) + 1
         if number > REVIEW_LOOP_ROUND_CAP:
@@ -1197,9 +1340,15 @@ def command_next_round(args: argparse.Namespace) -> dict[str, Any]:
             artifact, created = _freeze_snapshot(args.artifact_file, root, reviews, data["loop_id"], number)
         else:
             artifact = _freeze_git(args.git_revision, root)
-        rnd = _new_round(number, diff, artifact)
+        rnd = _new_round(number, diff, artifact, prior=prior if requested else None, affected_lanes=requested or None)
         data["rounds"].append(rnd)
-        return _receipt("next-round", root, state, data, rnd, attempts={lane: rnd[lane]["attempt_id"] for lane in LANES})
+        errors = validate_v2(data)
+        if errors:
+            raise StateError("RLSTATE_INVALID", errors[0])
+        extra: dict[str, Any] = {"attempts": {lane: rnd[lane]["attempt_id"] for lane in LANES if rnd[lane]["state"] != "retained"}}
+        if "coverage" in rnd:
+            extra["coverage"] = rnd["coverage"]
+        return _receipt("next-round", root, state, data, rnd, **extra)
     try:
         return _mutate(args, "next-round", payload, transition)
     except BaseException:
@@ -1215,11 +1364,12 @@ def command_close(args: argparse.Namespace) -> dict[str, Any]:
         if rnd["phase"] != "complete":
             raise StateError("RLSTATE_INVALID", "terminal outcome requires a complete round")
         if args.outcome == "converged":
-            if any(rnd[lane].get("verdict") != "PASS" for lane in VERDICT_LANES):
+            if any(_resolved_lane(data, rnd, lane).get("verdict") != "PASS" for lane in VERDICT_LANES):
                 raise StateError("RLSTATE_INVALID", "converged requires a complete PASS round")
-            if rnd["scout"].get("findings") and len(rnd["scout"].get("reconciliation", [])) < len(rnd["scout"]["findings"]):
+            scout = _resolved_lane(data, rnd, "scout")
+            if not _scout_reconciled(scout):
                 raise StateError("RLSTATE_INVALID", "scout findings remain unreconciled")
-        elif not any(rnd[lane].get("verdict") == "REVISE" for lane in VERDICT_LANES):
+        elif not any(_resolved_lane(data, rnd, lane).get("verdict") == "REVISE" for lane in VERDICT_LANES):
             raise StateError("RLSTATE_INVALID", f"{args.outcome} requires a complete REVISE round")
         data["status"] = args.outcome
         return _receipt("close", root, state, data, rnd, outcome=args.outcome)
@@ -1450,6 +1600,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     next_round = state_parser("next-round", operation=True)
     next_round.add_argument("--diff-file", required=True)
+    coverage = next_round.add_mutually_exclusive_group()
+    coverage.add_argument("--full-review", action="store_true")
+    coverage.add_argument("--affected-lane", action="append", choices=LANES, default=[])
     next_artifact = next_round.add_mutually_exclusive_group(required=True)
     next_artifact.add_argument("--artifact-file")
     next_artifact.add_argument("--git-revision")

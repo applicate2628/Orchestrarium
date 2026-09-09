@@ -29,7 +29,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
-from typing import Iterable
+from typing import Iterable, Literal
 
 
 README_BEGIN = "<!-- BEGIN GENERATED WORK-ITEMS STATUS -->"
@@ -1550,7 +1550,15 @@ def _validate_current_decision_h1(
         )
 
     first = logical_lines[2]
-    if DECISION_H1_PLAIN_FIELD_RE.fullmatch(first):
+    list_metadata = DECISION_LIST_FIELD_RE.fullmatch(first) is not None
+    if list_metadata:
+        if h1_cutover_date is None:
+            raise LifecycleError(
+                "WI-DECISION-H1-MANIFEST-MISSING",
+                f"decision:{slug} list metadata requires the H1 compatibility manifest",
+            )
+        field_re = DECISION_LIST_FIELD_RE
+    elif DECISION_H1_PLAIN_FIELD_RE.fullmatch(first):
         field_re = DECISION_H1_PLAIN_FIELD_RE
     elif DECISION_H1_BOLD_FIELD_RE.fullmatch(first):
         field_re = DECISION_H1_BOLD_FIELD_RE
@@ -1562,6 +1570,7 @@ def _validate_current_decision_h1(
 
     fields: dict[str, str] = {}
     normalized_keys: dict[str, str] = {}
+    field_order: list[str] = []
     raw_status: str | None = None
     for index, line in enumerate(logical_lines[2:prefix_end], start=3):
         if "\t" in line or not line or line[:1].isspace():
@@ -1589,7 +1598,18 @@ def _validate_current_decision_h1(
             )
         normalized_keys[normalized] = key
         fields[key] = value
-        if index == 3:
+        field_order.append(normalized)
+        if list_metadata and not value:
+            failure_id = (
+                "WI-DECISION-H1-STATUS-UNSUPPORTED"
+                if normalized == "status"
+                else "WI-DECISION-H1-SCHEMA-INVALID"
+            )
+            raise LifecycleError(
+                failure_id,
+                f"decision:{slug} has an empty H1 list field '{key}' at line {index}",
+            )
+        if not list_metadata and index == 3:
             if normalized != "status":
                 raise LifecycleError(
                     "WI-DECISION-H1-STATUS-UNSUPPORTED",
@@ -1597,18 +1617,43 @@ def _validate_current_decision_h1(
                 )
             raw_status = value
 
-    if raw_status is None or len([key for key in normalized_keys if key == "status"]) != 1:
+    if list_metadata:
+        if not field_order or field_order[0] != "id":
+            raise LifecycleError(
+                "WI-DECISION-H1-SCHEMA-INVALID",
+                f"decision:{slug} requires id as its first H1 list field",
+            )
+        if len(field_order) < 2 or field_order[1] != "status":
+            raise LifecycleError(
+                "WI-DECISION-H1-STATUS-UNSUPPORTED",
+                f"decision:{slug} requires status as its second H1 list field",
+            )
+        identity = fields[normalized_keys["id"]]
+        if identity != slug:
+            raise LifecycleError(
+                "WI-DECISION-IDENTITY-MISMATCH",
+                f"decision:{slug} id does not match its filename",
+            )
+        raw_status = fields[normalized_keys["status"]]
+        admitted = raw_status
+        if admitted not in {"accepted", "proposed"}:
+            raise LifecycleError(
+                "WI-DECISION-H1-STATUS-UNSUPPORTED",
+                f"decision:{slug} has an unsupported H1 status value",
+            )
+    elif raw_status is None or len([key for key in normalized_keys if key == "status"]) != 1:
         raise LifecycleError(
             "WI-DECISION-H1-STATUS-UNSUPPORTED",
             f"decision:{slug} requires exactly one first H1 status field",
         )
-    status_word = re.match(r"^([A-Za-z]+)(?:\s|$)", raw_status)
-    admitted = status_word.group(1).casefold() if status_word else ""
-    if admitted not in {"accepted", "proposed"}:
-        raise LifecycleError(
-            "WI-DECISION-H1-STATUS-UNSUPPORTED",
-            f"decision:{slug} has an unsupported H1 status token",
-        )
+    else:
+        status_word = re.match(r"^([A-Za-z]+)(?:\s|$)", raw_status)
+        admitted = status_word.group(1).casefold() if status_word else ""
+        if admitted not in {"accepted", "proposed"}:
+            raise LifecycleError(
+                "WI-DECISION-H1-STATUS-UNSUPPORTED",
+                f"decision:{slug} has an unsupported H1 status token",
+            )
 
     filename_date, _suffix = _decision_filename_date_suffix(slug)
     if h1_cutover_date is not None:
@@ -1717,6 +1762,8 @@ def _validate_current_decision_h1_manifest_record(
 def _verify_current_decision_compatibility_manifest(
     root: Path,
     profile: DecisionCompatibilityProfile,
+    *,
+    manifest_bytes: bytes | None = None,
 ) -> dict[str, CurrentDecisionRecord]:
     def manifest_invalid(message: str) -> LifecycleError:
         return LifecycleError(profile.manifest_invalid_failure_id, message)
@@ -1737,7 +1784,7 @@ def _verify_current_decision_compatibility_manifest(
         name for name, selected in formats.items() if selected == profile.format
     )
     manifest_path = work_items / profile.manifest_name
-    if not manifest_path.is_file():
+    if manifest_bytes is None and not manifest_path.is_file():
         if discovered:
             raise LifecycleError(
                 profile.manifest_missing_failure_id,
@@ -1745,8 +1792,13 @@ def _verify_current_decision_compatibility_manifest(
             )
         return {}
     try:
+        encoded = (
+            manifest_path.read_bytes()
+            if manifest_bytes is None
+            else manifest_bytes
+        )
         payload = json.loads(
-            manifest_path.read_text(encoding="utf-8"),
+            encoded.decode("utf-8"),
             object_pairs_hook=_decision_compatibility_json_object,
         )
     except (
@@ -1921,7 +1973,11 @@ def _preflight_current_decision_v0(root: Path) -> dict[str, CurrentDecisionRecor
     )
 
 
-def _preflight_current_decision_h1(root: Path) -> dict[str, CurrentDecisionRecord]:
+def _preflight_current_decision_h1(
+    root: Path,
+    *,
+    manifest_bytes: bytes | None = None,
+) -> dict[str, CurrentDecisionRecord]:
     return _verify_current_decision_compatibility_manifest(
         root,
         DecisionCompatibilityProfile(
@@ -1940,6 +1996,7 @@ def _preflight_current_decision_h1(root: Path) -> dict[str, CurrentDecisionRecor
             retired_reappeared_failure_id="WI-DECISION-H1-RETIRED-REAPPEARED",
             validate_record=_validate_current_decision_h1_manifest_record,
         ),
+        manifest_bytes=manifest_bytes,
     )
 
 
@@ -2647,11 +2704,16 @@ def render_readme_bytes(
         for entry in by_section[section]:
             marker = "x" if entry.checked else " "
             link = _relative_link(work_items, entry.link)
-            detail_parts = [
-                part for part in (entry.detail, entry.classification) if part
-            ]
+            if entry.section == "Recently completed" and entry.link.name == "closure.md":
+                label = entry.logical_reference.removeprefix("work-item:")
+                detail_parts = [entry.classification] if entry.classification else []
+            else:
+                label = entry.label
+                detail_parts = [
+                    part for part in (entry.detail, entry.classification) if part
+                ]
             detail = f" — {' — '.join(detail_parts)}" if detail_parts else ""
-            lines.append(f"- [{marker}] [{entry.label}]({link}){detail}")
+            lines.append(f"- [{marker}] [{label}]({link}){detail}")
         lines.append("")
     lines.append(README_END)
     static_guide = (
@@ -9633,8 +9695,15 @@ def _projection_fail(failure_id: str, message: str) -> None:
 
 def _projection_object(data: bytes, label: str) -> dict:
     try:
-        value = json.loads(data.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        value = json.loads(
+            data.decode("utf-8"),
+            object_pairs_hook=_decision_compatibility_json_object,
+        )
+    except (
+        UnicodeDecodeError,
+        json.JSONDecodeError,
+        _DecisionCompatibilityManifestDuplicateKey,
+    ) as exc:
         _projection_fail("WI-LEDGER-MIGRATION-MANIFEST-INVALID", f"{label} is not one JSON object")
         raise AssertionError from exc
     if not isinstance(value, dict):
@@ -10240,6 +10309,1086 @@ def revoke_legacy_ledger_projection(root: Path, apply_operation_id: str, apply_r
     return _revoke_legacy_ledger_projection_transaction(root, apply_operation_id, apply_record_sha256, expected_registry_sha256, operation_id, recorded_at)
 
 
+@dataclass(frozen=True)
+class SealedPrefixActivationRequestV1:
+    h1_manifest_path: str
+    h1_manifest_bytes: bytes
+    ledger_manifest_path: str
+    ledger_manifest_bytes: bytes
+    expected_registry_sha256: str
+    recorded_at: str
+
+
+@dataclass(frozen=True)
+class SealedPrefixRevokeRequestV1:
+    apply_receipt_path: str
+    apply_receipt_sha256: str
+    expected_registry_sha256: str
+    recorded_at: str
+
+
+@dataclass(frozen=True)
+class SealedPrefixActivationPlanV1:
+    state: Literal["apply", "revoke"]
+    operation_group_id: str
+    member_operation_ids: tuple[str, str]
+    receipt_id: str
+    ledger_manifest_path: str
+    ledger_manifest_bytes: bytes
+    h1_manifest_path: str
+    h1_manifest_bytes: bytes
+    registry_before_sha256: str
+    registry_after_bytes: bytes
+    receipt_path: str
+    receipt_bytes: bytes
+    replay: bool
+
+
+_SEALED_PREFIX_POLICY = "2026-08-28-ledger-h1-compatibility-boundary"
+_SEALED_PREFIX_PROFILE = "sealed-active-prefix-v1"
+_SEALED_PREFIX_REGISTRY_PATH = f"work-items/{LEGACY_PROJECTION_REGISTRY}"
+_SEALED_PREFIX_FAILURE_BOUNDARIES = frozenset(
+    {
+        "after-ledger-manifest",
+        "after-h1-manifest",
+        "after-registry-readback",
+        "after-receipt-create",
+    }
+)
+
+
+def _sealed_prefix_digest(domain: str, value: object) -> str:
+    return hashlib.sha256(
+        domain.encode("ascii") + b"\0" + _projection_json(value)
+    ).hexdigest()
+
+
+def _sealed_prefix_repository(root: Path) -> tuple[Path, Path]:
+    work_items = _work_items_root(root)
+    repository = work_items.parent
+    _lifecycle_reject_unreduced_reparse(
+        repository,
+        failure_id="WI-LEDGER-MIGRATION-TARGET-IDENTITY",
+        message="sealed-prefix repository contains a link or reparse point",
+    )
+    return repository, work_items
+
+
+def _sealed_prefix_path(
+    repository: Path,
+    relative: str,
+    *,
+    prefix: tuple[str, ...],
+    failure_id: str,
+) -> Path:
+    if not isinstance(relative, str) or "\\" in relative:
+        _projection_fail(failure_id, "sealed-prefix path is not canonical repository-relative text")
+    pure = PurePosixPath(relative)
+    if (
+        pure.is_absolute()
+        or relative != pure.as_posix()
+        or any(part in {"", ".", ".."} for part in pure.parts)
+        or tuple(pure.parts[: len(prefix)]) != prefix
+    ):
+        _projection_fail(failure_id, "sealed-prefix path escapes its structural scope")
+    return _require_lifecycle_mutation_path(
+        repository,
+        repository.joinpath(*pure.parts),
+        failure_id=failure_id,
+    )
+
+
+def _sealed_prefix_existing_bytes(path: Path, failure_id: str) -> bytes | None:
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise LifecycleError(failure_id, "sealed-prefix participant cannot be inspected") from exc
+    if _lifecycle_path_has_reparse(path) or not stat.S_ISREG(info.st_mode):
+        _projection_fail(failure_id, "sealed-prefix participant is not a regular non-reparse file")
+    try:
+        return path.read_bytes()
+    except OSError as exc:
+        raise LifecycleError(failure_id, "sealed-prefix participant cannot be read") from exc
+
+
+def _sealed_prefix_manifest(request: SealedPrefixActivationRequestV1) -> dict:
+    if type(request) is not SealedPrefixActivationRequestV1:
+        _projection_fail("WI-LEDGER-MIGRATION-MANIFEST-INVALID", "activation request type is invalid")
+    if (
+        not isinstance(request.h1_manifest_bytes, bytes)
+        or not request.h1_manifest_bytes
+        or not isinstance(request.ledger_manifest_bytes, bytes)
+        or not request.ledger_manifest_bytes
+        or re.fullmatch(r"[0-9a-f]{64}", request.expected_registry_sha256) is None
+    ):
+        _projection_fail("WI-LEDGER-MIGRATION-MANIFEST-INVALID", "activation request byte/digest fields are invalid")
+    try:
+        _load_agent_run_ledger()._strict_migration_inputs(
+            "sealed-prefix-activation",
+            request.recorded_at,
+        )
+    except Exception as exc:
+        raise LifecycleError(
+            "WI-LEDGER-MIGRATION-TARGET-IDENTITY",
+            "activation recorded-at is not strict UTC",
+        ) from exc
+    manifest = _projection_object(request.ledger_manifest_bytes, "sealed-prefix ledger manifest")
+    required = {
+        "schemaVersion",
+        "manifestId",
+        "policyDecision",
+        "profiles",
+        "entries",
+        "openReviseIdentitySha256",
+        "openReviseOracleSha256",
+    }
+    if set(manifest) != required or manifest.get("schemaVersion") != 2:
+        _projection_fail("WI-LEDGER-MIGRATION-MANIFEST-INVALID", "sealed-prefix ledger manifest shape is invalid")
+    manifest_id = manifest.get("manifestId")
+    entries = manifest.get("entries")
+    if (
+        not isinstance(manifest_id, str)
+        or _PROJECTION_OPERATION_RE.fullmatch(manifest_id) is None
+        or manifest.get("policyDecision") != _SEALED_PREFIX_POLICY
+        or manifest.get("profiles")
+        != [{"profileId": _SEALED_PREFIX_PROFILE, "profileVersion": 1}]
+        or not isinstance(entries, list)
+        or len(entries) != 2
+        or any(not isinstance(entry, dict) for entry in entries)
+    ):
+        _projection_fail("WI-LEDGER-MIGRATION-MANIFEST-INVALID", "sealed-prefix ledger manifest identity/profile is invalid")
+    entry_ids = [entry.get("entryId") for entry in entries]
+    ledger_paths = [entry.get("ledgerPath") for entry in entries]
+    if (
+        any(not isinstance(value, str) or _PROJECTION_OPERATION_RE.fullmatch(value) is None for value in entry_ids)
+        or len(set(entry_ids)) != 2
+        or any(not isinstance(value, str) for value in ledger_paths)
+        or ledger_paths != sorted(ledger_paths, key=lambda value: value.encode("utf-8"))
+        or len(set(ledger_paths)) != 2
+    ):
+        _projection_fail("WI-LEDGER-COMPAT-MEMBER-ORDER", "sealed-prefix manifest entries are not uniquely ordered")
+    return manifest
+
+
+def _sealed_prefix_apply_records(
+    manifest: dict,
+    request: SealedPrefixActivationRequestV1,
+) -> tuple[str, tuple[str, str], tuple[bytes, bytes]]:
+    entries = manifest["entries"]
+    manifest_sha = _sha256_bytes(request.ledger_manifest_bytes)
+    h1_sha = _sha256_bytes(request.h1_manifest_bytes)
+    group_id = "g-" + _sealed_prefix_digest(
+        "orchestrarium:ledger-h1:registry-group:v1",
+        [
+            "apply",
+            _SEALED_PREFIX_POLICY,
+            manifest_sha,
+            h1_sha,
+            [entry["entryId"] for entry in entries],
+        ],
+    )
+    member_ids = tuple(
+        "m:" + _sealed_prefix_digest(
+            "orchestrarium:ledger-h1:activation-member:v1",
+            [group_id, index, entry["entryId"]],
+        )
+        for index, entry in enumerate(entries, start=1)
+    )
+    records = []
+    for index, (entry, operation_id) in enumerate(
+        zip(entries, member_ids),
+        start=1,
+    ):
+        records.append(
+            {
+                "schemaVersion": 2,
+                "operationId": operation_id,
+                "operationGroupId": group_id,
+                "groupMemberIndex": index,
+                "groupMemberCount": 2,
+                "state": "apply",
+                "profileId": _SEALED_PREFIX_PROFILE,
+                "profileVersion": 1,
+                "policyDecision": _SEALED_PREFIX_POLICY,
+                "manifestId": manifest["manifestId"],
+                "manifestSha256": manifest_sha,
+                "manifestEntryId": entry["entryId"],
+                "h1ManifestPath": request.h1_manifest_path,
+                "h1ManifestSha256": h1_sha,
+                "workItem": entry["workItem"],
+                "ledgerPath": entry["ledgerPath"],
+                "prefixLineCount": entry["prefixLineCount"],
+                "prefixByteLength": entry["prefixByteLength"],
+                "prefixSha256": entry["prefixSha256"],
+                "projectedViewSha256": entry["projectedViewSha256"],
+                "recordedAt": request.recorded_at,
+            }
+        )
+    lines = tuple(_projection_json(record) + b"\n" for record in records)
+    return group_id, member_ids, lines
+
+
+def _sealed_prefix_group_position(
+    registry_bytes: bytes,
+    group_id: str,
+    member_ids: tuple[str, str],
+    lines: tuple[bytes, bytes],
+) -> tuple[bytes, bool]:
+    physical = registry_bytes.splitlines(keepends=True)
+    parsed: list[dict] = []
+    for ordinal, line in enumerate(physical, start=1):
+        if not line.endswith(b"\n"):
+            _projection_fail("WI-LEDGER-COMPAT-ACTIVATION-PARTIAL", f"registry line {ordinal} is not LF-terminated")
+        parsed.append(_projection_object(line[:-1], f"sealed-prefix registry line {ordinal}"))
+    positions = [
+        index
+        for index, record in enumerate(parsed)
+        if record.get("operationGroupId") == group_id
+        or record.get("operationId") in member_ids
+    ]
+    if not positions:
+        return registry_bytes, False
+    if positions != [len(physical) - 2, len(physical) - 1]:
+        _projection_fail("WI-LEDGER-COMPAT-ACTIVATION-PARTIAL", "sealed-prefix group is partial, interleaved, or not the registry tail")
+    observed = tuple(physical[index] for index in positions)
+    if observed != lines:
+        _projection_fail("WI-LEDGER-COMPAT-REPLAY-MISMATCH", "sealed-prefix group identity has different bytes")
+    return b"".join(physical[: positions[0]]), True
+
+
+def _sealed_prefix_receipt(
+    *,
+    state: Literal["apply", "revoke"],
+    group_id: str,
+    member_ids: tuple[str, str],
+    member_lines: tuple[bytes, bytes],
+    policy: str,
+    ledger_manifest_path: str,
+    ledger_manifest_bytes: bytes,
+    h1_manifest_path: str,
+    h1_manifest_bytes: bytes,
+    registry_before: bytes,
+    registry_after: bytes,
+    recorded_at: str,
+) -> tuple[str, str, bytes]:
+    before_sha = _sha256_bytes(registry_before)
+    after_sha = _sha256_bytes(registry_after)
+    receipt_id = "r-" + _sealed_prefix_digest(
+        "orchestrarium:ledger-h1:receipt-id:v1",
+        [state, group_id, before_sha, after_sha],
+    )
+    receipt = {
+        "schemaVersion": 2,
+        "receiptId": receipt_id,
+        "state": state,
+        "operationGroupId": group_id,
+        "policyDecision": policy,
+        "ledgerManifestPath": ledger_manifest_path,
+        "ledgerManifestSha256": _sha256_bytes(ledger_manifest_bytes),
+        "h1ManifestPath": h1_manifest_path,
+        "h1ManifestSha256": _sha256_bytes(h1_manifest_bytes),
+        "memberOperationIds": list(member_ids),
+        "memberRecordSha256": [_sha256_bytes(line) for line in member_lines],
+        "registryBeforeSha256": before_sha,
+        "registryAfterSha256": after_sha,
+        "recordedAt": recorded_at,
+    }
+    relative = f"work-items/{LEGACY_PROJECTION_RECEIPTS}/{receipt_id}.json"
+    return receipt_id, relative, _projection_json(receipt) + b"\n"
+
+
+def _sealed_prefix_candidate_contexts(
+    repository: Path,
+    *,
+    ledger_bytes_by_path: Mapping[str, bytes],
+    h1_manifest_path: str,
+    h1_manifest_bytes: bytes,
+    ledger_manifest_path: str,
+    ledger_manifest_bytes: bytes,
+    registry_bytes: bytes,
+    receipt_bytes_by_path: Mapping[str, bytes],
+    expected_state: Literal["active", "revoked"],
+) -> Mapping[str, object]:
+    validator = _load_agent_run_ledger().load_validator()
+    artifacts = validator.LedgerCompatibilityArtifactSetV1(
+        MappingProxyType(dict(ledger_bytes_by_path)),
+        h1_manifest_path,
+        h1_manifest_bytes,
+        ledger_manifest_path,
+        ledger_manifest_bytes,
+        registry_bytes,
+        MappingProxyType(dict(receipt_bytes_by_path)),
+    )
+    contexts = validator._load_effective_ledger_group(
+        repository,
+        compatibility_artifacts=artifacts,
+    )
+    if set(contexts) != set(ledger_bytes_by_path):
+        failure_ids = {
+            failure
+            for context in contexts.values()
+            for failure in context.observation.failure_ids
+        }
+        failure = sorted(failure_ids)[0] if failure_ids else "WI-LEDGER-COMPAT-ACTIVATION-PARTIAL"
+        diagnostics = [
+            diagnostic
+            for context in contexts.values()
+            for diagnostic in context.observation.diagnostics
+        ]
+        _projection_fail(failure, "; ".join(diagnostics) or "reader rejected sealed-prefix candidate")
+    values = list(contexts.values())
+    if expected_state == "active":
+        if (
+            not values
+            or any(
+                context.observation.activation_state != "active"
+                or context.view is None
+                for context in values
+            )
+            or len({id(context.invocation_token) for context in values}) != 1
+        ):
+            _projection_fail("WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS", "reader did not return one active shared-token group")
+    elif (
+        not values
+        or any(
+            context.observation.activation_state != "revoked"
+            or context.view is not None
+            or any(
+                any(
+                    (
+                        row.authority.launch_eligible,
+                        row.authority.terminal_eligible,
+                        row.authority.revise_target_eligible,
+                        row.authority.closer_eligible,
+                        row.authority.artifact_evidence_eligible,
+                    )
+                )
+                for row in context.rows
+            )
+            for context in values
+        )
+    ):
+        _projection_fail("WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS", "reader did not fold the revoke candidate to zero authority")
+    return contexts
+
+
+def _sealed_prefix_apply_preflight(
+    root: Path,
+    request: SealedPrefixActivationRequestV1,
+) -> tuple[SealedPrefixActivationPlanV1, Mapping[str, bytes]]:
+    manifest = _sealed_prefix_manifest(request)
+    repository, work_items = _sealed_prefix_repository(root)
+    if request.h1_manifest_path != f"work-items/{DECISION_H1_MANIFEST}":
+        _projection_fail("WI-LEDGER-MIGRATION-MANIFEST-INVALID", "H1 manifest path is not canonical")
+    expected_ledger_path = (
+        f"work-items/{LEGACY_PROJECTION_MANIFEST_DIR}/{manifest['manifestId']}.json"
+    )
+    if request.ledger_manifest_path != expected_ledger_path:
+        _projection_fail("WI-LEDGER-MIGRATION-MANIFEST-INVALID", "ledger manifest path does not match manifestId")
+    h1_path = _sealed_prefix_path(
+        repository,
+        request.h1_manifest_path,
+        prefix=("work-items",),
+        failure_id="WI-DECISION-H1-MANIFEST-INVALID",
+    )
+    ledger_manifest_path = _sealed_prefix_path(
+        repository,
+        request.ledger_manifest_path,
+        prefix=("work-items", LEGACY_PROJECTION_MANIFEST_DIR),
+        failure_id="WI-LEDGER-MIGRATION-MANIFEST-INVALID",
+    )
+    _preflight_current_decision_h1(root, manifest_bytes=request.h1_manifest_bytes)
+    h1_payload = _projection_object(request.h1_manifest_bytes, "H1 manifest")
+    if h1_payload.get("policyDecision") != manifest.get("policyDecision"):
+        _projection_fail("WI-LEDGER-MIGRATION-MANIFEST-INVALID", "H1 and ledger manifests name different policy decisions")
+
+    ledger_bytes_by_path: dict[str, bytes] = {}
+    for entry in manifest["entries"]:
+        ledger_relative = entry.get("ledgerPath")
+        work_item = entry.get("workItem")
+        if (
+            not isinstance(ledger_relative, str)
+            or not isinstance(work_item, str)
+            or ledger_relative != f"{work_item}/agent-runs.jsonl"
+        ):
+            _projection_fail("WI-LEDGER-MIGRATION-MANIFEST-INVALID", "ledger manifest target identity is invalid")
+        ledger_path = _sealed_prefix_path(
+            repository,
+            ledger_relative,
+            prefix=("work-items", "active"),
+            failure_id="WI-LEDGER-MIGRATION-TARGET-IDENTITY",
+        )
+        raw = _sealed_prefix_existing_bytes(
+            ledger_path,
+            "WI-LEDGER-MIGRATION-TARGET-IDENTITY",
+        )
+        if raw is None:
+            _projection_fail("WI-LEDGER-MIGRATION-TARGET-IDENTITY", "manifest ledger is missing")
+        ledger_bytes_by_path[ledger_relative] = raw
+
+    registry_path = work_items / LEGACY_PROJECTION_REGISTRY
+    registry_before_live = _sealed_prefix_existing_bytes(
+        registry_path,
+        "WI-LEDGER-MIGRATION-COMMIT-INDETERMINATE",
+    ) or b""
+    group_id, member_ids, member_lines = _sealed_prefix_apply_records(
+        manifest,
+        request,
+    )
+    group_before, group_exists = _sealed_prefix_group_position(
+        registry_before_live,
+        group_id,
+        member_ids,
+        member_lines,
+    )
+    if group_exists:
+        accepted_registry_hashes = {
+            _sha256_bytes(group_before),
+            _sha256_bytes(registry_before_live),
+        }
+        if request.expected_registry_sha256 not in accepted_registry_hashes:
+            _projection_fail("WI-LEDGER-MIGRATION-LEDGER-DRIFT", "replay registry digest differs from durable anchors")
+        registry_after = registry_before_live
+    else:
+        if _sha256_bytes(registry_before_live) != request.expected_registry_sha256:
+            _projection_fail("WI-LEDGER-MIGRATION-LEDGER-DRIFT", "projection registry digest changed")
+        group_before = registry_before_live
+        registry_after = registry_before_live + b"".join(member_lines)
+    receipt_id, receipt_relative, receipt_bytes = _sealed_prefix_receipt(
+        state="apply",
+        group_id=group_id,
+        member_ids=member_ids,
+        member_lines=member_lines,
+        policy=manifest["policyDecision"],
+        ledger_manifest_path=request.ledger_manifest_path,
+        ledger_manifest_bytes=request.ledger_manifest_bytes,
+        h1_manifest_path=request.h1_manifest_path,
+        h1_manifest_bytes=request.h1_manifest_bytes,
+        registry_before=group_before,
+        registry_after=registry_after,
+        recorded_at=request.recorded_at,
+    )
+    receipt_path = _sealed_prefix_path(
+        repository,
+        receipt_relative,
+        prefix=("work-items", LEGACY_PROJECTION_RECEIPTS),
+        failure_id="WI-LEDGER-COMPAT-RECEIPT-INVALID",
+    )
+    for path, wanted in (
+        (h1_path, request.h1_manifest_bytes),
+        (ledger_manifest_path, request.ledger_manifest_bytes),
+    ):
+        current = _sealed_prefix_existing_bytes(path, "WI-LEDGER-COMPAT-REPLAY-MISMATCH")
+        if current is not None and current != wanted:
+            _projection_fail("WI-LEDGER-COMPAT-REPLAY-MISMATCH", "create-only manifest bytes differ")
+    current_receipt = _sealed_prefix_existing_bytes(
+        receipt_path,
+        "WI-LEDGER-COMPAT-RECEIPT-INVALID",
+    )
+    if group_exists:
+        if current_receipt is None:
+            _projection_fail("WI-LEDGER-COMPAT-ACTIVATION-INCOMPLETE", "complete registry group lacks its receipt")
+        if current_receipt != receipt_bytes:
+            _projection_fail("WI-LEDGER-COMPAT-REPLAY-MISMATCH", "activation receipt bytes differ")
+    elif current_receipt is not None:
+        _projection_fail("WI-LEDGER-COMPAT-REPLAY-MISMATCH", "activation receipt exists without its registry group")
+
+    _sealed_prefix_candidate_contexts(
+        repository,
+        ledger_bytes_by_path=ledger_bytes_by_path,
+        h1_manifest_path=request.h1_manifest_path,
+        h1_manifest_bytes=request.h1_manifest_bytes,
+        ledger_manifest_path=request.ledger_manifest_path,
+        ledger_manifest_bytes=request.ledger_manifest_bytes,
+        registry_bytes=registry_after,
+        receipt_bytes_by_path={receipt_relative: receipt_bytes},
+        expected_state="active",
+    )
+    plan = SealedPrefixActivationPlanV1(
+        "apply",
+        group_id,
+        member_ids,
+        receipt_id,
+        request.ledger_manifest_path,
+        request.ledger_manifest_bytes,
+        request.h1_manifest_path,
+        request.h1_manifest_bytes,
+        _sha256_bytes(group_before),
+        registry_after,
+        receipt_relative,
+        receipt_bytes,
+        group_exists,
+    )
+    return plan, MappingProxyType(ledger_bytes_by_path)
+
+
+def preflight_sealed_prefix_activation(
+    root: Path,
+    request: SealedPrefixActivationRequestV1,
+) -> SealedPrefixActivationPlanV1:
+    return _sealed_prefix_apply_preflight(root, request)[0]
+
+
+def _sealed_prefix_inventory(
+    root: Path,
+    plan: SealedPrefixActivationPlanV1,
+) -> dict[str, dict[str, object]]:
+    if plan.replay:
+        return {}
+    repository, _work_items = _sealed_prefix_repository(root)
+    values = {
+        plan.ledger_manifest_path: plan.ledger_manifest_bytes,
+        plan.h1_manifest_path: plan.h1_manifest_bytes,
+        _SEALED_PREFIX_REGISTRY_PATH: plan.registry_after_bytes,
+        plan.receipt_path: plan.receipt_bytes,
+    }
+    inventory: dict[str, dict[str, object]] = {}
+    for relative, wanted in values.items():
+        path = repository.joinpath(*PurePosixPath(relative).parts)
+        current = _sealed_prefix_existing_bytes(
+            path,
+            "WI-LEDGER-COMPAT-COMMIT-INDETERMINATE",
+        )
+        if current != wanted:
+            inventory[relative] = {
+                "byteLength": len(wanted),
+                "sha256": _sha256_bytes(wanted),
+            }
+    return inventory
+
+
+def _sealed_prefix_result(
+    plan: SealedPrefixActivationPlanV1,
+    *,
+    dry_run: bool,
+    inventory: dict[str, dict[str, object]],
+) -> dict[str, object]:
+    return {
+        "state": plan.state,
+        "readiness": "REPLAY" if plan.replay else "READY",
+        "operationGroupId": plan.operation_group_id,
+        "memberOperationIds": list(plan.member_operation_ids),
+        "receiptId": plan.receipt_id,
+        "receiptPath": plan.receipt_path,
+        "receiptSha256": _sha256_bytes(plan.receipt_bytes),
+        "registryBeforeSha256": plan.registry_before_sha256,
+        "registryAfterSha256": _sha256_bytes(plan.registry_after_bytes),
+        "byteInventory": inventory,
+        "replay": plan.replay,
+        "dryRun": dry_run,
+    }
+
+
+def _sealed_prefix_revalidate(
+    root: Path,
+    request: SealedPrefixActivationRequestV1,
+    ledger_bytes_by_path: Mapping[str, bytes],
+    registry_expected: bytes,
+) -> None:
+    transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
+    if transaction is None:
+        _projection_fail("WI-LIFECYCLE-LOCK-IDENTITY", "sealed-prefix mutation lacks lifecycle transaction")
+    transaction.verify()
+    _preflight_current_decision_h1(root, manifest_bytes=request.h1_manifest_bytes)
+    repository, work_items = _sealed_prefix_repository(root)
+    for relative, expected in ledger_bytes_by_path.items():
+        path = repository.joinpath(*PurePosixPath(relative).parts)
+        if _sealed_prefix_existing_bytes(path, "WI-LEDGER-MIGRATION-LEDGER-DRIFT") != expected:
+            _projection_fail("WI-LEDGER-MIGRATION-LEDGER-DRIFT", "manifest ledger changed during activation")
+    registry = _sealed_prefix_existing_bytes(
+        work_items / LEGACY_PROJECTION_REGISTRY,
+        "WI-LEDGER-MIGRATION-COMMIT-INDETERMINATE",
+    ) or b""
+    if registry != registry_expected:
+        _projection_fail("WI-LEDGER-MIGRATION-LEDGER-DRIFT", "registry changed during activation")
+
+
+def _sealed_prefix_restore(
+    path: Path,
+    before: bytes | None,
+    wanted: bytes,
+    failure_id: str,
+) -> None:
+    current = _sealed_prefix_existing_bytes(path, failure_id)
+    if before is None:
+        if current is None:
+            return
+        if current != wanted:
+            _projection_fail(failure_id, "rollback target differs from transaction-owned bytes")
+        path.unlink()
+        return
+    if current == before:
+        return
+    if current != wanted:
+        _projection_fail(failure_id, "rollback target is neither exact before nor owned after")
+    _atomic_write(path, before)
+    if path.read_bytes() != before:
+        _projection_fail(failure_id, "rollback readback differs")
+
+
+def _sealed_prefix_remove_empty_created_dirs(paths: Iterable[tuple[Path, bool]]) -> None:
+    for path, existed in paths:
+        if existed:
+            continue
+        try:
+            path.rmdir()
+        except (FileNotFoundError, OSError):
+            pass
+
+
+def _apply_sealed_prefix_activation_locked(
+    root: Path,
+    request: SealedPrefixActivationRequestV1,
+    *,
+    inject_failure: str | None = None,
+) -> dict[str, object]:
+    if inject_failure is not None and inject_failure not in _SEALED_PREFIX_FAILURE_BOUNDARIES:
+        _projection_fail("WI-LEDGER-COMPAT-COMMIT-INDETERMINATE", "unknown activation failure boundary")
+    plan, ledger_bytes_by_path = _sealed_prefix_apply_preflight(root, request)
+    inventory = _sealed_prefix_inventory(root, plan)
+    if plan.replay:
+        return _sealed_prefix_result(plan, dry_run=False, inventory={})
+    repository, work_items = _sealed_prefix_repository(root)
+    ledger_path = repository.joinpath(*PurePosixPath(plan.ledger_manifest_path).parts)
+    h1_path = repository.joinpath(*PurePosixPath(plan.h1_manifest_path).parts)
+    registry_path = work_items / LEGACY_PROJECTION_REGISTRY
+    receipt_path = repository.joinpath(*PurePosixPath(plan.receipt_path).parts)
+    participants = (
+        (ledger_path, _sealed_prefix_existing_bytes(ledger_path, "WI-LEDGER-COMPAT-REPLAY-MISMATCH"), plan.ledger_manifest_bytes),
+        (h1_path, _sealed_prefix_existing_bytes(h1_path, "WI-LEDGER-COMPAT-REPLAY-MISMATCH"), plan.h1_manifest_bytes),
+        (registry_path, _sealed_prefix_existing_bytes(registry_path, "WI-LEDGER-MIGRATION-COMMIT-INDETERMINATE"), plan.registry_after_bytes),
+        (receipt_path, _sealed_prefix_existing_bytes(receipt_path, "WI-LEDGER-COMPAT-RECEIPT-INVALID"), plan.receipt_bytes),
+    )
+    created_dirs = (
+        (ledger_path.parent, ledger_path.parent.exists()),
+        (receipt_path.parent, receipt_path.parent.exists()),
+    )
+    registry_before = participants[2][1] or b""
+    receipt_committed = False
+    try:
+        _sealed_prefix_revalidate(root, request, ledger_bytes_by_path, registry_before)
+        _projection_create_or_exact(
+            ledger_path,
+            plan.ledger_manifest_bytes,
+            "WI-LEDGER-COMPAT-REPLAY-MISMATCH",
+        )
+        if inject_failure == "after-ledger-manifest":
+            _projection_fail("WI-LEDGER-COMPAT-COMMIT-INDETERMINATE", "injected failure after ledger manifest")
+        _sealed_prefix_revalidate(root, request, ledger_bytes_by_path, registry_before)
+        _projection_create_or_exact(
+            h1_path,
+            plan.h1_manifest_bytes,
+            "WI-LEDGER-COMPAT-REPLAY-MISMATCH",
+        )
+        if inject_failure == "after-h1-manifest":
+            _projection_fail("WI-LEDGER-COMPAT-COMMIT-INDETERMINATE", "injected failure after H1 manifest")
+        _sealed_prefix_revalidate(root, request, ledger_bytes_by_path, registry_before)
+        registry_path.parent.mkdir(parents=True, exist_ok=True)
+        _atomic_write(registry_path, plan.registry_after_bytes)
+        if registry_path.read_bytes() != plan.registry_after_bytes:
+            _projection_fail("WI-LEDGER-COMPAT-COMMIT-INDETERMINATE", "registry readback differs")
+        if inject_failure == "after-registry-readback":
+            _projection_fail("WI-LEDGER-COMPAT-COMMIT-INDETERMINATE", "injected failure after registry readback")
+        _sealed_prefix_revalidate(
+            root,
+            request,
+            ledger_bytes_by_path,
+            plan.registry_after_bytes,
+        )
+        _projection_create_or_exact(
+            receipt_path,
+            plan.receipt_bytes,
+            "WI-LEDGER-COMPAT-RECEIPT-INVALID",
+        )
+        receipt_committed = receipt_path.read_bytes() == plan.receipt_bytes
+        if not receipt_committed:
+            _projection_fail("WI-LEDGER-COMPAT-RECEIPT-INVALID", "activation receipt readback differs")
+        if inject_failure == "after-receipt-create":
+            _projection_fail("WI-LEDGER-COMPAT-COMMIT-INDETERMINATE", "injected failure after receipt create")
+        return _sealed_prefix_result(plan, dry_run=False, inventory=inventory)
+    except BaseException:
+        if not receipt_committed:
+            for path, before, wanted in reversed(participants):
+                _sealed_prefix_restore(
+                    path,
+                    before,
+                    wanted,
+                    "WI-LEDGER-COMPAT-COMMIT-INDETERMINATE",
+                )
+            _sealed_prefix_remove_empty_created_dirs(reversed(created_dirs))
+        raise
+
+
+_apply_sealed_prefix_activation_transaction = _lifecycle_participant(
+    _apply_sealed_prefix_activation_locked
+)
+
+
+def apply_sealed_prefix_activation(
+    root: Path,
+    request: SealedPrefixActivationRequestV1,
+    *,
+    dry_run: bool = False,
+    inject_failure: str | None = None,
+) -> dict[str, object]:
+    if dry_run:
+        if inject_failure is not None:
+            _projection_fail("WI-LEDGER-COMPAT-COMMIT-INDETERMINATE", "dry-run forbids failure injection")
+        plan = preflight_sealed_prefix_activation(root, request)
+        return _sealed_prefix_result(
+            plan,
+            dry_run=True,
+            inventory=_sealed_prefix_inventory(root, plan),
+        )
+    return _apply_sealed_prefix_activation_transaction(
+        root,
+        request,
+        inject_failure=inject_failure,
+    )
+
+
+def _sealed_prefix_revoke_preflight(
+    root: Path,
+    request: SealedPrefixRevokeRequestV1,
+) -> tuple[SealedPrefixActivationPlanV1, Mapping[str, bytes]]:
+    if type(request) is not SealedPrefixRevokeRequestV1:
+        _projection_fail("WI-LEDGER-COMPAT-RECEIPT-INVALID", "revoke request type is invalid")
+    if (
+        re.fullmatch(r"[0-9a-f]{64}", request.apply_receipt_sha256) is None
+        or re.fullmatch(r"[0-9a-f]{64}", request.expected_registry_sha256) is None
+    ):
+        _projection_fail("WI-LEDGER-COMPAT-RECEIPT-INVALID", "revoke request digest is invalid")
+    try:
+        _load_agent_run_ledger()._strict_migration_inputs(
+            "sealed-prefix-revoke",
+            request.recorded_at,
+        )
+    except Exception as exc:
+        raise LifecycleError("WI-LEDGER-MIGRATION-TARGET-IDENTITY", "revoke recorded-at is not strict UTC") from exc
+    repository, work_items = _sealed_prefix_repository(root)
+    apply_receipt_path = _sealed_prefix_path(
+        repository,
+        request.apply_receipt_path,
+        prefix=("work-items", LEGACY_PROJECTION_RECEIPTS),
+        failure_id="WI-LEDGER-COMPAT-RECEIPT-INVALID",
+    )
+    apply_receipt_bytes = _sealed_prefix_existing_bytes(
+        apply_receipt_path,
+        "WI-LEDGER-COMPAT-RECEIPT-INVALID",
+    )
+    if apply_receipt_bytes is None or _sha256_bytes(apply_receipt_bytes) != request.apply_receipt_sha256:
+        _projection_fail("WI-LEDGER-COMPAT-RECEIPT-INVALID", "apply receipt is missing or differs")
+    apply_receipt = _projection_object(apply_receipt_bytes, "apply receipt")
+    if (
+        apply_receipt.get("schemaVersion") != 2
+        or apply_receipt.get("state") != "apply"
+        or request.apply_receipt_path
+        != f"work-items/{LEGACY_PROJECTION_RECEIPTS}/{apply_receipt.get('receiptId')}.json"
+    ):
+        _projection_fail("WI-LEDGER-COMPAT-RECEIPT-INVALID", "apply receipt identity is invalid")
+    ledger_manifest_relative = apply_receipt.get("ledgerManifestPath")
+    h1_manifest_relative = apply_receipt.get("h1ManifestPath")
+    if not isinstance(ledger_manifest_relative, str) or not isinstance(h1_manifest_relative, str):
+        _projection_fail("WI-LEDGER-COMPAT-RECEIPT-INVALID", "apply receipt manifest paths are invalid")
+    ledger_manifest_path = _sealed_prefix_path(
+        repository,
+        ledger_manifest_relative,
+        prefix=("work-items", LEGACY_PROJECTION_MANIFEST_DIR),
+        failure_id="WI-LEDGER-MIGRATION-MANIFEST-INVALID",
+    )
+    h1_manifest_path = _sealed_prefix_path(
+        repository,
+        h1_manifest_relative,
+        prefix=("work-items",),
+        failure_id="WI-DECISION-H1-MANIFEST-INVALID",
+    )
+    ledger_manifest_bytes = _sealed_prefix_existing_bytes(ledger_manifest_path, "WI-LEDGER-MIGRATION-MANIFEST-INVALID")
+    h1_manifest_bytes = _sealed_prefix_existing_bytes(h1_manifest_path, "WI-DECISION-H1-MANIFEST-INVALID")
+    if ledger_manifest_bytes is None or h1_manifest_bytes is None:
+        _projection_fail("WI-LEDGER-COMPAT-ACTIVATION-PARTIAL", "apply manifests are missing")
+    if (
+        _sha256_bytes(ledger_manifest_bytes) != apply_receipt.get("ledgerManifestSha256")
+        or _sha256_bytes(h1_manifest_bytes) != apply_receipt.get("h1ManifestSha256")
+    ):
+        _projection_fail("WI-LEDGER-COMPAT-RECEIPT-INVALID", "apply manifest digest differs")
+    manifest = _projection_object(ledger_manifest_bytes, "sealed-prefix ledger manifest")
+    entries = manifest.get("entries")
+    if not isinstance(entries, list) or len(entries) != 2:
+        _projection_fail("WI-LEDGER-MIGRATION-MANIFEST-INVALID", "revoke manifest entries are invalid")
+    ledger_bytes_by_path: dict[str, bytes] = {}
+    for entry in entries:
+        if not isinstance(entry, dict) or not isinstance(entry.get("ledgerPath"), str):
+            _projection_fail("WI-LEDGER-MIGRATION-MANIFEST-INVALID", "revoke ledger entry is invalid")
+        ledger_path = _sealed_prefix_path(
+            repository,
+            entry["ledgerPath"],
+            prefix=("work-items", "active"),
+            failure_id="WI-LEDGER-MIGRATION-TARGET-IDENTITY",
+        )
+        raw = _sealed_prefix_existing_bytes(ledger_path, "WI-LEDGER-MIGRATION-TARGET-IDENTITY")
+        if raw is None:
+            _projection_fail("WI-LEDGER-MIGRATION-TARGET-IDENTITY", "revoke ledger is missing")
+        if (
+            len(raw) != entry.get("prefixByteLength")
+            or _sha256_bytes(raw) != entry.get("prefixSha256")
+        ):
+            _projection_fail("WI-LEDGER-COMPAT-REVOKE-AFTER-SUFFIX", "revoke refuses a ledger with suffix or prefix drift")
+        ledger_bytes_by_path[entry["ledgerPath"]] = raw
+    registry_path = work_items / LEGACY_PROJECTION_REGISTRY
+    registry_live = _sealed_prefix_existing_bytes(registry_path, "WI-LEDGER-COMPAT-ACTIVATION-PARTIAL")
+    if registry_live is None:
+        _projection_fail("WI-LEDGER-COMPAT-ACTIVATION-PARTIAL", "projection registry is missing")
+    physical = registry_live.splitlines(keepends=True)
+    parsed = [
+        _projection_object(line[:-1], f"revoke registry line {index}")
+        for index, line in enumerate(physical, start=1)
+        if line.endswith(b"\n")
+    ]
+    apply_ids = apply_receipt.get("memberOperationIds")
+    apply_hashes = apply_receipt.get("memberRecordSha256")
+    if not isinstance(apply_ids, list) or not isinstance(apply_hashes, list) or len(apply_ids) != 2 or len(apply_hashes) != 2:
+        _projection_fail("WI-LEDGER-COMPAT-RECEIPT-INVALID", "apply receipt member arrays are invalid")
+    apply_positions = [
+        next((index for index, record in enumerate(parsed) if record.get("operationId") == operation_id), -1)
+        for operation_id in apply_ids
+    ]
+    if apply_positions[0] < 0 or apply_positions[1] != apply_positions[0] + 1:
+        _projection_fail("WI-LEDGER-COMPAT-ACTIVATION-PARTIAL", "apply registry group is missing or noncontiguous")
+    apply_lines = tuple(physical[index] for index in apply_positions)
+    apply_records = tuple(parsed[index] for index in apply_positions)
+    if [_sha256_bytes(line) for line in apply_lines] != apply_hashes:
+        _projection_fail("WI-LEDGER-COMPAT-RECEIPT-INVALID", "apply registry member digest differs")
+    apply_registry = b"".join(physical[: apply_positions[-1] + 1])
+    _sealed_prefix_candidate_contexts(
+        repository,
+        ledger_bytes_by_path=ledger_bytes_by_path,
+        h1_manifest_path=h1_manifest_relative,
+        h1_manifest_bytes=h1_manifest_bytes,
+        ledger_manifest_path=ledger_manifest_relative,
+        ledger_manifest_bytes=ledger_manifest_bytes,
+        registry_bytes=apply_registry,
+        receipt_bytes_by_path={request.apply_receipt_path: apply_receipt_bytes},
+        expected_state="active",
+    )
+    manifest_sha = _sha256_bytes(ledger_manifest_bytes)
+    h1_sha = _sha256_bytes(h1_manifest_bytes)
+    group_id = "g-" + _sealed_prefix_digest(
+        "orchestrarium:ledger-h1:registry-group:v1",
+        [
+            "revoke",
+            manifest["policyDecision"],
+            manifest_sha,
+            h1_sha,
+            [entry["entryId"] for entry in entries],
+        ],
+    )
+    member_ids = tuple(
+        "m:" + _sealed_prefix_digest(
+            "orchestrarium:ledger-h1:activation-member:v1",
+            [group_id, index, entry["entryId"]],
+        )
+        for index, entry in enumerate(entries, start=1)
+    )
+    revoke_records = []
+    for index, (entry, operation_id, apply_id, apply_line, apply_record) in enumerate(
+        zip(entries, member_ids, apply_ids, apply_lines, apply_records),
+        start=1,
+    ):
+        retained = {
+            key: apply_record[key]
+            for key in (
+                "schemaVersion", "profileId", "profileVersion", "policyDecision",
+                "manifestId", "manifestSha256", "manifestEntryId", "h1ManifestPath",
+                "h1ManifestSha256", "workItem", "ledgerPath", "prefixLineCount",
+                "prefixByteLength", "prefixSha256", "projectedViewSha256",
+            )
+        }
+        revoke_records.append(
+            {
+                **retained,
+                "operationId": operation_id,
+                "operationGroupId": group_id,
+                "groupMemberIndex": index,
+                "groupMemberCount": 2,
+                "state": "revoke",
+                "recordedAt": request.recorded_at,
+                "revokeOfOperationId": apply_id,
+                "revokeOfOperationGroupId": apply_receipt["operationGroupId"],
+                "revokeOfRecordSha256": _sha256_bytes(apply_line),
+            }
+        )
+    revoke_lines = tuple(_projection_json(record) + b"\n" for record in revoke_records)
+    group_before, group_exists = _sealed_prefix_group_position(
+        registry_live,
+        group_id,
+        member_ids,
+        revoke_lines,
+    )
+    accepted_registry_hashes = (
+        {_sha256_bytes(group_before), _sha256_bytes(registry_live)}
+        if group_exists
+        else {_sha256_bytes(registry_live)}
+    )
+    if request.expected_registry_sha256 not in accepted_registry_hashes:
+        _projection_fail(
+            "WI-LEDGER-MIGRATION-LEDGER-DRIFT",
+            "revoke registry digest differs from the current or exact replay anchor",
+        )
+    registry_after = registry_live if group_exists else registry_live + b"".join(revoke_lines)
+    receipt_id, receipt_relative, receipt_bytes = _sealed_prefix_receipt(
+        state="revoke",
+        group_id=group_id,
+        member_ids=member_ids,
+        member_lines=revoke_lines,
+        policy=manifest["policyDecision"],
+        ledger_manifest_path=ledger_manifest_relative,
+        ledger_manifest_bytes=ledger_manifest_bytes,
+        h1_manifest_path=h1_manifest_relative,
+        h1_manifest_bytes=h1_manifest_bytes,
+        registry_before=group_before,
+        registry_after=registry_after,
+        recorded_at=request.recorded_at,
+    )
+    receipt_path = _sealed_prefix_path(
+        repository,
+        receipt_relative,
+        prefix=("work-items", LEGACY_PROJECTION_RECEIPTS),
+        failure_id="WI-LEDGER-COMPAT-RECEIPT-INVALID",
+    )
+    current_receipt = _sealed_prefix_existing_bytes(receipt_path, "WI-LEDGER-COMPAT-RECEIPT-INVALID")
+    if group_exists:
+        if current_receipt is None:
+            _projection_fail("WI-LEDGER-COMPAT-ACTIVATION-INCOMPLETE", "complete revoke group lacks receipt")
+        if current_receipt != receipt_bytes:
+            _projection_fail("WI-LEDGER-COMPAT-REPLAY-MISMATCH", "revoke receipt bytes differ")
+    elif current_receipt is not None:
+        _projection_fail("WI-LEDGER-COMPAT-REPLAY-MISMATCH", "revoke receipt exists without group")
+    _sealed_prefix_candidate_contexts(
+        repository,
+        ledger_bytes_by_path=ledger_bytes_by_path,
+        h1_manifest_path=h1_manifest_relative,
+        h1_manifest_bytes=h1_manifest_bytes,
+        ledger_manifest_path=ledger_manifest_relative,
+        ledger_manifest_bytes=ledger_manifest_bytes,
+        registry_bytes=registry_after,
+        receipt_bytes_by_path={
+            request.apply_receipt_path: apply_receipt_bytes,
+            receipt_relative: receipt_bytes,
+        },
+        expected_state="revoked",
+    )
+    plan = SealedPrefixActivationPlanV1(
+        "revoke", group_id, member_ids, receipt_id,
+        ledger_manifest_relative, ledger_manifest_bytes,
+        h1_manifest_relative, h1_manifest_bytes,
+        _sha256_bytes(group_before), registry_after,
+        receipt_relative, receipt_bytes, group_exists,
+    )
+    return plan, MappingProxyType(ledger_bytes_by_path)
+
+
+def preflight_sealed_prefix_revoke(
+    root: Path,
+    request: SealedPrefixRevokeRequestV1,
+) -> SealedPrefixActivationPlanV1:
+    return _sealed_prefix_revoke_preflight(root, request)[0]
+
+
+def _revoke_sealed_prefix_activation_locked(
+    root: Path,
+    request: SealedPrefixRevokeRequestV1,
+    *,
+    inject_failure: str | None = None,
+) -> dict[str, object]:
+    if inject_failure not in {None, "after-registry-readback", "after-receipt-create"}:
+        _projection_fail("WI-LEDGER-COMPAT-COMMIT-INDETERMINATE", "unknown revoke failure boundary")
+    plan, ledger_bytes = _sealed_prefix_revoke_preflight(root, request)
+    inventory = _sealed_prefix_inventory(root, plan)
+    if plan.replay:
+        return _sealed_prefix_result(plan, dry_run=False, inventory={})
+    repository, work_items = _sealed_prefix_repository(root)
+    registry_path = work_items / LEGACY_PROJECTION_REGISTRY
+    receipt_path = repository.joinpath(*PurePosixPath(plan.receipt_path).parts)
+    registry_before = registry_path.read_bytes()
+    receipt_before = _sealed_prefix_existing_bytes(receipt_path, "WI-LEDGER-COMPAT-RECEIPT-INVALID")
+    receipt_dir_existed = receipt_path.parent.exists()
+    receipt_committed = False
+    try:
+        transaction = _CURRENT_LIFECYCLE_TRANSACTION.get()
+        if transaction is None:
+            _projection_fail("WI-LIFECYCLE-LOCK-IDENTITY", "sealed-prefix revoke lacks lifecycle transaction")
+        transaction.verify()
+        for relative, expected in ledger_bytes.items():
+            path = repository.joinpath(*PurePosixPath(relative).parts)
+            if path.read_bytes() != expected:
+                _projection_fail("WI-LEDGER-COMPAT-REVOKE-AFTER-SUFFIX", "ledger changed during revoke")
+        if registry_path.read_bytes() != registry_before:
+            _projection_fail("WI-LEDGER-MIGRATION-LEDGER-DRIFT", "registry changed during revoke")
+        _atomic_write(registry_path, plan.registry_after_bytes)
+        if registry_path.read_bytes() != plan.registry_after_bytes:
+            _projection_fail("WI-LEDGER-COMPAT-COMMIT-INDETERMINATE", "revoke registry readback differs")
+        if inject_failure == "after-registry-readback":
+            _projection_fail("WI-LEDGER-COMPAT-COMMIT-INDETERMINATE", "injected failure after revoke registry")
+        transaction.verify()
+        for relative, expected in ledger_bytes.items():
+            path = repository.joinpath(*PurePosixPath(relative).parts)
+            if path.read_bytes() != expected:
+                _projection_fail("WI-LEDGER-COMPAT-REVOKE-AFTER-SUFFIX", "ledger changed before revoke receipt")
+        _projection_create_or_exact(receipt_path, plan.receipt_bytes, "WI-LEDGER-COMPAT-RECEIPT-INVALID")
+        receipt_committed = receipt_path.read_bytes() == plan.receipt_bytes
+        if not receipt_committed:
+            _projection_fail("WI-LEDGER-COMPAT-RECEIPT-INVALID", "revoke receipt readback differs")
+        if inject_failure == "after-receipt-create":
+            _projection_fail("WI-LEDGER-COMPAT-COMMIT-INDETERMINATE", "injected failure after revoke receipt")
+        return _sealed_prefix_result(plan, dry_run=False, inventory=inventory)
+    except BaseException:
+        if not receipt_committed:
+            _sealed_prefix_restore(
+                registry_path,
+                registry_before,
+                plan.registry_after_bytes,
+                "WI-LEDGER-COMPAT-COMMIT-INDETERMINATE",
+            )
+            _sealed_prefix_restore(
+                receipt_path,
+                receipt_before,
+                plan.receipt_bytes,
+                "WI-LEDGER-COMPAT-COMMIT-INDETERMINATE",
+            )
+            _sealed_prefix_remove_empty_created_dirs(((receipt_path.parent, receipt_dir_existed),))
+        raise
+
+
+_revoke_sealed_prefix_activation_transaction = _lifecycle_participant(
+    _revoke_sealed_prefix_activation_locked
+)
+
+
+def revoke_sealed_prefix_activation(
+    root: Path,
+    request: SealedPrefixRevokeRequestV1,
+    *,
+    dry_run: bool = False,
+    inject_failure: str | None = None,
+) -> dict[str, object]:
+    if dry_run:
+        if inject_failure is not None:
+            _projection_fail("WI-LEDGER-COMPAT-COMMIT-INDETERMINATE", "dry-run forbids failure injection")
+        plan = preflight_sealed_prefix_revoke(root, request)
+        return _sealed_prefix_result(
+            plan,
+            dry_run=True,
+            inventory=_sealed_prefix_inventory(root, plan),
+        )
+    return _revoke_sealed_prefix_activation_transaction(
+        root,
+        request,
+        inject_failure=inject_failure,
+    )
+
+
 def _write_historical_artifact_disposition_locked(
     root: Path, disposition_bytes: bytes, *, allow_legacy: bool = False
 ) -> dict:
@@ -10558,19 +11707,25 @@ def build_parser() -> argparse.ArgumentParser:
     projection_apply = sub.add_parser("apply-legacy-ledger-projection")
     _add_root(projection_apply)
     projection_apply.add_argument("--manifest-file", required=True)
-    projection_apply.add_argument("--manifest-entry-id", required=True)
-    projection_apply.add_argument("--raw-line-ordinal", required=True, type=int)
+    projection_apply.add_argument("--manifest-entry-id")
+    projection_apply.add_argument("--raw-line-ordinal", type=int)
     projection_apply.add_argument("--expected-registry-sha256", required=True)
-    projection_apply.add_argument("--operation-id", required=True)
+    projection_apply.add_argument("--operation-id")
     projection_apply.add_argument("--recorded-at", required=True)
+    projection_apply.add_argument("--ledger-manifest-path")
+    projection_apply.add_argument("--h1-manifest-file")
+    projection_apply.add_argument("--h1-manifest-path")
     projection_apply.add_argument("--dry-run", action="store_true")
     projection_revoke = sub.add_parser("revoke-legacy-ledger-projection")
     _add_root(projection_revoke)
-    projection_revoke.add_argument("--apply-operation-id", required=True)
-    projection_revoke.add_argument("--apply-record-sha256", required=True)
+    projection_revoke.add_argument("--apply-operation-id")
+    projection_revoke.add_argument("--apply-record-sha256")
     projection_revoke.add_argument("--expected-registry-sha256", required=True)
-    projection_revoke.add_argument("--operation-id", required=True)
+    projection_revoke.add_argument("--operation-id")
     projection_revoke.add_argument("--recorded-at", required=True)
+    projection_revoke.add_argument("--apply-receipt-path")
+    projection_revoke.add_argument("--apply-receipt-sha256")
+    projection_revoke.add_argument("--dry-run", action="store_true")
     projection_disposition = sub.add_parser("write-legacy-ledger-irrecoverable-disposition")
     _add_root(projection_disposition)
     projection_disposition.add_argument("--disposition-file", required=True)
@@ -10870,17 +12025,85 @@ def main(argv: list[str]) -> int:
                 f"operation={result['operationId']} after={result['afterLedgerSha256']}"
             )
         elif args.command == "apply-legacy-ledger-projection":
-            result = apply_legacy_ledger_projection(
-                root, _read_arg_file(args.manifest_file), args.manifest_entry_id,
-                args.raw_line_ordinal, args.expected_registry_sha256,
-                args.operation_id, args.recorded_at, dry_run=args.dry_run,
+            v2_values = (
+                args.ledger_manifest_path,
+                args.h1_manifest_file,
+                args.h1_manifest_path,
             )
+            legacy_values = (
+                args.manifest_entry_id,
+                args.raw_line_ordinal,
+                args.operation_id,
+            )
+            if any(value is not None for value in v2_values):
+                if any(value is None for value in v2_values) or any(
+                    value is not None for value in legacy_values
+                ):
+                    raise LifecycleError(
+                        "WI-LEDGER-COMPAT-CLI-ARGS",
+                        "sealed-prefix apply requires every V2 argument and forbids V1 arguments",
+                    )
+                request = SealedPrefixActivationRequestV1(
+                    h1_manifest_path=args.h1_manifest_path,
+                    h1_manifest_bytes=_read_arg_file(args.h1_manifest_file),
+                    ledger_manifest_path=args.ledger_manifest_path,
+                    ledger_manifest_bytes=_read_arg_file(args.manifest_file),
+                    expected_registry_sha256=args.expected_registry_sha256,
+                    recorded_at=args.recorded_at,
+                )
+                result = apply_sealed_prefix_activation(
+                    root,
+                    request,
+                    dry_run=args.dry_run,
+                )
+            else:
+                if any(value is None for value in legacy_values):
+                    raise LifecycleError(
+                        "WI-LEDGER-COMPAT-CLI-ARGS",
+                        "legacy projection apply requires every V1 argument",
+                    )
+                result = apply_legacy_ledger_projection(
+                    root, _read_arg_file(args.manifest_file), args.manifest_entry_id,
+                    args.raw_line_ordinal, args.expected_registry_sha256,
+                    args.operation_id, args.recorded_at, dry_run=args.dry_run,
+                )
             print(json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
         elif args.command == "revoke-legacy-ledger-projection":
-            result = revoke_legacy_ledger_projection(
-                root, args.apply_operation_id, _projection_cli_record_digests(args.apply_record_sha256),
-                args.expected_registry_sha256, args.operation_id, args.recorded_at,
+            v2_values = (args.apply_receipt_path, args.apply_receipt_sha256)
+            legacy_values = (
+                args.apply_operation_id,
+                args.apply_record_sha256,
+                args.operation_id,
             )
+            if any(value is not None for value in v2_values):
+                if any(value is None for value in v2_values) or any(
+                    value is not None for value in legacy_values
+                ):
+                    raise LifecycleError(
+                        "WI-LEDGER-COMPAT-CLI-ARGS",
+                        "sealed-prefix revoke requires every V2 argument and forbids V1 arguments",
+                    )
+                request = SealedPrefixRevokeRequestV1(
+                    apply_receipt_path=args.apply_receipt_path,
+                    apply_receipt_sha256=args.apply_receipt_sha256,
+                    expected_registry_sha256=args.expected_registry_sha256,
+                    recorded_at=args.recorded_at,
+                )
+                result = revoke_sealed_prefix_activation(
+                    root,
+                    request,
+                    dry_run=args.dry_run,
+                )
+            else:
+                if any(value is None for value in legacy_values) or args.dry_run:
+                    raise LifecycleError(
+                        "WI-LEDGER-COMPAT-CLI-ARGS",
+                        "legacy projection revoke requires every V1 argument and forbids dry-run",
+                    )
+                result = revoke_legacy_ledger_projection(
+                    root, args.apply_operation_id, _projection_cli_record_digests(args.apply_record_sha256),
+                    args.expected_registry_sha256, args.operation_id, args.recorded_at,
+                )
             print(json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
         elif args.command == "write-legacy-ledger-irrecoverable-disposition":
             result = write_legacy_ledger_irrecoverable_disposition(

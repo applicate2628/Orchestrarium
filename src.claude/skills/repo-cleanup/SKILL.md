@@ -69,6 +69,14 @@ The report supplies no approval. Route only separately authorized work:
 
 Owners retain their existing genuine current-user approval, no-follow traversal, exact-target, drift, rollback, redaction, and postcondition requirements. If authority is absent, report the owner/action needed without acting.
 
+When the host refuses a validated owner action before execution, preserve the exact target. This is a host-policy denial, not an operating-system or filesystem lock, access, or permission error returned after an owner attempts the action; those target-side failures remain ordinary unsettled residue and do not open this route. In the existing `ResourceRowV1` identity, settlement-probe/result, and disposition fields, record the requested action, pre-action and post-refusal settlement probe results, disposition `preserved`, the redacted refusal reason, and the owner/action still needed; add no disposition or report state.
+
+Do not evade a host-policy denial: no alternate shell, API, provider, command shape, retry, or allow-rule is allowed, and do not relax configuration or rename, move, or truncate the target. Only a genuine host-supported per-action permission route may be requested, and only for the same validated action. Without that route or grant, hand the exact operator action to the root main conversation and its existing current work-item while `$repo-cleanup` remains transient. Repeat cleanup only after a material condition change and fresh same-target ownership, identity, and settlement checks; never run a blind per-turn retry loop.
+
+A denied target may be explicitly deferred only when fresh checks prove it is an ordinary empty agent-owned disposable directory, including no hidden children; it is not a link or reparse point, has no live handle, process, subscription, transaction, lock, or other active resource, and cannot affect or be required by the functional result, accepted artifact, or any downstream action. Keep its existing `ResourceRowV1` disposition `preserved`. In the existing current work-item `status.md`, note the current probes, requested action, redacted denial reason, owner, and concrete condition for resuming cleanup. Add no registry, engine, schema, report status, daemon, or marker file. Unknown, sensitive, live, valuable, non-empty, or correctness-, lifecycle-, security-, or delivery-affecting targets cannot use this exception.
+
+Independent non-overlapping work continues. Deferral never settles cleanup: the affected cleanup predicate and all dependent zero-residue predicates remain `fail`, the row remains residue, and neither the report nor the cleanup lane may claim `PASS` or zero residue. An independently verified delivery, handoff, commit, or transfer may nevertheless proceed only when all of that action's own gates pass, no action depends on the deferred directory, and the handoff reports the exact residue and resume condition. This is not a waiver of any other blocker or removal authority.
+
 ## Recheck from scratch
 
 After owner work, discard every prior observation. Rebind repository identity and `HEAD`/unborn state, rerun the exact existing owner probes, rebuild all rows, and return one fresh report. Do not write the report into the repository or load an earlier one.
@@ -98,9 +106,9 @@ Counts derive only from rows. Valid `ephemeral-volume-exempt` rows are excluded 
 
 Enforce exactly:
 
-`cleanup PASS -> final inventory -> bundle -> trusted verify -> post-transfer classification`
+`cleanup PASS or qualifying deferred residue accounted -> final inventory -> bundle -> trusted verify -> post-transfer classification`
 
-Final inventory follows the last cleanup, lifecycle, Git, recovery, or tool-state mutation. `$manual-repo-transfer` supplies each transfer result; project it without reevaluation. Transfer preparation grants no delete, wipe, commit, push, publication, or external-copy authority.
+Qualifying deferred residue is exactly the host-policy-denied directory exception above; it leaves cleanup non-`PASS`. Final inventory follows the last cleanup, lifecycle, Git, recovery, or tool-state mutation and, with a deferral, the inventory and selection process explicitly accounts for the target and proves that no valuable data is silently omitted. `$manual-repo-transfer` supplies each transfer result; project it without reevaluation. Transfer preparation grants no delete, wipe, commit, push, publication, removal, or external-copy authority.
 
 ## Stop and safety rules
 
@@ -109,7 +117,7 @@ Final inventory follows the last cleanup, lifecycle, Git, recovery, or tool-stat
 - Never follow links or broaden an owner's mutation scope.
 - Redact credentials, remotes, secrets, customer data, raw logs, and machine-local paths.
 - On Windows, preserve junction/reparse refusal, literal paths, identity rechecks, and locked-file handling. On POSIX, preserve no-follow, device/inode, mount-boundary, and special-file refusal.
-- No actor may claim completion, `PASS`, transfer readiness, commit, push, or handoff while non-canonical agent-owned residue remains.
+- No actor may claim cleanup completion, cleanup `PASS`, or zero residue while non-canonical agent-owned residue remains. Delivery, handoff, commit, or transfer may advance with residue only under the exact host-policy-denied directory exception above: all receiving gates pass, no receiving action depends on the directory, and the residue and resume condition are reported.
 
 ## Terms and Abbreviations
 

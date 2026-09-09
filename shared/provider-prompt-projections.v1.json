@@ -4,17 +4,17 @@
   "files": {
     "provider_prompt.py": {
       "source": "scripts/provider_prompt.py",
-      "sha256": "71795240d70244eaf3dc3c42bd066224339e2a8a07e22e2c2c4d88a90e311612",
+      "sha256": "2b35ed950f2075ac176c2836d285ae6b9d5a5884154b4c36db44012aec57d1bb",
       "destination": "scripts/provider_prompt.py"
     },
     "process_supervision/process_runner.py": {
       "source": "scripts/process_supervision/process_runner.py",
-      "sha256": "fb1c34d2eb56882f4af50baba385507437f66177666b31ae4edafb254dee1e33",
+      "sha256": "8abdc9006ab334c27a81048ed0ae37f58bf580a88c0c10b277cfb15efd9e9685",
       "destination": "scripts/process_supervision/process_runner.py"
     },
     "invoke-codex-prompt.py": {
       "source": "scripts/invoke-codex-prompt.py",
-      "sha256": "0b085a6fd0e28a5a486c8ef25bf52d4c69123d94cc8712d63dd30deadcc5f665",
+      "sha256": "04fbc5fae33e623f0b10f783b6753947e4d8a5e62ab06bc058b9df776b76f79b",
       "destination": "scripts/invoke-codex-prompt.py"
     },
     "invoke-claude-prompt.py": {
@@ -39,7 +39,7 @@
     },
     "external-role-taxonomy.v1.json": {
       "source": "shared/external-role-taxonomy.v1.json",
-      "sha256": "51192eca72784dfcbc2d53596e143ea25856db9e7336031a25d89e9e4fdf85ce",
+      "sha256": "469ad1b8bf93b56f0323456413961ca7e01dd9a1890a66d766e564bc03d489b8",
       "destination": "scripts/external-role-taxonomy.v1.json"
     }
   }

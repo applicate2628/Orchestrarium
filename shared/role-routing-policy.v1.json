@@ -26,27 +26,62 @@
     "balanced-medium": {
       "modelTier": "balanced",
       "effort": "medium",
-      "codexModel": "gpt-5.6-terra"
+      "codexModel": "gpt-5.6-terra",
+      "useCriteria": "Routine work when cost per verified task favors balanced depth."
     },
     "balanced-high": {
       "modelTier": "balanced",
       "effort": "high",
-      "codexModel": "gpt-5.6-terra"
+      "codexModel": "gpt-5.6-terra",
+      "useCriteria": "Balanced work needing stronger validation without frontier depth."
     },
     "frontier-high": {
       "modelTier": "frontier",
       "effort": "high",
-      "codexModel": "gpt-5.6-sol"
+      "codexModel": "gpt-5.6-sol",
+      "useCriteria": "Difficult multi-step work requiring strong engineering reasoning."
     },
     "frontier-xhigh": {
       "modelTier": "frontier",
       "effort": "xhigh",
-      "codexModel": "gpt-5.6-sol"
+      "codexModel": "gpt-5.6-sol",
+      "useCriteria": "Demanding work with caller-justified additional reasoning."
     },
     "apex-max": {
       "modelTier": "apex",
       "effort": "max",
-      "codexModel": "gpt-5.6-sol"
+      "codexModel": "gpt-5.6-sol",
+      "useCriteria": "Maximum Sol effort only with explicit user approval."
+    },
+    "astra-low": {
+      "modelTier": "apex",
+      "effort": "low",
+      "codexModel": "gpt-6-astra",
+      "useCriteria": "Bounded clear work with an accepted directly testable contract."
+    },
+    "astra-medium": {
+      "modelTier": "apex",
+      "effort": "medium",
+      "codexModel": "gpt-6-astra",
+      "useCriteria": "Ordinary Astra work selected by cost per verified task."
+    },
+    "astra-high": {
+      "modelTier": "apex",
+      "effort": "high",
+      "codexModel": "gpt-6-astra",
+      "useCriteria": "Difficult or high-risk work needing deeper verification."
+    },
+    "astra-xhigh": {
+      "modelTier": "apex",
+      "effort": "xhigh",
+      "codexModel": "gpt-6-astra",
+      "useCriteria": "Demanding work with a recorded caller escalation rationale."
+    },
+    "astra-max": {
+      "modelTier": "apex",
+      "effort": "max",
+      "codexModel": "gpt-6-astra",
+      "useCriteria": "Maximum Astra effort only with explicit user approval."
     }
   },
   "taskClasses": {
@@ -68,37 +103,44 @@
     "exploration": {
       "requiredModelTier": "balanced",
       "requiredEffort": "high",
-      "mutationClass": "read-only"
+      "mutationClass": "read-only",
+      "admissibleProfiles": ["balanced-medium", "balanced-high", "frontier-high", "astra-low", "astra-medium", "astra-high", "astra-xhigh"]
     },
     "engineering": {
       "requiredModelTier": "balanced",
       "requiredEffort": "high",
-      "mutationClass": "bounded-write"
+      "mutationClass": "bounded-write",
+      "admissibleProfiles": ["balanced-medium", "balanced-high", "frontier-high", "frontier-xhigh", "apex-max", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
     },
     "planning": {
       "requiredModelTier": "balanced",
       "requiredEffort": "high",
-      "mutationClass": "read-only"
+      "mutationClass": "read-only",
+      "admissibleProfiles": ["balanced-high", "frontier-high", "frontier-xhigh", "apex-max", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
     },
     "review": {
       "requiredModelTier": "balanced",
       "requiredEffort": "high",
-      "mutationClass": "read-only"
+      "mutationClass": "read-only",
+      "admissibleProfiles": ["balanced-high", "frontier-high", "frontier-xhigh", "apex-max", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
     },
     "critical-design": {
       "requiredModelTier": "frontier",
       "requiredEffort": "xhigh",
-      "mutationClass": "read-only"
+      "mutationClass": "read-only",
+      "admissibleProfiles": ["frontier-high", "frontier-xhigh", "apex-max", "astra-high", "astra-xhigh", "astra-max"]
     },
     "critical-security": {
       "requiredModelTier": "frontier",
       "requiredEffort": "xhigh",
-      "mutationClass": "read-only"
+      "mutationClass": "read-only",
+      "admissibleProfiles": ["frontier-high", "frontier-xhigh", "apex-max", "astra-high", "astra-xhigh", "astra-max"]
     },
     "recovery": {
       "requiredModelTier": "frontier",
       "requiredEffort": "high",
-      "mutationClass": "bounded-write"
+      "mutationClass": "bounded-write",
+      "admissibleProfiles": ["balanced-medium", "balanced-high", "frontier-high", "frontier-xhigh", "apex-max", "astra-high", "astra-xhigh", "astra-max"]
     }
   },
   "roles": {
@@ -112,63 +154,133 @@
     },
     "default": {
       "defaultProfile": "frontier-xhigh",
-      "allowedProfiles": ["balanced-high", "frontier-high", "frontier-xhigh", "apex-max"]
+      "allowedProfiles": ["balanced-high", "frontier-high", "frontier-xhigh", "apex-max", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
     },
     "explorer": {
       "defaultProfile": "balanced-high",
-      "allowedProfiles": ["balanced-medium", "balanced-high", "frontier-high"]
+      "allowedProfiles": ["balanced-medium", "balanced-high", "frontier-high", "astra-low", "astra-medium", "astra-high", "astra-xhigh"]
     },
     "worker": {
       "defaultProfile": "frontier-high",
-      "allowedProfiles": ["balanced-medium", "balanced-high", "frontier-high", "frontier-xhigh"]
+      "allowedProfiles": ["balanced-medium", "balanced-high", "frontier-high", "frontier-xhigh", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
     },
     "analyst": {
       "defaultProfile": "balanced-high",
-      "allowedProfiles": ["balanced-high", "frontier-high", "frontier-xhigh"]
+      "allowedProfiles": ["balanced-high", "frontier-high", "frontier-xhigh", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
     },
     "planner": {
       "defaultProfile": "balanced-high",
-      "allowedProfiles": ["balanced-high", "frontier-high", "frontier-xhigh"]
+      "allowedProfiles": ["balanced-high", "frontier-high", "frontier-xhigh", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
     },
     "architect": {
       "defaultProfile": "frontier-xhigh",
-      "allowedProfiles": ["frontier-high", "frontier-xhigh", "apex-max"]
+      "allowedProfiles": ["frontier-high", "frontier-xhigh", "apex-max", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
     },
     "architecture-reviewer": {
       "defaultProfile": "frontier-xhigh",
-      "allowedProfiles": ["frontier-xhigh", "apex-max"]
+      "allowedProfiles": ["frontier-xhigh", "apex-max", "astra-high", "astra-xhigh", "astra-max"]
     },
     "algorithm-scientist": {
       "defaultProfile": "frontier-xhigh",
-      "allowedProfiles": ["frontier-xhigh", "apex-max"]
+      "allowedProfiles": ["frontier-xhigh", "apex-max", "astra-high", "astra-xhigh", "astra-max"]
     },
     "computational-scientist": {
       "defaultProfile": "frontier-xhigh",
-      "allowedProfiles": ["frontier-xhigh", "apex-max"]
+      "allowedProfiles": ["frontier-xhigh", "apex-max", "astra-high", "astra-xhigh", "astra-max"]
     },
     "security-engineer": {
       "defaultProfile": "frontier-xhigh",
-      "allowedProfiles": ["frontier-high", "frontier-xhigh"]
+      "allowedProfiles": ["frontier-high", "frontier-xhigh", "astra-high", "astra-xhigh", "astra-max"]
     },
     "security-reviewer": {
       "defaultProfile": "frontier-xhigh",
-      "allowedProfiles": ["frontier-xhigh", "apex-max"]
+      "allowedProfiles": ["frontier-xhigh", "apex-max", "astra-high", "astra-xhigh", "astra-max"]
     },
     "backend-engineer": {
       "defaultProfile": "balanced-high",
-      "allowedProfiles": ["balanced-medium", "balanced-high", "frontier-high", "frontier-xhigh"]
+      "allowedProfiles": ["balanced-medium", "balanced-high", "frontier-high", "frontier-xhigh", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
     },
     "platform-engineer": {
       "defaultProfile": "frontier-high",
-      "allowedProfiles": ["balanced-medium", "balanced-high", "frontier-high", "frontier-xhigh"]
+      "allowedProfiles": ["balanced-medium", "balanced-high", "frontier-high", "frontier-xhigh", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
     },
     "qa-engineer": {
       "defaultProfile": "balanced-high",
-      "allowedProfiles": ["balanced-high", "frontier-high", "frontier-xhigh"]
+      "allowedProfiles": ["balanced-high", "frontier-high", "frontier-xhigh", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
     },
     "knowledge-archivist": {
       "defaultProfile": "balanced-medium",
-      "allowedProfiles": ["balanced-medium", "balanced-high"]
+      "allowedProfiles": ["balanced-medium", "balanced-high", "astra-low", "astra-medium", "astra-high", "astra-xhigh"]
+    },
+    "scientific-software-engineer": {
+      "defaultProfile": "astra-medium",
+      "allowedProfiles": ["balanced-high", "frontier-high", "frontier-xhigh", "apex-max", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
+    }
+  },
+  "skillOnlyRoles": {
+    "product-analyst": {
+      "defaultProfile": "balanced-high",
+      "allowedProfiles": ["balanced-medium", "balanced-high", "frontier-high", "astra-low", "astra-medium", "astra-high", "astra-xhigh"]
+    },
+    "ux-designer": {
+      "defaultProfile": "balanced-high",
+      "allowedProfiles": ["balanced-high", "frontier-high", "frontier-xhigh", "apex-max", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
+    },
+    "performance-engineer": {
+      "defaultProfile": "frontier-high",
+      "allowedProfiles": ["frontier-high", "frontier-xhigh", "apex-max", "astra-high", "astra-xhigh", "astra-max"]
+    },
+    "reliability-engineer": {
+      "defaultProfile": "frontier-high",
+      "allowedProfiles": ["frontier-high", "frontier-xhigh", "apex-max", "astra-high", "astra-xhigh", "astra-max"]
+    },
+    "frontend-engineer": {
+      "defaultProfile": "balanced-high",
+      "allowedProfiles": ["balanced-medium", "balanced-high", "frontier-high", "frontier-xhigh", "apex-max", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
+    },
+    "qt-ui-engineer": {
+      "defaultProfile": "balanced-high",
+      "allowedProfiles": ["balanced-medium", "balanced-high", "frontier-high", "frontier-xhigh", "apex-max", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
+    },
+    "model-view-engineer": {
+      "defaultProfile": "balanced-high",
+      "allowedProfiles": ["balanced-medium", "balanced-high", "frontier-high", "frontier-xhigh", "apex-max", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
+    },
+    "data-engineer": {
+      "defaultProfile": "balanced-high",
+      "allowedProfiles": ["balanced-medium", "balanced-high", "frontier-high", "frontier-xhigh", "apex-max", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
+    },
+    "toolchain-engineer": {
+      "defaultProfile": "frontier-high",
+      "allowedProfiles": ["balanced-medium", "balanced-high", "frontier-high", "frontier-xhigh", "apex-max", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
+    },
+    "geometry-engineer": {
+      "defaultProfile": "frontier-high",
+      "allowedProfiles": ["balanced-medium", "balanced-high", "frontier-high", "frontier-xhigh", "apex-max", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
+    },
+    "graphics-engineer": {
+      "defaultProfile": "balanced-high",
+      "allowedProfiles": ["balanced-medium", "balanced-high", "frontier-high", "frontier-xhigh", "apex-max", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
+    },
+    "visualization-engineer": {
+      "defaultProfile": "balanced-high",
+      "allowedProfiles": ["balanced-medium", "balanced-high", "frontier-high", "frontier-xhigh", "apex-max", "astra-low", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
+    },
+    "performance-reviewer": {
+      "defaultProfile": "frontier-high",
+      "allowedProfiles": ["balanced-high", "frontier-high", "frontier-xhigh", "apex-max", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
+    },
+    "accessibility-reviewer": {
+      "defaultProfile": "balanced-high",
+      "allowedProfiles": ["balanced-high", "frontier-high", "frontier-xhigh", "apex-max", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
+    },
+    "ux-reviewer": {
+      "defaultProfile": "balanced-high",
+      "allowedProfiles": ["balanced-high", "frontier-high", "frontier-xhigh", "apex-max", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
+    },
+    "ui-test-engineer": {
+      "defaultProfile": "balanced-high",
+      "allowedProfiles": ["balanced-high", "frontier-high", "frontier-xhigh", "apex-max", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
     }
   },
   "mechanicalExecutionContract": {
@@ -216,11 +328,11 @@
     "micro": ["mechanical-scout"],
     "mechanical-read": ["mechanical-scout"],
     "mechanical": ["mechanical-worker"],
-    "exploration": ["explorer", "analyst"],
-    "engineering": ["worker", "backend-engineer", "platform-engineer"],
-    "planning": ["analyst", "planner", "architect"],
-    "review": ["qa-engineer", "architecture-reviewer", "security-reviewer"],
-    "critical-design": ["architect", "architecture-reviewer", "algorithm-scientist", "computational-scientist"],
+    "exploration": ["explorer", "analyst", "product-analyst"],
+    "engineering": ["worker", "backend-engineer", "platform-engineer", "scientific-software-engineer", "knowledge-archivist", "frontend-engineer", "qt-ui-engineer", "model-view-engineer", "data-engineer", "toolchain-engineer", "geometry-engineer", "graphics-engineer", "visualization-engineer"],
+    "planning": ["analyst", "planner", "architect", "ux-designer"],
+    "review": ["qa-engineer", "architecture-reviewer", "security-reviewer", "performance-reviewer", "accessibility-reviewer", "ux-reviewer", "ui-test-engineer"],
+    "critical-design": ["architect", "architecture-reviewer", "algorithm-scientist", "computational-scientist", "performance-engineer", "reliability-engineer"],
     "critical-security": ["security-engineer", "security-reviewer"],
     "recovery": ["default", "worker", "platform-engineer"]
   },

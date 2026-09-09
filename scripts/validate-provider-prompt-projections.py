@@ -353,8 +353,9 @@ def _validate_external_role_taxonomy(source_root: Path) -> None:
     ):
         raise _fail("external role taxonomy shape")
     mapping = taxonomy["roles"]
-    if len(mapping) != 34 or any(
+    if not mapping or any(
         not isinstance(role, str)
+        or re.fullmatch(r"[a-z][a-z0-9-]+", role) is None
         or lane not in {"consultant", "external-worker", "external-reviewer", "none"}
         for role, lane in mapping.items()
     ):
@@ -374,22 +375,29 @@ def _validate_external_role_taxonomy(source_root: Path) -> None:
     end = text.find("\n## ", start + len(marker)) if start >= 0 else -1
     if start < 0 or end < 0:
         raise _fail("shared role index bounds")
-    role_lines = [
-        line
-        for line in text[start:end].splitlines()
-        if line.startswith(
-            (
-                "- Roadmap and orchestration:",
-                "- Research, design, planning, and specialist constraints:",
-                "- Implementation:",
-                "- Review and verification:",
-            )
-        )
-    ]
-    indexed_roles = re.findall(
-        r"\$([a-z][a-z0-9-]+)", "\n".join(role_lines)
+    category_prefixes = (
+        "- Roadmap and orchestration:",
+        "- Research, design, planning, and specialist constraints:",
+        "- Implementation:",
+        "- Review and verification:",
     )
-    if len(indexed_roles) != 33 or len(set(indexed_roles)) != 33:
+    section_lines = text[start:end].splitlines()
+    role_lines = [
+        line for line in section_lines if line.startswith(category_prefixes)
+    ]
+    if len(role_lines) != len(category_prefixes) or any(
+        sum(line.startswith(prefix) for line in role_lines) != 1
+        for prefix in category_prefixes
+    ):
+        raise _fail("shared role index categories")
+    roles_by_category = [
+        re.findall(r"\$([a-z][a-z0-9-]+)", line) for line in role_lines
+    ]
+    indexed_roles = [role for roles in roles_by_category for role in roles]
+    if (
+        any(not roles for roles in roles_by_category)
+        or len(indexed_roles) != len(set(indexed_roles))
+    ):
         raise _fail("shared role index membership")
     if set(mapping) != set(indexed_roles) | provenance_only_roles:
         raise _fail("external role taxonomy parity")

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Scientific Software Engineer"
+  short_description: "Implement accepted scientific numerical models"
+  default_prompt: "Use $scientific-software-engineer to implement an accepted mathematical or physical model as verified numerical software."

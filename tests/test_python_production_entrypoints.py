@@ -371,7 +371,7 @@ def test_codex_production_entrypoint_creates_only_source_manifest_roles(
         )
     )
     installed_agents = project / ".codex" / "agents"
-    assert len(source_manifest["roles"]) == 17
+    assert len(source_manifest["roles"]) == 18
     assert not (installed_agents / "orchestrarium-role-manifest.json").exists()
     for role_name, source_record in source_manifest["roles"].items():
         assert (installed_agents / source_record["relativePath"]).is_file()

@@ -333,10 +333,30 @@ def test_repository_transfer_git_request_uses_the_sealed_profile(tmp_path: Path)
     assert request.capture_policy.policy_id == "repository-transfer-git-v1"
     assert request.capture_policy.aggregate_persisted_limit == 16 * 1024 * 1024
     assert request.capture_policy.per_stream_persisted_limit == 8 * 1024 * 1024
+    assert request.stdin_bytes is None
     assert request.windows_argv_profile_id == (
         "repository-transfer-git-v1" if os.name == "nt" else None
     )
     assert request.capture_sink_binding is sink
+    stdin_payload = b"./ignored path\0"
+    stdin_request, _stdin_sink = owner.build_repository_transfer_git_request(
+        argv=(str(git), "check-ignore", "--stdin", "-z"),
+        resolved_executable=git,
+        cwd=str(tmp_path),
+        environment=(),
+        capture_limit_bytes=8 * 1024 * 1024,
+        stdin_bytes=stdin_payload,
+    )
+    assert stdin_request.stdin_bytes == stdin_payload
+    with pytest.raises(runner.ProcessSupervisionError, match="PSV1-REQUEST-INVALID"):
+        owner.build_repository_transfer_git_request(
+            argv=(str(git), "check-ignore", "--stdin", "-z"),
+            resolved_executable=git,
+            cwd=str(tmp_path),
+            environment=(),
+            capture_limit_bytes=8 * 1024 * 1024,
+            stdin_bytes=b"x" * (runner.MAX_STDIN_BYTES + 1),
+        )
     with pytest.raises(runner.ProcessSupervisionError, match="PSV1-REQUEST-INVALID"):
         owner.build_repository_transfer_git_request(
             argv=(sys.executable, "-c", "pass"),

@@ -4999,11 +4999,11 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
 
     def test_oversized_suffix_revocation_malformed_and_absent_deny(self) -> None:
         cases = (
-            ([assistant("x" * 2048), user(self.GRANT), user("[revoke-pr-publication:v1]")], "PRG-TRANSCRIPT-UNAVAILABLE"),
+            ([assistant("x" * 2048), user(self.GRANT), user("[revoke-pr-publication:v1]")], "PRG-TRANSCRIPT-HISTORY-LIMIT"),
             ([assistant("x" * 2048), user(self.GRANT), user("[approve-pr-publication:v1 broken]")], "PRG-AUTH-MALFORMED"),
-            ([assistant("x" * 2048), user("continue")], "PRG-TRANSCRIPT-UNAVAILABLE"),
+            ([assistant("x" * 2048), user("continue")], "PRG-TRANSCRIPT-HISTORY-LIMIT"),
         )
-        for script in HOOKS:
+        for script in (CANONICAL_HOOK, *HOOKS):
             for entries, failure_id in cases:
                 with self.subTest(script=script, failure_id=failure_id):
                     stdout, observed = self._run_module(
@@ -5028,8 +5028,32 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
                     self._literal_command(script),
                     history_byte_cap=1024,
                 )
-                self.assertIn("PRG-TRANSCRIPT-UNAVAILABLE", stdout)
+                self.assertIn("PRG-TRANSCRIPT-HISTORY-LIMIT", stdout)
                 self.assertEqual(observed, [])
+
+    def test_readable_history_limit_is_distinct_from_unreadable_suffix(self) -> None:
+        module = _load_gate_module(CANONICAL_HOOK, "pr_grant_unreadable_distinction")
+        with synthetic_transcript([user("continue")]) as transcript_path:
+            preflight = module._a3_preflight.build_preflight(
+                {
+                    "tool_name": "Bash",
+                    "cwd": str(REPO_ROOT),
+                    "tool_input": {
+                        "command": "git push origin HEAD:refs/heads/feature",
+                        "workdir": str(REPO_ROOT),
+                    },
+                    "transcript_path": str(transcript_path),
+                }
+            )
+            with mock.patch.object(
+                module, "read_transcript_history", return_value=([], "limit")
+            ), mock.patch.object(
+                module, "_read_stable_transcript_suffix", return_value=([], "unreadable")
+            ):
+                with self.assertRaises(module.PrRouteDenied) as raised:
+                    module.evaluate_heavy(preflight)
+
+        self.assertEqual(raised.exception.failure_id, "PRG-TRANSCRIPT-UNAVAILABLE")
 
     def test_stable_suffix_detects_transcript_mutation(self) -> None:
         module = _load_gate_module(CANONICAL_HOOK, "pr_grant_suffix_mutation")

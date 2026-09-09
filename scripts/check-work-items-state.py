@@ -123,24 +123,7 @@ def parse_time(value: str) -> datetime:
     return parsed.astimezone(UTC)
 
 
-def read_events(item: Path) -> list[dict[str, Any]]:
-    ledger = item / "agent-runs.jsonl"
-    if not ledger.exists():
-        return []
-    events: list[dict[str, Any]] = []
-    for line in ledger.read_text(encoding="utf-8").splitlines():
-        if not line.strip():
-            continue
-        try:
-            parsed = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(parsed, dict):
-            events.append(parsed)
-    return events
-
-
-def unsettled_launch_run_ids(item: Path, events: list[dict[str, Any]], validator: Any) -> set[str]:
+def unsettled_launch_run_ids(item: Path, context: Any, validator: Any) -> set[str]:
     """Return valid lifecycle launches without a valid terminal settlement.
 
     ``validate_closure`` owns the terminal-to-launch relation.  The stale check
@@ -148,10 +131,17 @@ def unsettled_launch_run_ids(item: Path, events: list[dict[str, Any]], validator
     ``eventKind`` and ``launchRunId``.
     """
     validity_errors: list[str] = []
-    event_validity = validator.derive_event_validity(events, item, validity_errors)
-    _open_revise, open_launches = validator.validate_closure(
-        events, [], event_validity=event_validity
+    _active_positions, _validity, _open_revise, open_launches = (
+        validator._reduce_effective_current_state(
+        context.rows,
+        item,
+        validity_errors,
+        None,
+        context=context,
+        )
     )
+    if validity_errors:
+        return set()
     return {
         run_id
         for event in open_launches
@@ -165,15 +155,33 @@ def stale_running_errors(
     if stale_after.total_seconds() <= 0:
         return []
     errors: list[str] = []
-    events = read_events(item)
-    unsettled_launches = unsettled_launch_run_ids(item, events, validator)
+    root = validator.repo_root_for(item)
+    if root is None:
+        return errors
+    selected_ledger = (item / "agent-runs.jsonl").absolute()
+    selected_identity = selected_ledger.relative_to(root.absolute()).as_posix()
+    context = validator.load_effective_ledger_view(
+        root, item, selected_identity
+    )
+    if context.observation.activation_state == "invalid":
+        return errors
+    events = [row.event for row in context.rows]
+    unsettled_launches = unsettled_launch_run_ids(item, context, validator)
+    compatibility_active = context.view is not None
     for event in events:
         if event.get("status") != "running":
             continue
         run_id = event.get("runId", "<unknown>")
         # V2 launch rows are stale only until their valid terminal settlement.
         # Rows without eventKind retain the legacy stale-running behavior.
-        if event.get("eventKind") == "launch" and run_id not in unsettled_launches:
+        if (
+            compatibility_active
+            and run_id not in unsettled_launches
+        ) or (
+            not compatibility_active
+            and event.get("eventKind") == "launch"
+            and run_id not in unsettled_launches
+        ):
             continue
         updated_at = event.get("updatedAt")
         if not isinstance(updated_at, str) or not updated_at.strip():

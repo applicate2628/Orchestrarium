@@ -13,6 +13,8 @@ import stat as stat_module
 import sys
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from types import MappingProxyType
+from typing import Literal, Mapping, Sequence
 
 
 STATUS_VALUES = {"planned", "running", "completed", "revise", "blocked", "cancelled"}
@@ -61,6 +63,8 @@ V2_ONLY_FIELDS = {
     "scratchEvidence",
     "invalidatesRunId",
     "invalidatesEventSha256",
+    "invalidationMode",
+    "invalidatesRawLineOrdinal",
     "migrationAction",
     "normalizationKind",
     "migratesRunId",
@@ -137,6 +141,8 @@ ALLOWED_FIELDS = {
     "scratchEvidence",
     "invalidatesRunId",
     "invalidatesEventSha256",
+    "invalidationMode",
+    "invalidatesRawLineOrdinal",
     "migrationAction",
     "normalizationKind",
     "migratesRunId",
@@ -1209,6 +1215,166 @@ class LedgerProjectionRowV1:
     transformation: str = "raw"
 
 
+@dataclass(frozen=True)
+class LedgerCompatibilityArtifactSetV1:
+    ledger_bytes_by_path: Mapping[str, bytes]
+    h1_manifest_path: str
+    h1_manifest_bytes: bytes
+    ledger_manifest_path: str
+    ledger_manifest_bytes: bytes
+    registry_bytes: bytes
+    receipt_bytes_by_path: Mapping[str, bytes]
+
+
+@dataclass(frozen=True)
+class LedgerAuthorityV1:
+    launch_eligible: bool
+    terminal_eligible: bool
+    revise_target_eligible: bool
+    closer_eligible: bool
+    artifact_evidence_eligible: bool
+
+
+@dataclass(frozen=True)
+class RuntimeLedgerRowV1:
+    event: Mapping[str, object]
+    raw_line_ordinal: int
+    raw_line_sha256: str
+    raw_body_sha256: str
+    projected_event_sha256: str
+    epoch: Literal["raw", "sealed-prefix", "strict-suffix", "disposed-suffix"]
+    authority: LedgerAuthorityV1
+
+
+@dataclass(frozen=True)
+class LedgerEventValidityV1:
+    current_schema_valid: bool
+    authority: LedgerAuthorityV1
+
+
+@dataclass(frozen=True)
+class SuffixDispositionNoticeV1:
+    notice_id: Literal["WI-LEDGER-COMPAT-SUFFIX-DISPOSED-NONAUTHORIZING"]
+    ledger_path: str
+    raw_line_ordinal: int
+    raw_line_sha256: str
+    run_id: str
+    disposition_run_id: str
+    disposition_line_ordinal: int
+
+
+@dataclass(frozen=True)
+class LedgerCompatibilityObservationV1:
+    activation_state: Literal["inactive", "active", "revoked", "invalid"]
+    failure_ids: tuple[str, ...]
+    diagnostics: tuple[str, ...]
+    disposition_notices: tuple[SuffixDispositionNoticeV1, ...] = ()
+
+
+@dataclass(frozen=True)
+class LedgerCompatibilityViewV1:
+    wire: Mapping[str, object]
+    projected_view_sha256: str
+    reduction: Mapping[str, object]
+
+
+@dataclass(frozen=True)
+class LedgerValidationContextV1:
+    selected_ledger_path: str
+    rows: tuple[RuntimeLedgerRowV1, ...]
+    view: LedgerCompatibilityViewV1 | None
+    observation: LedgerCompatibilityObservationV1
+    group_open_revise_ids: tuple[str, ...]
+    group_open_launch_ids: tuple[str, ...]
+    invocation_token: object
+
+
+@dataclass(frozen=True)
+class _LedgerInvocationTokenV1:
+    rows_by_path: Mapping[str, tuple[RuntimeLedgerRowV1, ...]]
+
+
+_NO_LEDGER_AUTHORITY = LedgerAuthorityV1(False, False, False, False, False)
+
+
+def _sealed_context_is_bound(
+    rows: Sequence[RuntimeLedgerRowV1],
+    context: LedgerValidationContextV1 | None,
+    errors: list[str],
+) -> bool:
+    if not any(row.epoch in {"sealed-prefix", "disposed-suffix"} for row in rows):
+        return True
+    valid = bool(
+        isinstance(context, LedgerValidationContextV1)
+        and context.rows is rows
+        and context.observation.activation_state == "active"
+        and context.view is not None
+        and context.selected_ledger_path == context.view.wire.get("ledgerPath")
+        and isinstance(context.invocation_token, _LedgerInvocationTokenV1)
+        and context.invocation_token.rows_by_path.get(context.selected_ledger_path)
+        is context.rows
+    )
+    if not valid:
+        fail(
+            errors,
+            "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS: sealed-prefix rows require their exact receipt-minted validation context",
+        )
+    return valid
+
+
+def _runtime_rows_from_projection(
+    rows: Sequence[LedgerProjectionRowV1], *, epoch: Literal["raw", "strict-suffix"] = "raw"
+) -> tuple[RuntimeLedgerRowV1, ...]:
+    return tuple(
+        RuntimeLedgerRowV1(
+            MappingProxyType(copy.deepcopy(row.event)),
+            row.raw_line_ordinal,
+            row.raw_line_sha256,
+            row.raw_line_sha256,
+            hashlib.sha256(_canonical_projection_bytes(row.event)).hexdigest(),
+            epoch,
+            _NO_LEDGER_AUTHORITY,
+        )
+        for row in rows
+    )
+
+
+def _runtime_rows_from_events(
+    events: Sequence[Mapping[str, object]],
+) -> tuple[RuntimeLedgerRowV1, ...]:
+    return tuple(
+        RuntimeLedgerRowV1(
+            MappingProxyType(copy.deepcopy(dict(event))),
+            position,
+            hashlib.sha256(_canonical_projection_bytes(event)).hexdigest(),
+            hashlib.sha256(_canonical_projection_bytes(event)).hexdigest(),
+            hashlib.sha256(_canonical_projection_bytes(event)).hexdigest(),
+            "raw",
+            _NO_LEDGER_AUTHORITY,
+        )
+        for position, event in enumerate(events, start=1)
+    )
+
+
+def _validity_from_boolean_events(
+    rows: Sequence[RuntimeLedgerRowV1], valid: Sequence[bool]
+) -> tuple[LedgerEventValidityV1, ...]:
+    """Adapt already-owned historical validity into the five closure axes."""
+
+    result = []
+    for row, is_valid in zip(rows, valid):
+        event = row.event
+        mask = LedgerAuthorityV1(
+            bool(is_valid and event.get("eventKind") == "launch"),
+            bool(is_valid and event.get("eventKind") == "terminal"),
+            bool(is_valid and event.get("schemaVersion") == 2 and event.get("gate") == "REVISE"),
+            bool(is_valid and event.get("gate") in CLOSURE_GATES and event.get("closesRunIds")),
+            bool(is_valid and ("artifact" in event or "evidence" in event)),
+        )
+        result.append(LedgerEventValidityV1(bool(is_valid), mask))
+    return tuple(result)
+
+
 def _ledger_projection_rows(
     events: list[dict], raw_metadata: list[dict[str, object]], errors: list[str]
 ) -> tuple[LedgerProjectionRowV1, ...]:
@@ -1325,16 +1491,27 @@ def _validate_event(
     if "scratchEvidence" in event:
         validate_scratch_evidence(event, item, artifact_path, run_id, errors)
 
-    recovery_fields = {"invalidatesRunId", "invalidatesEventSha256"}
+    recovery_fields = {
+        "invalidatesRunId",
+        "invalidatesEventSha256",
+        "invalidationMode",
+        "invalidatesRawLineOrdinal",
+    }
     if event_kind == "closure-invalidation":
         if schema_version != 2:
             fail(errors, f"{run_id}: closure-invalidation requires schemaVersion 2")
+        invalidation_mode = event.get("invalidationMode")
+        invalid_current = invalidation_mode == "invalid-current-nonauthorizing"
         fixed = {
             "role": "lead",
             "executionRole": "main",
             "status": "completed",
             "gate": "none",
-            "scope": ["ledger-recovery:closure-invalidation"],
+            "scope": [
+                "ledger-recovery:invalid-current-nonauthorizing"
+                if invalid_current
+                else "ledger-recovery:closure-invalidation"
+            ],
         }
         for key, wanted in fixed.items():
             if event.get(key) != wanted:
@@ -1345,7 +1522,30 @@ def _validate_event(
             fail(errors, f"{run_id}: invalidatesRunId must be a runId string")
         if not isinstance(digest, str) or not SHA256_RE.fullmatch(digest):
             fail(errors, f"{run_id}: invalidatesEventSha256 must be lowercase SHA-256")
-        for forbidden in ("launchRunId", "closesRunIds", "artifact", "scratchEvidence"):
+        if invalid_current:
+            if (
+                type(event.get("invalidatesRawLineOrdinal")) is not int
+                or event["invalidatesRawLineOrdinal"] < 1
+            ):
+                fail(errors, f"{run_id}: invalidatesRawLineOrdinal must be a positive integer")
+            if event.get("authorizing") is not False:
+                fail(errors, f"{run_id}: invalid-current disposition requires authorizing=false")
+            if not isinstance(event.get("evidence"), list) or not event["evidence"]:
+                fail(errors, f"{run_id}: invalid-current disposition requires evidence")
+        elif invalidation_mode is not None or "invalidatesRawLineOrdinal" in event:
+            fail(errors, f"{run_id}: invalid-current disposition mode is invalid")
+        forbidden_fields = {
+            "launchRunId", "closesRunIds", "artifact", "scratchEvidence",
+        }
+        if invalid_current:
+            forbidden_fields |= {
+                "artifactRevision", "terminalClass", "actualExecutionPath",
+                "closerRunId", "targetTuple", "migrationAction",
+                "normalizationKind", "migratesRunId", "migratesEventSha256",
+                "revokesMigrationRunId", "revokesMigrationEventSha256",
+                "replacementEvent",
+            }
+        for forbidden in sorted(forbidden_fields):
             if forbidden in event:
                 fail(errors, f"{run_id}: closure-invalidation forbids {forbidden}")
         refs = [entry.get("ref", "") for entry in event.get("evidence", []) if isinstance(entry, dict) and entry.get("kind") == "manual-check"]
@@ -1565,7 +1765,14 @@ def _validate_event(
             if "externalDispatchId" in event and event.get("externalDispatchId") == event.get("externalEvidenceRunId"):
                 fail(errors, f"{run_id}: externalDispatchId and externalEvidenceRunId must be distinct")
     elif typed_terminal_fields & set(event):
-        for key in sorted(typed_terminal_fields & set(event)):
+        disposition_authorizing = (
+            event_kind == "closure-invalidation"
+            and event.get("invalidationMode") == "invalid-current-nonauthorizing"
+        )
+        unexpected_typed = typed_terminal_fields & set(event)
+        if disposition_authorizing:
+            unexpected_typed -= {"authorizing"}
+        for key in sorted(unexpected_typed):
             fail(errors, f"{run_id}: {key} requires terminalClass")
 
     for key in ("artifactIdentity", "externalDispatchId", "externalEvidenceRunId", "effortMappingLoss", "closerRunId"):
@@ -1658,32 +1865,159 @@ def validate_event(event: dict, item: Path, seen: set[str], errors: list[str]) -
     return _validate_event(event, item, seen, errors)
 
 
+def _launch_profile_is_exact(event: Mapping[str, object]) -> bool:
+    if "launchFlags" not in event:
+        return True
+    flags = event.get("launchFlags")
+    try:
+        frozen, model, effort = validate_launch_profile(event.get("provider"), flags)
+    except (UnicodeEncodeError, ValueError):
+        return False
+    return (
+        flags == list(frozen)
+        and event.get("model") == model
+        and event.get("effort") == effort
+    )
+
+
+def _derive_authority_masks(
+    rows: Sequence[RuntimeLedgerRowV1], current_validity: Sequence[bool], item: Path
+) -> tuple[LedgerAuthorityV1, ...]:
+    """Derive five independent authority axes from exact raw event fields."""
+
+    positions: dict[str, list[int]] = {}
+    for pos, row in enumerate(rows):
+        run_id = row.event.get("runId")
+        if isinstance(run_id, str) and run_id:
+            positions.setdefault(run_id, []).append(pos)
+
+    launch_eligible = [False] * len(rows)
+    for pos, row in enumerate(rows):
+        event = row.event
+        run_id = event.get("runId")
+        current_ok = pos < len(current_validity) and current_validity[pos]
+        historical_ok = row.epoch == "sealed-prefix"
+        launch_eligible[pos] = bool(
+            (current_ok or historical_ok)
+            and isinstance(run_id, str)
+            and run_id
+            and len(positions.get(run_id, ())) == 1
+            and (not historical_ok or event.get("workItem") == item.name)
+            and event.get("eventKind") == "launch"
+            and event.get("status") == "running"
+            and "launchRunId" not in event
+            and _launch_profile_is_exact(event)
+        )
+
+    terminal_eligible = [False] * len(rows)
+    settled: set[str] = set()
+    for pos, row in enumerate(rows):
+        event = row.event
+        run_id = event.get("runId")
+        launch_id = event.get("launchRunId")
+        current_ok = pos < len(current_validity) and current_validity[pos]
+        historical_ok = row.epoch == "sealed-prefix"
+        launch_positions = positions.get(launch_id, ()) if isinstance(launch_id, str) else ()
+        target_pos = launch_positions[0] if len(launch_positions) == 1 else None
+        target = rows[target_pos].event if target_pos is not None else None
+        flags_match = False
+        if target is not None:
+            if "launchFlags" not in target:
+                flags_match = "launchFlags" not in event
+            else:
+                flags_match = (
+                    event.get("launchFlags") == target.get("launchFlags")
+                    and _launch_profile_is_exact(event)
+                )
+        eligible = bool(
+            (current_ok or historical_ok)
+            and isinstance(run_id, str)
+            and run_id
+            and len(positions.get(run_id, ())) == 1
+            and (not historical_ok or event.get("workItem") == item.name)
+            and event.get("eventKind") == "terminal"
+            and isinstance(event.get("status"), str)
+            and event.get("status") != "running"
+            and target_pos is not None
+            and target_pos < pos
+            and launch_eligible[target_pos]
+            and launch_id not in settled
+            and flags_match
+        )
+        terminal_eligible[pos] = eligible
+        if eligible:
+            settled.add(launch_id)
+
+    masks: list[LedgerAuthorityV1] = []
+    for pos, row in enumerate(rows):
+        event = row.event
+        current_ok = pos < len(current_validity) and current_validity[pos]
+        if event.get("eventKind") == "closure-invalidation":
+            masks.append(_NO_LEDGER_AUTHORITY)
+            continue
+        if row.epoch == "sealed-prefix":
+            isolated_errors: list[str] = []
+            individually_current = _validate_event(
+                dict(event), item, set(), isolated_errors
+            )
+        else:
+            individually_current = current_ok
+        revise = bool(
+            (current_ok or row.epoch == "sealed-prefix")
+            and event.get("schemaVersion") == 2
+            and event.get("gate") == "REVISE"
+            and isinstance(event.get("runId"), str)
+            and len(positions.get(event.get("runId"), ())) == 1
+        )
+        closer = bool(
+            individually_current
+            and event.get("gate") in CLOSURE_GATES
+            and isinstance(event.get("closesRunIds"), list)
+            and event.get("closesRunIds")
+        )
+        artifact = bool(
+            individually_current and ("artifact" in event or "evidence" in event)
+        )
+        masks.append(
+            LedgerAuthorityV1(
+                launch_eligible[pos], terminal_eligible[pos], revise, closer, artifact
+            )
+        )
+    return tuple(masks)
+
+
 def derive_event_validity(
-    events: list[dict],
+    rows: Sequence[RuntimeLedgerRowV1],
     item: Path,
     errors: list[str],
     *,
     validate_schema_version: int | None = None,
-) -> list[bool]:
-    """Return one validation result per input position.
+    context: LedgerValidationContextV1 | None = None,
+) -> tuple[LedgerEventValidityV1, ...]:
+    """Validate current epochs and retain sealed-prefix authority independently."""
 
-    When a schema version is selected, other positions remain aligned but are
-    ineligible without emitting diagnostics. This preserves the archive scanner's
-    intentional legacy epoch while keeping validation state validator-owned.
-    """
+    if rows and isinstance(rows[0], Mapping):
+        rows = _runtime_rows_from_events(rows)  # existing read-only caller compatibility
+    if not _sealed_context_is_bound(rows, context, errors):
+        return tuple(
+            LedgerEventValidityV1(False, _NO_LEDGER_AUTHORITY) for _row in rows
+        )
     seen: set[str] = set()
-    event_validity: list[bool] = []
-    for event in events:
-        if (
+    current: list[bool] = []
+    for row in rows:
+        event = row.event
+        if row.epoch in {"sealed-prefix", "disposed-suffix"} or (
             validate_schema_version is not None
             and event.get("schemaVersion") != validate_schema_version
         ):
-            event_validity.append(False)
+            current.append(False)
             continue
-        event_validity.append(
-            validate_event(event, item, seen, errors)
-        )
-    return event_validity
+        current.append(_validate_event(dict(event), item, seen, errors))
+    masks = _derive_authority_masks(rows, current, item)
+    return tuple(
+        LedgerEventValidityV1(current_schema_valid=value, authority=mask)
+        for value, mask in zip(current, masks)
+    )
 
 
 def derive_archived_event_validity(
@@ -1751,19 +2085,36 @@ def derive_archived_event_validity(
     return validity, closure_validity
 
 
-def validate_closure(
-    events: list[dict],
+def _validate_closure_authority(
+    rows: Sequence[RuntimeLedgerRowV1],
     errors: list[str],
     telemetry: dict[str, int] | None = None,
     *,
-    event_validity: list[bool] | None = None,
-) -> tuple[list[dict], list[dict]]:
+    validity: Sequence[LedgerEventValidityV1] | None = None,
+    event_validity: Sequence[LedgerEventValidityV1] | Sequence[bool] | None = None,
+) -> tuple[list[Mapping[str, object]], list[Mapping[str, object]]]:
     """Ledger-level REVISE-closure validation (decision 2026-07-16-review-verdict-closure,
     minimal slice). Returns (open_v2_revise_events, open_launch_events) — obligations never discharged/settled events (never discharged by a valid
     closer). Closure is derived ONLY from the closesRunIds relation — never from
     role/scope/artifact string matching (proven unstable by live replay in the design loop).
     """
     tel = telemetry if telemetry is not None else {}
+    if rows and isinstance(rows[0], Mapping):
+        rows = _runtime_rows_from_events(rows)  # protected cross-script reader compatibility
+    if validity is None:
+        validity = event_validity
+    if validity is not None and validity and isinstance(validity[0], bool):
+        validity = _validity_from_boolean_events(rows, validity)
+    if validity is None:
+        fail(errors, "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS: typed validity is required")
+        return [], []
+    if len(rows) != len(validity):
+        fail(errors, "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS: row/validity cardinality differs")
+        return [], []
+    events = [row.event for row in rows]
+
+    def axis(position: int, name: str) -> bool:
+        return bool(getattr(validity[position].authority, name))
 
     def bump(rule: str) -> None:
         tel[rule] = tel.get(rule, 0) + 1
@@ -1780,15 +2131,20 @@ def validate_closure(
     # Lifecycle integrity (only when eventKind is used): one terminal per launch,
     # terminal references an earlier launch.
     terminals_by_launch: dict[str, str] = {}
+    relation_terminals_by_launch: dict[str, str] = {}
     for pos, event in enumerate(events):
-        if event_validity is not None and (
-            len(event_validity) != len(events) or not event_validity[pos]
-        ):
+        terminal_eligible = axis(pos, "terminal_eligible")
+        launch_id = event.get("launchRunId")
+        current_relation_diagnostic = bool(
+            validity[pos].current_schema_valid
+            and rows[pos].epoch in {"raw", "strict-suffix"}
+            and event.get("eventKind") == "terminal"
+        )
+        if not terminal_eligible and not current_relation_diagnostic:
             continue
         if event.get("eventKind") != "terminal":
             continue
         rid = event.get("runId")
-        launch_id = event.get("launchRunId")
         if not isinstance(launch_id, str):
             continue  # per-event check already failed it
         bump("lifecycle-terminal-checked")
@@ -1801,7 +2157,13 @@ def validate_closure(
             fail(errors, f"{rid}: launchRunId {launch_id} references a non-launch event")
             bump("lifecycle-nonlaunch-ref")
             continue
-        if event_validity is not None and not event_validity[target[0]]:
+        target_is_valid_launch = (
+            axis(target[0], "launch_eligible")
+            if not current_relation_diagnostic
+            or rows[target[0]].epoch == "sealed-prefix"
+            else validity[target[0]].current_schema_valid
+        )
+        if not target_is_valid_launch:
             fail(errors, f"{rid}: launchRunId {launch_id} references an invalid launch event")
             bump("lifecycle-invalid-launch-ref")
             continue
@@ -1811,20 +2173,25 @@ def validate_closure(
             if launch_flags is None or terminal_flags is None or launch_flags != terminal_flags:
                 fail(errors, f"{rid}: launchFlags must equal the referenced launch binding")
                 bump("lifecycle-launch-flags-mismatch")
-        if launch_id in terminals_by_launch:
-            fail(errors, f"{rid}: duplicate terminal for launch {launch_id} (first: {terminals_by_launch[launch_id]})")
+                continue
+        if launch_id in relation_terminals_by_launch:
+            fail(errors, f"{rid}: duplicate terminal for launch {launch_id} (first: {relation_terminals_by_launch[launch_id]})")
             bump("lifecycle-duplicate-terminal")
-        else:
-            terminals_by_launch[launch_id] = rid if isinstance(rid, str) else "<invalid>"
+            continue
+        relation_terminals_by_launch[launch_id] = (
+            rid if isinstance(rid, str) else "<invalid>"
+        )
+        if terminal_eligible:
+            terminals_by_launch[launch_id] = (
+                rid if isinstance(rid, str) else "<invalid>"
+            )
 
     discharged: dict[str, str] = {}  # target runId -> closer runId
     for pos, event in enumerate(events):
         # A caller-provided false validity bit is a complete settlement
         # boundary: the row keeps its per-event diagnostics but may not become
         # a terminal, closer, or evidence authority in this reduction.
-        if event_validity is not None and (
-            len(event_validity) != len(events) or not event_validity[pos]
-        ):
+        if not axis(pos, "closer_eligible"):
             continue
         gate = event.get("gate")
         # Privileged waiver authorization consumes explicit validation state at
@@ -1832,13 +2199,10 @@ def validate_closure(
         # rendered diagnostics and attacker-controlled runIds carry no authority.
         security_validity: list[bool] | None = None
         if gate == SECURITY_REVIEWER_WAIVER_GATE:
-            if (
-                event_validity is None
-                or len(event_validity) != len(events)
-                or not event_validity[pos]
-            ):
-                continue
-            security_validity = event_validity
+            security_validity = [
+                entry.current_schema_valid or entry.authority.revise_target_eligible
+                for entry in validity
+            ]
         closes = event.get("closesRunIds")
         if not isinstance(closes, list) or not closes:
             continue
@@ -1933,7 +2297,7 @@ def validate_closure(
                 continue
             target = entry[1]
             # C2: target is an open REVISE; one obligation, one closer.
-            if target.get("gate") != "REVISE":
+            if target.get("gate") != "REVISE" or not axis(entry[0], "revise_target_eligible"):
                 fail(errors, f"{rid}: closesRunIds target {target_id} is not a REVISE event (C2)")
                 bump("C2-fail")
                 continue
@@ -2020,8 +2384,9 @@ def validate_closure(
                                 and event.get("externalDispatchId")
                                 == evidence_event.get("externalDispatchId")
                             )
-                        if event_validity is not None:
-                            typed_close_ok = typed_close_ok and event_validity[evidence_pos]
+                        typed_close_ok = typed_close_ok and axis(
+                            evidence_pos, "artifact_evidence_eligible"
+                        )
                     if not typed_close_ok:
                         fail(errors, f"{rid}: internal closer does not bind one valid frozen external evidence tuple (C3)")
                         bump("C3-external-tuple-fail")
@@ -2084,22 +2449,45 @@ def validate_closure(
     # v1 ledgers migrate by hand with user sign-off (fable minimal-slice gate) instead of
     # retroactively failing every historical item.
     open_revise = [
-        event for event in events
-        if event.get("schemaVersion") == 2
-        and event.get("gate") == "REVISE"
+        event for pos, event in enumerate(events)
+        if axis(pos, "revise_target_eligible")
         and event.get("runId") not in discharged
     ]
     tel["open-revise"] = tel.get("open-revise", 0) + len(open_revise)
     # Unsettled launches (no terminal) are strict-mode blockers too: a lost terminal
     # must not make a possibly-REVISE run invisible to the push gate.
     open_launches = [
-        event for event in events
-        if event.get("eventKind") == "launch"
+        event for pos, event in enumerate(events)
+        if axis(pos, "launch_eligible")
         and isinstance(event.get("runId"), str)
         and event["runId"] not in terminals_by_launch
     ]
     tel["open-launches"] = tel.get("open-launches", 0) + len(open_launches)
     return open_revise, open_launches
+
+
+def validate_closure(
+    rows: Sequence[RuntimeLedgerRowV1],
+    errors: list[str],
+    telemetry: dict[str, int] | None = None,
+    *,
+    validity: Sequence[LedgerEventValidityV1] | None = None,
+    event_validity: Sequence[LedgerEventValidityV1] | Sequence[bool] | None = None,
+    context: LedgerValidationContextV1 | None = None,
+) -> tuple[list[Mapping[str, object]], list[Mapping[str, object]]]:
+    """Reduce authority only from raw rows or their exact receipt-minted context."""
+
+    if rows and not isinstance(rows[0], Mapping) and not _sealed_context_is_bound(
+        rows, context, errors
+    ):
+        return [], []
+    return _validate_closure_authority(
+        rows,
+        errors,
+        telemetry,
+        validity=validity,
+        event_validity=event_validity,
+    )
 
 
 def migration_terminal_launch_relation_error(events: list[dict], target_pos: int, item: Path) -> str | None:
@@ -2152,6 +2540,1170 @@ _STRICT_UTC_RE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z
 
 def _projection_fail(errors: list[str], kind: str, detail: str) -> None:
     fail(errors, f"{LEGACY_PROJECTION_IDS[kind]}: {detail}")
+
+
+_LEDGER_H1_POLICY = "2026-08-28-ledger-h1-compatibility-boundary"
+_LEDGER_H1_PROFILE = "sealed-active-prefix-v1"
+_LEDGER_H1_H1_MANIFEST = "work-items/decision-h1-compatibility.json"
+_LEDGER_H1_MANIFEST_DIR = "work-items/legacy-ledger-projection-manifests"
+_LEDGER_H1_REGISTRY = "work-items/legacy-ledger-projections.jsonl"
+_LEDGER_H1_RECEIPT_DIR = "work-items/legacy-ledger-projection-receipts"
+
+
+def _ledger_h1_live_participants_exist(root: Path) -> bool:
+    """Detect only this profile's participants, not unrelated V1 projections."""
+
+    h1 = root / _LEDGER_H1_H1_MANIFEST
+    receipts = root / _LEDGER_H1_RECEIPT_DIR
+    if h1.exists():
+        return True
+    profile_marker = _LEDGER_H1_PROFILE.encode("ascii")
+    policy_marker = _LEDGER_H1_POLICY.encode("ascii")
+    manifests = root / _LEDGER_H1_MANIFEST_DIR
+    registry = root / _LEDGER_H1_REGISTRY
+    try:
+        if manifests.is_dir() and any(
+            profile_marker in (raw := path.read_bytes()) or policy_marker in raw
+            for path in manifests.iterdir()
+            if path.is_file() and path.suffix == ".json"
+        ):
+            return True
+        if registry.is_file():
+            registry_bytes = registry.read_bytes()
+            if profile_marker in registry_bytes or policy_marker in registry_bytes:
+                return True
+        if receipts.is_dir():
+            for path in receipts.iterdir():
+                if not path.is_file() or path.suffix != ".json":
+                    continue
+                raw = path.read_bytes()
+                if (
+                    profile_marker in raw
+                    or policy_marker in raw
+                    or b'"ledgerManifestPath"' in raw
+                    or b'"h1ManifestPath"' in raw
+                    or re.search(rb'"schemaVersion"\s*:\s*2(?:\D|$)', raw)
+                    is not None
+                ):
+                    return True
+    except OSError:
+        return True
+    return False
+
+
+def _ledger_h1_digest(domain: str, value: object) -> str:
+    return hashlib.sha256(
+        domain.encode("ascii") + b"\0" + _canonical_projection_bytes(value)
+    ).hexdigest()
+
+
+def _ledger_h1_authority_wire(authority: LedgerAuthorityV1) -> dict[str, bool]:
+    return {
+        "launchEligible": authority.launch_eligible,
+        "terminalEligible": authority.terminal_eligible,
+        "reviseTargetEligible": authority.revise_target_eligible,
+        "closerEligible": authority.closer_eligible,
+        "artifactEvidenceEligible": authority.artifact_evidence_eligible,
+    }
+
+
+def _ledger_h1_parse_lines(
+    raw: bytes, source: str, errors: list[str]
+) -> tuple[list[dict[str, object]], list[bytes]]:
+    if not isinstance(raw, bytes) or not raw:
+        fail(errors, f"WI-LEDGER-MIGRATION-LEDGER-DRIFT: {source} is empty or not bytes")
+        return [], []
+    physical = raw.splitlines(keepends=True)
+    if (
+        len(physical) > MAX_LEDGER_EVENTS
+        or any(not line.endswith(b"\n") or not line[:-1].strip() for line in physical)
+    ):
+        fail(errors, f"WI-LEDGER-MIGRATION-LEDGER-DRIFT: {source} has invalid physical lines")
+        return [], []
+    events: list[dict[str, object]] = []
+    for ordinal, line in enumerate(physical, start=1):
+        body = line[:-1]
+        if len(body) > MAX_LEDGER_LINE_BYTES:
+            fail(errors, f"{source}:{ordinal}: event exceeds bounded line length")
+            continue
+        try:
+            text = body.decode("utf-8", errors="strict")
+            events.append(
+                decode_json_object(
+                    text, source=f"{source}:{ordinal}", maximum_bytes=MAX_LEDGER_LINE_BYTES
+                )
+            )
+        except (UnicodeDecodeError, ValueError) as exc:
+            fail(errors, str(exc))
+    return events, physical
+
+
+def _ledger_h1_runtime_rows(
+    ledger_path: str,
+    raw: bytes,
+    prefix_line_count: int | None,
+    item: Path,
+    errors: list[str],
+) -> tuple[RuntimeLedgerRowV1, ...]:
+    events, physical = _ledger_h1_parse_lines(raw, ledger_path, errors)
+    if len(events) != len(physical):
+        return ()
+    rows = tuple(
+        RuntimeLedgerRowV1(
+            MappingProxyType(copy.deepcopy(event)),
+            ordinal,
+            hashlib.sha256(line).hexdigest(),
+            hashlib.sha256(line.rstrip(b"\r\n")).hexdigest(),
+            _ledger_h1_digest(
+                "orchestrarium:ledger-h1:projected-event:v1", event
+            ),
+            (
+                "raw"
+                if prefix_line_count is None
+                else "sealed-prefix" if ordinal <= prefix_line_count else "strict-suffix"
+            ),
+            _NO_LEDGER_AUTHORITY,
+        )
+        for ordinal, (event, line) in enumerate(zip(events, physical), start=1)
+    )
+    current = [False] * len(rows)
+    masks = _derive_authority_masks(rows, current, item)
+    return tuple(
+        RuntimeLedgerRowV1(
+            row.event,
+            row.raw_line_ordinal,
+            row.raw_line_sha256,
+            row.raw_body_sha256,
+            row.projected_event_sha256,
+            row.epoch,
+            mask,
+        )
+        for row, mask in zip(rows, masks)
+    )
+
+
+def _ledger_h1_view_wire(
+    entry: Mapping[str, object], rows: Sequence[RuntimeLedgerRowV1]
+) -> tuple[dict[str, object], tuple[str, ...], tuple[str, ...]]:
+    prefix_rows = list(rows[: entry["prefixLineCount"]])
+    eligible = {
+        row.event["runId"]
+        for row in prefix_rows
+        if row.authority.launch_eligible and isinstance(row.event.get("runId"), str)
+    }
+    settled = {
+        row.event["launchRunId"]
+        for row in prefix_rows
+        if row.authority.terminal_eligible
+        and isinstance(row.event.get("launchRunId"), str)
+    }
+    validity = tuple(
+        LedgerEventValidityV1(False, row.authority) for row in prefix_rows
+    )
+    reduction_errors: list[str] = []
+    open_revise_rows, _ = _validate_closure_authority(
+        prefix_rows, reduction_errors, validity=validity
+    )
+    open_revises = {
+        row["runId"]
+        for row in open_revise_rows
+        if isinstance(row.get("runId"), str)
+    }
+    sort_ids = lambda values: sorted(values, key=lambda value: value.encode("utf-8"))
+    reduction = {
+        "effectiveRowCount": len(prefix_rows),
+        "eligibleLaunchRunIds": sort_ids(eligible),
+        "settledLaunchRunIds": sort_ids(settled),
+        "openLaunchRunIds": sort_ids(eligible - settled),
+        "openReviseRunIds": sort_ids(open_revises),
+    }
+    wire_rows = []
+    for row in prefix_rows:
+        authority = _ledger_h1_authority_wire(row.authority)
+        wire_rows.append(
+            {
+                "ledgerPath": entry["ledgerPath"],
+                "rawLineOrdinal": row.raw_line_ordinal,
+                "rawLineSha256": row.raw_line_sha256,
+                "projectedEventSha256": row.projected_event_sha256,
+                "authority": authority,
+                "authorityMaskSha256": _ledger_h1_digest(
+                    "orchestrarium:ledger-h1:authority-mask:v1", authority
+                ),
+            }
+        )
+    wire = {
+        "schemaVersion": 1,
+        "profileId": _LEDGER_H1_PROFILE,
+        "profileVersion": 1,
+        "ledgerPath": entry["ledgerPath"],
+        "prefixLineCount": entry["prefixLineCount"],
+        "prefixByteLength": entry["prefixByteLength"],
+        "prefixSha256": entry["prefixSha256"],
+        "rows": wire_rows,
+        "reduction": reduction,
+    }
+    return wire, tuple(reduction["openReviseRunIds"]), tuple(reduction["openLaunchRunIds"])
+
+
+def _ledger_h1_invalid_contexts(
+    root: Path,
+    artifacts: LedgerCompatibilityArtifactSetV1,
+    failure_ids: Sequence[str],
+    diagnostics: Sequence[str],
+) -> Mapping[str, LedgerValidationContextV1]:
+    token = object()
+    contexts: dict[str, LedgerValidationContextV1] = {}
+    for ledger_path, raw in artifacts.ledger_bytes_by_path.items():
+        item = root.joinpath(*PurePosixPath(ledger_path).parts[:-1])
+        row_errors: list[str] = []
+        rows = _ledger_h1_runtime_rows(ledger_path, raw, 0, item, row_errors)
+        contexts[ledger_path] = LedgerValidationContextV1(
+            ledger_path,
+            tuple(
+                RuntimeLedgerRowV1(
+                    row.event,
+                    row.raw_line_ordinal,
+                    row.raw_line_sha256,
+                    row.raw_body_sha256,
+                    row.projected_event_sha256,
+                    "raw",
+                    _NO_LEDGER_AUTHORITY,
+                )
+                for row in rows
+            ),
+            None,
+            LedgerCompatibilityObservationV1(
+                "invalid",
+                tuple(dict.fromkeys(failure_ids)),
+                tuple((*diagnostics, *row_errors)),
+            ),
+            (),
+            (),
+            token,
+        )
+    return MappingProxyType(contexts)
+
+
+_INVALID_CURRENT_DISPOSITION_MODE = "invalid-current-nonauthorizing"
+_INVALID_CURRENT_DISPOSITION_NOTICE = (
+    "WI-LEDGER-COMPAT-SUFFIX-DISPOSED-NONAUTHORIZING"
+)
+
+
+def _invalid_current_disposition_target(
+    rows: Sequence[RuntimeLedgerRowV1],
+    item: Path,
+    prefix_line_count: int,
+    disposition_position: int,
+    disposition_event: Mapping[str, object],
+    errors: list[str],
+) -> int | None:
+    """Return one exact invalid non-control suffix target for writer and reader."""
+
+    failure_id = "WI-LEDGER-COMPAT-SUFFIX-DISPOSITION-TARGET"
+    ordinal = disposition_event.get("invalidatesRawLineOrdinal")
+    target_run_id = disposition_event.get("invalidatesRunId")
+    target_sha256 = disposition_event.get("invalidatesEventSha256")
+    if (
+        type(ordinal) is not int
+        or ordinal <= prefix_line_count
+        or ordinal < 1
+        or ordinal > len(rows)
+        or ordinal - 1 >= disposition_position
+    ):
+        fail(errors, f"{failure_id}: target ordinal is outside the earlier strict suffix")
+        return None
+    target_position = ordinal - 1
+    target = rows[target_position]
+    event = target.event
+    run_positions = [
+        position
+        for position, row in enumerate(rows)
+        if row.event.get("runId") == target_run_id
+    ]
+    if (
+        target.epoch not in {"strict-suffix", "raw"}
+        or target.raw_line_sha256 != target_sha256
+        or event.get("runId") != target_run_id
+        or len(run_positions) != 1
+    ):
+        fail(errors, f"{failure_id}: target ordinal/hash/runId identity differs")
+        return None
+    if event.get("eventKind") in {
+        "launch",
+        "closure-invalidation",
+        LEGACY_MIGRATION_KIND,
+    } or any(
+        field in event
+        for field in (
+            "migrationAction",
+            "migratesRunId",
+            "revokesMigrationRunId",
+            "invalidationMode",
+        )
+    ):
+        fail(errors, f"{failure_id}: target control/lifecycle kind is ineligible")
+        return None
+    target_errors: list[str] = []
+    _validate_event(dict(event), item, set(), target_errors)
+    if not target_errors:
+        fail(errors, f"{failure_id}: target is current-schema valid")
+        return None
+    return target_position
+
+
+def _suffix_manifest_entry(
+    item: Path,
+    ledger_manifest_bytes: bytes,
+    errors: list[str],
+) -> tuple[dict[str, object], str] | None:
+    manifest = _projection_json_object(
+        ledger_manifest_bytes.rstrip(b"\n"), "ledger compatibility manifest", errors
+    )
+    required = {
+        "schemaVersion", "manifestId", "policyDecision", "profiles", "entries",
+        "openReviseIdentitySha256", "openReviseOracleSha256",
+    }
+    if (
+        manifest is None
+        or set(manifest) != required
+        or manifest.get("schemaVersion") != 2
+        or manifest.get("policyDecision") != _LEDGER_H1_POLICY
+        or not isinstance(manifest.get("entries"), list)
+    ):
+        fail(errors, "WI-LEDGER-COMPAT-SUFFIX-DISPOSITION-TARGET: ledger manifest is invalid")
+        return None
+    target = _projection_target_identity(
+        item, item / "agent-runs.jsonl", errors
+    )
+    if target is None:
+        fail(errors, "WI-LEDGER-COMPAT-SUFFIX-DISPOSITION-TARGET: work item has no safe repository identity")
+        return None
+    _root, work_item = target
+    ledger_path = f"{work_item}/agent-runs.jsonl"
+    entries = [
+        entry
+        for entry in manifest["entries"]
+        if isinstance(entry, dict)
+        and entry.get("workItem") == work_item
+        and entry.get("ledgerPath") == ledger_path
+    ]
+    if len(entries) != 1:
+        fail(errors, "WI-LEDGER-COMPAT-SUFFIX-DISPOSITION-TARGET: manifest target is missing or non-unique")
+        return None
+    entry = entries[0]
+    if (
+        entry.get("profileId") != _LEDGER_H1_PROFILE
+        or entry.get("profileVersion") != 1
+        or type(entry.get("prefixLineCount")) is not int
+        or entry["prefixLineCount"] < 1
+        or type(entry.get("prefixByteLength")) is not int
+        or entry["prefixByteLength"] < 1
+        or not isinstance(entry.get("prefixSha256"), str)
+        or SHA256_RE.fullmatch(entry["prefixSha256"]) is None
+    ):
+        fail(errors, "WI-LEDGER-COMPAT-SUFFIX-DISPOSITION-TARGET: manifest prefix entry is invalid")
+        return None
+    return entry, ledger_path
+
+
+def validate_invalid_current_disposition_candidate(
+    item: Path,
+    ledger_bytes: bytes,
+    disposition_event: Mapping[str, object],
+    *,
+    ledger_manifest_bytes: bytes,
+) -> tuple[str, ...]:
+    """Validate one preactivation append or exact replay without granting authority."""
+
+    errors: list[str] = []
+    selected = _suffix_manifest_entry(item, ledger_manifest_bytes, errors)
+    if selected is None or not isinstance(ledger_bytes, bytes):
+        return tuple(errors)
+    entry, ledger_path = selected
+    boundary = entry["prefixByteLength"]
+    prefix = ledger_bytes[:boundary]
+    if (
+        len(prefix) != boundary
+        or not prefix.endswith(b"\n")
+        or len(prefix.splitlines(keepends=True)) != entry["prefixLineCount"]
+        or hashlib.sha256(prefix).hexdigest() != entry["prefixSha256"]
+    ):
+        fail(errors, "WI-LEDGER-COMPAT-SUFFIX-DISPOSITION-TARGET: sealed prefix differs")
+        return tuple(errors)
+    rows = _ledger_h1_runtime_rows(
+        ledger_path, ledger_bytes, entry["prefixLineCount"], item, errors
+    )
+    disposition_errors: list[str] = []
+    _validate_event(dict(disposition_event), item, set(), disposition_errors)
+    if disposition_errors:
+        errors.extend(
+            f"WI-LEDGER-COMPAT-SUFFIX-DISPOSITION-INVALID: {message}"
+            for message in disposition_errors
+        )
+        return tuple(errors)
+    exact_positions = [
+        position
+        for position, row in enumerate(rows)
+        if dict(row.event) == dict(disposition_event)
+    ]
+    disposition_position = exact_positions[0] if len(exact_positions) == 1 else len(rows)
+    run_id = disposition_event.get("runId")
+    target_identity = (
+        disposition_event.get("invalidatesRawLineOrdinal"),
+        disposition_event.get("invalidatesRunId"),
+        disposition_event.get("invalidatesEventSha256"),
+    )
+    for position, row in enumerate(rows):
+        event = row.event
+        if event.get("invalidationMode") != _INVALID_CURRENT_DISPOSITION_MODE:
+            if event.get("runId") == run_id:
+                fail(errors, "WI-LEDGER-COMPAT-SUFFIX-DISPOSITION-CONFLICT: disposition runId is reused")
+            continue
+        existing_identity = (
+            event.get("invalidatesRawLineOrdinal"),
+            event.get("invalidatesRunId"),
+            event.get("invalidatesEventSha256"),
+        )
+        if position != disposition_position and (
+            event.get("runId") == run_id or existing_identity == target_identity
+        ):
+            fail(errors, "WI-LEDGER-COMPAT-SUFFIX-DISPOSITION-CONFLICT: target or disposition differs from existing row")
+    _invalid_current_disposition_target(
+        rows,
+        item,
+        entry["prefixLineCount"],
+        disposition_position,
+        disposition_event,
+        errors,
+    )
+    return tuple(errors)
+
+
+def _apply_active_suffix_dispositions(
+    rows: tuple[RuntimeLedgerRowV1, ...],
+    item: Path,
+    ledger_path: str,
+    prefix_line_count: int,
+) -> tuple[
+    tuple[RuntimeLedgerRowV1, ...],
+    tuple[SuffixDispositionNoticeV1, ...],
+    tuple[str, ...],
+]:
+    errors: list[str] = []
+    targets: dict[int, tuple[int, Mapping[str, object]]] = {}
+    for disposition_position, row in enumerate(rows):
+        event = row.event
+        if event.get("invalidationMode") != _INVALID_CURRENT_DISPOSITION_MODE:
+            continue
+        disposition_run_id = event.get("runId")
+        if sum(
+            other.event.get("runId") == disposition_run_id for other in rows
+        ) != 1:
+            fail(
+                errors,
+                "WI-LEDGER-COMPAT-SUFFIX-DISPOSITION-CONFLICT: disposition runId is not unique",
+            )
+            continue
+        disposition_errors: list[str] = []
+        _validate_event(dict(event), item, set(), disposition_errors)
+        if disposition_errors:
+            errors.extend(
+                f"WI-LEDGER-COMPAT-SUFFIX-DISPOSITION-INVALID: {message}"
+                for message in disposition_errors
+            )
+            continue
+        target_position = _invalid_current_disposition_target(
+            rows,
+            item,
+            prefix_line_count,
+            disposition_position,
+            event,
+            errors,
+        )
+        if target_position is None:
+            continue
+        if target_position in targets:
+            fail(errors, "WI-LEDGER-COMPAT-SUFFIX-DISPOSITION-CONFLICT: target has more than one disposition")
+            continue
+        targets[target_position] = (disposition_position, event)
+    if errors:
+        return rows, (), tuple(errors)
+    effective = list(rows)
+    notices: list[SuffixDispositionNoticeV1] = []
+    for target_position, (disposition_position, disposition_event) in targets.items():
+        target = rows[target_position]
+        effective[target_position] = RuntimeLedgerRowV1(
+            target.event,
+            target.raw_line_ordinal,
+            target.raw_line_sha256,
+            target.raw_body_sha256,
+            target.projected_event_sha256,
+            "disposed-suffix",
+            _NO_LEDGER_AUTHORITY,
+        )
+        notices.append(
+            SuffixDispositionNoticeV1(
+                _INVALID_CURRENT_DISPOSITION_NOTICE,
+                ledger_path,
+                target.raw_line_ordinal,
+                target.raw_line_sha256,
+                str(target.event.get("runId")),
+                str(disposition_event.get("runId")),
+                rows[disposition_position].raw_line_ordinal,
+            )
+        )
+    notices.sort(
+        key=lambda notice: (
+            notice.ledger_path.encode("utf-8"),
+            notice.raw_line_ordinal,
+            notice.disposition_line_ordinal,
+        )
+    )
+    return tuple(effective), tuple(notices), ()
+
+
+def _ledger_h1_candidate_group(
+    root: Path, artifacts: LedgerCompatibilityArtifactSetV1
+) -> Mapping[str, LedgerValidationContextV1]:
+    failures: list[str] = []
+    diagnostics: list[str] = []
+
+    def reject(failure_id: str, detail: str) -> None:
+        failures.append(failure_id)
+        diagnostics.append(f"{failure_id}: {detail}")
+
+    byte_fields = (
+        artifacts.h1_manifest_bytes,
+        artifacts.ledger_manifest_bytes,
+        artifacts.registry_bytes,
+    )
+    if (
+        not isinstance(artifacts.ledger_bytes_by_path, Mapping)
+        or not artifacts.ledger_bytes_by_path
+        or any(
+            not isinstance(path, str)
+            or not _safe_repo_relative(path)
+            or not isinstance(raw, bytes)
+            for path, raw in artifacts.ledger_bytes_by_path.items()
+        )
+        or any(not isinstance(value, bytes) or not value for value in byte_fields)
+        or not isinstance(artifacts.receipt_bytes_by_path, Mapping)
+        or not artifacts.receipt_bytes_by_path
+        or any(
+            not isinstance(path, str)
+            or not _safe_repo_relative(path)
+            or not isinstance(raw, bytes)
+            or not raw
+            for path, raw in artifacts.receipt_bytes_by_path.items()
+        )
+    ):
+        reject("WI-LEDGER-COMPAT-ACTIVATION-PARTIAL", "candidate artifact set is incomplete or has wrong member types")
+        return _ledger_h1_invalid_contexts(root, artifacts, failures, diagnostics)
+
+    manifest = _projection_json_object(
+        artifacts.ledger_manifest_bytes.rstrip(b"\n"), artifacts.ledger_manifest_path, diagnostics
+    )
+    manifest_fields = {
+        "schemaVersion", "manifestId", "policyDecision", "profiles", "entries",
+        "openReviseIdentitySha256", "openReviseOracleSha256",
+    }
+    receipt_fields = {
+        "schemaVersion", "receiptId", "state", "operationGroupId", "policyDecision",
+        "ledgerManifestPath", "ledgerManifestSha256", "h1ManifestPath", "h1ManifestSha256",
+        "memberOperationIds", "memberRecordSha256", "registryBeforeSha256",
+        "registryAfterSha256", "recordedAt",
+    }
+    if manifest is None or set(manifest) != manifest_fields:
+        reject("WI-LEDGER-MIGRATION-MANIFEST-INVALID", "ledger compatibility manifest shape is invalid")
+        return _ledger_h1_invalid_contexts(root, artifacts, failures, diagnostics)
+    profiles = manifest.get("profiles")
+    entries = manifest.get("entries")
+    if (
+        manifest.get("schemaVersion") != 2
+        or manifest.get("policyDecision") != _LEDGER_H1_POLICY
+        or not isinstance(manifest.get("manifestId"), str)
+        or SCRATCH_IDENTIFIER_RE.fullmatch(manifest["manifestId"]) is None
+        or profiles != [{"profileId": _LEDGER_H1_PROFILE, "profileVersion": 1}]
+        or not isinstance(entries, list)
+        or len(entries) != 2
+    ):
+        reject("WI-LEDGER-MIGRATION-MANIFEST-INVALID", "ledger compatibility manifest identity/profile is invalid")
+        return _ledger_h1_invalid_contexts(root, artifacts, failures, diagnostics)
+    entry_fields = {
+        "entryId", "profileId", "profileVersion", "workItem", "ledgerPath",
+        "prefixLineCount", "prefixByteLength", "prefixSha256", "projectedViewSha256",
+    }
+    if any(not isinstance(entry, dict) or set(entry) != entry_fields for entry in entries):
+        reject("WI-LEDGER-MIGRATION-MANIFEST-INVALID", "ledger compatibility entry shape is invalid")
+        return _ledger_h1_invalid_contexts(root, artifacts, failures, diagnostics)
+    ledger_paths = [entry["ledgerPath"] for entry in entries]
+    sorted_paths = sorted(ledger_paths, key=lambda value: value.encode("utf-8") if isinstance(value, str) else b"")
+    if ledger_paths != sorted_paths or len(set(ledger_paths)) != 2:
+        reject("WI-LEDGER-COMPAT-MEMBER-ORDER", "manifest entries are not uniquely UTF-8 sorted")
+    if set(artifacts.ledger_bytes_by_path) != set(ledger_paths):
+        reject("WI-LEDGER-COMPAT-ACTIVATION-PARTIAL", "candidate ledger keys differ from manifest entries")
+    manifest_sha = hashlib.sha256(artifacts.ledger_manifest_bytes).hexdigest()
+    h1_sha = hashlib.sha256(artifacts.h1_manifest_bytes).hexdigest()
+    if (
+        artifacts.h1_manifest_path != _LEDGER_H1_H1_MANIFEST
+        or artifacts.ledger_manifest_path
+        != f"{_LEDGER_H1_MANIFEST_DIR}/{manifest['manifestId']}.json"
+    ):
+        reject("WI-LEDGER-MIGRATION-MANIFEST-INVALID", "manifest paths are not canonical")
+
+    entry_rows: dict[str, tuple[RuntimeLedgerRowV1, ...]] = {}
+    views: dict[str, LedgerCompatibilityViewV1] = {}
+    revise_identities: list[str] = []
+    open_launch_ids: set[str] = set()
+    for entry in entries:
+        path = entry.get("ledgerPath")
+        work_item = entry.get("workItem")
+        if (
+            not isinstance(path, str)
+            or not isinstance(work_item, str)
+            or path != f"{work_item}/agent-runs.jsonl"
+            or PurePosixPath(work_item).parts[:2] != ("work-items", "active")
+            or len(PurePosixPath(work_item).parts) != 3
+            or entry.get("profileId") != _LEDGER_H1_PROFILE
+            or entry.get("profileVersion") != 1
+            or not isinstance(entry.get("entryId"), str)
+            or not isinstance(entry.get("prefixLineCount"), int)
+            or entry.get("prefixLineCount", 0) < 1
+            or not isinstance(entry.get("prefixByteLength"), int)
+            or entry.get("prefixByteLength", 0) < 1
+            or not isinstance(entry.get("prefixSha256"), str)
+            or SHA256_RE.fullmatch(entry["prefixSha256"]) is None
+            or not isinstance(entry.get("projectedViewSha256"), str)
+            or SHA256_RE.fullmatch(entry["projectedViewSha256"]) is None
+        ):
+            reject("WI-LEDGER-MIGRATION-MANIFEST-INVALID", "manifest entry identity or seal type is invalid")
+            continue
+        raw = artifacts.ledger_bytes_by_path.get(path)
+        if not isinstance(raw, bytes):
+            continue
+        boundary = entry["prefixByteLength"]
+        prefix = raw[:boundary]
+        if (
+            len(prefix) != boundary
+            or not prefix.endswith(b"\n")
+            or len(prefix.splitlines(keepends=True)) != entry["prefixLineCount"]
+            or hashlib.sha256(prefix).hexdigest() != entry["prefixSha256"]
+        ):
+            reject("WI-LEDGER-MIGRATION-LEDGER-DRIFT", f"sealed prefix differs for {path}")
+            continue
+        item = root.joinpath(*PurePosixPath(work_item).parts)
+        identity_errors: list[str] = []
+        identity = _projection_target_identity(item, root.joinpath(*PurePosixPath(path).parts), identity_errors)
+        if identity is None or identity[1] != work_item:
+            reject("WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS", f"unsafe manifest target {work_item}")
+            diagnostics.extend(identity_errors)
+            continue
+        rows = _ledger_h1_runtime_rows(path, raw, entry["prefixLineCount"], item, diagnostics)
+        if not rows:
+            continue
+        wire, open_revises, open_launches = _ledger_h1_view_wire(entry, rows)
+        projected_digest = _ledger_h1_digest(
+            "orchestrarium:ledger-h1:projected-view:v1", wire
+        )
+        if projected_digest != entry["projectedViewSha256"]:
+            reject("WI-LEDGER-MIGRATION-REPLACEMENT-MISMATCH", f"projected view differs for {path}")
+            continue
+        entry_rows[path] = rows
+        views[path] = LedgerCompatibilityViewV1(
+            MappingProxyType(wire), projected_digest, MappingProxyType(wire["reduction"])
+        )
+        logical_work_item = item.name
+        revise_rows = [
+            row
+            for row in rows
+            if row.event.get("runId") in open_revises
+        ]
+        if any(row.event.get("workItem") != logical_work_item for row in revise_rows):
+            reject(
+                "WI-LEDGER-MIGRATION-REPLACEMENT-MISMATCH",
+                f"open-REVISE logical work-item identity differs for {path}",
+            )
+            continue
+        revise_identities.extend(
+            f"{logical_work_item}\0{run_id}" for run_id in open_revises
+        )
+        open_launch_ids.update(open_launches)
+
+    revise_identities.sort(key=lambda value: value.encode("utf-8"))
+    identity_payload = "\n".join(revise_identities).encode("utf-8")
+    oracle = {
+        "schemaVersion": 1,
+        "ledgerPrefixes": [
+            {"ledgerPath": entry["ledgerPath"], "prefixSha256": entry["prefixSha256"]}
+            for entry in entries
+        ],
+        "openReviseIdentities": revise_identities,
+    }
+    if (
+        hashlib.sha256(identity_payload).hexdigest() != manifest.get("openReviseIdentitySha256")
+        or _ledger_h1_digest(
+            "orchestrarium:ledger-h1:open-revise-oracle:v1", oracle
+        ) != manifest.get("openReviseOracleSha256")
+    ):
+        reject("WI-LEDGER-MIGRATION-REPLACEMENT-MISMATCH", "group open-REVISE oracle differs")
+
+    registry_lines = artifacts.registry_bytes.splitlines(keepends=True)
+    parsed_registry: list[dict[str, object] | None] = []
+    for ordinal, line in enumerate(registry_lines, start=1):
+        if not line.endswith(b"\n"):
+            reject("WI-LEDGER-COMPAT-ACTIVATION-PARTIAL", "registry has a nonterminated line")
+            parsed_registry.append(None)
+            continue
+        parsed_registry.append(
+            _projection_json_object(line[:-1], f"candidate registry:{ordinal}", diagnostics)
+        )
+    receipts: dict[str, dict[str, object]] = {}
+    for receipt_path, receipt_bytes in artifacts.receipt_bytes_by_path.items():
+        receipt = _projection_json_object(
+            receipt_bytes.rstrip(b"\n"), receipt_path, diagnostics
+        )
+        if receipt is None or set(receipt) != receipt_fields:
+            reject("WI-LEDGER-COMPAT-RECEIPT-INVALID", f"receipt {receipt_path} shape is invalid")
+            continue
+        receipts[receipt_path] = receipt
+
+    sealed_positions = [
+        position
+        for position, record in enumerate(parsed_registry)
+        if isinstance(record, dict)
+        and (
+            record.get("profileId") == _LEDGER_H1_PROFILE
+            or record.get("policyDecision") == _LEDGER_H1_POLICY
+        )
+    ]
+    groups: list[tuple[int, list[dict[str, object]], list[bytes]]] = []
+    cursor = 0
+    while cursor < len(sealed_positions):
+        start = sealed_positions[cursor]
+        first = parsed_registry[start]
+        group_id = first.get("operationGroupId") if isinstance(first, dict) else None
+        positions: list[int] = []
+        while (
+            cursor < len(sealed_positions)
+            and sealed_positions[cursor] == start + len(positions)
+            and isinstance(parsed_registry[sealed_positions[cursor]], dict)
+            and parsed_registry[sealed_positions[cursor]].get("operationGroupId") == group_id
+        ):
+            positions.append(sealed_positions[cursor])
+            cursor += 1
+        records = [parsed_registry[position] for position in positions]
+        groups.append(
+            (
+                start,
+                [record for record in records if isinstance(record, dict)],
+                [registry_lines[position] for position in positions],
+            )
+        )
+    if len(groups) not in {1, 2}:
+        reject("WI-LEDGER-COMPAT-ACTIVATION-PARTIAL", "sealed-prefix registry history must contain apply and optional revoke")
+
+    expected_receipt_paths: set[str] = set()
+    apply_records: list[dict[str, object]] = []
+    apply_lines: list[bytes] = []
+    final_state = "invalid"
+    for group_index, (start, records, lines) in enumerate(groups):
+        state = "apply" if group_index == 0 else "revoke"
+        if len(records) != 2 or len(lines) != 2:
+            reject("WI-LEDGER-COMPAT-ACTIVATION-PARTIAL", f"{state} group is not one contiguous two-member group")
+            continue
+        expected_group = "g-" + _ledger_h1_digest(
+            "orchestrarium:ledger-h1:registry-group:v1",
+            [state, _LEDGER_H1_POLICY, manifest_sha, h1_sha, [entry["entryId"] for entry in entries]],
+        )
+        before = b"".join(registry_lines[:start])
+        after = b"".join(registry_lines[: start + 2])
+        member_ids: list[str] = []
+        member_hashes = [hashlib.sha256(line).hexdigest() for line in lines]
+        base_fields = {
+            "schemaVersion", "operationId", "operationGroupId", "groupMemberIndex",
+            "groupMemberCount", "state", "profileId", "profileVersion", "policyDecision",
+            "manifestId", "manifestSha256", "manifestEntryId", "h1ManifestPath",
+            "h1ManifestSha256", "workItem", "ledgerPath", "prefixLineCount",
+            "prefixByteLength", "prefixSha256", "projectedViewSha256", "recordedAt",
+        }
+        fields = base_fields | (
+            {"revokeOfOperationId", "revokeOfOperationGroupId", "revokeOfRecordSha256"}
+            if state == "revoke"
+            else set()
+        )
+        recorded_at = records[0].get("recordedAt")
+        for index, (record, entry) in enumerate(zip(records, entries), start=1):
+            expected_operation = "m:" + _ledger_h1_digest(
+                "orchestrarium:ledger-h1:activation-member:v1",
+                [expected_group, index, entry["entryId"]],
+            )
+            member_ids.append(expected_operation)
+            exact = {
+                "schemaVersion": 2,
+                "operationId": expected_operation,
+                "operationGroupId": expected_group,
+                "groupMemberIndex": index,
+                "groupMemberCount": 2,
+                "state": state,
+                "profileId": _LEDGER_H1_PROFILE,
+                "profileVersion": 1,
+                "policyDecision": _LEDGER_H1_POLICY,
+                "manifestId": manifest["manifestId"],
+                "manifestSha256": manifest_sha,
+                "manifestEntryId": entry["entryId"],
+                "h1ManifestPath": artifacts.h1_manifest_path,
+                "h1ManifestSha256": h1_sha,
+                "workItem": entry["workItem"],
+                "ledgerPath": entry["ledgerPath"],
+                "prefixLineCount": entry["prefixLineCount"],
+                "prefixByteLength": entry["prefixByteLength"],
+                "prefixSha256": entry["prefixSha256"],
+                "projectedViewSha256": entry["projectedViewSha256"],
+                "recordedAt": recorded_at,
+            }
+            if state == "revoke" and index <= len(apply_records):
+                exact.update(
+                    {
+                        "revokeOfOperationId": apply_records[index - 1]["operationId"],
+                        "revokeOfOperationGroupId": apply_records[index - 1]["operationGroupId"],
+                        "revokeOfRecordSha256": hashlib.sha256(apply_lines[index - 1]).hexdigest(),
+                    }
+                )
+            if set(record) != fields or record != exact:
+                reject("WI-LEDGER-COMPAT-MEMBER-ORDER", f"registry {state} member {index} binding differs")
+        if (
+            not isinstance(recorded_at, str)
+            or _STRICT_UTC_RE.fullmatch(recorded_at) is None
+            or [record.get("groupMemberIndex") for record in records] != [1, 2]
+        ):
+            reject("WI-LEDGER-COMPAT-MEMBER-ORDER", f"registry {state} group order or timestamp differs")
+        receipt_id = "r-" + _ledger_h1_digest(
+            "orchestrarium:ledger-h1:receipt-id:v1",
+            [state, expected_group, hashlib.sha256(before).hexdigest(), hashlib.sha256(after).hexdigest()],
+        )
+        receipt_path = f"{_LEDGER_H1_RECEIPT_DIR}/{receipt_id}.json"
+        expected_receipt_paths.add(receipt_path)
+        expected_receipt = {
+            "schemaVersion": 2,
+            "receiptId": receipt_id,
+            "state": state,
+            "operationGroupId": expected_group,
+            "policyDecision": _LEDGER_H1_POLICY,
+            "ledgerManifestPath": artifacts.ledger_manifest_path,
+            "ledgerManifestSha256": manifest_sha,
+            "h1ManifestPath": artifacts.h1_manifest_path,
+            "h1ManifestSha256": h1_sha,
+            "memberOperationIds": member_ids,
+            "memberRecordSha256": member_hashes,
+            "registryBeforeSha256": hashlib.sha256(before).hexdigest(),
+            "registryAfterSha256": hashlib.sha256(after).hexdigest(),
+            "recordedAt": recorded_at,
+        }
+        if receipts.get(receipt_path) != expected_receipt:
+            reject("WI-LEDGER-COMPAT-RECEIPT-INVALID", f"{state} receipt is missing or differs")
+        if state == "apply":
+            apply_records = records
+            apply_lines = lines
+            final_state = "active"
+        elif apply_records:
+            final_state = "revoked"
+
+    if set(artifacts.receipt_bytes_by_path) != expected_receipt_paths:
+        reject("WI-LEDGER-COMPAT-RECEIPT-INVALID", "candidate receipt paths differ from registry-derived paths")
+
+    if failures or set(entry_rows) != set(ledger_paths) or set(views) != set(ledger_paths):
+        if not failures:
+            reject("WI-LEDGER-COMPAT-ACTIVATION-PARTIAL", "not every manifest ledger projected")
+        return _ledger_h1_invalid_contexts(root, artifacts, failures, diagnostics)
+
+    disposition_notices_by_path: dict[
+        str, tuple[SuffixDispositionNoticeV1, ...]
+    ] = {}
+    if final_state == "active":
+        for entry in entries:
+            path = entry["ledgerPath"]
+            item = root.joinpath(*PurePosixPath(entry["workItem"]).parts)
+            effective_rows, notices, disposition_errors = (
+                _apply_active_suffix_dispositions(
+                    entry_rows[path],
+                    item,
+                    path,
+                    entry["prefixLineCount"],
+                )
+            )
+            entry_rows[path] = effective_rows
+            disposition_notices_by_path[path] = notices
+            for message in disposition_errors:
+                failures.append(message.split(":", 1)[0])
+                diagnostics.append(message)
+        if failures:
+            return _ledger_h1_invalid_contexts(
+                root, artifacts, failures, diagnostics
+            )
+
+    if final_state == "revoked":
+        token = object()
+        contexts = {
+            path: LedgerValidationContextV1(
+                path,
+                tuple(
+                    RuntimeLedgerRowV1(
+                        row.event,
+                        row.raw_line_ordinal,
+                        row.raw_line_sha256,
+                        row.raw_body_sha256,
+                        row.projected_event_sha256,
+                        "raw",
+                        _NO_LEDGER_AUTHORITY,
+                    )
+                    for row in entry_rows[path]
+                ),
+                None,
+                LedgerCompatibilityObservationV1("revoked", (), ()),
+                (),
+                (),
+                token,
+            )
+            for path in ledger_paths
+        }
+        return MappingProxyType(contexts)
+
+    token = _LedgerInvocationTokenV1(MappingProxyType(dict(entry_rows)))
+    open_launch_tuple = tuple(sorted(open_launch_ids, key=lambda value: value.encode("utf-8")))
+    contexts = {
+        path: LedgerValidationContextV1(
+            path,
+            entry_rows[path],
+            views[path],
+            LedgerCompatibilityObservationV1(
+                "active", (), (), disposition_notices_by_path.get(path, ())
+            ),
+            tuple(revise_identities),
+            open_launch_tuple,
+            token,
+        )
+        for path in ledger_paths
+    }
+    return MappingProxyType(contexts)
+
+
+def _load_live_ledger_h1_artifacts(
+    root: Path,
+) -> LedgerCompatibilityArtifactSetV1 | None:
+    """Acquire one complete live participant set without interpreting authority."""
+
+    participants = (
+        root / _LEDGER_H1_H1_MANIFEST,
+        root / _LEDGER_H1_MANIFEST_DIR,
+        root / _LEDGER_H1_REGISTRY,
+        root / _LEDGER_H1_RECEIPT_DIR,
+    )
+    if not _ledger_h1_live_participants_exist(root) or not all(
+        path.exists() for path in participants
+    ):
+        return None
+    h1_path, manifest_dir, registry_path, receipt_dir = participants
+    if (
+        not h1_path.is_file()
+        or not manifest_dir.is_dir()
+        or not registry_path.is_file()
+        or not receipt_dir.is_dir()
+        or any(_is_link_or_reparse(path) for path in participants)
+    ):
+        return None
+    try:
+        registry_bytes = registry_path.read_bytes()
+        registry_lines = registry_bytes.splitlines(keepends=True)
+        acquisition_errors: list[str] = []
+        parsed = [
+            _projection_json_object(
+                line[:-1], f"{registry_path}:{ordinal}", acquisition_errors
+            )
+            if line.endswith(b"\n")
+            else None
+            for ordinal, line in enumerate(registry_lines, start=1)
+        ]
+        sealed_positions = [
+            position
+            for position, record in enumerate(parsed)
+            if isinstance(record, dict)
+            and (
+                record.get("profileId") == _LEDGER_H1_PROFILE
+                or record.get("policyDecision") == _LEDGER_H1_POLICY
+            )
+        ]
+        if len(sealed_positions) not in {2, 4}:
+            return None
+        groups: list[tuple[int, list[dict[str, object]]]] = []
+        cursor = 0
+        while cursor < len(sealed_positions):
+            start = sealed_positions[cursor]
+            first = parsed[start]
+            group_id = first.get("operationGroupId") if isinstance(first, dict) else None
+            positions: list[int] = []
+            while (
+                cursor < len(sealed_positions)
+                and sealed_positions[cursor] == start + len(positions)
+                and isinstance(parsed[sealed_positions[cursor]], dict)
+                and parsed[sealed_positions[cursor]].get("operationGroupId") == group_id
+            ):
+                positions.append(sealed_positions[cursor])
+                cursor += 1
+            records = [parsed[position] for position in positions]
+            if len(records) != 2 or not all(isinstance(record, dict) for record in records):
+                return None
+            groups.append((start, records))
+        manifest_ids = {
+            record.get("manifestId")
+            for _start, records in groups
+            for record in records
+        }
+        if len(manifest_ids) != 1:
+            return None
+        manifest_id = next(iter(manifest_ids))
+        if not isinstance(manifest_id, str) or SCRATCH_IDENTIFIER_RE.fullmatch(manifest_id) is None:
+            return None
+        manifest_relative = f"{_LEDGER_H1_MANIFEST_DIR}/{manifest_id}.json"
+        h1_relative = _LEDGER_H1_H1_MANIFEST
+        receipt_bytes_by_path: dict[str, bytes] = {}
+        for start, records in groups:
+            state = records[0].get("state")
+            group_id = records[0].get("operationGroupId")
+            if state not in {"apply", "revoke"} or not isinstance(group_id, str):
+                return None
+            before_sha = hashlib.sha256(b"".join(registry_lines[:start])).hexdigest()
+            after_sha = hashlib.sha256(b"".join(registry_lines[: start + 2])).hexdigest()
+            receipt_id = "r-" + _ledger_h1_digest(
+                "orchestrarium:ledger-h1:receipt-id:v1",
+                [state, group_id, before_sha, after_sha],
+            )
+            receipt_relative = f"{_LEDGER_H1_RECEIPT_DIR}/{receipt_id}.json"
+            receipt_path = root.joinpath(*PurePosixPath(receipt_relative).parts)
+            if (
+                receipt_path.parent != receipt_dir
+                or not receipt_path.is_file()
+                or _is_link_or_reparse(receipt_path)
+            ):
+                return None
+            receipt_bytes_by_path[receipt_relative] = receipt_path.read_bytes()
+        manifest_path = root.joinpath(*PurePosixPath(manifest_relative).parts)
+        if (
+            manifest_path.parent != manifest_dir
+            or not manifest_path.is_file()
+            or _is_link_or_reparse(manifest_path)
+        ):
+            return None
+        manifest_bytes = manifest_path.read_bytes()
+        manifest = _projection_json_object(
+            manifest_bytes.rstrip(b"\n"), manifest_path, acquisition_errors
+        )
+        if not isinstance(manifest, dict) or not isinstance(
+            manifest.get("entries"), list
+        ):
+            return None
+        ledger_bytes_by_path: dict[str, bytes] = {}
+        for entry in manifest["entries"]:
+            ledger_relative = (
+                entry.get("ledgerPath") if isinstance(entry, dict) else None
+            )
+            if not isinstance(ledger_relative, str) or not _safe_repo_relative(
+                ledger_relative
+            ):
+                return None
+            ledger_path = root.joinpath(*PurePosixPath(ledger_relative).parts)
+            if not ledger_path.is_file() or _is_link_or_reparse(ledger_path):
+                return None
+            ledger_bytes_by_path[ledger_relative] = ledger_path.read_bytes()
+        return LedgerCompatibilityArtifactSetV1(
+            MappingProxyType(ledger_bytes_by_path),
+            h1_relative,
+            h1_path.read_bytes(),
+            manifest_relative,
+            manifest_bytes,
+            registry_bytes,
+            MappingProxyType(receipt_bytes_by_path),
+        )
+    except OSError:
+        return None
+
+
+def _load_effective_ledger_group(
+    root: Path,
+    *,
+    compatibility_artifacts: LedgerCompatibilityArtifactSetV1 | None = None,
+) -> Mapping[str, LedgerValidationContextV1]:
+    """Load and validate one receipt-bound two-ledger group without caching."""
+
+    if compatibility_artifacts is None:
+        compatibility_artifacts = _load_live_ledger_h1_artifacts(root)
+        if compatibility_artifacts is None:
+            return MappingProxyType({})
+    return _ledger_h1_candidate_group(Path(root), compatibility_artifacts)
+
+
+def load_effective_ledger_view(
+    root: Path,
+    item: Path,
+    selected_ledger_path: str,
+    *,
+    compatibility_artifacts: LedgerCompatibilityArtifactSetV1 | None = None,
+) -> LedgerValidationContextV1:
+    """Return the selected raw or receipt-activated effective ledger context."""
+
+    selected = Path(root).joinpath(*PurePosixPath(selected_ledger_path).parts)
+    identity_errors: list[str] = []
+    identity = _projection_target_identity(item, selected, identity_errors)
+    token = object()
+    if identity is None or selected_ledger_path != f"{identity[1]}/agent-runs.jsonl":
+        diagnostic = "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS: selected ledger identity is invalid"
+        return LedgerValidationContextV1(
+            selected_ledger_path, (), None,
+            LedgerCompatibilityObservationV1("invalid", ("WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS",), tuple((*identity_errors, diagnostic))),
+            (), (), token,
+        )
+    contexts = _load_effective_ledger_group(
+        root, compatibility_artifacts=compatibility_artifacts
+    )
+    if selected_ledger_path in contexts:
+        return contexts[selected_ledger_path]
+    if compatibility_artifacts is not None:
+        diagnostic = "WI-LEDGER-COMPAT-ACTIVATION-PARTIAL: selected ledger is absent from candidate group"
+        return LedgerValidationContextV1(
+            selected_ledger_path, (), None,
+            LedgerCompatibilityObservationV1("invalid", ("WI-LEDGER-COMPAT-ACTIVATION-PARTIAL",), (diagnostic,)),
+            (), (), token,
+        )
+    participants = (
+        root / _LEDGER_H1_H1_MANIFEST,
+        root / _LEDGER_H1_MANIFEST_DIR,
+        root / _LEDGER_H1_REGISTRY,
+        root / _LEDGER_H1_RECEIPT_DIR,
+    )
+    if _ledger_h1_live_participants_exist(root):
+        diagnostic = "WI-LEDGER-COMPAT-ACTIVATION-INCOMPLETE: compatibility participants exist without one valid receipt-bound group"
+        return LedgerValidationContextV1(
+            selected_ledger_path, (), None,
+            LedgerCompatibilityObservationV1("invalid", ("WI-LEDGER-COMPAT-ACTIVATION-INCOMPLETE",), (diagnostic,)),
+            (), (), token,
+        )
+    try:
+        raw = selected.read_bytes()
+    except OSError as exc:
+        diagnostic = f"cannot read ledger: {selected}: {exc}"
+        return LedgerValidationContextV1(
+            selected_ledger_path, (), None,
+            LedgerCompatibilityObservationV1("inactive", (), (diagnostic,)),
+            (), (), token,
+        )
+    parse_errors: list[str] = []
+    rows = _ledger_h1_runtime_rows(selected_ledger_path, raw, None, item, parse_errors)
+    return LedgerValidationContextV1(
+        selected_ledger_path, rows, None,
+        LedgerCompatibilityObservationV1("inactive", (), tuple(parse_errors)),
+        (), (), token,
+    )
 
 
 def _is_link_or_reparse(path: Path) -> bool:
@@ -3173,6 +4725,7 @@ def validate_archived_ledger_obligations(
     effective_rows, migration_counters, migration_errors = _project_migration_rows(shaped_rows, item)
     errors.extend(migration_errors)
     effective_events = _row_events(effective_rows)
+    runtime_rows = _runtime_rows_from_projection(effective_rows)
     historical_authorizations, disposition_errors = authorized_historical_missing_artifacts(
         item, ledger_bytes, events, raw_metadata
     )
@@ -3186,19 +4739,27 @@ def validate_archived_ledger_obligations(
         rows=effective_rows,
         telemetry=telemetry,
     )
-    effective_metadata = _row_metadata(effective_rows)
+    typed_closure_validity = _validity_from_boolean_events(
+        runtime_rows, closure_validity
+    )
     inactive = resolve_closure_invalidations(
-        effective_events, closure_validity, effective_metadata, errors, telemetry
+        runtime_rows,
+        typed_closure_validity,
+        errors,
+        telemetry,
+        context=None,
     )
     active_positions = [
         pos
         for pos in range(len(effective_events))
         if pos not in inactive
     ]
-    active_events = [effective_events[pos] for pos in active_positions]
-    active_validity = [closure_validity[pos] for pos in active_positions]
+    active_rows = [runtime_rows[pos] for pos in active_positions]
+    active_validity = tuple(
+        typed_closure_validity[pos] for pos in active_positions
+    )
     open_revise, open_launches = validate_closure(
-        active_events, errors, telemetry, event_validity=active_validity
+        active_rows, errors, telemetry, validity=active_validity
     )
     if telemetry is not None:
         for name, value in {**migration_counters, **projection_counters}.items():
@@ -3206,7 +4767,17 @@ def validate_archived_ledger_obligations(
     return errors, open_revise, open_launches
 
 
-def validate_status(item: Path, events: list[dict], errors: list[str]) -> None:
+def validate_status(
+    item: Path,
+    context: LedgerValidationContextV1 | Sequence[Mapping[str, object]],
+    errors: list[str],
+    *,
+    current_open_launch_ids: Sequence[str] | None = None,
+) -> None:
+    if isinstance(context, LedgerValidationContextV1) and not _sealed_context_is_bound(
+        context.rows, context, errors
+    ):
+        return
     status_path = item / "status.md"
     if not status_path.exists():
         fail(errors, f"missing status.md: {status_path}")
@@ -3222,8 +4793,25 @@ def validate_status(item: Path, events: list[dict], errors: list[str]) -> None:
         if section not in text:
             fail(errors, f"status.md missing section: {section}")
 
-    running_events = [event for event in events if event.get("status") == "running"]
-    if running_events and "Primary task status**: closed" in text:
+    if not isinstance(context, LedgerValidationContextV1):
+        # Backward-compatible direct helper calls remain diagnostic-only. The
+        # authorizing validate_work_item path always supplies the typed context.
+        open_launch_ids = tuple(
+            event.get("runId", "")
+            for event in context
+            if event.get("status") == "running"
+        )
+    elif context.view is not None:
+        if current_open_launch_ids is None:
+            fail(
+                errors,
+                "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS: active status validation requires the current closure result",
+            )
+            return
+        open_launch_ids = current_open_launch_ids
+    else:
+        open_launch_ids = context.group_open_launch_ids
+    if open_launch_ids and "Primary task status**: closed" in text:
         fail(errors, "status.md cannot be closed while ledger has running agents")
 
 
@@ -3477,25 +5065,38 @@ def validate_solution_attempt_gate_binding(binding: object) -> dict[str, object]
 
 
 def resolve_closure_invalidations(
-    events: list[dict],
-    event_validity: list[bool],
-    raw_metadata: list[dict[str, object]],
+    rows: Sequence[RuntimeLedgerRowV1],
+    validity: Sequence[LedgerEventValidityV1],
     errors: list[str],
     telemetry: dict[str, int] | None = None,
+    *,
+    context: LedgerValidationContextV1 | None = None,
 ) -> set[int]:
     """Return whole-event positions excluded only from V1/V2 relation reduction."""
+    if len(rows) != len(validity):
+        fail(errors, "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS: invalidation row/validity cardinality differs")
+        return set()
+    if not _sealed_context_is_bound(rows, context, errors):
+        return set()
     tel = telemetry if telemetry is not None else {}
     inactive: set[int] = set()
     positions: dict[str, list[int]] = {}
-    for pos, event in enumerate(events):
+    for pos, row in enumerate(rows):
+        event = row.event
         run_id = event.get("runId")
         if isinstance(run_id, str):
             positions.setdefault(run_id, []).append(pos)
 
-    for pos, recovery in enumerate(events):
+    for pos, recovery_row in enumerate(rows):
+        recovery = recovery_row.event
         if recovery.get("eventKind") != "closure-invalidation":
             continue
-        if pos >= len(event_validity) or not event_validity[pos]:
+        if recovery.get("invalidationMode") == _INVALID_CURRENT_DISPOSITION_MODE:
+            continue
+        active_context = context is not None and context.observation.activation_state == "active"
+        if not validity[pos].current_schema_valid or (
+            active_context and recovery_row.epoch != "strict-suffix"
+        ):
             continue
         recovery_id = recovery.get("runId")
         target_id = recovery.get("invalidatesRunId")
@@ -3504,18 +5105,23 @@ def resolve_closure_invalidations(
             fail(errors, f"{recovery_id}: ledger-recovery:target-identity requires exactly one earlier event for {target_id!r}")
             continue
         target_pos = candidates[0]
-        target = events[target_pos]
+        target_row = rows[target_pos]
+        target = target_row.event
         if target_pos in inactive or target.get("eventKind") == "closure-invalidation":
             fail(errors, f"{recovery_id}: ledger-recovery:topology forbids duplicate, chain, cycle, or correction target {target_id}")
             continue
         if target.get("schemaVersion") != 2 or target.get("eventKind") == "launch" or not isinstance(target.get("closesRunIds"), list):
             fail(errors, f"{recovery_id}: ledger-recovery:target-ineligible {target_id}")
             continue
-        if target_pos >= len(event_validity) or not event_validity[target_pos]:
+        target_individually_valid = (
+            validity[target_pos].authority.closer_eligible
+            if active_context and target_row.epoch == "sealed-prefix"
+            else validity[target_pos].current_schema_valid
+        )
+        if not target_individually_valid:
             fail(errors, f"{recovery_id}: ledger-recovery:target-per-event-invalid {target_id}")
             continue
-        recorded_digest = raw_metadata[target_pos].get("sha256") if target_pos < len(raw_metadata) else None
-        if recovery.get("invalidatesEventSha256") != recorded_digest:
+        if recovery.get("invalidatesEventSha256") != target_row.raw_body_sha256:
             fail(errors, f"{recovery_id}: ledger-recovery:target-digest-mismatch {target_id}")
             continue
 
@@ -3524,14 +5130,22 @@ def resolve_closure_invalidations(
         # C-rule logic is maintained in this recovery owner.
         before_positions = [index for index in range(target_pos) if index not in inactive]
         with_positions = before_positions + [target_pos]
-        before_events = [events[index] for index in before_positions]
-        with_events = [events[index] for index in with_positions]
-        before_validity = [event_validity[index] for index in before_positions]
-        with_validity = [event_validity[index] for index in with_positions]
+        before_rows = tuple(rows[index] for index in before_positions)
+        with_rows = tuple(rows[index] for index in with_positions)
+        before_validity = tuple(validity[index] for index in before_positions)
+        with_validity = tuple(validity[index] for index in with_positions)
         before_errors: list[str] = []
         with_errors: list[str] = []
-        validate_closure(before_events, before_errors, event_validity=before_validity)
-        validate_closure(with_events, with_errors, event_validity=with_validity)
+        _validate_closure_authority(
+            before_rows,
+            before_errors,
+            validity=before_validity,
+        )
+        _validate_closure_authority(
+            with_rows,
+            with_errors,
+            validity=with_validity,
+        )
         introduced = with_errors[len(before_errors):] if with_errors[: len(before_errors)] == before_errors else with_errors
         if not introduced:
             fail(errors, f"{recovery_id}: ledger-recovery:target-authoritative {target_id}")
@@ -3539,6 +5153,53 @@ def resolve_closure_invalidations(
         inactive.add(target_pos)
         tel["recovery-accepted"] = tel.get("recovery-accepted", 0) + 1
     return inactive
+
+
+def _reduce_effective_current_state(
+    rows: Sequence[RuntimeLedgerRowV1],
+    item: Path,
+    errors: list[str],
+    telemetry: dict[str, int] | None,
+    *,
+    context: LedgerValidationContextV1 | None,
+) -> tuple[
+    tuple[int, ...],
+    tuple[LedgerEventValidityV1, ...],
+    list[Mapping[str, object]],
+    list[Mapping[str, object]],
+]:
+    """Own validity, invalidation, and one effective closure reduction."""
+
+    if not _sealed_context_is_bound(rows, context, errors):
+        return (), (), [], []
+    validity = derive_event_validity(rows, item, errors, context=context)
+    baseline_errors: list[str] = []
+    baseline_revise, baseline_launches = _validate_closure_authority(
+        rows, baseline_errors, validity=validity
+    )
+    inactive = resolve_closure_invalidations(
+        rows, validity, errors, telemetry, context=context
+    )
+    active_positions = tuple(
+        position for position in range(len(rows)) if position not in inactive
+    )
+    active_rows = tuple(rows[position] for position in active_positions)
+    active_validity = tuple(validity[position] for position in active_positions)
+    open_revise, open_launches = _validate_closure_authority(
+        active_rows, errors, telemetry, validity=active_validity
+    )
+    if telemetry is not None:
+        reopened_revise = max(0, len(open_revise) - len(baseline_revise))
+        reopened_launch = max(0, len(open_launches) - len(baseline_launches))
+        if reopened_revise:
+            telemetry["recovery-reopened-revise"] = (
+                telemetry.get("recovery-reopened-revise", 0) + reopened_revise
+            )
+        if reopened_launch:
+            telemetry["recovery-reopened-launch"] = (
+                telemetry.get("recovery-reopened-launch", 0) + reopened_launch
+            )
+    return active_positions, validity, open_revise, open_launches
 
 
 def validate_work_item(
@@ -3549,6 +5210,7 @@ def validate_work_item(
     validate_status_file: bool = True,
     projection_manifest_blobs: dict[str, bytes] | None = None,
     projection_registry_bytes: bytes | None = None,
+    compatibility_artifacts: LedgerCompatibilityArtifactSetV1 | None = None,
 ) -> list[str]:
     """ledger_path: candidate-validation seam — validate THIS file instead of the live
     ledger (the atomic-write flow validates its temp candidate before os.replace).
@@ -3556,7 +5218,138 @@ def validate_work_item(
     tool's job is failing); pass False only for triage sessions.
     """
     errors: list[str] = []
+    if compatibility_artifacts is not None and (
+        ledger_path is not None
+        or projection_manifest_blobs is not None
+        or projection_registry_bytes is not None
+    ):
+        fail(
+            errors,
+            "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS: compatibility artifacts cannot be mixed with older candidate inputs",
+        )
+        return errors
     selected_ledger = ledger_path or (item / "agent-runs.jsonl")
+    root = repo_root_for(item)
+    live_compatibility_observed = bool(
+        root is not None
+        and _ledger_h1_live_participants_exist(root)
+    )
+    effective_compatibility_artifacts = compatibility_artifacts
+    selected_identity: str | None = None
+    if live_compatibility_observed and ledger_path is not None:
+        assert root is not None
+        target = _projection_target_identity(item, selected_ledger, errors)
+        if target is None:
+            return errors
+        selected_identity = f"{target[1]}/agent-runs.jsonl"
+        live_artifacts = _load_live_ledger_h1_artifacts(root)
+        if live_artifacts is None:
+            fail(
+                errors,
+                "WI-LEDGER-COMPAT-ACTIVATION-INCOMPLETE: active compatibility candidate inputs are unavailable",
+            )
+            return errors
+        if selected_identity not in live_artifacts.ledger_bytes_by_path:
+            fail(
+                errors,
+                "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS: candidate ledger is not a manifest-selected member",
+            )
+            return errors
+        try:
+            candidate_bytes = selected_ledger.read_bytes()
+        except OSError as exc:
+            fail(errors, f"cannot read ledger: {selected_ledger}: {exc}")
+            return errors
+        candidate_ledgers = dict(live_artifacts.ledger_bytes_by_path)
+        candidate_ledgers[selected_identity] = candidate_bytes
+        effective_compatibility_artifacts = LedgerCompatibilityArtifactSetV1(
+            MappingProxyType(candidate_ledgers),
+            live_artifacts.h1_manifest_path,
+            live_artifacts.h1_manifest_bytes,
+            live_artifacts.ledger_manifest_path,
+            live_artifacts.ledger_manifest_bytes,
+            live_artifacts.registry_bytes,
+            live_artifacts.receipt_bytes_by_path,
+        )
+    if effective_compatibility_artifacts is not None or live_compatibility_observed:
+        if root is None:
+            fail(errors, "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS: work item has no repository root")
+            return errors
+        if selected_identity is None:
+            selected_identity = selected_ledger.absolute().relative_to(root.absolute()).as_posix()
+        context = load_effective_ledger_view(
+            root,
+            item,
+            selected_identity,
+            compatibility_artifacts=effective_compatibility_artifacts,
+        )
+        errors.extend(context.observation.diagnostics)
+        if telemetry is not None and context.observation.disposition_notices:
+            key = "ledger-compat-suffix-disposed-nonauthorizing"
+            telemetry[key] = telemetry.get(key, 0) + len(
+                context.observation.disposition_notices
+            )
+        if context.view is None:
+            if context.observation.activation_state == "revoked":
+                raw_events = [dict(row.event) for row in context.rows]
+                _, v3_errors = reduce_v3_events(raw_events)
+                errors.extend(v3_errors)
+                validate_scratch_ownership(raw_events, item, errors)
+                _active_positions, _validity, open_revise, open_launches = (
+                    _reduce_effective_current_state(
+                        context.rows,
+                        item,
+                        errors,
+                        telemetry,
+                        context=context,
+                    )
+                )
+                if strict_revise:
+                    for event in open_launches:
+                        fail(
+                            errors,
+                            f"unsettled launch: {event.get('runId')} (lane={event.get('lane')!r}) — no terminal event; a lost verdict must not be invisible to the gate (re-settle or cancel it)",
+                        )
+                    for event in open_revise:
+                        fail(
+                            errors,
+                            f"open REVISE obligation: {event.get('runId')} (lane={event.get('lane')!r}, artifact={event.get('artifact')!r}) — closes only on re-verification PASS (closesRunIds) or a typed disposition, never on author belief or validator green",
+                        )
+                if validate_status_file:
+                    validate_status(item, context, errors)
+            return errors
+        _active_positions, _validity, open_revise, open_launches = (
+            _reduce_effective_current_state(
+                context.rows,
+                item,
+                errors,
+                telemetry,
+                context=context,
+            )
+        )
+        if strict_revise:
+            for event in open_launches:
+                fail(
+                    errors,
+                    f"unsettled launch: {event.get('runId')} (lane={event.get('lane')!r}) — no terminal event; a lost verdict must not be invisible to the gate (re-settle or cancel it)",
+                )
+            for event in open_revise:
+                fail(
+                    errors,
+                    f"open REVISE obligation: {event.get('runId')} (lane={event.get('lane')!r}, artifact={event.get('artifact')!r}) — closes only on re-verification PASS (closesRunIds) or a typed disposition, never on author belief or validator green",
+                )
+        if validate_status_file:
+            validate_status(
+                item,
+                context,
+                errors,
+                current_open_launch_ids=tuple(
+                    event["runId"]
+                    for event in open_launches
+                    if isinstance(event.get("runId"), str)
+                ),
+            )
+        return errors
     status_path = item / "status.md"
     status_text = status_path.read_text(encoding="utf-8") if status_path.exists() else ""
     # V1 keeps an undelegated quick-fix ledger-free.  A staged/full item and an
@@ -3586,36 +5379,29 @@ def validate_work_item(
     effective_rows, migration_counters, migration_errors = _project_migration_rows(shape_rows, item)
     errors.extend(migration_errors)
     effective_events = _row_events(effective_rows)
+    runtime_rows = _runtime_rows_from_projection(effective_rows)
     if ledger_path is not None and any(event.get("schemaVersion") == 3 for event in events):
         fail(errors, "legacy V1/V2 writer refuses a ledger containing schemaVersion 3")
-    event_validity = derive_event_validity(effective_events, item, errors)
     _, v3_errors = reduce_v3_events(events)
     errors.extend(v3_errors)
     validate_scratch_ownership(effective_events, item, errors)
-    effective_metadata = _row_metadata(effective_rows)
-    inactive = resolve_closure_invalidations(effective_events, event_validity, effective_metadata, errors, telemetry)
-    active_positions = [pos for pos in range(len(effective_events)) if pos not in inactive]
-    active_events = [effective_events[pos] for pos in active_positions]
-    active_validity = [event_validity[pos] for pos in active_positions]
-    raw_errors: list[str] = []
-    raw_open_revise, raw_open_launches = validate_closure(effective_events, raw_errors, event_validity=event_validity)
-    open_revise, open_launches = validate_closure(
-        active_events,
-        errors,
-        telemetry,
-        event_validity=active_validity,
+    active_positions, event_validity, open_revise, open_launches = (
+        _reduce_effective_current_state(
+            runtime_rows,
+            item,
+            errors,
+            telemetry,
+            context=None,
+        )
     )
+    active_events = [effective_events[pos] for pos in active_positions]
+    active_rows = [runtime_rows[pos] for pos in active_positions]
+    active_validity = [event_validity[pos] for pos in active_positions]
     if telemetry is not None:
         for name, value in migration_counters.items():
             telemetry[f"ledger-migration-{name}"] = value
         for name, value in projection_counters.items():
             telemetry[f"ledger-migration-{name}"] = value
-        reopened_revise = max(0, len(open_revise) - len(raw_open_revise))
-        reopened_launch = max(0, len(open_launches) - len(raw_open_launches))
-        if reopened_revise:
-            telemetry["recovery-reopened-revise"] = telemetry.get("recovery-reopened-revise", 0) + reopened_revise
-        if reopened_launch:
-            telemetry["recovery-reopened-launch"] = telemetry.get("recovery-reopened-launch", 0) + reopened_launch
     if strict_revise:
         for event in open_launches:
             fail(
@@ -3644,7 +5430,41 @@ def validate_work_item(
             for field in ("Closed", "Outcome", "Evidence", "Residual risk")
         )
     if validate_status_file and not (is_monthly_archive and archived_v1_closure):
-        validate_status(item, events, errors)
+        context = LedgerValidationContextV1(
+            selected_ledger.absolute().relative_to(root.absolute()).as_posix() if root is not None else str(selected_ledger),
+            tuple(active_rows),
+            None,
+            LedgerCompatibilityObservationV1("inactive", (), ()),
+            tuple(
+                sorted(
+                    (
+                        f"{item.relative_to(root).as_posix()}\0{event.get('runId')}"
+                        for event in open_revise
+                        if root is not None and isinstance(event.get("runId"), str)
+                    ),
+                    key=lambda value: value.encode("utf-8"),
+                )
+            ),
+            tuple(
+                sorted(
+                    {
+                        event["runId"]
+                        for event in open_launches
+                        if isinstance(event.get("runId"), str)
+                    }
+                    | {
+                        event["runId"]
+                        for event, row_validity in zip(active_events, active_validity)
+                        if row_validity.current_schema_valid
+                        and event.get("status") == "running"
+                        and isinstance(event.get("runId"), str)
+                    },
+                    key=lambda value: value.encode("utf-8"),
+                )
+            ),
+            object(),
+        )
+        validate_status(item, context, errors)
     return errors
 
 

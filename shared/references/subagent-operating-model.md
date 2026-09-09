@@ -6,8 +6,8 @@ Visual companion remains pack-local: use the corresponding `operating-model-diag
 
 ## 1. Main rule for the lead
 
-> **Split subagents by work stage and by risk type.**  
-> Anything that can independently fail the result — architecture, algorithms, numerics, performance, security, quality, maintainability, repository hygiene, or toolchain integrity — should have its own owner, its own artifact, and its own gate.  
+> **Split subagents by the stages selected for the task and by triggered risk type.**
+> Any selected stage or triggered risk that can independently fail the result — architecture, algorithms, numerics, performance, security, quality, maintainability, repository hygiene, or toolchain integrity — should have its own owner, its own artifact, and its own gate.
 > A subagent should not receive "build the whole feature." It should receive a role, minimal context, limited tools, one artifact, and an explicit acceptance criterion.
 
 Short version:
@@ -40,10 +40,10 @@ The lead assigns a task like this:
 1. **Do not mix roles.** One subagent owns one profession, not the whole lifecycle.
 2. **Do not pass extra context.** Each subagent gets only what its role needs.
 3. **Limit tools by role.** Research stays read-only; implementation stays inside an approved phase; reviewers do not replace implementers.
-4. **Do not skip gates.** Until an artifact is accepted, the next stage does not start.
+4. **Do not skip admitted gates.** Until a required artifact is accepted, its dependent stage does not start.
 5. **Verify subagent results before trusting them.** A subagent `PASS`, report, or claimed test result is a claim, not proof; the orchestrating owner or next gate checks the artifact, diff, logs, command output, or other repo-standard evidence before accepting or forwarding it.
 6. **Do not allow silent scope growth.** A subagent does not change architecture, plan, or requirements on its own.
-7. **Separate delivery from risk ownership.** A good patch is still incomplete if a critical risk has not been checked.
+7. **Separate delivery from risk ownership.** A good patch is still incomplete if a triggered critical risk has not been checked.
 8. **QA verifies the integrated result, including basic performance acceptance when relevant, but does not replace algorithm, performance, security, or reliability specialists.**
 9. **Accepted decisions should live near the code as one source of truth.**
 10. **Prefer facts over opinions.** Use factual roles to reduce uncertainty before asking interpretive roles to make tradeoffs or decisions.
@@ -52,7 +52,7 @@ The lead assigns a task like this:
 13. **Invalidate derived `PASS` states on material upstream revision.** If an accepted upstream artifact is revised materially after downstream artifacts have already passed, the lead must mark the affected derived artifacts for re-review before delivery continues. `PASS` does not survive a material upstream change automatically. Evaluate authored claims and review verdicts against the producing run's declared scope and accepted baseline: later independently owned lane deltas are reviewed in their own lane and do not retroactively falsify the earlier artifact; an actual material revision of the accepted upstream artifact still invalidates dependent `PASS` states and triggers dependent re-review.
 14. **Classify change impact before routing.** Use `cosmetic`, `additive`, `behavioral`, or `breaking-or-cross-cutting` to decide how strongly the lead should route and gate the work; `breaking-or-cross-cutting` must force stronger routing, re-review of affected downstream artifacts, and integration ownership when needed.
 15. **Treat the core role map as canonical, not exhaustive.** The role index names the core team only. The lead may choose a narrower installed specialist outside the core team when it is a better fit for the scoped work, and may choose a repo-local specialist only when the current repo/workspace defines or clearly implies it. Using such a specialist does not add it to the canonical team map automatically.
-16. **Preserve durable task memory for lead-routed work.** Keep roadmap, brief, status, and plan artifacts in repo-local storage so interrupted work can resume without relying on session memory.
+16. **Preserve durable task memory when the selected template requires recovery.** Keep only that template's required artifacts in repo-local storage so interrupted work can resume without relying on session memory.
 
 ---
 
@@ -70,7 +70,7 @@ Roadmap and intake loop:
 product-manager -> product-analyst -> lead
 ```
 
-Delivery loop:
+Full-delivery example; its stages are selected, not a universal prelude:
 
 ```text
 lead -> research -> design -> plan -> implement -> QA/review -> lead
@@ -79,6 +79,8 @@ lead -> research -> design -> plan -> implement -> QA/review -> lead
 ### 3.1a Workflow economy
 
 Workflow economy is owned by `shared/AGENTS.shared.md` under **Workflow economy (binding)**. This methodology does not create a second review, fan-out, or artifact policy; provider contracts project that shared rule for their native runtime.
+
+The selected template determines which stages and artifacts are admitted. Mandatory triggered risk owners, evidence, and review gates still apply; a `quick-fix` uses its focused implementation-and-QA path without acquiring Research, Design, Plan, or pre-implementation review by being non-trivial alone.
 
 The existing review loop is mandatory only for genuine complexity or ambiguity, materially competing owner/seam solutions, repeated review/fix failure, newly discovered complexity, or an explicit user request. A `design-decision` tag, file count, or identical cross-provider projections alone do not establish that trigger; a verified one-owner cause with one clear falsifying oracle proceeds through tests and one independent exact-delta review.
 
@@ -351,7 +353,7 @@ You hold the `lead` role as the main conversation — lead is never dispatched a
 Your task is not to write code. Your task is to route work through roles and artifacts.
 You alone dispatch downstream stages and write work-item lifecycle state, including `agent-runs.jsonl`; a main-owned helper or wrapper may write only on your behalf.
 
-First, turn the request into a canonical brief:
+For a staged or full-delivery route, turn the request into a canonical brief:
 - goal
 - scope
 - constraints
@@ -361,7 +363,7 @@ First, turn the request into a canonical brief:
 - required reviewers
 
 Call only the roles that are actually needed.
-Do not route work into implementation until research, design, specialist constraints, and plan artifacts are accepted when the task is non-trivial.
+Do not route work into implementation until every upstream artifact admitted by the selected template is accepted. A non-trivial task does not by itself require Research, Design, specialist constraints, and Plan as a universal prelude.
 Pass only minimal context, only approved inputs, only allowed tools, and exactly one expected artifact to each subagent.
 If a gate fails, route the work back to the correct prior stage with a bounded correction.
 ```
@@ -543,6 +545,8 @@ It should now be confirmed:
 
 ## 9. Practical routing patterns
 
+Except where a focused template is stated explicitly, the chains below are full-delivery examples. Select only the stages and risk owners required by the chosen template and current evidence; these examples do not override `quick-fix` or factual-routing rules.
+
 ### Factual lookup or investigation
 
 A standalone bounded fact lookup is answered inline with no artifact. A non-trivial factual investigation uses one `analyst` by default and creates recovery only when continuation is needed. A decision, Architecture Decision Record (ADR), or material alternatives adds `architect`; add `planner` only when an execution plan is requested.
@@ -680,7 +684,7 @@ When admitting a new candidate approach into discovery, the roadmap decision pac
 
 ### 11.1 What should live near the code
 
-At minimum, it is useful to keep these artifacts near the repository:
+The following is a catalog of artifacts that may be useful near the repository, not a universal minimum. Keep only the artifacts required by the selected template, triggered gates, and recovery contract:
 
 - roadmap decision package
 - canonical brief
@@ -707,9 +711,9 @@ At minimum, it is useful to keep these artifacts near the repository:
 - Use the configured task-memory directory when this repository uses optional tracked task memory.
 - Keep active admitted items in the configured active-item directory and use the repository-defined recovery entry point as the first recovery stop after interruption.
 - Every admitted `quick-fix` creates its minimal `work-items/active/<slug>/status.md` before the first repository mutation; its focused format is defined by the provider's `subagent-contracts.md`.
-- For recovery-tracked or multi-stage lead routes, `roadmap.md`, `brief.md`, and `status.md` are mandatory when tracked task memory is enabled.
+- For full-delivery and other lead-managed templates whose recovery contract requires them, `roadmap.md`, `brief.md`, and `status.md` are mandatory when tracked task memory is enabled; other templates use their own exact artifact set.
 - Re-classifying a `quick-fix` enriches that same work-item with the newly required recovery artifacts instead of creating a separate late item.
-- `plan.md` becomes mandatory before implementation or review only when the selected route admits a Plan or upstream specialist stage.
+- `plan.md` becomes mandatory before implementation or review only when the selected route admits a Plan stage.
 - If the current stage depends on upstream artifacts such as research, design, specialist constraints, phase plan, or required review reports, those artifacts must exist and be current before work continues.
 - If the required task-memory artifacts for the configured workflow are missing or stale, stop and restore them before continuing delivery.
 - `notes.md` or `notes/` holds technical findings and discoveries; accepted long-lived decisions still belong in the design or ADR artifact.

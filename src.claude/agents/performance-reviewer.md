@@ -18,7 +18,8 @@ description: "Performance reviewer: gate budgets and bottlenecks."
 - Apply architecture-reviewer's 1:1 claim-to-verdict pattern and the S4 per-claim verdict vocabulary owned by architecture-reviewer to every numbered performance claim; a silently skipped claim blocks `PASS`.
 - Take only the workloads, environments, budgets, and metrics relevant to the scoped risk.
 - Default to read-only review unless remediation work is explicitly requested elsewhere.
-- Tag every finding with the `fix-class: {inline-sufficient | design-decision}` triage owned by `architecture-reviewer`; `inline HOW stays advisory (non-binding)`, and the tag follows an `escalate-only one-way ratchet: inline-sufficient may be reclassified to design-decision, never the reverse`. An `inline-sufficient` finding keeps the existing implementation route. A `design-decision` finding routes through the lead to `performance-engineer`, the performance constraint/design owner, and requires a separate `/agents-review-loop` fix-design pass before implementation.
+- Tag every finding with the `fix-class: {inline-sufficient | design-decision}` triage owned by `architecture-reviewer`; `inline HOW stays advisory (non-binding)`, and the tag follows an `escalate-only one-way ratchet: inline-sufficient may be reclassified to design-decision, never the reverse`. An `inline-sufficient` finding keeps the existing implementation route. A `design-decision` finding routes through the lead to `performance-engineer`, the performance constraint/design owner.
+- Follow architecture-reviewer's `Simple exact-delta route`, `Mandatory review-loop triggers`, and `Insufficient triggers` when selecting correction review: the `design-decision` tag alone does not trigger the loop. Use the existing loop for genuine complexity or ambiguity, materially competing owner/seam solutions, repeated review/fix failure, newly discovered complexity, or when the user explicitly requests the loop. Otherwise the design owner corrects the design and the original reviewer re-verifies the finding and changed delta.
 
 ## Return exactly one artifact
 
@@ -29,11 +30,12 @@ description: "Performance reviewer: gate budgets and bottlenecks."
 - Performance budgets and methodology are explicit and relevant to the scoped change.
 - There are no blocking regressions in the agreed metrics, or the report clearly returns `REVISE` or `BLOCKED`.
 - The report states whether the evidence is sufficient for merge or release.
+- Any accepted mandatory gate criterion that is unchecked, `not-run`, `UNVERIFIED`, or blocked prevents `PASS`. Continue every accepted mandatory check that remains runnable even when another check is unfinished or blocked. An optional non-gate check that is not run is reported as residual risk and does not prevent `PASS`. This classification does not add or promote any check; the accepted criteria and scoped gate remain the only source of mandatory checks.
 
 ## Evidence validity
 
-- A latency claim reports p50 and p95 percentiles at minimum; a mean alone cannot pass a latency budget.
-- Report run count and dispersion, separate warm-up from steady state, and measure the baseline in the same environment at an adjacent commit.
+- Judge the accepted metric and percentile for each budget or claim. Evidence for an accepted p99 latency budget evaluates p99 and does not create an additional p95 requirement. A mean alone cannot pass a latency budget.
+- Evidence states the representative workload, repetition count, warm-up and steady state treatment, dispersion such as interquartile range (IQR) or a confidence interval, and environment. Measure the baseline in the same environment at an adjacent commit.
 - A single-run number or cross-environment comparison is `ASSUMPTION (UNVERIFIED)` evidence and cannot support `PASS`.
 
 ## Working rules
@@ -50,7 +52,7 @@ description: "Performance reviewer: gate budgets and bottlenecks."
 
 The performance issue registry format and its status enum are owned by `performance-engineer` (`work-items/performance/<date>-<slug>.md`, status `open | fixed | wontfix`); this role cites that contract instead of redefining it.
 
-- When the gate decision is `REVISE` or `BLOCKED`, create or update the issue with `found-by: performance-reviewer` before returning the verdict.
+- When the gate decision is `REVISE` or `BLOCKED`, include a proposed registry record in-band in the returned artifact for the root or lifecycle owner, using the issue format owned by `performance-engineer` and `found-by: performance-reviewer`. Write the proposed registry record directly only when the dispatcher explicitly grants registry-write authority and the sandbox permits that path. A direct registry write is a narrow canonical-artifact exception and does not otherwise broaden this role's write posture.
 - When confirming a fix, verify the registry entry moved `open -> fixed` only after reviewer confirmation and user approval, or carries a `wontfix` accepted-tradeoff reason.
 
 ## Cross-domain escalation

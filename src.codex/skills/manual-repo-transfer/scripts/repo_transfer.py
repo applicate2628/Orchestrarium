@@ -25,6 +25,7 @@ import threading
 import unicodedata
 import zipfile
 from contextlib import contextmanager
+from functools import lru_cache
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterable
 from urllib.parse import urlsplit, urlunsplit
@@ -54,8 +55,12 @@ MAX_ARCHIVE_ENTRY_BYTES = 128 * 1024 * 1024
 MAX_ARCHIVE_UNCOMPRESSED_BYTES = 512 * 1024 * 1024
 MAX_ARCHIVE_COMPRESSION_RATIO = 100
 MAX_JSON_BYTES = 8 * 1024 * 1024
+MAX_INVENTORY_JSON_BYTES = 256 * 1024 * 1024
 MAX_JSON_DEPTH = 64
 MAX_ARCHIVE_CENTRAL_DIRECTORY_BYTES = 8 * 1024 * 1024
+MAX_GIT_CHECK_IGNORE_PATHS = 4096
+MAX_GIT_CHECK_IGNORE_BYTES = MAX_JSON_BYTES
+MAX_GIT_STDIN_BYTES = 16 * 1024 * 1024
 GIT_COMMAND_TIMEOUT_SECONDS = 60
 GIT_PROCESS_CLEANUP_SECONDS = 2
 TRANSFER_REPOSITORY_BOUNDARY_INVALID = "TRANSFER-REPOSITORY-BOUNDARY-INVALID"
@@ -76,6 +81,7 @@ TRANSFER_ARCHIVE_CLOSE_FAILED = "TRANSFER-ARCHIVE-CLOSE-FAILED"
 TRANSFER_INPUT_BINDING_INVALID = "TRANSFER-INPUT-BINDING-INVALID"
 TRANSFER_INPUT_IDENTITY_DRIFT = "TRANSFER-INPUT-IDENTITY-DRIFT"
 TRANSFER_INPUT_CLOSE_FAILED = "TRANSFER-INPUT-CLOSE-FAILED"
+TRANSFER_INVENTORY_OPEN_SHARE_FAILED = "inventory file open/share failed"
 
 
 _PROCESS_RUNNER_MODULE: Any | None = None
@@ -313,6 +319,13 @@ def canonical_json(value: Any) -> bytes:
     return b"".join(canonical_json_chunks(value))
 
 
+def canonical_json_sha256(value: Any) -> str:
+    digest = hashlib.sha256()
+    for chunk in canonical_json_chunks(value):
+        digest.update(chunk)
+    return digest.hexdigest()
+
+
 def capped_canonical_json(value: Any, error_message: str, *, final_newline: bool = False) -> bytes:
     suffix = b"\n" if final_newline else b""
     encoded = bytearray()
@@ -435,7 +448,12 @@ def _load_process_runner() -> Any:
         raise ContractError("repository transfer process runner is unavailable") from error
 
 
-def _run_process_runner_git_process(command: list[str], repository: Path | None, environment: dict[str, str]) -> subprocess.CompletedProcess[bytes]:
+def _run_process_runner_git_process(
+    command: list[str],
+    repository: Path | None,
+    environment: dict[str, str],
+    stdin_bytes: bytes | None = None,
+) -> subprocess.CompletedProcess[bytes]:
     owner: Any | None = None
     try:
         runner_module = _load_process_runner()
@@ -452,6 +470,7 @@ def _run_process_runner_git_process(command: list[str], repository: Path | None,
             ),
             deadline_seconds=GIT_COMMAND_TIMEOUT_SECONDS,
             capture_limit_bytes=MAX_JSON_BYTES,
+            stdin_bytes=stdin_bytes,
         )
         result = owner.run(request)
         stdout = sink.bytes_for("stdout")
@@ -527,7 +546,12 @@ def _settle_posix_git_process(
         return False
 
 
-def _run_posix_git_process(command: list[str], repository: Path | None, environment: dict[str, str]) -> subprocess.CompletedProcess[bytes]:
+def _run_posix_git_process(
+    command: list[str],
+    repository: Path | None,
+    environment: dict[str, str],
+    stdin_bytes: bytes | None = None,
+) -> subprocess.CompletedProcess[bytes]:
     subreaper = _LinuxChildSubreaper()
     try:
         if not command or not Path(command[0]).is_absolute():
@@ -537,7 +561,7 @@ def _run_posix_git_process(command: list[str], repository: Path | None, environm
             command,
             executable=command[0],
             cwd=repository,
-            stdin=subprocess.DEVNULL,
+            stdin=subprocess.PIPE if stdin_bytes is not None else subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             env=environment,
@@ -557,12 +581,16 @@ def _run_posix_git_process(command: list[str], repository: Path | None, environm
         raise ContractError("not a git repository") from error
     assert process.stdout is not None and process.stderr is not None
     streams = {process.stdout: "stdout", process.stderr: "stderr"}
+    input_stream = process.stdin if stdin_bytes is not None else None
+    input_view = memoryview(stdin_bytes or b"")
+    input_offset = 0
     captures = {"stdout": bytearray(), "stderr": bytearray()}
     selector = selectors.DefaultSelector()
     overflow = False
     capture_error = False
     timed_out = False
     leftover_tree = False
+    stdin_error: str | None = None
     interrupted: BaseException | None = None
     containment_cleanup_error = False
     deadline = time.monotonic() + GIT_COMMAND_TIMEOUT_SECONDS
@@ -570,6 +598,12 @@ def _run_posix_git_process(command: list[str], repository: Path | None, environm
         for stream in streams:
             os.set_blocking(stream.fileno(), False)
             selector.register(stream, selectors.EVENT_READ, streams[stream])
+        if input_stream is not None:
+            if input_view:
+                os.set_blocking(input_stream.fileno(), False)
+                selector.register(input_stream, selectors.EVENT_WRITE, "stdin")
+            else:
+                input_stream.close()
         while selector.get_map() or process.poll() is None:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -577,6 +611,28 @@ def _run_posix_git_process(command: list[str], repository: Path | None, environm
                 break
             events = selector.select(min(0.05, remaining))
             for key, _ in events:
+                if key.data == "stdin":
+                    try:
+                        written = os.write(
+                            key.fd, input_view[input_offset : input_offset + 64 * 1024]
+                        )
+                    except BlockingIOError:
+                        continue
+                    except (BrokenPipeError, OSError):
+                        stdin_error = "PSV1-STDIN-BROKEN-PIPE"
+                        selector.unregister(key.fileobj)
+                        key.fileobj.close()
+                        break
+                    if written <= 0:
+                        stdin_error = "PSV1-STDIN-SHORT-WRITE"
+                        selector.unregister(key.fileobj)
+                        key.fileobj.close()
+                        break
+                    input_offset += written
+                    if input_offset == len(input_view):
+                        selector.unregister(key.fileobj)
+                        key.fileobj.close()
+                    continue
                 try:
                     chunk = os.read(key.fd, 64 * 1024)
                 except BlockingIOError:
@@ -594,7 +650,14 @@ def _run_posix_git_process(command: list[str], repository: Path | None, environm
                 if len(captured) > MAX_JSON_BYTES or len(chunk) > available:
                     overflow = True
                     break
-            if overflow or capture_error:
+            if overflow or capture_error or stdin_error is not None:
+                break
+            if (
+                process.poll() is not None
+                and input_stream is not None
+                and input_offset != len(input_view)
+            ):
+                stdin_error = "PSV1-STDIN-BROKEN-PIPE"
                 break
             if process.poll() is not None and _posix_process_group_exists(process.pid):
                 leftover_tree = True
@@ -602,6 +665,15 @@ def _run_posix_git_process(command: list[str], repository: Path | None, environm
     except BaseException as error:
         interrupted = error
     finally:
+        if input_stream is not None and not input_stream.closed:
+            try:
+                selector.unregister(input_stream)
+            except (KeyError, ValueError):
+                pass
+            try:
+                input_stream.close()
+            except OSError:
+                stdin_error = stdin_error or "PSV1-STDIN-BROKEN-PIPE"
         tree_empty = _settle_posix_git_process(process, subreaper)
         cleanup_deadline = time.monotonic() + GIT_PROCESS_CLEANUP_SECONDS
         while selector.get_map() and time.monotonic() < cleanup_deadline:
@@ -652,6 +724,8 @@ def _run_posix_git_process(command: list[str], repository: Path | None, environm
         raise ContractError("git output exceeds JSON limit")
     if capture_error:
         raise ContractError("git output capture failed")
+    if stdin_error is not None:
+        raise ContractError(f"git process supervision failed: {stdin_error}")
     if leftover_tree or not tree_empty:
         raise ContractError("git process tree did not settle")
     completed = subprocess.CompletedProcess(
@@ -666,10 +740,15 @@ def _run_posix_git_process(command: list[str], repository: Path | None, environm
     return completed
 
 
-def run_bounded_process(command: list[str], repository: Path | None, environment: dict[str, str]) -> subprocess.CompletedProcess[bytes]:
+def run_bounded_process(
+    command: list[str],
+    repository: Path | None,
+    environment: dict[str, str],
+    stdin_bytes: bytes | None = None,
+) -> subprocess.CompletedProcess[bytes]:
     if os.name == "posix":
-        return _run_posix_git_process(command, repository, environment)
-    return _run_process_runner_git_process(command, repository, environment)
+        return _run_posix_git_process(command, repository, environment, stdin_bytes)
+    return _run_process_runner_git_process(command, repository, environment, stdin_bytes)
 
 
 def local_filter_drivers(repository: BoundRepository) -> list[str]:
@@ -693,13 +772,42 @@ def local_filter_drivers(repository: BoundRepository) -> list[str]:
     return sorted(drivers)
 
 
-def run_git(repository: BoundRepository, *arguments: str, check: bool = True) -> subprocess.CompletedProcess[bytes]:
+def run_git(
+    repository: BoundRepository,
+    *arguments: str,
+    check: bool = True,
+    stdin_bytes: bytes | None = None,
+) -> subprocess.CompletedProcess[bytes]:
+    command = [*git_command_prefix(repository), *arguments]
+    return run_git_command(
+        repository, command, check=check, stdin_bytes=stdin_bytes
+    )
+
+
+def git_command_prefix(repository: BoundRepository) -> list[str]:
     filter_configuration: list[str] = []
     for driver in local_filter_drivers(repository):
         for setting, value in (("clean", ""), ("smudge", ""), ("process", ""), ("required", "false")):
             filter_configuration.extend(["-c", f"filter.{driver}.{setting}={value}"])
-    command = [str(repository.git_executable), *base_git_configuration(), *filter_configuration, *arguments]
-    result = run_bound_git_process(repository, command)
+    return [
+        str(repository.git_executable),
+        *base_git_configuration(),
+        *filter_configuration,
+    ]
+
+
+def run_git_command(
+    repository: BoundRepository,
+    command: list[str],
+    *,
+    check: bool = True,
+    stdin_bytes: bytes | None = None,
+) -> subprocess.CompletedProcess[bytes]:
+    if stdin_bytes is not None and (
+        type(stdin_bytes) is not bytes or len(stdin_bytes) > MAX_GIT_STDIN_BYTES
+    ):
+        raise ContractError("git input exceeds bounded limit")
+    result = run_bound_git_process(repository, command, stdin_bytes=stdin_bytes)
     if check and result.returncode:
         message = result.stderr.decode("utf-8", "replace").strip() or "not a git repository"
         raise ContractError(message)
@@ -875,10 +983,19 @@ def require_current_repository_binding(repository: BoundRepository) -> None:
         raise ContractError(TRANSFER_GIT_BINDING_DRIFT) from error
 
 
-def run_bound_git_process(repository: BoundRepository, command: list[str]) -> subprocess.CompletedProcess[bytes]:
+def run_bound_git_process(
+    repository: BoundRepository,
+    command: list[str],
+    stdin_bytes: bytes | None = None,
+) -> subprocess.CompletedProcess[bytes]:
     require_current_git_binding(repository)
     require_current_repository_binding(repository)
-    result = run_bounded_process(command, repository.root, sanitized_git_environment())
+    result = run_bounded_process(
+        command,
+        repository.root,
+        sanitized_git_environment(),
+        stdin_bytes,
+    )
     if (
         getattr(result, "executable_identity_sha256", None)
         != repository.git_executable_sha256
@@ -1277,6 +1394,25 @@ def publish_output_bytes(binding: OutputBinding, payload: bytes) -> None:
         stream.write(payload)
 
 
+def publish_canonical_json(
+    binding: OutputBinding,
+    value: Any,
+    cap: int,
+    error_message: str,
+    *,
+    final_newline: bool = False,
+) -> None:
+    suffix = b"\n" if final_newline else b""
+    written = 0
+    with _bound_output_temporary(binding) as stream:
+        for chunk in canonical_json_chunks(value):
+            if written + len(chunk) + len(suffix) > cap:
+                raise ContractError(error_message)
+            stream.write(chunk)
+            written += len(chunk)
+        stream.write(suffix)
+
+
 def is_reparse_point(path: Path) -> bool:
     try:
         attributes = getattr(path.lstat(), "st_file_attributes", 0)
@@ -1440,6 +1576,59 @@ def nul_delimited_paths(result: subprocess.CompletedProcess[bytes]) -> set[str]:
     return {item.decode("utf-8", "surrogateescape") for item in result.stdout.split(b"\0") if item}
 
 
+def ignored_census_paths(
+    repository: BoundRepository, paths: Iterable[str]
+) -> set[str]:
+    ignored: set[str] = set()
+    batch: list[str] = []
+    payload = bytearray()
+
+    def classify() -> None:
+        if not batch:
+            return
+        result = run_git(
+            repository,
+            "check-ignore",
+            "--no-index",
+            "--stdin",
+            "-z",
+            check=False,
+            stdin_bytes=bytes(payload),
+        )
+        if result.returncode not in {0, 1}:
+            message = (
+                result.stderr.decode("utf-8", "replace").strip()
+                or "inventory Git classification failed"
+            )
+            raise ContractError(message)
+        submitted = set(batch)
+        for returned in nul_delimited_paths(result):
+            if not returned.startswith("./") or returned[2:] not in submitted:
+                raise ContractError("inventory Git classification returned an unknown path")
+            ignored.add(returned[2:])
+        batch.clear()
+        payload.clear()
+
+    for relative in paths:
+        try:
+            encoded = os.fsencode(f"./{relative}") + b"\0"
+        except UnicodeError as error:
+            raise ContractError(TRANSFER_PATH_ENCODING_INVALID) from error
+        if len(encoded) > MAX_GIT_CHECK_IGNORE_BYTES:
+            raise ContractError(
+                "inventory Git classification path exceeds bounded command"
+            )
+        if batch and (
+            len(batch) >= MAX_GIT_CHECK_IGNORE_PATHS
+            or len(payload) + len(encoded) > MAX_GIT_CHECK_IGNORE_BYTES
+        ):
+            classify()
+        batch.append(relative)
+        payload.extend(encoded)
+    classify()
+    return ignored
+
+
 def repository_history(repository: BoundRepository) -> tuple[str, str | None]:
     resolved = run_git(repository, "rev-parse", "--verify", "--quiet", "HEAD", check=False)
     if resolved.returncode == 0:
@@ -1492,15 +1681,73 @@ def literal_pathspecs(paths: list[str]) -> list[str]:
     return [f":(literal){path}" for path in paths]
 
 
+def git_metadata_path_batches(
+    fixed_command: list[str], paths: list[str]
+) -> Iterable[list[str]]:
+    runner = _load_process_runner()
+
+    def admitted(command: list[str]) -> bool:
+        try:
+            encoded = [len(argument.encode("utf-8")) for argument in command]
+            return (
+                1 <= len(command) <= runner.MAX_ARGV_COUNT
+                and max(encoded) <= runner.MAX_ARG_BYTES
+                and sum(size + 1 for size in encoded) <= runner.MAX_ARGV_BYTES
+                and (
+                    os.name != "nt"
+                    or len(
+                        runner.serialize_msvcrt_argv(tuple(command)).encode("utf-16-le")
+                    )
+                    // 2
+                    <= runner.MAX_WINDOWS_COMMAND_LINE_UNITS
+                )
+            )
+        except (TypeError, UnicodeError, ValueError):
+            return False
+
+    if not admitted(fixed_command):
+        raise ContractError("git metadata command exceeds bounded runner request")
+    batch: list[str] = []
+    for pathspec in literal_pathspecs(sorted(paths)):
+        if admitted([*fixed_command, *batch, pathspec]):
+            batch.append(pathspec)
+            continue
+        if not batch:
+            raise ContractError("git metadata path exceeds bounded command")
+        yield batch
+        batch = []
+        if not admitted([*fixed_command, pathspec]):
+            raise ContractError("git metadata path exceeds bounded command")
+        batch.append(pathspec)
+    if batch:
+        yield batch
+
+
 def git_metadata(repository: BoundRepository, paths: list[str] | None = None) -> dict[str, bytes]:
     if paths == []:
         return {name: b"" for name in METADATA_NAMES}
-    suffix = [] if paths is None else ["--", *literal_pathspecs(paths)]
-    return {
-        METADATA_NAMES[0]: run_git(repository, "status", "--no-renames", "--porcelain=v1", "-z", "--untracked-files=all", *suffix).stdout,
-        METADATA_NAMES[1]: run_git(repository, "diff", "--no-renames", "--cached", "--binary", "--no-ext-diff", "--no-textconv", *suffix).stdout,
-        METADATA_NAMES[2]: run_git(repository, "diff", "--no-renames", "--binary", "--no-ext-diff", "--no-textconv", *suffix).stdout,
-    }
+    commands = (
+        (METADATA_NAMES[0], ("status", "--no-renames", "--porcelain=v1", "-z", "--untracked-files=all")),
+        (METADATA_NAMES[1], ("diff", "--no-renames", "--cached", "--binary", "--no-ext-diff", "--no-textconv")),
+        (METADATA_NAMES[2], ("diff", "--no-renames", "--binary", "--no-ext-diff", "--no-textconv")),
+    )
+    if paths is None:
+        return {
+            name: run_git(repository, *arguments).stdout
+            for name, arguments in commands
+        }
+    prefix = git_command_prefix(repository)
+    metadata: dict[str, bytes] = {}
+    for name, arguments in commands:
+        fixed = [*prefix, *arguments, "--"]
+        output = bytearray()
+        for batch in git_metadata_path_batches(fixed, paths):
+            result = run_git_command(repository, [*fixed, *batch])
+            if len(output) + len(result.stdout) > MAX_JSON_BYTES:
+                raise ContractError("git output exceeds JSON limit")
+            output.extend(result.stdout)
+        metadata[name] = bytes(output)
+    return metadata
 
 
 def walk_repository(root: Path) -> Iterable[tuple[str, Path, str]]:
@@ -1532,10 +1779,8 @@ def walk_repository(root: Path) -> Iterable[tuple[str, Path, str]]:
         for name in sorted(set(directories) | set(files)):
             child = current_path / name
             relative = child.relative_to(root).as_posix()
-            if name == ".git":
-                if current_path == root:
-                    continue
-                raise ContractError(f"unsupported repository entry: {relative}")
+            if name == ".git" and current_path == root:
+                continue
             entry_type = classify(child, relative)
             if entry_type == "directory":
                 kept_directories.append(name)
@@ -1550,7 +1795,6 @@ def build_inventory(repository: BoundRepository) -> dict[str, Any]:
     index_tracked = nul_delimited_paths(run_git(repository, "ls-files", "-z"))
     head_tracked = set() if head is None else nul_delimited_paths(run_git(repository, "ls-tree", "-r", "-z", "--name-only", head))
     tracked = index_tracked | head_tracked
-    ignored = nul_delimited_paths(run_git(repository, "ls-files", "--others", "--ignored", "--exclude-standard", "-z"))
     dirty = nul_delimited_paths(run_git(repository, "diff", "--no-renames", "--cached", "--name-only", "-z"))
     dirty |= nul_delimited_paths(run_git(repository, "diff", "--no-renames", "--name-only", "-z"))
     flagged_tracked = {
@@ -1563,7 +1807,7 @@ def build_inventory(repository: BoundRepository) -> dict[str, Any]:
     metadata_hashes = {name: sha256_bytes(data) for name, data in git_metadata(repository).items()}
     entries: list[dict[str, Any]] = []
     for relative, path, entry_type in walk_repository(root):
-        git_class = "tracked" if relative in tracked else "ignored" if relative in ignored else "untracked"
+        git_class = "tracked" if relative in tracked else "untracked"
         entry: dict[str, Any] = {"path": relative, "entryType": entry_type, "gitClass": git_class, "dirtyTracked": relative in dirty}
         if entry_type == "reparse":
             target, kind = link_metadata(path)
@@ -1574,6 +1818,12 @@ def build_inventory(repository: BoundRepository) -> dict[str, Any]:
         if portable_path_issue(relative):
             entry.update(metadataOnly=True, hostile=True)
         entries.append(entry)
+    ignored = ignored_census_paths(
+        repository, (entry["path"] for entry in entries)
+    )
+    for entry in entries:
+        if entry["gitClass"] != "tracked" and entry["path"] in ignored:
+            entry["gitClass"] = "ignored"
     present_paths = {entry["path"] for entry in entries}
     for relative in sorted(tracked & dirty - present_paths):
         entry = {"path": relative, "entryType": "deleted", "gitClass": "tracked", "dirtyTracked": True}
@@ -1587,7 +1837,7 @@ def build_inventory(repository: BoundRepository) -> dict[str, Any]:
     entries.sort(key=lambda entry: entry["path"])
     repository_data = {"historyState": history_state, "head": head, "remotes": remotes, "remoteEvidence": evidence, "gitExecutable": {"path": str(repository.git_executable), "sha256": repository.git_executable_content_sha256}, "gitMetadataHashes": metadata_hashes}
     snapshot = {"entries": entries, "repository": repository_data}
-    return {"schemaVersion": SCHEMA_VERSION, "repository": repository_data, "entries": entries, "snapshot": {"digest": sha256_bytes(canonical_json(snapshot))}}
+    return {"schemaVersion": SCHEMA_VERSION, "repository": repository_data, "entries": entries, "snapshot": {"digest": canonical_json_sha256(snapshot)}}
 
 
 def validate_json_depth(value: Any, depth: int = 0) -> None:
@@ -1607,8 +1857,10 @@ def reject_json_constant(value: str) -> None:
     raise ValueError(f"non-finite JSON constant: {value}")
 
 
-def read_json_bytes(data: bytes, label: str) -> dict[str, Any]:
-    if len(data) > MAX_JSON_BYTES:
+def read_json_bytes(
+    data: bytes, label: str, cap: int = MAX_JSON_BYTES
+) -> dict[str, Any]:
+    if type(cap) is not int or cap < 0 or len(data) > cap:
         raise ContractError(f"invalid {label}")
     try:
         def reject_duplicate_keys(items: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -1627,10 +1879,12 @@ def read_json_bytes(data: bytes, label: str) -> dict[str, Any]:
     return value
 
 
-def read_json(path: Path, label: str) -> dict[str, Any]:
+def read_json(
+    path: Path, label: str, cap: int = MAX_JSON_BYTES
+) -> dict[str, Any]:
     with BoundOrdinaryInputSession(path) as bound_input:
-        data = bound_input.read_bounded(MAX_JSON_BYTES, label)
-        return read_json_bytes(data, label)
+        data = bound_input.read_bounded(cap, label)
+        return read_json_bytes(data, label, cap)
 
 
 def is_sha256(value: Any) -> bool:
@@ -1641,7 +1895,9 @@ def validate_inventory(inventory: dict[str, Any]) -> None:
     try:
         if not isinstance(inventory.get("snapshot"), dict) or not isinstance(inventory.get("repository"), dict) or not isinstance(inventory.get("entries"), list):
             raise TypeError
-        expected = sha256_bytes(canonical_json({"entries": inventory["entries"], "repository": inventory["repository"]}))
+        expected = canonical_json_sha256(
+            {"entries": inventory["entries"], "repository": inventory["repository"]}
+        )
     except (KeyError, TypeError, ValueError):
         raise ContractError("invalid inventory snapshot")
     repository = inventory["repository"]
@@ -1875,7 +2131,9 @@ def consume_payload(
 def bundle(repository: BoundRepository, inventory_path: Path, selection_path: Path, output: Path, *, force: bool = False) -> None:
     root = repository.root
     output_binding = bind_output(output, root, force=force)
-    inventory = read_json(inventory_path, "inventory")
+    inventory = read_json(
+        inventory_path, "inventory", MAX_INVENTORY_JSON_BYTES
+    )
     selection = read_json(selection_path, "selection")
     validate_inventory(inventory)
     rows = validate_selection(root, inventory, selection)
@@ -1920,10 +2178,39 @@ def _posix_handle_identity(descriptor: int, *, include_change_stamp: bool) -> tu
     )
 
 
+@lru_cache(maxsize=1)
 def _windows_kernel32() -> Any:
     import ctypes
 
     return ctypes.WinDLL("kernel32", use_last_error=True)
+
+
+@lru_cache(maxsize=1)
+def _windows_handle_information_binding() -> tuple[type[Any], Any]:
+    import ctypes
+    from ctypes import wintypes
+
+    class ByHandleFileInformation(ctypes.Structure):
+        _fields_ = [
+            ("attributes", wintypes.DWORD),
+            ("creation", wintypes.FILETIME),
+            ("access", wintypes.FILETIME),
+            ("write", wintypes.FILETIME),
+            ("volume", wintypes.DWORD),
+            ("size_high", wintypes.DWORD),
+            ("size_low", wintypes.DWORD),
+            ("links", wintypes.DWORD),
+            ("index_high", wintypes.DWORD),
+            ("index_low", wintypes.DWORD),
+        ]
+
+    get_information = _windows_kernel32().GetFileInformationByHandle
+    get_information.argtypes = (
+        wintypes.HANDLE,
+        ctypes.POINTER(ByHandleFileInformation),
+    )
+    get_information.restype = wintypes.BOOL
+    return ByHandleFileInformation, get_information
 
 
 _WINDOWS_DOS_DEVICE_BASENAMES = {
@@ -1949,16 +2236,18 @@ class _OrdinaryFileErrors:
 
 
 class _OrdinaryFileOptions:
-    __slots__ = ("errors", "posix_nonblocking")
+    __slots__ = ("errors", "posix_nonblocking", "windows_share_write")
 
     def __init__(
         self,
         *,
         errors: _OrdinaryFileErrors,
         posix_nonblocking: bool,
+        windows_share_write: bool = False,
     ) -> None:
         self.errors = errors
         self.posix_nonblocking = posix_nonblocking
+        self.windows_share_write = windows_share_write
 
 
 _ARCHIVE_FILE_OPTIONS = _OrdinaryFileOptions(
@@ -1992,6 +2281,15 @@ _PAYLOAD_FILE_OPTIONS = _OrdinaryFileOptions(
         close="inventory drift",
     ),
     posix_nonblocking=True,
+)
+_INVENTORY_FILE_OPTIONS = _OrdinaryFileOptions(
+    errors=_OrdinaryFileErrors(
+        binding=TRANSFER_INVENTORY_OPEN_SHARE_FAILED,
+        drift="inventory drift",
+        close="inventory drift",
+    ),
+    posix_nonblocking=True,
+    windows_share_write=True,
 )
 
 
@@ -2180,7 +2478,9 @@ def _windows_open_ordinary_path(
     from ctypes import wintypes
 
     errors = options.errors
-    if share_write and options is not _OUTPUT_FILE_OPTIONS:
+    if share_write and (
+        options is not _OUTPUT_FILE_OPTIONS and not options.windows_share_write
+    ):
         raise ContractError(errors.binding)
     acquisition = owner or _OrdinaryFileAcquisitionOwner(errors)
     if acquisition.errors is not errors:
@@ -2249,26 +2549,9 @@ def _windows_open_ordinary_path(
 
 def _windows_handle_identity(handle: int, *, include_change_stamp: bool) -> tuple[int, ...]:
     import ctypes
-    from ctypes import wintypes
 
-    class ByHandleFileInformation(ctypes.Structure):
-        _fields_ = [
-            ("attributes", wintypes.DWORD),
-            ("creation", wintypes.FILETIME),
-            ("access", wintypes.FILETIME),
-            ("write", wintypes.FILETIME),
-            ("volume", wintypes.DWORD),
-            ("size_high", wintypes.DWORD),
-            ("size_low", wintypes.DWORD),
-            ("links", wintypes.DWORD),
-            ("index_high", wintypes.DWORD),
-            ("index_low", wintypes.DWORD),
-        ]
-
-    information = ByHandleFileInformation()
-    get_information = _windows_kernel32().GetFileInformationByHandle
-    get_information.argtypes = (wintypes.HANDLE, ctypes.POINTER(ByHandleFileInformation))
-    get_information.restype = wintypes.BOOL
+    information_type, get_information = _windows_handle_information_binding()
+    information = information_type()
     if not get_information(
         ctypes.c_void_p(handle), ctypes.byref(information)
     ):
@@ -2431,6 +2714,7 @@ class _BoundOrdinaryFileCore:
                 directory=False,
                 options=self.options,
                 owner=acquisition,
+                share_write=self.options.windows_share_write,
             )
             acquisition.windows_handle_to_fd(
                 os.O_RDONLY
@@ -2488,6 +2772,7 @@ class _BoundOrdinaryFileCore:
                 self.path,
                 directory=False,
                 options=self.options,
+                share_write=self.options.windows_share_write,
             )
             try:
                 current = _windows_handle_identity(
@@ -2679,8 +2964,17 @@ class BoundOrdinaryInputSession(_BoundOrdinaryFileCore):
 class BoundPayloadInputSession(_BoundOrdinaryFileCore):
     """One selected payload leaf held from classification through ZIP emission."""
 
-    def __init__(self, input_path: Path) -> None:
-        super().__init__(input_path, _PAYLOAD_FILE_OPTIONS)
+    def __init__(
+        self, input_path: Path, *, inventory_write_sharing: bool = False
+    ) -> None:
+        if type(inventory_write_sharing) is not bool:
+            raise ContractError("inventory drift")
+        options = (
+            _INVENTORY_FILE_OPTIONS
+            if inventory_write_sharing and os.name == "nt"
+            else _PAYLOAD_FILE_OPTIONS
+        )
+        super().__init__(input_path, options)
 
     def consume_census(
         self,
@@ -2732,7 +3026,9 @@ class BoundPayloadInputSession(_BoundOrdinaryFileCore):
 
 
 def inventory_regular_file(path: Path) -> tuple[int, str]:
-    with BoundPayloadInputSession(path) as input_session:
+    with BoundPayloadInputSession(
+        path, inventory_write_sharing=True
+    ) as input_session:
         return input_session.consume_census(input_session.eof)
 
 
@@ -3042,7 +3338,9 @@ def archive_member_matches_bytes(archive: zipfile.ZipFile, name: str, expected: 
 
 def load_validated_snapshot(repository: BoundRepository, inventory_path: Path, selection_path: Path, drift_message: str) -> tuple[Path, dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
     root = repository.root
-    inventory = read_json(inventory_path, "inventory")
+    inventory = read_json(
+        inventory_path, "inventory", MAX_INVENTORY_JSON_BYTES
+    )
     selection = read_json(selection_path, "selection")
     validate_inventory(inventory)
     rows = validate_selection(root, inventory, selection)
@@ -3170,8 +3468,13 @@ def main(arguments: list[str] | None = None) -> int:
         if args.command == "inventory":
             repository = bind_repository(args.repo, args.git_executable)
             output = bind_output(args.output, repository.root, force=args.force)
-            inventory_bytes = capped_canonical_json(build_inventory(repository), "inventory output exceeds JSON limit", final_newline=True)
-            publish_output_bytes(output, inventory_bytes)
+            publish_canonical_json(
+                output,
+                build_inventory(repository),
+                MAX_INVENTORY_JSON_BYTES,
+                f"inventory exceeds {MAX_INVENTORY_JSON_BYTES}-byte limit",
+                final_newline=True,
+            )
         elif args.command == "bundle":
             bundle(
                 bind_repository(args.repo, args.git_executable),

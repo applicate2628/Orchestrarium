@@ -27,54 +27,25 @@ MCP_POLICY_SCRIPTS = (
     ROOT / "src.claude" / "agents" / "scripts" / "mcp_continuity_policy.py",
 )
 
-STATEFUL_REPOSITORY_TOOL_CONTEXT = (
-    "For any stateful or indexed repository-understanding tool - whether MCP, CLI, or "
-    "skill-backed - repository/project/branch/worktree/indexed-input changes invalidate "
-    "any earlier answer: use the tool's own status/freshness probe; when it reports stale "
-    "or pending, run its documented sync/update/reindex, confirm fresh, then repeat the "
-    "intended query. Graphify, including standalone CLI or skill-backed use, follows "
-    "`status/freshness -> sync/update/reindex -> confirm fresh -> repeat intended query`. "
-    "Example: CodeGraph `status -> sync -> fresh status -> repeat query`. If the tool "
-    "is needed now, stale state does not justify skipping it or deferring refresh to an "
-    "authorizer or later concurrent work. If refresh fails, report it explicitly. Use an "
-    "alternate tool only when refresh genuinely fails, the tool is unavailable, the user "
-    "forbids it, or refresh exceeds an explicit approved resource bound; report the reason; "
-    "do not present stale output as current or any stale evidence as current. Stateless or "
-    "live MCPs need no refresh. "
-    "Other stateless or live tools likewise need no refresh."
-)
+def _load_policy(path: Path, module_name: str):
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    assert spec is not None and spec.loader is not None
+    policy = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(policy)
+    return policy
 
-TURN_ANCHOR_FRESHNESS_CONTEXT = (
-    "Repository-understanding freshness: any stateful/indexed tool (MCP, CLI, or "
-    "skill-backed), explicitly Graphify, is invalidated by repository/project/branch/"
-    "worktree/indexed-input changes; use status/freshness, then sync/update/reindex, fresh "
-    "recheck, then repeat the query - explicitly, Graphify follows `status/freshness -> "
-    "sync/update/reindex -> confirm fresh -> repeat intended query`. If the tool is needed "
-    "now, stale does not justify "
-    "skipping or deferring refresh to an authorizer or later concurrent work. Use an "
-    "alternate only after refresh genuinely fails, the tool is unavailable, the user "
-    "forbids it, or refresh exceeds an explicit approved resource bound; report why and "
-    "never present stale evidence; stateless/live MCPs are exempt. Other stateless/live "
-    "tools need no refresh."
+
+CANONICAL_MCP_POLICY = _load_policy(
+    MCP_POLICY_SCRIPTS[0], "canonical_mcp_continuity_policy_test"
 )
+CANONICAL_SESSION_START_CONTEXT = CANONICAL_MCP_POLICY.SESSION_START_CONTEXT
+CANONICAL_TURN_ANCHOR_CONTEXT = CANONICAL_MCP_POLICY.TURN_ANCHOR_CONTEXT
 
 # (script, config subdir under cwd, expected-context-dict-key)
 AGENTS_MODE_PY = (
     (ROOT / "src.codex" / "skills" / "lead" / "scripts" / "agents-mode-reminder.py", ".agents", "codex"),
     (ROOT / "src.claude" / "agents" / "scripts" / "agents-mode-reminder.py", ".claude", "claude"),
 )
-
-MCP_CONTEXT = "\n".join((
-    "[MCP / tools reminder - re-shown at session start and after every compaction]",
-    "MCP servers may be connected in this environment. For codebase, architecture, API/docs, search, browser, debugger, profiler, or repository-understanding tasks, make MCP/tool-discovery an explicit checkpoint before falling back to ad-hoc shell reads.",
-    "MCP tools load on demand: use the platform's tool discovery (e.g. ToolSearch) to see the connected servers and load a tool's schema, then call the relevant tool. If a relevant MCP is unavailable or broken, say so briefly instead of silently substituting a weaker path.",
-    "CONNECTED but uninitialized is not unavailable: do NOT skip a connected MCP reporting \"not initialized\", \"no index\", \"empty\", or \"no data yet\". Many servers require or build their own index/state on first use — when they report no index, INITIALIZE them per the server's own instructions (e.g. run a code-graph server's init / check its status; codegraph builds its initial index via `codegraph init`, then a file-watcher keeps it fresh) and use or await the result — never silently substitute ad-hoc shell/grep. Only a genuinely absent server (not connected, not installed, or absent from tool discovery) may be skipped with an explanation.",
-    "When mcpMode: force is active, relevant MCP use is a standing instruction. Under mcpMode: auto, still consider MCP first when it fits the task and record why it was skipped if the task explicitly asked for MCP.",
-    STATEFUL_REPOSITORY_TOOL_CONTEXT,
-    "High-value categories when present: semantic code navigation and code-graph, Repomix or repository packers, language-server / LSP, current library / framework / API docs (use these instead of answering API questions from memory), debuggers and profilers, browser automation, memory, search, and fetch utilities.",
-    "This STILL APPLIES AFTER COMPACTION - do not forget MCP just because the context was summarized.",
-    "SUBAGENTS: dispatched agents inherit the runtime tool surface. In the dispatch prompt, explicitly allow relevant MCP discovery/use within the assigned role, scope, and safety limits; do not accidentally hide MCP availability, but keep any deliberate tool limits honest.",
-))
 
 DELEGATION_HEADING = (
     "[Delegation posture - re-shown at session start and after every compaction]"
@@ -128,21 +99,29 @@ def _decode_context(stdout: str) -> str:
 
 
 class McpUsageReminderPythonHookTest(unittest.TestCase):
-    def test_all_policy_projections_carry_exact_repository_tool_freshness_contract(self) -> None:
-        for index, policy_path in enumerate(MCP_POLICY_SCRIPTS):
+    def test_all_policy_projections_match_the_canonical_contexts(self) -> None:
+        for index, policy_path in enumerate(MCP_POLICY_SCRIPTS[1:], start=1):
             with self.subTest(policy=str(policy_path.relative_to(ROOT))):
-                spec = importlib.util.spec_from_file_location(
-                    f"mcp_continuity_policy_freshness_test_{index}", policy_path
+                policy = _load_policy(
+                    policy_path, f"mcp_continuity_policy_projection_test_{index}"
                 )
-                assert spec is not None and spec.loader is not None
-                policy = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(policy)
-                self.assertIn(
-                    STATEFUL_REPOSITORY_TOOL_CONTEXT, policy.SESSION_START_CONTEXT
+                self.assertEqual(
+                    policy.SESSION_START_CONTEXT, CANONICAL_SESSION_START_CONTEXT
                 )
-                self.assertIn(
-                    TURN_ANCHOR_FRESHNESS_CONTEXT, policy.TURN_ANCHOR_CONTEXT
+                self.assertEqual(
+                    policy.TURN_ANCHOR_CONTEXT, CANONICAL_TURN_ANCHOR_CONTEXT
                 )
+
+    def test_canonical_session_context_uses_runtime_discovery_and_non_normative_examples(self) -> None:
+        for marker in (
+            "runtime tool discovery",
+            "Non-normative interface example only",
+            "its name never selects a tool",
+            "Non-normative workflow examples only",
+            "These names never select a tool",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, CANONICAL_SESSION_START_CONTEXT)
 
     def test_all_three_adapters_emit_their_policy_owned_exact_context(self) -> None:
         for index, (script, policy_path) in enumerate(
@@ -150,12 +129,9 @@ class McpUsageReminderPythonHookTest(unittest.TestCase):
         ):
             with self.subTest(script=str(script.relative_to(ROOT))):
                 self.assertTrue(policy_path.is_file(), f"missing {policy_path}")
-                spec = importlib.util.spec_from_file_location(
-                    f"mcp_continuity_policy_test_{index}", policy_path
+                policy = _load_policy(
+                    policy_path, f"mcp_continuity_policy_adapter_test_{index}"
                 )
-                assert spec is not None and spec.loader is not None
-                policy = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(policy)
                 result = _run(script, stdin="")
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(
@@ -170,7 +146,9 @@ class McpUsageReminderPythonHookTest(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(result.stderr, "")
                 self.assertEqual(len(result.stdout.splitlines()), 1)
-                self.assertEqual(_decode_context(result.stdout), MCP_CONTEXT)
+                self.assertEqual(
+                    _decode_context(result.stdout), CANONICAL_SESSION_START_CONTEXT
+                )
 
     def test_malformed_stdin_does_not_change_the_unconditional_reminder(self) -> None:
         # mcp-usage-reminder never reads stdin; garbage input has zero effect.
@@ -179,7 +157,9 @@ class McpUsageReminderPythonHookTest(unittest.TestCase):
                 result = _run(script, stdin=MALFORMED_JSON)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(result.stderr, "")
-                self.assertEqual(_decode_context(result.stdout), MCP_CONTEXT)
+                self.assertEqual(
+                    _decode_context(result.stdout), CANONICAL_SESSION_START_CONTEXT
+                )
 
     def test_absent_stdin_still_exits_zero_with_the_reminder(self) -> None:
         for script in MCP_PY_SCRIPTS:
@@ -190,7 +170,9 @@ class McpUsageReminderPythonHookTest(unittest.TestCase):
                     capture_output=True, text=True, encoding="utf-8",
                 )
                 self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertEqual(_decode_context(result.stdout), MCP_CONTEXT)
+                self.assertEqual(
+                    _decode_context(result.stdout), CANONICAL_SESSION_START_CONTEXT
+                )
 
 
 class AgentsModeReminderPythonHookTest(unittest.TestCase):

@@ -18,7 +18,8 @@ description: "Security reviewer: gate auth, secrets, and exposure."
 - Apply architecture-reviewer's 1:1 claim-to-verdict pattern and the S4 per-claim verdict vocabulary owned by architecture-reviewer to the numbered security claims; run each claim's falsifying probe or record why it could not run.
 - Take only the code paths, configs, dependencies, and data flows relevant to the security surface.
 - Escalate missing threat context instead of assuming safety.
-- Tag every finding with the `fix-class: {inline-sufficient | design-decision}` triage owned by `architecture-reviewer`; `inline HOW stays advisory (non-binding)`, and the tag follows an `escalate-only one-way ratchet: inline-sufficient may be reclassified to design-decision, never the reverse`. An `inline-sufficient` finding keeps the existing implementation route. A `design-decision` finding routes through the lead to `security-engineer`, the security constraint/design owner, and requires a separate `/agents-review-loop` fix-design pass before implementation.
+- Tag every finding with the `fix-class: {inline-sufficient | design-decision}` triage owned by `architecture-reviewer`; `inline HOW stays advisory (non-binding)`, and the tag follows an `escalate-only one-way ratchet: inline-sufficient may be reclassified to design-decision, never the reverse`. An `inline-sufficient` finding keeps the existing implementation route. A `design-decision` finding routes through the lead to `security-engineer`, the security constraint/design owner.
+- Follow architecture-reviewer's `Simple exact-delta route`, `Mandatory review-loop triggers`, and `Insufficient triggers` when selecting correction review: the `design-decision` tag alone does not trigger the loop. Use the existing loop for genuine complexity or ambiguity, materially competing owner/seam solutions, repeated review/fix failure, newly discovered complexity, or when the user explicitly requests the loop. Otherwise the design owner corrects the design and the original reviewer re-verifies the finding and changed delta.
 
 ## Return exactly one artifact
 
@@ -29,6 +30,7 @@ description: "Security reviewer: gate auth, secrets, and exposure."
 - Relevant auth, authz, validation, secrets, dependency, data exposure, and dangerous configuration checks were performed for the phase.
 - Findings are concrete, reproducible, and tied to the code or config under review.
 - The phase does not pass while unresolved high-risk issues remain.
+- Any accepted mandatory gate criterion that is unchecked, `not-run`, `UNVERIFIED`, or blocked prevents `PASS`. Continue every accepted mandatory check that remains runnable even when another check is unfinished or blocked. An optional non-gate check that is not run is reported as residual risk and does not prevent `PASS`. This classification does not add or promote any check; the accepted criteria and scoped gate remain the only source of mandatory checks.
 
 ## Severity anchors
 
@@ -61,7 +63,7 @@ For each applicable row report `found`, `not-applicable`, or `not-run`; `not-run
 
 ## Security finding registry
 
-- On `REVISE` or `BLOCKED`, file each finding in `work-items/bugs/<date>-<slug>.md` using the format owned by `qa-engineer`, with `found-by: security-reviewer`, before returning the verdict.
+- On `REVISE` or `BLOCKED`, include a proposed registry record in-band in the returned artifact for the root or lifecycle owner, using `work-items/bugs/<date>-<slug>.md`, the format owned by `qa-engineer`, and `found-by: security-reviewer`. Write the proposed registry record directly only when the dispatcher explicitly grants registry-write authority and the sandbox permits that path. A direct registry write is a narrow canonical-artifact exception and does not otherwise broaden this role's write posture.
 
 ## Architecture layering hygiene (security verification)
 

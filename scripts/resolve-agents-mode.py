@@ -36,6 +36,7 @@ _EXTERNAL_DISPOSITION_AVAILABILITY_PAIRS = frozenset(
     }
 )
 _MECHANICAL_ROLES = frozenset({"mechanical-scout", "mechanical-worker"})
+_MECHANICAL_TASK_CLASSES = frozenset({"micro", "mechanical-read", "mechanical"})
 _LUNA_ALLOWED_REASONING_EFFORTS = ("high", "xhigh", "max")
 _LUNA_OPERATION_SCHEMA_V1 = {
     "path-kind": frozenset({"path"}),
@@ -879,13 +880,21 @@ def load_role_policy(repo_root: Path) -> tuple[dict[str, Any], Path]:
     profiles = policy.get("profiles")
     task_classes = policy.get("taskClasses")
     roles = policy.get("roles")
+    skill_only_roles = policy.get("skillOnlyRoles")
     eligibility = policy.get("taskRoleEligibility")
     realizations = policy.get("providerRealizations")
     final_authorizing_roles = policy.get("finalAuthorizingRoles")
     mechanical_execution_contract = policy.get("mechanicalExecutionContract")
     if not all(
         isinstance(value, dict)
-        for value in (profiles, task_classes, roles, eligibility, realizations)
+        for value in (
+            profiles,
+            task_classes,
+            roles,
+            skill_only_roles,
+            eligibility,
+            realizations,
+        )
     ):
         raise ValueError("E_ROLE_POLICY_INVALID: policy maps are required")
     if not isinstance(model_tiers, list) or len(model_tiers) != len(set(model_tiers)):
@@ -912,8 +921,16 @@ def load_role_policy(repo_root: Path) -> tuple[dict[str, Any], Path]:
             raise ValueError(f"E_ROLE_POLICY_INVALID: profile {name} effort")
         if not isinstance(profile.get("codexModel"), str):
             raise ValueError(f"E_ROLE_POLICY_INVALID: profile {name} Codex model")
+        if name != "luna-high" and (
+            not isinstance(profile.get("useCriteria"), str)
+            or not profile["useCriteria"].strip()
+        ):
+            raise ValueError(f"E_ROLE_POLICY_INVALID: profile {name} use criteria")
 
-    for role_name, role in roles.items():
+    if set(roles).intersection(skill_only_roles):
+        raise ValueError("E_ROLE_POLICY_INVALID: native and skill-only roles overlap")
+    role_catalog = {**roles, **skill_only_roles}
+    for role_name, role in role_catalog.items():
         if not isinstance(role, dict):
             raise ValueError(f"E_ROLE_POLICY_INVALID: role {role_name} is not an object")
         allowed = role.get("allowedProfiles")
@@ -922,7 +939,7 @@ def load_role_policy(repo_root: Path) -> tuple[dict[str, Any], Path]:
             raise ValueError(f"E_ROLE_POLICY_INVALID: role {role_name} corridor")
         if any(profile not in profiles for profile in allowed):
             raise ValueError(f"E_ROLE_POLICY_INVALID: role {role_name} profile")
-    if any(role_name not in roles for role_name in final_authorizing_roles):
+    if any(role_name not in role_catalog for role_name in final_authorizing_roles):
         raise ValueError("E_ROLE_POLICY_INVALID: finalAuthorizingRoles role")
 
     for task_name, task in task_classes.items():
@@ -932,19 +949,38 @@ def load_role_policy(repo_root: Path) -> tuple[dict[str, Any], Path]:
         required_effort = task.get("requiredEffort")
         if required_model not in model_index or required_effort not in effort_index:
             raise ValueError(f"E_ROLE_POLICY_INVALID: task {task_name} floor")
+        admissible_profiles = task.get("admissibleProfiles")
+        if task_name in _MECHANICAL_TASK_CLASSES:
+            if admissible_profiles is not None:
+                raise ValueError(f"E_ROLE_POLICY_INVALID: task {task_name} mechanical corridor")
+        elif (
+            not isinstance(admissible_profiles, list)
+            or not admissible_profiles
+            or len(admissible_profiles) != len(set(admissible_profiles))
+            or any(profile not in profiles for profile in admissible_profiles)
+        ):
+            raise ValueError(f"E_ROLE_POLICY_INVALID: task {task_name} admissible profiles")
         eligible_roles = eligibility.get(task_name)
         if not isinstance(eligible_roles, list) or not eligible_roles:
             raise ValueError(f"E_ROLE_POLICY_INVALID: task {task_name} eligibility")
         for role_name in eligible_roles:
-            if role_name not in roles:
+            if role_name not in role_catalog:
                 raise ValueError(
                     f"E_ROLE_POLICY_INVALID: task {task_name} unknown role {role_name}"
                 )
-            default_profile = roles[role_name]["defaultProfile"]
+            default_profile = role_catalog[role_name]["defaultProfile"]
             profile = profiles[default_profile]
-            if (
+            if task_name in _MECHANICAL_TASK_CLASSES and (
                 model_index[profile["modelTier"]] < model_index[required_model]
                 or effort_index[profile["effort"]] < effort_index[required_effort]
+            ):
+                raise ValueError(
+                    f"E_ROLE_POLICY_INVALID: task {task_name} role {role_name} default"
+                )
+            if task_name not in _MECHANICAL_TASK_CLASSES and (
+                default_profile not in admissible_profiles
+                or not set(role_catalog[role_name]["allowedProfiles"])
+                & set(admissible_profiles)
             ):
                 raise ValueError(
                     f"E_ROLE_POLICY_INVALID: task {task_name} role {role_name} default"
@@ -1028,6 +1064,17 @@ def _role_dispatch_invalid(
     )
 
 
+def _valid_role_dispatch_request(task_class: Any, role_name: Any) -> bool:
+    return (
+        isinstance(task_class, str)
+        and bool(task_class)
+        and len(task_class) <= 128
+        and isinstance(role_name, str)
+        and bool(role_name)
+        and len(role_name) <= 128
+    )
+
+
 def _load_role_dispatch_contract(
     repo_root: Path,
     task_class: Any,
@@ -1037,14 +1084,7 @@ def _load_role_dispatch_contract(
     role_root: Path | None = None,
     linked_authority: Any | None = None,
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
-    if (
-        not isinstance(task_class, str)
-        or not task_class
-        or len(task_class) > 128
-        or not isinstance(role_name, str)
-        or not role_name
-        or len(role_name) > 128
-    ):
+    if not _valid_role_dispatch_request(task_class, role_name):
         return None, _role_dispatch_invalid(task_class, role_name, "request")
     try:
         policy, policy_path = load_role_policy(repo_root)
@@ -1075,13 +1115,11 @@ def _load_role_dispatch_contract(
             value: index for index, value in enumerate(policy["effortOrder"])
         }
         task = tasks[task_class]
-        if (
+        if task_class in _MECHANICAL_TASK_CLASSES and (
             model_index[profile["modelTier"]]
             < model_index[task["requiredModelTier"]]
             or effort_index[profile["effort"]]
             < effort_index[task["requiredEffort"]]
-            or profile["codexModel"] != "gpt-5.6-luna"
-            or role_name not in {"mechanical-scout", "mechanical-worker"}
         ):
             return None, _role_dispatch_decision(
                 status="denied",
@@ -1164,9 +1202,349 @@ def _load_role_dispatch_contract(
                 if role_name in _MECHANICAL_ROLES
                 else None
             ),
+            "policy": policy,
+            "task": task,
+            "roleConfig": roles[role_name],
+            "developerInstructions": str(role_toml.get("developer_instructions", "")),
         }, None
     except (KeyError, OSError, UnicodeDecodeError, ValueError, json.JSONDecodeError, tomllib.TOMLDecodeError) as exc:
         return None, _role_dispatch_invalid(task_class, role_name, str(exc))
+
+
+_ORDINARY_NATIVE_FAILURE_POLICY = {
+    "hostRejection": "E_ORDINARY_NATIVE_SELECTION_REJECTED",
+    "executionDrift": "E_ORDINARY_NATIVE_EXECUTION_DRIFT",
+    "missingActualMetadata": "unspecified by runtime",
+}
+
+
+def _ordinary_native_denied(task_class: Any, role: Any, stable_id: str) -> dict[str, Any]:
+    return {
+        "schemaVersion": 1,
+        "status": "denied",
+        "stableId": stable_id,
+        "taskClass": task_class if isinstance(task_class, str) else "",
+        "role": role if isinstance(role, str) else "",
+        "fallback": "none",
+    }
+
+
+def _profession_skill_metadata(repo_root: Path, role: str, instructions: str) -> dict[str, Any]:
+    candidates = (
+        repo_root / "src.codex" / "skills" / role / "SKILL.md",
+        repo_root.parent / role / "SKILL.md",
+    )
+    skill_path = next((path for path in candidates if _ordinary_file(path)), None)
+    return {
+        "skill": f"${role}" if skill_path is not None else None,
+        "skillSha256": _file_sha256(skill_path) if skill_path is not None else None,
+        "instructions": instructions,
+        "instructionsSha256": hashlib.sha256(instructions.encode("utf-8")).hexdigest(),
+    }
+
+
+def _describe_ordinary_native_role_options_in_layout(
+    role: Any,
+    task_class: Any,
+    host_observation: Any,
+    *,
+    repo_root: Path,
+    manifest_path: Path | None = None,
+    role_root: Path | None = None,
+    linked_authority: Any | None = None,
+) -> dict[str, Any]:
+    if not _valid_role_dispatch_request(task_class, role):
+        return _ordinary_native_denied(
+            task_class, role, "E_ORDINARY_NATIVE_SELECTION_INVALID"
+        )
+    try:
+        policy, _policy_path = load_role_policy(repo_root)
+    except (OSError, ValueError):
+        return _ordinary_native_denied(
+            task_class, role, "E_ORDINARY_NATIVE_SELECTION_INVALID"
+        )
+    skill_only = policy["skillOnlyRoles"].get(role) if isinstance(role, str) else None
+    if isinstance(skill_only, dict):
+        if (
+            task_class not in policy["taskClasses"]
+            or role not in policy["taskRoleEligibility"].get(task_class, ())
+            or task_class in _MECHANICAL_TASK_CLASSES
+        ):
+            return _ordinary_native_denied(
+                task_class, role, "E_ORDINARY_NATIVE_SELECTION_INVALID"
+            )
+        profile_name = skill_only["defaultProfile"]
+        profile = policy["profiles"][profile_name]
+        instructions = (
+            f"Activate ${role} and apply its current SKILL.md contract under AGENTS.md "
+            "without widening the caller's authority, scope, or allowed tools."
+        )
+        contract = {
+            "taskClass": task_class,
+            "role": role,
+            "profile": profile_name,
+            "model": profile["codexModel"],
+            "effort": profile["effort"],
+            "policy": policy,
+            "task": policy["taskClasses"][task_class],
+            "roleConfig": skill_only,
+            "developerInstructions": instructions,
+            "roleKind": "skill-only",
+        }
+        early = None
+    else:
+        contract, early = _load_role_dispatch_contract(
+            repo_root,
+            task_class,
+            role,
+            manifest_path=manifest_path,
+            role_root=role_root,
+            linked_authority=linked_authority,
+        )
+        if contract is not None:
+            contract["roleKind"] = "native"
+    if early is not None or contract is None or contract["role"] in _MECHANICAL_ROLES:
+        return _ordinary_native_denied(task_class, role, "E_ORDINARY_NATIVE_SELECTION_INVALID")
+    if not isinstance(host_observation, dict) or set(host_observation) - {
+        "explicitModelControl",
+        "explicitReasoningEffortControl",
+        "reportedModels",
+        "reportedEfforts",
+        "reportedAgentTypes",
+    }:
+        return _ordinary_native_denied(task_class, role, "E_ORDINARY_NATIVE_SELECTION_INVALID")
+    if not isinstance(host_observation.get("explicitModelControl"), bool) or not isinstance(
+        host_observation.get("explicitReasoningEffortControl"), bool
+    ):
+        return _ordinary_native_denied(task_class, role, "E_ORDINARY_NATIVE_SELECTION_INVALID")
+    reported_models = host_observation.get("reportedModels")
+    reported_efforts = host_observation.get("reportedEfforts")
+    reported_agent_types = host_observation.get("reportedAgentTypes")
+    for reported in (reported_models, reported_efforts, reported_agent_types):
+        if reported is not None and (
+            not isinstance(reported, list)
+            or len(reported) != len(set(reported))
+            or any(not isinstance(value, str) or not value for value in reported)
+        ):
+            return _ordinary_native_denied(task_class, role, "E_ORDINARY_NATIVE_SELECTION_INVALID")
+
+    policy = contract["policy"]
+    admissible = set(contract["task"]["admissibleProfiles"])
+    option_names = [
+        name for name in contract["roleConfig"]["allowedProfiles"] if name in admissible
+    ]
+    options = []
+    explicit_controls = (
+        host_observation["explicitModelControl"]
+        and host_observation["explicitReasoningEffortControl"]
+    )
+    for name in option_names:
+        profile = policy["profiles"][name]
+        if reported_models is not None and profile["codexModel"] not in reported_models:
+            continue
+        if reported_efforts is not None and profile["effort"] not in reported_efforts:
+            continue
+        capability = (
+            "controls-unavailable"
+            if not explicit_controls
+            else "reported"
+            if reported_models is not None and reported_efforts is not None
+            else "capability-unknown"
+        )
+        options.append(
+            {
+                "profile": name,
+                "model": profile["codexModel"],
+                "effort": profile["effort"],
+                "useCriteria": profile["useCriteria"],
+                "hostCapability": capability,
+            }
+        )
+    profession = _profession_skill_metadata(
+        repo_root, contract["role"], contract["developerInstructions"]
+    )
+    if contract["roleKind"] == "skill-only" and profession["skill"] is None:
+        return _ordinary_native_denied(
+            task_class, role, "E_ORDINARY_NATIVE_SELECTION_INVALID"
+        )
+    default_agent_type_capability = (
+        "not-applicable"
+        if contract["roleKind"] == "skill-only"
+        else "capability-unknown"
+        if reported_agent_types is None
+        else "reported"
+        if contract["role"] in reported_agent_types
+        else "reported-absent"
+    )
+    default_invocation = {
+        "mode": "named-role-default",
+        "agentType": contract["role"],
+    }
+    if contract["roleKind"] == "skill-only":
+        default_invocation = {
+            "mode": "generic-explicit-profile",
+            "forkTurns": "none",
+            "model": contract["model"],
+            "reasoningEffort": contract["effort"],
+            "professionSkill": profession["skill"],
+            "promptPreamble": profession["instructions"],
+        }
+    return {
+        "schemaVersion": 1,
+        "status": "available",
+        "stableId": None,
+        "taskClass": contract["taskClass"],
+        "role": contract["role"],
+        "roleKind": contract["roleKind"],
+        "mutationClass": contract["task"]["mutationClass"],
+        "defaultProfile": contract["profile"],
+        "defaultModel": contract["model"],
+        "defaultEffort": contract["effort"],
+        "profession": profession,
+        "options": options,
+        "hostObservation": copy.deepcopy(host_observation),
+        "defaultAgentTypeCapability": default_agent_type_capability,
+        "defaultInvocation": default_invocation,
+        "explicitInvocation": {
+            "mode": "generic-explicit-profile",
+            "omitAgentType": True,
+            "forkTurns": "none",
+        },
+        "failurePolicy": copy.deepcopy(_ORDINARY_NATIVE_FAILURE_POLICY),
+        "fallback": "none",
+    }
+
+
+def describe_ordinary_native_role_options(
+    role: Any,
+    task_class: Any,
+    host_observation: Any,
+    *,
+    repo_root: Path | None = None,
+) -> dict[str, Any]:
+    source_root = Path(repo_root).resolve() if repo_root is not None else Path(__file__).resolve().parents[1]
+    return _describe_ordinary_native_role_options_in_layout(
+        role, task_class, host_observation, repo_root=source_root
+    )
+
+
+def resolve_ordinary_native_dispatch(
+    description: Any,
+    *,
+    requested_model: Any = None,
+    requested_effort: Any = None,
+    caller_rationale: Any,
+    approved_execution_scope: Any,
+    user_approved_max: bool = False,
+) -> dict[str, Any]:
+    if (
+        not isinstance(description, dict)
+        or description.get("status") != "available"
+        or not isinstance(caller_rationale, str)
+        or not caller_rationale.strip()
+        or not isinstance(approved_execution_scope, dict)
+        or not approved_execution_scope
+        or (requested_model is None) != (requested_effort is None)
+    ):
+        return _ordinary_native_denied("", "", "E_ORDINARY_NATIVE_SELECTION_INVALID")
+    explicit = requested_model is not None
+    selected = None
+    if not explicit and description.get("roleKind") == "native" and (
+        description.get("defaultAgentTypeCapability") == "reported-absent"
+    ):
+        return _ordinary_native_denied(
+            description.get("taskClass"),
+            description.get("role"),
+            "E_ORDINARY_NATIVE_AGENT_TYPE_UNAVAILABLE",
+        )
+    if not explicit and description.get("roleKind") == "skill-only":
+        if not (
+            description["hostObservation"].get("explicitModelControl")
+            and description["hostObservation"].get("explicitReasoningEffortControl")
+        ):
+            return _ordinary_native_denied(
+                description.get("taskClass"),
+                description.get("role"),
+                "E_ORDINARY_NATIVE_CONTROLS_UNAVAILABLE",
+            )
+        selected = next(
+            (
+                option
+                for option in description.get("options", ())
+                if option.get("profile") == description.get("defaultProfile")
+            ),
+            None,
+        )
+        if selected is None:
+            return _ordinary_native_denied(
+                description.get("taskClass"),
+                description.get("role"),
+                "E_ORDINARY_NATIVE_SELECTION_INVALID",
+            )
+    if explicit:
+        if not (
+            description["hostObservation"].get("explicitModelControl")
+            and description["hostObservation"].get("explicitReasoningEffortControl")
+        ):
+            return _ordinary_native_denied(
+                description.get("taskClass"),
+                description.get("role"),
+                "E_ORDINARY_NATIVE_CONTROLS_UNAVAILABLE",
+            )
+        selected = next(
+            (
+                option
+                for option in description.get("options", ())
+                if option.get("model") == requested_model
+                and option.get("effort") == requested_effort
+            ),
+            None,
+        )
+        if selected is None or (requested_effort == "max" and user_approved_max is not True):
+            return _ordinary_native_denied(
+                description.get("taskClass"),
+                description.get("role"),
+                "E_ORDINARY_NATIVE_SELECTION_INVALID",
+            )
+    invocation = copy.deepcopy(description["defaultInvocation"])
+    resolved_profile = description["defaultProfile"]
+    resolved_model = description["defaultModel"]
+    resolved_effort = description["defaultEffort"]
+    host_capability = description.get(
+        "defaultAgentTypeCapability", "capability-unknown"
+    )
+    if selected is not None:
+        resolved_profile = selected["profile"]
+        resolved_model = selected["model"]
+        resolved_effort = selected["effort"]
+        host_capability = selected["hostCapability"]
+        invocation = {
+            "mode": "generic-explicit-profile",
+            "forkTurns": "none",
+            "model": resolved_model,
+            "reasoningEffort": resolved_effort,
+            "professionSkill": description["profession"]["skill"],
+            "promptPreamble": description["profession"]["instructions"],
+        }
+    return {
+        "schemaVersion": 1,
+        "status": "resolved",
+        "stableId": None,
+        "taskClass": description["taskClass"],
+        "role": description["role"],
+        "requestedModel": requested_model,
+        "requestedEffort": requested_effort,
+        "resolvedProfile": resolved_profile,
+        "resolvedModel": resolved_model,
+        "resolvedEffort": resolved_effort,
+        "hostCapability": host_capability,
+        "profession": copy.deepcopy(description["profession"]),
+        "callerRationale": caller_rationale,
+        "approvedExecutionScope": copy.deepcopy(approved_execution_scope),
+        "invocation": invocation,
+        "failurePolicy": copy.deepcopy(_ORDINARY_NATIVE_FAILURE_POLICY),
+        "fallback": "none",
+    }
 
 
 def _resolve_role_dispatch_in_layout(
@@ -1190,6 +1568,21 @@ def _resolve_role_dispatch_in_layout(
     if early is not None:
         return early
     assert contract is not None
+    if (
+        contract["role"] not in _MECHANICAL_ROLES
+        or contract["taskClass"] not in _MECHANICAL_TASK_CLASSES
+        or contract["model"] != "gpt-5.6-luna"
+    ):
+        return _role_dispatch_decision(
+            status="denied",
+            stable_id="E_ROLE_CORRIDOR_DENIED",
+            task_class=contract["taskClass"],
+            role=contract["role"],
+            requested_profile=contract["profile"],
+            requested_model=contract["model"],
+            requested_effort=contract["effort"],
+            sandbox=None,
+        )
     if effective_feature_state not in {"enabled", "disabled"}:
         return _role_dispatch_invalid(task_class, role, "feature-state")
     if effective_feature_state == "disabled":
@@ -1616,9 +2009,19 @@ def main() -> int:
     parser.add_argument("--repo-root", default=str(Path(__file__).resolve().parents[1]))
     parser.add_argument("--resolve-role-dispatch", action="store_true")
     parser.add_argument("--resolve-external-dispatch", action="store_true")
+    parser.add_argument("--ordinary-native-action", choices=("describe", "resolve"))
     parser.add_argument("--task-class")
     parser.add_argument("--role")
     parser.add_argument("--feature-state", choices=("enabled", "disabled"))
+    parser.add_argument("--host-controls", choices=("explicit", "unavailable"))
+    parser.add_argument("--reported-model", action="append")
+    parser.add_argument("--reported-effort", action="append")
+    parser.add_argument("--reported-agent-type", action="append")
+    parser.add_argument("--requested-model")
+    parser.add_argument("--requested-effort")
+    parser.add_argument("--caller-rationale")
+    parser.add_argument("--approved-scope-json")
+    parser.add_argument("--user-approved-max", action="store_true")
     parser.add_argument("--json", action="store_true", help="emit JSON output")
     args = parser.parse_args()
 
@@ -1638,8 +2041,86 @@ def main() -> int:
     project_root = Path(args.project_root).resolve()
     home = Path(os.path.expanduser(args.home)).resolve()
     source_root = _source_layout_root(resolver_path, repo_root)
-    if args.resolve_role_dispatch and args.resolve_external_dispatch:
+    dispatch_modes = sum(
+        bool(value)
+        for value in (
+            args.resolve_role_dispatch,
+            args.resolve_external_dispatch,
+            args.ordinary_native_action,
+        )
+    )
+    if dispatch_modes > 1:
         parser.error("choose exactly one dispatch resolver")
+    if args.ordinary_native_action:
+        if (
+            args.provider != "codex"
+            or not args.json
+            or args.task_class is None
+            or args.role is None
+            or args.host_controls is None
+            or args.feature_state is not None
+        ):
+            parser.error(
+                "--ordinary-native-action requires provider codex, task class, role, "
+                "host controls, no feature state, and --json"
+            )
+        host_observation: dict[str, Any] = {
+            "explicitModelControl": args.host_controls == "explicit",
+            "explicitReasoningEffortControl": args.host_controls == "explicit",
+        }
+        if args.reported_model is not None:
+            host_observation["reportedModels"] = args.reported_model
+        if args.reported_effort is not None:
+            host_observation["reportedEfforts"] = args.reported_effort
+        if args.reported_agent_type is not None:
+            host_observation["reportedAgentTypes"] = args.reported_agent_type
+        if source_root is not None:
+            description = describe_ordinary_native_role_options(
+                args.role,
+                args.task_class,
+                host_observation,
+                repo_root=source_root,
+            )
+        else:
+            try:
+                installed_root, manifest_path, role_root, authority = (
+                    _installed_role_dispatch_layout(resolver_path, project_root, home)
+                )
+            except (OSError, ValueError):
+                description = _ordinary_native_denied(
+                    args.task_class, args.role, "E_ORDINARY_NATIVE_SELECTION_INVALID"
+                )
+            else:
+                description = _describe_ordinary_native_role_options_in_layout(
+                    args.role,
+                    args.task_class,
+                    host_observation,
+                    repo_root=installed_root,
+                    manifest_path=manifest_path,
+                    role_root=role_root,
+                    linked_authority=authority,
+                )
+        decision = description
+        if args.ordinary_native_action == "resolve":
+            if args.caller_rationale is None or args.approved_scope_json is None:
+                parser.error(
+                    "ordinary native resolve requires caller rationale and approved scope JSON"
+                )
+            try:
+                approved_scope = json.loads(args.approved_scope_json)
+            except json.JSONDecodeError:
+                parser.error("approved scope JSON is invalid")
+            decision = resolve_ordinary_native_dispatch(
+                description,
+                requested_model=args.requested_model,
+                requested_effort=args.requested_effort,
+                caller_rationale=args.caller_rationale,
+                approved_execution_scope=approved_scope,
+                user_approved_max=args.user_approved_max,
+            )
+        json.dump(decision, sys.stdout, sort_keys=True, separators=(",", ":"))
+        sys.stdout.write("\n")
+        return 0
     if args.resolve_role_dispatch:
         if (
             args.provider != "codex"

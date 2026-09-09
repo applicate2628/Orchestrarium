@@ -257,16 +257,51 @@ ACCEPTED_LEGACY_PROVIDER_PROMPT_SHA256 = frozenset(
     (E7_LEGACY_PROVIDER_PROMPT_SHA256, PRE_E7_LEGACY_PROVIDER_PROMPT_SHA256)
 )
 E7_CANONICAL_SKILL_TREE_SHA256 = {
+    "accessibility-reviewer": "bef5e73f3e5f4b8263d07c877a7c940a169fe895d5e84bddbed2b148f6fac3a8",
+    "algorithm-scientist": "359a20634fe1b18f051531278e27dcb1b9c05b761dba96d0e52bf32772f54e22",
+    "analyst": "d66d3d8c1ddb2eb81bfd3cb4b35c0466779effb6a87fe6043f7417dbd8e4c8cf",
+    "analyzing-video-bugs": "d9d0ab65e70080f6bc39bd4e20fca007504425fdc02a874ef1415684ced79ca0",
+    "architect": "51612976f7fde46e3046222d607435b2fba5ef27ede636a06a80cb86c6fc7f5e",
+    "architecture-reviewer": "19b179fe14a2bb6135e46dd7435265e7483d0bf6d5ec97b55520e39f3cbb1b4d",
+    "backend-engineer": "e62cdd9fba1248d420670c513e9131aa525d517f74c89f7a5b9fc46078db2181",
+    "bug-hunting": "c61c14574c6252375c2565d97905f36350c6c7e42d34506f5d27463dfa73e8d8",
+    "computational-scientist": "c8d1d1623e48993ad8168d68aaa071e164ad5f2b14d39ae43fded6dfa5b794cf",
     "consultant": "2b8294473d5402361082876b569f38b6307f56aa8170e92539bd95bb3c26a6b6",
+    "data-engineer": "57b9821d3a53d0759baee45a7a3fa5edea7d2963fdda35b552e8a63b70792531",
     "design-panel": "fb9d97b09517ec38e4560e1b597794024e2e2d27184c25cfa79af0de8616973f",
+    "explain-simply": "fac8324b1107c8cc292d39bdeec91a1e50f3e27b75b08dcd1d4a13c5654c5384",
     "external-brigade": "abe6def46092b9caf7e081829b0832960831d940d8b062757cc020f4842bec8c",
     "external-reviewer": "9153bde23c68612926c560a1d43673ed51923d017e31618a02363ddbe6faf750",
     "external-worker": "3a457ffd5b9f55b786c3f18b6003073f64dda089f9c00e35302f6b6140e7c512",
+    "frontend-engineer": "b54a33be9cff7c08e296f76eda5aaf4a307a5e75f1d22c6f8305a479669a379d",
+    "geometry-engineer": "84a9d0a7047672e0cbbea2188c7b7ed5b2145ca045eef79a520a6093a5654a21",
+    "graphics-engineer": "e4b1294c4f2de8e31f0083500c7a7335a2abece08f801bb4e60e715eed3e081d",
     "init-project": "378850fefc2c8b9b352988a34290e515f958b8ea2622c183a5ca5d9b636562fe",
+    "knowledge-archivist": "112f1c024e39ca4a7833647aded8a93dbe8c16e94cd384b437c40c636af15eb4",
     "lead": "9bebb43f56bcb0ecb8b8ff8219d227a66b50af026a8c1b900374498c9c494117",
+    "mathtype-book-page": "2673b2e3132971af915a0302a2939df9f0f89e0b4d9e987616127452584ce862",
+    "model-view-engineer": "94fd65fd9fd36911ae3e37b589849ec4ce93ff0ad38571a1c0f964b965abddae",
+    "performance-engineer": "7f4c7d373a272bc3a4991f6fa770fa27477cb43f2ea68223d2880a34fb6c4290",
+    "performance-reviewer": "5d0d24b1067767959f10c57dd6e17554447f1d5e437b2f2968114149c1f60164",
+    "planner": "72df3a85d5fea94f54968dd594294a3d8fad67349f33fa63ff880687b93cf314",
+    "platform-engineer": "09cb9e683bd8316a5219bb167dc45cd4609cbea84fb1440d92d9b31f922b0140",
+    "product-analyst": "74051651c7f100527f405306d3a8fd82e81eca9ffe0f0edee9dde530c73893e9",
+    "product-manager": "e8f61582ec285db969191a47f498bcc3fdf2ba2c092994e07debc964674530e7",
     "qa-engineer": "c32b6e90e9ba229d13df62f3d3fd0d049ff503773d42c0a04f96ff1d574d7289",
+    "qt-ui-engineer": "0b68ec493fd04370ac1b31d66b38c61a316aea261a23339c57aad8e27290b689",
+    "reliability-engineer": "4f0b905495492c57226d9109f02016a4bcec80f723d54da1f62f12d5dc2235ea",
+    "review-changes": "16047092a3e29a47c5f261f3920fe653b03678e76ffc2a14835a2ce69010de71",
     "review-loop": "d5a5190926d170a6498399e221028e11087974aef7fb7e49abb1d2052acac089",
     "second-opinion": "d3f1e93ddb6641b21e05c13e28e1f291137e608922c00c00a59fa28ccad54741",
+    "security-engineer": "2ffbb3f112e3d3cd05c8ae547eb6a9c3bfe642129cad60f086479c11a7b8fc07",
+    "security-reviewer": "5ab908e960e9f25d8acb56f995160ac114dfcaa9bb01d1726f7ba446e8b394f5",
+    "toolchain-engineer": "51cf24ae0699a6bb379ee6bbf7b51e2a982cba12aaeab2dc76e57d4b4ccf2a74",
+    "ui-test-engineer": "15f27958e69176649338bd3df92e711ed3ffbdb22be95711ee3cd517ec5525fb",
+    "ux-designer": "4dd1ea16f1d4ab9681ead98de4a36251aff577636f50b75b283b7ecec723c65c",
+    "ux-reviewer": "e5ab300a8d1344a2556b74ec2f65d60e0551d5d5e4275912109d77aaa70f2088",
+    "vak-dissertation-review": "8423dc31e6b356aa37d786dcb1de62653d6c97a696cffe254eb14f67c82a23e2",
+    "visualization-engineer": "56218f313e0ee24fc973eae8792bac0cddfd17ccab390fffb028d787cd0286f0",
+    "windows-gui-manual-testing": "80f895204f0a0f390fab8261806f63bc85d0f09a9f6f7b4fe09f8ad2151d3bd9",
 }
 STOCK_8521_CANONICAL_SKILL_TREE_SHA256 = {
     "consultant": "57da94b645283cc695ff8f82a108a6f490f0036a564be76c22f663ba6afa3a38",
@@ -2901,7 +2936,7 @@ _READ_ONLY_ROLES = frozenset({
     "algorithm-scientist", "computational-scientist", "security-engineer",
     "security-reviewer", "qa-engineer", "mechanical-scout",
 })
-_BOUNDED_WRITE_ROLES = frozenset({"default", "worker", "backend-engineer", "platform-engineer", "knowledge-archivist", "mechanical-worker"})
+_BOUNDED_WRITE_ROLES = frozenset({"default", "worker", "backend-engineer", "platform-engineer", "knowledge-archivist", "mechanical-worker", "scientific-software-engineer"})
 _STOCK_NATIVE_ROLE_MIGRATION_SHA256 = {
     "worker": frozenset({
         "2d950ebfa4e9cc7293ee32cbc71ad3910fa6938a80a339bbbc3434ecc6c4d860",

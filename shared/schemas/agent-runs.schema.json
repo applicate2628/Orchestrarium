@@ -105,6 +105,8 @@
     },
     "invalidatesRunId": { "type": "string", "minLength": 8 },
     "invalidatesEventSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "invalidationMode": { "enum": ["invalid-current-nonauthorizing"] },
+    "invalidatesRawLineOrdinal": { "type": "integer", "minimum": 1 },
     "migrationAction": { "enum": ["apply", "revoke"] },
     "normalizationKind": { "enum": ["invalid-finding-class", "remove-string-scratch-evidence"] },
     "migratesRunId": { "type": "string", "minLength": 8 },
@@ -239,8 +241,6 @@
           { "required": ["recordedAt"] },
           { "required": ["eventType"] },
           { "required": ["payload"] }
-          ,{ "required": ["invalidatesRunId"] }
-          ,{ "required": ["invalidatesEventSha256"] }
         ]
       }
     },
@@ -266,16 +266,32 @@
     {
       "if": { "properties": { "eventKind": { "const": "closure-invalidation" } }, "required": ["eventKind"] },
       "then": {
-        "required": ["invalidatesRunId", "invalidatesEventSha256", "evidence"],
-        "properties": {
-          "schemaVersion": { "const": 2 }, "role": { "const": "lead" },
-          "executionRole": { "const": "main" }, "status": { "const": "completed" },
-          "gate": { "const": "none" },
-          "scope": { "const": ["ledger-recovery:closure-invalidation"] }
-        },
-        "not": { "anyOf": [ { "required": ["launchRunId"] }, { "required": ["closesRunIds"] }, { "required": ["artifact"] }, { "required": ["scratchEvidence"] } ] }
+        "oneOf": [
+          {
+            "required": ["invalidatesRunId", "invalidatesEventSha256", "evidence"],
+            "properties": {
+              "schemaVersion": { "const": 2 }, "role": { "const": "lead" },
+              "executionRole": { "const": "main" }, "status": { "const": "completed" },
+              "gate": { "const": "none" },
+              "scope": { "const": ["ledger-recovery:closure-invalidation"] }
+            },
+            "not": { "anyOf": [ { "required": ["invalidationMode"] }, { "required": ["invalidatesRawLineOrdinal"] }, { "required": ["authorizing"] }, { "required": ["launchRunId"] }, { "required": ["closesRunIds"] }, { "required": ["artifact"] }, { "required": ["scratchEvidence"] } ] }
+          },
+          {
+            "required": ["invalidationMode", "invalidatesRawLineOrdinal", "invalidatesRunId", "invalidatesEventSha256", "authorizing", "evidence"],
+            "properties": {
+              "schemaVersion": { "const": 2 }, "role": { "const": "lead" },
+              "executionRole": { "const": "main" }, "status": { "const": "completed" },
+              "gate": { "const": "none" },
+              "scope": { "const": ["ledger-recovery:invalid-current-nonauthorizing"] },
+              "invalidationMode": { "const": "invalid-current-nonauthorizing" },
+              "authorizing": { "const": false }
+            },
+            "not": { "anyOf": [ { "required": ["launchRunId"] }, { "required": ["closesRunIds"] }, { "required": ["artifact"] }, { "required": ["artifactRevision"] }, { "required": ["scratchEvidence"] }, { "required": ["terminalClass"] }, { "required": ["actualExecutionPath"] }, { "required": ["closerRunId"] }, { "required": ["targetTuple"] }, { "required": ["migrationAction"] }, { "required": ["normalizationKind"] }, { "required": ["migratesRunId"] }, { "required": ["migratesEventSha256"] }, { "required": ["revokesMigrationRunId"] }, { "required": ["revokesMigrationEventSha256"] }, { "required": ["replacementEvent"] } ] }
+          }
+        ]
       },
-      "else": { "not": { "anyOf": [ { "required": ["invalidatesRunId"] }, { "required": ["invalidatesEventSha256"] } ] } }
+      "else": { "not": { "anyOf": [ { "required": ["invalidatesRunId"] }, { "required": ["invalidatesEventSha256"] }, { "required": ["invalidationMode"] }, { "required": ["invalidatesRawLineOrdinal"] } ] } }
     },
     {
       "if": { "properties": { "eventKind": { "const": "legacy-obligation-migration" } }, "required": ["eventKind"] },

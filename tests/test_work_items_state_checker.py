@@ -85,7 +85,7 @@ def test_false_event_validity_cannot_settle_revise_or_register_terminal():
     assert [event["runId"] for event in open_launches] == ["launch-001"]
 
 
-def test_invalid_launch_target_cannot_be_settled_by_a_valid_terminal():
+def test_invalid_launch_does_not_enter_authority_reduction():
     validator = load_validator_module()
     launch = {"schemaVersion": 2, "runId": "launch-001", "eventKind": "launch"}
     terminal = {
@@ -98,7 +98,7 @@ def test_invalid_launch_target_cannot_be_settled_by_a_valid_terminal():
         [launch, terminal], errors, event_validity=[False, True]
     )
 
-    assert [event["runId"] for event in open_launches] == ["launch-001"]
+    assert open_launches == []
 
 
 def valid_status() -> str:

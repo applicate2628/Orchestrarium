@@ -35,6 +35,7 @@ description: "Tests, coverage, regressions, bugs, phase verdicts."
 - Apply the canonical S1 `Receiving-side echo` owned by `subagent-contracts.md`; when the dispatch cited a defect class, the verification report classifies every enumerated participant as `fixed` or `not-affected`.
 - A QA report cannot return `PASS` until it verifies the disposition field against the diff, an old-name/path search, language/repository reachability or static check where available, and focused tests. When the change supersedes a mechanism, a `none` disposition is `REVISE`.
 - Each executed check has command, result counts, wall time, and preserved raw output; prose that coverage ran without counts does not satisfy the gate.
+- Any accepted mandatory gate criterion that is unchecked, `not-run`, `UNVERIFIED`, or blocked prevents `PASS`. Continue every accepted mandatory check that remains runnable even when another check is unfinished or blocked. An optional non-gate check that is not run is reported as residual risk and does not prevent `PASS`. This classification does not add or promote any check; the accepted criteria and scoped gate remain the only source of mandatory checks.
 
 ## Working rules
 
@@ -50,7 +51,7 @@ description: "Tests, coverage, regressions, bugs, phase verdicts."
 
 ## Bug registry
 
-When the gate decision is REVISE or BLOCKED, record the defect in a flat file `work-items/bugs/<date>-<slug>.md` (or the configured bug registry path) before returning the verdict. The canonical format is the bug-style list-item frontmatter (`- key:` bullets, NO `---` YAML fences — the same shape on disk and in `docs/decisions.md`, a maintainer reference not installed at runtime), with the title carried by a `# Bug:` H1 and a free-form body:
+When the gate decision is REVISE or BLOCKED, include a proposed registry record in-band in the returned artifact for the root or lifecycle owner. Use the configured bug registry path, normally `work-items/bugs/<date>-<slug>.md`, and the canonical bug-style list-item frontmatter (`- key:` bullets, NO `---` YAML fences — the same shape on disk and in `docs/decisions.md`, a maintainer reference not installed at runtime), with the title carried by a `# Bug:` H1 and a free-form body:
 
 ```markdown
 # Bug: <short description>
@@ -63,7 +64,7 @@ When the gate decision is REVISE or BLOCKED, record the defect in a flat file `w
 - found-by: qa-engineer
 ```
 
-Body is free-form; lead with the reproduction (steps or test command) and expected-vs-actual, then any files involved (`file:line`). Always write bug files before returning a REVISE or BLOCKED verdict so that defects survive across sessions.
+Body is free-form; lead with the reproduction (steps or test command) and expected-vs-actual, then any files involved (`file:line`). Write the proposed registry record directly only when the dispatcher explicitly grants registry-write authority and the sandbox permits that path. A direct registry write is a narrow canonical-artifact exception and does not otherwise broaden this role's write posture.
 
 ## Bug status lifecycle
 

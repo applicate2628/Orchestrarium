@@ -37,6 +37,7 @@ When the main conversation (holding the Lead role) needs to decide between roles
 - Record the interruption in `status.md`, keep the stage open, and either re-dispatch the same role with a narrower slice or route to the proper factual role.
 - The lead must not synthesize the missing artifact or replace missing factual work inline.
 - On resume after interruption, restore only lead-owned task-memory state from persisted accepted artifacts. Do not reconstruct missing specialist artifacts or factual findings from chat memory.
+- The shared `$repo-cleanup` host-policy-denial exception may advance an independently verified delivery, handoff, commit, or transfer only for freshly proven harmless empty agent-owned directory residue, with every receiving gate passing and no dependency on that directory. Cleanup remains incomplete with failing zero-residue predicates, and the handoff reports the residue and resume condition; this never waives another blocker.
 
 ## Primary-task lock
 

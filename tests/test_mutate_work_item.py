@@ -6191,6 +6191,21 @@ def _legacy_h1_decision_record(
     return f"# Legacy H1 decision\n\n{prefix}\n\n{body}"
 
 
+def _legacy_h1_list_decision_record(
+    slug: str,
+    *,
+    status: str = "accepted",
+    extra_fields: tuple[tuple[str, str], ...] = (
+        ("work-item", "legacy-work-item"),
+        ("owner", "architecture-reviewer"),
+    ),
+    body: str = "Legacy H1 list-metadata decision body.\n",
+) -> str:
+    fields = (("id", slug), ("status", status), *extra_fields)
+    prefix = "\n".join(f"- {key}: {value}" for key, value in fields)
+    return f"# Decision: Legacy list metadata\n\n{prefix}\n\n{body}"
+
+
 def _accepted_h1_policy_record(
     slug: str,
     baseline_sha256: str,
@@ -6708,6 +6723,107 @@ def test_decision_h1_parser_accepts_closed_modes_and_opaque_body(tmp_path: Path)
             h1_cutover_date="2026-08-18",
         )
     assert caught.exception.failure_id == "WI-DECISION-H1-CUTOVER-VIOLATION"
+
+
+def test_decision_h1_manifest_admits_exact_heading_list_metadata(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "2026-07-18-external-owned-vcpkg-roots"
+    decision = root / "work-items" / "decisions" / f"{slug}.md"
+    body = "## Decision\n\nHistorical decision text remains opaque.\n"
+    write(decision, _legacy_h1_list_decision_record(slug, body=body))
+    decision_before = decision.read_bytes()
+    manifest = _write_decision_h1_manifest(
+        root,
+        [
+            {
+                "path": decision.name,
+                "sha256": hashlib.sha256(decision_before).hexdigest().upper(),
+                "state": "admitted",
+            }
+        ],
+    )
+    manifest_before = manifest.read_bytes()
+
+    assert module.audit_categories(root) == (f"decisions/{slug}.md",)
+    record = module._preflight_current_decision_h1(root)[decision.name]
+
+    assert record.format == "legacy-markdown-h1-v0"
+    assert record.fields["id"] == slug
+    assert record.fields["status"] == "accepted"
+    assert record.raw_status == "accepted"
+    assert record.admitted_current_status == "accepted"
+    assert record.legacy_read_only is True
+    normalized = decision.read_text(encoding="utf-8").encode("utf-8")
+    assert normalized[record.body_offset :].decode("utf-8") == body
+    assert decision.read_bytes() == decision_before
+    assert manifest.read_bytes() == manifest_before
+
+
+def test_decision_h1_list_metadata_requires_manifest_and_exact_identity_fields(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    slug = "2026-07-18-external-owned-vcpkg-roots"
+    canonical = _legacy_h1_list_decision_record(slug)
+
+    unmanifested = tmp_path / "unmanifested"
+    decision = unmanifested / "work-items" / "decisions" / f"{slug}.md"
+    write(decision, canonical)
+    with unittest.TestCase().assertRaises(module.LifecycleError) as caught:
+        module.audit_categories(unmanifested)
+    assert caught.exception.failure_id == "WI-DECISION-H1-MANIFEST-MISSING"
+
+    cases = {
+        "missing-id": (
+            canonical.replace(f"- id: {slug}\n", ""),
+            "WI-DECISION-H1-SCHEMA-INVALID",
+        ),
+        "duplicate-id": (
+            canonical.replace(f"- id: {slug}\n", f"- id: {slug}\n- id: {slug}\n"),
+            "WI-DECISION-H1-FIELD-DUPLICATE",
+        ),
+        "wrong-id": (
+            canonical.replace(f"- id: {slug}\n", "- id: 2026-07-18-wrong\n"),
+            "WI-DECISION-IDENTITY-MISMATCH",
+        ),
+        "missing-status": (
+            canonical.replace("- status: accepted\n", ""),
+            "WI-DECISION-H1-STATUS-UNSUPPORTED",
+        ),
+        "duplicate-status": (
+            canonical.replace(
+                "- status: accepted\n",
+                "- status: accepted\n- status: accepted\n",
+            ),
+            "WI-DECISION-H1-STATUS-UNSUPPORTED",
+        ),
+    }
+    for name, (payload, failure_id) in cases.items():
+        root = tmp_path / name
+        current = root / "work-items" / "decisions" / f"{slug}.md"
+        write(current, payload)
+        before = current.read_bytes()
+        manifest = _write_decision_h1_manifest(
+            root,
+            [
+                {
+                    "path": current.name,
+                    "sha256": hashlib.sha256(before).hexdigest().upper(),
+                    "state": "admitted",
+                }
+            ],
+        )
+        manifest_before = manifest.read_bytes()
+
+        with unittest.TestCase().assertRaises(module.LifecycleError) as caught:
+            module.audit_categories(root)
+
+        assert caught.exception.failure_id == failure_id, name
+        assert current.read_bytes() == before, name
+        assert manifest.read_bytes() == manifest_before, name
 
 
 def test_decision_h1_parser_rejects_malformed_prefix_without_fallback(tmp_path: Path) -> None:
