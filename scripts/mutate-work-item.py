@@ -811,6 +811,19 @@ BUG_DISPOSITIONS_OWNER = "mutate-work-item:close-item-bug-dispositions-v1"
 SHA256_RE = re.compile(r"[0-9a-f]{64}")
 BUG_DISPOSITION_ACTIONS = {"terminalize", "preserve-current"}
 BUG_DISPOSITION_TEXT_LIMIT = 2048
+BUG_SUPERSESSION_OWNER = "mutate-work-item:current-bug-supersession-v1"
+BUG_SUPERSESSION_KIND = "current-bug-supersession-v1"
+BUG_SUCCESSOR_BINDING_FIELDS = {
+    "schemaVersion",
+    "operationId",
+    "sourceReference",
+    "registryReference",
+    "recordReference",
+    "recordSha256",
+    "acceptedBy",
+    "acceptedAt",
+    "acceptanceEvidence",
+}
 
 
 @dataclass(frozen=True)
@@ -1242,13 +1255,25 @@ def _validate_current_decision_v1(text: str, slug: str) -> CurrentDecisionRecord
         (index for index, line in enumerate(lines) if line.startswith("#")),
         None,
     )
-    if heading_index is None or not (
-        re.match(r"^#\s+\S", lines[heading_index])
-        or lines[heading_index] == "## Decision"
-    ):
+    if heading_index is None:
         raise LifecycleError(
             "WI-DECISION-SCHEMA-INVALID",
-            f"decision:{slug} requires leading list metadata before its first body heading",
+            f"decision:{slug} has no body heading",
+        )
+    first_heading = lines[heading_index]
+    if not (
+        re.match(r"^#\s+\S", first_heading)
+        or first_heading == "## Decision"
+    ):
+        bounded_heading = (
+            first_heading
+            if len(first_heading) <= 160
+            else first_heading[:157] + "..."
+        )
+        raise LifecycleError(
+            "WI-DECISION-SCHEMA-INVALID",
+            f"decision:{slug} has unsupported first body heading at line "
+            f"{heading_index + 1}: {bounded_heading!r}",
         )
 
     leading_occurrences: dict[str, tuple[int, str]] = {}
@@ -3453,6 +3478,7 @@ def start_item(root: Path, slug: str, status_data: bytes, *, inject_readme_failu
     if locations != [backlog]:
         failure = "WI-CATEGORY-DUAL-LOCATION" if len(locations) > 1 else "WI-INVALID-TARGET"
         raise LifecycleError(failure, f"start requires exactly one backlog candidate: {slug}")
+    transfer_relation = _validate_started_transfer_relation(backlog.read_bytes(), status_data)
     _preflight_readme(root)
     active_parent = work_items / "active"
     active_parent.mkdir(parents=True, exist_ok=True)
@@ -3465,7 +3491,9 @@ def start_item(root: Path, slug: str, status_data: bytes, *, inject_readme_failu
         _atomic_write(temp / "status.md", status_data)
         if admission_ledger is not None:
             _atomic_write(temp / "agent-runs.jsonl", admission_ledger)
-            errors = _validator_module().validate_work_item(temp)
+            errors = _validator_module().validate_work_item(
+                temp, strict_revise=transfer_relation is None
+            )
             if errors:
                 raise LifecycleError("WI-LEDGER-BOOTSTRAP-INVALID", "; ".join(errors))
         os.replace(temp, target)
@@ -3945,6 +3973,7 @@ def _terminal_bug_bytes(
     terminal_instant: str,
     resolution: str,
     evidence: str,
+    successor: str | None = None,
 ) -> bytes:
     try:
         text = before.decode("utf-8")
@@ -3957,7 +3986,10 @@ def _terminal_bug_bytes(
         raise _bug_disposition_fail(
             "WI-BUG-DISPOSITIONS-DRIFT", "bug status changed after preflight"
         )
-    if any(fields.get(key) for key in ("terminal-at", "resolution", "evidence")):
+    if any(
+        fields.get(key)
+        for key in ("terminal-at", "resolution", "evidence", "successor")
+    ):
         raise _bug_disposition_fail(
             "WI-BUG-DISPOSITIONS-INVALID",
             "current bug already carries terminal evidence",
@@ -3981,6 +4013,7 @@ def _terminal_bug_bytes(
         + f"Terminal-at: {terminal_instant}{newline}"
         + f"Resolution: {resolution}{newline}"
         + f"Evidence: {evidence}{newline}"
+        + (f"Successor: {successor}{newline}" if successor is not None else "")
     ).encode("utf-8")
 
 
@@ -4642,6 +4675,18 @@ def audit_categories(root: Path) -> tuple[str, ...]:
 def audit(root: Path) -> tuple[str, ...]:
     _recover_all_transitions(root)
     legacy_read_compatible = audit_categories(root)
+    transfer_errors = _validator_module().validate_obligation_transfer_ownership(
+        Path(root).resolve()
+    )
+    if transfer_errors:
+        failure_id = transfer_errors[0].split(":", 1)[0]
+        if failure_id not in {
+            "WI-OBLIGATION-TRANSFER-COVERAGE",
+            "WI-OBLIGATION-TRANSFER-OWNER",
+            "WI-OBLIGATION-TRANSFER-DRIFT",
+        }:
+            failure_id = "WI-OBLIGATION-TRANSFER-OWNER"
+        raise LifecycleError(failure_id, "; ".join(transfer_errors))
     check_readme(root)
     return legacy_read_compatible
 
@@ -5022,6 +5067,7 @@ def revoke_legacy_ledger_obligation(
 
 
 TRANSITION_OWNER = "mutate-work-item:archive-with-successor-v1"
+TRANSFER_TRANSITION_OWNER = "mutate-work-item:archive-with-successor-v2"
 TRANSITION_INTENT_FIELDS = {
     "schemaVersion", "owner", "status", "operationId", "slug", "terminalInstant",
     "activePath", "archivePath", "successorPath", "expectedLedgerSha256",
@@ -5030,6 +5076,237 @@ TRANSITION_INTENT_FIELDS = {
     "closureInputSha256", "successorSlug", "finalReadmeSha256",
     "bugReceiptBefore", "bugReceiptAfter",
 }
+TRANSFER_TRANSITION_INTENT_FIELDS = TRANSITION_INTENT_FIELDS | {
+    "transferInputSha256", "archiveIdentity", "predecessorOperationId", "obligations",
+}
+BUG_SUPERSESSION_INTENT_FIELDS = {
+    "schemaVersion", "owner", "kind", "status", "operationId", "terminalInstant",
+    "sourcePath", "archivePath", "receiptPath", "expectedReadmeSha256",
+    "finalReadmeSha256", "sourceBefore", "sourceAfter", "receiptBefore",
+    "receiptAfter", "successorBindingSha256", "successorRegistryReference",
+    "successorRecordReference", "successorRecordSha256", "acceptedBy", "acceptedAt",
+    "acceptanceEvidence", "incomingLinksInventorySha256", "links",
+}
+BUG_SUPERSESSION_LINK_INTENT_FIELDS = {
+    "path", "before", "after", "beforeSha256", "afterSha256",
+}
+BUG_SUPERSESSION_RECEIPT_FIELDS = {
+    "schemaVersion", "owner", "kind", "status", "operationId", "terminalInstant",
+    "sourceReference", "sourcePath", "archivePath", "archivedBugSha256",
+    "successorBindingSha256", "successorRegistryReference", "successorRecordReference",
+    "successorRecordSha256", "acceptedBy", "acceptedAt", "acceptanceEvidence",
+    "incomingLinksInventorySha256", "links", "readmeSha256",
+    "requestExpectedBugSha256", "requestExpectedReadmeSha256",
+}
+BUG_SUPERSESSION_INVENTORY_FIELDS = {
+    "schemaVersion", "owner", "operationId", "sourceReference", "sourceBugSha256",
+    "successorBindingSha256", "links",
+}
+BUG_SUPERSESSION_INVENTORY_LINK_FIELDS = {
+    "path", "beforeSha256", "afterSha256", "afterBytesBase64",
+}
+
+
+def _validate_successor_transfer_fields(
+    successor_data: bytes, source_slug: str, operation_id: str
+) -> None:
+    try:
+        text = successor_data.decode("utf-8", errors="strict")
+    except UnicodeDecodeError as exc:
+        raise LifecycleError(
+            "WI-OBLIGATION-TRANSFER-COVERAGE", "successor transfer fields require UTF-8"
+        ) from exc
+    occurrences = _authoritative_field_occurrences(text)
+    expected = {"continues": source_slug, "obligation-transfer": operation_id}
+    for field, value in expected.items():
+        matches = [observed for _line, name, observed, _raw in occurrences if name == field]
+        if matches != [value]:
+            raise LifecycleError(
+                "WI-OBLIGATION-TRANSFER-COVERAGE",
+                f"successor requires exactly one {field} field bound to {value}",
+            )
+
+
+def _transfer_relation_fields(data: bytes, *, required: bool) -> tuple[str, str] | None:
+    try:
+        text = data.decode("utf-8", errors="strict")
+    except UnicodeDecodeError as exc:
+        raise LifecycleError(
+            "WI-OBLIGATION-TRANSFER-OWNER", "transfer relation fields require UTF-8"
+        ) from exc
+    occurrences = _authoritative_field_occurrences(text)
+    values = {
+        name: [value for _line, observed, value, _raw in occurrences if observed == name]
+        for name in ("continues", "obligation-transfer")
+    }
+    if not any(values.values()) and not required:
+        return None
+    if any(len(values[name]) != 1 or not values[name][0] for name in values):
+        raise LifecycleError(
+            "WI-OBLIGATION-TRANSFER-OWNER",
+            "transfer owner requires exactly one Continues and Obligation-transfer field",
+        )
+    return values["continues"][0], values["obligation-transfer"][0]
+
+
+def _validate_started_transfer_relation(
+    backlog_data: bytes, status_data: bytes
+) -> tuple[str, str] | None:
+    backlog_relation = _transfer_relation_fields(backlog_data, required=False)
+    status_relation = _transfer_relation_fields(status_data, required=False)
+    if backlog_relation != status_relation:
+        raise LifecycleError(
+            "WI-OBLIGATION-TRANSFER-OWNER",
+            "active status must preserve the backlog transfer owner fields exactly",
+        )
+    return backlog_relation
+
+
+def _inspect_transfer_obligations(root: Path, item: Path) -> tuple[object, ...]:
+    validator = _validator_module()
+    status_text = (item / "status.md").read_text(encoding="utf-8")
+    v1_staged = _parse_fields(status_text).get("template") == "staged"
+    states: list[object] = []
+    errors = validator.validate_work_item(
+        item,
+        strict_revise=False,
+        validate_status_file=not v1_staged,
+        obligation_state_out=states,
+    )
+    if v1_staged:
+        _validate_active_status_bytes(status_text.encode("utf-8"))
+    if errors:
+        raise LifecycleError("WI-LEDGER-UNSETTLED", "; ".join(errors))
+    if len(states) != 1:
+        raise LifecycleError(
+            "WI-OBLIGATION-TRANSFER-COVERAGE", "validator did not return one obligation state"
+        )
+    state = states[0]
+    if state.open_launches:
+        raise LifecycleError(
+            "WI-OBLIGATION-TRANSFER-COVERAGE", "running launches cannot be transferred"
+        )
+    return state.open_revise
+
+
+def _prepare_obligation_transfer(
+    root: Path,
+    active: Path,
+    archive: Path,
+    slug: str,
+    successor_slug: str,
+    successor_data: bytes,
+    operation_id: str,
+    expected_ledger_sha256: str,
+    transfer_data: bytes,
+) -> tuple[dict, list[dict], str, Path | None]:
+    validator = _validator_module()
+    try:
+        payload = validator.decode_json_object(
+            transfer_data,
+            source="obligation transfer input",
+            maximum_bytes=max(1, len(transfer_data)),
+        )
+    except ValueError as exc:
+        raise LifecycleError("WI-OBLIGATION-TRANSFER-COVERAGE", str(exc)) from exc
+    required = {
+        "schemaVersion", "sourceWorkItem", "successorWorkItem",
+        "expectedSourceLedgerSha256", "obligations",
+    }
+    if (
+        set(payload) != required
+        or payload.get("schemaVersion") != 1
+        or payload.get("sourceWorkItem") != slug
+        or payload.get("successorWorkItem") != successor_slug
+        or payload.get("expectedSourceLedgerSha256") != expected_ledger_sha256
+        or not isinstance(payload.get("obligations"), list)
+    ):
+        raise LifecycleError(
+            "WI-OBLIGATION-TRANSFER-COVERAGE", "obligation transfer input shape or owner binding differs"
+        )
+    _validate_successor_transfer_fields(successor_data, slug, operation_id)
+    open_rows = _inspect_transfer_obligations(root, active)
+    row_fields = {
+        "runId", "rawLineOrdinal", "rawLineSha256", "rawEventSha256",
+        "projectedEventSha256",
+    }
+    declared: dict[tuple[str, int, str, str, str], dict] = {}
+    declared_run_ids: set[str] = set()
+    for row in payload["obligations"]:
+        if not isinstance(row, dict) or set(row) != row_fields:
+            raise LifecycleError(
+                "WI-OBLIGATION-TRANSFER-COVERAGE", "obligation row shape differs"
+            )
+        identity = (
+            row.get("runId"), row.get("rawLineOrdinal"), row.get("rawLineSha256"),
+            row.get("rawEventSha256"), row.get("projectedEventSha256"),
+        )
+        if (
+            not isinstance(identity[0], str)
+            or type(identity[1]) is not int
+            or identity[1] < 1
+            or any(not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None for value in identity[2:])
+            or identity in declared
+            or identity[0] in declared_run_ids
+        ):
+            raise LifecycleError(
+                "WI-OBLIGATION-TRANSFER-COVERAGE", "duplicate or invalid obligation identity"
+            )
+        declared[identity] = row
+        declared_run_ids.add(identity[0])
+    observed = {
+        (
+            row.run_id, row.raw_line_ordinal, row.raw_line_sha256,
+            row.raw_event_sha256, row.projected_event_sha256,
+        ): row
+        for row in open_rows
+    }
+    declared_positions = {(identity[0], identity[1]) for identity in declared}
+    observed_positions = {(identity[0], identity[1]) for identity in observed}
+    if declared_positions != observed_positions or len(observed) != len(open_rows):
+        raise LifecycleError(
+            "WI-OBLIGATION-TRANSFER-COVERAGE", "declared obligations do not exactly cover open REVISE rows"
+        )
+    if set(declared) != set(observed):
+        raise LifecycleError(
+            "WI-OBLIGATION-TRANSFER-DRIFT", "declared obligation evidence bindings differ"
+        )
+    archive_relative = archive.relative_to(Path(root).resolve()).as_posix()
+    archive_identity = validator.archived_ledger_identity(
+        archive_relative, expected_ledger_sha256
+    )
+    obligations = []
+    for identity in sorted(observed, key=lambda value: (value[1], value[0].encode("utf-8"))):
+        row = observed[identity]
+        obligations.append({
+            **declared[identity],
+            "obligationId": (
+                row.obligation_id
+                if row.obligation_id is not None
+                else validator.obligation_transfer_id(
+                    archive_identity,
+                    row.raw_line_ordinal,
+                    row.raw_line_sha256,
+                    row.raw_event_sha256,
+                    row.run_id,
+                )
+            ),
+            "predecessorOperationId": row.predecessor_operation_id,
+        })
+    migration_receipts = sorted((active / "ledger-migration-receipts").glob("*.json"))
+    migration_required = any(row.source_kind == "migration-replaced" for row in open_rows)
+    expected_count = 1 if migration_required else 0
+    if len(migration_receipts) != expected_count:
+        raise LifecycleError(
+            "WI-LEDGER-MIGRATION-RECEIPT-MISMATCH",
+            f"transfer requires {expected_count} matching migration receipt(s)",
+        )
+    migration_receipt = None
+    if migration_receipts:
+        migration_receipt = _require_lifecycle_mutation_path(
+            root, migration_receipts[0], failure_id="WI-LEDGER-MIGRATION-RECEIPT-MISMATCH"
+        )
+    return payload, obligations, archive_identity, migration_receipt
 
 
 def _b64(data: bytes | None) -> str | None:
@@ -5043,6 +5320,609 @@ def _unb64(value: str | None) -> bytes | None:
         return base64.b64decode(value, validate=True)
     except (ValueError, TypeError) as exc:
         raise LifecycleError("WI-LIFECYCLE-TRANSITION-INTENT-INVALID", "invalid intent byte image") from exc
+
+
+def _bug_successor_binding_fail(message: str) -> LifecycleError:
+    return LifecycleError("WI-BUG-SUCCESSOR-BINDING", message)
+
+
+def _bug_successor_json_pairs(pairs: list[tuple[str, object]]) -> dict:
+    value: dict[str, object] = {}
+    for key, item in pairs:
+        if key in value:
+            raise _bug_successor_binding_fail(f"successor binding repeats JSON key: {key}")
+        value[key] = item
+    return value
+
+
+def _bug_successor_single_line(payload: dict, key: str) -> str:
+    value = payload.get(key)
+    if (
+        not isinstance(value, str)
+        or not value.strip()
+        or len(value) > BUG_DISPOSITION_TEXT_LIMIT
+        or "\n" in value
+        or "\r" in value
+    ):
+        raise _bug_successor_binding_fail(
+            f"successor binding {key} must be one non-empty bounded line"
+        )
+    return value
+
+
+def _parse_bug_successor_binding_data(
+    slug: str,
+    binding_data: bytes | None,
+    operation_id: str,
+) -> dict:
+    if binding_data is None:
+        raise _bug_successor_binding_fail("successor binding is required")
+    try:
+        payload = json.loads(
+            binding_data.decode("utf-8"), object_pairs_hook=_bug_successor_json_pairs
+        )
+    except LifecycleError:
+        raise
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise _bug_successor_binding_fail("successor binding is not strict UTF-8 JSON") from exc
+    if (
+        not isinstance(payload, dict)
+        or set(payload) != BUG_SUCCESSOR_BINDING_FIELDS
+        or payload.get("schemaVersion") != 1
+    ):
+        raise _bug_successor_binding_fail("successor binding shape differs")
+    for key in (
+        "operationId",
+        "sourceReference",
+        "registryReference",
+        "recordReference",
+        "recordSha256",
+        "acceptedBy",
+        "acceptedAt",
+        "acceptanceEvidence",
+    ):
+        _bug_successor_single_line(payload, key)
+    if (
+        payload["operationId"] != operation_id
+        or payload["sourceReference"] != f"bug:{slug}"
+        or not SHA256_RE.fullmatch(payload["recordSha256"])
+    ):
+        raise _bug_successor_binding_fail("successor binding identity differs")
+    try:
+        _strict_utc(payload["acceptedAt"])
+    except LifecycleError as exc:
+        raise _bug_successor_binding_fail("successor acceptance time differs") from exc
+    return payload
+
+
+def _parse_bug_successor_binding(
+    slug: str,
+    successor_record: Path,
+    binding_data: bytes | None,
+    operation_id: str,
+) -> tuple[dict, CapturedFileSnapshot]:
+    payload = _parse_bug_successor_binding_data(slug, binding_data, operation_id)
+    try:
+        successor = _capture_file_snapshot(
+            Path(successor_record), failure_id="WI-BUG-SUCCESSOR-BINDING"
+        )
+    except LifecycleError as exc:
+        raise _bug_successor_binding_fail("successor record identity differs") from exc
+    if _sha256_bytes(successor.data) != payload["recordSha256"]:
+        raise _bug_successor_binding_fail("successor record hash differs")
+    return payload, successor
+
+
+def _bug_supersession_inventory_pairs(pairs: list[tuple[str, object]]) -> dict:
+    value: dict[str, object] = {}
+    for key, item in pairs:
+        if key in value:
+            raise LifecycleError(
+                "WI-CATEGORY-MIGRATION-INVENTORY",
+                f"bug successor inventory repeats JSON key: {key}",
+            )
+        value[key] = item
+    return value
+
+
+def _parse_bug_supersession_inventory(data: bytes) -> dict:
+    try:
+        payload = json.loads(
+            data.decode("utf-8"), object_pairs_hook=_bug_supersession_inventory_pairs
+        )
+    except LifecycleError:
+        raise
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise LifecycleError(
+            "WI-CATEGORY-MIGRATION-INVENTORY",
+            "bug successor inventory is not strict UTF-8 JSON",
+        ) from exc
+    if (
+        not isinstance(payload, dict)
+        or set(payload) != BUG_SUPERSESSION_INVENTORY_FIELDS
+        or payload.get("schemaVersion") != 1
+        or payload.get("owner") != BUG_SUPERSESSION_OWNER
+        or not isinstance(payload.get("links"), list)
+    ):
+        raise LifecycleError(
+            "WI-CATEGORY-MIGRATION-INVENTORY",
+            "bug successor inventory shape differs",
+        )
+    paths: list[str] = []
+    for row in payload["links"]:
+        if (
+            not isinstance(row, dict)
+            or set(row) != BUG_SUPERSESSION_INVENTORY_LINK_FIELDS
+            or not isinstance(row.get("path"), str)
+            or not row["path"]
+            or not isinstance(row.get("beforeSha256"), str)
+            or not SHA256_RE.fullmatch(row["beforeSha256"])
+            or not isinstance(row.get("afterSha256"), str)
+            or not SHA256_RE.fullmatch(row["afterSha256"])
+            or not isinstance(row.get("afterBytesBase64"), str)
+        ):
+            raise LifecycleError(
+                "WI-CATEGORY-MIGRATION-INVENTORY",
+                "bug successor inventory link row differs",
+            )
+        paths.append(row["path"])
+    if paths != sorted(paths) or len(paths) != len(set(paths)):
+        raise LifecycleError(
+            "WI-CATEGORY-MIGRATION-INVENTORY",
+            "bug successor inventory paths are not sorted and unique",
+        )
+    return payload
+
+
+def _bug_successor_link_after(
+    consumer: Path,
+    source: Path,
+    before: bytes,
+    source_reference: str,
+    successor_reference: str,
+) -> bytes:
+    try:
+        text = before.decode("utf-8")
+    except UnicodeError as exc:
+        raise LifecycleError(
+            "WI-CATEGORY-MIGRATION-INVENTORY",
+            f"bug successor link consumer is not UTF-8: {consumer}",
+        ) from exc
+    replacements = [
+        (link.href_start, link.href_end)
+        for link in _markdown_local_links(text)
+        if _markdown_href_resolves(consumer.parent, link.href, source)
+    ]
+    for start, end in reversed(replacements):
+        text = text[:start] + successor_reference + text[end:]
+    text = text.replace(source_reference, successor_reference)
+    return text.encode("utf-8")
+
+
+def _prepare_bug_supersession_links(
+    root: Path,
+    source: Path,
+    source_reference: str,
+    successor_reference: str,
+    inventory: dict,
+) -> list[dict]:
+    current = _incoming_link_result(
+        root,
+        {source},
+        source_reference,
+        mutable_consumers_only=True,
+        strict_consumer_reads=True,
+    )
+    repository = _work_items_root(root).parent
+    expected_paths = sorted(
+        {
+            (repository / "work-items" / row["consumer"]).relative_to(repository).as_posix()
+            for row in current["references"]
+        }
+    )
+    supplied_paths = [row["path"] for row in inventory["links"]]
+    if supplied_paths != expected_paths:
+        raise LifecycleError(
+            "WI-CATEGORY-MIGRATION-INVENTORY",
+            "bug successor inventory does not exactly cover live incoming links",
+        )
+    plans: list[dict] = []
+    for row in inventory["links"]:
+        path = _intent_path(root, row["path"])
+        try:
+            snapshot = _capture_file_snapshot(
+                path, failure_id="WI-CATEGORY-MIGRATION-INVENTORY"
+            )
+            after = base64.b64decode(row["afterBytesBase64"], validate=True)
+        except (LifecycleError, ValueError, TypeError) as exc:
+            raise LifecycleError(
+                "WI-CATEGORY-MIGRATION-INVENTORY",
+                f"bug successor link image cannot be captured: {row['path']}",
+            ) from exc
+        expected_after = _bug_successor_link_after(
+            path, source, snapshot.data, source_reference, successor_reference
+        )
+        if (
+            _sha256_bytes(snapshot.data) != row["beforeSha256"]
+            or _sha256_bytes(after) != row["afterSha256"]
+            or after != expected_after
+            or after == snapshot.data
+        ):
+            raise LifecycleError(
+                "WI-CATEGORY-MIGRATION-INVENTORY",
+                f"bug successor link image differs: {row['path']}",
+            )
+        plans.append(
+            {
+                "path": path,
+                "pathRelative": row["path"],
+                "before": snapshot.data,
+                "after": after,
+                "beforeSha256": row["beforeSha256"],
+                "afterSha256": row["afterSha256"],
+            }
+        )
+    return plans
+
+
+def _precompute_bug_supersession_readme_sha256(
+    root: Path,
+    source: Path,
+    archive: Path,
+    source_after: bytes,
+    links: list[dict],
+) -> str:
+    work_items = _work_items_root(root)
+    repository = work_items.parent
+    static_guide = _static_guide(work_items / "README.md")
+    with tempfile.TemporaryDirectory(prefix="bug-supersession-readme-") as directory:
+        shadow_root = Path(directory)
+        shadow_work_items = shadow_root / "work-items"
+        shutil.copytree(work_items, shadow_work_items, symlinks=True)
+
+        def shadow(path: Path) -> Path:
+            return shadow_root / path.relative_to(repository)
+
+        for plan in links:
+            _atomic_write(shadow(plan["path"]), plan["after"])
+        shadow_source = shadow(source)
+        shadow_archive = shadow(archive)
+        _atomic_write(shadow_source, source_after)
+        shadow_archive.parent.mkdir(parents=True, exist_ok=True)
+        os.replace(shadow_source, shadow_archive)
+        transaction_token = _CURRENT_LIFECYCLE_TRANSACTION.set(None)
+        composer_token = _CURRENT_LIFECYCLE_OUTCOME_COMPOSER.set(None)
+        try:
+            rendered = render_readme_bytes(
+                shadow_root, static_guide_override=static_guide
+            )
+        finally:
+            _CURRENT_LIFECYCLE_OUTCOME_COMPOSER.reset(composer_token)
+            _CURRENT_LIFECYCLE_TRANSACTION.reset(transaction_token)
+        return _sha256_bytes(rendered)
+
+
+def _bug_supersession_receipt_payload(
+    *,
+    operation_id: str,
+    terminal_instant: str,
+    source_reference: str,
+    source_path: str,
+    archive_path: str,
+    archived_bug_sha256: str,
+    binding_data: bytes,
+    binding: dict,
+    inventory_data: bytes,
+    links: list[dict],
+    readme_sha256: str,
+    expected_bug_sha256: str,
+    expected_readme_sha256: str,
+) -> dict:
+    return {
+        "schemaVersion": 1,
+        "owner": BUG_SUPERSESSION_OWNER,
+        "kind": BUG_SUPERSESSION_KIND,
+        "status": "settled",
+        "operationId": operation_id,
+        "terminalInstant": terminal_instant,
+        "sourceReference": source_reference,
+        "sourcePath": source_path,
+        "archivePath": archive_path,
+        "archivedBugSha256": archived_bug_sha256,
+        "successorBindingSha256": _sha256_bytes(binding_data),
+        "successorRegistryReference": binding["registryReference"],
+        "successorRecordReference": binding["recordReference"],
+        "successorRecordSha256": binding["recordSha256"],
+        "acceptedBy": binding["acceptedBy"],
+        "acceptedAt": binding["acceptedAt"],
+        "acceptanceEvidence": binding["acceptanceEvidence"],
+        "incomingLinksInventorySha256": _sha256_bytes(inventory_data),
+        "links": [
+            {
+                "path": row["pathRelative"] if "pathRelative" in row else row["path"],
+                "beforeSha256": row["beforeSha256"],
+                "afterSha256": row["afterSha256"],
+            }
+            for row in links
+        ],
+        "readmeSha256": readme_sha256,
+        "requestExpectedBugSha256": expected_bug_sha256,
+        "requestExpectedReadmeSha256": expected_readme_sha256,
+    }
+
+
+def _bug_supersession_replay(
+    root: Path,
+    slug: str,
+    receipt_path: Path,
+    successor_binding_data: bytes | None,
+    incoming_links_inventory_data: bytes,
+    terminal_instant: str,
+    expected_bug_sha256: str,
+    expected_readme_sha256: str,
+    operation_id: str,
+) -> dict:
+    try:
+        binding = _parse_bug_successor_binding_data(
+            slug, successor_binding_data, operation_id
+        )
+        inventory = _parse_bug_supersession_inventory(
+            incoming_links_inventory_data
+        )
+        receipt = _verify_bug_supersession_settlement(root, receipt_path)
+    except LifecycleError as exc:
+        raise LifecycleError(
+            "WI-BUG-SUPERSESSION-SETTLEMENT-MISMATCH",
+            "bug supersession replay evidence differs",
+        ) from exc
+    inventory_links = [
+        {
+            "path": row["path"],
+            "beforeSha256": row["beforeSha256"],
+            "afterSha256": row["afterSha256"],
+        }
+        for row in inventory["links"]
+    ]
+    if (
+        receipt["operationId"] != operation_id
+        or receipt["terminalInstant"] != terminal_instant
+        or receipt["sourceReference"] != f"bug:{slug}"
+        or receipt["successorBindingSha256"]
+        != _sha256_bytes(successor_binding_data or b"")
+        or receipt["successorRegistryReference"] != binding["registryReference"]
+        or receipt["successorRecordReference"] != binding["recordReference"]
+        or receipt["successorRecordSha256"] != binding["recordSha256"]
+        or receipt["acceptedBy"] != binding["acceptedBy"]
+        or receipt["acceptedAt"] != binding["acceptedAt"]
+        or receipt["acceptanceEvidence"] != binding["acceptanceEvidence"]
+        or receipt["incomingLinksInventorySha256"]
+        != _sha256_bytes(incoming_links_inventory_data)
+        or receipt["links"] != inventory_links
+        or receipt["requestExpectedBugSha256"] != expected_bug_sha256
+        or receipt["requestExpectedReadmeSha256"] != expected_readme_sha256
+        or inventory["operationId"] != operation_id
+        or inventory["sourceReference"] != f"bug:{slug}"
+        or inventory["sourceBugSha256"] != expected_bug_sha256
+        or inventory["successorBindingSha256"]
+        != _sha256_bytes(successor_binding_data or b"")
+    ):
+        raise LifecycleError(
+            "WI-BUG-SUPERSESSION-SETTLEMENT-MISMATCH",
+            "bug supersession replay inputs differ",
+        )
+    return receipt
+
+
+def supersede_current_bug(
+    root: Path,
+    slug: str,
+    successor_record: Path,
+    successor_binding_data: bytes | None,
+    terminal_instant: str,
+    incoming_links_inventory_data: bytes,
+    expected_bug_sha256: str,
+    expected_readme_sha256: str,
+    operation_id: str,
+    *,
+    inject_failure_at: str | None = None,
+) -> dict:
+    _validate_slug(slug)
+    month = archive_month(terminal_instant)
+    intent_path = _transition_intent_path(root, operation_id)
+    work_items = _work_items_root(root)
+    repository = work_items.parent
+    source_reference = f"bug:{slug}"
+    source = work_items / "bugs" / f"{slug}.md"
+    archive = work_items / "bugs" / "archive" / month / f"{slug}.md"
+    receipt = archive.with_name(f"{slug}.supersession-receipt.json")
+    _recover_all_transitions(root)
+    if receipt.is_file():
+        return _bug_supersession_replay(
+            root,
+            slug,
+            receipt,
+            successor_binding_data,
+            incoming_links_inventory_data,
+            terminal_instant,
+            expected_bug_sha256,
+            expected_readme_sha256,
+            operation_id,
+        )
+    binding, successor_snapshot = _parse_bug_successor_binding(
+        slug, successor_record, successor_binding_data, operation_id
+    )
+    if (
+        not isinstance(expected_bug_sha256, str)
+        or not SHA256_RE.fullmatch(expected_bug_sha256)
+        or not isinstance(expected_readme_sha256, str)
+        or not SHA256_RE.fullmatch(expected_readme_sha256)
+    ):
+        raise LifecycleError(
+            "WI-BUG-DISPOSITIONS-DRIFT", "bug supersession request hash differs"
+        )
+    locations = _category_locations(root, CATEGORIES["bug"], slug)
+    if locations != [source]:
+        failure_id = "WI-CATEGORY-DUAL-LOCATION" if locations else "WI-REFERENCE-MISSING"
+        raise LifecycleError(failure_id, "bug supersession source is not uniquely current")
+    if archive.exists() or receipt.exists():
+        raise LifecycleError(
+            "WI-CATEGORY-DUAL-LOCATION", "bug supersession archive or receipt already exists"
+        )
+    source_snapshot = _capture_file_snapshot(
+        source, failure_id="WI-BUG-DISPOSITIONS-DRIFT"
+    )
+    if _sha256_bytes(source_snapshot.data) != expected_bug_sha256:
+        raise LifecycleError(
+            "WI-BUG-DISPOSITIONS-DRIFT", "bug supersession source hash differs"
+        )
+    fields = _parse_fields(source_snapshot.data.decode("utf-8"))
+    current_status = fields.get("status", "")
+    if current_status not in CATEGORIES["bug"].current_statuses:
+        raise LifecycleError(
+            "WI-BUG-DISPOSITIONS-DRIFT", "bug supersession source is not current"
+        )
+    readme = work_items / "README.md"
+    readme_snapshot = _capture_file_snapshot(
+        readme, failure_id="WI-README-STALE"
+    )
+    if _sha256_bytes(readme_snapshot.data) != expected_readme_sha256:
+        raise LifecycleError("WI-README-STALE", "bug supersession README hash differs")
+    binding_data = successor_binding_data or b""
+    inventory = _parse_bug_supersession_inventory(incoming_links_inventory_data)
+    if (
+        inventory["operationId"] != operation_id
+        or inventory["sourceReference"] != source_reference
+        or inventory["sourceBugSha256"] != expected_bug_sha256
+        or inventory["successorBindingSha256"] != _sha256_bytes(binding_data)
+    ):
+        raise LifecycleError(
+            "WI-CATEGORY-MIGRATION-INVENTORY",
+            "bug successor inventory binding differs",
+        )
+    successor_reference = (
+        f"{binding['registryReference']}#{binding['recordReference']}"
+    )
+    links = _prepare_bug_supersession_links(
+        root,
+        source,
+        source_reference,
+        successor_reference,
+        inventory,
+    )
+    source_after = _terminal_bug_bytes(
+        source_snapshot.data,
+        current_status=current_status,
+        terminal_status="superseded",
+        terminal_instant=terminal_instant,
+        resolution=f"Superseded by {successor_reference}.",
+        evidence=binding["acceptanceEvidence"],
+        successor=successor_reference,
+    )
+    _validate_flat_terminal(CATEGORIES["bug"], source_after)
+    final_readme_sha256 = _precompute_bug_supersession_readme_sha256(
+        root, source, archive, source_after, links
+    )
+    source_path = source.relative_to(repository).as_posix()
+    archive_path = archive.relative_to(repository).as_posix()
+    receipt_path = receipt.relative_to(repository).as_posix()
+    receipt_payload = _bug_supersession_receipt_payload(
+        operation_id=operation_id,
+        terminal_instant=terminal_instant,
+        source_reference=source_reference,
+        source_path=source_path,
+        archive_path=archive_path,
+        archived_bug_sha256=_sha256_bytes(source_after),
+        binding_data=binding_data,
+        binding=binding,
+        inventory_data=incoming_links_inventory_data,
+        links=links,
+        readme_sha256=final_readme_sha256,
+        expected_bug_sha256=expected_bug_sha256,
+        expected_readme_sha256=expected_readme_sha256,
+    )
+    receipt_after = _migration_receipt_bytes(receipt_payload)
+    intent = {
+        "schemaVersion": 1,
+        "owner": BUG_SUPERSESSION_OWNER,
+        "kind": BUG_SUPERSESSION_KIND,
+        "status": "intent",
+        "operationId": operation_id,
+        "terminalInstant": terminal_instant,
+        "sourcePath": source_path,
+        "archivePath": archive_path,
+        "receiptPath": receipt_path,
+        "expectedReadmeSha256": expected_readme_sha256,
+        "finalReadmeSha256": final_readme_sha256,
+        "sourceBefore": _b64(source_snapshot.data),
+        "sourceAfter": _b64(source_after),
+        "receiptBefore": None,
+        "receiptAfter": _b64(receipt_after),
+        "successorBindingSha256": _sha256_bytes(binding_data),
+        "successorRegistryReference": binding["registryReference"],
+        "successorRecordReference": binding["recordReference"],
+        "successorRecordSha256": binding["recordSha256"],
+        "acceptedBy": binding["acceptedBy"],
+        "acceptedAt": binding["acceptedAt"],
+        "acceptanceEvidence": binding["acceptanceEvidence"],
+        "incomingLinksInventorySha256": _sha256_bytes(
+            incoming_links_inventory_data
+        ),
+        "links": [
+            {
+                "path": row["pathRelative"],
+                "before": _b64(row["before"]),
+                "after": _b64(row["after"]),
+                "beforeSha256": row["beforeSha256"],
+                "afterSha256": row["afterSha256"],
+            }
+            for row in links
+        ],
+    }
+    _verify_captured_file(successor_snapshot, "WI-BUG-SUCCESSOR-BINDING")
+    if source.read_bytes() != source_snapshot.data or readme.read_bytes() != readme_snapshot.data:
+        raise LifecycleError(
+            "WI-BUG-DISPOSITIONS-DRIFT",
+            "bug supersession preimages changed before intent creation",
+        )
+    _atomic_write(intent_path, _migration_receipt_bytes(intent))
+    _transition_fsync_directory(intent_path.parent)
+    if inject_failure_at == "B0":
+        raise LifecycleError(
+            "WI-BUG-SUPERSESSION-ROLLBACK-INDETERMINATE", "injected B0"
+        )
+    for row in links:
+        if row["path"].read_bytes() != row["before"]:
+            raise LifecycleError(
+                "WI-BUG-SUPERSESSION-ROLLBACK-INDETERMINATE",
+                f"bug supersession link drifted: {row['pathRelative']}",
+            )
+        _atomic_write(row["path"], row["after"])
+    if inject_failure_at == "B1":
+        raise LifecycleError(
+            "WI-BUG-SUPERSESSION-ROLLBACK-INDETERMINATE", "injected B1"
+        )
+    if source.read_bytes() != source_snapshot.data:
+        raise LifecycleError(
+            "WI-BUG-SUPERSESSION-ROLLBACK-INDETERMINATE",
+            "bug supersession source drifted before terminalization",
+        )
+    _atomic_write(source, source_after)
+    if inject_failure_at == "B2":
+        raise LifecycleError(
+            "WI-BUG-SUPERSESSION-ROLLBACK-INDETERMINATE", "injected B2"
+        )
+    archive.parent.mkdir(parents=True, exist_ok=True)
+    os.replace(source, archive)
+    if inject_failure_at == "B3":
+        raise LifecycleError(
+            "WI-BUG-SUPERSESSION-ROLLFORWARD-INDETERMINATE", "injected B3"
+        )
+    return _recover_bug_supersession_transition(
+        root,
+        intent_path,
+        intent,
+        inject_failure_at=inject_failure_at,
+    )
 
 
 def _transition_intent_path(root: Path, operation_id: str) -> Path:
@@ -5108,22 +5988,362 @@ def _intent_path(root: Path, relative: str) -> Path:
     )
 
 
+def _bug_supersession_receipt_pairs(pairs: list[tuple[str, object]]) -> dict:
+    value: dict[str, object] = {}
+    for key, item in pairs:
+        if key in value:
+            raise LifecycleError(
+                "WI-BUG-SUPERSESSION-SETTLEMENT-MISMATCH",
+                f"bug supersession receipt repeats JSON key: {key}",
+            )
+        value[key] = item
+    return value
+
+
+def _verify_bug_supersession_settlement(
+    root: Path,
+    receipt_path: Path,
+    expected_bytes: bytes | None = None,
+) -> dict:
+    receipt_path = _require_lifecycle_mutation_path(
+        root,
+        receipt_path,
+        failure_id="WI-BUG-SUPERSESSION-SETTLEMENT-MISMATCH",
+    )
+    try:
+        receipt_bytes = receipt_path.read_bytes()
+        payload = json.loads(
+            receipt_bytes.decode("utf-8"),
+            object_pairs_hook=_bug_supersession_receipt_pairs,
+        )
+    except LifecycleError:
+        raise
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise LifecycleError(
+            "WI-BUG-SUPERSESSION-SETTLEMENT-MISMATCH",
+            "bug supersession receipt is unreadable",
+        ) from exc
+    if (
+        not isinstance(payload, dict)
+        or set(payload) != BUG_SUPERSESSION_RECEIPT_FIELDS
+        or payload.get("schemaVersion") != 1
+        or payload.get("owner") != BUG_SUPERSESSION_OWNER
+        or payload.get("kind") != BUG_SUPERSESSION_KIND
+        or payload.get("status") != "settled"
+        or not isinstance(payload.get("links"), list)
+        or any(
+            not isinstance(payload.get(key), str)
+            for key in BUG_SUPERSESSION_RECEIPT_FIELDS - {"schemaVersion", "links"}
+        )
+    ):
+        raise LifecycleError(
+            "WI-BUG-SUPERSESSION-SETTLEMENT-MISMATCH",
+            "bug supersession receipt shape differs",
+        )
+    try:
+        category, slug = _canonical_category(payload["sourceReference"])
+        month = archive_month(payload["terminalInstant"])
+    except LifecycleError as exc:
+        raise LifecycleError(
+            "WI-BUG-SUPERSESSION-SETTLEMENT-MISMATCH",
+            "bug supersession receipt identity differs",
+        ) from exc
+    repository = _work_items_root(root).parent
+    expected_source = repository / "work-items" / "bugs" / f"{slug}.md"
+    expected_archive = (
+        repository
+        / "work-items"
+        / "bugs"
+        / "archive"
+        / month
+        / f"{slug}.md"
+    )
+    expected_receipt = expected_archive.with_name(
+        f"{slug}.supersession-receipt.json"
+    )
+    if (
+        category.name != "bug"
+        or payload["sourcePath"] != expected_source.relative_to(repository).as_posix()
+        or payload["archivePath"] != expected_archive.relative_to(repository).as_posix()
+        or receipt_path.resolve() != expected_receipt.resolve()
+        or expected_source.exists()
+        or not SHA256_RE.fullmatch(payload["archivedBugSha256"])
+        or not SHA256_RE.fullmatch(payload["successorBindingSha256"])
+        or not SHA256_RE.fullmatch(payload["successorRecordSha256"])
+        or not SHA256_RE.fullmatch(payload["incomingLinksInventorySha256"])
+        or not SHA256_RE.fullmatch(payload["readmeSha256"])
+        or not SHA256_RE.fullmatch(payload["requestExpectedBugSha256"])
+        or not SHA256_RE.fullmatch(payload["requestExpectedReadmeSha256"])
+    ):
+        raise LifecycleError(
+            "WI-BUG-SUPERSESSION-SETTLEMENT-MISMATCH",
+            "bug supersession receipt binding differs",
+        )
+    try:
+        archived = _capture_file_snapshot(
+            expected_archive,
+            failure_id="WI-BUG-SUPERSESSION-SETTLEMENT-MISMATCH",
+        )
+    except LifecycleError as exc:
+        raise LifecycleError(
+            "WI-BUG-SUPERSESSION-SETTLEMENT-MISMATCH",
+            "archived bug identity differs",
+        ) from exc
+    try:
+        fields = _parse_fields(archived.data.decode("utf-8"))
+    except UnicodeError as exc:
+        raise LifecycleError(
+            "WI-BUG-SUPERSESSION-SETTLEMENT-MISMATCH",
+            "archived bug is not UTF-8",
+        ) from exc
+    successor_reference = (
+        f"{payload['successorRegistryReference']}#{payload['successorRecordReference']}"
+    )
+    if (
+        _sha256_bytes(archived.data) != payload["archivedBugSha256"]
+        or fields.get("status") != "superseded"
+        or fields.get("terminal-at") != payload["terminalInstant"]
+        or fields.get("successor") != successor_reference
+        or fields.get("evidence") != payload["acceptanceEvidence"]
+    ):
+        raise LifecycleError(
+            "WI-BUG-SUPERSESSION-SETTLEMENT-MISMATCH",
+            "archived bug settlement differs",
+        )
+    link_paths: list[str] = []
+    for row in payload["links"]:
+        if (
+            not isinstance(row, dict)
+            or set(row) != {"path", "beforeSha256", "afterSha256"}
+            or not isinstance(row.get("path"), str)
+            or not isinstance(row.get("beforeSha256"), str)
+            or not SHA256_RE.fullmatch(row["beforeSha256"])
+            or not isinstance(row.get("afterSha256"), str)
+            or not SHA256_RE.fullmatch(row["afterSha256"])
+        ):
+            raise LifecycleError(
+                "WI-BUG-SUPERSESSION-SETTLEMENT-MISMATCH",
+                "bug supersession receipt link row differs",
+            )
+        link_paths.append(row["path"])
+        path = _intent_path(root, row["path"])
+        if not path.is_file() or _sha256_bytes(path.read_bytes()) != row["afterSha256"]:
+            raise LifecycleError(
+                "WI-BUG-SUPERSESSION-SETTLEMENT-MISMATCH",
+                f"bug supersession settled link differs: {row['path']}",
+            )
+    readme = _work_items_root(root) / "README.md"
+    if (
+        link_paths != sorted(link_paths)
+        or len(link_paths) != len(set(link_paths))
+        or not readme.is_file()
+        or _sha256_bytes(readme.read_bytes()) != payload["readmeSha256"]
+        or (expected_bytes is not None and receipt_bytes != expected_bytes)
+    ):
+        raise LifecycleError(
+            "WI-BUG-SUPERSESSION-SETTLEMENT-MISMATCH",
+            "bug supersession settled bytes differ",
+        )
+    return payload
+
+
+def _bug_supersession_intent_links(root: Path, intent: dict) -> list[dict]:
+    result: list[dict] = []
+    for row in intent["links"]:
+        before = _unb64(row["before"])
+        after = _unb64(row["after"])
+        if before is None or after is None:
+            raise LifecycleError(
+                "WI-LIFECYCLE-TRANSITION-INTENT-INVALID",
+                "bug supersession intent link image is absent",
+            )
+        result.append(
+            {
+                "path": _intent_path(root, row["path"]),
+                "pathRelative": row["path"],
+                "before": before,
+                "after": after,
+                "beforeSha256": row["beforeSha256"],
+                "afterSha256": row["afterSha256"],
+            }
+        )
+    return result
+
+
+def _recover_bug_supersession_transition(
+    root: Path,
+    intent_path: Path,
+    intent: dict,
+    *,
+    inject_failure_at: str | None = None,
+) -> dict | None:
+    source = _intent_path(root, intent["sourcePath"])
+    archive = _intent_path(root, intent["archivePath"])
+    receipt = _intent_path(root, intent["receiptPath"])
+    source_before = _unb64(intent["sourceBefore"])
+    source_after = _unb64(intent["sourceAfter"])
+    receipt_before = _unb64(intent["receiptBefore"])
+    receipt_after = _unb64(intent["receiptAfter"])
+    if source_before is None or source_after is None or receipt_after is None:
+        raise LifecycleError(
+            "WI-LIFECYCLE-TRANSITION-INTENT-INVALID",
+            "bug supersession intent image is absent",
+        )
+    links = _bug_supersession_intent_links(root, intent)
+    source_exists = source.is_file()
+    archive_exists = archive.is_file()
+    if source_exists:
+        if archive_exists or source.read_bytes() not in {source_before, source_after}:
+            raise LifecycleError(
+                "WI-BUG-SUPERSESSION-ROLLBACK-INDETERMINATE",
+                "bug supersession rollback identity differs",
+            )
+        for row in links:
+            if not row["path"].is_file() or row["path"].read_bytes() not in {
+                row["before"], row["after"]
+            }:
+                raise LifecycleError(
+                    "WI-BUG-SUPERSESSION-ROLLBACK-INDETERMINATE",
+                    f"bug supersession rollback link differs: {row['pathRelative']}",
+                )
+        current_receipt = receipt.read_bytes() if receipt.is_file() else None
+        if current_receipt not in {receipt_before, receipt_after}:
+            raise LifecycleError(
+                "WI-BUG-SUPERSESSION-ROLLBACK-INDETERMINATE",
+                "bug supersession rollback receipt differs",
+            )
+        for row in links:
+            _atomic_write(row["path"], row["before"])
+        _atomic_write(source, source_before)
+        if receipt_before is None:
+            receipt.unlink(missing_ok=True)
+        else:
+            _atomic_write(receipt, receipt_before)
+        intent_path.unlink()
+        return None
+    if not archive_exists:
+        raise LifecycleError(
+            "WI-BUG-SUPERSESSION-ROLLFORWARD-INDETERMINATE",
+            "bug supersession commit identity is absent",
+        )
+    if archive.read_bytes() != source_after:
+        raise LifecycleError(
+            "WI-BUG-SUPERSESSION-ROLLFORWARD-INDETERMINATE",
+            "bug supersession archive image differs",
+        )
+    for row in links:
+        if not row["path"].is_file() or row["path"].read_bytes() != row["after"]:
+            raise LifecycleError(
+                "WI-BUG-SUPERSESSION-ROLLFORWARD-INDETERMINATE",
+                f"bug supersession roll-forward link differs: {row['pathRelative']}",
+            )
+    current_receipt = receipt.read_bytes() if receipt.is_file() else None
+    if current_receipt not in {receipt_before, receipt_after}:
+        raise LifecycleError(
+            "WI-BUG-SUPERSESSION-ROLLFORWARD-INDETERMINATE",
+            "bug supersession roll-forward receipt differs",
+        )
+    readme_sha256 = _safe_refresh_readme(root)
+    if readme_sha256 != intent["finalReadmeSha256"]:
+        raise LifecycleError(
+            "WI-BUG-SUPERSESSION-ROLLFORWARD-INDETERMINATE",
+            "bug supersession README afterimage differs",
+        )
+    if inject_failure_at == "B4":
+        raise LifecycleError(
+            "WI-BUG-SUPERSESSION-ROLLFORWARD-INDETERMINATE", "injected B4"
+        )
+    if current_receipt is None:
+        _atomic_write(receipt, receipt_after)
+        _transition_fsync_directory(receipt.parent)
+    if inject_failure_at == "B5":
+        raise LifecycleError(
+            "WI-BUG-SUPERSESSION-ROLLFORWARD-INDETERMINATE", "injected B5"
+        )
+    settled = _verify_bug_supersession_settlement(root, receipt, receipt_after)
+    if inject_failure_at == "B6":
+        raise LifecycleError(
+            "WI-BUG-SUPERSESSION-ROLLFORWARD-INDETERMINATE", "injected B6"
+        )
+    intent_path.unlink()
+    if inject_failure_at == "B7":
+        raise LifecycleError(
+            "WI-BUG-SUPERSESSION-ROLLFORWARD-INDETERMINATE", "injected B7"
+        )
+    return settled
+
+
 def _load_transition_intent(root: Path, path: Path) -> dict:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise LifecycleError("WI-LIFECYCLE-TRANSITION-INTENT-INVALID", "transition intent is unreadable") from exc
+    is_v1 = (
+        isinstance(payload, dict)
+        and set(payload) == TRANSITION_INTENT_FIELDS
+        and payload.get("schemaVersion") == 1
+        and payload.get("owner") == TRANSITION_OWNER
+    )
+    is_v2 = (
+        isinstance(payload, dict)
+        and set(payload) == TRANSFER_TRANSITION_INTENT_FIELDS
+        and payload.get("schemaVersion") == 2
+        and payload.get("owner") == TRANSFER_TRANSITION_OWNER
+        and isinstance(payload.get("obligations"), list)
+    )
+    is_bug_supersession = (
+        isinstance(payload, dict)
+        and set(payload) == BUG_SUPERSESSION_INTENT_FIELDS
+        and payload.get("schemaVersion") == 1
+        and payload.get("owner") == BUG_SUPERSESSION_OWNER
+        and payload.get("kind") == BUG_SUPERSESSION_KIND
+        and isinstance(payload.get("links"), list)
+    )
     if (
-        not isinstance(payload, dict)
-        or set(payload) != TRANSITION_INTENT_FIELDS
-        or payload.get("schemaVersion") != 1
-        or payload.get("owner") != TRANSITION_OWNER
+        not (is_v1 or is_v2 or is_bug_supersession)
         or payload.get("status") != "intent"
-        or not isinstance(payload.get("bugs"), list)
+        or (
+            not is_bug_supersession
+            and not isinstance(payload.get("bugs"), list)
+        )
     ):
         raise LifecycleError("WI-LIFECYCLE-TRANSITION-INTENT-INVALID", "transition intent shape differs")
+    if is_bug_supersession:
+        for key in ("sourcePath", "archivePath", "receiptPath"):
+            if not isinstance(payload[key], str):
+                raise LifecycleError(
+                    "WI-LIFECYCLE-TRANSITION-INTENT-INVALID",
+                    "bug supersession intent path differs",
+                )
+            _intent_path(root, payload[key])
+        paths: list[str] = []
+        for row in payload["links"]:
+            if (
+                not isinstance(row, dict)
+                or set(row) != BUG_SUPERSESSION_LINK_INTENT_FIELDS
+                or not isinstance(row.get("path"), str)
+                or not isinstance(row.get("before"), str)
+                or not isinstance(row.get("after"), str)
+                or not isinstance(row.get("beforeSha256"), str)
+                or not SHA256_RE.fullmatch(row["beforeSha256"])
+                or not isinstance(row.get("afterSha256"), str)
+                or not SHA256_RE.fullmatch(row["afterSha256"])
+            ):
+                raise LifecycleError(
+                    "WI-LIFECYCLE-TRANSITION-INTENT-INVALID",
+                    "bug supersession intent link differs",
+                )
+            paths.append(row["path"])
+            _intent_path(root, row["path"])
+        if paths != sorted(paths) or len(paths) != len(set(paths)):
+            raise LifecycleError(
+                "WI-LIFECYCLE-TRANSITION-INTENT-INVALID",
+                "bug supersession intent links are not sorted and unique",
+            )
+        return payload
     for key in ("activePath", "archivePath", "successorPath", "migrationReceiptPath"):
-        _intent_path(root, payload[key])
+        if payload[key] is not None:
+            _intent_path(root, payload[key])
     return payload
 
 
@@ -5147,16 +6367,19 @@ def _settlement_payload(root: Path, intent: dict, readme_sha256: str) -> dict:
     archive = _intent_path(root, intent["archivePath"])
     successor = _intent_path(root, intent["successorPath"])
     bug_receipt = archive / BUG_DISPOSITIONS_RECEIPT
-    migration_receipt = archive / "ledger-migration-receipts" / Path(intent["migrationReceiptPath"]).name
+    migration_receipt = None
+    if intent["migrationReceiptPath"] is not None:
+        migration_receipt = archive / "ledger-migration-receipts" / Path(intent["migrationReceiptPath"]).name
     bug_receipt = _require_lifecycle_mutation_path(
         root, bug_receipt, failure_id="WI-LIFECYCLE-TRANSITION-ROLLFORWARD-INDETERMINATE"
     )
-    migration_receipt = _require_lifecycle_mutation_path(
-        root, migration_receipt, failure_id="WI-LIFECYCLE-TRANSITION-ROLLFORWARD-INDETERMINATE"
-    )
-    return {
-        "schemaVersion": 1,
-        "owner": TRANSITION_OWNER,
+    if migration_receipt is not None:
+        migration_receipt = _require_lifecycle_mutation_path(
+            root, migration_receipt, failure_id="WI-LIFECYCLE-TRANSITION-ROLLFORWARD-INDETERMINATE"
+        )
+    payload = {
+        "schemaVersion": intent["schemaVersion"],
+        "owner": intent["owner"],
         "status": "settled",
         "operationId": intent["operationId"],
         "workItem": intent["slug"],
@@ -5168,7 +6391,9 @@ def _settlement_payload(root: Path, intent: dict, readme_sha256: str) -> dict:
         "statusSha256": _sha256_bytes((archive / "status.md").read_bytes()),
         "closureSha256": _sha256_bytes((archive / "closure.md").read_bytes()),
         "bugDispositionReceiptSha256": _sha256_bytes(bug_receipt.read_bytes()),
-        "migrationReceiptSha256": _sha256_bytes(migration_receipt.read_bytes()),
+        "migrationReceiptSha256": (
+            _sha256_bytes(migration_receipt.read_bytes()) if migration_receipt is not None else None
+        ),
         "readmeSha256": readme_sha256,
         "requestClosureSha256": intent["closureInputSha256"],
         "requestSuccessorSlug": intent["successorSlug"],
@@ -5177,6 +6402,14 @@ def _settlement_payload(root: Path, intent: dict, readme_sha256: str) -> dict:
         "requestExpectedLedgerSha256": intent["expectedLedgerSha256"],
         "requestExpectedReadmeSha256": intent["expectedReadmeSha256"],
     }
+    if intent["schemaVersion"] == 2:
+        payload.update({
+            "transferInputSha256": intent["transferInputSha256"],
+            "archiveIdentity": intent["archiveIdentity"],
+            "predecessorOperationId": intent["predecessorOperationId"],
+            "obligations": intent["obligations"],
+        })
+    return payload
 
 
 def _safe_refresh_readme(root: Path) -> str:
@@ -5244,7 +6477,15 @@ def _verify_settlement(root: Path, receipt: Path, expected: dict | None = None) 
         payload = json.loads(receipt.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise LifecycleError("WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH", "settled receipt is unreadable") from exc
-    if not isinstance(payload, dict) or payload.get("status") != "settled" or payload.get("owner") != TRANSITION_OWNER:
+    valid_owner = (
+        (payload.get("schemaVersion") == 1 and payload.get("owner") == TRANSITION_OWNER)
+        or (
+            payload.get("schemaVersion") == 2
+            and payload.get("owner") == TRANSFER_TRANSITION_OWNER
+            and isinstance(payload.get("obligations"), list)
+        )
+    ) if isinstance(payload, dict) else False
+    if not isinstance(payload, dict) or payload.get("status") != "settled" or not valid_owner:
         raise LifecycleError("WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH", "settled receipt shape differs")
     archive = _intent_path(root, payload["archivePath"])
     successor = _intent_path(root, payload["successorPath"])
@@ -5265,13 +6506,17 @@ def _verify_settlement(root: Path, receipt: Path, expected: dict | None = None) 
         "readmeSha256": _sha256_bytes(readme_path.read_bytes()),
     }
     migration_receipts = sorted((archive / "ledger-migration-receipts").glob("*.json"))
-    if len(migration_receipts) != 1:
+    expected_migration_sha = payload.get("migrationReceiptSha256")
+    expected_migration_count = 0 if expected_migration_sha is None else 1
+    if len(migration_receipts) != expected_migration_count:
         raise LifecycleError("WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH", "migration receipt cardinality differs")
-    migration_receipt_path = _require_lifecycle_mutation_path(
-        root, migration_receipts[0],
-        failure_id="WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH",
-    )
-    physical["migrationReceiptSha256"] = _sha256_bytes(migration_receipt_path.read_bytes())
+    physical["migrationReceiptSha256"] = None
+    if migration_receipts:
+        migration_receipt_path = _require_lifecycle_mutation_path(
+            root, migration_receipts[0],
+            failure_id="WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH",
+        )
+        physical["migrationReceiptSha256"] = _sha256_bytes(migration_receipt_path.read_bytes())
     if any(payload.get(key) != value for key, value in physical.items()):
         raise LifecycleError("WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH", "settled receipt hashes differ")
     if expected is not None and payload != expected:
@@ -5281,6 +6526,13 @@ def _verify_settlement(root: Path, receipt: Path, expected: dict | None = None) 
 
 def _recover_transition(root: Path, intent_path: Path, *, inject_failure_at: str | None = None) -> dict | None:
     intent = _load_transition_intent(root, intent_path)
+    if intent.get("kind") == BUG_SUPERSESSION_KIND:
+        return _recover_bug_supersession_transition(
+            root,
+            intent_path,
+            intent,
+            inject_failure_at=inject_failure_at,
+        )
     active = _intent_path(root, intent["activePath"])
     archive = _intent_path(root, intent["archivePath"])
     successor = _intent_path(root, intent["successorPath"])
@@ -5422,6 +6674,7 @@ def archive_with_successor(
     expected_ledger_sha256: str,
     expected_readme_sha256: str,
     *,
+    obligation_transfer_data: bytes | None = None,
     inject_failure_at: str | None = None,
 ) -> dict:
     _validate_slug(slug)
@@ -5445,6 +6698,10 @@ def archive_with_successor(
             or payload.get("requestTerminalInstant") != terminal_instant
             or payload.get("requestExpectedLedgerSha256") != expected_ledger_sha256
             or payload.get("requestExpectedReadmeSha256") != expected_readme_sha256
+            or payload.get("transferInputSha256") != (
+                _sha256_bytes(obligation_transfer_data)
+                if obligation_transfer_data is not None else None
+            )
         ):
             raise LifecycleError("WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH", "replay inputs differ")
         return payload
@@ -5470,14 +6727,33 @@ def archive_with_successor(
     )
     if archive.exists() or successor_preflight.exists():
         raise LifecycleError("WI-CATEGORY-DUAL-LOCATION", "archive or successor already exists")
-    _validate_item_before_close(active)
+    transfer_obligations: list[dict] | None = None
+    archive_identity: str | None = None
+    migration_receipt: Path | None = None
+    if obligation_transfer_data is None:
+        _validate_item_before_close(active)
+    else:
+        _transfer_payload, transfer_obligations, archive_identity, migration_receipt = (
+            _prepare_obligation_transfer(
+                root,
+                active,
+                archive,
+                slug,
+                successor_slug,
+                successor_data,
+                operation_id,
+                expected_ledger_sha256,
+                obligation_transfer_data,
+            )
+        )
     _manifest, manifest_data, bug_plans = _prepare_bug_dispositions(root, active, slug, terminal_instant)
-    migration_receipts = sorted((active / "ledger-migration-receipts").glob("*.json"))
-    if len(migration_receipts) != 1:
-        raise LifecycleError("WI-LEDGER-MIGRATION-RECEIPT-MISMATCH", "one migration receipt is required")
-    migration_receipts[0] = _require_lifecycle_mutation_path(
-        root, migration_receipts[0], failure_id="WI-LEDGER-MIGRATION-RECEIPT-MISMATCH"
-    )
+    if obligation_transfer_data is None:
+        migration_receipts = sorted((active / "ledger-migration-receipts").glob("*.json"))
+        if len(migration_receipts) != 1:
+            raise LifecycleError("WI-LEDGER-MIGRATION-RECEIPT-MISMATCH", "one migration receipt is required")
+        migration_receipt = _require_lifecycle_mutation_path(
+            root, migration_receipts[0], failure_id="WI-LEDGER-MIGRATION-RECEIPT-MISMATCH"
+        )
     archived_closure = _stamp_schema_marker(closure_data, "closure.md")
     status = active / "status.md"
     prior_status = status.read_bytes()
@@ -5499,7 +6775,9 @@ def archive_with_successor(
         root, slug, terminal_instant, manifest_data, archived_closure, bug_plans, final_readme_sha
     )
     intent = {
-        "schemaVersion": 1, "owner": TRANSITION_OWNER, "status": "intent",
+        "schemaVersion": 2 if obligation_transfer_data is not None else 1,
+        "owner": TRANSFER_TRANSITION_OWNER if obligation_transfer_data is not None else TRANSITION_OWNER,
+        "status": "intent",
         "operationId": operation_id, "slug": slug, "terminalInstant": terminal_instant,
         "activePath": relative(active), "archivePath": relative(archive),
         "successorPath": relative(successor_path),
@@ -5507,7 +6785,7 @@ def archive_with_successor(
         "statusBefore": _b64(prior_status), "statusAfter": _b64(status_after),
         "closureBefore": _b64(prior_closure), "closureAfter": _b64(archived_closure),
         "successorData": _b64(successor_data), "manifestData": _b64(manifest_data),
-        "migrationReceiptPath": relative(migration_receipts[0]),
+        "migrationReceiptPath": relative(migration_receipt) if migration_receipt is not None else None,
         "closureInputSha256": _sha256_bytes(closure_data),
         "successorSlug": successor_slug,
         "finalReadmeSha256": final_readme_sha,
@@ -5520,6 +6798,19 @@ def archive_with_successor(
             "statusBefore": plan.status_before, "statusAfter": plan.status_after,
         } for plan in bug_plans],
     }
+    if obligation_transfer_data is not None:
+        predecessor_ids = {
+            row["predecessorOperationId"] for row in (transfer_obligations or [])
+            if row["predecessorOperationId"] is not None
+        }
+        intent.update({
+            "transferInputSha256": _sha256_bytes(obligation_transfer_data),
+            "archiveIdentity": archive_identity,
+            "predecessorOperationId": (
+                next(iter(predecessor_ids)) if len(predecessor_ids) == 1 else None
+            ),
+            "obligations": transfer_obligations,
+        })
     intent_path = _require_lifecycle_mutation_path(
         root, intent_path, failure_id="WI-LIFECYCLE-TRANSITION-INTENT-INVALID"
     )
@@ -6467,6 +7758,7 @@ def _incoming_link_result(
     literal_path_references: Iterable[str] = (),
     mutable_consumers_only: bool = False,
     scan_markdown_links: bool = True,
+    strict_consumer_reads: bool = False,
 ) -> dict:
     work_items = _work_items_root(root)
     physical: list[dict[str, str]] = []
@@ -6507,13 +7799,18 @@ def _incoming_link_result(
         consumer_resolved = consumer.resolve()
         if belongs_to_owned(consumer_resolved):
             continue
+        consumer_rel = consumer.relative_to(work_items).as_posix()
+        if mutable_consumers_only and "archive" in Path(consumer_rel).parts:
+            continue
         try:
             consumer_bytes = consumer.read_bytes()
             text = consumer_bytes.decode("utf-8")
-        except (OSError, UnicodeError):
-            continue
-        consumer_rel = consumer.relative_to(work_items).as_posix()
-        if mutable_consumers_only and "archive" in Path(consumer_rel).parts:
+        except (OSError, UnicodeError) as exc:
+            if strict_consumer_reads:
+                raise LifecycleError(
+                    "WI-CATEGORY-MIGRATION-INVENTORY",
+                    f"cannot classify live incoming-link consumer: {consumer_rel}",
+                ) from exc
             continue
         if reference in text:
             logical.append(
@@ -11742,8 +13039,25 @@ def build_parser() -> argparse.ArgumentParser:
     archive_successor.add_argument("--operation-id", required=True)
     archive_successor.add_argument("--expected-ledger-sha256", required=True)
     archive_successor.add_argument("--expected-readme-sha256", required=True)
+    archive_successor.add_argument("--obligation-transfer-file")
     archive_successor.add_argument(
         "--inject-failure-at", choices=tuple(f"T{i}" for i in range(10)), help=argparse.SUPPRESS
+    )
+    supersede_bug = sub.add_parser("supersede-current-bug")
+    _add_root(supersede_bug)
+    supersede_bug.add_argument("--slug", required=True)
+    supersede_bug.add_argument("--successor-record", required=True)
+    supersede_bug.add_argument("--successor-binding-file", required=True)
+    supersede_bug.add_argument("--terminal-instant", required=True)
+    supersede_bug.add_argument("--incoming-links-inventory", required=True)
+    supersede_bug.add_argument("--expected-bug-sha256", required=True)
+    supersede_bug.add_argument("--expected-readme-sha256", required=True)
+    supersede_bug.add_argument("--operation-id", required=True)
+    supersede_bug.add_argument("--apply", action="store_true", required=True)
+    supersede_bug.add_argument(
+        "--inject-failure-at",
+        choices=tuple(f"B{i}" for i in range(8)),
+        help=argparse.SUPPRESS,
     )
     trial = sub.add_parser("trial")
     _add_root(trial)
@@ -12126,10 +13440,31 @@ def main(argv: list[str]) -> int:
                 args.operation_id,
                 args.expected_ledger_sha256,
                 args.expected_readme_sha256,
+                obligation_transfer_data=(
+                    _read_arg_file(args.obligation_transfer_file)
+                    if args.obligation_transfer_file else None
+                ),
                 inject_failure_at=args.inject_failure_at,
             )
             print(
                 "WI-LIFECYCLE-TRANSITION-COMMITTED "
+                f"operation={result['operationId']} readme={result['readmeSha256']}"
+            )
+        elif args.command == "supersede-current-bug":
+            result = supersede_current_bug(
+                root,
+                args.slug,
+                Path(args.successor_record),
+                _read_arg_file(args.successor_binding_file),
+                args.terminal_instant,
+                _read_arg_file(args.incoming_links_inventory),
+                args.expected_bug_sha256,
+                args.expected_readme_sha256,
+                args.operation_id,
+                inject_failure_at=args.inject_failure_at,
+            )
+            print(
+                "WI-BUG-SUPERSESSION-COMMITTED "
                 f"operation={result['operationId']} readme={result['readmeSha256']}"
             )
         elif args.command == "trial":
@@ -12176,6 +13511,7 @@ LIFECYCLE_PUBLIC_APIS = (
     "migrate_legacy_ledger_obligation",
     "revoke_legacy_ledger_obligation",
     "archive_with_successor",
+    "supersede_current_bug",
     "build_migration_inventory",
     "write_migration_inventory",
     "migrate_legacy",

@@ -237,20 +237,69 @@ effective view; it never deletes the apply anchor or the source line.
 
 ### Archive with a backlog successor
 
-Use this only after strict ledger closure, accepted terminal evidence, exact
-`bug-dispositions.json`, and the first-use gates below:
+Use this after accepted terminal evidence, exact `bug-dispositions.json`, and
+the first-use gates below. Omit the optional transfer file for the ordinary
+strict-close path; supply it only when every unresolved review obligation is
+being transferred to the one successor created by this command:
 
 ```powershell
-python scripts/mutate-work-item.py --root . archive-with-successor --slug <active-slug> --closure-file <closure.md-input> --terminal-instant <strict-UTC> --successor-slug <new-backlog-slug> --successor-file <successor.md-input> --operation-id <bounded-transition-id> --expected-ledger-sha256 <current-ledger-sha256> --expected-readme-sha256 <current-readme-sha256>
+python scripts/mutate-work-item.py --root . archive-with-successor --slug <active-slug> --closure-file <closure.md-input> --terminal-instant <strict-UTC> --successor-slug <new-backlog-slug> --successor-file <successor.md-input> --operation-id <bounded-transition-id> --expected-ledger-sha256 <current-ledger-sha256> --expected-readme-sha256 <current-readme-sha256> [--obligation-transfer-file <strict-json>]
 ```
+
+Without `--obligation-transfer-file`, the owner runs the unchanged strict
+validator and writes the existing schema-version 1 receipt. With the option,
+the strict UTF-8 JSON object is schema version 1 and binds the source slug,
+successor slug, expected source-ledger SHA-256, and the exact set of currently
+open REVISE rows by `runId`, raw line ordinal, raw line SHA-256, raw event
+SHA-256, and projected event SHA-256. Transfer requires zero open launches;
+missing, extra, duplicate, closed, or drifted rows fail before mutation.
 
 The owner fsyncs transition intent, applies the bound bug dispositions, moves
 the item to its final archive, writes the flat successor only after that
 archive exists, refreshes README, and writes
-`lifecycle-transition-receipt.json`. Its `status: settled` record binds
-`archivePath`, `successorPath`, `successorSha256`, `ledgerSha256`,
-`statusSha256`, `closureSha256`, `bugDispositionReceiptSha256`,
-`migrationReceiptSha256`, and `readmeSha256`.
+`lifecycle-transition-receipt.json`. Both receipt versions bind the existing
+archive, successor, ledger, status, closure, bug-disposition, migration-receipt,
+and README results. Transfer writes schema version 2 with owner
+`mutate-work-item:archive-with-successor-v2` and additionally binds the transfer
+input, immutable archive identity, predecessor operation, and derived
+obligation rows. Version 1 receipts remain readable and exact-replayable but
+confer no transferred ownership.
+
+The successor input must contain exactly one `Continues: <source-slug>` and
+`Obligation-transfer: <operation-id>` field. Ordinary `start` preserves both.
+Backlog, active, close, and re-transfer views resolve the same obligation under
+one current owner without copying source-ledger events: closure remains
+`closesRunIds`-driven, and a later transfer carries forward only the still-open
+set with its predecessor operation. Identical replay is a byte no-op; request,
+receipt, ledger, or ownership drift fails closed through the existing recovery
+owner.
+
+### Finish an accepted current-bug successor handoff
+
+The receiving registry first creates and accepts its successor record. The
+source lifecycle owner then consumes a strict schema-version 1 binding for that
+accepted record plus a complete owner-bound incoming-link inventory:
+
+```powershell
+python scripts/mutate-work-item.py --root . supersede-current-bug --slug <bug-slug> --successor-record <runtime-path> --successor-binding-file <strict-json> --terminal-instant <strict-UTC> --incoming-links-inventory <strict-json> --expected-bug-sha256 <current-bug-sha256> --expected-readme-sha256 <current-readme-sha256> --operation-id <bounded-operation-id> --apply
+```
+
+The binding names the exact operation, `bug:<source-slug>`, stable registry and
+record references, accepted record SHA-256, accepting owner, strict UTC
+acceptance time, and bounded acceptance evidence. The inventory binds the same
+operation/source/binding and every current source-local incoming link with its
+exact before/after image. Before intent creation the owner verifies the
+successor as a no-follow regular file, its hash, the unique current source, and
+complete link coverage. It never writes the receiving registry or persists the
+runtime successor path.
+
+Settlement terminalizes and archives the source bug as `superseded`, replaces
+every inventoried local incoming link with the stable successor reference,
+refreshes README, and writes the source-local supersession receipt through the
+existing transition recovery dispatcher. Identical replay verifies the bound
+receipt and changes no bytes; mismatched replay or incomplete binding/inventory
+fails closed. Receiving-registry preparation is not claimed as local completion
+or rollback.
 
 ### Failures, recovery, and telemetry
 
@@ -261,6 +310,7 @@ archive exists, refreshes README, and writes
 | Unknown normalization kind, kind/scope/evidence drift, or cross-kind revoke | `WI-LEDGER-MIGRATION-NORMALIZATION-KIND` |
 | Lock; invalid candidate; uncertain commit; receipt mismatch | `WI-LIFECYCLE-LOCK-HELD`; `WI-LEDGER-MIGRATION-CANDIDATE-INVALID`; `WI-LEDGER-MIGRATION-COMMIT-INDETERMINATE`; `WI-LEDGER-MIGRATION-RECEIPT-MISMATCH` |
 | Corrupt intent; rollback failure; roll-forward failure; settlement mismatch; late revoke | `WI-LIFECYCLE-TRANSITION-INTENT-INVALID`; `WI-LIFECYCLE-TRANSITION-ROLLBACK-INDETERMINATE`; `WI-LIFECYCLE-TRANSITION-ROLLFORWARD-INDETERMINATE`; `WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH`; `WI-LEDGER-MIGRATION-REVOCATION-FROZEN` |
+| Transfer coverage, ownership, or immutable-evidence drift; invalid accepted bug successor | `WI-OBLIGATION-TRANSFER-COVERAGE`; `WI-OBLIGATION-TRANSFER-OWNER`; `WI-OBLIGATION-TRANSFER-DRIFT`; `WI-BUG-SUCCESSOR-BINDING` |
 
 Telemetry always reports raw events separately from apply, revoke, and
 projected counts. Raw count never decreases; one active apply adds one raw

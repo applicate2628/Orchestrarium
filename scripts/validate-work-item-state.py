@@ -1213,6 +1213,29 @@ class LedgerProjectionRowV1:
     raw_line_sha256: str
     raw_event_sha256: str
     transformation: str = "raw"
+    obligation_id: str | None = None
+    predecessor_operation_id: str | None = None
+
+
+@dataclass(frozen=True)
+class WorkItemObligationRowV1:
+    """One currently open lifecycle obligation with its immutable source identity."""
+
+    run_id: str
+    event: Mapping[str, object]
+    raw_line_ordinal: int
+    raw_line_sha256: str
+    raw_event_sha256: str
+    projected_event_sha256: str
+    source_kind: str
+    obligation_id: str | None
+    predecessor_operation_id: str | None
+
+
+@dataclass(frozen=True)
+class WorkItemObligationStateV1:
+    open_revise: tuple[WorkItemObligationRowV1, ...]
+    open_launches: tuple[WorkItemObligationRowV1, ...]
 
 
 @dataclass(frozen=True)
@@ -1242,7 +1265,7 @@ class RuntimeLedgerRowV1:
     raw_line_sha256: str
     raw_body_sha256: str
     projected_event_sha256: str
-    epoch: Literal["raw", "sealed-prefix", "strict-suffix", "disposed-suffix"]
+    epoch: Literal["raw", "sealed-prefix", "strict-suffix", "disposed-suffix", "transferred"]
     authority: LedgerAuthorityV1
 
 
@@ -1332,7 +1355,7 @@ def _runtime_rows_from_projection(
             row.raw_line_sha256,
             row.raw_line_sha256,
             hashlib.sha256(_canonical_projection_bytes(row.event)).hexdigest(),
-            epoch,
+            "transferred" if row.transformation == "transferred" else epoch,
             _NO_LEDGER_AUTHORITY,
         )
         for row in rows
@@ -1354,6 +1377,54 @@ def _runtime_rows_from_events(
         )
         for position, event in enumerate(events, start=1)
     )
+
+
+def _capture_obligation_state(
+    sink: list[WorkItemObligationStateV1] | None,
+    rows: Sequence[LedgerProjectionRowV1] | Sequence[RuntimeLedgerRowV1],
+    open_revise: Sequence[Mapping[str, object]],
+    open_launches: Sequence[Mapping[str, object]],
+) -> None:
+    if sink is None:
+        return
+
+    rows_by_run_id = {
+        row.event.get("runId"): row
+        for row in rows
+        if isinstance(row.event.get("runId"), str)
+    }
+
+    def bound(events: Sequence[Mapping[str, object]]) -> tuple[WorkItemObligationRowV1, ...]:
+        result: list[WorkItemObligationRowV1] = []
+        for event in events:
+            run_id = event.get("runId")
+            row = rows_by_run_id.get(run_id)
+            if not isinstance(run_id, str) or row is None:
+                continue
+            if isinstance(row, LedgerProjectionRowV1):
+                raw_event_sha256 = row.raw_event_sha256
+                projected_event_sha256 = hashlib.sha256(
+                    _canonical_projection_bytes(row.event)
+                ).hexdigest()
+                source_kind = row.transformation
+            else:
+                raw_event_sha256 = row.raw_body_sha256
+                projected_event_sha256 = row.projected_event_sha256
+                source_kind = row.epoch
+            result.append(WorkItemObligationRowV1(
+                run_id,
+                MappingProxyType(copy.deepcopy(dict(row.event))),
+                row.raw_line_ordinal,
+                row.raw_line_sha256,
+                raw_event_sha256,
+                projected_event_sha256,
+                source_kind,
+                getattr(row, "obligation_id", None),
+                getattr(row, "predecessor_operation_id", None),
+            ))
+        return tuple(result)
+
+    sink.append(WorkItemObligationStateV1(bound(open_revise), bound(open_launches)))
 
 
 def _validity_from_boolean_events(
@@ -1896,13 +1967,13 @@ def _derive_authority_masks(
         event = row.event
         run_id = event.get("runId")
         current_ok = pos < len(current_validity) and current_validity[pos]
-        historical_ok = row.epoch == "sealed-prefix"
+        historical_ok = row.epoch in {"sealed-prefix", "transferred"}
         launch_eligible[pos] = bool(
             (current_ok or historical_ok)
             and isinstance(run_id, str)
             and run_id
             and len(positions.get(run_id, ())) == 1
-            and (not historical_ok or event.get("workItem") == item.name)
+            and (row.epoch != "sealed-prefix" or event.get("workItem") == item.name)
             and event.get("eventKind") == "launch"
             and event.get("status") == "running"
             and "launchRunId" not in event
@@ -1916,7 +1987,7 @@ def _derive_authority_masks(
         run_id = event.get("runId")
         launch_id = event.get("launchRunId")
         current_ok = pos < len(current_validity) and current_validity[pos]
-        historical_ok = row.epoch == "sealed-prefix"
+        historical_ok = row.epoch in {"sealed-prefix", "transferred"}
         launch_positions = positions.get(launch_id, ()) if isinstance(launch_id, str) else ()
         target_pos = launch_positions[0] if len(launch_positions) == 1 else None
         target = rows[target_pos].event if target_pos is not None else None
@@ -1934,7 +2005,7 @@ def _derive_authority_masks(
             and isinstance(run_id, str)
             and run_id
             and len(positions.get(run_id, ())) == 1
-            and (not historical_ok or event.get("workItem") == item.name)
+            and (row.epoch != "sealed-prefix" or event.get("workItem") == item.name)
             and event.get("eventKind") == "terminal"
             and isinstance(event.get("status"), str)
             and event.get("status") != "running"
@@ -1963,7 +2034,7 @@ def _derive_authority_masks(
         else:
             individually_current = current_ok
         revise = bool(
-            (current_ok or row.epoch == "sealed-prefix")
+            (current_ok or row.epoch in {"sealed-prefix", "transferred"})
             and event.get("schemaVersion") == 2
             and event.get("gate") == "REVISE"
             and isinstance(event.get("runId"), str)
@@ -2006,7 +2077,7 @@ def derive_event_validity(
     current: list[bool] = []
     for row in rows:
         event = row.event
-        if row.epoch in {"sealed-prefix", "disposed-suffix"} or (
+        if row.epoch in {"sealed-prefix", "disposed-suffix", "transferred"} or (
             validate_schema_version is not None
             and event.get("schemaVersion") != validate_schema_version
         ):
@@ -4393,6 +4464,374 @@ def archived_ledger_identity(work_item: str, ledger_sha256: str) -> str:
     ).hexdigest()
 
 
+def obligation_transfer_id(
+    archive_identity: str,
+    raw_line_ordinal: int,
+    raw_line_sha256: str,
+    raw_event_sha256: str,
+    run_id: str,
+) -> str:
+    return hashlib.sha256(
+        b"orchestrarium-obligation-v1\0"
+        + archive_identity.encode("ascii") + b"\0"
+        + str(raw_line_ordinal).encode("ascii") + b"\0"
+        + raw_line_sha256.encode("ascii") + b"\0"
+        + raw_event_sha256.encode("ascii") + b"\0"
+        + run_id.encode("utf-8")
+    ).hexdigest()
+
+
+def _transfer_status_relation(item: Path, errors: list[str]) -> tuple[str, str] | None:
+    status = item / "status.md"
+    if not status.is_file():
+        return None
+    try:
+        text = status.read_text(encoding="utf-8", errors="strict")
+    except (OSError, UnicodeError) as exc:
+        fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: transfer status is unreadable: {exc}")
+        return None
+    values: dict[str, list[str]] = {"continues": [], "obligation-transfer": []}
+    for line in text.splitlines():
+        match = re.fullmatch(r"\s*([A-Za-z][A-Za-z0-9 _-]*)\s*:\s*(.*?)\s*", line)
+        if match and match.group(1).strip().casefold() in values:
+            values[match.group(1).strip().casefold()].append(match.group(2).strip())
+    if not any(values.values()):
+        return None
+    if any(len(values[name]) != 1 or not values[name][0] for name in values):
+        fail(errors, "WI-OBLIGATION-TRANSFER-OWNER: transfer status relation is missing or duplicated")
+        return None
+    return values["continues"][0], values["obligation-transfer"][0]
+
+
+def _transfer_receipts(root: Path, errors: list[str]) -> dict[str, tuple[Path, dict]]:
+    receipts: dict[str, tuple[Path, dict]] = {}
+    work_items = root / "work-items"
+    for path in sorted((work_items / "archive").glob("*/*/lifecycle-transition-receipt.json")):
+        try:
+            payload = decode_json_object(
+                path.read_bytes(), source=str(path), maximum_bytes=max(1, path.stat().st_size)
+            )
+        except (OSError, ValueError) as exc:
+            fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: transfer receipt is unreadable: {exc}")
+            continue
+        if payload.get("schemaVersion") != 2 or payload.get("owner") != "mutate-work-item:archive-with-successor-v2":
+            continue
+        operation_id = payload.get("operationId")
+        if not isinstance(operation_id, str) or not operation_id or operation_id in receipts:
+            fail(errors, "WI-OBLIGATION-TRANSFER-OWNER: transfer operation identity is duplicate or invalid")
+            continue
+        obligations = payload.get("obligations")
+        if not isinstance(obligations, list):
+            fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: transfer receipt {operation_id} has no obligation rows")
+            continue
+        archive_path = payload.get("archivePath")
+        ledger_sha256 = payload.get("ledgerSha256")
+        if (
+            not isinstance(archive_path, str)
+            or not isinstance(ledger_sha256, str)
+            or SHA256_RE.fullmatch(ledger_sha256) is None
+            or payload.get("archiveIdentity") != archived_ledger_identity(archive_path, ledger_sha256)
+        ):
+            fail(errors, f"WI-OBLIGATION-TRANSFER-DRIFT: transfer receipt {operation_id} archive identity differs")
+            continue
+        archive = root.joinpath(*PurePosixPath(archive_path).parts)
+        ledger = archive / "agent-runs.jsonl"
+        try:
+            physical_ledger_sha = hashlib.sha256(ledger.read_bytes()).hexdigest()
+        except OSError as exc:
+            fail(errors, f"WI-OBLIGATION-TRANSFER-DRIFT: transfer ledger is unavailable: {exc}")
+            continue
+        if physical_ledger_sha != ledger_sha256:
+            fail(errors, f"WI-OBLIGATION-TRANSFER-DRIFT: transfer ledger digest differs: {operation_id}")
+            continue
+        receipts[operation_id] = (path, payload)
+    return receipts
+
+
+def _resolve_transferred_obligation(
+    root: Path,
+    receipts: Mapping[str, tuple[Path, dict]],
+    operation_id: str,
+    obligation: dict,
+    errors: list[str],
+    visiting: frozenset[str],
+) -> LedgerProjectionRowV1 | None:
+    if operation_id in visiting:
+        fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: transfer cycle at {operation_id}")
+        return None
+    receipt_entry = receipts.get(operation_id)
+    if receipt_entry is None:
+        fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: transfer receipt is absent: {operation_id}")
+        return None
+    _path, receipt = receipt_entry
+    predecessor = obligation.get("predecessorOperationId")
+    obligation_id = obligation.get("obligationId")
+    if predecessor is not None:
+        if not isinstance(predecessor, str):
+            fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: predecessor operation is invalid: {operation_id}")
+            return None
+        predecessor_entry = receipts.get(predecessor)
+        if predecessor_entry is None:
+            fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: predecessor receipt is absent: {predecessor}")
+            return None
+        predecessor_receipt = predecessor_entry[1]
+        if predecessor_receipt.get("requestSuccessorSlug") != receipt.get("workItem"):
+            fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: predecessor does not own source: {operation_id}")
+            return None
+        matches = [
+            row for row in predecessor_receipt.get("obligations", [])
+            if isinstance(row, dict) and row.get("obligationId") == obligation_id
+        ]
+        if len(matches) != 1:
+            fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: predecessor obligation is absent or duplicate: {operation_id}")
+            return None
+        inherited = _resolve_transferred_obligation(
+            root, receipts, predecessor, matches[0], errors, visiting | {operation_id}
+        )
+        if inherited is None:
+            return None
+        binding = (
+            inherited.event.get("runId"), inherited.raw_line_ordinal,
+            inherited.raw_line_sha256, inherited.raw_event_sha256,
+            hashlib.sha256(_canonical_projection_bytes(inherited.event)).hexdigest(),
+        )
+        declared = (
+            obligation.get("runId"), obligation.get("rawLineOrdinal"),
+            obligation.get("rawLineSha256"), obligation.get("rawEventSha256"),
+            obligation.get("projectedEventSha256"),
+        )
+        if declared != binding:
+            fail(errors, f"WI-OBLIGATION-TRANSFER-DRIFT: inherited obligation binding differs: {operation_id}")
+            return None
+        return LedgerProjectionRowV1(
+            dict(inherited.event), inherited.raw_line_ordinal, inherited.raw_line_sha256,
+            inherited.raw_event_sha256, "transferred", obligation_id, predecessor,
+        )
+
+    archive_path = receipt.get("archivePath")
+    if not isinstance(archive_path, str):
+        fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: archive path is absent: {operation_id}")
+        return None
+    source = root.joinpath(*PurePosixPath(archive_path).parts)
+    states: list[WorkItemObligationStateV1] = []
+    validation_errors = validate_work_item(
+        source, strict_revise=False, validate_status_file=False, obligation_state_out=states
+    )
+    if validation_errors or len(states) != 1:
+        errors.extend(validation_errors)
+        fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: source obligation state is invalid: {operation_id}")
+        return None
+    declared_binding = (
+        obligation.get("runId"), obligation.get("rawLineOrdinal"),
+        obligation.get("rawLineSha256"), obligation.get("rawEventSha256"),
+        obligation.get("projectedEventSha256"),
+    )
+    matches = [
+        row for row in states[0].open_revise
+        if (
+            row.run_id, row.raw_line_ordinal, row.raw_line_sha256,
+            row.raw_event_sha256, row.projected_event_sha256,
+        ) == declared_binding
+    ]
+    if len(matches) != 1:
+        fail(errors, f"WI-OBLIGATION-TRANSFER-DRIFT: source obligation binding differs: {operation_id}")
+        return None
+    row = matches[0]
+    expected_id = obligation_transfer_id(
+        receipt["archiveIdentity"], row.raw_line_ordinal, row.raw_line_sha256,
+        row.raw_event_sha256, row.run_id,
+    )
+    if obligation_id != expected_id:
+        fail(errors, f"WI-OBLIGATION-TRANSFER-DRIFT: obligation identity differs: {operation_id}")
+        return None
+    return LedgerProjectionRowV1(
+        dict(row.event), row.raw_line_ordinal, row.raw_line_sha256,
+        row.raw_event_sha256, "transferred", obligation_id, None,
+    )
+
+
+def _inherited_transfer_rows(item: Path, errors: list[str]) -> tuple[LedgerProjectionRowV1, ...]:
+    relation = _transfer_status_relation(item, errors)
+    if relation is None:
+        return ()
+    root = repo_root_for(item)
+    if root is None:
+        fail(errors, "WI-OBLIGATION-TRANSFER-OWNER: successor has no repository root")
+        return ()
+    source_slug, operation_id = relation
+    receipts = _transfer_receipts(root, errors)
+    entry = receipts.get(operation_id)
+    if entry is None:
+        fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: successor receipt is absent: {operation_id}")
+        return ()
+    receipt = entry[1]
+    successor_slug = receipt.get("requestSuccessorSlug")
+    item_matches_successor = (
+        successor_slug == item.name
+        or (
+            isinstance(successor_slug, str)
+            and item.parent.name == "active"
+            and item.name.startswith(f".{successor_slug}.")
+        )
+    )
+    if receipt.get("workItem") != source_slug or not item_matches_successor:
+        fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: successor relation differs: {operation_id}")
+        return ()
+    result: list[LedgerProjectionRowV1] = []
+    seen_ids: set[str] = set()
+    seen_run_ids: set[str] = set()
+    for obligation in receipt["obligations"]:
+        if not isinstance(obligation, dict):
+            fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: obligation row is invalid: {operation_id}")
+            continue
+        obligation_id = obligation.get("obligationId")
+        run_id = obligation.get("runId")
+        if (
+            not isinstance(obligation_id, str)
+            or not isinstance(run_id, str)
+            or obligation_id in seen_ids
+            or run_id in seen_run_ids
+        ):
+            fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: duplicate obligation owner: {operation_id}")
+            continue
+        seen_ids.add(obligation_id)
+        seen_run_ids.add(run_id)
+        resolved = _resolve_transferred_obligation(
+            root, receipts, operation_id, obligation, errors, frozenset()
+        )
+        if resolved is not None:
+            result.append(LedgerProjectionRowV1(
+                dict(resolved.event),
+                resolved.raw_line_ordinal,
+                resolved.raw_line_sha256,
+                resolved.raw_event_sha256,
+                "transferred",
+                resolved.obligation_id,
+                operation_id,
+            ))
+    return tuple(result)
+
+
+def validate_obligation_transfer_ownership(root: Path) -> list[str]:
+    """Audit every transferred obligation as one non-branching ownership chain."""
+
+    root = Path(root).resolve()
+    errors: list[str] = []
+    receipts = _transfer_receipts(root, errors)
+    rows_by_operation: dict[str, dict[str, dict]] = {}
+    children: dict[tuple[str, str], list[str]] = {}
+    origins: dict[str, list[str]] = {}
+    for operation_id, (receipt_path, receipt) in receipts.items():
+        archive_path = receipt.get("archivePath")
+        if isinstance(archive_path, str):
+            expected_receipt = root.joinpath(*PurePosixPath(archive_path).parts) / "lifecycle-transition-receipt.json"
+            if receipt_path.resolve() != expected_receipt.resolve():
+                fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: receipt location differs: {operation_id}")
+        operation_rows: dict[str, dict] = {}
+        for row in receipt.get("obligations", []):
+            if not isinstance(row, dict):
+                fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: invalid obligation row: {operation_id}")
+                continue
+            obligation_id = row.get("obligationId")
+            predecessor = row.get("predecessorOperationId")
+            if not isinstance(obligation_id, str) or obligation_id in operation_rows:
+                fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: duplicate obligation identity: {operation_id}")
+                continue
+            operation_rows[obligation_id] = row
+            if predecessor is None:
+                origins.setdefault(obligation_id, []).append(operation_id)
+            elif isinstance(predecessor, str):
+                children.setdefault((predecessor, obligation_id), []).append(operation_id)
+            else:
+                fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: invalid predecessor: {operation_id}")
+        rows_by_operation[operation_id] = operation_rows
+
+    for operation_id, operation_rows in rows_by_operation.items():
+        for obligation_id, row in operation_rows.items():
+            cursor = operation_id
+            current = row
+            visited: set[str] = set()
+            while current.get("predecessorOperationId") is not None:
+                if cursor in visited:
+                    fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: obligation ownership cycle: {obligation_id}")
+                    break
+                visited.add(cursor)
+                predecessor = current.get("predecessorOperationId")
+                if not isinstance(predecessor, str):
+                    break
+                prior = rows_by_operation.get(predecessor, {}).get(obligation_id)
+                if prior is None:
+                    break
+                cursor = predecessor
+                current = prior
+
+    for obligation_id, origin_operations in origins.items():
+        if len(origin_operations) != 1:
+            fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: obligation has multiple origins: {obligation_id}")
+            continue
+        operation_id = origin_operations[0]
+        visited: set[str] = set()
+        while True:
+            if operation_id in visited:
+                fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: obligation ownership cycle: {obligation_id}")
+                break
+            visited.add(operation_id)
+            row = rows_by_operation.get(operation_id, {}).get(obligation_id)
+            if row is None:
+                fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: obligation chain row is absent: {operation_id}")
+                break
+            if _resolve_transferred_obligation(
+                root, receipts, operation_id, row, errors, frozenset()
+            ) is None:
+                break
+            next_operations = children.get((operation_id, obligation_id), [])
+            if len(next_operations) > 1:
+                fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: obligation ownership branches: {obligation_id}")
+                break
+            if not next_operations:
+                successor_slug = receipts[operation_id][1].get("requestSuccessorSlug")
+                if not isinstance(successor_slug, str):
+                    fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: current owner is absent: {obligation_id}")
+                    break
+                work_items = root / "work-items"
+                locations = []
+                backlog = work_items / "backlog" / f"{successor_slug}.md"
+                active = work_items / "active" / successor_slug
+                if backlog.is_file():
+                    locations.append(backlog)
+                if active.is_dir():
+                    locations.append(active)
+                locations.extend(path for path in (work_items / "archive").glob(f"*/{successor_slug}") if path.is_dir())
+                if len(locations) != 1:
+                    fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: current owner location is absent or duplicate: {obligation_id}")
+                elif locations[0].is_dir() and locations[0].parent.parent.name == "archive":
+                    state: list[WorkItemObligationStateV1] = []
+                    terminal_errors = validate_work_item(
+                        locations[0], strict_revise=False, validate_status_file=False,
+                        obligation_state_out=state,
+                    )
+                    errors.extend(terminal_errors)
+                    if len(state) != 1 or any(
+                        open_row.obligation_id == obligation_id
+                        for open_row in state[0].open_revise
+                    ):
+                        fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: unresolved obligation has a terminal owner: {obligation_id}")
+                break
+            next_operation = next_operations[0]
+            next_receipt = receipts.get(next_operation)
+            if next_receipt is None or next_receipt[1].get("workItem") != receipts[operation_id][1].get("requestSuccessorSlug"):
+                fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: successor/source chain differs: {obligation_id}")
+                break
+            operation_id = next_operation
+
+    for (predecessor, obligation_id), next_operations in children.items():
+        if predecessor not in rows_by_operation or obligation_id not in rows_by_operation[predecessor]:
+            fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: predecessor obligation is absent: {obligation_id}")
+        if len(next_operations) > 1:
+            fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: obligation ownership branches: {obligation_id}")
+    return errors
+
+
 def _sha256_text(value: object) -> bool:
     return isinstance(value, str) and SHA256_RE.fullmatch(value) is not None
 
@@ -5233,6 +5672,7 @@ def validate_work_item(
     projection_manifest_blobs: dict[str, bytes] | None = None,
     projection_registry_bytes: bytes | None = None,
     compatibility_artifacts: LedgerCompatibilityArtifactSetV1 | None = None,
+    obligation_state_out: list[WorkItemObligationStateV1] | None = None,
 ) -> list[str]:
     """ledger_path: candidate-validation seam — validate THIS file instead of the live
     ledger (the atomic-write flow validates its temp candidate before os.replace).
@@ -5326,6 +5766,9 @@ def validate_work_item(
                         context=context,
                     )
                 )
+                _capture_obligation_state(
+                    obligation_state_out, context.rows, open_revise, open_launches
+                )
                 if strict_revise:
                     for event in open_launches:
                         fail(
@@ -5348,6 +5791,9 @@ def validate_work_item(
                 telemetry,
                 context=context,
             )
+        )
+        _capture_obligation_state(
+            obligation_state_out, context.rows, open_revise, open_launches
         )
         if strict_revise:
             for event in open_launches:
@@ -5398,15 +5844,18 @@ def validate_work_item(
         registry_bytes=projection_registry_bytes,
     )
     errors.extend(projection_errors)
-    effective_rows, migration_counters, migration_errors = _project_migration_rows(shape_rows, item)
+    native_effective_rows, migration_counters, migration_errors = _project_migration_rows(shape_rows, item)
     errors.extend(migration_errors)
-    effective_events = _row_events(effective_rows)
-    runtime_rows = _runtime_rows_from_projection(effective_rows)
+    native_effective_events = _row_events(native_effective_rows)
     if ledger_path is not None and any(event.get("schemaVersion") == 3 for event in events):
         fail(errors, "legacy V1/V2 writer refuses a ledger containing schemaVersion 3")
     _, v3_errors = reduce_v3_events(events)
     errors.extend(v3_errors)
-    validate_scratch_ownership(effective_events, item, errors)
+    validate_scratch_ownership(native_effective_events, item, errors)
+    inherited_rows = _inherited_transfer_rows(item, errors)
+    effective_rows = inherited_rows + native_effective_rows
+    effective_events = _row_events(effective_rows)
+    runtime_rows = _runtime_rows_from_projection(effective_rows)
     active_positions, event_validity, open_revise, open_launches = (
         _reduce_effective_current_state(
             runtime_rows,
@@ -5415,6 +5864,9 @@ def validate_work_item(
             telemetry,
             context=None,
         )
+    )
+    _capture_obligation_state(
+        obligation_state_out, effective_rows, open_revise, open_launches
     )
     active_events = [effective_events[pos] for pos in active_positions]
     active_rows = [runtime_rows[pos] for pos in active_positions]

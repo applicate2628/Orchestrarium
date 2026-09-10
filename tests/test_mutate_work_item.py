@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import hashlib
 import importlib.util
 import io
@@ -236,6 +237,66 @@ def write_bug_dispositions(
 
 def write_empty_bug_dispositions(root: Path, item_slug: str, instant: str) -> Path:
     return write_bug_dispositions(root, item_slug, instant, [])
+
+
+def successor_binding_bytes(
+    source_slug: str,
+    successor_bytes: bytes,
+    operation_id: str,
+    *,
+    accepted_by: str = "receiving-owner",
+) -> bytes:
+    return (
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "operationId": operation_id,
+                "sourceReference": f"bug:{source_slug}",
+                "registryReference": "external-bug-registry",
+                "recordReference": "bug:accepted-successor",
+                "recordSha256": hashlib.sha256(successor_bytes).hexdigest(),
+                "acceptedBy": accepted_by,
+                "acceptedAt": "2026-09-10T08:00:00Z",
+                "acceptanceEvidence": "Receiving owner accepted the current successor.",
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    ).encode("utf-8")
+
+
+def successor_link_inventory_bytes(
+    source_slug: str,
+    source_bytes: bytes,
+    binding_bytes: bytes,
+    operation_id: str,
+    links: list[dict] | None = None,
+) -> bytes:
+    return (
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "owner": "mutate-work-item:current-bug-supersession-v1",
+                "operationId": operation_id,
+                "sourceReference": f"bug:{source_slug}",
+                "sourceBugSha256": hashlib.sha256(source_bytes).hexdigest(),
+                "successorBindingSha256": hashlib.sha256(binding_bytes).hexdigest(),
+                "links": [] if links is None else links,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    ).encode("utf-8")
+
+
+def tree_file_bytes(root: Path) -> dict[str, bytes]:
+    return {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in sorted(root.rglob("*"))
+        if path.is_file()
+    }
 
 
 def test_close_requires_exact_bug_disposition_manifest(tmp_path: Path) -> None:
@@ -765,6 +826,533 @@ def test_close_replay_accepts_historical_archive_without_bug_manifest(
     assert not (archived / "bug-dispositions-receipt.json").exists()
 
 
+def test_supersede_current_bug_requires_exact_accepted_successor_binding_without_local_mutation(
+    tmp_path: Path,
+) -> None:
+    operation_id = "supersede-current-bug-binding"
+    for case in ("missing", "malformed", "unaccepted", "wrong-operation", "hash-drifted"):
+        module = load_module()
+        root = tmp_path / case
+        slug = f"2026-09-10-{case}-source"
+        source = seed_context_bug(root, "source-owner", slug)
+        successor = root / "receiving-registry" / "accepted-successor.md"
+        successor_bytes = b"id: accepted-successor\nstatus: accepted\n"
+        successor.parent.mkdir(parents=True)
+        successor.write_bytes(successor_bytes)
+        module.refresh_readme(root, allow_marker_bootstrap=True)
+        binding = successor_binding_bytes(slug, successor_bytes, operation_id)
+        if case == "missing":
+            supplied_binding = None
+        elif case == "malformed":
+            supplied_binding = b"{"
+        elif case == "unaccepted":
+            supplied_binding = successor_binding_bytes(
+                slug, successor_bytes, operation_id, accepted_by=""
+            )
+        elif case == "wrong-operation":
+            supplied_binding = successor_binding_bytes(
+                slug, successor_bytes, operation_id + "-other"
+            )
+        else:
+            supplied_binding = binding
+            successor.write_bytes(successor_bytes + b"drift\n")
+        inventory = successor_link_inventory_bytes(
+            slug, source.read_bytes(), binding, operation_id
+        )
+        before = tree_file_bytes(root / "work-items")
+        successor_before = successor.read_bytes()
+
+        try:
+            module.supersede_current_bug(
+                root,
+                slug,
+                successor,
+                supplied_binding,
+                "2026-09-10T08:01:00Z",
+                inventory,
+                hashlib.sha256(source.read_bytes()).hexdigest(),
+                hashlib.sha256(
+                    (root / "work-items" / "README.md").read_bytes()
+                ).hexdigest(),
+                operation_id,
+            )
+        except module.LifecycleError as exc:
+            assert exc.failure_id == "WI-BUG-SUCCESSOR-BINDING", case
+        else:
+            raise AssertionError(f"{case} successor binding was accepted")
+
+        assert tree_file_bytes(root / "work-items") == before, case
+        assert source.is_file(), case
+        assert successor.read_bytes() == successor_before, case
+
+
+def test_supersede_current_bug_rejects_unreadable_live_reference_consumers_without_mutation(
+    tmp_path: Path,
+) -> None:
+    for failure_kind in ("unicode", "oserror"):
+        for inventory_kind in ("zero", "partial"):
+            module = load_module()
+            case = f"{failure_kind}-{inventory_kind}"
+            root = tmp_path / case
+            slug = f"2026-09-10-unreadable-{case}"
+            operation_id = f"supersede-unreadable-{case}"
+            source = seed_context_bug(root, "source-owner", slug)
+            source_before = source.read_bytes()
+            active = root / "work-items" / "active"
+            write(active / "unreadable-consumer" / "status.md", quick_status())
+            unreadable = active / "unreadable-consumer" / "notes.md"
+            unreadable.parent.mkdir(parents=True, exist_ok=True)
+            unreadable.write_bytes(
+                f"Related: bug:{slug}\n".encode("utf-8")
+                + (b"\xff" if failure_kind == "unicode" else b"")
+            )
+            valid = active / "valid-consumer" / "notes.md"
+            valid_before = f"Related: bug:{slug}\n".encode("utf-8")
+            valid_after = (
+                "Related: external-bug-registry#bug:accepted-successor\n"
+            ).encode("utf-8")
+            if inventory_kind == "partial":
+                write(active / "valid-consumer" / "status.md", quick_status())
+                valid.parent.mkdir(parents=True, exist_ok=True)
+                valid.write_bytes(valid_before)
+            successor = root / "receiving-registry" / "accepted-successor.md"
+            successor_bytes = b"id: accepted-successor\nstatus: accepted\n"
+            successor.parent.mkdir(parents=True)
+            successor.write_bytes(successor_bytes)
+            module.refresh_readme(root, allow_marker_bootstrap=True)
+            readme = root / "work-items" / "README.md"
+            binding = successor_binding_bytes(slug, successor_bytes, operation_id)
+            links = (
+                [
+                    {
+                        "path": valid.relative_to(root).as_posix(),
+                        "beforeSha256": hashlib.sha256(valid_before).hexdigest(),
+                        "afterSha256": hashlib.sha256(valid_after).hexdigest(),
+                        "afterBytesBase64": base64.b64encode(valid_after).decode("ascii"),
+                    }
+                ]
+                if inventory_kind == "partial"
+                else []
+            )
+            inventory = successor_link_inventory_bytes(
+                slug, source_before, binding, operation_id, links
+            )
+            work_items_before = tree_file_bytes(root / "work-items")
+            successor_before = successor.read_bytes()
+            original_read_bytes = Path.read_bytes
+
+            def injected_read_bytes(path: Path) -> bytes:
+                if failure_kind == "oserror" and path == unreadable:
+                    raise OSError("injected unreadable live reference consumer")
+                return original_read_bytes(path)
+
+            try:
+                with patch.object(Path, "read_bytes", injected_read_bytes):
+                    module.supersede_current_bug(
+                        root,
+                        slug,
+                        successor,
+                        binding,
+                        "2026-09-10T08:01:30Z",
+                        inventory,
+                        hashlib.sha256(source_before).hexdigest(),
+                        hashlib.sha256(readme.read_bytes()).hexdigest(),
+                        operation_id,
+                    )
+            except module.LifecycleError as exc:
+                assert exc.failure_id == "WI-CATEGORY-MIGRATION-INVENTORY", case
+            else:
+                raise AssertionError(f"{case} unreadable live consumer was omitted")
+
+            assert tree_file_bytes(root / "work-items") == work_items_before, case
+            assert successor.read_bytes() == successor_before, case
+            assert not (
+                root
+                / ".scratch"
+                / "work-items-lifecycle-transitions"
+                / f"{operation_id}.json"
+            ).exists(), case
+
+
+def test_supersede_current_bug_excludes_unreadable_archived_consumers_from_strict_inventory(
+    tmp_path: Path,
+) -> None:
+    for failure_kind in ("unicode", "oserror"):
+        module = load_module()
+        root = tmp_path / failure_kind
+        slug = f"2026-09-10-archived-control-{failure_kind}"
+        operation_id = f"supersede-archived-control-{failure_kind}"
+        source = seed_context_bug(root, "source-owner", slug)
+        source_before = source.read_bytes()
+        historical = (
+            root
+            / "work-items"
+            / "archive"
+            / "2026-08"
+            / "unrelated-history"
+        )
+        write(historical / "status.md", marked_status())
+        write(
+            historical / "closure.md",
+            marked_closure("2026-08-01T00:00:00Z"),
+        )
+        archived_consumer = historical / "notes.bin"
+        archived_consumer.write_bytes(
+            f"Historical: bug:{slug}\n".encode("utf-8")
+            + (b"\xff" if failure_kind == "unicode" else b"")
+        )
+        archived_consumer_before = archived_consumer.read_bytes()
+        successor = root / "receiving-registry" / "accepted-successor.md"
+        successor_bytes = b"id: accepted-successor\nstatus: accepted\n"
+        successor.parent.mkdir(parents=True)
+        successor.write_bytes(successor_bytes)
+        module.refresh_readme(root, allow_marker_bootstrap=True)
+        readme = root / "work-items" / "README.md"
+        binding = successor_binding_bytes(slug, successor_bytes, operation_id)
+        inventory = successor_link_inventory_bytes(
+            slug, source_before, binding, operation_id
+        )
+        original_read_bytes = Path.read_bytes
+
+        def injected_read_bytes(path: Path) -> bytes:
+            if failure_kind == "oserror" and path == archived_consumer:
+                raise OSError("injected unreadable archived consumer")
+            return original_read_bytes(path)
+
+        with patch.object(Path, "read_bytes", injected_read_bytes):
+            settled = module.supersede_current_bug(
+                root,
+                slug,
+                successor,
+                binding,
+                "2026-09-10T08:01:45Z",
+                inventory,
+                hashlib.sha256(source_before).hexdigest(),
+                hashlib.sha256(readme.read_bytes()).hexdigest(),
+                operation_id,
+            )
+
+        archive = (
+            root
+            / "work-items"
+            / "bugs"
+            / "archive"
+            / "2026-09"
+            / f"{slug}.md"
+        )
+        assert settled["status"] == "settled", failure_kind
+        assert not source.exists() and archive.is_file(), failure_kind
+        assert archived_consumer.read_bytes() == archived_consumer_before, failure_kind
+        assert successor.read_bytes() == successor_bytes, failure_kind
+        assert not (
+            root
+            / ".scratch"
+            / "work-items-lifecycle-transitions"
+            / f"{operation_id}.json"
+        ).exists(), failure_kind
+
+
+def test_supersede_current_bug_archives_links_and_readme_in_one_recoverable_intent(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "2026-09-10-source-bug"
+    operation_id = "supersede-current-bug-success"
+    terminal_instant = "2026-09-10T08:02:00Z"
+    source = seed_context_bug(root, "source-owner", slug)
+    source_before = source.read_bytes()
+    consumer = root / "work-items" / "active" / "consumer" / "status.md"
+    old_href = f"../../bugs/{slug}.md"
+    successor_reference = "external-bug-registry#bug:accepted-successor"
+    consumer_before = (
+        quick_status("Track the source bug.")
+        + f"\nRelated: bug:{slug}\n[physical]({old_href})\n"
+    ).encode("utf-8")
+    consumer_after = consumer_before.replace(
+        f"bug:{slug}".encode("utf-8"), successor_reference.encode("utf-8")
+    ).replace(old_href.encode("utf-8"), successor_reference.encode("utf-8"))
+    consumer.parent.mkdir(parents=True)
+    consumer.write_bytes(consumer_before)
+    successor = root / "receiving-registry" / "accepted-successor.md"
+    successor_bytes = b"id: accepted-successor\nstatus: accepted\n"
+    successor.parent.mkdir(parents=True)
+    successor.write_bytes(successor_bytes)
+    module.refresh_readme(root, allow_marker_bootstrap=True)
+    readme = root / "work-items" / "README.md"
+    readme_before_sha256 = hashlib.sha256(readme.read_bytes()).hexdigest()
+    binding = successor_binding_bytes(slug, successor_bytes, operation_id)
+    inventory = successor_link_inventory_bytes(
+        slug,
+        source_before,
+        binding,
+        operation_id,
+        [
+            {
+                "path": consumer.relative_to(root).as_posix(),
+                "beforeSha256": hashlib.sha256(consumer_before).hexdigest(),
+                "afterSha256": hashlib.sha256(consumer_after).hexdigest(),
+                "afterBytesBase64": base64.b64encode(consumer_after).decode("ascii"),
+            }
+        ],
+    )
+    binding_file = root / "successor-binding.json"
+    inventory_file = root / "incoming-links.json"
+    binding_file.write_bytes(binding)
+    inventory_file.write_bytes(inventory)
+    successor_before = successor.read_bytes()
+
+    result = run_cli(
+        "supersede-current-bug",
+        "--root",
+        str(root),
+        "--slug",
+        slug,
+        "--successor-record",
+        str(successor),
+        "--successor-binding-file",
+        str(binding_file),
+        "--terminal-instant",
+        terminal_instant,
+        "--incoming-links-inventory",
+        str(inventory_file),
+        "--expected-bug-sha256",
+        hashlib.sha256(source_before).hexdigest(),
+        "--expected-readme-sha256",
+        readme_before_sha256,
+        "--operation-id",
+        operation_id,
+        "--apply",
+    )
+    assert result.returncode == 0, result.stdout
+    assert "WI-BUG-SUPERSESSION-COMMITTED" in result.stdout
+
+    archive = (
+        root
+        / "work-items"
+        / "bugs"
+        / "archive"
+        / "2026-09"
+        / f"{slug}.md"
+    )
+    receipt_path = archive.with_name(f"{slug}.supersession-receipt.json")
+    assert not source.exists()
+    assert archive.is_file()
+    assert consumer.read_bytes() == consumer_after
+    assert successor.read_bytes() == successor_before
+    fields = module._parse_fields(archive.read_text(encoding="utf-8"))
+    assert fields["status"] == "superseded"
+    assert fields["terminal-at"] == terminal_instant
+    assert fields["resolution"] == f"Superseded by {successor_reference}."
+    assert fields["evidence"] == "Receiving owner accepted the current successor."
+    assert fields["successor"] == successor_reference
+    assert str(successor) not in archive.read_text(encoding="utf-8")
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    assert set(receipt) == {
+        "schemaVersion",
+        "owner",
+        "kind",
+        "status",
+        "operationId",
+        "terminalInstant",
+        "sourceReference",
+        "sourcePath",
+        "archivePath",
+        "archivedBugSha256",
+        "successorBindingSha256",
+        "successorRegistryReference",
+        "successorRecordReference",
+        "successorRecordSha256",
+        "acceptedBy",
+        "acceptedAt",
+        "acceptanceEvidence",
+        "incomingLinksInventorySha256",
+        "links",
+        "readmeSha256",
+        "requestExpectedBugSha256",
+        "requestExpectedReadmeSha256",
+    }
+    assert receipt["owner"] == "mutate-work-item:current-bug-supersession-v1"
+    assert receipt["kind"] == "current-bug-supersession-v1"
+    assert receipt["status"] == "settled"
+    assert receipt["sourceReference"] == f"bug:{slug}"
+    assert receipt["successorRegistryReference"] == "external-bug-registry"
+    assert receipt["successorRecordReference"] == "bug:accepted-successor"
+    assert receipt["links"] == [
+        {
+            "path": consumer.relative_to(root).as_posix(),
+            "beforeSha256": hashlib.sha256(consumer_before).hexdigest(),
+            "afterSha256": hashlib.sha256(consumer_after).hexdigest(),
+        }
+    ]
+    assert receipt["readmeSha256"] == hashlib.sha256(readme.read_bytes()).hexdigest()
+    assert not (
+        root / ".scratch" / "work-items-lifecycle-transitions" / f"{operation_id}.json"
+    ).exists()
+
+
+def test_supersede_current_bug_replay_is_exact_and_mismatch_fails(
+    tmp_path: Path,
+) -> None:
+    def prepare(root: Path, suffix: str) -> tuple[object, dict, bytes, bytes]:
+        module = load_module()
+        slug = f"2026-09-10-recovery-{suffix}"
+        operation_id = f"supersede-recovery-{suffix}"
+        terminal_instant = "2026-09-10T08:03:00Z"
+        source = seed_context_bug(root, "source-owner", slug)
+        source_before = source.read_bytes()
+        consumer = root / "work-items" / "active" / f"consumer-{suffix}" / "status.md"
+        successor_reference = "external-bug-registry#bug:accepted-successor"
+        consumer_before = (
+            quick_status("Track one source bug.") + f"\nRelated: bug:{slug}\n"
+        ).encode("utf-8")
+        consumer_after = consumer_before.replace(
+            f"bug:{slug}".encode(), successor_reference.encode()
+        )
+        consumer.parent.mkdir(parents=True)
+        consumer.write_bytes(consumer_before)
+        successor = root / "receiving-registry" / "accepted-successor.md"
+        successor_bytes = b"id: accepted-successor\nstatus: accepted\n"
+        successor.parent.mkdir(parents=True)
+        successor.write_bytes(successor_bytes)
+        module.refresh_readme(root, allow_marker_bootstrap=True)
+        readme = root / "work-items" / "README.md"
+        binding = successor_binding_bytes(slug, successor_bytes, operation_id)
+        inventory = successor_link_inventory_bytes(
+            slug,
+            source_before,
+            binding,
+            operation_id,
+            [
+                {
+                    "path": consumer.relative_to(root).as_posix(),
+                    "beforeSha256": hashlib.sha256(consumer_before).hexdigest(),
+                    "afterSha256": hashlib.sha256(consumer_after).hexdigest(),
+                    "afterBytesBase64": base64.b64encode(consumer_after).decode("ascii"),
+                }
+            ],
+        )
+        request = {
+            "root": root,
+            "slug": slug,
+            "successor_record": successor,
+            "successor_binding_data": binding,
+            "terminal_instant": terminal_instant,
+            "incoming_links_inventory_data": inventory,
+            "expected_bug_sha256": hashlib.sha256(source_before).hexdigest(),
+            "expected_readme_sha256": hashlib.sha256(readme.read_bytes()).hexdigest(),
+            "operation_id": operation_id,
+        }
+        return module, request, consumer_after, successor_bytes
+
+    replay_root = tmp_path / "replay"
+    module, request, consumer_after, successor_bytes = prepare(replay_root, "replay")
+    settled = module.supersede_current_bug(**request)
+    assert settled["status"] == "settled"
+    assert request["successor_record"].read_bytes() == successor_bytes
+    before_replay = tree_file_bytes(replay_root / "work-items")
+    missing_runtime_path = replay_root / "receiving-registry" / "not-present.md"
+    replay_request = dict(request)
+    replay_request["successor_record"] = missing_runtime_path
+    assert module.supersede_current_bug(**replay_request) == settled
+    assert tree_file_bytes(replay_root / "work-items") == before_replay
+
+    mismatch_requests = {
+        "binding": {
+            "successor_binding_data": request["successor_binding_data"] + b" "
+        },
+        "inventory": {
+            "incoming_links_inventory_data": request["incoming_links_inventory_data"]
+            + b" "
+        },
+        "bug-hash": {"expected_bug_sha256": "0" * 64},
+        "readme-hash": {"expected_readme_sha256": "1" * 64},
+        "terminal": {"terminal_instant": "2026-09-10T08:04:00Z"},
+        "operation": {"operation_id": request["operation_id"] + "-other"},
+    }
+    for case, delta in mismatch_requests.items():
+        mismatched = dict(replay_request)
+        mismatched.update(delta)
+        try:
+            module.supersede_current_bug(**mismatched)
+        except module.LifecycleError as exc:
+            assert exc.failure_id == "WI-BUG-SUPERSESSION-SETTLEMENT-MISMATCH", case
+        else:
+            raise AssertionError(f"{case} replay mismatch was accepted")
+        assert tree_file_bytes(replay_root / "work-items") == before_replay, case
+
+    drift_root = tmp_path / "archive-byte-drift"
+    module, request, _consumer_after, _successor_bytes = prepare(
+        drift_root, "archive-byte-drift"
+    )
+    module.supersede_current_bug(**request)
+    archived_bug = (
+        drift_root
+        / "work-items"
+        / "bugs"
+        / "archive"
+        / "2026-09"
+        / f"{request['slug']}.md"
+    )
+    archived_bug.write_bytes(b"\xff")
+    drift_replay = dict(request)
+    drift_replay["successor_record"] = drift_root / "missing-runtime-record.md"
+    try:
+        module.supersede_current_bug(**drift_replay)
+    except module.LifecycleError as exc:
+        assert exc.failure_id == "WI-BUG-SUPERSESSION-SETTLEMENT-MISMATCH"
+    else:
+        raise AssertionError("non-UTF-8 archived bug drift passed replay")
+
+    for boundary_index in range(8):
+        boundary = f"B{boundary_index}"
+        root = tmp_path / boundary.casefold()
+        module, request, expected_consumer, successor_bytes = prepare(
+            root, boundary.casefold()
+        )
+        try:
+            module.supersede_current_bug(
+                **request, inject_failure_at=boundary
+            )
+        except module.LifecycleError as exc:
+            expected_failure = (
+                "WI-BUG-SUPERSESSION-ROLLBACK-INDETERMINATE"
+                if boundary_index <= 2
+                else "WI-BUG-SUPERSESSION-ROLLFORWARD-INDETERMINATE"
+            )
+            assert exc.failure_id == expected_failure, boundary
+        else:
+            raise AssertionError(f"{boundary} did not interrupt settlement")
+
+        recovered = module.supersede_current_bug(**request)
+        assert recovered["status"] == "settled", boundary
+        source = root / "work-items" / "bugs" / f"{request['slug']}.md"
+        archive = (
+            root
+            / "work-items"
+            / "bugs"
+            / "archive"
+            / "2026-09"
+            / f"{request['slug']}.md"
+        )
+        consumer = (
+            root
+            / "work-items"
+            / "active"
+            / f"consumer-{boundary.casefold()}"
+            / "status.md"
+        )
+        assert not source.exists() and archive.is_file(), boundary
+        assert consumer.read_bytes() == expected_consumer, boundary
+        assert request["successor_record"].read_bytes() == successor_bytes, boundary
+        assert not (
+            root
+            / ".scratch"
+            / "work-items-lifecycle-transitions"
+            / f"{request['operation_id']}.json"
+        ).exists(), boundary
+
+
 def test_category_audit_rejects_unapplied_active_bug_dispositions(
     tmp_path: Path,
 ) -> None:
@@ -975,7 +1563,7 @@ def test_staged_start_ledger_failure_restores_candidate(tmp_path: Path) -> None:
                 return real_ledger.serialize_event(event)
 
         class RejectingValidator:
-            def validate_work_item(self, _item):
+            def validate_work_item(self, _item, *, strict_revise=True):
                 return ["injected temporary validation failure"]
 
         def injected_atomic_write(path: Path, data: bytes) -> None:
@@ -6340,6 +6928,69 @@ def test_decision_v1_list_metadata_accepts_exact_h2_decision_body_heading(
     assert record.body_offset == len(payload.split("## Decision\n", 1)[0].encode("utf-8"))
 
 
+def test_decision_v1_first_heading_diagnostics_preserve_supported_formats_and_metadata_errors(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    slug = "2026-08-11-first-heading-diagnostic"
+    canonical = _canonical_decision_record(slug)
+
+    h1_path = tmp_path / "h1" / f"{slug}.md"
+    write(h1_path, canonical)
+    assert module._validate_current_decision_record(h1_path, slug).format == "canonical-list-v1"
+
+    h2_payload = canonical.replace(f"# Decision: {slug}\n\n", "")
+    h2_path = tmp_path / "h2" / f"{slug}.md"
+    write(h2_path, h2_payload)
+    assert module._validate_current_decision_record(h2_path, slug).format == "canonical-list-v1"
+
+    missing_metadata = canonical.replace("- context: schema-test\n", "")
+    missing_metadata_path = tmp_path / "missing-metadata" / f"{slug}.md"
+    write(missing_metadata_path, missing_metadata)
+    with unittest.TestCase().assertRaises(module.LifecycleError) as metadata_caught:
+        module._validate_current_decision_record(missing_metadata_path, slug)
+    assert metadata_caught.exception.failure_id == "WI-DECISION-SCHEMA-INVALID"
+    assert str(metadata_caught.exception) == (
+        f"decision:{slug} requires one non-empty leading 'context' field"
+    )
+
+    unsupported = canonical.replace(
+        f"# Decision: {slug}", "## Acceptance gate"
+    )
+    unsupported_path = tmp_path / "unsupported" / f"{slug}.md"
+    write(unsupported_path, unsupported)
+    with unittest.TestCase().assertRaises(module.LifecycleError) as unsupported_caught:
+        module._validate_current_decision_record(unsupported_path, slug)
+    assert unsupported_caught.exception.failure_id == "WI-DECISION-SCHEMA-INVALID"
+    assert str(unsupported_caught.exception) == (
+        f"decision:{slug} has unsupported first body heading at line 11: "
+        "'## Acceptance gate'"
+    )
+
+    missing_heading = canonical.replace(
+        f"# Decision: {slug}\n\n", "Decision title\n\n"
+    ).replace("## Decision\n", "Decision body\n")
+    missing_heading_path = tmp_path / "missing-heading" / f"{slug}.md"
+    write(missing_heading_path, missing_heading)
+    with unittest.TestCase().assertRaises(module.LifecycleError) as missing_heading_caught:
+        module._validate_current_decision_record(missing_heading_path, slug)
+    assert missing_heading_caught.exception.failure_id == "WI-DECISION-SCHEMA-INVALID"
+    assert str(missing_heading_caught.exception) == (
+        f"decision:{slug} has no body heading"
+    )
+
+    long_heading = "## " + "x" * 300
+    long_payload = canonical.replace(f"# Decision: {slug}", long_heading)
+    long_path = tmp_path / "long-heading" / f"{slug}.md"
+    write(long_path, long_payload)
+    with unittest.TestCase().assertRaises(module.LifecycleError) as long_caught:
+        module._validate_current_decision_record(long_path, slug)
+    message = str(long_caught.exception)
+    assert long_caught.exception.failure_id == "WI-DECISION-SCHEMA-INVALID"
+    assert len(message) < 300
+    assert "x" * 200 not in message
+
+
 def test_decision_v1_list_metadata_rejects_malformed_h2_body_headings(
     tmp_path: Path,
 ) -> None:
@@ -7254,6 +7905,7 @@ class LifecycleTransactionTests(unittest.TestCase):
             "migrate_legacy_ledger_obligation",
             "revoke_legacy_ledger_obligation",
             "archive_with_successor",
+            "supersede_current_bug",
             "build_migration_inventory",
             "write_migration_inventory",
             "migrate_legacy",

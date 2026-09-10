@@ -2,6 +2,11 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-09-10
+
+- **The source lifecycle owner can now transfer unresolved review obligations to one explicit successor and finish an accepted cross-registry current-bug handoff locally.** `archive-with-successor` accepts an optional bound transfer file, preserves immutable source-ledger bytes, projects one current owner through backlog, activation, close, and re-transfer, and emits a compatible Version 2 receipt; omission retains strict ordinary close and exact Version 1 replay. `supersede-current-bug` requires receiving-owner acceptance plus an exact binding and complete incoming-link inventory, then updates only source-local bug, link, receipt, and README state with exact replay/recovery; it never writes the receiving registry. **Why it matters:** blocked evidence remains traceable without duplicating history, while independently owned bug registries can complete a two-step handoff without pretending to provide cross-registry atomicity. These are tracked source capabilities; installed Codex and Claude runtimes change only after their normal install/update path.
+- **Current Version 1 decision diagnostics now distinguish a missing body heading from an unsupported first heading without changing the accepted grammar or error code.** Unsupported heading text is bounded, while genuine leading-metadata errors retain their field-specific message. **Why it matters:** operators see the actual format defect instead of being told present metadata is missing.
+
 ## 2026-09-09
 
 - **Effective ledger authority is recomputed after closure invalidation.** Invalidated rows have no authority, and a later valid cancellation can settle the launch without reviving the rejected outcome or admitting two authoritative terminals. Unsupported historical finding classes now produce an explicit diagnostic before an atomic waiver bundle is rejected; historical records are neither reclassified nor automatically waived. **Why it matters:** valid cancellation is no longer ignored, and a no-effect waiver can no longer pass silently.

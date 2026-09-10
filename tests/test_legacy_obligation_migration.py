@@ -154,6 +154,228 @@ def run_transition(fixture: dict, *, inject: str | None = None):
     )
 
 
+def transfer_fixture(tmp_path: Path):
+    item, expected, lifecycle, _, migration = committed_fixture(tmp_path)
+    ledger_path = item / "agent-runs.jsonl"
+    ledger_before = ledger_path.read_bytes()
+    instant = "2026-08-18T00:03:00Z"
+    (item / "bug-dispositions.json").write_text(json.dumps({
+        "schemaVersion": 1, "workItem": item.name, "closedAt": instant, "bugs": []
+    }, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    lifecycle.refresh_readme(tmp_path)
+    validator = load_validator()
+    metadata: list[dict[str, object]] = []
+    errors: list[str] = []
+    raw_events = validator.load_jsonl(ledger_path, errors, metadata, ledger_before)
+    assert errors == []
+    effective_events, _, projection_errors = validator.project_legacy_obligation_migrations(
+        raw_events, metadata, item
+    )
+    assert projection_errors == []
+    raw_position = next(
+        position for position, event in enumerate(raw_events)
+        if event.get("runId") == expected["targetRunId"]
+    )
+    raw_event = raw_events[raw_position]
+    projected_event = next(
+        event for event in effective_events
+        if event.get("runId") == expected["targetRunId"]
+    )
+    successor_slug = f"{item.name}-successor"
+    operation_id = "transition-transfer-op-001"
+    transfer = {
+        "schemaVersion": 1,
+        "sourceWorkItem": item.name,
+        "successorWorkItem": successor_slug,
+        "expectedSourceLedgerSha256": sha256(ledger_before),
+        "obligations": [{
+            "runId": expected["targetRunId"],
+            "rawLineOrdinal": metadata[raw_position]["line"],
+            "rawLineSha256": metadata[raw_position]["sha256"],
+            "rawEventSha256": sha256(json.dumps(
+                raw_event, ensure_ascii=False, separators=(",", ":"), sort_keys=True
+            ).encode("utf-8")),
+            "projectedEventSha256": sha256(json.dumps(
+                projected_event, ensure_ascii=False, separators=(",", ":"), sort_keys=True
+            ).encode("utf-8")),
+        }],
+    }
+    closure = (
+        f"Closed: {instant}\n"
+        "Outcome: Transferred the unresolved obligation.\n"
+        "Evidence: focused transfer integration test\n"
+        "Residual risk: None in fixture.\n"
+    ).encode("utf-8")
+    successor = (
+        "Task: Continue the transferred obligation.\n"
+        f"Continues: {item.name}\n"
+        f"Obligation-transfer: {operation_id}\n"
+        "Next action: Resolve the inherited review finding.\n"
+        "updated: 2026-08-18T00:03:00Z\n"
+    ).encode("utf-8")
+    return {
+        "root": tmp_path,
+        "item": item,
+        "slug": item.name,
+        "lifecycle": lifecycle,
+        "closure": closure,
+        "instant": instant,
+        "successorSlug": successor_slug,
+        "successor": successor,
+        "operationId": operation_id,
+        "ledgerSha": sha256(ledger_before),
+        "ledgerBefore": ledger_before,
+        "readmeSha": sha256((tmp_path / "work-items" / "README.md").read_bytes()),
+        "migration": migration,
+        "transfer": json.dumps(transfer, sort_keys=True).encode("utf-8"),
+        "transferObject": transfer,
+    }
+
+
+def native_transfer_fixture(tmp_path: Path):
+    item, expected = copied_fixture(tmp_path)
+    lifecycle = load_script(LIFECYCLE, f"native_transfer_{id(item)}")
+    ledger_path = item / "agent-runs.jsonl"
+    native_events = [
+        json.loads(line) for line in ledger_path.read_text(encoding="utf-8").splitlines()
+    ]
+    native_events[1]["findingClass"] = "correctness"
+    ledger_path.write_bytes(b"".join(
+        json.dumps(event, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode("utf-8") + b"\n"
+        for event in native_events
+    ))
+    ledger_before = ledger_path.read_bytes()
+    instant = "2026-08-18T00:03:00Z"
+    (item / "bug-dispositions.json").write_text(json.dumps({
+        "schemaVersion": 1, "workItem": item.name, "closedAt": instant, "bugs": []
+    }, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    lifecycle.refresh_readme(tmp_path)
+    metadata: list[dict[str, object]] = []
+    errors: list[str] = []
+    raw_events = load_validator().load_jsonl(ledger_path, errors, metadata, ledger_before)
+    assert errors == []
+    raw_position = next(
+        position for position, event in enumerate(raw_events)
+        if event.get("runId") == expected["targetRunId"]
+    )
+    raw_event = raw_events[raw_position]
+    successor_slug = f"{item.name}-native-successor"
+    operation_id = "transition-native-transfer-op-001"
+    transfer = {
+        "schemaVersion": 1,
+        "sourceWorkItem": item.name,
+        "successorWorkItem": successor_slug,
+        "expectedSourceLedgerSha256": sha256(ledger_before),
+        "obligations": [{
+            "runId": expected["targetRunId"],
+            "rawLineOrdinal": metadata[raw_position]["line"],
+            "rawLineSha256": metadata[raw_position]["sha256"],
+            "rawEventSha256": sha256(json.dumps(
+                raw_event, ensure_ascii=False, separators=(",", ":"), sort_keys=True
+            ).encode("utf-8")),
+            "projectedEventSha256": sha256(json.dumps(
+                raw_event, ensure_ascii=False, separators=(",", ":"), sort_keys=True
+            ).encode("utf-8")),
+        }],
+    }
+    successor = (
+        "Task: Continue the native obligation.\n"
+        f"Continues: {item.name}\n"
+        f"Obligation-transfer: {operation_id}\n"
+        "Next action: Resolve the inherited review finding.\n"
+        f"updated: {instant}\n"
+    ).encode("utf-8")
+    return {
+        "root": tmp_path,
+        "item": item,
+        "slug": item.name,
+        "lifecycle": lifecycle,
+        "closure": (
+            f"Closed: {instant}\n"
+            "Outcome: Transferred the native obligation.\n"
+            "Evidence: focused native transfer test\n"
+            "Residual risk: None in fixture.\n"
+        ).encode("utf-8"),
+        "instant": instant,
+        "successorSlug": successor_slug,
+        "successor": successor,
+        "operationId": operation_id,
+        "ledgerSha": sha256(ledger_before),
+        "ledgerBefore": ledger_before,
+        "readmeSha": sha256((tmp_path / "work-items" / "README.md").read_bytes()),
+        "transfer": json.dumps(transfer, sort_keys=True).encode("utf-8"),
+        "transferObject": transfer,
+    }
+
+
+def run_transfer(fixture: dict, *, inject: str | None = None):
+    return fixture["lifecycle"].archive_with_successor(
+        fixture["root"], fixture["slug"], fixture["closure"], fixture["instant"],
+        fixture["successorSlug"], fixture["successor"], fixture["operationId"],
+        fixture["ledgerSha"], fixture["readmeSha"],
+        obligation_transfer_data=fixture["transfer"], inject_failure_at=inject,
+    )
+
+
+def successor_status(source_slug: str, operation_id: str) -> bytes:
+    return (
+        "---\n"
+        "template: staged\n"
+        "status: active\n"
+        "started: 2026-08-18T00:04:00Z\n"
+        "updated: 2026-08-18T00:04:00Z\n"
+        "---\n\n"
+        "Task: Resolve the inherited obligation.\n"
+        "Current step: Re-verify the inherited finding.\n"
+        "Last result: Successor accepted.\n"
+        "Next action: Run the lifecycle oracle.\n"
+        "Scope boundary: Successor fixture only.\n"
+        "Owner: qa-engineer\n"
+        "Integration owner: lead\n"
+        "Evidence gate: focused transfer test\n"
+        f"Continues: {source_slug}\n"
+        f"Obligation-transfer: {operation_id}\n"
+    ).encode("utf-8")
+
+
+def append_successor_closer(item: Path, target_run_id: str) -> None:
+    ledger_owner = load_script(LEDGER, f"successor_closer_{id(item)}")
+    ledger_path = item / "agent-runs.jsonl"
+    launch = {
+        "schemaVersion": 2,
+        "runId": "successor-review-r1",
+        "workItem": item.name,
+        "role": "toolchain-engineer",
+        "executionRole": "internal",
+        "status": "running",
+        "gate": "none",
+        "scope": ["implementation.md"],
+        "eventKind": "launch",
+        "startedAt": "2026-08-18T00:04:10Z",
+        "updatedAt": "2026-08-18T00:04:10Z",
+    }
+    terminal = {
+        **launch,
+        "runId": "successor-review-r1-terminal",
+        "status": "completed",
+        "gate": "PASS",
+        "eventKind": "terminal",
+        "launchRunId": launch["runId"],
+        "closesRunIds": [target_run_id],
+        "artifact": "implementation.md",
+        "artifactRevision": "b" * 64,
+        "lane": "implementation",
+        "effort": "high",
+        "evidence": [{"kind": "artifact", "ref": "implementation.md"}],
+        "startedAt": "2026-08-18T00:04:20Z",
+        "updatedAt": "2026-08-18T00:04:20Z",
+    }
+    (item / "implementation.md").write_text("# Successor verification\n", encoding="utf-8")
+    with ledger_path.open("ab") as stream:
+        stream.write((ledger_owner.serialize_event(launch) + "\n").encode("utf-8"))
+        stream.write((ledger_owner.serialize_event(terminal) + "\n").encode("utf-8"))
+
+
 def copied_fixture(tmp_path: Path) -> tuple[Path, dict]:
     item = tmp_path / "work-items" / "active" / "legacy-obligation-migration-v2"
     shutil.copytree(FIXTURE, item)
@@ -820,6 +1042,363 @@ def test_archive_with_successor_replay_is_idempotent_and_hash_bound(tmp_path: Pa
             fixture["lifecycle"].archive_with_successor(**{**base, **overrides})
         assert caught.value.failure_id == "WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH"
     assert {path.relative_to(tmp_path).as_posix(): sha256(path.read_bytes()) for path in paths} == before
+
+
+def test_archive_with_successor_transfer_exactly_once_across_activation_close_and_retransfer(
+    tmp_path: Path,
+) -> None:
+    fixture = transfer_fixture(tmp_path)
+
+    receipt = run_transfer(fixture)
+
+    archive = tmp_path / "work-items" / "archive" / "2026-08" / fixture["slug"]
+    successor = tmp_path / "work-items" / "backlog" / f"{fixture['successorSlug']}.md"
+    assert receipt["schemaVersion"] == 2
+    assert receipt["owner"] == "mutate-work-item:archive-with-successor-v2"
+    assert receipt["transferInputSha256"] == sha256(fixture["transfer"])
+    assert len(receipt["obligations"]) == 1
+    assert receipt["obligations"][0]["runId"] == fixture["transferObject"]["obligations"][0]["runId"]
+    assert receipt["obligations"][0]["obligationId"]
+    assert receipt["obligations"][0]["predecessorOperationId"] is None
+    assert (archive / "agent-runs.jsonl").read_bytes() == fixture["ledgerBefore"]
+    assert successor.read_bytes() == fixture["successor"]
+
+    incomplete_status = successor_status(fixture["slug"], fixture["operationId"]).replace(
+        f"Obligation-transfer: {fixture['operationId']}\n".encode("utf-8"), b""
+    )
+    with pytest.raises(fixture["lifecycle"].LifecycleError) as caught:
+        fixture["lifecycle"].start_item(
+            fixture["root"], fixture["successorSlug"], incomplete_status
+        )
+    assert caught.value.failure_id == "WI-OBLIGATION-TRANSFER-OWNER"
+    assert successor.is_file()
+
+    active_successor = fixture["lifecycle"].start_item(
+        fixture["root"],
+        fixture["successorSlug"],
+        successor_status(fixture["slug"], fixture["operationId"]),
+    )
+    states: list[object] = []
+    errors = load_validator().validate_work_item(
+        active_successor, strict_revise=False, obligation_state_out=states
+    )
+    assert errors == []
+    assert len(states) == 1
+    assert [row.run_id for row in states[0].open_revise] == [
+        fixture["transferObject"]["obligations"][0]["runId"]
+    ]
+    assert [row.obligation_id for row in states[0].open_revise] == [
+        receipt["obligations"][0]["obligationId"]
+    ]
+
+    second_operation = "transition-transfer-op-002"
+    second_successor_slug = f"{fixture['successorSlug']}-next"
+    second_inherited = states[0].open_revise[0]
+    second_transfer = json.dumps({
+        "schemaVersion": 1,
+        "sourceWorkItem": fixture["successorSlug"],
+        "successorWorkItem": second_successor_slug,
+        "expectedSourceLedgerSha256": sha256((active_successor / "agent-runs.jsonl").read_bytes()),
+        "obligations": [{
+            "runId": second_inherited.run_id,
+            "rawLineOrdinal": second_inherited.raw_line_ordinal,
+            "rawLineSha256": second_inherited.raw_line_sha256,
+            "rawEventSha256": second_inherited.raw_event_sha256,
+            "projectedEventSha256": second_inherited.projected_event_sha256,
+        }],
+    }, sort_keys=True).encode("utf-8")
+    second_instant = "2026-08-18T00:05:00Z"
+    (active_successor / "bug-dispositions.json").write_text(json.dumps({
+        "schemaVersion": 1,
+        "workItem": fixture["successorSlug"],
+        "closedAt": second_instant,
+        "bugs": [],
+    }, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    fixture["lifecycle"].refresh_readme(fixture["root"])
+    second_ledger_sha = sha256((active_successor / "agent-runs.jsonl").read_bytes())
+    second_readme_sha = sha256((fixture["root"] / "work-items" / "README.md").read_bytes())
+    second_successor = (
+        "Task: Continue the inherited obligation once more.\n"
+        f"Continues: {fixture['successorSlug']}\n"
+        f"Obligation-transfer: {second_operation}\n"
+        "Next action: Resolve the inherited review finding.\n"
+        f"updated: {second_instant}\n"
+    ).encode("utf-8")
+    second_closure = (
+        f"Closed: {second_instant}\n"
+        "Outcome: Re-transferred the unresolved obligation.\n"
+        "Evidence: focused re-transfer integration test\n"
+        "Residual risk: None in fixture.\n"
+    ).encode("utf-8")
+
+    second_receipt = fixture["lifecycle"].archive_with_successor(
+        fixture["root"], fixture["successorSlug"], second_closure, second_instant,
+        second_successor_slug, second_successor, second_operation,
+        second_ledger_sha, second_readme_sha,
+        obligation_transfer_data=second_transfer,
+    )
+
+    assert second_receipt["obligations"][0]["obligationId"] == receipt["obligations"][0]["obligationId"]
+    assert second_receipt["obligations"][0]["predecessorOperationId"] == fixture["operationId"]
+    assert fixture["transferObject"]["obligations"][0]["runId"].encode("utf-8") not in (
+        fixture["root"] / "work-items" / "archive" / "2026-08" /
+        fixture["successorSlug"] / "agent-runs.jsonl"
+    ).read_bytes()
+    fixture["lifecycle"].audit(fixture["root"])
+
+    close_fixture = transfer_fixture(tmp_path / "close")
+    close_receipt = run_transfer(close_fixture)
+    close_active = close_fixture["lifecycle"].start_item(
+        close_fixture["root"],
+        close_fixture["successorSlug"],
+        successor_status(close_fixture["slug"], close_fixture["operationId"]),
+    )
+    append_successor_closer(
+        close_active, close_receipt["obligations"][0]["runId"]
+    )
+    close_instant = "2026-08-18T00:06:00Z"
+    (close_active / "bug-dispositions.json").write_text(json.dumps({
+        "schemaVersion": 1,
+        "workItem": close_fixture["successorSlug"],
+        "closedAt": close_instant,
+        "bugs": [],
+    }, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    close_fixture["lifecycle"].refresh_readme(close_fixture["root"])
+    closed = close_fixture["lifecycle"].close_item(
+        close_fixture["root"],
+        close_fixture["successorSlug"],
+        (
+            f"Closed: {close_instant}\n"
+            "Outcome: Closed the inherited obligation.\n"
+            "Evidence: focused successor close test\n"
+            "Residual risk: None in fixture.\n"
+        ).encode("utf-8"),
+        close_instant,
+    )
+    assert closed.is_dir()
+    successor_events = [
+        json.loads(line)
+        for line in (closed / "agent-runs.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert all(
+        event.get("runId") != close_receipt["obligations"][0]["runId"]
+        for event in successor_events
+    )
+    close_fixture["lifecycle"].audit(close_fixture["root"])
+
+
+def test_archive_with_successor_transfer_rejects_coverage_owner_and_drift_matrix_without_mutation(
+    tmp_path: Path,
+) -> None:
+    cases = (
+        ("missing", "WI-OBLIGATION-TRANSFER-COVERAGE"),
+        ("duplicate", "WI-OBLIGATION-TRANSFER-COVERAGE"),
+        ("raw-drift", "WI-OBLIGATION-TRANSFER-DRIFT"),
+        ("projected-drift", "WI-OBLIGATION-TRANSFER-DRIFT"),
+    )
+    for name, expected_failure in cases:
+        fixture = transfer_fixture(tmp_path / name)
+        payload = json.loads(fixture["transfer"])
+        if name == "missing":
+            payload["obligations"] = []
+        elif name == "duplicate":
+            payload["obligations"].append(dict(payload["obligations"][0]))
+        elif name == "raw-drift":
+            payload["obligations"][0]["rawEventSha256"] = "0" * 64
+        else:
+            payload["obligations"][0]["projectedEventSha256"] = "0" * 64
+        fixture["transfer"] = json.dumps(payload, sort_keys=True).encode("utf-8")
+        before = {
+            path.relative_to(fixture["root"]).as_posix(): sha256(path.read_bytes())
+            for path in (fixture["root"] / "work-items").rglob("*")
+            if path.is_file()
+        }
+
+        with pytest.raises(fixture["lifecycle"].LifecycleError) as caught:
+            run_transfer(fixture)
+
+        after = {
+            path.relative_to(fixture["root"]).as_posix(): sha256(path.read_bytes())
+            for path in (fixture["root"] / "work-items").rglob("*")
+            if path.is_file()
+        }
+        assert caught.value.failure_id == expected_failure
+        assert after == before
+
+    terminal = transfer_fixture(tmp_path / "terminal-owner")
+    terminal_receipt = run_transfer(terminal)
+    terminal_backlog = (
+        terminal["root"] / "work-items" / "backlog" / f"{terminal['successorSlug']}.md"
+    )
+    terminal_owner = (
+        terminal["root"] / "work-items" / "archive" / "2026-08" /
+        terminal["successorSlug"]
+    )
+    terminal_owner.mkdir(parents=True)
+    shutil.move(str(terminal_backlog), str(terminal_owner / "admission.md"))
+    (terminal_owner / "status.md").write_bytes(
+        successor_status(terminal["slug"], terminal["operationId"])
+    )
+    terminal_errors = load_validator().validate_obligation_transfer_ownership(
+        terminal["root"]
+    )
+    assert any(
+        "WI-OBLIGATION-TRANSFER-OWNER" in error and "terminal owner" in error
+        for error in terminal_errors
+    )
+
+    def add_fabricated_receipt(
+        fixture: dict,
+        base_receipt: dict,
+        operation_id: str,
+        predecessor_operation_id: str,
+        successor_slug: str,
+    ) -> None:
+        validator = load_validator()
+        archive = (
+            fixture["root"] / "work-items" / "archive" / "2026-09" / operation_id
+        )
+        archive.mkdir(parents=True)
+        ledger_bytes = b'{"fixture":"transfer-owner"}\n'
+        (archive / "agent-runs.jsonl").write_bytes(ledger_bytes)
+        archive_relative = archive.relative_to(fixture["root"]).as_posix()
+        row = dict(base_receipt["obligations"][0])
+        row["predecessorOperationId"] = predecessor_operation_id
+        payload = {
+            **base_receipt,
+            "operationId": operation_id,
+            "workItem": fixture["successorSlug"],
+            "requestSuccessorSlug": successor_slug,
+            "successorPath": f"work-items/backlog/{successor_slug}.md",
+            "archivePath": archive_relative,
+            "ledgerSha256": sha256(ledger_bytes),
+            "archiveIdentity": validator.archived_ledger_identity(
+                archive_relative, sha256(ledger_bytes)
+            ),
+            "predecessorOperationId": predecessor_operation_id,
+            "obligations": [row],
+        }
+        (archive / "lifecycle-transition-receipt.json").write_text(
+            json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8"
+        )
+
+    branch = transfer_fixture(tmp_path / "branch")
+    branch_receipt = run_transfer(branch)
+    add_fabricated_receipt(
+        branch, branch_receipt, "branch-op-a", branch["operationId"], "branch-a"
+    )
+    add_fabricated_receipt(
+        branch, branch_receipt, "branch-op-b", branch["operationId"], "branch-b"
+    )
+    branch_errors = load_validator().validate_obligation_transfer_ownership(branch["root"])
+    assert any("WI-OBLIGATION-TRANSFER-OWNER" in error and "branches" in error for error in branch_errors)
+
+    duplicate = transfer_fixture(tmp_path / "duplicate-owner")
+    run_transfer(duplicate)
+    duplicate_path = (
+        duplicate["root"] / "work-items" / "archive" / "2026-08" /
+        duplicate["slug"] / "lifecycle-transition-receipt.json"
+    )
+    duplicate_payload = json.loads(duplicate_path.read_text(encoding="utf-8"))
+    duplicate_payload["obligations"].append(dict(duplicate_payload["obligations"][0]))
+    duplicate_path.write_text(json.dumps(duplicate_payload, sort_keys=True) + "\n", encoding="utf-8")
+    duplicate_errors = load_validator().validate_obligation_transfer_ownership(duplicate["root"])
+    assert any("WI-OBLIGATION-TRANSFER-OWNER" in error and "duplicate" in error for error in duplicate_errors)
+
+    cycle = transfer_fixture(tmp_path / "cycle")
+    cycle_receipt = run_transfer(cycle)
+    add_fabricated_receipt(cycle, cycle_receipt, "cycle-op-a", "cycle-op-b", "cycle-a")
+    add_fabricated_receipt(cycle, cycle_receipt, "cycle-op-b", "cycle-op-a", "cycle-b")
+    cycle_errors = load_validator().validate_obligation_transfer_ownership(cycle["root"])
+    assert any("WI-OBLIGATION-TRANSFER-OWNER" in error and "cycle" in error for error in cycle_errors)
+
+
+def test_archive_with_successor_transfer_preserves_ledger_bytes_crash_recovery_and_replay(
+    tmp_path: Path,
+) -> None:
+    for boundary in (f"T{index}" for index in range(10)):
+        fixture = transfer_fixture(tmp_path / boundary)
+        with pytest.raises(fixture["lifecycle"].LifecycleError):
+            run_transfer(fixture, inject=boundary)
+        fresh = load_script(LIFECYCLE, f"transfer_recovery_{boundary}")
+        fixture["lifecycle"] = fresh
+        if boundary in {"T0", "T1", "T2"}:
+            fresh._recover_all_transitions(fixture["root"])
+            assert fixture["item"].is_dir()
+        first = run_transfer(fixture)
+        archive = (
+            fixture["root"] / "work-items" / "archive" / "2026-08" / fixture["slug"]
+        )
+        assert (archive / "agent-runs.jsonl").read_bytes() == fixture["ledgerBefore"]
+        before = {
+            path.relative_to(fixture["root"]).as_posix(): sha256(path.read_bytes())
+            for path in (fixture["root"] / "work-items").rglob("*")
+            if path.is_file()
+        }
+        second = run_transfer(fixture)
+        after = {
+            path.relative_to(fixture["root"]).as_posix(): sha256(path.read_bytes())
+            for path in (fixture["root"] / "work-items").rglob("*")
+            if path.is_file()
+        }
+        assert second == first
+        assert after == before
+
+        changed = dict(json.loads(fixture["transfer"]))
+        changed["obligations"] = []
+        fixture["transfer"] = json.dumps(changed, sort_keys=True).encode("utf-8")
+        with pytest.raises(fresh.LifecycleError) as caught:
+            run_transfer(fixture)
+        assert caught.value.failure_id == "WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH"
+
+
+def test_archive_with_successor_transfer_accepts_zero_migration_receipts_for_native_open_revise(
+    tmp_path: Path,
+) -> None:
+    fixture = native_transfer_fixture(tmp_path)
+
+    receipt = run_transfer(fixture)
+
+    assert receipt["schemaVersion"] == 2
+    assert receipt["migrationReceiptSha256"] is None
+    assert len(receipt["obligations"]) == 1
+    archive = tmp_path / "work-items" / "archive" / "2026-08" / fixture["slug"]
+    assert not (archive / "ledger-migration-receipts").exists()
+    assert (archive / "agent-runs.jsonl").read_bytes() == fixture["ledgerBefore"]
+
+
+def test_archive_with_successor_transfer_cli_binds_optional_input_file(tmp_path: Path) -> None:
+    fixture = native_transfer_fixture(tmp_path)
+    closure_file = tmp_path / "closure-transfer.md"
+    successor_file = tmp_path / "successor-transfer.md"
+    transfer_file = tmp_path / "obligation-transfer.json"
+    closure_file.write_bytes(fixture["closure"])
+    successor_file.write_bytes(fixture["successor"])
+    transfer_file.write_bytes(fixture["transfer"])
+
+    result = run_script(
+        LIFECYCLE,
+        "archive-with-successor",
+        "--root", str(tmp_path),
+        "--slug", fixture["slug"],
+        "--closure-file", str(closure_file),
+        "--terminal-instant", fixture["instant"],
+        "--successor-slug", fixture["successorSlug"],
+        "--successor-file", str(successor_file),
+        "--operation-id", fixture["operationId"],
+        "--expected-ledger-sha256", fixture["ledgerSha"],
+        "--expected-readme-sha256", fixture["readmeSha"],
+        "--obligation-transfer-file", str(transfer_file),
+    )
+
+    assert result.returncode == 0, result.stdout
+    assert "WI-LIFECYCLE-TRANSITION-COMMITTED" in result.stdout
+    receipt_path = (
+        tmp_path / "work-items" / "archive" / "2026-08" / fixture["slug"] /
+        "lifecycle-transition-receipt.json"
+    )
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    assert receipt["transferInputSha256"] == sha256(fixture["transfer"])
 def test_checker_enforces_migration_schema_runbook_fixture_and_pointer_parity(tmp_path: Path) -> None:
     checker = load_script(
         ROOT / "scripts" / "check-agent-run-ledger-contract.py",
