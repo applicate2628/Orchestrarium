@@ -63,8 +63,8 @@ def resolve_scalar(
         try:
             if not candidate.is_file():
                 continue
-            text = candidate.read_text(encoding="utf-8", errors="replace")
-        except Exception:
+            text = candidate.read_text(encoding="utf-8", errors="strict")
+        except (OSError, UnicodeError):
             continue
         for raw_line in text.splitlines():
             if raw_line.startswith(prefix):
