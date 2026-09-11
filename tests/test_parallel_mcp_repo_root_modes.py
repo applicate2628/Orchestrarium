@@ -35,7 +35,7 @@ def test_parallel_reminder_reads_project_modes_from_git_root(tmp_path: Path) -> 
     envelope = {
         "hook_event_name": "PreToolUse",
         "tool_name": "exec_command",
-        "tool_input": {"cmd": "python scripts/run.py"},
+        "tool_input": {"cmd": "python ../../scripts/run.py"},
         "cwd": str(nested),
     }
     env = os.environ.copy()
