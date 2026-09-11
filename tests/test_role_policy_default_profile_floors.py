@@ -57,15 +57,16 @@ def test_reminder_does_not_claim_the_installed_resolver_is_absent() -> None:
     assert "is NOT shipped to install targets" not in source
 
 
-def test_installed_resolver_is_a_runtime_helper_while_reminder_stays_self_contained() -> None:
+def test_installed_resolver_and_sibling_scalar_helper_keep_distinct_runtime_ownership() -> None:
     installer = (ROOT / "scripts" / "production_installer.py").read_text(encoding="utf-8")
     reminder = (
         ROOT / "src.codex" / "skills" / "lead" / "scripts" / "agents-mode-reminder.py"
     ).read_text(encoding="utf-8")
 
     assert '"resolve-agents-mode.py",' in installer
-    assert "SELF-CONTAINED first-match read" in reminder
-    assert "does not import" in reminder
+    assert "agents_mode_runtime.py" in reminder
+    assert "owns the first-match read" in reminder
+    assert "from agents_mode_runtime import resolve_scalar" in reminder
 
 
 def test_role_migration_and_luna_docs_have_no_stale_create_only_contract() -> None:
