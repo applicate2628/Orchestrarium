@@ -5,6 +5,7 @@ import importlib.util
 import json
 import os
 import re
+import stat
 import sys
 import tempfile
 import time
@@ -652,39 +653,141 @@ def _noncanonical_history_marker(
     }
 
 
-def _read_exact_history_blob(path: Path, expected_sha256: str) -> bytes | None:
-    if not path.exists():
-        return None
+def _noncanonical_is_reparse(metadata: os.stat_result) -> bool:
+    flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+    return bool(getattr(metadata, "st_file_attributes", 0) & flag)
+
+
+def _noncanonical_file_identity(metadata: os.stat_result) -> tuple[int, int, int, int]:
+    return (
+        metadata.st_dev,
+        metadata.st_ino,
+        metadata.st_mode,
+        getattr(metadata, "st_file_attributes", 0),
+    )
+
+
+def _noncanonical_open_ordinary(path: Path, *, writable: bool) -> tuple[int, os.stat_result]:
     try:
-        value = path.read_bytes()
+        before = path.lstat()
     except OSError as exc:
         _noncanonical_fail("HISTORY-CONFLICT", str(exc))
+    if (
+        not stat.S_ISREG(before.st_mode)
+        or stat.S_ISLNK(before.st_mode)
+        or _noncanonical_is_reparse(before)
+    ):
+        _noncanonical_fail("HISTORY-CONFLICT", f"linked or non-ordinary path: {path.name}")
+    flags = (os.O_RDWR if writable else os.O_RDONLY) | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        _noncanonical_fail("HISTORY-CONFLICT", str(exc))
+    try:
+        opened = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or _noncanonical_is_reparse(opened)
+            or _noncanonical_file_identity(before) != _noncanonical_file_identity(opened)
+        ):
+            _noncanonical_fail("HISTORY-CONFLICT", f"path identity changed while opening: {path.name}")
+        return descriptor, opened
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def _read_exact_history_blob(path: Path, expected_sha256: str) -> bytes | None:
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        _noncanonical_fail("HISTORY-CONFLICT", str(exc))
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or stat.S_ISLNK(metadata.st_mode)
+        or _noncanonical_is_reparse(metadata)
+    ):
+        _noncanonical_fail("HISTORY-CONFLICT", "history blob is linked or non-ordinary")
+    # A crash after os.link() but before staging cleanup leaves exactly the
+    # history name plus its owned staging name on the same inode. Admit only that
+    # known two-link crash state; an arbitrary external hardlink is not authority.
+    links = getattr(metadata, "st_nlink", 1)
+    if links != 1:
+        staging = path.parent / f".{path.name}.tmp"
+        try:
+            staging_metadata = staging.lstat()
+        except OSError as exc:
+            _noncanonical_fail("HISTORY-CONFLICT", "history blob has an unowned hardlink")
+        if (
+            links != 2
+            or not stat.S_ISREG(staging_metadata.st_mode)
+            or stat.S_ISLNK(staging_metadata.st_mode)
+            or _noncanonical_is_reparse(staging_metadata)
+            or (metadata.st_dev, metadata.st_ino) != (staging_metadata.st_dev, staging_metadata.st_ino)
+        ):
+            _noncanonical_fail("HISTORY-CONFLICT", "history blob has an unowned hardlink")
+    descriptor, _opened = _noncanonical_open_ordinary(path, writable=False)
+    try:
+        with os.fdopen(descriptor, "rb") as stream:
+            descriptor = -1
+            value = stream.read()
+    except OSError as exc:
+        _noncanonical_fail("HISTORY-CONFLICT", str(exc))
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
     if hashlib.sha256(value).hexdigest() != expected_sha256:
         _noncanonical_fail("HISTORY-CONFLICT", "history blob digest changed")
     return value
 
 
 def _write_exact_staging_file(path: Path, expected: bytes) -> None:
-    if path.exists():
+    def accept_existing() -> None:
+        descriptor, opened = _noncanonical_open_ordinary(path, writable=False)
+        if getattr(opened, "st_nlink", 1) != 1:
+            os.close(descriptor)
+            _noncanonical_fail("HISTORY-CONFLICT", f"staging path has extra hardlinks: {path.name}")
         try:
-            actual = path.read_bytes()
+            with os.fdopen(descriptor, "rb") as stream:
+                actual = stream.read()
         except OSError as exc:
             _noncanonical_fail("HISTORY-CONFLICT", str(exc))
         if actual != expected:
             _noncanonical_fail("HISTORY-CONFLICT", f"staging path conflicts: {path.name}")
-        return
-    descriptor = None
+
     try:
-        descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        with os.fdopen(descriptor, "wb") as stream:
+        path.lstat()
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        _noncanonical_fail("HISTORY-CONFLICT", str(exc))
+    else:
+        accept_existing()
+        return
+
+    descriptor = None
+    flags = os.O_CREAT | os.O_EXCL | os.O_RDWR | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags, 0o600)
+        opened = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or _noncanonical_is_reparse(opened)
+            or getattr(opened, "st_nlink", 1) != 1
+        ):
+            _noncanonical_fail("HISTORY-CONFLICT", f"created staging path is not ordinary: {path.name}")
+        with os.fdopen(descriptor, "w+b") as stream:
             descriptor = None
             stream.write(expected)
             stream.flush()
-        if path.read_bytes() != expected:
-            _noncanonical_fail("HISTORY-CONFLICT", f"staging readback changed: {path.name}")
+            os.fsync(stream.fileno())
+            stream.seek(0)
+            if stream.read() != expected:
+                _noncanonical_fail("HISTORY-CONFLICT", f"staging readback changed: {path.name}")
     except FileExistsError:
-        if path.read_bytes() != expected:
-            _noncanonical_fail("HISTORY-CONFLICT", f"staging path conflicts: {path.name}")
+        accept_existing()
     except OSError as exc:
         _noncanonical_fail("HISTORY-CONFLICT", str(exc))
     finally:
@@ -696,18 +799,24 @@ def _publish_noncanonical_history_blob(
     item: Path, history_path: Path, expected_sha256: str, original_bytes: bytes
 ) -> None:
     staging = item / f".{history_path.name}.tmp"
+    existing = _read_exact_history_blob(history_path, expected_sha256)
+    if existing is not None:
+        if existing != original_bytes:
+            _noncanonical_fail("HISTORY-CONFLICT", "history blob bytes changed")
+        # Complete cleanup from the admitted crash state. unlink() removes only
+        # the staging directory entry; it never follows a symlink or reparse leaf.
+        staging.unlink(missing_ok=True)
+        return
     _write_exact_staging_file(staging, original_bytes)
     try:
-        existing = _read_exact_history_blob(history_path, expected_sha256)
-        if existing is None:
-            try:
-                os.link(staging, history_path)
-            except FileExistsError:
-                existing = _read_exact_history_blob(history_path, expected_sha256)
-                if existing is None:
-                    _noncanonical_fail(
-                        "HISTORY-CONFLICT", "history publication raced without a file"
-                    )
+        try:
+            os.link(staging, history_path, follow_symlinks=False)
+        except FileExistsError:
+            existing = _read_exact_history_blob(history_path, expected_sha256)
+            if existing is None:
+                _noncanonical_fail(
+                    "HISTORY-CONFLICT", "history publication raced without a file"
+                )
         published = _read_exact_history_blob(history_path, expected_sha256)
         if published != original_bytes:
             _noncanonical_fail("HISTORY-CONFLICT", "history blob bytes changed")
