@@ -667,22 +667,27 @@ def _noncanonical_file_identity(metadata: os.stat_result) -> tuple[int, int, int
     )
 
 
-def _noncanonical_open_ordinary(path: Path, *, writable: bool) -> tuple[int, os.stat_result]:
+def _noncanonical_open_ordinary(
+    path: Path,
+    *,
+    writable: bool,
+    failure_id: str = "HISTORY-CONFLICT",
+) -> tuple[int, os.stat_result]:
     try:
         before = path.lstat()
     except OSError as exc:
-        _noncanonical_fail("HISTORY-CONFLICT", str(exc))
+        _noncanonical_fail(failure_id, str(exc))
     if (
         not stat.S_ISREG(before.st_mode)
         or stat.S_ISLNK(before.st_mode)
         or _noncanonical_is_reparse(before)
     ):
-        _noncanonical_fail("HISTORY-CONFLICT", f"linked or non-ordinary path: {path.name}")
+        _noncanonical_fail(failure_id, f"linked or non-ordinary path: {path.name}")
     flags = (os.O_RDWR if writable else os.O_RDONLY) | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
     try:
         descriptor = os.open(path, flags)
     except OSError as exc:
-        _noncanonical_fail("HISTORY-CONFLICT", str(exc))
+        _noncanonical_fail(failure_id, str(exc))
     try:
         opened = os.fstat(descriptor)
         if (
@@ -690,11 +695,29 @@ def _noncanonical_open_ordinary(path: Path, *, writable: bool) -> tuple[int, os.
             or _noncanonical_is_reparse(opened)
             or _noncanonical_file_identity(before) != _noncanonical_file_identity(opened)
         ):
-            _noncanonical_fail("HISTORY-CONFLICT", f"path identity changed while opening: {path.name}")
+            _noncanonical_fail(failure_id, f"path identity changed while opening: {path.name}")
         return descriptor, opened
     except BaseException:
         os.close(descriptor)
         raise
+
+
+def _noncanonical_read_owned_bytes(path: Path, *, failure_id: str) -> bytes:
+    descriptor, opened = _noncanonical_open_ordinary(
+        path, writable=False, failure_id=failure_id
+    )
+    if getattr(opened, "st_nlink", 1) != 1:
+        os.close(descriptor)
+        _noncanonical_fail(failure_id, f"path has extra hardlinks: {path.name}")
+    try:
+        with os.fdopen(descriptor, "rb") as stream:
+            descriptor = -1
+            return stream.read()
+    except OSError as exc:
+        _noncanonical_fail(failure_id, str(exc))
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
 
 
 def _read_exact_history_blob(path: Path, expected_sha256: str) -> bytes | None:
@@ -835,10 +858,7 @@ def _noncanonical_recovery_state(
 ) -> tuple[str, bytes, Path, bytes]:
     ledger_path = item / "agent-runs.jsonl"
     history_path = item / f"agent-runs.history.{expected_sha256}.jsonl"
-    try:
-        current = ledger_path.read_bytes()
-    except OSError as exc:
-        _noncanonical_fail("DRIFT", str(exc))
+    current = _noncanonical_read_owned_bytes(ledger_path, failure_id="DRIFT")
     history = _read_exact_history_blob(history_path, expected_sha256)
     original = history if history is not None else current
     _validate_noncanonical_history(item, original, validator)
@@ -900,10 +920,9 @@ def _command_apply_noncanonical_history(
             _noncanonical_fail(
                 "READBACK-INDETERMINATE", "injected post-replace readback failure"
             )
-        try:
-            actual = ledger_path.read_bytes()
-        except OSError as exc:
-            _noncanonical_fail("READBACK-INDETERMINATE", str(exc))
+        actual = _noncanonical_read_owned_bytes(
+            ledger_path, failure_id="READBACK-INDETERMINATE"
+        )
         if actual != marker_bytes:
             _noncanonical_fail("READBACK-INDETERMINATE", "marker readback changed")
     except OSError as exc:
@@ -937,10 +956,9 @@ def _command_rollback_noncanonical_history(
         )
 
     ledger_path = item / "agent-runs.jsonl"
-    try:
-        current = ledger_path.read_bytes()
-    except OSError as exc:
-        _noncanonical_fail("ROLLBACK-NOT-EMPTY", str(exc))
+    current = _noncanonical_read_owned_bytes(
+        ledger_path, failure_id="ROLLBACK-NOT-EMPTY"
+    )
     if current != marker_bytes:
         _noncanonical_fail(
             "ROLLBACK-NOT-EMPTY", "rollback is frozen after a later append"
@@ -958,10 +976,9 @@ def _command_rollback_noncanonical_history(
             _noncanonical_fail(
                 "READBACK-INDETERMINATE", "injected rollback readback failure"
             )
-        try:
-            actual = ledger_path.read_bytes()
-        except OSError as exc:
-            _noncanonical_fail("READBACK-INDETERMINATE", str(exc))
+        actual = _noncanonical_read_owned_bytes(
+            ledger_path, failure_id="READBACK-INDETERMINATE"
+        )
         if actual != original:
             _noncanonical_fail("READBACK-INDETERMINATE", "rollback readback changed")
     except OSError as exc:
