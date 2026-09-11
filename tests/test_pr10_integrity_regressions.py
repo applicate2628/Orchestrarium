@@ -194,3 +194,21 @@ def test_noncanonical_staging_rejects_existing_symlink(tmp_path: Path) -> None:
 
     assert staging.is_symlink()
     assert external.read_bytes() == expected
+
+
+def test_noncanonical_staging_rejects_external_hardlink(tmp_path: Path) -> None:
+    ledger = load_module(LEDGER, "pr10_noncanonical_hardlink_owner")
+    external = tmp_path / "external-hardlink-source"
+    expected = b"exact staging bytes\n"
+    external.write_bytes(expected)
+    staging = tmp_path / "agent-runs.jsonl.tmp"
+    try:
+        os.link(external, staging)
+    except OSError as exc:
+        pytest.skip(f"hardlink unavailable: {exc}")
+
+    with pytest.raises(ledger.LedgerNoncanonicalRecoveryError):
+        ledger._write_exact_staging_file(staging, expected)
+
+    assert staging.exists()
+    assert external.read_bytes() == expected
