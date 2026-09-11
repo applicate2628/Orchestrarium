@@ -174,21 +174,31 @@ def _all_strings(value):
 
 class TestWorkItemsLifecycleInstallParity(unittest.TestCase):
     def test_bug_disposition_close_contract_is_present_across_installed_surfaces(self) -> None:
-        surfaces = (
+        explicit_surfaces = (
             ROOT / "shared" / "AGENTS.shared.md",
-            ROOT / "src.codex" / "AGENTS.codex.md",
             ROOT / "src.claude" / "CLAUDE.md",
             ROOT / "src.codex" / "skills" / "lead" / "SKILL.md",
             ROOT / "src.claude" / "skills" / "lead" / "SKILL.md",
             ROOT / "src.codex" / "skills" / "knowledge-archivist" / "SKILL.md",
             ROOT / "src.claude" / "agents" / "knowledge-archivist.md",
         )
-        for path in surfaces:
+        for path in explicit_surfaces:
             text = path.read_text(encoding="utf-8")
             with self.subTest(path=str(path.relative_to(ROOT))):
                 self.assertIn("bug-dispositions.json", text)
                 self.assertIn("terminalize", text)
                 self.assertIn("preserve-current", text)
+
+        # The Codex platform file is intentionally a thin installed surface: it
+        # delegates disposition vocabulary to the versioned physical-lifecycle
+        # owner instead of duplicating the mutable enum. Pin that owner reference
+        # explicitly so the parity gate still fails if Codex drops the contract.
+        codex_platform = (ROOT / "src.codex" / "AGENTS.codex.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("bug-dispositions.json", codex_platform)
+        self.assertIn("Physical Lifecycle V1", codex_platform)
+        self.assertIn("lifecycle owner", codex_platform)
 
         owner = (ROOT / "scripts" / "mutate-work-item.py").read_text(
             encoding="utf-8"
