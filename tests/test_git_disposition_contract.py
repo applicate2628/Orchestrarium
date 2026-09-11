@@ -78,7 +78,7 @@ class GitDispositionContractTests(unittest.TestCase):
                         self.assertIn(fragment, rule)
 
     def test_open_gate_blocks_only_dependent_checkpoint_work(self) -> None:
-        required = (
+        full_projection = (
             "Lead creates a timely local Git commit checkpoint",
             "coherent and separable",
             "staging only that scope",
@@ -87,8 +87,21 @@ class GitDispositionContractTests(unittest.TestCase):
             "neither completion nor publication",
             "Human review, leak checking, and explicit publication authority still govern push and release",
         )
+        compact_shared_projection = (
+            "Lead creates a timely local Git commit checkpoint",
+            "coherent and separable",
+            "staging only that scope",
+            "An open gate blocks dependent changes, not unrelated ready work or eligible checkpoints",
+            "neither completion nor publication",
+            "Human review, leak checking, and explicit publication authority still govern push/release",
+        )
         for path in CHECKPOINT_POLICY_SURFACES:
             text = _read(path)
+            required = (
+                compact_shared_projection
+                if path == "shared/AGENTS.shared.md"
+                else full_projection
+            )
             with self.subTest(path=path):
                 for fragment in required:
                     self.assertIn(fragment, text)
