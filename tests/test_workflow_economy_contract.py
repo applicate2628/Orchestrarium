@@ -79,6 +79,18 @@ ARCHITECTURE_REVIEWER_PROJECTIONS = (
     "src.codex/skills/architecture-reviewer/SKILL.md",
     "src.claude/agents/architecture-reviewer.md",
 )
+LEAD_SKILL_PROJECTIONS = (
+    "src.codex/skills/lead/SKILL.md",
+    "src.claude/skills/lead/SKILL.md",
+)
+LEAD_ROUTING_PROJECTIONS = (
+    "src.codex/skills/lead/operating-model.md",
+    "src.claude/agents/contracts/operating-model.md",
+)
+ARCHITECT_PROJECTIONS = (
+    "src.codex/skills/architect/SKILL.md",
+    "src.claude/skills/architect/SKILL.md",
+)
 
 
 class TestWorkflowEconomyContract(unittest.TestCase):
@@ -100,6 +112,49 @@ class TestWorkflowEconomyContract(unittest.TestCase):
 
     def _assert_retired_rule_absent(self, relative: str, text: str, retired: str) -> None:
         self.assertTrue(retired not in text, f"{relative} retains retired rule: {retired!r}")
+
+    def test_role_alignment_keeps_coordination_and_architecture_evidence_triggered(self) -> None:
+        # Source-contract proof only; independent review owns behavioral-obedience evidence.
+        selected_item_rule = (
+            "Resolve the selected item and its declared dependencies first. Missing/stale state blocks only "
+            "an item that is selected, depended on, or in verified physical/ownership conflict; surface "
+            "unrelated active-item drift without blocking ready work."
+        )
+        for relative in LEAD_SKILL_PROJECTIONS:
+            self.assertIn(selected_item_rule, self._read(relative), relative)
+
+        routing_rule = (
+            "Resolve the template and evidence triggers first. Each listed role is a candidate; include it "
+            "only when its artifact is required by accepted uncertainty, contract, or risk. Preserve mandatory "
+            "security, performance, geometry, scientific, human, and publication gates."
+        )
+        for relative in LEAD_ROUTING_PROJECTIONS:
+            text = self._read(relative)
+            self.assertIn("## Routing examples", text, relative)
+            self.assertIn(routing_rule, text, relative)
+
+        applicability_rule = (
+            "Apply a law only when accepted evidence triggers its concern. An existing boundary law governs "
+            "use of that boundary; it does not require creating one."
+        )
+        seam_rule = (
+            "Extend an accepted existing seam, or create one only for a concrete current second consumer, "
+            "independently varying lifecycle/contract, or other accepted requirement; otherwise correct the "
+            "current owner directly."
+        )
+        for relative in ARCHITECT_PROJECTIONS:
+            text = self._read(relative)
+            self.assertIn(applicability_rule, text, relative)
+            self.assertIn(seam_rule, text, relative)
+            self.assertIn("When the design creates, changes, or consumes a serialized/wire boundary", text, relative)
+            self.assertIn("Otherwise, ordinary repo-standard run evidence suffices.", text, relative)
+
+        for relative in ARCHITECTURE_REVIEWER_PROJECTIONS:
+            text = self._read(relative)
+            self.assertIn(applicability_rule, text, relative)
+            self.assertIn("A non-triggered law is not a finding.", text, relative)
+            self.assertIn("the Architect seam condition", text, relative)
+            self.assertIn("Otherwise, ordinary repo-standard run evidence suffices.", text, relative)
 
     def test_role_index_and_reference_provenance_remain_truthful(self) -> None:
         spine = self._read(SPINE)

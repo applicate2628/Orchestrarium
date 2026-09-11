@@ -36,6 +36,7 @@ Do not collapse those layers into one claim. When a row is Orchestrarium-owned r
 | Installed pack root | `~/.codex/` | Global Codex pack install target |
 | Governance entrypoint | `~/.codex/AGENTS.md` | Installed Codex runtime entrypoint; intentionally the compact universal minimum rather than the full role/runtime manual |
 | Skill tree | `$HOME/.agents/skills/<role>/SKILL.md` | Orchestrarium Codex runtime organizes each role as a skill directory |
+| Legacy skill compatibility | `~/.codex/skills/<role>` | Global Codex installs preserve the `.codex/skills` root and unrelated entries, then project each absent Orchestrarium-owned name to the canonical `$HOME/.agents/skills/<role>` tree. An ordinary same-name tree is preserved and migrated only with repeatable `--migrate-legacy-skill <role>` authority; project installs remain `.agents`-only. |
 | Design-panel binding | `$HOME/.agents/skills/design-panel/SKILL.md` + `agents/openai.yaml` | Independent multi-lane design generation on one pinned problem, converged through one mandatory synthesis; no panel-state validator is installed |
 | Native roles | `~/.codex/agents/<role>.toml` | Create-only: absent roles are created, identical files are no-ops, and differing files are preserved while installation fails. The source manifest validates current payloads and is never installed as a receipt; 1.x has no adoption, update, deletion, or reclaim authority. |
 | Validation script | `$HOME/.agents/skills/lead/scripts/validate-skill-pack.sh` | Same lead script tree as the repo source |

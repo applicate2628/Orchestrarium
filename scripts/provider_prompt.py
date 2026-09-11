@@ -27,6 +27,7 @@ try:
         EnvironmentRowV1,
         ExecutableBindingV1,
         KimiWindowsProfileV1,
+        ProcessDialogueV1,
         ProcessRequestV1,
         ProcessResultV1,
         ProcessRunnerV1,
@@ -40,6 +41,7 @@ except ModuleNotFoundError:
         EnvironmentRowV1,
         ExecutableBindingV1,
         KimiWindowsProfileV1,
+        ProcessDialogueV1,
         ProcessRequestV1,
         ProcessResultV1,
         ProcessRunnerV1,
@@ -65,7 +67,28 @@ KIMI_AGENT_TERMINAL_INSTRUCTION = (
     + ", ".join(KIMI_GATE_PREFIX + verdict for verdict in KIMI_TERMINAL_VERDICTS)
     + ". Do not emit any other gate-like line.\n"
 ).encode("utf-8")
+KIMI_ACP_AGENT_PROFILE_V1 = (
+    b"---\n"
+    b"name: agent\n"
+    b"description: Orchestrarium finite ACP result agent\n"
+    b"override: true\n"
+    b"tools: []\n"
+    b"subagents: []\n"
+    b"---\n\n"
+    b"${base_prompt}\n"
+)
 KIMI_GATE_LIKE = re.compile(r"^[ \t]*GATE[ \t]*:")
+KIMI_ACP_PROTOCOL_VERSION = 1
+KIMI_ACP_LINE_MAX_BYTES = 1024 * 1024
+KIMI_ACP_CONTROL_UPDATES = frozenset(
+    {
+        "available_commands_update",
+        "config_option_update",
+        "current_mode_update",
+        "session_info_update",
+        "usage_update",
+    }
+)
 INVALID_SLUG = re.compile(r'[\\/:\*\?"<>\|\x00]')
 RESULT_MAX_BYTES_DEFAULT = 1024 * 1024
 RESULT_MAX_BYTES_HARD = 16 * 1024 * 1024
@@ -98,13 +121,7 @@ _EXTERNAL_DISPATCH_DECISION_FIELDS = frozenset(
 )
 KIMI_WINDOWS_PROFILE_V1 = KimiWindowsProfileV1
 KIMI_READINESS_MAX_BYTES = 64 * 1024
-KIMI_REQUIRED_HELP_FLAGS = (
-    "--agent-file",
-    "--skills-dir",
-    "--model",
-    "--output-format",
-    "--prompt",
-)
+KIMI_REQUIRED_HELP_FLAGS = ("acp",)
 SETTINGS_SNAPSHOT_MAX_BYTES = 1024 * 1024
 CLEANUP_ISSUE_LIMIT = 32
 CLEANUP_ISSUE_TOKEN_MAX = 64
@@ -173,7 +190,7 @@ PROVIDER_AUTH_CONTROL_ENV_KEYS_V1 = types.MappingProxyType(
 PROMPT_SNAPSHOT_MAX_BYTES = 16 * 1024 * 1024
 EXTERNAL_GOVERNANCE_CAPSULE_NAME = "external-prompt-governance.md"
 EXTERNAL_GOVERNANCE_CAPSULE_SHA256 = (
-    "c7a59ccec7d6e46be76584a107b0a5b30b249368b4f0958cb78177962dc34b00"
+    "2017bb3b253a0bb2b198999d2b26fcf60ae347d25698a3841083360ef7e8e952"
 )
 EXTERNAL_GOVERNANCE_BEGIN = b"ORCHESTRARIUM_EXTERNAL_GOVERNANCE_V1\n"
 EXTERNAL_GOVERNANCE_END = b"END_ORCHESTRARIUM_EXTERNAL_GOVERNANCE_V1\n\n"
@@ -222,6 +239,256 @@ class Control:
     role: str | None = None
     live_root: Path | None = None
     provider_flags: list[str] = field(default_factory=list)
+
+
+@dataclass
+class KimiAcpOneShotV1:
+    """Own one finite, correlated Kimi ACP request sequence."""
+
+    prompt_bytes: bytes
+    cwd: str
+    result_bytes: bytes = field(default=b"", init=False)
+    session_id: str | None = field(default=None, init=False)
+    _next_id: int = field(default=1, init=False)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.prompt_bytes, bytes) or not isinstance(self.cwd, str) or not self.cwd:
+            raise ValueError("E_KIMI_ACP_PROTOCOL")
+        try:
+            self.prompt_bytes.decode("utf-8", errors="strict")
+        except UnicodeDecodeError as exc:
+            raise ValueError("E_KIMI_ACP_PROTOCOL") from exc
+
+    @staticmethod
+    def _decode_line(line: bytes) -> dict[str, object]:
+        if not isinstance(line, bytes) or not line or len(line) > KIMI_ACP_LINE_MAX_BYTES:
+            raise ValueError("E_KIMI_ACP_PROTOCOL")
+
+        def unique(pairs):
+            result = {}
+            for key, value in pairs:
+                if key in result:
+                    raise ValueError("duplicate")
+                result[key] = value
+            return result
+
+        try:
+            value = json.loads(line.decode("utf-8", errors="strict"), object_pairs_hook=unique)
+        except (UnicodeDecodeError, ValueError, json.JSONDecodeError) as exc:
+            raise ValueError("E_KIMI_ACP_PROTOCOL") from exc
+        if not isinstance(value, dict) or value.get("jsonrpc") != "2.0":
+            raise ValueError("E_KIMI_ACP_PROTOCOL")
+        return value
+
+    def _send(self, channel, method: str, params: dict[str, object], *, notification: bool = False) -> int | None:
+        request_id = None if notification else self._next_id
+        if request_id is not None:
+            self._next_id += 1
+        message: dict[str, object] = {"jsonrpc": "2.0", "method": method, "params": params}
+        if request_id is not None:
+            message["id"] = request_id
+        payload = json.dumps(message, ensure_ascii=False, separators=(",", ":")).encode("utf-8") + b"\n"
+        if channel.write_line(payload) != len(payload):
+            raise ValueError("E_KIMI_ACP_PROTOCOL")
+        return request_id
+
+    def _response(self, channel, request_id: int, *, collect: bool = False) -> dict[str, object]:
+        chunks: list[str] = []
+        while True:
+            try:
+                message = self._decode_line(channel.read_line())
+            except ProcessSupervisionError:
+                raise
+            except (EOFError, OSError, ValueError) as exc:
+                raise ValueError("E_KIMI_ACP_PROTOCOL") from exc
+            if "method" in message:
+                if (
+                    "id" in message
+                    or message.get("method") != "session/update"
+                    or self.session_id is None
+                ):
+                    raise ValueError("E_KIMI_ACP_PROTOCOL")
+                params = message.get("params")
+                if not isinstance(params, dict) or params.get("sessionId") != self.session_id:
+                    raise ValueError("E_KIMI_ACP_PROTOCOL")
+                update = params.get("update")
+                if not isinstance(update, dict):
+                    raise ValueError("E_KIMI_ACP_PROTOCOL")
+                update_kind = update.get("sessionUpdate")
+                if update_kind in KIMI_ACP_CONTROL_UPDATES:
+                    continue
+                if not collect:
+                    raise ValueError("E_KIMI_ACP_PROTOCOL")
+                if update_kind == "agent_message_chunk":
+                    content = update.get("content")
+                    if not isinstance(content, dict) or content.get("type") != "text" or not isinstance(content.get("text"), str):
+                        raise ValueError("E_KIMI_ACP_PROTOCOL")
+                    chunks.append(content["text"])
+                continue
+            response_id = message.get("id")
+            if (
+                type(response_id) is not int
+                or response_id != request_id
+                or "error" in message
+            ):
+                raise ValueError("E_KIMI_ACP_PROTOCOL")
+            result = message.get("result")
+            if not isinstance(result, dict):
+                raise ValueError("E_KIMI_ACP_PROTOCOL")
+            if collect:
+                self.result_bytes = "".join(chunks).encode("utf-8")
+            return result
+
+    def _cleanup_session(self, channel, *, cancel: bool) -> None:
+        if self.session_id is None:
+            return
+        if cancel:
+            begin_cleanup = getattr(channel, "begin_cleanup", None)
+            if callable(begin_cleanup):
+                begin_cleanup()
+            self._send(
+                channel,
+                "session/cancel",
+                {"sessionId": self.session_id},
+                notification=True,
+            )
+        close_id = self._send(
+            channel, "session/close", {"sessionId": self.session_id}
+        )
+        assert close_id is not None
+        self._response(channel, close_id)
+        delete_id = self._send(
+            channel, "session/delete", {"sessionId": self.session_id}
+        )
+        assert delete_id is not None
+        self._response(channel, delete_id)
+
+    def __call__(self, channel) -> None:
+        initialize_id = self._send(
+            channel,
+            "initialize",
+            {"protocolVersion": KIMI_ACP_PROTOCOL_VERSION, "clientCapabilities": {}},
+        )
+        assert initialize_id is not None
+        initialized = self._response(channel, initialize_id)
+        protocol_version = initialized.get("protocolVersion")
+        if (
+            type(protocol_version) is not int
+            or protocol_version != KIMI_ACP_PROTOCOL_VERSION
+            or not isinstance(initialized.get("agentCapabilities"), dict)
+        ):
+            raise ValueError("E_KIMI_ACP_PROTOCOL")
+        new_id = self._send(
+            channel,
+            "session/new",
+            {"cwd": self.cwd, "mcpServers": [], "additionalDirectories": []},
+        )
+        assert new_id is not None
+        created = self._response(channel, new_id)
+        session_id = created.get("sessionId")
+        if not isinstance(session_id, str) or not session_id:
+            raise ValueError("E_KIMI_ACP_PROTOCOL")
+        self.session_id = session_id
+        try:
+            model_id = self._send(
+                channel,
+                "session/set_config_option",
+                {
+                    "sessionId": session_id,
+                    "configId": "model",
+                    "value": KIMI_WINDOWS_PROFILE_V1.model,
+                },
+            )
+            assert model_id is not None
+            configured = self._response(channel, model_id)
+            config_options = configured.get("configOptions")
+            if not isinstance(config_options, list):
+                raise ValueError("E_KIMI_ACP_PROTOCOL")
+            model_options = [
+                option
+                for option in config_options
+                if isinstance(option, dict) and option.get("id") == "model"
+            ]
+            if (
+                len(model_options) != 1
+                or model_options[0].get("currentValue")
+                != KIMI_WINDOWS_PROFILE_V1.model
+            ):
+                raise ValueError("E_KIMI_ACP_PROTOCOL")
+            prompt_id = self._send(
+                channel,
+                "session/prompt",
+                {
+                    "sessionId": session_id,
+                    "prompt": [
+                        {"type": "text", "text": self.prompt_bytes.decode("utf-8")}
+                    ],
+                },
+            )
+            assert prompt_id is not None
+            prompt_result = self._response(channel, prompt_id, collect=True)
+        except ProcessSupervisionError as exc:
+            if exc.failure_id == "PSV1-CANCELLED":
+                self._cleanup_session(channel, cancel=True)
+            raise
+        if not isinstance(prompt_result.get("stopReason"), str):
+            raise ValueError("E_KIMI_ACP_PROTOCOL")
+        self._cleanup_session(channel, cancel=False)
+
+
+@dataclass
+class KimiPrivateHomeAliasesV1:
+    home: Path
+    aliases: tuple[tuple[Path, str], ...]
+    cleaned: bool = False
+
+    @classmethod
+    def create(cls, run_dir: Path, user_data: Path) -> "KimiPrivateHomeAliasesV1":
+        profile_dir = run_dir / ".kimi-code" / "agents"
+        profile_dir.mkdir(parents=True)
+        (profile_dir / "agent.md").write_bytes(KIMI_ACP_AGENT_PROFILE_V1)
+        home = run_dir / "kimi-home"
+        home.mkdir(mode=0o700)
+        aliases: list[tuple[Path, str]] = []
+        owner = cls(home, ())
+        try:
+            for name, is_directory in (("config.toml", False), ("credentials", True)):
+                source = Path(os.path.abspath(user_data / name))
+                if not os.path.lexists(source):
+                    continue
+                alias = home / name
+                os.symlink(str(source), alias, target_is_directory=is_directory)
+                aliases.append((alias, str(source)))
+            owner.aliases = tuple(aliases)
+            return owner
+        except Exception:
+            owner.aliases = tuple(aliases)
+            owner.cleanup()
+            raise
+
+    def cleanup(self) -> None:
+        if self.cleaned:
+            return
+
+        def normalized_target(value: str) -> str:
+            normalized = os.path.normcase(os.path.abspath(value))
+            if normalized.startswith("\\\\?\\unc\\"):
+                return "\\\\" + normalized[8:]
+            if normalized.startswith("\\\\?\\"):
+                return normalized[4:]
+            return normalized
+
+        for alias, target in reversed(self.aliases):
+            if not os.path.lexists(alias):
+                continue
+            metadata = alias.lstat()
+            if not (stat.S_ISLNK(metadata.st_mode) or _metadata_is_reparse(metadata)):
+                raise OSError("Kimi private-home alias identity changed")
+            observed = os.readlink(alias)
+            if normalized_target(observed) != normalized_target(target):
+                raise OSError("Kimi private-home alias target changed")
+            os.unlink(alias)
+        self.cleaned = True
 
 
 @dataclass(frozen=True)
@@ -1817,14 +2084,26 @@ def _policy_bound_external_control(
         or decision.get("role") != control.role
         or decision.get("status") != "external-authorized"
         or decision.get("executionAuthorized") is not True
-        or decision.get("mutationClass") != "read-only"
+        or decision.get("mutationClass") not in {"read-only", "bounded-write"}
         or decision.get("finalAuthorizingRole") is not False
         or decision.get("independentVerification") is not True
         or decision.get("fallback") != "none"
         or decision.get("stableId") is not None
     ):
         raise ValueError("E_EXTERNAL_DISPATCH_POLICY_DENIED")
-    return replace(control, ledger_role=control.role, ledger_role_explicit=True), decision
+    admitted = replace(control, ledger_role=control.role, ledger_role_explicit=True)
+    if decision["mutationClass"] == "bounded-write":
+        try:
+            provenance = external_role_provenance(admitted, provider)
+        except ValueError:
+            raise ValueError("E_EXTERNAL_DISPATCH_POLICY_DENIED") from None
+        if (
+            provider != "kimi"
+            or provenance.execution_role != "external-worker"
+            or admitted.provider_flags
+        ):
+            raise ValueError("E_EXTERNAL_DISPATCH_POLICY_DENIED")
+    return admitted, decision
 
 
 def external_execution_provenance(
@@ -2106,16 +2385,14 @@ def _default_kimi_readiness_probe(
     try:
         with tempfile.TemporaryDirectory(prefix="orchestrarium-kimi-readiness-") as temporary:
             private_home = Path(temporary).resolve()
-            environment = {
-                "KIMI_CODE_HOME": str(private_home),
-                "KIMI_CODE_NO_AUTO_UPDATE": "1",
-                "DO_NOT_TRACK": "1",
-            }
-            if os.name == "nt":
-                system_root = os.environ.get("SYSTEMROOT")
-                if not system_root:
-                    raise ValueError("E_KIMI_READINESS_DIAGNOSTIC_FAILED")
-                environment["SYSTEMROOT"] = system_root
+            environment = dict(
+                resolve_provider_auth_configuration("kimi").child_environment
+            )
+            environment["KIMI_CODE_HOME"] = str(private_home)
+            if os.name == "nt" and not (
+                environment.get("SYSTEMROOT") or environment.get("SystemRoot")
+            ):
+                raise ValueError("E_KIMI_READINESS_DIAGNOSTIC_FAILED")
             sink = runner.mint_memory_capture_sink()
             executable = Path(resolution.command[0])
             request = ProcessRequestV1(
@@ -2157,7 +2434,85 @@ def _default_kimi_readiness_probe(
         runner.close()
 
 
-def _diagnose_kimi_readiness(home: Path, *, probe_runner=None) -> list[str]:
+def _help_option_block(help_text: str, option: str) -> str:
+    match = re.search(re.escape(option) + r"(?![A-Za-z0-9-])", help_text)
+    if match is None:
+        return ""
+    following = help_text[match.end():]
+    next_option = re.search(r"\n\s*--[A-Za-z0-9]", following)
+    return help_text[match.start():match.end() + (next_option.start() if next_option else len(following))]
+
+
+def _kimi_capability_readiness_report(
+    resolution: ResolvedProviderCommand, version_text: str, help_text: str
+) -> dict[str, object]:
+    output_block = _help_option_block(help_text, "--output-format").casefold()
+    mcp_options = ("--mcp-config-file", "--mcp-config")
+    mcp_blocks = {
+        option: _help_option_block(help_text, option).casefold()
+        for option in mcp_options
+    }
+    present_mcp_options = [
+        option for option in mcp_options if mcp_blocks[option]
+    ]
+    repeat_markers = ("repeatable", "multiple times", "can be repeated")
+    default_none_markers = ("default: none", "defaults to none", "default none")
+    repeatable = bool(present_mcp_options) and all(
+        any(marker in mcp_blocks[option] for marker in repeat_markers)
+        for option in present_mcp_options
+    )
+    no_default = bool(present_mcp_options) and all(
+        any(marker in mcp_blocks[option] for marker in default_none_markers)
+        for option in present_mcp_options
+    )
+    help_bytes = help_text.encode("utf-8")
+    return {
+        "schemaVersion": 1,
+        "kind": "kimi-capability-readiness",
+        "version": version_text,
+        "command": list(resolution.command),
+        "launchEnvironment": {
+            "KIMI_CODE_EXPERIMENTAL_FLAG": "1",
+            "KIMI_CODE_NO_AUTO_UPDATE": "1",
+            "DO_NOT_TRACK": "1",
+            "isolatedKimiCodeHome": True,
+        },
+        "help": {
+            "bytes": len(help_bytes),
+            "sha256": hashlib.sha256(help_bytes).hexdigest(),
+            "text": help_text,
+        },
+        "support": {
+            "structuredOutput": {
+                "outputFormatFlag": bool(output_block),
+                "streamJsonValue": "stream-json" in output_block,
+                "supported": bool(output_block) and "stream-json" in output_block,
+            },
+            "selectedMcpConfiguration": {
+                "flags": present_mcp_options,
+                "repeatable": repeatable,
+                "noDefaultConfig": no_default,
+                "supported": (
+                    present_mcp_options == list(mcp_options)
+                    and repeatable
+                    and no_default
+                ),
+            },
+            "independentChildControls": {
+                "agentFileFlag": bool(_help_option_block(help_text, "--agent-file")),
+                "toolsField": False,
+                "subagentsField": False,
+                "defaultToolsDisabled": True,
+                "defaultChildrenDisabled": True,
+                "runtimeVerified": False,
+            },
+        },
+    }
+
+
+def _diagnose_kimi_readiness(
+    home: Path, *, probe_runner=None, include_capabilities: bool = False
+) -> list[str] | dict[str, object]:
     resolution = _resolved_fixed_kimi_command(home)
     probe = probe_runner or _default_kimi_readiness_probe
     try:
@@ -2175,6 +2530,10 @@ def _diagnose_kimi_readiness(home: Path, *, probe_runner=None) -> list[str]:
         if str(exc) == "E_KIMI_READINESS_DIAGNOSTIC_FAILED":
             raise
         raise ValueError("E_KIMI_READINESS_DIAGNOSTIC_FAILED") from exc
+    if include_capabilities:
+        return _kimi_capability_readiness_report(
+            resolution, version_text, help_text
+        )
     return list(resolution.command)
 
 
@@ -2517,35 +2876,6 @@ def secure_output_dir(provider: str) -> Path:
                 f"{env_key} configured capture root must be owner-controlled"
             )
     return output
-
-
-KIMI_AGENT_BUNDLE_PREAMBLE = (
-    b"The sealed bundle below contains the exact task.\n\nBEGIN SEALED BUNDLE\n"
-)
-KIMI_AGENT_BUNDLE_EPILOGUE = b"\nEND SEALED BUNDLE\n"
-
-
-def prepare_kimi_agent_payload(body: bytes) -> bytes:
-    """Validate and compose the complete Kimi agent before any launch side effect."""
-    if b"${" in body:
-        raise ValueError("E_KIMI_BUNDLE_TEMPLATE_INVALID")
-    task = _bounded_strict_utf8_snapshot(body, "Kimi bundle")
-    return (
-        KimiWindowsProfileV1.agent_frontmatter
-        + KIMI_AGENT_BUNDLE_PREAMBLE
-        + task
-        + KIMI_AGENT_BUNDLE_EPILOGUE
-        + KIMI_AGENT_TERMINAL_INSTRUCTION
-    )
-
-
-def materialize_kimi_agent_payload(payload: bytes, run_dir: Path) -> tuple[Path, Path]:
-    """Materialize one already-validated no-tools, no-subagent Kimi agent."""
-    agent = run_dir / "kimi-agent.md"
-    skills = run_dir / "kimi-empty-skills"
-    skills.mkdir(mode=0o700)
-    agent.write_bytes(payload)
-    return agent, skills
 
 
 def _bounded_strict_utf8_snapshot(data: bytes, label: str) -> bytes:
@@ -3002,6 +3332,7 @@ class ReservedExternalRunV1:
     state: str = "absent"
     finalized: bool = False
     _cleanup_result: CleanupResult | None = None
+    _auxiliary_cleanup: list[object] = field(default_factory=list)
 
     def adopt_lifecycle(self, lifecycle: RunCaptureLifecycle) -> None:
         if self.state != "absent" or self.lifecycle is not None:
@@ -3014,9 +3345,21 @@ class ReservedExternalRunV1:
             raise ValueError("E_EXTERNAL_RESERVED_RUN_LIFECYCLE_MISMATCH")
         self.state = "initialized"
 
+    def adopt_auxiliary_cleanup(self, cleanup) -> None:
+        if self.state != "initialized" or not callable(cleanup):
+            raise ValueError("E_EXTERNAL_RESERVED_RUN_LIFECYCLE_MISMATCH")
+        self._auxiliary_cleanup.append(cleanup)
+
     def cleanup_once(self) -> CleanupResult:
         if self._cleanup_result is not None:
             return self._cleanup_result
+        auxiliary_issues: list[str] = []
+        for cleanup in reversed(self._auxiliary_cleanup):
+            try:
+                cleanup()
+            except Exception:
+                auxiliary_issues.append("auxiliary-cleanup-failed")
+        self._auxiliary_cleanup.clear()
         try:
             if self.state == "absent":
                 result = CleanupResult(())
@@ -3035,6 +3378,11 @@ class ReservedExternalRunV1:
             result = _bounded_cleanup_result(
                 ("cleanup-owner-failed", "cleanup-retention-unknown"),
                 recovery_retained=False,
+            )
+        if auxiliary_issues:
+            result = _bounded_cleanup_result(
+                (*auxiliary_issues, *result.issues),
+                recovery_retained=result.recovery_retained,
             )
         self._cleanup_result = result
         self.state = "cleaned"
@@ -3400,10 +3748,10 @@ def provider_windows_argv_profile_id(
     return None
 
 
-def kimi_provider_args(agent_file: Path, skills_dir: Path) -> list[str]:
-    """Delegate the exact sealed Kimi argv to the runner-owned profile."""
+def kimi_provider_args() -> list[str]:
+    """Delegate the exact Kimi ACP argv to the runner-owned profile."""
 
-    return KIMI_WINDOWS_PROFILE_V1.build_args(agent_file, skills_dir)
+    return KIMI_WINDOWS_PROFILE_V1.build_args()
 
 
 def run_provider_process(
@@ -3417,6 +3765,7 @@ def run_provider_process(
     provider: str | None = None,
     *,
     expected_executable_binding: ExecutableBindingV1 | None = None,
+    dialogue: ProcessDialogueV1 | None = None,
 ) -> tuple[ProcessResultV1, bytes, bytes]:
     """Run one provider through the sole process/tree/I-O lifecycle owner."""
 
@@ -3441,7 +3790,11 @@ def run_provider_process(
         ),
         expected_executable_binding=expected_executable_binding,
     )
-    result = runner.run(request)
+    result = (
+        runner.run(request, dialogue=dialogue)
+        if dialogue is not None
+        else runner.run(request)
+    )
     return result, sink.bytes_for("stdout"), sink.bytes_for("stderr")
 
 
@@ -4585,13 +4938,15 @@ def kimi_main(argv: list[str]) -> int:
             "\nRuns the fixed kimi-code/k3 file-prompt transport with the sealed "
             "no-tools agent profile.\n"
             "Maintenance diagnostics: --enroll-executable, "
-            "--replace-kimi-enrollment, --verify-enrollment."
+            "--replace-kimi-enrollment, --verify-enrollment, "
+            "--diagnose-capabilities."
         )
         return 0
     maintenance_flags = {
         "--enroll-executable",
         "--replace-kimi-enrollment",
         "--verify-enrollment",
+        "--diagnose-capabilities",
     }
     selected = maintenance_flags.intersection(argv)
     if not selected:
@@ -4618,6 +4973,15 @@ def kimi_main(argv: list[str]) -> int:
         except ValueError as exc:
             return fail(str(exc))
         print(f"KIMI-EXECUTABLE-READINESS: PASS path={command[0]}")
+        return 0
+    if argv == ["--diagnose-capabilities"]:
+        try:
+            report = _diagnose_kimi_readiness(
+                _kimi_user_home(), include_capabilities=True
+            )
+        except ValueError as exc:
+            return fail(str(exc))
+        print(json.dumps(report, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
         return 0
     return fail("E_KIMI_MAINTENANCE_ARGUMENTS_INVALID")
 
@@ -4735,15 +5099,6 @@ def _launch_with_runner(
             stable_failure_id_from_exception(exc, "E_EXTERNAL_PROMPT_INVALID")
         )
 
-    kimi_agent_payload: bytes | None = None
-    if provider == "kimi":
-        try:
-            kimi_agent_payload = prepare_kimi_agent_payload(body)
-        except Exception as exc:
-            return reserved_failure(
-                stable_failure_id_from_exception(exc, "E_KIMI_BUNDLE_INVALID")
-            )
-
     if provider == "codex":
         if not Path(command[0]).is_absolute() or not Path(command[0]).is_file():
             return reserved_failure("E_EXTERNAL_PROVIDER_EXECUTABLE_INVALID")
@@ -4792,6 +5147,37 @@ def _launch_with_runner(
         )
 
     assert lifecycle is not None
+    kimi_exchange: KimiAcpOneShotV1 | None = None
+    kimi_private_home: KimiPrivateHomeAliasesV1 | None = None
+    if provider == "kimi":
+        try:
+            kimi_private_home = KimiPrivateHomeAliasesV1.create(
+                lifecycle.run_dir,
+                _kimi_user_home() / ".kimi-code",
+            )
+            reserved_run.adopt_auxiliary_cleanup(kimi_private_home.cleanup)
+            kimi_exchange = KimiAcpOneShotV1(
+                body + b"\n" + KIMI_AGENT_TERMINAL_INSTRUCTION,
+                str(lifecycle.run_dir),
+            )
+        except Exception:
+            return finalize_reserved_run_once(
+                control,
+                provider,
+                model,
+                effort,
+                slug,
+                "",
+                reserved_run,
+                1,
+                launch_error="E_KIMI_ACP_SETUP",
+                credential_needles=auth_configuration.needles,
+                auth_output_scan_disposition=auth_configuration.output_scan_disposition,
+                runner=runner,
+                role_provenance=role_provenance,
+                provenance=provenance,
+                launch_flags=launch_flags,
+            )
 
     launch_run_id = ""
     if control.ledger:
@@ -4854,21 +5240,6 @@ def _launch_with_runner(
                 launch_flags=launch_flags,
             )
 
-    kimi_agent: Path | None = None
-    kimi_skills: Path | None = None
-    if provider == "kimi":
-        try:
-            assert kimi_agent_payload is not None
-            kimi_agent, kimi_skills = materialize_kimi_agent_payload(
-                kimi_agent_payload, lifecycle.run_dir
-            )
-        except Exception:
-            return finalize_reserved_run_once(
-                control, provider, model, effort, slug, launch_run_id, reserved_run, 1,
-                launch_error="E_KIMI_BUNDLE_MATERIALIZATION", realization=realization, runner=runner,
-                role_provenance=role_provenance, provenance=provenance,
-                launch_flags=launch_flags,
-            )
     provider_args = (
         [
             "exec",
@@ -4877,7 +5248,7 @@ def _launch_with_runner(
             *flags,
         ]
         if provider == "codex"
-        else kimi_provider_args(kimi_agent, kimi_skills)
+        else kimi_provider_args()
         if provider == "kimi"
         else flags
     )
@@ -4886,6 +5257,9 @@ def _launch_with_runner(
         child_environment["ORCHESTRARIUM_DISPATCHED_REVIEW"] = "1"
     elif provider == "codex":
         child_environment["CODEX_HOME"] = str(codex_home)
+    elif provider == "kimi":
+        assert kimi_private_home is not None
+        child_environment["KIMI_CODE_HOME"] = str(kimi_private_home.home)
 
     exit_code = 1
     launch_error: str | None = None
@@ -4906,7 +5280,17 @@ def _launch_with_runner(
             control,
             provider,
             expected_executable_binding=expected_executable_binding,
+            dialogue=(
+                ProcessDialogueV1(
+                    KIMI_WINDOWS_PROFILE_V1.profile_id,
+                    kimi_exchange,
+                )
+                if kimi_exchange is not None
+                else None
+            ),
         )
+        if kimi_exchange is not None:
+            raw_stdout = kimi_exchange.result_bytes
         stream_result = provider_stream_result(process_result)
         if process_result.target_exit_code is not None:
             exit_code = process_result.target_exit_code

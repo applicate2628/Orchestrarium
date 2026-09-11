@@ -12,7 +12,12 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 LIVE_PACKS = ("src.claude", "src.codex")
 GENERALIZE_SKILL = "generalize-from-instance"
-GENERALIZE_BODY_SHA256 = "7233fcd0d38ccb87e2b95d5f95af3811aa5224e873591eaefd397d3c20b9fea4"
+GENERALIZE_BODY_SHA256 = "c55e0d9389abce424e778c41816127c76948d67d92233e9afb26ab4d92cfaf97"
+IMPLEMENTATION_TO_THEORY_SKILL = "implementation-to-theory"
+IMPLEMENTATION_TO_THEORY_SHA256 = "ca4a632ee9ca469dd65415f98ac0fd94dd250cdadb77fb34fe26657627a5db46"
+IMPLEMENTATION_TO_THEORY_BODY_SHA256 = (
+    "2a62f5489701d38a7252a9f3964a8b31f7fd064893075b95da34d17a5855bb78"
+)
 
 
 def _runtime():
@@ -140,6 +145,37 @@ def test_generalize_from_instance_has_no_private_case_or_absolute_path_anchor() 
         body,
     )
     assert not private_absolute_paths
+
+
+def test_implementation_to_theory_import_is_provider_neutral_and_catalogued() -> None:
+    digest = _runtime().common_skill_body_sha256
+    paths = {
+        pack: _skill(ROOT, pack, IMPLEMENTATION_TO_THEORY_SKILL)
+        for pack in LIVE_PACKS
+    }
+    for pack, path in paths.items():
+        assert path.is_file(), f"{pack}/{IMPLEMENTATION_TO_THEORY_SKILL} missing"
+        _assert_frontmatter(path, f"{pack}/{IMPLEMENTATION_TO_THEORY_SKILL}")
+
+    payloads = {pack: path.read_bytes() for pack, path in paths.items()}
+    assert len(set(payloads.values())) == 1
+    assert {__import__("hashlib").sha256(body).hexdigest() for body in payloads.values()} == {
+        IMPLEMENTATION_TO_THEORY_SHA256
+    }
+    assert {digest(body) for body in payloads.values()} == {
+        IMPLEMENTATION_TO_THEORY_BODY_SHA256
+    }
+
+    body = payloads["src.codex"].decode("utf-8")
+    assert not re.findall(
+        r"(?im)(?:\b[a-z]:[\\/]|/(?:home|users)/[^/\s]+/|vfem|nabla|dima_|onedrive|orchestrator)",
+        body,
+    )
+    token = f"`${IMPLEMENTATION_TO_THEORY_SKILL}`"
+    assert token in (ROOT / "shared/references/spine/common-skills.md").read_text(
+        encoding="utf-8"
+    )
+    assert token in (ROOT / "INSTALL.md").read_text(encoding="utf-8")
 
 
 def test_live_add_changes_only_live_membership(tmp_path: Path) -> None:

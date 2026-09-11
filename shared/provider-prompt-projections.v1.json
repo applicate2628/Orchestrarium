@@ -4,12 +4,12 @@
   "files": {
     "provider_prompt.py": {
       "source": "scripts/provider_prompt.py",
-      "sha256": "669f975143e83c0a4faa1eb74f7bdc8b7f313b7788332fefbfa443151563f1aa",
+      "sha256": "298c8f169d2eb85445cd176b18d1fbade75131585019bbaf76b796b23c69b903",
       "destination": "scripts/provider_prompt.py"
     },
     "process_supervision/process_runner.py": {
       "source": "scripts/process_supervision/process_runner.py",
-      "sha256": "f674d95f4d7d3f925c5c65d88346cbf4720ce79e1ab7ca7cb5db65cf51cf625d",
+      "sha256": "1315731ece968028efb25c5b3d80d80d65090da8a35c7a4a7baf9c15a3b328fd",
       "destination": "scripts/process_supervision/process_runner.py"
     },
     "invoke-codex-prompt.py": {
@@ -34,7 +34,7 @@
     },
     "external-prompt-governance.md": {
       "source": "shared/external-prompt-governance.md",
-      "sha256": "c7a59ccec7d6e46be76584a107b0a5b30b249368b4f0958cb78177962dc34b00",
+      "sha256": "2017bb3b253a0bb2b198999d2b26fcf60ae347d25698a3841083360ef7e8e952",
       "destination": "scripts/external-prompt-governance.md"
     },
     "external-role-taxonomy.v1.json": {

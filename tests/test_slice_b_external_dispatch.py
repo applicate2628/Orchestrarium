@@ -204,6 +204,29 @@ def test_external_dispatch_projects_provider_execution_disposition(
     }
 
 
+def test_kimi_engineering_admits_only_external_worker_taxonomy_roles() -> None:
+    admitted = RESOLVER.resolve_external_dispatch(
+        "kimi", "engineering", "backend-engineer", repo_root=ROOT
+    )
+
+    assert admitted["status"] == "external-authorized"
+    assert admitted["mutationClass"] == "bounded-write"
+    assert admitted["executionAuthorized"] is True
+    assert admitted["independentVerification"] is True
+    assert admitted["fallback"] == "none"
+    for role in ("knowledge-archivist", "qa-engineer", "external-worker"):
+        denied = RESOLVER.resolve_external_dispatch(
+            "kimi", "engineering", role, repo_root=ROOT
+        )
+        assert denied["status"] == "denied"
+        assert denied["executionAuthorized"] is False
+    grok = RESOLVER.resolve_external_dispatch(
+        "grok", "engineering", "backend-engineer", repo_root=ROOT
+    )
+    assert grok["status"] == "denied"
+    assert grok["executionAuthorized"] is False
+
+
 def test_kimi_consultant_is_planning_only_in_source_and_installed_policy(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -262,7 +285,6 @@ def test_kimi_consultant_is_planning_only_in_source_and_installed_policy(
         ("micro", "mechanical-scout"),
         ("mechanical-read", "mechanical-scout"),
         ("mechanical", "mechanical-worker"),
-        ("engineering", "worker"),
         ("critical-design", "architect"),
         ("critical-security", "security-reviewer"),
         ("recovery", "worker"),
@@ -354,7 +376,7 @@ def test_advisory_task_classes_fail_closed_and_grok_remains_unavailable(
     assert grok["executionAuthorized"] is False
 
 
-def test_advisory_consultant_does_not_enter_native_corridors() -> None:
+def test_advisory_consultant_uses_skill_only_ranking_without_entering_native_roles() -> None:
     policy, _ = RESOLVER.load_role_policy(ROOT)
 
     assert policy["providerRealizations"]["kimi"]["advisoryTaskClasses"] == [
@@ -362,11 +384,12 @@ def test_advisory_consultant_does_not_enter_native_corridors() -> None:
     ]
     assert "advisoryTaskClasses" not in policy["providerRealizations"]["grok"]
     assert "consultant" not in policy["roles"]
-    assert "consultant" not in policy["skillOnlyRoles"]
-    assert all(
-        "consultant" not in roles
-        for roles in policy["taskRoleEligibility"].values()
-    )
+    assert policy["skillOnlyRoles"]["consultant"]["defaultProfile"] == "frontier-high"
+    assert {
+        task
+        for task, roles in policy["taskRoleEligibility"].items()
+        if "consultant" in roles
+    } == {"planning", "review", "critical-design"}
     luna = RESOLVER.resolve_role_dispatch(
         "mechanical-read", "mechanical-scout", "enabled", repo_root=ROOT
     )
@@ -526,6 +549,9 @@ def test_installed_global_codex_external_dispatch_accepts_declared_agents_root(
     )
     shared.joinpath("role-routing-policy.v1.json").write_bytes(
         (ROOT / "shared" / "role-routing-policy.v1.json").read_bytes()
+    )
+    shared.joinpath("external-role-taxonomy.v1.json").write_bytes(
+        (ROOT / "shared" / "external-role-taxonomy.v1.json").read_bytes()
     )
     if kind != "ordinary":
         redirect_agents = tmp_path / f"redirect-agents-{kind}"

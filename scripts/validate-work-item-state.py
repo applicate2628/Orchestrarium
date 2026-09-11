@@ -1323,6 +1323,9 @@ class LedgerValidationContextV1:
 @dataclass(frozen=True)
 class _LedgerInvocationTokenV1:
     rows_by_path: Mapping[str, tuple[RuntimeLedgerRowV1, ...]]
+    h1_projection_partition: tuple[
+        str, str, str, str, tuple[tuple[int, str], ...]
+    ]
 
 
 _NO_LEDGER_AUTHORITY = LedgerAuthorityV1(False, False, False, False, False)
@@ -1849,8 +1852,26 @@ def _validate_event(
             and event.get("invalidationMode") == "invalid-current-nonauthorizing"
         )
         unexpected_typed = typed_terminal_fields & set(event)
+        internal_closer_identity = (
+            event.get("schemaVersion") == 2
+            and unexpected_typed == {"artifactIdentity"}
+            and event.get("executionRole") == "internal"
+            and status == "completed"
+            and gate == "PASS"
+            and isinstance(event.get("closesRunIds"), list)
+            and len(event["closesRunIds"]) == 1
+            and (
+                (event_kind == "standalone" and "launchRunId" not in event)
+                or (
+                    event_kind == "terminal"
+                    and isinstance(event.get("launchRunId"), str)
+                )
+            )
+        )
         if disposition_authorizing:
             unexpected_typed -= {"authorizing"}
+        if internal_closer_identity:
+            unexpected_typed -= {"artifactIdentity"}
         for key in sorted(unexpected_typed):
             fail(errors, f"{run_id}: {key} requires terminalClass")
 
@@ -2490,7 +2511,43 @@ def _validate_closure_authority(
                     bump("C3-executionrole-fail")
                     continue
                 t_art, c_art = target.get("artifact"), event.get("artifact")
-                if isinstance(t_art, str) and t_art.strip():
+                t_assigned = target.get("assignedRole")
+                t_identity = target.get("artifactIdentity")
+                external_professional_close = (
+                    target.get("role") == target.get("executionRole")
+                    and target.get("role") in {"external-worker", "external-reviewer"}
+                    and target.get("terminalClass") == "external-nonauthorizing"
+                    and target.get("closesRunIds") == []
+                    and isinstance(t_assigned, str)
+                    and bool(t_assigned.strip())
+                    and isinstance(t_art, str)
+                    and bool(t_art.strip())
+                    and isinstance(t_identity, str)
+                    and bool(t_identity.strip())
+                    and event.get("executionRole") == "internal"
+                )
+                if external_professional_close:
+                    closer_assigned = event.get("assignedRole")
+                    if event.get("role") != t_assigned or (
+                        closer_assigned is not None and closer_assigned != t_assigned
+                    ):
+                        fail(errors, f"{rid}: closer profession does not match {target_id} (C3-external-profession-fail)")
+                        bump("C3-external-profession-fail")
+                        continue
+                    if event.get("scope") != target.get("scope"):
+                        fail(errors, f"{rid}: closer scope does not match {target_id} (C3-external-scope-fail)")
+                        bump("C3-external-scope-fail")
+                        continue
+                    c_identity = event.get("artifactIdentity")
+                    if not isinstance(c_identity, str) or not c_identity.strip() or c_identity != t_identity:
+                        fail(errors, f"{rid}: closer artifact identity does not match {target_id} (C3-external-artifact-identity-fail)")
+                        bump("C3-external-artifact-identity-fail")
+                        continue
+                    if not isinstance(c_art, str) or not c_art.strip() or c_art == t_art:
+                        fail(errors, f"{rid}: closer report is not distinct from {target_id} (C3-external-report-fail)")
+                        bump("C3-external-report-fail")
+                        continue
+                elif isinstance(t_art, str) and t_art.strip():
                     if not isinstance(c_art, str) or c_art != t_art:
                         fail(errors, f"{rid}: closer artifact {c_art!r} != target artifact {t_art!r} (C3)")
                         bump("C3-artifact-fail")
@@ -2501,11 +2558,12 @@ def _validate_closure_authority(
                         fail(errors, f"{rid}: closer lane {c_lane!r} != target lane {t_lane!r} (C3)")
                         bump("C3-lane-fail")
                         continue
-                t_role = target.get("role")
-                if event.get("role") != t_role and event.get("assignedRole") != t_role:
-                    fail(errors, f"{rid}: closer lacks authority over {target_id} (role/assignedRole != {t_role!r}) (C3)")
-                    bump("C3-authority-fail")
-                    continue
+                if not external_professional_close:
+                    t_role = target.get("role")
+                    if event.get("role") != t_role and event.get("assignedRole") != t_role:
+                        fail(errors, f"{rid}: closer lacks authority over {target_id} (role/assignedRole != {t_role!r}) (C3)")
+                        bump("C3-authority-fail")
+                        continue
                 # Audit counters for the DEFERRED cathedral (fable impl gate): observe,
                 # without enforcing, how often the deferred rules would have mattered.
                 if target.get("provider") != event.get("provider"):
@@ -3568,8 +3626,22 @@ def _ledger_h1_candidate_group(
                 root, artifacts, failures, diagnostics
             )
 
+    h1_projection_partition = (
+        artifacts.ledger_manifest_path,
+        manifest_sha,
+        _LEDGER_H1_REGISTRY,
+        hashlib.sha256(artifacts.registry_bytes).hexdigest(),
+        tuple(
+            (start + offset + 1, hashlib.sha256(line).hexdigest())
+            for start, _records, lines in groups
+            for offset, line in enumerate(lines)
+        ),
+    )
+
     if final_state == "revoked":
-        token = object()
+        token = _LedgerInvocationTokenV1(
+            MappingProxyType({}), h1_projection_partition
+        )
         contexts = {
             path: LedgerValidationContextV1(
                 path,
@@ -3595,7 +3667,9 @@ def _ledger_h1_candidate_group(
         }
         return MappingProxyType(contexts)
 
-    token = _LedgerInvocationTokenV1(MappingProxyType(dict(entry_rows)))
+    token = _LedgerInvocationTokenV1(
+        MappingProxyType(dict(entry_rows)), h1_projection_partition
+    )
     open_launch_tuple = tuple(sorted(open_launch_ids, key=lambda value: value.encode("utf-8")))
     contexts = {
         path: LedgerValidationContextV1(
@@ -3817,6 +3891,69 @@ def _load_effective_ledger_group(
     return _ledger_h1_candidate_group(Path(root), compatibility_artifacts)
 
 
+def _ledger_h1_selection_failure(
+    selected_ledger_path: str,
+    diagnostic: str,
+) -> LedgerValidationContextV1:
+    return LedgerValidationContextV1(
+        selected_ledger_path,
+        (),
+        None,
+        LedgerCompatibilityObservationV1(
+            "invalid",
+            ("WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS",),
+            (diagnostic,),
+        ),
+        (),
+        (),
+        object(),
+    )
+
+
+def _classify_ledger_h1_selection(
+    item_relative: str,
+    selected_ledger_path: str,
+    artifacts: LedgerCompatibilityArtifactSetV1,
+    contexts: Mapping[str, LedgerValidationContextV1],
+) -> tuple[str, object | LedgerValidationContextV1 | None]:
+    """Classify one selection only after its complete H1 group is validated."""
+
+    invalid_contexts = [
+        context
+        for context in contexts.values()
+        if context.observation.activation_state == "invalid"
+    ]
+    if invalid_contexts:
+        return "invalid", invalid_contexts[0]
+    exact_matches: list[object] = []
+    intersections = 0
+    for location in artifacts.participant_locations_by_path.values():
+        item_match = item_relative in {
+            getattr(location, "logical_work_item", None),
+            getattr(location, "physical_work_item", None),
+        }
+        ledger_match = selected_ledger_path in {
+            getattr(location, "logical_ledger_path", None),
+            getattr(location, "physical_ledger_path", None),
+        }
+        if item_match and ledger_match:
+            exact_matches.append(location)
+        elif item_match or ledger_match:
+            intersections += 1
+    if len(exact_matches) == 1 and intersections == 0:
+        location = exact_matches[0]
+        context_key = getattr(location, "logical_ledger_path", None)
+        context = contexts.get(context_key)
+        if context is not None:
+            return "member", location
+    if exact_matches or intersections:
+        return "invalid", _ledger_h1_selection_failure(
+            selected_ledger_path,
+            "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS: selected item and ledger partially, multiply, or cross-match H1 participants",
+        )
+    return "ordinary-nonmember", None
+
+
 def load_effective_ledger_view(
     root: Path,
     item: Path,
@@ -3835,36 +3972,29 @@ def load_effective_ledger_view(
             return _ledger_h1_acquisition_failure_context(exc)
     physical_selected_path = selected_ledger_path
     context_key = selected_ledger_path
-    locations = (
-        resolved_artifacts.participant_locations_by_path
-        if resolved_artifacts is not None
-        else {}
-    )
-    if locations:
+    selection_classification = "ordinary-nonmember"
+    contexts: Mapping[str, LedgerValidationContextV1] = MappingProxyType({})
+    if resolved_artifacts is not None:
+        contexts = _load_effective_ledger_group(
+            root, compatibility_artifacts=resolved_artifacts
+        )
         try:
             item_relative = Path(item).absolute().relative_to(root.absolute()).as_posix()
         except ValueError:
             item_relative = ""
-        matches = [
-            location
-            for location in locations.values()
-            if getattr(location, "physical_work_item", None) == item_relative
-            and selected_ledger_path
-            in {
-                getattr(location, "logical_ledger_path", None),
-                getattr(location, "physical_ledger_path", None),
-            }
-        ]
-        if len(matches) != 1:
-            diagnostic = "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS: selected ledger has no unique physical participant location"
-            return LedgerValidationContextV1(
-                selected_ledger_path, (), None,
-                LedgerCompatibilityObservationV1("invalid", ("WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS",), (diagnostic,)),
-                (), (), object(),
-            )
-        location = matches[0]
-        physical_selected_path = getattr(location, "physical_ledger_path")
-        context_key = getattr(location, "logical_ledger_path")
+        selection_classification, selection = _classify_ledger_h1_selection(
+            item_relative,
+            selected_ledger_path,
+            resolved_artifacts,
+            contexts,
+        )
+        if selection_classification == "invalid":
+            assert isinstance(selection, LedgerValidationContextV1)
+            return selection
+        if selection_classification == "member":
+            location = selection
+            physical_selected_path = getattr(location, "physical_ledger_path")
+            context_key = getattr(location, "logical_ledger_path")
     selected = root.joinpath(*PurePosixPath(physical_selected_path).parts)
     identity_errors: list[str] = []
     identity = _projection_target_identity(item, selected, identity_errors)
@@ -3876,19 +4006,19 @@ def load_effective_ledger_view(
             LedgerCompatibilityObservationV1("invalid", ("WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS",), tuple((*identity_errors, diagnostic))),
             (), (), token,
         )
-    contexts = _load_effective_ledger_group(
-        root, compatibility_artifacts=resolved_artifacts
-    )
     if context_key in contexts:
         return contexts[context_key]
-    if compatibility_artifacts is not None:
+    if (
+        compatibility_artifacts is not None
+        and selection_classification != "ordinary-nonmember"
+    ):
         diagnostic = "WI-LEDGER-COMPAT-ACTIVATION-PARTIAL: selected ledger is absent from candidate group"
         return LedgerValidationContextV1(
             selected_ledger_path, (), None,
             LedgerCompatibilityObservationV1("invalid", ("WI-LEDGER-COMPAT-ACTIVATION-PARTIAL",), (diagnostic,)),
             (), (), token,
         )
-    if _ledger_h1_live_participants_exist(root):
+    if resolved_artifacts is None and _ledger_h1_live_participants_exist(root):
         diagnostic = "WI-LEDGER-COMPAT-ACTIVATION-INCOMPLETE: compatibility participants exist without one valid receipt-bound group"
         return LedgerValidationContextV1(
             selected_ledger_path, (), None,
@@ -4125,11 +4255,20 @@ def project_manifest_bound_legacy_ledger_projections(
     selected_ledger: Path, ledger_bytes: bytes,
     manifest_blobs: dict[str, bytes] | None = None,
     registry_bytes: bytes | None = None,
+    validated_h1_partition: tuple[
+        str, str, str, str, tuple[tuple[int, str], ...]
+    ] | None = None,
 ) -> tuple[list[dict], dict[str, int], list[str]]:
     """Read verified immutable legacy rows through closed shape-only profiles."""
     counters = {"manifest-apply": 0, "manifest-revoke": 0, "manifest-projected": 0}
     errors: list[str] = []
     candidate_input = manifest_blobs is not None or registry_bytes is not None
+    if validated_h1_partition is not None and candidate_input:
+        fail(
+            errors,
+            "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS: validated H1 partition cannot be combined with caller-supplied legacy projection inputs",
+        )
+        return events, counters, errors
     if not candidate_input and repo_root_for(item) is None:
         return events, counters, errors
     target = _projection_target_identity(item, selected_ledger, errors)
@@ -4139,6 +4278,42 @@ def project_manifest_bound_legacy_ledger_projections(
     work_items = root / "work-items"
     manifests = work_items / LEGACY_PROJECTION_MANIFEST_DIR
     registry = work_items / LEGACY_PROJECTION_REGISTRY
+    owned_registry_rows: dict[int, str] = {}
+    if validated_h1_partition is not None:
+        (
+            excluded_path,
+            excluded_sha256,
+            excluded_registry_path,
+            excluded_registry_sha256,
+            excluded_rows,
+        ) = validated_h1_partition
+        excluded_parts = PurePosixPath(excluded_path).parts
+        if (
+            len(excluded_parts) != 3
+            or excluded_parts[:2]
+            != ("work-items", LEGACY_PROJECTION_MANIFEST_DIR)
+            or Path(excluded_parts[2]).name != excluded_parts[2]
+            or not excluded_parts[2].endswith(".json")
+            or SHA256_RE.fullmatch(excluded_sha256) is None
+            or excluded_registry_path
+            != f"work-items/{LEGACY_PROJECTION_REGISTRY}"
+            or SHA256_RE.fullmatch(excluded_registry_sha256) is None
+            or len(excluded_rows) not in {2, 4}
+            or any(
+                type(ordinal) is not int
+                or ordinal < 1
+                or SHA256_RE.fullmatch(row_sha256) is None
+                for ordinal, row_sha256 in excluded_rows
+            )
+            or tuple(sorted(excluded_rows)) != excluded_rows
+            or len({ordinal for ordinal, _digest in excluded_rows})
+            != len(excluded_rows)
+        ):
+            fail(
+                errors,
+                "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS: validated H1 projection partition is unsafe",
+            )
+            return events, counters, errors
     if candidate_input and (manifest_blobs is None or registry_bytes is None):
         _projection_fail(errors, "manifest", "candidate projection requires both manifest blobs and registry bytes")
         return events, counters, errors
@@ -4173,13 +4348,28 @@ def project_manifest_bound_legacy_ledger_projections(
         registry_source = "candidate:legacy-ledger-projections.jsonl"
     else:
         try:
-            registry_lines = registry.read_bytes().splitlines(keepends=True)
+            registry_raw = registry.read_bytes()
+            registry_lines = registry_raw.splitlines(keepends=True)
             manifest_inputs = [(path.name, None, str(path)) for path in sorted(manifests.iterdir())]
         except OSError as exc:
             _projection_fail(errors, "manifest", f"cannot read projection input: {exc}")
             return events, counters, errors
         registry_source = str(registry)
+        if validated_h1_partition is not None:
+            if (
+                registry.relative_to(root).as_posix()
+                != validated_h1_partition[2]
+                or hashlib.sha256(registry_raw).hexdigest()
+                != validated_h1_partition[3]
+            ):
+                fail(
+                    errors,
+                    "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS: validated H1 registry snapshot differs",
+                )
+                return events, counters, errors
+            owned_registry_rows = dict(validated_h1_partition[4])
     manifest_by_id: dict[str, tuple[dict, bytes]] = {}
+    excluded_matches = 0
     for name, raw, source in manifest_inputs:
         path = manifests / name
         if not candidate_input:
@@ -4197,6 +4387,14 @@ def project_manifest_bound_legacy_ledger_projections(
                 continue
             raw = path.read_bytes()
         assert isinstance(raw, bytes)
+        if validated_h1_partition is not None:
+            relative_path = path.relative_to(root).as_posix()
+            if (
+                relative_path == validated_h1_partition[0]
+                and hashlib.sha256(raw).hexdigest() == validated_h1_partition[1]
+            ):
+                excluded_matches += 1
+                continue
         manifest = _projection_json_object(raw, source, errors)
         required = {"schemaVersion", "manifestId", "profiles", "entries"}
         if manifest is None or not _strict_shape(manifest, required, required, errors, f"manifest {name}"):
@@ -4243,13 +4441,31 @@ def project_manifest_bound_legacy_ledger_projections(
         if not manifest_valid:
             continue
         manifest_by_id[manifest["manifestId"]] = (manifest, raw)
+    if validated_h1_partition is not None and excluded_matches != 1:
+        fail(
+            errors,
+            "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS: validated H1 manifest partition did not match exactly once",
+        )
+        return events, counters, errors
     active: dict[tuple[str, int], tuple[dict, bytes, dict]] = {}
     operation_ids: set[str] = set()
     apply_lines: dict[str, tuple[tuple[str, int], bytes]] = {}
     seen_group_ids: set[str] = set()
     current_group_id: str | None = None
     history_groups: dict[str, list[dict]] = {}
+    if any(
+        ordinal > len(registry_lines)
+        or hashlib.sha256(registry_lines[ordinal - 1]).hexdigest() != row_sha256
+        for ordinal, row_sha256 in owned_registry_rows.items()
+    ):
+        fail(
+            errors,
+            "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS: validated H1 registry row partition differs",
+        )
+        return events, counters, errors
     for ordinal, physical in enumerate(registry_lines, start=1):
+        if ordinal in owned_registry_rows:
+            continue
         record = _projection_json_object(physical.rstrip(b"\r\n"), f"{registry_source}:{ordinal}", errors)
         required = {"schemaVersion", "operationId", "state", "profileId", "profileVersion", "manifestId", "manifestSha256", "manifestEntryId", "workItem", "ledgerPath", "ledgerSha256", "rawLineOrdinal", "rawLineSha256", "projectedEvent", "projectedEventSha256", "recordedAt"}
         if record is None:
@@ -4502,12 +4718,17 @@ def _project_manifest_rows(
     *,
     manifest_blobs: dict[str, bytes] | None = None,
     registry_bytes: bytes | None = None,
+    validated_h1_partition: tuple[
+        str, str, str, str, tuple[tuple[int, str], ...]
+    ] | None = None,
 ) -> tuple[tuple[LedgerProjectionRowV1, ...], dict[str, int], list[str]]:
     """Apply the existing manifest owner while retaining physical row identity."""
     events = _row_events(rows)
     projected, counters, errors = project_manifest_bound_legacy_ledger_projections(
         events, _row_metadata(rows), item, selected_ledger, ledger_bytes,
-        manifest_blobs=manifest_blobs, registry_bytes=registry_bytes,
+        manifest_blobs=manifest_blobs,
+        registry_bytes=registry_bytes,
+        validated_h1_partition=validated_h1_partition,
     )
     if len(projected) != len(rows):
         _projection_fail(errors, "identity", "manifest projection changed ledger cardinality")
@@ -4611,7 +4832,7 @@ def obligation_transfer_id(
 
 
 def _transfer_status_relation(item: Path, errors: list[str]) -> tuple[str, str] | None:
-    status = item / "status.md"
+    status = item if item.is_file() else item / "status.md"
     if not status.is_file():
         return None
     try:
@@ -4632,10 +4853,18 @@ def _transfer_status_relation(item: Path, errors: list[str]) -> tuple[str, str] 
     return values["continues"][0], values["obligation-transfer"][0]
 
 
-def _transfer_receipts(root: Path, errors: list[str]) -> dict[str, tuple[Path, dict]]:
-    receipts: dict[str, tuple[Path, dict]] = {}
+def _transfer_receipts(
+    root: Path, errors: list[str]
+) -> dict[str, tuple[Path, dict, Path]]:
+    receipts: dict[str, tuple[Path, dict, Path]] = {}
     work_items = root / "work-items"
     for path in sorted((work_items / "archive").glob("*/*/lifecycle-transition-receipt.json")):
+        if _is_link_or_reparse(path):
+            fail(
+                errors,
+                "WI-OBLIGATION-TRANSFER-OWNER: transfer receipt is a link or reparse point",
+            )
+            continue
         try:
             payload = decode_json_object(
                 path.read_bytes(), source=str(path), maximum_bytes=max(1, path.stat().st_size)
@@ -4655,15 +4884,29 @@ def _transfer_receipts(root: Path, errors: list[str]) -> dict[str, tuple[Path, d
             continue
         archive_path = payload.get("archivePath")
         ledger_sha256 = payload.get("ledgerSha256")
+        archive = path.parent
+        try:
+            physical_archive_path = archive.relative_to(root).as_posix()
+        except ValueError:
+            fail(
+                errors,
+                f"WI-OBLIGATION-TRANSFER-OWNER: receipt location escapes repository: {operation_id}",
+            )
+            continue
+        if not isinstance(archive_path, str) or archive_path != physical_archive_path:
+            fail(
+                errors,
+                f"WI-OBLIGATION-TRANSFER-OWNER: receipt location differs: {operation_id}",
+            )
+            continue
         if (
-            not isinstance(archive_path, str)
-            or not isinstance(ledger_sha256, str)
+            not isinstance(ledger_sha256, str)
             or SHA256_RE.fullmatch(ledger_sha256) is None
-            or payload.get("archiveIdentity") != archived_ledger_identity(archive_path, ledger_sha256)
+            or payload.get("archiveIdentity")
+            != archived_ledger_identity(physical_archive_path, ledger_sha256)
         ):
             fail(errors, f"WI-OBLIGATION-TRANSFER-DRIFT: transfer receipt {operation_id} archive identity differs")
             continue
-        archive = root.joinpath(*PurePosixPath(archive_path).parts)
         ledger = archive / "agent-runs.jsonl"
         try:
             physical_ledger_sha = hashlib.sha256(ledger.read_bytes()).hexdigest()
@@ -4673,13 +4916,13 @@ def _transfer_receipts(root: Path, errors: list[str]) -> dict[str, tuple[Path, d
         if physical_ledger_sha != ledger_sha256:
             fail(errors, f"WI-OBLIGATION-TRANSFER-DRIFT: transfer ledger digest differs: {operation_id}")
             continue
-        receipts[operation_id] = (path, payload)
+        receipts[operation_id] = (path, payload, archive)
     return receipts
 
 
 def _resolve_transferred_obligation(
     root: Path,
-    receipts: Mapping[str, tuple[Path, dict]],
+    receipts: Mapping[str, tuple[Path, dict, Path]],
     operation_id: str,
     obligation: dict,
     errors: list[str],
@@ -4692,7 +4935,7 @@ def _resolve_transferred_obligation(
     if receipt_entry is None:
         fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: transfer receipt is absent: {operation_id}")
         return None
-    _path, receipt = receipt_entry
+    _path, receipt, archive = receipt_entry
     predecessor = obligation.get("predecessorOperationId")
     obligation_id = obligation.get("obligationId")
     if predecessor is not None:
@@ -4737,14 +4980,12 @@ def _resolve_transferred_obligation(
             inherited.raw_event_sha256, "transferred", obligation_id, predecessor,
         )
 
-    archive_path = receipt.get("archivePath")
-    if not isinstance(archive_path, str):
-        fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: archive path is absent: {operation_id}")
-        return None
-    source = root.joinpath(*PurePosixPath(archive_path).parts)
     states: list[WorkItemObligationStateV1] = []
     validation_errors = validate_work_item(
-        source, strict_revise=False, validate_status_file=False, obligation_state_out=states
+        archive,
+        strict_revise=False,
+        validate_status_file=False,
+        obligation_state_out=states,
     )
     if validation_errors or len(states) != 1:
         errors.extend(validation_errors)
@@ -4850,12 +5091,7 @@ def validate_obligation_transfer_ownership(root: Path) -> list[str]:
     rows_by_operation: dict[str, dict[str, dict]] = {}
     children: dict[tuple[str, str], list[str]] = {}
     origins: dict[str, list[str]] = {}
-    for operation_id, (receipt_path, receipt) in receipts.items():
-        archive_path = receipt.get("archivePath")
-        if isinstance(archive_path, str):
-            expected_receipt = root.joinpath(*PurePosixPath(archive_path).parts) / "lifecycle-transition-receipt.json"
-            if receipt_path.resolve() != expected_receipt.resolve():
-                fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: receipt location differs: {operation_id}")
+    for operation_id, (_receipt_path, receipt, _archive) in receipts.items():
         operation_rows: dict[str, dict] = {}
         for row in receipt.get("obligations", []):
             if not isinstance(row, dict):
@@ -4945,6 +5181,14 @@ def validate_obligation_transfer_ownership(root: Path) -> list[str]:
                         for open_row in state[0].open_revise
                     ):
                         fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: unresolved obligation has a terminal owner: {obligation_id}")
+                elif _transfer_status_relation(locations[0], errors) != (
+                    receipts[operation_id][1].get("workItem"),
+                    operation_id,
+                ):
+                    fail(
+                        errors,
+                        f"WI-OBLIGATION-TRANSFER-OWNER: current owner relation differs: {obligation_id}",
+                    )
                 break
             next_operation = next_operations[0]
             next_receipt = receipts.get(next_operation)
@@ -5826,8 +6070,11 @@ def validate_work_item(
         and _ledger_h1_live_participants_exist(root)
     )
     effective_compatibility_artifacts = compatibility_artifacts
+    validated_h1_partition: tuple[
+        str, str, str, str, tuple[tuple[int, str], ...]
+    ] | None = None
     selected_identity: str | None = None
-    if live_compatibility_observed and ledger_path is not None:
+    if live_compatibility_observed and effective_compatibility_artifacts is None:
         assert root is not None
         target = _projection_target_identity(item, selected_ledger, errors)
         if target is None:
@@ -5846,29 +6093,60 @@ def validate_work_item(
                 "WI-LEDGER-COMPAT-ACTIVATION-INCOMPLETE: active compatibility candidate inputs are unavailable",
             )
             return errors
-        if selected_identity not in live_artifacts.ledger_bytes_by_path:
-            fail(
-                errors,
-                "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS: candidate ledger is not a manifest-selected member",
-            )
-            return errors
-        try:
-            candidate_bytes = selected_ledger.read_bytes()
-        except OSError as exc:
-            fail(errors, f"cannot read ledger: {selected_ledger}: {exc}")
-            return errors
-        candidate_ledgers = dict(live_artifacts.ledger_bytes_by_path)
-        candidate_ledgers[selected_identity] = candidate_bytes
-        effective_compatibility_artifacts = LedgerCompatibilityArtifactSetV1(
-            MappingProxyType(candidate_ledgers),
-            live_artifacts.h1_manifest_path,
-            live_artifacts.h1_manifest_bytes,
-            live_artifacts.ledger_manifest_path,
-            live_artifacts.ledger_manifest_bytes,
-            live_artifacts.registry_bytes,
-            live_artifacts.receipt_bytes_by_path,
-            live_artifacts.participant_locations_by_path,
+        live_contexts = _load_effective_ledger_group(
+            root, compatibility_artifacts=live_artifacts
         )
+        classification, selection = _classify_ledger_h1_selection(
+            target[1],
+            selected_identity,
+            live_artifacts,
+            live_contexts,
+        )
+        if classification == "invalid":
+            assert isinstance(selection, LedgerValidationContextV1)
+            errors.extend(selection.observation.diagnostics)
+            return errors
+        if classification == "ordinary-nonmember":
+            live_compatibility_observed = False
+            tokens = {id(context.invocation_token): context.invocation_token for context in live_contexts.values()}
+            if len(tokens) != 1:
+                fail(
+                    errors,
+                    "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS: validated H1 group has no unique invocation token",
+                )
+                return errors
+            token = next(iter(tokens.values()))
+            if not isinstance(token, _LedgerInvocationTokenV1):
+                fail(
+                    errors,
+                    "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS: validated H1 group invocation token is invalid",
+                )
+                return errors
+            validated_h1_partition = token.h1_projection_partition
+        else:
+            if ledger_path is None:
+                selected_identity = getattr(
+                    selection, "logical_ledger_path", selected_identity
+                )
+                effective_compatibility_artifacts = live_artifacts
+            else:
+                try:
+                    candidate_bytes = selected_ledger.read_bytes()
+                except OSError as exc:
+                    fail(errors, f"cannot read ledger: {selected_ledger}: {exc}")
+                    return errors
+                candidate_ledgers = dict(live_artifacts.ledger_bytes_by_path)
+                candidate_ledgers[selected_identity] = candidate_bytes
+                effective_compatibility_artifacts = LedgerCompatibilityArtifactSetV1(
+                    MappingProxyType(candidate_ledgers),
+                    live_artifacts.h1_manifest_path,
+                    live_artifacts.h1_manifest_bytes,
+                    live_artifacts.ledger_manifest_path,
+                    live_artifacts.ledger_manifest_bytes,
+                    live_artifacts.registry_bytes,
+                    live_artifacts.receipt_bytes_by_path,
+                    live_artifacts.participant_locations_by_path,
+                )
     if effective_compatibility_artifacts is not None or live_compatibility_observed:
         if root is None:
             fail(errors, "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS: work item has no repository root")
@@ -5978,6 +6256,7 @@ def validate_work_item(
         rows, item, selected_ledger, ledger_bytes,
         manifest_blobs=projection_manifest_blobs,
         registry_bytes=projection_registry_bytes,
+        validated_h1_partition=validated_h1_partition,
     )
     errors.extend(projection_errors)
     native_effective_rows, migration_counters, migration_errors = _project_migration_rows(shape_rows, item)

@@ -10,6 +10,12 @@ SKILL_PATHS = (
     ROOT / "src.codex/skills/github-pr-review-bot/SKILL.md",
     ROOT / "src.claude/skills/github-pr-review-bot/SKILL.md",
 )
+PROTOCOL_PATH = ROOT / "shared/references/github-pr-review-bot-protocol.md"
+LEAD_PATHS = (
+    ROOT / "src.codex/skills/lead/SKILL.md",
+    ROOT / "src.claude/skills/lead/SKILL.md",
+)
+SHARED_GOVERNANCE_PATH = ROOT / "shared/AGENTS.shared.md"
 RETRYABLE_TERMINAL_BODY = (
     'Codex Review: Something went wrong. Try again later by commenting "@codex review".\n'
     "An unknown error occurred"
@@ -165,6 +171,48 @@ def test_retryable_terminal_failure_allows_one_explicitly_authorized_retry() -> 
     )
     for clause in required_contract:
         assert clause in body, f"missing bounded retry clause: {clause}"
+
+
+def test_pr_cycle_reuses_active_grant_and_preserves_authorization_boundaries() -> None:
+    bodies = [path.read_text(encoding="utf-8") for path in SKILL_PATHS]
+
+    assert bodies[0] == bodies[1]
+    body = bodies[0]
+    scenario_contract = {
+        "active-grant-no-repeat-ask": (
+            "active PR-bound grant",
+            "reuses existing permission and creates none",
+            "Do not ask again",
+            "ordinary corrective pushes",
+            "resolution of the exact fixed threads",
+            "the next review trigger",
+        ),
+        "revoked-or-other-target-needs-authorization": (
+            "another PR, remote, or head branch",
+            "widened scope",
+            "[revoke-pr-publication:v1]",
+            "later genuine user no-push instruction",
+            "Fresh authorization is required",
+        ),
+        "publication-gates-stay-bound": (
+            "current-head and PR/Git binding checks",
+            "branch protection",
+            "human review",
+            "fresh leak/range receipt",
+        ),
+    }
+    for scenario, clauses in scenario_contract.items():
+        for clause in clauses:
+            assert clause in body, f"missing {scenario} clause: {clause}"
+
+    protocol = PROTOCOL_PATH.read_text(encoding="utf-8")
+    assert "Authorization continuity" in protocol
+    assert "installed `$github-pr-review-bot` skill" in protocol
+    for path in LEAD_PATHS:
+        lead = path.read_text(encoding="utf-8")
+        assert "authorization-continuity rule before asking again" in lead
+    shared = SHARED_GOVERNANCE_PATH.read_text(encoding="utf-8")
+    assert "apply the checked current PR-bound grant" in shared
 
 
 def test_issue_comment_order_is_repo_local_total_order_for_rest_comments() -> None:

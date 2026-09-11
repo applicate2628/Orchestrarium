@@ -89,6 +89,25 @@ Current external provider wrappers record the exact resolved model, effort, and 
 
 `--execution-role` takes one of the canonical values from `shared/schemas/agent-runs.schema.json`: `main` (the one main-conversation identity, which also holds the Lead role), `internal`, `consultant`, `external-worker`, `external-reviewer`, or `external-brigade`. Orchestration weight belongs to the selected template and routing process; current staged status does not require a separate `orchestration: light | full-lead` field. Ledgers written before 2026-07-11 may carry the legacy value `lead`; validators and rollups read it as `main` (same owner), but a new append with `lead` is rejected — write `main`.
 
+## Close External Review Findings
+
+An external review records `role` and `executionRole` as `external-reviewer`; `assignedRole` identifies its professional reviewer. Its `external-nonauthorizing` terminal has empty `closesRunIds` and cannot authorize publication.
+
+A later native professional PASS may close its findings through a launch-bound terminal or a genuine standalone event. Preserve launch provenance when a launch exists:
+
+- The closer's `role` equals the target's `assignedRole`; any closer `assignedRole` must agree. Native `executionRole` stays `internal`, not the adapter role.
+- `artifact` identifies each produced report. The native and external reports must have distinct paths.
+- Matching nonblank `artifactIdentity` values identify the reviewed subject, not those report paths; `scope` must match exactly.
+- `closesRunIds` names the exact external REVISE event. Existing launch, lane, effort, and other checks still apply.
+
+This flag fragment supplements an otherwise valid native PASS append; use the actual target's identity and scope:
+
+```text
+--artifact reviews/native-qa.md --artifact-identity topic:subject --closes external-review-event
+```
+
+Unrelated professions, subjects, scopes, and invalid report relations still fail.
+
 ## Validate One Work Item
 
 Run this before stage closeout or archive movement.
@@ -389,6 +408,23 @@ one current owner without copying source-ledger events: closure remains
 set with its predecessor operation. Identical replay is a byte no-op; request,
 receipt, ledger, or ownership drift fails closed through the existing recovery
 owner.
+
+Plain `audit` is read-only. If a transition intent is pending, it fails with
+`WI-LIFECYCLE-TRANSITION-RECOVERY-REQUIRED`, names the bounded operation ID,
+and prints the exact command to run. Recover only that operation explicitly:
+
+```powershell
+python scripts/mutate-work-item.py recover-transition --root <repo> --operation-id <bounded-transition-id> --apply
+```
+
+The command delegates to the existing transition recovery owner and reports
+`outcome=rolled-back` or `outcome=settled`; rerun `audit` afterward. Omitting
+`--apply` or naming a non-pending operation changes no bytes. Do not use audit
+as a batch recovery command.
+
+If `start`, `update`, or `reopen` reports `WI-README-STALE` after saying the
+canonical state committed, do not retry that operation. Run `refresh`, then
+use `resolve` and `audit` to verify the target.
 
 ### Finish an accepted current-bug successor handoff
 

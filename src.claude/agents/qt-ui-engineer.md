@@ -9,7 +9,7 @@ description: "Qt UI engineer: implement approved Widgets UI phases."
 
 - Implement only the approved Qt UI phase.
 - Preserve interaction intent, platform conventions, and existing Qt architecture.
-- Keep the diff small, reviewable, and aligned with the accepted plan.
+- Keep the change scoped, reviewable, and aligned with the accepted plan.
 
 ## Input contract
 

@@ -16,6 +16,11 @@ ROOT = Path(__file__).resolve().parents[1]
 OWNER_PATH = ROOT / "scripts" / "provider_prompt.py"
 WRAPPER_PATH = ROOT / "scripts" / "invoke-kimi-prompt.py"
 INSTALLER_PATH = ROOT / "scripts" / "production_installer.py"
+CODEX_UI_PROMPT_PATHS = (
+    ROOT / "src.codex/skills/consultant/agents/openai.yaml",
+    ROOT / "src.codex/skills/init-project/agents/openai.yaml",
+    ROOT / "src.codex/skills/second-opinion/agents/openai.yaml",
+)
 EXPECTED_KIMI_TERMINAL_INSTRUCTION = (
     b"Your final nonblank line must be exactly one of: GATE: PASS, "
     b"GATE: REVISE, GATE: BLOCKED. Do not emit any other gate-like line.\n"
@@ -45,6 +50,14 @@ def test_kimi_wrapper_stays_thin() -> None:
     assert "from provider_prompt import kimi_main" in text
     assert "kimi_main(sys.argv[1:])" in text
     assert "subprocess" not in text
+
+
+def test_codex_ui_prompts_describe_fixed_no_enrollment_kimi_launch() -> None:
+    for path in CODEX_UI_PROMPT_PATHS:
+        prompt = path.read_text(encoding="utf-8")
+        assert "Windows-enrolled" not in prompt
+        assert "canonical fixed `kimi-code/k3` no-tools/no-subagents wrapper" in prompt
+        assert "ordinary launch does not consult enrollment" in prompt
 
 
 def test_installer_kimi_enrollment_actions_are_explicit_and_mutually_exclusive() -> None:
@@ -192,12 +205,195 @@ def test_kimi_readiness_diagnostic_checks_version_and_required_help_flags(
         calls.append(argv)
         if argv == ("--version",):
             return b"0.42.0\n"
-        return b"--agent-file --skills-dir --model --output-format --prompt\n"
+        return b"Commands: acp\n"
 
     command = owner._diagnose_kimi_readiness(home, probe_runner=probe)
 
     assert command == [str(executable.resolve())]
     assert calls == [("--version",), ("--help",)]
+
+
+def test_kimi_capability_diagnostic_exposes_bounded_help_and_exact_support(
+    tmp_path: Path,
+) -> None:
+    owner = _load_owner()
+    home = (tmp_path / "user").resolve()
+    executable = home / ".kimi-code" / "bin" / "kimi.exe"
+    executable.parent.mkdir(parents=True)
+    executable.write_bytes(b"synthetic-kimi")
+    calls: list[tuple[str, ...]] = []
+    help_text = (
+        "Commands: acp\n"
+        "--agent-file <path> --skills-dir <dir> --model <model>\n"
+        "--output-format <format> supports text and stream-json\n"
+        "--prompt <prompt>\n"
+        "--mcp-config-file <path> repeatable; default: none\n"
+        "--mcp-config <json> repeatable; default: none\n"
+    )
+
+    def probe(resolution, argv: tuple[str, ...]) -> bytes:
+        assert resolution.command == (str(executable.resolve()),)
+        calls.append(argv)
+        return b"0.42.0\n" if argv == ("--version",) else help_text.encode("utf-8")
+
+    report = owner._diagnose_kimi_readiness(
+        home, probe_runner=probe, include_capabilities=True
+    )
+
+    assert report["schemaVersion"] == 1
+    assert report["kind"] == "kimi-capability-readiness"
+    assert report["version"] == "0.42.0"
+    assert report["command"] == [str(executable.resolve())]
+    assert report["launchEnvironment"] == {
+        "KIMI_CODE_EXPERIMENTAL_FLAG": "1",
+        "KIMI_CODE_NO_AUTO_UPDATE": "1",
+        "DO_NOT_TRACK": "1",
+        "isolatedKimiCodeHome": True,
+    }
+    assert report["help"] == {
+        "bytes": len(help_text.encode("utf-8")),
+        "sha256": hashlib.sha256(help_text.encode("utf-8")).hexdigest(),
+        "text": help_text,
+    }
+    assert report["support"]["structuredOutput"] == {
+        "outputFormatFlag": True,
+        "streamJsonValue": True,
+        "supported": True,
+    }
+    assert report["support"]["selectedMcpConfiguration"] == {
+        "flags": ["--mcp-config-file", "--mcp-config"],
+        "repeatable": True,
+        "noDefaultConfig": True,
+        "supported": True,
+    }
+    assert report["support"]["independentChildControls"] == {
+        "agentFileFlag": True,
+        "toolsField": False,
+        "subagentsField": False,
+        "defaultToolsDisabled": True,
+        "defaultChildrenDisabled": True,
+        "runtimeVerified": False,
+    }
+    assert calls == [("--version",), ("--help",)]
+
+
+def test_kimi_capability_diagnostic_reports_absent_installed_help_features(
+    tmp_path: Path,
+) -> None:
+    owner = _load_owner()
+    home = (tmp_path / "user").resolve()
+    executable = home / ".kimi-code" / "bin" / "kimi.exe"
+    executable.parent.mkdir(parents=True)
+    executable.write_bytes(b"synthetic-kimi")
+    base_help = "Commands: acp\n--agent-file --skills-dir --model --output-format --prompt\n"
+
+    report = owner._diagnose_kimi_readiness(
+        home,
+        probe_runner=lambda _resolution, argv: (
+            b"0.42.0\n" if argv == ("--version",) else base_help.encode("utf-8")
+        ),
+        include_capabilities=True,
+    )
+
+    assert report["support"]["structuredOutput"]["supported"] is False
+    assert report["support"]["selectedMcpConfiguration"] == {
+        "flags": [],
+        "repeatable": False,
+        "noDefaultConfig": False,
+        "supported": False,
+    }
+    assert report["help"]["text"] == base_help
+
+
+@pytest.mark.parametrize("argv", (("--version",), ("--help",)))
+def test_kimi_readiness_diagnostic_uses_actual_sealed_launch_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, argv: tuple[str, ...]
+) -> None:
+    owner = _load_owner()
+    executable = (tmp_path / "kimi.exe").resolve()
+    executable.write_bytes(b"synthetic-kimi")
+    resolution = owner.ResolvedProviderCommand(
+        (str(executable),), executable, "explicit-absolute-binding"
+    )
+    observed: list[object] = []
+
+    class Sink:
+        def bytes_for(self, stream: str) -> bytes:
+            return b"installed help\n" if stream == "stdout" else b""
+
+    class Runner:
+        def mint_memory_capture_sink(self) -> Sink:
+            return Sink()
+
+        def run(self, request):
+            observed.append(request)
+            return SimpleNamespace(
+                outcome="success",
+                target_exit_code=0,
+                resources_closed=True,
+                tree=SimpleNamespace(tree_empty=True),
+            )
+
+        def close(self) -> None:
+            return None
+
+    def auth(provider: str):
+        assert provider == "kimi"
+        return SimpleNamespace(
+            child_environment={
+                "PATH": "synthetic-path",
+                "SYSTEMROOT": "C:\\Windows",
+                "KIMI_CODE_EXPERIMENTAL_FLAG": "1",
+                "KIMI_CODE_NO_AUTO_UPDATE": "1",
+                "DO_NOT_TRACK": "1",
+            }
+        )
+
+    monkeypatch.setattr(owner, "ProcessRunnerV1", Runner)
+    monkeypatch.setattr(owner, "resolve_provider_auth_configuration", auth)
+
+    assert owner._default_kimi_readiness_probe(resolution, argv) == b"installed help\n"
+    request = observed[0]
+    environment = {row.name: row.value for row in request.environment}
+    assert environment["PATH"] == "synthetic-path"
+    assert environment["SYSTEMROOT"] == "C:\\Windows"
+    assert environment["KIMI_CODE_EXPERIMENTAL_FLAG"] == "1"
+    assert environment["KIMI_CODE_NO_AUTO_UPDATE"] == "1"
+    assert environment["DO_NOT_TRACK"] == "1"
+    assert Path(environment["KIMI_CODE_HOME"]).resolve() == Path(request.cwd).resolve()
+    assert request.argv == (str(executable), *argv)
+    assert request.windows_argv_profile_id == owner.KIMI_WINDOWS_PROFILE_V1.probe_profile_id
+
+
+def test_kimi_capability_command_is_json_only_and_never_launches_provider(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    owner = _load_owner()
+    home = (tmp_path / "user").resolve()
+    report = {"schemaVersion": 1, "kind": "kimi-capability-readiness"}
+
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setattr(
+        owner,
+        "_diagnose_kimi_readiness",
+        lambda selected_home, *, include_capabilities=False: (
+            report
+            if selected_home == home and include_capabilities
+            else pytest.fail("capability command used the wrong diagnostic contract")
+        ),
+    )
+    monkeypatch.setattr(
+        owner,
+        "launch",
+        lambda *_args, **_kwargs: pytest.fail("capability diagnostic reached provider launch"),
+    )
+
+    assert owner.kimi_main(["--diagnose-capabilities"]) == 0
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert json.loads(captured.out) == report
 
 
 def test_kimi_maintenance_aliases_share_one_nonwriting_readiness_diagnostic(
@@ -309,6 +505,7 @@ def test_provider_owner_still_rejects_invalid_taxonomy_schema_or_lane(
         ["--replace-kimi-enrollment", "--enroll-executable"],
         ["--replace-kimi-enrollment", "topic"],
         ["topic", "--verify-enrollment"],
+        ["--diagnose-capabilities", "topic"],
     ),
 )
 def test_kimi_maintenance_flags_fail_closed_when_combined(
@@ -334,40 +531,16 @@ def test_kimi_profile_is_fixed_and_has_no_native_effort_control() -> None:
         owner.resolved_profile("kimi", ["--model", "other"])
 
 
-def test_kimi_file_reference_argv_is_exact(tmp_path: Path) -> None:
+def test_kimi_acp_argv_is_exact() -> None:
     owner = _load_owner()
-    agent = tmp_path / "agent.md"
-    skills = tmp_path / "empty-skills"
-    agent.write_text(
-        "---\nname: orchestrarium-bundle-reviewer\n"
-        "description: Reviews only the context bundled in this file\n"
-        "tools: []\nsubagents: []\n---\nGATE: PASS\n",
-        encoding="utf-8",
-    )
-    skills.mkdir()
-    assert owner.kimi_provider_args(agent, skills) == [
-        "--agent-file",
-        str(agent.resolve()),
-        "--skills-dir",
-        str(skills.resolve()),
-        "--model",
-        "kimi-code/k3",
-        "--output-format",
-        "text",
-        "--prompt",
-        owner.KIMI_WINDOWS_PROFILE_V1.constant_prompt,
-    ]
+    assert owner.kimi_provider_args() == ["acp"]
 
 
-def test_kimi_file_reference_request_has_no_stdin(tmp_path: Path) -> None:
+def test_kimi_acp_request_has_programmatic_dialogue_and_no_static_stdin(tmp_path: Path) -> None:
     owner = _load_owner()
-    agent = tmp_path / "agent.md"
-    skills = tmp_path / "empty-skills"
     executable = tmp_path / "kimi.exe"
     executable.write_bytes(b"synthetic-kimi")
-    agent.write_text("fixture\n", encoding="utf-8")
-    skills.mkdir()
-    observed: list[object] = []
+    observed: list[tuple[object, object]] = []
 
     class Sink:
         def bytes_for(self, _stream: str) -> bytes:
@@ -377,11 +550,15 @@ def test_kimi_file_reference_request_has_no_stdin(tmp_path: Path) -> None:
         def mint_memory_capture_sink(self) -> Sink:
             return Sink()
 
-        def run(self, request):
-            observed.append(request)
+        def run(self, request, *, dialogue=None):
+            observed.append((request, dialogue))
             return object()
 
-    provider_args = owner.kimi_provider_args(agent, skills)
+    provider_args = owner.kimi_provider_args()
+    exchange = owner.KimiAcpOneShotV1(b"fixture", str(tmp_path))
+    dialogue = owner.ProcessDialogueV1(
+        owner.KIMI_WINDOWS_PROFILE_V1.profile_id, exchange
+    )
     expected_binding = owner.ExecutableBindingV1(
         str(executable.resolve()),
         executable.stat().st_size,
@@ -397,12 +574,14 @@ def test_kimi_file_reference_request_has_no_stdin(tmp_path: Path) -> None:
         owner.Control(),
         "kimi",
         expected_executable_binding=expected_binding,
+        dialogue=dialogue,
     )
 
-    request = observed[0]
+    request, observed_dialogue = observed[0]
     assert request.argv == (str(executable), *provider_args)
     assert request.stdin_bytes is None
     assert request.expected_executable_binding == expected_binding
+    assert observed_dialogue is dialogue
 
 
 def test_kimi_command_resolution_ignores_ambient_binary_override(
@@ -413,40 +592,6 @@ def test_kimi_command_resolution_ignores_ambient_binary_override(
     executable.write_bytes(b"synthetic")
     monkeypatch.setenv("KIMI_BIN", str(executable))
     assert owner.resolve_provider_command("kimi") is None
-
-
-def test_kimi_bundle_rejects_ambient_template_variables(tmp_path: Path) -> None:
-    owner = _load_owner()
-    with pytest.raises(ValueError, match="E_KIMI_BUNDLE_TEMPLATE_INVALID"):
-        owner.prepare_kimi_agent_payload(b"Review ${cwd}")
-
-
-def test_kimi_bundle_is_no_tools_and_no_subagents(tmp_path: Path) -> None:
-    owner = _load_owner()
-    caller = b"Review the sealed context in natural language."
-    generic = owner.assemble_external_prompt(caller)
-    prepared = owner.prepare_kimi_agent_payload(generic)
-    agent, skills = owner.materialize_kimi_agent_payload(prepared, tmp_path)
-    assert skills.is_dir() and not tuple(skills.iterdir())
-    expected = (
-        "---\nname: orchestrarium-bundle-reviewer\n"
-        "description: Reviews only the context bundled in this file\n"
-        "tools: []\nsubagents: []\n---\n\n"
-    )
-    payload = agent.read_bytes()[len(owner.KimiWindowsProfileV1.agent_frontmatter) :]
-    sealed, instruction = payload.split(owner.KIMI_AGENT_BUNDLE_EPILOGUE, 1)
-    assert sealed == owner.KIMI_AGENT_BUNDLE_PREAMBLE + generic
-    assert instruction == EXPECTED_KIMI_TERMINAL_INSTRUCTION
-    assert payload.count(owner.KIMI_AGENT_BUNDLE_EPILOGUE) == 1
-    assert payload.count(EXPECTED_KIMI_TERMINAL_INSTRUCTION) == 1
-    assert agent.read_text(encoding="utf-8").startswith(expected)
-    assert generic == (
-        owner.EXTERNAL_GOVERNANCE_BEGIN
-        + owner.external_governance_capsule_snapshot()
-        + owner.EXTERNAL_GOVERNANCE_END
-        + caller
-    )
-    assert b"GATE:" not in caller
 
 
 def test_kimi_terminal_instruction_and_renderer_share_one_closed_verdict_owner() -> None:
@@ -478,79 +623,6 @@ def test_codex_and_claude_generic_prompt_composition_remains_byte_identical() ->
         expected,
         expected,
     )
-
-
-def test_kimi_payload_validation_precedes_capture_and_launch_ledger(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    owner = _load_owner()
-    provenance = owner.ExecutionProvenance(
-        work_item="fixture",
-        assigned_internal_role="qa-engineer",
-        provider="kimi",
-        model="kimi-code/k3",
-        effort="unsupported",
-        launch_flags=(),
-        artifact_identity="fixture",
-        external_dispatch_id="dispatch-fixture",
-        external_evidence_run_id="evidence-fixture",
-        effort_mapping_loss="no-native-effort-control",
-    )
-    prevalidated = owner.PolicyBoundLaunch(
-        owner.Control(ledger="fixture-item"),
-        "fixture",
-        (),
-        "kimi-code/k3",
-        "unsupported",
-        owner.ExternalRoleProvenance("qa-engineer", "external-reviewer"),
-        provenance,
-    )
-    executable = Path(sys.executable).resolve()
-    binding = owner.ExecutableBindingV1(
-        str(executable),
-        executable.stat().st_size,
-        hashlib.sha256(executable.read_bytes()).hexdigest(),
-    )
-    monkeypatch.setattr(
-        owner,
-        "_resolve_enrolled_kimi_launch",
-        lambda: ([str(executable)], binding),
-    )
-    monkeypatch.setattr(owner, "prompt_bytes", lambda *_args, **_kwargs: b"Review ${cwd}")
-    monkeypatch.setattr(
-        owner,
-        "resolve_provider_auth_configuration",
-        lambda _provider: SimpleNamespace(
-            child_environment={},
-            needles=(),
-            output_scan_disposition="opaque-provider-session",
-        ),
-    )
-    monkeypatch.setattr(
-        owner.RunCaptureLifecycle,
-        "create",
-        lambda *_args, **_kwargs: pytest.fail("capture reached before Kimi validation"),
-    )
-    monkeypatch.setattr(
-        owner,
-        "run_ledger",
-        lambda *_args, **_kwargs: pytest.fail("launch ledger reached before Kimi validation"),
-    )
-    receipt_path = (tmp_path / "kimi-validation.receipt").resolve()
-    prevalidated.control.terminal_receipt = receipt_path
-
-    with owner.TerminalReceiptV1.reserve(receipt_path) as receipt:
-        reserved = owner.ReservedExternalRunV1(receipt)
-        assert owner._launch_with_runner(
-            "kimi",
-            [],
-            SimpleNamespace(),
-            prevalidated=prevalidated,
-            reserved_run=reserved,
-        ) == 1
-    assert "E_KIMI_BUNDLE_TEMPLATE_INVALID" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize(
@@ -1184,15 +1256,17 @@ def test_kimi_wrapper_has_no_auth_storage_contract() -> None:
         "E_KIMI_AUTH_STORAGE_INVALID",
     )
     assert all(token not in source for token in forbidden)
-    assert source.count('"KIMI_CODE_HOME": str(private_home)') == 1
 
 
 def test_kimi_profile_identifier_has_one_production_owner() -> None:
+    owner = _load_owner()
     source = (ROOT / "scripts" / "process_supervision" / "process_runner.py").read_text(
         encoding="utf-8"
     )
-    assert source.count('"kimi-sealed-bundle-text-v1"') == 1
-    assert source.count('"--agent-file"') == 1
+    assert owner.KIMI_WINDOWS_PROFILE_V1.profile_id == "kimi-acp-one-shot-v1"
+    assert owner.kimi_provider_args() == ["acp"]
+    assert "kimi-sealed-bundle-text-v1" not in source
+    assert "_kimi_bundle_file_binding" not in source
 
 
 def test_kimi_transport_adds_no_second_lifecycle_or_smoke_path() -> None:
@@ -1209,3 +1283,670 @@ def test_kimi_transport_adds_no_second_lifecycle_or_smoke_path() -> None:
         "subprocess.run",
     )
     assert all(token not in text for token in forbidden)
+
+
+def test_policy_bound_kimi_engineering_requires_external_worker_provenance() -> None:
+    owner = _load_owner()
+    control, decision = owner._policy_bound_external_control(
+        "kimi",
+        owner.Control(task_class="engineering", role="backend-engineer"),
+    )
+
+    assert decision["mutationClass"] == "bounded-write"
+    assert control.ledger_role == "backend-engineer"
+    assert control.ledger_role_explicit is True
+    assert control.provider_flags == []
+    assert owner.external_role_provenance(control, "kimi") == owner.ExternalRoleProvenance(
+        assigned_role="backend-engineer",
+        execution_role="external-worker",
+    )
+    for role in ("knowledge-archivist", "qa-engineer", "external-worker"):
+        with pytest.raises(ValueError, match="^E_EXTERNAL_DISPATCH_POLICY_DENIED$"):
+            owner._policy_bound_external_control(
+                "kimi", owner.Control(task_class="engineering", role=role)
+            )
+
+    review, review_decision = owner._policy_bound_external_control(
+        "kimi", owner.Control(task_class="review", role="qa-engineer")
+    )
+    assert review_decision["mutationClass"] == "read-only"
+    assert owner.external_role_provenance(review, "kimi").execution_role == "external-reviewer"
+
+
+class _FakeKimiAcpPeer:
+    def __init__(
+        self,
+        *,
+        out_of_order_update: bool = False,
+        reverse_rpc: bool = False,
+        eof_method: str | None = None,
+        wrong_id_method: str | None = None,
+        cancel_exception: Exception | None = None,
+        boolean_initialize_id: bool = False,
+        boolean_protocol_version: bool = False,
+        model_config_result: dict[str, object] | None = None,
+        interleaved_method: str | None = None,
+        interleaved_update: dict[str, object] | None = None,
+    ) -> None:
+        self.requests: list[dict[str, object]] = []
+        self.responses: list[bytes] = []
+        self.out_of_order_update = out_of_order_update
+        self.reverse_rpc = reverse_rpc
+        self.eof_method = eof_method
+        self.wrong_id_method = wrong_id_method
+        self.cancel_exception = cancel_exception
+        self.boolean_initialize_id = boolean_initialize_id
+        self.boolean_protocol_version = boolean_protocol_version
+        self.model_config_result = (
+            {
+                "configOptions": [
+                    {
+                        "type": "select",
+                        "id": "model",
+                        "name": "Model",
+                        "category": "model",
+                        "currentValue": "kimi-code/k3",
+                        "options": [
+                            {"value": "kimi-code/k3", "name": "K3"},
+                        ],
+                    },
+                    {
+                        "type": "select",
+                        "id": "mode",
+                        "name": "Mode",
+                        "category": "mode",
+                        "currentValue": "default",
+                        "options": [
+                            {"value": "default", "name": "Default"},
+                        ],
+                    },
+                ]
+            }
+            if model_config_result is None
+            else model_config_result
+        )
+        self.interleaved_method = interleaved_method
+        self.interleaved_update = interleaved_update
+        self.cancel_pending = False
+
+    def write_line(self, payload: bytes) -> int:
+        request = json.loads(payload.decode("utf-8"))
+        self.requests.append(request)
+        request_id = request.get("id")
+        method = request.get("method")
+        if method == "session/cancel":
+            return len(payload)
+        if method == self.eof_method:
+            return len(payload)
+        if self.out_of_order_update and method == "initialize":
+            self.responses.append(
+                json.dumps(
+                    {
+                        "jsonrpc": "2.0",
+                        "method": "session/update",
+                        "params": {"sessionId": None, "update": {}},
+                    },
+                    separators=(",", ":"),
+                ).encode("utf-8")
+                + b"\n"
+            )
+        if self.reverse_rpc and method == "initialize":
+            self.responses.append(
+                json.dumps(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": 99,
+                        "method": "fs/read_text_file",
+                        "params": {"path": "forbidden"},
+                    },
+                    separators=(",", ":"),
+                ).encode("utf-8")
+                + b"\n"
+            )
+        if method == self.interleaved_method and self.interleaved_update is not None:
+            self.responses.append(
+                json.dumps(
+                    {
+                        "jsonrpc": "2.0",
+                        "method": "session/update",
+                        "params": {
+                            "sessionId": "fake-session-1",
+                            "update": self.interleaved_update,
+                        },
+                    },
+                    separators=(",", ":"),
+                ).encode("utf-8")
+                + b"\n"
+            )
+        if method == "initialize":
+            result = {
+                "protocolVersion": (
+                    True if self.boolean_protocol_version else 1
+                ),
+                "agentCapabilities": {},
+            }
+        elif method == "session/new":
+            result = {"sessionId": "fake-session-1", "configOptions": [], "modes": {}}
+        elif method == "session/set_config_option":
+            result = self.model_config_result
+        elif method == "session/prompt":
+            if self.cancel_exception is not None:
+                self.cancel_pending = True
+                return len(payload)
+            self.responses.append(
+                json.dumps(
+                    {
+                        "jsonrpc": "2.0",
+                        "method": "session/update",
+                        "params": {
+                            "sessionId": "fake-session-1",
+                            "update": {
+                                "sessionUpdate": "agent_message_chunk",
+                                "content": {"type": "text", "text": "artifact\nGATE: PASS\n"},
+                            },
+                        },
+                    },
+                    separators=(",", ":"),
+                ).encode("utf-8")
+                + b"\n"
+            )
+            result = {"stopReason": "end_turn"}
+        elif method in {"session/close", "session/delete"}:
+            result = {}
+        else:
+            raise AssertionError(f"unexpected request: {request}")
+        self.responses.append(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": (
+                        True
+                        if method == "initialize" and self.boolean_initialize_id
+                        else request_id + 100
+                        if method == self.wrong_id_method and isinstance(request_id, int)
+                        else request_id
+                    ),
+                    "result": result,
+                },
+                separators=(",", ":"),
+            ).encode("utf-8")
+            + b"\n"
+        )
+        return len(payload)
+
+    def read_line(self) -> bytes:
+        if self.cancel_pending and self.cancel_exception is not None:
+            self.cancel_pending = False
+            raise self.cancel_exception
+        if not self.responses:
+            raise EOFError("fake ACP peer has no queued response")
+        return self.responses.pop(0)
+
+    def cancellation_requested(self) -> bool:
+        return False
+
+
+def test_kimi_acp_one_shot_preserves_literal_task_bytes() -> None:
+    owner = _load_owner()
+    body = (
+        "set(ROOT ${CMAKE_SOURCE_DIR})\r\n"
+        "echo ${x} $USER $$ $$$$\n"
+        "embedded:\x00; unicode: Привет 🌍"
+    ).encode("utf-8")
+    peer = _FakeKimiAcpPeer()
+    exchange = owner.KimiAcpOneShotV1(body, "C:/private/run")
+
+    exchange(peer)
+
+    assert [request["method"] for request in peer.requests] == [
+        "initialize",
+        "session/new",
+        "session/set_config_option",
+        "session/prompt",
+        "session/close",
+        "session/delete",
+    ]
+    assert peer.requests[0]["params"]["clientCapabilities"] == {}
+    assert peer.requests[1]["params"]["mcpServers"] == []
+    assert peer.requests[1]["params"]["additionalDirectories"] == []
+    assert peer.requests[2]["params"] == {
+        "sessionId": "fake-session-1",
+        "configId": "model",
+        "value": "kimi-code/k3",
+    }
+    prompt = peer.requests[3]["params"]["prompt"]
+    assert prompt == [{"type": "text", "text": body.decode("utf-8")}]
+    assert exchange.result_bytes == b"artifact\nGATE: PASS\n"
+
+
+@pytest.mark.parametrize(
+    "model_config_result",
+    (
+        {},
+        {"configOptions": []},
+        {
+            "configOptions": [
+                {"id": "model", "currentValue": "kimi-code/kimi-for-coding"}
+            ]
+        },
+        {
+            "configOptions": [
+                {"id": "model", "currentValue": "kimi-code/k3"},
+                {"id": "model", "currentValue": "kimi-code/k3"},
+            ]
+        },
+    ),
+)
+def test_kimi_acp_one_shot_rejects_unattested_fixed_model(
+    model_config_result: dict[str, object],
+) -> None:
+    owner = _load_owner()
+    peer = _FakeKimiAcpPeer(model_config_result=model_config_result)
+    exchange = owner.KimiAcpOneShotV1(b"safe task", "C:/private/run")
+
+    with pytest.raises(ValueError, match="^E_KIMI_ACP_PROTOCOL$"):
+        exchange(peer)
+
+    assert all(request["method"] != "session/prompt" for request in peer.requests)
+
+
+@pytest.mark.parametrize(
+    "control_update",
+    (
+        {"sessionUpdate": "available_commands_update", "availableCommands": []},
+        {"sessionUpdate": "current_mode_update", "currentModeId": "default"},
+        {"sessionUpdate": "config_option_update", "configOptions": []},
+        {"sessionUpdate": "usage_update", "used": 1, "size": 1048576},
+        {"sessionUpdate": "session_info_update", "title": None},
+    ),
+)
+def test_kimi_acp_demultiplexes_control_updates_while_awaiting_model_response(
+    control_update: dict[str, object],
+) -> None:
+    owner = _load_owner()
+    peer = _FakeKimiAcpPeer(
+        interleaved_method="session/set_config_option",
+        interleaved_update=control_update,
+    )
+    exchange = owner.KimiAcpOneShotV1(b"safe task", "C:/private/run")
+
+    exchange(peer)
+
+    assert exchange.result_bytes == b"artifact\nGATE: PASS\n"
+    assert any(request["method"] == "session/prompt" for request in peer.requests)
+
+
+@pytest.mark.parametrize("cleanup_method", ("session/close", "session/delete"))
+def test_kimi_acp_demultiplexes_control_updates_while_awaiting_cleanup_response(
+    cleanup_method: str,
+) -> None:
+    owner = _load_owner()
+    peer = _FakeKimiAcpPeer(
+        interleaved_method=cleanup_method,
+        interleaved_update={
+            "sessionUpdate": "config_option_update",
+            "configOptions": [],
+        },
+    )
+    exchange = owner.KimiAcpOneShotV1(b"safe task", "C:/private/run")
+
+    exchange(peer)
+
+    assert [request["method"] for request in peer.requests][-2:] == [
+        "session/close",
+        "session/delete",
+    ]
+
+
+def test_kimi_acp_rejects_prompt_output_update_between_rpc_replies() -> None:
+    owner = _load_owner()
+    peer = _FakeKimiAcpPeer(
+        interleaved_method="session/set_config_option",
+        interleaved_update={
+            "sessionUpdate": "agent_message_chunk",
+            "content": {"type": "text", "text": "out-of-phase"},
+        },
+    )
+    exchange = owner.KimiAcpOneShotV1(b"safe task", "C:/private/run")
+
+    with pytest.raises(ValueError, match="^E_KIMI_ACP_PROTOCOL$"):
+        exchange(peer)
+
+    assert all(request["method"] != "session/prompt" for request in peer.requests)
+
+
+def test_kimi_acp_one_shot_refuses_reverse_rpc() -> None:
+    owner = _load_owner()
+    exchange = owner.KimiAcpOneShotV1(b"safe task", "C:/private/run")
+
+    with pytest.raises(ValueError, match="^E_KIMI_ACP_PROTOCOL$"):
+        exchange(_FakeKimiAcpPeer(reverse_rpc=True))
+
+
+def test_kimi_acp_one_shot_rejects_session_update_before_prompt() -> None:
+    owner = _load_owner()
+    exchange = owner.KimiAcpOneShotV1(b"safe task", "C:/private/run")
+
+    with pytest.raises(ValueError, match="^E_KIMI_ACP_PROTOCOL$"):
+        exchange(_FakeKimiAcpPeer(out_of_order_update=True))
+
+
+def test_kimi_acp_one_shot_rejects_boolean_response_id() -> None:
+    owner = _load_owner()
+    exchange = owner.KimiAcpOneShotV1(b"safe task", "C:/private/run")
+
+    with pytest.raises(ValueError, match="^E_KIMI_ACP_PROTOCOL$"):
+        exchange(_FakeKimiAcpPeer(boolean_initialize_id=True))
+
+
+def test_kimi_acp_one_shot_rejects_boolean_protocol_version() -> None:
+    owner = _load_owner()
+    exchange = owner.KimiAcpOneShotV1(b"safe task", "C:/private/run")
+
+    with pytest.raises(ValueError, match="^E_KIMI_ACP_PROTOCOL$"):
+        exchange(_FakeKimiAcpPeer(boolean_protocol_version=True))
+
+
+@pytest.mark.parametrize(
+    "peer",
+    (
+        _FakeKimiAcpPeer(eof_method="session/new"),
+        _FakeKimiAcpPeer(wrong_id_method="initialize"),
+    ),
+)
+def test_kimi_acp_one_shot_rejects_eof_and_wrong_response_id(peer) -> None:
+    owner = _load_owner()
+    exchange = owner.KimiAcpOneShotV1(b"safe task", "C:/private/run")
+
+    with pytest.raises(ValueError, match="^E_KIMI_ACP_PROTOCOL$"):
+        exchange(peer)
+
+
+def test_kimi_acp_cancel_closes_and_deletes_session() -> None:
+    owner = _load_owner()
+    cancelled = owner.ProcessSupervisionError("PSV1-CANCELLED", "cancellation")
+    peer = _FakeKimiAcpPeer(cancel_exception=cancelled)
+    exchange = owner.KimiAcpOneShotV1(b"safe task", "C:/private/run")
+
+    with pytest.raises(owner.ProcessSupervisionError) as caught:
+        exchange(peer)
+
+    assert caught.value.failure_id == "PSV1-CANCELLED"
+    assert [request["method"] for request in peer.requests][-3:] == [
+        "session/cancel",
+        "session/close",
+        "session/delete",
+    ]
+
+
+def test_kimi_private_home_aliases_unlink_before_lifecycle_removes_private_state(
+    tmp_path: Path,
+) -> None:
+    owner = _load_owner()
+    user_data = tmp_path / "user-data"
+    credentials = user_data / "credentials"
+    credentials.mkdir(parents=True)
+    config = user_data / "config.toml"
+    secret = credentials / "token"
+    config.write_text("default_model='kimi-code/k3'\n", encoding="utf-8")
+    secret.write_text("private\n", encoding="utf-8")
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    try:
+        aliases = owner.KimiPrivateHomeAliasesV1.create(run_dir, user_data)
+    except OSError as exc:
+        pytest.skip(f"file/directory symlinks unavailable: {exc}")
+
+    assert (aliases.home / "config.toml").is_symlink()
+    assert (aliases.home / "credentials").is_symlink()
+    private_session = aliases.home / "sessions" / "session.json"
+    private_session.parent.mkdir()
+    private_session.write_text("{}\n", encoding="utf-8")
+    aliases.cleanup()
+
+    assert aliases.home.is_dir()
+    assert not os.path.lexists(aliases.home / "config.toml")
+    assert not os.path.lexists(aliases.home / "credentials")
+    assert private_session.read_text(encoding="utf-8") == "{}\n"
+    assert config.read_text(encoding="utf-8") == "default_model='kimi-code/k3'\n"
+    assert secret.read_text(encoding="utf-8") == "private\n"
+
+
+def test_kimi_private_run_materializes_fixed_zero_capability_agent_profile(
+    tmp_path: Path,
+) -> None:
+    owner = _load_owner()
+    user_data = tmp_path / "user-data"
+    user_data.mkdir()
+    (user_data / "config.toml").write_text(
+        "default_model='kimi-code/k3'\n", encoding="utf-8"
+    )
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+
+    try:
+        owner.KimiPrivateHomeAliasesV1.create(run_dir, user_data)
+    except OSError as exc:
+        pytest.skip(f"file symlinks unavailable: {exc}")
+
+    profile = run_dir / ".kimi-code" / "agents" / "agent.md"
+    assert profile.read_bytes() == (
+        b"---\n"
+        b"name: agent\n"
+        b"description: Orchestrarium finite ACP result agent\n"
+        b"override: true\n"
+        b"tools: []\n"
+        b"subagents: []\n"
+        b"---\n\n"
+        b"${base_prompt}\n"
+    )
+
+
+def _write_fake_kimi_acp(tmp_path: Path, mode: str) -> Path:
+    (tmp_path / "mode.txt").write_text(mode, encoding="ascii")
+    script = tmp_path / "acp"
+    script.write_text(
+        """from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+
+root = Path.cwd()
+mode = (root / "mode.txt").read_text(encoding="ascii")
+methods = []
+
+
+def record(method):
+    methods.append(method)
+    (root / "methods.json").write_text(json.dumps(methods), encoding="utf-8")
+
+
+def emit(message):
+    sys.stdout.write(json.dumps(message, ensure_ascii=False, separators=(",", ":")) + "\\n")
+    sys.stdout.flush()
+
+
+for line in sys.stdin.buffer:
+    request = json.loads(line.decode("utf-8"))
+    method = request["method"]
+    record(method)
+    request_id = request.get("id")
+    if method == "initialize":
+        result = {"protocolVersion": 1, "agentCapabilities": {}}
+    elif method == "session/new":
+        if mode == "eof":
+            raise SystemExit(0)
+        result = {"sessionId": "fake-session-1"}
+    elif method == "session/set_config_option":
+        if request["params"] != {
+            "sessionId": "fake-session-1",
+            "configId": "model",
+            "value": "kimi-code/k3",
+        }:
+            raise SystemExit(18)
+        result = {
+            "configOptions": [
+                {
+                    "type": "select",
+                    "id": "model",
+                    "name": "Model",
+                    "category": "model",
+                    "currentValue": "kimi-code/k3",
+                    "options": [{"value": "kimi-code/k3", "name": "K3"}],
+                }
+            ]
+        }
+    elif method == "session/prompt":
+        text = request["params"]["prompt"][0]["text"]
+        (root / "prompt.bin").write_bytes(text.encode("utf-8"))
+        if mode == "cancel":
+            (root / "cancel.ready").write_text("ready", encoding="ascii")
+            continue
+        emit({
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {
+                "sessionId": "fake-session-1",
+                "update": {
+                    "sessionUpdate": "agent_message_chunk",
+                    "content": {"type": "text", "text": "artifact\\nGATE: PASS\\n"},
+                },
+            },
+        })
+        result = {"stopReason": "end_turn"}
+    elif method == "session/cancel":
+        continue
+    elif method in {"session/close", "session/delete"}:
+        result = {}
+    else:
+        raise SystemExit(19)
+    emit({"jsonrpc": "2.0", "id": request_id, "result": result})
+    if method == "session/delete":
+        raise SystemExit(7 if mode == "nonzero" else 0)
+""",
+        encoding="utf-8",
+    )
+    return script
+
+
+def _run_fake_kimi_acp(tmp_path: Path, mode: str, body: bytes):
+    owner = _load_owner()
+    _write_fake_kimi_acp(tmp_path, mode)
+    executable = Path(sys.executable).resolve()
+    runner = owner.ProcessRunnerV1()
+    sink = runner.mint_memory_capture_sink()
+    environment = [
+        owner.EnvironmentRowV1(name, os.environ[name])
+        for name in ("PATH", "SYSTEMROOT", "TEMP", "TMP")
+        if name in os.environ
+    ]
+    environment.append(owner.EnvironmentRowV1("PYTHONUNBUFFERED", "1"))
+    request = owner.ProcessRequestV1(
+        schema_version=1,
+        argv=(str(executable), "acp"),
+        resolved_executable=executable,
+        cwd=str(tmp_path),
+        environment=tuple(environment),
+        stdin_bytes=None,
+        deadline_monotonic=__import__("time").monotonic() + 5.0,
+        capture_policy=owner.CapturePolicyV1(
+            "fake-kimi-acp-v1", 1024 * 1024, 0, 0, 64 * 1024
+        ),
+        capture_sink_binding=sink,
+        settle_policy=owner.SettlePolicyV1(5.0),
+        cancellation_probe=(
+            (lambda: (tmp_path / "cancel.ready").is_file())
+            if mode == "cancel"
+            else None
+        ),
+        windows_argv_profile_id=owner.KIMI_WINDOWS_PROFILE_V1.profile_id,
+        expected_executable_binding=owner.ExecutableBindingV1(
+            str(executable),
+            executable.stat().st_size,
+            hashlib.sha256(executable.read_bytes()).hexdigest(),
+        ),
+    )
+    exchange = owner.KimiAcpOneShotV1(body, str(tmp_path))
+    try:
+        result = runner.run(
+            request,
+            dialogue=owner.ProcessDialogueV1(
+                owner.KIMI_WINDOWS_PROFILE_V1.profile_id, exchange
+            ),
+        )
+    finally:
+        close_result = runner.close()
+    return exchange, result, close_result
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows finite Kimi ACP process contract")
+def test_fake_kimi_acp_process_preserves_literals_and_settles(tmp_path: Path) -> None:
+    body = (
+        "set(ROOT ${CMAKE_SOURCE_DIR})\r\n"
+        "echo ${x} $USER $$ $$$$\n"
+        "embedded:\x00; unicode: Привет 🌍"
+    ).encode("utf-8")
+
+    exchange, result, close_result = _run_fake_kimi_acp(tmp_path, "success", body)
+
+    assert (tmp_path / "prompt.bin").read_bytes() == body
+    assert exchange.result_bytes == b"artifact\nGATE: PASS\n"
+    assert result.outcome == "success"
+    assert result.target_exit_code == 0
+    assert result.failure_id is None
+    assert result.resources_closed is True
+    assert result.tree.tree_empty is True
+    assert close_result.outcome == "closed"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows finite Kimi ACP process contract")
+def test_fake_kimi_acp_process_rejects_eof_and_settles(tmp_path: Path) -> None:
+    _exchange, result, close_result = _run_fake_kimi_acp(
+        tmp_path, "eof", b"safe task"
+    )
+
+    assert result.failure_id == "PSV1-KIMI-ACP-PROTOCOL"
+    assert result.resources_closed is True
+    assert result.tree.tree_empty is True
+    assert close_result.outcome == "closed"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows finite Kimi ACP process contract")
+def test_fake_kimi_acp_process_preserves_nonzero_exit(tmp_path: Path) -> None:
+    exchange, result, close_result = _run_fake_kimi_acp(
+        tmp_path, "nonzero", b"safe task"
+    )
+
+    assert exchange.result_bytes == b"artifact\nGATE: PASS\n"
+    assert result.outcome == "child-failure"
+    assert result.target_exit_code == 7
+    assert result.resources_closed is True
+    assert result.tree.tree_empty is True
+    assert close_result.outcome == "closed"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows finite Kimi ACP process contract")
+def test_fake_kimi_acp_process_cancels_then_closes_deletes_and_settles(
+    tmp_path: Path,
+) -> None:
+    _exchange, result, close_result = _run_fake_kimi_acp(
+        tmp_path, "cancel", b"safe task"
+    )
+
+    methods = json.loads((tmp_path / "methods.json").read_text(encoding="utf-8"))
+    assert methods == [
+        "initialize",
+        "session/new",
+        "session/set_config_option",
+        "session/prompt",
+        "session/cancel",
+        "session/close",
+        "session/delete",
+    ]
+    assert result.failure_id == "PSV1-CANCELLED"
+    assert result.cancelled is True
+    assert result.resources_closed is True
+    assert result.tree.tree_empty is True
+    assert close_result.outcome == "closed"

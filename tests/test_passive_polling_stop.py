@@ -18,7 +18,6 @@ SCRIPT_PATHS = (
     REPO_ROOT / "src.codex" / "skills" / "lead" / "scripts" / "check-passive-polling-stop.py",
 )
 
-
 def entry(role: str, content: object) -> dict[str, object]:
     return {"type": role, "message": {"role": role, "content": content}}
 
@@ -312,7 +311,6 @@ class TestPassivePollingStop(unittest.TestCase):
     def test_empty_stdin_allows_stop(self) -> None:
         result = self.run_hook(raw_stdin="")
         self.assert_allowed(result)
-
 
 if __name__ == "__main__":
     unittest.main()

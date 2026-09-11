@@ -3477,6 +3477,14 @@ def retire_legacy_backlog(
     return target
 
 
+def _postcommit_readme_stale(operation: str) -> LifecycleError:
+    return LifecycleError(
+        "WI-README-STALE",
+        f"{operation} committed canonical state; README refresh required; "
+        f"do not retry {operation}; run refresh, then verify the target.",
+    )
+
+
 def start_item(root: Path, slug: str, status_data: bytes, *, inject_readme_failure: bool = False) -> Path:
     _validate_slug(slug)
     _validate_active_status_bytes(status_data)
@@ -3489,6 +3497,7 @@ def start_item(root: Path, slug: str, status_data: bytes, *, inject_readme_failu
         failure = "WI-CATEGORY-DUAL-LOCATION" if len(locations) > 1 else "WI-INVALID-TARGET"
         raise LifecycleError(failure, f"start requires exactly one backlog candidate: {slug}")
     transfer_relation = _validate_started_transfer_relation(backlog.read_bytes(), status_data)
+    _validate_obligation_transfer_ownership(root)
     _preflight_readme(root)
     active_parent = work_items / "active"
     active_parent.mkdir(parents=True, exist_ok=True)
@@ -3515,11 +3524,11 @@ def start_item(root: Path, slug: str, status_data: bytes, *, inject_readme_failu
                 os.replace(moved_candidate, backlog)
             shutil.rmtree(temp, ignore_errors=True)
     if inject_readme_failure:
-        raise LifecycleError("WI-README-STALE", "injected failure after canonical success")
+        raise _postcommit_readme_stale("start")
     try:
         refresh_readme(root)
     except LifecycleError as exc:
-        raise LifecycleError("WI-README-STALE", str(exc)) from exc
+        raise _postcommit_readme_stale("start") from exc
     return target
 
 
@@ -3532,11 +3541,11 @@ def update_status(root: Path, slug: str, status_data: bytes, *, inject_readme_fa
     status = target / "status.md"
     _atomic_write(status, status_data)
     if inject_readme_failure:
-        raise LifecycleError("WI-README-STALE", "injected failure after canonical success")
+        raise _postcommit_readme_stale("update")
     try:
         refresh_readme(root)
     except LifecycleError as exc:
-        raise LifecycleError("WI-README-STALE", str(exc)) from exc
+        raise _postcommit_readme_stale("update") from exc
     return status
 
 
@@ -4694,11 +4703,11 @@ def reopen_item(
         if not committed:
             shutil.rmtree(temp, ignore_errors=True)
     if inject_readme_failure:
-        raise LifecycleError("WI-README-STALE", "injected failure after canonical success")
+        raise _postcommit_readme_stale("reopen")
     try:
         refresh_readme(root)
     except LifecycleError as exc:
-        raise LifecycleError("WI-README-STALE", str(exc)) from exc
+        raise _postcommit_readme_stale("reopen") from exc
     return target
 
 
@@ -4842,9 +4851,7 @@ def audit_categories(root: Path) -> tuple[str, ...]:
     return tuple(sorted(legacy_read_compatible))
 
 
-def audit(root: Path) -> tuple[str, ...]:
-    _recover_all_transitions(root)
-    legacy_read_compatible = audit_categories(root)
+def _validate_obligation_transfer_ownership(root: Path) -> None:
     transfer_errors = _validator_module().validate_obligation_transfer_ownership(
         Path(root).resolve()
     )
@@ -4857,6 +4864,44 @@ def audit(root: Path) -> tuple[str, ...]:
         }:
             failure_id = "WI-OBLIGATION-TRANSFER-OWNER"
         raise LifecycleError(failure_id, "; ".join(transfer_errors))
+
+
+def _transition_intent_operation_id(root: Path, intent_path: Path) -> str:
+    intent = _load_transition_intent(root, intent_path)
+    operation_id = intent.get("operationId")
+    if not isinstance(operation_id, str):
+        raise LifecycleError(
+            "WI-LIFECYCLE-TRANSITION-INTENT-INVALID",
+            "transition intent operation id is absent",
+        )
+    expected_path = _transition_intent_path(root, operation_id)
+    if expected_path.absolute() != intent_path.absolute():
+        raise LifecycleError(
+            "WI-LIFECYCLE-TRANSITION-INTENT-INVALID",
+            "transition intent path differs from its operation id",
+        )
+    return operation_id
+
+
+def audit(root: Path) -> tuple[str, ...]:
+    pending_operations: list[str] = []
+    for intent_path in _iter_transition_intents(root):
+        pending_operations.append(
+            _transition_intent_operation_id(root, intent_path)
+        )
+    if pending_operations:
+        commands = "; ".join(
+            "recover-transition --root <repo> "
+            f"--operation-id {operation_id} --apply"
+            for operation_id in pending_operations
+        )
+        raise LifecycleError(
+            "WI-LIFECYCLE-TRANSITION-RECOVERY-REQUIRED",
+            "pending lifecycle transition(s): "
+            f"{', '.join(pending_operations)}; run: {commands}",
+        )
+    legacy_read_compatible = audit_categories(root)
+    _validate_obligation_transfer_ownership(root)
     check_readme(root)
     return legacy_read_compatible
 
@@ -5246,8 +5291,14 @@ TRANSITION_INTENT_FIELDS = {
     "closureInputSha256", "successorSlug", "finalReadmeSha256",
     "bugReceiptBefore", "bugReceiptAfter",
 }
-TRANSFER_TRANSITION_INTENT_FIELDS = TRANSITION_INTENT_FIELDS | {
+LEGACY_TRANSFER_TRANSITION_INTENT_FIELDS = TRANSITION_INTENT_FIELDS | {
     "transferInputSha256", "archiveIdentity", "predecessorOperationId", "obligations",
+}
+TRANSFER_TRANSITION_INTENT_FIELDS = (
+    TRANSITION_INTENT_FIELDS - {"migrationReceiptPath"}
+) | {
+    "migrationReceipts", "transferInputSha256", "archiveIdentity",
+    "predecessorOperationId", "obligations",
 }
 TRANSITION_SETTLEMENT_FIELDS = {
     "schemaVersion", "owner", "status", "operationId", "workItem",
@@ -5258,9 +5309,16 @@ TRANSITION_SETTLEMENT_FIELDS = {
     "requestTerminalInstant", "requestExpectedLedgerSha256",
     "requestExpectedReadmeSha256",
 }
-TRANSFER_TRANSITION_SETTLEMENT_FIELDS = TRANSITION_SETTLEMENT_FIELDS | {
+LEGACY_TRANSFER_TRANSITION_SETTLEMENT_FIELDS = TRANSITION_SETTLEMENT_FIELDS | {
     "transferInputSha256", "archiveIdentity", "predecessorOperationId", "obligations",
 }
+TRANSFER_TRANSITION_SETTLEMENT_FIELDS = (
+    TRANSITION_SETTLEMENT_FIELDS - {"migrationReceiptSha256"}
+) | {
+    "migrationReceipts", "transferInputSha256", "archiveIdentity",
+    "predecessorOperationId", "obligations",
+}
+MIGRATION_RECEIPT_BINDING_FIELDS = {"path", "sha256"}
 BUG_SUPERSESSION_INTENT_FIELDS = {
     "schemaVersion", "owner", "kind", "status", "operationId", "terminalInstant",
     "sourcePath", "archivePath", "receiptPath", "expectedReadmeSha256",
@@ -5287,6 +5345,43 @@ BUG_SUPERSESSION_INVENTORY_FIELDS = {
 BUG_SUPERSESSION_INVENTORY_LINK_FIELDS = {
     "path", "beforeSha256", "afterSha256", "afterBytesBase64",
 }
+
+
+def _validate_transfer_migration_receipt_bindings(
+    root: Path,
+    archive_path: object,
+    value: object,
+    *,
+    failure_id: str,
+) -> tuple[dict[str, str], ...]:
+    if not isinstance(archive_path, str) or not isinstance(value, list):
+        raise LifecycleError(failure_id, "migration receipt binding list differs")
+    expected_parent = PurePosixPath(archive_path) / "ledger-migration-receipts"
+    rows: list[dict[str, str]] = []
+    paths: list[str] = []
+    for row in value:
+        if (
+            not isinstance(row, dict)
+            or set(row) != MIGRATION_RECEIPT_BINDING_FIELDS
+            or not isinstance(row.get("path"), str)
+            or not isinstance(row.get("sha256"), str)
+            or SHA256_RE.fullmatch(row["sha256"]) is None
+        ):
+            raise LifecycleError(failure_id, "migration receipt binding row differs")
+        path = row["path"]
+        _intent_path(root, path)
+        pure = PurePosixPath(path)
+        if pure.parent != expected_parent or pure.suffix != ".json":
+            raise LifecycleError(failure_id, "migration receipt binding path differs")
+        paths.append(path)
+        rows.append({"path": path, "sha256": row["sha256"]})
+    if paths != sorted(paths, key=lambda item: item.encode("utf-8")) or len(
+        paths
+    ) != len(set(paths)):
+        raise LifecycleError(
+            failure_id, "migration receipt binding paths are not sorted and unique"
+        )
+    return tuple(rows)
 
 
 @dataclass(frozen=True)
@@ -5394,7 +5489,7 @@ def _prepare_obligation_transfer(
     operation_id: str,
     expected_ledger_sha256: str,
     transfer_data: bytes,
-) -> tuple[dict, list[dict], str, Path | None]:
+) -> tuple[dict, list[dict], str, tuple[CapturedFileSnapshot, ...]]:
     validator = _validator_module()
     try:
         payload = validator.decode_json_object(
@@ -5488,20 +5583,107 @@ def _prepare_obligation_transfer(
             ),
             "predecessorOperationId": row.predecessor_operation_id,
         })
-    migration_receipts = sorted((active / "ledger-migration-receipts").glob("*.json"))
-    migration_required = any(row.source_kind == "migration-replaced" for row in open_rows)
-    expected_count = 1 if migration_required else 0
-    if len(migration_receipts) != expected_count:
+    migration_receipts = sorted(
+        (active / "ledger-migration-receipts").glob("*.json"),
+        key=lambda path: path.relative_to(active).as_posix().encode("utf-8"),
+    )
+    ledger_owner = _load_agent_run_ledger()
+    migrated_rows = {
+        (
+            row.run_id,
+            _sha256_bytes(
+                ledger_owner.serialize_event(dict(row.event)).encode("utf-8")
+            ),
+        ): row
+        for row in open_rows
+        if row.source_kind == "migration-replaced"
+    }
+    if len(migrated_rows) != sum(
+        row.source_kind == "migration-replaced" for row in open_rows
+    ) or len(migration_receipts) != len(migrated_rows):
         raise LifecycleError(
             "WI-LEDGER-MIGRATION-RECEIPT-MISMATCH",
-            f"transfer requires {expected_count} matching migration receipt(s)",
+            "transfer requires the exact migration receipt set",
         )
-    migration_receipt = None
-    if migration_receipts:
-        migration_receipt = _require_lifecycle_mutation_path(
-            root, migration_receipts[0], failure_id="WI-LEDGER-MIGRATION-RECEIPT-MISMATCH"
+    repository = Path(root).resolve()
+    if repository.name == "work-items":
+        repository = repository.parent
+    snapshots: dict[tuple[str, str], CapturedFileSnapshot] = {}
+    for migration_receipt in migration_receipts:
+        snapshot = _capture_file_snapshot(
+            migration_receipt,
+            failure_id="WI-LEDGER-MIGRATION-RECEIPT-MISMATCH",
         )
-    return payload, obligations, archive_identity, migration_receipt
+        try:
+            facts = validator.decode_json_object(
+                snapshot.data,
+                source=str(migration_receipt),
+                maximum_bytes=max(1, len(snapshot.data)),
+            )
+        except ValueError as exc:
+            raise LifecycleError(
+                "WI-LEDGER-MIGRATION-RECEIPT-MISMATCH",
+                "migration receipt is not one strict JSON object",
+            ) from exc
+        required_strings = (
+            "operationId",
+            "targetRunId",
+            "targetEventSha256",
+            "beforeLedgerSha256",
+            "replacementEventSha256",
+            "normalizationKind",
+        )
+        if any(not isinstance(facts.get(key), str) for key in required_strings):
+            raise LifecycleError(
+                "WI-LEDGER-MIGRATION-RECEIPT-MISMATCH",
+                "migration receipt identity fields differ",
+            )
+        try:
+            canonical_facts = _committed_migration_facts(
+                active,
+                target_run_id=facts["targetRunId"],
+                target_event_sha256=facts["targetEventSha256"],
+                expected_before_sha256=facts["beforeLedgerSha256"],
+                operation_id=facts["operationId"],
+                normalization_kind=facts["normalizationKind"],
+            )
+        except LifecycleError as exc:
+            raise LifecycleError(
+                "WI-LEDGER-MIGRATION-RECEIPT-MISMATCH",
+                "migration receipt does not reconstruct from the source ledger",
+            ) from exc
+        actual_path = migration_receipt.relative_to(repository).as_posix()
+        identity = (facts["targetRunId"], facts["replacementEventSha256"])
+        if (
+            canonical_facts is None
+            or canonical_facts != facts
+            or facts.get("receiptPath") != actual_path
+            or identity not in migrated_rows
+            or identity in snapshots
+        ):
+            raise LifecycleError(
+                "WI-LEDGER-MIGRATION-RECEIPT-MISMATCH",
+                "migration receipt set does not match migrated open obligations",
+            )
+        snapshots[identity] = snapshot
+    if set(snapshots) != set(migrated_rows):
+        raise LifecycleError(
+            "WI-LEDGER-MIGRATION-RECEIPT-MISMATCH",
+            "migration receipt set does not exactly cover migrated open obligations",
+        )
+    return (
+        payload,
+        obligations,
+        archive_identity,
+        tuple(
+            sorted(
+                snapshots.values(),
+                key=lambda snapshot: snapshot.path.relative_to(repository)
+                .as_posix()
+                .encode("utf-8"),
+            )
+        ),
+    )
 
 
 def _b64(data: bytes | None) -> str | None:
@@ -6486,6 +6668,13 @@ def _load_transition_intent(root: Path, path: Path) -> dict:
         and payload.get("owner") == TRANSFER_TRANSITION_OWNER
         and isinstance(payload.get("obligations"), list)
     )
+    is_legacy_v2 = (
+        isinstance(payload, dict)
+        and set(payload) == LEGACY_TRANSFER_TRANSITION_INTENT_FIELDS
+        and payload.get("schemaVersion") == 2
+        and payload.get("owner") == TRANSFER_TRANSITION_OWNER
+        and isinstance(payload.get("obligations"), list)
+    )
     is_bug_supersession = (
         isinstance(payload, dict)
         and set(payload) == BUG_SUPERSESSION_INTENT_FIELDS
@@ -6503,7 +6692,13 @@ def _load_transition_intent(root: Path, path: Path) -> dict:
         and isinstance(payload.get("members"), list)
     )
     if (
-        not (is_v1 or is_v2 or is_bug_supersession or is_ledger_h1_relocation)
+        not (
+            is_v1
+            or is_v2
+            or is_legacy_v2
+            or is_bug_supersession
+            or is_ledger_h1_relocation
+        )
         or payload.get("status") != "intent"
         or (
             not (is_bug_supersession or is_ledger_h1_relocation)
@@ -6547,9 +6742,18 @@ def _load_transition_intent(root: Path, path: Path) -> dict:
     if is_ledger_h1_relocation:
         _validate_ledger_h1_relocation_intent_shape(root, payload, path)
         return payload
-    for key in ("activePath", "archivePath", "successorPath", "migrationReceiptPath"):
+    for key in ("activePath", "archivePath", "successorPath"):
         if payload[key] is not None:
             _intent_path(root, payload[key])
+    if is_v2:
+        _validate_transfer_migration_receipt_bindings(
+            root,
+            payload["archivePath"],
+            payload["migrationReceipts"],
+            failure_id="WI-LIFECYCLE-TRANSITION-INTENT-INVALID",
+        )
+    elif payload["migrationReceiptPath"] is not None:
+        _intent_path(root, payload["migrationReceiptPath"])
     return payload
 
 
@@ -6615,6 +6819,48 @@ def _ledger_location_regular_sha256(path: Path, *, failure_id: str) -> str:
         raise LifecycleError(failure_id, "ledger location path is unreadable") from exc
 
 
+def _migration_receipt_bindings_at(
+    root: Path,
+    archive: Path,
+    *,
+    failure_id: str,
+) -> tuple[dict[str, str], ...]:
+    repository = Path(root).resolve()
+    if repository.name == "work-items":
+        repository = repository.parent
+    receipt_root = archive / "ledger-migration-receipts"
+    if not _ledger_location_lexically_exists(receipt_root):
+        return ()
+    _lifecycle_reject_unreduced_reparse(
+        receipt_root,
+        failure_id=failure_id,
+        message="migration receipt root crosses a link or reparse point",
+    )
+    if not receipt_root.is_dir():
+        raise LifecycleError(failure_id, "migration receipt root is not a directory")
+    receipts = sorted(
+        receipt_root.glob("*.json"),
+        key=lambda path: path.relative_to(repository).as_posix().encode("utf-8"),
+    )
+    rows = tuple(
+        {
+            "path": receipt.relative_to(repository).as_posix(),
+            "sha256": _ledger_location_regular_sha256(
+                receipt,
+                failure_id=failure_id,
+            ),
+        }
+        for receipt in receipts
+    )
+    _validate_transfer_migration_receipt_bindings(
+        root,
+        archive.relative_to(repository).as_posix(),
+        list(rows),
+        failure_id=failure_id,
+    )
+    return rows
+
+
 def _ledger_location_archive_relative(slug: str, terminal_instant: object) -> str:
     if not isinstance(terminal_instant, str):
         raise LifecycleError(
@@ -6653,11 +6899,12 @@ def _validate_ledger_location_intent(
             "WI-LIFECYCLE-TRANSITION-INTENT-INVALID",
             "ledger location intent changed while acquired",
         )
-    expected_fields = (
-        TRANSFER_TRANSITION_INTENT_FIELDS
-        if payload.get("schemaVersion") == 2
-        else TRANSITION_INTENT_FIELDS
-    )
+    field_set_is_valid = set(payload) == TRANSITION_INTENT_FIELDS
+    if payload.get("schemaVersion") == 2:
+        field_set_is_valid = set(payload) in (
+            TRANSFER_TRANSITION_INTENT_FIELDS,
+            LEGACY_TRANSFER_TRANSITION_INTENT_FIELDS,
+        )
     valid_owner = (
         payload.get("schemaVersion") == 1
         and payload.get("owner") == TRANSITION_OWNER
@@ -6672,7 +6919,7 @@ def _validate_ledger_location_intent(
         slug, payload.get("terminalInstant")
     )
     if (
-        set(payload) != expected_fields
+        not field_set_is_valid
         or not valid_owner
         or payload.get("status") != "intent"
         or payload.get("slug") != slug
@@ -6764,15 +7011,20 @@ def _validate_stable_ledger_settlement(
         unreadable="settled receipt is unreadable",
     )
     schema_version = payload.get("schemaVersion")
-    expected_fields = (
-        TRANSFER_TRANSITION_SETTLEMENT_FIELDS
-        if schema_version == 2
-        else TRANSITION_SETTLEMENT_FIELDS
+    is_v1 = (
+        schema_version == 1
+        and set(payload) == TRANSITION_SETTLEMENT_FIELDS
+        and payload.get("owner") == TRANSITION_OWNER
     )
-    valid_owner = (
-        schema_version == 1 and payload.get("owner") == TRANSITION_OWNER
-    ) or (
+    is_v2 = (
         schema_version == 2
+        and set(payload) == TRANSFER_TRANSITION_SETTLEMENT_FIELDS
+        and payload.get("owner") == TRANSFER_TRANSITION_OWNER
+        and isinstance(payload.get("obligations"), list)
+    )
+    is_legacy_v2 = (
+        schema_version == 2
+        and set(payload) == LEGACY_TRANSFER_TRANSITION_SETTLEMENT_FIELDS
         and payload.get("owner") == TRANSFER_TRANSITION_OWNER
         and isinstance(payload.get("obligations"), list)
     )
@@ -6799,8 +7051,7 @@ def _validate_stable_ledger_settlement(
         "requestExpectedReadmeSha256",
     )
     if (
-        set(payload) != expected_fields
-        or not valid_owner
+        not (is_v1 or is_v2 or is_legacy_v2)
         or payload.get("status") != "settled"
         or payload.get("workItem") != slug
         or payload.get("requestTerminalInstant") != terminal_instant
@@ -6888,41 +7139,42 @@ def _validate_stable_ledger_settlement(
             failure_id="WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH",
         ),
     }
-    migration_root = archive / "ledger-migration-receipts"
-    migration_receipts: list[Path] = []
-    if _ledger_location_lexically_exists(migration_root):
-        _lifecycle_reject_unreduced_reparse(
-            migration_root,
-            failure_id="WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH",
-            message="migration receipt root crosses a link or reparse point",
-        )
-        if not migration_root.is_dir():
-            raise LifecycleError(
-                "WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH",
-                "migration receipt root is not a directory",
-            )
-        migration_receipts = sorted(migration_root.glob("*.json"))
-    expected_migration_sha256 = payload.get("migrationReceiptSha256")
-    if expected_migration_sha256 is None:
-        if migration_receipts:
-            raise LifecycleError(
-                "WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH",
-                "migration receipt cardinality differs",
-            )
-    elif (
-        not isinstance(expected_migration_sha256, str)
-        or SHA256_RE.fullmatch(expected_migration_sha256) is None
-        or len(migration_receipts) != 1
-        or _ledger_location_regular_sha256(
-            migration_receipts[0],
+    physical_migration_receipts = _migration_receipt_bindings_at(
+        root,
+        archive,
+        failure_id="WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH",
+    )
+    if is_v2:
+        expected_migration_receipts = _validate_transfer_migration_receipt_bindings(
+            root,
+            payload.get("archivePath"),
+            payload.get("migrationReceipts"),
             failure_id="WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH",
         )
-        != expected_migration_sha256
-    ):
-        raise LifecycleError(
-            "WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH",
-            "migration receipt hash differs",
-        )
+        if physical_migration_receipts != expected_migration_receipts:
+            raise LifecycleError(
+                "WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH",
+                "migration receipt set differs",
+            )
+    else:
+        expected_migration_sha256 = payload.get("migrationReceiptSha256")
+        if expected_migration_sha256 is None:
+            if physical_migration_receipts:
+                raise LifecycleError(
+                    "WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH",
+                    "migration receipt cardinality differs",
+                )
+        elif (
+            not isinstance(expected_migration_sha256, str)
+            or SHA256_RE.fullmatch(expected_migration_sha256) is None
+            or len(physical_migration_receipts) != 1
+            or physical_migration_receipts[0]["sha256"]
+            != expected_migration_sha256
+        ):
+            raise LifecycleError(
+                "WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH",
+                "migration receipt hash differs",
+            )
     if any(payload.get(key) != value for key, value in physical_hashes.items()):
         raise LifecycleError(
             "WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH",
@@ -6962,13 +7214,22 @@ def _ledger_settlement_agrees_with_intent(receipt: dict, intent: dict) -> bool:
         if image is None or receipt.get(receipt_key) != _sha256_bytes(image):
             return False
     if receipt.get("schemaVersion") == 2:
-        return all(
+        transfer_fields_agree = all(
             receipt.get(key) == intent.get(key)
             for key in (
                 "transferInputSha256", "archiveIdentity",
                 "predecessorOperationId", "obligations",
             )
         )
+        if not transfer_fields_agree:
+            return False
+        if "migrationReceipts" in intent or "migrationReceipts" in receipt:
+            return (
+                "migrationReceipts" in intent
+                and "migrationReceipts" in receipt
+                and receipt["migrationReceipts"] == intent["migrationReceipts"]
+            )
+        return True
     return True
 
 
@@ -7166,7 +7427,10 @@ def _settlement_payload(root: Path, intent: dict, readme_sha256: str) -> dict:
     successor = _intent_path(root, intent["successorPath"])
     bug_receipt = archive / BUG_DISPOSITIONS_RECEIPT
     migration_receipt = None
-    if intent["migrationReceiptPath"] is not None:
+    if (
+        "migrationReceiptPath" in intent
+        and intent["migrationReceiptPath"] is not None
+    ):
         migration_receipt = archive / "ledger-migration-receipts" / Path(intent["migrationReceiptPath"]).name
     bug_receipt = _require_lifecycle_mutation_path(
         root, bug_receipt, failure_id="WI-LIFECYCLE-TRANSITION-ROLLFORWARD-INDETERMINATE"
@@ -7189,9 +7453,6 @@ def _settlement_payload(root: Path, intent: dict, readme_sha256: str) -> dict:
         "statusSha256": _sha256_bytes((archive / "status.md").read_bytes()),
         "closureSha256": _sha256_bytes((archive / "closure.md").read_bytes()),
         "bugDispositionReceiptSha256": _sha256_bytes(bug_receipt.read_bytes()),
-        "migrationReceiptSha256": (
-            _sha256_bytes(migration_receipt.read_bytes()) if migration_receipt is not None else None
-        ),
         "readmeSha256": readme_sha256,
         "requestClosureSha256": intent["closureInputSha256"],
         "requestSuccessorSlug": intent["successorSlug"],
@@ -7200,6 +7461,32 @@ def _settlement_payload(root: Path, intent: dict, readme_sha256: str) -> dict:
         "requestExpectedLedgerSha256": intent["expectedLedgerSha256"],
         "requestExpectedReadmeSha256": intent["expectedReadmeSha256"],
     }
+    if "migrationReceipts" in intent:
+        expected_migration_receipts = _validate_transfer_migration_receipt_bindings(
+            root,
+            intent["archivePath"],
+            intent["migrationReceipts"],
+            failure_id="WI-LIFECYCLE-TRANSITION-ROLLFORWARD-INDETERMINATE",
+        )
+        physical_migration_receipts = _migration_receipt_bindings_at(
+            root,
+            archive,
+            failure_id="WI-LIFECYCLE-TRANSITION-ROLLFORWARD-INDETERMINATE",
+        )
+        if physical_migration_receipts != expected_migration_receipts:
+            raise LifecycleError(
+                "WI-LIFECYCLE-TRANSITION-ROLLFORWARD-INDETERMINATE",
+                "migration receipt set differs from transition intent",
+            )
+        payload["migrationReceipts"] = [
+            dict(row) for row in physical_migration_receipts
+        ]
+    else:
+        payload["migrationReceiptSha256"] = (
+            _sha256_bytes(migration_receipt.read_bytes())
+            if migration_receipt is not None
+            else None
+        )
     if intent["schemaVersion"] == 2:
         payload.update({
             "transferInputSha256": intent["transferInputSha256"],
@@ -7275,14 +7562,23 @@ def _verify_settlement(root: Path, receipt: Path, expected: dict | None = None) 
         payload = json.loads(receipt.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise LifecycleError("WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH", "settled receipt is unreadable") from exc
-    valid_owner = (
-        (payload.get("schemaVersion") == 1 and payload.get("owner") == TRANSITION_OWNER)
-        or (
-            payload.get("schemaVersion") == 2
+    valid_owner = False
+    if isinstance(payload, dict):
+        schema_version = payload.get("schemaVersion")
+        valid_owner = (
+            schema_version == 1
+            and payload.get("owner") == TRANSITION_OWNER
+            and set(payload) == TRANSITION_SETTLEMENT_FIELDS
+        ) or (
+            schema_version == 2
             and payload.get("owner") == TRANSFER_TRANSITION_OWNER
             and isinstance(payload.get("obligations"), list)
+            and set(payload)
+            in (
+                TRANSFER_TRANSITION_SETTLEMENT_FIELDS,
+                LEGACY_TRANSFER_TRANSITION_SETTLEMENT_FIELDS,
+            )
         )
-    ) if isinstance(payload, dict) else False
     if not isinstance(payload, dict) or payload.get("status") != "settled" or not valid_owner:
         raise LifecycleError("WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH", "settled receipt shape differs")
     archive = _intent_path(root, payload["archivePath"])
@@ -7303,18 +7599,35 @@ def _verify_settlement(root: Path, receipt: Path, expected: dict | None = None) 
         "bugDispositionReceiptSha256": _sha256_bytes(bug_receipt_path.read_bytes()),
         "readmeSha256": _sha256_bytes(readme_path.read_bytes()),
     }
-    migration_receipts = sorted((archive / "ledger-migration-receipts").glob("*.json"))
-    expected_migration_sha = payload.get("migrationReceiptSha256")
-    expected_migration_count = 0 if expected_migration_sha is None else 1
-    if len(migration_receipts) != expected_migration_count:
-        raise LifecycleError("WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH", "migration receipt cardinality differs")
-    physical["migrationReceiptSha256"] = None
-    if migration_receipts:
-        migration_receipt_path = _require_lifecycle_mutation_path(
-            root, migration_receipts[0],
+    migration_receipts = _migration_receipt_bindings_at(
+        root,
+        archive,
+        failure_id="WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH",
+    )
+    if "migrationReceipts" in payload:
+        expected_migration_receipts = _validate_transfer_migration_receipt_bindings(
+            root,
+            payload["archivePath"],
+            payload["migrationReceipts"],
             failure_id="WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH",
         )
-        physical["migrationReceiptSha256"] = _sha256_bytes(migration_receipt_path.read_bytes())
+        if migration_receipts != expected_migration_receipts:
+            raise LifecycleError(
+                "WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH",
+                "migration receipt set differs",
+            )
+        physical["migrationReceipts"] = [dict(row) for row in migration_receipts]
+    else:
+        expected_migration_sha = payload.get("migrationReceiptSha256")
+        expected_migration_count = 0 if expected_migration_sha is None else 1
+        if len(migration_receipts) != expected_migration_count:
+            raise LifecycleError(
+                "WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH",
+                "migration receipt cardinality differs",
+            )
+        physical["migrationReceiptSha256"] = (
+            migration_receipts[0]["sha256"] if migration_receipts else None
+        )
     if any(payload.get(key) != value for key, value in physical.items()):
         raise LifecycleError("WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH", "settled receipt hashes differ")
     if expected is not None and payload != expected:
@@ -7454,7 +7767,7 @@ def _recover_transition(root: Path, intent_path: Path, *, inject_failure_at: str
     return settlement
 
 
-def _recover_all_transitions(root: Path) -> None:
+def _iter_transition_intents(root: Path) -> Iterable[Path]:
     repository = Path(root).resolve()
     if repository.name == "work-items":
         repository = repository.parent
@@ -7464,6 +7777,11 @@ def _recover_all_transitions(root: Path) -> None:
     if not directory.is_dir() or _lifecycle_path_has_reparse(directory):
         raise LifecycleError("WI-LIFECYCLE-TRANSITION-INTENT-INVALID", "transition staging root is unsafe")
     for intent_path in sorted(directory.glob("*.json")):
+        yield intent_path
+
+
+def _recover_all_transitions(root: Path) -> None:
+    for intent_path in _iter_transition_intents(root):
         _recover_transition(root, intent_path)
 
 
@@ -7536,21 +7854,25 @@ def archive_with_successor(
     transfer_obligations: list[dict] | None = None
     archive_identity: str | None = None
     migration_receipt: Path | None = None
+    transfer_migration_receipts: tuple[CapturedFileSnapshot, ...] = ()
     if obligation_transfer_data is None:
         _validate_item_before_close(active)
     else:
-        _transfer_payload, transfer_obligations, archive_identity, migration_receipt = (
-            _prepare_obligation_transfer(
-                root,
-                active,
-                archive,
-                slug,
-                successor_slug,
-                successor_data,
-                operation_id,
-                expected_ledger_sha256,
-                obligation_transfer_data,
-            )
+        (
+            _transfer_payload,
+            transfer_obligations,
+            archive_identity,
+            transfer_migration_receipts,
+        ) = _prepare_obligation_transfer(
+            root,
+            active,
+            archive,
+            slug,
+            successor_slug,
+            successor_data,
+            operation_id,
+            expected_ledger_sha256,
+            obligation_transfer_data,
         )
     _manifest, manifest_data, bug_plans = _prepare_bug_dispositions(root, active, slug, terminal_instant)
     if obligation_transfer_data is None:
@@ -7591,7 +7913,6 @@ def archive_with_successor(
         "statusBefore": _b64(prior_status), "statusAfter": _b64(status_after),
         "closureBefore": _b64(prior_closure), "closureAfter": _b64(archived_closure),
         "successorData": _b64(successor_data), "manifestData": _b64(manifest_data),
-        "migrationReceiptPath": relative(migration_receipt) if migration_receipt is not None else None,
         "closureInputSha256": _sha256_bytes(closure_data),
         "successorSlug": successor_slug,
         "finalReadmeSha256": final_readme_sha,
@@ -7604,12 +7925,31 @@ def archive_with_successor(
             "statusBefore": plan.status_before, "statusAfter": plan.status_after,
         } for plan in bug_plans],
     }
-    if obligation_transfer_data is not None:
+    if obligation_transfer_data is None:
+        intent["migrationReceiptPath"] = (
+            relative(migration_receipt) if migration_receipt is not None else None
+        )
+    else:
         predecessor_ids = {
             row["predecessorOperationId"] for row in (transfer_obligations or [])
             if row["predecessorOperationId"] is not None
         }
+        migration_receipt_bindings = [
+            {
+                "path": relative(
+                    archive
+                    / "ledger-migration-receipts"
+                    / snapshot.path.name
+                ),
+                "sha256": _sha256_bytes(snapshot.data),
+            }
+            for snapshot in transfer_migration_receipts
+        ]
+        migration_receipt_bindings.sort(
+            key=lambda row: row["path"].encode("utf-8")
+        )
         intent.update({
+            "migrationReceipts": migration_receipt_bindings,
             "transferInputSha256": _sha256_bytes(obligation_transfer_data),
             "archiveIdentity": archive_identity,
             "predecessorOperationId": (
@@ -7620,6 +7960,11 @@ def archive_with_successor(
     intent_path = _require_lifecycle_mutation_path(
         root, intent_path, failure_id="WI-LIFECYCLE-TRANSITION-INTENT-INVALID"
     )
+    for snapshot in transfer_migration_receipts:
+        _verify_captured_file(
+            snapshot,
+            "WI-LEDGER-MIGRATION-RECEIPT-MISMATCH",
+        )
     _atomic_write(intent_path, _migration_receipt_bytes(intent))
     _transition_fsync_directory(intent_path.parent)
     if inject_failure_at == "T0":
@@ -8962,20 +9307,35 @@ def _capture_file_snapshot(
 def _verify_captured_file(snapshot: CapturedFileSnapshot, failure_id: str) -> None:
     _verify_captured_parent_chain(snapshot.parent_chain, failure_id)
     try:
+        descriptor = _open_readonly_nofollow(snapshot.path)
+        with os.fdopen(descriptor, "rb", closefd=True) as stream:
+            before = os.fstat(stream.fileno())
+            data = stream.read(snapshot.length + 1)
+            after = os.fstat(stream.fileno())
         current = snapshot.path.lstat()
     except OSError as exc:
         raise LifecycleError(failure_id, "captured file path is no longer available") from exc
     if (
         _lifecycle_path_has_reparse(snapshot.path)
+        or not stat.S_ISREG(before.st_mode)
         or stat.S_ISLNK(current.st_mode)
         or bool(
             getattr(current, "st_file_attributes", 0)
             & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
         )
+        or bool(
+            getattr(before, "st_file_attributes", 0)
+            & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+        )
+        or _lifecycle_file_identity(before) != snapshot.identity
+        or _lifecycle_file_identity(after) != snapshot.identity
         or _lifecycle_file_identity(current) != snapshot.identity
+        or before.st_size != snapshot.length
+        or after.st_size != snapshot.length
         or current.st_size != snapshot.length
+        or data != snapshot.data
     ):
-        raise LifecycleError(failure_id, "captured file path identity changed")
+        raise LifecycleError(failure_id, "captured file path identity or content changed")
 
 
 def _parse_migration_inventory_bytes(
@@ -13698,7 +14058,11 @@ def _ledger_h1_member_snapshot(
     return _ledger_h1_directory_snapshot(path)
 
 
-def _ledger_h1_artifact_set_digest(members: Iterable[Mapping[str, object]]) -> str:
+def _ledger_h1_artifact_set_digest_version(
+    members: Iterable[Mapping[str, object]],
+    *,
+    version: Literal[1, 2],
+) -> str:
     rows: list[dict[str, object]] = []
     for member in sorted(
         members,
@@ -13708,7 +14072,7 @@ def _ledger_h1_artifact_set_digest(members: Iterable[Mapping[str, object]]) -> s
             "logicalPath": member["logicalPath"],
             "kind": member["kind"],
         }
-        if member["kind"] == "file":
+        if version == 2 or member["kind"] == "file":
             row.update(
                 {
                     "byteLength": member["byteLength"],
@@ -13717,8 +14081,21 @@ def _ledger_h1_artifact_set_digest(members: Iterable[Mapping[str, object]]) -> s
             )
         rows.append(row)
     return hashlib.sha256(
-        b"orchestrarium:ledger-h1-artifact-set:v1\0" + _projection_json(rows)
+        f"orchestrarium:ledger-h1-artifact-set:v{version}\0".encode("ascii")
+        + _projection_json(rows)
     ).hexdigest()
+
+
+def _ledger_h1_artifact_set_digest_v1(
+    members: Iterable[Mapping[str, object]],
+) -> str:
+    return _ledger_h1_artifact_set_digest_version(members, version=1)
+
+
+def _ledger_h1_artifact_set_digest(
+    members: Iterable[Mapping[str, object]],
+) -> str:
+    return _ledger_h1_artifact_set_digest_version(members, version=2)
 
 
 def _ledger_h1_lexically_exists(path: Path) -> bool:
@@ -13870,18 +14247,27 @@ def _ledger_h1_validate_receipt(
     repository: Path,
     base: Path,
     receipt: Mapping[str, object],
-    artifact_set_sha256: str,
+    artifact_set_sha256_v1: str,
+    artifact_set_sha256_v2: str,
 ) -> None:
     base_relative = base.relative_to(repository).as_posix()
     archive_owner = base.parent.relative_to(repository).as_posix()
     root_after = receipt.get("rootContractAfterSha256")
+    schema_version = receipt.get("schemaVersion")
+    receipt_artifact_set_sha256 = (
+        artifact_set_sha256_v1
+        if schema_version == 1
+        else artifact_set_sha256_v2
+        if schema_version == 2
+        else None
+    )
     if (
         set(receipt) != LEDGER_H1_RELOCATION_RECEIPT_FIELDS
-        or receipt.get("schemaVersion") != 1
+        or receipt_artifact_set_sha256 is None
         or receipt.get("status") != "settled"
         or receipt.get("archiveOwner") != archive_owner
         or receipt.get("artifactBase") != base_relative
-        or receipt.get("artifactSetSha256") != artifact_set_sha256
+        or receipt.get("artifactSetSha256") != receipt_artifact_set_sha256
         or not isinstance(receipt.get("operationId"), str)
         or _PROJECTION_OPERATION_RE.fullmatch(str(receipt["operationId"])) is None
         or not isinstance(receipt.get("recordedAt"), str)
@@ -13948,14 +14334,21 @@ def resolve_ledger_h1_artifact_set_location(
             "archived H1 artifact base has no valid work-item owner",
         ) from exc
     members = _ledger_h1_members_at_base(repository, base)
-    artifact_set_sha256 = _ledger_h1_artifact_set_digest(members)
+    artifact_set_sha256_v2 = _ledger_h1_artifact_set_digest(members)
+    artifact_set_sha256_v1 = _ledger_h1_artifact_set_digest_v1(members)
     receipt_path = base / "relocation-receipt.json"
     receipt, _raw = _ledger_h1_receipt_object(receipt_path)
-    _ledger_h1_validate_receipt(repository, base, receipt, artifact_set_sha256)
+    _ledger_h1_validate_receipt(
+        repository,
+        base,
+        receipt,
+        artifact_set_sha256_v1,
+        artifact_set_sha256_v2,
+    )
     return LedgerH1ArtifactSetLocationV1(
         base.relative_to(repository).as_posix(),
         "settled-archive",
-        artifact_set_sha256,
+        artifact_set_sha256_v2,
         str(receipt["operationId"]),
         receipt_path.relative_to(repository).as_posix(),
     )
@@ -14052,7 +14445,7 @@ def _ledger_h1_relocation_preflight(
         )
     )
     receipt_payload = {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "status": "settled",
         "operationId": request.operation_id,
         "archiveOwner": request.archive_owner,
@@ -14236,6 +14629,7 @@ def _validate_ledger_h1_relocation_intent_shape(
     if (
         not isinstance(receipt, dict)
         or set(receipt) != LEDGER_H1_RELOCATION_RECEIPT_FIELDS
+        or receipt.get("schemaVersion") != 2
         or receipt.get("operationId") != operation_id
         or receipt.get("recordedAt") != recorded_at
         or receipt.get("archiveOwner") != archive_owner
@@ -14554,7 +14948,7 @@ def _ledger_h1_replay_result(
         receipt.get("operationId") != request.operation_id
         or receipt.get("recordedAt") != request.recorded_at
         or receipt.get("archiveOwner") != request.archive_owner
-        or receipt.get("artifactSetSha256") != expected_artifact_set_sha256
+        or location.artifact_set_sha256 != expected_artifact_set_sha256
         or receipt.get("rootContractBeforeSha256")
         != expected_root_contract_sha256
     ):
@@ -14944,6 +15338,10 @@ def build_parser() -> argparse.ArgumentParser:
     audit_mode = audit_parser.add_mutually_exclusive_group()
     audit_mode.add_argument("--output")
     audit_mode.add_argument("--verify-migration")
+    recover_transition = sub.add_parser("recover-transition")
+    _add_root(recover_transition)
+    recover_transition.add_argument("--operation-id", required=True)
+    recover_transition.add_argument("--apply", action="store_true")
     migrate = sub.add_parser("migrate")
     _add_root(migrate)
     migrate_mode = migrate.add_mutually_exclusive_group(required=True)
@@ -15234,6 +15632,26 @@ def main(argv: list[str]) -> int:
                 print(resolve_category(root, args.reference))
             else:
                 print(f"WI-LEGACY-READ-COMPAT {resolve_legacy_path(root, args.legacy_path)}")
+        elif args.command == "recover-transition":
+            if not args.apply:
+                raise LifecycleError(
+                    "WI-LIFECYCLE-TRANSITION-RECOVERY-REQUIRED",
+                    "recover-transition requires explicit --apply",
+                )
+            intent_path = _transition_intent_path(root, args.operation_id)
+            if not intent_path.is_file():
+                raise LifecycleError(
+                    "WI-LIFECYCLE-TRANSITION-RECOVERY-REQUIRED",
+                    f"no pending transition for operation: {args.operation_id}",
+                )
+            _transition_intent_operation_id(root, intent_path)
+            recovered = _recover_transition(root, intent_path)
+            outcome = "rolled-back" if recovered is None else "settled"
+            print(
+                "RECOVER-TRANSITION: "
+                f"operation={args.operation_id} outcome={outcome}"
+            )
+            print("next=audit")
         elif args.command == "audit":
             if args.output:
                 inventory = write_migration_inventory(root, Path(args.output))

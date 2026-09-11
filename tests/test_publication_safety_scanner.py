@@ -411,6 +411,27 @@ def pass_rows() -> dict[str, str]:
     }
 
 
+def public_token_reproduction_rows() -> dict[str, str]:
+    return {
+        "port-slots": _join(
+            "to", "ken", "=", '"',
+            "ZIMP_RUN_MANIFEST_TERMINAL_PORT_SLOTS_INVALID", '"',
+        ),
+        "orientations": _join(
+            "to", "ken", "=", '"',
+            "ZIMP_RUN_MANIFEST_TERMINAL_ORIENTATIONS_INVALID", '"',
+        ),
+        "partition-certificate": _join(
+            "ZIMP_ENDPOINT_PARTITION_SUCCESS_TO", "KEN = ", '"',
+            "ZIMP_ENDPOINT_PARTITION_OK_IMMUTABLE_CERTIFICATE", '"',
+        ),
+    }
+
+
+def public_token_annotation(comment: str = "#") -> str:
+    return f"{comment} orchestrarium:public-" + "token"
+
+
 @unittest.skipIf(_git() is None, "needs git on PATH")
 class TestPublicationSafetyScanner(unittest.TestCase):
     def _run_staged_transition(
@@ -598,6 +619,106 @@ class TestPublicationSafetyScanner(unittest.TestCase):
         proc = self._run_cached_process(CANONICAL_SCANNER, fixture)
         self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
         self.assertIn("PS-FINDING-CONTENT", proc.stderr)
+
+    def test_unannotated_public_protocol_tokens_remain_blocking(self) -> None:
+        rows = public_token_reproduction_rows()
+        for scanner in SCANNERS:
+            with self.subTest(scanner=scanner):
+                self._assert_cached_block_batch(scanner, rows)
+
+    def test_terminal_public_token_annotations_clear_source_candidates(self) -> None:
+        rows = public_token_reproduction_rows()
+        annotated = {
+            "port-slots": rows["port-slots"] + "), " + public_token_annotation(),
+            "orientations": rows["orientations"] + ", " + public_token_annotation(),
+            "partition-certificate": (
+                rows["partition-certificate"] + "; " + public_token_annotation("//")
+            ),
+            "single-quoted": _join(
+                "to", "ken", " = '",
+                "ZIMP_ENDPOINT_PARTITION_OK_IMMUTABLE_CERTIFICATE", "'; ",
+                public_token_annotation(),
+            ),
+            "capital-token": _join(
+                "CAPITAL_TO", "KEN = \"ZIMP_ENDPOINT_PARTITION_OK_CERTIFICATE\"; ",
+                public_token_annotation(),
+            ),
+        }
+        for scanner in SCANNERS:
+            with self.subTest(scanner=scanner):
+                self._assert_cached_pass_batch(scanner, annotated)
+
+    def test_public_token_annotation_rejects_nonbinding_forms(self) -> None:
+        value = public_token_reproduction_rows()["partition-certificate"]
+        marker = public_token_annotation()
+        cases = {
+            "malformed": value + "; " + marker + "-extra",
+            "embedded-string": value + '; "' + marker + '"',
+            "detached": value + "\n" + marker,
+            "nonterminal": value + "; " + marker + " trailing",
+            "no-separator": value + marker,
+            "mismatched-quotes": _join(
+                "to", "ken", "=\"ZIMP_ENDPOINT_PARTITION_OK_CERTIFICATE'; ", marker,
+            ),
+        }
+        for name, fixture in cases.items():
+            with self.subTest(name=name):
+                proc = self._run_cached_process(CANONICAL_SCANNER, fixture)
+                self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+                self.assertIn("class=value-token", proc.stderr)
+
+    def test_public_token_annotation_is_candidate_local_and_rejects_credentials(self) -> None:
+        marker = public_token_annotation()
+        public = public_token_reproduction_rows()["partition-certificate"]
+        earlier_secret = _join(
+            "to", "ken", "=\"A1B2C3D4E5F6G7H8IJK\"; ",
+        )
+        cases = {
+            "two-assignments": earlier_secret + public + "; " + marker,
+            "auth-camel": _join(
+                "auth", "To", "ken", "=\"ZIMP_ENDPOINT_PARTITION_OK_CERTIFICATE\"; ",
+                marker,
+            ),
+            "access-snake": _join(
+                "access_", "to", "ken", "=\"ZIMP_ENDPOINT_PARTITION_OK_CERTIFICATE\"; ",
+                marker,
+            ),
+            "api-acronym": _join(
+                "API_TO", "KEN", "=\"ZIMP_ENDPOINT_PARTITION_OK_CERTIFICATE\"; ",
+                marker,
+            ),
+            "password-family": _join(
+                "pass", "word", "=\"ZIMP_ENDPOINT_PARTITION_OK_CERTIFICATE\"; ", marker,
+            ),
+            "secret-family": _join(
+                "sec", "ret", "=\"ZIMP_ENDPOINT_PARTITION_OK_CERTIFICATE\"; ", marker,
+            ),
+            "api-key-family": _join(
+                "api_", "key", "=\"ZIMP_ENDPOINT_PARTITION_OK_CERTIFICATE\"; ", marker,
+            ),
+        }
+        for name, fixture in cases.items():
+            with self.subTest(name=name):
+                proc = self._run_cached_process(CANONICAL_SCANNER, fixture)
+                self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+                self.assertIn("PS-FINDING-CONTENT", proc.stderr)
+
+    def test_public_token_annotation_does_not_suppress_other_finding_classes(self) -> None:
+        annotated = (
+            public_token_reproduction_rows()["partition-certificate"]
+            + "; "
+            + public_token_annotation()
+        )
+        simple = block_rows()["b14_aws"] + "; " + annotated
+        machine_path = block_rows()["b01_win_home"] + "; " + annotated
+
+        simple_proc = self._run_cached_process(CANONICAL_SCANNER, simple)
+        self.assertEqual(simple_proc.returncode, 1, simple_proc.stdout + simple_proc.stderr)
+        self.assertIn("class=simple-", simple_proc.stderr)
+
+        path_proc = self._run_cached_process(CANONICAL_SCANNER, machine_path)
+        self.assertEqual(path_proc.returncode, 1, path_proc.stdout + path_proc.stderr)
+        self.assertIn("class=machine-path", path_proc.stderr)
 
     def test_clean_repo_exits_0(self) -> None:
         for scanner in SCANNERS:
@@ -1232,7 +1353,57 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
             rc, out, err = self._run_range(CANONICAL_SCANNER, repo, "origin", "claude")
             self.assertEqual(rc, 1, out + err)
             self.assertIn("PS-FINDING-CONTENT", err)
-            self.assertNotIn(sentinel, out + err)
+        self.assertNotIn(sentinel, out + err)
+
+    def test_range_mode_terminal_public_token_annotations_are_clean(self) -> None:
+        rows = public_token_reproduction_rows()
+        annotated = "\n".join((
+            rows["port-slots"] + "), " + public_token_annotation(),
+            rows["orientations"] + ", " + public_token_annotation(),
+            rows["partition-certificate"] + "; " + public_token_annotation("//"),
+        ))
+        with tempfile.TemporaryDirectory() as td:
+            repo = self._init_range_repo(Path(td))
+            self._commit_file(repo, "protocol.py", annotated)
+
+            rc, out, err = self._run_range(
+                CANONICAL_SCANNER, repo, "origin", "claude"
+            )
+
+        self.assertEqual(rc, 0, out + err)
+        self.assertNotIn("PS-FINDING", out + err)
+
+    def test_range_mode_binary_public_token_annotation_still_blocks(self) -> None:
+        annotated = (
+            public_token_reproduction_rows()["partition-certificate"]
+            + "; "
+            + public_token_annotation()
+        )
+
+        rc, out, err = self._run_binary_payload(
+            b"\0" + annotated.encode("ascii")
+        )
+
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("class=value-token", err)
+
+    def test_range_mode_commit_message_public_token_annotation_still_blocks(self) -> None:
+        annotated = (
+            public_token_reproduction_rows()["partition-certificate"]
+            + "; "
+            + public_token_annotation()
+        )
+        with tempfile.TemporaryDirectory() as td:
+            repo = self._init_range_repo(Path(td))
+            self._commit_file(repo, "clean.txt", "clean", message=annotated)
+
+            rc, out, err = self._run_range(
+                CANONICAL_SCANNER, repo, "origin", "claude"
+            )
+
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("PS-FINDING-COMMIT-MESSAGE", err)
+        self.assertIn("class=value-token", err)
 
     def test_range_mode_binary_public_key_identity_and_text_heuristics_are_clean(self) -> None:
         public_key_token = block_rows()["b43_public_key_token_identity"]
@@ -4496,6 +4667,117 @@ class TestPublicationSafetyScannerR5Proof(unittest.TestCase):
                 module._confirm_tip,
                 module._content_hits,
             ) = originals
+
+
+class TestPublicationSafetyScannerEarlyRefusalCleanup(unittest.TestCase):
+    def _module(self, suffix: str):
+        return _load_canonical_scanner("_scanner_cleanup_" + suffix)
+
+    def test_large_residual_output_is_discarded_while_child_settles(self) -> None:
+        module = self._module("large_residual")
+        oid = "1" * 40
+        rows = (
+            (
+                "oversized",
+                oid,
+                module._MAX_BLOB_BYTES + 1,
+                module._refusal("PS-MSG-LIMIT", "blob-bytes"),
+            ),
+            (
+                "bad-identity",
+                "2" * 40,
+                4 * 1024 * 1024,
+                module._refusal("PS-MSG-FRAME", "identity"),
+            ),
+        )
+
+        async def exercise(label: str, returned_oid: str, size: int, expected) -> None:
+            producer = (
+                "import sys\n"
+                "request = sys.stdin.buffer.readline().strip()\n"
+                f"sys.stdout.buffer.write(b'{returned_oid} blob {size}\\n')\n"
+                "sys.stdout.buffer.flush()\n"
+                "chunk = b'x' * 65536\n"
+                f"remaining = {size}\n"
+                "while remaining:\n"
+                "    part = chunk[:min(len(chunk), remaining)]\n"
+                "    sys.stdout.buffer.write(part)\n"
+                "    sys.stdout.buffer.flush()\n"
+                "    remaining -= len(part)\n"
+                "sys.stdout.buffer.write(b'\\n')\n"
+                "sys.stdout.buffer.flush()\n"
+            )
+            reader = module._AsyncGitObjectReader(
+                argv=(sys.executable, "-u", "-c", producer),
+                request_timeout=1.0,
+                settle_timeout=3.0,
+            )
+            self.assertIsNone(await reader.start(), label)
+            try:
+                refusal = await reader.read(oid, "blob")
+                self.assertEqual(refusal, expected, label)
+                finalization = await reader.finalize()
+                self.assertIsNone(finalization, label)
+                certificate = reader.reap_certificate
+                self.assertIsNotNone(certificate, label)
+                self.assertTrue(certificate.complete, label)
+                self.assertEqual(certificate.cleanup_errors, (), label)
+                self.assertEqual(certificate.attempts_used, 1, label)
+                outcome = module._finalize_range_outcome(
+                    module.ScanOutcome("refusal", "range", refusal=refusal),
+                    finalization,
+                    certificate,
+                )
+                self.assertEqual(outcome.refusal, expected, label)
+                self.assertIs(outcome.reap_certificate, certificate, label)
+            finally:
+                process = reader.process
+                if process is not None and process.returncode is None:
+                    process.kill()
+                    await process.wait()
+
+        async def run_rows() -> None:
+            for row in rows:
+                with self.subTest(row=row[0]):
+                    await exercise(*row)
+
+        asyncio.run(run_rows())
+
+    def test_normal_reader_still_rejects_trailing_output(self) -> None:
+        module = self._module("normal_trailing")
+        oid = "1" * 40
+        producer = (
+            "import sys\n"
+            "request = sys.stdin.buffer.readline().strip()\n"
+            "sys.stdout.buffer.write(request + b' blob 1\\n' + b'x\\ntrailing')\n"
+            "sys.stdout.buffer.flush()\n"
+            "sys.stdin.buffer.read()\n"
+        )
+
+        async def exercise() -> None:
+            reader = module._AsyncGitObjectReader(
+                argv=(sys.executable, "-u", "-c", producer),
+                request_timeout=1.0,
+                settle_timeout=1.0,
+            )
+            self.assertIsNone(await reader.start())
+            try:
+                result = await reader.read(oid, "blob")
+                self.assertEqual(type(result).__name__, "ObjectReadSuccess")
+                self.assertIsNone(await reader.finalize())
+                self.assertEqual(reader.state, module.ReaderState.REAP_PENDING)
+                outcome = module._finalize_range_outcome(
+                    module.ScanOutcome("clean", "range"), None, reader.reap_certificate
+                )
+                self.assertEqual(outcome.kind, "refusal")
+                self.assertEqual(outcome.refusal.failure_id, "PS-MSG-REAP")
+                self.assertIsNotNone(reader.process.returncode)
+            finally:
+                if reader.process is not None and reader.process.returncode is None:
+                    reader.process.kill()
+                    await reader.process.wait()
+
+        asyncio.run(exercise())
 
 
 class TestThisTestFileIsGateSafe(unittest.TestCase):

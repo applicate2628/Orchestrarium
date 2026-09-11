@@ -14,8 +14,8 @@ ROOT = Path(__file__).resolve().parents[1]
 RESOLVER_PATH = ROOT / "scripts" / "resolve-agents-mode.py"
 SKILL_ONLY_BY_TASK = {
     "exploration": {"product-analyst"},
-    "planning": {"ux-designer"},
-    "critical-design": {"performance-engineer", "reliability-engineer"},
+    "planning": {"ux-designer", "consultant"},
+    "critical-design": {"performance-engineer", "reliability-engineer", "consultant"},
     "engineering": {
         "frontend-engineer",
         "qt-ui-engineer",
@@ -27,6 +27,7 @@ SKILL_ONLY_BY_TASK = {
         "visualization-engineer",
     },
     "review": {
+        "consultant",
         "performance-reviewer",
         "accessibility-reviewer",
         "ux-reviewer",

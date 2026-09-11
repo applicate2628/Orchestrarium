@@ -642,7 +642,8 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
         ):
             with self.subTest(owner=owner):
                 text = self._read(owner)
-                self.assertIn("Before `Design PASS`, walk one producer serialization through the exact consumer signature and validation", text)
+                self.assertIn("When the design creates, changes, or consumes a serialized/wire boundary", text)
+                self.assertIn("before `Design PASS`, walk one producer serialization through the exact consumer signature and validation", text)
                 self.assertIn("literal wire shape and field order", text)
                 self.assertIn("an acyclic provenance dependency graph", text)
                 self.assertIn("include one actual serialized sample", text)

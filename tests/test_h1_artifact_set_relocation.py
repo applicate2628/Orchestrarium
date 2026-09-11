@@ -37,23 +37,57 @@ def digest(raw: bytes) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
-def artifact_set_digest(root: Path) -> str:
+def artifact_set_digest(
+    root: Path,
+    *,
+    base: Path | None = None,
+    version: int = 2,
+) -> str:
     members = (
         ("work-items/decision-h1-compatibility.json", "file"),
         ("work-items/legacy-ledger-projection-manifests", "directory"),
         ("work-items/legacy-ledger-projections.jsonl", "file"),
         ("work-items/legacy-ledger-projection-receipts", "directory"),
     )
+    if version not in {1, 2}:
+        raise ValueError(f"unsupported artifact-set digest version: {version}")
+    physical_base = root / "work-items" if base is None else base
     rows = []
     for logical_path, kind in members:
         row = {"kind": kind, "logicalPath": logical_path}
+        physical = physical_base / Path(logical_path).name
         if kind == "file":
-            raw = root.joinpath(*logical_path.split("/")).read_bytes()
+            raw = physical.read_bytes()
             row.update({"byteLength": len(raw), "sha256": digest(raw)})
+        elif version == 2:
+            directory_rows = []
+            for child in sorted(
+                physical.iterdir(), key=lambda path: path.name.encode("utf-8")
+            ):
+                raw = child.read_bytes()
+                directory_rows.append(
+                    {
+                        "name": child.name,
+                        "byteLength": len(raw),
+                        "sha256": digest(raw),
+                    }
+                )
+            row.update(
+                {
+                    "byteLength": sum(
+                        int(child["byteLength"]) for child in directory_rows
+                    ),
+                    "sha256": digest(
+                        b"orchestrarium:ledger-h1-artifact-directory:v1\0"
+                        + canonical(directory_rows)
+                    ),
+                }
+            )
         rows.append(row)
     rows.sort(key=lambda row: str(row["logicalPath"]).encode("utf-8"))
     return digest(
-        b"orchestrarium:ledger-h1-artifact-set:v1\0" + canonical(rows)
+        f"orchestrarium:ledger-h1-artifact-set:v{version}\0".encode("ascii")
+        + canonical(rows)
     )
 
 
@@ -254,6 +288,31 @@ def test_relocate_h1_set_defaults_to_non_mutating_preflight(tmp_path: Path) -> N
     assert support.tree_state(root) == before
 
 
+def test_h1_v2_digest_rejects_directory_member_drift_before_intent(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "directory-content"
+    support, writer, _reader, request, _items, _paths = activated_relocation_fixture(
+        root
+    )
+
+    ready = writer.relocate_ledger_h1_artifact_set(root, request)
+    assert ready["artifactSetSha256"] == request.expected_artifact_set_sha256
+    manifests = root / "work-items" / "legacy-ledger-projection-manifests"
+    member = sorted(manifests.iterdir(), key=lambda path: path.name.encode("utf-8"))[0]
+    before = member.read_bytes()
+    assert before.endswith(b"\n")
+    member.write_bytes(before[:-1] + b" ")
+    assert artifact_set_digest(root) != request.expected_artifact_set_sha256
+    drifted_tree = support.tree_state(root)
+
+    with pytest.raises(writer.LifecycleError) as rejected:
+        writer.relocate_ledger_h1_artifact_set(root, request)
+
+    assert rejected.value.failure_id == "WI-LEDGER-COMPAT-SET-TOPOLOGY"
+    assert support.tree_state(root) == drifted_tree
+
+
 def test_relocation_digest_inputs_are_case_normalized_and_exact(
     tmp_path: Path,
 ) -> None:
@@ -350,7 +409,7 @@ def test_relocate_h1_set_preserves_bytes_paths_and_views(tmp_path: Path) -> None
     assert not (root_base / "root-contract.json").exists()
     receipt = json.loads((target_base / "relocation-receipt.json").read_bytes())
     assert receipt == {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "status": "settled",
         "operationId": request.operation_id,
         "archiveOwner": request.archive_owner,
@@ -376,6 +435,49 @@ def test_relocate_h1_set_preserves_bytes_paths_and_views(tmp_path: Path) -> None
     )
     after_contexts = reader._load_effective_ledger_group(root)
     assert {path: after_contexts[path].view for path in paths} == before_views
+
+
+def test_h1_v1_receipt_is_immutable_but_replay_requires_current_v2_digest(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "legacy-receipt"
+    _support, writer, _reader, request, _items, _paths = activated_relocation_fixture(
+        root
+    )
+    writer.relocate_ledger_h1_artifact_set(root, request, apply=True)
+    target_base = (
+        root
+        / "work-items"
+        / "archive"
+        / "2026-09"
+        / "h1-owner"
+        / "ledger-h1-compatibility"
+    )
+    receipt_path = target_base / "relocation-receipt.json"
+    legacy_digest = artifact_set_digest(root, base=target_base, version=1)
+    legacy_receipt = json.loads(receipt_path.read_bytes())
+    legacy_receipt["schemaVersion"] = 1
+    legacy_receipt["artifactSetSha256"] = legacy_digest
+    legacy_bytes = json.dumps(
+        legacy_receipt, ensure_ascii=False, indent=2, sort_keys=True
+    ).encode("utf-8") + b"\n"
+    receipt_path.write_bytes(legacy_bytes)
+
+    location = writer.resolve_ledger_h1_artifact_set_location(root)
+    replay = writer.relocate_ledger_h1_artifact_set(root, request, apply=True)
+
+    assert location is not None
+    assert location.artifact_set_sha256 == request.expected_artifact_set_sha256
+    assert replay["artifactSetSha256"] == request.expected_artifact_set_sha256
+    assert replay["replay"] is True
+    assert receipt_path.read_bytes() == legacy_bytes
+    with pytest.raises(writer.LifecycleError) as rejected:
+        writer.relocate_ledger_h1_artifact_set(
+            root,
+            replace(request, expected_artifact_set_sha256=legacy_digest),
+            apply=True,
+        )
+    assert rejected.value.failure_id == "WI-LEDGER-COMPAT-SET-TOPOLOGY"
 
 
 def test_relocation_removes_only_h1_root_contract_declarations(

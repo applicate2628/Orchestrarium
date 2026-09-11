@@ -897,6 +897,70 @@ def test_supersede_current_bug_requires_exact_accepted_successor_binding_without
         assert successor.read_bytes() == successor_before, case
 
 
+def test_supersede_current_bug_rechecks_same_length_successor_bytes_before_intent(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    root = tmp_path / "same-length-successor"
+    slug = "2026-09-10-same-length-successor"
+    operation_id = "supersede-same-length-successor"
+    source = seed_context_bug(root, "source-owner", slug)
+    source_before = source.read_bytes()
+    successor = root / "receiving-registry" / "accepted-successor.md"
+    accepted_bytes = b"id: accepted-successor\nstatus: accepted\n"
+    updated_bytes = b"id: accepted-successor\nstatus: reviewed\n"
+    assert len(accepted_bytes) == len(updated_bytes)
+    successor.parent.mkdir(parents=True)
+    successor.write_bytes(accepted_bytes)
+    module.refresh_readme(root, allow_marker_bootstrap=True)
+    readme = root / "work-items" / "README.md"
+    binding = successor_binding_bytes(slug, accepted_bytes, operation_id)
+    inventory = successor_link_inventory_bytes(
+        slug, source_before, binding, operation_id
+    )
+    original_verify = module._verify_captured_file
+    injected = False
+
+    def update_before_final_verify(snapshot, failure_id):
+        nonlocal injected
+        if not injected and snapshot.path == successor:
+            successor.write_bytes(updated_bytes)
+            injected = True
+        return original_verify(snapshot, failure_id)
+
+    module._verify_captured_file = update_before_final_verify
+    try:
+        try:
+            module.supersede_current_bug(
+                root,
+                slug,
+                successor,
+                binding,
+                "2026-09-10T08:02:00Z",
+                inventory,
+                hashlib.sha256(source_before).hexdigest(),
+                hashlib.sha256(readme.read_bytes()).hexdigest(),
+                operation_id,
+            )
+        except module.LifecycleError as exc:
+            assert exc.failure_id == "WI-BUG-SUCCESSOR-BINDING"
+        else:
+            raise AssertionError("same-length successor drift was accepted")
+    finally:
+        module._verify_captured_file = original_verify
+
+    assert injected is True
+    assert source.read_bytes() == source_before
+    assert successor.read_bytes() == updated_bytes
+    assert not list((root / "work-items" / "bugs" / "archive").glob("*/*.md"))
+    assert not (
+        root
+        / ".scratch"
+        / "work-items-lifecycle-transitions"
+        / f"{operation_id}.json"
+    ).exists()
+
+
 def _supersede_current_bug_cli_fixture(
     module,
     root: Path,
@@ -1881,12 +1945,95 @@ def test_staged_start_readme_failure_leaves_valid_canonical_item(tmp_path: Path)
         module.start_item(root, slug, status, inject_readme_failure=True)
     except module.LifecycleError as exc:
         assert exc.failure_id == "WI-README-STALE"
+        assert str(exc) == (
+            "start committed canonical state; README refresh required; "
+            "do not retry start; run refresh, then verify the target."
+        )
     else:
         raise AssertionError("injected README failure did not abort the derived-view refresh")
 
     target = root / "work-items" / "active" / slug
+    assert target.is_dir()
+    assert not (root / "work-items" / "backlog" / f"{slug}.md").exists()
     result = run_state_validator(target)
     assert result.returncode == 0, result.stdout
+    try:
+        module.check_readme(root)
+    except module.LifecycleError as exc:
+        assert exc.failure_id == "WI-README-STALE"
+    else:
+        raise AssertionError("post-commit start unexpectedly refreshed README")
+    module.refresh_readme(root)
+    module.audit(root)
+    assert module.resolve_category(root, f"work-item:{slug}") == target.resolve()
+
+
+def test_update_and_reopen_readme_failures_share_actionable_postcommit_diagnostic(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+
+    update_root = tmp_path / "update"
+    update_slug = "postcommit-update"
+    seed_active(module, update_root, update_slug)
+    updated_status = quick_status("Updated canonical task state.").encode("utf-8")
+    try:
+        module.update_status(
+            update_root,
+            update_slug,
+            updated_status,
+            inject_readme_failure=True,
+        )
+    except module.LifecycleError as exc:
+        assert exc.failure_id == "WI-README-STALE"
+        assert str(exc) == (
+            "update committed canonical state; README refresh required; "
+            "do not retry update; run refresh, then verify the target."
+        )
+    else:
+        raise AssertionError("injected update README failure returned success")
+    updated = update_root / "work-items" / "active" / update_slug / "status.md"
+    assert updated.read_bytes() == updated_status
+    module.refresh_readme(update_root)
+    module.audit(update_root)
+
+    reopen_root = tmp_path / "reopen"
+    archived_slug = "postcommit-reopen-source"
+    successor_slug = "postcommit-reopen-successor"
+    seed_active(module, reopen_root, archived_slug)
+    instant = "2026-07-31T13:00:00Z"
+    write_empty_bug_dispositions(reopen_root, archived_slug, instant)
+    archived = module.close_item(
+        reopen_root,
+        archived_slug,
+        closure(instant).encode("utf-8"),
+        instant,
+    )
+    successor_status = staged_status(archived_slug).encode("utf-8")
+    try:
+        module.reopen_item(
+            reopen_root,
+            archived_slug,
+            successor_slug,
+            successor_status,
+            inject_readme_failure=True,
+        )
+    except module.LifecycleError as exc:
+        assert exc.failure_id == "WI-README-STALE"
+        assert str(exc) == (
+            "reopen committed canonical state; README refresh required; "
+            "do not retry reopen; run refresh, then verify the target."
+        )
+    else:
+        raise AssertionError("injected reopen README failure returned success")
+    successor = reopen_root / "work-items" / "active" / successor_slug
+    assert successor.joinpath("status.md").read_bytes() == successor_status
+    assert archived.is_dir()
+    module.refresh_readme(reopen_root)
+    module.audit(reopen_root)
+    assert module.resolve_category(
+        reopen_root, f"work-item:{archived_slug}"
+    ) == archived.resolve()
 
 
 def test_start_quick_fix_preserves_ledger_free_contract(tmp_path: Path) -> None:

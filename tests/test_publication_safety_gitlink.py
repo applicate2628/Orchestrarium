@@ -36,20 +36,24 @@ def _repo(tmp_path: Path) -> tuple[Path, str]:
     return repo, head.stdout.strip()
 
 
-def _stage_gitlink(repo: Path, commit: str) -> None:
+def _stage_gitlink(
+    repo: Path,
+    commit: str,
+    path: str = "vendor/submodule",
+) -> None:
     result = _git(
         repo,
         "update-index",
         "--add",
         "--cacheinfo",
-        f"160000,{commit},vendor/submodule",
+        f"160000,{commit},{path}",
     )
     assert result.returncode == 0, result.stderr
 
 
 def _scan(repo: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, "-B", str(SCANNER), "--cached"],
+        [sys.executable, "-B", str(SCANNER)],
         cwd=repo,
         env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
         text=True,
@@ -67,6 +71,48 @@ def test_cached_scan_accepts_clean_staged_gitlink(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert "PS-INPUT-REFUSAL" not in result.stdout + result.stderr
+
+
+def test_cached_scan_accepts_gitlink_with_nonlocal_target_commit(tmp_path: Path) -> None:
+    repo, _head = _repo(tmp_path)
+    missing_commit = "f" * 40
+    assert _git(repo, "cat-file", "-e", missing_commit).returncode != 0
+    _stage_gitlink(repo, missing_commit)
+
+    result = _scan(repo)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "PS-INPUT-REFUSAL" not in result.stdout + result.stderr
+
+
+def test_cached_scan_still_checks_gitlink_path(tmp_path: Path) -> None:
+    repo, head = _repo(tmp_path)
+    _stage_gitlink(repo, head, ".env")
+
+    result = _scan(repo)
+
+    output = result.stdout + result.stderr
+    assert result.returncode == 1, output
+    assert "class=filename-env" in output
+    assert "PS-INPUT-REFUSAL" not in output
+
+
+def test_cached_scan_still_refuses_regular_entry_with_nonblob_object(tmp_path: Path) -> None:
+    repo, head = _repo(tmp_path)
+    staged = _git(
+        repo,
+        "update-index",
+        "--add",
+        "--cacheinfo",
+        f"100644,{head},not-a-blob.txt",
+    )
+    assert staged.returncode == 0, staged.stderr
+
+    result = _scan(repo)
+
+    output = result.stdout + result.stderr
+    assert result.returncode == 2, output
+    assert "PS-INPUT-REFUSAL" in output
 
 
 def test_cached_scan_continues_past_gitlink_and_blocks_other_staged_leak(tmp_path: Path) -> None:

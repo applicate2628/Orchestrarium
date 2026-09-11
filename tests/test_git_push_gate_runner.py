@@ -225,6 +225,51 @@ def test_r4_deep_contract_rejects_all_top_level_and_nested_mutations() -> None:
             raise AssertionError("R4-DEEP-FOREIGN-SHAPE-ACCEPTED")
 
 
+def test_transcript_diagnostic_is_finite_and_legacy_construction_survives() -> None:
+    for target in TARGETS:
+        module = _load(
+            target.preflight_path,
+            f"transcript_diagnostic_contract_{target.label}",
+        )
+        legacy = module.PreflightResult(
+            "DEFER", "PFP-DENY-INTERNAL", "RENDER_DENY",
+            None, None, "", None, None, None, False, None, "", "",
+        )
+        assert legacy.transcript_diagnostic is None
+        assert module.validate_preflight_result(legacy) is legacy
+
+        missing = module.build_preflight({
+            "tool_name": "Bash",
+            "tool_input": {"command": "git push origin main"},
+        })
+        diagnostic = missing.transcript_diagnostic
+        assert diagnostic == module.TranscriptDiagnostic(
+            "missing", "not-run", "not-run", "not-run"
+        )
+
+        invalid = (
+            diagnostic._replace(envelope="private-value"),
+            diagnostic._replace(current_turn="private-value"),
+            diagnostic._replace(history="private-value"),
+            diagnostic._replace(recovery="private-value"),
+            diagnostic._replace(envelope="string"),
+            diagnostic._replace(current_turn="found"),
+            diagnostic._replace(history="invalid", recovery="found"),
+            tuple(diagnostic),
+        )
+        for candidate in invalid:
+            try:
+                module.validate_preflight_result(
+                    missing._replace(transcript_diagnostic=candidate)
+                )
+            except (TypeError, ValueError):
+                pass
+            else:
+                raise AssertionError(
+                    f"TRANSCRIPT-DIAGNOSTIC-MUTATION-ACCEPTED:{candidate!r}"
+                )
+
+
 def _builder_positive_results(module, tmp_path: Path):
     transcript = tmp_path / "preflight-branches.jsonl"
     transcript.write_text(
@@ -367,7 +412,8 @@ def test_r4_public_interface_is_explicit_minimal_and_used() -> None:
     assert len(imports) == 1
     imported = tuple(alias.name for alias in imports[0].names)
     expected = (
-        "PreflightResult", "validate_preflight_result",
+        "PreflightResult", "TranscriptDiagnostic",
+        "validate_preflight_result", "validate_transcript_diagnostic",
         "build_preflight_from_stdin", "ShellParseResult", "PrRouteDenied",
         "resolve_command_dialect", "parse_transcript_command",
         "project_scan_range_binding",
@@ -713,6 +759,7 @@ def test_a3_preflight_contract_and_old_owner_are_red_until_relocated() -> None:
         "failure_id",
         "repository_workdir",
         "repository_workdir_source",
+        "transcript_diagnostic",
     )
     for target in TARGETS:
         assert target.preflight_path.is_file(), f"A3-PREFLIGHT-MISSING:{target.label}"

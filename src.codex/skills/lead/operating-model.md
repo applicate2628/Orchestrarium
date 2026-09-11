@@ -26,6 +26,7 @@ Apply the binding shared **Workflow economy (binding)** rule. This Codex project
 - `REVISE` stays inside the same role for a bounded correction.
 - Apply the shared spine's consecutive same-role/same-artifact `REVISE`-cycle cap before the lead must escalate to the user with a summary of all attempts, remaining findings, and a recommendation.
 - A handoff interrupt or worker stall without an artifact is not a completed `REVISE` artifact. Keep the stage open, record the interruption in `status.md`, then either re-dispatch the same role with a narrower slice or route to the proper factual role.
+- A root-owned external job that outlives a model turn follows the Lead skill's **Conditional external-run monitoring** rule; this projection adds no second polling or recovery-state owner.
 - `BLOCKED` is reserved for real external blockers, missing decisions, or unavailable prerequisites.
 - The shared `$repo-cleanup` host-policy-denial exception may advance an independently verified delivery, handoff, commit, or transfer only for freshly proven harmless empty agent-owned directory residue, with every receiving gate passing and no dependency on that directory. Cleanup remains incomplete with failing zero-residue predicates, and the handoff reports the residue and resume condition; this never waives another blocker.
 - A consultant sweep is advisory-only. Run it only when the lead explicitly wants a second opinion or a repo-local lane policy explicitly asks for one and `consultantMode` is not `disabled`.
@@ -78,7 +79,9 @@ Apply the binding shared **Workflow economy (binding)** rule. This Codex project
 - Once a provider or subagent run is launched, a later preference change to effort, model, or framing applies to the next dispatch. Do not stop and replace the in-flight run: spent reasoning is sunk and redispatch adds cost. Stop only when the run is orphaned, no longer needed, or its prompt is broken/wrong.
 - Resolve the requested route before launch without treating the request as execution evidence. Codex native role TOMLs declare the installed default profile; role policy owns every effort floor and corridor. Claim an override only when the host explicitly supports it and returned actual runtime metadata confirms the effective model and effort; otherwise record `unspecified by runtime`. The optional Astra native-host path is owned by `Native Astra task-dependent route` in the installed `AGENTS.md`; follow that section without duplicating its policy here. Do not reflexively request `max`/`xhigh` where no policy floor or corridor requires it.
 
-## Canonical routing patterns
+## Routing examples
+
+Resolve the template and evidence triggers first. Each listed role is a candidate; include it only when its artifact is required by accepted uncertainty, contract, or risk. Preserve mandatory security, performance, geometry, scientific, human, and publication gates.
 
 - Roadmap prioritization or milestone shaping:
   `product-manager -> lead`
@@ -317,7 +320,7 @@ For critical changes, run both in sequence: Claim-Verify first (fast, catches ex
 - Keep the periodic layer lightweight: if a control is really about whether work may advance, it belongs in the stage-gate path instead.
 - Physical-state reconciliation (`$knowledge-archivist`): every lifecycle state change (create, resume, stage transition, park, close, archive) reconciles physical roots and regenerates `work-items/README.md` in the same transition.
 - Board refresh (`$knowledge-archivist`): every delivery wave, in the same post-wave sync pass, refresh `work-items/README.md` against git and the tree.
-- Registry governance reconciliation (`$knowledge-archivist`): after accepted task-memory governance changes, on an all-registry request, and at milestone-wide cleanup, run one complete structural plus semantic-currency matrix across every current registry. Non-consistent rows return to their semantic owners through `$lead`; placement-only success is not overall `PASS`.
+- Registry governance reconciliation (`$knowledge-archivist`): after a verified change to cross-registry schema, lifecycle, or relations, on an all-registry request, and at milestone-wide cleanup, run one complete structural plus semantic-currency matrix across every current registry. Non-consistent rows return to their semantic owners through `$lead`; placement-only success is not overall `PASS`.
 
 Do not let a role that defines a critical constraint act as the only approval gate for that same risk.
 

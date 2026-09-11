@@ -27,13 +27,38 @@ VALIDATORS = (
     ROOT / "src.codex/skills/lead/scripts/validate-skill-pack.py",
     ROOT / "src.claude/agents/scripts/validate-skill-pack.py",
 )
+SHARED_INVARIANT_ACTIONS = (
+    (
+        "shared governance requires direct external launch",
+        "launch directly from the orchestrating runtime or an approved transport wrapper, "
+        "never an internal relay",
+    ),
+    (
+        "shared governance requires file-based external CLI prompts",
+        "Every external CLI substantive prompt uses file-based prompt delivery through "
+        "stdin/file input; argv carries only flags/options/paths",
+    ),
+    (
+        "shared governance rejects split-brain state synchronization",
+        "Split-brain sync is an architecture bug",
+    ),
+    (
+        "shared governance requires verification before trusting subagent results",
+        "verify its result before acceptance/forwarding/completion claims",
+    ),
+    (
+        "shared governance requires measured evidence before root-cause or fix claims",
+        "capture observable wording/error/log/return/repro or `file:line`; verify the "
+        "causal chain",
+    ),
+)
 PROVIDER_RUNTIME_MIRRORS = (
     ROOT / "src.codex/skills/lead/scripts/skill_pack_validator_runtime.py",
     ROOT / "src.claude/agents/scripts/skill_pack_validator_runtime.py",
 )
 EXPECTED_SUMMARIES = (
-    "PASS: 558  WARN: 0  FAIL: 0",
-    "Checks: 489  |  Passed: 489  |  Warnings: 0  |  Errors: 0",
+    "PASS: 564  WARN: 0  FAIL: 0",
+    "Checks: 495  |  Passed: 495  |  Warnings: 0  |  Errors: 0",
 )
 
 
@@ -1355,6 +1380,98 @@ def test_installed_codex_layering_checks_only_orchestrarium_owned_skills(
 
     assert result.warnings == expected_warnings
     assert result.errors == expected_errors
+
+
+@pytest.mark.parametrize(
+    ("body", "expected_passed", "expected_unresolved"),
+    (
+        (
+            "- **Coherent locality (A4/A7/M):** one combined law.\n"
+            "A4 A7 M govern this role.\n",
+            True,
+            (),
+        ),
+        (
+            "- **Coherent locality (A4/A7):** incomplete combined law.\n"
+            "A4 A7 M govern this role.\n",
+            False,
+            ("M",),
+        ),
+        (
+            "A4 A7 M govern this role.\n"
+            "Ordinary prose mentions (A4/A7/M) without defining the laws.\n",
+            False,
+            ("A4", "A7", "M"),
+        ),
+    ),
+)
+def test_layering_ids_resolve_only_from_bold_labeled_definitions(
+    tmp_path: Path,
+    body: str,
+    expected_passed: bool,
+    expected_unresolved: tuple[str, ...],
+) -> None:
+    skill = tmp_path / "SKILL.md"
+    skill.write_text(body, encoding="utf-8")
+    runtime = _load(RUNTIME, f"grouped_layering_ids_{len(body)}")
+
+    passed, unresolved = runtime.layering_ids_resolve(skill)
+
+    assert passed is expected_passed
+    assert unresolved == expected_unresolved
+
+
+@pytest.mark.parametrize(
+    ("provider", "validator"),
+    tuple(zip(("codex", "claude"), VALIDATORS, strict=True)),
+)
+@pytest.mark.parametrize(("label", "required_clause"), SHARED_INVARIANT_ACTIONS)
+def test_provider_shared_invariant_actions_bind_current_clause_and_reject_removal(
+    tmp_path: Path,
+    provider: str,
+    validator: Path,
+    label: str,
+    required_clause: str,
+) -> None:
+    adapter = _load(validator, f"shared_invariant_adapter_{provider}_{len(label)}")
+    matches = tuple(action for action in adapter._DECLARED_ACTIONS if action[-1] == label)
+    assert len(matches) == 1
+    declared = matches[0]
+    assert declared[0] == "check_contains"
+    assert declared[2] == required_clause
+
+    shared_text = (ROOT / "shared/AGENTS.shared.md").read_text(encoding="utf-8")
+    assert shared_text.count(required_clause) == 1
+    candidate = tmp_path / f"{provider}-{len(label)}.md"
+    candidate.write_text(shared_text, encoding="utf-8")
+    action = ("check_contains", str(candidate), required_clause, label)
+    runtime = _load(RUNTIME, f"shared_invariant_runtime_{provider}_{len(label)}")
+
+    accepted = runtime.validate_pack(
+        script=validator,
+        provider=provider,
+        actions=(action,),
+        maintainer_only_shared_reference_names=frozenset(),
+        utility_skills=frozenset(),
+        curated_role_skills=frozenset(),
+        root=ROOT,
+    )
+    assert accepted.errors == 0
+
+    candidate.write_text(
+        shared_text.replace(required_clause, "[removed shared invariant]"),
+        encoding="utf-8",
+    )
+    rejected = runtime.validate_pack(
+        script=validator,
+        provider=provider,
+        actions=(action,),
+        maintainer_only_shared_reference_names=frozenset(),
+        utility_skills=frozenset(),
+        curated_role_skills=frozenset(),
+        root=ROOT,
+    )
+    assert rejected.errors == 1
 
 
 @pytest.mark.parametrize(

@@ -1199,6 +1199,251 @@ def test_internal_final_closer_binds_one_external_evidence_tuple(tmp_path: Path)
     assert validated.returncode == 0, validated.stdout
 
 
+def _append_external_review_revise(
+    item: Path,
+    *,
+    professional_role: str,
+    artifact_identity: str,
+    scope: str = "workflow-coherence",
+    artifact: str = "reviews/external-review.md",
+) -> subprocess.CompletedProcess:
+    report = item / artifact
+    report.parent.mkdir(parents=True, exist_ok=True)
+    report.write_text("REVISE\n", encoding="utf-8")
+    return run_ledger(
+        item,
+        "append",
+        "--run-id", "external-review-revise-001",
+        "--role", "external-reviewer",
+        "--execution-role", "external-reviewer",
+        "--assigned-role", professional_role,
+        "--provider", "kimi",
+        "--model", "kimi-code/k3",
+        "--effort", "unsupported",
+        "--status", "revise",
+        "--gate", "REVISE",
+        "--scope", scope,
+        "--artifact", artifact,
+        "--artifact-identity", artifact_identity,
+        "--terminal-class", "external-nonauthorizing",
+        "--authorizing", "false",
+        "--actual-execution-path", "direct-external-cli",
+        "--external-dispatch-id", "external-review-dispatch-001",
+        "--external-evidence-run-id", "external-review-revise-001",
+        "--effort-mapping-loss", "no-native-effort-control",
+        "--evidence", f"review:{artifact}",
+        "--started-at", "2026-09-11T10:00:00Z",
+        "--updated-at", "2026-09-11T10:00:00Z",
+    )
+
+
+def _append_internal_professional_launch(
+    item: Path,
+    *,
+    professional_role: str,
+    scope: str,
+    artifact: str,
+) -> subprocess.CompletedProcess:
+    return run_ledger(
+        item,
+        "append",
+        "--run-id", "native-review-launch-001",
+        "--role", professional_role,
+        "--execution-role", "internal",
+        "--assigned-role", professional_role,
+        "--status", "running",
+        "--gate", "none",
+        "--event-kind", "launch",
+        "--scope", scope,
+        "--artifact", artifact,
+        "--started-at", "2026-09-11T10:00:30Z",
+        "--updated-at", "2026-09-11T10:00:30Z",
+    )
+
+
+def _append_internal_professional_closer(
+    item: Path,
+    *,
+    professional_role: str,
+    artifact_identity: str,
+    scope: str = "workflow-coherence",
+    artifact: str = "reviews/native-review.md",
+    closer_role: str | None = None,
+    event_kind: str = "standalone",
+    target_run_id: str = "external-review-revise-001",
+) -> subprocess.CompletedProcess:
+    report = item / artifact
+    report.parent.mkdir(parents=True, exist_ok=True)
+    report.write_text("PASS\n", encoding="utf-8")
+    args = [
+        item,
+        "append",
+        "--run-id", "native-review-pass-001",
+        "--role", closer_role or professional_role,
+        "--execution-role", "internal",
+        "--assigned-role", professional_role,
+        "--status", "completed",
+        "--gate", "PASS",
+        "--event-kind", event_kind,
+        "--scope", scope,
+        "--artifact", artifact,
+        "--artifact-identity", artifact_identity,
+        "--closes", target_run_id,
+        "--evidence", f"review:{artifact}",
+        "--started-at", "2026-09-11T10:01:00Z",
+        "--updated-at", "2026-09-11T10:01:00Z",
+    ]
+    if event_kind == "terminal":
+        args.extend(("--launch-run-id", "native-review-launch-001"))
+    return run_ledger(*args)
+
+
+def test_internal_backend_closer_discharges_external_worker_revise_terminal(
+    tmp_path: Path,
+) -> None:
+    item = prepare_valid_work_item(tmp_path)
+    identity = "sha256:" + "a" * 64
+    worker_report = "reviews/worker-report.md"
+    native_report = "reviews/native-backend-qa.md"
+    (item / worker_report).write_text("REVISE\n", encoding="utf-8")
+    external_launch = run_ledger(
+        item,
+        "append",
+        "--run-id", "external-worker-launch-001",
+        "--role", "external-worker",
+        "--execution-role", "external-worker",
+        "--assigned-role", "backend-engineer",
+        "--provider", "kimi",
+        "--model", "kimi-code/k3",
+        "--effort", "unsupported",
+        "--status", "running",
+        "--gate", "none",
+        "--event-kind", "launch",
+        "--scope", "artifact-worker",
+        "--artifact", worker_report,
+        "--started-at", "2026-09-11T11:00:00Z",
+        "--updated-at", "2026-09-11T11:00:00Z",
+    )
+    target = run_ledger(
+        item,
+        "append",
+        "--run-id", "external-worker-revise-001",
+        "--role", "external-worker",
+        "--execution-role", "external-worker",
+        "--assigned-role", "backend-engineer",
+        "--provider", "kimi",
+        "--model", "kimi-code/k3",
+        "--effort", "unsupported",
+        "--status", "revise",
+        "--gate", "REVISE",
+        "--event-kind", "terminal",
+        "--launch-run-id", "external-worker-launch-001",
+        "--scope", "artifact-worker",
+        "--artifact", worker_report,
+        "--artifact-identity", identity,
+        "--terminal-class", "external-nonauthorizing",
+        "--authorizing", "false",
+        "--actual-execution-path", "direct-external-cli",
+        "--external-dispatch-id", "external-worker-launch-001",
+        "--external-evidence-run-id", "external-worker-revise-001",
+        "--effort-mapping-loss", "no-native-effort-control",
+        "--evidence", f"review:{worker_report}",
+        "--started-at", "2026-09-11T11:00:30Z",
+        "--updated-at", "2026-09-11T11:00:30Z",
+    )
+    native_launch = _append_internal_professional_launch(
+        item,
+        professional_role="backend-engineer",
+        scope="artifact-worker",
+        artifact=native_report,
+    )
+    closer = _append_internal_professional_closer(
+        item,
+        professional_role="backend-engineer",
+        artifact_identity=identity,
+        scope="artifact-worker",
+        artifact=native_report,
+        event_kind="terminal",
+        target_run_id="external-worker-revise-001",
+    )
+
+    for result in (external_launch, target, native_launch):
+        assert result.returncode == 0, result.stdout + result.stderr
+    assert closer.returncode == 0, closer.stdout + closer.stderr
+    validated = run_validator(item)
+    assert validated.returncode == 0, validated.stdout + validated.stderr
+
+
+@pytest.mark.parametrize(
+    ("professional_role", "event_kind"),
+    (("qa-engineer", "terminal"), ("architecture-reviewer", "standalone")),
+)
+def test_internal_professional_closer_discharges_external_reviewer_revise(
+    tmp_path: Path, professional_role: str, event_kind: str
+) -> None:
+    item = prepare_valid_work_item(tmp_path)
+    identity = "sha256:" + "a" * 64
+
+    target = _append_external_review_revise(
+        item,
+        professional_role=professional_role,
+        artifact_identity=identity,
+    )
+    launch = None
+    if event_kind == "terminal":
+        launch = _append_internal_professional_launch(
+            item,
+            professional_role=professional_role,
+            scope="workflow-coherence",
+            artifact="reviews/native-review.md",
+        )
+    closer = _append_internal_professional_closer(
+        item,
+        professional_role=professional_role,
+        artifact_identity=identity,
+        event_kind=event_kind,
+    )
+
+    assert target.returncode == 0, target.stdout + target.stderr
+    if launch is not None:
+        assert launch.returncode == 0, launch.stdout + launch.stderr
+    assert closer.returncode == 0, closer.stdout + closer.stderr
+    validated = run_validator(item)
+    assert validated.returncode == 0, validated.stdout + validated.stderr
+
+
+@pytest.mark.parametrize(
+    ("closer_changes", "diagnostic"),
+    (
+        ({"closer_role": "architecture-reviewer"}, "C3-external-profession-fail"),
+        ({"artifact_identity": "sha256:" + "b" * 64}, "C3-external-artifact-identity-fail"),
+        ({"scope": "different-review-scope"}, "C3-external-scope-fail"),
+        ({"artifact": "reviews/external-review.md"}, "C3-external-report-fail"),
+    ),
+)
+def test_external_reviewer_revise_rejects_unbound_internal_closer(
+    tmp_path: Path, closer_changes: dict[str, str], diagnostic: str
+) -> None:
+    item = prepare_valid_work_item(tmp_path)
+    identity = "sha256:" + "a" * 64
+    professional_role = "qa-engineer"
+    target = _append_external_review_revise(
+        item,
+        professional_role=professional_role,
+        artifact_identity=identity,
+    )
+    closer_args = {
+        "professional_role": professional_role,
+        "artifact_identity": identity,
+    }
+    closer_args.update(closer_changes)
+    closer = _append_internal_professional_closer(item, **closer_args)
+
+    assert target.returncode == 0, target.stdout + target.stderr
+    assert closer.returncode != 0
+    assert diagnostic in closer.stdout + closer.stderr
+
+
 def test_internal_closer_binds_actual_codex_terminal_and_launch_without_extended_ids(tmp_path: Path):
     """A Codex closer uses the terminal ledger identity, never a dispatch-shaped alias."""
 

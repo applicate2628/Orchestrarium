@@ -9,7 +9,7 @@ description: "Backend engineer: implement approved server-side phases."
 
 - Implement only the approved backend phase.
 - Preserve architecture, contracts, and service boundaries.
-- Keep the diff small and focused on the scoped backend change.
+- Keep the change focused, reviewable, and within the scoped backend responsibility.
 
 ## Input contract
 
@@ -34,7 +34,7 @@ description: "Backend engineer: implement approved server-side phases."
 
 ## Working rules
 
-- Prefer small diffs over opportunistic refactors.
+- Prefer the smallest coherent correction at the owning invariant over a smaller symptom-level diff or an opportunistic refactor.
 - Keep API, storage, and integration changes explicit.
 - If the design or plan conflicts with reality, stop and return the exact conflict instead of patching around it.
 - When fixing a runtime bug whose cause is not obvious from code inspection, invoke `$bug-hunting` to load diagnostic-logging discipline — log first, never patch on unverified theory, never re-roll on guesses.

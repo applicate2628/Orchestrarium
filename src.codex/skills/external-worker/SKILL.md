@@ -42,6 +42,7 @@ description: "External worker: run eligible worker roles externally."
 ## Execution recipe
 
 - Use the approved thin wrapper owned by `../lead/external-dispatch.md`; that owner supplies the strict V2 parser, full external-nonauthorizing tuple, and untrusted/potentially-sensitive resultText contract. Do not retype the schema, consume wrapper-private captures, or substitute a direct closure/manual sidecar path.
+- When explicit Kimi engineering is policy-admitted, keep the existing sealed empty-capability transport and neutral workdir. Kimi returns either a unified diff or a full-file set with repository-relative targets; it does not edit the neutral or live repository. Report `returned patch/full-file set; repository unchanged`, and leave path/content/check validation plus later application to the integration owner.
 - Await the wrapper's terminal return, then apply the owner's stall/timeout and tracked-ledger rules; never duplicate a still-running launch.
 - Accept completion only when the shared run-completion oracle passes; a failed oracle is `UNVERIFIED`, not a worker artifact.
 

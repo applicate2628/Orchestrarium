@@ -246,9 +246,10 @@ docstring and the module docstring's "A CRASH WHILE DECIDING" note above):
   5. Every exact direct push proving a standalone positive long `--dry-run`,
      with no negation, ambiguous option role, or conservative candidate → exit 0.
   6. Missing, unreadable, or invalid transcript data denies with
-     `PRG-TRANSCRIPT-UNAVAILABLE`. When full history exceeds its bound, a
-     readable stable suffix with no active grant denies with
-     `PRG-TRANSCRIPT-HISTORY-LIMIT`; an active suffix grant keeps its strict route.
+     `PRG-TRANSCRIPT-UNAVAILABLE`. When full history exceeds the in-memory
+     bound, reduce the complete stable JSONL file in forward order with bounded
+     memory. No active grant denies with `PRG-TRANSCRIPT-HISTORY-LIMIT`; an
+     active grant still enters the unchanged strict route.
   7. If the LAST GENUINE USER MESSAGE contains `[approve-publication]` AND
      that message is no longer than MARKER_MAX_MESSAGE_LENGTH characters →
      exit 0. The marker is honored ONLY from the user's own text — never from
@@ -361,8 +362,11 @@ from urllib.parse import quote, unquote_to_bytes, urlsplit
 
 from hook_common import (
     CURRENT_TURN_BYTE_CAP,
+    HISTORY_STATUS_ABSENT,
     HISTORY_STATUS_FOUND,
+    HISTORY_STATUS_INVALID,
     HISTORY_STATUS_LIMIT,
+    HISTORY_STATUS_UNREADABLE,
     NO_OBSERVED_FAILURE,
     STATUS_FOUND,
     extract_model_shell_command_occurrences,
@@ -379,7 +383,9 @@ from hook_common import (
 
 from git_push_gate_preflight import (
     PreflightResult,
+    TranscriptDiagnostic,
     validate_preflight_result,
+    validate_transcript_diagnostic,
     build_preflight_from_stdin,
     ShellParseResult,
     PrRouteDenied,
@@ -409,7 +415,7 @@ PR_REVOKE_MARKER = "[revoke-pr-publication:v1]"
 PR_RESERVED_PREFIXES = ("[approve-pr-publication:", "[revoke-pr-publication:")
 TRANSCRIPT_HISTORY_BYTE_CAP = 32 * 1024 * 1024
 TRANSCRIPT_HISTORY_RECORD_CAP = 50_000
-TRANSCRIPT_HISTORY_LINE_BYTE_CAP = 2 * 1024 * 1024
+TRANSCRIPT_HISTORY_LINE_BYTE_CAP = 4 * 1024 * 1024
 PROCESS_OUTPUT_BYTE_CAP = 256 * 1024
 PROCESS_TIMEOUT_SECONDS = 8.0
 ORACLE_TIMEOUT_SECONDS = 45.0
@@ -1409,91 +1415,125 @@ def _canonicalize_numeric_pr_grant(
     return ActivePrGrant(match.group("url"), owner, repo, number)
 
 
+@dataclass(slots=True)
+class _PrGrantReducer:
+    """Reduce genuine-user PR grant state in original transcript order."""
+
+    envelope_repository_workdir: str
+    state: str = "absent"
+    grant: ActivePrGrant | None = None
+    transcript_workdir: str | None = None
+    record_position: int = 0
+    last_genuine_user_position: int = -1
+    pending_numeric: tuple[ActivePrGrant, str | None, int] | None = None
+
+    def consume(self, entry: dict) -> None:
+        position = self.record_position
+        self.record_position += 1
+        payload = entry.get("payload")
+        if entry.get("type") in ("session_meta", "turn_context"):
+            raw_context = payload.get("cwd") if isinstance(payload, dict) else None
+            self.transcript_workdir = (
+                raw_context if type(raw_context) is str and raw_context else None
+            )
+        if not is_user_message(entry):
+            return
+        text = extract_user_typed_text(entry)
+        if not text:
+            return
+
+        if self.pending_numeric is not None and self.pending_numeric[1] is None:
+            self.state, self.grant, self.pending_numeric = "malformed", None, None
+        self.last_genuine_user_position = position
+
+        if text == PR_REVOKE_MARKER:
+            self.state, self.grant, self.pending_numeric = "revoked", None, None
+            return
+        parsed_grant = _parse_pr_grant(text)
+        if parsed_grant is not None:
+            if parsed_grant.owner:
+                self.state, self.grant = "active", parsed_grant
+                self.pending_numeric = None
+                return
+            direct_context = entry.get("cwd")
+            if direct_context is not None and (
+                type(direct_context) is not str or not direct_context
+            ):
+                self.state, self.grant, self.pending_numeric = "malformed", None, None
+                return
+            contexts = {
+                value
+                for value in (direct_context, self.transcript_workdir)
+                if value is not None
+            }
+            if len(contexts) > 1:
+                self.state, self.grant, self.pending_numeric = "malformed", None, None
+                return
+            authorization_workdir = next(iter(contexts), None)
+            self.state, self.grant = "active", None
+            self.pending_numeric = (parsed_grant, authorization_workdir, position)
+            return
+        if text.startswith(PR_RESERVED_PREFIXES):
+            self.state, self.grant, self.pending_numeric = "malformed", None, None
+
+    def finish(self) -> tuple[str, ActivePrGrant | None]:
+        if self.pending_numeric is None:
+            return self.state, self.grant
+        parsed_grant, authorization_workdir, position = self.pending_numeric
+        if authorization_workdir is None:
+            if position != self.last_genuine_user_position:
+                self.state, self.grant, self.pending_numeric = "malformed", None, None
+                return self.state, self.grant
+            authorization_workdir = self.envelope_repository_workdir
+        self.grant = _canonicalize_numeric_pr_grant(
+            parsed_grant.number, authorization_workdir
+        )
+        self.state, self.pending_numeric = "active", None
+        return self.state, self.grant
+
+
 def _derive_pr_grant(
     entries: list[dict], envelope_repository_workdir: str
 ) -> tuple[str, ActivePrGrant | None]:
-    state = "absent"
-    grant: ActivePrGrant | None = None
-    transcript_workdir: str | None = None
-    genuine_user_indexes = [
-        index for index, entry in enumerate(entries)
-        if is_user_message(entry) and extract_user_typed_text(entry)
-    ]
-    last_user_index = genuine_user_indexes[-1] if genuine_user_indexes else -1
-    for index, entry in enumerate(entries):
-        payload = entry.get("payload") if isinstance(entry, dict) else None
-        if entry.get("type") in ("session_meta", "turn_context"):
-            raw_context = payload.get("cwd") if isinstance(payload, dict) else None
-            transcript_workdir = raw_context if type(raw_context) is str and raw_context else None
-        if not is_user_message(entry):
-            continue
-        text = extract_user_typed_text(entry)
-        if not text:
-            continue
-        if text == PR_REVOKE_MARKER:
-            state, grant = "revoked", None
-            continue
-        parsed_grant = _parse_pr_grant(text)
-        if parsed_grant is not None:
-            if not parsed_grant.owner:
-                direct_context = entry.get("cwd")
-                if direct_context is not None and (
-                    type(direct_context) is not str or not direct_context
-                ):
-                    state, grant = "malformed", None
-                    continue
-                contexts = {
-                    value for value in (direct_context, transcript_workdir)
-                    if value is not None
-                }
-                if len(contexts) > 1:
-                    state, grant = "malformed", None
-                    continue
-                authorization_workdir = next(iter(contexts), None)
-                if authorization_workdir is None and index == last_user_index:
-                    authorization_workdir = envelope_repository_workdir
-                if authorization_workdir is None:
-                    state, grant = "malformed", None
-                    continue
-                parsed_grant = _canonicalize_numeric_pr_grant(
-                    parsed_grant.number, authorization_workdir
-                )
-            state, grant = "active", parsed_grant
-            continue
-        if text.startswith(PR_RESERVED_PREFIXES):
-            state, grant = "malformed", None
-    return state, grant
+    reducer = _PrGrantReducer(envelope_repository_workdir)
+    for entry in entries:
+        reducer.consume(entry)
+    return reducer.finish()
 
 
-def _read_stable_transcript_suffix(transcript_path: str) -> tuple[list[dict], str]:
-    """Read one stable complete-record suffix under the history reader's caps."""
+def _stream_stable_pr_grant(
+    transcript_path: str, envelope_repository_workdir: str
+) -> tuple[str, ActivePrGrant | None, str]:
+    """Reduce a complete stable JSONL transcript with bounded memory."""
+
     if not transcript_path:
-        return [], "absent"
+        return "absent", None, HISTORY_STATUS_ABSENT
     path = Path(transcript_path)
+    reducer = _PrGrantReducer(envelope_repository_workdir)
     try:
         with path.open("rb") as stream:
             before = os.fstat(stream.fileno())
-            eof = before.st_size
-            if eof > TRANSCRIPT_HISTORY_BYTE_CAP:
-                stream.seek(eof - TRANSCRIPT_HISTORY_BYTE_CAP)
-                raw = stream.read(TRANSCRIPT_HISTORY_BYTE_CAP)
-                if len(raw) != TRANSCRIPT_HISTORY_BYTE_CAP:
-                    return [], "unreadable"
-                sentinel, payload = raw[:1], raw[1:]
-                if sentinel != b"\n":
-                    newline = payload.find(b"\n")
-                    if newline < 0:
-                        return [], "limit"
-                    payload = payload[newline + 1 :]
-            else:
-                stream.seek(0)
-                payload = stream.read(eof)
-                if len(payload) != eof:
-                    return [], "unreadable"
+            while True:
+                raw_line = stream.readline(TRANSCRIPT_HISTORY_LINE_BYTE_CAP + 1)
+                if not raw_line:
+                    break
+                if len(raw_line) > TRANSCRIPT_HISTORY_LINE_BYTE_CAP:
+                    return "absent", None, HISTORY_STATUS_LIMIT
+                if not raw_line.strip():
+                    continue
+                try:
+                    entry = json.loads(raw_line.decode("utf-8", errors="strict"))
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    return "absent", None, HISTORY_STATUS_INVALID
+                if not isinstance(entry, dict):
+                    return "absent", None, HISTORY_STATUS_INVALID
+                reducer.consume(entry)
             after = os.fstat(stream.fileno())
             current = path.stat()
+    except PrRouteDenied:
+        raise
     except Exception:
-        return [], "unreadable"
+        return "absent", None, HISTORY_STATUS_UNREADABLE
 
     identity_before = (
         before.st_dev,
@@ -1512,29 +1552,9 @@ def _read_stable_transcript_suffix(transcript_path: str) -> tuple[list[dict], st
         current.st_size,
         current.st_mtime_ns,
     ):
-        return [], "unreadable"
-
-    raw_lines = payload.split(b"\n")
-    ended_with_newline = payload.endswith(b"\n")
-    if ended_with_newline:
-        raw_lines.pop()
-    entries: list[dict] = []
-    for index, raw_line in enumerate(raw_lines):
-        if not raw_line.strip():
-            continue
-        line_size = len(raw_line) + (1 if ended_with_newline or index < len(raw_lines) - 1 else 0)
-        if line_size > TRANSCRIPT_HISTORY_LINE_BYTE_CAP:
-            return [], "limit"
-        if len(entries) >= TRANSCRIPT_HISTORY_RECORD_CAP:
-            return [], "limit"
-        try:
-            entry = json.loads(raw_line.decode("utf-8", errors="strict"))
-        except (UnicodeDecodeError, json.JSONDecodeError):
-            return [], "invalid"
-        if not isinstance(entry, dict):
-            return [], "invalid"
-        entries.append(entry)
-    return entries, "found"
+        return "absent", None, HISTORY_STATUS_UNREADABLE
+    state, grant = reducer.finish()
+    return state, grant, HISTORY_STATUS_FOUND
 
 
 def _is_within(path: Path, parent: Path) -> bool:
@@ -3039,16 +3059,30 @@ def evaluate_heavy(preflight: PreflightResult) -> bool:
         record_cap=TRANSCRIPT_HISTORY_RECORD_CAP,
         line_byte_cap=TRANSCRIPT_HISTORY_LINE_BYTE_CAP,
     )
-    suffix_recovery = history_status == HISTORY_STATUS_LIMIT
-    if suffix_recovery:
-        history_entries, history_status = _read_stable_transcript_suffix(
-            preflight.transcript_path
+    stream_recovery = history_status == HISTORY_STATUS_LIMIT
+    transcript_diagnostic = preflight.transcript_diagnostic
+    if stream_recovery:
+        pr_state, pr_grant, recovery_status = _stream_stable_pr_grant(
+            preflight.transcript_path, preflight.repository_workdir
         )
-    if history_status != HISTORY_STATUS_FOUND:
-        raise PrRouteDenied("PRG-TRANSCRIPT-UNAVAILABLE")
-    pr_state, pr_grant = _derive_pr_grant(
-        history_entries, preflight.repository_workdir
-    )
+        transcript_diagnostic = _with_transcript_read_status(
+            transcript_diagnostic, history_status, recovery_status
+        )
+    else:
+        transcript_diagnostic = _with_transcript_read_status(
+            transcript_diagnostic, history_status, "not-run"
+        )
+        if history_status != HISTORY_STATUS_FOUND:
+            raise PrRouteDenied(
+                "PRG-TRANSCRIPT-UNAVAILABLE", transcript_diagnostic
+            )
+        pr_state, pr_grant = _derive_pr_grant(
+            history_entries, preflight.repository_workdir
+        )
+    if stream_recovery and recovery_status != HISTORY_STATUS_FOUND:
+        raise PrRouteDenied(
+            "PRG-TRANSCRIPT-UNAVAILABLE", transcript_diagnostic
+        )
     if pr_state == "malformed":
         raise PrRouteDenied("PRG-AUTH-MALFORMED")
     if pr_state == "active" and pr_grant is not None:
@@ -3056,8 +3090,10 @@ def evaluate_heavy(preflight: PreflightResult) -> bool:
             pr_grant, preflight.command, preflight.dialect, preflight.parsed,
             preflight.repository_workdir, preflight.repository_workdir_source,
         )
-    if suffix_recovery:
-        raise PrRouteDenied("PRG-TRANSCRIPT-HISTORY-LIMIT")
+    if stream_recovery:
+        raise PrRouteDenied(
+            "PRG-TRANSCRIPT-HISTORY-LIMIT", transcript_diagnostic
+        )
     grammar = preflight.generic_decision
     if preflight.push_instruction:
         if grammar.status != "PGG-ADMISSIBLE" or grammar.binding is None:
@@ -3079,6 +3115,41 @@ def evaluate_heavy(preflight: PreflightResult) -> bool:
         return True
     return False
 
+_TRANSCRIPT_FAILURE_IDS = frozenset((
+    "PRG-TRANSCRIPT-UNAVAILABLE",
+    "PRG-TRANSCRIPT-HISTORY-LIMIT",
+))
+
+
+def _with_transcript_read_status(
+    diagnostic: TranscriptDiagnostic | None,
+    history: str,
+    recovery: str,
+) -> TranscriptDiagnostic | None:
+    if diagnostic is None:
+        return None
+    return validate_transcript_diagnostic(
+        diagnostic._replace(history=history, recovery=recovery)
+    )
+
+
+def _denial_scope(failure_id: str) -> str:
+    if failure_id in _TRANSCRIPT_FAILURE_IDS:
+        return "Publication denied"
+    if failure_id.startswith("PGG-"):
+        return "Generic scan-derived publication denied"
+    return "PR-scoped publication denied"
+
+
+def _format_transcript_diagnostic(diagnostic: TranscriptDiagnostic) -> str:
+    checked = validate_transcript_diagnostic(diagnostic)
+    return (
+        "Transcript diagnostics: "
+        f"envelope={checked.envelope}; current-turn={checked.current_turn}; "
+        f"history={checked.history}; recovery={checked.recovery}."
+    )
+
+
 def _format_gate_denial(failure_id: str) -> str:
     if failure_id not in SCAN_DENIAL_REASONS:
         failure_id = "PRG-INTERNAL"
@@ -3086,11 +3157,7 @@ def _format_gate_denial(failure_id: str) -> str:
         failure_id,
         "Retry only after the publication gate can complete its checks normally.",
     )
-    scope = (
-        "Generic scan-derived publication denied"
-        if failure_id.startswith("PGG-")
-        else "PR-scoped publication denied"
-    )
+    scope = _denial_scope(failure_id)
     return f"{failure_id}: {scope}. {remediation}"
 
 
@@ -3107,12 +3174,14 @@ def compose_gate_result(preflight: PreflightResult) -> int:
         return 0
 
     failure_id: str | None = result.failure_id
+    transcript_diagnostic = result.transcript_diagnostic
     if result.continuation == "EVALUATE_HEAVY":
         try:
             if evaluate_heavy(result):
                 return 0
         except PrRouteDenied as exc:
             failure_id = exc.failure_id
+            transcript_diagnostic = exc.transcript_diagnostic
         except Exception:
             pass
 
@@ -3123,7 +3192,7 @@ def compose_gate_result(preflight: PreflightResult) -> int:
         **SCAN_DENIAL_REASONS,
         "PRG-AUTH-MALFORMED": "Use the exact version-1 PR approval or revocation line in a genuine user message.",
         "PRG-TRANSCRIPT-UNAVAILABLE": "Retry from a readable current session transcript; summaries cannot authorize publication.",
-        "PRG-TRANSCRIPT-HISTORY-LIMIT": "History exceeds the bounded PR-grant window and the readable suffix has no active grant. For one generic push, the user must send a new genuine message containing `[approve-publication]`; older approvals, summaries, assistant text, and tool output do not authorize.",
+        "PRG-TRANSCRIPT-HISTORY-LIMIT": "History exceeds the in-memory PR-grant window and the complete stable transcript has no active grant. The user must send a new genuine exact PR grant for repeated pushes or `[approve-publication]` for one generic push; summaries, assistant text, and tool output do not authorize.",
         "PRG-COMMAND-SHAPE": "Use one exact absolute Git literal: `git push <remote> HEAD:refs/heads/<head>` or `git -C <absolute-root> push <remote> HEAD:refs/heads/<head>`.",
         "PRG-PR-UNAVAILABLE": "Restore authenticated GitHub state access, then retry so the pull request can be checked afresh.",
         "PRG-PR-STATE": "The pull request is not open; obtain a new grant only for an open pull request.",
@@ -3159,8 +3228,15 @@ def compose_gate_result(preflight: PreflightResult) -> int:
             reason = _format_gate_denial(failure_id)
         else:
             remediation = pr_reasons.get(failure_id, pr_reasons["PRG-INTERNAL"])
-            scope = "Generic scan-derived publication denied" if failure_id.startswith("PGG-") else "PR-scoped publication denied"
+            scope = _denial_scope(failure_id)
             reason = f"{failure_id}: {scope}. {remediation}"
+            if (
+                failure_id in _TRANSCRIPT_FAILURE_IDS
+                and transcript_diagnostic is not None
+            ):
+                reason += " " + _format_transcript_diagnostic(
+                    transcript_diagnostic
+                )
     else:
         reason = (
         "Git-push publication gate: this Bash command runs `git push` (an "

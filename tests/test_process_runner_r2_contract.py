@@ -121,6 +121,56 @@ def test_capture_tail_is_compact_bytes_and_diagnostic_storage_is_bounded() -> No
     assert not hasattr(capture, "total_write_bytes")
 
 
+def test_kimi_acp_dialogue_channel_writes_and_reads_complete_json_lines() -> None:
+    runner = _load_runner()
+    read_fd, write_fd = os.pipe()
+    lifecycle = runner.RunLifecycleV1(runner.RunTokenV1(b"d" * 16, 1))
+    lifecycle.register_resource("dialogue-stdin", lambda _remaining: os.close(write_fd))
+    lines = runner._DialogueLineRouterV1()
+    lines.feed(b'{"jsonrpc":"2.0","id":1,"result":{}}\n')
+    lines.finish()
+    state: dict[str, object] = {}
+    issues: list[str] = []
+
+    def handler(channel) -> None:
+        assert channel.write_line(b'{"jsonrpc":"2.0","id":1}\n') > 0
+        assert channel.read_line() == b'{"jsonrpc":"2.0","id":1,"result":{}}\n'
+
+    runner._dialogue_fd(
+        write_fd,
+        runner.ProcessDialogueV1("kimi-acp-one-shot-v1", handler),
+        lines,
+        state,
+        issues,
+        lifecycle,
+        "dialogue-stdin",
+        time.monotonic() + 1.0,
+        None,
+    )
+    written = os.read(read_fd, 4096)
+    os.close(read_fd)
+
+    assert written == b'{"jsonrpc":"2.0","id":1}\n'
+    assert state["complete"] is True
+    assert state["written"] == len(written)
+    assert issues == []
+
+
+def test_kimi_acp_line_router_fails_closed_on_eof_fragment_and_cancel() -> None:
+    runner = _load_runner()
+    fragment = runner._DialogueLineRouterV1()
+    fragment.feed(b'{"jsonrpc":"2.0"}')
+    fragment.finish()
+    with pytest.raises(runner.ProcessSupervisionError) as malformed:
+        fragment.read_line(time.monotonic() + 1.0, lambda: False)
+    assert malformed.value.failure_id == "PSV1-KIMI-ACP-PROTOCOL"
+
+    cancelled = runner._DialogueLineRouterV1()
+    with pytest.raises(runner.ProcessSupervisionError) as stopped:
+        cancelled.read_line(time.monotonic() + 1.0, lambda: True)
+    assert stopped.value.failure_id == "PSV1-CANCELLED"
+
+
 @pytest.mark.skipif(os.name != "nt", reason="production backend execution is Windows-only")
 def test_run_tokens_are_non_recyclable_and_safe_results_expose_only_digest() -> None:
     """Repeated calls cannot use recyclable request object addresses as identities."""

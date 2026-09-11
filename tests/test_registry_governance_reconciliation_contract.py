@@ -40,6 +40,8 @@ SUMMARY_COUNT_FORWARD_FIXTURE = {
 def test_archivist_full_registry_mode_separates_structure_from_semantics() -> None:
     required = (
         "Registry Governance Reconciliation (mandatory complete mode)",
+        "after a verified change to cross-registry schema, lifecycle, or relations",
+        "A single-item or single-registry change uses Work-cycle reconciliation",
         "structural gate",
         "semantic currency",
         "for EVERY current record",
@@ -80,6 +82,8 @@ def test_registry_summary_counts_reconcile_from_exact_forward_fixture() -> None:
 def test_lead_must_consume_every_registry_exception_before_close() -> None:
     required = (
         "Registry reconciliation intake",
+        "only when its complete-mode trigger applies",
+        "bounded Work-cycle reconciliation for affected single-item or single-registry state",
         "route every non-consistent semantic row",
         "do not claim the registries current or close the parent item",
         "structural AND semantic gates both return `PASS`",

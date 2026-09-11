@@ -9,7 +9,7 @@ description: "Frontend engineer: implement approved web UI phases."
 
 - Implement only the approved frontend phase.
 - Preserve design intent, contracts, and interaction boundaries.
-- Keep the diff small, reviewable, and aligned with the accepted UI system.
+- Keep the change scoped, reviewable, and aligned with the accepted UI system.
 
 ## Input contract
 

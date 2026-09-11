@@ -14,7 +14,9 @@ Reference for routing, interaction types, periodic controls, and role aliases. R
 
 Apply the binding shared **Workflow economy (binding)** rule. This Claude projection adds no default review, consultant, or external-brigade fan-out unless evidence, explicit user/configuration intent, or a documented risk trigger admits it. At a natural readiness or decision point, if a bounded independent read-only alternative view would materially reduce unresolved ambiguity or compare consequential options, Lead considers an advisory route and may explicitly select Kimi without waiting for a user reminder. Otherwise no Kimi call or skip record is required. Selection never enters `auto` or creates a gate or counter; current availability or quota claims require evidence, and the existing wrapper-only fixed `kimi-code/k3`, no-tools, read-only, independently verified, nonauthorizing contract remains. Grok remains disabled and non-executing in 1.x. Preserve every template-required security, performance, or geometry role and the human publication/leak-check gate.
 
-## Template-based routing
+## Routing examples
+
+Resolve the template and evidence triggers first. Each listed role is a candidate; include it only when its artifact is required by accepted uncertainty, contract, or risk. Preserve mandatory security, performance, geometry, scientific, human, and publication gates.
 
 Team templates in `.claude/agents/team-templates/` define the team composition and execution chain for each task type.
 
@@ -35,6 +37,7 @@ When the main conversation (holding the Lead role) needs to decide between roles
 
 - A handoff interrupt or worker stall without an artifact is not a completed `REVISE` artifact.
 - Record the interruption in `status.md`, keep the stage open, and either re-dispatch the same role with a narrower slice or route to the proper factual role.
+- A root-owned external job that outlives a model turn follows the Lead skill's **Conditional external-run monitoring** rule; this projection adds no second polling or recovery-state owner.
 - The lead must not synthesize the missing artifact or replace missing factual work inline.
 - On resume after interruption, restore only lead-owned task-memory state from persisted accepted artifacts. Do not reconstruct missing specialist artifacts or factual findings from chat memory.
 - The shared `$repo-cleanup` host-policy-denial exception may advance an independently verified delivery, handoff, commit, or transfer only for freshly proven harmless empty agent-owned directory residue, with every receiving gate passing and no dependency on that directory. Cleanup remains incomplete with failing zero-residue predicates, and the handoff reports the residue and resume condition; this never waives another blocker.
@@ -141,7 +144,7 @@ Periodic controls complement stage gates. Stage gates answer "may this item adva
 | Refactor debt scan | `$architecture-reviewer` | Milestone close | Admit bounded refactor item |
 | Closure and archive hygiene | `$knowledge-archivist` | Monthly / milestone close | Archive, reconcile physical roots, and regenerate `work-items/README.md` |
 | Board refresh | `$knowledge-archivist` | Every delivery wave (post-wave sync pass) | Refresh `work-items/README.md` against git and the tree |
-| Registry governance reconciliation | `$knowledge-archivist` | Accepted task-memory governance change, all-registry request, or milestone-wide cleanup | Run one complete structural plus semantic-currency matrix across every current registry; placement-only success is not overall `PASS`; route non-consistent rows to semantic owners through `$lead` |
+| Registry governance reconciliation | `$knowledge-archivist` | Verified change to cross-registry schema, lifecycle, or relations; all-registry request; or milestone-wide cleanup | Run one complete structural plus semantic-currency matrix across every current registry; placement-only success is not overall `PASS`; route non-consistent rows to semantic owners through `$lead` |
 | Governance alignment | `$knowledge-archivist` | Governance change | Propagate to all governance files in same commit |
 | Documentation sync | `$knowledge-archivist` | Skill, role, or template added/removed/renamed | Update README, INSTALL, install scripts per root CLAUDE.md checklists |
 | Batch-close consultant-check | `$lead` | Only when explicitly requested by lead or repo-local lane policy and `consultantMode` is enabled | Satisfy the requested consultant sweep or keep the batch open and escalate honestly |

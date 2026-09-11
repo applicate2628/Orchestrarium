@@ -40,7 +40,7 @@ When a replaceable binary adapter is introduced, or its producer and consumer ma
 
 ## Working rules
 
-- Prefer the smallest change that restores or improves reproducible builds.
+- Prefer a coherent correction at the owning build invariant that restores or improves reproducible builds.
 - Make compiler, SDK, package-manager, cache, and environment assumptions easy to review.
 - A cache change enumerates key inputs—sources, flags, toolchain version, and relevant environment—and demonstrates a stale-hit test by mutating one input and showing the key changes.
 - A dependency or toolchain bump includes the lockfile diff, exact old-to-new versions, and changelog or vulnerability rationale; floating ranges and unrelated bundled bumps are `REVISE`.

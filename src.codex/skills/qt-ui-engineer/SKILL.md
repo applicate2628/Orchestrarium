@@ -9,7 +9,7 @@ description: "Qt Widgets desktop UI: dialogs, signals/slots, DPI."
 
 - Implement only the approved Qt UI phase.
 - Preserve interaction intent, platform conventions, and existing Qt architecture.
-- Keep the diff small, reviewable, and aligned with the accepted plan.
+- Keep the change scoped, reviewable, and aligned with the accepted plan.
 
 ## Input contract
 

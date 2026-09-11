@@ -739,7 +739,7 @@ _DECLARED_ACTIONS = (('direct', 'file', '@AGENTS'),
   '@ROOT/src.codex/skills/explain-simply/SKILL.md'),
  ('check_common_skill_body_pin',
   'github-pr-review-bot',
-  'd276aa377d70532d47c8550042467c946f1fe73f51205fc6ea7f87db856a6ce2',
+  '58cc498b72c5ded0252e1b5cb2f6bf3d9a2010d3df3a35733bd50c5d237281f2',
   '@ROOT/src.codex/skills/github-pr-review-bot/SKILL.md'),
  ('check_contains',
   '@ROOT/src.codex/skills/github-pr-review-bot/SKILL.md',
@@ -767,8 +767,12 @@ _DECLARED_ACTIONS = (('direct', 'file', '@AGENTS'),
   'github-pr-review-bot prioritizes exact post-trigger current-head findings'),
  ('check_common_skill_body_pin',
   'generalize-from-instance',
-  '7233fcd0d38ccb87e2b95d5f95af3811aa5224e873591eaefd397d3c20b9fea4',
+  'c55e0d9389abce424e778c41816127c76948d67d92233e9afb26ab4d92cfaf97',
   '@ROOT/src.codex/skills/generalize-from-instance/SKILL.md'),
+ ('check_common_skill_body_pin',
+  'implementation-to-theory',
+  '2a62f5489701d38a7252a9f3964a8b31f7fd064893075b95da34d17a5855bb78',
+  '@ROOT/src.codex/skills/implementation-to-theory/SKILL.md'),
  ('check_common_skill_body_pin',
   'manual-repo-transfer',
   '9aa447a9a0c908482d9186a9629bf8dcd10936240120159cbaa406ca594dd7b6',
@@ -945,11 +949,12 @@ _DECLARED_ACTIONS = (('direct', 'file', '@AGENTS'),
   'shared governance no longer allows adapter-host metadata for external execution'),
  ('check_contains',
   '@AGENTS',
-  'must use direct external launch',
+  'launch directly from the orchestrating runtime or an approved transport wrapper, never an internal relay',
   'shared governance requires direct external launch'),
  ('check_contains',
   '@AGENTS',
-  'substantive task prompt must use file-based prompt delivery',
+  'Every external CLI substantive prompt uses file-based prompt delivery through stdin/file input; argv '
+  'carries only flags/options/paths',
   'shared governance requires file-based external CLI prompts'),
  ('check_contains',
   '@AGENTS',
@@ -961,7 +966,7 @@ _DECLARED_ACTIONS = (('direct', 'file', '@AGENTS'),
   'shared governance requires state synchronization ownership discipline'),
  ('check_contains',
   '@AGENTS',
-  'split-brain state sync as an architecture bug',
+  'Split-brain sync is an architecture bug',
   'shared governance rejects split-brain state synchronization'),
  ('check_contains',
   '@AGENTS',
@@ -969,7 +974,7 @@ _DECLARED_ACTIONS = (('direct', 'file', '@AGENTS'),
   'shared governance requires traceable state synchronization diagnostics'),
  ('check_contains',
   '@AGENTS',
-  'verify every subagent result before accepting it',
+  'verify its result before acceptance/forwarding/completion claims',
   'shared governance requires verification before trusting subagent results'),
  ('check_contains',
   '@AGENTS',
@@ -981,7 +986,7 @@ _DECLARED_ACTIONS = (('direct', 'file', '@AGENTS'),
   'shared governance requires terminology and abbreviation explanations in documents'),
  ('check_contains',
   '@AGENTS',
-  'concrete observable data',
+  'capture observable wording/error/log/return/repro or `file:line`; verify the causal chain',
   'shared governance requires measured evidence before root-cause or fix claims'),
  ('check_contains',
   '@AGENTS',
@@ -1651,10 +1656,10 @@ def _is_source_only_maintainer_action(action: tuple[str, ...]) -> bool:
 # assertion may never leak into the installed-pack action set as an index moves.
 _ALL_ACTIONS = (
     _DECLARED_ACTIONS[0:35]
-    + _DECLARED_ACTIONS[142:305]
-    + _DECLARED_ACTIONS[323:330]
+    + _DECLARED_ACTIONS[142:306]
+    + _DECLARED_ACTIONS[324:331]
     # Include declaration 373 so its @ROOT/docs prefix routes it to dev_repo.
-    + _DECLARED_ACTIONS[367:374]
+    + _DECLARED_ACTIONS[368:375]
     + _APAT_ACTIONS
 )
 
@@ -1672,10 +1677,10 @@ ACTIONS = (
         + _DECLARED_ACTIONS[58:76]
         + _DECLARED_ACTIONS[86:122]
         + _DECLARED_ACTIONS[129:142]
-        + _DECLARED_ACTIONS[319:322]
-        + _DECLARED_ACTIONS[330:335]
-        + _DECLARED_ACTIONS[336:343]
-        + _DECLARED_ACTIONS[352:367]
+        + _DECLARED_ACTIONS[320:323]
+        + _DECLARED_ACTIONS[331:336]
+        + _DECLARED_ACTIONS[337:344]
+        + _DECLARED_ACTIONS[353:368]
         + tuple(
             action for action in _ALL_ACTIONS
             if _is_source_only_maintainer_action(action)
@@ -1689,10 +1694,10 @@ ACTIONS = (
         _DECLARED_ACTIONS[51:58]
         + _DECLARED_ACTIONS[76:86]
         + _DECLARED_ACTIONS[122:129]
-        + _DECLARED_ACTIONS[305:319]
-        + _DECLARED_ACTIONS[322:323]
-        + _DECLARED_ACTIONS[335:336]
-        + _DECLARED_ACTIONS[343:352],
+        + _DECLARED_ACTIONS[306:320]
+        + _DECLARED_ACTIONS[323:324]
+        + _DECLARED_ACTIONS[336:337]
+        + _DECLARED_ACTIONS[344:353],
     ),
     ("installed", _INSTALLED_ACTIONS),
 )

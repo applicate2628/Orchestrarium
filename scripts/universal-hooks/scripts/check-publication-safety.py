@@ -186,6 +186,16 @@ _VALUE_RULES = tuple(
     for family, keyword, title, upper in _KEYWORDS
 )
 _VALUE_PATTERNS = tuple(pattern for _family, pattern in _VALUE_RULES)
+_PUBLIC_TOKEN_CREDENTIAL_CUES = (
+    "AUTH", "ACCESS", "API", "BEARER", "REFRESH", "SESSION", "OAUTH", "JWT",
+    "CREDENTIAL", "SECRET", "IDENTITY",
+)
+_IDENTIFIER_COMPONENT = re.compile(
+    r"[A-Z]+(?=[A-Z][a-z]|[0-9]|$)|[A-Z]?[a-z]+|[A-Z]+|[0-9]+"
+)
+_PUBLIC_TOKEN_ANNOTATION_SUFFIX = re.compile(
+    r"[ \t,;)\]}]+(?:# orchestrarium:public-token|// orchestrarium:public-token)[ \t]*$"
+)
 _SCANNER_REGEX_CATALOG_LINE = re.compile(
     r"""(?P<binary_rule>\((?:True|False),\s*)?re\.compile\([rubfRUBF]*(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')\)(?(binary_rule)\)),?"""
 )
@@ -1096,6 +1106,9 @@ def _content_hits(
                         candidate
                         for candidate in pattern.finditer(line)
                         if not _is_callable_rhs(line, candidate)
+                        and not _is_annotated_public_token_match(
+                            line, family, candidate, subject_kind
+                        )
                     ),
                     None,
                 )
@@ -1136,6 +1149,32 @@ def _is_binary(raw: bytes) -> bool:
 
 def _is_callable_rhs(line: str, match: re.Match[str]) -> bool:
     return _CALLABLE_RHS.match(line, match.start("rhs_value")) is not None
+
+
+def _is_annotated_public_token_match(
+    line: str,
+    family: str,
+    match: re.Match[str],
+    subject_kind: str,
+) -> bool:
+    if family != "token" or subject_kind == "commit-message":
+        return False
+    rhs = match.group("rhs_value")
+    if len(rhs) < 2 or rhs[0] not in {"'", '"'} or rhs[-1] != rhs[0]:
+        return False
+    prefix = _IDENTIFIER_PREFIX.search(line[:match.start()])
+    identifier = (prefix.group(0) if prefix is not None else "") + line[
+        match.start():match.start() + len("token")
+    ]
+    components = {
+        component.group(0).upper()
+        for component in _IDENTIFIER_COMPONENT.finditer(identifier)
+    }
+    if any(cue in components for cue in _PUBLIC_TOKEN_CREDENTIAL_CUES):
+        return False
+    return _PUBLIC_TOKEN_ANNOTATION_SUFFIX.fullmatch(
+        line[match.end("rhs_value"):]
+    ) is not None
 
 
 def _is_public_key_token_match(line: str, family: str, match: re.Match[str]) -> bool:
@@ -1212,6 +1251,10 @@ _STAGED_HUNK_HEADER = re.compile(
     rb"^@@ -([0-9]+)(?:,([0-9]+))? \+([0-9]+)(?:,([0-9]+))? @@(?: .*)?$"
 )
 _STAGED_OID = re.compile(rb"(?:[0-9a-f]{40}|[0-9a-f]{64})")
+_STAGED_INDEX_ENTRY = re.compile(
+    rb"(?P<mode>[0-7]{6}) (?P<oid>[0-9a-f]{40}|[0-9a-f]{64}) 0\t(?P<path>.*)\0",
+    re.DOTALL,
+)
 
 
 def _parse_staged_entries(raw: bytes) -> tuple[StagedEntry, ...]:
@@ -1270,6 +1313,21 @@ def _staged_blob_oid(revision: str) -> str:
     if proc.returncode or _STAGED_OID.fullmatch(value) is None:
         raise RuntimeError("could not resolve staged blob")
     return value.decode("ascii")
+
+
+def _staged_index_entry(path: str) -> tuple[str, str]:
+    proc = _run_git(["ls-files", "--stage", "-z", "--", path], timeout=30)
+    match = _STAGED_INDEX_ENTRY.fullmatch(proc.stdout)
+    if (
+        proc.returncode
+        or match is None
+        or match.group("path").decode("utf-8", "surrogateescape") != path
+    ):
+        raise RuntimeError("could not resolve staged index entry")
+    mode = match.group("mode").decode("ascii")
+    if mode not in {"100644", "100755", "120000", "160000"}:
+        raise RuntimeError("unsupported staged mode")
+    return mode, match.group("oid").decode("ascii")
 
 
 def _staged_post_image(oid: str) -> bytes:
@@ -1358,7 +1416,11 @@ def _tracked_files() -> tuple[
     machine_path_lines: dict[str, frozenset[int] | None] = {}
     for entry in entries:
         path = entry.destination_path
-        new_oid = _staged_blob_oid(f":{path}")
+        new_mode, new_oid = _staged_index_entry(path)
+        if new_mode == "160000":
+            blobs[path] = b""
+            machine_path_lines[path] = frozenset()
+            continue
         raw = _staged_post_image(new_oid)
         blobs[path] = raw
         code = entry.status[0]
@@ -2455,8 +2517,27 @@ class _AsyncGitObjectReader:
         except asyncio.TimeoutError:
             return False
         except Exception:
-            errors.append(phase)
-            return process.returncode is not None
+            terminal = process.returncode is not None
+            if not terminal:
+                errors.append(phase)
+            return terminal
+
+    async def _discard_stdout(self, deadline: float) -> tuple[bool, bool]:
+        """Drain fixed chunks to EOF without retaining child output."""
+        process = self._process
+        if process is None or process.stdout is None:
+            return True, False
+        observed_data = False
+        try:
+            while True:
+                chunk = await self._within(
+                    process.stdout.read(_READ_CHUNK_BYTES), deadline
+                )
+                if not chunk:
+                    return True, observed_data
+                observed_data = True
+        except (asyncio.TimeoutError, OSError, RuntimeError, ValueError):
+            return False, observed_data
 
     async def _drive_finalizer(self) -> _ReaderFinalizerResult:
         process = self._process
@@ -2499,13 +2580,19 @@ class _AsyncGitObjectReader:
             None,
             loop.time(),
         )
+        drain_task = (
+            asyncio.create_task(self._discard_stdout(deadline))
+            if process.stdout is not None
+            else None
+        )
+        terminate_failed = False
         if os.name == "nt":
             terminal = await self._wait_step(deadline, errors, "wait")
             if not terminal:
                 try:
                     process.terminate()
                 except Exception:
-                    errors.append("terminate")
+                    terminate_failed = True
                 terminal = await self._wait_step(
                     deadline, errors, "terminate-wait"
                 )
@@ -2519,28 +2606,38 @@ class _AsyncGitObjectReader:
         )
         if not terminal:
             errors.append("group-settle")
+            if terminate_failed:
+                errors.append("terminate")
         child = ChildObservation(
             child_identity,
             process.returncode,
             terminal and process.returncode is not None,
             loop.time(),
         )
-        if process.stdout is not None and child.terminal_observed:
+        if drain_task is not None:
             try:
-                trailing = False
-                while True:
-                    chunk = await self._within(
-                        process.stdout.read(_READ_CHUNK_BYTES), deadline
+                drained, trailing = await asyncio.shield(drain_task)
+                if not drained:
+                    errors.append("stdout-drain")
+                    stdout = TransportObservation(
+                        "owned", "unobserved", False, "stdout-drain", loop.time()
                     )
-                    if not chunk:
-                        break
-                    trailing = True
-                if trailing:
+                elif trailing and not self._poisoned:
                     errors.append("stdout-trailing")
-                stdout = TransportObservation("owned", "output-eof", True, None, loop.time())
+                    stdout = TransportObservation(
+                        "owned", "output-eof", True, None, loop.time()
+                    )
+                else:
+                    stdout = TransportObservation(
+                        "owned", "output-eof", True, None, loop.time()
+                    )
             except Exception:
+                if not drain_task.done():
+                    drain_task.cancel()
                 errors.append("stdout-drain")
-                stdout = TransportObservation("owned", "unobserved", False, "stdout-drain", loop.time())
+                stdout = TransportObservation(
+                    "owned", "unobserved", False, "stdout-drain", loop.time()
+                )
         if child.terminal_observed and stdin.observed and stdout.observed:
             return _ReaderFinalizerResult(None, child, stdin, stdout, tuple(errors))
         self._state = ReaderState.REAP_PENDING

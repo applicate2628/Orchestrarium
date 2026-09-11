@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -146,6 +147,90 @@ def fixture(root: Path):
         recorded_at="2026-09-08T01:00:00Z",
     )
     return writer, reader, request, items, paths
+
+
+def ordinary_legacy_projection(
+    root: Path,
+    item: Path,
+    ledger_bytes: bytes,
+    raw_line: bytes,
+    projected_event: dict,
+    *,
+    raw_line_ordinal: int,
+    suffix: str,
+) -> tuple[bytes, bytes]:
+    manifest_id = f"ordinary-{suffix}"
+    entry_id = f"ordinary-entry-{suffix}"
+    relative_item = item.relative_to(root).as_posix()
+    relative_ledger = (item / "agent-runs.jsonl").relative_to(root).as_posix()
+    manifest = {
+        "schemaVersion": 1,
+        "manifestId": manifest_id,
+        "profiles": [{"profileId": "canonical-v0-shape", "profileVersion": 1}],
+        "entries": [
+            {
+                "entryId": entry_id,
+                "profileId": "canonical-v0-shape",
+                "profileVersion": 1,
+                "workItem": relative_item,
+                "ledgerPath": relative_ledger,
+                "ledgerSha256": digest(ledger_bytes),
+                "rawLineOrdinals": [raw_line_ordinal],
+                "rawLineSha256": [digest(raw_line)],
+                "projectedEvents": [projected_event],
+                "projectedEventSha256": [digest(canonical(projected_event))],
+            }
+        ],
+    }
+    manifest_bytes = canonical(manifest)
+    record = {
+        "schemaVersion": 1,
+        "operationId": f"ordinary-projection-{suffix}",
+        "state": "apply",
+        "profileId": "canonical-v0-shape",
+        "profileVersion": 1,
+        "manifestId": manifest_id,
+        "manifestSha256": digest(manifest_bytes),
+        "manifestEntryId": entry_id,
+        "workItem": relative_item,
+        "ledgerPath": relative_ledger,
+        "ledgerSha256": digest(ledger_bytes),
+        "rawLineOrdinal": raw_line_ordinal,
+        "rawLineSha256": digest(raw_line),
+        "projectedEvent": projected_event,
+        "projectedEventSha256": digest(canonical(projected_event)),
+        "recordedAt": f"2026-09-10T02:0{raw_line_ordinal}:00Z",
+    }
+    return manifest_bytes, canonical(record) + b"\n"
+
+
+def legacy_ordinary_event(item: Path, suffix: str) -> tuple[dict, dict]:
+    raw = {
+        "runId": f"ordinary-legacy-{suffix}",
+        "workItem": item.name,
+        "role": "analysis",
+        "executionRole": "lead",
+        "status": "completed",
+        "gate": "none",
+        "scope": f"legacy ordinary {suffix}",
+        "evidence": f"legacy ordinary evidence {suffix}",
+        "started": f"2026-09-10T02:0{suffix}:00Z",
+        "updated": f"2026-09-10T02:0{suffix}:01Z",
+    }
+    projected = {
+        "schemaVersion": 2,
+        "runId": raw["runId"],
+        "workItem": item.name,
+        "role": "analyst",
+        "executionRole": "main",
+        "status": "completed",
+        "gate": "none",
+        "scope": [raw["scope"]],
+        "evidence": [{"kind": "manual-check", "ref": raw["evidence"]}],
+        "startedAt": raw["started"],
+        "updatedAt": raw["updated"],
+    }
+    return raw, projected
 
 
 def test_apply_dry_run_receipt_last_and_exact_replay(tmp_path: Path) -> None:
@@ -324,6 +409,429 @@ def test_archive_one_activated_h1_member_keeps_remaining_member_valid(
         "WI-LEDGER-COMPAT-ACTIVATION-INCOMPLETE" in error
         for error in malformed_errors
     )
+
+
+def test_unselected_ordinary_ledger_routes_beside_activated_h1_group(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "ordinary-beside-h1"
+    writer, reader, request, items, paths = fixture(root)
+    applied = writer.apply_sealed_prefix_activation(root, request)
+
+    ordinary = root / "work-items" / "active" / "ordinary-reader"
+    ordinary.mkdir(parents=True)
+    ordinary_ledger = ordinary / "agent-runs.jsonl"
+    ordinary_event = {
+        "schemaVersion": 2,
+        "runId": "ordinary-reader-live",
+        "workItem": ordinary.name,
+        "role": "analyst",
+        "executionRole": "internal",
+        "status": "completed",
+        "gate": "none",
+        "scope": ["ordinary ledger beside H1"],
+        "startedAt": "2026-09-10T02:00:00Z",
+        "updatedAt": "2026-09-10T02:00:01Z",
+    }
+    ordinary_ledger.write_bytes(canonical(ordinary_event) + b"\n")
+    h1_bytes_before = {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in root.rglob("*")
+        if path.is_file() and ordinary not in path.parents
+    }
+
+    ordinary_relative = ordinary_ledger.relative_to(root).as_posix()
+    context = reader.load_effective_ledger_view(
+        root,
+        ordinary,
+        ordinary_relative,
+    )
+    assert context.observation.activation_state == "inactive", context.observation
+    assert context.view is None
+    assert len(context.rows) == 1
+    assert not any(
+        "WI-LEDGER-COMPAT-" in diagnostic
+        for diagnostic in context.observation.diagnostics
+    )
+
+    live_errors = reader.validate_work_item(
+        ordinary,
+        strict_revise=False,
+        validate_status_file=False,
+    )
+    assert live_errors == []
+    ordinary_live_before = ordinary_ledger.read_bytes()
+    ordinary_ledger.write_bytes(ordinary_live_before + b"{}\n")
+    live_malformed_errors = reader.validate_work_item(
+        ordinary,
+        strict_revise=False,
+        validate_status_file=False,
+    )
+    assert any(
+        "runId" in error or "schemaVersion" in error
+        for error in live_malformed_errors
+    )
+    assert not any(
+        "WI-LEDGER-COMPAT-" in error for error in live_malformed_errors
+    )
+    ordinary_ledger.write_bytes(ordinary_live_before)
+
+    candidate = ordinary / "agent-runs.jsonl.tmp"
+    candidate_event = {
+        **ordinary_event,
+        "runId": "ordinary-reader-candidate",
+        "startedAt": "2026-09-10T02:01:00Z",
+        "updatedAt": "2026-09-10T02:01:01Z",
+    }
+    candidate.write_bytes(
+        ordinary_ledger.read_bytes() + canonical(candidate_event) + b"\n"
+    )
+    candidate_errors = reader.validate_work_item(
+        ordinary,
+        ledger_path=candidate,
+        strict_revise=False,
+        validate_status_file=False,
+    )
+    assert candidate_errors == []
+
+    manifests = root / "work-items" / "legacy-ledger-projection-manifests"
+    malformed_manifest = manifests / "malformed-sibling.json"
+    malformed_manifest.write_bytes(b"{}\n")
+    sibling_manifest_errors = reader.validate_work_item(
+        ordinary,
+        ledger_path=candidate,
+        strict_revise=False,
+        validate_status_file=False,
+    )
+    assert any(
+        "WI-LEDGER-MIGRATION-MANIFEST-INVALID" in error
+        and "malformed-sibling.json" in error
+        for error in sibling_manifest_errors
+    )
+    malformed_manifest.unlink()
+
+    registry = root / "work-items" / "legacy-ledger-projections.jsonl"
+    registry_before = registry.read_bytes()
+    registry.write_bytes(registry_before + b"{}\n")
+    sibling_registry_errors = reader.validate_work_item(
+        ordinary,
+        ledger_path=candidate,
+        strict_revise=False,
+        validate_status_file=False,
+    )
+    assert any(
+        "WI-LEDGER-MIGRATION-MANIFEST-INVALID" in error
+        and "projection registry line" in error
+        for error in sibling_registry_errors
+    )
+    registry.write_bytes(registry_before)
+
+    candidate.write_bytes(ordinary_ledger.read_bytes() + b"{}\n")
+    malformed_errors = reader.validate_work_item(
+        ordinary,
+        ledger_path=candidate,
+        strict_revise=False,
+        validate_status_file=False,
+    )
+    assert malformed_errors
+    assert any("runId" in error or "schemaVersion" in error for error in malformed_errors)
+    assert not any("WI-LEDGER-COMPAT-" in error for error in malformed_errors)
+
+    cross_match = reader.load_effective_ledger_view(
+        root,
+        ordinary,
+        paths[0],
+    )
+    assert cross_match.observation.failure_ids == (
+        "WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS",
+    )
+    assert {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in root.rglob("*")
+        if path.is_file() and ordinary not in path.parents
+    } == h1_bytes_before
+    assert set(reader._load_effective_ledger_group(root)) == set(paths)
+    assert items[0].joinpath("agent-runs.jsonl").is_file()
+    assert items[1].joinpath("agent-runs.jsonl").is_file()
+
+    contexts = reader._load_effective_ledger_group(root)
+    token = next(iter(contexts.values())).invocation_token
+    partition = token.h1_projection_partition
+    for mutant in (
+        ("unsafe/manifest.json", *partition[1:]),
+        (partition[0], "0" * 64, *partition[2:]),
+        (*partition[:3], "0" * 64, partition[4]),
+        (*partition[:4], ((partition[4][0][0], "0" * 64), *partition[4][1:])),
+        (*partition[:4], partition[4][:-1]),
+        (*partition[:4], (*partition[4], partition[4][0])),
+    ):
+        _events, _counters, partition_errors = (
+            reader.project_manifest_bound_legacy_ledger_projections(
+                [ordinary_event],
+                [{"line": 1}],
+                ordinary,
+                ordinary_ledger,
+                ordinary_ledger.read_bytes(),
+                validated_h1_partition=mutant,
+            )
+        )
+        assert any("WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS" in error for error in partition_errors)
+    _events, _counters, caller_errors = (
+        reader.project_manifest_bound_legacy_ledger_projections(
+            [ordinary_event],
+            [{"line": 1}],
+            ordinary,
+            ordinary_ledger,
+            ordinary_ledger.read_bytes(),
+            manifest_blobs={},
+            registry_bytes=b"",
+            validated_h1_partition=partition,
+        )
+    )
+    assert any("WI-LEDGER-COMPAT-EFFECTIVE-VIEW-BYPASS" in error for error in caller_errors)
+
+    apply_receipt = root.joinpath(*applied["receiptPath"].split("/"))
+    revoke_request = writer.SealedPrefixRevokeRequestV1(
+        apply_receipt_path=applied["receiptPath"],
+        apply_receipt_sha256=digest(apply_receipt.read_bytes()),
+        expected_registry_sha256=digest(registry.read_bytes()),
+        recorded_at="2026-09-10T03:00:00Z",
+    )
+    writer.revoke_sealed_prefix_activation(root, revoke_request)
+    revoked_h1_before = {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in root.rglob("*")
+        if path.is_file() and ordinary not in path.parents
+    }
+    candidate.write_bytes(
+        ordinary_ledger.read_bytes() + canonical(candidate_event) + b"\n"
+    )
+    revoked_errors = reader.validate_work_item(
+        ordinary,
+        ledger_path=candidate,
+        strict_revise=False,
+        validate_status_file=False,
+    )
+    assert revoked_errors == []
+    revoked_live_errors = reader.validate_work_item(
+        ordinary,
+        strict_revise=False,
+        validate_status_file=False,
+    )
+    assert revoked_live_errors == []
+    ordinary_ledger.write_bytes(ordinary_live_before + b"{}\n")
+    revoked_live_malformed_errors = reader.validate_work_item(
+        ordinary,
+        strict_revise=False,
+        validate_status_file=False,
+    )
+    assert any(
+        "runId" in error or "schemaVersion" in error
+        for error in revoked_live_malformed_errors
+    )
+    assert not any(
+        "WI-LEDGER-COMPAT-" in error
+        for error in revoked_live_malformed_errors
+    )
+    ordinary_ledger.write_bytes(ordinary_live_before)
+    assert {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in root.rglob("*")
+        if path.is_file() and ordinary not in path.parents
+    } == revoked_h1_before
+
+
+def test_unselected_live_ordinary_preserves_mixed_legacy_registry_order(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "mixed-ordinary-beside-h1"
+    writer, reader, request, _items, _paths = fixture(root)
+    ordinary = root / "work-items" / "active" / "mixed-ordinary-reader"
+    ordinary.mkdir(parents=True)
+    ordinary_ledger = ordinary / "agent-runs.jsonl"
+    raw_before, projected_before = legacy_ordinary_event(ordinary, "1")
+    raw_after, projected_after = legacy_ordinary_event(ordinary, "3")
+    ordinary_event = {
+        "schemaVersion": 2,
+        "runId": "ordinary-current-middle",
+        "workItem": ordinary.name,
+        "role": "analyst",
+        "executionRole": "internal",
+        "status": "completed",
+        "gate": "none",
+        "scope": ["ordinary current middle"],
+        "startedAt": "2026-09-10T02:02:00Z",
+        "updatedAt": "2026-09-10T02:02:01Z",
+    }
+    raw_before_line = canonical(raw_before) + b"\n"
+    current_line = canonical(ordinary_event) + b"\n"
+    raw_after_line = canonical(raw_after) + b"\n"
+    ledger_bytes = raw_before_line + current_line + raw_after_line
+    ordinary_ledger.write_bytes(ledger_bytes)
+
+    before_manifest, before_record = ordinary_legacy_projection(
+        root,
+        ordinary,
+        ledger_bytes,
+        raw_before_line,
+        projected_before,
+        raw_line_ordinal=1,
+        suffix="before",
+    )
+    manifests = root / "work-items" / "legacy-ledger-projection-manifests"
+    manifests.mkdir(parents=True, exist_ok=True)
+    (manifests / "ordinary-before.json").write_bytes(before_manifest)
+    registry = root / "work-items" / "legacy-ledger-projections.jsonl"
+    registry.write_bytes(before_record)
+    request = replace(
+        request,
+        expected_registry_sha256=digest(before_record),
+    )
+    applied = writer.apply_sealed_prefix_activation(root, request)
+
+    after_manifest, after_record = ordinary_legacy_projection(
+        root,
+        ordinary,
+        ledger_bytes,
+        raw_after_line,
+        projected_after,
+        raw_line_ordinal=3,
+        suffix="after",
+    )
+    (manifests / "ordinary-after.json").write_bytes(after_manifest)
+    with registry.open("ab") as stream:
+        stream.write(after_record)
+
+    active_h1_before = {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in root.rglob("*")
+        if path.is_file() and ordinary not in path.parents
+    }
+    contexts = reader._load_effective_ledger_group(root)
+    assert all(
+        context.observation.activation_state == "active"
+        for context in contexts.values()
+    )
+    active_partition = next(iter(contexts.values())).invocation_token.h1_projection_partition
+    assert tuple(ordinal for ordinal, _sha256 in active_partition[4]) == (2, 3)
+    registry_lines = registry.read_bytes().splitlines(keepends=True)
+    assert json.loads(registry_lines[0])["operationId"] == "ordinary-projection-before"
+    assert json.loads(registry_lines[3])["operationId"] == "ordinary-projection-after"
+
+    metadata: list[dict[str, object]] = []
+    parse_errors: list[str] = []
+    events = reader.load_jsonl(
+        ordinary_ledger,
+        parse_errors,
+        metadata,
+        ledger_bytes,
+    )
+    assert parse_errors == []
+    projected, counters, projection_errors = (
+        reader.project_manifest_bound_legacy_ledger_projections(
+            events,
+            metadata,
+            ordinary,
+            ordinary_ledger,
+            ledger_bytes,
+            validated_h1_partition=active_partition,
+        )
+    )
+    assert projection_errors == []
+    assert counters["manifest-apply"] == 2
+    assert counters["manifest-projected"] == 2
+    assert [event["runId"] for event in projected] == [
+        projected_before["runId"],
+        ordinary_event["runId"],
+        projected_after["runId"],
+    ]
+    assert reader.validate_work_item(
+        ordinary,
+        strict_revise=False,
+        validate_status_file=False,
+    ) == []
+    ordinary_ledger.write_bytes(ledger_bytes + b"{}\n")
+    active_malformed = reader.validate_work_item(
+        ordinary,
+        strict_revise=False,
+        validate_status_file=False,
+    )
+    assert any(
+        "runId" in error or "schemaVersion" in error for error in active_malformed
+    )
+    assert not any("WI-LEDGER-COMPAT-" in error for error in active_malformed)
+    ordinary_ledger.write_bytes(ledger_bytes)
+    assert {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in root.rglob("*")
+        if path.is_file() and ordinary not in path.parents
+    } == active_h1_before
+
+    apply_receipt = root.joinpath(*applied["receiptPath"].split("/"))
+    writer.revoke_sealed_prefix_activation(
+        root,
+        writer.SealedPrefixRevokeRequestV1(
+            apply_receipt_path=applied["receiptPath"],
+            apply_receipt_sha256=digest(apply_receipt.read_bytes()),
+            expected_registry_sha256=digest(registry.read_bytes()),
+            recorded_at="2026-09-10T03:00:00Z",
+        ),
+    )
+    revoked_h1_before = {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in root.rglob("*")
+        if path.is_file() and ordinary not in path.parents
+    }
+    revoked_contexts = reader._load_effective_ledger_group(root)
+    assert all(
+        context.observation.activation_state == "revoked"
+        for context in revoked_contexts.values()
+    )
+    revoked_partition = next(
+        iter(revoked_contexts.values())
+    ).invocation_token.h1_projection_partition
+    assert tuple(ordinal for ordinal, _sha256 in revoked_partition[4]) == (
+        2,
+        3,
+        5,
+        6,
+    )
+    revoked_projected, revoked_counters, revoked_projection_errors = (
+        reader.project_manifest_bound_legacy_ledger_projections(
+            events,
+            metadata,
+            ordinary,
+            ordinary_ledger,
+            ledger_bytes,
+            validated_h1_partition=revoked_partition,
+        )
+    )
+    assert revoked_projection_errors == []
+    assert revoked_counters["manifest-apply"] == 2
+    assert [event["runId"] for event in revoked_projected] == [
+        event["runId"] for event in projected
+    ]
+    assert reader.validate_work_item(
+        ordinary,
+        strict_revise=False,
+        validate_status_file=False,
+    ) == []
+    ordinary_ledger.write_bytes(ledger_bytes + b"{}\n")
+    revoked_malformed = reader.validate_work_item(
+        ordinary,
+        strict_revise=False,
+        validate_status_file=False,
+    )
+    assert any(
+        "runId" in error or "schemaVersion" in error for error in revoked_malformed
+    )
+    assert not any("WI-LEDGER-COMPAT-" in error for error in revoked_malformed)
+    ordinary_ledger.write_bytes(ledger_bytes)
+    assert {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in root.rglob("*")
+        if path.is_file() and ordinary not in path.parents
+    } == revoked_h1_before
 
 
 def test_h1_reader_preserves_typed_relocation_corruption_and_duplicate_diagnostics(

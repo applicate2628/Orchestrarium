@@ -105,16 +105,10 @@ def _fake_kimi(module, path: Path, payload: bytes = b"synthetic-kimi") -> Path:
 
 
 def _kimi_argv(module, executable: Path, prompt_file: Path) -> tuple[str, ...]:
-    prompt_file.write_bytes(
-        b"---\nname: orchestrarium-bundle-reviewer\n"
-        b"description: Reviews only the context bundled in this file\n"
-        b"tools: []\nsubagents: []\n---\n\nGATE: PASS\n"
-    )
-    skills = prompt_file.parent / "empty-skills"
-    skills.mkdir(exist_ok=True)
+    _ = prompt_file
     return (
         str(executable.resolve()),
-        *module.KimiWindowsProfileV1.build_args(prompt_file, skills),
+        *module.KimiWindowsProfileV1.build_args(),
     )
 
 
@@ -381,7 +375,7 @@ def test_admission_owner_has_no_direct_subprocess_escape_hatch() -> None:
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows Kimi argv profile contract")
-def test_kimi_profile_accepts_only_fixed_transport_and_binds_prompt_file(tmp_path: Path) -> None:
+def test_kimi_profile_accepts_only_fixed_acp_transport(tmp_path: Path) -> None:
     module = _load_runner()
     owner = module.ProcessRunnerV1()
     neutral = tmp_path / "neutral root-Москва"
@@ -393,17 +387,17 @@ def test_kimi_profile_accepts_only_fixed_transport_and_binds_prompt_file(tmp_pat
         module,
         owner,
         _kimi_argv(module, executable, prompt),
-        "kimi-sealed-bundle-text-v1",
+        module.KimiWindowsProfileV1.profile_id,
         cwd=neutral,
     )
 
     lifecycle, admission, launch_owner = _admit(module, owner, request)
     try:
-        assert admission.profile_id == "kimi-sealed-bundle-text-v1"
-        assert admission.probe_kind == "kimi-sealed-bundle-v1"
-        assert admission.prompt_file_canonical == str(prompt.resolve())
-        assert admission.prompt_file_identity
-        assert admission.prompt_file_sha256
+        assert admission.profile_id == "kimi-acp-one-shot-v1"
+        assert admission.probe_kind == "kimi-acp-one-shot-v1"
+        assert admission.prompt_file_canonical is None
+        assert admission.prompt_file_identity is None
+        assert admission.prompt_file_sha256 is None
         owner.windows_argv_admission_owner.consume(
             lifecycle, request, admission, launch_owner
         )
@@ -415,12 +409,10 @@ def test_kimi_profile_accepts_only_fixed_transport_and_binds_prompt_file(tmp_pat
 @pytest.mark.parametrize(
     "mutate",
     (
-        lambda argv: (*argv[:1], "-m", *argv[2:]),
-        lambda argv: (*argv[:1], "--output-format", "text", "--model", "kimi-code/k3", *argv[5:]),
+        lambda argv: (argv[0], "ACP"),
         lambda argv: (*argv, "--extra"),
-        lambda argv: (*argv[:2], "other-model", *argv[3:]),
-        lambda argv: (*argv[:4], "stream-json", *argv[5:]),
-        lambda argv: (*argv[:6], argv[6] + " "),
+        lambda argv: (argv[0], "--help"),
+        lambda argv: (argv[0], "acp", "--login"),
     ),
 )
 def test_kimi_profile_rejects_argv_variants_without_probe(tmp_path: Path, mutate) -> None:
@@ -435,7 +427,7 @@ def test_kimi_profile_rejects_argv_variants_without_probe(tmp_path: Path, mutate
         module,
         owner,
         tuple(mutate(_kimi_argv(module, executable, prompt))),
-        "kimi-sealed-bundle-text-v1",
+        module.KimiWindowsProfileV1.profile_id,
         cwd=neutral,
     )
     lifecycle = owner._begin_lifecycle()
@@ -447,7 +439,7 @@ def test_kimi_profile_rejects_argv_variants_without_probe(tmp_path: Path, mutate
             owner.windows_argv_admission_owner.admit(
                 lifecycle, request, launch_owner
             )
-        assert caught.value.failure_id == "PSV1-ARGV-CODEC-UNSUPPORTED"
+        assert caught.value.failure_id == "PSV1-ARGV-ATTESTATION"
     finally:
         _release(owner, lifecycle)
 
@@ -469,7 +461,7 @@ def test_kimi_profile_rejects_marker_only_file_when_expected_binding_differs(tmp
         module,
         owner,
         _kimi_argv(module, executable, prompt),
-        "kimi-sealed-bundle-text-v1",
+        module.KimiWindowsProfileV1.profile_id,
         cwd=neutral,
         expected_executable_binding=module.ExecutableBindingV1(
             str(executable.resolve()), executable.stat().st_size, "0" * 64
@@ -490,7 +482,7 @@ def test_kimi_profile_rejects_marker_only_file_when_expected_binding_differs(tmp
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows Kimi argv profile contract")
-def test_kimi_profile_rejects_prompt_mutation_between_admit_and_consume(tmp_path: Path) -> None:
+def test_kimi_profile_rejects_argv_mutation_between_admit_and_consume(tmp_path: Path) -> None:
     module = _load_runner()
     owner = module.ProcessRunnerV1()
     neutral = tmp_path / "neutral"
@@ -502,15 +494,17 @@ def test_kimi_profile_rejects_prompt_mutation_between_admit_and_consume(tmp_path
         module,
         owner,
         _kimi_argv(module, executable, prompt),
-        "kimi-sealed-bundle-text-v1",
+        module.KimiWindowsProfileV1.profile_id,
         cwd=neutral,
     )
     lifecycle, admission, launch_owner = _admit(module, owner, request)
     try:
-        prompt.write_text("changed\nGATE: PASS\n", encoding="utf-8")
+        changed = dataclasses.replace(
+            request, argv=(request.argv[0], "--help")
+        )
         with pytest.raises(module.ProcessSupervisionError) as caught:
             owner.windows_argv_admission_owner.consume(
-                lifecycle, request, admission, launch_owner
+                lifecycle, changed, admission, launch_owner
             )
         assert caught.value.failure_id == "PSV1-ARGV-ATTESTATION"
     finally:

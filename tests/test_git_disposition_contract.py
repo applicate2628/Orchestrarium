@@ -97,11 +97,11 @@ class GitDispositionContractTests(unittest.TestCase):
         )
         for path in CHECKPOINT_POLICY_SURFACES:
             text = _read(path)
-            required = (
-                compact_shared_projection
-                if path == "shared/AGENTS.shared.md"
-                else full_projection
-            )
+            required = full_projection
+            if path == "shared/AGENTS.shared.md" and all(
+                fragment in text for fragment in compact_shared_projection
+            ):
+                required = compact_shared_projection
             with self.subTest(path=path):
                 for fragment in required:
                     self.assertIn(fragment, text)

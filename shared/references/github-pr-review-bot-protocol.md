@@ -32,9 +32,15 @@ A clean result is semantic, not phrase-pinned. Connector author identity, curren
 
 Failure signatures are the opposite: each retryable or non-retryable terminal signature is an exact repo-local predicate with its normalized body, surface, connector author identity, current-head binding, ordering, and unresolved-trigger attribution. Error-like prose that is not exact-listed remains indeterminate.
 
+## Authorization continuity
+
+The installed `$github-pr-review-bot` skill owns the operative cycle rule: check the publication gate's latest genuine grant, exact revocation, and later user no-push state before asking again. An active grant for the same pull request head branch and admitted scope reuses existing authority and creates none; another target or branch, wider scope, revocation, or a later no-push instruction requires fresh authorization. Current-head binding, protection, human review, and fresh leak/range checks remain mandatory.
+
+Authorization is reduced only from original genuine-user JSONL records that remain physically present in the transcript. If the in-memory reader reaches its byte or record cap, the gate reads the complete stable transcript forward with bounded memory; compaction summaries never reconstruct authorization, and there is no sidecar grant state. An absent or revoked result remains denied, malformed reserved syntax remains malformed, and any invalid or unstable transcript remains unavailable before the existing pull-request oracle or range scan can run.
+
 ## Retry lineage
 
-A terminal failure and its authorized successor are one lineage with at most one successor trigger. Retry is never automatic. Before creation, bind explicit user authorization and record the creating transition. Count the retry only after a complete hosted refresh uniquely binds the successor trigger identifier, creation time, and unchanged head. A definite failed create requires proof that no successor exists; an ambiguous create enters reconciliation and cannot be repeated. A failed successor cannot authorize another successor.
+A terminal failure and its authorized successor are one lineage with at most one successor trigger. Retry is never automatic. Before creation, apply the authorization-continuity rule and record the creating transition. Count the retry only after a complete hosted refresh uniquely binds the successor trigger identifier, creation time, and unchanged head. A definite failed create requires proof that no successor exists; an ambiguous create enters reconciliation and cannot be repeated. A failed successor cannot authorize another successor.
 
 ## Terms and Abbreviations
 

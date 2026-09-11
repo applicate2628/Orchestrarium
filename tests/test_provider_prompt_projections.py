@@ -1205,6 +1205,7 @@ def test_exact_8f92_transport_set_is_one_atomic_prior_plan(tmp_path: Path) -> No
         "process_supervision/process_runner.py",
         "invoke-codex-prompt.py",
         "invoke-kimi-prompt.py",
+        "external-prompt-governance.md",
         "external-role-taxonomy.v1.json",
     )
     assert staged.manifest_pending is True
@@ -1226,6 +1227,7 @@ def test_exact_8f92_transport_set_is_one_atomic_prior_plan(tmp_path: Path) -> No
                 "process_supervision/process_runner.py",
                 "invoke-codex-prompt.py",
                 "invoke-kimi-prompt.py",
+                "external-prompt-governance.md",
                 "external-role-taxonomy.v1.json",
             ),
         ),
@@ -1237,6 +1239,7 @@ def test_exact_8f92_transport_set_is_one_atomic_prior_plan(tmp_path: Path) -> No
                 "process_supervision/process_runner.py",
                 "invoke-codex-prompt.py",
                 "invoke-kimi-prompt.py",
+                "external-prompt-governance.md",
                 "external-role-taxonomy.v1.json",
             ),
         ),
@@ -1248,6 +1251,7 @@ def test_exact_8f92_transport_set_is_one_atomic_prior_plan(tmp_path: Path) -> No
                 "process_supervision/process_runner.py",
                 "invoke-codex-prompt.py",
                 "invoke-kimi-prompt.py",
+                "external-prompt-governance.md",
                 "external-role-taxonomy.v1.json",
             ),
         ),
@@ -1258,6 +1262,7 @@ def test_exact_8f92_transport_set_is_one_atomic_prior_plan(tmp_path: Path) -> No
                 "provider_prompt.py",
                 "process_supervision/process_runner.py",
                 "invoke-codex-prompt.py",
+                "external-prompt-governance.md",
                 "external-role-taxonomy.v1.json",
             ),
         ),
@@ -1268,6 +1273,7 @@ def test_exact_8f92_transport_set_is_one_atomic_prior_plan(tmp_path: Path) -> No
                 "provider_prompt.py",
                 "process_supervision/process_runner.py",
                 "invoke-codex-prompt.py",
+                "external-prompt-governance.md",
                 "external-role-taxonomy.v1.json",
             ),
         ),
@@ -1278,6 +1284,7 @@ def test_exact_8f92_transport_set_is_one_atomic_prior_plan(tmp_path: Path) -> No
                 "provider_prompt.py",
                 "process_supervision/process_runner.py",
                 "invoke-codex-prompt.py",
+                "external-prompt-governance.md",
                 "external-role-taxonomy.v1.json",
             ),
         ),
@@ -1511,6 +1518,10 @@ def test_immediate_448e_prior_applies_only_changed_transport_members_and_manifes
             STOCK_448E_PROJECTION_SHA256["invoke-codex-prompt.py"],
         ),
         (
+            "scripts/external-prompt-governance.md",
+            STOCK_448E_PROJECTION_SHA256["external-prompt-governance.md"],
+        ),
+        (
             "scripts/external-role-taxonomy.v1.json",
             STOCK_448E_PROJECTION_SHA256["external-role-taxonomy.v1.json"],
         ),
@@ -1552,6 +1563,7 @@ def test_exact_8521_transport_set_is_one_atomic_prior_plan(tmp_path: Path) -> No
         "process_supervision/process_runner.py",
         "invoke-codex-prompt.py",
         "invoke-kimi-prompt.py",
+        "external-prompt-governance.md",
         "external-role-taxonomy.v1.json",
     )
     assert staged.manifest_pending is True
@@ -1581,6 +1593,7 @@ def test_exact_7872_six_member_transport_is_one_atomic_nine_member_plan(
         "process_supervision/process_runner.py",
         "invoke-codex-prompt.py",
         "invoke-kimi-prompt.py",
+        "external-prompt-governance.md",
         "external-role-taxonomy.v1.json",
     )
     assert staged.manifest_pending is True
@@ -1852,7 +1865,7 @@ def test_8521_transport_final_parity_failure_restores_original_identities(
     assert not tuple(projection.parent.rglob("*.prior"))
 
 
-def test_8521_transport_real_install_replaces_six_members_then_is_noop(
+def test_8521_transport_real_install_replaces_seven_members_then_is_noop(
     tmp_path: Path,
 ) -> None:
     installer = _load_installer()
@@ -1890,6 +1903,7 @@ def test_8521_transport_real_install_replaces_six_members_then_is_noop(
         "process_supervision/process_runner.py",
         "invoke-codex-prompt.py",
         "invoke-kimi-prompt.py",
+        "external-prompt-governance.md",
         "external-role-taxonomy.v1.json",
         current_manifest.name,
     }:
@@ -1906,7 +1920,7 @@ def test_8521_transport_real_install_replaces_six_members_then_is_noop(
     } == after_first
 
 
-def test_8521_transport_dry_run_reports_six_replacements_without_mutation(
+def test_8521_transport_dry_run_reports_seven_replacements_without_mutation(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     installer = _load_installer()
@@ -1924,7 +1938,7 @@ def test_8521_transport_dry_run_reports_six_replacements_without_mutation(
 
     assert installer.install("claude", [*args, "--dry-run"]) == 0
     output = capsys.readouterr().out
-    assert "transport prior 8521b638: 6 replacements" in output
+    assert "transport prior 8521b638: 7 replacements" in output
     assert {
         name: (
             path.read_bytes(),

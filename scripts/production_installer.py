@@ -543,6 +543,16 @@ def _parser(provider: str) -> argparse.ArgumentParser:
     modes.add_argument("--global", "-Global", dest="global_install", action="store_true")
     modes.add_argument("--target", "-Target")
     parser.add_argument("--force", "-Force", action="store_true")
+    parser.add_argument(
+        "--migrate-legacy-skill",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help=(
+            "Global Codex only: preserve and project one exact legacy "
+            ".codex/skills/NAME tree"
+        ),
+    )
     parser.add_argument("--dry-run", "-DryRun", action="store_true")
     parser.add_argument("--allow-unsafe-target", "-AllowUnsafeTarget", action="store_true")
     parser.add_argument("--no-hypothesis-hook", "-NoHypothesisHook", action="store_true")
@@ -3731,12 +3741,18 @@ def _install_canonical_skills(
 
 
 @dataclass(frozen=True)
-class _ClaudeSkillProjectionPlan:
+class _SkillProjectionPlan:
     name: str
     canonical_target: Path
     canonical_digest: str
     action: str
     historical_digest: str | None
+    backup_target: Path | None = None
+    target_identity: tuple[int, int, int, int] | None = None
+    backup_digest: str | None = None
+
+
+_ClaudeSkillProjectionPlan = _SkillProjectionPlan
 
 
 def _preflight_claude_skill_projections(
@@ -3779,15 +3795,17 @@ def _preflight_claude_skill_projections(
     return tuple(plans)
 
 
-def _assert_claude_skill_projection_plan_current(
-    plan: tuple[_ClaudeSkillProjectionPlan, ...],
+def _assert_skill_projection_plan_current(
+    plan: tuple[_SkillProjectionPlan, ...],
     canonical_source: Path,
     projection_root: Path,
+    *,
+    failure_id: str,
 ) -> None:
     for item in plan:
         source = canonical_source / item.name
         if _tree_sha256(source, ignore_runtime_cache=item.name == "lead") != item.canonical_digest:
-            raise ValueError(f"E_CREATE_ONLY_PROJECTION_COLLISION: preflight drift {item.name}")
+            raise ValueError(f"{failure_id}: preflight drift {item.name}")
         installed = projection_root / item.name
         if item.action == "create":
             current = not (installed.exists() or installed.is_symlink())
@@ -3798,7 +3816,20 @@ def _assert_claude_skill_projection_plan_current(
                 installed, ignore_runtime_cache=item.name == "lead"
             ) == item.historical_digest
         if not current:
-            raise ValueError(f"E_CREATE_ONLY_PROJECTION_COLLISION: preflight drift {item.name}")
+            raise ValueError(f"{failure_id}: preflight drift {item.name}")
+
+
+def _assert_claude_skill_projection_plan_current(
+    plan: tuple[_ClaudeSkillProjectionPlan, ...],
+    canonical_source: Path,
+    projection_root: Path,
+) -> None:
+    _assert_skill_projection_plan_current(
+        plan,
+        canonical_source,
+        projection_root,
+        failure_id="E_CREATE_ONLY_PROJECTION_COLLISION",
+    )
 
 
 def _apply_claude_skill_projection_plan(
@@ -3835,6 +3866,246 @@ def _install_claude_skill_projections(
     _apply_claude_skill_projection_plan(
         plan, canonical_source, projection_root, owner
     )
+
+
+def _validate_legacy_codex_skill_requests(
+    provider: str,
+    mode: str,
+    requested: list[str],
+    canonical_plan: _CanonicalSkillsPlan,
+) -> frozenset[str]:
+    if requested and (provider != "codex" or mode != "global"):
+        raise ValueError(
+            "E_LEGACY_CODEX_SKILL_ARGUMENT: --migrate-legacy-skill requires global Codex install"
+        )
+    if len(requested) != len(set(requested)):
+        raise ValueError("E_LEGACY_CODEX_SKILL_ARGUMENT: duplicate skill name")
+    canonical_names = {skill.name for skill in canonical_plan.skills}
+    for name in requested:
+        if (
+            not isinstance(name, str)
+            or _ROLE_NAME.fullmatch(name) is None
+            or Path(name).name != name
+            or name not in canonical_names
+        ):
+            raise ValueError(
+                f"E_LEGACY_CODEX_SKILL_ARGUMENT: unknown or unsafe skill name: {name}"
+            )
+    return frozenset(requested)
+
+
+def _preflight_codex_legacy_skill_projections(
+    canonical_plan: _CanonicalSkillsPlan,
+    canonical_root: Path,
+    projection_root: Path,
+    backup_root: Path,
+    authorized_migrations: frozenset[str],
+) -> tuple[tuple[_SkillProjectionPlan, ...], tuple[int, int, int, int] | None]:
+    try:
+        root_identity = _CreateOnlyMutablePath._identity(projection_root)
+    except FileNotFoundError:
+        root_identity = None
+    plans: list[_SkillProjectionPlan] = []
+    for skill in canonical_plan.skills:
+        canonical = canonical_root / skill.name
+        installed = projection_root / skill.name
+        backup_target: Path | None = None
+        backup_digest: str | None = None
+        try:
+            metadata = installed.lstat()
+        except FileNotFoundError:
+            action = "create"
+            installed_digest = None
+            target_identity = None
+        else:
+            target_identity = _CreateOnlyMutablePath._identity(installed)
+            if stat.S_ISLNK(metadata.st_mode) or _is_reparse_metadata(metadata):
+                action = (
+                    "current"
+                    if _projection_resolves_to(installed, canonical)
+                    else "collision"
+                )
+                installed_digest = None
+            elif stat.S_ISDIR(metadata.st_mode):
+                installed_digest = _tree_sha256(
+                    installed, ignore_runtime_cache=skill.ignore_runtime_cache
+                )
+                if installed_digest is None:
+                    action = "collision"
+                elif skill.name not in authorized_migrations:
+                    action = "collision"
+                else:
+                    action = "migrate"
+                    backup_target = (
+                        backup_root / skill.name / installed_digest
+                    )
+                    if backup_target.exists() or backup_target.is_symlink():
+                        backup_metadata = backup_target.lstat()
+                        backup_digest = _tree_sha256(
+                            backup_target,
+                            ignore_runtime_cache=skill.ignore_runtime_cache,
+                        )
+                        if (
+                            not stat.S_ISDIR(backup_metadata.st_mode)
+                            or stat.S_ISLNK(backup_metadata.st_mode)
+                            or _is_reparse_metadata(backup_metadata)
+                            or backup_digest != installed_digest
+                        ):
+                            action = "collision"
+            else:
+                action = "collision"
+                installed_digest = None
+        plans.append(
+            _SkillProjectionPlan(
+                skill.name,
+                canonical,
+                skill.source_digest,
+                action,
+                installed_digest,
+                backup_target,
+                target_identity,
+                backup_digest,
+            )
+        )
+    return tuple(plans), root_identity
+
+
+def _assert_codex_legacy_skill_projection_plan_current(
+    plan: tuple[_SkillProjectionPlan, ...],
+    canonical_plan: _CanonicalSkillsPlan,
+    projection_root: Path,
+    root_identity: tuple[int, int, int, int] | None,
+    *,
+    dry_run: bool,
+) -> None:
+    canonical_by_name = {skill.name: skill for skill in canonical_plan.skills}
+    try:
+        current_root_identity = _CreateOnlyMutablePath._identity(projection_root)
+    except FileNotFoundError:
+        current_root_identity = None
+    if current_root_identity != root_identity:
+        raise ValueError("E_LEGACY_CODEX_SKILL_COLLISION:<root>")
+    for item in plan:
+        canonical = canonical_by_name[item.name]
+        if (
+            _tree_sha256(
+                canonical.source,
+                ignore_runtime_cache=canonical.ignore_runtime_cache,
+            )
+            != item.canonical_digest
+            or (
+                not dry_run
+                and _tree_sha256(
+                    item.canonical_target,
+                    ignore_runtime_cache=canonical.ignore_runtime_cache,
+                )
+                != item.canonical_digest
+            )
+        ):
+            raise ValueError(
+                f"E_LEGACY_CODEX_SKILL_COLLISION:{item.name}"
+            )
+        installed = projection_root / item.name
+        if item.action == "create":
+            current = not (installed.exists() or installed.is_symlink())
+        elif item.action == "current":
+            current = (
+                _CreateOnlyMutablePath._identity(installed)
+                == item.target_identity
+                and _projection_resolves_to(installed, item.canonical_target)
+            )
+        else:
+            try:
+                identity = _CreateOnlyMutablePath._identity(installed)
+            except FileNotFoundError:
+                current = False
+            else:
+                current = identity == item.target_identity
+                if item.historical_digest is not None:
+                    current = current and _tree_sha256(
+                        installed,
+                        ignore_runtime_cache=canonical.ignore_runtime_cache,
+                    ) == item.historical_digest
+        if not current:
+            raise ValueError(
+                f"E_LEGACY_CODEX_SKILL_COLLISION:{item.name}"
+            )
+        if item.backup_target is not None:
+            observed_backup = (
+                _tree_sha256(
+                    item.backup_target,
+                    ignore_runtime_cache=canonical.ignore_runtime_cache,
+                )
+                if item.backup_target.exists()
+                else None
+            )
+            if observed_backup != item.backup_digest:
+                raise ValueError(
+                    f"E_LEGACY_CODEX_SKILL_COLLISION:{item.name}"
+                )
+
+
+def _apply_codex_legacy_skill_projection_plan(
+    plan: tuple[_SkillProjectionPlan, ...],
+    canonical_plan: _CanonicalSkillsPlan,
+    projection_root: Path,
+    root_identity: tuple[int, int, int, int] | None,
+    home_owner: _CreateOnlyMutablePath,
+    projection_owner: _CreateOnlyMutablePath,
+) -> tuple[str, ...]:
+    _assert_codex_legacy_skill_projection_plan_current(
+        plan,
+        canonical_plan,
+        projection_root,
+        root_identity,
+        dry_run=projection_owner.dry_run,
+    )
+    projection_relative = projection_root.relative_to(projection_owner.anchor)
+    canonical_by_name = {skill.name: skill for skill in canonical_plan.skills}
+    collisions: list[str] = []
+    for item in plan:
+        if item.action == "collision":
+            print(
+                f"  E_LEGACY_CODEX_SKILL_COLLISION:{item.name}: preserved {projection_root / item.name}",
+                file=sys.stderr,
+            )
+            collisions.append(item.name)
+            continue
+        relative = projection_relative / item.name
+        if item.action == "create":
+            projection_owner.create_projection(relative, item.canonical_target)
+            continue
+        if item.action == "current":
+            continue
+        assert item.action == "migrate"
+        assert item.historical_digest is not None
+        assert item.backup_target is not None
+        target = projection_root / item.name
+        ignore_runtime_cache = canonical_by_name[item.name].ignore_runtime_cache
+        backup_relative = item.backup_target.relative_to(home_owner.anchor)
+        backup = home_owner.destination(backup_relative)
+        if projection_owner.dry_run:
+            print(f"  [dry-run] would preserve {target} -> {backup}")
+            continue
+        if backup.exists():
+            if _tree_sha256(
+                backup, ignore_runtime_cache=ignore_runtime_cache
+            ) != item.historical_digest:
+                raise ValueError(
+                    f"E_LEGACY_CODEX_SKILL_COLLISION:{item.name}"
+                )
+            _remove_readonly_tree(target)
+        else:
+            backup.parent.mkdir(parents=True, exist_ok=True)
+            home_owner._final_absence(backup)
+            os.replace(target, backup)
+        if _tree_sha256(
+            backup, ignore_runtime_cache=ignore_runtime_cache
+        ) != item.historical_digest:
+            raise ValueError("E_MUTABLE_PATH_POSTCONDITION")
+        projection_owner.create_projection(relative, item.canonical_target)
+        print(f"  Preserved legacy Codex skill tree: {backup}")
+    return tuple(collisions)
 
 
 def _toml_string(value: str) -> str:
@@ -4769,6 +5040,86 @@ def _assert_global_claude_linked_subroot_authority(
         raise ValueError("E_MUTABLE_PATH_IDENTITY_CHANGED") from exc
 
 
+def _install_codex_legacy_skill_compatibility(
+    root: Path,
+    home: Path,
+    target: Path,
+    canonical_plan: _CanonicalSkillsPlan,
+    canonical_skills_target: Path,
+    authorized_migrations: frozenset[str],
+    *,
+    dry_run: bool,
+) -> None:
+    logical_root = target / "skills"
+    try:
+        authority = _linked_runtime_subroots_module(
+            root
+        ).LinkedRuntimeSubrootAuthority.bind(
+            logical_root,
+            scope="global",
+            trusted_global_roots=(logical_root,),
+        )
+    except (OSError, ValueError) as exc:
+        raise ValueError("E_LEGACY_CODEX_SKILL_COLLISION:<root>") from exc
+    projection_root = (
+        authority.resolved_root if authority is not None else logical_root
+    )
+    backup_root = target / "orchestrarium-legacy-skills"
+    plan, root_identity = _preflight_codex_legacy_skill_projections(
+        canonical_plan,
+        canonical_skills_target,
+        projection_root,
+        backup_root,
+        authorized_migrations,
+    )
+    mutation_paths = [
+        path
+        for item in plan
+        if item.action in {"create", "migrate"}
+        for path in (
+            projection_root / item.name,
+            *(
+                (item.backup_target,)
+                if item.backup_target is not None
+                else ()
+            ),
+        )
+    ]
+    transaction = _InstallTransaction(mutation_paths, enabled=not dry_run)
+    collisions: tuple[str, ...] = ()
+    with transaction:
+        home_owner = _CreateOnlyMutablePath(
+            home, transaction, dry_run=dry_run
+        )
+        projection_owner = (
+            _CreateOnlyMutablePath(
+                projection_root,
+                transaction,
+                dry_run=dry_run,
+                linked_authority=authority,
+            )
+            if authority is not None
+            else home_owner
+        )
+        if authority is not None:
+            authority.assert_current()
+        collisions = _apply_codex_legacy_skill_projection_plan(
+            plan,
+            canonical_plan,
+            projection_root,
+            root_identity,
+            home_owner,
+            projection_owner,
+        )
+        if authority is not None:
+            authority.assert_current()
+        transaction.commit()
+    if collisions:
+        raise ValueError(
+            "E_LEGACY_CODEX_SKILL_COLLISION:" + ",".join(collisions)
+        )
+
+
 RETIRED_HOOK_SPECS = (
     ("check-work-items-archival-stop", "Stop"),
 )
@@ -5024,6 +5375,15 @@ def _verify_files(
 
 def install(provider: str, argv: list[str] | None = None) -> int:
     args = _parser(provider).parse_args(argv)
+    if args.migrate_legacy_skill and (
+        provider != "codex" or not args.global_install
+    ):
+        print(
+            "FAIL: E_LEGACY_CODEX_SKILL_ARGUMENT: "
+            "--migrate-legacy-skill requires global Codex install",
+            file=sys.stderr,
+        )
+        return 1
     if args.kimi_offline_policy is not None and not (
         args.enroll_kimi or args.replace_kimi_enrollment
     ):
@@ -5173,6 +5533,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
         )
 
         claude_skill_projection_plan: tuple[_ClaudeSkillProjectionPlan, ...] = ()
+        legacy_codex_skill_migrations: frozenset[str] = frozenset()
         if provider == "claude":
             assert claude_skills_projection_target is not None
             claude_skill_projection_plan = _preflight_claude_skill_projections(
@@ -5201,6 +5562,19 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                     f"{replacement_count} replacements"
                 )
         elif provider == "codex":
+            canonical_plan = _preflight_canonical_skills(
+                source_tree,
+                canonical_skills_target,
+                root=root,
+            )
+            legacy_codex_skill_migrations = (
+                _validate_legacy_codex_skill_requests(
+                    provider,
+                    mode,
+                    args.migrate_legacy_skill,
+                    canonical_plan,
+                )
+            )
             assert codex_agents_target is not None
             codex_native_role_plan = _preflight_codex_native_roles(
                 root,
@@ -5345,8 +5719,12 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                         "shared",
                         args.dry_run,
                     )
-                _install_canonical_skills(
-                    source_tree, target_tree, canonical_skills_owner, root=root
+                assert canonical_plan is not None
+                _apply_canonical_skills_plan(
+                    canonical_plan,
+                    target_tree,
+                    canonical_skills_owner,
+                    root=root,
                 )
             else:
                 # The canonical skill trees plus the paired Claude transport
@@ -5514,6 +5892,18 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                 args.dry_run,
             )
             if args.dry_run:
+                if provider == "codex" and mode == "global":
+                    assert home is not None
+                    assert canonical_plan is not None
+                    _install_codex_legacy_skill_compatibility(
+                        root,
+                        home,
+                        target,
+                        canonical_plan,
+                        canonical_skills_target,
+                        legacy_codex_skill_migrations,
+                        dry_run=True,
+                    )
                 if args.replace_kimi_enrollment:
                     assert home is not None
                     _replace_kimi_enrollment(
@@ -5598,10 +5988,22 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                     dry_run=False,
                     offline_policy=args.kimi_offline_policy,
                 )
+            transaction.commit()
+            if provider == "codex" and mode == "global":
+                assert home is not None
+                assert canonical_plan is not None
+                _install_codex_legacy_skill_compatibility(
+                    root,
+                    home,
+                    target,
+                    canonical_plan,
+                    canonical_skills_target,
+                    legacy_codex_skill_migrations,
+                    dry_run=args.dry_run,
+                )
             print(
                 f"RESULT: OK - {provider.capitalize()} pack installed to {target}"
             )
-            transaction.commit()
             return 0
     except (OSError, RuntimeError, ValueError) as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
