@@ -34,7 +34,7 @@
     },
     "external-prompt-governance.md": {
       "source": "shared/external-prompt-governance.md",
-      "sha256": "c7a59ccec7d6e46be76584a107b0a5b30b249368b4f0958cb78177962dc34b00",
+      "sha256": "0e5c589748272e49a4c487ddd36383cf26746b78996fd941524e0a149008b6d0",
       "destination": "scripts/external-prompt-governance.md"
     },
     "external-role-taxonomy.v1.json": {
