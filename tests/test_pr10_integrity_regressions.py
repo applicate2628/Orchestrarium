@@ -4,6 +4,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -14,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MUTATE = ROOT / "scripts" / "mutate-work-item.py"
 VALIDATOR = ROOT / "scripts" / "validate-work-item-state.py"
 LEDGER = ROOT / "scripts" / "agent-run-ledger.py"
+CHECKER = ROOT / "scripts" / "check-work-items-state.py"
 LEGACY_TRANSFER_TESTS = ROOT / "tests" / "test_legacy_obligation_migration.py"
 
 
@@ -106,10 +108,7 @@ def test_transfer_receipt_archive_path_is_assertion_not_locator(tmp_path: Path) 
     assert errors
 
 
-def test_transfer_chain_endpoint_must_retain_owner_relation(tmp_path: Path) -> None:
-    fixtures = load_module(LEGACY_TRANSFER_TESTS, "pr10_legacy_transfer_fixtures")
-    fixture = fixtures.transfer_fixture(tmp_path)
-    fixtures.run_transfer(fixture)
+def _break_transfer_relation(fixture: dict) -> None:
     backlog = (
         fixture["root"]
         / "work-items"
@@ -125,10 +124,42 @@ def test_transfer_chain_endpoint_must_retain_owner_relation(tmp_path: Path) -> N
     ) + "\n"
     backlog.write_text(text, encoding="utf-8")
 
+
+def test_transfer_chain_endpoint_must_retain_owner_relation(tmp_path: Path) -> None:
+    fixtures = load_module(LEGACY_TRANSFER_TESTS, "pr10_legacy_transfer_fixtures")
+    fixture = fixtures.transfer_fixture(tmp_path)
+    fixtures.run_transfer(fixture)
+    _break_transfer_relation(fixture)
+
     with pytest.raises(fixture["lifecycle"].LifecycleError) as caught:
         fixture["lifecycle"].audit(fixture["root"])
 
     assert caught.value.failure_id == "WI-OBLIGATION-TRANSFER-OWNER"
+
+
+def test_active_only_checker_cannot_hide_broken_transfer_owner(tmp_path: Path) -> None:
+    fixtures = load_module(LEGACY_TRANSFER_TESTS, "pr10_checker_transfer_fixtures")
+    fixture = fixtures.transfer_fixture(tmp_path)
+    fixtures.run_transfer(fixture)
+    _break_transfer_relation(fixture)
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(CHECKER),
+            "--root",
+            str(fixture["root"]),
+            "--active-only",
+        ],
+        cwd=ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "WI-OBLIGATION-TRANSFER-OWNER" in result.stdout + result.stderr
 
 
 def test_captured_successor_detects_same_size_in_place_rewrite(tmp_path: Path) -> None:
