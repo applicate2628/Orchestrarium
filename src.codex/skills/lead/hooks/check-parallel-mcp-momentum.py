@@ -55,6 +55,12 @@ def _is_repository_work_start(envelope: dict, tool_input: dict) -> bool:
         return False
 
     tool_name = envelope["tool_name"].lower()
+    # Production installers register this hook for the Claude `PowerShell`
+    # tool as well as the shell aliases owned by the shared classifier. Project
+    # that tool onto the same command-classification path instead of silently
+    # dropping every registered PowerShell work start.
+    if tool_name == "powershell":
+        tool_name = "exec_command"
     if tool_name in classifier["_MUTATION_TOOLS"]:
         repository_targets = [
             path for path in target_paths if classifier["_inside"](path, root)
