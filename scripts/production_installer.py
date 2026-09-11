@@ -4634,6 +4634,7 @@ _HOOK_METADATA = (
     ("check-passive-polling-stop", "scripts", "Stop", None),
     ("check-machine-local-path", "hooks", "PreToolUse", "Edit|Write|NotebookEdit|apply_patch"),
     ("check-no-trash-in-repo", "hooks", "PreToolUse", "Edit|Write|NotebookEdit|apply_patch|Bash|PowerShell"),
+    ("check-parallel-mcp-momentum", "hooks", "PreToolUse", "Edit|Write|NotebookEdit|apply_patch|Bash|PowerShell|shell_command|exec_command"),
     ("check-stale-relation-residue", "hooks", "PreToolUse", "Edit|Write|NotebookEdit|apply_patch"),
     ("check-repository-orientation", "hooks", "PreToolUse", "Edit|Write|NotebookEdit|apply_patch|Bash|PowerShell|shell_command|exec_command"),
     ("check-mcp-momentum", "hooks", "PreToolUse", "Grep|Bash|PowerShell|shell_command|exec_command"),
@@ -4643,6 +4644,22 @@ _HOOK_METADATA = (
     ("check-scratch-valuables", "scripts", "SessionStart", None),
     ("turn-anchor-reminder", "scripts", "UserPromptSubmit", None),
 )
+
+_CODEX_HOOK_STATUS_MESSAGES = {
+    "agents-mode-reminder": "Load delegation mode",
+    "check-bugfix-discipline": "Check fix discipline",
+    "check-git-push-gate": "Check publication safety",
+    "check-machine-local-path": "Check local paths",
+    "check-mcp-momentum": "Check MCP tool use",
+    "check-no-trash-in-repo": "Check cleanup",
+    "check-parallel-mcp-momentum": "Parallel work and MCP",
+    "check-passive-polling-stop": "Check task progress",
+    "check-repository-orientation": "Check repository orientation",
+    "check-scratch-valuables": "Check scratch recovery",
+    "check-stale-relation-residue": "Check stale references",
+    "mcp-usage-reminder": "Load MCP guidance",
+    "turn-anchor-reminder": "Anchor active work",
+}
 
 _HOOK_DIRECTORY_OVERRIDES = {
     ("claude", "check-mcp-momentum"): "scripts",
@@ -4672,6 +4689,16 @@ def _hook_specs(provider: str, installed_root: Path):
     missing = sorted(membership.difference(metadata))
     if missing:
         raise RuntimeError("registered hook metadata is missing for: " + ", ".join(missing))
+    missing_statuses = (
+        sorted(membership.difference(_CODEX_HOOK_STATUS_MESSAGES))
+        if provider == "codex"
+        else []
+    )
+    if missing_statuses:
+        raise RuntimeError(
+            "Codex hook status-message catalog is missing: "
+            + ", ".join(missing_statuses)
+        )
     roots = {"scripts": scripts, "hooks": hooks}
     specs = [
         (
@@ -4835,6 +4862,8 @@ def _install_hooks(
             arguments.extend(["--hook-event", event])
         if matcher:
             arguments.extend(["--tool-matcher", matcher])
+        if provider == "codex":
+            arguments.extend(["--status-message", _CODEX_HOOK_STATUS_MESSAGES[marker]])
         proc = _run(arguments, root)
         if proc.returncode:
             raise RuntimeError(f"hook registration failed for {marker}")

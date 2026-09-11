@@ -389,6 +389,38 @@ DYNAMIC_FORCE_PARITY = (
     ),
 )
 
+STALE_PASS_FORWARD_FIXTURE = {
+    "dispatch": {
+        "task_identity": "handoff-current",
+        "scope": "current-scope",
+        "expected_artifact": "current-result.md",
+    },
+    "returned_prior_pass": {
+        "task_identity": "handoff-previous",
+        "scope": "previous-scope",
+        "expected_artifact": "previous-result.md",
+        "gate": "PASS",
+    },
+}
+
+ARCHIVED_SUCCESSOR_FORWARD_FIXTURE = {
+    "accepted_snapshot": {
+        "stable_identifier": "external-successor-001",
+        "sha256": "a" * 64,
+        "root": "current",
+    },
+    "qa_lookup": {
+        "stable_identifier": "external-successor-001",
+        "matches": [
+            {
+                "root": "archive/2026-09",
+                "source_relation": "source-bug-001",
+                "lifecycle": "terminal",
+            }
+        ],
+    },
+}
+
 
 class TestOrchestrationDisciplineContract(unittest.TestCase):
     _cache: dict[str, str] = {}
@@ -514,6 +546,139 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
                 )
                 self.assertNotIn("runtime default surface", text)
                 self.assertNotIn("all MCP", text)
+
+    def test_actionable_handoff_activation_contract_is_provider_aware(self) -> None:
+        codex = self._read("src.codex/skills/lead/SKILL.md")
+        self.assertIn("Treat informational delivery and task activation as distinct operations", codex)
+        self.assertIn("proves only delivery, not that execution was scheduled or progress resumed", codex)
+        self.assertIn("wait only after scheduling succeeds or current-running evidence exists", codex)
+        self.assertIn("`collaboration.followup_task` schedules an idle agent", codex)
+        self.assertIn("On other hosts, use the actual host-equivalent operations and semantics, not the Codex tool names", codex)
+
+        generic_clause = "an informational delivery does not schedule recipient execution"
+        for owner in (
+            "src.claude/skills/lead/SKILL.md",
+            "shared/references/subagent-operating-model.md",
+        ):
+            with self.subTest(owner=owner):
+                text = self._read(owner)
+                self.assertIn(generic_clause, text.casefold())
+                self.assertIn("host's explicit follow-up task mechanism", text)
+                self.assertNotIn("collaboration.send_message", text)
+                self.assertNotIn("collaboration.followup_task", text)
+
+    def test_receiving_correlation_rejects_prior_pass_forward_fixture(self) -> None:
+        # Source-contract forward fixture only; this does not claim host enforcement.
+        dispatch = STALE_PASS_FORWARD_FIXTURE["dispatch"]
+        returned = STALE_PASS_FORWARD_FIXTURE["returned_prior_pass"]
+        compared = ("task_identity", "scope", "expected_artifact")
+        self.assertNotEqual(
+            tuple(dispatch[key] for key in compared),
+            tuple(returned[key] for key in compared),
+        )
+        self.assertEqual(returned["gate"], "PASS")
+
+        for owner in HANDOFF_CONTRACTS:
+            with self.subTest(owner=owner):
+                text = self._read(owner)
+                self.assertIn("Current-assignment correlation is part of the existing Receiving-side echo", text)
+                self.assertIn("current host task identity, or the existing ledger `runId` when present", text)
+                self.assertIn("together with the echoed `Scope` and `Expected artifact`", text)
+                self.assertIn("Hash only declared file `Approved inputs`", text)
+                self.assertIn("is stale and nonauthorizing", text)
+                self.assertIn("Trivial inline work and legitimate artifactless fact lookup require neither a ledger nor an artifact nor a new field", text)
+                self.assertIn("| Root main conversation | `lead` | `main` | omit |", text)
+                self.assertIn("| Native specialist | `toolchain-engineer` | `internal` | omit |", text)
+                self.assertIn("| External worker assigned analysis | `external-worker` | `external-worker` | `analyst` |", text)
+                self.assertIn("Human artifact labels such as `Execution role` are not JSON values", text)
+                self.assertIn("existing `launch`, `terminal`, or `standalone` relation", text)
+                self.assertIn("Never hand-append invented `resume` or `accept` JSON", text)
+                self.assertIn("preserve accepted engineering artifacts", text)
+                self.assertIn("Do not invent a bypass or administrative journal", text)
+
+        shared = self._read("shared/references/subagent-operating-model.md")
+        self.assertIn("**Receiving correlation**", shared)
+        self.assertIn("Trivial inline work and legitimate artifactless fact lookup require no ledger, artifact, or new field", shared)
+
+    def test_work_item_closure_guidance_matches_lifecycle_owner(self) -> None:
+        owners = (
+            "src.codex/AGENTS.codex.md",
+            "src.codex/skills/lead/SKILL.md",
+            "src.claude/skills/lead/SKILL.md",
+            "docs/work-item-execution-tracking.md",
+        )
+        required = (
+            "nonempty `Closed`, `Outcome`, `Evidence`, and `Residual risk` fields",
+            "`Closed` MUST exactly equal the requested `--terminal-instant` and use strict UTC `YYYY-MM-DDTHH:MM:SSZ`",
+        )
+        for owner in owners:
+            with self.subTest(owner=owner):
+                text = " ".join(self._read(owner).split())
+                for fragment in required:
+                    self.assertIn(fragment, text)
+
+        codex = self._read("src.codex/AGENTS.codex.md")
+        self.assertIn("versioned Lead/lifecycle-owner contract", codex)
+        self.assertNotIn(
+            "enumerating exactly all current bugs whose parsed `context` equals the item slug",
+            codex,
+        )
+
+        stale_work_item_clause = (
+            "It holds the final closeout record: outcome, residual risk, and archive "
+            "location, and MUST carry a `Closed: <YYYY-MM-DD>` line."
+        )
+        for owner in (
+            "src.codex/skills/lead/SKILL.md",
+            "src.claude/skills/lead/SKILL.md",
+        ):
+            with self.subTest(owner=owner):
+                self.assertNotIn(stale_work_item_clause, self._read(owner))
+
+    def test_design_readiness_contract_is_cross_pack_and_sample_honest(self) -> None:
+        for owner in (
+            "src.codex/skills/architect/SKILL.md",
+            "src.claude/skills/architect/SKILL.md",
+        ):
+            with self.subTest(owner=owner):
+                text = self._read(owner)
+                self.assertIn("Before `Design PASS`, walk one producer serialization through the exact consumer signature and validation", text)
+                self.assertIn("literal wire shape and field order", text)
+                self.assertIn("an acyclic provenance dependency graph", text)
+                self.assertIn("include one actual serialized sample", text)
+                self.assertIn("explicitly proposed representative specimen", text)
+                self.assertIn("Hand off a ready decision before optional prose polishing", text)
+
+        shared = self._read("shared/references/subagent-operating-model.md")
+        self.assertIn("Before Design PASS, walk one producer record through the exact consumer signature and validation", shared)
+        self.assertIn("For an existing producer, use an actual serialized sample", shared)
+        self.assertIn("not fake production data or runtime proof", shared)
+
+    def test_archived_external_successor_forward_fixture_is_guidance_only(self) -> None:
+        # The fixture pins the accepted source contract; no resolver or host behavior is exercised.
+        accepted = ARCHIVED_SUCCESSOR_FORWARD_FIXTURE["accepted_snapshot"]
+        lookup = ARCHIVED_SUCCESSOR_FORWARD_FIXTURE["qa_lookup"]
+        self.assertEqual(accepted["stable_identifier"], lookup["stable_identifier"])
+        self.assertEqual(accepted["root"], "current")
+        self.assertEqual(len(lookup["matches"]), 1)
+        self.assertEqual(lookup["matches"][0]["root"], "archive/2026-09")
+        self.assertNotIn("sha256", lookup)
+
+        for owner in (
+            "src.codex/skills/qa-engineer/SKILL.md",
+            "src.claude/agents/qa-engineer.md",
+        ):
+            with self.subTest(owner=owner):
+                text = self._read(owner)
+                self.assertIn("target registry owner to resolve the stable identifier across its complete physical lifecycle, current plus archive", text)
+                self.assertIn("missing, unique current, unique archived, or duplicate", text)
+                self.assertIn("A unique archived successor remains valid", text)
+                self.assertIn("accepted successor hash freezes only the acceptance snapshot", text)
+                self.assertIn("does not freeze future external record bytes", text)
+
+        shared = self._read("shared/references/subagent-operating-model.md")
+        self.assertIn("resolve the stable identifier across current and archive", shared)
+        self.assertIn("accepted hash as the acceptance snapshot rather than a freeze on future external bytes", shared)
 
     def test_cleanup_disposition_is_one_exact_cross_pack_field(self) -> None:
         field = (

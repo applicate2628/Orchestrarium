@@ -49,7 +49,15 @@ Before dispatch, fill `Diff-invisible invariants`, `Named regression guard`, `De
 
 Populate `Allowed tools` under the caller-owned tool selection contract in installed `AGENTS.md`. The caller performs fresh discovery before every subagent spawn and records only the exact task-scoped identifiers selected for that run, or `none`. An inherited but unlisted tool remains behaviorally forbidden; blanket Model Context Protocol or whole-runtime authorization is invalid.
 
+When a selected tool's current runtime schema requires a context-dependent argument, the caller supplies that concrete argument from `Scope` or `Approved inputs`, such as the approved project or root identity. Recording only the tool name is incomplete when the recipient cannot derive a required argument. This is caller guidance, not a validator or sandbox. Do not add a handoff field or hardcode tool names.
+
 `Approved inputs` identify the producing run's declared scope and accepted artifact revision when available; no new handoff field is required. Evaluate authored claims and review verdicts against the producing run's declared scope and accepted baseline: later independently owned lane deltas are reviewed in their own lane and do not retroactively falsify the earlier artifact; an actual material revision of the accepted upstream artifact still invalidates dependent `PASS` states and triggers dependent re-review.
+
+Current-assignment correlation is part of the existing Receiving-side echo, not a new handoff field. Before accepting a result, compare its current host task identity, or the existing ledger `runId` when present, together with the echoed `Scope` and `Expected artifact`, against the dispatch. Hash only declared file `Approved inputs`; fact-only inputs and undeclared files do not gain a hash requirement. A prior `PASS` with any identity, scope, expected-artifact, or declared-input-hash mismatch is stale and nonauthorizing. Trivial inline work and legitimate artifactless fact lookup require neither a ledger nor an artifact nor a new field.
+
+Conditional PAO carry-forward applies only when accepted work already has a Primary Acceptance Oracle (PAO). `Approved inputs` names its accepted revision: a declared file uses its path and SHA-256, while a non-file artifact uses its existing producing task/run identity and revision reference. `Scope` carries its exact scenario, source, configuration, environment, and invocation bounds. `Acceptance criteria` carries success, failure, safety, cleanup, evidence, and owner requirements. The Receiving-side echo records the actual source, configuration, and environment used and compares them with the approved revision and scoped scenario. Any PAO revision, scoped scenario, source, configuration, or environment mismatch makes evidence stale and nonauthorizing. Trivial work and work with no PAO gain no requirement, file, identifier, or field.
+
+When `Approved inputs` contains an accepted Architect or domain artifact with numbered `{ guarantee, single-owner, enforcement-probe }` claims, the implementation artifact preserves each claim number, owner, and probe and maps it to the implementation surface plus observed evidence/result. The implementer does not rewrite the upstream claim set.
 
 Receiving-side echo: the returned artifact MUST (a) report the Named regression guard's actual result (expected vs observed), (b) answer each Diff-invisible invariant as verified or ASSUMPTION (UNVERIFIED), (c) report the Dead/superseded code disposition result and its named probe, (d) report the Cleanup disposition for owned child process trees, temp/capture paths, and isolation worktrees as `cleaned`, `preserved` with its reason, or `none`, and (e) when the dispatch cited a defect class, include the class audit — every enumerated participant classified fixed / not-affected. It also returns a complete current `ResourceRowV1` for every selected owned resource, including branches, locks, handles, generated artifacts, and dead/superseded surfaces; allowed dispositions additionally include `ephemeral-volume-exempt`. An absent/unknown field, ownership/classification gap, invalid exemption, or missing settlement result makes the row `unclassified`; an artifact missing this echo fails the mechanical acceptance gate.
 
@@ -150,11 +158,23 @@ Legacy sectioned `status.md` records remain readable compatibility input; do not
 
 Only the root main conversation holding Lead writes `agent-runs.jsonl`: it records each launch and, after receiving and accepting the assigned artifact and evidence, its terminal outcome. A main-owned validated helper or wrapper may perform that write on the root's behalf.
 
+For every non-trivial provider or subagent dispatch bound to a work-item, append its root-owned running launch event through the existing ledger helper before asking the host to schedule the run; a failed append stops scheduling. After acceptance, the terminal event names that launch through its exact `launchRunId`. `closesRunIds` is reserved for discharging `REVISE` obligations and never settles an orphan launch. Refresh `status.md` after the terminal append and before the next non-trivial dispatch.
+
 The ledger is machine-readable execution state; `status.md` remains the human-readable recovery summary. A `PASS` in `status.md` is not accepted unless the corresponding ledger event has `gate: "PASS"`, `status: "completed"`, an artifact path, and at least one evidence entry.
 
 Minimum required fields are defined by `shared/schemas/agent-runs.schema.json`: `schemaVersion`, `runId`, `workItem`, `role`, `executionRole`, `status`, `gate`, `scope`, `startedAt`, and `updatedAt`.
 
-When `scripts/agent-run-ledger.*` or an installed equivalent is available, prefer its `append` command so the event is validated and rolled back on failure. Use its `init` command for one-time migration of legacy work items with missing status sections or ledger files. Manual JSONL append is acceptable only when no helper is available.
+Use these authoritative field mappings; they reuse existing schema fields and values:
+
+| Run owner | `role` | `executionRole` | `assignedRole` |
+| --- | --- | --- | --- |
+| Root main conversation | `lead` | `main` | omit |
+| Native specialist | `toolchain-engineer` | `internal` | omit |
+| External worker assigned analysis | `external-worker` | `external-worker` | `analyst` |
+
+The approved external wrapper owns its full provider provenance. Human artifact labels such as `Execution role` are not JSON values and MUST NOT be copied blindly into `executionRole`.
+
+Use `scripts/agent-run-ledger.*` or its installed equivalent so the writer validates the existing `launch`, `terminal`, or `standalone` relation and rolls back a rejected append. Use its `init` command only for one-time migration of legacy work items with missing status sections or ledger files. Never hand-append invented `resume` or `accept` JSON, duplicate identifiers, or guessed role values. If corrupt history or another invalid ledger makes the writer refuse an event, preserve accepted engineering artifacts and route repair to the ledger/lifecycle owner; refusal does not authorize a raw row, bypass validation, or claim closure. Do not invent a bypass or administrative journal.
 
 Before closeout, run `scripts/validate-work-item-state.* --work-item <path>` or the installed equivalent when the repository exposes one. Before broad closeout, interruption recovery, or publication review, run `scripts/check-work-items-state.* --root <repo>` or the installed equivalent to scan all active work items. Closeout is blocked while the ledger contains running agents, duplicate run IDs, missing artifacts for `PASS`, `PASS` without evidence, stale running agents, or inconsistent `BLOCKED` / `REVISE` status.
 

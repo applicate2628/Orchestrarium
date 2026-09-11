@@ -17,7 +17,7 @@ The roadmap loop decides what should enter discovery or delivery. The delivery l
 
 ## Workflow economy projection
 
-Apply the binding shared **Workflow economy (binding)** rule. This Codex projection adds no default review, consultant, or external-brigade fan-out unless evidence, explicit user/configuration intent, or a documented risk trigger admits it. Kimi may be selected explicitly only for read-only research/review with independent verification and nonauthorizing results; Grok remains disabled and non-executing in 1.x. Preserve every template-required security, performance, or geometry role and the human publication/leak-check gate.
+Apply the binding shared **Workflow economy (binding)** rule. This Codex projection adds no default review, consultant, or external-brigade fan-out unless evidence, explicit user/configuration intent, or a documented risk trigger admits it. At a natural readiness or decision point, if a bounded independent read-only alternative view would materially reduce unresolved ambiguity or compare consequential options, Lead considers an advisory route and may explicitly select Kimi without waiting for a user reminder. Otherwise no Kimi call or skip record is required. Selection never enters `auto` or creates a gate or counter; current availability or quota claims require evidence, and the existing wrapper-only fixed `kimi-code/k3`, no-tools, read-only, independently verified, nonauthorizing contract remains. Grok remains disabled and non-executing in 1.x. Preserve every template-required security, performance, or geometry role and the human publication/leak-check gate.
 
 ## Rolling-loop execution
 
@@ -44,7 +44,7 @@ Apply the binding shared **Workflow economy (binding)** rule. This Codex project
 - Before marking a batch or final answer complete, reconcile the current result against the original request, accepted scope, required checks, canonical-source updates, and any open obligations.
 - Do not treat a partial sub-batch as completion when a known required next action still exists inside the admitted scope.
 - A full-impact review or verification pass remains open until a review artifact is produced; side clarification may refine the review, but does not close or replace it.
-- Do not begin install validation, commit, push, publication, or equivalent closeout work while a primary review or verification task remains open unless the user explicitly parks, cancels, or reprioritizes that task.
+- When an independently verified scope is accepted, Lead creates a timely local Git commit checkpoint if the scope is coherent and separable, staging only that scope. Any open gate blocks its dependent changes; unrelated ready work and eligible checkpoints continue. The checkpoint preserves evidence and is neither completion nor publication. Human review, leak checking, and explicit publication authority still govern push and release.
 
 ## Change classification
 
@@ -69,7 +69,7 @@ Apply the binding shared **Workflow economy (binding)** rule. This Codex project
 - If the requested work is not advisory consultant work, worker-side work, or review/QA-side work, fail fast instead of probing provider availability.
 - There is no generic external adapter for owner roles such as `$product-manager` or `$lead`.
 - An explicit request for `external` on an unsupported owner role changes the disclosure, not the eligibility. The lead must say the route is unsupported and reroute honestly.
-- `externalProvider: auto` is the ordinary default only; it resolves through the active production profile and uses the shipped Codex/Claude pair only. Explicit user override may choose Kimi for a policy-admitted read-only research/review lane; the fixed Kimi transport remains independently verified and nonauthorizing. Grok remains unavailable and must not be launched or probed in 1.x.
+- `externalProvider: auto` is the ordinary default only; it resolves through the active production profile and uses the shipped Codex/Claude pair only. Explicit user or Lead override may choose Kimi for a policy-admitted read-only research/review lane; the fixed Kimi transport remains independently verified and nonauthorizing. Grok remains unavailable and must not be launched or probed in 1.x.
 - Shipped and repo-local production profiles must keep explicit-only and unavailable providers out of `externalPriorityProfiles`.
 - `parallelMode` is the general orchestrator rule for whether independent helper lanes should be parallelized by judgment at all; external fan-out is one overlay on top of that rule.
 - Independent external adapters may run in parallel when their scopes are disjoint, `parallelMode` permits ordinary parallel fan-out, and provider runtimes support it. If native internal slot limits would otherwise block additional independent eligible lanes, prefer available external adapters over silent serialization or dropped lanes.
@@ -105,7 +105,7 @@ Apply the binding shared **Workflow economy (binding)** rule. This Codex project
 - Algorithmically sensitive work:
   `lead -> analyst -> architect -> algorithm-scientist -> planner -> implementation -> qa-engineer -> lead`
 - Scientific-modeling or numerical-method work:
-  `lead -> analyst -> architect -> computational-scientist -> planner -> implementation -> qa-engineer -> lead`
+  `lead -> analyst -> architect -> computational-scientist (model) -> planner -> scientific-software-engineer -> computational-scientist (scientific-conformance-review; independent run) -> qa-engineer -> lead`
 - Repository hygiene, documentation, or archival-consistency work with no semantic control-plane change:
   `lead -> knowledge-archivist -> lead`
 - Repository control-plane semantic change prepared by `knowledge-archivist`:
@@ -243,18 +243,20 @@ The lead chooses the review strategy for each risk domain when invoking an indep
 
 ### Strategy A — Claim-Verify
 
-The upstream specialist (builder) includes an explicit **claims section** in their artifact: a numbered list of falsifiable guarantees this artifact makes.
+When an accepted Architect or domain artifact contains numbered `{ guarantee, single-owner, enforcement-probe }` claims, pass that accepted Architect or domain artifact/revision unchanged in `Approved inputs` to implementation and review.
+
+The implementer does not author, reorder, replace, or become owner of those claims; its implementation artifact maps each upstream claim number to its implementation surface and observed evidence/result. Missing or changed claims return `REVISE` to their Architect or domain owner. No upstream claims means no synthetic claim set; use the accepted criteria and named regression guard.
 
 The reviewer receives:
-- the implementation artifact
-- the claims list only — **not** the full design package or reasoning chain of the builder
+- the upstream claims and implementation evidence side by side
+- the accepted constraints and claim identity needed for independent challenge, without requiring the entire unused design prose
 
 The reviewer's job:
 1. Verify each claim against the artifact or implementation.
 2. Find risk surfaces or threat classes not covered by any claim.
 
 Use Claim-Verify when:
-- The risk is well-understood and the builder can enumerate what they are guaranteeing
+- The risk is well-understood and the accepted Architect or domain owner has enumerated what the artifact guarantees
 - The goal is catching execution errors (implementation does not satisfy stated design)
 - Speed matters — claim-verify is faster than adversarial review
 - Example domains: security controls on a known threat model, performance against defined budgets, architecture against accepted design
@@ -284,7 +286,7 @@ Use Adversarial Review when:
 
 ### How to instruct the reviewer
 
-**Claim-Verify:** Pass the claims list from the builder's artifact explicitly. Tell the reviewer: "Verify each claim. Also identify any risk surfaces not covered by any claim."
+**Claim-Verify:** Pass the unchanged upstream-owner claims, implementer evidence, accepted constraints, and claim identity explicitly. Tell the reviewer: "Verify each claim against the implementation evidence. Also identify any risk surfaces not covered by any claim."
 
 **Adversarial:** Pass the implementation artifact only. Tell the reviewer: "Do not read the upstream design package. Assume an adversary with full knowledge of the implementation. Find the three highest-probability failure or attack vectors and show the exact mechanism for each."
 

@@ -317,6 +317,252 @@ def run_transfer(fixture: dict, *, inject: str | None = None):
     )
 
 
+@pytest.mark.parametrize(
+    ("boundary", "expected_phase"),
+    (
+        ("T0", "active-intent"),
+        ("T1", "active-intent"),
+        ("T2", "active-intent"),
+        ("T3", "moved-intent"),
+        ("T4", "moved-intent"),
+        ("T5", "moved-intent"),
+        ("T6", "settled-archive"),
+        ("T7", "settled-archive"),
+        ("T8", "settled-archive"),
+        ("T9", "settled-archive"),
+        (None, "settled-archive"),
+    ),
+)
+def test_ledger_location_resolver_covers_archive_transition_states(
+    tmp_path: Path,
+    boundary: str | None,
+    expected_phase: str,
+) -> None:
+    fixture = transfer_fixture(tmp_path)
+    if boundary is None:
+        run_transfer(fixture)
+    else:
+        with pytest.raises(fixture["lifecycle"].LifecycleError):
+            run_transfer(fixture, inject=boundary)
+    logical_work_item = f"work-items/active/{fixture['slug']}"
+    logical_ledger_path = f"{logical_work_item}/agent-runs.jsonl"
+
+    resolved = fixture["lifecycle"].resolve_work_item_ledger_location(
+        tmp_path,
+        logical_work_item=logical_work_item,
+        logical_ledger_path=logical_ledger_path,
+    )
+
+    assert resolved.phase == expected_phase
+    assert resolved.logical_work_item == logical_work_item
+    assert resolved.logical_ledger_path == logical_ledger_path
+    assert resolved.ledger_sha256 == fixture["ledgerSha"]
+    assert resolved.operation_id == fixture["operationId"]
+    assert resolved.provenance_path is not None
+    assert resolved.provenance_sha256 is not None
+    physical = tmp_path.joinpath(*resolved.physical_ledger_path.split("/"))
+    assert physical.read_bytes() == fixture["ledgerBefore"]
+    assert (tmp_path / logical_ledger_path).exists() == expected_phase.startswith(
+        "active"
+    )
+
+
+def test_ledger_location_resolver_returns_plain_active_without_provenance(
+    tmp_path: Path,
+) -> None:
+    fixture = transfer_fixture(tmp_path)
+    logical_work_item = f"work-items/active/{fixture['slug']}"
+    logical_ledger_path = f"{logical_work_item}/agent-runs.jsonl"
+    before = {
+        path.relative_to(tmp_path).as_posix(): path.read_bytes()
+        for path in tmp_path.rglob("*")
+        if path.is_file()
+    }
+
+    resolved = fixture["lifecycle"].resolve_work_item_ledger_location(
+        tmp_path,
+        logical_work_item=logical_work_item,
+        logical_ledger_path=logical_ledger_path,
+    )
+
+    assert resolved.phase == "active"
+    assert resolved.physical_work_item == logical_work_item
+    assert resolved.physical_ledger_path == logical_ledger_path
+    assert resolved.ledger_sha256 == fixture["ledgerSha"]
+    assert resolved.operation_id is None
+    assert resolved.provenance_path is None
+    assert resolved.provenance_sha256 is None
+    assert {
+        path.relative_to(tmp_path).as_posix(): path.read_bytes()
+        for path in tmp_path.rglob("*")
+        if path.is_file()
+    } == before
+
+
+def test_ledger_location_resolver_accepts_v1_settled_receipt(tmp_path: Path) -> None:
+    fixture = transition_fixture(tmp_path)
+    receipt = run_transition(fixture)
+    logical_work_item = f"work-items/active/{fixture['slug']}"
+
+    resolved = fixture["lifecycle"].resolve_work_item_ledger_location(
+        tmp_path,
+        logical_work_item=logical_work_item,
+        logical_ledger_path=f"{logical_work_item}/agent-runs.jsonl",
+    )
+
+    assert receipt["schemaVersion"] == 1
+    assert resolved.phase == "settled-archive"
+    assert resolved.operation_id == fixture["operationId"]
+    assert resolved.ledger_sha256 == fixture["ledgerSha"]
+
+
+def test_ledger_location_settlement_survives_normal_successor_and_readme_changes(
+    tmp_path: Path,
+) -> None:
+    fixture = transfer_fixture(tmp_path)
+    run_transfer(fixture)
+    logical_work_item = f"work-items/active/{fixture['slug']}"
+    logical_ledger_path = f"{logical_work_item}/agent-runs.jsonl"
+    before = fixture["lifecycle"].resolve_work_item_ledger_location(
+        tmp_path,
+        logical_work_item=logical_work_item,
+        logical_ledger_path=logical_ledger_path,
+    )
+
+    fixture["lifecycle"].start_item(
+        tmp_path,
+        fixture["successorSlug"],
+        successor_status(fixture["slug"], fixture["operationId"]),
+    )
+    after = fixture["lifecycle"].resolve_work_item_ledger_location(
+        tmp_path,
+        logical_work_item=logical_work_item,
+        logical_ledger_path=logical_ledger_path,
+    )
+
+    assert after == before
+
+
+@pytest.mark.parametrize(
+    ("drift", "failure_id"),
+    (
+        ("ledger", "WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH"),
+        ("receipt-duplicate-key", "WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH"),
+        ("missing-receipt", "WI-LEDGER-COMPAT-ACTIVATION-INCOMPLETE"),
+        ("active-copy", "WI-CATEGORY-DUAL-LOCATION"),
+    ),
+)
+def test_ledger_location_settlement_drift_fails_closed(
+    tmp_path: Path,
+    drift: str,
+    failure_id: str,
+) -> None:
+    fixture = transfer_fixture(tmp_path)
+    receipt = run_transfer(fixture)
+    archive = tmp_path.joinpath(*receipt["archivePath"].split("/"))
+    receipt_path = archive / "lifecycle-transition-receipt.json"
+    if drift == "ledger":
+        (archive / "agent-runs.jsonl").write_bytes(
+            (archive / "agent-runs.jsonl").read_bytes() + b"{}\n"
+        )
+    elif drift == "receipt-duplicate-key":
+        receipt_path.write_bytes(
+            b'{"schemaVersion":2,' + receipt_path.read_bytes()[1:]
+        )
+    elif drift == "missing-receipt":
+        receipt_path.unlink()
+    else:
+        active = tmp_path / "work-items" / "active" / fixture["slug"]
+        active.mkdir(parents=True)
+        (active / "agent-runs.jsonl").write_bytes(fixture["ledgerBefore"])
+    logical_work_item = f"work-items/active/{fixture['slug']}"
+
+    with pytest.raises(fixture["lifecycle"].LifecycleError) as caught:
+        fixture["lifecycle"].resolve_work_item_ledger_location(
+            tmp_path,
+            logical_work_item=logical_work_item,
+            logical_ledger_path=f"{logical_work_item}/agent-runs.jsonl",
+        )
+
+    assert caught.value.failure_id == failure_id
+
+
+def test_ledger_location_intent_and_settlement_must_agree(tmp_path: Path) -> None:
+    fixture = transfer_fixture(tmp_path)
+    with pytest.raises(fixture["lifecycle"].LifecycleError):
+        run_transfer(fixture, inject="T6")
+    intent_path = (
+        tmp_path
+        / ".scratch"
+        / "work-items-lifecycle-transitions"
+        / f"{fixture['operationId']}.json"
+    )
+    intent = json.loads(intent_path.read_bytes())
+    intent["expectedReadmeSha256"] = "0" * 64
+    intent_path.write_text(
+        json.dumps(intent, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    logical_work_item = f"work-items/active/{fixture['slug']}"
+
+    with pytest.raises(fixture["lifecycle"].LifecycleError) as caught:
+        fixture["lifecycle"].resolve_work_item_ledger_location(
+            tmp_path,
+            logical_work_item=logical_work_item,
+            logical_ledger_path=f"{logical_work_item}/agent-runs.jsonl",
+        )
+
+    assert caught.value.failure_id == "WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH"
+
+
+def test_ledger_location_moved_intent_rejects_invalid_after_image_type(
+    tmp_path: Path,
+) -> None:
+    fixture = transfer_fixture(tmp_path)
+    with pytest.raises(fixture["lifecycle"].LifecycleError):
+        run_transfer(fixture, inject="T3")
+    intent_path = (
+        tmp_path
+        / ".scratch"
+        / "work-items-lifecycle-transitions"
+        / f"{fixture['operationId']}.json"
+    )
+    intent = json.loads(intent_path.read_bytes())
+    intent["statusAfter"] = 7
+    intent_path.write_text(
+        json.dumps(intent, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    logical_work_item = f"work-items/active/{fixture['slug']}"
+
+    with pytest.raises(fixture["lifecycle"].LifecycleError) as caught:
+        fixture["lifecycle"].resolve_work_item_ledger_location(
+            tmp_path,
+            logical_work_item=logical_work_item,
+            logical_ledger_path=f"{logical_work_item}/agent-runs.jsonl",
+        )
+
+    assert caught.value.failure_id == "WI-LIFECYCLE-TRANSITION-INTENT-INVALID"
+
+
+def test_ledger_location_rejects_archive_reparse(tmp_path: Path) -> None:
+    fixture = transfer_fixture(tmp_path)
+    receipt = run_transfer(fixture)
+    archive = tmp_path.joinpath(*receipt["archivePath"].split("/"))
+    real_archive = archive.with_name(f"{archive.name}-real")
+    archive.rename(real_archive)
+    try:
+        make_directory_link(archive, real_archive)
+    except (OSError, AssertionError) as exc:
+        pytest.skip(f"target environment cannot create a directory link: {exc}")
+    logical_work_item = f"work-items/active/{fixture['slug']}"
+
+    with pytest.raises(fixture["lifecycle"].LifecycleError):
+        fixture["lifecycle"].resolve_work_item_ledger_location(
+            tmp_path,
+            logical_work_item=logical_work_item,
+            logical_ledger_path=f"{logical_work_item}/agent-runs.jsonl",
+        )
+
+
 def successor_status(source_slug: str, operation_id: str) -> bytes:
     return (
         "---\n"
@@ -1042,6 +1288,112 @@ def test_archive_with_successor_replay_is_idempotent_and_hash_bound(tmp_path: Pa
             fixture["lifecycle"].archive_with_successor(**{**base, **overrides})
         assert caught.value.failure_id == "WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH"
     assert {path.relative_to(tmp_path).as_posix(): sha256(path.read_bytes()) for path in paths} == before
+
+
+@pytest.mark.parametrize("transfer", (False, True), ids=("ordinary", "transfer"))
+@pytest.mark.parametrize("first_case", ("lower", "upper", "mixed"))
+@pytest.mark.parametrize("replay_case", ("lower", "upper", "mixed"))
+def test_archive_with_successor_hash_case_matrix_is_canonical_on_first_commit_and_replay(
+    tmp_path: Path,
+    transfer: bool,
+    first_case: str,
+    replay_case: str,
+) -> None:
+    fixture = transfer_fixture(tmp_path) if transfer else transition_fixture(tmp_path)
+    runner = run_transfer if transfer else run_transition
+    canonical_ledger = fixture["ledgerSha"]
+    canonical_readme = fixture["readmeSha"]
+
+    def digest_case(value: str, case: str) -> str:
+        if case == "lower":
+            return value
+        if case == "upper":
+            return value.upper()
+        letters_seen = 0
+        result = []
+        for character in value:
+            if character.isalpha():
+                letters_seen += 1
+                character = character.upper() if letters_seen % 2 else character
+            result.append(character)
+        mixed = "".join(result)
+        assert any(character.isupper() for character in mixed)
+        assert any(character.islower() for character in mixed)
+        return mixed
+
+    fixture["ledgerSha"] = digest_case(canonical_ledger, first_case)
+    fixture["readmeSha"] = digest_case(canonical_readme, first_case)
+    first = runner(fixture)
+
+    assert first["requestExpectedLedgerSha256"] == canonical_ledger
+    assert first["requestExpectedReadmeSha256"] == canonical_readme
+
+    fixture["ledgerSha"] = digest_case(canonical_ledger, replay_case)
+    fixture["readmeSha"] = digest_case(canonical_readme, replay_case)
+    assert runner(fixture) == first
+
+
+@pytest.mark.parametrize(
+    ("field", "invalid_kind", "first_failure_id"),
+    (
+        ("ledgerSha", "different", "WI-LEDGER-MIGRATION-LEDGER-DRIFT"),
+        ("readmeSha", "different", "WI-README-STALE"),
+        ("ledgerSha", "nonhex", "WI-LEDGER-MIGRATION-LEDGER-DRIFT"),
+        ("readmeSha", "whitespace", "WI-README-STALE"),
+        ("ledgerSha", "unicode-ligature", "WI-LEDGER-MIGRATION-LEDGER-DRIFT"),
+        ("readmeSha", "wrong-type", "WI-README-STALE"),
+    ),
+)
+def test_archive_with_successor_hash_case_normalization_preserves_invalid_and_mismatch_refusal(
+    tmp_path: Path,
+    field: str,
+    invalid_kind: str,
+    first_failure_id: str,
+) -> None:
+    def invalid_value(canonical: str) -> object:
+        if invalid_kind == "different":
+            replacement = "0" if canonical[0] != "0" else "1"
+            return replacement + canonical[1:]
+        if invalid_kind == "nonhex":
+            return "g" * 64
+        if invalid_kind == "whitespace":
+            return f" {canonical}"
+        if invalid_kind == "unicode-ligature":
+            return "\ufb00" * 32
+        return None
+
+    first_fixture = transition_fixture(tmp_path / "first")
+    first_before = {
+        path.relative_to(first_fixture["root"]).as_posix(): path.read_bytes()
+        for path in first_fixture["root"].rglob("*")
+        if path.is_file()
+    }
+    first_fixture[field] = invalid_value(first_fixture[field])
+    with pytest.raises(first_fixture["lifecycle"].LifecycleError) as first_caught:
+        run_transition(first_fixture)
+    assert first_caught.value.failure_id == first_failure_id
+    assert {
+        path.relative_to(first_fixture["root"]).as_posix(): path.read_bytes()
+        for path in first_fixture["root"].rglob("*")
+        if path.is_file()
+    } == first_before
+
+    replay_fixture = transition_fixture(tmp_path / "replay")
+    run_transition(replay_fixture)
+    replay_before = {
+        path.relative_to(replay_fixture["root"]).as_posix(): path.read_bytes()
+        for path in replay_fixture["root"].rglob("*")
+        if path.is_file()
+    }
+    replay_fixture[field] = invalid_value(replay_fixture[field])
+    with pytest.raises(replay_fixture["lifecycle"].LifecycleError) as replay_caught:
+        run_transition(replay_fixture)
+    assert replay_caught.value.failure_id == "WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH"
+    assert {
+        path.relative_to(replay_fixture["root"]).as_posix(): path.read_bytes()
+        for path in replay_fixture["root"].rglob("*")
+        if path.is_file()
+    } == replay_before
 
 
 def test_archive_with_successor_transfer_exactly_once_across_activation_close_and_retransfer(

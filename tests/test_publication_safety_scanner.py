@@ -61,6 +61,7 @@ CANONICAL_SCANNER = REPO_ROOT / "scripts" / "universal-hooks" / "scripts" / "che
 CODEX_SCANNER = REPO_ROOT / "src.codex" / "skills" / "lead" / "scripts" / "check-publication-safety.py"
 CLAUDE_SCANNER = REPO_ROOT / "src.claude" / "agents" / "scripts" / "check-publication-safety.py"
 CODEX_REF = REPO_ROOT / "src.codex" / "skills" / "lead" / "hooks" / "check-machine-local-path.py"
+PUSH_GATE = REPO_ROOT / "src.codex" / "skills" / "lead" / "scripts" / "check-git-push-gate.py"
 SCANNERS = (CODEX_SCANNER, CLAUDE_SCANNER)
 
 BACKSLASH = chr(92)  # keep the literal backslash out of source path literals
@@ -117,6 +118,24 @@ def _load_canonical_scanner(name: str):
         spec.loader.exec_module(mod)
     finally:
         sys.modules.pop(name, None)
+    return mod
+
+
+def _load_push_gate(name: str):
+    script_dir = str(PUSH_GATE.parent)
+    added = script_dir not in sys.path
+    if added:
+        sys.path.insert(0, script_dir)
+    try:
+        sys.modules.pop("hook_common", None)
+        spec = importlib.util.spec_from_file_location(name, str(PUSH_GATE))
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules[name] = mod
+        spec.loader.exec_module(mod)
+    finally:
+        sys.modules.pop(name, None)
+        if added:
+            sys.path.remove(script_dir)
     return mod
 
 
@@ -394,6 +413,57 @@ def pass_rows() -> dict[str, str]:
 
 @unittest.skipIf(_git() is None, "needs git on PATH")
 class TestPublicationSafetyScanner(unittest.TestCase):
+    def _run_staged_transition(
+        self,
+        before: dict[str, str],
+        after: dict[str, str],
+        *,
+        renames: tuple[tuple[str, str], ...] = (),
+    ) -> subprocess.CompletedProcess[str]:
+        git = _git()
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            subprocess.run([git, "init", "-q", repo], check=True, capture_output=True)
+            subprocess.run(
+                [git, "-C", repo, "config", "user.email", "t@t"],
+                check=True,
+                capture_output=True,
+            )
+            subprocess.run(
+                [git, "-C", repo, "config", "user.name", "t"],
+                check=True,
+                capture_output=True,
+            )
+            for relative, content in before.items():
+                path = repo / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(content, encoding="utf-8")
+            subprocess.run([git, "-C", repo, "add", "-A"], check=True, capture_output=True)
+            subprocess.run(
+                [git, "-C", repo, "commit", "-q", "--allow-empty", "-m", "base"],
+                check=True,
+                capture_output=True,
+            )
+            for old, new in renames:
+                (repo / new).parent.mkdir(parents=True, exist_ok=True)
+                subprocess.run(
+                    [git, "-C", repo, "mv", "--", old, new],
+                    check=True,
+                    capture_output=True,
+                )
+            for relative, content in after.items():
+                path = repo / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(content, encoding="utf-8")
+            subprocess.run([git, "-C", repo, "add", "-A"], check=True, capture_output=True)
+            return subprocess.run(
+                [sys.executable, str(CANONICAL_SCANNER)],
+                cwd=repo,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+            )
+
     def _run_cached(
         self,
         scanner: Path,
@@ -544,6 +614,131 @@ class TestPublicationSafetyScanner(unittest.TestCase):
                 rc, out = self._run_cached_full(scanner, "nothing machine-local here")
                 self.assertEqual(rc, 0)
                 self.assertIn("publication-safety: clean (tracked, examined 1 file)", out)
+
+    def test_staged_jsonl_append_ignores_unchanged_historical_machine_path(self) -> None:
+        historical = _join('{"path":"', WIN_D, BS, DEV, BS, "historical", '"}\n')
+        appended = historical + '{"event":"clean-append"}\n'
+        proc = self._run_staged_transition(
+            {"logs/agent-runs.jsonl": historical},
+            {"logs/agent-runs.jsonl": appended},
+        )
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+
+    def test_staged_modified_machine_path_reports_new_postimage_line(self) -> None:
+        added_path = _join(WIN_D, BS, DEV, BS, "new-output")
+        proc = self._run_staged_transition(
+            {"notes.txt": "first\nthird\n"},
+            {"notes.txt": "first\n" + added_path + "\nthird\n"},
+        )
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        self.assertRegex(proc.stderr, r"\bline=2\b class=machine-path")
+
+    def test_staged_modified_old_secret_still_blocks_full_postimage(self) -> None:
+        leak = _join("to", "ken", " = ", "'", "A1B2C3D4E5F6", "'")
+        proc = self._run_staged_transition(
+            {"settings.txt": leak + "\nold\n"},
+            {"settings.txt": leak + "\nnew\n"},
+        )
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        self.assertRegex(proc.stderr, r"\bline=1\b class=value-token")
+
+    def test_staged_pure_rename_ignores_historical_machine_path(self) -> None:
+        historical = _join(WIN_D, BS, DEV, BS, "historical") + "\n"
+        proc = self._run_staged_transition(
+            {"archive/old.txt": historical},
+            {"archive/new.txt": historical},
+            renames=(("archive/old.txt", "archive/new.txt"),),
+        )
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+
+    def test_staged_rename_old_secret_still_blocks_full_postimage(self) -> None:
+        leak = _join("to", "ken", " = ", "'", "A1B2C3D4E5F6", "'") + "\n"
+        proc = self._run_staged_transition(
+            {"old.txt": leak},
+            {"renamed.txt": leak},
+            renames=(("old.txt", "renamed.txt"),),
+        )
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        self.assertRegex(proc.stderr, r"\bline=1\b class=value-token")
+
+    def test_staged_added_historical_looking_file_scans_full_postimage(self) -> None:
+        machine_path = _join(WIN_D, BS, DEV, BS, "archived-output") + "\n"
+        proc = self._run_staged_transition(
+            {},
+            {"archive/2020/historical-session.txt": machine_path},
+        )
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        self.assertIn("class=machine-path", proc.stderr)
+
+    def test_staged_destination_filename_always_checked(self) -> None:
+        proc = self._run_staged_transition(
+            {"notes.txt": "clean\n"},
+            {".env": "clean\n"},
+            renames=(("notes.txt", ".env"),),
+        )
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        self.assertIn("class=filename-env", proc.stderr)
+
+    def test_staged_ordinary_locator_is_encoded_with_index(self) -> None:
+        machine_path = _join(WIN_D, BS, DEV, BS, "new-output") + "\n"
+        proc = self._run_staged_transition(
+            {},
+            {"logs/agent runs.jsonl": machine_path},
+        )
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        self.assertIn(
+            "kind=tracked-blob locator=logs%2Fagent%20runs.jsonl "
+            "staged-index=1 line=1 class=machine-path",
+            proc.stderr,
+        )
+
+    def test_untrusted_finding_locator_never_emitted(self) -> None:
+        unsafe = _join("logs/to", "ken=A1B2C3D4E5F6.txt")
+        machine_path = _join(WIN_D, BS, DEV, BS, "new-output") + "\n"
+        proc = self._run_staged_transition({}, {unsafe: machine_path})
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        self.assertIn("kind=tracked-blob locator=redacted staged-index=1", proc.stderr)
+        self.assertNotIn(unsafe, proc.stdout + proc.stderr)
+
+    def test_staged_clean_receipt_shape_unchanged(self) -> None:
+        proc = self._run_staged_transition({}, {"clean.txt": "clean\n"})
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertEqual(
+            proc.stdout,
+            "publication-safety: clean (tracked, examined 1 file)\n",
+        )
+        gate = _load_push_gate("_staged_clean_receipt_consumer")
+        observed = gate.parse_publication_safety_observation(proc.stdout)
+        self.assertEqual(observed.kind, "legacy-nonauthorizing")
+
+    def test_staged_malformed_name_status_fails_closed(self) -> None:
+        module = _load_canonical_scanner("_staged_malformed_name_status")
+        malformed = subprocess.CompletedProcess([], 0, stdout=b"M\0unterminated", stderr=b"")
+        with mock.patch.object(module, "_run_git", return_value=malformed):
+            with self.assertRaises(RuntimeError):
+                module._tracked_files()
+
+    def test_staged_type_change_fails_closed(self) -> None:
+        module = _load_canonical_scanner("_staged_type_change")
+        type_change = subprocess.CompletedProcess([], 0, stdout=b"T\0node\0", stderr=b"")
+        with mock.patch.object(module, "_run_git", return_value=type_change):
+            with self.assertRaises(RuntimeError):
+                module._tracked_files()
+
+    def test_staged_modified_diff_failure_fails_closed(self) -> None:
+        module = _load_canonical_scanner("_staged_diff_failure")
+        old_oid = ("1" * 40 + "\n").encode("ascii")
+        new_oid = ("2" * 40 + "\n").encode("ascii")
+        calls = (
+            subprocess.CompletedProcess([], 0, stdout=b"M\0node\0", stderr=b""),
+            subprocess.CompletedProcess([], 0, stdout=new_oid, stderr=b""),
+            subprocess.CompletedProcess([], 0, stdout=b"old\nnew\n", stderr=b""),
+            subprocess.CompletedProcess([], 0, stdout=old_oid, stderr=b""),
+            subprocess.CompletedProcess([], 1, stdout=b"", stderr=b"diff failed"),
+        )
+        with mock.patch.object(module, "_run_git", side_effect=calls):
+            with self.assertRaises(RuntimeError):
+                module._tracked_files()
 
     def test_nothing_staged_exits_0_but_reports_zero_examined(self) -> None:
         # THE LIVE FAILURE (2026-07-25/26): with nothing staged at all (the
@@ -3208,6 +3403,9 @@ class TestPublicationSafetyScannerV3(unittest.TestCase):
             "src=refs%2Fheads%2Ftopic, tip=" + "2" * 40 + ")",
         )
         self.assertFalse(hasattr(module, "_serialize_range_receipt_v2"))
+
+    def test_range_contract_unchanged_after_staged_delta(self) -> None:
+        self.test_receipt_v3_canonicalization()
 
     def test_redacted_finding_output(self) -> None:
         sentinel = "A1B2C3D4E5F6G7H8IJK"

@@ -24,6 +24,11 @@ PROVIDER_DIRS = {
 }
 REMOVED_EXTERNAL_PROVIDERS = frozenset({"gemini", "qwen"})
 EXTERNAL_DISPATCH_PROVIDERS = ("kimi", "grok")
+_EXTERNAL_ROLE_TAXONOMY_NAME = "external-role-taxonomy.v1.json"
+_EXTERNAL_ROLE_TAXONOMY_MAX_BYTES = 64 * 1024
+_EXTERNAL_ROLE_LANES = frozenset(
+    {"consultant", "external-worker", "external-reviewer", "none"}
+)
 PROVIDER_CHOICES = tuple(sorted((*PROVIDER_DIRS, *EXTERNAL_DISPATCH_PROVIDERS)))
 _EXTERNAL_EXECUTION_DISPOSITIONS = frozenset(
     {"explicit-read-only", "classifier-only"}
@@ -993,6 +998,7 @@ def load_role_policy(repo_root: Path) -> tuple[dict[str, Any], Path]:
         if not isinstance(realization, dict):
             raise ValueError(f"E_ROLE_POLICY_INVALID: {provider} realization")
         allowed = realization.get("allowedTaskClasses")
+        advisory = realization.get("advisoryTaskClasses", [])
         if (
             not isinstance(allowed, list)
             or len(allowed) != len(set(allowed))
@@ -1011,6 +1017,19 @@ def load_role_policy(repo_root: Path) -> tuple[dict[str, Any], Path]:
             or not realization["effortMappingLoss"]
         ):
             raise ValueError(f"E_ROLE_POLICY_INVALID: {provider} realization shape")
+        if (
+            not isinstance(advisory, list)
+            or any(not isinstance(task, str) for task in advisory)
+            or len(advisory) != len(set(advisory))
+            or any(task not in allowed for task in advisory)
+            or any(
+                task_classes[task].get("mutationClass") != "read-only"
+                for task in advisory
+            )
+        ):
+            raise ValueError(
+                f"E_ROLE_POLICY_INVALID: {provider} advisory task classes"
+            )
     return policy, path
 
 
@@ -1360,6 +1379,10 @@ def _describe_ordinary_native_role_options_in_layout(
                 "hostCapability": capability,
             }
         )
+    if not options:
+        return _ordinary_native_denied(
+            task_class, role, "E_ORDINARY_NATIVE_SELECTION_INVALID"
+        )
     profession = _profession_skill_metadata(
         repo_root, contract["role"], contract["developerInstructions"]
     )
@@ -1667,6 +1690,59 @@ def _external_dispatch_decision(
     }
 
 
+def _external_consultant_role(policy_root: Path) -> str:
+    """Derive the single advisory role from the paired external taxonomy."""
+
+    candidates = (
+        policy_root / "shared" / _EXTERNAL_ROLE_TAXONOMY_NAME,
+        policy_root / "scripts" / _EXTERNAL_ROLE_TAXONOMY_NAME,
+    )
+    taxonomy_paths = [path for path in candidates if _ordinary_file(path)]
+    if len(taxonomy_paths) != 1:
+        raise ValueError("external role taxonomy is missing or ambiguous")
+    taxonomy_path = taxonomy_paths[0]
+    metadata = taxonomy_path.lstat()
+    descriptor = os.open(
+        taxonomy_path,
+        os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0),
+    )
+    try:
+        opened = os.fstat(descriptor)
+        if (opened.st_dev, opened.st_ino, opened.st_mode) != (
+            metadata.st_dev,
+            metadata.st_ino,
+            metadata.st_mode,
+        ):
+            raise ValueError("external role taxonomy identity changed")
+        payload = os.read(descriptor, _EXTERNAL_ROLE_TAXONOMY_MAX_BYTES + 1)
+    finally:
+        os.close(descriptor)
+    if len(payload) > _EXTERNAL_ROLE_TAXONOMY_MAX_BYTES:
+        raise ValueError("external role taxonomy exceeds byte limit")
+    document = json.loads(payload.decode("utf-8", errors="strict"))
+    if (
+        not isinstance(document, dict)
+        or set(document) != {"schemaVersion", "roles"}
+        or document.get("schemaVersion") != 1
+        or not isinstance(document.get("roles"), dict)
+    ):
+        raise ValueError("external role taxonomy shape")
+    mapping = document["roles"]
+    if any(
+        not isinstance(role, str)
+        or not role
+        or lane not in _EXTERNAL_ROLE_LANES
+        for role, lane in mapping.items()
+    ):
+        raise ValueError("external role taxonomy membership")
+    consultant_roles = [
+        role for role, lane in mapping.items() if lane == "consultant"
+    ]
+    if len(consultant_roles) != 1:
+        raise ValueError("external role taxonomy consultant lane")
+    return consultant_roles[0]
+
+
 def resolve_external_dispatch(
     provider: Any,
     task_class: Any,
@@ -1709,11 +1785,18 @@ def resolve_external_dispatch(
         eligible = policy["taskRoleEligibility"].get(task_name)
         final_authorizing_role = role_name in policy["finalAuthorizingRoles"]
         independent_verification = realization["independentVerification"] is True
+        ordinary_role_admitted = isinstance(eligible, list) and role_name in eligible
+        advisory_role_admitted = False
+        if (
+            not ordinary_role_admitted
+            and task_name in realization.get("advisoryTaskClasses", [])
+        ):
+            advisory_role_admitted = role_name == _external_consultant_role(source_root)
         base_admitted = (
             isinstance(task, dict)
             and isinstance(eligible, list)
             and task_name in realization["allowedTaskClasses"]
-            and role_name in eligible
+            and (ordinary_role_admitted or advisory_role_admitted)
             and task.get("mutationClass")
             == realization["requiredMutationClass"]
             == "read-only"

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -90,45 +91,214 @@ def test_orphan_kimi_offline_policy_fails_before_target_or_transaction(
     assert "E_KIMI_OFFLINE_POLICY_ORPHAN" in capsys.readouterr().err
 
 
-def test_kimi_maintenance_modes_never_launch_provider(
+def test_kimi_launch_uses_fixed_executable_without_admission_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    owner = _load_owner()
+    home = (tmp_path / "user").resolve()
+    executable = home / ".kimi-code" / "bin" / "kimi.exe"
+    executable.parent.mkdir(parents=True)
+    executable.write_bytes(b"synthetic-kimi")
+    monkeypatch.setenv("USERPROFILE", str(home))
+
+    command, binding = owner._resolve_enrolled_kimi_launch()
+
+    assert command == [str(executable.resolve())]
+    assert binding is None
+    assert not (home / ".codex" / "orchestrarium-runtime" / "kimi").exists()
+
+
+def test_kimi_missing_fixed_executable_has_actionable_unavailable_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    owner = _load_owner()
+    home = (tmp_path / "user").resolve()
+    home.mkdir()
+    monkeypatch.setenv("USERPROFILE", str(home))
+
+    with pytest.raises(ValueError, match="^E_KIMI_EXECUTABLE_UNAVAILABLE:"):
+        owner._resolve_enrolled_kimi_launch()
+
+    assert not (home / ".codex" / "orchestrarium-runtime" / "kimi").exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows junction contract")
+def test_kimi_launch_follows_fixed_path_junction_without_enrollment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    owner = _load_owner()
+    home = (tmp_path / "user").resolve()
+    home.mkdir()
+    physical = (tmp_path / "physical-kimi-home").resolve()
+    executable = physical / "bin" / "kimi.exe"
+    executable.parent.mkdir(parents=True)
+    executable.write_bytes(b"synthetic-kimi")
+    junction = home / ".kimi-code"
+    result = subprocess.run(
+        ["cmd.exe", "/d", "/c", "mklink", "/J", str(junction), str(physical)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    if result.returncode != 0:
+        pytest.skip(f"junction unavailable: {result.stderr.strip()}")
+    monkeypatch.setenv("USERPROFILE", str(home))
+
+    command, binding = owner._resolve_enrolled_kimi_launch()
+
+    assert command == [str(executable)]
+    assert binding is None
+    assert not (home / ".codex" / "orchestrarium-runtime" / "kimi").exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows file-symlink contract")
+def test_kimi_launch_keeps_profile_after_fixed_file_symlink_resolves_to_renamed_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    owner = _load_owner()
+    home = (tmp_path / "user").resolve()
+    link = home / ".kimi-code" / "bin" / "kimi.exe"
+    link.parent.mkdir(parents=True)
+    target = (tmp_path / "physical" / "current-kimi-client.exe").resolve()
+    target.parent.mkdir()
+    target.write_bytes(b"synthetic-kimi")
+    try:
+        link.symlink_to(target)
+    except OSError as exc:
+        pytest.skip(f"file symlink unavailable: {exc}")
+    monkeypatch.setenv("USERPROFILE", str(home))
+
+    command, binding = owner._resolve_enrolled_kimi_launch()
+
+    assert command == [str(target)]
+    assert binding is None
+    assert owner.provider_windows_argv_profile_id("kimi", target) == (
+        owner.KIMI_WINDOWS_PROFILE_V1.profile_id
+    )
+
+
+def test_kimi_readiness_diagnostic_checks_version_and_required_help_flags(
+    tmp_path: Path,
+) -> None:
+    owner = _load_owner()
+    home = (tmp_path / "user").resolve()
+    executable = home / ".kimi-code" / "bin" / "kimi.exe"
+    executable.parent.mkdir(parents=True)
+    executable.write_bytes(b"synthetic-kimi")
+    calls: list[tuple[str, ...]] = []
+
+    def probe(resolution, argv: tuple[str, ...]) -> bytes:
+        assert resolution.command == (str(executable.resolve()),)
+        calls.append(argv)
+        if argv == ("--version",):
+            return b"0.42.0\n"
+        return b"--agent-file --skills-dir --model --output-format --prompt\n"
+
+    command = owner._diagnose_kimi_readiness(home, probe_runner=probe)
+
+    assert command == [str(executable.resolve())]
+    assert calls == [("--version",), ("--help",)]
+
+
+def test_kimi_maintenance_aliases_share_one_nonwriting_readiness_diagnostic(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    owner = _load_owner()
+    home = (tmp_path / "user").resolve()
+    runtime = (tmp_path / "runtime-must-stay-absent").resolve()
+    observed: list[Path] = []
+
+    def diagnose(selected_home: Path) -> list[str]:
+        observed.append(selected_home)
+        return [str(selected_home / ".kimi-code" / "bin" / "kimi.exe")]
+
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setattr(owner, "_diagnose_kimi_readiness", diagnose, raising=False)
+    monkeypatch.setattr(
+        owner,
+        "launch",
+        lambda *_args, **_kwargs: pytest.fail("maintenance reached provider launch"),
+    )
+
+    assert owner.kimi_main(["--enroll-executable"]) == 0
+    assert owner.kimi_main(["--replace-kimi-enrollment"]) == 0
+    assert owner.kimi_main(["--verify-enrollment"]) == 0
+    assert observed == [home, home, home]
+    assert not runtime.exists()
+    assert not (home / ".codex" / "orchestrarium-runtime" / "kimi").exists()
+    output = capsys.readouterr().out
+    assert output.count("KIMI-EXECUTABLE-READINESS: PASS") == 3
+    assert "ENROLLMENT" not in output
+    assert "REPLACEMENT" not in output
+
+    with pytest.raises(ValueError, match="^E_KIMI_OFFLINE_POLICY_OBSOLETE$"):
+        owner.enroll_kimi_executable(
+            home,
+            runtime,
+            dry_run=False,
+            offline_policy="24h",
+        )
+    assert observed == [home, home, home]
+    assert not runtime.exists()
+
+
+def test_kimi_help_is_local_and_never_enters_policy_or_provider_launch(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     owner = _load_owner()
-    enrolled: list[tuple[Path, Path, bool]] = []
-    replaced: list[tuple[Path, Path, bool]] = []
-    verified = [False]
+    monkeypatch.setattr(
+        owner,
+        "launch",
+        lambda *_args, **_kwargs: pytest.fail("help reached provider launch"),
+    )
 
-    def enroll(home: Path, runtime_root: Path, *, dry_run: bool) -> None:
-        enrolled.append((home, runtime_root, dry_run))
+    assert owner.kimi_main(["--help"]) == 0
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert "usage: invoke-kimi-prompt.py" in captured.out
+    assert "--prompt-file" in captured.out
+    assert "kimi-code/k3" in captured.out
 
-    def replace(home: Path, runtime_root: Path, *, dry_run: bool) -> None:
-        replaced.append((home, runtime_root, dry_run))
 
-    def verify() -> list[str]:
-        verified[0] = True
-        return [r"C:\fixed\kimi.exe"]
+def test_provider_owner_accepts_current_35_role_taxonomy() -> None:
+    owner = _load_owner()
 
-    def forbidden_launch(_provider: str, _argv: list[str]) -> int:
-        raise AssertionError("maintenance mode reached provider launch")
+    roles, reviewers, workers, unsupported = owner._external_role_taxonomy()
 
-    monkeypatch.setattr(owner, "enroll_kimi_executable", enroll)
-    monkeypatch.setattr(owner, "replace_kimi_enrollment", replace)
-    monkeypatch.setattr(owner, "verify_kimi_enrollment", verify)
-    monkeypatch.setattr(owner, "launch", forbidden_launch)
+    assert len(roles) == 35
+    assert "scientific-software-engineer" in roles
+    assert reviewers | workers | unsupported | {"consultant"} == roles
 
-    assert owner.kimi_main(["--enroll-executable"]) == 0
-    assert len(enrolled) == 1
-    assert enrolled[0][0].is_absolute()
-    assert enrolled[0][1].name == "kimi"
-    assert enrolled[0][2] is False
-    assert owner.kimi_main(["--replace-kimi-enrollment"]) == 0
-    assert len(replaced) == 1
-    assert replaced[0][0].is_absolute()
-    assert replaced[0][1].name == "kimi"
-    assert replaced[0][2] is False
-    assert owner.kimi_main(["--verify-enrollment"]) == 0
-    assert verified == [True]
-    assert "KIMI-EXECUTABLE-ENROLLMENT: PASS" in capsys.readouterr().out
+
+@pytest.mark.parametrize(
+    "document",
+    (
+        {"schemaVersion": 2, "roles": {"consultant": "consultant"}},
+        {
+            "schemaVersion": 1,
+            "roles": {"consultant": "consultant", "analyst": "invalid-lane"},
+        },
+    ),
+)
+def test_provider_owner_still_rejects_invalid_taxonomy_schema_or_lane(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    document: dict[str, object],
+) -> None:
+    owner = _load_owner()
+    source_root = tmp_path / "fixture"
+    script = source_root / "scripts" / "provider_prompt.py"
+    taxonomy = source_root / "shared" / owner.EXTERNAL_ROLE_TAXONOMY_NAME
+    script.parent.mkdir(parents=True)
+    taxonomy.parent.mkdir(parents=True)
+    script.write_text("fixture\n", encoding="utf-8")
+    payload = json.dumps(document, separators=(",", ":")).encode("utf-8")
+    taxonomy.write_bytes(payload)
+    monkeypatch.setattr(owner, "__file__", str(script))
+    monkeypatch.setattr(owner, "EXTERNAL_ROLE_TAXONOMY_SHA256", hashlib.sha256(payload).hexdigest())
+
+    with pytest.raises(ValueError, match="^E_EXTERNAL_PROVENANCE_ROLE_INVALID"):
+        owner._external_role_taxonomy()
 
 
 @pytest.mark.parametrize(
@@ -553,12 +723,16 @@ def _finalize_kimi(
     return code, payload, [notes], lifecycle
 
 
-@pytest.mark.parametrize("verdict", ("PASS", "REVISE", "BLOCKED"))
+@pytest.mark.parametrize(
+    ("verdict", "expected_exit"),
+    (("PASS", 0), ("REVISE", 0), ("BLOCKED", 1)),
+)
 def test_valid_kimi_verdicts_remain_external_nonauthorizing(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     verdict: str,
+    expected_exit: int,
 ) -> None:
     owner = _load_owner()
     code, payload, _notes, lifecycle = _finalize_kimi(
@@ -571,7 +745,7 @@ def test_valid_kimi_verdicts_remain_external_nonauthorizing(
         with_ledger=True,
     )
 
-    assert code == 0
+    assert code == expected_exit
     assert payload["gate"] == verdict
     assert payload["authorizing"] is False
     assert payload["closesRunIds"] == []
@@ -846,7 +1020,7 @@ def test_kimi_error_marker_keeps_nonpass_without_stderr_capture_metadata(
         with_ledger=True,
     )
 
-    assert code == 0
+    assert code == 1
     assert payload["token"] == "UNVERIFIED:err-markers"
     assert payload["gate"] == "none"
     assert payload["primaryOutcome"]["token"] == "UNVERIFIED:err-markers"
@@ -1019,23 +1193,6 @@ def test_kimi_profile_identifier_has_one_production_owner() -> None:
     )
     assert source.count('"kimi-sealed-bundle-text-v1"') == 1
     assert source.count('"--agent-file"') == 1
-
-
-def test_runtime_pin_is_restored_after_injected_post_enrollment_failure(
-    tmp_path: Path,
-) -> None:
-    installer = _load_installer()
-    pin = tmp_path / "runtime" / "kimi" / "executable-binding-v2.json"
-    pin.parent.mkdir(parents=True)
-    before = b'{"accepted":"prior"}\n'
-    pin.write_bytes(before)
-
-    with pytest.raises(RuntimeError, match="injected"):
-        with installer._InstallTransaction([pin], enabled=True):
-            pin.write_bytes(b'{"accepted":"new"}\n')
-            raise RuntimeError("injected post-enrollment failure")
-
-    assert pin.read_bytes() == before
 
 
 def test_kimi_transport_adds_no_second_lifecycle_or_smoke_path() -> None:

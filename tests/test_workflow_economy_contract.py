@@ -20,6 +20,14 @@ PROJECTIONS = (
     "src.codex/skills/lead/subagent-contracts.md",
     "src.claude/agents/contracts/subagent-contracts.md",
 )
+KIMI_WORKFLOW_PROJECTIONS = (
+    "src.codex/skills/lead/operating-model.md",
+    "src.claude/agents/contracts/operating-model.md",
+)
+KIMI_EXTERNAL_DISPATCH_PROJECTIONS = (
+    "src.codex/skills/lead/external-dispatch.md",
+    "src.claude/agents/contracts/external-dispatch.md",
+)
 
 DEAD_CODE_DISPOSITION_FIELD = "Dead/superseded code disposition:"
 DEAD_CODE_DISPOSITION_REQUIREMENT = "When a change supersedes a mechanism, `none` is invalid."
@@ -123,7 +131,7 @@ class TestWorkflowEconomyContract(unittest.TestCase):
             "Re-review only open finding/changed delta",
             "new defect class/material upstream revision",
             "Consultant and `$external-brigade` default off",
-            "Kimi: explicit read-only broad research/review",
+            "At a natural readiness or decision point",
             "Grok is unavailable in 1.x",
             "Quick-fix: no pre-implementation review ceremony",
             "one canonical artifact",
@@ -277,6 +285,30 @@ class TestWorkflowEconomyContract(unittest.TestCase):
                     self._read(projection),
                     "provider surface must project the shared rule without a second policy owner",
                 )
+
+    def test_kimi_advisory_selection_is_optional_and_lead_selectable(self) -> None:
+        required = (
+            "At a natural readiness or decision point",
+            "bounded independent read-only alternative view",
+            "Lead considers an advisory route and may explicitly select Kimi without waiting for a user reminder",
+            "Otherwise no Kimi call or skip record is required",
+            "never enters `auto` or creates a gate or counter",
+            "current availability or quota claims require evidence",
+            "wrapper-only fixed `kimi-code/k3`",
+            "independently verified, nonauthorizing",
+        )
+        for relative in (SPINE, *KIMI_WORKFLOW_PROJECTIONS):
+            text = self._read(relative)
+            with self.subTest(relative=relative):
+                for fragment in required:
+                    self.assertIn(fragment, text)
+
+        selector = "Explicit user or Lead override may choose Kimi"
+        for relative in (*KIMI_WORKFLOW_PROJECTIONS, *KIMI_EXTERNAL_DISPATCH_PROJECTIONS):
+            text = self._read(relative)
+            with self.subTest(relative=relative, relation="selector"):
+                self.assertIn(selector, text)
+                self.assertNotIn("Explicit user override may choose Kimi", text)
 
     def test_methodology_defers_to_the_shared_rule(self) -> None:
         methodology = self._read(METHODOLOGY)

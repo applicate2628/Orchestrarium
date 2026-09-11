@@ -47,6 +47,17 @@ def run_cli(*args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+def run_cli_separate_streams(*args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, str(SCRIPT), *args],
+        cwd=ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+
+
 def run_state_validator(work_item: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, str(STATE_VALIDATOR), "--work-item", str(work_item)],
@@ -884,6 +895,186 @@ def test_supersede_current_bug_requires_exact_accepted_successor_binding_without
         assert tree_file_bytes(root / "work-items") == before, case
         assert source.is_file(), case
         assert successor.read_bytes() == successor_before, case
+
+
+def _supersede_current_bug_cli_fixture(
+    module,
+    root: Path,
+    slug: str,
+    operation_id: str,
+) -> tuple[list[str], Path, Path, Path]:
+    source = seed_context_bug(root, "source-owner", slug)
+    successor = root / "receiving-registry" / "accepted-successor.md"
+    successor_bytes = b"id: accepted-successor\nstatus: accepted\n"
+    successor.parent.mkdir(parents=True)
+    successor.write_bytes(successor_bytes)
+    module.refresh_readme(root, allow_marker_bootstrap=True)
+    readme = root / "work-items" / "README.md"
+    binding = successor_binding_bytes(slug, successor_bytes, operation_id)
+    binding_file = root / "input" / "successor-binding.json"
+    inventory_file = root / "input" / "incoming-links.json"
+    binding_file.parent.mkdir(parents=True)
+    binding_file.write_bytes(binding)
+    inventory_file.write_bytes(
+        successor_link_inventory_bytes(
+            slug, source.read_bytes(), binding, operation_id
+        )
+    )
+    return (
+        [
+            "supersede-current-bug",
+            "--root",
+            str(root),
+            "--slug",
+            slug,
+            "--successor-record",
+            str(successor),
+            "--successor-binding-file",
+            str(binding_file),
+            "--terminal-instant",
+            "2026-09-10T08:05:00Z",
+            "--incoming-links-inventory",
+            str(inventory_file),
+            "--expected-bug-sha256",
+            hashlib.sha256(source.read_bytes()).hexdigest(),
+            "--expected-readme-sha256",
+            hashlib.sha256(readme.read_bytes()).hexdigest(),
+            "--operation-id",
+            operation_id,
+            "--apply",
+        ],
+        source,
+        binding_file,
+        successor,
+    )
+
+
+def test_supersede_current_bug_cli_projects_failure_output_without_caller_content(
+    tmp_path: Path,
+) -> None:
+    cases = (
+        (
+            "duplicate-token-key",
+            "SYNTHETIC_TOKEN_LIKE_sk_FAKE_6f3d9a0c",
+            "duplicate",
+            "WI-BUG-SUCCESSOR-BINDING: current bug supersession rejected\n",
+        ),
+        (
+            "duplicate-log-key",
+            "SYNTHETIC_RAW_LOG_2026-09-10T08_30_00Z_ERROR_5b72c1e4",
+            "duplicate",
+            "WI-BUG-SUCCESSOR-BINDING: current bug supersession rejected\n",
+        ),
+        (
+            "missing-path",
+            "SYNTHETIC_MACHINE_LOCAL_PATH_91e7c4ab",
+            "missing",
+            "WI-IO: required current bug supersession input could not be read\n",
+        ),
+        (
+            "malformed-control",
+            "SYNTHETIC_MALFORMED_CONTROL_2dc848ae",
+            "malformed",
+            "WI-BUG-SUCCESSOR-BINDING: current bug supersession rejected\n",
+        ),
+    )
+    for case, sentinel, mode, expected_stdout in cases:
+        module = load_module()
+        root = tmp_path / case
+        slug = f"2026-09-10-{case}-failure-output"
+        operation_id = f"failure-output-{case}"
+        argv, source, binding_file, successor = _supersede_current_bug_cli_fixture(
+            module, root, slug, operation_id
+        )
+        if mode == "duplicate":
+            valid = binding_file.read_bytes()
+            binding_file.write_bytes(
+                (f'{{"{sentinel}":"first","{sentinel}":"second",').encode()
+                + valid[1:]
+            )
+        elif mode == "missing":
+            missing = root / "missing-input" / sentinel / "successor-binding.json"
+            argv[argv.index(str(binding_file))] = str(missing)
+        else:
+            binding_file.write_bytes(b"{" + sentinel.encode("ascii"))
+        before = tree_file_bytes(root)
+
+        result = run_cli_separate_streams(*argv)
+
+        assert result.returncode == 1, case
+        assert result.stdout == expected_stdout, case
+        assert result.stderr == "", case
+        assert sentinel not in result.stdout, case
+        assert sentinel not in result.stderr, case
+        assert tree_file_bytes(root) == before, case
+        assert source.is_file(), case
+        assert successor.is_file(), case
+        assert not list((root / "work-items" / "bugs").glob("archive/*/*.md")), case
+        assert not list(root.rglob("*.supersession-receipt.json")), case
+        assert not (
+            root
+            / ".scratch"
+            / "work-items-lifecycle-transitions"
+            / f"{operation_id}.json"
+        ).exists(), case
+
+
+def test_supersede_current_bug_main_projects_unexpected_exception_and_preserves_controls(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    root = tmp_path / "unexpected"
+    argv, _source, _binding_file, _successor = _supersede_current_bug_cli_fixture(
+        module,
+        root,
+        "2026-09-10-unexpected-failure-output",
+        "failure-output-unexpected",
+    )
+    marker = "SYNTHETIC_UNEXPECTED_RUNTIME_MARKER_7c91e2"
+    output = io.StringIO()
+    error = io.StringIO()
+    with patch.object(
+        module,
+        "supersede_current_bug",
+        side_effect=RuntimeError(marker),
+    ), redirect_stdout(output), redirect_stderr(error):
+        assert module.main(argv) == 1
+    assert output.getvalue() == (
+        "WI-BUG-SUPERSESSION-UNEXPECTED: "
+        "current bug supersession failed unexpectedly\n"
+    )
+    assert error.getvalue() == ""
+    assert marker not in output.getvalue()
+    assert "Traceback" not in output.getvalue()
+
+    for interruption in (
+        KeyboardInterrupt("synthetic keyboard interruption"),
+        asyncio.CancelledError("synthetic cancellation"),
+    ):
+        output = io.StringIO()
+        error = io.StringIO()
+        with patch.object(
+            module,
+            "supersede_current_bug",
+            side_effect=interruption,
+        ), redirect_stdout(output), redirect_stderr(error):
+            with unittest.TestCase().assertRaises(type(interruption)) as caught:
+                module.main(argv)
+        assert caught.exception is interruption
+        assert output.getvalue() == ""
+        assert error.getvalue() == ""
+
+    detailed = "other command retains its detailed diagnostic"
+    output = io.StringIO()
+    error = io.StringIO()
+    with patch.object(
+        module,
+        "refresh_readme",
+        side_effect=module.LifecycleError("WI-README-STALE", detailed),
+    ), redirect_stdout(output), redirect_stderr(error):
+        assert module.main(["refresh", "--root", str(root)]) == 1
+    assert output.getvalue() == f"WI-README-STALE: {detailed}\n"
+    assert error.getvalue() == ""
 
 
 def test_supersede_current_bug_rejects_unreadable_live_reference_consumers_without_mutation(

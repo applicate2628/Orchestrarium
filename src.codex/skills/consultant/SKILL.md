@@ -136,7 +136,7 @@ Do not invoke for:
   - **Prompt form:** <blind-options | critique-of-choice | not-applicable: reason>
   - **Inputs consumed:** <artifacts/files used, such as canonical brief, design decision id, or diff range>
   - **Deviation reason:** <none | external unavailable: [reason]>
-  - **Provider boundary:** Kimi is explicit-only Windows-enrolled read-only no-tools bundle review, independently verified and nonauthorizing; Grok remains unavailable in 1.x and must never be selected, resolved, executed, or recorded as a provenance provider.
+  - **Provider boundary:** Kimi is explicit-only Windows read-only work through the canonical fixed `kimi-code/k3` file-prompt/no-tools wrapper, independently verified and nonauthorizing; Grok remains unavailable in 1.x and must never be selected, resolved, executed, or recorded as a provenance provider.
 - Every consultant memo must end with an explicit continuation section:
   - **Continuation prompt:** one ready-to-send second prompt that can be used verbatim to continue the work.
   - The continuation prompt must begin with a direct imperative to continue, for example `Continue working:` or `Proceed with the next batch:`.
@@ -162,7 +162,7 @@ Check the selected provider first:
 
 - Codex path: `codex`
 - Claude path: `claude` (macOS/Linux) or `claude.exe` / `claude.cmd` (Windows)
-- Kimi path: the approved canonical `invoke-kimi-prompt` wrapper after explicit Windows enrollment
+- Kimi path: the approved canonical `invoke-kimi-prompt` wrapper
 
 If `.agents/.agents-mode.yaml` selects Claude and contains `externalClaudeProfile`, map it as follows:
 

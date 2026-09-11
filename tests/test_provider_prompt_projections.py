@@ -437,6 +437,19 @@ def _linked_global_claude(
     return logical, backing
 
 
+def _linked_global_canonical_agents(tmp_path: Path, home: Path) -> tuple[Path, Path]:
+    logical = home / ".agents"
+    backing_parent = tmp_path / "OneDrive - operator"
+    backing_parent.mkdir()
+    backing = backing_parent / "canonical-agents"
+    shutil.move(str(logical), str(backing))
+    try:
+        os.symlink(backing, logical, target_is_directory=True)
+    except (NotImplementedError, OSError) as exc:
+        pytest.skip(f"directory symlink unavailable: {exc}")
+    return logical, backing
+
+
 def _fixture(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
     source = tmp_path / "source"
     canonical = tmp_path / "canonical" / "scripts"
@@ -736,6 +749,99 @@ def test_global_scope_accepts_installer_authorized_linked_claude_agents(
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert '"projections":["canonical","claude-host"]' in result.stdout
+
+
+def test_global_scope_accepts_installer_authorized_linked_canonical_agents(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    installer = _load_installer()
+    logical_claude, _claude_backing = _linked_global_claude(
+        tmp_path, monkeypatch, installer
+    )
+    _logical_agents, _agents_backing = _linked_global_canonical_agents(
+        tmp_path, logical_claude.parent
+    )
+
+    result = _run_scoped_validator("global", ROOT, logical_claude.parent)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert '"projections":["canonical","claude-host"]' in result.stdout
+
+
+def test_installed_validator_bootstraps_pinned_authority_through_linked_canonical_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    installer = _load_installer()
+    logical_claude, _claude_backing = _linked_global_claude(
+        tmp_path, monkeypatch, installer
+    )
+    logical_agents, agents_backing = _linked_global_canonical_agents(
+        tmp_path, logical_claude.parent
+    )
+    installed_validator = (
+        agents_backing
+        / "skills"
+        / "lead"
+        / "scripts"
+        / "validate-provider-prompt-projections.py"
+    )
+    shutil.copyfile(VALIDATOR_PATH, installed_validator)
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(
+                logical_agents
+                / "skills"
+                / "lead"
+                / "scripts"
+                / "validate-provider-prompt-projections.py"
+            ),
+            "--require",
+            "--scope",
+            "global",
+            "--source-root",
+            str(ROOT),
+            "--install-root",
+            str(logical_claude.parent),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env=os.environ.copy(),
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert '"projections":["canonical","claude-host"]' in result.stdout
+
+
+def test_global_scope_rejects_linked_leaf_below_authorized_canonical_agents_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    installer = _load_installer()
+    logical_claude, _claude_backing = _linked_global_claude(
+        tmp_path, monkeypatch, installer
+    )
+    _logical_agents, agents_backing = _linked_global_canonical_agents(
+        tmp_path, logical_claude.parent
+    )
+    leaf = agents_backing / "skills" / "lead" / "scripts" / TRANSPORT_FILES[0]
+    replacement = tmp_path / "linked-canonical-provider-prompt.py"
+    shutil.copyfile(leaf, replacement)
+    leaf.unlink()
+    try:
+        os.symlink(replacement, leaf)
+    except (NotImplementedError, OSError) as exc:
+        pytest.skip(f"file symlink unavailable: {exc}")
+
+    result = _run_scoped_validator("global", ROOT, logical_claude.parent)
+
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert result.stderr.startswith(
+        "E_TRANSPORT_PROJECTION_PARITY: "
+        "canonical/provider_prompt.py linked runtime authority"
+    )
 
 
 def test_linked_runtime_subroots_helper_is_pinned_to_canonical_digest() -> None:

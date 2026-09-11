@@ -42,11 +42,13 @@ If the trigger does not apply, record the evidence that the boundary remains ins
 - Include a named **Diff-invisible invariants** list: pre-existing behavioral couplings endangered by the declared change surface (timing, ordering, lifecycle, shared state, or render/layout passes), each with a **Named regression guard** containing an executable test or probe and its expected result. `none` is valid only with a one-line reason.
 - When the design changes an external contract or persisted schema/state, name the migration strategy, including expand-contract phasing, the backward-compatibility window, and rollback of already-migrated state. Otherwise state `no contract/persisted-state change`; silence while a contract changes is `REVISE`.
 - For every named failure mode, name the observable signal — log or event id, metric, or status code — that distinguishes it from neighboring failure modes. A failure mode without an observable discriminator is `REVISE`.
+- Before `Design PASS`, walk one producer serialization through the exact consumer signature and validation: state the literal wire shape and field order, the owner of every required field, an acyclic provenance dependency graph, and every unresolved input with the dependent work it blocks. For an existing producer, include one actual serialized sample. For an entirely new format, include one explicitly proposed representative specimen and never present it as production data or runtime proof.
 
 ## Gate
 
 - The design is traceable to accepted research facts and constraints, or to the accepted inputs and unresolved choice that triggered the bounded early route.
 - For a bounded early package, the decision, owner, seam, protected surface, material-alternative disposition, and falsifying probe are explicit. For a full package, alternatives, interfaces, extension seams, dependency direction, expected blast radius, failure modes, observability, and test strategy are explicit.
+- The design-readiness walk is complete; unresolved inputs block only their dependent work, not unrelated ready work.
 - Contract and persisted-state migration impact is explicit, and every failure mode has an observable discriminator.
 - Every cross-cutting / long-lived decision in the claims section carries a `work-items/decisions/` id (you author it as `status: proposed`); a local single-work-item decision stays inline in `design.md`.
 - No implementation code is included.
@@ -56,6 +58,7 @@ If the trigger does not apply, record the evidence that the boundary remains ins
 
 - Prefer the smallest durable design that satisfies the validated requirements.
 - Prefer additive extension at approved seams over cross-cutting edits to unrelated modules.
+- Hand off a ready decision before optional prose polishing.
 - Document rejected options when they materially affect future work. Each rejected alternative names its decisive rejection driver and traces it to a research-memo fact or named constraint; an unverifiable driver is `ASSUMPTION (UNVERIFIED)` with the probe that would resolve it.
 - When the design makes a cross-cutting or long-lived architecture decision (one that outlives this work-item or constrains others), file it in the `work-items/decisions/` registry as `status: proposed` (lead skill `## Decisions`) and REFERENCE it by id from this design package, rather than burying it in a `design.md` that will be archived with the item. Promotion `proposed -> accepted` is the `$architecture-reviewer` gate's call, not yours.
 - Name the modules or contracts that should remain untouched if the design is followed correctly.

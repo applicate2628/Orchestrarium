@@ -166,7 +166,7 @@
     },
     "analyst": {
       "defaultProfile": "balanced-high",
-      "allowedProfiles": ["balanced-high", "frontier-high", "frontier-xhigh", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
+      "allowedProfiles": ["balanced-medium", "balanced-high", "frontier-high", "frontier-xhigh", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
     },
     "planner": {
       "defaultProfile": "balanced-high",
@@ -345,6 +345,7 @@
       "modelTier": "model-only",
       "effort": "unsupported",
       "allowedTaskClasses": ["exploration", "planning", "review"],
+      "advisoryTaskClasses": ["planning"],
       "requiredMutationClass": "read-only",
       "independentVerification": true,
       "executionDisposition": "explicit-read-only",

@@ -12,7 +12,7 @@ Reference for routing, interaction types, periodic controls, and role aliases. R
 
 ## Workflow economy projection
 
-Apply the binding shared **Workflow economy (binding)** rule. This Claude projection adds no default review, consultant, or external-brigade fan-out unless evidence, explicit user/configuration intent, or a documented risk trigger admits it. Kimi may be selected explicitly only for read-only research/review with independent verification and nonauthorizing results; Grok remains disabled and non-executing in 1.x. Preserve every template-required security, performance, or geometry role and the human publication/leak-check gate.
+Apply the binding shared **Workflow economy (binding)** rule. This Claude projection adds no default review, consultant, or external-brigade fan-out unless evidence, explicit user/configuration intent, or a documented risk trigger admits it. At a natural readiness or decision point, if a bounded independent read-only alternative view would materially reduce unresolved ambiguity or compare consequential options, Lead considers an advisory route and may explicitly select Kimi without waiting for a user reminder. Otherwise no Kimi call or skip record is required. Selection never enters `auto` or creates a gate or counter; current availability or quota claims require evidence, and the existing wrapper-only fixed `kimi-code/k3`, no-tools, read-only, independently verified, nonauthorizing contract remains. Grok remains disabled and non-executing in 1.x. Preserve every template-required security, performance, or geometry role and the human publication/leak-check gate.
 
 ## Template-based routing
 
@@ -50,7 +50,7 @@ When the main conversation (holding the Lead role) needs to decide between roles
 - Before marking a batch or final answer complete, reconcile the current result against the original request, accepted scope, required checks, canonical-source updates, and any open obligations.
 - Do not treat a partial sub-batch as completion when a known required next action still exists inside the admitted scope.
 - A full-impact review or verification pass remains open until a review artifact is produced; side clarification may refine the review, but does not close or replace it.
-- Do not begin install validation, commit, push, publication, or equivalent closeout work while a primary review or verification task remains open unless the user explicitly parks, cancels, or reprioritizes that task.
+- When an independently verified scope is accepted, Lead creates a timely local Git commit checkpoint if the scope is coherent and separable, staging only that scope. Any open gate blocks its dependent changes; unrelated ready work and eligible checkpoints continue. The checkpoint preserves evidence and is neither completion nor publication. Human review, leak checking, and explicit publication authority still govern push and release.
 
 ## External adapter routing
 
@@ -63,7 +63,7 @@ Claude-line keeps one shared local config file at `.claude/.agents-mode.yaml`.
 - `mcpMode: auto` allows MCP use by judgment when appropriate; `force` makes relevant MCP use an explicit standing instruction.
 - `preferExternalWorker: true` prefers `$external-worker` for eligible worker-side slots.
 - `preferExternalReviewer: true` prefers `$external-reviewer` for eligible review and QA-side slots.
-- `externalProvider: auto` resolves by the active named production priority profile instead of a host-line default; shipped `auto` uses the Codex/Claude pair only. Explicit user override may choose Kimi for a policy-admitted read-only research/review lane; the fixed Kimi transport remains independently verified and nonauthorizing. Grok remains unavailable and must not be launched or probed in 1.x.
+- `externalProvider: auto` resolves by the active named production priority profile instead of a host-line default; shipped `auto` uses the Codex/Claude pair only. Explicit user or Lead override may choose Kimi for a policy-admitted read-only research/review lane; the fixed Kimi transport remains independently verified and nonauthorizing. Grok remains unavailable and must not be launched or probed in 1.x.
 - The Claude-line canonical schema may include the shared `externalModelMode` and `externalCodexProfile`; `externalClaudeProfile` remains Codex-line only.
 - The team template JSON does not change; routing substitutions happen at execution time.
 - `Assigned role` in provenance names the internal role being replaced; it does not narrow the adapter to only one profession.
@@ -152,6 +152,7 @@ These pairings are not derivable from classification alone — lead must know th
 
 | Work type | Design role | Implementation role | QA / Review |
 | --- | --- | --- | --- |
+| Scientific modeling / numerical methods | `$computational-scientist (model)` | `$scientific-software-engineer` | `$computational-scientist (scientific-conformance-review; independent run)` + `$qa-engineer` |
 | Scientific / data visualization | `$computational-scientist` | `$visualization-engineer` | `$qa-engineer` |
 | Geometry / spatial computation | `$computational-scientist` | `$geometry-engineer` | `$qa-engineer` + `$architecture-reviewer` |
 | Qt model-view heavy | — | `$model-view-engineer` | `$qa-engineer` + `$ui-test-engineer` (both) |
@@ -169,7 +170,7 @@ Composition is sequential, not competing: design-panel generates and synthesizes
 
 ## How to instruct reviewers
 
-**Claim-Verify**: pass the claims list from the builder's artifact. Tell the reviewer: *"Verify each claim against the artifact. Also identify any risk surfaces not covered by any claim."*
+**Claim-Verify**: when an accepted Architect or domain artifact has numbered `{ guarantee, single-owner, enforcement-probe }` claims, pass that accepted Architect or domain artifact/revision unchanged in `Approved inputs` to implementation and review. The implementer does not author, reorder, replace, or become owner of those claims; it maps each upstream claim number to its implementation surface and observed evidence/result. Give the reviewer the upstream claims and implementation evidence side by side, plus the accepted constraints and claim identity needed for independent challenge, without requiring the entire unused design prose. Missing or changed claims return `REVISE` to their Architect or domain owner. No upstream claims means no synthetic claim set; use the accepted criteria and named regression guard. Tell the reviewer: *"Verify each claim against the implementation evidence. Also identify any risk surfaces not covered by any claim."*
 
 **Adversarial**: pass the implementation artifact only. Tell the reviewer: *"Do not read the upstream design package. Assume an adversary with full knowledge of the implementation. Find the three highest-probability failure or attack vectors and show the exact mechanism for each."*
 

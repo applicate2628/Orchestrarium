@@ -177,7 +177,7 @@ Notes:
 - Any spawned internal subagent is still an internal execution path. For `$external-worker` and `$external-reviewer`, `external` means the real provider CLI or approved transport wrapper only.
 - `auto` uses the active named production provider-order profile and must not silently self-bounce into the same provider line.
 - Explicit-only Kimi and unavailable Grok must not appear in shipped or repo-local `auto` production profiles.
-- Grok policy resolution is non-executing. Kimi execution requires its explicit Windows enrollment and sealed bundle transport; neither provider is selected by `auto`.
+- Grok policy resolution is non-executing. Kimi execution requires explicit selection and the canonical fixed `kimi-code/k3` file-prompt/no-tools wrapper; it does not require executable enrollment, and neither provider is selected by `auto`.
 - An `external-required` resolver result means only that the named task and role meet the policy classifier. It is not executable availability and must not cause prompt reading, launcher preparation, probing, or a provider process.
 - Explicit self-provider selection is allowed only as an override for isolation, profile, transport, or an intentionally independent rerun — and NOT for the consultant lane, which always requires a model different from the orchestrator's own (a same-model consultant is the orchestrator echoing itself; see the consultant role's different-model rule).
 - `reserve` is a symbolic supplemental profile candidate for advisory/review lanes only. It is independent of primary `claude` and `codex`, appears after them in shipped advisory/review orders, and is not a scalar `externalProvider` value.
@@ -225,7 +225,7 @@ externalPriorityProfiles:
 Guardrails:
 - Keep the nesting capped at `profile -> lane -> ordered provider list`.
 - Provider names in production worker `auto` profiles are limited to the Codex/Claude pair; advisory and review profiles may additionally include `reserve` as the last supplemental candidate.
-- Kimi requires explicit global Windows enrollment and is not a profile entry; Grok remains an unavailable policy classifier and is not a profile entry.
+- Kimi is explicit-only, uses the canonical Windows wrapper without prior executable enrollment, and is not a profile entry; Grok remains an unavailable policy classifier and is not a profile entry.
 - These structured blocks are the approved multi-line exception to older flat one-key-per-line guidance and should be preserved verbatim by update tools.
 
 Recommended shipped profiles:

@@ -37,6 +37,21 @@ def digest(raw: bytes) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
+def active_status(task: str) -> bytes:
+    return (
+        "---\n"
+        "template: quick-fix\n"
+        "status: active\n"
+        "started: 2026-09-10T00:00:00Z\n"
+        "updated: 2026-09-10T00:00:00Z\n"
+        "---\n\n"
+        f"- **Task**: {task}\n"
+        "- **Current step**: Exercise H1 relocation.\n"
+        "- **Last result**: H1 activation is complete.\n"
+        "- **Next action**: Run the lifecycle oracle.\n"
+    ).encode("utf-8")
+
+
 def tree_state(root: Path):
     files = {
         path.relative_to(root).as_posix(): path.read_bytes()
@@ -175,6 +190,380 @@ def test_apply_dry_run_receipt_last_and_exact_replay(tmp_path: Path) -> None:
     assert replay["replay"] is True
     assert replay["byteInventory"] == {}
     assert tree_state(root) == after
+
+
+def archive_first_activated_h1_member(root: Path):
+    writer, reader, request, items, paths = fixture(root)
+    for index, item in enumerate(items, start=1):
+        (item / "status.md").write_bytes(active_status(f"Relocate H1 member {index}."))
+    writer.apply_sealed_prefix_activation(root, request)
+
+    source = items[0]
+    terminal_instant = "2026-09-10T01:00:00Z"
+    operation_id = "h1-relocation-member-a"
+    successor_slug = "reader-a-successor"
+    (source / "bug-dispositions.json").write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "workItem": source.name,
+                "closedAt": terminal_instant,
+                "bugs": [],
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    writer.refresh_readme(root, allow_marker_bootstrap=True)
+    obligation_states = []
+    source_errors = reader.validate_work_item(
+        source,
+        strict_revise=False,
+        obligation_state_out=obligation_states,
+    )
+    assert source_errors == []
+    assert len(obligation_states) == 1
+    assert obligation_states[0].open_launches == ()
+    transfer = {
+        "schemaVersion": 1,
+        "sourceWorkItem": source.name,
+        "successorWorkItem": successor_slug,
+        "expectedSourceLedgerSha256": digest((source / "agent-runs.jsonl").read_bytes()),
+        "obligations": [
+            {
+                "runId": row.run_id,
+                "rawLineOrdinal": row.raw_line_ordinal,
+                "rawLineSha256": row.raw_line_sha256,
+                "rawEventSha256": row.raw_event_sha256,
+                "projectedEventSha256": row.projected_event_sha256,
+            }
+            for row in obligation_states[0].open_revise
+        ],
+    }
+    closure = (
+        f"Closed: {terminal_instant}\n"
+        "Outcome: Transferred the H1 participant obligation.\n"
+        "Evidence: focused two-member relocation test\n"
+        "Residual risk: None in fixture.\n"
+    ).encode("utf-8")
+    successor = (
+        "Task: Continue the H1 participant obligation.\n"
+        f"Continues: {source.name}\n"
+        f"Obligation-transfer: {operation_id}\n"
+        "Next action: Resolve the inherited review finding.\n"
+        f"updated: {terminal_instant}\n"
+    ).encode("utf-8")
+
+    receipt = writer.archive_with_successor(
+        root,
+        source.name,
+        closure,
+        terminal_instant,
+        successor_slug,
+        successor,
+        operation_id,
+        transfer["expectedSourceLedgerSha256"],
+        digest((root / "work-items" / "README.md").read_bytes()),
+        obligation_transfer_data=json.dumps(transfer, sort_keys=True).encode("utf-8"),
+    )
+    return writer, reader, items, paths, receipt
+
+
+def test_archive_one_activated_h1_member_keeps_remaining_member_valid(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "relocation"
+    _writer, reader, items, paths, receipt = archive_first_activated_h1_member(root)
+
+    contexts = reader._load_effective_ledger_group(root)
+    remaining_errors = reader.validate_work_item(items[1], strict_revise=False)
+    assert set(contexts) == set(paths)
+    archive = root.joinpath(*receipt["archivePath"].split("/"))
+    archived_context = reader.load_effective_ledger_view(
+        root,
+        archive,
+        f"{receipt['archivePath']}/agent-runs.jsonl",
+    )
+    assert archived_context.selected_ledger_path == paths[0]
+    assert archived_context.view == contexts[paths[0]].view
+    assert not any(
+        "WI-LEDGER-COMPAT-ACTIVATION-INCOMPLETE" in error
+        for error in remaining_errors
+    )
+    candidate = items[1] / "agent-runs.jsonl.tmp"
+    candidate.write_bytes(
+        (items[1] / "agent-runs.jsonl").read_bytes()
+        + canonical(
+            {
+                "schemaVersion": 2,
+                "runId": "reader-b-candidate-suffix",
+                "workItem": items[1].name,
+                "role": "analyst",
+                "executionRole": "internal",
+                "status": "completed",
+                "gate": "none",
+                "scope": ["H1 relocation candidate suffix"],
+                "startedAt": "2026-09-10T01:01:00Z",
+                "updatedAt": "2026-09-10T01:01:01Z",
+            }
+        )
+        + b"\n"
+    )
+    candidate_errors = reader.validate_work_item(
+        items[1], ledger_path=candidate, strict_revise=False
+    )
+    assert candidate_errors == remaining_errors
+    candidate.write_bytes((items[1] / "agent-runs.jsonl").read_bytes() + b"{}\n")
+    malformed_errors = reader.validate_work_item(
+        items[1], ledger_path=candidate, strict_revise=False
+    )
+    assert malformed_errors
+    assert not any(
+        "WI-LEDGER-COMPAT-ACTIVATION-INCOMPLETE" in error
+        for error in malformed_errors
+    )
+
+
+def test_h1_reader_preserves_typed_relocation_corruption_and_duplicate_diagnostics(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "typed-relocation-failures"
+    _writer, reader, items, paths, receipt = archive_first_activated_h1_member(root)
+    archive = root.joinpath(*receipt["archivePath"].split("/"))
+    archived_ledger = archive / "agent-runs.jsonl"
+    archived_ledger_before = archived_ledger.read_bytes()
+    archived_ledger.write_bytes(archived_ledger_before + b"{}\n")
+
+    corruption_errors = reader.validate_work_item(items[1], strict_revise=False)
+
+    assert any(
+        "WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH" in error
+        and paths[0] in error
+        for error in corruption_errors
+    )
+    assert not any(
+        "WI-LEDGER-COMPAT-ACTIVATION-INCOMPLETE" in error
+        for error in corruption_errors
+    )
+    failed_group = reader._load_effective_ledger_group(root)
+    assert set(failed_group) == {paths[0]}
+    assert failed_group[paths[0]].view is None
+    assert failed_group[paths[0]].observation.failure_ids == (
+        "WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH",
+    )
+    candidate = items[1] / "agent-runs.jsonl.tmp"
+    candidate.write_bytes((items[1] / "agent-runs.jsonl").read_bytes())
+    candidate_errors = reader.validate_work_item(
+        items[1], ledger_path=candidate, strict_revise=False
+    )
+    assert any(
+        "WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH" in error
+        and paths[0] in error
+        for error in candidate_errors
+    )
+    assert not any(
+        "WI-LEDGER-COMPAT-ACTIVATION-INCOMPLETE" in error
+        for error in candidate_errors
+    )
+    archived_ledger.write_bytes(archived_ledger_before)
+    duplicate = root.joinpath(*paths[0].split("/")).parent
+    duplicate.mkdir(parents=True)
+    (duplicate / "agent-runs.jsonl").write_bytes(archived_ledger_before)
+
+    duplicate_errors = reader.validate_work_item(items[1], strict_revise=False)
+
+    assert any(
+        "WI-CATEGORY-DUAL-LOCATION" in error and paths[0] in error
+        for error in duplicate_errors
+    )
+    assert not any(
+        "WI-LEDGER-COMPAT-ACTIVATION-INCOMPLETE" in error
+        for error in duplicate_errors
+    )
+
+
+def test_h1_reader_reports_set_topology_for_missing_h1_artifacts(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "missing-h1-artifacts"
+    item = root / "work-items" / "active" / "reader-a"
+    item.mkdir(parents=True)
+    (item / "agent-runs.jsonl").write_bytes(b"{}\n")
+    h1 = root / "work-items" / "decision-h1-compatibility.json"
+    h1.write_bytes(b"{}\n")
+    logical_ledger_path = "work-items/active/reader-a/agent-runs.jsonl"
+
+    reader_fixture = load_module(
+        READER_FIXTURE_SCRIPT,
+        f"missing_h1_reader_fixture_{id(root)}",
+    )
+    context = reader_fixture.load_validator().load_effective_ledger_view(
+        root,
+        item,
+        logical_ledger_path,
+    )
+
+    assert context.observation.failure_ids == (
+        "WI-LEDGER-COMPAT-SET-TOPOLOGY",
+    )
+    assert context.observation.diagnostics == (
+        "WI-LEDGER-COMPAT-SET-TOPOLOGY: H1 participant location failed for work-items/decision-h1-compatibility.json",
+    )
+
+
+def test_archive_both_h1_members_preserves_logical_group_and_sealed_artifacts(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "both-archives"
+    writer, reader, request, items, paths = fixture(root)
+    for index, item in enumerate(items, start=1):
+        (item / "status.md").write_bytes(active_status(f"Relocate H1 member {index}."))
+    applied = writer.apply_sealed_prefix_activation(root, request)
+    with (items[0] / "agent-runs.jsonl").open("ab") as stream:
+        stream.write(
+            canonical(
+                {
+                    "schemaVersion": 2,
+                    "runId": "close-revise-a-after-seal",
+                    "workItem": items[0].name,
+                    "role": "analyst",
+                    "executionRole": "internal",
+                    "status": "completed",
+                    "gate": "PASS",
+                    "scope": ["target.md"],
+                    "artifact": "target.md",
+                    "lane": "qa",
+                    "effort": "high",
+                    "closesRunIds": ["revise-a-0001"],
+                    "evidence": [{"kind": "artifact", "ref": "target.md"}],
+                    "startedAt": "2026-09-10T02:00:00Z",
+                    "updatedAt": "2026-09-10T02:00:01Z",
+                }
+            )
+            + b"\n"
+        )
+    with (items[1] / "agent-runs.jsonl").open("ab") as stream:
+        stream.write(
+            canonical(
+                {
+                    "schemaVersion": 2,
+                    "runId": "close-launch-b-after-seal",
+                    "workItem": items[1].name,
+                    "role": "analyst",
+                    "executionRole": "internal",
+                    "status": "completed",
+                    "gate": "none",
+                    "scope": ["synthetic reader fixture"],
+                    "eventKind": "terminal",
+                    "launchRunId": "launch-b-open",
+                    "startedAt": "2026-09-10T02:00:00Z",
+                    "updatedAt": "2026-09-10T02:00:01Z",
+                }
+            )
+            + b"\n"
+        )
+    before_ledgers = {
+        path: root.joinpath(*path.split("/")).read_bytes() for path in paths
+    }
+    sealed_paths = (
+        request.h1_manifest_path,
+        request.ledger_manifest_path,
+        "work-items/legacy-ledger-projections.jsonl",
+        applied["receiptPath"],
+    )
+    sealed_hashes = {
+        path: digest(root.joinpath(*path.split("/")).read_bytes())
+        for path in sealed_paths
+    }
+    before_contexts = reader._load_effective_ledger_group(root)
+    before_views = {path: before_contexts[path].view for path in paths}
+
+    receipts = []
+    for index, (item, path) in enumerate(zip(items, paths), start=1):
+        instant = f"2026-09-10T0{index + 2}:00:00Z"
+        operation_id = f"h1-relocation-both-{index}"
+        successor_slug = f"{item.name}-successor"
+        (item / "bug-dispositions.json").write_text(
+            json.dumps(
+                {
+                    "schemaVersion": 1,
+                    "workItem": item.name,
+                    "closedAt": instant,
+                    "bugs": [],
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        writer.refresh_readme(root, allow_marker_bootstrap=True)
+        states = []
+        errors = reader.validate_work_item(
+            item, strict_revise=False, obligation_state_out=states
+        )
+        assert errors == []
+        assert len(states) == 1
+        assert states[0].open_revise == ()
+        assert states[0].open_launches == ()
+        ledger_sha256 = digest((item / "agent-runs.jsonl").read_bytes())
+        transfer = {
+            "schemaVersion": 1,
+            "sourceWorkItem": item.name,
+            "successorWorkItem": successor_slug,
+            "expectedSourceLedgerSha256": ledger_sha256,
+            "obligations": [],
+        }
+        successor = (
+            "Task: Continue after the H1 member archive.\n"
+            f"Continues: {item.name}\n"
+            f"Obligation-transfer: {operation_id}\n"
+            "Next action: Verify the relocated group.\n"
+            f"updated: {instant}\n"
+        ).encode("utf-8")
+        receipts.append(
+            writer.archive_with_successor(
+                root,
+                item.name,
+                (
+                    f"Closed: {instant}\n"
+                    "Outcome: Archived one H1 participant.\n"
+                    "Evidence: focused two-archive relocation test\n"
+                    "Residual risk: None in fixture.\n"
+                ).encode("utf-8"),
+                instant,
+                successor_slug,
+                successor,
+                operation_id,
+                ledger_sha256,
+                digest((root / "work-items" / "README.md").read_bytes()),
+                obligation_transfer_data=json.dumps(transfer, sort_keys=True).encode(
+                    "utf-8"
+                ),
+            )
+        )
+        assert not (root / "work-items" / "active" / item.name).exists()
+        assert reader.validate_work_item(
+            root.joinpath(*receipts[-1]["archivePath"].split("/")),
+            strict_revise=False,
+            validate_status_file=False,
+        ) == []
+
+    after_contexts = reader._load_effective_ledger_group(root)
+    assert set(after_contexts) == set(paths)
+    assert {path: after_contexts[path].view for path in paths} == before_views
+    assert {
+        path: digest(root.joinpath(*path.split("/")).read_bytes())
+        for path in sealed_paths
+    } == sealed_hashes
+    for path, raw, receipt in zip(paths, before_ledgers.values(), receipts):
+        archive_ledger = root.joinpath(
+            *receipt["archivePath"].split("/"), "agent-runs.jsonl"
+        )
+        assert archive_ledger.read_bytes() == raw
+        assert not root.joinpath(*path.split("/")).exists()
 
 
 @pytest.mark.parametrize(

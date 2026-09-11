@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 HELPER = ROOT / "scripts" / "install-hypothesis-hook.py"
 OBSOLETE_MARKER = "check-work-items-archival-stop"
 RETIRED_BYPASS = "[acknowledge-open-work-items]"
-REMINDER_MARKERS = frozenset(
+SHARED_REMINDER_MARKERS = frozenset(
     {
         "mcp-usage-reminder",
         "agents-mode-reminder",
@@ -27,6 +27,7 @@ REMINDER_MARKERS = frozenset(
         "turn-anchor-reminder",
     }
 )
+CODEX_REMINDER_MARKERS = SHARED_REMINDER_MARKERS | {"check-parallel-mcp-momentum"}
 SHARED_STRUCTURAL_MARKERS = frozenset(
     {
         "check-bugfix-discipline",
@@ -40,11 +41,11 @@ SHARED_STRUCTURAL_MARKERS = frozenset(
     }
 )
 EXPECTED_MARKERS = {
-    "codex": SHARED_STRUCTURAL_MARKERS | REMINDER_MARKERS,
-    "claude": SHARED_STRUCTURAL_MARKERS | REMINDER_MARKERS | {"check-typed-routing"},
+    "codex": SHARED_STRUCTURAL_MARKERS | CODEX_REMINDER_MARKERS,
+    "claude": SHARED_STRUCTURAL_MARKERS | SHARED_REMINDER_MARKERS | {"check-typed-routing"},
 }
 EXPECTED_COUNTS = {
-    "codex": (8, 12),
+    "codex": (8, 13),
     "claude": (9, 13),
 }
 CURRENT_LIFECYCLE_SURFACES = (
@@ -235,7 +236,10 @@ class TestWorkItemsLifecycleInstallParity(unittest.TestCase):
             )
             self.assertEqual(markers, EXPECTED_MARKERS[provider])
             self.assertEqual(len(markers), total_count)
-            self.assertEqual(len(markers - REMINDER_MARKERS), structural_count)
+            reminder_markers = (
+                CODEX_REMINDER_MARKERS if provider == "codex" else SHARED_REMINDER_MARKERS
+            )
+            self.assertEqual(len(markers - reminder_markers), structural_count)
 
         install = (ROOT / "INSTALL.md").read_text(encoding="utf-8")
         self.assertIn("direct-Python hook runtime", install)
@@ -248,7 +252,7 @@ class TestWorkItemsLifecycleInstallParity(unittest.TestCase):
 
         codex = (ROOT / "src.codex" / "AGENTS.codex.md").read_text(encoding="utf-8")
         self.assertIn("ships eight structural hooks", codex)
-        self.assertIn("auto-installs all twelve hook entries", codex)
+        self.assertIn("auto-installs all thirteen hook entries", codex)
         self.assertIn("Physical location owns membership", codex)
 
         claude = (ROOT / "src.claude" / "CLAUDE.md").read_text(encoding="utf-8")
@@ -266,7 +270,7 @@ class TestWorkItemsLifecycleInstallParity(unittest.TestCase):
         installer = _load_installer()
         with tempfile.TemporaryDirectory() as directory:
             temp = Path(directory)
-            for provider, expected_count in (("codex", 12), ("claude", 13)):
+            for provider, expected_count in (("codex", 13), ("claude", 13)):
                 source_root = (
                     ROOT / "src.codex" / "skills" / "lead"
                     if provider == "codex"

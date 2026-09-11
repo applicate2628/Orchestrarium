@@ -34,6 +34,7 @@ STATUS_SECTIONS = {
 APPEND_SUCCESS_MARKER = "RESULT: PASS append"
 RECOVERY_SUCCESS_MARKER = "RESULT: PASS recover-invalid-closure"
 INVALID_CURRENT_DISPOSITION_SUCCESS_MARKER = "RESULT: PASS dispose-invalid-current"
+NONCANONICAL_HISTORY_SUCCESS_MARKER = "RESULT: PASS recover-noncanonical-history"
 
 
 def load_validator():
@@ -502,6 +503,18 @@ class LedgerWriteLockError(RuntimeError):
     pass
 
 
+class LedgerNoncanonicalRecoveryError(RuntimeError):
+    def __init__(self, failure_id: str, message: str):
+        super().__init__(message)
+        self.failure_id = failure_id
+
+
+def _noncanonical_fail(failure_id: str, message: str) -> None:
+    raise LedgerNoncanonicalRecoveryError(
+        f"WI-LEDGER-NONCANONICAL-{failure_id}", message
+    )
+
+
 @contextmanager
 def ledger_write_lock(item: Path):
     """The existing per-item writer lock, reusable by the lifecycle owner."""
@@ -531,6 +544,327 @@ def ledger_write_lock(item: Path):
         lock_path.unlink(missing_ok=True)
 
 
+def _normalize_noncanonical_sha256(value: str) -> str:
+    try:
+        value.encode("ascii", errors="strict")
+    except UnicodeEncodeError:
+        _noncanonical_fail("DRIFT", "expected ledger digest is not ASCII hexadecimal")
+    if re.fullmatch(r"[0-9A-Fa-f]{64}", value, re.ASCII) is None:
+        _noncanonical_fail("DRIFT", "expected ledger digest must be SHA-256")
+    return value.lower()
+
+
+def _strict_noncanonical_inputs(operation_id: str, recorded_at: str) -> None:
+    if re.fullmatch(
+        r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", operation_id, re.ASCII
+    ) is None:
+        _noncanonical_fail("IDENTITY-BEARING", "operation id is not bounded")
+    if re.fullmatch(
+        r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z",
+        recorded_at,
+        re.ASCII,
+    ) is None:
+        _noncanonical_fail("MALFORMED", "recorded-at is not strict UTC")
+
+
+def _has_valid_v3_identity(event: dict[str, Any], validator: Any) -> bool:
+    event_id = event.get("eventId")
+    operation_id = event.get("operationId")
+    fingerprint = event.get("fingerprint")
+    prior_head = event.get("priorHead")
+    return bool(
+        isinstance(event_id, str)
+        and validator.SCRATCH_IDENTIFIER_RE.fullmatch(event_id)
+        and len(event_id) <= 128
+        and isinstance(operation_id, str)
+        and validator.SCRATCH_IDENTIFIER_RE.fullmatch(operation_id)
+        and len(operation_id) <= 128
+        and isinstance(fingerprint, str)
+        and validator.SHA256_RE.fullmatch(fingerprint)
+        and (
+            prior_head == "GENESIS"
+            or (
+                isinstance(prior_head, str)
+                and validator.SHA256_RE.fullmatch(prior_head)
+            )
+        )
+    )
+
+
+def _validate_noncanonical_history(
+    item: Path, ledger_bytes: bytes, validator: Any
+) -> tuple[dict[str, Any], ...]:
+    parse_errors: list[str] = []
+    events = validator.load_jsonl(
+        item / "agent-runs.jsonl", parse_errors, None, ledger_bytes
+    )
+    if parse_errors:
+        _noncanonical_fail("MALFORMED", "; ".join(parse_errors))
+
+    for event in events:
+        event_errors: list[str] = []
+        if validator.validate_event(dict(event), item, set(), event_errors):
+            _noncanonical_fail(
+                "CURRENT-EVENT", "history contains a current-schema-valid event"
+            )
+        schema_version = event.get("schemaVersion")
+        if schema_version in (1, 2, 3):
+            _noncanonical_fail(
+                "CURRENT-EVENT", f"history declares schemaVersion {schema_version}"
+            )
+        run_id = event.get("runId")
+        if isinstance(run_id, str) and run_id.strip() and len(run_id) >= 8:
+            _noncanonical_fail(
+                "IDENTITY-BEARING", "history contains a valid V1/V2 runId identity"
+            )
+        if _has_valid_v3_identity(event, validator):
+            _noncanonical_fail(
+                "IDENTITY-BEARING", "history contains a complete valid V3 identity"
+            )
+    return tuple(events)
+
+
+def _noncanonical_history_marker(
+    item: Path,
+    expected_sha256: str,
+    original_bytes: bytes,
+    operation_id: str,
+    recorded_at: str,
+) -> dict[str, Any]:
+    history_name = f"agent-runs.history.{expected_sha256}.jsonl"
+    return {
+        "schemaVersion": 2,
+        "runId": f"ledger-history-{operation_id}",
+        "workItem": item.name,
+        "role": "lead",
+        "executionRole": "main",
+        "status": "completed",
+        "gate": "none",
+        "scope": ["ledger-recovery:noncanonical-history-seal"],
+        "eventKind": "standalone",
+        "startedAt": recorded_at,
+        "updatedAt": recorded_at,
+        "notes": (
+            f"opaqueHistoryPath={history_name} "
+            f"opaqueHistorySha256={expected_sha256} "
+            f"opaqueHistoryBytes={len(original_bytes)} authority=none"
+        ),
+    }
+
+
+def _read_exact_history_blob(path: Path, expected_sha256: str) -> bytes | None:
+    if not path.exists():
+        return None
+    try:
+        value = path.read_bytes()
+    except OSError as exc:
+        _noncanonical_fail("HISTORY-CONFLICT", str(exc))
+    if hashlib.sha256(value).hexdigest() != expected_sha256:
+        _noncanonical_fail("HISTORY-CONFLICT", "history blob digest changed")
+    return value
+
+
+def _write_exact_staging_file(path: Path, expected: bytes) -> None:
+    if path.exists():
+        try:
+            actual = path.read_bytes()
+        except OSError as exc:
+            _noncanonical_fail("HISTORY-CONFLICT", str(exc))
+        if actual != expected:
+            _noncanonical_fail("HISTORY-CONFLICT", f"staging path conflicts: {path.name}")
+        return
+    descriptor = None
+    try:
+        descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        with os.fdopen(descriptor, "wb") as stream:
+            descriptor = None
+            stream.write(expected)
+            stream.flush()
+        if path.read_bytes() != expected:
+            _noncanonical_fail("HISTORY-CONFLICT", f"staging readback changed: {path.name}")
+    except FileExistsError:
+        if path.read_bytes() != expected:
+            _noncanonical_fail("HISTORY-CONFLICT", f"staging path conflicts: {path.name}")
+    except OSError as exc:
+        _noncanonical_fail("HISTORY-CONFLICT", str(exc))
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+
+
+def _publish_noncanonical_history_blob(
+    item: Path, history_path: Path, expected_sha256: str, original_bytes: bytes
+) -> None:
+    staging = item / f".{history_path.name}.tmp"
+    _write_exact_staging_file(staging, original_bytes)
+    try:
+        existing = _read_exact_history_blob(history_path, expected_sha256)
+        if existing is None:
+            try:
+                os.link(staging, history_path)
+            except FileExistsError:
+                existing = _read_exact_history_blob(history_path, expected_sha256)
+                if existing is None:
+                    _noncanonical_fail(
+                        "HISTORY-CONFLICT", "history publication raced without a file"
+                    )
+        published = _read_exact_history_blob(history_path, expected_sha256)
+        if published != original_bytes:
+            _noncanonical_fail("HISTORY-CONFLICT", "history blob bytes changed")
+    except OSError as exc:
+        _noncanonical_fail("HISTORY-CONFLICT", str(exc))
+    finally:
+        staging.unlink(missing_ok=True)
+
+
+def _noncanonical_recovery_state(
+    item: Path,
+    expected_sha256: str,
+    operation_id: str,
+    recorded_at: str,
+    validator: Any,
+) -> tuple[str, bytes, Path, bytes]:
+    ledger_path = item / "agent-runs.jsonl"
+    history_path = item / f"agent-runs.history.{expected_sha256}.jsonl"
+    try:
+        current = ledger_path.read_bytes()
+    except OSError as exc:
+        _noncanonical_fail("DRIFT", str(exc))
+    history = _read_exact_history_blob(history_path, expected_sha256)
+    original = history if history is not None else current
+    _validate_noncanonical_history(item, original, validator)
+    marker = _noncanonical_history_marker(
+        item, expected_sha256, original, operation_id, recorded_at
+    )
+    marker_bytes = (serialize_event(marker) + "\n").encode("utf-8")
+    if current == marker_bytes and history is not None:
+        return "applied", original, history_path, marker_bytes
+    if current == original and hashlib.sha256(current).hexdigest() == expected_sha256:
+        return "original", original, history_path, marker_bytes
+    return "other", original, history_path, marker_bytes
+
+
+def _validate_noncanonical_marker_candidate(
+    item: Path, candidate: Path, validator: Any
+) -> None:
+    errors = validator.validate_work_item(
+        item, ledger_path=candidate, strict_revise=False
+    )
+    if errors:
+        _noncanonical_fail("CANDIDATE-INVALID", "; ".join(errors))
+
+
+def _command_apply_noncanonical_history(
+    item: Path,
+    expected_sha256: str,
+    operation_id: str,
+    recorded_at: str,
+    validator: Any,
+    inject_failure: str | None,
+) -> tuple[bool, Path]:
+    state, original, history_path, marker_bytes = _noncanonical_recovery_state(
+        item, expected_sha256, operation_id, recorded_at, validator
+    )
+    if state == "applied":
+        return True, history_path
+    if state != "original":
+        _noncanonical_fail("DRIFT", "ledger digest or recovery marker changed")
+
+    ledger_path = item / "agent-runs.jsonl"
+    candidate = ledger_path.with_suffix(".jsonl.tmp")
+    replaced = False
+    try:
+        _write_exact_staging_file(candidate, marker_bytes)
+        _validate_noncanonical_marker_candidate(item, candidate, validator)
+        _publish_noncanonical_history_blob(
+            item, history_path, expected_sha256, original
+        )
+        if inject_failure == "post-history-publish":
+            print("FAIL: injected post-history-publish interruption", file=sys.stderr)
+            return False, history_path
+        if inject_failure == "pre-ledger-replace":
+            print("FAIL: injected pre-ledger-replace interruption", file=sys.stderr)
+            return False, history_path
+        os.replace(candidate, ledger_path)
+        replaced = True
+        if inject_failure == "post-ledger-replace-readback":
+            _noncanonical_fail(
+                "READBACK-INDETERMINATE", "injected post-replace readback failure"
+            )
+        try:
+            actual = ledger_path.read_bytes()
+        except OSError as exc:
+            _noncanonical_fail("READBACK-INDETERMINATE", str(exc))
+        if actual != marker_bytes:
+            _noncanonical_fail("READBACK-INDETERMINATE", "marker readback changed")
+    except OSError as exc:
+        if replaced:
+            _noncanonical_fail("READBACK-INDETERMINATE", str(exc))
+        _noncanonical_fail("CANDIDATE-INVALID", str(exc))
+    finally:
+        if not replaced:
+            candidate.unlink(missing_ok=True)
+    return False, history_path
+
+
+def _command_rollback_noncanonical_history(
+    item: Path,
+    expected_sha256: str,
+    operation_id: str,
+    recorded_at: str,
+    validator: Any,
+    inject_failure: str | None,
+) -> tuple[bool, Path]:
+    state, original, history_path, marker_bytes = _noncanonical_recovery_state(
+        item, expected_sha256, operation_id, recorded_at, validator
+    )
+    if state == "original":
+        if history_path.exists():
+            return True, history_path
+        _noncanonical_fail("ROLLBACK-NOT-EMPTY", "recovery marker is absent")
+    if state != "applied":
+        _noncanonical_fail(
+            "ROLLBACK-NOT-EMPTY", "rollback is frozen after a later append"
+        )
+
+    ledger_path = item / "agent-runs.jsonl"
+    try:
+        current = ledger_path.read_bytes()
+    except OSError as exc:
+        _noncanonical_fail("ROLLBACK-NOT-EMPTY", str(exc))
+    if current != marker_bytes:
+        _noncanonical_fail(
+            "ROLLBACK-NOT-EMPTY", "rollback is frozen after a later append"
+        )
+    candidate = ledger_path.with_suffix(".jsonl.tmp")
+    replaced = False
+    try:
+        _write_exact_staging_file(candidate, original)
+        if inject_failure == "pre-ledger-replace":
+            print("FAIL: injected pre-ledger-replace interruption", file=sys.stderr)
+            return False, history_path
+        os.replace(candidate, ledger_path)
+        replaced = True
+        if inject_failure == "post-ledger-replace-readback":
+            _noncanonical_fail(
+                "READBACK-INDETERMINATE", "injected rollback readback failure"
+            )
+        try:
+            actual = ledger_path.read_bytes()
+        except OSError as exc:
+            _noncanonical_fail("READBACK-INDETERMINATE", str(exc))
+        if actual != original:
+            _noncanonical_fail("READBACK-INDETERMINATE", "rollback readback changed")
+    except OSError as exc:
+        if replaced:
+            _noncanonical_fail("READBACK-INDETERMINATE", str(exc))
+        _noncanonical_fail("CANDIDATE-INVALID", str(exc))
+    finally:
+        if not replaced:
+            candidate.unlink(missing_ok=True)
+    return False, history_path
+
+
 def _iter_active_items(active_dir: Path) -> list[Path]:
     if not active_dir.is_dir():
         return []
@@ -555,6 +889,79 @@ def active_work_item(args: argparse.Namespace, command: str) -> Path | None:
         )
         return None
     return item
+
+
+def command_recover_noncanonical_history(args: argparse.Namespace) -> int:
+    item = active_work_item(args, "recover-noncanonical-history")
+    if item is None or not item.exists():
+        print(f"FAIL: missing work item: {item}", file=sys.stderr)
+        return 1
+    try:
+        expected_sha256 = _normalize_noncanonical_sha256(
+            args.expected_ledger_sha256
+        )
+        _strict_noncanonical_inputs(args.operation_id, args.recorded_at)
+        validator = load_validator()
+        if not args.apply_admitted and not args.rollback_admitted:
+            state, _original, history_path, marker_bytes = _noncanonical_recovery_state(
+                item,
+                expected_sha256,
+                args.operation_id,
+                args.recorded_at,
+                validator,
+            )
+            if state == "other":
+                _noncanonical_fail("DRIFT", "ledger digest or recovery marker changed")
+            marker_errors: list[str] = []
+            marker_event = json.loads(marker_bytes)
+            validator.validate_event(marker_event, item, set(), marker_errors)
+            validator.validate_status(item, [marker_event], marker_errors)
+            if marker_errors:
+                _noncanonical_fail("CANDIDATE-INVALID", "; ".join(marker_errors))
+            print(
+                f"{NONCANONICAL_HISTORY_SUCCESS_MARKER} action=preflight "
+                f"state={state} history={history_path.name}"
+            )
+            return 0
+        try:
+            with ledger_write_lock(item):
+                if args.apply_admitted:
+                    replay, history_path = _command_apply_noncanonical_history(
+                        item,
+                        expected_sha256,
+                        args.operation_id,
+                        args.recorded_at,
+                        validator,
+                        args.inject_failure,
+                    )
+                    action = "apply"
+                else:
+                    replay, history_path = _command_rollback_noncanonical_history(
+                        item,
+                        expected_sha256,
+                        args.operation_id,
+                        args.recorded_at,
+                        validator,
+                        args.inject_failure,
+                    )
+                    action = "rollback"
+        except LedgerWriteLockError as exc:
+            _noncanonical_fail("LOCKED", str(exc))
+        if args.apply_admitted and args.inject_failure in {
+            "post-history-publish",
+            "pre-ledger-replace",
+        }:
+            return 1
+        if args.rollback_admitted and args.inject_failure == "pre-ledger-replace":
+            return 1
+        print(
+            f"{NONCANONICAL_HISTORY_SUCCESS_MARKER} action={action} "
+            f"replay={str(replay).lower()} history={history_path.name}"
+        )
+        return 0
+    except LedgerNoncanonicalRecoveryError as exc:
+        print(f"FAIL: {exc.failure_id}: {exc}", file=sys.stderr)
+        return 1
 
 
 def command_init(args: argparse.Namespace) -> int:
@@ -1009,6 +1416,27 @@ def build_parser() -> argparse.ArgumentParser:
         help=argparse.SUPPRESS,
     )
     disposition.set_defaults(func=command_dispose_invalid_current)
+
+    noncanonical = subparsers.add_parser(
+        "recover-noncanonical-history",
+        help="Seal one exact noncanonical ledger as inert history and start a canonical ledger",
+    )
+    noncanonical.add_argument("--expected-ledger-sha256", required=True)
+    noncanonical.add_argument("--operation-id", required=True)
+    noncanonical.add_argument("--recorded-at", required=True)
+    action = noncanonical.add_mutually_exclusive_group()
+    action.add_argument("--apply-admitted", action="store_true")
+    action.add_argument("--rollback-admitted", action="store_true")
+    noncanonical.add_argument(
+        "--inject-failure",
+        choices=[
+            "post-history-publish",
+            "pre-ledger-replace",
+            "post-ledger-replace-readback",
+        ],
+        help=argparse.SUPPRESS,
+    )
+    noncanonical.set_defaults(func=command_recover_noncanonical_history)
 
     rollup = subparsers.add_parser("rollup", help="Aggregate ledger events (one work-item via --work-item, or all active via --root)")
     rollup.add_argument("--root", type=Path, default=Path("."), help="Repository root for an all-active rollup (when --work-item is omitted).")

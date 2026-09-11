@@ -16,6 +16,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER_PATH = ROOT / "scripts" / "process_supervision" / "process_runner.py"
 CHILD = ROOT / "tests" / "fixtures" / "process_supervision" / "child_helper.py"
+_AUTO_KIMI_BINDING = object()
 
 
 def _load_runner():
@@ -36,7 +37,7 @@ def _request(
     profile_id: str,
     *,
     cwd: Path = ROOT,
-    expected_executable_binding=None,
+    expected_executable_binding=_AUTO_KIMI_BINDING,
 ):
     executable = Path(argv[0]).resolve()
     rows = tuple(
@@ -46,7 +47,7 @@ def _request(
     )
     optional = (
         {"expected_executable_binding": expected_executable_binding}
-        if expected_executable_binding is not None
+        if expected_executable_binding is not _AUTO_KIMI_BINDING
         else {
             "expected_executable_binding": module.ExecutableBindingV1(
                 str(executable),
@@ -147,6 +148,76 @@ def test_kimi_admission_accepts_exact_caller_binding_without_release_source_pin(
         request_owner.close()
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows Kimi dynamic binding contract")
+def test_kimi_admission_uses_launch_owner_binding_when_caller_omits_expected_binding(
+    tmp_path: Path,
+) -> None:
+    module = _load_runner()
+    executable = _fake_kimi(module, tmp_path / "kimi.exe", b"current-installed-kimi")
+    owner = module.ProcessRunnerV1()
+    request = _request(
+        module,
+        owner,
+        _kimi_argv(module, executable, tmp_path / "prompt.md"),
+        module.KimiWindowsProfileV1.profile_id,
+        cwd=tmp_path,
+        expected_executable_binding=None,
+    )
+    assert request.expected_executable_binding is None
+
+    try:
+        lifecycle, admission, launch_owner = _admit(module, owner, request)
+        try:
+            assert admission.executable_binding == launch_owner.binding
+            assert admission.executable_binding is not None
+            owner.windows_argv_admission_owner.consume(
+                lifecycle, request, admission, launch_owner
+            )
+        finally:
+            _release(owner, lifecycle)
+    finally:
+        owner.close()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows Kimi resolved-link contract")
+def test_kimi_profile_accepts_resolved_file_symlink_target_with_different_basename(
+    tmp_path: Path,
+) -> None:
+    module = _load_runner()
+    target = _fake_kimi(
+        module, tmp_path / "current-kimi-client.exe", b"current-installed-kimi"
+    )
+    link = tmp_path / "kimi.exe"
+    try:
+        link.symlink_to(target)
+    except OSError as exc:
+        pytest.skip(f"file symlink unavailable: {exc}")
+    owner = module.ProcessRunnerV1()
+    request = _request(
+        module,
+        owner,
+        _kimi_argv(module, link, tmp_path / "prompt.md"),
+        module.KimiWindowsProfileV1.profile_id,
+        cwd=tmp_path,
+        expected_executable_binding=None,
+    )
+    assert request.resolved_executable == target.resolve()
+    assert request.resolved_executable.name != "kimi.exe"
+
+    try:
+        lifecycle, admission, launch_owner = _admit(module, owner, request)
+        try:
+            assert admission.executable_binding == launch_owner.binding
+            assert admission.executable_binding is not None
+            owner.windows_argv_admission_owner.consume(
+                lifecycle, request, admission, launch_owner
+            )
+        finally:
+            _release(owner, lifecycle)
+    finally:
+        owner.close()
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows Kimi metadata probe contract")
 @pytest.mark.parametrize("argument", ("--version", "--help"))
 def test_kimi_metadata_probe_profile_allows_only_exact_bound_read_only_argv(
@@ -172,6 +243,38 @@ def test_kimi_metadata_probe_profile_allows_only_exact_bound_read_only_argv(
         lifecycle, admission, launch_owner = _admit(module, owner, request)
         try:
             assert admission.probe_kind == "kimi-metadata-probe-v2"
+            owner.windows_argv_admission_owner.consume(
+                lifecycle, request, admission, launch_owner
+            )
+        finally:
+            _release(owner, lifecycle)
+    finally:
+        owner.close()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows Kimi metadata probe contract")
+@pytest.mark.parametrize("argument", ("--version", "--help"))
+def test_kimi_metadata_probe_uses_launch_owner_binding_when_caller_omits_expected_binding(
+    tmp_path: Path, argument: str
+) -> None:
+    module = _load_runner()
+    executable = _fake_kimi(module, tmp_path / "kimi.exe", b"current-installed-kimi")
+    owner = module.ProcessRunnerV1()
+    request = _request(
+        module,
+        owner,
+        (str(executable), argument),
+        module.KimiWindowsProfileV1.probe_profile_id,
+        cwd=tmp_path,
+        expected_executable_binding=None,
+    )
+    assert request.expected_executable_binding is None
+
+    try:
+        lifecycle, admission, launch_owner = _admit(module, owner, request)
+        try:
+            assert admission.executable_binding == launch_owner.binding
+            assert admission.executable_binding is not None
             owner.windows_argv_admission_owner.consume(
                 lifecycle, request, admission, launch_owner
             )

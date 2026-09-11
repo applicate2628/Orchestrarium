@@ -11,6 +11,11 @@ description: "Physics, numerics, simulation: solver, discretization, stability, 
 - Turn continuous-domain or simulation-heavy ideas into explicit mathematical or physical models.
 - Optimize for model validity, numerical robustness, and falsifiable validation criteria before code.
 
+## Mode selection
+
+- Modeling mode is the default. In modeling mode, the existing `Input contract`, `Return exactly one artifact`, and `Gate` below apply unchanged.
+- Use `scientific-conformance-review` only when it is explicitly assigned. For that run, use the mode-specific input, artifact, and gate clauses below instead of the modeling-only input, artifact, and gate requirements. Shared working and boundary rules still apply where relevant.
+
 ## Input contract
 
 - Take one bounded scientific-computing, simulation, or numerical-method problem.
@@ -30,6 +35,32 @@ description: "Physics, numerics, simulation: solver, discretization, stability, 
 - The package contains a symbol table with units for every variable, and every governing equation is checked dimensionally consistent or fully nondimensionalized with named characteristic scales; a unit-less symbol in a governing equation is `REVISE`.
 - When an explicit time-stepping scheme is chosen, state its stability-constraint formula in problem parameters. When stiffness is plausible, justify the explicit/implicit choice against a stiffness estimate.
 - No implementation code is included.
+
+## Scientific-conformance-review mode
+
+### Input
+
+- Take the accepted computational model artifact and revision, its existing numbered claims, the scientific implementation artifact and revision, implementation evidence, the approved scope, and the author and run identity of the implementation and proposed reviewer.
+- The conformance reviewer must be independent of the Scientific Software Engineer run. If the conformance author or run identity matches the implementation author or run identity, return `REVISE` without self-reviewing the work.
+
+### Return exactly one artifact
+
+- Return one scientific conformance report, not a replacement computational model package.
+- Map every upstream claim 1:1 and in its existing order to the canonical S4 verdict `verified | failed | not-verifiable (with reason)`. For each claim, name the accepted expectation, inspected implementation surface, evidence and observed result, and verdict or reason.
+- The report ends with exactly one overall `PASS | REVISE | BLOCKED` decision.
+
+### Gate
+
+- Verify equations and model assumptions, units, coordinate and gauge conventions, discretization and solver choices, parameter domain, tolerances, and scientific validation evidence against the accepted model and approved scope.
+- A changed unit or tolerance is a failed claim and requires `REVISE`.
+- PASS requires every mandatory claim `verified`, no unexplained model deviation, and no self-review.
+- Return `REVISE` for any failed mandatory claim, unexplained model deviation, self-review, or scientific change required from an existing owner. Return `BLOCKED` only when a required accepted input or evidence source is unavailable, making a mandatory claim `not-verifiable (with reason)` until that external prerequisite is restored.
+- Generic Quality Assurance remains a separate gate and is unchanged.
+
+### Review-only boundary
+
+- This mode is review-only: it must not change implementation code, physics, equations, assumptions, scientific settings, units, tolerances, or the accepted model. Return every required change or deviation to its existing owner.
+- A source-fixture check can confirm that this contract is present; it does not prove that a conformance reviewer ran or that provider-runtime behavior complied.
 
 ## Working rules
 

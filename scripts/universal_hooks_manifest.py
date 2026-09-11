@@ -81,6 +81,8 @@ PACK_ONLY_SCRIPTS = {
     }),
     "src.codex/skills/lead/scripts": frozenset({
         "agents-mode-reminder.py",  # see above
+        # Codex first-match scalar support shared by its pack-only reminders.
+        "agents_mode_runtime.py",
         "validate-skill-pack.py",
     }),
 }
@@ -100,7 +102,11 @@ PACK_ONLY_HOOKS = {
         # which Codex CLI has no analog for.
         "dispatch_sentinels.py",
     }),
-    "src.codex/skills/lead/hooks": frozenset(),
+    "src.codex/skills/lead/hooks": frozenset({
+        # Codex root-only, agents-mode-aware mid-turn reminder. Claude has its
+        # own provider runtime and no accepted equivalent in this change.
+        "check-parallel-mcp-momentum.py",
+    }),
 }
 
 # Single source of truth for the Python targets that are registered as hooks.
@@ -130,6 +136,7 @@ REGISTERED_HOOK_STEMS_BY_PLATFORM = {
         "check-machine-local-path",
         "check-mcp-momentum",
         "check-no-trash-in-repo",
+        "check-parallel-mcp-momentum",
         "check-passive-polling-stop",
         "check-repository-orientation",
         "check-scratch-valuables",

@@ -167,6 +167,67 @@ The writer holds the existing ledger lock, builds and validates a temporary cand
 
 Invalidation removes every closure edge contributed by the target event. It can therefore reopen a `REVISE` obligation or a launch. Append an ordinary independently authorized replacement terminal or closure event through the normal writer; the invalidation itself never satisfies the reopened obligation.
 
+## Recover one noncanonical historical ledger
+
+Use this only after the Lead-owned main conversation admits one exact active-item
+ledger whose nonblank lines are bounded, duplicate-key-free UTF-8 JSON objects
+but are not canonical ledger events. Every row must fail the current event
+validator; a declared schema Version 1, 2, or 3, a valid Version 1/Version 2
+`runId`, a complete valid Version 3 identity tuple, any valid current event, or
+a mixture containing one of those forms is refused unchanged. Lone generic
+`status`, `gate`, `eventId`, or `operationId` fields remain opaque, as does a
+seven-character `runId`; none of those field names alone is treated as
+authority.
+
+Capture the exact current ledger digest without parsing or reserializing its
+rows. The same digest, new bounded operation identity, and strict Coordinated
+Universal Time (UTC) value bind preflight, apply, replay, and any pre-append
+rollback. ASCII hexadecimal digest casing is accepted and normalized; the
+history filename and marker store lowercase.
+
+```powershell
+$ledger = 'work-items\active\<slug>\agent-runs.jsonl'
+$sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $ledger).Hash
+
+python -B scripts\agent-run-ledger.py --work-item work-items\active\<slug> recover-noncanonical-history --expected-ledger-sha256 $sha256 --operation-id <new-bounded-operation-id> --recorded-at <strict-UTC>
+
+python -B scripts\agent-run-ledger.py --work-item work-items\active\<slug> recover-noncanonical-history --expected-ledger-sha256 $sha256 --operation-id <same-operation-id> --recorded-at <same-strict-UTC> --apply-admitted
+```
+
+Omitting both action flags performs a read-only preflight: it creates no lock,
+temporary file, history blob, or marker. `--apply-admitted` holds the existing
+item lock, preserves the original bytes beside the ledger as
+`agent-runs.history.<lowercase-sha256>.jsonl`, validates one genuinely new
+canonical marker, atomically replaces the ledger, and verifies exact readback.
+The marker records only this recovery operation and has no historical launch,
+terminal, `REVISE`, closer, artifact, evidence, provider, model, gate, identity,
+or timestamp authority. `RESULT: PASS recover-noncanonical-history action=apply`
+means the exact history blob and marker passed readback; it makes no `fsync` or
+power-loss-durability claim. An exact blob plus exact marker replays without a
+duplicate.
+
+Continue only through the ordinary writer with new identities and times:
+
+```powershell
+python -B scripts\agent-run-ledger.py --work-item work-items\active\<slug> append --run-id <new-launch-run-id> --role <role> --execution-role internal --status running --gate none --scope <bounded-scope> --event-kind launch --started-at <new-started-at> --updated-at <new-started-at>
+
+python -B scripts\agent-run-ledger.py --work-item work-items\active\<slug> append --run-id <new-terminal-run-id> --role <same-role> --execution-role internal --status completed --gate PASS --scope <same-bounded-scope> --event-kind terminal --launch-run-id <new-launch-run-id> --artifact <accepted-item-relative-artifact> --evidence "command:<verification>" --started-at <new-terminal-at> --updated-at <new-terminal-at>
+```
+
+Before any later append, the admitted operator may restore the exact opaque
+bytes with the same binding:
+
+```powershell
+python -B scripts\agent-run-ledger.py --work-item work-items\active\<slug> recover-noncanonical-history --expected-ledger-sha256 $sha256 --operation-id <same-operation-id> --recorded-at <same-strict-UTC> --rollback-admitted
+```
+
+After a later append, rollback fails with
+`WI-LEDGER-NONCANONICAL-ROLLBACK-NOT-EMPTY`. Other stable refusal classes are
+`LOCKED`, `DRIFT`, `MALFORMED`, `CURRENT-EVENT`, `IDENTITY-BEARING`,
+`HISTORY-CONFLICT`, `CANDIDATE-INVALID`, and `READBACK-INDETERMINATE`, each
+prefixed by `WI-LEDGER-NONCANONICAL-`. A readback-indeterminate result requires
+inspection or exact replay; it never authorizes an ad hoc ledger rewrite.
+
 ## Dispose one invalid-current suffix row
 
 Use this only after the user admits one exact current-schema-invalid suffix row. This mode is separate from `recover-invalid-closure`: an individually valid relation-invalid closer continues to use that existing command, while `dispose-invalid-current` preserves one invalid target's exact bytes and makes no closure, gate, launch, terminal, `PASS`, or evidence authority claim.
@@ -234,6 +295,61 @@ python scripts/mutate-work-item.py --root . revoke-legacy-ledger-obligation --sl
 
 `WI-LEDGER-MIGRATION-REVOKED` restores the original invalid diagnostic in the
 effective view; it never deletes the apply anchor or the source line.
+
+### Close with current-bug dispositions
+
+The existing close command consumes the active item's `bug-dispositions.json`:
+
+The supplied `closure.md` MUST contain nonempty `Closed`, `Outcome`, `Evidence`,
+and `Residual risk` fields. `Closed` MUST exactly equal the requested
+`--terminal-instant` and use strict UTC `YYYY-MM-DDTHH:MM:SSZ`.
+
+```powershell
+python scripts/mutate-work-item.py --root . close --slug <active-slug> --closure-file <closure.md-input> --terminal-instant <strict-UTC>
+```
+
+Version 1 remains exact-context-only. Its `bugs` array enumerates every current
+bug whose parsed `context` equals the closing slug. A `terminalize` row contains
+`id`, `action`, `inputSha256`, `status`, `resolution`, and `evidence`; a
+`preserve-current` row uses `reason` instead of `resolution`.
+
+Version 2 keeps the same top-level fields (`schemaVersion`, `workItem`,
+`closedAt`, and `bugs`) and adds `contextBefore` and `contextAfter` to every
+Version 1 row. Every exact-context current bug remains required. The manifest
+may additionally select a current `adjacent-finding` or `standalone` bug only
+with `action: terminalize`; `contextBefore` must equal that bug's actual
+original context and `contextAfter` must equal `workItem`. Exact-context Version
+2 rows therefore use the closing slug for both context images. Unselected
+placeholder bugs remain current and byte-identical, and a placeholder cannot be
+`preserve-current`. Do not manually edit a bug's context: the lifecycle owner
+performs the admitted recontextualization and writes both context images to the
+Version 2 receipt. The ordinary `close` path alone admits Version 2;
+`archive-with-successor` keeps Version 1 bug-disposition admission.
+
+This is a complete one-row Version 2 shape for a close whose complete required
+set is one selected `adjacent-finding` bug. It is not runnable unchanged:
+replace every angle-bracket value with the actual current value, and add every
+exact-context bug row when the repository has any.
+
+```json
+{
+  "schemaVersion": 2,
+  "workItem": "<active-slug>",
+  "closedAt": "<same-strict-UTC-terminal-instant>",
+  "bugs": [
+    {
+      "id": "<selected-current-bug-id>",
+      "action": "terminalize",
+      "inputSha256": "<sha256-of-exact-current-bug-bytes>",
+      "status": "fixed",
+      "resolution": "<accepted-terminal-resolution>",
+      "evidence": "<accepted-evidence-reference>",
+      "contextBefore": "adjacent-finding",
+      "contextAfter": "<active-slug>"
+    }
+  ]
+}
+```
 
 ### Archive with a backlog successor
 

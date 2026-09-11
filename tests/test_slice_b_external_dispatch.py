@@ -204,6 +204,57 @@ def test_external_dispatch_projects_provider_execution_disposition(
     }
 
 
+def test_kimi_consultant_is_planning_only_in_source_and_installed_policy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    expected = {
+        "schemaVersion": 1,
+        "status": "external-authorized",
+        "stableId": None,
+        "provider": "kimi",
+        "taskClass": "planning",
+        "role": "consultant",
+        "requiredModelTier": "balanced",
+        "requiredEffort": "high",
+        "mutationClass": "read-only",
+        "nativeEffort": "unsupported",
+        "effortMappingLoss": "no-native-effort-control",
+        "finalAuthorizingRole": False,
+        "executionAuthorized": True,
+        "independentVerification": True,
+        "fallback": "none",
+    }
+
+    assert RESOLVER.resolve_external_dispatch(
+        "kimi", "planning", "consultant", repo_root=ROOT
+    ) == expected
+    for task_class in ("exploration", "review"):
+        denied = RESOLVER.resolve_external_dispatch(
+            "kimi", task_class, "consultant", repo_root=ROOT
+        )
+        assert denied["status"] == "denied"
+        assert denied["stableId"] == "E_KIMI_DISPATCH_DENIED"
+        assert denied["executionAuthorized"] is False
+
+    resolver, _policy_root, project_root, home = _install_dispatch_layout(
+        tmp_path, monkeypatch, "codex", "project"
+    )
+    foreign = tmp_path / "foreign-consultant"
+    foreign.mkdir()
+    result = _run_installed_external_dispatch(
+        resolver,
+        provider="kimi",
+        task_class="planning",
+        role="consultant",
+        project_root=project_root,
+        home=home,
+        cwd=foreign,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout) == expected
+
+
 @pytest.mark.parametrize("provider", ("kimi", "grok"))
 @pytest.mark.parametrize(
     ("task_class", "role"),
@@ -256,6 +307,74 @@ def test_external_dispatch_denies_unsupported_provider_and_native_is_unchanged()
             (ROOT / "shared" / "role-routing-policy.v1.json").read_text(encoding="utf-8")
         )["mechanicalExecutionContract"],
     }
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ("duplicate", "unknown", "non-read-only", "outside-allowed"),
+)
+def test_advisory_task_classes_fail_closed_and_grok_remains_unavailable(
+    tmp_path: Path, mutation: str
+) -> None:
+    policy_root = tmp_path / mutation
+    shared = policy_root / "shared"
+    shared.mkdir(parents=True)
+    policy = json.loads(
+        (ROOT / "shared" / "role-routing-policy.v1.json").read_text(encoding="utf-8")
+    )
+    advisory = {
+        "duplicate": ["planning", "planning"],
+        "unknown": ["unknown"],
+        "non-read-only": ["planning"],
+        "outside-allowed": ["critical-design"],
+    }[mutation]
+    policy["providerRealizations"]["kimi"]["advisoryTaskClasses"] = advisory
+    if mutation == "non-read-only":
+        policy["taskClasses"]["planning"]["mutationClass"] = "workspace-write"
+    shared.joinpath("role-routing-policy.v1.json").write_text(
+        json.dumps(policy), encoding="utf-8"
+    )
+    shared.joinpath("external-role-taxonomy.v1.json").write_bytes(
+        (ROOT / "shared" / "external-role-taxonomy.v1.json").read_bytes()
+    )
+
+    with pytest.raises(ValueError, match="kimi advisory task classes"):
+        RESOLVER.load_role_policy(policy_root)
+    denied = RESOLVER.resolve_external_dispatch(
+        "kimi", "planning", "consultant", repo_root=policy_root
+    )
+    assert denied["status"] == "denied"
+    assert denied["stableId"] == "E_KIMI_DISPATCH_DENIED"
+    assert denied["executionAuthorized"] is False
+
+    grok = RESOLVER.resolve_external_dispatch(
+        "grok", "planning", "planner", repo_root=ROOT
+    )
+    assert grok["status"] == "unavailable"
+    assert grok["executionAuthorized"] is False
+
+
+def test_advisory_consultant_does_not_enter_native_corridors() -> None:
+    policy, _ = RESOLVER.load_role_policy(ROOT)
+
+    assert policy["providerRealizations"]["kimi"]["advisoryTaskClasses"] == [
+        "planning"
+    ]
+    assert "advisoryTaskClasses" not in policy["providerRealizations"]["grok"]
+    assert "consultant" not in policy["roles"]
+    assert "consultant" not in policy["skillOnlyRoles"]
+    assert all(
+        "consultant" not in roles
+        for roles in policy["taskRoleEligibility"].values()
+    )
+    luna = RESOLVER.resolve_role_dispatch(
+        "mechanical-read", "mechanical-scout", "enabled", repo_root=ROOT
+    )
+    assert luna["status"] == "native-required"
+    assert luna["requestedProfile"] == "luna-high"
+    assert luna["requestedModel"] == "gpt-5.6-luna"
+    assert luna["requestedEffort"] == "high"
+    assert luna["fallback"] == "none"
 
 
 @pytest.mark.parametrize(

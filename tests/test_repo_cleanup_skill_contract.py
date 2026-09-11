@@ -74,6 +74,22 @@ def test_repo_cleanup_contract_is_transient_coordinator_only() -> None:
         assert required in body
 
 
+def test_work_items_selection_requires_an_exhaustive_immediate_child_census() -> None:
+    for path in (CODEX_SKILL, CLAUDE_SKILL, REFERENCE):
+        text = path.read_text(encoding="utf-8")
+        for required in (
+            "when `work-items/` is selected",
+            "every immediate child exactly once",
+            "`category | derived | repository-local exception | unknown`",
+            "audit `PASS` does not satisfy this census",
+            "`unknown` remains preserved",
+            "yields `REVISE`",
+        ):
+            assert required.casefold() in text.casefold(), (
+                f"{path.relative_to(ROOT)} missing {required!r}"
+            )
+
+
 def test_host_refusal_preserves_target_without_bypass_or_false_pass() -> None:
     surfaces = (CODEX_SKILL, CLAUDE_SKILL, REFERENCE)
     required = (

@@ -280,7 +280,7 @@ class ExecutableBindingV1:
 def _expected_executable_binding_matches(
     expected: object, live: ExecutableBindingV1
 ) -> bool:
-    """Compare the enrolled portable pin with the live OS-object evidence."""
+    """Compare a caller-supplied binding with the live OS-object evidence."""
 
     if type(expected) is not ExecutableBindingV1:
         return False
@@ -1619,13 +1619,12 @@ class WindowsArgvAdmissionOwnerV1:
                 prompt_binding = _kimi_bundle_file_binding(
                     request, failure_id="PSV1-ARGV-CODEC-UNSUPPORTED"
                 )
-            if executable.name.casefold() != "kimi.exe":
-                raise ProcessSupervisionError(
-                    "PSV1-EXECUTABLE-UNRESOLVED", "request-validation"
-                )
             executable_binding = launch_owner.binding
-            if not _expected_executable_binding_matches(
-                request.expected_executable_binding, executable_binding
+            if executable_binding is None or (
+                request.expected_executable_binding is not None
+                and not _expected_executable_binding_matches(
+                    request.expected_executable_binding, executable_binding
+                )
             ):
                 raise ProcessSupervisionError(
                     "PSV1-EXECUTABLE-UNRESOLVED", "request-validation"
@@ -1756,11 +1755,13 @@ class WindowsArgvAdmissionOwnerV1:
             and admission.resolved_executable_version == version
             and admission.executable_binding == executable_binding
             and (
-                _expected_executable_binding_matches(
-                    request.expected_executable_binding, executable_binding
+                request.expected_executable_binding is None
+                or (
+                    executable_binding is not None
+                    and _expected_executable_binding_matches(
+                        request.expected_executable_binding, executable_binding
+                    )
                 )
-                if executable_binding is not None
-                else request.expected_executable_binding is None
             )
             and admission.actual_argv_sha256 == _json_argv_sha256(request.argv)
             and admission.actual_argv_shape_sha256 == _argv_shape_sha256(request.argv)
