@@ -212,3 +212,71 @@ def test_noncanonical_staging_rejects_external_hardlink(tmp_path: Path) -> None:
 
     assert staging.exists()
     assert external.read_bytes() == expected
+
+
+def _noncanonical_replay_fixture(tmp_path: Path, module_name: str):
+    ledger = load_module(LEDGER, module_name)
+    item = tmp_path / "work-items" / "active" / "noncanonical-replay"
+    item.mkdir(parents=True)
+    original = (
+        b'{"date":"2026-09-10","lane":"example","execution_role":"analyst",'
+        b'"result":"historical note"}\n'
+    )
+    expected_sha256 = hashlib.sha256(original).hexdigest()
+    history = item / f"agent-runs.history.{expected_sha256}.jsonl"
+    history.write_bytes(original)
+    marker = ledger._noncanonical_history_marker(
+        item, expected_sha256, original, "linked-ledger-replay", "2026-09-10T12:00:00Z"
+    )
+    marker_bytes = (ledger.serialize_event(marker) + "\n").encode("utf-8")
+    return ledger, item, expected_sha256, marker_bytes
+
+
+def test_noncanonical_replay_rejects_symlinked_canonical_ledger(tmp_path: Path) -> None:
+    ledger, item, expected_sha256, marker_bytes = _noncanonical_replay_fixture(
+        tmp_path, "pr10_noncanonical_replay_symlink_owner"
+    )
+    external = tmp_path / "external-canonical-ledger"
+    external.write_bytes(marker_bytes)
+    canonical = item / "agent-runs.jsonl"
+    try:
+        canonical.symlink_to(external)
+    except OSError as exc:
+        pytest.skip(f"symlink unavailable: {exc}")
+
+    with pytest.raises(ledger.LedgerNoncanonicalRecoveryError):
+        ledger._noncanonical_recovery_state(
+            item,
+            expected_sha256,
+            "linked-ledger-replay",
+            "2026-09-10T12:00:00Z",
+            ledger.load_validator(),
+        )
+
+    assert canonical.is_symlink()
+    assert external.read_bytes() == marker_bytes
+
+
+def test_noncanonical_replay_rejects_hardlinked_canonical_ledger(tmp_path: Path) -> None:
+    ledger, item, expected_sha256, marker_bytes = _noncanonical_replay_fixture(
+        tmp_path, "pr10_noncanonical_replay_hardlink_owner"
+    )
+    external = tmp_path / "external-canonical-ledger-hardlink"
+    external.write_bytes(marker_bytes)
+    canonical = item / "agent-runs.jsonl"
+    try:
+        os.link(external, canonical)
+    except OSError as exc:
+        pytest.skip(f"hardlink unavailable: {exc}")
+
+    with pytest.raises(ledger.LedgerNoncanonicalRecoveryError):
+        ledger._noncanonical_recovery_state(
+            item,
+            expected_sha256,
+            "linked-ledger-replay",
+            "2026-09-10T12:00:00Z",
+            ledger.load_validator(),
+        )
+
+    assert canonical.exists()
+    assert external.read_bytes() == marker_bytes
