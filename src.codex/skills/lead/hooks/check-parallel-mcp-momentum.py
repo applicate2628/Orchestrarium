@@ -31,12 +31,8 @@ REMINDER = (
 )
 
 
-def _is_repository_work_start(envelope: dict, tool_input: dict) -> bool:
-    """Project this call through the existing repository-action classifier.
-
-    Loading the sibling hook as source keeps its command/token/path rules as the
-    single classifier owner. No module or cross-invocation cache is retained.
-    """
+def _repository_context(envelope: dict) -> tuple[dict, Path, Path | None]:
+    """Return the shared classifier, event cwd, and nearest repository root."""
     classifier = runpy.run_path(
         str(Path(__file__).resolve().with_name("check-repository-orientation.py"))
     )
@@ -46,11 +42,33 @@ def _is_repository_work_start(envelope: dict, tool_input: dict) -> bool:
         if isinstance(cwd_value, str) and cwd_value
         else Path.cwd().resolve()
     )
+    root = classifier["_nearest_git_root"](cwd)
+    return classifier, cwd, root
+
+
+def _is_repository_work_start(
+    envelope: dict,
+    tool_input: dict,
+    *,
+    classifier: dict | None = None,
+    cwd: Path | None = None,
+    root: Path | None = None,
+) -> bool:
+    """Project this call through the existing repository-action classifier.
+
+    Loading the sibling hook as source keeps its command/token/path rules as the
+    single classifier owner. No module or cross-invocation cache is retained.
+    """
+    if classifier is None or cwd is None:
+        classifier, cwd, discovered_root = _repository_context(envelope)
+        if root is None:
+            root = discovered_root
     raw_targets = classifier["_target_strings"](tool_input)
     target_paths = [classifier["_as_path"](value, cwd) for value in raw_targets]
-    root = classifier["_nearest_git_root"](
-        target_paths[0] if target_paths else cwd
-    ) or classifier["_nearest_git_root"](cwd)
+    if root is None:
+        root = classifier["_nearest_git_root"](
+            target_paths[0] if target_paths else cwd
+        ) or classifier["_nearest_git_root"](cwd)
     if root is None:
         return False
 
@@ -93,11 +111,20 @@ def main() -> int:
             return 0
         if not isinstance(envelope.get("tool_input"), dict):
             return 0
-        if resolve_scalar("delegationMode") not in ACTIVE_MODES:
+        classifier, cwd, root = _repository_context(envelope)
+        if root is None:
             return 0
-        if resolve_scalar("parallelMode") not in ACTIVE_MODES:
+        if resolve_scalar("delegationMode", cwd=root) not in ACTIVE_MODES:
             return 0
-        if not _is_repository_work_start(envelope, envelope["tool_input"]):
+        if resolve_scalar("parallelMode", cwd=root) not in ACTIVE_MODES:
+            return 0
+        if not _is_repository_work_start(
+            envelope,
+            envelope["tool_input"],
+            classifier=classifier,
+            cwd=cwd,
+            root=root,
+        ):
             return 0
         emit_advisory(envelope, REMINDER)
     except Exception:
