@@ -766,6 +766,38 @@ def _read_exact_history_blob(path: Path, expected_sha256: str) -> bytes | None:
     return value
 
 
+def _cleanup_owned_history_staging(history_path: Path, staging: Path) -> None:
+    try:
+        staging_metadata = staging.lstat()
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        _noncanonical_fail("HISTORY-CONFLICT", str(exc))
+    try:
+        history_metadata = history_path.lstat()
+    except OSError as exc:
+        _noncanonical_fail("HISTORY-CONFLICT", str(exc))
+    if (
+        not stat.S_ISREG(history_metadata.st_mode)
+        or stat.S_ISLNK(history_metadata.st_mode)
+        or _noncanonical_is_reparse(history_metadata)
+        or not stat.S_ISREG(staging_metadata.st_mode)
+        or stat.S_ISLNK(staging_metadata.st_mode)
+        or _noncanonical_is_reparse(staging_metadata)
+        or getattr(history_metadata, "st_nlink", 1) != 2
+        or getattr(staging_metadata, "st_nlink", 1) != 2
+        or (history_metadata.st_dev, history_metadata.st_ino)
+        != (staging_metadata.st_dev, staging_metadata.st_ino)
+    ):
+        _noncanonical_fail(
+            "HISTORY-CONFLICT", "reserved history staging path conflicts"
+        )
+    try:
+        staging.unlink()
+    except OSError as exc:
+        _noncanonical_fail("HISTORY-CONFLICT", str(exc))
+
+
 def _write_exact_staging_file(path: Path, expected: bytes) -> None:
     def accept_existing() -> None:
         descriptor, opened = _noncanonical_open_ordinary(path, writable=False)
@@ -826,9 +858,7 @@ def _publish_noncanonical_history_blob(
     if existing is not None:
         if existing != original_bytes:
             _noncanonical_fail("HISTORY-CONFLICT", "history blob bytes changed")
-        # Complete cleanup from the admitted crash state. unlink() removes only
-        # the staging directory entry; it never follows a symlink or reparse leaf.
-        staging.unlink(missing_ok=True)
+        _cleanup_owned_history_staging(history_path, staging)
         return
     _write_exact_staging_file(staging, original_bytes)
     try:
@@ -845,8 +875,7 @@ def _publish_noncanonical_history_blob(
             _noncanonical_fail("HISTORY-CONFLICT", "history blob bytes changed")
     except OSError as exc:
         _noncanonical_fail("HISTORY-CONFLICT", str(exc))
-    finally:
-        staging.unlink(missing_ok=True)
+    _cleanup_owned_history_staging(history_path, staging)
 
 
 def _noncanonical_recovery_state(
