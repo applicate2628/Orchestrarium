@@ -139,9 +139,6 @@ def build_event(args: argparse.Namespace, validator: Any | None = None) -> dict[
         )
     started_at = args.started_at or utc_timestamp()
     updated_at = args.updated_at or started_at
-    # schemaVersion 2 when any v2 closure/lifecycle field is present; 1 otherwise
-    # (the validator rejects v2 fields on v1 events, and strict open-REVISE scoping
-    # keys on schemaVersion 2 — see decision 2026-07-16-review-verdict-closure).
     v2 = any(
         value is not None
         for value in (
@@ -177,7 +174,6 @@ def build_event(args: argparse.Namespace, validator: Any | None = None) -> dict[
         "startedAt": started_at,
         "updatedAt": updated_at,
     }
-
     optional_fields = {
         "assignedRole": args.assigned_role,
         "provider": args.provider,
@@ -185,7 +181,6 @@ def build_event(args: argparse.Namespace, validator: Any | None = None) -> dict[
         "promptFile": args.prompt_file,
         "artifact": args.artifact,
         "notes": args.notes,
-        # v2 closure/lifecycle fields
         "eventKind": getattr(args, "event_kind", None),
         "launchRunId": getattr(args, "launch_run_id", None),
         "closesRunIds": getattr(args, "closes", None),
@@ -207,17 +202,13 @@ def build_event(args: argparse.Namespace, validator: Any | None = None) -> dict[
     if getattr(args, "authorizing", None) is not None:
         event["authorizing"] = args.authorizing == "true"
     if getattr(args, "launch_flags_json", None) is not None:
-        event["launchFlags"] = parse_launch_flags_json(
-            args.launch_flags_json, validator
-        )
+        event["launchFlags"] = parse_launch_flags_json(args.launch_flags_json, validator)
     if getattr(args, "target_tuple_json", None) is not None:
         event["targetTuple"] = validator.decode_json_object(
-            args.target_tuple_json,
-            source="--target-tuple-json",
+            args.target_tuple_json, source="--target-tuple-json"
         )
     if event.get("terminalClass") == "external-nonauthorizing":
         event["closesRunIds"] = []
-
     evidence: list[dict[str, Any]] = []
     for value in args.evidence or []:
         evidence.append(parse_evidence(value))
@@ -225,20 +216,16 @@ def build_event(args: argparse.Namespace, validator: Any | None = None) -> dict[
         evidence.append(parse_evidence_json(value, validator))
     if evidence:
         event["evidence"] = evidence
-
     scratch_evidence = [
         parse_scratch_evidence_json(value, validator)
         for value in (getattr(args, "scratch_evidence_json", None) or [])
     ]
     if scratch_evidence:
         event["scratchEvidence"] = scratch_evidence
-
     return event
 
 
 def serialize_event(event: dict[str, Any]) -> str:
-    """Render one canonical compact JSONL event without its line terminator."""
-
     return json.dumps(event, ensure_ascii=False, separators=(",", ":"))
 
 
@@ -265,50 +252,17 @@ def _strict_migration_inputs(operation_id: str, recorded_at: str) -> None:
         _migration_fail("WI-LEDGER-MIGRATION-TARGET-IDENTITY", "recorded-at is not strict UTC")
 
 
-def stage_invalid_finding_class_migration(
-    item: Path,
-    target_run_id: str,
-    target_event_sha256: str,
-    expected_ledger_sha256: str,
-    operation_id: str,
-    recorded_at: str,
-) -> StagedLegacyMigration:
-    """Build and validate one append-only migration anchor without replacing the ledger."""
-
-    return stage_legacy_obligation_migration(
-        item, target_run_id, target_event_sha256, expected_ledger_sha256,
-        operation_id, recorded_at, "invalid-finding-class",
-    )
+def stage_invalid_finding_class_migration(item: Path, target_run_id: str, target_event_sha256: str, expected_ledger_sha256: str, operation_id: str, recorded_at: str) -> StagedLegacyMigration:
+    return stage_legacy_obligation_migration(item, target_run_id, target_event_sha256, expected_ledger_sha256, operation_id, recorded_at, "invalid-finding-class")
 
 
-def stage_legacy_scratch_evidence_migration(
-    item: Path,
-    target_run_id: str,
-    target_event_sha256: str,
-    expected_ledger_sha256: str,
-    operation_id: str,
-    recorded_at: str,
-) -> StagedLegacyMigration:
-    return stage_legacy_obligation_migration(
-        item, target_run_id, target_event_sha256, expected_ledger_sha256,
-        operation_id, recorded_at, "remove-string-scratch-evidence",
-    )
+def stage_legacy_scratch_evidence_migration(item: Path, target_run_id: str, target_event_sha256: str, expected_ledger_sha256: str, operation_id: str, recorded_at: str) -> StagedLegacyMigration:
+    return stage_legacy_obligation_migration(item, target_run_id, target_event_sha256, expected_ledger_sha256, operation_id, recorded_at, "remove-string-scratch-evidence")
 
 
-def stage_legacy_obligation_migration(
-    item: Path,
-    target_run_id: str,
-    target_event_sha256: str,
-    expected_ledger_sha256: str,
-    operation_id: str,
-    recorded_at: str,
-    normalization_kind: str,
-) -> StagedLegacyMigration:
+def stage_legacy_obligation_migration(item: Path, target_run_id: str, target_event_sha256: str, expected_ledger_sha256: str, operation_id: str, recorded_at: str, normalization_kind: str) -> StagedLegacyMigration:
     _strict_migration_inputs(operation_id, recorded_at)
-    for value, failure_id in (
-        (target_event_sha256, "WI-LEDGER-MIGRATION-TARGET-DIGEST"),
-        (expected_ledger_sha256, "WI-LEDGER-MIGRATION-LEDGER-DRIFT"),
-    ):
+    for value, failure_id in ((target_event_sha256, "WI-LEDGER-MIGRATION-TARGET-DIGEST"), (expected_ledger_sha256, "WI-LEDGER-MIGRATION-LEDGER-DRIFT")):
         if re.fullmatch(r"[0-9a-f]{64}", value, re.ASCII) is None:
             _migration_fail(failure_id, "digest must be lowercase SHA-256")
     item = Path(item)
@@ -320,7 +274,6 @@ def stage_legacy_obligation_migration(
     before_sha = hashlib.sha256(before).hexdigest()
     if before_sha != expected_ledger_sha256:
         _migration_fail("WI-LEDGER-MIGRATION-LEDGER-DRIFT", "ledger digest changed")
-
     validator = load_validator()
     row = validator.LEGACY_MIGRATION_NORMALIZATIONS.get(normalization_kind)
     if row is None:
@@ -340,11 +293,7 @@ def stage_legacy_obligation_migration(
     raw_digest = metadata[target_pos].get("sha256") if target_pos < len(metadata) else None
     if raw_digest != target_event_sha256:
         _migration_fail("WI-LEDGER-MIGRATION-TARGET-DIGEST", "target digest changed")
-    if (
-        target.get("schemaVersion") != 2
-        or target.get("eventKind") != "terminal"
-        or target.get("eventKind") in {validator.LEGACY_MIGRATION_KIND, "closure-invalidation"}
-    ):
+    if target.get("schemaVersion") != 2 or target.get("eventKind") != "terminal" or target.get("eventKind") in {validator.LEGACY_MIGRATION_KIND, "closure-invalidation"}:
         _migration_fail("WI-LEDGER-MIGRATION-TARGET-INELIGIBLE", "target is not an eligible V2 terminal")
     if normalization_kind == "invalid-finding-class":
         if target.get("gate") != "REVISE":
@@ -363,10 +312,7 @@ def stage_legacy_obligation_migration(
     replacement_errors: list[str] = []
     validator.validate_event(replacement, item, set(), replacement_errors)
     if replacement_errors:
-        _migration_fail(
-            "WI-LEDGER-MIGRATION-DEFECT-CLASS",
-            "target has diagnostics besides the selected normalization: " + "; ".join(replacement_errors),
-        )
+        _migration_fail("WI-LEDGER-MIGRATION-DEFECT-CLASS", "target has diagnostics besides the selected normalization: " + "; ".join(replacement_errors))
     relation_events = list(events)
     relation_events[target_pos] = replacement
     relation_error = validator.migration_terminal_launch_relation_error(relation_events, target_pos, item)
@@ -375,7 +321,6 @@ def stage_legacy_obligation_migration(
     for event in events:
         if event.get("eventKind") == validator.LEGACY_MIGRATION_KIND and event.get("migrationAction") == "apply" and event.get("migratesRunId") == target_run_id:
             _migration_fail("WI-LEDGER-MIGRATION-TOPOLOGY", "target already has a migration apply")
-
     anchor_run_id = f"ledger-migration-{operation_id}"
     if any(event.get("runId") == anchor_run_id for event in events):
         _migration_fail("WI-LEDGER-MIGRATION-TOPOLOGY", "anchor run id already exists")
@@ -410,18 +355,15 @@ def stage_legacy_obligation_migration(
         with os.fdopen(descriptor, "wb") as stream:
             stream.write(staged)
             stream.flush()
-        parse_errors: list[str] = []
+        parse_errors = []
         candidate_metadata: list[dict[str, Any]] = []
         candidate_events = validator.load_jsonl(candidate_path, parse_errors, candidate_metadata)
-        _effective, _counters, projection_errors = validator.project_legacy_obligation_migrations(
-            candidate_events, candidate_metadata, item
-        )
+        _effective, _counters, projection_errors = validator.project_legacy_obligation_migrations(candidate_events, candidate_metadata, item)
         if parse_errors or projection_errors:
             _migration_fail("WI-LEDGER-MIGRATION-CANDIDATE-INVALID", "; ".join(parse_errors + projection_errors))
     finally:
         if candidate_path is not None:
             candidate_path.unlink(missing_ok=True)
-
     after_sha = hashlib.sha256(staged).hexdigest()
     anchor_sha = hashlib.sha256(anchor_bytes).hexdigest()
     replacement_sha = hashlib.sha256(serialize_event(replacement).encode("utf-8")).hexdigest()
@@ -458,9 +400,6 @@ def restore_ledger(path: Path, previous: str | None) -> None:
 
 
 def _read_ledger(item: Path, validator: Any | None = None) -> tuple[list[dict[str, Any]], int]:
-    """Return (events, malformed_line_count). A corrupt or non-object JSONL line
-    is skipped but COUNTED so the rollup can surface it — an audit surface
-    (evidence coverage) must not silently under-count corrupt input."""
     ledger = item / "agent-runs.jsonl"
     events: list[dict[str, Any]] = []
     malformed = 0
@@ -476,9 +415,7 @@ def _read_ledger(item: Path, validator: Any | None = None) -> tuple[list[dict[st
             line_no += 1
             complete_line = raw.endswith("\n")
             line = raw.rstrip("\r\n")
-            if len(line) > validator.MAX_LEDGER_LINE_CHARS or (
-                not complete_line and len(raw) > validator.MAX_LEDGER_LINE_CHARS
-            ):
+            if len(line) > validator.MAX_LEDGER_LINE_CHARS or (not complete_line and len(raw) > validator.MAX_LEDGER_LINE_CHARS):
                 while raw and not raw.endswith("\n"):
                     raw = stream.readline(validator.MAX_LEDGER_LINE_CHARS + 2)
                 malformed += 1
@@ -489,12 +426,7 @@ def _read_ledger(item: Path, validator: Any | None = None) -> tuple[list[dict[st
                 malformed += 1
                 break
             try:
-                events.append(
-                    validator.decode_json_object(
-                        line,
-                        source=f"{ledger}:{line_no}",
-                    )
-                )
+                events.append(validator.decode_json_object(line, source=f"{ledger}:{line_no}"))
             except ValueError:
                 malformed += 1
     return events, malformed
@@ -511,15 +443,11 @@ class LedgerNoncanonicalRecoveryError(RuntimeError):
 
 
 def _noncanonical_fail(failure_id: str, message: str) -> None:
-    raise LedgerNoncanonicalRecoveryError(
-        f"WI-LEDGER-NONCANONICAL-{failure_id}", message
-    )
+    raise LedgerNoncanonicalRecoveryError(f"WI-LEDGER-NONCANONICAL-{failure_id}", message)
 
 
 @contextmanager
 def ledger_write_lock(item: Path):
-    """The existing per-item writer lock, reusable by the lifecycle owner."""
-
     lock_path = Path(item) / "agent-runs.jsonl.lock"
     lock_fd = None
     for _attempt in range(50):
@@ -535,9 +463,7 @@ def ledger_write_lock(item: Path):
             holder = lock_path.read_text(encoding="utf-8").strip()
         except OSError:
             pass
-        raise LedgerWriteLockError(
-            f"ledger locked ({lock_path}; holder: {holder or 'unknown'}); no automatic takeover"
-        )
+        raise LedgerWriteLockError(f"ledger locked ({lock_path}; holder: {holder or 'unknown'}); no automatic takeover")
     try:
         yield
     finally:
@@ -556,15 +482,9 @@ def _normalize_noncanonical_sha256(value: str) -> str:
 
 
 def _strict_noncanonical_inputs(operation_id: str, recorded_at: str) -> None:
-    if re.fullmatch(
-        r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", operation_id, re.ASCII
-    ) is None:
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", operation_id, re.ASCII) is None:
         _noncanonical_fail("IDENTITY-BEARING", "operation id is not bounded")
-    if re.fullmatch(
-        r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z",
-        recorded_at,
-        re.ASCII,
-    ) is None:
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z", recorded_at, re.ASCII) is None:
         _noncanonical_fail("MALFORMED", "recorded-at is not strict UTC")
 
 
@@ -573,65 +493,30 @@ def _has_valid_v3_identity(event: dict[str, Any], validator: Any) -> bool:
     operation_id = event.get("operationId")
     fingerprint = event.get("fingerprint")
     prior_head = event.get("priorHead")
-    return bool(
-        isinstance(event_id, str)
-        and validator.SCRATCH_IDENTIFIER_RE.fullmatch(event_id)
-        and len(event_id) <= 128
-        and isinstance(operation_id, str)
-        and validator.SCRATCH_IDENTIFIER_RE.fullmatch(operation_id)
-        and len(operation_id) <= 128
-        and isinstance(fingerprint, str)
-        and validator.SHA256_RE.fullmatch(fingerprint)
-        and (
-            prior_head == "GENESIS"
-            or (
-                isinstance(prior_head, str)
-                and validator.SHA256_RE.fullmatch(prior_head)
-            )
-        )
-    )
+    return bool(isinstance(event_id, str) and validator.SCRATCH_IDENTIFIER_RE.fullmatch(event_id) and len(event_id) <= 128 and isinstance(operation_id, str) and validator.SCRATCH_IDENTIFIER_RE.fullmatch(operation_id) and len(operation_id) <= 128 and isinstance(fingerprint, str) and validator.SHA256_RE.fullmatch(fingerprint) and (prior_head == "GENESIS" or (isinstance(prior_head, str) and validator.SHA256_RE.fullmatch(prior_head))))
 
 
-def _validate_noncanonical_history(
-    item: Path, ledger_bytes: bytes, validator: Any
-) -> tuple[dict[str, Any], ...]:
+def _validate_noncanonical_history(item: Path, ledger_bytes: bytes, validator: Any) -> tuple[dict[str, Any], ...]:
     parse_errors: list[str] = []
-    events = validator.load_jsonl(
-        item / "agent-runs.jsonl", parse_errors, None, ledger_bytes
-    )
+    events = validator.load_jsonl(item / "agent-runs.jsonl", parse_errors, None, ledger_bytes)
     if parse_errors:
         _noncanonical_fail("MALFORMED", "; ".join(parse_errors))
-
     for event in events:
         event_errors: list[str] = []
         if validator.validate_event(dict(event), item, set(), event_errors):
-            _noncanonical_fail(
-                "CURRENT-EVENT", "history contains a current-schema-valid event"
-            )
+            _noncanonical_fail("CURRENT-EVENT", "history contains a current-schema-valid event")
         schema_version = event.get("schemaVersion")
         if schema_version in (1, 2, 3):
-            _noncanonical_fail(
-                "CURRENT-EVENT", f"history declares schemaVersion {schema_version}"
-            )
+            _noncanonical_fail("CURRENT-EVENT", f"history declares schemaVersion {schema_version}")
         run_id = event.get("runId")
         if isinstance(run_id, str) and run_id.strip() and len(run_id) >= 8:
-            _noncanonical_fail(
-                "IDENTITY-BEARING", "history contains a valid V1/V2 runId identity"
-            )
+            _noncanonical_fail("IDENTITY-BEARING", "history contains a valid V1/V2 runId identity")
         if _has_valid_v3_identity(event, validator):
-            _noncanonical_fail(
-                "IDENTITY-BEARING", "history contains a complete valid V3 identity"
-            )
+            _noncanonical_fail("IDENTITY-BEARING", "history contains a complete valid V3 identity")
     return tuple(events)
 
 
-def _noncanonical_history_marker(
-    item: Path,
-    expected_sha256: str,
-    original_bytes: bytes,
-    operation_id: str,
-    recorded_at: str,
-) -> dict[str, Any]:
+def _noncanonical_history_marker(item: Path, expected_sha256: str, original_bytes: bytes, operation_id: str, recorded_at: str) -> dict[str, Any]:
     history_name = f"agent-runs.history.{expected_sha256}.jsonl"
     return {
         "schemaVersion": 2,
@@ -645,11 +530,7 @@ def _noncanonical_history_marker(
         "eventKind": "standalone",
         "startedAt": recorded_at,
         "updatedAt": recorded_at,
-        "notes": (
-            f"opaqueHistoryPath={history_name} "
-            f"opaqueHistorySha256={expected_sha256} "
-            f"opaqueHistoryBytes={len(original_bytes)} authority=none"
-        ),
+        "notes": f"opaqueHistoryPath={history_name} opaqueHistorySha256={expected_sha256} opaqueHistoryBytes={len(original_bytes)} authority=none",
     }
 
 
@@ -659,29 +540,15 @@ def _noncanonical_is_reparse(metadata: os.stat_result) -> bool:
 
 
 def _noncanonical_file_identity(metadata: os.stat_result) -> tuple[int, int, int, int]:
-    return (
-        metadata.st_dev,
-        metadata.st_ino,
-        metadata.st_mode,
-        getattr(metadata, "st_file_attributes", 0),
-    )
+    return (metadata.st_dev, metadata.st_ino, metadata.st_mode, getattr(metadata, "st_file_attributes", 0))
 
 
-def _noncanonical_open_ordinary(
-    path: Path,
-    *,
-    writable: bool,
-    failure_id: str = "HISTORY-CONFLICT",
-) -> tuple[int, os.stat_result]:
+def _noncanonical_open_ordinary(path: Path, *, writable: bool, failure_id: str = "HISTORY-CONFLICT") -> tuple[int, os.stat_result]:
     try:
         before = path.lstat()
     except OSError as exc:
         _noncanonical_fail(failure_id, str(exc))
-    if (
-        not stat.S_ISREG(before.st_mode)
-        or stat.S_ISLNK(before.st_mode)
-        or _noncanonical_is_reparse(before)
-    ):
+    if not stat.S_ISREG(before.st_mode) or stat.S_ISLNK(before.st_mode) or _noncanonical_is_reparse(before):
         _noncanonical_fail(failure_id, f"linked or non-ordinary path: {path.name}")
     flags = (os.O_RDWR if writable else os.O_RDONLY) | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
     try:
@@ -690,11 +557,7 @@ def _noncanonical_open_ordinary(
         _noncanonical_fail(failure_id, str(exc))
     try:
         opened = os.fstat(descriptor)
-        if (
-            not stat.S_ISREG(opened.st_mode)
-            or _noncanonical_is_reparse(opened)
-            or _noncanonical_file_identity(before) != _noncanonical_file_identity(opened)
-        ):
+        if not stat.S_ISREG(opened.st_mode) or _noncanonical_is_reparse(opened) or _noncanonical_file_identity(before) != _noncanonical_file_identity(opened):
             _noncanonical_fail(failure_id, f"path identity changed while opening: {path.name}")
         return descriptor, opened
     except BaseException:
@@ -703,9 +566,7 @@ def _noncanonical_open_ordinary(
 
 
 def _noncanonical_read_owned_bytes(path: Path, *, failure_id: str) -> bytes:
-    descriptor, opened = _noncanonical_open_ordinary(
-        path, writable=False, failure_id=failure_id
-    )
+    descriptor, opened = _noncanonical_open_ordinary(path, writable=False, failure_id=failure_id)
     if getattr(opened, "st_nlink", 1) != 1:
         os.close(descriptor)
         _noncanonical_fail(failure_id, f"path has extra hardlinks: {path.name}")
@@ -727,29 +588,16 @@ def _read_exact_history_blob(path: Path, expected_sha256: str) -> bytes | None:
         return None
     except OSError as exc:
         _noncanonical_fail("HISTORY-CONFLICT", str(exc))
-    if (
-        not stat.S_ISREG(metadata.st_mode)
-        or stat.S_ISLNK(metadata.st_mode)
-        or _noncanonical_is_reparse(metadata)
-    ):
+    if not stat.S_ISREG(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode) or _noncanonical_is_reparse(metadata):
         _noncanonical_fail("HISTORY-CONFLICT", "history blob is linked or non-ordinary")
-    # A crash after os.link() but before staging cleanup leaves exactly the
-    # history name plus its owned staging name on the same inode. Admit only that
-    # known two-link crash state; an arbitrary external hardlink is not authority.
     links = getattr(metadata, "st_nlink", 1)
     if links != 1:
         staging = path.parent / f".{path.name}.tmp"
         try:
             staging_metadata = staging.lstat()
-        except OSError as exc:
+        except OSError:
             _noncanonical_fail("HISTORY-CONFLICT", "history blob has an unowned hardlink")
-        if (
-            links != 2
-            or not stat.S_ISREG(staging_metadata.st_mode)
-            or stat.S_ISLNK(staging_metadata.st_mode)
-            or _noncanonical_is_reparse(staging_metadata)
-            or (metadata.st_dev, metadata.st_ino) != (staging_metadata.st_dev, staging_metadata.st_ino)
-        ):
+        if links != 2 or not stat.S_ISREG(staging_metadata.st_mode) or stat.S_ISLNK(staging_metadata.st_mode) or _noncanonical_is_reparse(staging_metadata) or (metadata.st_dev, metadata.st_ino) != (staging_metadata.st_dev, staging_metadata.st_ino):
             _noncanonical_fail("HISTORY-CONFLICT", "history blob has an unowned hardlink")
     descriptor, _opened = _noncanonical_open_ordinary(path, writable=False)
     try:
@@ -766,6 +614,36 @@ def _read_exact_history_blob(path: Path, expected_sha256: str) -> bytes | None:
     return value
 
 
+def _cleanup_owned_history_staging(history_path: Path, staging: Path) -> None:
+    try:
+        staging_metadata = staging.lstat()
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        _noncanonical_fail("HISTORY-CONFLICT", str(exc))
+    try:
+        history_metadata = history_path.lstat()
+    except OSError as exc:
+        _noncanonical_fail("HISTORY-CONFLICT", str(exc))
+    if (
+        not stat.S_ISREG(history_metadata.st_mode)
+        or stat.S_ISLNK(history_metadata.st_mode)
+        or _noncanonical_is_reparse(history_metadata)
+        or not stat.S_ISREG(staging_metadata.st_mode)
+        or stat.S_ISLNK(staging_metadata.st_mode)
+        or _noncanonical_is_reparse(staging_metadata)
+        or getattr(history_metadata, "st_nlink", 1) != 2
+        or getattr(staging_metadata, "st_nlink", 1) != 2
+        or (history_metadata.st_dev, history_metadata.st_ino)
+        != (staging_metadata.st_dev, staging_metadata.st_ino)
+    ):
+        _noncanonical_fail("HISTORY-CONFLICT", "reserved history staging path conflicts")
+    try:
+        staging.unlink()
+    except OSError as exc:
+        _noncanonical_fail("HISTORY-CONFLICT", str(exc))
+
+
 def _write_exact_staging_file(path: Path, expected: bytes) -> None:
     def accept_existing() -> None:
         descriptor, opened = _noncanonical_open_ordinary(path, writable=False)
@@ -779,7 +657,6 @@ def _write_exact_staging_file(path: Path, expected: bytes) -> None:
             _noncanonical_fail("HISTORY-CONFLICT", str(exc))
         if actual != expected:
             _noncanonical_fail("HISTORY-CONFLICT", f"staging path conflicts: {path.name}")
-
     try:
         path.lstat()
     except FileNotFoundError:
@@ -789,17 +666,12 @@ def _write_exact_staging_file(path: Path, expected: bytes) -> None:
     else:
         accept_existing()
         return
-
     descriptor = None
     flags = os.O_CREAT | os.O_EXCL | os.O_RDWR | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
     try:
         descriptor = os.open(path, flags, 0o600)
         opened = os.fstat(descriptor)
-        if (
-            not stat.S_ISREG(opened.st_mode)
-            or _noncanonical_is_reparse(opened)
-            or getattr(opened, "st_nlink", 1) != 1
-        ):
+        if not stat.S_ISREG(opened.st_mode) or _noncanonical_is_reparse(opened) or getattr(opened, "st_nlink", 1) != 1:
             _noncanonical_fail("HISTORY-CONFLICT", f"created staging path is not ordinary: {path.name}")
         with os.fdopen(descriptor, "w+b") as stream:
             descriptor = None
@@ -818,53 +690,42 @@ def _write_exact_staging_file(path: Path, expected: bytes) -> None:
             os.close(descriptor)
 
 
-def _publish_noncanonical_history_blob(
-    item: Path, history_path: Path, expected_sha256: str, original_bytes: bytes
-) -> None:
+def _publish_noncanonical_history_blob(item: Path, history_path: Path, expected_sha256: str, original_bytes: bytes) -> None:
     staging = item / f".{history_path.name}.tmp"
     existing = _read_exact_history_blob(history_path, expected_sha256)
     if existing is not None:
         if existing != original_bytes:
             _noncanonical_fail("HISTORY-CONFLICT", "history blob bytes changed")
-        # Complete cleanup from the admitted crash state. unlink() removes only
-        # the staging directory entry; it never follows a symlink or reparse leaf.
-        staging.unlink(missing_ok=True)
+        _cleanup_owned_history_staging(history_path, staging)
         return
     _write_exact_staging_file(staging, original_bytes)
+    published_ok = False
     try:
         try:
             os.link(staging, history_path, follow_symlinks=False)
         except FileExistsError:
             existing = _read_exact_history_blob(history_path, expected_sha256)
             if existing is None:
-                _noncanonical_fail(
-                    "HISTORY-CONFLICT", "history publication raced without a file"
-                )
+                _noncanonical_fail("HISTORY-CONFLICT", "history publication raced without a file")
         published = _read_exact_history_blob(history_path, expected_sha256)
         if published != original_bytes:
             _noncanonical_fail("HISTORY-CONFLICT", "history blob bytes changed")
+        published_ok = True
     except OSError as exc:
         _noncanonical_fail("HISTORY-CONFLICT", str(exc))
     finally:
-        staging.unlink(missing_ok=True)
+        if published_ok:
+            _cleanup_owned_history_staging(history_path, staging)
 
 
-def _noncanonical_recovery_state(
-    item: Path,
-    expected_sha256: str,
-    operation_id: str,
-    recorded_at: str,
-    validator: Any,
-) -> tuple[str, bytes, Path, bytes]:
+def _noncanonical_recovery_state(item: Path, expected_sha256: str, operation_id: str, recorded_at: str, validator: Any) -> tuple[str, bytes, Path, bytes]:
     ledger_path = item / "agent-runs.jsonl"
     history_path = item / f"agent-runs.history.{expected_sha256}.jsonl"
     current = _noncanonical_read_owned_bytes(ledger_path, failure_id="DRIFT")
     history = _read_exact_history_blob(history_path, expected_sha256)
     original = history if history is not None else current
     _validate_noncanonical_history(item, original, validator)
-    marker = _noncanonical_history_marker(
-        item, expected_sha256, original, operation_id, recorded_at
-    )
+    marker = _noncanonical_history_marker(item, expected_sha256, original, operation_id, recorded_at)
     marker_bytes = (serialize_event(marker) + "\n").encode("utf-8")
     if current == marker_bytes and history is not None:
         return "applied", original, history_path, marker_bytes
@@ -873,41 +734,25 @@ def _noncanonical_recovery_state(
     return "other", original, history_path, marker_bytes
 
 
-def _validate_noncanonical_marker_candidate(
-    item: Path, candidate: Path, validator: Any
-) -> None:
-    errors = validator.validate_work_item(
-        item, ledger_path=candidate, strict_revise=False
-    )
+def _validate_noncanonical_marker_candidate(item: Path, candidate: Path, validator: Any) -> None:
+    errors = validator.validate_work_item(item, ledger_path=candidate, strict_revise=False)
     if errors:
         _noncanonical_fail("CANDIDATE-INVALID", "; ".join(errors))
 
 
-def _command_apply_noncanonical_history(
-    item: Path,
-    expected_sha256: str,
-    operation_id: str,
-    recorded_at: str,
-    validator: Any,
-    inject_failure: str | None,
-) -> tuple[bool, Path]:
-    state, original, history_path, marker_bytes = _noncanonical_recovery_state(
-        item, expected_sha256, operation_id, recorded_at, validator
-    )
+def _command_apply_noncanonical_history(item: Path, expected_sha256: str, operation_id: str, recorded_at: str, validator: Any, inject_failure: str | None) -> tuple[bool, Path]:
+    state, original, history_path, marker_bytes = _noncanonical_recovery_state(item, expected_sha256, operation_id, recorded_at, validator)
     if state == "applied":
         return True, history_path
     if state != "original":
         _noncanonical_fail("DRIFT", "ledger digest or recovery marker changed")
-
     ledger_path = item / "agent-runs.jsonl"
     candidate = ledger_path.with_suffix(".jsonl.tmp")
     replaced = False
     try:
         _write_exact_staging_file(candidate, marker_bytes)
         _validate_noncanonical_marker_candidate(item, candidate, validator)
-        _publish_noncanonical_history_blob(
-            item, history_path, expected_sha256, original
-        )
+        _publish_noncanonical_history_blob(item, history_path, expected_sha256, original)
         if inject_failure == "post-history-publish":
             print("FAIL: injected post-history-publish interruption", file=sys.stderr)
             return False, history_path
@@ -917,12 +762,8 @@ def _command_apply_noncanonical_history(
         os.replace(candidate, ledger_path)
         replaced = True
         if inject_failure == "post-ledger-replace-readback":
-            _noncanonical_fail(
-                "READBACK-INDETERMINATE", "injected post-replace readback failure"
-            )
-        actual = _noncanonical_read_owned_bytes(
-            ledger_path, failure_id="READBACK-INDETERMINATE"
-        )
+            _noncanonical_fail("READBACK-INDETERMINATE", "injected post-replace readback failure")
+        actual = _noncanonical_read_owned_bytes(ledger_path, failure_id="READBACK-INDETERMINATE")
         if actual != marker_bytes:
             _noncanonical_fail("READBACK-INDETERMINATE", "marker readback changed")
     except OSError as exc:
@@ -935,34 +776,18 @@ def _command_apply_noncanonical_history(
     return False, history_path
 
 
-def _command_rollback_noncanonical_history(
-    item: Path,
-    expected_sha256: str,
-    operation_id: str,
-    recorded_at: str,
-    validator: Any,
-    inject_failure: str | None,
-) -> tuple[bool, Path]:
-    state, original, history_path, marker_bytes = _noncanonical_recovery_state(
-        item, expected_sha256, operation_id, recorded_at, validator
-    )
+def _command_rollback_noncanonical_history(item: Path, expected_sha256: str, operation_id: str, recorded_at: str, validator: Any, inject_failure: str | None) -> tuple[bool, Path]:
+    state, original, history_path, marker_bytes = _noncanonical_recovery_state(item, expected_sha256, operation_id, recorded_at, validator)
     if state == "original":
         if history_path.exists():
             return True, history_path
         _noncanonical_fail("ROLLBACK-NOT-EMPTY", "recovery marker is absent")
     if state != "applied":
-        _noncanonical_fail(
-            "ROLLBACK-NOT-EMPTY", "rollback is frozen after a later append"
-        )
-
+        _noncanonical_fail("ROLLBACK-NOT-EMPTY", "rollback is frozen after a later append")
     ledger_path = item / "agent-runs.jsonl"
-    current = _noncanonical_read_owned_bytes(
-        ledger_path, failure_id="ROLLBACK-NOT-EMPTY"
-    )
+    current = _noncanonical_read_owned_bytes(ledger_path, failure_id="ROLLBACK-NOT-EMPTY")
     if current != marker_bytes:
-        _noncanonical_fail(
-            "ROLLBACK-NOT-EMPTY", "rollback is frozen after a later append"
-        )
+        _noncanonical_fail("ROLLBACK-NOT-EMPTY", "rollback is frozen after a later append")
     candidate = ledger_path.with_suffix(".jsonl.tmp")
     replaced = False
     try:
@@ -973,12 +798,8 @@ def _command_rollback_noncanonical_history(
         os.replace(candidate, ledger_path)
         replaced = True
         if inject_failure == "post-ledger-replace-readback":
-            _noncanonical_fail(
-                "READBACK-INDETERMINATE", "injected rollback readback failure"
-            )
-        actual = _noncanonical_read_owned_bytes(
-            ledger_path, failure_id="READBACK-INDETERMINATE"
-        )
+            _noncanonical_fail("READBACK-INDETERMINATE", "injected rollback readback failure")
+        actual = _noncanonical_read_owned_bytes(ledger_path, failure_id="READBACK-INDETERMINATE")
         if actual != original:
             _noncanonical_fail("READBACK-INDETERMINATE", "rollback readback changed")
     except OSError as exc:
@@ -998,21 +819,14 @@ def _iter_active_items(active_dir: Path) -> list[Path]:
 
 
 def active_work_item(args: argparse.Namespace, command: str) -> Path | None:
-    """Return one resolved current item, rejecting every non-active lifecycle path."""
-
     if args.work_item is None:
         print(f"FAIL: {command} requires --work-item", file=sys.stderr)
         return None
-
     item = args.work_item.resolve()
     work_items = next((parent for parent in item.parents if parent.name == "work-items"), None)
     active_root = work_items / "active" if work_items is not None else None
     if active_root is None or item.parent != active_root:
-        print(
-            f"FAIL: {command} requires a current work-items/active/<item> directory; "
-            f"refusing non-active lifecycle path: {item}",
-            file=sys.stderr,
-        )
+        print(f"FAIL: {command} requires a current work-items/active/<item> directory; refusing non-active lifecycle path: {item}", file=sys.stderr)
         return None
     return item
 
@@ -1023,19 +837,11 @@ def command_recover_noncanonical_history(args: argparse.Namespace) -> int:
         print(f"FAIL: missing work item: {item}", file=sys.stderr)
         return 1
     try:
-        expected_sha256 = _normalize_noncanonical_sha256(
-            args.expected_ledger_sha256
-        )
+        expected_sha256 = _normalize_noncanonical_sha256(args.expected_ledger_sha256)
         _strict_noncanonical_inputs(args.operation_id, args.recorded_at)
         validator = load_validator()
         if not args.apply_admitted and not args.rollback_admitted:
-            state, _original, history_path, marker_bytes = _noncanonical_recovery_state(
-                item,
-                expected_sha256,
-                args.operation_id,
-                args.recorded_at,
-                validator,
-            )
+            state, _original, history_path, marker_bytes = _noncanonical_recovery_state(item, expected_sha256, args.operation_id, args.recorded_at, validator)
             if state == "other":
                 _noncanonical_fail("DRIFT", "ledger digest or recovery marker changed")
             marker_errors: list[str] = []
@@ -1044,46 +850,23 @@ def command_recover_noncanonical_history(args: argparse.Namespace) -> int:
             validator.validate_status(item, [marker_event], marker_errors)
             if marker_errors:
                 _noncanonical_fail("CANDIDATE-INVALID", "; ".join(marker_errors))
-            print(
-                f"{NONCANONICAL_HISTORY_SUCCESS_MARKER} action=preflight "
-                f"state={state} history={history_path.name}"
-            )
+            print(f"{NONCANONICAL_HISTORY_SUCCESS_MARKER} action=preflight state={state} history={history_path.name}")
             return 0
         try:
             with ledger_write_lock(item):
                 if args.apply_admitted:
-                    replay, history_path = _command_apply_noncanonical_history(
-                        item,
-                        expected_sha256,
-                        args.operation_id,
-                        args.recorded_at,
-                        validator,
-                        args.inject_failure,
-                    )
+                    replay, history_path = _command_apply_noncanonical_history(item, expected_sha256, args.operation_id, args.recorded_at, validator, args.inject_failure)
                     action = "apply"
                 else:
-                    replay, history_path = _command_rollback_noncanonical_history(
-                        item,
-                        expected_sha256,
-                        args.operation_id,
-                        args.recorded_at,
-                        validator,
-                        args.inject_failure,
-                    )
+                    replay, history_path = _command_rollback_noncanonical_history(item, expected_sha256, args.operation_id, args.recorded_at, validator, args.inject_failure)
                     action = "rollback"
         except LedgerWriteLockError as exc:
             _noncanonical_fail("LOCKED", str(exc))
-        if args.apply_admitted and args.inject_failure in {
-            "post-history-publish",
-            "pre-ledger-replace",
-        }:
+        if args.apply_admitted and args.inject_failure in {"post-history-publish", "pre-ledger-replace"}:
             return 1
         if args.rollback_admitted and args.inject_failure == "pre-ledger-replace":
             return 1
-        print(
-            f"{NONCANONICAL_HISTORY_SUCCESS_MARKER} action={action} "
-            f"replay={str(replay).lower()} history={history_path.name}"
-        )
+        print(f"{NONCANONICAL_HISTORY_SUCCESS_MARKER} action={action} replay={str(replay).lower()} history={history_path.name}")
         return 0
     except LedgerNoncanonicalRecoveryError as exc:
         print(f"FAIL: {exc.failure_id}: {exc}", file=sys.stderr)
@@ -1114,23 +897,16 @@ def command_append(args: argparse.Namespace) -> int:
     if not item.exists():
         print(f"FAIL: missing work item: {item}", file=sys.stderr)
         return 1
-
     validator = load_validator()
     try:
         event = build_event(args, validator)
     except ValueError as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
         return 1
-
     ledger_path = item / "agent-runs.jsonl"
-    # Kill-safe old-or-new transaction (decision 2026-07-16-review-verdict-closure):
-    # lock -> read -> merge -> write TEMP (same dir) -> validate the CANDIDATE ->
-    # os.replace -> unlock. NO automatic stale-lock takeover (the ABA reclamation
-    # race is unfixable without fencing): on timeout we fail closed with a manual
-    # recovery diagnostic. Power-loss durability is explicitly NOT claimed.
     lock_path = item / "agent-runs.jsonl.lock"
     lock_fd = None
-    for _attempt in range(50):  # ~5s bounded retry
+    for _attempt in range(50):
         try:
             lock_fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
             os.write(lock_fd, f"pid={os.getpid()} at={utc_timestamp()}\n".encode())
@@ -1143,13 +919,8 @@ def command_append(args: argparse.Namespace) -> int:
             holder = lock_path.read_text(encoding="utf-8").strip()
         except OSError:
             pass
-        print(
-            f"FAIL: ledger locked ({lock_path}; holder: {holder or 'unknown'}). "
-            "No automatic takeover — verify the holder pid is dead, remove the lock file, retry.",
-            file=sys.stderr,
-        )
+        print(f"FAIL: ledger locked ({lock_path}; holder: {holder or 'unknown'}). No automatic takeover — verify the holder pid is dead, remove the lock file, retry.", file=sys.stderr)
         return 1
-
     try:
         previous = ledger_path.read_text(encoding="utf-8") if ledger_path.exists() else ""
         prefix = "" if not previous or previous.endswith("\n") else "\n"
@@ -1158,9 +929,6 @@ def command_append(args: argparse.Namespace) -> int:
         with candidate.open("w", encoding="utf-8", newline="") as fh:
             fh.write(f"{previous}{prefix}{line}\n")
             fh.flush()
-
-        # strict_revise=False: the helper RECORDS events (including REVISE verdicts
-        # themselves); closure strictness is the checker's and the gates' job.
         errors = validator.validate_work_item(item, ledger_path=candidate, strict_revise=False)
         if errors:
             candidate.unlink(missing_ok=True)
@@ -1172,7 +940,6 @@ def command_append(args: argparse.Namespace) -> int:
     finally:
         os.close(lock_fd)
         lock_path.unlink(missing_ok=True)
-
     print(f"{APPEND_SUCCESS_MARKER} ({ledger_path})")
     return 0
 
@@ -1200,37 +967,16 @@ def command_recover_invalid_closure(args: argparse.Namespace) -> int:
         "startedAt": started_at,
         "updatedAt": args.updated_at or started_at,
     }
-    ledger_path = item / "agent-runs.jsonl"
     decoded, _ = _read_ledger(item, validator)
     if any(event.get("schemaVersion") == 3 for event in decoded):
         print("FAIL: legacy V1/V2 writer refuses a ledger containing schemaVersion 3")
         return 1
-
     def validate_candidate(candidate: Path, _expected: bytes) -> list[str]:
-        return validator.validate_work_item(
-            item, ledger_path=candidate, strict_revise=False
-        )
-
-    return _commit_recovery_append(
-        item,
-        event,
-        validate_candidate,
-        RECOVERY_SUCCESS_MARKER,
-        args.inject_failure,
-    )
+        return validator.validate_work_item(item, ledger_path=candidate, strict_revise=False)
+    return _commit_recovery_append(item, event, validate_candidate, RECOVERY_SUCCESS_MARKER, args.inject_failure)
 
 
-def _commit_recovery_append(
-    item: Path,
-    event: dict[str, Any],
-    validate_candidate: Callable[[Path, bytes], list[str] | tuple[str, ...]],
-    success_marker: str,
-    inject_failure: str | None,
-    *,
-    replay_detector: Callable[[bytes], bool] | None = None,
-) -> int:
-    """Commit one validated recovery row through the existing atomic append path."""
-
+def _commit_recovery_append(item: Path, event: dict[str, Any], validate_candidate: Callable[[Path, bytes], list[str] | tuple[str, ...]], success_marker: str, inject_failure: str | None, *, replay_detector: Callable[[bytes], bool] | None = None) -> int:
     ledger_path = item / "agent-runs.jsonl"
     lock_path = item / "agent-runs.jsonl.lock"
     lock_fd = None
@@ -1276,12 +1022,7 @@ def _commit_recovery_append(
         except OSError:
             print("FAIL: ledger-recovery:post-commit-readback-indeterminate")
             return 1
-        if (
-            len(actual) != len(expected)
-            or hashlib.sha256(actual).digest() != hashlib.sha256(expected).digest()
-            or not actual.startswith(previous)
-            or not actual.endswith(line)
-        ):
+        if len(actual) != len(expected) or hashlib.sha256(actual).digest() != hashlib.sha256(expected).digest() or not actual.startswith(previous) or not actual.endswith(line):
             print("FAIL: ledger-recovery:post-commit-readback-indeterminate")
             return 1
     except (OSError, ValueError) as exc:
@@ -1310,13 +1051,7 @@ def command_dispose_invalid_current(args: argparse.Namespace) -> int:
     decoded, _malformed = _read_ledger(item, validator)
     existing = [event for event in decoded if event.get("runId") == args.run_id]
     existing_disposition = existing[0] if len(existing) == 1 else None
-    if (
-        isinstance(existing_disposition, dict)
-        and existing_disposition.get("invalidationMode")
-        == "invalid-current-nonauthorizing"
-        and args.started_at is None
-        and args.updated_at is None
-    ):
+    if isinstance(existing_disposition, dict) and existing_disposition.get("invalidationMode") == "invalid-current-nonauthorizing" and args.started_at is None and args.updated_at is None:
         started_at = existing_disposition.get("startedAt")
         updated_at = existing_disposition.get("updatedAt")
     else:
@@ -1341,37 +1076,13 @@ def command_dispose_invalid_current(args: argparse.Namespace) -> int:
         "startedAt": started_at,
         "updatedAt": updated_at,
     }
-
     def validate_candidate(_candidate: Path, expected: bytes) -> tuple[str, ...]:
-        return validator.validate_invalid_current_disposition_candidate(
-            item,
-            expected,
-            event,
-            ledger_manifest_bytes=manifest_bytes,
-        )
-
+        return validator.validate_invalid_current_disposition_candidate(item, expected, event, ledger_manifest_bytes=manifest_bytes)
     def is_replay(previous: bytes) -> bool:
         replay_errors: list[str] = []
-        current = validator.load_jsonl(
-            item / "agent-runs.jsonl", replay_errors, None, previous
-        )
-        return not replay_errors and any(candidate == event for candidate in current) and not (
-            validator.validate_invalid_current_disposition_candidate(
-                item,
-                previous,
-                event,
-                ledger_manifest_bytes=manifest_bytes,
-            )
-        )
-
-    return _commit_recovery_append(
-        item,
-        event,
-        validate_candidate,
-        INVALID_CURRENT_DISPOSITION_SUCCESS_MARKER,
-        args.inject_failure,
-        replay_detector=is_replay,
-    )
+        current = validator.load_jsonl(item / "agent-runs.jsonl", replay_errors, None, previous)
+        return not replay_errors and any(candidate == event for candidate in current) and not validator.validate_invalid_current_disposition_candidate(item, previous, event, ledger_manifest_bytes=manifest_bytes)
+    return _commit_recovery_append(item, event, validate_candidate, INVALID_CURRENT_DISPOSITION_SUCCESS_MARKER, args.inject_failure, replay_detector=is_replay)
 
 
 def _fmt_counts(counts: dict[str, int]) -> str:
@@ -1379,14 +1090,11 @@ def _fmt_counts(counts: dict[str, int]) -> str:
 
 
 def command_rollup(args: argparse.Namespace) -> int:
-    """Aggregate agent-runs.jsonl events for one work-item (--work-item) or across
-    all active items (--root). Read-only summary; never mutates a ledger."""
     if args.work_item is not None:
         items = [args.work_item.resolve()]
     else:
         active_dir = (args.root.resolve() / args.active_dir).resolve()
         items = _iter_active_items(active_dir)
-
     total = 0
     malformed_total = 0
     by_role: dict[str, int] = {}
@@ -1395,7 +1103,6 @@ def command_rollup(args: argparse.Namespace) -> int:
     by_status: dict[str, int] = {}
     with_evidence = 0
     per_item: list[tuple[str, int]] = []
-
     validator = load_validator()
     for item in items:
         events, malformed = _read_ledger(item, validator)
@@ -1403,39 +1110,17 @@ def command_rollup(args: argparse.Namespace) -> int:
         per_item.append((item.name, len(events)))
         for event in events:
             total += 1
-            for field, bucket in (
-                ("role", by_role),
-                ("executionRole", by_execution_role),
-                ("gate", by_gate),
-                ("status", by_status),
-            ):
+            for field, bucket in (("role", by_role), ("executionRole", by_execution_role), ("gate", by_gate), ("status", by_status)):
                 key = str(event.get(field, "<none>"))
                 if field == "executionRole":
-                    # legacy read-mapping (lead -> main): ONE owner must roll up
-                    # into ONE audit bucket even across pre-rename ledger lines
                     key = LEGACY_EXECUTION_ROLES.get(key, key)
                 bucket[key] = bucket.get(key, 0) + 1
             evidence = event.get("evidence")
             if isinstance(evidence, list) and evidence:
                 with_evidence += 1
-
     if args.json:
-        print(json.dumps(
-            {
-                "items": len(items),
-                "totalRuns": total,
-                "byRole": by_role,
-                "byExecutionRole": by_execution_role,
-                "byGate": by_gate,
-                "byStatus": by_status,
-                "evidenceCoverage": {"withEvidence": with_evidence, "total": total},
-                "malformedLines": malformed_total,
-                "perItem": dict(per_item),
-            },
-            ensure_ascii=False, indent=2,
-        ))
+        print(json.dumps({"items": len(items), "totalRuns": total, "byRole": by_role, "byExecutionRole": by_execution_role, "byGate": by_gate, "byStatus": by_status, "evidenceCoverage": {"withEvidence": with_evidence, "total": total}, "malformedLines": malformed_total, "perItem": dict(per_item)}, ensure_ascii=False, indent=2))
         return 0
-
     scope = items[0].name if (args.work_item is not None and items) else f"{len(items)} active items"
     print(f"=== agent-run ledger rollup ({scope}) ===")
     print(f"total runs: {total}")
@@ -1452,69 +1137,50 @@ def command_rollup(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Initialize, append, and roll up Orchestrarium agent-run ledger events.")
-    parser.add_argument(
-        "--work-item",
-        type=Path,
-        help="Path to one work-items/active/<item> directory. Required for init/append; optional for rollup (omit to roll up all active items via --root).",
-    )
+    parser.add_argument("--work-item", type=Path, help="Path to one work-items/active/<item> directory. Required for init/append; optional for rollup (omit to roll up all active items via --root).")
     subparsers = parser.add_subparsers(dest="command", required=True)
-
     init = subparsers.add_parser("init", help="Create missing status sections and an empty agent-runs.jsonl")
     init.add_argument("--primary-task", default="Unspecified.", help="Primary task text for a new or migrated status.md")
     init.add_argument("--stage", default="Unspecified.", help="Current stage text for a new or migrated status.md")
     init.set_defaults(func=command_init)
-
     append = subparsers.add_parser("append", help="Append one validated event to agent-runs.jsonl")
     append.add_argument("--run-id", help="Stable unique run identifier. Defaults to timestamp plus role.")
     append.add_argument("--work-item-name", help="Ledger workItem value. Defaults to the work-item directory name.")
     append.add_argument("--role", required=True, help="Actual role that produced the event.")
     append.add_argument("--execution-role", required=True, help="Execution role accepted by validate-work-item-state.py.")
-    append.add_argument("--assigned-role", help="Assigned or replaced internal role, when applicable.")
-    append.add_argument("--provider", help="Requested or resolved external provider, when applicable.")
-    append.add_argument("--model", help="Model or profile used, when known.")
-    append.add_argument("--status", required=True, help="Agent run status.")
-    append.add_argument("--gate", required=True, help="Gate verdict.")
-    append.add_argument("--scope", action="append", required=True, help="Scoped file, artifact, or responsibility. Repeatable.")
-    append.add_argument("--prompt-file", help="Prompt file path, when a provider-backed launch used one.")
-    append.add_argument("--artifact", help="Artifact path relative to the work item.")
-    append.add_argument("--evidence", action="append", help="Evidence in KIND:REF form. Repeatable.")
-    append.add_argument("--evidence-json", action="append", help="Evidence as a JSON object. Repeatable.")
-    append.add_argument(
-        "--scratch-evidence-json",
-        action="append",
-        help="Terminal scratch-evidence ownership entry as a JSON object. Repeatable.",
-    )
-    append.add_argument("--started-at", help="ISO-like start timestamp. Defaults to current UTC.")
-    append.add_argument("--updated-at", help="ISO-like update timestamp. Defaults to started-at.")
-    append.add_argument("--notes", help="Short operational note.")
-    # v2 closure/lifecycle fields (decision 2026-07-16-review-verdict-closure, minimal slice)
-    append.add_argument("--event-kind", choices=["launch", "terminal", "standalone"], help="v2 lifecycle discriminator.")
-    append.add_argument("--launch-run-id", help="On a terminal event: the runId of the launch it settles.")
-    append.add_argument(
-        "--closes",
-        action="append",
-        help=(
-            "runId of an earlier REVISE this PASS/WAIVED:user/"
-            "WAIVED:security-reviewer event discharges. Repeatable."
-        ),
-    )
-    append.add_argument("--artifact-revision", help="Revision of the reviewed artifact at review time (git sha or content digest).")
-    append.add_argument("--lane", help="Review angle label (e.g. architecture-adversarial).")
-    append.add_argument("--effort", choices=["low", "medium", "high", "xhigh", "max", "unsupported"], help="Typed declared reasoning-effort tier, or unsupported when an external provider exposes no native effort control.")
-    append.add_argument("--finding-class", choices=["publication-safety", "security", "correctness", "performance", "other"], help="REVISE finding classification (publication-safety/security are non-user-waivable).")
-    append.add_argument("--terminal-class", choices=["external-nonauthorizing", "internal-authorizing"], help="Typed durable terminal authority class.")
-    append.add_argument("--authorizing", choices=["true", "false"], help="Whether this terminal may authorize lifecycle closure.")
-    append.add_argument("--actual-execution-path", choices=["direct-external-cli", "internal"], help="Actual terminal execution path.")
-    append.add_argument("--artifact-identity", help="Frozen identity of the reviewed artifact.")
-    append.add_argument("--external-dispatch-id", help="Frozen external dispatch identity.")
-    append.add_argument("--external-evidence-run-id", help="External evidence run consumed by an internal closer.")
-    append.add_argument("--effort-mapping-loss", help="Frozen external provider effort-mapping disposition.")
-    append.add_argument("--launch-flags-json", help="Exact resolved provider argv flags as a JSON array of strings.")
-    append.add_argument("--closer-run-id", help="Distinct internal closer run identity.")
-    append.add_argument("--target-tuple-json", help="Exact external target tuple as a JSON object.")
+    append.add_argument("--assigned-role")
+    append.add_argument("--provider")
+    append.add_argument("--model")
+    append.add_argument("--status", required=True)
+    append.add_argument("--gate", required=True)
+    append.add_argument("--scope", action="append", required=True)
+    append.add_argument("--prompt-file")
+    append.add_argument("--artifact")
+    append.add_argument("--evidence", action="append")
+    append.add_argument("--evidence-json", action="append")
+    append.add_argument("--scratch-evidence-json", action="append")
+    append.add_argument("--started-at")
+    append.add_argument("--updated-at")
+    append.add_argument("--notes")
+    append.add_argument("--event-kind", choices=["launch", "terminal", "standalone"])
+    append.add_argument("--launch-run-id")
+    append.add_argument("--closes", action="append")
+    append.add_argument("--artifact-revision")
+    append.add_argument("--lane")
+    append.add_argument("--effort", choices=["low", "medium", "high", "xhigh", "max", "unsupported"])
+    append.add_argument("--finding-class", choices=["publication-safety", "security", "correctness", "performance", "other"])
+    append.add_argument("--terminal-class", choices=["external-nonauthorizing", "internal-authorizing"])
+    append.add_argument("--authorizing", choices=["true", "false"])
+    append.add_argument("--actual-execution-path", choices=["direct-external-cli", "internal"])
+    append.add_argument("--artifact-identity")
+    append.add_argument("--external-dispatch-id")
+    append.add_argument("--external-evidence-run-id")
+    append.add_argument("--effort-mapping-loss")
+    append.add_argument("--launch-flags-json")
+    append.add_argument("--closer-run-id")
+    append.add_argument("--target-tuple-json")
     append.set_defaults(func=command_append)
-
-    recovery = subparsers.add_parser("recover-invalid-closure", help="Append one digest-bound V2 closure invalidation")
+    recovery = subparsers.add_parser("recover-invalid-closure")
     recovery.add_argument("--run-id", required=True)
     recovery.add_argument("--target-run-id", required=True)
     recovery.add_argument("--target-event-sha256", required=True)
@@ -1523,11 +1189,7 @@ def build_parser() -> argparse.ArgumentParser:
     recovery.add_argument("--updated-at")
     recovery.add_argument("--inject-failure", choices=["pre-replace", "post-replace-readback"], help=argparse.SUPPRESS)
     recovery.set_defaults(func=command_recover_invalid_closure)
-
-    disposition = subparsers.add_parser(
-        "dispose-invalid-current",
-        help="Append one exact nonauthorizing invalid-current suffix disposition",
-    )
+    disposition = subparsers.add_parser("dispose-invalid-current")
     disposition.add_argument("--run-id", required=True)
     disposition.add_argument("--target-run-id", required=True)
     disposition.add_argument("--target-raw-line-ordinal", type=int, required=True)
@@ -1536,38 +1198,21 @@ def build_parser() -> argparse.ArgumentParser:
     disposition.add_argument("--evidence", action="append", required=True)
     disposition.add_argument("--started-at")
     disposition.add_argument("--updated-at")
-    disposition.add_argument(
-        "--inject-failure",
-        choices=["pre-replace", "post-replace-readback"],
-        help=argparse.SUPPRESS,
-    )
+    disposition.add_argument("--inject-failure", choices=["pre-replace", "post-replace-readback"], help=argparse.SUPPRESS)
     disposition.set_defaults(func=command_dispose_invalid_current)
-
-    noncanonical = subparsers.add_parser(
-        "recover-noncanonical-history",
-        help="Seal one exact noncanonical ledger as inert history and start a canonical ledger",
-    )
+    noncanonical = subparsers.add_parser("recover-noncanonical-history")
     noncanonical.add_argument("--expected-ledger-sha256", required=True)
     noncanonical.add_argument("--operation-id", required=True)
     noncanonical.add_argument("--recorded-at", required=True)
     action = noncanonical.add_mutually_exclusive_group()
     action.add_argument("--apply-admitted", action="store_true")
     action.add_argument("--rollback-admitted", action="store_true")
-    noncanonical.add_argument(
-        "--inject-failure",
-        choices=[
-            "post-history-publish",
-            "pre-ledger-replace",
-            "post-ledger-replace-readback",
-        ],
-        help=argparse.SUPPRESS,
-    )
+    noncanonical.add_argument("--inject-failure", choices=["post-history-publish", "pre-ledger-replace", "post-ledger-replace-readback"], help=argparse.SUPPRESS)
     noncanonical.set_defaults(func=command_recover_noncanonical_history)
-
-    rollup = subparsers.add_parser("rollup", help="Aggregate ledger events (one work-item via --work-item, or all active via --root)")
-    rollup.add_argument("--root", type=Path, default=Path("."), help="Repository root for an all-active rollup (when --work-item is omitted).")
-    rollup.add_argument("--active-dir", default="work-items/active", help="Active dir relative to --root. Defaults to work-items/active.")
-    rollup.add_argument("--json", action="store_true", help="Emit the rollup as JSON instead of a human-readable summary.")
+    rollup = subparsers.add_parser("rollup")
+    rollup.add_argument("--root", type=Path, default=Path("."))
+    rollup.add_argument("--active-dir", default="work-items/active")
+    rollup.add_argument("--json", action="store_true")
     rollup.set_defaults(func=command_rollup)
     return parser
 
