@@ -190,15 +190,15 @@ class TestWorkItemsLifecycleInstallParity(unittest.TestCase):
                 self.assertIn("preserve-current", text)
 
         # The Codex platform file is intentionally a thin installed surface: it
-        # delegates disposition vocabulary to the versioned physical-lifecycle
-        # owner instead of duplicating the mutable enum. Pin that owner reference
-        # explicitly so the parity gate still fails if Codex drops the contract.
+        # delegates disposition vocabulary to the versioned lifecycle owner
+        # instead of duplicating the mutable enum. Pin the concrete thin-surface
+        # references so this gate fails if Codex drops that ownership contract.
         codex_platform = (ROOT / "src.codex" / "AGENTS.codex.md").read_text(
             encoding="utf-8"
         )
         self.assertIn("bug-dispositions.json", codex_platform)
-        self.assertIn("Physical Lifecycle V1", codex_platform)
-        self.assertIn("lifecycle owner", codex_platform)
+        self.assertIn("versioned Lead/lifecycle-owner contract", codex_platform)
+        self.assertIn("Physical location owns membership", codex_platform)
 
         owner = (ROOT / "scripts" / "mutate-work-item.py").read_text(
             encoding="utf-8"
