@@ -172,8 +172,6 @@ def stale_running_errors(
         if event.get("status") != "running":
             continue
         run_id = event.get("runId", "<unknown>")
-        # V2 launch rows are stale only until their valid terminal settlement.
-        # Rows without eventKind retain the legacy stale-running behavior.
         if (
             compatibility_active
             and run_id not in unsettled_launches
@@ -394,9 +392,9 @@ def next_action_line(item: Path, validator=None) -> str:
             if stripped.lower().rstrip(": ") in ("## next action", "## next actions"):
                 in_section = True
             continue
-        if stripped.startswith("## "):  # next top-level section ends the block
+        if stripped.startswith("## "):
             break
-        if stripped.startswith("#"):  # a sub-heading inside the section is not the action
+        if stripped.startswith("#"):
             continue
         content = stripped.lstrip("-*").strip()
         if content:
@@ -408,9 +406,6 @@ def command_check(args: argparse.Namespace) -> int:
     root = args.root.resolve()
     active_dir = (root / args.active_dir).resolve()
     items = iter_work_items(active_dir)
-    # NOTE: no early return on empty active/ — the archive laundering scan below must
-    # run regardless (fable impl-gate r2 F1: archiving the LAST active item is the
-    # natural laundering terminal state and used to bypass the scan entirely).
 
     validator = load_validator()
     now = parse_time(args.now) if args.now else datetime.now(UTC)
@@ -425,6 +420,14 @@ def command_check(args: argparse.Namespace) -> int:
     except lifecycle.LifecycleError as exc:
         failed += 1
         print(f"FAIL category lifecycle: {exc.failure_id}: {exc}")
+
+    transfer_errors = validator.validate_obligation_transfer_ownership(root)
+    if transfer_errors:
+        failed += 1
+        print("FAIL obligation transfer ownership:")
+        for error in transfer_errors:
+            print(f"  - {error}")
+
     global_notes = epic_adoption_notes(items, active_dir)
     sentinel_dependency = load_required_sentinels()
     if not sentinel_dependency.available:
@@ -443,9 +446,6 @@ def command_check(args: argparse.Namespace) -> int:
         resolver = sentinel_dependency.resolve_epic_locations
         if callable(resolver):
             errors.extend(epic_link_notes(item, active_dir, resolver, is_valid_slug))
-        # Informational notes (aging, blocked-by) are NOT failures: a blocked or
-        # aging active item is expected state, not a defect, so they never flip
-        # the exit code or the RESULT line.
         notes = item_aging_notes(item, today, args.max_age_days)
         notes.extend(blocked_by_notes(item, root, lifecycle, is_valid_slug))
         label = item.name
@@ -461,14 +461,6 @@ def command_check(args: argparse.Namespace) -> int:
     for note in global_notes:
         print(f"info: {note}")
 
-    # Sentinel findings, reported informationally (S4 seam). This NEVER
-    # affects `failed` / the RESULT line: the sentinel registry answers "has
-    # the process failed?" at the always-on Stop path, this validator answers
-    # "does this document conform?" on demand -- two different questions, one
-    # owner each (design.md §3.2). A sentinel RESOLVE/NOTICE surfaces here
-    # purely as an extra signal for a human running this checker by hand (a
-    # third tier, HALT, was designed and then withdrawn before release --
-    # design.md §0.9/§1.0 -- so it is never a value `finding.severity` takes).
     sentinels = sentinel_dependency.module
     if sentinels is not None:
         build_context = getattr(sentinels, "build_context", None)
@@ -488,8 +480,6 @@ def command_check(args: argparse.Namespace) -> int:
             )
         else:
             try:
-                # Runtime evaluation is informational here; document validity was
-                # handled above through the registry-owned delivery parser.
                 sentinel_ctx = build_context(str(root))
                 for finding in evaluate_all(sentinel_ctx):
                     first_line = finding.message.splitlines()[0] if finding.message else ""
@@ -500,9 +490,6 @@ def command_check(args: argparse.Namespace) -> int:
                     f"{type(exc).__name__}: {exc}"
                 )
 
-    # The default periodic audit prevents archival laundering. Publication uses
-    # --active-only because local historical hygiene is not part of a tracked
-    # delta's current-task gate; lifecycle close already validates its own move.
     if not args.no_strict_revise and not args.active_only:
         for ledger in sorted(archive_dir.rglob("agent-runs.jsonl")):
             arch_errors, open_revise, _open_launches = validator.validate_archived_ledger_obligations(
@@ -523,13 +510,7 @@ def command_check(args: argparse.Namespace) -> int:
         counters = ", ".join(f"{k}={v}" for k, v in sorted(telemetry.items()))
         print(f"TELEMETRY: {counters}")
 
-    # Forcing function (bug 2026-07-18-false-completion-claim-validator-pass-conflated-with-done):
-    # a green RESULT means "valid state + no open ledger obligations", NOT "all closed / done".
-    # Always surface every active item + its Next action so a PASS can never be quoted as
-    # completion while real unstarted work remains.
     if items:
-        # Header is verdict-neutral (prints on PASS and FAIL runs alike): a check result
-        # of ANY kind is state, never completion, while these items remain open.
         print("STILL OPEN - these active work-items are NOT closed (a check result is state, not completion):")
         for item in items:
             print(f"  - {item.name} -- Next action: {next_action_line(item, validator)}")
@@ -596,11 +577,6 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str]) -> int:
-    # Output-encoding guard at the owner (the stdout stream), not per-string: this tool
-    # prints arbitrary status.md content (Next-action previews) that routinely contains
-    # non-ASCII (em-dashes, arrows). On a non-UTF-8 console (e.g. cp866) an unguarded
-    # print would raise UnicodeEncodeError and kill the whole report. Replace
-    # un-encodable characters instead of crashing — closes the class for every print path.
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
             try:
