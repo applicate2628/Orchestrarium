@@ -18,7 +18,23 @@ HOOK = (
 )
 
 
-def test_powershell_repository_work_start_emits_parallel_reminder(tmp_path: Path) -> None:
+def _run_hook(project: Path, home: Path, envelope: dict) -> subprocess.CompletedProcess[str]:
+    env = os.environ.copy()
+    env["USERPROFILE"] = str(home)
+    env["HOME"] = str(home)
+    return subprocess.run(
+        [sys.executable, "-B", str(HOOK)],
+        cwd=project,
+        env=env,
+        input=json.dumps(envelope),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+
+
+def _project_fixture(tmp_path: Path) -> tuple[Path, Path]:
     project = tmp_path / "project"
     home = tmp_path / "home"
     (project / ".git").mkdir(parents=True)
@@ -30,29 +46,42 @@ def test_powershell_repository_work_start_emits_parallel_reminder(tmp_path: Path
         "delegationMode: force\nparallelMode: force\n",
         encoding="utf-8",
     )
-    envelope = {
-        "hook_event_name": "PreToolUse",
-        "tool_name": "PowerShell",
-        "tool_input": {"command": "python scripts/run.py"},
-        "cwd": str(project),
-    }
-    env = os.environ.copy()
-    env["USERPROFILE"] = str(home)
-    env["HOME"] = str(home)
+    return project, home
 
-    result = subprocess.run(
-        [sys.executable, "-B", str(HOOK)],
-        cwd=project,
-        env=env,
-        input=json.dumps(envelope),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        check=False,
-    )
 
+def _assert_reminder(result: subprocess.CompletedProcess[str]) -> None:
     assert result.returncode == 0
     assert result.stderr == ""
     payload = json.loads(result.stdout)
     assert payload["hookSpecificOutput"]["hookEventName"] == "PreToolUse"
     assert "parallel and MCP momentum" in payload["hookSpecificOutput"]["additionalContext"]
+
+
+def test_powershell_repository_work_start_emits_parallel_reminder(tmp_path: Path) -> None:
+    project, home = _project_fixture(tmp_path)
+    result = _run_hook(
+        project,
+        home,
+        {
+            "hook_event_name": "PreToolUse",
+            "tool_name": "PowerShell",
+            "tool_input": {"command": "python scripts/run.py"},
+            "cwd": str(project),
+        },
+    )
+    _assert_reminder(result)
+
+
+def test_exec_command_cmd_repository_work_start_emits_parallel_reminder(tmp_path: Path) -> None:
+    project, home = _project_fixture(tmp_path)
+    result = _run_hook(
+        project,
+        home,
+        {
+            "hook_event_name": "PreToolUse",
+            "tool_name": "exec_command",
+            "tool_input": {"cmd": "python scripts/run.py"},
+            "cwd": str(project),
+        },
+    )
+    _assert_reminder(result)
