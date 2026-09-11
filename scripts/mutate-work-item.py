@@ -14570,6 +14570,10 @@ def _validate_ledger_h1_relocation_intent_shape(
         f"work-items/{name}": (name, kind)
         for name, kind in LEDGER_H1_RELOCATION_MEMBERS
     }
+    expected_logical_paths = sorted(
+        expected_members,
+        key=lambda value: value.encode("utf-8"),
+    )
     logical_paths: list[str] = []
     for member in members:
         if (
@@ -14602,10 +14606,10 @@ def _validate_ledger_h1_relocation_intent_shape(
         logical_paths.append(str(member["logicalPath"]))
         _intent_path(root, str(member["sourcePath"]))
         _intent_path(root, str(member["targetPath"]))
-    if logical_paths != sorted(logical_paths, key=lambda value: value.encode("utf-8")):
+    if logical_paths != expected_logical_paths:
         raise LifecycleError(
             "WI-LIFECYCLE-TRANSITION-INTENT-INVALID",
-            "H1 relocation intent members are not sorted",
+            "H1 relocation intent members differ from the complete sorted set",
         )
     root_before = _unb64(intent.get("rootContractBefore"))
     root_after = _unb64(intent.get("rootContractAfter"))
@@ -14739,6 +14743,12 @@ def _ledger_h1_restore_before_receipt(
     intent_path: Path,
     intent: Mapping[str, object],
 ) -> None:
+    receipt_path = _intent_path(root, str(intent["receiptPath"]))
+    if _ledger_h1_lexically_exists(receipt_path):
+        raise LifecycleError(
+            "WI-LEDGER-COMPAT-COMMIT-INDETERMINATE",
+            "H1 rollback is forbidden after receipt commit",
+        )
     distribution = _ledger_h1_intent_distribution(root, intent)
     repository = Path(root).resolve()
     if repository.name == "work-items":
@@ -14769,12 +14779,6 @@ def _ledger_h1_restore_before_receipt(
                 "H1 rollback root contract cannot be proven",
             )
         _atomic_write(contract_path, root_before)
-    receipt_path = _intent_path(root, str(intent["receiptPath"]))
-    if _ledger_h1_lexically_exists(receipt_path):
-        raise LifecycleError(
-            "WI-LEDGER-COMPAT-COMMIT-INDETERMINATE",
-            "H1 rollback is forbidden after receipt commit",
-        )
     try:
         artifact_base.rmdir()
     except FileNotFoundError:

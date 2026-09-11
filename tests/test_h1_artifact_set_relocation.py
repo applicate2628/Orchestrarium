@@ -722,6 +722,30 @@ def test_preflight_rejects_noncalendar_archive_month(tmp_path: Path) -> None:
     assert support.tree_state(root) == before
 
 
+def test_relocation_rejects_duplicate_intent_member_set_before_mutation(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "duplicate-intent-members"
+    support, writer, _reader, request, _items, _paths = activated_relocation_fixture(
+        root
+    )
+    plan = writer._ledger_h1_relocation_preflight(root, request)
+    intent = writer._ledger_h1_relocation_intent(plan, request)
+    members = intent["members"]
+    assert isinstance(members, list)
+    intent["members"] = [dict(members[0]) for _member in members]
+    intent_path = writer._transition_intent_path(root, request.operation_id)
+    intent_path.parent.mkdir(parents=True, exist_ok=True)
+    writer._atomic_write(intent_path, writer._migration_receipt_bytes(intent))
+    before = support.tree_state(root)
+
+    with pytest.raises(writer.LifecycleError) as rejected:
+        writer.relocate_ledger_h1_artifact_set(root, request, apply=True)
+
+    assert rejected.value.failure_id == "WI-LIFECYCLE-TRANSITION-INTENT-INVALID"
+    assert support.tree_state(root) == before
+
+
 @pytest.mark.parametrize(
     "boundary",
     (
@@ -807,6 +831,48 @@ def test_post_receipt_failure_never_reverses_and_replay_settles(
     settled = support.tree_state(root)
     assert not (root / "work-items" / "decision-h1-compatibility.json").exists()
     replay = writer.relocate_ledger_h1_artifact_set(root, request, apply=True)
+    assert replay["replay"] is True
+    assert support.tree_state(root) == settled
+    assert not writer._transition_intent_path(root, request.operation_id).exists()
+
+
+def test_receipt_sync_failure_preserves_committed_archive_for_replay(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "receipt-sync-failure"
+    support, writer, _reader, request, _items, _paths = activated_relocation_fixture(
+        root
+    )
+    plan = writer._ledger_h1_relocation_preflight(root, request)
+    original_sync = writer._transition_fsync_directory
+
+    def fail_after_receipt_sync(path: Path) -> None:
+        original_sync(path)
+        if path == plan.receipt_path.parent and plan.receipt_path.is_file():
+            raise writer.LifecycleError(
+                "WI-LEDGER-COMPAT-COMMIT-INDETERMINATE",
+                "injected failure after H1 receipt directory sync",
+            )
+
+    monkeypatch.setattr(writer, "_transition_fsync_directory", fail_after_receipt_sync)
+    with pytest.raises(writer.LifecycleError) as interrupted:
+        writer.relocate_ledger_h1_artifact_set(root, request, apply=True)
+    monkeypatch.setattr(writer, "_transition_fsync_directory", original_sync)
+
+    assert interrupted.value.failure_id == "WI-LEDGER-COMPAT-COMMIT-INDETERMINATE"
+    assert plan.receipt_path.read_bytes() == plan.receipt_bytes
+    for member in plan.members:
+        source = root.joinpath(*str(member["sourcePath"]).split("/"))
+        target = root.joinpath(*str(member["targetPath"]).split("/"))
+        assert not source.exists()
+        assert target.exists()
+    current_contract = writer._ledger_h1_current_contract(plan.root_contract_path)
+    assert current_contract == plan.root_contract_after
+    settled = support.tree_state(root)
+
+    replay = writer.relocate_ledger_h1_artifact_set(root, request, apply=True)
+
     assert replay["replay"] is True
     assert support.tree_state(root) == settled
     assert not writer._transition_intent_path(root, request.operation_id).exists()

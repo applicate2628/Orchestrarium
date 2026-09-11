@@ -4897,6 +4897,67 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
                     )
                 )
 
+    def test_grant_state_order_and_quoted_examples_remain_fail_closed(self) -> None:
+        old_malformed = self.GRANT + "\nquoted explanation"
+        malformed_revoke = "[revoke-pr-publication:v1] trailing explanation"
+        malformed_other = (
+            "[approve-pr-publication:v1 "
+            "pr=https://github.com/acme/other/pull/]"
+        )
+        compact = user(self.GRANT)
+        compact["isCompactSummary"] = True
+        quoted = (
+            assistant(self.GRANT),
+            tool_result(self.GRANT, tool_id="quoted-grant"),
+            compact,
+            user("Documentation example: " + self.GRANT),
+        )
+        for script in (CANONICAL_HOOK, *HOOKS):
+            module = _load_gate_module(
+                script, f"pr_grant_order_{script.parent.parent.name}"
+            )
+            with self.subTest(script=script, state="later-valid"):
+                state, grant = module._derive_pr_grant(
+                    [user(old_malformed), user(self.GRANT)],
+                    str(REPO_ROOT.resolve()),
+                )
+                self.assertEqual((state, grant), (
+                    "active",
+                    module.ActivePrGrant(
+                        "https://github.com/acme/project/pull/7",
+                        "acme", "project", 7,
+                    ),
+                ))
+            for latest, label in (
+                (malformed_revoke, "latest-malformed-revoke"),
+                (malformed_other, "malformed-other-pr"),
+                (
+                    "[approve-pr-publication:v1 pr=10] , include accumulated context",
+                    "same-line-comment-not-admitted",
+                ),
+                (self.GRANT + "\ntrailing context", "multiline-grant"),
+                (self.GRANT + "adjacent", "undelimited-grant"),
+            ):
+                with self.subTest(script=script, state=label):
+                    self.assertEqual(
+                        module._derive_pr_grant(
+                            [user(self.GRANT), user(latest)],
+                            str(REPO_ROOT.resolve()),
+                        ),
+                        ("malformed", None),
+                    )
+            with self.subTest(script=script, state="quoted-examples"):
+                state, grant = module._derive_pr_grant(
+                    [user(self.GRANT), *quoted], str(REPO_ROOT.resolve())
+                )
+                self.assertEqual((state, grant), (
+                    "active",
+                    module.ActivePrGrant(
+                        "https://github.com/acme/project/pull/7",
+                        "acme", "project", 7,
+                    ),
+                ))
+
     def test_number_shorthand_keeps_authorization_repository_identity_after_switch(self) -> None:
         with temporary_repository_workdir() as authorization_workdir:
             grant = user("[approve-pr-publication:v1 pr=3]")
