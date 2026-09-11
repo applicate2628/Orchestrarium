@@ -69,7 +69,12 @@ def _is_repository_work_start(envelope: dict, tool_input: dict) -> bool:
             not classifier["_is_exempt"](path, root) for path in repository_targets
         )
     if tool_name in classifier["_SHELL_TOOLS"]:
-        command = tool_input.get("command")
+        # Codex's canonical exec_command shape uses `cmd`; Claude/compatibility
+        # shell wrappers use `command`. Accept both while keeping the command
+        # classifier itself single-owned by check-repository-orientation.py.
+        command = tool_input.get("cmd") if tool_name == "exec_command" else None
+        if not isinstance(command, str) or not command:
+            command = tool_input.get("command")
         if not isinstance(command, str) or not command:
             return False
         risky, _target = classifier["_risky_shell_target"](command, cwd, root)
