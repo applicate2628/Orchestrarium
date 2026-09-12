@@ -4953,6 +4953,39 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
                     self.assertEqual(snapshots[0]["remote"], "origin")
                     self.assertEqual(snapshots[0]["headRef"], "feature")
 
+    def test_simple_marker_accepts_normal_direct_powershell_push_forms(self) -> None:
+        head = "feature"
+        refspec = f"HEAD:refs/heads/{head}"
+        root = str(REPO_ROOT.resolve())
+        executable = self.OWNED_GIT_IDENTITY
+        for script in (CANONICAL_HOOK, *HOOKS):
+            forms = [
+                f"git push origin {refspec}",
+                f"git -C '{root}' push origin {refspec}",
+                self._literal_command(script),
+            ]
+            if self._tool_name(script) == "PowerShell":
+                forms.insert(
+                    2, f"& '{executable}' -C '{root}' push origin {refspec}"
+                )
+            for command in forms:
+                with self.subTest(script=script, command_kind=forms.index(command)):
+                    stdout, _observed = self._run_module(
+                        script, [user("[approve-pr-publication]")], command
+                    )
+                    self.assertFalse(denies_text(stdout), stdout)
+
+            compound = forms[0] + "; echo done"
+            denied, _observed = self._run_module(
+                script, [user("[approve-pr-publication]")], compound
+            )
+            self.assertTrue(denies_text(denied), denied)
+
+            legacy, _observed = self._run_module(
+                script, [user(self.GRANT)], forms[0]
+            )
+            self.assertIn("PRG-COMMAND-SHAPE", legacy)
+
     def test_simple_marker_negative_forms_never_create_state(self) -> None:
         forms = (
             "please use [approve-pr-publication]",

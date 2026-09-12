@@ -3274,6 +3274,104 @@ def _prepare_pr_push(
     return PreparedPrPush(literal, repository_workdir, git_exe)
 
 
+def _prepare_simple_pr_push(
+    dialect: str,
+    parsed: ShellParseResult,
+    repository_workdir: str,
+    repository_workdir_source: str,
+) -> PreparedPrPush:
+    if (
+        parsed.strict_projection.status == "canonical"
+        and parsed.strict_projection.argv
+        and Path(parsed.strict_projection.argv[0]).is_absolute()
+    ):
+        return _prepare_pr_push(
+            parsed.raw_command, dialect, parsed, repository_workdir,
+            repository_workdir_source,
+        )
+    effective = parsed.effective_publications
+    if (
+        not effective.exact_complete
+        or len(effective.records) != 1
+        or effective.records[0].kind != "DIRECT"
+        or len(parsed.commands) != 1
+        or len(parsed.pushes) != 1
+        or parsed.normalizations
+    ):
+        raise PrRouteDenied("PRG-COMMAND-SHAPE")
+    push = effective.records[0].push
+    command = push.command
+    if (
+        push is not parsed.pushes[0]
+        or not push.only_direct_push
+        or not push.only_executable_command
+        or push.shell_context not in {"top-level", "call-operator"}
+        or command.control_keywords
+        or (
+            command.boundary_before != "start"
+            and not (
+                push.shell_context == "call-operator"
+                and command.boundary_before == "&"
+            )
+        )
+        or (
+            command.boundary_after != "end"
+            and not command.trailing_linebreak_only
+        )
+        or push.environment_assignments
+        or push.option_status != "GPO-PARSED"
+        or push.push_options
+        or push.dry_run
+        or len(push.positionals) != 2
+        or push.repository_context not in {"ambient", "redirected"}
+    ):
+        raise PrRouteDenied("PRG-COMMAND-SHAPE")
+    global_options = tuple(push.git_global_options)
+    if global_options:
+        if len(global_options) != 2 or global_options[0] != "-C":
+            raise PrRouteDenied("PRG-COMMAND-SHAPE")
+        command_root = _normalize_repository_workdir(global_options[1])
+        if repository_workdir_source == "tool":
+            if _normalize_repository_workdir(repository_workdir) != command_root:
+                raise PrRouteDenied("PRG-WORKDIR-INVALID")
+        elif repository_workdir_source != "envelope":
+            raise PrRouteDenied("PRG-WORKDIR-INVALID")
+        repository_workdir = command_root
+    else:
+        if push.repository_context != "ambient":
+            raise PrRouteDenied("PRG-COMMAND-SHAPE")
+        repository_workdir = _normalize_repository_workdir(repository_workdir)
+    remote, refspec = push.positionals
+    if not REMOTE_NAME_REGEX.fullmatch(remote):
+        raise PrRouteDenied("PRG-COMMAND-SHAPE")
+    prefix = "HEAD:refs/heads/"
+    if not refspec.startswith(prefix):
+        raise PrRouteDenied("PRG-COMMAND-SHAPE")
+    head_ref = refspec[len(prefix):]
+    if not _portable_pr_head_ref(head_ref):
+        raise PrRouteDenied("PRG-COMMAND-SHAPE")
+    git_exe = _resolve_executable("git", repository_workdir)
+    if git_exe is None:
+        raise PrRouteDenied("PRG-REMOTE-MISMATCH")
+    raw_executable = command.executable
+    if Path(raw_executable).is_absolute():
+        literal_executable = raw_executable
+    elif Path(raw_executable).name == raw_executable and raw_executable.casefold() in {
+        "git", "git.exe",
+    }:
+        literal_executable = git_exe
+    else:
+        raise PrRouteDenied("PRG-COMMAND-SHAPE")
+    literal = LiteralPushCommand(
+        _pr_command_dialect(dialect), literal_executable, remote, refspec,
+        PushTarget(remote, f"refs/heads/{head_ref}", head_ref),
+        repository_workdir if global_options else None,
+    )
+    literal = _bind_pr_literal_executable(literal, git_exe)
+    repository_workdir = _prove_repository_root(repository_workdir, git_exe)
+    return PreparedPrPush(literal, repository_workdir, git_exe)
+
+
 def _discover_unique_open_pr(
     prepared: PreparedPrPush,
 ) -> tuple[ActivePrGrant, str, str]:
@@ -3327,8 +3425,8 @@ def _evaluate_simple_pr_route(
 ) -> bool:
     if not intent.sha256:
         raise PrRouteDenied("PRG-TRANSCRIPT-UNAVAILABLE")
-    prepared = _prepare_pr_push(
-        preflight.command, preflight.dialect, preflight.parsed,
+    prepared = _prepare_simple_pr_push(
+        preflight.dialect, preflight.parsed,
         preflight.repository_workdir, preflight.repository_workdir_source,
     )
     identity = _repository_identity(prepared.repository_workdir)
@@ -3571,7 +3669,7 @@ def compose_gate_result(preflight: PreflightResult) -> int:
         "PRG-AUTH-MALFORMED": "Use the exact version-1 PR approval or revocation line in a genuine user message.",
         "PRG-TRANSCRIPT-UNAVAILABLE": "Retry from a readable current session transcript; summaries cannot authorize publication.",
         "PRG-TRANSCRIPT-HISTORY-LIMIT": "History exceeds the in-memory PR-grant window and the complete stable transcript has no active grant. The user must send a new genuine exact PR grant for repeated pushes or `[approve-publication]` for one generic push; summaries, assistant text, and tool output do not authorize.",
-        "PRG-COMMAND-SHAPE": "Use one exact absolute Git literal: `git push <remote> HEAD:refs/heads/<head>` or `git -C <absolute-root> push <remote> HEAD:refs/heads/<head>`.",
+        "PRG-COMMAND-SHAPE": "Use one solitary direct `git push <remote> HEAD:refs/heads/<head>` or `git -C <absolute-root> push <remote> HEAD:refs/heads/<head>` for a simple bound grant; existing Version 1 grants retain the exact absolute Git literal requirement.",
         "PRG-PR-UNAVAILABLE": "Restore authenticated GitHub state access, then retry so the pull request can be checked afresh.",
         "PRG-PR-STATE": "The pull request is not open; obtain a new grant only for an open pull request.",
         "PRG-BINDING-DRIFT": "Refresh the pull-request binding and retry with a current exact grant if needed.",
