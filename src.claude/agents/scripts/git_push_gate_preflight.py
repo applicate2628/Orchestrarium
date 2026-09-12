@@ -22,6 +22,17 @@ from hook_common import (
 )
 
 APPROVE_MARKER_REGEX = re.compile(r"\[approve-publication\]", re.IGNORECASE)
+SIMPLE_PR_APPROVAL_MARKER = "[approve-pr-publication]"
+
+
+def is_simple_pr_approval(text: str) -> bool:
+    """Accept only the three finite whole-message display forms."""
+    stripped = text.strip()
+    return stripped in (
+        SIMPLE_PR_APPROVAL_MARKER,
+        f"`{SIMPLE_PR_APPROVAL_MARKER}`",
+        f"**{SIMPLE_PR_APPROVAL_MARKER}**",
+    )
 
 class DataRegion(NamedTuple):
     kind: str
@@ -2300,6 +2311,7 @@ class PreflightResult(NamedTuple):
     repository_workdir: str = ""
     repository_workdir_source: str = ""
     transcript_diagnostic: TranscriptDiagnostic | None = None
+    simple_pr_approval: bool = False
 
 
 _OUTCOMES = frozenset(("ALLOW_FINAL", "DEFER"))
@@ -2553,6 +2565,8 @@ def validate_preflight_result(result: object) -> PreflightResult:
         and result.push_instruction
     ):
         raise ValueError("unexpected branch push instruction")
+    if result.reason_id != "PFP-HEAVY" and result.simple_pr_approval:
+        raise ValueError("unexpected simple PR approval")
     if expected_failure == "REGISTERED":
         if result.failure_id not in _PREFLIGHT_FAILURE_IDS:
             raise ValueError("missing registered preflight failure")
@@ -2577,6 +2591,7 @@ def _result(
     repository_workdir: str = "",
     repository_workdir_source: str = "",
     transcript_diagnostic: TranscriptDiagnostic | None = None,
+    simple_pr_approval: bool = False,
 ) -> PreflightResult:
     return validate_preflight_result(PreflightResult(
         outcome, reason_id, continuation, command, dialect, transcript_path,
@@ -2584,6 +2599,7 @@ def _result(
         repository_workdir,
         repository_workdir_source,
         transcript_diagnostic,
+        simple_pr_approval,
     ))
 
 
@@ -2688,6 +2704,7 @@ def build_preflight(envelope: dict) -> PreflightResult:
             push_instruction=instruction, repository_workdir=repository_workdir,
             repository_workdir_source=repository_workdir_source,
             transcript_diagnostic=transcript_diagnostic,
+            simple_pr_approval=is_simple_pr_approval(user_text),
         )
     except PrRouteDenied as exc:
         return _result(

@@ -392,6 +392,7 @@ from git_push_gate_preflight import (
     resolve_command_dialect,
     parse_transcript_command,
     project_scan_range_binding,
+    is_simple_pr_approval,
 )
 
 
@@ -413,6 +414,8 @@ PR_URL_REGEX = re.compile(
 )
 PR_REVOKE_MARKER = "[revoke-pr-publication:v1]"
 PR_RESERVED_PREFIXES = ("[approve-pr-publication:", "[revoke-pr-publication:")
+PR_BINDING_SIDECAR_SUFFIX = ".pr-publication-binding-v1.json"
+PR_BINDING_SIDECAR_BYTE_CAP = 8192
 TRANSCRIPT_HISTORY_BYTE_CAP = 32 * 1024 * 1024
 TRANSCRIPT_HISTORY_RECORD_CAP = 50_000
 TRANSCRIPT_HISTORY_LINE_BYTE_CAP = 4 * 1024 * 1024
@@ -495,6 +498,36 @@ class ActivePrGrant(NamedTuple):
     owner: str
     repo: str
     number: int
+
+
+class SimplePrIntent(NamedTuple):
+    record: int
+    sha256: str
+
+
+class PrBindingState(NamedTuple):
+    anchor_record: int
+    anchor_sha256: str
+    state: str
+    repository_identity: tuple[int, int]
+    remote: str
+    head_ref: str
+    pr_url: str | None
+    pr_id: str | None
+    head_repository_id: str | None
+
+
+class PreparedPrPush(NamedTuple):
+    literal: LiteralPushCommand
+    repository_workdir: str
+    git_exe: str
+
+
+class VerifiedPrOracle(NamedTuple):
+    target: PushTarget
+    local_head: str
+    pr_id: str
+    head_repository_id: str
 
 
 class ProcessResult(NamedTuple):
@@ -1421,13 +1454,13 @@ class _PrGrantReducer:
 
     envelope_repository_workdir: str
     state: str = "absent"
-    grant: ActivePrGrant | None = None
+    grant: ActivePrGrant | SimplePrIntent | None = None
     transcript_workdir: str | None = None
     record_position: int = 0
     last_genuine_user_position: int = -1
     pending_numeric: tuple[ActivePrGrant, str | None, int] | None = None
 
-    def consume(self, entry: dict) -> None:
+    def consume(self, entry: dict, raw_record: bytes | None = None) -> None:
         position = self.record_position
         self.record_position += 1
         payload = entry.get("payload")
@@ -1448,6 +1481,12 @@ class _PrGrantReducer:
 
         if text == PR_REVOKE_MARKER:
             self.state, self.grant, self.pending_numeric = "revoked", None, None
+            return
+        if is_simple_pr_approval(text):
+            digest = hashlib.sha256(raw_record).hexdigest() if raw_record else ""
+            self.state = "simple"
+            self.grant = SimplePrIntent(position + 1, digest)
+            self.pending_numeric = None
             return
         parsed_grant = _parse_pr_grant(text)
         if parsed_grant is not None:
@@ -1476,7 +1515,7 @@ class _PrGrantReducer:
         if text.startswith(PR_RESERVED_PREFIXES):
             self.state, self.grant, self.pending_numeric = "malformed", None, None
 
-    def finish(self) -> tuple[str, ActivePrGrant | None]:
+    def finish(self) -> tuple[str, ActivePrGrant | SimplePrIntent | None]:
         if self.pending_numeric is None:
             return self.state, self.grant
         parsed_grant, authorization_workdir, position = self.pending_numeric
@@ -1494,7 +1533,7 @@ class _PrGrantReducer:
 
 def _derive_pr_grant(
     entries: list[dict], envelope_repository_workdir: str
-) -> tuple[str, ActivePrGrant | None]:
+) -> tuple[str, ActivePrGrant | SimplePrIntent | None]:
     reducer = _PrGrantReducer(envelope_repository_workdir)
     for entry in entries:
         reducer.consume(entry)
@@ -1503,7 +1542,7 @@ def _derive_pr_grant(
 
 def _stream_stable_pr_grant(
     transcript_path: str, envelope_repository_workdir: str
-) -> tuple[str, ActivePrGrant | None, str]:
+) -> tuple[str, ActivePrGrant | SimplePrIntent | None, str]:
     """Reduce a complete stable JSONL transcript with bounded memory."""
 
     if not transcript_path:
@@ -1527,7 +1566,7 @@ def _stream_stable_pr_grant(
                     return "absent", None, HISTORY_STATUS_INVALID
                 if not isinstance(entry, dict):
                     return "absent", None, HISTORY_STATUS_INVALID
-                reducer.consume(entry)
+                reducer.consume(entry, raw_line)
             after = os.fstat(stream.fileno())
             current = path.stat()
     except PrRouteDenied:
@@ -1555,6 +1594,180 @@ def _stream_stable_pr_grant(
         return "absent", None, HISTORY_STATUS_UNREADABLE
     state, grant = reducer.finish()
     return state, grant, HISTORY_STATUS_FOUND
+
+
+def _binding_sidecar_path(transcript_path: str) -> Path:
+    if type(transcript_path) is not str or not transcript_path:
+        raise PrRouteDenied("PRG-TRANSCRIPT-UNAVAILABLE")
+    transcript = Path(transcript_path)
+    try:
+        if not transcript.is_file():
+            raise PrRouteDenied("PRG-TRANSCRIPT-UNAVAILABLE")
+    except OSError:
+        raise PrRouteDenied("PRG-TRANSCRIPT-UNAVAILABLE") from None
+    return Path(str(transcript) + PR_BINDING_SIDECAR_SUFFIX)
+
+
+def _repository_identity(repository_workdir: str) -> tuple[int, int]:
+    try:
+        observed = os.stat(repository_workdir, follow_symlinks=False)
+    except OSError:
+        raise PrRouteDenied("PRG-WORKDIR-INVALID") from None
+    return observed.st_dev, observed.st_ino
+
+
+def _binding_payload(state: PrBindingState) -> dict:
+    return {
+        "v": 1,
+        "anchor": {
+            "record": state.anchor_record,
+            "sha256": state.anchor_sha256,
+        },
+        "state": state.state,
+        "repositoryIdentity": list(state.repository_identity),
+        "remote": state.remote,
+        "headRef": state.head_ref,
+        "prUrl": state.pr_url,
+        "prId": state.pr_id,
+        "headRepositoryId": state.head_repository_id,
+    }
+
+
+def _validate_binding_payload(value: object) -> PrBindingState:
+    expected = {
+        "v", "anchor", "state", "repositoryIdentity", "remote", "headRef",
+        "prUrl", "prId", "headRepositoryId",
+    }
+    if not isinstance(value, dict) or set(value) != expected or value.get("v") != 1:
+        raise PrRouteDenied("PRG-AUTH-MALFORMED")
+    anchor = value.get("anchor")
+    identity = value.get("repositoryIdentity")
+    if (
+        not isinstance(anchor, dict)
+        or set(anchor) != {"record", "sha256"}
+        or type(anchor.get("record")) is not int
+        or anchor["record"] <= 0
+        or not isinstance(anchor.get("sha256"), str)
+        or re.fullmatch(r"[0-9a-f]{64}", anchor["sha256"]) is None
+        or not isinstance(identity, list)
+        or len(identity) != 2
+        or any(type(item) is not int or item < 0 for item in identity)
+        or value.get("state") not in {"pending", "bound", "revoked"}
+        or not isinstance(value.get("remote"), str)
+        or REMOTE_NAME_REGEX.fullmatch(value["remote"]) is None
+        or not isinstance(value.get("headRef"), str)
+        or not _portable_pr_head_ref(value["headRef"])
+    ):
+        raise PrRouteDenied("PRG-AUTH-MALFORMED")
+    pr_values = (value.get("prUrl"), value.get("prId"), value.get("headRepositoryId"))
+    if value["state"] == "pending":
+        if pr_values != (None, None, None):
+            raise PrRouteDenied("PRG-AUTH-MALFORMED")
+    elif value["state"] == "bound" and any(
+        not isinstance(item, str) or not item for item in pr_values
+    ):
+        raise PrRouteDenied("PRG-AUTH-MALFORMED")
+    elif value["state"] == "revoked" and pr_values != (None, None, None) and any(
+        not isinstance(item, str) or not item for item in pr_values
+    ):
+        raise PrRouteDenied("PRG-AUTH-MALFORMED")
+    if value["state"] == "bound" or (
+        value["state"] == "revoked" and pr_values != (None, None, None)
+    ):
+        if (
+            PR_URL_REGEX.fullmatch(value["prUrl"]) is None
+            or NODE_ID_REGEX.fullmatch(value["prId"]) is None
+            or NODE_ID_REGEX.fullmatch(value["headRepositoryId"]) is None
+        ):
+            raise PrRouteDenied("PRG-AUTH-MALFORMED")
+    return PrBindingState(
+        anchor["record"], anchor["sha256"], value["state"], tuple(identity),
+        value["remote"], value["headRef"], *pr_values,
+    )
+
+
+def _read_binding_state(path: Path) -> PrBindingState | None:
+    try:
+        observed = path.lstat()
+    except FileNotFoundError:
+        return None
+    except OSError:
+        raise PrRouteDenied("PRG-AUTH-MALFORMED") from None
+    if not stat.S_ISREG(observed.st_mode) or observed.st_size > PR_BINDING_SIDECAR_BYTE_CAP:
+        raise PrRouteDenied("PRG-AUTH-MALFORMED")
+    try:
+        with path.open("rb") as stream:
+            raw = stream.read(PR_BINDING_SIDECAR_BYTE_CAP + 1)
+        if len(raw) > PR_BINDING_SIDECAR_BYTE_CAP:
+            raise PrRouteDenied("PRG-AUTH-MALFORMED")
+        current = path.lstat()
+        if (
+            (observed.st_dev, observed.st_ino, observed.st_size, observed.st_mtime_ns)
+            != (current.st_dev, current.st_ino, current.st_size, current.st_mtime_ns)
+        ):
+            raise PrRouteDenied("PRG-AUTH-MALFORMED")
+        value = json.loads(raw.decode("utf-8", errors="strict"))
+    except PrRouteDenied:
+        raise
+    except Exception:
+        raise PrRouteDenied("PRG-AUTH-MALFORMED") from None
+    return _validate_binding_payload(value)
+
+
+def _write_binding_state(
+    path: Path, state: PrBindingState, *, create_only: bool
+) -> None:
+    payload = json.dumps(
+        _binding_payload(state), ensure_ascii=True, separators=(",", ":")
+    ).encode("utf-8")
+    if len(payload) > PR_BINDING_SIDECAR_BYTE_CAP:
+        raise PrRouteDenied("PRG-INTERNAL")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_BINARY"):
+        flags |= os.O_BINARY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    target = path if create_only else path.with_name(
+        path.name + ".tmp-" + secrets.token_hex(8)
+    )
+    fd: int | None = None
+    try:
+        fd = os.open(target, flags, 0o600)
+        offset = 0
+        while offset < len(payload):
+            written = os.write(fd, payload[offset:])
+            if written <= 0:
+                raise OSError("short sidecar write")
+            offset += written
+        os.fsync(fd)
+        os.close(fd)
+        fd = None
+        if not create_only:
+            os.replace(target, path)
+    except FileExistsError:
+        raise PrRouteDenied("PRG-BINDING-DRIFT") from None
+    except PrRouteDenied:
+        raise
+    except Exception:
+        raise PrRouteDenied("PRG-INTERNAL") from None
+    finally:
+        if fd is not None:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        if not create_only:
+            try:
+                target.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
+def _same_binding_anchor(state: PrBindingState, intent: SimplePrIntent) -> bool:
+    return (
+        state.anchor_record == intent.record
+        and state.anchor_sha256 == intent.sha256
+    )
 
 
 def _is_within(path: Path, parent: Path) -> bool:
@@ -2689,7 +2902,7 @@ def _repo_record(value: object, expected: str, failure_id: str) -> tuple[str, st
 
 def _verify_pr_oracle(
     grant: ActivePrGrant, literal: LiteralPushCommand, repository_workdir: str
-) -> tuple[PushTarget, str]:
+) -> VerifiedPrOracle:
     deadline = time.monotonic() + ORACLE_TIMEOUT_SECONDS
     git_exe = literal.executable
     gh_exe = _resolve_executable("gh", repository_workdir)
@@ -2853,7 +3066,9 @@ def _verify_pr_oracle(
     local_head_rows = local_head_text.splitlines()
     if len(local_head_rows) != 1 or not object_format.matches(local_head_rows[0]):
         raise PrRouteDenied("PRG-RECEIPT-MISMATCH")
-    return target, local_head_rows[0].lower()
+    return VerifiedPrOracle(
+        target, local_head_rows[0].lower(), pr_id, head_repo_id
+    )
 
 
 def _build_parsed_transcript_commands(
@@ -3003,49 +3218,193 @@ def _evaluate_active_pr_route(
     repository_workdir_source: str,
 ) -> bool:
     try:
-        effective = parsed.effective_publications
-        if (
-            parsed.strict_projection.status != "canonical"
-            or len(effective.records) != 1
-            or effective.records[0].kind != "DIRECT"
-        ):
-            raise PrRouteDenied("PRG-COMMAND-SHAPE")
-        dialect = _pr_command_dialect(dialect)
-        literal = _parse_pr_literal_shape(parsed, dialect)
-        if literal.repository_root is None:
-            repository_workdir = _normalize_repository_workdir(
-                repository_workdir
-            )
-        else:
-            command_root = _normalize_repository_workdir(
-                literal.repository_root
-            )
-            if repository_workdir_source == "tool":
-                tool_root = _normalize_repository_workdir(repository_workdir)
-                if tool_root != command_root:
-                    raise PrRouteDenied("PRG-WORKDIR-INVALID")
-            elif repository_workdir_source != "envelope":
-                raise PrRouteDenied("PRG-WORKDIR-INVALID")
-            repository_workdir = command_root
-        git_exe = _resolve_executable("git", repository_workdir)
-        if git_exe is None:
-            raise PrRouteDenied("PRG-REMOTE-MISMATCH")
-        literal = _bind_pr_literal_executable(literal, git_exe)
-        repository_workdir = _prove_repository_root(
-            repository_workdir, git_exe
+        prepared = _prepare_pr_push(
+            command, dialect, parsed, repository_workdir,
+            repository_workdir_source,
         )
-        target, local_head = _verify_pr_oracle(
-            grant, literal, repository_workdir
+        verified = _verify_pr_oracle(
+            grant, prepared.literal, prepared.repository_workdir
         )
         binding = PushScanBinding(
-            "strict", target.remote, target.destination, local_head, local_head
+            "strict", verified.target.remote, verified.target.destination,
+            verified.local_head, verified.local_head,
         )
-        _run_authoritative_scan(binding, repository_workdir, git_exe)
+        _run_authoritative_scan(
+            binding, prepared.repository_workdir, prepared.git_exe
+        )
         return True
     except PrRouteDenied:
         raise
     except Exception:
         raise PrRouteDenied("PRG-INTERNAL") from None
+
+
+def _prepare_pr_push(
+    command: str,
+    dialect: str,
+    parsed: ShellParseResult,
+    repository_workdir: str,
+    repository_workdir_source: str,
+) -> PreparedPrPush:
+    effective = parsed.effective_publications
+    if (
+        parsed.strict_projection.status != "canonical"
+        or len(effective.records) != 1
+        or effective.records[0].kind != "DIRECT"
+    ):
+        raise PrRouteDenied("PRG-COMMAND-SHAPE")
+    dialect = _pr_command_dialect(dialect)
+    literal = _parse_pr_literal_shape(parsed, dialect)
+    if literal.repository_root is None:
+        repository_workdir = _normalize_repository_workdir(repository_workdir)
+    else:
+        command_root = _normalize_repository_workdir(literal.repository_root)
+        if repository_workdir_source == "tool":
+            tool_root = _normalize_repository_workdir(repository_workdir)
+            if tool_root != command_root:
+                raise PrRouteDenied("PRG-WORKDIR-INVALID")
+        elif repository_workdir_source != "envelope":
+            raise PrRouteDenied("PRG-WORKDIR-INVALID")
+        repository_workdir = command_root
+    git_exe = _resolve_executable("git", repository_workdir)
+    if git_exe is None:
+        raise PrRouteDenied("PRG-REMOTE-MISMATCH")
+    literal = _bind_pr_literal_executable(literal, git_exe)
+    repository_workdir = _prove_repository_root(repository_workdir, git_exe)
+    return PreparedPrPush(literal, repository_workdir, git_exe)
+
+
+def _discover_unique_open_pr(
+    prepared: PreparedPrPush,
+) -> tuple[ActivePrGrant, str, str]:
+    gh_exe = _resolve_executable("gh", prepared.repository_workdir)
+    if gh_exe is None:
+        raise PrRouteDenied("PRG-PR-UNAVAILABLE")
+    _, text = _run_text(
+        [
+            gh_exe, "pr", "list", "--state", "open", "--head",
+            prepared.literal.target.head_ref, "--limit", "2", "--json",
+            "id,number,url,headRefName,headRepository",
+        ],
+        time.monotonic() + ORACLE_TIMEOUT_SECONDS,
+        "PRG-PR-UNAVAILABLE",
+        prepared.repository_workdir,
+    )
+    rows = _strict_json(text, list, "PRG-PR-UNAVAILABLE")
+    if len(rows) != 1 or not isinstance(rows[0], dict):
+        raise PrRouteDenied("PRG-PR-UNAVAILABLE")
+    row = rows[0]
+    match = (
+        PR_URL_REGEX.fullmatch(row.get("url"))
+        if isinstance(row.get("url"), str) else None
+    )
+    head_repository = row.get("headRepository")
+    if (
+        match is None
+        or row.get("number") != int(match.group("number"))
+        or row.get("headRefName") != prepared.literal.target.head_ref
+        or not isinstance(row.get("id"), str)
+        or NODE_ID_REGEX.fullmatch(row["id"]) is None
+        or not isinstance(head_repository, dict)
+        or not isinstance(head_repository.get("id"), str)
+        or NODE_ID_REGEX.fullmatch(head_repository["id"]) is None
+    ):
+        raise PrRouteDenied("PRG-PR-UNAVAILABLE")
+    return (
+        ActivePrGrant(
+            match.group("url"), match.group("owner"), match.group("repo"),
+            int(match.group("number")),
+        ),
+        row["id"],
+        head_repository["id"],
+    )
+
+
+def _evaluate_simple_pr_route(
+    intent: SimplePrIntent,
+    current_marker: bool,
+    preflight: PreflightResult,
+) -> bool:
+    if not intent.sha256:
+        raise PrRouteDenied("PRG-TRANSCRIPT-UNAVAILABLE")
+    prepared = _prepare_pr_push(
+        preflight.command, preflight.dialect, preflight.parsed,
+        preflight.repository_workdir, preflight.repository_workdir_source,
+    )
+    identity = _repository_identity(prepared.repository_workdir)
+    sidecar_path = _binding_sidecar_path(preflight.transcript_path)
+    existing = _read_binding_state(sidecar_path)
+    pending = PrBindingState(
+        intent.record, intent.sha256, "pending", identity,
+        prepared.literal.remote, prepared.literal.target.head_ref,
+        None, None, None,
+    )
+    if existing is None:
+        if not current_marker:
+            raise PrRouteDenied("PRG-AUTH-MALFORMED")
+        _write_binding_state(sidecar_path, pending, create_only=True)
+        existing = pending
+    elif not _same_binding_anchor(existing, intent):
+        if not current_marker:
+            raise PrRouteDenied("PRG-BINDING-DRIFT")
+        _write_binding_state(sidecar_path, pending, create_only=False)
+        existing = pending
+    if (
+        existing.repository_identity != identity
+        or existing.remote != prepared.literal.remote
+        or existing.head_ref != prepared.literal.target.head_ref
+    ):
+        raise PrRouteDenied("PRG-BINDING-DRIFT")
+    if existing.state == "revoked":
+        raise PrRouteDenied("PRG-AUTH-MALFORMED")
+    if existing.state == "pending":
+        if not current_marker:
+            raise PrRouteDenied("PRG-BINDING-DRIFT")
+        grant, pr_id, head_repository_id = _discover_unique_open_pr(prepared)
+        verified = _verify_pr_oracle(
+            grant, prepared.literal, prepared.repository_workdir
+        )
+        if (
+            verified.pr_id != pr_id
+            or verified.head_repository_id != head_repository_id
+        ):
+            raise PrRouteDenied("PRG-BINDING-DRIFT")
+        existing = PrBindingState(
+            intent.record, intent.sha256, "bound", identity,
+            prepared.literal.remote, prepared.literal.target.head_ref,
+            grant.url, pr_id, head_repository_id,
+        )
+        _write_binding_state(sidecar_path, existing, create_only=False)
+    else:
+        match = PR_URL_REGEX.fullmatch(existing.pr_url or "")
+        if match is None:
+            raise PrRouteDenied("PRG-AUTH-MALFORMED")
+        grant = ActivePrGrant(
+            match.group("url"), match.group("owner"), match.group("repo"),
+            int(match.group("number")),
+        )
+        verified = _verify_pr_oracle(
+            grant, prepared.literal, prepared.repository_workdir
+        )
+        if (
+            verified.pr_id != existing.pr_id
+            or verified.head_repository_id != existing.head_repository_id
+        ):
+            raise PrRouteDenied("PRG-BINDING-DRIFT")
+    binding = PushScanBinding(
+        "strict", verified.target.remote, verified.target.destination,
+        verified.local_head, verified.local_head,
+    )
+    _run_authoritative_scan(binding, prepared.repository_workdir, prepared.git_exe)
+    return True
+
+
+def _revoke_simple_binding(transcript_path: str) -> None:
+    path = _binding_sidecar_path(transcript_path)
+    existing = _read_binding_state(path)
+    if existing is None or existing.state == "revoked":
+        return
+    _write_binding_state(path, existing._replace(state="revoked"), create_only=False)
 
 
 
@@ -3079,16 +3438,35 @@ def evaluate_heavy(preflight: PreflightResult) -> bool:
         pr_state, pr_grant = _derive_pr_grant(
             history_entries, preflight.repository_workdir
         )
+        if (
+            pr_state == "simple"
+            and isinstance(pr_grant, SimplePrIntent)
+            and not pr_grant.sha256
+        ):
+            pr_state, pr_grant, stable_status = _stream_stable_pr_grant(
+                preflight.transcript_path, preflight.repository_workdir
+            )
+            if stable_status != HISTORY_STATUS_FOUND:
+                raise PrRouteDenied(
+                    "PRG-TRANSCRIPT-UNAVAILABLE", transcript_diagnostic
+                )
     if stream_recovery and recovery_status != HISTORY_STATUS_FOUND:
         raise PrRouteDenied(
             "PRG-TRANSCRIPT-UNAVAILABLE", transcript_diagnostic
         )
     if pr_state == "malformed":
         raise PrRouteDenied("PRG-AUTH-MALFORMED")
+    if pr_state == "revoked":
+        _revoke_simple_binding(preflight.transcript_path)
+        return False
     if pr_state == "active" and pr_grant is not None:
         return _evaluate_active_pr_route(
             pr_grant, preflight.command, preflight.dialect, preflight.parsed,
             preflight.repository_workdir, preflight.repository_workdir_source,
+        )
+    if pr_state == "simple" and isinstance(pr_grant, SimplePrIntent):
+        return _evaluate_simple_pr_route(
+            pr_grant, preflight.simple_pr_approval, preflight
         )
     if stream_recovery:
         raise PrRouteDenied(

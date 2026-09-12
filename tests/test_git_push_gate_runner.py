@@ -414,9 +414,9 @@ def test_r4_public_interface_is_explicit_minimal_and_used() -> None:
     expected = (
         "PreflightResult", "TranscriptDiagnostic",
         "validate_preflight_result", "validate_transcript_diagnostic",
-        "build_preflight_from_stdin", "ShellParseResult", "PrRouteDenied",
-        "resolve_command_dialect", "parse_transcript_command",
-        "project_scan_range_binding",
+            "build_preflight_from_stdin", "ShellParseResult", "PrRouteDenied",
+            "resolve_command_dialect", "parse_transcript_command",
+            "project_scan_range_binding", "is_simple_pr_approval",
     )
     assert imported == expected
     assert "*" not in imported
@@ -760,6 +760,7 @@ def test_a3_preflight_contract_and_old_owner_are_red_until_relocated() -> None:
         "repository_workdir",
         "repository_workdir_source",
         "transcript_diagnostic",
+        "simple_pr_approval",
     )
     for target in TARGETS:
         assert target.preflight_path.is_file(), f"A3-PREFLIGHT-MISSING:{target.label}"

@@ -35,3 +35,11 @@
 - Авторизация `git push` по результату сканирования требует один gate-owned range-receipt Version 3 с полным покрытием неопубликованного графа commit/tree/blob и каждого subject commit/raw-path/blob. Version 2, tracked, path, manual, zero-commit, incomplete, mixed, malformed, finding, refusal, timeout, cancellation, drift и cleanup-failed evidence не авторизуют публикацию.
 - Только `$security-reviewer` может одобрить исключение безопасности публикации к результату сканирования. Любая публикация без этого одобрения считается `BLOCKED`.
 - Точные команды publication-safety scan живут в root docs репозитория и runtime docs соответствующего pack. Этот reference намеренно оставляет policy на общем уровне, чтобы один design-level источник истины подходил текущим и будущим pack'ам.
+
+## Повторная публикация в рамках pull request
+
+Пользователь может заменить повторные подтверждения push для одного конкретного GitHub pull request (PR), отправив отдельный маркер `[approve-pr-publication]` без другого текста. Допустимы raw-форма либо одна сбалансированная пара одинарных backticks или двойных звёздочек; внешний whitespace игнорируется. Предложения, примеры, дополнительный текст, fenced или malformed wrappers, assistant text, tool output и compaction summaries не создают разрешение.
+
+Только маркер в текущем genuine-user turn может инициализировать binding record рядом с transcript. Pending push предоставляет проверенный Git repository root, remote и head branch; после этого привязывается ровно один подходящий открытый PR. Последующие push должны совпадать с сохранёнными root identity, remote, PR и head branch и по-прежнему проходить свежие PR/protection/leak-scan/receipt проверки. Исторический маркер при отсутствующем или повреждённом состоянии даёт consent reset и отказ. Более поздний точный revoke перед отказом заменяет сохранённое состояние на `revoked`.
+
+Versioned формы остаются compatibility input для существующих transcripts; прежние правила их точной формы и authorization-time binding не изменены.
