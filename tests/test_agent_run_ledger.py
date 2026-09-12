@@ -1069,6 +1069,201 @@ def test_append_accepts_codex_external_terminal_without_extended_provenance_ids(
     assert validated.returncode == 0, validated.stdout
 
 
+def test_settle_launch_derives_launch_identity_and_replays_exactly(tmp_path: Path):
+    """A terminal settles one launch without reconstructing its dispatch metadata."""
+    item = prepare_valid_work_item(tmp_path)
+    launch = run_ledger(
+        item,
+        "append",
+        "--run-id", "run-settle-launch-001",
+        "--role", "external-reviewer",
+        "--execution-role", "external-reviewer",
+        "--assigned-role", "qa-engineer",
+        "--provider", "codex",
+        "--model", "gpt-5.6-sol",
+        "--effort", "high",
+        "--status", "running",
+        "--gate", "none",
+        "--scope", "provider evidence",
+        "--event-kind", "launch",
+        "--started-at", "2026-09-12T10:00:00Z",
+        "--updated-at", "2026-09-12T10:00:00Z",
+    )
+    assert launch.returncode == 0, launch.stderr
+    settle = [
+        "settle-launch",
+        "--launch-run-id", "run-settle-launch-001",
+        "--run-id", "run-settle-terminal-001",
+        "--status", "completed",
+        "--gate", "PASS",
+        "--artifact", "reviews/qa.md",
+        "--evidence", "command:pytest tests/test_agent_run_ledger.py -q",
+        "--notes", "observed terminal outcome",
+        "--terminal-class", "external-nonauthorizing",
+        "--authorizing", "false",
+        "--actual-execution-path", "direct-external-cli",
+        "--artifact-identity", "sha256:" + "d" * 64,
+        "--started-at", "2026-09-12T10:05:00Z",
+        "--updated-at", "2026-09-12T10:05:00Z",
+    ]
+
+    result = run_ledger(item, *settle)
+    assert result.returncode == 0, result.stderr
+    events = [
+        json.loads(line)
+        for line in (item / "agent-runs.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    terminal = events[-1]
+    assert terminal["eventKind"] == "terminal"
+    assert terminal["launchRunId"] == "run-settle-launch-001"
+    assert terminal["role"] == "external-reviewer"
+    assert terminal["executionRole"] == "external-reviewer"
+    assert terminal["assignedRole"] == "qa-engineer"
+    assert terminal["provider"] == "codex"
+    assert terminal["model"] == "gpt-5.6-sol"
+    assert terminal["scope"] == ["provider evidence"]
+    assert terminal["artifact"] == "reviews/qa.md"
+    assert "externalDispatchId" not in terminal
+    assert "externalEvidenceRunId" not in terminal
+    assert run_validator(item).returncode == 0
+
+    before = (item / "agent-runs.jsonl").read_bytes()
+    replay = run_ledger(item, *settle)
+    assert replay.returncode == 0, replay.stderr
+    assert "already-settled" in replay.stdout
+    assert (item / "agent-runs.jsonl").read_bytes() == before
+
+    conflicting_settle = [*settle]
+    conflicting_settle[conflicting_settle.index("--notes") + 1] = "different outcome"
+    conflict = run_ledger(item, *conflicting_settle)
+    assert conflict.returncode != 0
+    assert "WI-LEDGER-SETTLE-CONFLICT" in conflict.stderr
+    assert (item / "agent-runs.jsonl").read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    ("status", "gate", "needs_artifact"),
+    (
+        ("completed", "none", False),
+        ("completed", "PASS", True),
+        ("completed", "REVISE", False),
+        ("revise", "REVISE", False),
+        ("blocked", "none", False),
+        ("blocked", "BLOCKED:prerequisite", False),
+        ("cancelled", "none", False),
+    ),
+)
+def test_settle_launch_accepts_existing_terminal_status_gate_pairs(
+    tmp_path: Path, status: str, gate: str, needs_artifact: bool
+):
+    """Settlement admits the validator's terminal states rather than inventing failed."""
+    item = prepare_valid_work_item(tmp_path)
+    launch = run_ledger(
+        item,
+        "append",
+        "--run-id", "run-terminal-state-launch",
+        "--role", "qa-engineer",
+        "--execution-role", "internal",
+        "--status", "running",
+        "--gate", "none",
+        "--scope", "lifecycle settlement",
+        "--event-kind", "launch",
+    )
+    assert launch.returncode == 0, launch.stderr
+    settle = [
+        "settle-launch",
+        "--launch-run-id", "run-terminal-state-launch",
+        "--run-id", "run-terminal-state-result",
+        "--status", status,
+        "--gate", gate,
+        "--started-at", "2026-09-12T10:05:00Z",
+        "--updated-at", "2026-09-12T10:05:00Z",
+    ]
+    if needs_artifact:
+        settle.extend(
+            [
+                "--artifact", "reviews/qa.md",
+                "--evidence", "command:focused lifecycle settlement",
+            ]
+        )
+
+    result = run_ledger(item, *settle)
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("status", ("planned", "running", "failed"))
+def test_settle_launch_rejects_nonterminal_status_without_writing(
+    tmp_path: Path, status: str
+):
+    """A caller cannot encode an in-flight or invented terminal outcome."""
+    item = prepare_valid_work_item(tmp_path)
+    launch = run_ledger(
+        item,
+        "append",
+        "--run-id", "run-nonterminal-launch",
+        "--role", "qa-engineer",
+        "--execution-role", "internal",
+        "--status", "running",
+        "--gate", "none",
+        "--scope", "lifecycle settlement",
+        "--event-kind", "launch",
+    )
+    assert launch.returncode == 0, launch.stderr
+    before = (item / "agent-runs.jsonl").read_bytes()
+
+    result = run_ledger(
+        item,
+        "settle-launch",
+        "--launch-run-id", "run-nonterminal-launch",
+        "--run-id", "run-nonterminal-result",
+        "--status", status,
+        "--gate", "none",
+        "--started-at", "2026-09-12T10:05:00Z",
+        "--updated-at", "2026-09-12T10:05:00Z",
+    )
+    assert result.returncode != 0
+    assert (item / "agent-runs.jsonl").read_bytes() == before
+
+
+def test_settle_launch_refuses_incomplete_external_provenance_without_writing(
+    tmp_path: Path,
+):
+    """External terminal identity remains caller-observed instead of writer-invented."""
+    item = prepare_valid_work_item(tmp_path)
+    launch = run_ledger(
+        item,
+        "append",
+        "--run-id", "run-provenance-launch",
+        "--role", "external-reviewer",
+        "--execution-role", "external-reviewer",
+        "--assigned-role", "qa-engineer",
+        "--provider", "codex",
+        "--status", "running",
+        "--gate", "none",
+        "--scope", "provider evidence",
+        "--event-kind", "launch",
+    )
+    assert launch.returncode == 0, launch.stderr
+    before = (item / "agent-runs.jsonl").read_bytes()
+
+    result = run_ledger(
+        item,
+        "settle-launch",
+        "--launch-run-id", "run-provenance-launch",
+        "--run-id", "run-provenance-terminal",
+        "--status", "completed",
+        "--gate", "PASS",
+        "--artifact", "reviews/qa.md",
+        "--evidence", "command:focused lifecycle settlement",
+        "--terminal-class", "external-nonauthorizing",
+        "--started-at", "2026-09-12T10:05:00Z",
+        "--updated-at", "2026-09-12T10:05:00Z",
+    )
+    assert result.returncode != 0
+    assert "typed terminal requires authorizing" in result.stderr
+    assert (item / "agent-runs.jsonl").read_bytes() == before
+
+
 @pytest.mark.parametrize(
     "encoded",
     (

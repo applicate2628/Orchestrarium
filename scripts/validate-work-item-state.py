@@ -4920,6 +4920,119 @@ def _transfer_receipts(
     return receipts
 
 
+def validate_transfer_receipt_obligation_coverage(
+    root: Path,
+    receipt: Mapping[str, object],
+    archive: Path,
+) -> list[str]:
+    """Bind one settled transfer receipt to the archive's canonical open state."""
+
+    errors: list[str] = []
+    states: list[WorkItemObligationStateV1] = []
+    source_errors = validate_work_item(
+        archive,
+        strict_revise=False,
+        validate_status_file=False,
+        obligation_state_out=states,
+    )
+    if source_errors or len(states) != 1:
+        errors.extend(source_errors)
+        fail(
+            errors,
+            "WI-OBLIGATION-TRANSFER-OWNER: source obligation state is invalid",
+        )
+        return errors
+    if states[0].open_launches:
+        fail(
+            errors,
+            "WI-OBLIGATION-TRANSFER-COVERAGE: settled transfer source has open launches",
+        )
+        return errors
+
+    obligations = receipt.get("obligations")
+    archive_identity = receipt.get("archiveIdentity")
+    if (
+        not isinstance(obligations, list)
+        or not isinstance(archive_identity, str)
+        or SHA256_RE.fullmatch(archive_identity) is None
+    ):
+        fail(
+            errors,
+            "WI-OBLIGATION-TRANSFER-COVERAGE: settled transfer receipt obligation shape differs",
+        )
+        return errors
+
+    row_fields = {
+        "runId",
+        "rawLineOrdinal",
+        "rawLineSha256",
+        "rawEventSha256",
+        "projectedEventSha256",
+        "obligationId",
+        "predecessorOperationId",
+    }
+    declared: dict[tuple[str, int], tuple[object, ...]] = {}
+    for row in obligations:
+        if (
+            not isinstance(row, dict)
+            or set(row) != row_fields
+            or not isinstance(row.get("runId"), str)
+            or type(row.get("rawLineOrdinal")) is not int
+            or row["rawLineOrdinal"] < 1
+        ):
+            fail(
+                errors,
+                "WI-OBLIGATION-TRANSFER-COVERAGE: settled transfer receipt obligation row differs",
+            )
+            return errors
+        position = (row["runId"], row["rawLineOrdinal"])
+        if position in declared:
+            fail(
+                errors,
+                "WI-OBLIGATION-TRANSFER-COVERAGE: settled transfer receipt obligation position is duplicate",
+            )
+            return errors
+        declared[position] = (
+            row.get("rawLineSha256"),
+            row.get("rawEventSha256"),
+            row.get("projectedEventSha256"),
+            row.get("obligationId"),
+            row.get("predecessorOperationId"),
+        )
+
+    expected: dict[tuple[str, int], tuple[object, ...]] = {}
+    for row in states[0].open_revise:
+        position = (row.run_id, row.raw_line_ordinal)
+        obligation_id = row.obligation_id
+        if obligation_id is None:
+            obligation_id = obligation_transfer_id(
+                archive_identity,
+                row.raw_line_ordinal,
+                row.raw_line_sha256,
+                row.raw_event_sha256,
+                row.run_id,
+            )
+        expected[position] = (
+            row.raw_line_sha256,
+            row.raw_event_sha256,
+            row.projected_event_sha256,
+            obligation_id,
+            row.predecessor_operation_id,
+        )
+
+    if set(declared) != set(expected) or len(expected) != len(states[0].open_revise):
+        fail(
+            errors,
+            "WI-OBLIGATION-TRANSFER-COVERAGE: settled transfer receipt does not exactly cover archived open REVISE rows",
+        )
+    elif declared != expected:
+        fail(
+            errors,
+            "WI-OBLIGATION-TRANSFER-DRIFT: settled transfer receipt obligation bindings differ",
+        )
+    return errors
+
+
 def _resolve_transferred_obligation(
     root: Path,
     receipts: Mapping[str, tuple[Path, dict, Path]],
@@ -5091,7 +5204,10 @@ def validate_obligation_transfer_ownership(root: Path) -> list[str]:
     rows_by_operation: dict[str, dict[str, dict]] = {}
     children: dict[tuple[str, str], list[str]] = {}
     origins: dict[str, list[str]] = {}
-    for operation_id, (_receipt_path, receipt, _archive) in receipts.items():
+    for operation_id, (_receipt_path, receipt, archive) in receipts.items():
+        errors.extend(
+            validate_transfer_receipt_obligation_coverage(root, receipt, archive)
+        )
         operation_rows: dict[str, dict] = {}
         for row in receipt.get("obligations", []):
             if not isinstance(row, dict):

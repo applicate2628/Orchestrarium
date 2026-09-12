@@ -1156,13 +1156,64 @@ def test_active_only_keeps_periodic_archive_failures_out_of_publication_scope(
     assert "archive obligation scan skipped" in publication.stdout
 
 
-def test_publication_gate_requests_active_only_work_item_scope() -> None:
-    source = (ROOT / "scripts" / "check-publication-gate.py").read_text(
-        encoding="utf-8"
-    )
+def test_publication_preflight_ignores_unrelated_active_lifecycle_state(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Removing the lifecycle predicate must not bypass the scanner or Git target check."""
+    gate_path = ROOT / "scripts" / "check-publication-gate.py"
+    spec = importlib.util.spec_from_file_location("publication_gate", gate_path)
+    assert spec is not None and spec.loader is not None
+    gate = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(gate)
 
-    assert '"--active-only"' in source
-    assert "run: python scripts/check-work-items-state.py --active-only" in source
+    calls: list[list[str]] = []
+
+    def fake_run(args, **_kwargs):
+        calls.append(args)
+        if args[0] == sys.executable:
+            return subprocess.CompletedProcess(args, 0)
+        raise AssertionError(f"unexpected subprocess call: {args}")
+
+    monkeypatch.setattr(gate, "_git_root", lambda: tmp_path)
+    monkeypatch.setattr(gate.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        gate,
+        "_run",
+        lambda args, **_kwargs: subprocess.CompletedProcess(args, 0, stdout=b""),
+    )
+    (tmp_path / "work-items" / "active" / "unrelated").mkdir(parents=True)
+
+    assert gate.main([]) == 0
+    assert calls == [[sys.executable, str(tmp_path / "src.codex" / "skills" / "lead" / "scripts" / "check-publication-safety.py")]]
+
+
+def test_publication_preflight_keeps_release_note_requirement_with_active_work(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    """Lifecycle separation must not turn a release-relevant staged target into PASS."""
+    gate_path = ROOT / "scripts" / "check-publication-gate.py"
+    spec = importlib.util.spec_from_file_location("publication_gate_release", gate_path)
+    assert spec is not None and spec.loader is not None
+    gate = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(gate)
+
+    monkeypatch.setattr(gate, "_git_root", lambda: tmp_path)
+    monkeypatch.setattr(
+        gate.subprocess,
+        "run",
+        lambda args, **_kwargs: subprocess.CompletedProcess(args, 0),
+    )
+    monkeypatch.setattr(
+        gate,
+        "_run",
+        lambda args, **_kwargs: subprocess.CompletedProcess(
+            args, 0, stdout=b"scripts/changed.py\\0"
+        ),
+    )
+    (tmp_path / "work-items" / "active" / "unrelated").mkdir(parents=True)
+
+    assert gate.main([]) == 1
+    assert "release-relevant staged changes require" in capsys.readouterr().err
 
 
 def test_archive_scan_keeps_skipped_legacy_positions_for_v2_closure_targets(tmp_path: Path):

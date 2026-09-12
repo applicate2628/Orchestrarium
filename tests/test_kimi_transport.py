@@ -838,7 +838,7 @@ def test_kimi_explicit_capability_receipt_is_redacted_and_cleanup_complete(
                 env=(owner.KimiNameValueV1("TOKEN", "secret-value"),),
             ),
         ),
-        subagents=("explore",),
+        subagents=("*",),
         permission="approve_once",
         cwd=str(selected_cwd),
     )
@@ -857,7 +857,7 @@ def test_kimi_explicit_capability_receipt_is_redacted_and_cleanup_complete(
     assert payload["selected"] == {
         "tools": ["Read", "Agent"],
         "mcpNames": ["private-mcp"],
-        "subagents": ["explore"],
+        "subagents": ["*"],
         "permission": "approve_once",
         "cwdSelected": True,
     }
@@ -2610,6 +2610,8 @@ def test_kimi_capabilities_file_rejects_oversize_and_invalid_cwd_without_echo(
         (["AgentSwarm"], []),
         ([], ["future-explorer"]),
         (["Agent"], ["future-explorer"]),
+        ([], ["*"]),
+        (["Agent"], ["*", "future-explorer"]),
     ),
 )
 def test_kimi_capabilities_file_rejects_children_explicitly(
@@ -2638,6 +2640,47 @@ def test_kimi_capabilities_file_rejects_children_explicitly(
                 "backend-engineer",
             ],
         )
+
+
+@pytest.mark.parametrize(
+    ("tools", "expected_disabled"),
+    (
+        (["Agent"], ["AgentSwarm"]),
+        (["AgentSwarm"], ["Agent"]),
+        (["Read", "Agent", "AgentSwarm"], []),
+    ),
+)
+def test_kimi_wildcard_child_permission_projects_only_selected_dispatch_tools(
+    tmp_path: Path,
+    tools: list[str],
+    expected_disabled: list[str],
+) -> None:
+    owner = _load_owner()
+    capabilities = tmp_path / "capabilities.json"
+    _write_kimi_capabilities(capabilities, tools=tools, subagents=["*"])
+
+    selection = owner.read_kimi_capability_selection(capabilities)
+    user_data = tmp_path / "user-data"
+    user_data.mkdir()
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    aliases = owner.KimiPrivateHomeAliasesV1.create(
+        run_dir, user_data, selection
+    )
+    parsed = tomllib.loads(
+        (aliases.home / "config.toml").read_text(encoding="utf-8")
+    )
+
+    assert selection.subagents == ("*",)
+    assert parsed["tools"] == {
+        "enabled": tools,
+        "disabled": expected_disabled,
+    }
+    assert owner.kimi_selected_receipt(selection)["subagents"] == ["*"]
+    assert "future-explorer" not in json.dumps(
+        owner.kimi_selected_receipt(selection)
+    )
+    aliases.cleanup()
 
 
 @pytest.mark.parametrize(
@@ -2721,6 +2764,46 @@ def test_kimi_private_config_preserves_exact_matching_user_bytes(
     private_config = aliases.home / "config.toml"
     assert not private_config.is_symlink()
     assert private_config.read_bytes() == original
+    assert user_config.read_bytes() == original
+    aliases.cleanup()
+    assert user_config.read_bytes() == original
+
+
+@pytest.mark.parametrize(
+    ("selected_tools", "original"),
+    (
+        (
+            ("Read", "Bash"),
+            b'[tools]\nenabled = ["Bash", "Read", "Read"]\n'
+            b'disabled = ["AgentSwarm", "Agent", "Bash", "Agent"]\n',
+        ),
+        (
+            ("Read", "Bash", "mcp__selected__tool"),
+            b'[tools]\nenabled = ["Read"]\n'
+            b'disabled = ["Agent", "AgentSwarm"]\n',
+        ),
+    ),
+)
+def test_kimi_private_config_preserves_semantically_narrower_user_policy_bytes(
+    tmp_path: Path,
+    selected_tools: tuple[str, ...],
+    original: bytes,
+) -> None:
+    owner = _load_owner()
+    user_data = tmp_path / "user-data"
+    user_data.mkdir()
+    user_config = user_data / "config.toml"
+    user_config.write_bytes(original)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+
+    aliases = owner.KimiPrivateHomeAliasesV1.create(
+        run_dir,
+        user_data,
+        owner.KimiCapabilitySelectionV1(tools=selected_tools),
+    )
+
+    assert (aliases.home / "config.toml").read_bytes() == original
     assert user_config.read_bytes() == original
     aliases.cleanup()
     assert user_config.read_bytes() == original
@@ -2877,6 +2960,10 @@ def test_kimi_private_config_rejects_link_target_change_during_read(
     (
         b'[tools]\nenabled = ["Bash"]\ndisabled = ["Agent","AgentSwarm"]\n',
         b'[tools]\nenabled = ["Read"]\ndisabled = ["Agent"]\n',
+        b'[tools]\nenabled = []\ndisabled = ["Agent","AgentSwarm"]\n',
+        b'[tools]\nenabled = ["Read"]\ndisabled = ["Agent","AgentSwarm"]\nextra = true\n',
+        b'[tools]\nenabled = [" Read"]\ndisabled = ["Agent","AgentSwarm"]\n',
+        b'[tools]\nenabled = ["mcp__selected__*"]\ndisabled = ["Agent","AgentSwarm"]\n',
         b"[tools\n",
     ),
 )

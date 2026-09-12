@@ -88,8 +88,26 @@ LEAD_ROUTING_PROJECTIONS = (
 )
 ARCHITECT_PROJECTIONS = (
     "src.codex/skills/architect/SKILL.md",
-    "src.claude/skills/architect/SKILL.md",
 )
+
+PROFESSION_ROLES = (
+    "algorithm-scientist", "backend-engineer", "computational-scientist",
+    "data-engineer", "frontend-engineer", "geometry-engineer",
+    "graphics-engineer", "model-view-engineer", "platform-engineer",
+    "qt-ui-engineer", "toolchain-engineer", "visualization-engineer",
+)
+D3_ROLES = (
+    "algorithm-scientist", "computational-scientist", "qa-engineer",
+    "platform-engineer", "reliability-engineer", "toolchain-engineer",
+)
+A4 = "Treat generality, extensibility, low coupling, cohesion, simplicity, and efficiency as one design tradeoff."
+D3 = "A machine-readable run manifest is required only when output is published, packaged, or golden; compared across environments; or an accepted scientific/performance reproducibility requirement applies."
+RUNTIME_ROLE_CLAUSES = {
+    "backend-engineer": "Every new or modified outbound HTTP, database, queue, cache, or RPC operation has an effective finite timeout owned at the narrowest coherent boundary—call site, shared client or driver, request or transaction context, or composition policy—plus a bounded-backoff retry or explicit no-retry decision and failure mapping. Name the timeout owner and prove inheritance; a default infinite timeout or unverified inheritance is a finding.",
+    "reliability-engineer": "For every retried mutation, state the idempotency mechanism (key, dedupe, or naturally idempotent operation), maximum attempts, backoff with jitter, and the authoritative outcome the retry observes. A definitive synchronous returned result is sufficient for the sole caller. When another consumer must observe or reconcile after return, cite the writer-owner and an independently observable settled state through the owning contract—event, callback or future, versioned query, or equivalent. Do not invent an event; a retried non-idempotent mutation without a guard, or an asynchronous observer without authoritative settlement, is a finding.",
+    "model-view-engineer": "Every structural mutation uses its matching `begin*`/`end*` pair. Pair `layoutChanged` with `layoutAboutToBeChanged` and required persistent-index updates; batch `dataChanged` over the minimal range and roles. Choose granular notification, layout change, or reset by model/index/view correctness first, then coherent simplicity and representative performance. Prefer granular notification when it preserves required indexes, selection/current item, and viewport without disproportionate bookkeeping. Reset is valid for radical data/structure change or when correct granular bookkeeping is materially more complex or error-prone; name invalidated current/selected items and caller recovery.",
+}
+RETIRED_MODEL_VIEW_RESET_RULE = "full reset is reserved for changes incremental signals cannot express"
 
 
 class TestWorkflowEconomyContract(unittest.TestCase):
@@ -378,6 +396,43 @@ class TestWorkflowEconomyContract(unittest.TestCase):
             with self.subTest(relative=relative):
                 for fragment in projection_required:
                     self.assertIn(fragment, text)
+
+    def test_profession_conditions_are_paired_and_evidence_triggered(self) -> None:
+        for role in PROFESSION_ROLES:
+            paths = (
+                f"src.codex/skills/{role}/SKILL.md",
+                f"src.claude/agents/{role}.md",
+            )
+            texts = tuple(self._read(path) for path in paths)
+            for text in texts:
+                self.assertIn(A4, text)
+                self.assertIn("a second consumer is evidence, not a prerequisite", text)
+                self.assertNotIn("a new variant is a plugin + thin scenario", text)
+                self.assertNotIn("MOST GENERAL level its responsibility allows", text)
+        for role in D3_ROLES:
+            paths = (
+                f"src.codex/skills/{role}/SKILL.md",
+                f"src.claude/agents/{role}.md",
+            )
+            for path in paths:
+                text = self._read(path)
+                self.assertIn(D3, text)
+                self.assertIn("Otherwise, ordinary repo-standard run evidence suffices.", text)
+                self.assertIn("declared-absent passes", text)
+                self.assertNotIn("every result-producing/golden/validation/release run emits", text)
+
+    def test_runtime_role_conditions_project_all_accepted_clauses(self) -> None:
+        for role, clause in RUNTIME_ROLE_CLAUSES.items():
+            paths = (
+                f"src.codex/skills/{role}/SKILL.md",
+                f"src.claude/agents/{role}.md",
+            )
+            for path in paths:
+                text = self._read(path)
+                with self.subTest(path=path):
+                    self.assertIn(clause, text)
+                    if role == "model-view-engineer":
+                        self.assertNotIn(RETIRED_MODEL_VIEW_RESET_RULE, text)
 
         selector = "Explicit user or Lead override may choose Kimi"
         for relative in (*KIMI_WORKFLOW_PROJECTIONS, *KIMI_EXTERNAL_DISPATCH_PROJECTIONS):

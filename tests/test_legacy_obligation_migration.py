@@ -2061,6 +2061,60 @@ def test_archive_with_successor_binds_exact_two_migration_receipts_and_replays(
     ) == ["migration-op-001.json", "migration-op-002.json"]
 
 
+@pytest.mark.parametrize("retained_obligations", (1, 0))
+def test_settled_transfer_receipt_cannot_omit_archived_open_obligations(
+    tmp_path: Path,
+    retained_obligations: int,
+) -> None:
+    fixture = two_migration_transfer_fixture(tmp_path)
+    receipt = run_transfer(fixture)
+    archive = (
+        fixture["root"]
+        / "work-items"
+        / "archive"
+        / "2026-08"
+        / fixture["slug"]
+    )
+    receipt_path = archive / "lifecycle-transition-receipt.json"
+
+    assert len(receipt["obligations"]) == 2
+    assert load_validator().validate_obligation_transfer_ownership(
+        fixture["root"]
+    ) == []
+    assert run_transfer(fixture) == receipt
+
+    shortened = dict(receipt)
+    shortened["obligations"] = receipt["obligations"][:retained_obligations]
+    receipt_path.write_text(
+        json.dumps(shortened, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    before_refusal = {
+        path.relative_to(fixture["root"]).as_posix(): sha256(path.read_bytes())
+        for path in (fixture["root"] / "work-items").rglob("*")
+        if path.is_file()
+    }
+
+    audit_errors = load_validator().validate_obligation_transfer_ownership(
+        fixture["root"]
+    )
+    with pytest.raises(fixture["lifecycle"].LifecycleError) as replay_error:
+        run_transfer(fixture)
+
+    after_refusal = {
+        path.relative_to(fixture["root"]).as_posix(): sha256(path.read_bytes())
+        for path in (fixture["root"] / "work-items").rglob("*")
+        if path.is_file()
+    }
+    assert any(
+        error.startswith("WI-OBLIGATION-TRANSFER-COVERAGE:")
+        and "exactly cover archived open REVISE rows" in error
+        for error in audit_errors
+    )
+    assert replay_error.value.failure_id == "WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH"
+    assert after_refusal == before_refusal
+
+
 @pytest.mark.parametrize(
     "case",
     ("missing", "extra", "duplicate-target", "content-drift"),

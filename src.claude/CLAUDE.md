@@ -32,8 +32,8 @@ Read per-key configuration in this order: project `.claude/.agents-mode.yaml`, l
 2. Otherwise classify the task and select `.claude/agents/team-templates/<template>.json`.
 
 - Every specialist invocation uses the Agent tool with the matching `subagent_type`; the built-in `general-purpose` agent does not replace a typed role.
-- The curated inline role-skills are exactly `lead`, `product-manager`, `analyst`, `architect`, and `planner`. Explicit Skill invocation may adopt them inline; the shared quick-fix route may self-invoke only its already-admitted bounded intake/factual/seam decision. Inline adoption is neither isolated nor an independent gate.
-- `lead` is a host-selected main agent and inline `/lead` role. Lead is never spawned as a subagent. The wrapper rejects a stale dispatched `subagent_type: lead`; only a stale `subagent_type: lead` dispatch is fail-closed. The other four remain typed Agent targets whose wrappers load their same-named skill.
+- The curated inline role identities are exactly `lead`, `product-manager`, `analyst`, `architect`, and `planner`. Architect's sole role-contract body is the universal `.agents/skills/architect/SKILL.md` projection. Explicit Skill invocation may adopt these identities inline; the shared quick-fix route may self-invoke only its already-admitted bounded intake/factual/seam decision. Inline adoption is neither isolated nor an independent gate.
+- `lead` is a host-selected main agent and inline `/lead` role. Lead is never spawned as a subagent. The wrapper rejects a stale dispatched `subagent_type: lead`; only a stale `subagent_type: lead` dispatch is fail-closed. `product-manager`, `analyst`, and `planner` remain typed Agent targets whose wrappers load their same-named Claude skill; the Architect wrapper loads the universal body.
 - For `requiresLead: false` routes, the main conversation invokes the declared Agent chain directly. For `requiresLead: true`, it adopts `/lead`, owns integration/recovery, and invokes leaf specialists; `requiresLead` never creates a Lead subagent.
 - Launch independent Agent calls together only when their complete resource surfaces are disjoint. External worker/reviewer substitution follows the installed external-dispatch contract.
 
@@ -52,7 +52,7 @@ Auto-match user intent against the installed command contracts and apply the own
 
 ## Role definitions
 
-Ordinary roles live in `.claude/agents/<role>.md`; the five curated inline roles use `.claude/skills/<role>/SKILL.md`. `.claude/agents/lead.md` uses `initialPrompt: /lead` for main-agent activation and refuses stale dispatch; the other four wrappers load their same-named skill.
+Ordinary roles live in `.claude/agents/<role>.md`; the four Claude-owned curated inline roles `lead`, `product-manager`, `analyst`, and `planner` use `.claude/skills/<role>/SKILL.md`. Architect uses the `.claude/skills/architect` projection to the universal `.agents/skills/architect/SKILL.md` body. `.claude/agents/lead.md` uses `initialPrompt: /lead` for main-agent activation and refuses stale dispatch; the `product-manager`, `analyst`, and `planner` wrappers load their same-named skill, while the Architect wrapper loads the universal body.
 
 ## Publication safety scan
 

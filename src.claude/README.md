@@ -11,8 +11,8 @@ Use it together with:
 Source surface:
 
 - `CLAUDE.md` is the Claude-provider runtime entrypoint in the monorepo source tree
-- `agents/` carries role definitions, contracts, team templates, and supporting scripts, including the Claude API wrapper under `agents/scripts/` — with a curated exception: five roles keep their canonical contracts at `skills/<role>/SKILL.md`. `lead` uses the documented main-agent `initialPrompt: /lead` to load that contract while retaining its fail-closed stale-dispatch branch; the four duals `product-manager`, `analyst`, `architect`, `planner` use thin delegate wrappers loading the same-named skill. Every other role's canonical contract lives under `agents/`.
-- `skills/` carries the curated inline role-skills (`lead`, `product-manager`, `analyst`, `architect`, `planner`) and the Claude-side common skills
+- `agents/` carries role definitions, contracts, team templates, and supporting scripts, including the Claude API wrapper under `agents/scripts/`. The four Claude-owned curated roles `lead`, `product-manager`, `analyst`, and `planner` keep their canonical contracts at `skills/<role>/SKILL.md`; `lead` uses the documented main-agent `initialPrompt: /lead` while the other three use thin delegate wrappers. Architect's sole body is the universal `.agents/skills/architect/SKILL.md` projection, with `agents/architect.md` retaining dispatched authority. Every other role's canonical contract lives under `agents/`.
+- `skills/` carries the curated inline role identities (`lead`, `product-manager`, `analyst`, `architect`, `planner`) and the Claude-side common skills; Architect's body is not Claude-owned source
 - `commands/` carries Claude-side command helpers maintained in this branch, including the bounded parallel external-helper surface `/agents-external-brigade`
 - `agents/contracts/design-panel.md` + `commands/agents-design-panel.md` carry the design-panel technique — independent multi-lane design generation on one pinned problem, converged through one mandatory synthesis; the generation-side analog of `agents/contracts/review-loop.md` + `commands/agents-review-loop.md`
 

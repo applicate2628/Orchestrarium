@@ -510,7 +510,7 @@ _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
   'src.claude/skills/product-manager/SKILL.md',
   'product-manager has a curated role-skill file'),
  ('check_file', 'src.claude/skills/analyst/SKILL.md', 'analyst has a curated role-skill file'),
- ('check_file', 'src.claude/skills/architect/SKILL.md', 'architect has a curated role-skill file'),
+ ('check_file', 'src.codex/skills/architect/SKILL.md', 'architect has the universal role-contract body'),
  ('check_file', 'src.claude/skills/planner/SKILL.md', 'planner has a curated role-skill file'),
  ('check_contains',
   'src.claude/agents/product-manager.md',
@@ -530,12 +530,11 @@ _DECLARED_ACTIONS = (('direct', 'exists', 'src.claude/CLAUDE.md exists'),
   'analyst agent wrapper is not a fail-closed stub (dual role must stay a valid dispatch target)'),
  ('check_contains',
   'src.claude/agents/architect.md',
-  'invoke the `Skill` tool with name `architect` to load the full role contract',
-  'architect agent wrapper pins to its curated skill via the Skill tool'),
- ('check_absent',
-  'src.claude/agents/architect.md',
-  'lead-is-a-main-conversation-role',
-  'architect agent wrapper is not a fail-closed stub (dual role must stay a valid dispatch target)'),
+  'The universal Architect skill (`.agents/skills/architect/SKILL.md`, sourced from `src.codex/skills/architect/SKILL.md`) is the sole role-contract body owner',
+  'architect agent wrapper pins to the universal role-contract body via the Skill tool'),
+ ('check_not_exists',
+  'src.claude/skills/architect/SKILL.md',
+  'architect has no duplicate Claude-owned source body'),
  ('check_contains',
   'src.claude/agents/planner.md',
   'invoke the `Skill` tool with name `planner` to load the full role contract',
@@ -1331,7 +1330,12 @@ _SOURCE_ONLY_MAINTAINER_OPERATIONS = (
 def _is_source_only_maintainer_action(action: tuple[str, ...]) -> bool:
     return (
         action[:2] == ("direct", "curated_registry")
-        or any(str(value).startswith("src.claude/skills/lead/") for value in action)
+        or any(
+            str(value).startswith(
+                ("src.claude/skills/lead/", "src.claude/skills/architect/", "src.codex/skills/architect/")
+            )
+            for value in action
+        )
         or action[0] in _SOURCE_ONLY_MAINTAINER_OPERATIONS
         or any(
             str(value).startswith(_SOURCE_ONLY_MAINTAINER_PREFIXES)

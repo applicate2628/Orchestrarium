@@ -7630,6 +7630,15 @@ def _verify_settlement(root: Path, receipt: Path, expected: dict | None = None) 
         )
     if any(payload.get(key) != value for key, value in physical.items()):
         raise LifecycleError("WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH", "settled receipt hashes differ")
+    if payload.get("schemaVersion") == 2:
+        coverage_errors = _validator_module().validate_transfer_receipt_obligation_coverage(
+            Path(root).resolve(), payload, archive
+        )
+        if coverage_errors:
+            raise LifecycleError(
+                "WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH",
+                "; ".join(coverage_errors),
+            )
     if expected is not None and payload != expected:
         raise LifecycleError("WI-LIFECYCLE-TRANSITION-SETTLEMENT-MISMATCH", "settled receipt content differs")
     return payload

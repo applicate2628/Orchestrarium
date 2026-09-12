@@ -33,6 +33,8 @@ STATUS_SECTIONS = {
 # Post-commit stdout contract for consumers that need to distinguish a durable
 # append from a rejected or rolled-back attempt. Keep the text in this writer.
 APPEND_SUCCESS_MARKER = "RESULT: PASS append"
+SETTLE_SUCCESS_MARKER = "RESULT: PASS settle-launch"
+SETTLE_ALREADY_MARKER = "RESULT: PASS already-settled"
 RECOVERY_SUCCESS_MARKER = "RESULT: PASS recover-invalid-closure"
 INVALID_CURRENT_DISPOSITION_SUCCESS_MARKER = "RESULT: PASS dispose-invalid-current"
 NONCANONICAL_HISTORY_SUCCESS_MARKER = "RESULT: PASS recover-noncanonical-history"
@@ -1136,21 +1138,14 @@ def command_init(args: argparse.Namespace) -> int:
     return 0
 
 
-def command_append(args: argparse.Namespace) -> int:
-    item = active_work_item(args, "append")
-    if item is None:
-        return 1
-    if not item.exists():
-        print(f"FAIL: missing work item: {item}", file=sys.stderr)
-        return 1
+def _append_event_transaction(
+    item: Path, validator: Any, event_factory: Any
+) -> bool:
+    """Append one validator-approved event, or report an idempotent no-op.
 
-    validator = load_validator()
-    try:
-        event = build_event(args, validator)
-    except ValueError as exc:
-        print(f"FAIL: {exc}", file=sys.stderr)
-        return 1
-
+    The factory runs while the ledger lock is held so a launch lookup and its
+    terminal append observe one indivisible ledger state.
+    """
     ledger_path = item / "agent-runs.jsonl"
     # Kill-safe old-or-new transaction (decision 2026-07-16-review-verdict-closure):
     # lock -> read -> merge -> write TEMP (same dir) -> validate the CANDIDATE ->
@@ -1181,6 +1176,9 @@ def command_append(args: argparse.Namespace) -> int:
 
     try:
         previous = ledger_path.read_text(encoding="utf-8") if ledger_path.exists() else ""
+        event = event_factory(previous)
+        if event is None:
+            return False
         prefix = "" if not previous or previous.endswith("\n") else "\n"
         line = serialize_event(event)
         candidate = ledger_path.with_suffix(".jsonl.tmp")
@@ -1196,13 +1194,128 @@ def command_append(args: argparse.Namespace) -> int:
             for error in errors:
                 print(f"FAIL: {error}", file=sys.stderr)
             print(f"RESULT: FAIL ({len(errors)} errors)", file=sys.stderr)
-            return 1
+            raise ValueError("; ".join(errors))
         os.replace(candidate, ledger_path)
     finally:
         os.close(lock_fd)
         lock_path.unlink(missing_ok=True)
 
-    print(f"{APPEND_SUCCESS_MARKER} ({ledger_path})")
+    return True
+
+
+def command_append(args: argparse.Namespace) -> int:
+    item = active_work_item(args, "append")
+    if item is None:
+        return 1
+    if not item.exists():
+        print(f"FAIL: missing work item: {item}", file=sys.stderr)
+        return 1
+
+    validator = load_validator()
+    try:
+        event = build_event(args, validator)
+        _append_event_transaction(item, validator, lambda _previous: event)
+    except ValueError as exc:
+        print(f"FAIL: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"{APPEND_SUCCESS_MARKER} ({item / 'agent-runs.jsonl'})")
+    return 0
+
+
+def _settlement_event(
+    args: argparse.Namespace, launch: dict[str, Any], validator: Any
+) -> dict[str, Any]:
+    if args.status in {"planned", "running"}:
+        raise ValueError(
+            "WI-LEDGER-SETTLE-TARGET: terminal status must not be planned or running"
+        )
+
+    immutable = {
+        "work_item_name": launch.get("workItem"),
+        "role": launch.get("role"),
+        "execution_role": launch.get("executionRole"),
+        "assigned_role": launch.get("assignedRole"),
+        "provider": launch.get("provider"),
+        "model": launch.get("model"),
+        "scope": launch.get("scope"),
+        "prompt_file": launch.get("promptFile"),
+        "effort": launch.get("effort"),
+        "launch_flags_json": (
+            json.dumps(launch["launchFlags"], separators=(",", ":"))
+            if "launchFlags" in launch
+            else None
+        ),
+    }
+    if not isinstance(immutable["work_item_name"], str) or not isinstance(
+        immutable["role"], str
+    ) or not isinstance(immutable["execution_role"], str) or not isinstance(
+        immutable["scope"], list
+    ):
+        raise ValueError(
+            "WI-LEDGER-SETTLE-TARGET: launch lacks immutable event metadata"
+        )
+
+    terminal = argparse.Namespace(**vars(args), **immutable)
+    terminal.event_kind = "terminal"
+    terminal.closes = None
+    return build_event(terminal, validator)
+
+
+def _settle_launch_from_ledger(
+    previous: str, args: argparse.Namespace, validator: Any
+) -> dict[str, Any] | None:
+    try:
+        events = [json.loads(line) for line in previous.splitlines() if line.strip()]
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            "WI-LEDGER-SETTLE-TARGET: existing ledger is not valid JSONL"
+        ) from exc
+    launches = [event for event in events if event.get("runId") == args.launch_run_id]
+    if len(launches) != 1 or launches[0].get("eventKind") != "launch":
+        raise ValueError(
+            "WI-LEDGER-SETTLE-TARGET: launch must identify one V2 launch event"
+        )
+    terminals = [
+        event
+        for event in events
+        if event.get("eventKind") == "terminal"
+        and event.get("launchRunId") == args.launch_run_id
+    ]
+    if len(terminals) > 1:
+        raise ValueError(
+            "WI-LEDGER-SETTLE-TARGET: launch has multiple terminal events"
+        )
+
+    event = _settlement_event(args, launches[0], validator)
+    if terminals:
+        if terminals[0] == event:
+            return None
+        raise ValueError(
+            "WI-LEDGER-SETTLE-CONFLICT: launch already has a different terminal event"
+        )
+    return event
+
+
+def command_settle_launch(args: argparse.Namespace) -> int:
+    item = active_work_item(args, "settle-launch")
+    if item is None or not item.exists():
+        print(f"FAIL: missing work item: {item}", file=sys.stderr)
+        return 1
+    validator = load_validator()
+    try:
+        appended = _append_event_transaction(
+            item,
+            validator,
+            lambda previous: _settle_launch_from_ledger(previous, args, validator),
+        )
+    except ValueError as exc:
+        print(f"FAIL: {exc}", file=sys.stderr)
+        return 1
+    if appended:
+        print(f"{SETTLE_SUCCESS_MARKER} ({item / 'agent-runs.jsonl'})")
+    else:
+        print(f"{SETTLE_ALREADY_MARKER} ({item / 'agent-runs.jsonl'})")
     return 0
 
 
@@ -1542,6 +1655,37 @@ def build_parser() -> argparse.ArgumentParser:
     append.add_argument("--closer-run-id", help="Distinct internal closer run identity.")
     append.add_argument("--target-tuple-json", help="Exact external target tuple as a JSON object.")
     append.set_defaults(func=command_append)
+
+    settle = subparsers.add_parser(
+        "settle-launch",
+        help="Append one terminal event derived from a unique open V2 launch.",
+    )
+    settle.add_argument("--launch-run-id", required=True)
+    settle.add_argument("--run-id", required=True)
+    settle.add_argument("--status", required=True)
+    settle.add_argument("--gate", required=True)
+    settle.add_argument("--artifact")
+    settle.add_argument("--evidence", action="append")
+    settle.add_argument("--evidence-json", action="append")
+    settle.add_argument("--scratch-evidence-json", action="append")
+    settle.add_argument("--started-at", required=True)
+    settle.add_argument("--updated-at", required=True)
+    settle.add_argument("--notes")
+    settle.add_argument(
+        "--terminal-class",
+        choices=["external-nonauthorizing", "internal-authorizing"],
+    )
+    settle.add_argument("--authorizing", choices=["true", "false"])
+    settle.add_argument(
+        "--actual-execution-path", choices=["direct-external-cli", "internal"]
+    )
+    settle.add_argument("--artifact-identity")
+    settle.add_argument("--external-dispatch-id")
+    settle.add_argument("--external-evidence-run-id")
+    settle.add_argument("--effort-mapping-loss")
+    settle.add_argument("--closer-run-id")
+    settle.add_argument("--target-tuple-json")
+    settle.set_defaults(func=command_settle_launch)
 
     recovery = subparsers.add_parser("recover-invalid-closure", help="Append one digest-bound V2 closure invalidation")
     recovery.add_argument("--run-id", required=True)

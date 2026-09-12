@@ -75,7 +75,7 @@ CLAUDE_MANIFEST: dict[str, tuple[str, ...]] = {
         "externalProvider: auto | codex | claude | kimi | grok",
         "Every specialist invocation uses the Agent tool",
         "matching `subagent_type`",
-        "curated inline role-skills",
+        "curated inline role identities",
         "Lead is never spawned as a subagent",
         "requiresLead",
         "general-purpose",

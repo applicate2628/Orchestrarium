@@ -43,7 +43,7 @@ description: "Ordered phases, acceptance criteria, rollback notes."
 - Call out phases that require specialist review before implementation or merge.
 - Split shared or core module changes into explicit enabling phases with tighter review instead of hiding them inside feature work.
 - When planning a non-foundation feature, require the design to specify a stable feature identifier, owner, default state, and a single settings/capability registry entry that gates the feature, and to verify both the enabled and disabled paths (including absence of side effects in the disabled path — no UI, hotkey, command-palette entry, background watcher, network request, or persistence write reaches the feature when its gate is off).
-- If the work item includes an admitted bug or prerequisite issue, always make that fix Phase A. Cleanup, adjacent fixes, and feature work come only after the admitted issue is verified fixed.
+- Prioritize critical-path and concrete enabling phases by dependencies; a blocker delays only dependent phases. Apply Lead's plan-checkpoint rule: choose work that lowers total remaining verified delivery cost when its expected benefit outweighs step, replanning, and rework cost.
 
 ## Non-goals
 

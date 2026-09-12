@@ -331,10 +331,16 @@ def _kimi_unique_name_array(value: object) -> tuple[str, ...]:
     return tuple(result)
 
 
-def _reject_kimi_child_selection(
+def _validate_kimi_child_selection(
     tools: tuple[str, ...], subagents: tuple[str, ...]
 ) -> None:
-    if subagents or any(tool in {"Agent", "AgentSwarm"} for tool in tools):
+    dispatch_selected = any(
+        tool in {"Agent", "AgentSwarm"} for tool in tools
+    )
+    if (
+        subagents not in {(), ("*",)}
+        or bool(subagents) != dispatch_selected
+    ):
         raise ValueError("E_KIMI_CHILD_SELECTION_UNSUPPORTED")
 
 
@@ -438,7 +444,7 @@ def read_kimi_capability_selection(path: Path) -> KimiCapabilitySelectionV1:
             raise ValueError("shape")
         tools = _kimi_unique_name_array(document.get("tools"))
         subagents = _kimi_unique_name_array(document.get("subagents"))
-        _reject_kimi_child_selection(tools, subagents)
+        _validate_kimi_child_selection(tools, subagents)
         permission = document.get("permission")
         if permission not in {"reject", "approve_once", "approve_always"}:
             raise ValueError("permission")
@@ -491,7 +497,11 @@ def _kimi_tools_policy(selection: KimiCapabilitySelectionV1) -> dict[str, list[s
     enabled = list(selection.tools) if selection.tools else ["Agent"]
     return {
         "enabled": enabled,
-        "disabled": ["Agent", "AgentSwarm"],
+        "disabled": [
+            tool
+            for tool in ("Agent", "AgentSwarm")
+            if tool not in selection.tools
+        ],
     }
 
 
@@ -561,6 +571,30 @@ def _kimi_user_config_snapshot(path: Path) -> tuple[bytes, dict[str, object]] | 
         raise ValueError("E_KIMI_CAPABILITIES_CONFIG_CONFLICT") from exc
 
 
+def _kimi_tools_policy_compatible(
+    existing: object, expected: dict[str, list[str]]
+) -> bool:
+    if not isinstance(existing, dict) or set(existing) != {
+        "enabled",
+        "disabled",
+    }:
+        return False
+    enabled = existing.get("enabled")
+    disabled = existing.get("disabled")
+    if not isinstance(enabled, list) or not isinstance(disabled, list):
+        return False
+    try:
+        enabled_set = {_kimi_capability_name(value) for value in enabled}
+        disabled_set = {_kimi_capability_name(value) for value in disabled}
+    except ValueError:
+        return False
+    return (
+        bool(enabled_set)
+        and enabled_set.issubset(expected["enabled"])
+        and disabled_set.issuperset(expected["disabled"])
+    )
+
+
 def _kimi_private_config(
     user_config: Path, selection: KimiCapabilitySelectionV1
 ) -> bytes:
@@ -571,7 +605,7 @@ def _kimi_private_config(
     source, document = snapshot
     expected = _kimi_tools_policy(selection)
     if "tools" in document:
-        if document["tools"] != expected:
+        if not _kimi_tools_policy_compatible(document["tools"], expected):
             raise ValueError("E_KIMI_CAPABILITIES_CONFIG_CONFLICT")
         return source
     separator = b"\n" if source.endswith((b"\n", b"\r")) else b"\n\n"

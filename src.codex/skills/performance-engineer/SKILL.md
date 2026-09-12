@@ -13,7 +13,7 @@ description: "Latency, throughput, memory, slow: profiling, benchmarks, budgets.
 
 ## Input contract
 
-- Require accepted research and design artifacts unless the task is explicitly a performance investigation.
+- Consume only the artifacts required by the admitted route. Do not require accepted Research or Design artifacts unless the admitted route requires them.
 - Take only the workloads, environments, budgets, and constraints needed for the performance question.
 - Escalate architecture changes instead of smuggling them in under optimization work.
 

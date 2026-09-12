@@ -267,13 +267,10 @@ PINS = [
      ["src.claude/agents/contracts/operating-model.md", "src.codex/skills/lead/operating-model.md"]),
 
     # P8 — writer-owner + conditionally required settlement observation.
-    # The Claude pointer targets skills/architect/SKILL.md (not agents/architect.md): the
-    # roles-as-skills curated subset made architect a dual role-skill, and the full role
-    # contract — including this P8 sentence — moved into the skill; agents/architect.md is
-    # now a thin delegate wrapper that loads the skill. This matches the codex pointer shape,
-    # which already targeted skills/architect/SKILL.md.
+    # Architect has one universal role-contract body. Claude routing authority remains in
+    # CLAUDE.md and agents/architect.md; neither surface duplicates this P8 contract.
     ("P8-architect", "For every pipeline touching shared mutable state (for example scroll, geometry, or cache), the Change-Surface Contract MUST name exactly one writer-owner. When another consumer observes or reconciles after the writer returns, the owning contract MUST expose authoritative settled state independently through an event, callback/future, versioned query, or equivalent; an ordinary synchronous return is sufficient for the sole caller. Missing the writer-owner or required settlement observation is `REVISE` at design input.",
-     ["src.claude/skills/architect/SKILL.md", "src.codex/skills/architect/SKILL.md"]),
+     ["src.codex/skills/architect/SKILL.md"]),
     ("P8-reviewer", "Reject any pipeline touching shared mutable state unless the accepted design names exactly one writer-owner. When another consumer observes or reconciles after the writer returns, require independent observation of authoritative settled state through the owning contract; an event, callback/future, versioned query, or equivalent may satisfy it, while an ordinary synchronous return is sufficient for the sole caller. Verify the implementation preserves the writer-owner, required observation, and cross-surface convergence.",
      ["src.claude/agents/architecture-reviewer.md", "src.codex/skills/architecture-reviewer/SKILL.md"]),
 
@@ -331,6 +328,15 @@ DYNAMIC_ADMISSION_CLAUSES = (
     "A waiting or long-running lane does not head-of-line block independent ready work.",
     "waiting on an external prerequisite is parked or closed with a durable recovery point",
     "Integration-owner and shared integration-surface work is serialized.",
+)
+
+PLAN_CHECKPOINT_LEAD_OWNERS = (
+    "src.claude/skills/lead/SKILL.md",
+    "src.codex/skills/lead/SKILL.md",
+)
+PLAN_CHECKPOINT_PLANNER_OWNERS = (
+    "src.claude/skills/planner/SKILL.md",
+    "src.codex/skills/planner/SKILL.md",
 )
 
 RUSSIAN_DYNAMIC_ADMISSION_CLAUSES = (
@@ -485,6 +491,32 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
             for residue in stale:
                 with self.subTest(owner=owner, residue=residue):
                     self.assertNotIn(residue, text)
+
+    def test_plan_checkpoints_prioritize_downstream_work_reduction(self) -> None:
+        lead_clauses = (
+            "At natural checkpoints—stage completion, changed dependencies or blockers, or material cost growth—",
+            "removes, simplifies, or reuses downstream work",
+            "preserve scope, quality, gates, and authority",
+        )
+        planner_clauses = (
+            "Prioritize critical-path and concrete enabling phases by dependencies; a blocker delays only dependent phases.",
+            "Apply Lead's plan-checkpoint rule",
+            "total remaining verified delivery cost",
+        )
+        retired = "If the work item includes an admitted bug or prerequisite issue, always make that fix Phase A."
+
+        for owner in PLAN_CHECKPOINT_LEAD_OWNERS:
+            with self.subTest(owner=owner):
+                text = self._read(owner)
+                for clause in lead_clauses:
+                    self.assertIn(clause, text)
+
+        for owner in PLAN_CHECKPOINT_PLANNER_OWNERS:
+            with self.subTest(owner=owner):
+                text = self._read(owner)
+                for clause in planner_clauses:
+                    self.assertIn(clause, text)
+                self.assertNotIn(retired, text)
 
     def test_model_and_effort_truth_is_provider_neutral_in_the_shared_owner(self) -> None:
         shared = self._read("shared/references/subagent-operating-model.md")
@@ -642,7 +674,6 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
     def test_design_readiness_contract_is_cross_pack_and_sample_honest(self) -> None:
         for owner in (
             "src.codex/skills/architect/SKILL.md",
-            "src.claude/skills/architect/SKILL.md",
         ):
             with self.subTest(owner=owner):
                 text = self._read(owner)

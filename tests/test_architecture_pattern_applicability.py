@@ -140,7 +140,6 @@ BLOCKS = {
     ),
     "ARCHITECT-DISPOSITION": (
         ROOT / "src.codex/skills/architect/SKILL.md",
-        ROOT / "src.claude/skills/architect/SKILL.md",
     ),
     "ARCHITECTURE-REVIEW": (
         ROOT / "src.codex/skills/architecture-reviewer/SKILL.md",
@@ -468,6 +467,20 @@ def test_canonical_runtime_claim_does_not_overstate_static_delivery() -> None:
     assert text.count(marker) == 1, f"{FAILURE_IDS[6]}: canonical runtime marker count"
 
 
+def test_claude_architect_source_composition_has_one_universal_body() -> None:
+    universal = ROOT / "src.codex/skills/architect/SKILL.md"
+    duplicate = ROOT / "src.claude/skills/architect/SKILL.md"
+    wrapper = ROOT / "src.claude/agents/architect.md"
+    inline_policy = ROOT / "src.claude/CLAUDE.md"
+    validator = ROOT / "src.claude/agents/scripts/validate-skill-pack.py"
+
+    assert universal.is_file()
+    assert not duplicate.exists()
+    assert "The universal Architect skill (`.agents/skills/architect/SKILL.md`, sourced from `src.codex/skills/architect/SKILL.md`) is the sole role-contract body owner" in _read(wrapper, FAILURE_IDS[0])
+    assert "Architect's sole role-contract body is the universal `.agents/skills/architect/SKILL.md` projection." in _read(inline_policy, FAILURE_IDS[0])
+    assert "('check_not_exists',\n  'src.claude/skills/architect/SKILL.md'" in _read(validator, FAILURE_IDS[0])
+
+
 @pytest.mark.parametrize(
     "provider,installer,source_roles,installed_roles,validator",
     (
@@ -554,6 +567,12 @@ def test_installed_parity_and_validator(
         assert installed_path.read_bytes() == source.read_bytes(), (
             f"{FAILURE_IDS[5]}: {provider} installed drift for {source.name}"
         )
+
+    if provider == "claude":
+        claude_architect = target / ".claude/skills/architect"
+        universal_architect = target / ".agents/skills/architect"
+        assert claude_architect.is_symlink(), "Claude Architect projection must remain a link"
+        assert claude_architect.resolve() == universal_architect.resolve()
 
     installed_validator = target / validator
     validation = subprocess.run(
