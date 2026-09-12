@@ -206,7 +206,7 @@ If the advisory profile resolves to primary Claude, run the approved `invoke-cla
 
 If Kimi is selected explicitly, keep it read-only and nonauthorizing.
 
-- Use only the approved Kimi transport from the shared external-dispatch contract with fixed `kimi-code/k3`, file-based prompt delivery, no tools or subagents, and independent verification.
+- Use only the approved Kimi transport from the shared external-dispatch contract with fixed `kimi-code/k3`, file-based prompt delivery, and independent verification. Omission of the capability file keeps tools/servers/subagents empty with permission `reject`; a validated file for this read-only advisory role may select only admitted read tools or Model Context Protocol servers.
 - If Kimi is unavailable or fails, return an unavailable memo; do not silently downgrade to Codex or Claude.
 - Grok remains unavailable in 1.x and must not be selected, launched, or probed.
 - Route every substantive task through the approved provider prompt wrapper named by the shared external-dispatch contract, which owns file/stdin prompt delivery and the governance capsule; raw provider CLI prompt routes are unsupported. Inline argv is only for a fixed synthetic non-substantive smoke token, never a provider limitation or real task.

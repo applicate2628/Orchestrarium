@@ -205,16 +205,16 @@ def test_external_dispatch_projects_provider_execution_disposition(
 
 
 def test_kimi_engineering_admits_only_external_worker_taxonomy_roles() -> None:
-    admitted = RESOLVER.resolve_external_dispatch(
-        "kimi", "engineering", "backend-engineer", repo_root=ROOT
-    )
-
-    assert admitted["status"] == "external-authorized"
-    assert admitted["mutationClass"] == "bounded-write"
-    assert admitted["executionAuthorized"] is True
-    assert admitted["independentVerification"] is True
-    assert admitted["fallback"] == "none"
-    for role in ("knowledge-archivist", "qa-engineer", "external-worker"):
+    for role in ("backend-engineer", "platform-engineer"):
+        admitted = RESOLVER.resolve_external_dispatch(
+            "kimi", "engineering", role, repo_root=ROOT
+        )
+        assert admitted["status"] == "external-authorized"
+        assert admitted["mutationClass"] == "bounded-write"
+        assert admitted["executionAuthorized"] is True
+        assert admitted["independentVerification"] is True
+        assert admitted["fallback"] == "none"
+    for role in ("worker", "knowledge-archivist", "qa-engineer", "external-worker"):
         denied = RESOLVER.resolve_external_dispatch(
             "kimi", "engineering", role, repo_root=ROOT
         )
@@ -428,6 +428,62 @@ def test_external_dispatch_fails_closed_on_invalid_execution_realization(
     assert decision["executionAuthorized"] is False
     assert decision["independentVerification"] is False
     assert decision["fallback"] == "none"
+
+
+def test_external_dispatch_normalizes_legacy_execution_disposition(
+    tmp_path: Path,
+) -> None:
+    policy_root = tmp_path / "policy-root"
+    shared_root = policy_root / "shared"
+    shared_root.mkdir(parents=True)
+    policy = json.loads(
+        (ROOT / "shared" / "role-routing-policy.v1.json").read_text(encoding="utf-8")
+    )
+    policy["providerRealizations"]["kimi"]["executionDisposition"] = (
+        "explicit-read-only"
+    )
+    (shared_root / "role-routing-policy.v1.json").write_text(
+        json.dumps(policy), encoding="utf-8"
+    )
+    (shared_root / "external-role-taxonomy.v1.json").write_bytes(
+        (ROOT / "shared" / "external-role-taxonomy.v1.json").read_bytes()
+    )
+
+    canonical = RESOLVER.resolve_external_dispatch(
+        "kimi", "engineering", "backend-engineer", repo_root=ROOT
+    )
+    legacy = RESOLVER.resolve_external_dispatch(
+        "kimi", "engineering", "backend-engineer", repo_root=policy_root
+    )
+
+    assert legacy == canonical
+    assert legacy["status"] == "external-authorized"
+    assert legacy["mutationClass"] == "bounded-write"
+    assert legacy["executionAuthorized"] is True
+    loaded, _ = RESOLVER.load_role_policy(policy_root)
+    assert (
+        loaded["providerRealizations"]["kimi"]["executionDisposition"]
+        == "explicit-wrapper"
+    )
+
+
+@pytest.mark.parametrize("invalid_disposition", ({}, []))
+def test_role_policy_rejects_non_scalar_execution_disposition(
+    tmp_path: Path, invalid_disposition: object
+) -> None:
+    policy_root = tmp_path / "policy-root"
+    policy_path = policy_root / "shared" / "role-routing-policy.v1.json"
+    policy_path.parent.mkdir(parents=True)
+    policy = json.loads(
+        (ROOT / "shared" / "role-routing-policy.v1.json").read_text(encoding="utf-8")
+    )
+    policy["providerRealizations"]["kimi"]["executionDisposition"] = (
+        invalid_disposition
+    )
+    policy_path.write_text(json.dumps(policy), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="^E_ROLE_POLICY_INVALID: kimi realization shape$"):
+        RESOLVER.load_role_policy(policy_root)
 
 
 @pytest.mark.parametrize("provider", ("kimi", "grok"))

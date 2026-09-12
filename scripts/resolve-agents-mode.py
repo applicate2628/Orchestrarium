@@ -31,12 +31,15 @@ _EXTERNAL_ROLE_LANES = frozenset(
 )
 PROVIDER_CHOICES = tuple(sorted((*PROVIDER_DIRS, *EXTERNAL_DISPATCH_PROVIDERS)))
 _EXTERNAL_EXECUTION_DISPOSITIONS = frozenset(
-    {"explicit-read-only", "classifier-only"}
+    {"explicit-wrapper", "classifier-only"}
 )
+_LEGACY_EXTERNAL_EXECUTION_DISPOSITIONS = {
+    "explicit-read-only": "explicit-wrapper"
+}
 _EXTERNAL_AVAILABILITIES = frozenset({"available", "unavailable"})
 _EXTERNAL_DISPOSITION_AVAILABILITY_PAIRS = frozenset(
     {
-        ("explicit-read-only", "available"),
+        ("explicit-wrapper", "available"),
         ("classifier-only", "unavailable"),
     }
 )
@@ -997,6 +1000,13 @@ def load_role_policy(repo_root: Path) -> tuple[dict[str, Any], Path]:
         realization = realizations.get(provider)
         if not isinstance(realization, dict):
             raise ValueError(f"E_ROLE_POLICY_INVALID: {provider} realization")
+        disposition = realization.get("executionDisposition")
+        if isinstance(disposition, str):
+            realization["executionDisposition"] = (
+                _LEGACY_EXTERNAL_EXECUTION_DISPOSITIONS.get(
+                    disposition, disposition
+                )
+            )
         allowed = realization.get("allowedTaskClasses")
         advisory = realization.get("advisoryTaskClasses", [])
         mutation_policy = realization.get("requiredMutationClass")
@@ -1017,6 +1027,7 @@ def load_role_policy(repo_root: Path) -> tuple[dict[str, Any], Path]:
                 for mutation in mutation_classes
             )
             or realization.get("independentVerification") is not True
+            or not isinstance(realization.get("executionDisposition"), str)
             or realization.get("executionDisposition")
             not in _EXTERNAL_EXECUTION_DISPOSITIONS
             or realization.get("availability") not in _EXTERNAL_AVAILABILITIES
@@ -1841,7 +1852,7 @@ def resolve_external_dispatch(
         admitted = base_admitted and not final_authorizing_role
         execution_authorized = (
             admitted
-            and realization["executionDisposition"] == "explicit-read-only"
+            and realization["executionDisposition"] == "explicit-wrapper"
             and realization["availability"] == "available"
         )
         unavailable = (

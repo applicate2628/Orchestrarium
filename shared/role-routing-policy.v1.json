@@ -352,7 +352,7 @@
       "advisoryTaskClasses": ["planning"],
       "requiredMutationClass": ["read-only", "bounded-write"],
       "independentVerification": true,
-      "executionDisposition": "explicit-read-only",
+      "executionDisposition": "explicit-wrapper",
       "availability": "available",
       "effortMappingLoss": "no-native-effort-control"
     },

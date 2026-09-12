@@ -1,4 +1,4 @@
 interface:
   display_name: "Second Opinion"
   short_description: "Get an independent advisory memo or manage consultant toggle"
-  default_prompt: "Use $second-opinion for independent nonauthorizing advice on this task, or manage consultant mode when requested; follow the skill's current routing and preserve unrelated configuration."
+  default_prompt: "Use $second-opinion for independent nonauthorizing advice on this task, or manage consultant mode when requested; follow the skill's current routing and preserve unrelated configuration. Kimi is explicit-only through the fixed `kimi-code/k3` wrapper: an omitted Kimi capability file keeps tools/MCP/subagents empty with permission reject, while a validated capability file may select admitted read tools or MCP servers; ordinary launch does not consult enrollment, and every result remains independently verified and nonauthorizing."

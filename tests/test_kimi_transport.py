@@ -56,8 +56,9 @@ def test_codex_ui_prompts_describe_fixed_no_enrollment_kimi_launch() -> None:
     for path in CODEX_UI_PROMPT_PATHS:
         prompt = path.read_text(encoding="utf-8")
         assert "Windows-enrolled" not in prompt
-        assert "canonical fixed `kimi-code/k3` no-tools/no-subagents wrapper" in prompt
-        assert "ordinary launch does not consult enrollment" in prompt
+        assert "omitted Kimi capability file keeps tools/MCP/subagents empty with permission reject" in prompt
+        assert "validated capability file" in prompt
+        assert "ordinary launch does not consult enrollment" in prompt.lower()
 
 
 def test_installer_kimi_enrollment_actions_are_explicit_and_mutually_exclusive() -> None:
