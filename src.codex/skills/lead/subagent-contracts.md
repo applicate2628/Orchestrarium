@@ -29,6 +29,7 @@ Dead/superseded code disposition:
 Cleanup disposition:
 - <owned child process trees, temp/capture paths, and isolation worktrees: `cleaned` | `preserved` + reason | `none`>
 - ResourceRowV1 for every selected resource: <category; creator/adopter role + run; exact identity; preexisting flag; settlement probe and current result; disposition>
+- When no resource is selected, Cleanup disposition is `none` and no `ResourceRowV1` is required; do not invent a row.
 Evidence discipline:
 - <cite each decision-driving claim with an in-repo file:line, installed-dependency surface check, versioned official docs/upstream source URL, or target-environment smoke test preserved under .scratch/; otherwise label it ASSUMPTION (UNVERIFIED) with the resolving step; never use "should work", "should be fine", "probably", "likely", "I think", "based on training data", "in general", or "this pattern usually works" as a correctness-driver>
 Defect-class inventory:
@@ -61,7 +62,7 @@ When `Approved inputs` contains an accepted Architect or domain artifact with nu
 
 Receiving-side echo: the returned artifact MUST (a) report the Named regression guard's actual result (expected vs observed), (b) answer each Diff-invisible invariant as verified or ASSUMPTION (UNVERIFIED), (c) report the Dead/superseded code disposition result and its named probe, (d) report the Cleanup disposition for owned child process trees, temp/capture paths, and isolation worktrees as `cleaned`, `preserved` with its reason, or `none`, and (e) when the dispatch cited a defect class, include the class audit — every enumerated participant classified fixed / not-affected. It also returns a complete current `ResourceRowV1` for every selected owned resource, including branches, locks, handles, generated artifacts, and dead/superseded surfaces; allowed dispositions additionally include `ephemeral-volume-exempt`. An absent/unknown field, ownership/classification gap, invalid exemption, or missing settlement result makes the row `unclassified`; an artifact missing this echo fails the mechanical acceptance gate.
 
-Implementation and Quality Assurance (QA) receive the same accepted `Acceptance criteria` and `Named regression guard`; each returned artifact echoes both and records the guard's expected and observed result. Reuse these existing fields; do not add a Primary Acceptance Oracle identifier, status field, ledger field, or file.
+Implementation and Quality Assurance (QA) receive the same accepted `Acceptance criteria` and `Named regression guard`; each returned artifact echoes both and records the guard's expected and observed result. Implementation and Quality Assurance receive route-appropriate accepted artifacts; a Plan is required only when the selected route admits a Plan stage. Reuse these existing fields; do not add a Primary Acceptance Oracle identifier, status field, ledger field, or file.
 
 **Class-completeness trigger (mandatory):** when a reviewer, bot, or test cites one instance of a defect class, the dispatch prompt MUST direct the recipient to enumerate every participant of that class, classify each one, and fix every confirmed instance. A prompt scoped only to the named line is invalid.
 
@@ -433,7 +434,7 @@ Acceptance criteria:
 
 ## Implementation Specialists
 
-Use only after plan approval.
+Use after the selected route admits implementation. Require the accepted artifacts and specialist constraints that route selects; a Plan is required only when the selected route admits a Plan stage.
 
 Return exactly:
 - one implementation package

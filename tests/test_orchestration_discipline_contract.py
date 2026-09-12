@@ -299,6 +299,26 @@ PINS = [
       "src.codex/skills/lead/subagent-contracts.md",
       "src.claude/agents/architecture-reviewer.md",
       "src.codex/skills/architecture-reviewer/SKILL.md"]),
+
+    # Batch B — route-appropriate handoffs and fixed-value criteria.
+    ("batch-b-hardcoding", "Classify a fixed value before changing it: a true invariant or protocol/schema constant may remain fixed; a policy-owner default must be single-owned and omission-safe; deployment, calibration, and user inputs require variability and omission tests.",
+     [SPINE, "shared/external-prompt-governance.md"]),
+    ("batch-b-implementation-route", "Implementation and Quality Assurance receive route-appropriate accepted artifacts; a Plan is required only when the selected route admits a Plan stage.",
+     ["src.claude/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md"]),
+    ("batch-b-qa-input", "Require the accepted artifact for the selected route, the implementation artifact being tested, any relevant specialist constraints, and the inputs required by the canonical S1 `Receiving-side echo` in `subagent-contracts.md`. A Plan is required only when the selected route admits a Plan stage.",
+     ["src.claude/agents/qa-engineer.md", "src.codex/skills/qa-engineer/SKILL.md"]),
+    ("batch-b-external-review", "Require the approved reviewable artifact (implementation, governance/control-plane change, plan, or other routed artifact) to review.",
+     ["src.claude/agents/external-reviewer.md", "src.codex/skills/external-reviewer/SKILL.md"]),
+    ("batch-b-analyst-taxonomy", "If a research admission gate fails without a real external prerequisite, return `REVISE` or `rejected` with the failed gate; reserve `BLOCKED` for a real external prerequisite.",
+     ["src.claude/skills/analyst/SKILL.md", "src.codex/skills/analyst/SKILL.md"]),
+    ("batch-b-analyst-adjacent-blocker", "If a real external prerequisite blocks the current task, return `BLOCKED:prerequisite` instead of working around it.",
+     ["src.claude/skills/analyst/SKILL.md", "src.codex/skills/analyst/SKILL.md"]),
+    ("batch-b-resource-free", "When no resource is selected, Cleanup disposition is `none` and no `ResourceRowV1` is required; do not invent a row.",
+     ["src.claude/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md"]),
+    ("batch-b-inline-alternative", "For an `inline-sufficient` finding with one dominant correction, report `material alternative: none`.",
+     ["src.claude/agents/architecture-reviewer.md", "src.codex/skills/architecture-reviewer/SKILL.md"]),
+    ("batch-b-planner-criteria", "Derive each acceptance criterion from the accepted contract or oracle; write it as an absolute observable assertion with the contract/oracle's value, count, order, or invariant. Do not invent literals.",
+     ["src.claude/skills/planner/SKILL.md", "src.codex/skills/planner/SKILL.md"]),
 ]
 
 # P7 must NOT be in the spine (synthesis D-spine-P7: spine gets ONLY P4 + A5).
@@ -460,6 +480,25 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
                     substring, spine,
                     f"[{gap_id}] {substring!r} must NOT be in the spine (P7 is Lead-file-only)",
                 )
+
+    def test_implementation_prerequisite_is_route_appropriate_without_relaxing_planner(self) -> None:
+        codex = self._read("src.codex/skills/lead/subagent-contracts.md")
+        claude = self._read("src.claude/agents/contracts/subagent-contracts.md")
+        route_rule = (
+            "Implementation and Quality Assurance receive route-appropriate accepted artifacts; "
+            "a Plan is required only when the selected route admits a Plan stage."
+        )
+        for owner, text in (
+            ("src.codex/skills/lead/subagent-contracts.md", codex),
+            ("src.claude/agents/contracts/subagent-contracts.md", claude),
+        ):
+            with self.subTest(owner=owner):
+                self.assertIn(route_rule, text)
+        self.assertNotIn("Use only after plan approval.", codex)
+        self.assertIn(
+            "## Planner\n\nUse after the required design and specialist constraints are accepted.",
+            codex,
+        )
 
     def test_dynamic_lane_ready_admission_contract_is_cross_pack_and_canonical(self) -> None:
         for owner in DYNAMIC_ADMISSION_OWNERS:

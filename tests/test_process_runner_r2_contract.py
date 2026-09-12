@@ -201,6 +201,78 @@ def test_kimi_acp_line_router_fails_closed_on_eof_fragment_and_cancel() -> None:
     assert stopped.value.failure_id == "PSV1-CANCELLED"
 
 
+def test_kimi_acp_line_router_bounds_all_retained_bytes_and_reclaims_reads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner = _load_runner()
+    monkeypatch.setattr(runner, "MAX_STDIN_BYTES", 32)
+    lines = runner._DialogueLineRouterV1()
+    complete = b"x" * 15 + b"\n"
+
+    lines.feed(complete)
+    lines.feed(complete)
+    assert lines.read_line(time.monotonic() + 1.0, lambda: False) == complete
+
+    lines.feed(complete)
+    lines.feed(b"overflow\n")
+
+    assert sum(map(len, lines._lines)) + len(lines._buffer) <= 32
+    with pytest.raises(runner.ProcessSupervisionError) as overflow:
+        lines.read_line(time.monotonic() + 1.0, lambda: False)
+    assert overflow.value.failure_id == "PSV1-KIMI-ACP-PROTOCOL"
+
+
+def test_kimi_acp_cleanup_uses_one_finite_grace_after_operation_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner = _load_runner()
+    now = [100.0]
+    monkeypatch.setattr(runner.time, "monotonic", lambda: now[0])
+    read_fd, write_fd = os.pipe()
+    lifecycle = runner.RunLifecycleV1(runner.RunTokenV1(b"g" * 16, 1))
+    lines = runner._DialogueLineRouterV1()
+    lines.feed(
+        b'{"jsonrpc":"2.0","id":1,"result":{}}\n'
+        b'{"jsonrpc":"2.0","id":2,"result":{}}\n'
+    )
+    channel = runner.ProcessDialogueChannelV1(
+        write_fd,
+        lines,
+        lifecycle,
+        99.0,
+        None,
+    )
+    close = b'{"jsonrpc":"2.0","id":1,"method":"session/close"}\n'
+    delete = b'{"jsonrpc":"2.0","id":2,"method":"session/delete"}\n'
+
+    try:
+        channel.begin_cleanup()
+        cleanup_deadline = 100.0 + runner.RUNNER_CLOSE_TIMEOUT_SECONDS
+        assert channel._deadline == cleanup_deadline
+        now[0] = cleanup_deadline - 1.0
+        channel.begin_cleanup()
+        assert channel._deadline == cleanup_deadline
+
+        assert channel.write_line(close) == len(close)
+        assert channel.read_line() == b'{"jsonrpc":"2.0","id":1,"result":{}}\n'
+        assert channel.write_line(delete) == len(delete)
+        assert channel.read_line() == b'{"jsonrpc":"2.0","id":2,"result":{}}\n'
+
+        now[0] = cleanup_deadline
+        with pytest.raises(runner.ProcessSupervisionError) as write_expired:
+            channel.write_line(close)
+        assert write_expired.value.failure_id == "PSV1-KIMI-ACP-PROTOCOL"
+        with pytest.raises(runner.ProcessSupervisionError) as read_expired:
+            channel.read_line()
+        assert read_expired.value.failure_id == "PSV1-DEADLINE"
+    finally:
+        os.close(write_fd)
+    try:
+        assert os.read(read_fd, 4096) == close + delete
+    finally:
+        os.close(read_fd)
+
+
 @pytest.mark.skipif(os.name != "nt", reason="production backend execution is Windows-only")
 def test_run_tokens_are_non_recyclable_and_safe_results_expose_only_digest() -> None:
     """Repeated calls cannot use recyclable request object addresses as identities."""

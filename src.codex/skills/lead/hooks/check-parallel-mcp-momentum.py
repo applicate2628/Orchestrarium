@@ -32,7 +32,7 @@ REMINDER = (
 
 
 def _repository_context(envelope: dict) -> tuple[dict, Path, Path | None]:
-    """Return the shared classifier, event cwd, and nearest repository root."""
+    """Return the shared classifier, event cwd, and unambiguous repository root."""
     classifier = runpy.run_path(
         str(Path(__file__).resolve().with_name("check-repository-orientation.py"))
     )
@@ -42,18 +42,20 @@ def _repository_context(envelope: dict) -> tuple[dict, Path, Path | None]:
         if isinstance(cwd_value, str) and cwd_value
         else Path.cwd().resolve()
     )
-    root = classifier["_nearest_git_root"](cwd)
-    if root is None:
-        tool_input = envelope.get("tool_input")
-        raw_targets = (
-            classifier["_target_strings"](tool_input)
-            if isinstance(tool_input, dict)
-            else []
-        )
+    tool_input = envelope.get("tool_input")
+    tool_name = str(envelope.get("tool_name", "")).lower()
+    if isinstance(tool_input, dict) and tool_name in classifier["_MUTATION_TOOLS"]:
+        raw_targets = classifier["_target_strings"](tool_input)
         target_paths = [classifier["_as_path"](value, cwd) for value in raw_targets]
         if target_paths:
-            root = classifier["_nearest_git_root"](target_paths[0])
-    return classifier, cwd, root
+            target_roots = [
+                classifier["_nearest_git_root"](path) for path in target_paths
+            ]
+            root = target_roots[0]
+            if root is None or any(candidate != root for candidate in target_roots):
+                return classifier, cwd, None
+            return classifier, cwd, root
+    return classifier, cwd, classifier["_nearest_git_root"](cwd)
 
 
 def _is_repository_work_start(
@@ -75,10 +77,6 @@ def _is_repository_work_start(
             root = discovered_root
     raw_targets = classifier["_target_strings"](tool_input)
     target_paths = [classifier["_as_path"](value, cwd) for value in raw_targets]
-    if root is None:
-        root = classifier["_nearest_git_root"](
-            target_paths[0] if target_paths else cwd
-        ) or classifier["_nearest_git_root"](cwd)
     if root is None:
         return False
 

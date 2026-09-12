@@ -44,8 +44,10 @@ TURN_ANCHOR_CONTEXT = (
     " status/freshness, sync/update/reindex stale state, confirm fresh, and retry. Use fallback"
     " only if refresh fails, the tool is unavailable, the user forbids it, or an explicit"
     " resource bound is exceeded; state why and never use stale evidence.\n"
-    "Before completion or handoff, clean owned processes and temporary or dead artifacts;"
-    " preserve user or unclear state. Do not invent work."
+    "Universal no-self-residue checkpoint: before completion, commit, push, or handoff, and"
+    " before transfer, settle every owned process/resource and remove temporary or dead"
+    " alternatives; preserve pre-existing user state and treat ambiguous ownership as a"
+    " destructive-action blocker. Do not invent work."
 )
 
 ADMITTED_TOOLS = frozenset(

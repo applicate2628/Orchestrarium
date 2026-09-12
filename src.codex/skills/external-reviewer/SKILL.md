@@ -16,7 +16,7 @@ description: "Review or QA run on external CLI provider; read-only."
 
 ## Input contract
 
-- Require the accepted implementation artifact to review.
+- Require the approved reviewable artifact (implementation, governance/control-plane change, plan, or other routed artifact) to review.
 - Require the internal reviewer or QA role label being replaced for provenance.
 - Require an explicit review strategy: `claim-verify` or `adversarial`; if it is missing, ask the orchestrating owner instead of guessing.
 - In adversarial mode, send an artifact-only prompt containing the artifact and review scope but no builder claims or self-review, as required by the lead-owned review-strategy rule.

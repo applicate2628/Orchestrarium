@@ -55,6 +55,11 @@ SHARED_KIMI_TRANSPORT_REQUIREMENTS = (
     "use orchestrating runtime/approved wrapper, never an internal relay",
     "file-based prompt via stdin/file, never argv",
 )
+KIMI_BEHAVIORAL_READ_ONLY_BOUNDARY = (
+    "For `mutationClass: read-only`, read-only constrains the assigned work and expected "
+    "operations, not the runtime effects of selected tools, Model Context Protocol servers, "
+    "`cwd`, or permission."
+)
 
 RETIRED_TRANSPORT_RELATIONS = (
     "ships no primary-run prompt wrappers",
@@ -489,6 +494,15 @@ def test_kimi_orchestration_is_wrapper_only_and_callers_do_not_compose_provider_
         text = contract.read_text(encoding="utf-8")
         for statement in required:
             assert statement in text, f"{contract} omits Kimi wrapper-only contract: {statement}"
+
+
+def test_kimi_read_only_is_behavioral_not_a_capability_sandbox() -> None:
+    for contract in KIMI_TRANSPORT_OWNER_CONTRACTS:
+        text = contract.read_text(encoding="utf-8")
+        assert KIMI_BEHAVIORAL_READ_ONLY_BOUNDARY in text
+        assert "Those selections are caller-owned task inputs, not a sandbox" in text
+        assert "write intent requires the existing `engineering` mutation class" in text
+        assert "Every external result remains nonauthorizing and independently verified." in text
 
 
 @pytest.mark.parametrize(

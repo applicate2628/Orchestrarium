@@ -4,12 +4,12 @@
   "files": {
     "provider_prompt.py": {
       "source": "scripts/provider_prompt.py",
-      "sha256": "03015bbec47b0ce2fcc55fdfa12644710cb9b8fe34cc005bed80a594a86507a5",
+      "sha256": "4b3c67a2d5f278ddb47fc0568d9341772493d473d1d300c366720339a50d0c5e",
       "destination": "scripts/provider_prompt.py"
     },
     "process_supervision/process_runner.py": {
       "source": "scripts/process_supervision/process_runner.py",
-      "sha256": "cc9ba8d4563a63d71ba6aa2587c6214d6726a01bb5f11816afa8921d25bd9555",
+      "sha256": "3159ccb9ee86a4889c006528758440ee0ae0bc97260e33b131b54c98abdafa08",
       "destination": "scripts/process_supervision/process_runner.py"
     },
     "invoke-codex-prompt.py": {
@@ -34,7 +34,7 @@
     },
     "external-prompt-governance.md": {
       "source": "shared/external-prompt-governance.md",
-      "sha256": "2017bb3b253a0bb2b198999d2b26fcf60ae347d25698a3841083360ef7e8e952",
+      "sha256": "c1a0080fffeac5da9bf2011c8ba8a8d4cafed337f238bfe8bf9fcc168693a039",
       "destination": "scripts/external-prompt-governance.md"
     },
     "external-role-taxonomy.v1.json": {

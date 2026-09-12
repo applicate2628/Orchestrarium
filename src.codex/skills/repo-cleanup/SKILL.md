@@ -26,8 +26,9 @@ Explicit `$repo-cleanup` wins. Compound prepare-plus-cleanup intent performs one
 
 1. Bind the physical repository identity and current `HEAD`, or record the unborn state. Take a pre-mutation Git/resource census. Treat prior cleanup reports as nonexistent.
 2. Use governance plus existing read-only inventories and audits. For Orchestrarium work-item structure, project the exact current result of `python scripts/check-work-items-state.py`; do not duplicate its logic.
-3. Create one `ResourceRowV1` for every selected resource. Direct-root work derives rows only from its own census and tool/resource actions.
-4. Project lifecycle, Git, and transfer predicate rows only from one exact existing owner result. Missing, stale, null, cross-repository, cross-`HEAD`, or incomplete evidence yields `REVISE`; never combine partial owner evidence.
+3. When `work-items/` is selected, enumerate every immediate child exactly once as `category | derived | repository-local exception | unknown`; audit `PASS` does not satisfy this census. An `unknown` remains preserved and yields `REVISE`.
+4. Create one `ResourceRowV1` for every selected resource. Direct-root work derives rows only from its own census and tool/resource actions.
+5. Project lifecycle, Git, and transfer predicate rows only from one exact existing owner result. Missing, stale, null, cross-repository, cross-`HEAD`, or incomplete evidence yields `REVISE`; never combine partial owner evidence.
 
 ### ResourceRowV1
 

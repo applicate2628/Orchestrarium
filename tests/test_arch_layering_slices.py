@@ -11,6 +11,19 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts/validate-arch-layering-slices.py"
 
+REFERENCE_CLAUSE_EXPECTATIONS = {
+    ROOT / "shared" / "references" / "architecture-layering-hygiene.md": (
+        "accepted current requirement, accepted declared future direction, concrete second consumer, evidenced domain variability, or verified external-contract evolution",
+        "A second consumer is evidence, not a prerequisite.",
+        "published, packaged, golden, cross-environment-comparison, or accepted scientific/performance reproducibility",
+    ),
+    ROOT / "shared" / "references" / "ru" / "architecture-layering-hygiene.md": (
+        "принятым текущим требованием, принятым заявленным будущим направлением, конкретным вторым потребителем, доказанной вариативностью предметной области или подтверждённой эволюцией внешнего контракта",
+        "Второй потребитель — доказательство, не предпосылка.",
+        "публикуемой, пакетируемой, golden, cross-environment-comparison или принятой scientific/performance reproducibility",
+    ),
+}
+
 
 def _load_validator():
     spec = importlib.util.spec_from_file_location("arch_layering_slices", SCRIPT)
@@ -18,6 +31,15 @@ def _load_validator():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def test_layering_references_keep_conditional_seam_and_manifest_rules() -> None:
+    """Source-clause coverage, not a claim that a future agent will obey the rules."""
+
+    for path, expectations in REFERENCE_CLAUSE_EXPECTATIONS.items():
+        text = " ".join(path.read_text(encoding="utf-8").split())
+        for expected in expectations:
+            assert expected in text, f"{path} omits accepted conditional rule: {expected}"
 
 
 def test_claude_architect_layering_slice_resolves_to_universal_body() -> None:

@@ -2535,19 +2535,27 @@ class _DialogueLineRouterV1:
         self._condition = threading.Condition()
         self._buffer = bytearray()
         self._lines: list[bytes] = []
+        self._queued_bytes = 0
         self._eof = False
         self._failed = False
 
     def feed(self, data: bytes) -> None:
         with self._condition:
-            self._buffer.extend(data)
-            if len(self._buffer) > MAX_STDIN_BYTES:
+            if self._failed:
+                return
+            retained_bytes = self._queued_bytes + len(self._buffer)
+            if len(data) > MAX_STDIN_BYTES - retained_bytes:
                 self._failed = True
+                self._condition.notify_all()
+                return
+            self._buffer.extend(data)
             while not self._failed:
                 newline = self._buffer.find(b"\n")
                 if newline < 0:
                     break
-                self._lines.append(bytes(self._buffer[: newline + 1]))
+                line = bytes(self._buffer[: newline + 1])
+                self._lines.append(line)
+                self._queued_bytes += len(line)
                 del self._buffer[: newline + 1]
             self._condition.notify_all()
 
@@ -2564,12 +2572,14 @@ class _DialogueLineRouterV1:
     ) -> bytes:
         with self._condition:
             while True:
-                if self._lines:
-                    return self._lines.pop(0)
                 if self._failed:
                     raise ProcessSupervisionError(
                         "PSV1-KIMI-ACP-PROTOCOL", "stdin-delivery"
                     )
+                if self._lines:
+                    line = self._lines.pop(0)
+                    self._queued_bytes -= len(line)
+                    return line
                 if self._eof:
                     raise EOFError("ACP stdout closed")
                 if cancellation_requested():
@@ -2605,6 +2615,9 @@ class ProcessDialogueChannelV1:
         )
 
     def begin_cleanup(self) -> None:
+        if self._cleanup_mode:
+            return
+        self._deadline = time.monotonic() + RUNNER_CLOSE_TIMEOUT_SECONDS
         self._cleanup_mode = True
 
     def write_line(self, payload: bytes) -> int:

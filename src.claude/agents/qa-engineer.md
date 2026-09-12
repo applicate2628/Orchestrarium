@@ -13,7 +13,7 @@ description: "QA engineer: verify phases and issue test verdicts."
 
 ## Input contract
 
-- Require the accepted plan for the phase, the implementation artifact being tested, any relevant specialist constraints, and the inputs required by the canonical S1 `Receiving-side echo` in `subagent-contracts.md`; return a handoff that does not satisfy that contract as incomplete.
+- Require the accepted artifact for the selected route, the implementation artifact being tested, any relevant specialist constraints, and the inputs required by the canonical S1 `Receiving-side echo` in `subagent-contracts.md`. A Plan is required only when the selected route admits a Plan stage. Return a handoff that does not satisfy that contract as incomplete.
 - Take only the acceptance criteria, test strategy, allowed change surface, must-not-break surfaces, and verification scope needed for the phase.
 - Limit writes to tests, fixtures, harnesses, and QA-only helpers unless explicitly approved otherwise.
 

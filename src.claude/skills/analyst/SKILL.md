@@ -58,7 +58,7 @@ When investigating a candidate approach admitted by `$product-manager`, verify t
 3. **Known-limits gate** — name the expected limiting factors upfront (capacity caps, noise sensitivity, narrow-band specialization, scaling walls). If the candidate has cap-bound behavior without a known path around it, include that in the research memo.
 4. **Bounded falsification gate** — identify a short, honest experiment (2–3 cases, clear PASS/FAIL threshold, minimal tuning) that can confirm or reject the candidate before full implementation. If no such experiment exists, the candidate is too vague for admission.
 
-Include gate assessments in the research memo under a "Research admission gates" section. If any gate fails, recommend `BLOCKED` with the specific gate failure.
+Include gate assessments in the research memo under a "Research admission gates" section. If a research admission gate fails without a real external prerequisite, return `REVISE` or `rejected` with the failed gate; reserve `BLOCKED` for a real external prerequisite.
 
 ## Adjacent findings protocol
 
@@ -68,7 +68,7 @@ When scope investigation reveals issues outside the admitted scope:
 2. Write the proposed registry record directly only when the dispatcher explicitly grants registry-write authority and the sandbox permits that path. A direct registry write is a narrow canonical-artifact exception and does not otherwise broaden this role's write posture.
 3. Mention it in the current artifact under an "Adjacent findings" section.
 4. Do NOT include it in the current research or design — scope expansion is the orchestrator's decision.
-5. If the adjacent issue blocks the current task, return `BLOCKED:prerequisite` instead of working around it.
+5. If a real external prerequisite blocks the current task, return `BLOCKED:prerequisite` instead of working around it.
 
 ## Non-goals
 
