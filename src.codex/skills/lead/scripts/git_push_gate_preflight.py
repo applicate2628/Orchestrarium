@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import json
 import re
 import shlex
 import types
@@ -23,16 +24,102 @@ from hook_common import (
 
 APPROVE_MARKER_REGEX = re.compile(r"\[approve-publication\]", re.IGNORECASE)
 SIMPLE_PR_APPROVAL_MARKER = "[approve-pr-publication]"
+PR_GRANT_PREFIX = "[approve-pr-publication:v1 pr="
+PR_REVOKE_MARKER = "[revoke-pr-publication:v1]"
+PR_URL_REGEX = re.compile(
+    r"^(?P<url>https://github\.com/"
+    r"(?P<owner>[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,98}[A-Za-z0-9])?)/"
+    r"(?P<repo>[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,98}[A-Za-z0-9])?)/pull/"
+    r"(?P<number>[1-9][0-9]*))$"
+)
+PR_GRANT_NUMBER_REGEX = re.compile(r"^[1-9][0-9]*$")
+PR_GRANT_MARKDOWN_REGEX = re.compile(
+    r"^\[(?P<label>[^\]]+)\]\((?P<destination>[^)]+)\)$"
+)
+_QUESTION_REPLY_OPEN = "<send_user_message_question_reply>\n"
+_QUESTION_REPLY_CLOSE = "\n</send_user_message_question_reply>"
+
+
+class PublicationUserReply(NamedTuple):
+    kind: str
+    text: str
+
+
+class PublicationPrGrant(NamedTuple):
+    url: str
+    owner: str
+    repo: str
+    number: int
+
+
+def normalize_publication_approval_text(text: str) -> str:
+    """Remove at most one accepted display wrapper from a whole approval."""
+    normalized = text.strip()
+    for wrapper in ("`", "**"):
+        if (
+            normalized.startswith(wrapper)
+            and normalized.endswith(wrapper)
+            and len(normalized) > len(wrapper) * 2
+        ):
+            return normalized[len(wrapper):-len(wrapper)]
+    return normalized
+
+
+def extract_publication_user_reply(entry: object) -> PublicationUserReply:
+    """Decode the one observed structured UI reply without trusting its question."""
+    text = extract_user_typed_text(entry)
+    if not text.startswith("<send_user_message_question_reply>"):
+        return PublicationUserReply("plain", text)
+    if not (text.startswith(_QUESTION_REPLY_OPEN) and text.endswith(_QUESTION_REPLY_CLOSE)):
+        return PublicationUserReply("recognized-malformed", "")
+    encoded = text[len(_QUESTION_REPLY_OPEN):-len(_QUESTION_REPLY_CLOSE)]
+    try:
+        payload = json.loads(encoded)
+    except (TypeError, ValueError):
+        return PublicationUserReply("recognized-malformed", "")
+    if (
+        type(payload) is not list
+        or len(payload) != 1
+        or type(payload[0]) is not dict
+        or set(payload[0]) != {"questionItemId", "question", "answer"}
+        or any(type(payload[0][key]) is not str for key in payload[0])
+    ):
+        return PublicationUserReply("recognized-malformed", "")
+    return PublicationUserReply("structured-answer", payload[0]["answer"])
+
+
+def parse_publication_pr_grant(text: str) -> PublicationPrGrant | None:
+    """Parse only a whole, targeted grant; never infer target identity."""
+    normalized = normalize_publication_approval_text(text)
+    target: str
+    if normalized.startswith(PR_GRANT_PREFIX) and normalized.endswith("]"):
+        target = normalized[len(PR_GRANT_PREFIX):-1]
+        if PR_GRANT_NUMBER_REGEX.fullmatch(target):
+            return PublicationPrGrant(target, "", "", int(target))
+        markdown = PR_GRANT_MARKDOWN_REGEX.fullmatch(target)
+        if markdown:
+            if markdown.group("label") != markdown.group("destination"):
+                return None
+            target = markdown.group("label")
+    else:
+        for prefix in ("[approve-publication pr=", "[approve-pr-publication pr="):
+            if normalized.startswith(prefix) and normalized.endswith("]"):
+                target = normalized[len(prefix):-1]
+                break
+        else:
+            return None
+    match = PR_URL_REGEX.fullmatch(target)
+    if match is None or match.group("owner") in (".", "..") or match.group("repo") in (".", ".."):
+        return None
+    return PublicationPrGrant(
+        match.group("url"), match.group("owner"), match.group("repo"),
+        int(match.group("number")),
+    )
 
 
 def is_simple_pr_approval(text: str) -> bool:
     """Accept only the three finite whole-message display forms."""
-    stripped = text.strip()
-    return stripped in (
-        SIMPLE_PR_APPROVAL_MARKER,
-        f"`{SIMPLE_PR_APPROVAL_MARKER}`",
-        f"**{SIMPLE_PR_APPROVAL_MARKER}**",
-    )
+    return normalize_publication_approval_text(text) == SIMPLE_PR_APPROVAL_MARKER
 
 class DataRegion(NamedTuple):
     kind: str
@@ -2672,11 +2759,12 @@ def build_preflight(envelope: dict) -> PreflightResult:
         last_user, _after_user, status = scan_current_turn_boundary(
             transcript_path, byte_cap=CURRENT_TURN_BYTE_CAP
         )
-        user_text = (
-            extract_user_typed_text(last_user)
+        reply = (
+            extract_publication_user_reply(last_user)
             if status == STATUS_FOUND and last_user is not None
-            else ""
+            else PublicationUserReply("plain", "")
         )
+        user_text = reply.text
         instruction = PUSH_INSTRUCTION_REGEX.search(user_text) is not None
         grammar = classify_generic_push(parsed)
         transcript_diagnostic = TranscriptDiagnostic(

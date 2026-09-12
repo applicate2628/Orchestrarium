@@ -2608,6 +2608,8 @@ class ProcessDialogueChannelV1:
         self._cleanup_mode = True
 
     def write_line(self, payload: bytes) -> int:
+        if self.cancellation_requested():
+            raise ProcessSupervisionError("PSV1-CANCELLED", "cancellation")
         if (
             not isinstance(payload, bytes)
             or not payload

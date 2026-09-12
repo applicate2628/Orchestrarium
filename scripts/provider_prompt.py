@@ -16,9 +16,11 @@ import stat
 import sys
 import tempfile
 import time
+import tomllib
 import types
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 
 try:
@@ -329,6 +331,13 @@ def _kimi_unique_name_array(value: object) -> tuple[str, ...]:
     return tuple(result)
 
 
+def _reject_kimi_child_selection(
+    tools: tuple[str, ...], subagents: tuple[str, ...]
+) -> None:
+    if subagents or any(tool in {"Agent", "AgentSwarm"} for tool in tools):
+        raise ValueError("E_KIMI_CHILD_SELECTION_UNSUPPORTED")
+
+
 def _kimi_argument_array(value: object) -> tuple[str, ...]:
     if not isinstance(value, list) or any(
         not isinstance(item, str) or "\x00" in item for item in value
@@ -429,9 +438,7 @@ def read_kimi_capability_selection(path: Path) -> KimiCapabilitySelectionV1:
             raise ValueError("shape")
         tools = _kimi_unique_name_array(document.get("tools"))
         subagents = _kimi_unique_name_array(document.get("subagents"))
-        has_dispatch = "Agent" in tools or "AgentSwarm" in tools
-        if has_dispatch != bool(subagents):
-            raise ValueError("child gate")
+        _reject_kimi_child_selection(tools, subagents)
         permission = document.get("permission")
         if permission not in {"reject", "approve_once", "approve_always"}:
             raise ValueError("permission")
@@ -453,7 +460,10 @@ def read_kimi_capability_selection(path: Path) -> KimiCapabilitySelectionV1:
             cwd=selected_cwd,
         )
     except Exception as exc:
-        if isinstance(exc, ValueError) and str(exc) == "E_KIMI_CAPABILITIES_INVALID":
+        if isinstance(exc, ValueError) and str(exc) in {
+            "E_KIMI_CAPABILITIES_INVALID",
+            "E_KIMI_CHILD_SELECTION_UNSUPPORTED",
+        }:
             raise
         raise ValueError("E_KIMI_CAPABILITIES_INVALID") from exc
 
@@ -475,6 +485,97 @@ def _kimi_agent_profile(selection: KimiCapabilitySelectionV1) -> bytes:
         b"---\n\n"
         b"${base_prompt}\n"
     )
+
+
+def _kimi_tools_policy(selection: KimiCapabilitySelectionV1) -> dict[str, list[str]]:
+    enabled = list(selection.tools) if selection.tools else ["Agent"]
+    return {
+        "enabled": enabled,
+        "disabled": ["Agent", "AgentSwarm"],
+    }
+
+
+def _kimi_tools_table(selection: KimiCapabilitySelectionV1) -> bytes:
+    policy = _kimi_tools_policy(selection)
+    enabled = json.dumps(
+        policy["enabled"], ensure_ascii=True, separators=(",", ":")
+    ).encode("ascii")
+    disabled = json.dumps(
+        policy["disabled"], ensure_ascii=True, separators=(",", ":")
+    ).encode("ascii")
+    return (
+        b"[tools]\n"
+        b"enabled = " + enabled + b"\n"
+        b"disabled = " + disabled + b"\n"
+    )
+
+
+def _kimi_user_config_snapshot(path: Path) -> tuple[bytes, dict[str, object]] | None:
+    if not os.path.lexists(path):
+        return None
+    try:
+        candidate = Path(os.path.abspath(path))
+        resolved_before = candidate.resolve(strict=True)
+        before = resolved_before.lstat()
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or stat.S_ISLNK(before.st_mode)
+            or _metadata_is_reparse(before)
+        ):
+            raise ValueError("config type")
+        descriptor = os.open(
+            resolved_before,
+            os.O_RDONLY
+            | getattr(os, "O_BINARY", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+        )
+        with os.fdopen(descriptor, "rb") as stream:
+            opened = os.fstat(stream.fileno())
+            data = stream.read(PROMPT_SNAPSHOT_MAX_BYTES + 1)
+            after_read = os.fstat(stream.fileno())
+        resolved_after = candidate.resolve(strict=True)
+        after_path = resolved_after.lstat()
+        stable_fields = (
+            "st_dev",
+            "st_ino",
+            "st_mode",
+            "st_size",
+            "st_mtime_ns",
+            "st_ctime_ns",
+        )
+        if (
+            os.path.normcase(str(resolved_before))
+            != os.path.normcase(str(resolved_after))
+            or (opened.st_dev, opened.st_ino, opened.st_mode)
+            != (before.st_dev, before.st_ino, before.st_mode)
+            or tuple(getattr(opened, name) for name in stable_fields)
+            != tuple(getattr(after_read, name) for name in stable_fields)
+            or tuple(getattr(before, name) for name in stable_fields)
+            != tuple(getattr(after_path, name) for name in stable_fields)
+            or len(data) > PROMPT_SNAPSHOT_MAX_BYTES
+        ):
+            raise ValueError("config identity")
+        document = tomllib.loads(data.decode("utf-8", errors="strict"))
+        return data, document
+    except Exception as exc:
+        raise ValueError("E_KIMI_CAPABILITIES_CONFIG_CONFLICT") from exc
+
+
+def _kimi_private_config(
+    user_config: Path, selection: KimiCapabilitySelectionV1
+) -> bytes:
+    snapshot = _kimi_user_config_snapshot(user_config)
+    table = _kimi_tools_table(selection)
+    if snapshot is None or not snapshot[0]:
+        return table
+    source, document = snapshot
+    expected = _kimi_tools_policy(selection)
+    if "tools" in document:
+        if document["tools"] != expected:
+            raise ValueError("E_KIMI_CAPABILITIES_CONFIG_CONFLICT")
+        return source
+    separator = b"\n" if source.endswith((b"\n", b"\r")) else b"\n\n"
+    return source + separator + table
 
 
 @dataclass
@@ -562,7 +663,12 @@ class KimiAcpOneShotV1:
             for pair in pairs
             if pair.value
         ]
-        if self.cwd in text or any(secret in text for secret in sensitive):
+        if (
+            self.cwd in text
+            or any(secret in text for secret in sensitive)
+            or _machine_path_scan_terminal(text.encode("utf-8", errors="strict"))
+            is not None
+        ):
             return "<redacted>"
         return text
 
@@ -746,26 +852,32 @@ class KimiAcpOneShotV1:
     def _cleanup_session(self, channel, *, cancel: bool) -> None:
         if self.session_id is None:
             return
+        begin_cleanup = getattr(channel, "begin_cleanup", None)
+        if callable(begin_cleanup):
+            begin_cleanup()
+        cleanup_error: BaseException | None = None
         if cancel:
-            begin_cleanup = getattr(channel, "begin_cleanup", None)
-            if callable(begin_cleanup):
-                begin_cleanup()
-            self._send(
-                channel,
-                "session/cancel",
-                {"sessionId": self.session_id},
-                notification=True,
-            )
-        close_id = self._send(
-            channel, "session/close", {"sessionId": self.session_id}
-        )
-        assert close_id is not None
-        self._response(channel, close_id)
-        delete_id = self._send(
-            channel, "session/delete", {"sessionId": self.session_id}
-        )
-        assert delete_id is not None
-        self._response(channel, delete_id)
+            try:
+                self._send(
+                    channel,
+                    "session/cancel",
+                    {"sessionId": self.session_id},
+                    notification=True,
+                )
+            except BaseException as exc:
+                cleanup_error = exc
+        for method in ("session/close", "session/delete"):
+            try:
+                request_id = self._send(
+                    channel, method, {"sessionId": self.session_id}
+                )
+                assert request_id is not None
+                self._response(channel, request_id)
+            except BaseException as exc:
+                if cleanup_error is None:
+                    cleanup_error = exc
+        if cleanup_error is not None:
+            raise cleanup_error
 
     def __call__(self, channel) -> None:
         initialize_id = self._send(
@@ -835,12 +947,18 @@ class KimiAcpOneShotV1:
             )
             assert prompt_id is not None
             prompt_result = self._response(channel, prompt_id, collect=True)
-        except ProcessSupervisionError as exc:
-            if exc.failure_id == "PSV1-CANCELLED":
-                self._cleanup_session(channel, cancel=True)
+            if not isinstance(prompt_result.get("stopReason"), str):
+                raise ValueError("E_KIMI_ACP_PROTOCOL")
+        except BaseException as exc:
+            cancel = (
+                isinstance(exc, ProcessSupervisionError)
+                and exc.failure_id == "PSV1-CANCELLED"
+            )
+            try:
+                self._cleanup_session(channel, cancel=cancel)
+            except BaseException as cleanup_exc:
+                raise exc from cleanup_exc
             raise
-        if not isinstance(prompt_result.get("stopReason"), str):
-            raise ValueError("E_KIMI_ACP_PROTOCOL")
         self._cleanup_session(channel, cancel=False)
 
 
@@ -848,6 +966,7 @@ class KimiAcpOneShotV1:
 class KimiPrivateHomeAliasesV1:
     home: Path
     aliases: tuple[tuple[Path, str], ...]
+    private_config: Path | None = None
     cleaned: bool = False
 
     @classmethod
@@ -857,15 +976,20 @@ class KimiPrivateHomeAliasesV1:
         user_data: Path,
         capabilities: KimiCapabilitySelectionV1 = KimiCapabilitySelectionV1(),
     ) -> "KimiPrivateHomeAliasesV1":
+        config_bytes = _kimi_private_config(user_data / "config.toml", capabilities)
         profile_dir = run_dir / ".kimi-code" / "agents"
         profile_dir.mkdir(parents=True)
         (profile_dir / "agent.md").write_bytes(_kimi_agent_profile(capabilities))
         home = run_dir / "kimi-home"
         home.mkdir(mode=0o700)
+        private_config = home / "config.toml"
         aliases: list[tuple[Path, str]] = []
-        owner = cls(home, ())
+        owner = cls(home, (), private_config)
         try:
-            for name, is_directory in (("config.toml", False), ("credentials", True)):
+            private_config.write_bytes(config_bytes)
+            if private_config.is_symlink() or not private_config.is_file():
+                raise OSError("Kimi private config is not a regular file")
+            for name, is_directory in (("credentials", True),):
                 source = Path(os.path.abspath(user_data / name))
                 if not os.path.lexists(source):
                     continue
@@ -901,6 +1025,15 @@ class KimiPrivateHomeAliasesV1:
             if normalized_target(observed) != normalized_target(target):
                 raise OSError("Kimi private-home alias target changed")
             os.unlink(alias)
+        if self.private_config is not None and os.path.lexists(self.private_config):
+            metadata = self.private_config.lstat()
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or stat.S_ISLNK(metadata.st_mode)
+                or _metadata_is_reparse(metadata)
+            ):
+                raise OSError("Kimi private config identity changed")
+            os.unlink(self.private_config)
         self.cleaned = True
 
 
@@ -4292,6 +4425,40 @@ def credential_scan_terminal(
     return None
 
 
+@lru_cache(maxsize=1)
+def _machine_path_finder() -> object | None:
+    """Load the in-process machine-path classifier once per wrapper process."""
+
+    try:
+        script_dir = Path(__file__).resolve().parent
+        candidates = (
+            script_dir.parent / "hooks" / "check-machine-local-path.py",
+            script_dir / "universal-hooks" / "hooks" / "check-machine-local-path.py",
+        )
+        classifier = next(path for path in candidates if path.is_file())
+        spec = importlib.util.spec_from_file_location("_kimi_machine_path_classifier", classifier)
+        if spec is None or spec.loader is None:
+            raise ValueError("classifier")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        finder = getattr(module, "find_machine_paths")
+        return finder if callable(finder) else None
+    except Exception:
+        return None
+
+
+def _machine_path_scan_terminal(stdout: bytes) -> str | None:
+    try:
+        finder = _machine_path_finder()
+        if not callable(finder):
+            return "E_EXTERNAL_PROVIDER_OUTPUT_SCAN_UNAVAILABLE"
+        if finder(stdout.decode("utf-8", errors="replace")):
+            return "E_EXTERNAL_PROVIDER_MACHINE_PATH_ECHO"
+    except Exception:
+        return "E_EXTERNAL_PROVIDER_OUTPUT_SCAN_UNAVAILABLE"
+    return None
+
+
 def provider_output_safety_scan_terminal(
     provider: str,
     needles: tuple[bytes, ...],
@@ -4307,24 +4474,7 @@ def provider_output_safety_scan_terminal(
         return credential
     if provider != "kimi" and not serialized_line:
         return None
-    try:
-        script_dir = Path(__file__).resolve().parent
-        candidates = (
-            script_dir.parent / "hooks" / "check-machine-local-path.py",
-            script_dir / "universal-hooks" / "hooks" / "check-machine-local-path.py",
-        )
-        classifier = next(path for path in candidates if path.is_file())
-        spec = importlib.util.spec_from_file_location("_kimi_machine_path_classifier", classifier)
-        if spec is None or spec.loader is None:
-            raise ValueError("classifier")
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        finder = getattr(module, "find_machine_paths")
-        if finder(stdout.decode("utf-8", errors="replace")):
-            return "E_EXTERNAL_PROVIDER_MACHINE_PATH_ECHO"
-    except (OSError, ValueError, StopIteration, AttributeError, ImportError):
-        return "E_EXTERNAL_PROVIDER_OUTPUT_SCAN_UNAVAILABLE"
-    return None
+    return _machine_path_scan_terminal(stdout)
 
 
 def classify_kimi_child_nonzero(stderr: bytes) -> str:
@@ -5745,7 +5895,7 @@ def _launch_with_runner(
                 control.kimi_capabilities.permission,
                 control.result_max_bytes,
             )
-        except Exception:
+        except Exception as exc:
             return finalize_reserved_run_once(
                 control,
                 provider,
@@ -5755,7 +5905,9 @@ def _launch_with_runner(
                 "",
                 reserved_run,
                 1,
-                launch_error="E_KIMI_ACP_SETUP",
+                launch_error=stable_failure_id_from_exception(
+                    exc, "E_KIMI_ACP_SETUP"
+                ),
                 credential_needles=auth_configuration.needles,
                 auth_output_scan_disposition=auth_configuration.output_scan_disposition,
                 runner=runner,

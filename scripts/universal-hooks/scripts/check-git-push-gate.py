@@ -372,7 +372,6 @@ from hook_common import (
     extract_model_shell_command_occurrences,
     extract_model_tool_calls_with_ids,
     extract_tool_outputs_with_ids,
-    extract_user_typed_text,
     is_user_message,
     parse_envelope,
     read_stdin_utf8,
@@ -392,7 +391,10 @@ from git_push_gate_preflight import (
     resolve_command_dialect,
     parse_transcript_command,
     project_scan_range_binding,
+    extract_publication_user_reply,
     is_simple_pr_approval,
+    normalize_publication_approval_text,
+    parse_publication_pr_grant,
 )
 
 
@@ -401,11 +403,6 @@ from git_push_gate_preflight import (
 # (see the consultant continuation-prompt untrusted-data rule), so unlike
 # [skip-bugfix-discipline] this marker never counts from the model's own reply.
 
-PR_GRANT_PREFIX = "[approve-pr-publication:v1 pr="
-PR_GRANT_NUMBER_REGEX = re.compile(r"^[1-9][0-9]*$")
-PR_GRANT_MARKDOWN_REGEX = re.compile(
-    r"^\[(?P<label>[^\]]+)\]\((?P<destination>[^)]+)\)$"
-)
 PR_URL_REGEX = re.compile(
     r"^(?P<url>https://github\.com/"
     r"(?P<owner>[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,98}[A-Za-z0-9])?)/"
@@ -413,7 +410,10 @@ PR_URL_REGEX = re.compile(
     r"(?P<number>[1-9][0-9]*))$"
 )
 PR_REVOKE_MARKER = "[revoke-pr-publication:v1]"
-PR_RESERVED_PREFIXES = ("[approve-pr-publication:", "[revoke-pr-publication:")
+PR_RESERVED_PREFIXES = (
+    "[approve-pr-publication:", "[revoke-pr-publication:",
+    "[approve-pr-publication pr=", "[approve-publication pr=",
+)
 PR_BINDING_SIDECAR_SUFFIX = ".pr-publication-binding-v1.json"
 PR_BINDING_SIDECAR_BYTE_CAP = 8192
 TRANSCRIPT_HISTORY_BYTE_CAP = 32 * 1024 * 1024
@@ -503,6 +503,7 @@ class ActivePrGrant(NamedTuple):
 class SimplePrIntent(NamedTuple):
     record: int
     sha256: str
+    prior_scoped_grant: ActivePrGrant | None
 
 
 class PrBindingState(NamedTuple):
@@ -1387,26 +1388,10 @@ def _mask_attached_io_numbers(command: str) -> str:
 
 
 def _parse_pr_grant(text: str) -> ActivePrGrant | None:
-    if not text.startswith(PR_GRANT_PREFIX) or not text.endswith("]"):
+    parsed = parse_publication_pr_grant(text)
+    if parsed is None:
         return None
-    target = text[len(PR_GRANT_PREFIX):-1]
-    if PR_GRANT_NUMBER_REGEX.fullmatch(target):
-        return ActivePrGrant(target, "", "", int(target))
-    markdown = PR_GRANT_MARKDOWN_REGEX.fullmatch(target)
-    if markdown:
-        if markdown.group("label") != markdown.group("destination"):
-            return None
-        target = markdown.group("label")
-    match = PR_URL_REGEX.fullmatch(target)
-    if not match:
-        return None
-    owner = match.group("owner")
-    repo = match.group("repo")
-    if owner in (".", "..") or repo in (".", ".."):
-        return None
-    return ActivePrGrant(
-        match.group("url"), owner, repo, int(match.group("number"))
-    )
+    return ActivePrGrant(parsed.url, parsed.owner, parsed.repo, parsed.number)
 
 
 def _canonicalize_numeric_pr_grant(
@@ -1459,6 +1444,7 @@ class _PrGrantReducer:
     record_position: int = 0
     last_genuine_user_position: int = -1
     pending_numeric: tuple[ActivePrGrant, str | None, int] | None = None
+    prior_scoped_grant: ActivePrGrant | None = None
 
     def consume(self, entry: dict, raw_record: bytes | None = None) -> None:
         position = self.record_position
@@ -1471,27 +1457,34 @@ class _PrGrantReducer:
             )
         if not is_user_message(entry):
             return
-        text = extract_user_typed_text(entry)
+        reply = extract_publication_user_reply(entry)
+        if reply.kind == "recognized-malformed":
+            self.state, self.grant, self.pending_numeric = "malformed", None, None
+            return
+        text = reply.text
         if not text:
             return
+        normalized = normalize_publication_approval_text(text)
 
         if self.pending_numeric is not None and self.pending_numeric[1] is None:
             self.state, self.grant, self.pending_numeric = "malformed", None, None
         self.last_genuine_user_position = position
 
-        if text == PR_REVOKE_MARKER:
+        if normalized == PR_REVOKE_MARKER:
             self.state, self.grant, self.pending_numeric = "revoked", None, None
+            self.prior_scoped_grant = None
             return
-        if is_simple_pr_approval(text):
+        if is_simple_pr_approval(normalized):
             digest = hashlib.sha256(raw_record).hexdigest() if raw_record else ""
             self.state = "simple"
-            self.grant = SimplePrIntent(position + 1, digest)
+            self.grant = SimplePrIntent(position + 1, digest, self.prior_scoped_grant)
             self.pending_numeric = None
             return
-        parsed_grant = _parse_pr_grant(text)
+        parsed_grant = _parse_pr_grant(normalized)
         if parsed_grant is not None:
             if parsed_grant.owner:
                 self.state, self.grant = "active", parsed_grant
+                self.prior_scoped_grant = parsed_grant
                 self.pending_numeric = None
                 return
             direct_context = entry.get("cwd")
@@ -1512,7 +1505,7 @@ class _PrGrantReducer:
             self.state, self.grant = "active", None
             self.pending_numeric = (parsed_grant, authorization_workdir, position)
             return
-        if text.startswith(PR_RESERVED_PREFIXES):
+        if normalized.startswith(PR_RESERVED_PREFIXES):
             self.state, self.grant, self.pending_numeric = "malformed", None, None
 
     def finish(self) -> tuple[str, ActivePrGrant | SimplePrIntent | None]:
@@ -3482,9 +3475,28 @@ def _evaluate_simple_pr_route(
         prepared.literal.remote, prepared.literal.target.head_ref,
         None, None, None,
     )
-    if existing is None:
-        if not current_marker:
+    verified: VerifiedPrOracle | None = None
+    if existing is None and not current_marker:
+        grant = intent.prior_scoped_grant
+        if grant is None:
             raise PrRouteDenied("PRG-AUTH-MALFORMED")
+        try:
+            verified = _verify_pr_oracle(
+                grant, prepared.literal, prepared.repository_workdir
+            )
+        except PrRouteDenied as exc:
+            if exc.failure_id == "PRG-COMMAND-SHAPE":
+                _raise_command_shape(
+                    "simple", preflight.dialect, preflight.parsed, "oracle"
+                )
+            raise
+        existing = PrBindingState(
+            intent.record, intent.sha256, "bound", identity,
+            prepared.literal.remote, prepared.literal.target.head_ref,
+            grant.url, verified.pr_id, verified.head_repository_id,
+        )
+        _write_binding_state(sidecar_path, existing, create_only=True)
+    elif existing is None:
         _write_binding_state(sidecar_path, pending, create_only=True)
         existing = pending
     elif not _same_binding_anchor(existing, intent):
@@ -3500,7 +3512,9 @@ def _evaluate_simple_pr_route(
         raise PrRouteDenied("PRG-BINDING-DRIFT")
     if existing.state == "revoked":
         raise PrRouteDenied("PRG-AUTH-MALFORMED")
-    if existing.state == "pending":
+    if verified is not None:
+        pass
+    elif existing.state == "pending":
         if not current_marker:
             raise PrRouteDenied("PRG-BINDING-DRIFT")
         grant, pr_id, head_repository_id = _discover_unique_open_pr(prepared)

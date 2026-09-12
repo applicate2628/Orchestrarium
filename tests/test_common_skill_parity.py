@@ -120,11 +120,9 @@ def test_generalize_from_instance_is_registered_on_every_common_surface() -> Non
 
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     install = (ROOT / "INSTALL.md").read_text(encoding="utf-8")
-    claude_md = (ROOT / "src.claude/CLAUDE.md").read_text(encoding="utf-8")
     token = f"`${GENERALIZE_SKILL}`"
     assert token in readme
     assert token in install
-    assert token in claude_md
 
 
 def test_generalize_from_instance_bodies_match_the_source_pin() -> None:
@@ -267,9 +265,7 @@ def test_doc_common_skill_lists_match_the_spine_owner() -> None:
     assert readme_names == owner
 
     claude_md = (ROOT / "src.claude/CLAUDE.md").read_text(encoding="utf-8")
-    inline = re.search(
+    assert "## Common skills" not in claude_md
+    assert not re.search(
         r"common-skills \((`\$[a-z0-9-]+`(?:,\s*`\$[a-z0-9-]+`)*)\)", claude_md
-    )
-    assert inline, "src.claude/CLAUDE.md has no inline common-skills enumeration"
-    claude_names = set(re.findall(r"`\$([a-z][a-z0-9-]+)`", inline.group(1)))
-    assert claude_names == owner
+    ), "the Claude delta must import the shared common-skill inventory"

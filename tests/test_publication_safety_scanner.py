@@ -703,6 +703,59 @@ class TestPublicationSafetyScanner(unittest.TestCase):
                 self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
                 self.assertIn("PS-FINDING-CONTENT", proc.stderr)
 
+    def test_public_token_annotation_rejects_credential_purpose_components(self) -> None:
+        marker = public_token_annotation()
+        value = "PUBLIC_PROTOCOL_RESULT_MARKER"
+        cases = {
+            "authentication": _join(
+                "authentica", "tion", "To", "ken=\"", value, "\"; ", marker,
+            ),
+            "authorization": _join(
+                "authoriza", "tion", "To", "ken=\"", value, "\"; ", marker,
+            ),
+            "authorisation-british": _join(
+                "authorisa", "tion", "To", "ken=\"", value, "\"; ", marker,
+            ),
+            "csrf": _join(
+                "cs", "rf", "To", "ken=\"", value, "\"; ", marker,
+            ),
+            "password-reset": _join(
+                "pass", "word", "Reset", "To", "ken=\"", value, "\"; ", marker,
+            ),
+            "auth-existing": _join(
+                "auth", "To", "ken=\"", value, "\"; ", marker,
+            ),
+            "access-existing": _join(
+                "access_", "to", "ken=\"", value, "\"; ", marker,
+            ),
+            "api-existing": _join(
+                "API_TO", "KEN=\"", value, "\"; ", marker,
+            ),
+        }
+        for scanner in SCANNERS:
+            for name, fixture in cases.items():
+                with self.subTest(scanner=scanner, name=name):
+                    proc = self._run_cached_process(scanner, fixture)
+                    self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+                    self.assertIn("class=value-token", proc.stderr)
+
+    def test_public_token_annotation_preserves_noncredential_components(self) -> None:
+        marker = public_token_annotation()
+        value = "PUBLIC_PROTOCOL_RESULT_MARKER"
+        rows = {
+            "plain": _join("to", "ken=\"", value, "\"; ", marker),
+            "capital": _join("CAPITAL_TO", "KEN=\"", value, "\"; ", marker),
+            "authorship": _join(
+                "author", "ship", "To", "ken=\"", value, "\"; ", marker,
+            ),
+            "user-approved": _join(
+                "userApprovedPublic", "To", "ken=\"", value, "\"; ", marker,
+            ),
+        }
+        for scanner in SCANNERS:
+            with self.subTest(scanner=scanner):
+                self._assert_cached_pass_batch(scanner, rows)
+
     def test_public_token_annotation_does_not_suppress_other_finding_classes(self) -> None:
         annotated = (
             public_token_reproduction_rows()["partition-certificate"]

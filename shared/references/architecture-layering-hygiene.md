@@ -366,31 +366,26 @@ integer add; bitwise and/or/xor; integer min/max — a floating-point accumulato
 associative, and FP min/max carry NaN/signed-zero edge cases, so an FP reduction is a merge-owner datum,
 not an atomic-summary), or REDUCED by a MERGE-OWNER in a CANONICAL merge order that is a C1-OWNED
 invariant, not a per-region free choice (a fixed, order-deterministic combine, not whichever-finishes-
-first). A non-associative reduction reordered across workers does not merely vary nondeterministically —
-it produces a DIFFERENT numeric result, so the merge order MUST be the C1-owned canonical order (this is
-the parallel reading of B2's "an order-sensitive reduction can change results — see C1"). Shared mutable
-state is NEVER clobbered by concurrent workers, and NEVER guarded by a SERIALIZING LOCK on a measured/hot
-parallel loop — a lock there is BOTH a performance hazard (serializes the region) AND a determinism
-hazard (nondeterministic acquisition order changes an order-sensitive accumulation). A new parallel
-region DECLARES, PER DATUM, its class (immutable / worker-owned / atomic-summary / merge-owner); the
-per-datum requirement is load-bearing — one region may mix all four. EXCEPTION: an embarrassingly-parallel
-region with no shared mutable state; a genuinely exactly-associative atomic summary; or a coarse
-low-contention lock OFF the measured path guarding an ORDER-INSENSITIVE update on already-classified data
-(the 4-class classification is universal; only the LOCK BAN is measured-loop-specific; an order-sensitive
-accumulation under a lock stays a determinism hazard even off the hot path — route it through the
-C1-canonical merge instead). OWNER: the parallel region's author (per-datum ownership) + C1 (the canonical
-merge order). PROBE: each datum crossing a parallel boundary is classified; no shared mutable state
-(process-global OR heap/captured) is written by concurrent workers outside its declared class — the
-per-datum classification is UNIVERSAL and unconditional (every region declares it); any mutable state
-reachable across the parallel boundary with NO declared class FAILS (fail-closed default); and no
-lock/mutex is acquired inside a parallel region the author classifies hot — where a region counts as
-reviewer-verified hot when EITHER (a) a repo-defined performance-critical marker tags it OR (b) a
-profiling measurement PRESERVED at the repo-standard performance-evidence location (a repo-local
-policy/checklist names the concrete path) and CITED in the commit/PR shows it on a measured-critical path
-— an unarchived verbal claim is insufficient; ABSENT both (a) and (b), the lock-ban applies FAIL-CLOSED
-to every parallel region as a candidate — opting OUT of the lock-ban requires (a) or (b) as positive
-evidence (FAIL). [spine: Determinism and ambient-input control] (sharpens B2 toward the parallel case;
-specializes D4)
+first). A non-associative reduction reordered across workers produces a DIFFERENT numeric result, so the
+merge order MUST be the C1-owned canonical order; LOCK ACQUISITION ORDER never supplies numerical merge
+order. Shared mutable state is NEVER clobbered by concurrent workers. A correctness-required lock MAY
+guard already-classified ORDER-INSENSITIVE state; it is not a substitute for the C1-canonical merge of a
+floating-point or other order-sensitive reduction. A new parallel region DECLARES, PER DATUM, its class
+(immutable / worker-owned / atomic-summary / merge-owner); the per-datum requirement is load-bearing —
+one region may mix all four.
+
+A COLD correctness-required lock needs no automatic profile. In a REVIEWER-VERIFIED HOT region, measure
+the lock against the ACCEPTED performance budget: it passes only when correctness and the budget both
+pass, and fails when the budget fails; D5 imposes no blanket lock-free mandate. A region is reviewer-
+verified hot when either a repo-defined performance-critical marker tags it or a profiling measurement
+preserved at the repo-standard performance-evidence location and cited in the commit/PR shows it on a
+measured-critical path; an unarchived verbal claim is insufficient. OWNER: the parallel region's author
+(per-datum ownership and any correctness-required lock) + C1 (the canonical merge order). PROBE: every
+datum crossing a parallel boundary is classified; no process-global, heap, or captured mutable state is
+written concurrently outside its declared class; every floating-point or other order-sensitive reduction
+uses the C1-owned canonical merge rather than lock acquisition order; a cold lock requires no profile;
+and every reviewer-verified hot lock has measured evidence that it meets the accepted budget. [spine:
+Determinism and ambient-input control] (sharpens B2 toward the parallel case; specializes D4)
 
 ## Protected properties (must not regress)
 
@@ -433,8 +428,9 @@ a regression in any is a blocking finding:
   fail/verified-redact on machine-local path / credential.
 - **No mutable process-global in a leaf; cleanup on all exit paths** (D4) — probe: no-mutable-global lint;
   handle contracts document free rules; cleanup-path coverage judgment-bound (cancel + timeout traced).
-- **Parallel data owned + deterministic C1-canonical merge** (D5) — probe: per-datum classification; no
-  shared-mutable clobber by concurrent workers; no lock on a (reviewer-verified) hot parallel loop.
+- **Parallel data owned + deterministic C1-canonical merge** (D5) — probe: apply D5's canonical OWNER/PROBE
+  above, including per-datum classification, race freedom, canonical order-sensitive merge, cold-lock
+  allowance, and accepted-budget evidence for a reviewer-verified hot lock.
 - **No stale-relation residue after a superseding change** (C6) — probe: post-change grep for the old name
   + stale-relation phrases returns only LIVE relations (discrimination review-bound).
 - **No general owner edited to add a single concrete instance** (M) — probe: the extension-churn budget
@@ -484,11 +480,9 @@ check that catches a violation):
 - [ ] No mutable process-global state in a leaf (only const registries / documented safely-published
       immutables); every resource has an owner with cleanup on all exit paths (judgment-bound: cancel +
       timeout); handle contracts document free rules (D4).
-- [ ] Mutable state crossing a parallel boundary is classified per datum (immutable / worker-owned /
-      exactly-associative-integer/bitwise-atomic-summary / merge-owner) and merged in the C1-canonical
-      order; no shared-mutable clobber; no serializing lock on a parallel loop — verified-hot by (a) a
-      perf-marker or (b) a preserved profiling artifact; absent both, the lock-ban applies fail-closed to
-      all parallel regions (D5).
+- [ ] D5's canonical OWNER/PROBE above passes: its per-datum classification, race-freedom, and canonical
+      order-sensitive-merge requirements are universal, while correctness-required locks follow its
+      stated cold-lock allowance and reviewer-verified-hot accepted-budget treatment (D5).
 - [ ] A superseding change left ONLY the correct current state; the old name + stale-relation phrases were
       grepped and erased, keeping only LIVE relations (C6) — the stale-vs-live discrimination is
       review-bound (grep surfaces candidates; a reviewer verifies each before erasing).

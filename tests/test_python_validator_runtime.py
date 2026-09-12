@@ -30,13 +30,11 @@ VALIDATORS = (
 SHARED_INVARIANT_ACTIONS = (
     (
         "shared governance requires direct external launch",
-        "launch directly from the orchestrating runtime or an approved transport wrapper, "
-        "never an internal relay",
+        "use orchestrating runtime/approved wrapper, never an internal relay",
     ),
     (
         "shared governance requires file-based external CLI prompts",
-        "Every external CLI substantive prompt uses file-based prompt delivery through "
-        "stdin/file input; argv carries only flags/options/paths",
+        "file-based prompt via stdin/file, never argv",
     ),
     (
         "shared governance rejects split-brain state synchronization",
@@ -1498,10 +1496,10 @@ def test_provider_shared_invariant_actions_bind_current_clause_and_reject_remova
             "claude",
             "agents",
             ".claude/CLAUDE.md",
-            "agents-design-panel.md",
-            "agents-stale-panel.md",
+            ".claude/commands/agents-help.md",
+            ".claude/commands/agents-stale-help.md",
             "  RESULT: PASS\n",
-            "CLAUDE.md dispatch index exposes the design-panel command",
+            "CLAUDE.md points to the installed command index",
         ),
     ),
 )

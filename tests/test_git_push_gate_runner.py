@@ -416,7 +416,9 @@ def test_r4_public_interface_is_explicit_minimal_and_used() -> None:
         "validate_preflight_result", "validate_transcript_diagnostic",
             "build_preflight_from_stdin", "ShellParseResult", "PrRouteDenied",
             "resolve_command_dialect", "parse_transcript_command",
-            "project_scan_range_binding", "is_simple_pr_approval",
+            "project_scan_range_binding", "extract_publication_user_reply",
+            "is_simple_pr_approval", "normalize_publication_approval_text",
+            "parse_publication_pr_grant",
     )
     assert imported == expected
     assert "*" not in imported

@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -1953,6 +1954,29 @@ def test_kimi_acp_one_shot_rejects_unattested_fixed_model(
         exchange(peer)
 
     assert all(request["method"] != "session/prompt" for request in peer.requests)
+    assert [request["method"] for request in peer.requests][-2:] == [
+        "session/close",
+        "session/delete",
+    ]
+
+
+def test_kimi_acp_postcreation_error_preserves_primary_and_attempts_delete_after_close_error() -> None:
+    owner = _load_owner()
+    peer = _FakeKimiAcpPeer(
+        model_config_result={},
+        wrong_id_method="session/close",
+    )
+    exchange = owner.KimiAcpOneShotV1(b"safe task", "C:/private/run")
+
+    with pytest.raises(ValueError) as caught:
+        exchange(peer)
+
+    assert str(caught.value) == "E_KIMI_ACP_PROTOCOL"
+    assert [request["method"] for request in peer.requests][-2:] == [
+        "session/close",
+        "session/delete",
+    ]
+    assert isinstance(caught.value.__cause__, ValueError)
 
 
 @pytest.mark.parametrize(
@@ -2211,6 +2235,88 @@ def test_kimi_observed_titles_redact_selected_cwd_and_mcp_secret(
     assert str(tmp_path) not in visible
 
 
+def test_kimi_path_bearing_optional_titles_do_not_erase_safe_answer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    owner = _load_owner()
+    machine_title = (
+        "Bash C:" + "\\Users\\private-machine\\Python314\\python.exe"
+        " -B check_worker.py"
+    )
+    permission = _permission_request(
+        [{"optionId": "allow-custom", "name": "Allow", "kind": "allow_once"}]
+    )
+    permission["toolCall"]["title"] = machine_title
+    peer = _FakeKimiAcpPeer(
+        tool_updates=(
+            {
+                "sessionUpdate": "tool_call",
+                "toolCallId": "1:tool-call-1",
+                "title": machine_title,
+                "status": "in_progress",
+            },
+        ),
+        permission_request=permission,
+    )
+    capabilities = owner.KimiCapabilitySelectionV1(
+        tools=("Read", "Bash"),
+        permission="approve_once",
+        cwd=str(tmp_path),
+    )
+    exchange = owner.KimiAcpOneShotV1(
+        b"safe task", str(tmp_path), (), "approve_once"
+    )
+
+    exchange(peer)
+    observed = exchange.observed_receipt()
+    code, payload, _notes, lifecycle = _finalize_kimi(
+        owner,
+        tmp_path,
+        monkeypatch,
+        capsys,
+        stdout=exchange.result_bytes,
+        stderr=b"",
+        capabilities=capabilities,
+        observed=observed,
+    )
+
+    assert code == 0
+    assert payload["resultText"] == "artifact\nGATE: PASS\n"
+    assert payload["token"] == "COMPLETE:EXTERNAL_NONAUTHORIZING"
+    assert payload["observed"] == {
+        "toolCalls": [
+            {
+                "id": "1:tool-call-1",
+                "title": "<redacted>",
+                "status": "in_progress",
+            }
+        ],
+        "permissionDecisions": [
+            {
+                "id": "1:tool-call-1",
+                "title": "<redacted>",
+                "decision": "approve_once",
+            }
+        ],
+    }
+    assert machine_title not in json.dumps(payload)
+    assert not lifecycle.run_dir.exists()
+
+
+def test_kimi_optional_title_redacts_when_machine_path_classifier_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = _load_owner()
+    finder = getattr(owner, "_machine_path_finder", None)
+    assert callable(finder)
+    monkeypatch.setattr(owner, "_machine_path_finder", lambda: None)
+    exchange = owner.KimiAcpOneShotV1(b"safe task", "C:/private/run")
+
+    assert exchange._receipt_text("Bash synthetic worker check") == "<redacted>"
+
+
 @pytest.mark.parametrize(
     "update",
     (
@@ -2312,6 +2418,7 @@ def test_kimi_private_home_aliases_unlink_before_lifecycle_removes_private_state
     config = user_data / "config.toml"
     secret = credentials / "token"
     config.write_text("default_model='kimi-code/k3'\n", encoding="utf-8")
+    original_config = config.read_bytes()
     secret.write_text("private\n", encoding="utf-8")
     run_dir = tmp_path / "run"
     run_dir.mkdir()
@@ -2320,7 +2427,16 @@ def test_kimi_private_home_aliases_unlink_before_lifecycle_removes_private_state
     except OSError as exc:
         pytest.skip(f"file/directory symlinks unavailable: {exc}")
 
-    assert (aliases.home / "config.toml").is_symlink()
+    private_config = aliases.home / "config.toml"
+    assert private_config.is_file()
+    assert not private_config.is_symlink()
+    assert private_config.read_bytes() == (
+        original_config
+        + b"\n"
+        b"[tools]\n"
+        b'enabled = ["Agent"]\n'
+        b'disabled = ["Agent","AgentSwarm"]\n'
+    )
     assert (aliases.home / "credentials").is_symlink()
     private_session = aliases.home / "sessions" / "session.json"
     private_session.parent.mkdir()
@@ -2328,10 +2444,10 @@ def test_kimi_private_home_aliases_unlink_before_lifecycle_removes_private_state
     aliases.cleanup()
 
     assert aliases.home.is_dir()
-    assert not os.path.lexists(aliases.home / "config.toml")
+    assert not os.path.lexists(private_config)
     assert not os.path.lexists(aliases.home / "credentials")
     assert private_session.read_text(encoding="utf-8") == "{}\n"
-    assert config.read_text(encoding="utf-8") == "default_model='kimi-code/k3'\n"
+    assert config.read_bytes() == original_config
     assert secret.read_text(encoding="utf-8") == "private\n"
 
 
@@ -2440,8 +2556,6 @@ def test_kimi_help_advertises_optional_capabilities_file(
         b'{"v":1,"tools":"Read","mcpServers":[],"subagents":[],"permission":"reject","cwd":null}',
         b'{"v":1,"tools":["Read","Read"],"mcpServers":[],"subagents":[],"permission":"reject","cwd":null}',
         b'{"v":1,"tools":[],"mcpServers":[],"subagents":[],"permission":"sometimes","cwd":null}',
-        b'{"v":1,"tools":["Agent"],"mcpServers":[],"subagents":[],"permission":"reject","cwd":null}',
-        b'{"v":1,"tools":[],"mcpServers":[],"subagents":["explore"],"permission":"reject","cwd":null}',
         b'{"v":1,"tools":[],"mcpServers":[{"name":"local","command":"tool","type":"stdio"}],"subagents":[],"permission":"reject","cwd":null}',
         b'{"v":1,"tools":[],"mcpServers":[{"name":"local","command":"tool"}],"subagents":[],"permission":"reject","cwd":null}',
         b'{"v":1,"tools":[],"mcpServers":[{"name":"remote","type":"http","url":"https://example.invalid"}],"subagents":[],"permission":"reject","cwd":null}',
@@ -2489,47 +2603,327 @@ def test_kimi_capabilities_file_rejects_oversize_and_invalid_cwd_without_echo(
         assert "private-workdir" not in str(caught.value)
 
 
-def test_kimi_selected_profile_keeps_tools_and_children_independent_and_secret_free(
+@pytest.mark.parametrize(
+    ("tools", "subagents"),
+    (
+        (["Agent"], []),
+        (["AgentSwarm"], []),
+        ([], ["future-explorer"]),
+        (["Agent"], ["future-explorer"]),
+    ),
+)
+def test_kimi_capabilities_file_rejects_children_explicitly(
     tmp_path: Path,
+    tools: list[str],
+    subagents: list[str],
 ) -> None:
     owner = _load_owner()
-    selected_cwd = tmp_path / "selected-cwd"
-    selected_cwd.mkdir()
     capabilities = tmp_path / "capabilities.json"
     _write_kimi_capabilities(
         capabilities,
-        cwd=selected_cwd,
-        tools=["FutureNativeTool42", "Agent"],
-        mcp_servers=[
-            {
-                "name": "local",
-                "command": "fixture-tool",
-                "args": ["--mode", "two words"],
-                "env": [{"name": "FIXTURE_TOKEN", "value": "secret-value"}],
-            }
-        ],
-        subagents=["future-explorer"],
+        tools=tools,
+        subagents=subagents,
     )
-    load = getattr(owner, "read_kimi_capability_selection", lambda _path: None)
-    selection = load(capabilities)
-    assert selection is not None
+
+    with pytest.raises(ValueError, match="^E_KIMI_CHILD_SELECTION_UNSUPPORTED$"):
+        owner._prevalidate_policy_bound_external_launch(
+            "kimi",
+            [
+                "fixture",
+                "--kimi-capabilities-file",
+                str(capabilities),
+                "--task-class",
+                "engineering",
+                "--role",
+                "backend-engineer",
+            ],
+        )
+
+
+@pytest.mark.parametrize(
+    ("selected_tools", "expected_enabled", "expected_active"),
+    (
+        ((), ["Agent"], {"Read": False, "Bash": False, "mcp__other__tool": False}),
+        (
+            ("Read", "mcp__selected__tool"),
+            ["Read", "mcp__selected__tool"],
+            {
+                "Read": True,
+                "Bash": False,
+                "mcp__selected__tool": True,
+                "mcp__other__tool": False,
+            },
+        ),
+    ),
+)
+def test_kimi_private_config_projects_native_tool_upper_bound(
+    tmp_path: Path,
+    selected_tools: tuple[str, ...],
+    expected_enabled: list[str],
+    expected_active: dict[str, bool],
+) -> None:
+    owner = _load_owner()
     user_data = tmp_path / "user-data"
     user_data.mkdir()
-    (user_data / "config.toml").write_text(
-        "default_model='kimi-code/k3'\n", encoding="utf-8"
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    aliases = owner.KimiPrivateHomeAliasesV1.create(
+        run_dir,
+        user_data,
+        owner.KimiCapabilitySelectionV1(tools=selected_tools),
     )
+
+    private_config = aliases.home / "config.toml"
+    parsed = tomllib.loads(private_config.read_text(encoding="utf-8"))
+    assert parsed == {
+        "tools": {
+            "enabled": expected_enabled,
+            "disabled": ["Agent", "AgentSwarm"],
+        }
+    }
+
+    def active(name: str) -> bool:
+        enabled = parsed["tools"]["enabled"]
+        disabled = parsed["tools"]["disabled"]
+        allowed = name in enabled
+        return allowed and name not in disabled
+
+    assert {name: active(name) for name in expected_active} == expected_active
+    aliases.cleanup()
+    assert not private_config.exists()
+
+
+def test_kimi_private_config_preserves_exact_matching_user_bytes(
+    tmp_path: Path,
+) -> None:
+    owner = _load_owner()
+    user_data = tmp_path / "user-data"
+    user_data.mkdir()
+    original = (
+        b"default_model = 'kimi-code/k3'\n"
+        b"[tools]\n"
+        b'enabled = ["Read", "mcp__selected__tool"]\n'
+        b'disabled = ["Agent", "AgentSwarm"]\n'
+    )
+    user_config = user_data / "config.toml"
+    user_config.write_bytes(original)
     run_dir = tmp_path / "run"
     run_dir.mkdir()
 
-    owner.KimiPrivateHomeAliasesV1.create(run_dir, user_data, selection)
-
-    profile = (run_dir / ".kimi-code" / "agents" / "agent.md").read_text(
-        encoding="utf-8"
+    aliases = owner.KimiPrivateHomeAliasesV1.create(
+        run_dir,
+        user_data,
+        owner.KimiCapabilitySelectionV1(
+            tools=("Read", "mcp__selected__tool")
+        ),
     )
-    assert 'tools: ["FutureNativeTool42","Agent"]' in profile
-    assert 'subagents: ["future-explorer"]' in profile
-    assert "secret-value" not in profile
-    assert str(selected_cwd) not in profile
+
+    private_config = aliases.home / "config.toml"
+    assert not private_config.is_symlink()
+    assert private_config.read_bytes() == original
+    assert user_config.read_bytes() == original
+    aliases.cleanup()
+    assert user_config.read_bytes() == original
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows file-symlink contract")
+def test_kimi_private_config_accepts_file_symlink_without_mutating_target(
+    tmp_path: Path,
+) -> None:
+    owner = _load_owner()
+    target = tmp_path / "physical" / "config.toml"
+    target.parent.mkdir()
+    original = b"default_model = 'kimi-code/k3'\n"
+    target.write_bytes(original)
+    user_data = tmp_path / "user-data"
+    user_data.mkdir()
+    link = user_data / "config.toml"
+    link.symlink_to(target)
+    link_target = os.readlink(link)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+
+    aliases = owner.KimiPrivateHomeAliasesV1.create(run_dir, user_data)
+
+    assert (aliases.home / "config.toml").read_bytes() == (
+        original
+        + b"\n"
+        b"[tools]\n"
+        b'enabled = ["Agent"]\n'
+        b'disabled = ["Agent","AgentSwarm"]\n'
+    )
+    assert link.is_symlink()
+    assert os.readlink(link) == link_target
+    assert target.read_bytes() == original
+    aliases.cleanup()
+    assert link.is_symlink()
+    assert target.read_bytes() == original
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows directory-link contract")
+@pytest.mark.parametrize("link_kind", ("symlink", "junction"))
+def test_kimi_private_config_accepts_linked_user_directory_without_mutation(
+    tmp_path: Path,
+    link_kind: str,
+) -> None:
+    owner = _load_owner()
+    physical = tmp_path / "physical-user-data"
+    physical.mkdir()
+    original = b"default_model = 'kimi-code/k3'\n"
+    target = physical / "config.toml"
+    target.write_bytes(original)
+    user_data = tmp_path / "linked-user-data"
+    if link_kind == "symlink":
+        user_data.symlink_to(physical, target_is_directory=True)
+    else:
+        result = subprocess.run(
+            ["cmd.exe", "/d", "/c", "mklink", "/J", str(user_data), str(physical)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        if result.returncode != 0:
+            pytest.skip(f"junction unavailable: {result.stderr.strip()}")
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    try:
+        aliases = owner.KimiPrivateHomeAliasesV1.create(run_dir, user_data)
+
+        assert (aliases.home / "config.toml").read_bytes() == (
+            original
+            + b"\n"
+            b"[tools]\n"
+            b'enabled = ["Agent"]\n'
+            b'disabled = ["Agent","AgentSwarm"]\n'
+        )
+        assert target.read_bytes() == original
+        aliases.cleanup()
+        assert target.read_bytes() == original
+    finally:
+        if os.path.lexists(user_data):
+            if user_data.is_symlink():
+                user_data.unlink()
+            else:
+                user_data.rmdir()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows file-symlink contract")
+def test_kimi_private_config_rejects_broken_file_symlink_visibly(
+    tmp_path: Path,
+) -> None:
+    owner = _load_owner()
+    user_data = tmp_path / "user-data"
+    user_data.mkdir()
+    link = user_data / "config.toml"
+    link.symlink_to(tmp_path / "missing-config.toml")
+    link_target = os.readlink(link)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+
+    with pytest.raises(
+        ValueError, match="^E_KIMI_CAPABILITIES_CONFIG_CONFLICT$"
+    ):
+        owner.KimiPrivateHomeAliasesV1.create(run_dir, user_data)
+
+    assert link.is_symlink()
+    assert os.readlink(link) == link_target
+    assert not (run_dir / "kimi-home").exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows file-symlink contract")
+def test_kimi_private_config_rejects_link_target_change_during_read(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = _load_owner()
+    first = tmp_path / "first.toml"
+    second = tmp_path / "second.toml"
+    first.write_bytes(b"default_model = 'kimi-code/k3'\n")
+    second.write_bytes(b"default_model = 'kimi-code/k3'\n")
+    user_data = tmp_path / "user-data"
+    user_data.mkdir()
+    link = user_data / "config.toml"
+    link.symlink_to(first)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    original_resolve = owner.Path.resolve
+    candidate = owner.Path(os.path.abspath(link))
+    resolutions = 0
+
+    def retarget_on_second_resolve(path: Path, *args, **kwargs):
+        nonlocal resolutions
+        if owner.Path(os.path.abspath(path)) == candidate:
+            resolutions += 1
+            if resolutions == 2:
+                link.unlink()
+                link.symlink_to(second)
+        return original_resolve(path, *args, **kwargs)
+
+    monkeypatch.setattr(owner.Path, "resolve", retarget_on_second_resolve)
+
+    with pytest.raises(
+        ValueError, match="^E_KIMI_CAPABILITIES_CONFIG_CONFLICT$"
+    ):
+        owner.KimiPrivateHomeAliasesV1.create(run_dir, user_data)
+
+    assert resolutions == 2
+    assert first.read_bytes() == b"default_model = 'kimi-code/k3'\n"
+    assert second.read_bytes() == b"default_model = 'kimi-code/k3'\n"
+    assert not (run_dir / "kimi-home").exists()
+
+
+@pytest.mark.parametrize(
+    "original",
+    (
+        b'[tools]\nenabled = ["Bash"]\ndisabled = ["Agent","AgentSwarm"]\n',
+        b'[tools]\nenabled = ["Read"]\ndisabled = ["Agent"]\n',
+        b"[tools\n",
+    ),
+)
+def test_kimi_private_config_rejects_conflict_without_mutating_user_bytes(
+    tmp_path: Path,
+    original: bytes,
+) -> None:
+    owner = _load_owner()
+    user_data = tmp_path / "user-data"
+    user_data.mkdir()
+    user_config = user_data / "config.toml"
+    user_config.write_bytes(original)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+
+    with pytest.raises(
+        ValueError, match="^E_KIMI_CAPABILITIES_CONFIG_CONFLICT$"
+    ):
+        owner.KimiPrivateHomeAliasesV1.create(
+            run_dir,
+            user_data,
+            owner.KimiCapabilitySelectionV1(tools=("Read",)),
+        )
+
+    assert user_config.read_bytes() == original
+    assert not (run_dir / "kimi-home").exists()
+
+
+def test_kimi_private_config_is_removed_when_alias_setup_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = _load_owner()
+    user_data = tmp_path / "user-data"
+    (user_data / "credentials").mkdir(parents=True)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+
+    def fail_symlink(*_args, **_kwargs) -> None:
+        raise OSError("synthetic")
+
+    monkeypatch.setattr(owner.os, "symlink", fail_symlink)
+
+    with pytest.raises(OSError, match="synthetic"):
+        owner.KimiPrivateHomeAliasesV1.create(run_dir, user_data)
+
+    assert not (run_dir / "kimi-home" / "config.toml").exists()
 
 
 def test_kimi_selected_cwd_and_mcp_variants_reach_session_new_unchanged(

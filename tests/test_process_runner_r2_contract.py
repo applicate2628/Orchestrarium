@@ -156,6 +156,36 @@ def test_kimi_acp_dialogue_channel_writes_and_reads_complete_json_lines() -> Non
     assert issues == []
 
 
+def test_kimi_dialogue_cancellation_blocks_normal_write_but_allows_cleanup() -> None:
+    runner = _load_runner()
+    read_fd, write_fd = os.pipe()
+    lifecycle = runner.RunLifecycleV1(runner.RunTokenV1(b"c" * 16, 1))
+    channel = runner.ProcessDialogueChannelV1(
+        write_fd,
+        runner._DialogueLineRouterV1(),
+        lifecycle,
+        time.monotonic() + 1.0,
+        None,
+    )
+    normal = b'{"jsonrpc":"2.0","id":1,"method":"session/prompt"}\n'
+    cleanup = b'{"jsonrpc":"2.0","id":2,"method":"session/close"}\n'
+    lifecycle.request_cancel()
+    try:
+        with pytest.raises(runner.ProcessSupervisionError) as stopped:
+            channel.write_line(normal)
+        assert stopped.value.failure_id == "PSV1-CANCELLED"
+        assert stopped.value.terminal_stage == "cancellation"
+
+        channel.begin_cleanup()
+        assert channel.write_line(cleanup) == len(cleanup)
+    finally:
+        os.close(write_fd)
+    try:
+        assert os.read(read_fd, 4096) == cleanup
+    finally:
+        os.close(read_fd)
+
+
 def test_kimi_acp_line_router_fails_closed_on_eof_fragment_and_cancel() -> None:
     runner = _load_runner()
     fragment = runner._DialogueLineRouterV1()

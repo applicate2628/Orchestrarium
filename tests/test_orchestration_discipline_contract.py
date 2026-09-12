@@ -22,7 +22,6 @@ SPINE = "shared/AGENTS.shared.md"
 CLAUDE_QUICK_FIX_TEMPLATE = "src.claude/agents/team-templates/quick-fix.json"
 CLAUDE_RESEARCH_TEMPLATE = "src.claude/agents/team-templates/research.json"
 
-ROUTING_ENTRYPOINTS = ("src.codex/AGENTS.codex.md", "src.claude/CLAUDE.md")
 HANDOFF_CONTRACTS = (
     "src.codex/skills/lead/subagent-contracts.md",
     "src.claude/agents/contracts/subagent-contracts.md",
@@ -80,13 +79,13 @@ STATUS_ACCEPTANCE_CARRIER_FRAGMENTS = (
 PINS = [
     # Repository-orientation Bootstrap checkpoint — both installed provider roots.
     ("orientation-a0", "**(a0) Pre-action orientation trigger**",
-     ["src.claude/CLAUDE.md", "src.codex/AGENTS.codex.md"]),
+     ["src.codex/AGENTS.codex.md"]),
     ("orientation-step0", "0. **Repository orientation.**",
-     ["src.claude/CLAUDE.md", "src.codex/AGENTS.codex.md"]),
+     ["src.codex/AGENTS.codex.md"]),
     ("orientation-record", "REPOSITORY ORIENTATION: scope=<repo-relative path>; status=<live|mutable|frozen|archived|deprecated|superseded|conflict>; workflow=<repo-relative entry point(s)>; protected=<repo-relative path(s)|none>; evidence=<path:line[,path:line...]>",
-     ["src.claude/CLAUDE.md", "src.codex/AGENTS.codex.md"]),
+     [SPINE, "src.codex/AGENTS.codex.md"]),
     ("orientation-violation", "Treating missing or conflicting orientation as permission to proceed.",
-     ["src.claude/CLAUDE.md", "src.codex/AGENTS.codex.md"]),
+     ["src.codex/AGENTS.codex.md"]),
 
     # P4 — spine stop-rule (Fable probe text) + operational bullet (Sol text)
     ("P4-spine", "Stop-rule: a SECOND fix in one session that breaks a previously-working neighbor", [SPINE]),
@@ -101,7 +100,7 @@ PINS = [
      ["src.claude/skills/bug-hunting/SKILL.md", "src.codex/skills/bug-hunting/SKILL.md"]),
 
     # P2+P5 — oracle-anchored, absolute QA (three bullets)
-    ("P2P5-letpass", "Before any run, write `What would this criterion let pass?` for each acceptance criterion",
+    ("P2P5-letpass", "Before any run, challenge each acceptance criterion with a falsifying case and its required property; if the criterion admits the known failure or a degenerate result, return `REVISE` with that evidence to the acceptance owner instead of rewriting accepted success semantics.",
      ["src.claude/agents/qa-engineer.md", "src.codex/skills/qa-engineer/SKILL.md"]),
     ("P2P5-oracle", "Anchor expected behavior to a known-good oracle (a shipped release or independent ground truth)",
      ["src.claude/agents/qa-engineer.md", "src.codex/skills/qa-engineer/SKILL.md"]),
@@ -136,7 +135,9 @@ PINS = [
      ["src.claude/skills/lead/SKILL.md", "src.codex/skills/lead/SKILL.md"]),
     # A2 — hook doc discriminator sentence (installed provider roots + INSTALL)
     ("A2-doc", "warns on every confidently parsed `git worktree add` except one add whose command ends with the exact `# orchestrarium:requested-isolation-worktree` marker required by the installed parallel-isolation protocol; missing, near-match, quoted, reused, or batch markers do not suppress the audit.",
-     ["src.claude/CLAUDE.md", "src.codex/AGENTS.codex.md", "INSTALL.md"]),
+     ["src.codex/AGENTS.codex.md", "INSTALL.md"]),
+    ("A2-doc-claude", "The worktree audit recognizes only an exact trailing `# orchestrarium:requested-isolation-worktree` marker.",
+     ["src.claude/CLAUDE.md"]),
     # A2 — hook marker constant present in BOTH hook copies
     ("A2-hook-const", 'REQUESTED_ISOLATION_MARKER = "# orchestrarium:requested-isolation-worktree"',
      ["src.claude/agents/hooks/check-no-trash-in-repo.py", "src.codex/skills/lead/hooks/check-no-trash-in-repo.py"]),
@@ -265,15 +266,15 @@ PINS = [
     ("A13", "Once a provider or subagent run is launched, a later preference change to effort, model, or framing applies to the next dispatch.",
      ["src.claude/agents/contracts/operating-model.md", "src.codex/skills/lead/operating-model.md"]),
 
-    # P8 — writer-owner + settled event (architect return + reviewer gate).
+    # P8 — writer-owner + conditionally required settlement observation.
     # The Claude pointer targets skills/architect/SKILL.md (not agents/architect.md): the
     # roles-as-skills curated subset made architect a dual role-skill, and the full role
     # contract — including this P8 sentence — moved into the skill; agents/architect.md is
     # now a thin delegate wrapper that loads the skill. This matches the codex pointer shape,
     # which already targeted skills/architect/SKILL.md.
-    ("P8-architect", "the Change-Surface Contract MUST name exactly one writer-owner and one downstream-observable `settled/committed` event. Missing either is `REVISE` at design input.",
+    ("P8-architect", "For every pipeline touching shared mutable state (for example scroll, geometry, or cache), the Change-Surface Contract MUST name exactly one writer-owner. When another consumer observes or reconciles after the writer returns, the owning contract MUST expose authoritative settled state independently through an event, callback/future, versioned query, or equivalent; an ordinary synchronous return is sufficient for the sole caller. Missing the writer-owner or required settlement observation is `REVISE` at design input.",
      ["src.claude/skills/architect/SKILL.md", "src.codex/skills/architect/SKILL.md"]),
-    ("P8-reviewer", "Reject any pipeline touching shared mutable state unless the accepted design names exactly one writer-owner and a downstream-observable `settled/committed` event, and the implementation preserves both.",
+    ("P8-reviewer", "Reject any pipeline touching shared mutable state unless the accepted design names exactly one writer-owner. When another consumer observes or reconciles after the writer returns, require independent observation of authoritative settled state through the owning contract; an event, callback/future, versioned query, or equivalent may satisfy it, while an ordinary synchronous return is sufficient for the sole caller. Verify the implementation preserves the writer-owner, required observation, and cross-surface convergence.",
      ["src.claude/agents/architecture-reviewer.md", "src.codex/skills/architecture-reviewer/SKILL.md"]),
 
     # Single-writer orchestration — the root main conversation owns dispatch and lifecycle
@@ -429,7 +430,10 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
         if rel not in self._cache:
             path = REPO_ROOT / rel
             self.assertTrue(path.is_file(), f"owner file missing: {rel}")
-            self._cache[rel] = path.read_text(encoding="utf-8")
+            text = path.read_text(encoding="utf-8")
+            if rel == "src.claude/CLAUDE.md":
+                text = self._read(SPINE) + "\n" + text
+            self._cache[rel] = text
         return self._cache[rel]
 
     def test_normative_sentences_present_in_every_owner(self) -> None:
@@ -719,7 +723,7 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
             self.assertIn("route `implementation -> QA`", text)
             self.assertIn("create the minimal `work-items/active/<slug>/status.md`", text)
         self.assertIn(
-            "For `requiresLead: false` routes that need continuation",
+            "For `requiresLead: false` routes",
             self._read("src.claude/CLAUDE.md"),
         )
         self.assertIn("Evaluate the shared `quick-fix` predicate before invoking a process skill",
@@ -804,7 +808,7 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
                     {"research", "design", "plan", "pre-implementation review"},
                 )
 
-        for entrypoint in ("src.codex/AGENTS.codex.md", "src.claude/CLAUDE.md"):
+        for entrypoint in ("src.codex/AGENTS.codex.md",):
             with self.subTest(entrypoint=entrypoint):
                 text = self._read(entrypoint)
                 self.assertIn(
@@ -821,9 +825,8 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
     def test_fact_lookup_routes_by_decision_need_and_preserves_active_task_continuity(self) -> None:
         direct_role_priority = {
             "src.codex/AGENTS.codex.md": "1. User explicitly names a role: invoke it directly.",
-            "src.claude/CLAUDE.md": "1. Did the user explicitly name a role? → invoke that role directly",
         }
-        for entrypoint in ROUTING_ENTRYPOINTS:
+        for entrypoint in ("src.codex/AGENTS.codex.md",):
             with self.subTest(entrypoint=entrypoint):
                 text = self._read(entrypoint)
                 for fragment in FACT_ROUTING_FRAGMENTS + SIDE_QUESTION_CONTINUITY_FRAGMENTS:
@@ -833,8 +836,12 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
                     )
                 self.assertTrue(
                     direct_role_priority[entrypoint] in text,
-                    f"{entrypoint}: explicit user role must precede default factual routing",
-                )
+                        f"{entrypoint}: explicit user role must precede default factual routing",
+                    )
+
+        claude = self._read("src.claude/CLAUDE.md")
+        self.assertIn("1. Did the user explicitly name a role? → invoke that role directly.", claude)
+        self.assertIn(".claude/agents/team-templates/<template>.json", claude)
 
         template = json.loads(self._read(CLAUDE_RESEARCH_TEMPLATE))
         roles = {role["agentType"]: role for role in template["roles"]}

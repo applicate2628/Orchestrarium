@@ -195,6 +195,7 @@ Currently shipped:
 - `$github-pr-review-bot` — knowledge-style; drive a GitHub pull-request review loop with the Codex review bot to a terminal result on the current remote head.
 - `$explain-simply` — knowledge-style; reader-tailored plain-language explanations for concepts, code paths, results, decisions, and learner notes.
 - `$generalize-from-instance` — knowledge-style; derive an owner-level general contract from a private case while retaining that case only as regression evidence.
+- `$implementation-to-theory` — knowledge-style; reconstruct the theory, numerical algorithms, and derivation behind existing scientific code with equation-to-implementation traceability and verified technical illustrations.
 - `$vak-dissertation-review` — knowledge-style; review of a Russian dissertation (диссертация) and autoreferat for a кандидат/доктор наук defense — нормоконтроль, novelty, ВАК compliance, borrowings, references, ВАК-list publications.
 - `$vcpkg-ports-updater` — knowledge-style leaf specialist; admitted vcpkg overlay source/version synchronization and read-only named-root sweeps against each port's official upstream.
 - `$vcpkg-builder` — knowledge-style leaf executor; one admitted vcpkg port/triplet or aggregate runtime gate with current-run receiving-side evidence.

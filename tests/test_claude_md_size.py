@@ -22,10 +22,10 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parent.parent
 VALIDATOR = REPO_ROOT / "scripts" / "validate-claude-md.py"
 CLAUDE_MD = REPO_ROOT / "src.claude" / "CLAUDE.md"
+AGENTS_MD = REPO_ROOT / "shared" / "AGENTS.shared.md"
 REFERENCE = REPO_ROOT / "references-claude" / "claude-md-structural-enforcement.md"
-POST_EXTRACTION_SIZE_CAP = 36_771
+CLAUDE_DELTA_SIZE_CAP = 8_192
 NON_BINDING_SIZE_CAP = 1_000_000
-BOOTSTRAP_SHA256 = "07374be13bb75fa40e827663927c619540f714b5e04f98a09ffd5b665c957b81"
 
 EXPECTED_PAYLOADS: dict[str, tuple[int, str]] = {
     "structural-overview": (
@@ -33,8 +33,8 @@ EXPECTED_PAYLOADS: dict[str, tuple[int, str]] = {
         "488c41acb051ccf6100422b28b3d4ded846e8d9cdd88fb937fb9b383f8d70319",
     ),
     "hook-behavior-contracts": (
-        17_113,
-        "1257c115a1fd1f60683f83fc8cd60f4ef38df20defaeca4652d108365d2f462f",
+        17_997,
+        "6a04609faa133108c92c5906e5419db87450b6f6b6fb27e2f8ea7c8efcff6e0c",
     ),
     # Payload pins force deliberate review of current hook behavior, placement,
     # and installer truth before a canonical-reference edit can pass.
@@ -48,61 +48,70 @@ EXPECTED_PAYLOADS: dict[str, tuple[int, str]] = {
     ),
 }
 
-EXPECTED_MANIFEST: dict[str, tuple[str, ...]] = {
-    "install anchors": (
-        "@AGENTS.md",
-        "## Delegation rule",
-        "## Publication safety scan",
+EXPECTED_SHARED_MANIFEST: dict[str, tuple[str, ...]] = {
+    "shared owners": (
+        "# Shared Governance",
+        "## Role index",
+        "## Common skills",
+        "### Physical lifecycle V1",
+        "### Session persistence rule (mandatory)",
+        "## Core delegation principles",
+        "## Engineering hygiene",
+        "## Publication safety",
     ),
-    "bootstrap teeth": (
-        "STOP. Universal premise rule first",
-        "**(a0) Pre-action orientation trigger**",
-        "**(a) Pre-fix trigger**",
-        "**(b) Pre-commit trigger**",
-        "REPOSITORY ORIENTATION: scope=",
-        "**Diagnostic data.**",
-        "**Hypothesis inventory.**",
-        "ASSUMPTION (UNVERIFIED)",
-        "**Scope proportionality.**",
-        "Fix means correct logic, not workaround",
-        "**Recovery readiness.**",
-        "most likely means",
-        "while I'm here let me also",
-        "I'll just commit this and we can fix it if wrong",
+    "shared gates": (
+        "`quick-fix`: target+steps",
+        "before QA across phases/specialists, assign one integration owner",
+        "**Repository orientation; Mechanism inventory before new paths:**",
+        "REPOSITORY ORIENTATION: scope=<repo-relative path>; status=<live|mutable|frozen|archived|deprecated|superseded|conflict>; workflow=<repo-relative entry point(s)>; protected=<repo-relative path(s)|none>; evidence=<path:line[,path:line...]>",
+        "**Hypothesis disclosure discipline:**",
+        "**Pre-fix diagnostic gate:**",
+        "**Evidence-based completion:**",
+        "Human review before",
     ),
-    "structural-enforcement teeth": (
-        "They are backstops; they do not replace the text rules above.",
-        "prompts should allow relevant MCP use",
-        "gate captures and directly executes the verified",
+}
+
+EXPECTED_CLAUDE_MANIFEST: dict[str, tuple[str, ...]] = {
+    "Claude tool mapping": (
+        "## Claude tool mapping",
+        "`Bash|PowerShell`",
+        "`Edit|Write|NotebookEdit`",
+        "commits apply all shared checkpoints",
+    ),
+    "Claude hooks": (
+        "auto-installs thirteen `settings.json` entries",
+        "nine structural hooks",
+        "They are backstops; they do not replace `AGENTS.md`",
         "a subagent must never be blocked",
-        "This exemption never transfers ownership: the dispatching main conversation still owns diagnostic discipline and publication authorization",
-        "Transcript/manual results cannot authorize",
-        "Stop hooks do not replace the main conversation's current-turn status checks or work-item close/archive ownership",
-        "Reminder hooks re-anchor Model Context Protocol (MCP) discovery/use after compaction, active delegation/recovery, scratch preservation, and every-turn continuity",
-        "AUDIT mode",
-        "fail-open",
-        "[skip-bugfix-discipline]` bypasses the PreToolUse guard for the next turn",
-        "[approve-publication]` opens the git-push gate for one turn — honored ONLY when it appears in the user's own last message",
-        "[acknowledge-passive-stop]` bypasses one passive-polling Stop decision when the assistant is intentionally handing off to the user",
-        "Physical location owns lifecycle membership",
+        "The first other valid root final receives one reconciliation pass",
+        "`stop_hook_active` allows the next Stop",
+        "[skip-bugfix-discipline]",
+        "[approve-publication]",
+        "[approve-mcp-fallback:v1]",
+        "[acknowledge-passive-stop]",
     ),
-    "delegation and recovery teeth": (
+    "Claude delegation": (
         "/agents-init-project",
         "externalProvider: auto | codex | claude | kimi | grok",
-        "never a provider entry inside `externalPriorityProfiles`",
-        "Every specialist invocation MUST use the Agent tool",
+        "Every specialist invocation uses the Agent tool",
+        "matching `subagent_type`",
+        "curated inline role-skills",
         "Lead is never spawned as a subagent",
-        "The main conversation owns `work-items/`",
-        "**Close is mandatory.**",
+        "requiresLead",
+        "general-purpose",
+        "approved thin wrapper",
+        "independently verified and nonauthorizing",
+        "Grok remains unavailable",
     ),
-    "routing and role teeth": (
-        "## Slash command auto-invocation",
-        "**Auto-invocation contract:**",
-        "**Dispatch index**",
-        "## Coexistence with the superpowers plugin",
-        "New feature, exploration, or unclear request → invoke `brainstorming` first, then pick a template.",
-        "Already in mid-flow with admitted scope",
+    "Claude commands and roles": (
+        "## Slash command routing",
+        ".claude/agents/team-templates/",
+        ".claude/commands/agents-help.md",
+        "Each command file owns its `## When to auto-invoke` rules",
         "## Role definitions",
+        "initialPrompt: /lead",
+        "Evaluate the shared `quick-fix` predicate before invoking a process skill",
+        "process skills govern method; Orchestrarium governs delegation",
         "Pre-publication scan: run `/agents-check-safety`",
     ),
 }
@@ -126,12 +135,19 @@ def _run(*args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def _production_manifest() -> dict[str, tuple[str, ...]]:
+def _production_manifests() -> tuple[
+    dict[str, tuple[str, ...]], dict[str, tuple[str, ...]]
+]:
     _require_validator()
     namespace = runpy.run_path(str(VALIDATOR))
-    manifest = namespace.get("MANIFEST")
-    assert isinstance(manifest, dict), "validator must expose grouped MANIFEST"
-    return {group: tuple(tokens) for group, tokens in manifest.items()}
+    shared = namespace.get("SHARED_MANIFEST")
+    claude = namespace.get("CLAUDE_MANIFEST")
+    assert isinstance(shared, dict), "validator must expose grouped SHARED_MANIFEST"
+    assert isinstance(claude, dict), "validator must expose grouped CLAUDE_MANIFEST"
+    return (
+        {group: tuple(tokens) for group, tokens in shared.items()},
+        {group: tuple(tokens) for group, tokens in claude.items()},
+    )
 
 
 def _binding_size(path: Path) -> int:
@@ -154,25 +170,21 @@ def test_validator_script_exists() -> None:
     assert VALIDATOR.is_file(), f"Claude Markdown validator missing: {VALIDATOR}"
 
 
-def test_live_claude_md_passes_at_post_extraction_cap_and_reports_exact_counts() -> None:
+def test_live_composed_entrypoint_passes_with_separate_claude_delta_budget() -> None:
     result = _run()
     assert result.returncode == 0, result.stdout + result.stderr
-    for expected in (
-            "Code points: 36573",
-            "UTF-8 bytes: 36751",
-            "Binding size: 36751",
-        "Size cap: 36771",
-        "Warning threshold: 36521",
-        "Manifest: 46/46",
-        "RESULT: PASS",
-    ):
-        assert expected in result.stdout, result.stdout
+    assert f"Claude delta size cap: {CLAUDE_DELTA_SIZE_CAP}" in result.stdout
+    assert "Shared manifest:" in result.stdout
+    assert "Claude manifest:" in result.stdout
+    assert "RESULT: PASS" in result.stdout
+    assert _binding_size(CLAUDE_MD) <= CLAUDE_DELTA_SIZE_CAP
 
 
 def test_tiny_size_cap_fails_closed() -> None:
     result = _run("--size-cap", "1000")
     assert result.returncode == 1, result.stdout + result.stderr
-    assert "FAIL: Claude Markdown binding size 36751 > size cap 1000" in result.stdout
+    assert "FAIL: Claude delta binding size" in result.stdout
+    assert "> size cap 1000" in result.stdout
     assert "RESULT: FAIL" in result.stdout
 
 
@@ -207,7 +219,7 @@ def test_over_cap_temporary_content_fails(tmp_path: Path) -> None:
     result = _run("--claude-md", str(copy), "--size-cap", str(binding - 1))
 
     assert result.returncode == 1, result.stdout + result.stderr
-    assert f"FAIL: Claude Markdown binding size {binding} > size cap {binding - 1}" in result.stdout
+    assert f"FAIL: Claude delta binding size {binding} > size cap {binding - 1}" in result.stdout
 
 
 def test_missing_source_path_fails_closed(tmp_path: Path) -> None:
@@ -227,47 +239,82 @@ def test_invalid_utf8_fails_closed(tmp_path: Path) -> None:
     assert "RESULT: FAIL" in result.stdout
 
 
-def test_manifest_matches_the_complete_lose_nothing_contract() -> None:
-    assert _production_manifest() == EXPECTED_MANIFEST
+def test_manifests_match_the_composed_owner_contract() -> None:
+    assert _production_manifests() == (
+        EXPECTED_SHARED_MANIFEST,
+        EXPECTED_CLAUDE_MANIFEST,
+    )
 
 
-def test_unchanged_copy_passes_and_every_manifest_token_removal_fails(tmp_path: Path) -> None:
-    manifest = _production_manifest()
-    tokens = [token for group in manifest.values() for token in group]
-    assert len(tokens) == 46
-    assert len(tokens) == len(set(tokens)), "manifest tokens must be unique"
-
-    source = CLAUDE_MD.read_text(encoding="utf-8", errors="strict")
-    unchanged = tmp_path / "unchanged.md"
-    unchanged.write_bytes(source.encode("utf-8"))
+def test_unchanged_pair_passes_and_each_owner_fails_on_semantic_removal(
+    tmp_path: Path,
+) -> None:
+    shared_manifest, claude_manifest = _production_manifests()
+    shared_source = AGENTS_MD.read_text(encoding="utf-8", errors="strict")
+    claude_source = CLAUDE_MD.read_text(encoding="utf-8", errors="strict")
+    shared_copy = tmp_path / "AGENTS.md"
+    claude_copy = tmp_path / "CLAUDE.md"
+    shared_copy.write_text(shared_source, encoding="utf-8")
+    claude_copy.write_text(claude_source, encoding="utf-8")
     unchanged_result = _run(
-        "--claude-md", str(unchanged), "--size-cap", str(NON_BINDING_SIZE_CAP)
+        "--claude-md",
+        str(claude_copy),
+        "--agents-md",
+        str(shared_copy),
+        "--size-cap",
+        str(NON_BINDING_SIZE_CAP),
     )
     assert unchanged_result.returncode == 0, unchanged_result.stdout + unchanged_result.stderr
 
-    for index, token in enumerate(tokens):
-        assert token in source, f"live CLAUDE.md lacks manifest token {token!r}"
-        tampered = source.replace(token, "")
-        assert tampered != source
-        candidate = tmp_path / f"missing-token-{index:02d}.md"
-        candidate.write_bytes(tampered.encode("utf-8"))
+    for owner, manifest, source in (
+        ("shared", shared_manifest, shared_source),
+        ("claude", claude_manifest, claude_source),
+    ):
+        tokens = [token for group in manifest.values() for token in group]
+        assert len(tokens) == len(set(tokens)), f"{owner} manifest tokens must be unique"
+        for index, token in enumerate(tokens):
+            assert token in source, f"live {owner} owner lacks manifest token {token!r}"
+            shared_copy.write_text(shared_source, encoding="utf-8")
+            claude_copy.write_text(claude_source, encoding="utf-8")
+            candidate = shared_copy if owner == "shared" else claude_copy
+            candidate.write_text(source.replace(token, ""), encoding="utf-8")
+            result = _run(
+                "--claude-md",
+                str(claude_copy),
+                "--agents-md",
+                str(shared_copy),
+                "--size-cap",
+                str(NON_BINDING_SIZE_CAP),
+            )
+            assert result.returncode == 1, (
+                f"removing {owner} token {token!r} did not fail closed:\n"
+                f"{result.stdout}\n{result.stderr}"
+            )
+            assert token in result.stdout
 
+
+def test_import_and_duplicate_common_owners_fail_closed(tmp_path: Path) -> None:
+    shared_copy = tmp_path / "AGENTS.md"
+    claude_copy = tmp_path / "CLAUDE.md"
+    shared_copy.write_bytes(AGENTS_MD.read_bytes())
+    source = CLAUDE_MD.read_text(encoding="utf-8")
+    mutations = (
+        source.replace("@AGENTS.md", "", 1),
+        source + "\n@AGENTS.md\n",
+        source + "\n## Common skills\n\nDuplicated list.\n",
+        source + "\n## Bootstrap — duplicated shared rules\n",
+    )
+    for index, mutation in enumerate(mutations):
+        claude_copy.write_text(mutation, encoding="utf-8")
         result = _run(
-            "--claude-md", str(candidate), "--size-cap", str(NON_BINDING_SIZE_CAP)
+            "--claude-md",
+            str(claude_copy),
+            "--agents-md",
+            str(shared_copy),
+            "--size-cap",
+            str(NON_BINDING_SIZE_CAP),
         )
-
-        assert result.returncode == 1, (
-            f"removing {token!r} did not fail closed:\n{result.stdout}\n{result.stderr}"
-        )
-        assert token in result.stdout, (
-            f"validator did not name missing token {token!r}:\n{result.stdout}"
-        )
-
-
-def test_bootstrap_lines_are_byte_identical_to_the_accepted_baseline() -> None:
-    lines = CLAUDE_MD.read_bytes().splitlines(keepends=True)
-    bootstrap = b"".join(lines[6:68])
-    assert hashlib.sha256(bootstrap).hexdigest() == BOOTSTRAP_SHA256
+        assert result.returncode == 1, f"mutation {index} passed:\n{result.stdout}"
 
 
 def test_reference_payloads_are_hash_pinned_unique_and_absent_from_entrypoint() -> None:
@@ -288,17 +335,28 @@ def test_reference_payloads_are_hash_pinned_unique_and_absent_from_entrypoint() 
         assert source_raw.count(payload) == 0
 
 
-def test_required_anchors_and_exact_one_canonical_reference_pointer() -> None:
+def test_required_anchors_have_no_uninstalled_reference_dependency() -> None:
     text = CLAUDE_MD.read_text(encoding="utf-8", errors="strict")
-    pointer = (
-        "Full detail: [Claude Markdown structural-enforcement maintainer reference]"
-        "(../references-claude/claude-md-structural-enforcement.md)."
-    )
     for anchor in ("@AGENTS.md", "## Delegation rule", "## Publication safety scan"):
         assert text.splitlines().count(anchor) == 1
-    assert text.splitlines().count(pointer) == 1
-    assert text.count("Full detail:") == 1
+    assert "references-claude/" not in text
     assert REFERENCE.is_file()
+
+
+def test_stop_behavior_stays_the_accepted_concise_62_word_delta() -> None:
+    lines = CLAUDE_MD.read_text(encoding="utf-8").splitlines()
+    stop_lines = [line for line in lines if line.startswith("- **Stop ownership.**")]
+    assert len(stop_lines) == 1
+    stop = stop_lines[0]
+    assert len(stop.split()) == 62
+    for required in (
+        "Passive verdicts remain unchanged.",
+        "The first other valid root final receives one reconciliation pass",
+        "`stop_hook_active` allows the next Stop",
+        "even for a standalone answer or pause",
+        "cannot guarantee model obedience",
+    ):
+        assert required in stop
 
 
 def test_live_and_created_tracked_text_files_are_lf_only() -> None:

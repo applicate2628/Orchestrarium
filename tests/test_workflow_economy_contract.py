@@ -41,7 +41,6 @@ EXTERNAL_PROMPT_CONSUMERS = (
     "src.codex/skills/external-reviewer/SKILL.md",
     "src.codex/skills/review-loop/SKILL.md",
     "src.codex/skills/design-panel/SKILL.md",
-    "src.claude/CLAUDE.md",
     "src.claude/agents/contracts/external-dispatch.md",
     "src.claude/agents/consultant.md",
     "src.claude/agents/external-worker.md",
@@ -138,9 +137,11 @@ class TestWorkflowEconomyContract(unittest.TestCase):
             "use of that boundary; it does not require creating one."
         )
         seam_rule = (
-            "Extend an accepted existing seam, or create one only for a concrete current second consumer, "
-            "independently varying lifecycle/contract, or other accepted requirement; otherwise correct the "
-            "current owner directly."
+            "Keep changes local to the correct owner and extend an accepted seam when it fits. Create the "
+            "smallest stable seam when justified by an accepted current requirement, accepted declared future "
+            "direction, concrete second consumer, evidenced domain variability, or verified external-contract "
+            "evolution; a second consumer is evidence, not a prerequisite. Otherwise correct the current owner "
+            "directly."
         )
         for relative in ARCHITECT_PROJECTIONS:
             text = self._read(relative)
@@ -153,7 +154,14 @@ class TestWorkflowEconomyContract(unittest.TestCase):
             text = self._read(relative)
             self.assertIn(applicability_rule, text, relative)
             self.assertIn("A non-triggered law is not a finding.", text, relative)
-            self.assertIn("the Architect seam condition", text, relative)
+            self.assertIn(
+                "Verify that the change stays local to the correct owner, extends an accepted seam when suitable, "
+                "or creates the smallest stable seam only for an accepted current requirement, accepted declared "
+                "future direction, concrete second consumer, evidenced domain variability, or verified external-contract "
+                "evolution; a second consumer is evidence, not a prerequisite.",
+                text,
+                relative,
+            )
             self.assertIn("Otherwise, ordinary repo-standard run evidence suffices.", text, relative)
 
     def test_role_index_and_reference_provenance_remain_truthful(self) -> None:
@@ -186,8 +194,8 @@ class TestWorkflowEconomyContract(unittest.TestCase):
             "Re-review only open finding/changed delta",
             "new defect class/material upstream revision",
             "Consultant and `$external-brigade` default off",
-            "At a natural readiness or decision point",
-            "Grok is unavailable in 1.x",
+            "At readiness/decision",
+            "Grok unavailable in 1.x",
             "Quick-fix: no pre-implementation review ceremony",
             "one canonical artifact",
             "root: one concise ledger entry",
@@ -210,7 +218,7 @@ class TestWorkflowEconomyContract(unittest.TestCase):
             "actual run records source/config/env; mock/unit≠`Functional PASS`; scope=>new ID/gates; implementation cannot revise",
             "actual run records source/config/env; mock/unit≠`Functional PASS`",
             "never expands/freezes unverified/workaround output",
-            "accepted requirement/current second consumer/verified external-contract evolution)=>simplest one-owner stable/local seam",
+            "accepted requirement or declared future direction/evidenced domain variability/current second consumer/verified external-contract evolution)=>simplest one-owner stable/local seam",
             "architecture before implementation",
             "Needed designs/lifecycle; urgency no bypass; local correction=no ceremony",
             "confidentiality/integrity/authentication/authorization/trust/injection/untrusted-execution/data-loss/corruption/irreversible/publication=>fail closed",
@@ -342,7 +350,20 @@ class TestWorkflowEconomyContract(unittest.TestCase):
                 )
 
     def test_kimi_advisory_selection_is_optional_and_lead_selectable(self) -> None:
-        required = (
+        shared_required = (
+            "At readiness/decision",
+            "explicit Kimi choice by Lead",
+            "bounded independent read-only view",
+            "no Kimi call/skip otherwise",
+            "not `auto`/gate/counter",
+            "evidence for availability/quota",
+            "fixed wrapper `kimi-code/k3`",
+            "independent verification; nonauthorizing",
+        )
+        for fragment in shared_required:
+            self.assertIn(fragment, self._read(SPINE))
+
+        projection_required = (
             "At a natural readiness or decision point",
             "bounded independent read-only alternative view",
             "Lead considers an advisory route and may explicitly select Kimi without waiting for a user reminder",
@@ -352,10 +373,10 @@ class TestWorkflowEconomyContract(unittest.TestCase):
             "wrapper-only fixed `kimi-code/k3`",
             "independently verified, nonauthorizing",
         )
-        for relative in (SPINE, *KIMI_WORKFLOW_PROJECTIONS):
+        for relative in KIMI_WORKFLOW_PROJECTIONS:
             text = self._read(relative)
             with self.subTest(relative=relative):
-                for fragment in required:
+                for fragment in projection_required:
                     self.assertIn(fragment, text)
 
         selector = "Explicit user or Lead override may choose Kimi"
@@ -404,19 +425,16 @@ class TestWorkflowEconomyContract(unittest.TestCase):
                 self._assert_contract_marker("src.claude/agents/team-templates/review.json", template["notes"], marker)
 
     def test_provider_review_entrypoints_keep_objective_selection_and_triggered_risk_gates(self) -> None:
-        for relative in ("src.codex/AGENTS.codex.md", "src.claude/CLAUDE.md"):
-            rows = [line for line in self._read(relative).splitlines() if line.startswith("| `review` |")]
-            self.assertEqual(len(rows), 1, f"{relative} must contain exactly one review routing row")
-            row = rows[0]
-            for marker in ("objective-named reviewer", "evidence-triggered helpers", "when present"):
-                with self.subTest(relative=relative, marker=marker):
-                    self._assert_contract_marker(relative, row, marker)
-            for retired in (
-                "chains `$analyst` then `$qa-engineer` then reviewer(s)",
-                "analyst → QA → reviewers",
-            ):
-                with self.subTest(relative=relative, retired=retired):
-                    self._assert_retired_rule_absent(relative, row, retired)
+        codex = "src.codex/AGENTS.codex.md"
+        rows = [line for line in self._read(codex).splitlines() if line.startswith("| `review` |")]
+        self.assertEqual(len(rows), 1)
+        for marker in ("objective-named reviewer", "evidence-triggered helpers", "when present"):
+            self._assert_contract_marker(codex, rows[0], marker)
+
+        claude = self._read("src.claude/CLAUDE.md")
+        self.assertNotIn("| `review` |", claude)
+        self.assertIn(".claude/agents/team-templates/", claude)
+        self.assertIn("For `requiresLead: false` routes", claude)
 
         for relative, required_role in (
             ("src.claude/agents/team-templates/security-sensitive.json", "security-reviewer"),

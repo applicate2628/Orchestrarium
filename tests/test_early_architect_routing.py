@@ -38,7 +38,7 @@ class TestEarlyArchitectRouting(unittest.TestCase):
         )
         self.assertIn("architecture before implementation", spine)
         self.assertIn(
-            "accepted requirement/current second consumer/verified external-contract evolution",
+            "accepted requirement or declared future direction/evidenced domain variability/current second consumer/verified external-contract evolution",
             spine,
         )
         self.assertIn(

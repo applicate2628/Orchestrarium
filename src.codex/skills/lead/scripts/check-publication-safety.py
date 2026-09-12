@@ -188,8 +188,9 @@ _VALUE_RULES = tuple(
 _VALUE_PATTERNS = tuple(pattern for _family, pattern in _VALUE_RULES)
 _PUBLIC_TOKEN_CREDENTIAL_CUES = (
     "AUTH", "ACCESS", "API", "BEARER", "REFRESH", "SESSION", "OAUTH", "JWT",
-    "CREDENTIAL", "SECRET", "IDENTITY",
+    "CREDENTIAL", "SECRET", "IDENTITY", "CSRF", "PASSWORD",
 )
+_PUBLIC_TOKEN_AUTH_CUE_PREFIXES = ("AUTHENTICAT", "AUTHORIZ", "AUTHORIS")
 _IDENTIFIER_COMPONENT = re.compile(
     r"[A-Z]+(?=[A-Z][a-z]|[0-9]|$)|[A-Z]?[a-z]+|[A-Z]+|[0-9]+"
 )
@@ -1166,10 +1167,12 @@ def _is_annotated_public_token_match(
     identifier = (prefix.group(0) if prefix is not None else "") + line[
         match.start():match.start() + len("token")
     ]
-    components = {
-        component.group(0).upper()
-        for component in _IDENTIFIER_COMPONENT.finditer(identifier)
-    }
+    components = set()
+    for component_match in _IDENTIFIER_COMPONENT.finditer(identifier):
+        component = component_match.group(0).upper()
+        if component.startswith(_PUBLIC_TOKEN_AUTH_CUE_PREFIXES):
+            component = "AUTH"
+        components.add(component)
     if any(cue in components for cue in _PUBLIC_TOKEN_CREDENTIAL_CUES):
         return False
     return _PUBLIC_TOKEN_ANNOTATION_SUFFIX.fullmatch(

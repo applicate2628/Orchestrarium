@@ -11,13 +11,11 @@ Decision algorithm (fail-open on malformed envelopes and unreadable state):
   1. Read the Stop JSON envelope from stdin.
   2. If stop_hook_active is true -> exit 0 to avoid recursive Stop loops.
   3. Read last_assistant_message directly from the envelope.
-  4. If the message contains [acknowledge-passive-stop] -> exit 0.
-  5. If it is a user handoff phrase ("waiting for your response", etc.)
-     -> exit 0.
-  6. Detect passive polling with strong and weak phrase tiers.
-  7. If passive polling is detected, inspect only the current transcript turn
-     for a relevant state/time/status probe.
-  8. If no relevant probe is present, emit {"decision":"block","reason":"..."}.
+  4. Detect passive polling with strong and weak phrase tiers.
+  5. Within that passive branch, preserve the existing override, user-handoff,
+     current-turn probe, and passive denial behavior.
+  6. For every other valid root Stop, emit one pre-final reconciliation block.
+     The host's stop_hook_active re-entry flag permits the following Stop.
 """
 from __future__ import annotations
 
@@ -133,26 +131,29 @@ def main(config: StopRuntimeConfig) -> int:
         if not isinstance(last_message, str) or not last_message.strip():
             return 0
 
-        if OVERRIDE_MARKER_REGEX.search(last_message):
-            return 0
-        if USER_HANDOFF_REGEX.search(last_message):
-            return 0
-        if not _detect_passive_polling(last_message):
-            return 0
+        if _detect_passive_polling(last_message):
+            if OVERRIDE_MARKER_REGEX.search(last_message):
+                return 0
+            if USER_HANDOFF_REGEX.search(last_message):
+                return 0
 
-        transcript_path = envelope.get("transcript_path") or ""
-        if not transcript_path:
-            return 0
-        _last_user, current_turn_entries, current_turn_status = scan_current_turn_boundary(
-            str(transcript_path), byte_cap=CURRENT_TURN_BYTE_CAP
-        )
-        if current_turn_status != STATUS_FOUND:
-            return 0
+            transcript_path = envelope.get("transcript_path") or ""
+            if not transcript_path:
+                return 0
+            _last_user, current_turn_entries, current_turn_status = (
+                scan_current_turn_boundary(
+                    str(transcript_path), byte_cap=CURRENT_TURN_BYTE_CAP
+                )
+            )
+            if current_turn_status != STATUS_FOUND:
+                return 0
+            if _has_relevant_probe(current_turn_entries):
+                return 0
+            reason = _deny_reason()
+        else:
+            reason = _reconciliation_reason()
 
-        if _has_relevant_probe(current_turn_entries):
-            return 0
-
-        print(json.dumps({"decision": "block", "reason": _deny_reason()}))
+        print(json.dumps({"decision": "block", "reason": reason}))
         return 0
     except Exception:
         return 0
@@ -247,6 +248,18 @@ def _deny_reason() -> str:
         "(2) include [acknowledge-passive-stop] if this is an intentional "
         "handoff to the user; (3) invoke a concrete probe such as Bash: gh pr "
         "view, Bash: date, or Read on an output/log/task file."
+    )
+
+
+def _reconciliation_reason() -> str:
+    return (
+        "root Stop reconciliation: before finalizing, reconcile explicit task "
+        "state already in the conversation. Choose exactly one: standalone "
+        "question answered; user paused, cancelled, or reprioritized; blocked "
+        "on a needed user decision; requested task complete with evidence; or "
+        "work remains. On re-entry, finalize the first four. If work remains, "
+        "perform the next authorized action first. A passed slice or proposed "
+        "final is not completion."
     )
 
 

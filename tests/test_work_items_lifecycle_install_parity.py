@@ -184,6 +184,10 @@ class TestWorkItemsLifecycleInstallParity(unittest.TestCase):
         )
         for path in explicit_surfaces:
             text = path.read_text(encoding="utf-8")
+            if path == ROOT / "src.claude" / "CLAUDE.md":
+                text = (ROOT / "shared" / "AGENTS.shared.md").read_text(
+                    encoding="utf-8"
+                ) + "\n" + text
             with self.subTest(path=str(path.relative_to(ROOT))):
                 self.assertIn("bug-dispositions.json", text)
                 self.assertIn("terminalize", text)

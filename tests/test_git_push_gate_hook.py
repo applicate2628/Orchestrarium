@@ -1453,6 +1453,20 @@ def user(text: str) -> dict:
     return {"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": text}]}}
 
 
+def question_reply(answer: str, *, question: str = "Approve this PR?") -> dict:
+    """Synthetic exact structured UI user-reply carrier."""
+    payload = [{
+        "questionItemId": '["request_user_input_async","call_synthetic",0]',
+        "question": question,
+        "answer": answer,
+    }]
+    return user(
+        "<send_user_message_question_reply>\n"
+        + json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+        + "\n</send_user_message_question_reply>"
+    )
+
+
 def tool_result(text: str, tool_id: str = "toolu_default", *, is_error: object = _MISSING) -> dict:
     item = {"type": "tool_result", "tool_use_id": tool_id, "content": text}
     if is_error is not _MISSING:
@@ -4924,6 +4938,118 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
                     )
                 )
 
+    def test_structured_user_reply_uses_only_answer_for_generic_approval(self) -> None:
+        """An echoed question must not convert a negative answer into consent."""
+        for script in (CANONICAL_HOOK, *HOOKS):
+            with self.subTest(script=script):
+                denied, _observed = self._run_module(
+                    script,
+                    [question_reply("NO", question="Use [approve-publication]?")],
+                    self._literal_command(script),
+                )
+                self.assertTrue(denies_text(denied), denied)
+
+                for answer in (
+                    "[approve-pr-publication pr=https://github.com/acme/project/pull/7]",
+                    "`[approve-pr-publication pr=https://github.com/acme/project/pull/7]`",
+                    "**[approve-pr-publication pr=https://github.com/acme/project/pull/7]**",
+                ):
+                    with self.subTest(script=script, answer=answer):
+                        allowed, observed = self._run_module(
+                            script, [question_reply(answer)], self._literal_command(script)
+                        )
+                        self.assertFalse(denies_text(allowed), allowed)
+                        self.assertTrue(any(
+                            argv[1:4] == ["pr", "view", "https://github.com/acme/project/pull/7"]
+                            for argv in observed
+                        ))
+
+    def test_structured_user_reply_rejects_malformed_and_multi_question_carriers(self) -> None:
+        malformed = user(
+            "<send_user_message_question_reply>\n"
+            '[{"questionItemId":"id","question":"[approve-publication]","answer":"YES","extra":"x"}]\n'
+            "</send_user_message_question_reply>"
+        )
+        multiple = user(
+            "<send_user_message_question_reply>\n"
+            '[{"questionItemId":"id-1","question":"[approve-publication]","answer":"YES"},'
+            '{"questionItemId":"id-2","question":"[approve-publication]","answer":"YES"}]\n'
+            "</send_user_message_question_reply>"
+        )
+        for script in (CANONICAL_HOOK, *HOOKS):
+            for entry in (malformed, multiple):
+                with self.subTest(script=script, entry=entry):
+                    snapshots: list[dict] = []
+                    stdout, observed = self._run_module(
+                        script, [entry], self._literal_command(script),
+                        sidecar_snapshots=snapshots,
+                    )
+                    self.assertTrue(denies_text(stdout), stdout)
+                    self.assertEqual(snapshots, [])
+                    self.assertEqual(observed, [])
+
+    def test_structured_targeted_reply_rejects_invalid_url(self) -> None:
+        for script in (CANONICAL_HOOK, *HOOKS):
+            with self.subTest(script=script):
+                snapshots: list[dict] = []
+                stdout, observed = self._run_module(
+                    script,
+                    [question_reply(
+                        "[approve-publication pr=https://github.com/acme/project/pull/not-a-number]"
+                    )],
+                    self._literal_command(script), sidecar_snapshots=snapshots,
+                )
+                self.assertTrue(denies_text(stdout), stdout)
+                self.assertEqual(snapshots, [])
+                self.assertEqual(observed, [])
+
+    def test_historical_short_uses_only_latest_unrevoked_scoped_grant(self) -> None:
+        short = "[approve-pr-publication]"
+        expected = "https://github.com/acme/project/pull/7"
+        for script in (CANONICAL_HOOK, *HOOKS):
+            module = _load_gate_module(script, f"historical_short_{script.parent.parent.name}")
+            with self.subTest(script=script, state="retained"):
+                state, intent = module._derive_pr_grant(
+                    [user(self.GRANT), user(short)], str(REPO_ROOT.resolve())
+                )
+                self.assertEqual(state, "simple")
+                self.assertEqual(intent.prior_scoped_grant.url, expected)
+            with self.subTest(script=script, state="revoke-clears"):
+                state, intent = module._derive_pr_grant(
+                    [user(self.GRANT), user("[revoke-pr-publication:v1]"), user(short)],
+                    str(REPO_ROOT.resolve()),
+                )
+                self.assertEqual(state, "simple")
+                self.assertIsNone(intent.prior_scoped_grant)
+
+            snapshots: list[dict] = []
+            allowed, _observed = self._run_module(
+                script,
+                [user(self.GRANT), user(short), user("continue")],
+                self._literal_command(script), sidecar_snapshots=snapshots,
+            )
+            self.assertFalse(denies_text(allowed), allowed)
+            self.assertEqual([snapshot["state"] for snapshot in snapshots], ["bound"])
+
+            revoked, _observed = self._run_module(
+                script,
+                [user(self.GRANT), user("[revoke-pr-publication:v1]"), user(short), user("continue")],
+                self._literal_command(script),
+            )
+            self.assertTrue(denies_text(revoked), revoked)
+
+    def test_historical_short_without_scoped_grant_keeps_sidecar_absent(self) -> None:
+        for script in (CANONICAL_HOOK, *HOOKS):
+            with self.subTest(script=script):
+                snapshots: list[dict] = []
+                stdout, observed = self._run_module(
+                    script,
+                    [user("[approve-pr-publication]"), user("continue")],
+                    self._literal_command(script), sidecar_snapshots=snapshots,
+                )
+                self.assertTrue(denies_text(stdout), stdout)
+                self.assertEqual(snapshots, [])
+
     def test_simple_marker_display_forms_bind_from_pending_repository(self) -> None:
         forms = (
             "[approve-pr-publication]",
@@ -5555,7 +5681,7 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
             (
                 [user(self.GRANT), assistant("a"), user("[revoke-pr-publication:v1]"),
                  assistant("b"), user("continue")],
-                "PRG-TRANSCRIPT-HISTORY-LIMIT",
+                "generic-denial",
                 False,
             ),
             (
@@ -5585,6 +5711,10 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
                         self.assertTrue(
                             any(argv[1:3] == ["pr", "view"] for argv in observed)
                         )
+                    elif failure_id == "generic-denial":
+                        self.assertTrue(denies_text(stdout), stdout)
+                        self.assertNotIn("PRG-TRANSCRIPT-HISTORY-LIMIT", stdout)
+                        self.assertEqual(observed, [])
                     else:
                         self.assertIn(failure_id, stdout)
                         self.assertEqual(observed, [])
@@ -5651,7 +5781,8 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
                     self._literal_command(script),
                     history_byte_cap=1024,
                 )
-                self.assertIn("PRG-TRANSCRIPT-HISTORY-LIMIT", stdout)
+                self.assertTrue(denies_text(stdout), stdout)
+                self.assertNotIn("PRG-TRANSCRIPT-HISTORY-LIMIT", stdout)
                 self.assertNotIn("PRG-TRANSCRIPT-UNAVAILABLE", stdout)
                 self.assertEqual(observed, [])
 
@@ -5700,7 +5831,7 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
 
     def test_oversized_history_revocation_malformed_and_absent_deny(self) -> None:
         cases = (
-            ([assistant("x" * 2048), user(self.GRANT), user("[revoke-pr-publication:v1]")], "PRG-TRANSCRIPT-HISTORY-LIMIT"),
+            ([assistant("x" * 2048), user(self.GRANT), user("[revoke-pr-publication:v1]")], "generic-denial"),
             ([assistant("x" * 2048), user(self.GRANT), user("[approve-pr-publication:v1 broken]")], "PRG-AUTH-MALFORMED"),
             ([assistant("x" * 2048), user("continue")], "PRG-TRANSCRIPT-HISTORY-LIMIT"),
         )
@@ -5713,7 +5844,11 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
                         self._literal_command(script),
                         history_byte_cap=1024,
                     )
-                    self.assertIn(failure_id, stdout)
+                    if failure_id == "generic-denial":
+                        self.assertTrue(denies_text(stdout), stdout)
+                        self.assertNotIn("PRG-TRANSCRIPT-HISTORY-LIMIT", stdout)
+                    else:
+                        self.assertIn(failure_id, stdout)
                     self.assertEqual(observed, [])
 
     def test_oversized_history_rejects_assistant_and_tool_injection(self) -> None:
