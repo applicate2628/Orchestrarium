@@ -4986,6 +4986,60 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
             )
             self.assertIn("PRG-COMMAND-SHAPE", legacy)
 
+    def test_command_shape_denial_reports_only_finite_route_projection(self) -> None:
+        canary = "PRIVATE_COMMAND_CANARY_9017"
+        simple, _observed = self._run_module(
+            CANONICAL_HOOK,
+            [user("[approve-pr-publication]")],
+            "git push origin HEAD:refs/heads/feature; echo " + canary,
+        )
+        self.assertIn("PRG-COMMAND-SHAPE", simple)
+        self.assertIn("Command diagnostics: route=simple;", simple)
+        self.assertIn("dialect=powershell;", simple)
+        self.assertIn("strict=noncanonical;", simple)
+        self.assertIn("stage=projection.", simple)
+        self.assertNotIn(canary, simple)
+
+        legacy, _observed = self._run_module(
+            CANONICAL_HOOK,
+            [user(self.GRANT)],
+            "git push origin HEAD:refs/heads/feature",
+        )
+        self.assertIn("Command diagnostics: route=legacy;", legacy)
+        self.assertIn("stage=legacy-strict.", legacy)
+        self.assertNotIn(canary, legacy)
+
+    def test_simple_codex_accepts_exact_posix_host_projection_on_windows(self) -> None:
+        script = HOOKS[1]
+        root = str(REPO_ROOT.resolve())
+        refspec = "HEAD:refs/heads/feature"
+        for command in (
+            f"git push origin {refspec}",
+            f"git -C '{root}' push origin {refspec}",
+        ):
+            with self.subTest(command=command):
+                stdout, _observed = self._run_module(
+                    script,
+                    [user("[approve-pr-publication]")],
+                    command,
+                    tool_name="Bash",
+                )
+                self.assertFalse(denies_text(stdout), stdout)
+
+        compound, _observed = self._run_module(
+            script,
+            [user("[approve-pr-publication]")],
+            f"git push origin {refspec}; echo ambiguous",
+            tool_name="Bash",
+        )
+        self.assertTrue(denies_text(compound), compound)
+
+        legacy, _observed = self._run_module(
+            script, [user(self.GRANT)], f"git push origin {refspec}",
+            tool_name="Bash",
+        )
+        self.assertIn("PRG-COMMAND-SHAPE", legacy)
+
     def test_simple_marker_negative_forms_never_create_state(self) -> None:
         forms = (
             "please use [approve-pr-publication]",

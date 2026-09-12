@@ -3218,13 +3218,23 @@ def _evaluate_active_pr_route(
     repository_workdir_source: str,
 ) -> bool:
     try:
-        prepared = _prepare_pr_push(
-            command, dialect, parsed, repository_workdir,
-            repository_workdir_source,
-        )
-        verified = _verify_pr_oracle(
-            grant, prepared.literal, prepared.repository_workdir
-        )
+        try:
+            prepared = _prepare_pr_push(
+                command, dialect, parsed, repository_workdir,
+                repository_workdir_source,
+            )
+        except PrRouteDenied as exc:
+            if exc.failure_id == "PRG-COMMAND-SHAPE":
+                _raise_command_shape("legacy", dialect, parsed, "legacy-strict")
+            raise
+        try:
+            verified = _verify_pr_oracle(
+                grant, prepared.literal, prepared.repository_workdir
+            )
+        except PrRouteDenied as exc:
+            if exc.failure_id == "PRG-COMMAND-SHAPE":
+                _raise_command_shape("legacy", dialect, parsed, "oracle")
+            raise
         binding = PushScanBinding(
             "strict", verified.target.remote, verified.target.destination,
             verified.local_head, verified.local_head,
@@ -3274,31 +3284,55 @@ def _prepare_pr_push(
     return PreparedPrPush(literal, repository_workdir, git_exe)
 
 
+def _raise_command_shape(
+    route: str,
+    dialect: str,
+    parsed: ShellParseResult,
+    stage: str,
+) -> None:
+    effective = parsed.effective_publications
+    direct = (
+        len(effective.records) == 1
+        and effective.records[0].kind == "DIRECT"
+    )
+    safe_dialect = dialect if dialect in {"powershell", "posix", "unsupported"} else "other"
+    strict = parsed.strict_projection.status
+    if strict not in {"canonical", "noncanonical"}:
+        strict = "other"
+    allowed_stages = {
+        "projection", "command-context", "git-global", "target",
+        "executable", "dialect", "root", "oracle", "legacy-strict",
+    }
+    safe_stage = stage if stage in allowed_stages else "projection"
+    error = PrRouteDenied("PRG-COMMAND-SHAPE")
+    error.command_shape_diagnostic = (
+        route if route in {"simple", "legacy"} else "legacy",
+        safe_dialect,
+        "true" if direct else "false",
+        strict,
+        safe_stage,
+    )
+    raise error
+
+
 def _prepare_simple_pr_push(
     dialect: str,
     parsed: ShellParseResult,
     repository_workdir: str,
     repository_workdir_source: str,
 ) -> PreparedPrPush:
-    if (
-        parsed.strict_projection.status == "canonical"
-        and parsed.strict_projection.argv
-        and Path(parsed.strict_projection.argv[0]).is_absolute()
-    ):
-        return _prepare_pr_push(
-            parsed.raw_command, dialect, parsed, repository_workdir,
-            repository_workdir_source,
-        )
     effective = parsed.effective_publications
     if (
-        not effective.exact_complete
+        parsed.dialect != dialect
+        or dialect not in {"posix", "powershell"}
+        or not effective.exact_complete
         or len(effective.records) != 1
         or effective.records[0].kind != "DIRECT"
         or len(parsed.commands) != 1
         or len(parsed.pushes) != 1
         or parsed.normalizations
     ):
-        raise PrRouteDenied("PRG-COMMAND-SHAPE")
+        _raise_command_shape("simple", dialect, parsed, "projection")
     push = effective.records[0].push
     command = push.command
     if (
@@ -3325,11 +3359,11 @@ def _prepare_simple_pr_push(
         or len(push.positionals) != 2
         or push.repository_context not in {"ambient", "redirected"}
     ):
-        raise PrRouteDenied("PRG-COMMAND-SHAPE")
+        _raise_command_shape("simple", dialect, parsed, "command-context")
     global_options = tuple(push.git_global_options)
     if global_options:
         if len(global_options) != 2 or global_options[0] != "-C":
-            raise PrRouteDenied("PRG-COMMAND-SHAPE")
+            _raise_command_shape("simple", dialect, parsed, "git-global")
         command_root = _normalize_repository_workdir(global_options[1])
         if repository_workdir_source == "tool":
             if _normalize_repository_workdir(repository_workdir) != command_root:
@@ -3339,17 +3373,17 @@ def _prepare_simple_pr_push(
         repository_workdir = command_root
     else:
         if push.repository_context != "ambient":
-            raise PrRouteDenied("PRG-COMMAND-SHAPE")
+            _raise_command_shape("simple", dialect, parsed, "command-context")
         repository_workdir = _normalize_repository_workdir(repository_workdir)
     remote, refspec = push.positionals
     if not REMOTE_NAME_REGEX.fullmatch(remote):
-        raise PrRouteDenied("PRG-COMMAND-SHAPE")
+        _raise_command_shape("simple", dialect, parsed, "target")
     prefix = "HEAD:refs/heads/"
     if not refspec.startswith(prefix):
-        raise PrRouteDenied("PRG-COMMAND-SHAPE")
+        _raise_command_shape("simple", dialect, parsed, "target")
     head_ref = refspec[len(prefix):]
     if not _portable_pr_head_ref(head_ref):
-        raise PrRouteDenied("PRG-COMMAND-SHAPE")
+        _raise_command_shape("simple", dialect, parsed, "target")
     git_exe = _resolve_executable("git", repository_workdir)
     if git_exe is None:
         raise PrRouteDenied("PRG-REMOTE-MISMATCH")
@@ -3361,14 +3395,25 @@ def _prepare_simple_pr_push(
     }:
         literal_executable = git_exe
     else:
-        raise PrRouteDenied("PRG-COMMAND-SHAPE")
+        _raise_command_shape("simple", dialect, parsed, "executable")
+    prepared_dialect = dialect
     literal = LiteralPushCommand(
-        _pr_command_dialect(dialect), literal_executable, remote, refspec,
+        prepared_dialect, literal_executable, remote, refspec,
         PushTarget(remote, f"refs/heads/{head_ref}", head_ref),
         repository_workdir if global_options else None,
     )
-    literal = _bind_pr_literal_executable(literal, git_exe)
-    repository_workdir = _prove_repository_root(repository_workdir, git_exe)
+    try:
+        literal = _bind_pr_literal_executable(literal, git_exe)
+    except PrRouteDenied as exc:
+        if exc.failure_id == "PRG-COMMAND-SHAPE":
+            _raise_command_shape("simple", dialect, parsed, "executable")
+        raise
+    try:
+        repository_workdir = _prove_repository_root(repository_workdir, git_exe)
+    except PrRouteDenied as exc:
+        if exc.failure_id == "PRG-COMMAND-SHAPE":
+            _raise_command_shape("simple", dialect, parsed, "root")
+        raise
     return PreparedPrPush(literal, repository_workdir, git_exe)
 
 
@@ -3459,9 +3504,16 @@ def _evaluate_simple_pr_route(
         if not current_marker:
             raise PrRouteDenied("PRG-BINDING-DRIFT")
         grant, pr_id, head_repository_id = _discover_unique_open_pr(prepared)
-        verified = _verify_pr_oracle(
-            grant, prepared.literal, prepared.repository_workdir
-        )
+        try:
+            verified = _verify_pr_oracle(
+                grant, prepared.literal, prepared.repository_workdir
+            )
+        except PrRouteDenied as exc:
+            if exc.failure_id == "PRG-COMMAND-SHAPE":
+                _raise_command_shape(
+                    "simple", preflight.dialect, preflight.parsed, "oracle"
+                )
+            raise
         if (
             verified.pr_id != pr_id
             or verified.head_repository_id != head_repository_id
@@ -3481,9 +3533,16 @@ def _evaluate_simple_pr_route(
             match.group("url"), match.group("owner"), match.group("repo"),
             int(match.group("number")),
         )
-        verified = _verify_pr_oracle(
-            grant, prepared.literal, prepared.repository_workdir
-        )
+        try:
+            verified = _verify_pr_oracle(
+                grant, prepared.literal, prepared.repository_workdir
+            )
+        except PrRouteDenied as exc:
+            if exc.failure_id == "PRG-COMMAND-SHAPE":
+                _raise_command_shape(
+                    "simple", preflight.dialect, preflight.parsed, "oracle"
+                )
+            raise
         if (
             verified.pr_id != existing.pr_id
             or verified.head_repository_id != existing.head_repository_id
@@ -3626,6 +3685,27 @@ def _format_transcript_diagnostic(diagnostic: TranscriptDiagnostic) -> str:
     )
 
 
+def _format_command_shape_diagnostic(value: object) -> str:
+    if (
+        not isinstance(value, tuple)
+        or len(value) != 5
+        or value[0] not in {"simple", "legacy"}
+        or value[1] not in {"powershell", "posix", "unsupported", "other"}
+        or value[2] not in {"true", "false"}
+        or value[3] not in {"canonical", "noncanonical", "other"}
+        or value[4] not in {
+            "projection", "command-context", "git-global", "target",
+            "executable", "dialect", "root", "oracle", "legacy-strict",
+        }
+    ):
+        return ""
+    return (
+        "Command diagnostics: "
+        f"route={value[0]}; dialect={value[1]}; direct={value[2]}; "
+        f"strict={value[3]}; stage={value[4]}."
+    )
+
+
 def _format_gate_denial(failure_id: str) -> str:
     if failure_id not in SCAN_DENIAL_REASONS:
         failure_id = "PRG-INTERNAL"
@@ -3651,6 +3731,7 @@ def compose_gate_result(preflight: PreflightResult) -> int:
 
     failure_id: str | None = result.failure_id
     transcript_diagnostic = result.transcript_diagnostic
+    command_shape_diagnostic = None
     if result.continuation == "EVALUATE_HEAVY":
         try:
             if evaluate_heavy(result):
@@ -3658,6 +3739,9 @@ def compose_gate_result(preflight: PreflightResult) -> int:
         except PrRouteDenied as exc:
             failure_id = exc.failure_id
             transcript_diagnostic = exc.transcript_diagnostic
+            command_shape_diagnostic = getattr(
+                exc, "command_shape_diagnostic", None
+            )
         except Exception:
             pass
 
@@ -3713,6 +3797,12 @@ def compose_gate_result(preflight: PreflightResult) -> int:
                 reason += " " + _format_transcript_diagnostic(
                     transcript_diagnostic
                 )
+            if failure_id == "PRG-COMMAND-SHAPE":
+                detail = _format_command_shape_diagnostic(
+                    command_shape_diagnostic
+                )
+                if detail:
+                    reason += " " + detail
     else:
         reason = (
         "Git-push publication gate: this Bash command runs `git push` (an "
