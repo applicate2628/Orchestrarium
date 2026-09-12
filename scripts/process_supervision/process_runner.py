@@ -543,6 +543,7 @@ class ProcessRequestV1:
 class ProcessDialogueV1:
     protocol_id: str
     handler: Callable[["ProcessDialogueChannelV1"], None]
+    continue_after_stdout_capture_limit: bool = False
 
 
 def _hook_script_binding(path: Path) -> dict[str, object]:
@@ -2759,9 +2760,10 @@ def _result_from_parts(
     resources_closed: bool,
     poisoned: bool,
     cleanup_issues: Sequence[str],
+    capture_limit_is_failure: bool = True,
 ) -> ProcessResultV1:
     streams = capture.snapshot()
-    if failure_id is None and (
+    if failure_id is None and capture_limit_is_failure and (
         capture.limit_crossed or any(stream.truncated for stream in streams.values())
     ):
         failure_id = "PSV1-CAPTURE-LIMIT"
@@ -3195,7 +3197,12 @@ class _WindowsBackendV1:
                 wait_failed = wait == self.api.INFINITE
                 if wait_failed:
                     failure_id, stage = "PSV1-INTERNAL", "execution"
-                elif capture.limit_crossed:
+                elif capture.limit_crossed and not (
+                    dialogue is not None
+                    and dialogue.continue_after_stdout_capture_limit
+                    and capture.snapshot()["stdout"].truncated
+                    and not capture.snapshot()["stderr"].truncated
+                ):
                     failure_id, stage = "PSV1-CAPTURE-LIMIT", "capture-limit"
                 elif capture.io_failed or "PSV1-CAPTURE-IO" in issues:
                     failure_id, stage = "PSV1-CAPTURE-IO", "execution"
@@ -3323,6 +3330,13 @@ class _WindowsBackendV1:
         resources_closed = not any(handles.values()) and not issues
         if settlement == "AMBIGUOUS" and direct_reaped and ownership_confirmed and not failure_id:
             failure_id, stage = "PSV1-TREE-SETTLEMENT", "tree-settlement"
+        final_streams = capture.snapshot()
+        continued_stdout_capture_limit = (
+            dialogue is not None
+            and dialogue.continue_after_stdout_capture_limit
+            and final_streams["stdout"].truncated
+            and not final_streams["stderr"].truncated
+        )
         return _result_from_parts(
             request, started,
             executable_identity_sha256=validated_cwd.executable_identity_sha256,
@@ -3333,6 +3347,7 @@ class _WindowsBackendV1:
             direct_reaped=direct_reaped, primary_thread_closed=primary_thread_closed,
             job_handle_closed=job_handle_closed, resources_closed=resources_closed,
             poisoned=self.coordinator.poisoned, cleanup_issues=issues,
+            capture_limit_is_failure=not continued_stdout_capture_limit,
         )
 
 
@@ -3636,6 +3651,7 @@ class ProcessRunnerV1:
                 type(dialogue) is not ProcessDialogueV1
                 or dialogue.protocol_id != KimiWindowsProfileV1.profile_id
                 or not callable(dialogue.handler)
+                or type(dialogue.continue_after_stdout_capture_limit) is not bool
                 or request.windows_argv_profile_id
                 != KimiWindowsProfileV1.profile_id
                 or request.stdin_bytes is not None

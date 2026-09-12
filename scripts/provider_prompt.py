@@ -67,16 +67,6 @@ KIMI_AGENT_TERMINAL_INSTRUCTION = (
     + ", ".join(KIMI_GATE_PREFIX + verdict for verdict in KIMI_TERMINAL_VERDICTS)
     + ". Do not emit any other gate-like line.\n"
 ).encode("utf-8")
-KIMI_ACP_AGENT_PROFILE_V1 = (
-    b"---\n"
-    b"name: agent\n"
-    b"description: Orchestrarium finite ACP result agent\n"
-    b"override: true\n"
-    b"tools: []\n"
-    b"subagents: []\n"
-    b"---\n\n"
-    b"${base_prompt}\n"
-)
 KIMI_GATE_LIKE = re.compile(r"^[ \t]*GATE[ \t]*:")
 KIMI_ACP_PROTOCOL_VERSION = 1
 KIMI_ACP_LINE_MAX_BYTES = 1024 * 1024
@@ -88,6 +78,14 @@ KIMI_ACP_CONTROL_UPDATES = frozenset(
         "session_info_update",
         "usage_update",
     }
+)
+KIMI_ACP_PERMISSION_KINDS = {
+    "reject": "reject_once",
+    "approve_once": "allow_once",
+    "approve_always": "allow_always",
+}
+KIMI_ACP_TOOL_STATUSES = frozenset(
+    {"pending", "in_progress", "completed", "failed"}
 )
 INVALID_SLUG = re.compile(r'[\\/:\*\?"<>\|\x00]')
 RESULT_MAX_BYTES_DEFAULT = 1024 * 1024
@@ -238,7 +236,245 @@ class Control:
     task_class: str | None = None
     role: str | None = None
     live_root: Path | None = None
+    kimi_capabilities_file: Path | None = None
+    kimi_capabilities: "KimiCapabilitySelectionV1" = field(
+        default_factory=lambda: KimiCapabilitySelectionV1()
+    )
     provider_flags: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class KimiNameValueV1:
+    name: str
+    value: str
+
+    def wire(self) -> dict[str, str]:
+        return {"name": self.name, "value": self.value}
+
+
+@dataclass(frozen=True)
+class KimiMcpServerV1:
+    name: str
+    transport: str | None = None
+    command: str | None = None
+    args: tuple[str, ...] = ()
+    env: tuple[KimiNameValueV1, ...] = ()
+    url: str | None = None
+    headers: tuple[KimiNameValueV1, ...] = ()
+
+    def wire(self) -> dict[str, object]:
+        if self.transport is None:
+            return {
+                "name": self.name,
+                "command": self.command,
+                "args": list(self.args),
+                "env": [entry.wire() for entry in self.env],
+            }
+        return {
+            "name": self.name,
+            "type": self.transport,
+            "url": self.url,
+            "headers": [entry.wire() for entry in self.headers],
+        }
+
+
+@dataclass(frozen=True)
+class KimiCapabilitySelectionV1:
+    tools: tuple[str, ...] = ()
+    mcp_servers: tuple[KimiMcpServerV1, ...] = ()
+    subagents: tuple[str, ...] = ()
+    permission: str = "reject"
+    cwd: str | None = None
+
+
+def _kimi_capability_name(value: object) -> str:
+    if (
+        not isinstance(value, str)
+        or not value
+        or value != value.strip()
+        or any(character.isspace() or ord(character) < 32 or ord(character) == 127 for character in value)
+    ):
+        raise ValueError("E_KIMI_CAPABILITIES_INVALID")
+    return value
+
+
+def _kimi_name_values(value: object) -> tuple[KimiNameValueV1, ...]:
+    if not isinstance(value, list):
+        raise ValueError("E_KIMI_CAPABILITIES_INVALID")
+    result: list[KimiNameValueV1] = []
+    names: set[str] = set()
+    for entry in value:
+        if not isinstance(entry, dict) or set(entry) != {"name", "value"}:
+            raise ValueError("E_KIMI_CAPABILITIES_INVALID")
+        name = _kimi_capability_name(entry.get("name"))
+        item_value = entry.get("value")
+        if not isinstance(item_value, str) or name in names:
+            raise ValueError("E_KIMI_CAPABILITIES_INVALID")
+        names.add(name)
+        result.append(KimiNameValueV1(name, item_value))
+    return tuple(result)
+
+
+def _kimi_unique_name_array(value: object) -> tuple[str, ...]:
+    if not isinstance(value, list):
+        raise ValueError("E_KIMI_CAPABILITIES_INVALID")
+    result: list[str] = []
+    seen: set[str] = set()
+    for item in value:
+        selected = _kimi_capability_name(item)
+        if selected in seen:
+            raise ValueError("E_KIMI_CAPABILITIES_INVALID")
+        seen.add(selected)
+        result.append(selected)
+    return tuple(result)
+
+
+def _kimi_argument_array(value: object) -> tuple[str, ...]:
+    if not isinstance(value, list) or any(
+        not isinstance(item, str) or "\x00" in item for item in value
+    ):
+        raise ValueError("E_KIMI_CAPABILITIES_INVALID")
+    return tuple(value)
+
+
+def _kimi_mcp_servers(value: object) -> tuple[KimiMcpServerV1, ...]:
+    if not isinstance(value, list):
+        raise ValueError("E_KIMI_CAPABILITIES_INVALID")
+    result: list[KimiMcpServerV1] = []
+    names: set[str] = set()
+    for entry in value:
+        if not isinstance(entry, dict):
+            raise ValueError("E_KIMI_CAPABILITIES_INVALID")
+        name = _kimi_capability_name(entry.get("name"))
+        if name in names:
+            raise ValueError("E_KIMI_CAPABILITIES_INVALID")
+        names.add(name)
+        if "type" not in entry:
+            if set(entry) != {"name", "command", "args", "env"}:
+                raise ValueError("E_KIMI_CAPABILITIES_INVALID")
+            command = entry.get("command")
+            if not isinstance(command, str) or not command:
+                raise ValueError("E_KIMI_CAPABILITIES_INVALID")
+            args = _kimi_argument_array(entry["args"])
+            env = _kimi_name_values(entry["env"])
+            result.append(
+                KimiMcpServerV1(name=name, command=command, args=args, env=env)
+            )
+            continue
+        if set(entry) != {"name", "type", "url", "headers"}:
+            raise ValueError("E_KIMI_CAPABILITIES_INVALID")
+        transport = entry.get("type")
+        url = entry.get("url")
+        if transport not in {"http", "sse"} or not isinstance(url, str) or not url:
+            raise ValueError("E_KIMI_CAPABILITIES_INVALID")
+        headers = _kimi_name_values(entry["headers"])
+        result.append(
+            KimiMcpServerV1(
+                name=name,
+                transport=str(transport),
+                url=url,
+                headers=headers,
+            )
+        )
+    return tuple(result)
+
+
+def read_kimi_capability_selection(path: Path) -> KimiCapabilitySelectionV1:
+    """Read one identity-bound Kimi capability file without displaying its values."""
+
+    try:
+        candidate = Path(os.path.abspath(path))
+        validate_no_reparse_components(candidate)
+        before = candidate.lstat()
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or stat.S_ISLNK(before.st_mode)
+            or _metadata_is_reparse(before)
+        ):
+            raise ValueError("file type")
+        descriptor = os.open(
+            candidate,
+            os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0),
+        )
+        with os.fdopen(descriptor, "rb") as stream:
+            opened = os.fstat(stream.fileno())
+            if (opened.st_dev, opened.st_ino, opened.st_mode) != (
+                before.st_dev,
+                before.st_ino,
+                before.st_mode,
+            ):
+                raise ValueError("identity")
+            raw = stream.read(PROMPT_SNAPSHOT_MAX_BYTES + 1)
+        if len(raw) > PROMPT_SNAPSHOT_MAX_BYTES:
+            raise ValueError("size")
+
+        def unique(pairs):
+            document: dict[str, object] = {}
+            for key, value in pairs:
+                if key in document:
+                    raise ValueError("duplicate")
+                document[key] = value
+            return document
+
+        document = json.loads(
+            raw.decode("utf-8", errors="strict"), object_pairs_hook=unique
+        )
+        required = {"v", "tools", "mcpServers", "subagents", "permission", "cwd"}
+        if (
+            not isinstance(document, dict)
+            or set(document) != required
+            or type(document.get("v")) is not int
+            or document.get("v") != 1
+        ):
+            raise ValueError("shape")
+        tools = _kimi_unique_name_array(document.get("tools"))
+        subagents = _kimi_unique_name_array(document.get("subagents"))
+        has_dispatch = "Agent" in tools or "AgentSwarm" in tools
+        if has_dispatch != bool(subagents):
+            raise ValueError("child gate")
+        permission = document.get("permission")
+        if permission not in {"reject", "approve_once", "approve_always"}:
+            raise ValueError("permission")
+        cwd_value = document.get("cwd")
+        if cwd_value is None:
+            selected_cwd = None
+        elif isinstance(cwd_value, str) and Path(cwd_value).is_absolute():
+            selected_path = Path(os.path.abspath(cwd_value))
+            if not selected_path.is_dir():
+                raise ValueError("cwd")
+            selected_cwd = str(selected_path)
+        else:
+            raise ValueError("cwd")
+        return KimiCapabilitySelectionV1(
+            tools=tools,
+            mcp_servers=_kimi_mcp_servers(document.get("mcpServers")),
+            subagents=subagents,
+            permission=str(permission),
+            cwd=selected_cwd,
+        )
+    except Exception as exc:
+        if isinstance(exc, ValueError) and str(exc) == "E_KIMI_CAPABILITIES_INVALID":
+            raise
+        raise ValueError("E_KIMI_CAPABILITIES_INVALID") from exc
+
+
+def _kimi_agent_profile(selection: KimiCapabilitySelectionV1) -> bytes:
+    tools = json.dumps(
+        list(selection.tools), ensure_ascii=True, separators=(",", ":")
+    ).encode("ascii")
+    subagents = json.dumps(
+        list(selection.subagents), ensure_ascii=True, separators=(",", ":")
+    ).encode("ascii")
+    return (
+        b"---\n"
+        b"name: agent\n"
+        b"description: Orchestrarium finite ACP result agent\n"
+        b"override: true\n"
+        b"tools: " + tools + b"\n"
+        b"subagents: " + subagents + b"\n"
+        b"---\n\n"
+        b"${base_prompt}\n"
+    )
 
 
 @dataclass
@@ -247,12 +483,27 @@ class KimiAcpOneShotV1:
 
     prompt_bytes: bytes
     cwd: str
+    mcp_servers: tuple[KimiMcpServerV1, ...] = ()
+    permission: str = "reject"
+    result_max_bytes: int = RESULT_MAX_BYTES_DEFAULT
     result_bytes: bytes = field(default=b"", init=False)
     session_id: str | None = field(default=None, init=False)
     _next_id: int = field(default=1, init=False)
+    _tool_calls: dict[str, dict[str, str]] = field(default_factory=dict, init=False)
+    _permission_decisions: list[dict[str, str]] = field(
+        default_factory=list, init=False
+    )
 
     def __post_init__(self) -> None:
-        if not isinstance(self.prompt_bytes, bytes) or not isinstance(self.cwd, str) or not self.cwd:
+        if (
+            not isinstance(self.prompt_bytes, bytes)
+            or not isinstance(self.cwd, str)
+            or not self.cwd
+            or self.permission not in KIMI_ACP_PERMISSION_KINDS
+            or type(self.result_max_bytes) is not int
+            or self.result_max_bytes <= 0
+            or self.result_max_bytes > RESULT_MAX_BYTES_HARD
+        ):
             raise ValueError("E_KIMI_ACP_PROTOCOL")
         try:
             self.prompt_bytes.decode("utf-8", errors="strict")
@@ -292,8 +543,145 @@ class KimiAcpOneShotV1:
             raise ValueError("E_KIMI_ACP_PROTOCOL")
         return request_id
 
+    @staticmethod
+    def _wire_text(value: object) -> str:
+        if (
+            not isinstance(value, str)
+            or not value
+            or any(ord(character) < 32 or ord(character) == 127 for character in value)
+        ):
+            raise ValueError("E_KIMI_ACP_PROTOCOL")
+        return value
+
+    def _receipt_text(self, value: object) -> str:
+        text = self._wire_text(value)
+        sensitive = [
+            pair.value
+            for server in self.mcp_servers
+            for pairs in (server.env, server.headers)
+            for pair in pairs
+            if pair.value
+        ]
+        if self.cwd in text or any(secret in text for secret in sensitive):
+            return "<redacted>"
+        return text
+
+    def _validate_observation_bounds(self) -> None:
+        if (
+            len(self._tool_calls) > AGENT_RUN_MAX_EVENTS
+            or len(self._permission_decisions) > AGENT_RUN_MAX_EVENTS
+        ):
+            raise ValueError("E_KIMI_ACP_PROTOCOL")
+        encoded = json.dumps(
+            self.observed_receipt(), ensure_ascii=True, separators=(",", ":")
+        )
+        if len(encoded) > AGENT_RUN_MAX_LINE_CHARS:
+            raise ValueError("E_KIMI_ACP_PROTOCOL")
+
+    def _record_tool_update(self, update: dict[str, object]) -> None:
+        update_kind = update.get("sessionUpdate")
+        tool_id = self._wire_text(update.get("toolCallId"))
+        receipt_id = self._receipt_text(tool_id)
+        title_value = update.get("title")
+        status_value = update.get("status")
+        title = (
+            self._receipt_text(title_value) if title_value is not None else None
+        )
+        status = (
+            self._wire_text(status_value) if status_value is not None else None
+        )
+        if status is not None and status not in KIMI_ACP_TOOL_STATUSES:
+            raise ValueError("E_KIMI_ACP_PROTOCOL")
+        if update_kind == "tool_call":
+            if tool_id in self._tool_calls or title is None or status is None:
+                raise ValueError("E_KIMI_ACP_PROTOCOL")
+            self._tool_calls[tool_id] = {
+                "id": receipt_id,
+                "title": title,
+                "status": status,
+            }
+        elif update_kind == "tool_call_update":
+            observed = self._tool_calls.get(tool_id)
+            if observed is None or (title is None and status is None):
+                raise ValueError("E_KIMI_ACP_PROTOCOL")
+            if title is not None:
+                observed["title"] = title
+            if status is not None:
+                observed["status"] = status
+        else:
+            raise ValueError("E_KIMI_ACP_PROTOCOL")
+        self._validate_observation_bounds()
+
+    def _handle_permission_request(
+        self, channel, message: dict[str, object], *, collect: bool
+    ) -> None:
+        request_id = message.get("id")
+        if (
+            not collect
+            or self.session_id is None
+            or not (
+                type(request_id) is int
+                or isinstance(request_id, str) and bool(request_id)
+            )
+        ):
+            raise ValueError("E_KIMI_ACP_PROTOCOL")
+        params = message.get("params")
+        if not isinstance(params, dict) or params.get("sessionId") != self.session_id:
+            raise ValueError("E_KIMI_ACP_PROTOCOL")
+        options = params.get("options")
+        tool_call = params.get("toolCall")
+        if not isinstance(options, list) or not isinstance(tool_call, dict):
+            raise ValueError("E_KIMI_ACP_PROTOCOL")
+        desired_kind = KIMI_ACP_PERMISSION_KINDS[self.permission]
+        matches: list[dict[str, object]] = []
+        option_ids: set[str] = set()
+        for option in options:
+            if not isinstance(option, dict):
+                raise ValueError("E_KIMI_ACP_PROTOCOL")
+            option_id = self._wire_text(option.get("optionId"))
+            self._wire_text(option.get("name"))
+            kind = self._wire_text(option.get("kind"))
+            if option_id in option_ids:
+                raise ValueError("E_KIMI_ACP_PROTOCOL")
+            option_ids.add(option_id)
+            if kind == desired_kind:
+                matches.append(option)
+        if len(matches) != 1:
+            raise ValueError("E_KIMI_ACP_PROTOCOL")
+        tool_id = self._receipt_text(tool_call.get("toolCallId"))
+        title = self._receipt_text(tool_call.get("title"))
+        selected_id = self._wire_text(matches[0].get("optionId"))
+        response = {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "result": {
+                "outcome": {"outcome": "selected", "optionId": selected_id}
+            },
+        }
+        payload = (
+            json.dumps(response, ensure_ascii=False, separators=(",", ":")).encode(
+                "utf-8"
+            )
+            + b"\n"
+        )
+        if channel.write_line(payload) != len(payload):
+            raise ValueError("E_KIMI_ACP_PROTOCOL")
+        self._permission_decisions.append(
+            {"id": tool_id, "title": title, "decision": self.permission}
+        )
+        self._validate_observation_bounds()
+
+    def observed_receipt(self) -> dict[str, object]:
+        return {
+            "toolCalls": [dict(observed) for observed in self._tool_calls.values()],
+            "permissionDecisions": [
+                dict(observed) for observed in self._permission_decisions
+            ],
+        }
+
     def _response(self, channel, request_id: int, *, collect: bool = False) -> dict[str, object]:
-        chunks: list[str] = []
+        chunks: list[bytes] = []
+        collected_bytes = 0
         while True:
             try:
                 message = self._decode_line(channel.read_line())
@@ -302,9 +690,15 @@ class KimiAcpOneShotV1:
             except (EOFError, OSError, ValueError) as exc:
                 raise ValueError("E_KIMI_ACP_PROTOCOL") from exc
             if "method" in message:
+                if "id" in message:
+                    if message.get("method") != "session/request_permission":
+                        raise ValueError("E_KIMI_ACP_PROTOCOL")
+                    self._handle_permission_request(
+                        channel, message, collect=collect
+                    )
+                    continue
                 if (
-                    "id" in message
-                    or message.get("method") != "session/update"
+                    message.get("method") != "session/update"
                     or self.session_id is None
                 ):
                     raise ValueError("E_KIMI_ACP_PROTOCOL")
@@ -319,11 +713,21 @@ class KimiAcpOneShotV1:
                     continue
                 if not collect:
                     raise ValueError("E_KIMI_ACP_PROTOCOL")
+                if update_kind in {"tool_call", "tool_call_update"}:
+                    self._record_tool_update(update)
+                    continue
                 if update_kind == "agent_message_chunk":
                     content = update.get("content")
                     if not isinstance(content, dict) or content.get("type") != "text" or not isinstance(content.get("text"), str):
                         raise ValueError("E_KIMI_ACP_PROTOCOL")
-                    chunks.append(content["text"])
+                    try:
+                        chunk = content["text"].encode("utf-8", errors="strict")
+                    except UnicodeEncodeError as exc:
+                        raise ValueError("E_KIMI_ACP_PROTOCOL") from exc
+                    collected_bytes += len(chunk)
+                    if collected_bytes > self.result_max_bytes:
+                        raise ValueError("E_KIMI_ACP_PROTOCOL")
+                    chunks.append(chunk)
                 continue
             response_id = message.get("id")
             if (
@@ -336,7 +740,7 @@ class KimiAcpOneShotV1:
             if not isinstance(result, dict):
                 raise ValueError("E_KIMI_ACP_PROTOCOL")
             if collect:
-                self.result_bytes = "".join(chunks).encode("utf-8")
+                self.result_bytes = b"".join(chunks)
             return result
 
     def _cleanup_session(self, channel, *, cancel: bool) -> None:
@@ -381,7 +785,11 @@ class KimiAcpOneShotV1:
         new_id = self._send(
             channel,
             "session/new",
-            {"cwd": self.cwd, "mcpServers": [], "additionalDirectories": []},
+            {
+                "cwd": self.cwd,
+                "mcpServers": [server.wire() for server in self.mcp_servers],
+                "additionalDirectories": [],
+            },
         )
         assert new_id is not None
         created = self._response(channel, new_id)
@@ -443,10 +851,15 @@ class KimiPrivateHomeAliasesV1:
     cleaned: bool = False
 
     @classmethod
-    def create(cls, run_dir: Path, user_data: Path) -> "KimiPrivateHomeAliasesV1":
+    def create(
+        cls,
+        run_dir: Path,
+        user_data: Path,
+        capabilities: KimiCapabilitySelectionV1 = KimiCapabilitySelectionV1(),
+    ) -> "KimiPrivateHomeAliasesV1":
         profile_dir = run_dir / ".kimi-code" / "agents"
         profile_dir.mkdir(parents=True)
-        (profile_dir / "agent.md").write_bytes(KIMI_ACP_AGENT_PROFILE_V1)
+        (profile_dir / "agent.md").write_bytes(_kimi_agent_profile(capabilities))
         home = run_dir / "kimi-home"
         home.mkdir(mode=0o700)
         aliases: list[tuple[Path, str]] = []
@@ -1657,7 +2070,9 @@ def stable_failure_id_from_exception(exc: BaseException, fallback: str) -> str:
     return match.group(1) if match is not None else fallback
 
 
-def parse_control(argv: list[str], *, external: bool = False) -> Control:
+def parse_control(
+    argv: list[str], *, external: bool = False, provider: str | None = None
+) -> Control:
     result = Control()
     seen_values: dict[str, object] = {}
     value_flags = {
@@ -1680,6 +2095,7 @@ def parse_control(argv: list[str], *, external: bool = False) -> Control:
         "--result-max-bytes": "result_max_bytes",
         "-capturemaxbytes": "capture_max_bytes",
         "--capture-max-bytes": "capture_max_bytes",
+        "--kimi-capabilities-file": "kimi_capabilities_file",
     }
     if external:
         value_flags.update(
@@ -1701,7 +2117,11 @@ def parse_control(argv: list[str], *, external: bool = False) -> Control:
                 raise ValueError(f"{token} requires a value")
             value = argv[index + 1]
             attr = value_flags[key]
-            if attr in {"prompt_file", "terminal_receipt"}:
+            if attr in {
+                "prompt_file",
+                "terminal_receipt",
+                "kimi_capabilities_file",
+            }:
                 parsed_value: object = Path(value)
             elif attr in {"live_root"}:
                 parsed_value = Path(value)
@@ -1744,6 +2164,12 @@ def parse_control(argv: list[str], *, external: bool = False) -> Control:
         )
     if result.result_max_bytes > result.capture_max_bytes:
         raise ValueError("--result-max-bytes must not exceed --capture-max-bytes")
+    if result.kimi_capabilities_file is not None:
+        if provider is not None and provider != "kimi":
+            raise ValueError("E_EXTERNAL_LAUNCH_FLAGS_UNSAFE")
+        result.kimi_capabilities = read_kimi_capability_selection(
+            result.kimi_capabilities_file
+        )
     if external and (not result.task_class or not result.role):
         raise ValueError(
             "E_EXTERNAL_DISPATCH_POLICY_DENIED: --task-class and --role are required"
@@ -2151,7 +2577,7 @@ def require_exact_execution_provenance(
 def _prevalidate_policy_bound_external_launch(
     provider: str, argv: list[str]
 ) -> PolicyBoundLaunch:
-    control = parse_control(argv, external=True)
+    control = parse_control(argv, external=True, provider=provider)
     topic = validate_topic(control.topic)
     if control.ledger_closes:
         raise ValueError(
@@ -4127,6 +4553,97 @@ def serialized_safety_failure_outcome(
     )
 
 
+def kimi_selected_receipt(
+    selection: KimiCapabilitySelectionV1,
+) -> dict[str, object]:
+    return {
+        "tools": list(selection.tools),
+        "mcpNames": [server.name for server in selection.mcp_servers],
+        "subagents": list(selection.subagents),
+        "permission": selection.permission,
+        "cwdSelected": selection.cwd is not None,
+    }
+
+
+def empty_kimi_observed_receipt() -> dict[str, object]:
+    return {"toolCalls": [], "permissionDecisions": []}
+
+
+def _validate_kimi_receipt_fields(
+    selected: object, observed: object
+) -> None:
+    if (
+        not isinstance(selected, dict)
+        or set(selected)
+        != {"tools", "mcpNames", "subagents", "permission", "cwdSelected"}
+        or not isinstance(observed, dict)
+        or set(observed) != {"toolCalls", "permissionDecisions"}
+    ):
+        raise ValueError("provider result Kimi capability evidence mismatch")
+
+    def names(value: object) -> bool:
+        return (
+            isinstance(value, list)
+            and all(
+                isinstance(item, str)
+                and bool(item)
+                and not any(
+                    ord(character) < 32 or ord(character) == 127
+                    for character in item
+                )
+                for item in value
+            )
+            and len(value) == len(set(value))
+        )
+
+    if (
+        not names(selected.get("tools"))
+        or not names(selected.get("mcpNames"))
+        or not names(selected.get("subagents"))
+        or selected.get("permission") not in KIMI_ACP_PERMISSION_KINDS
+        or type(selected.get("cwdSelected")) is not bool
+    ):
+        raise ValueError("provider result Kimi capability evidence mismatch")
+    tool_calls = observed.get("toolCalls")
+    decisions = observed.get("permissionDecisions")
+    if (
+        not isinstance(tool_calls, list)
+        or not isinstance(decisions, list)
+        or len(tool_calls) > AGENT_RUN_MAX_EVENTS
+        or len(decisions) > AGENT_RUN_MAX_EVENTS
+    ):
+        raise ValueError("provider result Kimi capability evidence mismatch")
+    tool_ids: set[str] = set()
+    for item in tool_calls:
+        if (
+            not isinstance(item, dict)
+            or set(item) != {"id", "title", "status"}
+            or not names([item.get("id")])
+            or not names([item.get("title")])
+            or item.get("status") not in KIMI_ACP_TOOL_STATUSES
+            or item.get("id") in tool_ids
+        ):
+            raise ValueError("provider result Kimi capability evidence mismatch")
+        tool_ids.add(str(item["id"]))
+    for item in decisions:
+        if (
+            not isinstance(item, dict)
+            or set(item) != {"id", "title", "decision"}
+            or not names([item.get("id")])
+            or not names([item.get("title")])
+            or item.get("decision") not in KIMI_ACP_PERMISSION_KINDS
+        ):
+            raise ValueError("provider result Kimi capability evidence mismatch")
+    if len(
+        json.dumps(
+            {"selected": selected, "observed": observed},
+            ensure_ascii=True,
+            separators=(",", ":"),
+        )
+    ) > AGENT_RUN_MAX_LINE_CHARS:
+        raise ValueError("provider result Kimi capability evidence mismatch")
+
+
 def build_provider_result_line(
     provider: str,
     model: str,
@@ -4143,6 +4660,8 @@ def build_provider_result_line(
     expected_provenance: ExecutionProvenance | None = None,
     child_nonzero_category: str | None = None,
     launch_flags: tuple[str, ...] | list[str] | None = None,
+    kimi_selected: dict[str, object] | None = None,
+    kimi_observed: dict[str, object] | None = None,
 ) -> str:
     if provenance is not None:
         provenance = require_exact_execution_provenance(
@@ -4205,6 +4724,12 @@ def build_provider_result_line(
             raise ValueError("invalid Kimi child nonzero category")
         payload["childNonzeroCategory"] = child_nonzero_category
         payload["primaryOutcome"]["childNonzeroCategory"] = child_nonzero_category
+    if kimi_selected is not None or kimi_observed is not None:
+        if provider != "kimi" or kimi_selected is None or kimi_observed is None:
+            raise ValueError("provider result Kimi capability evidence mismatch")
+        _validate_kimi_receipt_fields(kimi_selected, kimi_observed)
+        payload["selected"] = kimi_selected
+        payload["observed"] = kimi_observed
     if stream is not None:
         payload.update(
             {
@@ -4351,6 +4876,12 @@ def parse_provider_result(output: str) -> dict[str, object]:
             raise ValueError("provider result Kimi child nonzero category mismatch")
     elif isinstance(primary, dict) and "childNonzeroCategory" in primary:
         raise ValueError("provider result Kimi child nonzero category mismatch")
+    selected = payload.get("selected")
+    observed = payload.get("observed")
+    if "selected" in payload or "observed" in payload:
+        if payload.get("provider") != "kimi":
+            raise ValueError("provider result Kimi capability evidence mismatch")
+        _validate_kimi_receipt_fields(selected, observed)
     return payload
 
 
@@ -4568,6 +5099,7 @@ def finalize_reserved_run_once(
     runner: ProcessRunnerV1 | None = None,
     launch_flags: tuple[str, ...] | list[str] | None = None,
     stable_failure_id: str | None = None,
+    kimi_observed: dict[str, object] | None = None,
 ) -> int:
     terminal_receipt = reserved_run.receipt
     lifecycle = reserved_run.lifecycle
@@ -4608,12 +5140,31 @@ def finalize_reserved_run_once(
     if provenance is not None:
         provenance = require_exact_execution_provenance(provenance, provenance)
     frozen_role = role_provenance or external_role_provenance(control, provider)
+    complete_kimi_stdout_overflow = (
+        provider == "kimi"
+        and process_result is not None
+        and process_result.outcome == "success"
+        and process_result.failure_id is None
+        and process_result.target_exit_code == 0
+        and process_result.stdin.complete
+        and process_result.resources_closed
+        and process_result.tree.tree_empty
+        and process_result.tree.direct_reaped
+        and process_result.stdout.truncated
+        and not process_result.stderr.truncated
+        and not process_result.cleanup_issues
+        and raw_stdout is not None
+        and raw_stderr is not None
+        and not cancelled
+        and not timed_out
+        and launch_error is None
+    )
     raw_streams_settled = (
         process_result is not None
         and process_result.resources_closed
         and process_result.tree.tree_empty
         and process_result.tree.direct_reaped
-        and not process_result.stdout.truncated
+        and (not process_result.stdout.truncated or complete_kimi_stdout_overflow)
         and not process_result.stderr.truncated
         and raw_stdout is not None
         and raw_stderr is not None
@@ -4648,7 +5199,12 @@ def finalize_reserved_run_once(
             )
         except Exception:
             scan_outcome = scan_unavailable
-    if scan_required and stream is not None and stream.overflow:
+    if (
+        scan_required
+        and stream is not None
+        and stream.overflow
+        and not complete_kimi_stdout_overflow
+    ):
         scan_outcome = scan_unavailable
     child_nonzero_category = None
     if (
@@ -4666,7 +5222,9 @@ def finalize_reserved_run_once(
     public_stream = stream
     if provider == "kimi":
         public_stream = (
-            empty_provider_stream_result()
+            stream
+            if scan_outcome is not None and stream is not None and stream.overflow
+            else empty_provider_stream_result()
             if scan_outcome is not None
             else provider_stream_result(process_result, include_stderr=False)
         )
@@ -4675,8 +5233,18 @@ def finalize_reserved_run_once(
     if scan_outcome is not None:
         result_text = ""
         terminal = output_safety_scan_failure_terminal(lifecycle, scan_outcome)
+        if (
+            stream is not None
+            and stream.overflow
+            and not complete_kimi_stdout_overflow
+        ):
+            primary_terminal = capture_overflow_terminal(stream)
         combined_exit = exit_code if exit_code != 0 else 1
-    elif stream is not None and stream.overflow:
+    elif (
+        stream is not None
+        and stream.overflow
+        and not complete_kimi_stdout_overflow
+    ):
         result_text = ""
         terminal = capture_overflow_terminal(stream)
         combined_exit = exit_code if exit_code != 0 else 1
@@ -4732,6 +5300,17 @@ def finalize_reserved_run_once(
         print(f"FAIL: {launch_error}", file=sys.stderr)
 
     terminal_outcome = outcome
+    kimi_selected_evidence = (
+        kimi_selected_receipt(control.kimi_capabilities)
+        if provider == "kimi" and control.kimi_capabilities_file is not None
+        else None
+    )
+    if kimi_selected_evidence is None:
+        kimi_observed_evidence = kimi_observed
+    elif kimi_observed is None:
+        kimi_observed_evidence = empty_kimi_observed_receipt()
+    else:
+        kimi_observed_evidence = kimi_observed
     try:
         line = build_provider_result_line(
             provider,
@@ -4748,6 +5327,8 @@ def finalize_reserved_run_once(
             expected_provenance=provenance,
             child_nonzero_category=child_nonzero_category,
             launch_flags=launch_flags,
+            kimi_selected=kimi_selected_evidence,
+            kimi_observed=kimi_observed_evidence,
         )
     except Exception:
         terminal_outcome = serialized_safety_failure_outcome(
@@ -4847,7 +5428,7 @@ def launch(provider: str, argv: list[str]) -> int:
             unavailable = EXTERNAL_UNAVAILABLE_IDS.get(provider)
             if unavailable is not None:
                 return fail(f"{unavailable}: provider execution is unavailable")
-            control = parse_control(argv)
+            control = parse_control(argv, provider=provider)
             topic = validate_topic(control.topic)
             flags, model, effort = resolved_profile(provider, control.provider_flags)
             if control.ledger_closes:
@@ -4934,9 +5515,9 @@ def kimi_main(argv: list[str]) -> int:
         print(
             "usage: invoke-kimi-prompt.py <topic> --prompt-file <path> "
             "--terminal-receipt <path> --task-class <class> --role <role> "
-            "[wrapper options]\n"
-            "\nRuns the fixed kimi-code/k3 file-prompt transport with the sealed "
-            "no-tools agent profile.\n"
+            "[--kimi-capabilities-file <json>] [wrapper options]\n"
+            "\nRuns the fixed kimi-code/k3 file-prompt transport. Omitting the "
+            "capabilities file keeps the no-tools, no-subagents profile.\n"
             "Maintenance diagnostics: --enroll-executable, "
             "--replace-kimi-enrollment, --verify-enrollment, "
             "--diagnose-capabilities."
@@ -5154,11 +5735,15 @@ def _launch_with_runner(
             kimi_private_home = KimiPrivateHomeAliasesV1.create(
                 lifecycle.run_dir,
                 _kimi_user_home() / ".kimi-code",
+                control.kimi_capabilities,
             )
             reserved_run.adopt_auxiliary_cleanup(kimi_private_home.cleanup)
             kimi_exchange = KimiAcpOneShotV1(
                 body + b"\n" + KIMI_AGENT_TERMINAL_INSTRUCTION,
-                str(lifecycle.run_dir),
+                control.kimi_capabilities.cwd or str(lifecycle.run_dir),
+                control.kimi_capabilities.mcp_servers,
+                control.kimi_capabilities.permission,
+                control.result_max_bytes,
             )
         except Exception:
             return finalize_reserved_run_once(
@@ -5284,6 +5869,7 @@ def _launch_with_runner(
                 ProcessDialogueV1(
                     KIMI_WINDOWS_PROFILE_V1.profile_id,
                     kimi_exchange,
+                    continue_after_stdout_capture_limit=True,
                 )
                 if kimi_exchange is not None
                 else None
@@ -5337,4 +5923,10 @@ def _launch_with_runner(
         process_result=process_result,
         runner=runner,
         launch_flags=launch_flags,
+        kimi_observed=(
+            kimi_exchange.observed_receipt()
+            if kimi_exchange is not None
+            and control.kimi_capabilities_file is not None
+            else None
+        ),
     )

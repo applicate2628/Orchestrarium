@@ -681,10 +681,21 @@ def _kimi_process_result(
     settled: bool = True,
     target_exit_code: int | None = None,
     failure_id: str | None = None,
+    dialogue_complete: bool = False,
+    outcome: str | None = None,
 ) -> SimpleNamespace:
     return SimpleNamespace(
+        outcome=(
+            outcome
+            if outcome is not None
+            else "supervisor-failure"
+            if failure_id is not None
+            else "success"
+        ),
+        terminal_stage="capture-limit" if failure_id == "PSV1-CAPTURE-LIMIT" else "completed",
         resources_closed=settled,
         tree=SimpleNamespace(tree_empty=settled, direct_reaped=settled),
+        stdin=SimpleNamespace(complete=dialogue_complete),
         stdout=SimpleNamespace(
             truncated=stdout_truncated,
             observed_bytes=len(stdout),
@@ -733,6 +744,9 @@ def _finalize_kimi(
     with_ledger: bool = False,
     exit_code: int = 0,
     cancelled: bool = False,
+    capabilities: object | None = None,
+    observed: dict[str, object] | None = None,
+    credential_needles: tuple[bytes, ...] = (),
 ) -> tuple[int, dict[str, object], list[str], object]:
     monkeypatch.setenv("USERPROFILE", str(tmp_path / "user"))
     lifecycle = owner.RunCaptureLifecycle.create("kimi", "safe-public-capture")
@@ -764,9 +778,23 @@ def _finalize_kimi(
     else:
         control = owner.Control()
         provenance = owner.ExternalRoleProvenance("none", "external-reviewer")
+    if capabilities is not None:
+        control.kimi_capabilities_file = tmp_path / "selected-capabilities.json"
+        control.kimi_capabilities = capabilities
     receipt_path = (tmp_path / "kimi-terminal.receipt").resolve()
     control.terminal_receipt = receipt_path
     with owner.TerminalReceiptV1.reserve(receipt_path) as receipt:
+        arguments = {
+            "cancelled": cancelled,
+            "role_provenance": provenance,
+            "raw_stdout": stdout,
+            "raw_stderr": stderr,
+            "process_result": process_result or process,
+            "runner": object() if with_ledger else None,
+            "credential_needles": credential_needles,
+        }
+        if observed is not None:
+            arguments["kimi_observed"] = observed
         code = owner.finalize_reserved_run_once(
             control,
             "kimi",
@@ -779,12 +807,7 @@ def _finalize_kimi(
             ),
             exit_code,
             capture,
-            cancelled=cancelled,
-            role_provenance=provenance,
-            raw_stdout=stdout,
-            raw_stderr=stderr,
-            process_result=process_result or process,
-            runner=object() if with_ledger else None,
+            **arguments,
         )
     payload = owner.parse_provider_result(capsys.readouterr().out)
     notes = (
@@ -793,6 +816,349 @@ def _finalize_kimi(
         else ""
     )
     return code, payload, [notes], lifecycle
+
+
+def test_kimi_explicit_capability_receipt_is_redacted_and_cleanup_complete(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    owner = _load_owner()
+    selected_cwd = tmp_path / "selected-cwd"
+    selected_cwd.mkdir()
+    capabilities = owner.KimiCapabilitySelectionV1(
+        tools=("Read", "Agent"),
+        mcp_servers=(
+            owner.KimiMcpServerV1(
+                name="private-mcp",
+                command="fixture",
+                args=(),
+                env=(owner.KimiNameValueV1("TOKEN", "secret-value"),),
+            ),
+        ),
+        subagents=("explore",),
+        permission="approve_once",
+        cwd=str(selected_cwd),
+    )
+
+    code, payload, _notes, lifecycle = _finalize_kimi(
+        owner,
+        tmp_path,
+        monkeypatch,
+        capsys,
+        stdout=b"GATE: PASS\n",
+        stderr=b"",
+        capabilities=capabilities,
+    )
+
+    assert code == 0
+    assert payload["selected"] == {
+        "tools": ["Read", "Agent"],
+        "mcpNames": ["private-mcp"],
+        "subagents": ["explore"],
+        "permission": "approve_once",
+        "cwdSelected": True,
+    }
+    assert payload["observed"] == {"toolCalls": [], "permissionDecisions": []}
+    visible = json.dumps(payload)
+    assert "secret-value" not in visible
+    assert str(selected_cwd) not in visible
+    assert not lifecycle.run_dir.exists()
+
+
+def test_kimi_capture_limit_keeps_real_counters_and_primary_cause(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    owner = _load_owner()
+    process = _kimi_process_result(
+        b"x",
+        b"",
+        stdout_truncated=True,
+        target_exit_code=0,
+        failure_id="PSV1-CAPTURE-LIMIT",
+    )
+    process.stdout.observed_bytes = 1261818
+    process.stdout.persisted_bytes = 1048576
+    process.stdout.digest = "a" * 64
+    stream = owner.provider_stream_result(process)
+
+    code, payload, _notes, lifecycle = _finalize_kimi(
+        owner,
+        tmp_path,
+        monkeypatch,
+        capsys,
+        stdout=b"GATE: PASS\n",
+        stderr=b"",
+        process_result=process,
+        stream=stream,
+        exit_code=1,
+    )
+
+    assert code == 1
+    assert payload["token"] == "UNVERIFIED:E_EXTERNAL_PROVIDER_OUTPUT_SCAN_UNAVAILABLE"
+    assert payload["resultText"] == ""
+    assert {
+        "captureOverflow": payload["captureOverflow"],
+        "captureObservedBytes": payload["captureObservedBytes"],
+        "capturePersistedBytes": payload["capturePersistedBytes"],
+        "captureDigest": payload["captureDigest"],
+        "captureIssueCount": payload["captureIssueCount"],
+    } == {
+        "captureOverflow": True,
+        "captureObservedBytes": 1261818,
+        "capturePersistedBytes": 1048576,
+        "captureDigest": stream.digest,
+        "captureIssueCount": 1,
+    }
+    assert payload["primaryOutcome"] == {
+        "exitCode": 1,
+        "token": "FAILED:capture-overflow",
+        "status": "blocked",
+        "gate": "none",
+        "note": "stream: combined stdout/stderr capture exceeded configured maximum; observedBytes=1261818",
+    }
+    assert payload["cleanupStatus"] == "complete"
+    assert not lifecycle.run_dir.exists()
+
+
+def test_kimi_complete_stdout_overflow_returns_bounded_scanned_answer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    owner = _load_owner()
+    process = _kimi_process_result(
+        b"x",
+        b"",
+        stdout_truncated=True,
+        target_exit_code=0,
+        dialogue_complete=True,
+        outcome="success",
+    )
+    process.stdout.observed_bytes = 1261818
+    process.stdout.persisted_bytes = 1048576
+    process.stdout.digest = "a" * 64
+    stream = owner.provider_stream_result(process)
+
+    code, payload, _notes, lifecycle = _finalize_kimi(
+        owner,
+        tmp_path,
+        monkeypatch,
+        capsys,
+        stdout=b"GATE: PASS\n",
+        stderr=b"",
+        process_result=process,
+        stream=stream,
+        exit_code=0,
+    )
+
+    assert code == 0
+    assert payload["resultText"] == "GATE: PASS\n"
+    assert payload["token"] == "COMPLETE:EXTERNAL_NONAUTHORIZING"
+    assert payload["captureOverflow"] is True
+    assert payload["captureObservedBytes"] == 1261818
+    assert payload["primaryOutcome"]["token"] == "COMPLETE:PASS"
+    assert payload["cleanupStatus"] == "complete"
+    assert not lifecycle.run_dir.exists()
+
+
+def test_kimi_complete_stdout_overflow_still_blocks_secret_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    owner = _load_owner()
+    process = _kimi_process_result(
+        b"x",
+        b"",
+        stdout_truncated=True,
+        target_exit_code=0,
+        dialogue_complete=True,
+        outcome="success",
+    )
+    stream = owner.provider_stream_result(process)
+
+    code, payload, _notes, lifecycle = _finalize_kimi(
+        owner,
+        tmp_path,
+        monkeypatch,
+        capsys,
+        stdout=b"secret-canary\nGATE: PASS\n",
+        stderr=b"",
+        process_result=process,
+        stream=stream,
+        exit_code=0,
+        credential_needles=(b"secret-canary",),
+    )
+
+    assert code != 0
+    assert payload["resultText"] == ""
+    assert payload["token"] == "UNVERIFIED:E_EXTERNAL_PROVIDER_CREDENTIAL_ECHO"
+    assert payload["primaryOutcome"]["token"] == (
+        "UNVERIFIED:E_EXTERNAL_PROVIDER_CREDENTIAL_ECHO"
+    )
+    assert "secret-canary" not in json.dumps(payload)
+    assert not lifecycle.run_dir.exists()
+
+
+def test_kimi_explicit_receipt_includes_only_bounded_observed_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    owner = _load_owner()
+    capabilities = owner.KimiCapabilitySelectionV1(tools=("Read",))
+    observed = {
+        "toolCalls": [
+            {"id": "1:tool-call-1", "title": "Read", "status": "completed"}
+        ],
+        "permissionDecisions": [
+            {"id": "1:tool-call-1", "title": "Read", "decision": "reject"}
+        ],
+    }
+    try:
+        code, payload, _notes, lifecycle = _finalize_kimi(
+            owner,
+            tmp_path,
+            monkeypatch,
+            capsys,
+            stdout=b"GATE: PASS\n",
+            stderr=b"",
+            capabilities=capabilities,
+            observed=observed,
+        )
+    except TypeError as exc:
+        pytest.fail(f"Kimi observed evidence did not reach the finalizer: {exc}")
+
+    assert code == 0
+    assert payload["observed"] == observed
+    assert set(payload["observed"]) == {"toolCalls", "permissionDecisions"}
+    assert not lifecycle.run_dir.exists()
+
+
+@pytest.mark.parametrize(
+    ("provider", "model", "effort"),
+    (
+        ("kimi", "kimi-code/k3", "unsupported"),
+        ("codex", "gpt-5.6-sol", "xhigh"),
+        ("claude", "opus", "xhigh"),
+    ),
+)
+def test_legacy_provider_receipts_parse_without_kimi_capability_fields(
+    provider: str, model: str, effort: str
+) -> None:
+    owner = _load_owner()
+    outcome = owner.FinalOutcome(
+        0,
+        "COMPLETE:EXTERNAL_NONAUTHORIZING",
+        "passed",
+        "PASS",
+        "fixture",
+        0,
+        "COMPLETE:PASS",
+        "passed",
+        "PASS",
+        "fixture",
+        "complete",
+        0,
+        "",
+        False,
+        0,
+    )
+
+    payload = owner.parse_provider_result(
+        owner.build_provider_result_line(
+            provider,
+            model,
+            effort,
+            "GATE: PASS\n",
+            outcome,
+            cancelled=False,
+            timed_out=False,
+            role_provenance=owner.ExternalRoleProvenance("none", "none"),
+        )
+    )
+
+    assert "selected" not in payload
+    assert "observed" not in payload
+
+
+def test_provider_result_parser_rejects_malformed_or_non_kimi_capability_fields() -> None:
+    owner = _load_owner()
+    outcome = owner.FinalOutcome(
+        0,
+        "COMPLETE:EXTERNAL_NONAUTHORIZING",
+        "passed",
+        "PASS",
+        "fixture",
+        0,
+        "COMPLETE:PASS",
+        "passed",
+        "PASS",
+        "fixture",
+        "complete",
+        0,
+        "",
+        False,
+        0,
+    )
+    base = owner.build_provider_result_line(
+        "kimi",
+        "kimi-code/k3",
+        "unsupported",
+        "GATE: PASS\n",
+        outcome,
+        cancelled=False,
+        timed_out=False,
+        role_provenance=owner.ExternalRoleProvenance("none", "none"),
+    )
+    prefix, encoded = base.rstrip("\n").split("=", 1)
+    assert prefix == "ORCHESTRARIUM_PROVIDER_RESULT_V2"
+    payload = json.loads(encoded)
+    selected = {
+        "tools": ["Read"],
+        "mcpNames": [],
+        "subagents": [],
+        "permission": "reject",
+        "cwdSelected": False,
+    }
+    observed = {"toolCalls": [], "permissionDecisions": []}
+    malformed = []
+    for changes in (
+        {"selected": selected},
+        {"selected": {**selected, "tools": [{}]}, "observed": observed},
+        {
+            "provider": "claude",
+            "model": "opus",
+            "effort": "xhigh",
+            "selected": selected,
+            "observed": observed,
+        },
+        {
+            "selected": selected,
+            "observed": {
+                "toolCalls": [
+                    {"id": "duplicate", "title": "Read", "status": "completed"},
+                    {"id": "duplicate", "title": "Read", "status": "failed"},
+                ],
+                "permissionDecisions": [],
+            },
+        },
+    ):
+        changed = {**payload, **changes}
+        malformed.append(
+            owner.RESULT_PREFIX
+            + json.dumps(changed, ensure_ascii=True, separators=(",", ":"))
+            + "\n"
+        )
+
+    for line in malformed:
+        with pytest.raises(
+            ValueError, match="^provider result Kimi capability evidence mismatch$"
+        ):
+            owner.parse_provider_result(line)
 
 
 @pytest.mark.parametrize(
@@ -1327,8 +1693,12 @@ class _FakeKimiAcpPeer:
         model_config_result: dict[str, object] | None = None,
         interleaved_method: str | None = None,
         interleaved_update: dict[str, object] | None = None,
+        permission_request: dict[str, object] | None = None,
+        permission_request_id: object = "permission-rpc-1",
+        tool_updates: tuple[dict[str, object], ...] = (),
     ) -> None:
         self.requests: list[dict[str, object]] = []
+        self.client_responses: list[dict[str, object]] = []
         self.responses: list[bytes] = []
         self.out_of_order_update = out_of_order_update
         self.reverse_rpc = reverse_rpc
@@ -1367,10 +1737,16 @@ class _FakeKimiAcpPeer:
         )
         self.interleaved_method = interleaved_method
         self.interleaved_update = interleaved_update
+        self.permission_request = permission_request
+        self.permission_request_id = permission_request_id
+        self.tool_updates = tool_updates
         self.cancel_pending = False
 
     def write_line(self, payload: bytes) -> int:
         request = json.loads(payload.decode("utf-8"))
+        if "method" not in request:
+            self.client_responses.append(request)
+            return len(payload)
         self.requests.append(request)
         request_id = request.get("id")
         method = request.get("method")
@@ -1433,6 +1809,34 @@ class _FakeKimiAcpPeer:
             if self.cancel_exception is not None:
                 self.cancel_pending = True
                 return len(payload)
+            for update in self.tool_updates:
+                self.responses.append(
+                    json.dumps(
+                        {
+                            "jsonrpc": "2.0",
+                            "method": "session/update",
+                            "params": {
+                                "sessionId": "fake-session-1",
+                                "update": update,
+                            },
+                        },
+                        separators=(",", ":"),
+                    ).encode("utf-8")
+                    + b"\n"
+                )
+            if self.permission_request is not None:
+                self.responses.append(
+                    json.dumps(
+                        {
+                            "jsonrpc": "2.0",
+                            "id": self.permission_request_id,
+                            "method": "session/request_permission",
+                            "params": self.permission_request,
+                        },
+                        separators=(",", ":"),
+                    ).encode("utf-8")
+                    + b"\n"
+                )
             self.responses.append(
                 json.dumps(
                     {
@@ -1615,6 +2019,224 @@ def test_kimi_acp_rejects_prompt_output_update_between_rpc_replies() -> None:
     assert all(request["method"] != "session/prompt" for request in peer.requests)
 
 
+def _permission_request(options: list[dict[str, str]]) -> dict[str, object]:
+    return {
+        "sessionId": "fake-session-1",
+        "options": options,
+        "toolCall": {
+            "toolCallId": "1:tool-call-1",
+            "title": "Read",
+            "kind": "read",
+            "status": "in_progress",
+            "content": [
+                {
+                    "type": "content",
+                    "content": {"type": "text", "text": "private tool content"},
+                }
+            ],
+        },
+    }
+
+
+@pytest.mark.parametrize(
+    ("configured", "kind", "option_id"),
+    (
+        ("reject", "reject_once", "deny-this-request"),
+        ("approve_once", "allow_once", "permit-once-custom"),
+        ("approve_always", "allow_always", "permit-session-custom"),
+    ),
+)
+def test_kimi_acp_permission_uses_exact_offered_option_and_rpc_id(
+    configured: str, kind: str, option_id: str
+) -> None:
+    owner = _load_owner()
+    peer = _FakeKimiAcpPeer(
+        permission_request=_permission_request(
+            [
+                {"optionId": "other", "name": "Other", "kind": "reject_once"},
+                {"optionId": option_id, "name": "Selected", "kind": kind},
+            ]
+            if kind != "reject_once"
+            else [
+                {"optionId": "permit", "name": "Permit", "kind": "allow_once"},
+                {"optionId": option_id, "name": "Reject", "kind": kind},
+            ]
+        ),
+        permission_request_id="server-rpc-42",
+    )
+    exchange = owner.KimiAcpOneShotV1(b"safe task", "C:/private/run")
+    exchange.permission = configured
+
+    exchange(peer)
+
+    assert peer.client_responses == [
+        {
+            "jsonrpc": "2.0",
+            "id": "server-rpc-42",
+            "result": {
+                "outcome": {"outcome": "selected", "optionId": option_id}
+            },
+        }
+    ]
+    observed = getattr(exchange, "observed_receipt", lambda: None)()
+    assert observed == {
+        "toolCalls": [],
+        "permissionDecisions": [
+            {"id": "1:tool-call-1", "title": "Read", "decision": configured}
+        ],
+    }
+
+
+@pytest.mark.parametrize(
+    ("request_id", "options"),
+    (
+        (
+            True,
+            [{"optionId": "deny", "name": "Reject", "kind": "reject_once"}],
+        ),
+        (
+            17,
+            [{"optionId": "permit", "name": "Permit", "kind": "allow_once"}],
+        ),
+        (
+            18,
+            [
+                {"optionId": "deny-a", "name": "Reject A", "kind": "reject_once"},
+                {"optionId": "deny-b", "name": "Reject B", "kind": "reject_once"},
+            ],
+        ),
+    ),
+)
+def test_kimi_acp_permission_rejects_bad_id_or_option_mismatch(
+    request_id: object, options: list[dict[str, str]]
+) -> None:
+    owner = _load_owner()
+    peer = _FakeKimiAcpPeer(
+        permission_request=_permission_request(options),
+        permission_request_id=request_id,
+    )
+    exchange = owner.KimiAcpOneShotV1(b"safe task", "C:/private/run")
+    exchange.permission = "reject"
+
+    with pytest.raises(ValueError, match="^E_KIMI_ACP_PROTOCOL$"):
+        exchange(peer)
+
+    assert peer.client_responses == []
+
+
+def test_kimi_acp_merges_tool_updates_without_content_or_raw_output() -> None:
+    owner = _load_owner()
+    peer = _FakeKimiAcpPeer(
+        tool_updates=(
+            {
+                "sessionUpdate": "tool_call",
+                "toolCallId": "1:tool-call-1",
+                "title": "Read",
+                "status": "in_progress",
+                "content": [
+                    {
+                        "type": "content",
+                        "content": {"type": "text", "text": "secret-value"},
+                    }
+                ],
+                "rawInput": {"path": "C:/Users/<user>/private.txt"},
+            },
+            {
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": "1:tool-call-1",
+                "title": "Read",
+            },
+            {
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": "1:tool-call-1",
+                "status": "completed",
+                "rawOutput": "secret-value",
+            },
+        )
+    )
+    exchange = owner.KimiAcpOneShotV1(b"safe task", "C:/private/run")
+
+    exchange(peer)
+
+    observed_method = getattr(exchange, "observed_receipt", None)
+    assert callable(observed_method)
+    observed = observed_method()
+    assert observed == {
+        "toolCalls": [
+            {"id": "1:tool-call-1", "title": "Read", "status": "completed"}
+        ],
+        "permissionDecisions": [],
+    }
+    assert "secret-value" not in json.dumps(observed)
+    assert "private.txt" not in json.dumps(observed)
+
+
+def test_kimi_observed_titles_redact_selected_cwd_and_mcp_secret(
+    tmp_path: Path,
+) -> None:
+    owner = _load_owner()
+    server = owner.KimiMcpServerV1(
+        name="private-mcp",
+        command="fixture",
+        args=(),
+        env=(owner.KimiNameValueV1("TOKEN", "secret-value"),),
+    )
+    permission = _permission_request(
+        [{"optionId": "deny-custom", "name": "Reject", "kind": "reject_once"}]
+    )
+    permission["toolCall"]["title"] = f"Read {tmp_path}"
+    peer = _FakeKimiAcpPeer(
+        tool_updates=(
+            {
+                "sessionUpdate": "tool_call",
+                "toolCallId": "1:tool-call-1",
+                "title": "Read secret-value",
+                "status": "in_progress",
+            },
+        ),
+        permission_request=permission,
+    )
+    exchange = owner.KimiAcpOneShotV1(
+        b"safe task", str(tmp_path), (server,), "reject"
+    )
+
+    exchange(peer)
+
+    observed = exchange.observed_receipt()
+    assert observed["toolCalls"][0]["title"] == "<redacted>"
+    assert observed["permissionDecisions"][0]["title"] == "<redacted>"
+    visible = json.dumps(observed)
+    assert "secret-value" not in visible
+    assert str(tmp_path) not in visible
+
+
+@pytest.mark.parametrize(
+    "update",
+    (
+        {
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "unknown",
+            "status": "completed",
+        },
+        {
+            "sessionUpdate": "tool_call",
+            "toolCallId": "1:tool-call-1",
+            "title": "Read",
+            "status": "unknown-status",
+        },
+    ),
+)
+def test_kimi_acp_rejects_unmergeable_tool_evidence(
+    update: dict[str, object],
+) -> None:
+    owner = _load_owner()
+    peer = _FakeKimiAcpPeer(tool_updates=(update,))
+    exchange = owner.KimiAcpOneShotV1(b"safe task", "C:/private/run")
+
+    with pytest.raises(ValueError, match="^E_KIMI_ACP_PROTOCOL$"):
+        exchange(peer)
+
+
 def test_kimi_acp_one_shot_refuses_reverse_rpc() -> None:
     owner = _load_owner()
     exchange = owner.KimiAcpOneShotV1(b"safe task", "C:/private/run")
@@ -1742,6 +2364,260 @@ def test_kimi_private_run_materializes_fixed_zero_capability_agent_profile(
     )
 
 
+def _write_kimi_capabilities(
+    path: Path,
+    *,
+    cwd: Path | None = None,
+    tools: list[str] | None = None,
+    mcp_servers: list[dict[str, object]] | None = None,
+    subagents: list[str] | None = None,
+    permission: str = "reject",
+) -> None:
+    path.write_text(
+        json.dumps(
+            {
+                "v": 1,
+                "tools": [] if tools is None else tools,
+                "mcpServers": [] if mcp_servers is None else mcp_servers,
+                "subagents": [] if subagents is None else subagents,
+                "permission": permission,
+                "cwd": None if cwd is None else str(cwd),
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_kimi_capabilities_file_parses_exact_shape_without_provider_flags(
+    tmp_path: Path,
+) -> None:
+    owner = _load_owner()
+    capabilities = tmp_path / "capabilities.json"
+    _write_kimi_capabilities(capabilities)
+
+    control = owner.parse_control(
+        [
+            "fixture",
+            "--kimi-capabilities-file",
+            str(capabilities),
+            "--task-class",
+            "review",
+            "--role",
+            "qa-engineer",
+        ],
+        external=True,
+    )
+
+    assert control.provider_flags == []
+    selected = getattr(control, "kimi_capabilities", None)
+    assert selected is not None
+    assert selected.tools == ()
+    assert selected.mcp_servers == ()
+    assert selected.subagents == ()
+    assert selected.permission == "reject"
+    assert selected.cwd is None
+
+
+def test_kimi_help_advertises_optional_capabilities_file(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    owner = _load_owner()
+
+    assert owner.kimi_main(["--help"]) == 0
+
+    assert "[--kimi-capabilities-file <json>]" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "raw",
+    (
+        b'{"v":1,"v":1,"tools":[],"mcpServers":[],"subagents":[],"permission":"reject","cwd":null}',
+        b'{"v":1,"tools":[],"mcpServers":[],"subagents":[],"permission":"reject","cwd":null,"extra":true}',
+        b'{"v":2,"tools":[],"mcpServers":[],"subagents":[],"permission":"reject","cwd":null}',
+        b'{"v":true,"tools":[],"mcpServers":[],"subagents":[],"permission":"reject","cwd":null}',
+        b'{"v":1,"tools":"Read","mcpServers":[],"subagents":[],"permission":"reject","cwd":null}',
+        b'{"v":1,"tools":["Read","Read"],"mcpServers":[],"subagents":[],"permission":"reject","cwd":null}',
+        b'{"v":1,"tools":[],"mcpServers":[],"subagents":[],"permission":"sometimes","cwd":null}',
+        b'{"v":1,"tools":["Agent"],"mcpServers":[],"subagents":[],"permission":"reject","cwd":null}',
+        b'{"v":1,"tools":[],"mcpServers":[],"subagents":["explore"],"permission":"reject","cwd":null}',
+        b'{"v":1,"tools":[],"mcpServers":[{"name":"local","command":"tool","type":"stdio"}],"subagents":[],"permission":"reject","cwd":null}',
+        b'{"v":1,"tools":[],"mcpServers":[{"name":"local","command":"tool"}],"subagents":[],"permission":"reject","cwd":null}',
+        b'{"v":1,"tools":[],"mcpServers":[{"name":"remote","type":"http","url":"https://example.invalid"}],"subagents":[],"permission":"reject","cwd":null}',
+        b'{"v":1,"tools":[],"mcpServers":[{"name":"remote","type":"sse","url":"https://example.invalid"}],"subagents":[],"permission":"reject","cwd":null}',
+        b'{"v":1,"tools":[],"mcpServers":[{"name":"remote","type":"http","url":"https://example.invalid","args":[]}],"subagents":[],"permission":"reject","cwd":null}',
+        b'{"v":1,"tools":[],"mcpServers":[{"name":"dup","command":"one"},{"name":"dup","command":"two"}],"subagents":[],"permission":"reject","cwd":null}',
+        b'{"v":1,"tools":[],"mcpServers":[{"name":"local","command":"tool","env":[{"name":"TOKEN","value":"one"},{"name":"TOKEN","value":"two"}]}],"subagents":[],"permission":"reject","cwd":null}',
+    ),
+)
+def test_kimi_capabilities_file_rejects_invalid_shapes(
+    tmp_path: Path, raw: bytes
+) -> None:
+    owner = _load_owner()
+    capabilities = tmp_path / "invalid.json"
+    capabilities.write_bytes(raw)
+    load = getattr(owner, "read_kimi_capability_selection", lambda _path: None)
+
+    with pytest.raises(ValueError, match="^E_KIMI_CAPABILITIES_INVALID$"):
+        load(capabilities)
+
+
+def test_kimi_capabilities_file_rejects_oversize_and_invalid_cwd_without_echo(
+    tmp_path: Path,
+) -> None:
+    owner = _load_owner()
+    load = getattr(owner, "read_kimi_capability_selection", lambda _path: None)
+    oversized = tmp_path / "oversized.json"
+    oversized.write_bytes(b" " * (owner.PROMPT_SNAPSHOT_MAX_BYTES + 1))
+    invalid_cwd = tmp_path / "invalid-cwd.json"
+    _write_kimi_capabilities(invalid_cwd)
+    document = json.loads(invalid_cwd.read_text(encoding="utf-8"))
+    document["cwd"] = "relative/private-workdir"
+    invalid_cwd.write_text(json.dumps(document), encoding="utf-8")
+    missing_cwd = tmp_path / "missing-cwd.json"
+    _write_kimi_capabilities(missing_cwd)
+    document = json.loads(missing_cwd.read_text(encoding="utf-8"))
+    document["cwd"] = str(tmp_path / "does-not-exist")
+    missing_cwd.write_text(json.dumps(document), encoding="utf-8")
+
+    for path in (oversized, invalid_cwd, missing_cwd):
+        with pytest.raises(ValueError) as caught:
+            load(path)
+        assert str(caught.value) == "E_KIMI_CAPABILITIES_INVALID"
+        assert str(path) not in str(caught.value)
+        assert "private-workdir" not in str(caught.value)
+
+
+def test_kimi_selected_profile_keeps_tools_and_children_independent_and_secret_free(
+    tmp_path: Path,
+) -> None:
+    owner = _load_owner()
+    selected_cwd = tmp_path / "selected-cwd"
+    selected_cwd.mkdir()
+    capabilities = tmp_path / "capabilities.json"
+    _write_kimi_capabilities(
+        capabilities,
+        cwd=selected_cwd,
+        tools=["FutureNativeTool42", "Agent"],
+        mcp_servers=[
+            {
+                "name": "local",
+                "command": "fixture-tool",
+                "args": ["--mode", "two words"],
+                "env": [{"name": "FIXTURE_TOKEN", "value": "secret-value"}],
+            }
+        ],
+        subagents=["future-explorer"],
+    )
+    load = getattr(owner, "read_kimi_capability_selection", lambda _path: None)
+    selection = load(capabilities)
+    assert selection is not None
+    user_data = tmp_path / "user-data"
+    user_data.mkdir()
+    (user_data / "config.toml").write_text(
+        "default_model='kimi-code/k3'\n", encoding="utf-8"
+    )
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+
+    owner.KimiPrivateHomeAliasesV1.create(run_dir, user_data, selection)
+
+    profile = (run_dir / ".kimi-code" / "agents" / "agent.md").read_text(
+        encoding="utf-8"
+    )
+    assert 'tools: ["FutureNativeTool42","Agent"]' in profile
+    assert 'subagents: ["future-explorer"]' in profile
+    assert "secret-value" not in profile
+    assert str(selected_cwd) not in profile
+
+
+def test_kimi_selected_cwd_and_mcp_variants_reach_session_new_unchanged(
+    tmp_path: Path,
+) -> None:
+    owner = _load_owner()
+    selected_cwd = tmp_path / "selected-cwd"
+    selected_cwd.mkdir()
+    capabilities = tmp_path / "capabilities.json"
+    expected_mcp = [
+        {
+            "name": "local",
+            "command": "fixture-tool",
+            "args": ["--mode", "two words"],
+            "env": [{"name": "FIXTURE_TOKEN", "value": "secret-value"}],
+        },
+        {
+            "name": "remote-http",
+            "type": "http",
+            "url": "https://example.invalid/mcp",
+            "headers": [{"name": "Authorization", "value": "private-header"}],
+        },
+        {
+            "name": "remote-sse",
+            "type": "sse",
+            "url": "https://example.invalid/sse",
+            "headers": [],
+        },
+    ]
+    _write_kimi_capabilities(
+        capabilities,
+        cwd=selected_cwd,
+        mcp_servers=expected_mcp,
+    )
+    load = getattr(owner, "read_kimi_capability_selection", lambda _path: None)
+    selection = load(capabilities)
+    assert selection is not None
+    peer = _FakeKimiAcpPeer()
+    exchange = owner.KimiAcpOneShotV1(
+        b"safe task",
+        selection.cwd or str(tmp_path / "private-run"),
+        selection.mcp_servers,
+    )
+
+    exchange(peer)
+
+    assert peer.requests[1]["params"] == {
+        "cwd": str(selected_cwd),
+        "mcpServers": expected_mcp,
+        "additionalDirectories": [],
+    }
+
+
+def test_non_kimi_capability_option_is_rejected_before_file_read(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    owner = _load_owner()
+    capability_file = tmp_path / "must-not-read.json"
+    reads: list[Path] = []
+    monkeypatch.setattr(
+        owner,
+        "read_kimi_capability_selection",
+        lambda path: reads.append(path) or owner.KimiCapabilitySelectionV1(),
+    )
+
+    assert owner.launch(
+        "claude", ["fixture", "--kimi-capabilities-file", str(capability_file)]
+    ) != 0
+    assert "E_EXTERNAL_LAUNCH_FLAGS_UNSAFE" in capsys.readouterr().err
+    assert reads == []
+
+    with pytest.raises(ValueError, match="^E_EXTERNAL_LAUNCH_FLAGS_UNSAFE$"):
+        owner._prevalidate_policy_bound_external_launch(
+            "grok",
+            [
+                "fixture",
+                "--kimi-capabilities-file",
+                str(capability_file),
+                "--task-class",
+                "review",
+                "--role",
+                "qa-engineer",
+            ],
+        )
+    assert reads == []
+
+
 def _write_fake_kimi_acp(tmp_path: Path, mode: str) -> Path:
     (tmp_path / "mode.txt").write_text(mode, encoding="ascii")
     script = tmp_path / "acp"
@@ -1750,12 +2626,14 @@ def _write_fake_kimi_acp(tmp_path: Path, mode: str) -> Path:
 
 import json
 import sys
+import time
 from pathlib import Path
 
 
 root = Path.cwd()
 mode = (root / "mode.txt").read_text(encoding="ascii")
 methods = []
+pending_prompt_id = None
 
 
 def record(method):
@@ -1770,6 +2648,30 @@ def emit(message):
 
 for line in sys.stdin.buffer:
     request = json.loads(line.decode("utf-8"))
+    if "method" not in request:
+        if pending_prompt_id is None:
+            raise SystemExit(20)
+        (root / "permission-response.json").write_text(
+            json.dumps(request, ensure_ascii=True), encoding="utf-8"
+        )
+        emit({
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {
+                "sessionId": "fake-session-1",
+                "update": {
+                    "sessionUpdate": "agent_message_chunk",
+                    "content": {"type": "text", "text": "artifact\\nGATE: PASS\\n"},
+                },
+            },
+        })
+        emit({
+            "jsonrpc": "2.0",
+            "id": pending_prompt_id,
+            "result": {"stopReason": "end_turn"},
+        })
+        pending_prompt_id = None
+        continue
     method = request["method"]
     record(method)
     request_id = request.get("id")
@@ -1804,6 +2706,68 @@ for line in sys.stdin.buffer:
         if mode == "cancel":
             (root / "cancel.ready").write_text("ready", encoding="ascii")
             continue
+        if mode in {"permission", "permission-mismatch"}:
+            emit({
+                "jsonrpc": "2.0",
+                "method": "session/update",
+                "params": {
+                    "sessionId": "fake-session-1",
+                    "update": {
+                        "sessionUpdate": "tool_call",
+                        "toolCallId": "1:tool-call-1",
+                        "title": "Read",
+                        "status": "in_progress",
+                    },
+                },
+            })
+            emit({
+                "jsonrpc": "2.0",
+                "id": "permission-rpc-1",
+                "method": "session/request_permission",
+                "params": {
+                    "sessionId": "fake-session-1",
+                    "options": [
+                        {
+                            "optionId": "deny-custom",
+                            "name": "Reject",
+                            "kind": (
+                                "allow_once"
+                                if mode == "permission-mismatch"
+                                else "reject_once"
+                            ),
+                        }
+                    ],
+                    "toolCall": {
+                        "toolCallId": "1:tool-call-1",
+                        "title": "Read",
+                    },
+                },
+            })
+            pending_prompt_id = request_id
+            continue
+        if mode == "paced-overflow":
+            for _ in range(7):
+                emit({
+                    "jsonrpc": "2.0",
+                    "method": "session/update",
+                    "params": {
+                        "sessionId": "fake-session-1",
+                        "update": {
+                            "sessionUpdate": "agent_thought_chunk",
+                            "content": {"type": "text", "text": "x" * 180000},
+                        },
+                    },
+                })
+            time.sleep(0.5)
+        if mode == "stderr-overflow":
+            sys.stderr.write("e" * (1024 * 1024 + 1))
+            sys.stderr.flush()
+            time.sleep(0.5)
+        answer = (
+            "x" * 1024 + "\\nGATE: PASS\\n"
+            if mode == "answer-oversize"
+            else "artifact\\nGATE: PASS\\n"
+        )
         emit({
             "jsonrpc": "2.0",
             "method": "session/update",
@@ -1811,7 +2775,7 @@ for line in sys.stdin.buffer:
                 "sessionId": "fake-session-1",
                 "update": {
                     "sessionUpdate": "agent_message_chunk",
-                    "content": {"type": "text", "text": "artifact\\nGATE: PASS\\n"},
+                    "content": {"type": "text", "text": answer},
                 },
             },
         })
@@ -1831,7 +2795,14 @@ for line in sys.stdin.buffer:
     return script
 
 
-def _run_fake_kimi_acp(tmp_path: Path, mode: str, body: bytes):
+def _run_fake_kimi_acp(
+    tmp_path: Path,
+    mode: str,
+    body: bytes,
+    *,
+    result_max_bytes: int = 1024 * 1024,
+    continue_after_stdout_capture_limit: bool = True,
+):
     owner = _load_owner()
     _write_fake_kimi_acp(tmp_path, mode)
     executable = Path(sys.executable).resolve()
@@ -1869,12 +2840,19 @@ def _run_fake_kimi_acp(tmp_path: Path, mode: str, body: bytes):
         ),
     )
     exchange = owner.KimiAcpOneShotV1(body, str(tmp_path))
+    object.__setattr__(exchange, "result_max_bytes", result_max_bytes)
+    dialogue = owner.ProcessDialogueV1(
+        owner.KIMI_WINDOWS_PROFILE_V1.profile_id, exchange
+    )
+    object.__setattr__(
+        dialogue,
+        "continue_after_stdout_capture_limit",
+        continue_after_stdout_capture_limit,
+    )
     try:
         result = runner.run(
             request,
-            dialogue=owner.ProcessDialogueV1(
-                owner.KIMI_WINDOWS_PROFILE_V1.profile_id, exchange
-            ),
+            dialogue=dialogue,
         )
     finally:
         close_result = runner.close()
@@ -1947,6 +2925,114 @@ def test_fake_kimi_acp_process_cancels_then_closes_deletes_and_settles(
     ]
     assert result.failure_id == "PSV1-CANCELLED"
     assert result.cancelled is True
+    assert result.resources_closed is True
+    assert result.tree.tree_empty is True
+    assert close_result.outcome == "closed"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows finite Kimi ACP process contract")
+def test_fake_kimi_acp_permission_response_and_observation_settle(tmp_path: Path) -> None:
+    exchange, result, close_result = _run_fake_kimi_acp(
+        tmp_path, "permission", b"safe task"
+    )
+
+    response = json.loads(
+        (tmp_path / "permission-response.json").read_text(encoding="utf-8")
+    )
+    assert response == {
+        "jsonrpc": "2.0",
+        "id": "permission-rpc-1",
+        "result": {
+            "outcome": {"outcome": "selected", "optionId": "deny-custom"}
+        },
+    }
+    assert exchange.observed_receipt() == {
+        "toolCalls": [
+            {"id": "1:tool-call-1", "title": "Read", "status": "in_progress"}
+        ],
+        "permissionDecisions": [
+            {"id": "1:tool-call-1", "title": "Read", "decision": "reject"}
+        ],
+    }
+    assert result.outcome == "success"
+    assert result.resources_closed is True
+    assert result.tree.tree_empty is True
+    assert close_result.outcome == "closed"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows finite Kimi ACP process contract")
+def test_fake_kimi_acp_permission_option_mismatch_reaps_process(tmp_path: Path) -> None:
+    _exchange, result, close_result = _run_fake_kimi_acp(
+        tmp_path, "permission-mismatch", b"safe task"
+    )
+
+    assert result.failure_id == "PSV1-KIMI-ACP-PROTOCOL"
+    assert result.resources_closed is True
+    assert result.tree.tree_empty is True
+    assert close_result.outcome == "closed"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows finite Kimi ACP process contract")
+def test_fake_kimi_acp_paced_stdout_overflow_drains_to_complete_answer(
+    tmp_path: Path,
+) -> None:
+    exchange, result, close_result = _run_fake_kimi_acp(
+        tmp_path, "paced-overflow", b"safe task"
+    )
+
+    assert exchange.result_bytes == b"artifact\nGATE: PASS\n"
+    assert result.outcome == "success"
+    assert result.failure_id is None
+    assert result.target_exit_code == 0
+    assert result.stdout.truncated is True
+    assert result.stdout.observed_bytes > 1024 * 1024
+    assert result.stdin.complete is True
+    assert result.resources_closed is True
+    assert result.tree.tree_empty is True
+    assert close_result.outcome == "closed"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows finite Kimi ACP process contract")
+def test_fake_kimi_acp_paced_stdout_overflow_is_fatal_by_default(
+    tmp_path: Path,
+) -> None:
+    exchange, result, close_result = _run_fake_kimi_acp(
+        tmp_path,
+        "paced-overflow",
+        b"safe task",
+        continue_after_stdout_capture_limit=False,
+    )
+
+    assert exchange.result_bytes == b""
+    assert result.failure_id == "PSV1-CAPTURE-LIMIT"
+    assert result.stdout.truncated is True
+    assert result.resources_closed is True
+    assert result.tree.tree_empty is True
+    assert close_result.outcome == "closed"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows finite Kimi ACP process contract")
+def test_fake_kimi_acp_stderr_overflow_remains_fatal(tmp_path: Path) -> None:
+    exchange, result, close_result = _run_fake_kimi_acp(
+        tmp_path, "stderr-overflow", b"safe task"
+    )
+
+    assert exchange.result_bytes == b""
+    assert result.failure_id == "PSV1-CAPTURE-LIMIT"
+    assert result.stderr.truncated is True
+    assert result.resources_closed is True
+    assert result.tree.tree_empty is True
+    assert close_result.outcome == "closed"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows finite Kimi ACP process contract")
+def test_fake_kimi_acp_oversize_answer_fails_and_reaps_process(tmp_path: Path) -> None:
+    exchange, result, close_result = _run_fake_kimi_acp(
+        tmp_path, "answer-oversize", b"safe task", result_max_bytes=64
+    )
+
+    assert exchange.result_bytes == b""
+    assert result.failure_id == "PSV1-KIMI-ACP-PROTOCOL"
     assert result.resources_closed is True
     assert result.tree.tree_empty is True
     assert close_result.outcome == "closed"
