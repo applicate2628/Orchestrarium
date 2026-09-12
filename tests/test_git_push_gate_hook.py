@@ -5121,6 +5121,7 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
             CANONICAL_HOOK,
             [user("[approve-pr-publication]")],
             "git push origin HEAD:refs/heads/feature; echo " + canary,
+            tool_name="PowerShell",
         )
         self.assertIn("PRG-COMMAND-SHAPE", simple)
         self.assertIn("Command diagnostics: route=simple;", simple)
@@ -5133,6 +5134,7 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
             CANONICAL_HOOK,
             [user(self.GRANT)],
             "git push origin HEAD:refs/heads/feature",
+            tool_name="PowerShell",
         )
         self.assertIn("Command diagnostics: route=legacy;", legacy)
         self.assertIn("stage=legacy-strict.", legacy)

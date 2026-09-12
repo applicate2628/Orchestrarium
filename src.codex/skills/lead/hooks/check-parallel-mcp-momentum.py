@@ -43,6 +43,16 @@ def _repository_context(envelope: dict) -> tuple[dict, Path, Path | None]:
         else Path.cwd().resolve()
     )
     root = classifier["_nearest_git_root"](cwd)
+    if root is None:
+        tool_input = envelope.get("tool_input")
+        raw_targets = (
+            classifier["_target_strings"](tool_input)
+            if isinstance(tool_input, dict)
+            else []
+        )
+        target_paths = [classifier["_as_path"](value, cwd) for value in raw_targets]
+        if target_paths:
+            root = classifier["_nearest_git_root"](target_paths[0])
     return classifier, cwd, root
 
 

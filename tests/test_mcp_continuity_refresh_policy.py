@@ -59,30 +59,32 @@ class StatefulMcpRefreshPolicyTests(unittest.TestCase):
         )
         self.assertNotIn("статический или live MCP", russian_reference)
 
-    def test_codegraph_stale_sync_fresh_repeat_query_fixture(self) -> None:
-        """An indexed server must prove freshness before reusing a query result."""
-        required_order = (
-            "Non-normative workflow examples only",
-            "CodeGraph follows `status -> sync -> fresh status -> repeat query`",
-            "These names never select a tool",
-            "If refresh fails, report it explicitly",
-            "do not present stale output as current",
+    def test_stateful_or_indexed_mcp_fixture_requires_freshness_before_repeat(self) -> None:
+        """Stateful or indexed evidence must refresh before its query is reused."""
+        required_session_context = (
+            "Before using stateful or indexed repository evidence",
+            "check status/freshness; when stale or pending, sync/update/reindex, confirm fresh, and repeat the intended query.",
+            "Never present stale evidence.",
+            "Use another path only if refresh fails, the tool is unavailable, the user forbids it, or an explicit resource bound is exceeded; state why.",
+            "Stateless or live tools need no refresh.",
         )
-        for index, path in enumerate(POLICY_PATHS):
-            with self.subTest(policy=path.relative_to(ROOT).as_posix()):
-                context = load_policy(path, index).SESSION_START_CONTEXT
-                cursor = -1
-                for token in required_order:
-                    cursor = context.find(token, cursor + 1)
-                    self.assertNotEqual(cursor, -1, token)
-
-    def test_stateless_or_live_mcp_fixture_does_not_require_refresh(self) -> None:
+        required_turn_context = (
+            "After repository, project, branch, worktree, or indexed-input changes, check status/freshness, sync/update/reindex stale state, confirm fresh, and retry.",
+            "Use fallback only if refresh fails, the tool is unavailable, the user forbids it, or an explicit resource bound is exceeded; state why and never use stale evidence.",
+        )
+        canonical_contexts = None
         for index, path in enumerate(POLICY_PATHS):
             with self.subTest(policy=path.relative_to(ROOT).as_posix()):
                 policy = load_policy(path, index)
-                self.assertIn("Stateless or live MCPs need no refresh.", policy.SESSION_START_CONTEXT)
-                self.assertIn("stateless/live MCPs are exempt.", policy.TURN_ANCHOR_CONTEXT)
-                self.assertIn("fresh recheck, then repeat the query", policy.TURN_ANCHOR_CONTEXT)
+                contexts = (policy.SESSION_START_CONTEXT, policy.TURN_ANCHOR_CONTEXT)
+                if canonical_contexts is None:
+                    canonical_contexts = contexts
+                else:
+                    self.assertEqual(contexts, canonical_contexts)
+                for marker in required_session_context:
+                    self.assertIn(marker, policy.SESSION_START_CONTEXT)
+                for marker in required_turn_context:
+                    self.assertIn(marker, policy.TURN_ANCHOR_CONTEXT)
 
 
 if __name__ == "__main__":

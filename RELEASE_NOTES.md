@@ -2,6 +2,12 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-09-13
+
+- **Repository-work reminders also follow an absolute mutation target when the session starts outside a repository.** The existing classifier still owns repository discovery, mode selection and root-only behavior; the reminder remains nonblocking.
+- **Thin Claude guidance preserves its transport-owner pointer and publication-evidence limits.** Tests distinguish imported or referenced owners from inline consumers instead of requiring duplicate instruction bodies. MCP reminders remain generic, and historical Luna migration fixtures no longer depend on changing live policy bytes or a complete Git history.
+- **Validator and shell fixtures check behavior instead of incidental host defaults or check counts.** Success summaries require positive completed checks and zero errors; the PowerShell diagnostic case explicitly selects that dialect on every host.
+
 ## 2026-09-12
 
 - **Kimi explicit tool selections use a private per-run native configuration while retaining the selected working directory.** Compatible reordered or narrower exact-token user policies preserve their bytes and supported links; conflicting policies are reported rather than overwritten. Child permission is an explicit OFF/ON choice: ON requires a selected dispatch tool and remains restricted by the native profile, without guaranteeing any child type. Real selected Read, exact MCP and prepared Bash-test calls passed; live child execution and empty-selection visibility remain explicit verification limitations.

@@ -47,46 +47,40 @@ PROTECTED_EXISTING_ROLE_DIGESTS = {
 }
 STOCK_FAST_POLICY_SHA256 = "dcab8e4da55b05475f9b9c507a3a9a97679a0c7b72006ff7ffca4b95ccd13451"
 STOCK_FAST_MANIFEST_SHA256 = "842b1b29fae7d41a0b2422d8711652b3e6d7c720406c3ce3fc13259518f82115"
+STOCK_FAST_FIXTURE_ROOT = (
+    ROOT
+    / "tests"
+    / "fixtures"
+    / "native-luna-policy-priors"
+    / "5ca19c135b987ec37b77bc00a9c73ef6dea8351e"
+)
+STOCK_FAST_POLICY_FIXTURE = STOCK_FAST_FIXTURE_ROOT / "role-routing-policy.v1.json"
+STOCK_FAST_MANIFEST_FIXTURE = (
+    STOCK_FAST_FIXTURE_ROOT / "orchestrarium-role-manifest.json"
+)
 
 
 def _stock_fast_policy_manifest_pair() -> tuple[bytes, bytes]:
-    policy = POLICY_PATH.read_text(encoding="utf-8")
-    policy = policy.replace('    "mechanical",\n    "balanced"', '    "fast",\n    "balanced"')
-    policy = policy.replace(
-        '''    "luna-high": {
-      "modelTier": "mechanical",
-      "effort": "high",
-      "codexModel": "gpt-5.6-luna"
-    },''',
-        '''    "micro-low": {
-      "modelTier": "fast",
-      "effort": "low",
-      "codexModel": "gpt-5.6-luna"
-    },
-    "fast-medium": {
-      "modelTier": "fast",
-      "effort": "medium",
-      "codexModel": "gpt-5.6-luna"
-    },
-    "fast-high": {
-      "modelTier": "fast",
-      "effort": "high",
-      "codexModel": "gpt-5.6-luna"
-    },''',
-    )
-    policy = policy.replace('"luna-high"', '"fast-high"')
-    policy = policy.replace(
-        '"requiredModelTier": "mechanical"', '"requiredModelTier": "fast"'
-    )
-    policy_bytes = policy.encode("utf-8")
-    manifest = (AGENTS_SOURCE / installer.CODEX_ROLE_MANIFEST).read_text(encoding="utf-8")
-    manifest = manifest.replace(
-        hashlib.sha256(POLICY_PATH.read_bytes()).hexdigest(), STOCK_FAST_POLICY_SHA256
-    )
-    manifest_bytes = manifest.encode("utf-8")
+    policy_bytes = STOCK_FAST_POLICY_FIXTURE.read_bytes()
+    manifest_bytes = STOCK_FAST_MANIFEST_FIXTURE.read_bytes()
     assert hashlib.sha256(policy_bytes).hexdigest() == STOCK_FAST_POLICY_SHA256
     assert hashlib.sha256(manifest_bytes).hexdigest() == STOCK_FAST_MANIFEST_SHA256
     return policy_bytes, manifest_bytes
+
+
+@pytest.mark.parametrize("live_policy", (None, b'{"mutated": true}\n'))
+def test_stock_fast_fixture_is_independent_of_live_policy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, live_policy: bytes | None
+) -> None:
+    replacement = tmp_path / "live-policy.json"
+    if live_policy is not None:
+        replacement.write_bytes(live_policy)
+    monkeypatch.setattr(sys.modules[__name__], "POLICY_PATH", replacement)
+
+    policy_bytes, manifest_bytes = _stock_fast_policy_manifest_pair()
+
+    assert hashlib.sha256(policy_bytes).hexdigest() == STOCK_FAST_POLICY_SHA256
+    assert hashlib.sha256(manifest_bytes).hexdigest() == STOCK_FAST_MANIFEST_SHA256
 
 
 def _policy() -> dict:

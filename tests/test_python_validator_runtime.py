@@ -55,8 +55,8 @@ PROVIDER_RUNTIME_MIRRORS = (
     ROOT / "src.claude/agents/scripts/skill_pack_validator_runtime.py",
 )
 EXPECTED_SUMMARIES = (
-    "PASS: 564  WARN: 0  FAIL: 0",
-    "Checks: 495  |  Passed: 495  |  Warnings: 0  |  Errors: 0",
+    r"^  PASS: [1-9][0-9]*  WARN: 0  FAIL: 0$",
+    r"^  Checks: ([1-9][0-9]*)  \|  Passed: \1  \|  Warnings: 0  \|  Errors: 0$",
 )
 
 
@@ -130,6 +130,13 @@ def test_work_items_checker_consumes_canonical_slug_predicate_explicitly(
     assert resolver_calls == ["safe.dot"]
 
 
+def _has_complete_summary_line(output: str, summary: str) -> bool:
+    return any(
+        re.fullmatch(summary.removesuffix("\n"), line)
+        for line in output.splitlines()
+    )
+
+
 def _run_validator(
     validator: Path,
     summary: str,
@@ -153,8 +160,52 @@ def _run_validator(
         check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert summary in result.stdout
+    assert _has_complete_summary_line(result.stdout, summary), result.stdout
     return result
+
+
+@pytest.mark.parametrize(
+    ("summary", "line", "expected"),
+    (
+        (EXPECTED_SUMMARIES[0], "  PASS: 1  WARN: 0  FAIL: 0", True),
+        (
+            EXPECTED_SUMMARIES[1],
+            "  Checks: 1  |  Passed: 1  |  Warnings: 0  |  Errors: 0",
+            True,
+        ),
+        (EXPECTED_SUMMARIES[0], "  PASS: 0  WARN: 0  FAIL: 0", False),
+        (
+            EXPECTED_SUMMARIES[1],
+            "  Checks: 0  |  Passed: 0  |  Warnings: 0  |  Errors: 0",
+            False,
+        ),
+        (
+            EXPECTED_SUMMARIES[1],
+            "  Checks: 2  |  Passed: 1  |  Warnings: 0  |  Errors: 0",
+            False,
+        ),
+        (EXPECTED_SUMMARIES[0], "  PASS: 1  WARN: 0  FAIL: 1", False),
+        (
+            EXPECTED_SUMMARIES[1],
+            "  Checks: 2  |  Passed: 2  |  Warnings: 0  |  Errors: 1",
+            False,
+        ),
+        (EXPECTED_SUMMARIES[0], "  PASS: 1  WARN: 0  FAIL: 01", False),
+        (
+            EXPECTED_SUMMARIES[1],
+            "  Checks: 2  |  Passed: 2  |  Warnings: 0  |  Errors: 01",
+            False,
+        ),
+        ("VALIDATION PASSED\n", "VALIDATION PASSED", True),
+        ("  RESULT: PASS\n", "  RESULT: PASS", True),
+    ),
+)
+def test_validator_summary_patterns_require_a_complete_clean_success_line(
+    summary: str,
+    line: str,
+    expected: bool,
+) -> None:
+    assert _has_complete_summary_line(line + "\n", summary) is expected
 
 
 def _copy_validator_runtime(destination: Path) -> None:

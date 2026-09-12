@@ -21,6 +21,7 @@ The pack auto-installs thirteen `settings.json` entries: nine structural hooks a
 - **Lifecycle and audits.** No Stop hook terminalizes work-items; Physical location owns lifecycle membership. Audits are warn-only and fail-open. The worktree audit recognizes only an exact trailing `# orchestrarium:requested-isolation-worktree` marker.
 - **MCP control.** Model Context Protocol (MCP) discovery reminders are advisory in `auto` and subagent contexts. Root `force` denies qualifying fallback searches with `[MCP-FORCE-1]`; exact user marker `[approve-mcp-fallback:v1]` grants one recovery turn without changing configuration.
 - **User controls.** `[skip-bugfix-discipline]`, `[approve-publication]`, `[approve-mcp-fallback:v1]`, and `[acknowledge-passive-stop]` retain their exact one-turn or one-stop meanings; assistant/tool text cannot mint user authorization.
+- **Harness evidence limitation.** Arbitrary same-process mutation defeats harness observation and may run arbitrary caller code; the only proven invariant is that unchanged shipped source contains no external adapter or launcher, and its cooperative result has zero production/publication consumers.
 
 ## Delegation rule
 
@@ -35,7 +36,7 @@ Read per-key configuration in this order: project `.claude/.agents-mode.yaml`, l
 - The curated inline role identities are exactly `lead`, `product-manager`, `analyst`, `architect`, and `planner`. Architect's sole role-contract body is the universal `.agents/skills/architect/SKILL.md` projection. Explicit Skill invocation may adopt these identities inline; the shared quick-fix route may self-invoke only its already-admitted bounded intake/factual/seam decision. Inline adoption is neither isolated nor an independent gate.
 - `lead` is a host-selected main agent and inline `/lead` role. Lead is never spawned as a subagent. The wrapper rejects a stale dispatched `subagent_type: lead`; only a stale `subagent_type: lead` dispatch is fail-closed. `product-manager`, `analyst`, and `planner` remain typed Agent targets whose wrappers load their same-named Claude skill; the Architect wrapper loads the universal body.
 - For `requiresLead: false` routes, the main conversation invokes the declared Agent chain directly. For `requiresLead: true`, it adopts `/lead`, owns integration/recovery, and invokes leaf specialists; `requiresLead` never creates a Lead subagent.
-- Launch independent Agent calls together only when their complete resource surfaces are disjoint. External worker/reviewer substitution follows the installed external-dispatch contract.
+- Launch independent Agent calls together only when their complete resource surfaces are disjoint. External worker/reviewer substitution follows the installed [external-dispatch contract](agents/contracts/external-dispatch.md).
 
 Team-template JSON files under `.claude/agents/team-templates/` are the sole owners of each chain, trigger, required role, and `requiresLead` value. Select the exact file after classification; apply the `requiresLead` rules above.
 
