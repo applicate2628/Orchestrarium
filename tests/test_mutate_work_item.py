@@ -1818,6 +1818,9 @@ def test_staged_start_ledger_failure_restores_candidate(tmp_path: Path) -> None:
                 return real_ledger.serialize_event(event)
 
         class RejectingValidator:
+            def validate_obligation_transfer_ownership(self, _root):
+                return []
+
             def validate_work_item(self, _item, *, strict_revise=True):
                 return ["injected temporary validation failure"]
 

@@ -481,6 +481,49 @@ def test_claude_architect_source_composition_has_one_universal_body() -> None:
     assert "('check_not_exists',\n  'src.claude/skills/architect/SKILL.md'" in _read(validator, FAILURE_IDS[0])
 
 
+def test_claude_validator_maps_architect_apat_to_each_layout_owner() -> None:
+    validator = ROOT / "src.claude/agents/scripts/validate-skill-pack.py"
+    validation = subprocess.run(
+        [sys.executable, "-B", str(validator), "--root", str(ROOT)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=120,
+        check=False,
+    )
+    architect_label = "APAT-E006-INSTALLED-MISSING: claude architect "
+    architect_passes = tuple(
+        line for line in validation.stdout.splitlines()
+        if "PASS" in line and architect_label in line
+    )
+    assert validation.returncode == 0 and len(architect_passes) == 8, (
+        f"{FAILURE_IDS[5]}: full Claude source validation did not check the "
+        f"universal Architect owner\n{validation.stdout}\n{validation.stderr}"
+    )
+
+    declaration = _load_validator_declaration(validator)
+    scopes = dict(declaration.ACTIONS)
+
+    def architect_actions(scope: str) -> tuple[tuple[str, ...], ...]:
+        return tuple(
+            action for action in scopes[scope]
+            if architect_label in action[-1]
+        )
+
+    source_actions = architect_actions("dev_repo")
+    installed_actions = architect_actions("installed")
+    assert len(source_actions) == len(installed_actions) == 8
+    assert {action[1] for action in source_actions} == {
+        "@ROOT/src.codex/skills/architect/SKILL.md"
+    }
+    assert {action[1] for action in installed_actions} == {
+        "@PACK/skills/architect/SKILL.md"
+    }
+    assert not architect_actions("all")
+
+
 @pytest.mark.parametrize(
     "provider,installer,source_roles,installed_roles,validator",
     (

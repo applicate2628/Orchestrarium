@@ -1272,6 +1272,21 @@ _APAT_ACTIONS = (
     ("check_contains", "@PACK/agents/architecture-reviewer.md", "each tempting but unsuitable pattern has explicit negative evidence", "APAT-E006-INSTALLED-MISSING: claude architecture-reviewer APAT negative-selection wording"),
 )
 
+_APAT_ARCHITECT_INSTALLED_PATH = "@PACK/skills/architect/SKILL.md"
+_APAT_ARCHITECT_SOURCE_PATH = "@ROOT/src.codex/skills/architect/SKILL.md"
+_APAT_ARCHITECT_INSTALLED_ACTIONS = tuple(
+    action for action in _APAT_ACTIONS
+    if action[1] == _APAT_ARCHITECT_INSTALLED_PATH
+)
+_APAT_SHARED_ACTIONS = tuple(
+    action for action in _APAT_ACTIONS
+    if action[1] != _APAT_ARCHITECT_INSTALLED_PATH
+)
+_APAT_ARCHITECT_SOURCE_ACTIONS = tuple(
+    (action[0], _APAT_ARCHITECT_SOURCE_PATH, *action[2:])
+    for action in _APAT_ARCHITECT_INSTALLED_ACTIONS
+)
+
 _APAT_DEV_ACTIONS = (
     ("check_file", "@ROOT/shared/references/architecture-pattern-applicability.md", "APAT-G04-PROVIDER-PARITY canonical applicability reference"),
     ("check_file", "@ROOT/shared/references/ru/architecture-pattern-applicability.md", "APAT-G04-PROVIDER-PARITY Russian applicability reference"),
@@ -1347,7 +1362,7 @@ def _is_source_only_maintainer_action(action: tuple[str, ...]) -> bool:
 _ALL_ACTIONS = (
     _DECLARED_ACTIONS[0:42]
     + _DECLARED_ACTIONS[114:258]
-    + _APAT_ACTIONS
+    + _APAT_SHARED_ACTIONS
 )
 
 
@@ -1372,6 +1387,7 @@ ACTIONS = (
             action for action in _ALL_ACTIONS
             if _is_source_only_maintainer_action(action)
         )
+        + _APAT_ARCHITECT_SOURCE_ACTIONS
         + _APAT_DEV_ACTIONS
         + _UI_CONTINUITY_DEV_ACTIONS,
     ),
@@ -1382,7 +1398,7 @@ ACTIONS = (
         + _DECLARED_ACTIONS[281:282]
         + _DECLARED_ACTIONS[288:295],
     ),
-    ("installed", _INSTALLED_ACTIONS),
+    ("installed", _INSTALLED_ACTIONS + _APAT_ARCHITECT_INSTALLED_ACTIONS),
 )
 
 def validate(root: Path | None = None):

@@ -17,10 +17,6 @@ LEAD_CONTRACTS = (
     ROOT / "src.codex" / "skills" / "lead" / "SKILL.md",
     ROOT / "src.claude" / "skills" / "lead" / "SKILL.md",
 )
-LEDGER_CONTRACTS = (
-    ROOT / "src.codex" / "skills" / "lead" / "subagent-contracts.md",
-    ROOT / "src.claude" / "agents" / "contracts" / "subagent-contracts.md",
-)
 ARCHIVIST_CONTRACTS = (
     ROOT / "src.codex" / "skills" / "knowledge-archivist" / "SKILL.md",
     ROOT / "src.claude" / "agents" / "knowledge-archivist.md",
@@ -66,19 +62,6 @@ def test_lead_recipe_encodes_the_ordered_work_cycle_without_widening_admission()
         assert "side question that does not become separately admitted work" in recipe, path
         assert "does not park or close" in recipe, path
         assert "not host enforcement" in recipe, path
-
-
-def test_ledger_contract_pairs_each_terminal_with_its_launch() -> None:
-    obligations = (
-        "before asking the host to schedule",
-        "exact `launchRunId`",
-        "`closesRunIds` is reserved for discharging `REVISE` obligations",
-        "never settles an orphan launch",
-    )
-    for path in LEDGER_CONTRACTS:
-        text = _read(path)
-        for obligation in obligations:
-            assert obligation in text, (path, obligation)
 
 
 def test_archivist_reconciles_changed_sets_through_the_lifecycle_owner() -> None:

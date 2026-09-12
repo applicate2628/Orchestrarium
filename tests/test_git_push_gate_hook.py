@@ -3999,12 +3999,15 @@ class TestCanonicalPublicationCommandGrammar(unittest.TestCase):
                 "https://github.com/acme/project/pull/7", "acme", "project", 7
             )
             target = module.PushTarget("origin", "refs/heads/feature", "feature")
+            verified = module.VerifiedPrOracle(
+                target, "1" * 40, "synthetic-pr-id", "synthetic-head-repository-id"
+            )
             with self.subTest(script=script), \
                  mock.patch.object(module, "_PR_COMMAND_DIALECT_TEST_OVERRIDE", dialect), \
                  mock.patch.object(module, "_normalize_repository_workdir", return_value=workdir) as normalize, \
                  mock.patch.object(module, "_resolve_executable", return_value=git_exe), \
                  mock.patch.object(module, "_prove_repository_root", return_value=workdir) as prove, \
-                 mock.patch.object(module, "_verify_pr_oracle", return_value=(target, "1" * 40)) as oracle, \
+                 mock.patch.object(module, "_verify_pr_oracle", return_value=verified) as oracle, \
                  mock.patch.object(module, "_run_authoritative_scan") as scanner:
                 self.assertTrue(module._evaluate_active_pr_route(
                     grant, command, dialect, parsed, workdir, "tool"

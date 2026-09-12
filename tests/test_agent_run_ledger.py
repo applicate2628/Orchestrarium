@@ -1191,6 +1191,41 @@ def test_settle_launch_accepts_existing_terminal_status_gate_pairs(
     assert result.returncode == 0, result.stderr
 
 
+def test_settle_launch_rejects_unknown_launch_without_writing(tmp_path: Path):
+    item = prepare_valid_work_item(tmp_path)
+    launch = run_ledger(
+        item,
+        "append",
+        "--run-id", "run-known-launch",
+        "--role", "qa-engineer",
+        "--execution-role", "internal",
+        "--status", "running",
+        "--gate", "none",
+        "--scope", "lifecycle settlement",
+        "--event-kind", "launch",
+    )
+    assert launch.returncode == 0, launch.stderr
+    ledger = item / "agent-runs.jsonl"
+    before = ledger.read_bytes()
+
+    result = run_ledger(
+        item,
+        "settle-launch",
+        "--launch-run-id", "run-missing-launch",
+        "--run-id", "run-missing-terminal",
+        "--status", "completed",
+        "--gate", "PASS",
+        "--artifact", "reviews/qa.md",
+        "--evidence", "command:unknown launch rejection",
+        "--started-at", "2026-09-12T10:05:00Z",
+        "--updated-at", "2026-09-12T10:05:00Z",
+    )
+
+    assert result.returncode != 0
+    assert "launch must identify one V2 launch event" in result.stderr
+    assert ledger.read_bytes() == before
+
+
 @pytest.mark.parametrize("status", ("planned", "running", "failed"))
 def test_settle_launch_rejects_nonterminal_status_without_writing(
     tmp_path: Path, status: str
