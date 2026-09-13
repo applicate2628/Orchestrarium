@@ -347,14 +347,14 @@
     },
     "kimi": {
       "modelTier": "model-only",
-      "effort": "unsupported",
+      "effort": "high",
       "allowedTaskClasses": ["exploration", "engineering", "planning", "review"],
       "advisoryTaskClasses": ["planning"],
       "requiredMutationClass": ["read-only", "bounded-write"],
       "independentVerification": true,
       "executionDisposition": "explicit-wrapper",
       "availability": "available",
-      "effortMappingLoss": "no-native-effort-control"
+      "effortMappingLoss": "none"
     },
     "grok": {
       "modelTier": "model-only",

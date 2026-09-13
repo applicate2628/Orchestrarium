@@ -283,6 +283,55 @@ def test_kimi_unsupported_effort_is_durable_and_validator_accepted(tmp_path: Pat
     assert [event["effort"] for event in events] == ["unsupported", "unsupported"]
 
 
+def test_kimi_configured_max_with_empty_flags_is_durable_and_validator_accepted(
+    tmp_path: Path,
+):
+    item = prepare_valid_work_item(tmp_path)
+    common = (
+        "--role", "qa-engineer",
+        "--execution-role", "external-reviewer",
+        "--assigned-role", "qa-engineer",
+        "--provider", "kimi",
+        "--model", "kimi-code/k3",
+        "--effort", "max",
+        "--status", "completed",
+        "--gate", "PASS",
+        "--scope", "provider configured effort fixture",
+        "--artifact", "reviews/qa.md",
+        "--evidence", "command:provider-configured-effort-fixture",
+        "--started-at", "2026-09-14T10:00:00Z",
+        "--updated-at", "2026-09-14T10:00:00Z",
+        "--launch-flags-json", "[]",
+    )
+    launch = run_ledger(
+        item,
+        "append",
+        "--run-id", "dispatch-kimi-configured-max",
+        "--event-kind", "launch",
+        *common,
+    )
+    assert launch.returncode == 0, launch.stderr
+    terminal = run_ledger(
+        item,
+        "append",
+        "--run-id", "evidence-kimi-configured-max",
+        "--event-kind", "terminal",
+        "--launch-run-id", "dispatch-kimi-configured-max",
+        "--terminal-class", "external-nonauthorizing",
+        "--authorizing", "false",
+        "--actual-execution-path", "direct-external-cli",
+        "--artifact-identity", "sha256:" + "b" * 64,
+        "--external-dispatch-id", "dispatch-kimi-configured-max",
+        "--external-evidence-run-id", "evidence-kimi-configured-max",
+        "--effort-mapping-loss", "none",
+        "--evidence", "command:provider-result-envelope-flushed",
+        *common,
+    )
+    assert terminal.returncode == 0, terminal.stderr
+    validator = run_validator(item)
+    assert validator.returncode == 0, validator.stderr
+
+
 def test_staged_init_and_append_preserve_status_bytes(tmp_path: Path):
     item = tmp_path / "work-items" / "active" / "staged-ledger"
     (item / "reviews").mkdir(parents=True)

@@ -531,11 +531,63 @@ def test_kimi_maintenance_flags_fail_closed_when_combined(
     assert "E_KIMI_MAINTENANCE_ARGUMENTS_INVALID" in capsys.readouterr().err
 
 
-def test_kimi_profile_is_fixed_and_has_no_native_effort_control() -> None:
+def test_kimi_profile_resolves_only_high_or_max_effort_without_provider_flags() -> None:
     owner = _load_owner()
-    assert owner.resolved_profile("kimi", []) == ([], "kimi-code/k3", "unsupported")
+    assert owner.resolved_profile("kimi", []) == ([], "kimi-code/k3", "high")
+    assert owner.resolved_profile("kimi", [], kimi_effort="max") == (
+        [],
+        "kimi-code/k3",
+        "max",
+    )
+    assert owner.parse_control(["fixture"], provider="kimi").kimi_effort == "high"
+    assert owner.parse_control(
+        ["fixture", "--kimi-effort", "max"], provider="kimi"
+    ).kimi_effort == "max"
+    with pytest.raises(ValueError, match="E_KIMI_EFFORT_INVALID"):
+        owner.parse_control(["fixture", "--kimi-effort", "low"], provider="kimi")
     with pytest.raises(ValueError, match="E_KIMI_PROFILE_FIXED"):
         owner.resolved_profile("kimi", ["--model", "other"])
+
+
+def test_kimi_wrapper_entry_freezes_policy_bound_max_provenance(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    owner = _load_owner()
+    captured: list[object] = []
+
+    def stop_before_provider(
+        _provider, _argv, _runner, *, prevalidated, reserved_run, **_kwargs
+    ) -> int:
+        captured.append((prevalidated, reserved_run))
+        return 0
+
+    monkeypatch.setattr(owner, "_launch_with_runner", stop_before_provider)
+    receipt = tmp_path / "kimi-effort.receipt"
+
+    assert owner.launch(
+        "kimi",
+        [
+            "fixture",
+            "--terminal-receipt",
+            str(receipt),
+            "--task-class",
+            "review",
+            "--role",
+            "qa-engineer",
+            "--kimi-effort",
+            "max",
+        ],
+    ) == 0
+
+    prevalidated, _reserved_run = captured[0]
+    assert prevalidated.effort == "max"
+    assert prevalidated.flags == ()
+    assert prevalidated.provenance is not None
+    assert prevalidated.provenance.effort == "max"
+    assert prevalidated.provenance.launch_flags == ()
+    assert owner.require_exact_execution_provenance(
+        prevalidated.provenance, prevalidated.provenance
+    ) == prevalidated.provenance
 
 
 def test_kimi_acp_argv_is_exact() -> None:
@@ -2072,6 +2124,7 @@ class _FakeKimiAcpPeer:
         boolean_initialize_id: bool = False,
         boolean_protocol_version: bool = False,
         model_config_result: dict[str, object] | None = None,
+        thinking_config_result: dict[str, object] | None = None,
         interleaved_method: str | None = None,
         interleaved_update: dict[str, object] | None = None,
         permission_request: dict[str, object] | None = None,
@@ -2115,6 +2168,26 @@ class _FakeKimiAcpPeer:
             }
             if model_config_result is None
             else model_config_result
+        )
+        self.thinking_config_result = (
+            {
+                "configOptions": [
+                    {
+                        "type": "select",
+                        "id": "thinking",
+                        "name": "Thinking",
+                        "category": "thinking",
+                        "currentValue": "high",
+                        "options": [
+                            {"value": "low", "name": "Low"},
+                            {"value": "high", "name": "High"},
+                            {"value": "max", "name": "Max"},
+                        ],
+                    }
+                ]
+            }
+            if thinking_config_result is None
+            else thinking_config_result
         )
         self.interleaved_method = interleaved_method
         self.interleaved_update = interleaved_update
@@ -2187,7 +2260,11 @@ class _FakeKimiAcpPeer:
         elif method == "session/new":
             result = {"sessionId": "fake-session-1", "configOptions": [], "modes": {}}
         elif method == "session/set_config_option":
-            result = self.model_config_result
+            result = (
+                self.model_config_result
+                if request["params"].get("configId") == "model"
+                else self.thinking_config_result
+            )
         elif method == "session/prompt":
             if self.cancel_exception is not None:
                 self.cancel_pending = True
@@ -2289,6 +2366,7 @@ def test_kimi_acp_one_shot_preserves_literal_task_bytes() -> None:
         "initialize",
         "session/new",
         "session/set_config_option",
+        "session/set_config_option",
         "session/prompt",
         "session/close",
         "session/delete",
@@ -2301,7 +2379,12 @@ def test_kimi_acp_one_shot_preserves_literal_task_bytes() -> None:
         "configId": "model",
         "value": "kimi-code/k3",
     }
-    prompt = peer.requests[3]["params"]["prompt"]
+    assert peer.requests[3]["params"] == {
+        "sessionId": "fake-session-1",
+        "configId": "thinking",
+        "value": "high",
+    }
+    prompt = peer.requests[4]["params"]["prompt"]
     assert prompt == [{"type": "text", "text": body.decode("utf-8")}]
     assert exchange.result_bytes == b"artifact\nGATE: PASS\n"
 
@@ -2387,6 +2470,92 @@ def test_kimi_acp_one_shot_rejects_unattested_fixed_model(
         "session/close",
         "session/delete",
     ]
+
+
+def test_kimi_acp_rejects_unattested_thinking_before_prompt() -> None:
+    owner = _load_owner()
+    peer = _FakeKimiAcpPeer(thinking_config_result={"configOptions": []})
+    exchange = owner.KimiAcpOneShotV1(
+        b"safe task", "C:/private/run", effort="max"
+    )
+
+    with pytest.raises(ValueError, match="^E_KIMI_ACP_PROTOCOL$"):
+        exchange(peer)
+
+    assert [request["params"].get("configId") for request in peer.requests] == [
+        None,
+        None,
+        "model",
+        "thinking",
+        None,
+        None,
+    ]
+    assert all(request["method"] != "session/prompt" for request in peer.requests)
+
+
+def test_kimi_acp_max_thinking_readback_precedes_prompt() -> None:
+    owner = _load_owner()
+    peer = _FakeKimiAcpPeer(
+        thinking_config_result={
+            "configOptions": [
+                {"id": "thinking", "currentValue": "max"}
+            ]
+        }
+    )
+    exchange = owner.KimiAcpOneShotV1(
+        b"safe task", "C:/private/run", effort="max"
+    )
+
+    exchange(peer)
+
+    thinking = next(
+        request for request in peer.requests
+        if request["params"].get("configId") == "thinking"
+    )
+    assert thinking["params"] == {
+        "sessionId": "fake-session-1",
+        "configId": "thinking",
+        "value": "max",
+    }
+    assert peer.requests.index(thinking) < next(
+        index
+        for index, request in enumerate(peer.requests)
+        if request["method"] == "session/prompt"
+    )
+
+
+@pytest.mark.parametrize("effort", ("high", "max"))
+def test_kimi_empty_launch_flags_accept_resolved_effort_and_legacy_unsupported(
+    effort: str,
+) -> None:
+    owner = _load_owner()
+    provenance = owner.ExecutionProvenance(
+        "fixture-item",
+        "backend-engineer",
+        "kimi",
+        "kimi-code/k3",
+        effort,
+        (),
+        "fixture-artifact",
+        "dispatch-fixture",
+        "evidence-fixture",
+        "configured-per-run",
+    )
+    assert provenance.effort == effort
+    outcome = owner.FinalOutcome(
+        0, "COMPLETE:EXTERNAL_NONAUTHORIZING", "passed", "PASS", "fixture",
+        0, "COMPLETE:PASS", "passed", "PASS", "fixture", "complete", 0, "", False, 0,
+    )
+    payload = owner.parse_provider_result(
+        owner.build_provider_result_line(
+            "kimi", "kimi-code/k3", effort, "GATE: PASS\n", outcome,
+            cancelled=False, timed_out=False,
+            role_provenance=owner.ExternalRoleProvenance("none", "none"),
+            provenance=provenance,
+        )
+    )
+    assert payload["launchFlags"] == []
+    assert payload["effort"] == effort
 
 
 def test_kimi_acp_postcreation_error_preserves_primary_and_attempts_delete_after_close_error() -> None:
@@ -3666,24 +3835,46 @@ for line in sys.stdin.buffer:
             raise SystemExit(0)
         result = {"sessionId": "fake-session-1"}
     elif method == "session/set_config_option":
-        if request["params"] != {
+        if request["params"] == {
             "sessionId": "fake-session-1",
             "configId": "model",
             "value": "kimi-code/k3",
         }:
+            result = {
+                "configOptions": [
+                    {
+                        "type": "select",
+                        "id": "model",
+                        "name": "Model",
+                        "category": "model",
+                        "currentValue": "kimi-code/k3",
+                        "options": [{"value": "kimi-code/k3", "name": "K3"}],
+                    }
+                ]
+            }
+        elif request["params"] == {
+            "sessionId": "fake-session-1",
+            "configId": "thinking",
+            "value": "high",
+        }:
+            result = {
+                "configOptions": [
+                    {
+                        "type": "select",
+                        "id": "thinking",
+                        "name": "Thinking",
+                        "category": "thinking",
+                        "currentValue": "high",
+                        "options": [
+                            {"value": "low", "name": "Low"},
+                            {"value": "high", "name": "High"},
+                            {"value": "max", "name": "Max"},
+                        ],
+                    }
+                ]
+            }
+        else:
             raise SystemExit(18)
-        result = {
-            "configOptions": [
-                {
-                    "type": "select",
-                    "id": "model",
-                    "name": "Model",
-                    "category": "model",
-                    "currentValue": "kimi-code/k3",
-                    "options": [{"value": "kimi-code/k3", "name": "K3"}],
-                }
-            ]
-        }
     elif method == "session/prompt":
         text = request["params"]["prompt"][0]["text"]
         (root / "prompt.bin").write_bytes(text.encode("utf-8"))
@@ -3901,6 +4092,7 @@ def test_fake_kimi_acp_process_cancels_then_closes_deletes_and_settles(
     assert methods == [
         "initialize",
         "session/new",
+        "session/set_config_option",
         "session/set_config_option",
         "session/prompt",
         "session/cancel",

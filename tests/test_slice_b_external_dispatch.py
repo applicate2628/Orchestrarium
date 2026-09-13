@@ -178,12 +178,8 @@ def test_external_dispatch_projects_provider_execution_disposition(
     decision = RESOLVER.resolve_external_dispatch(
         provider, task_class, role, repo_root=ROOT
     )
-    expected_native_effort = "unsupported" if provider == "kimi" else "high"
-    expected_loss = (
-        "no-native-effort-control"
-        if provider == "kimi"
-        else "none"
-    )
+    expected_native_effort = "high"
+    expected_loss = "none"
 
     assert decision == {
         "schemaVersion": 1,
@@ -240,8 +236,8 @@ def test_kimi_consultant_is_planning_only_in_source_and_installed_policy(
         "requiredModelTier": "balanced",
         "requiredEffort": "high",
         "mutationClass": "read-only",
-        "nativeEffort": "unsupported",
-        "effortMappingLoss": "no-native-effort-control",
+        "nativeEffort": "high",
+        "effortMappingLoss": "none",
         "finalAuthorizingRole": False,
         "executionAuthorized": True,
         "independentVerification": True,

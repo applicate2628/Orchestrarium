@@ -242,6 +242,7 @@ class Control:
     kimi_capabilities: "KimiCapabilitySelectionV1" = field(
         default_factory=lambda: KimiCapabilitySelectionV1()
     )
+    kimi_effort: str = "high"
     provider_flags: list[str] = field(default_factory=list)
 
 
@@ -732,6 +733,7 @@ class KimiAcpOneShotV1:
     permission: str = "reject"
     result_max_bytes: int = RESULT_MAX_BYTES_DEFAULT
     observed_budget_chars: int | None = None
+    effort: str = "high"
     result_bytes: bytes = field(default=b"", init=False)
     session_id: str | None = field(default=None, init=False)
     _next_id: int = field(default=1, init=False)
@@ -752,6 +754,7 @@ class KimiAcpOneShotV1:
             or type(self.result_max_bytes) is not int
             or self.result_max_bytes <= 0
             or self.result_max_bytes > RESULT_MAX_BYTES_HARD
+            or self.effort not in {"high", "max"}
             or (
                 self.observed_budget_chars is not None
                 and (
@@ -1178,6 +1181,30 @@ class KimiAcpOneShotV1:
                 != KIMI_WINDOWS_PROFILE_V1.model
             ):
                 raise ValueError("E_KIMI_ACP_PROTOCOL")
+            thinking_id = self._send(
+                channel,
+                "session/set_config_option",
+                {
+                    "sessionId": session_id,
+                    "configId": "thinking",
+                    "value": self.effort,
+                },
+            )
+            assert thinking_id is not None
+            thinking_configured = self._response(channel, thinking_id)
+            thinking_options = thinking_configured.get("configOptions")
+            if not isinstance(thinking_options, list):
+                raise ValueError("E_KIMI_ACP_PROTOCOL")
+            thinking_rows = [
+                option
+                for option in thinking_options
+                if isinstance(option, dict) and option.get("id") == "thinking"
+            ]
+            if (
+                len(thinking_rows) != 1
+                or thinking_rows[0].get("currentValue") != self.effort
+            ):
+                raise ValueError("E_KIMI_ACP_PROTOCOL")
             prompt_id = self._send(
                 channel,
                 "session/prompt",
@@ -1334,6 +1361,13 @@ class ExecutionProvenance:
             )
         except ValueError as exc:
             raise ValueError("E_EXTERNAL_PROVENANCE_INVALID") from exc
+        if (
+            self.provider == "kimi"
+            and self.launch_flags == ()
+            and self.model == "kimi-code/k3"
+            and self.effort in {"high", "max"}
+        ):
+            return
         if (
             frozen != self.launch_flags
             or model != self.model
@@ -2472,6 +2506,7 @@ def parse_control(
         "-capturemaxbytes": "capture_max_bytes",
         "--capture-max-bytes": "capture_max_bytes",
         "--kimi-capabilities-file": "kimi_capabilities_file",
+        "--kimi-effort": "kimi_effort",
     }
     if external:
         value_flags.update(
@@ -2509,6 +2544,10 @@ def parse_control(
                 parsed_value = int(value)
                 if parsed_value <= 0:
                     raise ValueError(f"{token} must be a positive integer")
+            elif attr == "kimi_effort":
+                if provider != "kimi" or value not in {"high", "max"}:
+                    raise ValueError("E_KIMI_EFFORT_INVALID")
+                parsed_value = value
             elif attr == "ledger_closes":
                 result.ledger_closes.append(value)
                 index += 2
@@ -2676,13 +2715,15 @@ def normalize_launch_flags(provider: str, flags: object) -> tuple[str, ...]:
     return normalize_launch_profile(provider, flags)[0]
 
 
-def resolved_profile(provider: str, flags: list[str]) -> tuple[list[str], str, str]:
+def resolved_profile(
+    provider: str, flags: list[str], *, kimi_effort: str = "high"
+) -> tuple[list[str], str, str]:
     if provider == "kimi":
-        if flags:
+        if flags or kimi_effort not in {"high", "max"}:
             raise ValueError(
                 "E_KIMI_PROFILE_FIXED: Kimi 1.x accepts no caller-supplied provider flags"
             )
-        return [], "kimi-code/k3", "unsupported"
+        return [], "kimi-code/k3", kimi_effort
     if not flags:
         flags = (
             ["--model", "gpt-5.6-sol", "-c", "model_reasoning_effort=xhigh"]
@@ -2960,7 +3001,9 @@ def _prevalidate_policy_bound_external_launch(
             "E_EXTERNAL_CLOSES_FORBIDDEN: external provider results cannot close ledger runs"
         )
     control, decision = _policy_bound_external_control(provider, control)
-    flags, model, effort = resolved_profile(provider, control.provider_flags)
+    flags, model, effort = resolved_profile(
+        provider, control.provider_flags, kimi_effort=control.kimi_effort
+    )
     role_provenance = external_role_provenance(control, provider)
     return PolicyBoundLaunch(
         control,
@@ -5250,6 +5293,13 @@ def parse_provider_result(output: str) -> dict[str, object]:
         except ValueError as exc:
             raise ValueError("provider result launchFlags mismatch") from exc
         if (
+            payload.get("provider") == "kimi"
+            and payload["launchFlags"] == []
+            and payload.get("model") == "kimi-code/k3"
+            and payload.get("effort") in {"high", "max"}
+        ):
+            pass
+        elif (
             payload["launchFlags"] != list(frozen)
             or payload.get("model") != derived_model
             or payload.get("effort") != derived_effort
@@ -5821,7 +5871,9 @@ def launch(provider: str, argv: list[str]) -> int:
                 return fail(f"{unavailable}: provider execution is unavailable")
             control = parse_control(argv, provider=provider)
             topic = validate_topic(control.topic)
-            flags, model, effort = resolved_profile(provider, control.provider_flags)
+            flags, model, effort = resolved_profile(
+                provider, control.provider_flags, kimi_effort=control.kimi_effort
+            )
             if control.ledger_closes:
                 return fail(
                     "E_EXTERNAL_CLOSES_FORBIDDEN: external provider results cannot close ledger runs"
@@ -6155,6 +6207,7 @@ def _launch_with_runner(
                 control.kimi_capabilities.permission,
                 control.result_max_bytes,
                 kimi_observed_budget,
+                effort,
             )
         except Exception as exc:
             return finalize_reserved_run_once(

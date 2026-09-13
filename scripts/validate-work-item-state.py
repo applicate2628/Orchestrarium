@@ -329,6 +329,15 @@ def validate_launch_profile(
     return exact, model, effort
 
 
+def _kimi_empty_flags_resolved_effort(event: Mapping[str, object]) -> bool:
+    return (
+        event.get("provider") == "kimi"
+        and event.get("launchFlags") == []
+        and event.get("model") == "kimi-code/k3"
+        and event.get("effort") in {"high", "max"}
+    )
+
+
 def load_lifecycle_owner():
     global _LIFECYCLE_OWNER
     if _LIFECYCLE_OWNER is not None:
@@ -1889,7 +1898,13 @@ def _validate_event(
         else:
             if launch_flags != list(frozen_flags):
                 fail(errors, f"{run_id}: launchFlags must preserve exact token order")
-            if event.get("model") != derived_model or event.get("effort") != derived_effort:
+            if (
+                not _kimi_empty_flags_resolved_effort(event)
+                and (
+                    event.get("model") != derived_model
+                    or event.get("effort") != derived_effort
+                )
+            ):
                 fail(errors, f"{run_id}: launchFlags must bind the declared model and effort")
         if event_kind not in {"launch", "terminal"} or event.get("provider") not in {
             "codex", "claude", "kimi"
@@ -1973,10 +1988,9 @@ def _launch_profile_is_exact(event: Mapping[str, object]) -> bool:
         frozen, model, effort = validate_launch_profile(event.get("provider"), flags)
     except (UnicodeEncodeError, ValueError):
         return False
-    return (
-        flags == list(frozen)
-        and event.get("model") == model
-        and event.get("effort") == effort
+    return flags == list(frozen) and (
+        _kimi_empty_flags_resolved_effort(event)
+        or (event.get("model") == model and event.get("effort") == effort)
     )
 
 
