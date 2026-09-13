@@ -108,6 +108,7 @@ class TestPassivePollingStop(unittest.TestCase):
         reason = payload["reason"]
         self.assertIn("root Stop reconciliation", reason)
         self.assertIn("explicit task state already in the conversation", reason)
+        self.assertIn("standalone question with no active primary task", reason)
         self.assertIn("If work remains, perform the next authorized action first", reason)
         self.assertIn("A passed slice or proposed final is not completion", reason)
         self.assertNotIn("passive-polling Stop guard", reason)

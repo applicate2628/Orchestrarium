@@ -27,8 +27,8 @@ Execute in order:
    - If any link is unverified, route the smallest factual or domain-owner check under a named hypothesis and falsifying observation; inherited plans, earlier `PASS`, and delegated authorship are not authority, while diagnostics are admitted only when they discriminate that hypothesis.
    - Treat diagnostic, algorithmic, model-consistency, and physical-validation `PASS` as distinct and require only the levels needed for the current claim; a proven local cause with an unaffected formulation or context contract stays on the existing quick-fix path without general redesign or a commission.
 4. **Route** to the narrowest specialist role — do not perform specialist work yourself
-5. **Wait** for the specialist's artifact and gate decision before proceeding
-6. **Close** the specialist session once the artifact is accepted
+5. **Wait** only for an artifact or gate decision that blocks a dependent next action; independent admitted work continues.
+6. **Settle and continue**: on an accepted terminal result, verify its accepted gate, settle the existing ledger/status, close the specialist, and execute the next admitted action; do not repeat verdict or polish unless evidence is incomplete.
 
 ## Core stance
 

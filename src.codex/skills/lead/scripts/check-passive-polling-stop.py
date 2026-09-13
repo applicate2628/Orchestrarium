@@ -255,7 +255,7 @@ def _reconciliation_reason() -> str:
     return (
         "root Stop reconciliation: before finalizing, reconcile explicit task "
         "state already in the conversation. Choose exactly one: standalone "
-        "question answered; user paused, cancelled, or reprioritized; blocked "
+        "question with no active primary task answered; user paused, cancelled, or reprioritized; blocked "
         "on a needed user decision; requested task complete with evidence; or "
         "work remains. On re-entry, finalize the first four. If work remains, "
         "perform the next authorized action first. A passed slice or proposed "

@@ -225,6 +225,45 @@ class TestWorkflowEconomyContract(unittest.TestCase):
             with self.subTest(required=required):
                 self.assertIn(required, spine)
 
+    def test_targeted_continuation_and_abstraction_clarifications_preserve_existing_gates(self) -> None:
+        spine = self._read(SPINE)
+        self.assertIn(
+            "Keep each function at a coherent abstraction level; separate high-level scenario flow from "
+            "parsing, storage, or transport only when mixing them harms local reasoning or independent change.",
+            spine,
+        )
+        self.assertIn(
+            "Do not force pass-through wrappers, fragmentation, length limits, or splits that break atomic "
+            "invariants or measured hot paths.",
+            spine,
+        )
+
+        for relative in LEAD_SKILL_PROJECTIONS:
+            text = self._read(relative)
+            self.assertIn(
+                "**Wait** only for an artifact or gate decision that blocks a dependent next action; independent "
+                "admitted work continues.",
+                text,
+                relative,
+            )
+            self.assertIn(
+                "verify its accepted gate, settle the existing ledger/status, close the specialist, and execute "
+                "the next admitted action",
+                text,
+                relative,
+            )
+            self.assertIn("do not repeat verdict or polish unless evidence is incomplete", text, relative)
+
+        for relative in ARCHITECTURE_REVIEWER_PROJECTIONS:
+            text = self._read(relative)
+            self.assertIn(
+                "Run this check only inside an already-triggered Architecture Reviewer gate; it creates no "
+                "reviewer, lane, artifact, engine, or review loop.",
+                text,
+                relative,
+            )
+            self.assertIn("any `PILED` class maps to `REVISE`", text, relative)
+
     def test_functional_first_policy_keeps_the_approved_boundaries(self) -> None:
         spine = self._read(SPINE)
         extract = self._read(FUNCTIONAL_FIRST_EXTRACT)
