@@ -216,7 +216,7 @@ class TestWorkflowEconomyContract(unittest.TestCase):
             "Grok unavailable in 1.x",
             "Quick-fix: no pre-implementation review ceremony",
             "one canonical artifact",
-            "root: concise ledger entry",
+            "root: concise ledger entry; one per result",
             "progress-only artifact",
             "progress-only artifact/`REVISE`",
             "human publication/leak-check gates",
