@@ -1950,7 +1950,9 @@ class _FakeKimiAcpPeer:
         self.tool_updates = tool_updates
         self.cancel_pending = False
 
-    def write_line(self, payload: bytes) -> int:
+    def write_line(
+        self, payload: bytes, *, reserve_cleanup_fraction: float = 0.0
+    ) -> int:
         request = json.loads(payload.decode("utf-8"))
         if "method" not in request:
             self.client_responses.append(request)
@@ -2086,7 +2088,7 @@ class _FakeKimiAcpPeer:
         )
         return len(payload)
 
-    def read_line(self) -> bytes:
+    def read_line(self, *, reserve_cleanup_fraction: float = 0.0) -> bytes:
         if self.cancel_pending and self.cancel_exception is not None:
             self.cancel_pending = False
             raise self.cancel_exception
@@ -2231,6 +2233,79 @@ def test_kimi_acp_postcreation_error_preserves_primary_and_attempts_delete_after
         "session/delete",
     ]
     assert isinstance(caught.value.__cause__, ValueError)
+
+
+def test_kimi_acp_close_deadline_reserves_delete_and_preserves_first_error() -> None:
+    owner = _load_owner()
+
+    class CloseDeadlinePeer:
+        def __init__(self) -> None:
+            self.methods: list[str] = []
+            self.write_fractions: list[float] = []
+            self.read_fractions: list[float] = []
+
+        def begin_cleanup(self) -> None:
+            return None
+
+        def write_line(
+            self, payload: bytes, *, reserve_cleanup_fraction: float = 0.0
+        ) -> int:
+            self.methods.append(json.loads(payload.decode("utf-8"))["method"])
+            self.write_fractions.append(reserve_cleanup_fraction)
+            return len(payload)
+
+        def read_line(self, *, reserve_cleanup_fraction: float = 0.0) -> bytes:
+            self.read_fractions.append(reserve_cleanup_fraction)
+            if self.methods[-1] == "session/close":
+                raise owner.ProcessSupervisionError("PSV1-DEADLINE", "deadline")
+            return b'{"jsonrpc":"2.0","id":2,"result":{}}\n'
+
+    peer = CloseDeadlinePeer()
+    exchange = owner.KimiAcpOneShotV1(b"safe task", "C:/private/run")
+    exchange.session_id = "synthetic-session"
+
+    with pytest.raises(owner.ProcessSupervisionError) as caught:
+        exchange._cleanup_session(peer, cancel=False)
+
+    assert caught.value.failure_id == "PSV1-DEADLINE"
+    assert peer.methods == ["session/close", "session/delete"]
+    assert peer.write_fractions == [0.5, 0.0]
+    assert peer.read_fractions == [0.5, 0.0]
+
+
+def test_kimi_acp_close_deadline_remains_first_error_when_delete_write_fails() -> None:
+    owner = _load_owner()
+
+    class DeleteFailurePeer:
+        def __init__(self) -> None:
+            self.methods: list[str] = []
+
+        def begin_cleanup(self) -> None:
+            return None
+
+        def write_line(
+            self, payload: bytes, *, reserve_cleanup_fraction: float = 0.0
+        ) -> int:
+            method = json.loads(payload.decode("utf-8"))["method"]
+            self.methods.append(method)
+            if method == "session/delete":
+                raise owner.ProcessSupervisionError(
+                    "PSV1-KIMI-ACP-PROTOCOL", "stdin-delivery"
+                )
+            return len(payload)
+
+        def read_line(self, *, reserve_cleanup_fraction: float = 0.0) -> bytes:
+            raise owner.ProcessSupervisionError("PSV1-DEADLINE", "deadline")
+
+    peer = DeleteFailurePeer()
+    exchange = owner.KimiAcpOneShotV1(b"safe task", "C:/private/run")
+    exchange.session_id = "synthetic-session"
+
+    with pytest.raises(owner.ProcessSupervisionError) as caught:
+        exchange._cleanup_session(peer, cancel=False)
+
+    assert caught.value.failure_id == "PSV1-DEADLINE"
+    assert peer.methods == ["session/close", "session/delete"]
 
 
 @pytest.mark.parametrize(

@@ -2551,22 +2551,22 @@ class _DialogueLineRouterV1:
                 self._failed = True
                 self._condition.notify_all()
                 return
-            self._buffer.extend(data)
-            if self._buffer.count(b"\n") > MAX_DIALOGUE_PENDING_LINES - len(
-                self._lines
-            ):
+            if data.count(b"\n") > MAX_DIALOGUE_PENDING_LINES - len(self._lines):
                 self._buffer.clear()
                 self._failed = True
                 self._condition.notify_all()
                 return
+            search_from = len(self._buffer)
+            self._buffer.extend(data)
             while not self._failed:
-                newline = self._buffer.find(b"\n")
+                newline = self._buffer.find(b"\n", search_from)
                 if newline < 0:
                     break
                 line = bytes(self._buffer[: newline + 1])
                 self._lines.append(line)
                 self._queued_bytes += len(line)
                 del self._buffer[: newline + 1]
+                search_from = 0
             self._condition.notify_all()
 
     def finish(self, *, failed: bool = False) -> None:
@@ -2615,6 +2615,8 @@ class ProcessDialogueChannelV1:
         self._deadline = deadline
         self._cancellation_probe = cancellation_probe
         self._cleanup_mode = False
+        self._cleanup_end: float | None = None
+        self._cleanup_span: float | None = None
         self.written_bytes = 0
 
     def cancellation_requested(self) -> bool:
@@ -2627,12 +2629,29 @@ class ProcessDialogueChannelV1:
     def begin_cleanup(self) -> None:
         if self._cleanup_mode:
             return
-        self._deadline = time.monotonic() + RUNNER_CLOSE_TIMEOUT_SECONDS
+        self._cleanup_span = RUNNER_CLOSE_TIMEOUT_SECONDS
+        self._cleanup_end = time.monotonic() + self._cleanup_span
+        self._deadline = self._cleanup_end
         self._cleanup_mode = True
 
-    def write_line(self, payload: bytes) -> int:
+    def write_line(
+        self, payload: bytes, *, reserve_cleanup_fraction: float = 0.0
+    ) -> int:
         if self.cancellation_requested():
             raise ProcessSupervisionError("PSV1-CANCELLED", "cancellation")
+        if (
+            isinstance(reserve_cleanup_fraction, bool)
+            or not isinstance(reserve_cleanup_fraction, (int, float))
+            or not 0.0 <= reserve_cleanup_fraction <= 1.0
+            or reserve_cleanup_fraction
+            and (self._cleanup_end is None or self._cleanup_span is None)
+        ):
+            raise ProcessSupervisionError("PSV1-KIMI-ACP-PROTOCOL", "stdin-delivery")
+        deadline = (
+            self._cleanup_end - self._cleanup_span * reserve_cleanup_fraction
+            if reserve_cleanup_fraction
+            else self._deadline
+        )
         if (
             not isinstance(payload, bytes)
             or not payload
@@ -2640,7 +2659,7 @@ class ProcessDialogueChannelV1:
             or len(payload) > MAX_STDIN_BYTES - self.written_bytes
             or not payload.endswith(b"\n")
             or b"\n" in payload[:-1]
-            or time.monotonic() >= self._deadline
+            or time.monotonic() >= deadline
         ):
             raise ProcessSupervisionError(
                 "PSV1-KIMI-ACP-PROTOCOL", "stdin-delivery"
@@ -2649,9 +2668,22 @@ class ProcessDialogueChannelV1:
         self.written_bytes += written
         return written
 
-    def read_line(self) -> bytes:
+    def read_line(self, *, reserve_cleanup_fraction: float = 0.0) -> bytes:
+        if (
+            isinstance(reserve_cleanup_fraction, bool)
+            or not isinstance(reserve_cleanup_fraction, (int, float))
+            or not 0.0 <= reserve_cleanup_fraction <= 1.0
+            or reserve_cleanup_fraction
+            and (self._cleanup_end is None or self._cleanup_span is None)
+        ):
+            raise ProcessSupervisionError("PSV1-KIMI-ACP-PROTOCOL", "stdin-delivery")
+        deadline = (
+            self._cleanup_end - self._cleanup_span * reserve_cleanup_fraction
+            if reserve_cleanup_fraction
+            else self._deadline
+        )
         return self._lines.read_line(
-            self._deadline,
+            deadline,
             self.cancellation_requested,
         )
 

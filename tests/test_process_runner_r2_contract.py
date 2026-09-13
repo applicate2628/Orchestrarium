@@ -330,6 +330,76 @@ def test_kimi_acp_cleanup_uses_one_finite_grace_after_operation_timeout(
         os.close(read_fd)
 
 
+def test_kimi_acp_cleanup_reserves_fraction_for_close_io_without_rearming(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner = _load_runner()
+    now = [100.0]
+    monkeypatch.setattr(runner.time, "monotonic", lambda: now[0])
+    read_fd, write_fd = os.pipe()
+    lifecycle = runner.RunLifecycleV1(runner.RunTokenV1(b"h" * 16, 1))
+    channel = runner.ProcessDialogueChannelV1(
+        write_fd,
+        runner._DialogueLineRouterV1(),
+        lifecycle,
+        99.0,
+        None,
+    )
+    close = b'{"jsonrpc":"2.0","id":1,"method":"session/close"}\n'
+    delete = b'{"jsonrpc":"2.0","id":2,"method":"session/delete"}\n'
+
+    try:
+        channel.begin_cleanup()
+        cleanup_end = 100.0 + runner.RUNNER_CLOSE_TIMEOUT_SECONDS
+        assert channel._deadline == cleanup_end
+        now[0] = cleanup_end - runner.RUNNER_CLOSE_TIMEOUT_SECONDS * 0.5
+        with pytest.raises(runner.ProcessSupervisionError) as close_read:
+            channel.read_line(reserve_cleanup_fraction=0.5)
+        assert close_read.value.failure_id == "PSV1-DEADLINE"
+        assert channel.write_line(delete) == len(delete)
+        channel.begin_cleanup()
+        assert channel._deadline == cleanup_end
+        with pytest.raises(runner.ProcessSupervisionError) as close_write:
+            channel.write_line(close, reserve_cleanup_fraction=0.5)
+        assert close_write.value.failure_id == "PSV1-KIMI-ACP-PROTOCOL"
+    finally:
+        os.close(write_fd)
+    try:
+        assert os.read(read_fd, 4096) == delete
+    finally:
+        os.close(read_fd)
+
+
+def test_dialogue_router_scans_only_new_data_and_resets_after_prefix_delete() -> None:
+    runner = _load_runner()
+
+    class TrackingBuffer(bytearray):
+        def __init__(self, value: bytes) -> None:
+            super().__init__(value)
+            self.count_calls: list[tuple[object, ...]] = []
+            self.find_calls: list[tuple[object, ...]] = []
+
+        def count(self, *args) -> int:
+            self.count_calls.append(args)
+            return super().count(*args)
+
+        def find(self, *args) -> int:
+            self.find_calls.append(args)
+            return super().find(*args)
+
+    router = runner._DialogueLineRouterV1()
+    prefix = b"retained-prefix"
+    tracked = TrackingBuffer(prefix)
+    router._buffer = tracked
+
+    router.feed(b"one\ntwo\n")
+
+    assert tracked.count_calls == []
+    assert [call[1] for call in tracked.find_calls] == [len(prefix), 0, 0]
+    assert list(router._lines) == [b"retained-prefixone\n", b"two\n"]
+    assert router._queued_bytes == len(b"retained-prefixone\n") + len(b"two\n")
+
+
 @pytest.mark.skipif(os.name != "nt", reason="production backend execution is Windows-only")
 def test_run_tokens_are_non_recyclable_and_safe_results_expose_only_digest() -> None:
     """Repeated calls cannot use recyclable request object addresses as identities."""

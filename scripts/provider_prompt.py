@@ -725,7 +725,15 @@ class KimiAcpOneShotV1:
             raise ValueError("E_KIMI_ACP_PROTOCOL")
         return value
 
-    def _send(self, channel, method: str, params: dict[str, object], *, notification: bool = False) -> int | None:
+    def _send(
+        self,
+        channel,
+        method: str,
+        params: dict[str, object],
+        *,
+        notification: bool = False,
+        reserve_cleanup_fraction: float = 0.0,
+    ) -> int | None:
         request_id = None if notification else self._next_id
         if request_id is not None:
             self._next_id += 1
@@ -733,7 +741,14 @@ class KimiAcpOneShotV1:
         if request_id is not None:
             message["id"] = request_id
         payload = json.dumps(message, ensure_ascii=False, separators=(",", ":")).encode("utf-8") + b"\n"
-        if channel.write_line(payload) != len(payload):
+        written = (
+            channel.write_line(
+                payload, reserve_cleanup_fraction=reserve_cleanup_fraction
+            )
+            if reserve_cleanup_fraction
+            else channel.write_line(payload)
+        )
+        if written != len(payload):
             raise ValueError("E_KIMI_ACP_PROTOCOL")
         return request_id
 
@@ -914,11 +929,24 @@ class KimiAcpOneShotV1:
             observed["observationsOmitted"] = True
         return observed
 
-    def _response(self, channel, request_id: int, *, collect: bool = False) -> dict[str, object]:
+    def _response(
+        self,
+        channel,
+        request_id: int,
+        *,
+        collect: bool = False,
+        reserve_cleanup_fraction: float = 0.0,
+    ) -> dict[str, object]:
         chunks = bytearray()
         while True:
             try:
-                message = self._decode_line(channel.read_line())
+                message = self._decode_line(
+                    channel.read_line(
+                        reserve_cleanup_fraction=reserve_cleanup_fraction
+                    )
+                    if reserve_cleanup_fraction
+                    else channel.read_line()
+                )
             except ProcessSupervisionError:
                 raise
             except (EOFError, OSError, ValueError) as exc:
@@ -994,12 +1022,20 @@ class KimiAcpOneShotV1:
             except BaseException as exc:
                 cleanup_error = exc
         for method in ("session/close", "session/delete"):
+            reserve_cleanup_fraction = 0.5 if method == "session/close" else 0.0
             try:
                 request_id = self._send(
-                    channel, method, {"sessionId": self.session_id}
+                    channel,
+                    method,
+                    {"sessionId": self.session_id},
+                    reserve_cleanup_fraction=reserve_cleanup_fraction,
                 )
                 assert request_id is not None
-                self._response(channel, request_id)
+                self._response(
+                    channel,
+                    request_id,
+                    reserve_cleanup_fraction=reserve_cleanup_fraction,
+                )
             except BaseException as exc:
                 if cleanup_error is None:
                     cleanup_error = exc
