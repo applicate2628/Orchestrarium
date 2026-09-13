@@ -116,6 +116,7 @@ def test_parallel_reminder_uses_absolute_mutation_target_root_from_outside_repo(
         ("NotebookEdit", "notebook_path"),
         ("apply_patch", "patch"),
         ("apply_patch", "command"),
+        ("apply_patch", "move-command"),
     ),
 )
 def test_parallel_reminder_uses_cross_repository_mutation_target_modes(
@@ -141,9 +142,17 @@ def test_parallel_reminder_uses_cross_repository_mutation_target_modes(
         config_dir.mkdir()
         (config_dir / ".agents-mode.yaml").write_text(modes, encoding="utf-8")
     patch = f"*** Begin Patch\n*** Update File: {target}\n*** End Patch"
+    if target_shape == "move-command":
+        patch = (
+            "*** Begin Patch\n"
+            f"*** Update File: {repo_b / '.scratch' / 'source.md'}\n"
+            f"*** Move to: {target}\n"
+            "*** End Patch"
+        )
     tool_input = (
-        {target_shape: patch}
+        {"command" if target_shape == "move-command" else target_shape: patch}
         if target_shape in {"patch", "command"}
+        or target_shape == "move-command"
         else {target_shape: str(target)}
     )
     envelope = {

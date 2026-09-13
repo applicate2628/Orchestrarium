@@ -93,7 +93,10 @@ def _target_strings(tool_input: dict, *, tool_name: str = "") -> list[str]:
     if isinstance(patch, str):
         targets.extend(
             match.group(1).strip()
-            for match in re.finditer(r"(?m)^\*\*\* (?:Add|Update|Delete) File:\s*(.+)$", patch)
+            for match in re.finditer(
+                r"(?m)^\*\*\* (?:(?:Add|Update|Delete) File|Move to):\s*(.+)$",
+                patch,
+            )
         )
     return targets
 

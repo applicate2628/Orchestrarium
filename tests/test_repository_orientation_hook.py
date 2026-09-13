@@ -262,12 +262,53 @@ class RepositoryOrientationHookTests(unittest.TestCase):
         )
 
     def test_apply_patch_targets_are_scope_checked(self) -> None:
-        patch = "*** Begin Patch\n*** Update File: src/app.py\n@@\n-old\n+new\n*** End Patch"
-        self.assert_warns(
-            [claude_user("Update src."), claude_assistant("Applying the patch.")],
-            tool_name="apply_patch",
-            tool_input={"patch": patch},
+        for operation in ("Add", "Update", "Delete"):
+            with self.subTest(operation=operation):
+                patch = (
+                    f"*** Begin Patch\n*** {operation} File: src/app.py\n"
+                    "@@\n-old\n+new\n*** End Patch"
+                )
+                self.assert_warns(
+                    [claude_user("Update src."), claude_assistant("Applying the patch.")],
+                    tool_name="apply_patch",
+                    tool_input={"patch": patch},
+                )
+
+    def test_apply_patch_move_destination_is_scope_checked(self) -> None:
+        patch = (
+            "*** Begin Patch\n"
+            "*** Update File: .scratch/source.md\n"
+            "*** Move to: src/app.py\n"
+            "*** End Patch"
         )
+        self.assert_warns(
+            [claude_user("Move the patch target."), claude_assistant("Applying the patch.")],
+            tool_name="apply_patch",
+            tool_input={"command": patch},
+        )
+        self.assert_silent(
+            [claude_user("Move the patch target."), claude_assistant(orientation(scope="src"))],
+            tool_name="apply_patch",
+            tool_input={"command": patch},
+        )
+
+    def test_apply_patch_move_target_guards_preserve_scratch_and_outside_scope(self) -> None:
+        outside = self.repo.parent / "outside" / "target.py"
+        cases = (
+            ("public-source-to-scratch", "src/app.py", ".scratch/target.md", True),
+            ("scratch-source-to-outside", ".scratch/source.md", str(outside), False),
+        )
+        entries = [claude_user("Move the patch target."), claude_assistant("Applying the patch.")]
+        for name, source, destination, warns in cases:
+            patch = (
+                "*** Begin Patch\n"
+                f"*** Update File: {source}\n"
+                f"*** Move to: {destination}\n"
+                "*** End Patch"
+            )
+            with self.subTest(case=name):
+                assertion = self.assert_warns if warns else self.assert_silent
+                assertion(entries, tool_name="apply_patch", tool_input={"command": patch})
 
     def test_canonical_apply_patch_carriers_classify_framed_command_without_parsing_bash(self) -> None:
         patch = "*** Begin Patch\n*** Update File: src/app.py\n@@\n-old\n+new\n*** End Patch"

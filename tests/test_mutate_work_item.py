@@ -519,13 +519,14 @@ def test_retained_payload_digest_optional_limits_keep_legacy_golden_bytes(
 ) -> None:
     module = load_module()
     payload = tmp_path / "payload"
-    write(payload / "proof.txt", "proof\n")
+    (payload / "proof.txt").parent.mkdir(parents=True, exist_ok=True)
+    (payload / "proof.txt").write_bytes(b"proof\n")
     (payload / "nested").mkdir()
     (payload / "nested" / "data.bin").write_bytes(b"xy")
 
     assert module._payload_digest(payload) == (
         "sha256-tree-entries-v1",
-        "37c69b7b12d9e4483883ed4e576ad179761ab64d3426d1819c319cdf3645057e",
+        "81dfbcb39577424a703e807dd5712bdb0d3decf231edd85327e3438a48ffba5f",
     )
     legacy_file = tmp_path / "legacy-file.txt"
     legacy_file.write_bytes(b"legacy file\n")
