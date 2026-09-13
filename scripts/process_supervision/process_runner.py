@@ -2637,19 +2637,16 @@ class ProcessDialogueChannelV1:
             not isinstance(payload, bytes)
             or not payload
             or len(payload) > MAX_STDIN_BYTES
+            or len(payload) > MAX_STDIN_BYTES - self.written_bytes
             or not payload.endswith(b"\n")
             or b"\n" in payload[:-1]
             or time.monotonic() >= self._deadline
         ):
             raise ProcessSupervisionError(
                 "PSV1-KIMI-ACP-PROTOCOL", "stdin-delivery"
-            )
+        )
         written = write_all_bytes(payload, lambda view: os.write(self._stdin_fd, view))
         self.written_bytes += written
-        if self.written_bytes > MAX_STDIN_BYTES:
-            raise ProcessSupervisionError(
-                "PSV1-KIMI-ACP-PROTOCOL", "stdin-delivery"
-            )
         return written
 
     def read_line(self) -> bytes:

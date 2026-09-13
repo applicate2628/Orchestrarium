@@ -156,6 +156,38 @@ def test_kimi_acp_dialogue_channel_writes_and_reads_complete_json_lines() -> Non
     assert issues == []
 
 
+def test_kimi_acp_dialogue_channel_rejects_cumulative_stdin_before_write(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner = _load_runner()
+    monkeypatch.setattr(runner, "MAX_STDIN_BYTES", 4)
+    writes: list[bytes] = []
+
+    def counted_write(_fd: int, view: memoryview) -> int:
+        data = bytes(view)
+        writes.append(data)
+        return len(data)
+
+    monkeypatch.setattr(runner.os, "write", counted_write)
+    lifecycle = runner.RunLifecycleV1(runner.RunTokenV1(b"b" * 16, 1))
+    channel = runner.ProcessDialogueChannelV1(
+        41,
+        runner._DialogueLineRouterV1(),
+        lifecycle,
+        time.monotonic() + 1.0,
+        None,
+    )
+
+    assert channel.write_line(b"a\n") == 2
+    with pytest.raises(runner.ProcessSupervisionError) as overflow:
+        channel.write_line(b"bcd\n")
+
+    assert overflow.value.failure_id == "PSV1-KIMI-ACP-PROTOCOL"
+    assert overflow.value.terminal_stage == "stdin-delivery"
+    assert writes == [b"a\n"]
+    assert channel.written_bytes == 2
+
+
 def test_kimi_dialogue_cancellation_blocks_normal_write_but_allows_cleanup() -> None:
     runner = _load_runner()
     read_fd, write_fd = os.pipe()

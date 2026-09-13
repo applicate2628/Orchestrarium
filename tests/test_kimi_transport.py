@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 import hashlib
 import importlib.util
 import json
@@ -7,6 +8,7 @@ import os
 import subprocess
 import sys
 import tomllib
+import tracemalloc
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -1923,6 +1925,54 @@ def test_kimi_acp_one_shot_preserves_literal_task_bytes() -> None:
     prompt = peer.requests[3]["params"]["prompt"]
     assert prompt == [{"type": "text", "text": body.decode("utf-8")}]
     assert exchange.result_bytes == b"artifact\nGATE: PASS\n"
+
+
+def test_kimi_acp_result_chunks_stay_under_memory_budget() -> None:
+    owner = _load_owner()
+    count = 200_000
+    session_id = "profile-session"
+    update = json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {
+                "sessionId": session_id,
+                "update": {
+                    "sessionUpdate": "agent_message_chunk",
+                    "content": {"type": "text", "text": "x"},
+                },
+            },
+        },
+        separators=(",", ":"),
+    ).encode("utf-8") + b"\n"
+    terminal = b'{"jsonrpc":"2.0","id":1,"result":{"stopReason":"end_turn"}}\n'
+
+    class LazyPeer:
+        def __init__(self) -> None:
+            self.sent = 0
+
+        def read_line(self) -> bytes:
+            if self.sent < count:
+                self.sent += 1
+                return update
+            self.sent += 1
+            return terminal
+
+    exchange = owner.KimiAcpOneShotV1(
+        b"safe task", str(ROOT), result_max_bytes=count
+    )
+    object.__setattr__(exchange, "session_id", session_id)
+    gc.collect()
+    tracemalloc.start(1)
+    try:
+        result = exchange._response(LazyPeer(), 1, collect=True)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+
+    assert result == {"stopReason": "end_turn"}
+    assert exchange.result_bytes == b"x" * count
+    assert peak < 4 * 1024 * 1024
 
 
 @pytest.mark.parametrize(

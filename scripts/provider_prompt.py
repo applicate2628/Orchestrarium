@@ -820,8 +820,7 @@ class KimiAcpOneShotV1:
         }
 
     def _response(self, channel, request_id: int, *, collect: bool = False) -> dict[str, object]:
-        chunks: list[bytes] = []
-        collected_bytes = 0
+        chunks = bytearray()
         while True:
             try:
                 message = self._decode_line(channel.read_line())
@@ -864,10 +863,9 @@ class KimiAcpOneShotV1:
                         chunk = content["text"].encode("utf-8", errors="strict")
                     except UnicodeEncodeError as exc:
                         raise ValueError("E_KIMI_ACP_PROTOCOL") from exc
-                    collected_bytes += len(chunk)
-                    if collected_bytes > self.result_max_bytes:
+                    if len(chunks) + len(chunk) > self.result_max_bytes:
                         raise ValueError("E_KIMI_ACP_PROTOCOL")
-                    chunks.append(chunk)
+                    chunks += chunk
                 continue
             response_id = message.get("id")
             if (
@@ -880,7 +878,7 @@ class KimiAcpOneShotV1:
             if not isinstance(result, dict):
                 raise ValueError("E_KIMI_ACP_PROTOCOL")
             if collect:
-                self.result_bytes = b"".join(chunks)
+                self.result_bytes = bytes(chunks)
             return result
 
     def _cleanup_session(self, channel, *, cancel: bool) -> None:
