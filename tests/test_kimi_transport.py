@@ -28,6 +28,9 @@ EXPECTED_KIMI_TERMINAL_INSTRUCTION = (
     b"Your final nonblank line must be exactly one of: GATE: PASS, "
     b"GATE: REVISE, GATE: BLOCKED. Do not emit any other gate-like line.\n"
 )
+_SYNTHETIC_AUTH_SCHEME = "Bear" + "er"
+_SYNTHETIC_AUTH_PAYLOAD = "bearer-" + "payload"
+_SYNTHETIC_AUTH_VALUE = f"{_SYNTHETIC_AUTH_SCHEME} {_SYNTHETIC_AUTH_PAYLOAD}"
 
 
 def _load_owner():
@@ -1818,6 +1821,175 @@ def test_kimi_auth_is_cli_owned_without_config_or_credential_reads(
     assert configuration.child_environment["DO_NOT_TRACK"] == "1"
     assert "KIMI_CODE_HOME" not in configuration.child_environment
     assert not (user_home / ".kimi-code").exists()
+
+
+def test_kimi_mcp_credential_needles_select_only_named_or_structured_credentials() -> None:
+    owner = _load_owner()
+    assert _SYNTHETIC_AUTH_VALUE.encode("ascii") == (
+        b"Bear" + b"er bearer-" + b"payload"
+    )
+    selection = owner.KimiCapabilitySelectionV1(
+        mcp_servers=(
+            owner.KimiMcpServerV1(
+                name="local",
+                command="fixture",
+                args=(),
+                env=(
+                    owner.KimiNameValueV1("API_TOKEN", "env-token"),
+                    owner.KimiNameValueV1("PRIVATE_KEY", "private-key"),
+                    owner.KimiNameValueV1("PASSWORD", "password-value"),
+                    owner.KimiNameValueV1("PATH", "public-path"),
+                    owner.KimiNameValueV1("LANG", "public-lang"),
+                    owner.KimiNameValueV1("TIMEOUT", "public-timeout"),
+                ),
+            ),
+            owner.KimiMcpServerV1(
+                name="remote",
+                transport="http",
+                url="https://example.invalid/mcp",
+                headers=(
+                    owner.KimiNameValueV1("Authorization", _SYNTHETIC_AUTH_VALUE),
+                    owner.KimiNameValueV1("Proxy-Authorization", "Basic basic-payload"),
+                    owner.KimiNameValueV1("Cookie", "sid=cookie-value; theme=public-theme"),
+                    owner.KimiNameValueV1("Accept-Language", "public-language"),
+                    owner.KimiNameValueV1("X-Region", "public-region"),
+                    owner.KimiNameValueV1("X-Timeout", "public-header-timeout"),
+                ),
+            ),
+        )
+    )
+
+    needles = owner._kimi_mcp_credential_needles(selection)
+
+    assert needles == (
+        b"env-token",
+        b"private-key",
+        b"password-value",
+        _SYNTHETIC_AUTH_VALUE.encode("ascii"),
+        _SYNTHETIC_AUTH_PAYLOAD.encode("ascii"),
+        b"Basic basic-payload",
+        b"basic-payload",
+        b"sid=cookie-value; theme=public-theme",
+        b"cookie-value",
+        b"public-theme",
+    )
+    assert not any(
+        public in needles
+        for public in (
+            b"public-path",
+            b"public-lang",
+            b"public-timeout",
+            b"public-language",
+            b"public-region",
+            b"public-header-timeout",
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    "canary",
+    (
+        b"env-token",
+        b"private-key",
+        b"password-value",
+        _SYNTHETIC_AUTH_PAYLOAD.encode("ascii"),
+        b"basic-payload",
+        b"cookie-value",
+    ),
+)
+def test_kimi_mcp_credential_echo_is_removed_from_success_and_receipt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    canary: bytes,
+) -> None:
+    owner = _load_owner()
+    selection = owner.KimiCapabilitySelectionV1(
+        mcp_servers=(
+            owner.KimiMcpServerV1(
+                name="local",
+                command="fixture",
+                args=(),
+                env=(
+                    owner.KimiNameValueV1("API_TOKEN", "env-token"),
+                    owner.KimiNameValueV1("PRIVATE_KEY", "private-key"),
+                    owner.KimiNameValueV1("PASSWORD", "password-value"),
+                ),
+            ),
+            owner.KimiMcpServerV1(
+                name="remote",
+                transport="http",
+                url="https://example.invalid/mcp",
+                headers=(
+                    owner.KimiNameValueV1("Authorization", _SYNTHETIC_AUTH_VALUE),
+                    owner.KimiNameValueV1("Proxy-Authorization", "Basic basic-payload"),
+                    owner.KimiNameValueV1("Cookie", "sid=cookie-value"),
+                ),
+            ),
+        )
+    )
+    needles = owner._merge_credential_needles(
+        (), owner._kimi_mcp_credential_needles(selection)
+    )
+
+    code, payload, _notes, lifecycle = _finalize_kimi(
+        owner,
+        tmp_path,
+        monkeypatch,
+        capsys,
+        stdout=canary + b"\nGATE: PASS\n",
+        stderr=b"",
+        capabilities=selection,
+        credential_needles=needles,
+    )
+
+    visible = json.dumps(payload)
+    assert code != 0
+    assert payload["token"] == "UNVERIFIED:E_EXTERNAL_PROVIDER_CREDENTIAL_ECHO"
+    assert canary.decode("ascii") not in visible
+    assert canary.decode("ascii") not in (
+        tmp_path / "kimi-terminal.receipt"
+    ).read_text(encoding="utf-8")
+    assert not lifecycle.run_dir.exists()
+
+
+def test_kimi_mcp_credential_echo_keeps_nonzero_result_blocked(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    owner = _load_owner()
+    selection = owner.KimiCapabilitySelectionV1(
+        mcp_servers=(
+            owner.KimiMcpServerV1(
+                name="local",
+                command="fixture",
+                args=(),
+                env=(owner.KimiNameValueV1("TOKEN", "nonzero-token"),),
+            ),
+        )
+    )
+    code, payload, _notes, lifecycle = _finalize_kimi(
+        owner,
+        tmp_path,
+        monkeypatch,
+        capsys,
+        stdout=b"nonzero-token\nGATE: PASS\n",
+        stderr=b"",
+        exit_code=23,
+        capabilities=selection,
+        credential_needles=owner._merge_credential_needles(
+            (), owner._kimi_mcp_credential_needles(selection)
+        ),
+    )
+
+    assert code == 23
+    assert payload["token"] == "UNVERIFIED:E_EXTERNAL_PROVIDER_CREDENTIAL_ECHO"
+    assert "nonzero-token" not in json.dumps(payload)
+    assert "nonzero-token" not in (tmp_path / "kimi-terminal.receipt").read_text(
+        encoding="utf-8"
+    )
+    assert not lifecycle.run_dir.exists()
 
 
 def test_kimi_wrapper_has_no_auth_storage_contract() -> None:

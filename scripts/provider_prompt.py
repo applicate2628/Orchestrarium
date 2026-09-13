@@ -254,6 +254,86 @@ class KimiNameValueV1:
         return {"name": self.name, "value": self.value}
 
 
+def _merge_credential_needles(*groups: tuple[bytes, ...]) -> tuple[bytes, ...]:
+    merged: list[bytes] = []
+    for group in groups:
+        for needle in group:
+            if needle not in merged:
+                merged.append(needle)
+    return tuple(merged)
+
+
+def _kimi_mcp_credential_needles(
+    selection: "KimiCapabilitySelectionV1",
+) -> tuple[bytes, ...]:
+    """Select exact credential values from parsed Kimi MCP configuration only."""
+
+    credential_components = {
+        "auth",
+        "authentication",
+        "authorization",
+        "access",
+        "bearer",
+        "refresh",
+        "session",
+        "oauth",
+        "jwt",
+        "credential",
+        "secret",
+        "csrf",
+        "password",
+        "token",
+        "cookie",
+    }
+    needles: list[bytes] = []
+
+    def components(name: str) -> tuple[str, ...]:
+        return tuple(part.casefold() for part in re.findall(r"[A-Za-z0-9]+", name))
+
+    def add(value: str) -> None:
+        if not value:
+            return
+        try:
+            encoded = value.encode("utf-8", errors="strict")
+        except UnicodeEncodeError as exc:
+            raise ValueError(
+                "E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE"
+            ) from exc
+        if b"\x00" in encoded:
+            raise ValueError("E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE")
+        if encoded not in needles:
+            needles.append(encoded)
+
+    for server in selection.mcp_servers:
+        for entry in (*server.env, *server.headers):
+            name_parts = components(entry.name)
+            name_part_set = set(name_parts)
+            is_authorization = name_parts in {
+                ("authorization",),
+                ("proxy", "authorization"),
+            }
+            is_cookie = name_parts == ("cookie",)
+            is_api_key = {"api", "key"}.issubset(name_part_set)
+            has_private_components = {"private", "key"}.issubset(name_part_set)
+            if not (
+                name_part_set.intersection(credential_components)
+                or is_api_key
+                or has_private_components
+            ):
+                continue
+            add(entry.value)
+            if is_authorization:
+                scheme, separator, payload = entry.value.partition(" ")
+                if scheme.casefold() in {"bearer", "basic"} and separator:
+                    add(payload.strip())
+            elif is_cookie:
+                for item in entry.value.split(";"):
+                    _name, separator, value = item.partition("=")
+                    if separator:
+                        add(value.strip())
+    return tuple(needles)
+
+
 @dataclass(frozen=True)
 class KimiMcpServerV1:
     name: str
@@ -5993,6 +6073,15 @@ def _launch_with_runner(
         )
     ):
         return reserved_failure("E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE")
+    try:
+        credential_needles = _merge_credential_needles(
+            auth_configuration.needles,
+            _kimi_mcp_credential_needles(control.kimi_capabilities)
+            if provider == "kimi"
+            else (),
+        )
+    except ValueError:
+        return reserved_failure("E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE")
 
     try:
         body = assemble_external_prompt(prompt_bytes(control, external=True))
@@ -6040,7 +6129,7 @@ def _launch_with_runner(
             reserved_run,
             1,
             launch_error="E_EXTERNAL_CAPTURE_SETUP",
-            credential_needles=auth_configuration.needles,
+            credential_needles=credential_needles,
             auth_output_scan_disposition=auth_configuration.output_scan_disposition,
             runner=runner,
             role_provenance=role_provenance,
@@ -6080,7 +6169,7 @@ def _launch_with_runner(
                 launch_error=stable_failure_id_from_exception(
                     exc, "E_KIMI_ACP_SETUP"
                 ),
-                credential_needles=auth_configuration.needles,
+                credential_needles=credential_needles,
                 auth_output_scan_disposition=auth_configuration.output_scan_disposition,
                 runner=runner,
                 role_provenance=role_provenance,
@@ -6099,7 +6188,7 @@ def _launch_with_runner(
                 replace(control, ledger=None), provider, model, effort, slug, "", reserved_run, 1,
                 launch_error="E_EXTERNAL_LEDGER_HELPER_UNAVAILABLE", realization=realization, runner=runner,
                 role_provenance=role_provenance, provenance=provenance,
-                launch_flags=launch_flags,
+                launch_flags=launch_flags, credential_needles=credential_needles,
             )
         launch_run_id = (
             provenance.external_dispatch_id
@@ -6146,7 +6235,7 @@ def _launch_with_runner(
                 replace(control, ledger=None), provider, model, effort, slug, "", reserved_run, 1,
                 launch_error="E_EXTERNAL_LAUNCH_LEDGER_FAILED", realization=realization, runner=runner,
                 role_provenance=role_provenance, provenance=provenance,
-                launch_flags=launch_flags,
+                launch_flags=launch_flags, credential_needles=credential_needles,
             )
 
     provider_args = (
@@ -6238,7 +6327,7 @@ def _launch_with_runner(
         timed_out=timed_out,
         launch_error=launch_error,
         realization=realization,
-        credential_needles=auth_configuration.needles,
+        credential_needles=credential_needles,
         auth_output_scan_disposition=auth_configuration.output_scan_disposition,
         role_provenance=role_provenance,
         provenance=provenance,
