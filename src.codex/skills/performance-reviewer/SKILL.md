@@ -50,10 +50,10 @@ description: "Performance gate: latency, throughput, memory, CPU, benchmarks, bu
 
 ## Performance issue registry
 
-The performance issue registry format and its status enum are owned by `performance-engineer` (`work-items/performance/<date>-<slug>.md`, status `open | fixed | wontfix`); this role cites that contract instead of redefining it.
+The configured bug registry (default `work-items/bugs/<date>-<slug>.md`) owns the record schema and statuses; performance roles do not create a separate registry or enum.
 
-- When the gate decision is `REVISE` or `BLOCKED`, include a proposed registry record in-band in the returned artifact for the root or lifecycle owner, using the issue format owned by `performance-engineer` and `found-by: performance-reviewer`. Write the proposed registry record directly only when the dispatcher explicitly grants registry-write authority and the sandbox permits that path. A direct registry write is a narrow canonical-artifact exception and does not otherwise broaden this role's write posture.
-- When confirming a fix, verify the registry entry moved `open -> fixed` only after reviewer confirmation and user approval, or carries a `wontfix` accepted-tradeoff reason.
+- When the gate decision is `REVISE` or `BLOCKED`, include a proposed bug record in-band in the returned artifact for the root or lifecycle owner, preserving Description, Metric (metric / budget / actual / baseline), and Files involved; the reviewer remains proposal-only unless the dispatcher explicitly grants registry-write authority.
+- When confirming a fix, require reviewer confirmation and user approval before its disposition; the lifecycle owner alone terminalizes or archives the bug.
 
 ## Cross-domain escalation
 

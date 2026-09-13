@@ -40,33 +40,7 @@ description: "Performance engineer: define budgets and measurements."
 
 ## Performance issue registry
 
-When identifying a performance issue, create or update a file in `work-items/performance/`:
-
-```markdown
----
-severity: high | medium | low
-status: open | fixed | wontfix   # this role OWNS the perf-registry status enum; reviewers cite it
-found-by: performance-engineer
-context: <work-item slug or "standalone">
----
-
-## Description
-
-<What is slow or over budget — one paragraph.>
-
-## Metric
-
-- **Metric**: <what is measured>
-- **Budget**: <target value>
-- **Actual**: <measured value>
-- **Baseline**: <required value before the change, or explicitly declared absent before optimization>
-
-## Files involved
-
-- <file:line>
-```
-
-Status moves `open -> fixed` only after the performance reviewer confirms AND the user approves; `wontfix` records the accepted-tradeoff reason.
+When a performance defect is found, use the configured bug registry (default `work-items/bugs/<date>-<slug>.md`) and its existing schema/statuses; do not create a performance-specific registry or enum. Preserve the Description, Metric (metric / budget / actual / baseline, with baseline required before optimization or explicitly declared absent), and Files involved evidence. A fix disposition still requires performance-reviewer confirmation and user approval; the lifecycle owner alone terminalizes or archives the bug.
 
 ## Architecture layering hygiene (performance)
 

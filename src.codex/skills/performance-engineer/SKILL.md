@@ -40,7 +40,7 @@ description: "Latency, throughput, memory, slow: profiling, benchmarks, budgets.
 
 ## Performance issue registry
 
-When a performance issue is found, create or update a file in `work-items/performance/<date>-<slug>.md` (the same flat list-item registry shape as `work-items/bugs/`), with frontmatter `severity: high | medium | low`, `status: open`, `found-by: performance-engineer`, `context: <work-item slug or "standalone">`, and body sections: Description (what is slow or over budget), Metric (metric / budget / actual / baseline, with baseline required before optimization or explicitly declared absent), Files involved. Status moves `open -> fixed` only after the performance reviewer confirms AND the user approves; `wontfix` records the accepted-tradeoff reason.
+When a performance defect is found, use the configured bug registry (default `work-items/bugs/<date>-<slug>.md`) and its existing schema/statuses; do not create a performance-specific registry or enum. Preserve the Description, Metric (metric / budget / actual / baseline, with baseline required before optimization or explicitly declared absent), and Files involved evidence. A fix disposition still requires performance-reviewer confirmation and user approval; the lifecycle owner alone terminalizes or archives the bug.
 
 ## Architecture layering hygiene (performance)
 
