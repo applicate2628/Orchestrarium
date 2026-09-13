@@ -28,6 +28,7 @@ HOOKS = (
     ROOT / "src.claude" / "agents" / "hooks" / "check-repository-orientation.py",
     ROOT / "src.codex" / "skills" / "lead" / "hooks" / "check-repository-orientation.py",
 )
+CANONICAL_HOOK = ROOT / "scripts" / "universal-hooks" / "hooks" / "check-repository-orientation.py"
 WARNING = "[repository-orientation AUDIT]"
 STALE_WARNING = "[repository-orientation STALE-TARGET AUDIT]"
 
@@ -267,6 +268,27 @@ class RepositoryOrientationHookTests(unittest.TestCase):
             tool_name="apply_patch",
             tool_input={"patch": patch},
         )
+
+    def test_canonical_apply_patch_carriers_classify_framed_command_without_parsing_bash(self) -> None:
+        patch = "*** Begin Patch\n*** Update File: src/app.py\n@@\n-old\n+new\n*** End Patch"
+        carriers = (
+            ("patch", "apply_patch", {"patch": patch}, True),
+            ("input", "apply_patch", {"input": patch}, True),
+            ("command", "apply_patch", {"command": patch}, True),
+            ("non-apply-command", "Bash", {"command": patch}, False),
+        )
+        entries = [claude_user("Update src."), claude_assistant("Applying the patch.")]
+        for name, tool_name, tool_input, warns in carriers:
+            with self.subTest(carrier=name):
+                result = run_hook(
+                    CANONICAL_HOOK,
+                    self.repo,
+                    entries,
+                    tool_name=tool_name,
+                    tool_input=tool_input,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(bool(result.stdout), warns, result.stdout)
         self.assert_silent(
             [claude_user("Update src."), claude_assistant(orientation(scope="src"))],
             tool_name="apply_patch",

@@ -45,7 +45,7 @@ def _repository_context(envelope: dict) -> tuple[dict, Path, Path | None]:
     tool_input = envelope.get("tool_input")
     tool_name = str(envelope.get("tool_name", "")).lower()
     if isinstance(tool_input, dict) and tool_name in classifier["_MUTATION_TOOLS"]:
-        raw_targets = classifier["_target_strings"](tool_input)
+        raw_targets = classifier["_target_strings"](tool_input, tool_name=tool_name)
         target_paths = [classifier["_as_path"](value, cwd) for value in raw_targets]
         if target_paths:
             target_roots = [
@@ -75,12 +75,12 @@ def _is_repository_work_start(
         classifier, cwd, discovered_root = _repository_context(envelope)
         if root is None:
             root = discovered_root
-    raw_targets = classifier["_target_strings"](tool_input)
+    tool_name = envelope["tool_name"].lower()
+    raw_targets = classifier["_target_strings"](tool_input, tool_name=tool_name)
     target_paths = [classifier["_as_path"](value, cwd) for value in raw_targets]
     if root is None:
         return False
 
-    tool_name = envelope["tool_name"].lower()
     # Production installers register this hook for the Claude `PowerShell`
     # tool as well as the shell aliases owned by the shared classifier. Project
     # that tool onto the same command-classification path instead of silently
