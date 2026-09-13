@@ -816,6 +816,7 @@ class EvidenceRetentionPlan:
     tree_sha256: str
     canonical_pointer: Path
     canonical_pointer_sha256: str
+    limits: "PayloadDigestLimits"
 
 
 BUG_DISPOSITIONS_MANIFEST = "bug-dispositions.json"
@@ -3995,6 +3996,11 @@ def _prepare_evidence_retention(
         return ()
     owner_root = root / ".scratch" / "work-items" / item.name
     classifier = _scratch_classifier_module()
+    limits = PayloadDigestLimits(
+        max_files=classifier.MAX_OWNED_TREE_FILES,
+        max_entries=classifier.MAX_OWNED_TREE_ENTRIES,
+        max_bytes=classifier.MAX_OWNED_TREE_BYTES,
+    )
     try:
         originals, tombstones = _scratch_namespace_entries(owner_root)
     except classifier.OwnedTreeClassificationError as exc:
@@ -4050,10 +4056,21 @@ def _prepare_evidence_retention(
             or not pointer.is_file()
         ):
             raise LifecycleError("WI-BUG-DISPOSITIONS-INVALID", "evidenceRetention canonical pointer is unsafe")
-        pointer_bytes = pointer.read_bytes()
+        try:
+            pointer_snapshot = _capture_file_snapshot(
+                pointer, failure_id="WI-BUG-DISPOSITIONS-INVALID"
+            )
+            pointer_bytes = pointer_snapshot.data
+            pointer_text = pointer_bytes.decode("utf-8", errors="strict")
+        except (LifecycleError, UnicodeDecodeError) as exc:
+            raise LifecycleError(
+                "WI-BUG-DISPOSITIONS-INVALID", "evidenceRetention canonical pointer is unsafe"
+            ) from exc
         if (
             hashlib.sha256(pointer_bytes).hexdigest() != row["canonicalPointerSha256"]
-            or candidate.name not in pointer_bytes.decode("utf-8", errors="replace")
+            or not _pointer_names_retained_root(
+                pointer_text, candidate.name, relative.as_posix()
+            )
         ):
             raise LifecycleError("WI-BUG-DISPOSITIONS-DRIFT", "evidenceRetention canonical pointer differs")
         try:
@@ -4068,11 +4085,24 @@ def _prepare_evidence_retention(
                 "WI-BUG-DISPOSITIONS-INVALID",
                 "evidenceRetention root is not an ordinary file or directory",
             )
-        digest = _payload_digest(candidate)[1]
+        try:
+            digest = _payload_digest(candidate, limits=limits)[1]
+        except LifecycleError as exc:
+            raise LifecycleError(
+                "WI-SCRATCH-UNSAFE-ENTRY", "retained scratch evidence is unreadable"
+            ) from exc
         if digest != row["treeSha256"]:
             raise LifecycleError("WI-BUG-DISPOSITIONS-DRIFT", "evidenceRetention tree hash differs")
         seen.add(candidate)
-        plans.append(EvidenceRetentionPlan(candidate, digest, pointer, row["canonicalPointerSha256"]))
+        plans.append(
+            EvidenceRetentionPlan(
+                candidate,
+                digest,
+                pointer,
+                row["canonicalPointerSha256"],
+                limits,
+            )
+        )
     return tuple(plans)
 
 
@@ -4765,7 +4795,16 @@ def close_item(
             raise LifecycleError("WI-README-STALE", "injected failure after canonical success")
         readme_sha256 = refresh_readme(root)
         for retention in evidence_retention:
-            if _payload_digest(retention.path)[1] != retention.tree_sha256:
+            try:
+                observed_retention_digest = _payload_digest(
+                    retention.path, limits=retention.limits
+                )[1]
+            except LifecycleError as exc:
+                raise LifecycleError(
+                    "WI-SCRATCH-UNSAFE-ENTRY",
+                    "retained scratch evidence is unreadable after preflight",
+                ) from exc
+            if observed_retention_digest != retention.tree_sha256:
                 raise LifecycleError("WI-BUG-DISPOSITIONS-DRIFT", "retained scratch evidence changed after preflight")
         receipt_data = _bug_disposition_receipt_bytes(
             root,
@@ -8917,16 +8956,135 @@ def migrate_legacy(
     return _move_terminal_category(root, reference)
 
 
-def _payload_digest(path: Path) -> tuple[str, str]:
+@dataclass(frozen=True)
+class PayloadDigestLimits:
+    max_files: int
+    max_entries: int
+    max_bytes: int
+
+    def __post_init__(self) -> None:
+        for value in (self.max_files, self.max_entries, self.max_bytes):
+            if type(value) is not int or value < 0:
+                raise ValueError("payload digest limits must be non-negative integers")
+
+
+_POINTER_LITERAL_IDENTIFIER_CHARS = frozenset(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-/"
+)
+
+
+def _pointer_names_retained_root(
+    pointer_text: str, root_name: str, manifest_path: str
+) -> bool:
+    """Accept only a literal retained root name or its manifest-authorized path."""
+
+    for reference in (root_name, manifest_path):
+        start = pointer_text.find(reference)
+        while start >= 0:
+            end = start + len(reference)
+            left_is_literal = (
+                start > 0 and pointer_text[start - 1] in _POINTER_LITERAL_IDENTIFIER_CHARS
+            )
+            right_is_literal = (
+                end < len(pointer_text)
+                and pointer_text[end] in _POINTER_LITERAL_IDENTIFIER_CHARS
+            )
+            if not left_is_literal and not right_is_literal:
+                return True
+            start = pointer_text.find(reference, start + 1)
+    return False
+
+
+def _payload_stream_regular_file(path: Path, expected: os.stat_result, digest, classifier) -> None:
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise LifecycleError("WI-CATEGORY-MIGRATION-PAYLOAD", "payload file cannot be opened") from exc
+    try:
+        opened = os.fstat(descriptor)
+        if not classifier._same_open_identity(opened, expected) or not stat.S_ISREG(opened.st_mode):
+            raise LifecycleError("WI-CATEGORY-MIGRATION-PAYLOAD", "payload file identity changed while opening")
+        while True:
+            block = os.read(descriptor, 1024 * 1024)
+            if not block:
+                break
+            digest.update(block)
+        final = os.fstat(descriptor)
+        if not classifier._same_open_identity(final, opened):
+            raise LifecycleError("WI-CATEGORY-MIGRATION-PAYLOAD", "payload file identity changed while reading")
+    except OSError as exc:
+        raise LifecycleError("WI-CATEGORY-MIGRATION-PAYLOAD", "payload file cannot be read") from exc
+    finally:
+        os.close(descriptor)
+
+
+def _payload_limited_tree_entries(path: Path, limits: PayloadDigestLimits) -> list[Path]:
+    """Walk at most one entry beyond the retention ceiling without preloading directories."""
+
+    entries: list[Path] = []
+    directories = [path]
+    while directories:
+        directory = directories.pop()
+        try:
+            with os.scandir(directory) as iterator:
+                for entry in iterator:
+                    if len(entries) >= limits.max_entries:
+                        raise LifecycleError(
+                            "WI-CATEGORY-MIGRATION-PAYLOAD",
+                            "payload exceeds retention entry limit",
+                        )
+                    candidate = Path(entry.path)
+                    info = entry.stat(follow_symlinks=False)
+                    if entry.is_symlink() or bool(
+                        getattr(info, "st_file_attributes", 0)
+                        & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+                    ):
+                        raise LifecycleError(
+                            "WI-CATEGORY-MIGRATION-PAYLOAD",
+                            "payload tree entry is not ordinary",
+                        )
+                    if stat.S_ISDIR(info.st_mode):
+                        directories.append(candidate)
+                    elif not stat.S_ISREG(info.st_mode):
+                        raise LifecycleError(
+                            "WI-CATEGORY-MIGRATION-PAYLOAD",
+                            "unsupported tree entry",
+                        )
+                    entries.append(candidate)
+        except OSError as exc:
+            raise LifecycleError(
+                "WI-CATEGORY-MIGRATION-PAYLOAD", "payload tree cannot be enumerated"
+            ) from exc
+    entries.sort(key=lambda item: item.relative_to(path).as_posix())
+    return entries
+
+
+def _payload_digest(path: Path, *, limits: PayloadDigestLimits | None = None) -> tuple[str, str]:
     if path.is_symlink():
         raise LifecycleError(
             "WI-CATEGORY-MIGRATION-PAYLOAD",
             f"symbolic-link payload is not admitted: {path}",
         )
     if path.is_file():
+        if limits is None:
+            return (
+                MIGRATION_DIGEST_ALGORITHMS["file"],
+                hashlib.sha256(path.read_bytes()).hexdigest(),
+            )
+        try:
+            expected = path.lstat()
+        except OSError as exc:
+            raise LifecycleError("WI-CATEGORY-MIGRATION-PAYLOAD", "payload file is unavailable") from exc
+        if _lifecycle_path_has_reparse(path) or not stat.S_ISREG(expected.st_mode):
+            raise LifecycleError("WI-CATEGORY-MIGRATION-PAYLOAD", "payload file is not ordinary")
+        if limits.max_entries < 1 or limits.max_files < 1 or expected.st_size > limits.max_bytes:
+            raise LifecycleError("WI-CATEGORY-MIGRATION-PAYLOAD", "payload exceeds retention limits")
+        digest = hashlib.sha256()
+        _payload_stream_regular_file(path, expected, digest, _scratch_classifier_module())
         return (
             MIGRATION_DIGEST_ALGORITHMS["file"],
-            hashlib.sha256(path.read_bytes()).hexdigest(),
+            digest.hexdigest(),
         )
     if not path.is_dir():
         raise LifecycleError(
@@ -8935,7 +9093,15 @@ def _payload_digest(path: Path) -> tuple[str, str]:
         )
     digest = hashlib.sha256()
     digest.update(b"sha256-tree-entries-v1\0")
-    for entry in sorted(path.rglob("*"), key=lambda item: item.relative_to(path).as_posix()):
+    if limits is None:
+        entries = sorted(path.rglob("*"), key=lambda item: item.relative_to(path).as_posix())
+        classifier = None
+    else:
+        entries = _payload_limited_tree_entries(path, limits)
+        classifier = _scratch_classifier_module()
+    file_count = 0
+    total_bytes = 0
+    for entry in entries:
         if entry.is_symlink():
             raise LifecycleError(
                 "WI-CATEGORY-MIGRATION-PAYLOAD",
@@ -8943,16 +9109,37 @@ def _payload_digest(path: Path) -> tuple[str, str]:
             )
         relative = entry.relative_to(path).as_posix().encode("utf-8")
         if entry.is_dir():
+            if limits is not None and _lifecycle_path_has_reparse(entry):
+                raise LifecycleError("WI-CATEGORY-MIGRATION-PAYLOAD", "payload tree entry is not ordinary")
             digest.update(b"D")
             digest.update(len(relative).to_bytes(8, "big"))
             digest.update(relative)
         elif entry.is_file():
-            data = entry.read_bytes()
+            if limits is None:
+                data = entry.read_bytes()
+                size = len(data)
+            else:
+                try:
+                    expected = entry.lstat()
+                except OSError as exc:
+                    raise LifecycleError("WI-CATEGORY-MIGRATION-PAYLOAD", "payload tree entry is unavailable") from exc
+                if _lifecycle_path_has_reparse(entry) or not stat.S_ISREG(expected.st_mode):
+                    raise LifecycleError("WI-CATEGORY-MIGRATION-PAYLOAD", "payload tree entry is not ordinary")
+                file_count += 1
+                total_bytes += expected.st_size
+                if file_count > limits.max_files or total_bytes > limits.max_bytes:
+                    raise LifecycleError("WI-CATEGORY-MIGRATION-PAYLOAD", "payload exceeds retention file or byte limit")
+                data = None
+                size = expected.st_size
             digest.update(b"F")
             digest.update(len(relative).to_bytes(8, "big"))
             digest.update(relative)
-            digest.update(len(data).to_bytes(8, "big"))
-            digest.update(data)
+            digest.update(size.to_bytes(8, "big"))
+            if data is None:
+                assert limits is not None and classifier is not None
+                _payload_stream_regular_file(entry, expected, digest, classifier)
+            else:
+                digest.update(data)
         else:
             raise LifecycleError(
                 "WI-CATEGORY-MIGRATION-PAYLOAD",

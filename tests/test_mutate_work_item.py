@@ -514,6 +514,185 @@ def test_retained_scratch_pointer_parent_link_is_rejected_before_archive(tmp_pat
     assert not (root / "work-items" / "archive" / "2026-08" / slug).exists()
 
 
+def test_retained_payload_digest_optional_limits_keep_legacy_golden_bytes(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    payload = tmp_path / "payload"
+    write(payload / "proof.txt", "proof\n")
+    (payload / "nested").mkdir()
+    (payload / "nested" / "data.bin").write_bytes(b"xy")
+
+    assert module._payload_digest(payload) == (
+        "sha256-tree-entries-v1",
+        "37c69b7b12d9e4483883ed4e576ad179761ab64d3426d1819c319cdf3645057e",
+    )
+    legacy_file = tmp_path / "legacy-file.txt"
+    legacy_file.write_bytes(b"legacy file\n")
+    assert module._payload_digest(legacy_file) == (
+        "sha256-file-bytes-v1",
+        "2ed93b04807efb14d2186e20bb6f8c45264a32d08bd97df62316cccd6ded4894",
+    )
+    assert module._payload_digest(
+        payload,
+        limits=module.PayloadDigestLimits(
+            max_files=8, max_entries=8, max_bytes=1024
+        ),
+    ) == module._payload_digest(payload)
+
+    cases = (
+        (module.PayloadDigestLimits(max_files=8, max_entries=1, max_bytes=1024), "entry"),
+        (module.PayloadDigestLimits(max_files=1, max_entries=8, max_bytes=1024), "file"),
+        (module.PayloadDigestLimits(max_files=8, max_entries=8, max_bytes=1), "byte"),
+    )
+    for limits, label in cases:
+        try:
+            module._payload_digest(payload, limits=limits)
+        except module.LifecycleError as exc:
+            assert exc.failure_id == "WI-CATEGORY-MIGRATION-PAYLOAD", label
+        else:
+            raise AssertionError(f"{label} payload limit was accepted")
+
+
+def test_retained_payload_digest_limit_stops_scandir_before_preloading(tmp_path: Path) -> None:
+    module = load_module()
+    payload = tmp_path / "payload"
+    for name in ("one.txt", "two.txt", "three.txt"):
+        write(payload / name, name + "\n")
+
+    original_scandir = module.os.scandir
+    consumed: list[str] = []
+    closed: list[bool] = []
+
+    class TrackingScandir:
+        def __init__(self, path) -> None:
+            self._context = original_scandir(path)
+            self._iterator = self._context.__enter__()
+            self._track = Path(path) == payload
+            self._closed = False
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            entry = next(self._iterator)
+            if self._track:
+                consumed.append(entry.name)
+            return entry
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback) -> None:
+            self._closed = True
+            if self._track:
+                closed.append(self._closed)
+            self._context.__exit__(exc_type, exc, traceback)
+
+    with patch.object(module.os, "scandir", side_effect=TrackingScandir):
+        try:
+            module._payload_digest(
+                payload,
+                limits=module.PayloadDigestLimits(
+                    max_files=8, max_entries=1, max_bytes=1024
+                ),
+            )
+        except module.LifecycleError as exc:
+            assert exc.failure_id == "WI-CATEGORY-MIGRATION-PAYLOAD"
+        else:
+            raise AssertionError("bounded payload walk accepted three entries")
+
+    assert len(consumed) == 2
+    assert closed == [True]
+
+
+def test_retained_evidence_limits_use_cleanup_owner_ceilings(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "retained-ceiling"
+    instant = "2026-08-11T10:02:30Z"
+    item, retained, _pointer, _before, _pointer_before, manifest = seed_retained_scratch_manifest(
+        module, root, slug, instant
+    )
+    write(retained / "second-proof.txt", "second retained proof\n")
+    manifest["evidenceRetention"][0]["treeSha256"] = module._payload_digest(retained)[1]
+
+    classifier = module._scratch_classifier_module()
+    with (
+        patch.object(module, "_scratch_classifier_module", return_value=classifier),
+        patch.object(classifier, "MAX_OWNED_TREE_FILES", 1),
+    ):
+        try:
+            module._prepare_evidence_retention(root, item, manifest)
+        except module.LifecycleError as exc:
+            assert exc.failure_id == "WI-SCRATCH-UNSAFE-ENTRY"
+        else:
+            raise AssertionError("retained evidence exceeded the cleanup owner file ceiling")
+
+
+def test_retained_evidence_pointer_requires_literal_root_or_manifest_path(
+    tmp_path: Path,
+) -> None:
+    module = load_module()
+    instant = "2026-08-11T10:02:45Z"
+    cases = (
+        ("plain", "historical-evidence", "historical-evidence\n", True),
+        ("quoted", "historical-evidence", '"historical-evidence"\n', True),
+        (
+            "manifest-path-with-spaces",
+            "historical evidence",
+            ".scratch/work-items/retained-manifest-path-with-spaces/run-001/historical evidence\n",
+            True,
+        ),
+        ("catalog", "log", "catalog\n", False),
+        ("unrelated-label", "evidence", "unrelated-evidence-label\n", False),
+        ("wrong-path", "log", "wrong/path/log\n", False),
+    )
+    for suffix, leaf_name, pointer_text, accepted in cases:
+        root = tmp_path / suffix
+        slug = f"retained-{suffix}"
+        item, _retained, pointer, _before, _pointer_before, manifest = seed_retained_scratch_manifest(
+            module, root, slug, instant, leaf_name=leaf_name
+        )
+        pointer.write_text(pointer_text, encoding="utf-8")
+        manifest["evidenceRetention"][0]["canonicalPointerSha256"] = hashlib.sha256(
+            pointer.read_bytes()
+        ).hexdigest()
+
+        if accepted:
+            plans = module._prepare_evidence_retention(root, item, manifest)
+            assert len(plans) == 1, suffix
+            continue
+        try:
+            module._prepare_evidence_retention(root, item, manifest)
+        except module.LifecycleError as exc:
+            assert exc.failure_id == "WI-BUG-DISPOSITIONS-DRIFT", suffix
+        else:
+            raise AssertionError(f"false pointer reference was admitted: {suffix}")
+
+
+def test_retained_evidence_pointer_snapshot_limit_fails_before_hashing(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "retained-pointer-limit"
+    instant = "2026-08-11T10:03:00Z"
+    item, _retained, _pointer, _before, _pointer_before, manifest = seed_retained_scratch_manifest(
+        module, root, slug, instant
+    )
+    capture = module._capture_file_snapshot
+
+    def capture_with_tiny_limit(path: Path, *, failure_id: str, maximum_bytes: int = 4 * 1024 * 1024):
+        return capture(path, failure_id=failure_id, maximum_bytes=1)
+
+    with patch.object(module, "_capture_file_snapshot", side_effect=capture_with_tiny_limit):
+        try:
+            module._prepare_evidence_retention(root, item, manifest)
+        except module.LifecycleError as exc:
+            assert exc.failure_id == "WI-BUG-DISPOSITIONS-INVALID"
+        else:
+            raise AssertionError("oversized canonical pointer was admitted")
+
+
 def successor_binding_bytes(
     source_slug: str,
     successor_bytes: bytes,
