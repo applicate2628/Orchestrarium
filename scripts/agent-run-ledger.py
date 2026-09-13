@@ -704,6 +704,40 @@ def _noncanonical_open_ordinary(
         raise
 
 
+def _collect_noncanonical_binary_lines(
+    stream, *, validator: Any, failure_id: str
+) -> bytes:
+    aggregate_limit = validator.MAX_LEDGER_EVENTS * (validator.MAX_LEDGER_LINE_BYTES + 2)
+    chunks: list[bytes] = []
+    total_bytes = 0
+    event_count = 0
+    while True:
+        raw = stream.readline(validator.MAX_LEDGER_LINE_BYTES + 3)
+        if raw == b"":
+            break
+        if raw.endswith(b"\r\n"):
+            body = raw[:-2]
+        elif raw.endswith(b"\n"):
+            body = raw[:-1]
+        else:
+            body = raw
+        if len(body) > validator.MAX_LEDGER_LINE_BYTES:
+            _noncanonical_fail(failure_id, "ledger line exceeds bounded length")
+        if total_bytes + len(raw) > aggregate_limit:
+            _noncanonical_fail(failure_id, "ledger exceeds bounded aggregate length")
+        try:
+            nonblank = bool(body.decode("utf-8", errors="strict").strip())
+        except UnicodeDecodeError:
+            nonblank = True
+        if nonblank:
+            if event_count >= validator.MAX_LEDGER_EVENTS:
+                _noncanonical_fail(failure_id, "ledger exceeds bounded event count")
+            event_count += 1
+        chunks.append(raw)
+        total_bytes += len(raw)
+    return b"".join(chunks)
+
+
 def _noncanonical_read_owned_bytes(path: Path, *, failure_id: str) -> bytes:
     descriptor, opened = _noncanonical_open_ordinary(
         path, writable=False, failure_id=failure_id
@@ -714,7 +748,9 @@ def _noncanonical_read_owned_bytes(path: Path, *, failure_id: str) -> bytes:
     try:
         with os.fdopen(descriptor, "rb") as stream:
             descriptor = -1
-            return stream.read()
+            return _collect_noncanonical_binary_lines(
+                stream, validator=load_validator(), failure_id=failure_id
+            )
     except OSError as exc:
         _noncanonical_fail(failure_id, str(exc))
     finally:
@@ -757,7 +793,9 @@ def _read_exact_history_blob(path: Path, expected_sha256: str) -> bytes | None:
     try:
         with os.fdopen(descriptor, "rb") as stream:
             descriptor = -1
-            value = stream.read()
+            value = _collect_noncanonical_binary_lines(
+                stream, validator=load_validator(), failure_id="HISTORY-CONFLICT"
+            )
     except OSError as exc:
         _noncanonical_fail("HISTORY-CONFLICT", str(exc))
     finally:

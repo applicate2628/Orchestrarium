@@ -6,6 +6,8 @@ import subprocess
 import sys
 from dataclasses import asdict
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 
@@ -44,6 +46,15 @@ def load_validator():
     spec = importlib.util.spec_from_file_location("noncanonical_recovery_validator", VALIDATOR)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_writer():
+    spec = importlib.util.spec_from_file_location("noncanonical_recovery_writer", WRITER)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
 
@@ -120,6 +131,100 @@ def assert_no_owned_temps(item: Path) -> None:
     assert list(item.glob(".agent-runs.history.*.tmp")) == []
     assert not (item / "agent-runs.jsonl.tmp").exists()
     assert not (item / "agent-runs.jsonl.lock").exists()
+
+
+class _NoUnboundedReadStream:
+    def __init__(self, stream, readline_sizes: list[int]) -> None:
+        self._stream = stream
+        self._readline_sizes = readline_sizes
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback) -> None:
+        self._stream.close()
+
+    def readline(self, size: int = -1) -> bytes:
+        assert size >= 0
+        self._readline_sizes.append(size)
+        return self._stream.readline(size)
+
+    def read(self, *args, **kwargs):
+        raise AssertionError("noncanonical acquisition called read()")
+
+
+def _read_routes_with_tiny_validator(tmp_path: Path, raw: bytes):
+    writer = load_writer()
+    source = tmp_path / "agent-runs.jsonl"
+    history = tmp_path / "agent-runs.history.tiny.jsonl"
+    source.write_bytes(raw)
+    history.write_bytes(raw)
+    validator = SimpleNamespace(MAX_LEDGER_LINE_BYTES=4, MAX_LEDGER_EVENTS=1)
+    original_fdopen = writer.os.fdopen
+    readline_sizes: list[int] = []
+
+    def fdopen_without_read(descriptor, *args, **kwargs):
+        return _NoUnboundedReadStream(
+            original_fdopen(descriptor, *args, **kwargs), readline_sizes
+        )
+
+    return writer, source, history, validator, readline_sizes, fdopen_without_read
+
+
+@pytest.mark.parametrize("route", ("source", "history"))
+def test_noncanonical_raw_readers_reject_tiny_line_limit_without_unbounded_read(
+    tmp_path: Path, route: str
+) -> None:
+    writer, source, history, validator, readline_sizes, fdopen_without_read = (
+        _read_routes_with_tiny_validator(tmp_path, b"12345\n")
+    )
+
+    with (
+        patch.object(writer, "load_validator", return_value=validator),
+        patch.object(writer.os, "fdopen", side_effect=fdopen_without_read),
+    ):
+        with pytest.raises(writer.LedgerNoncanonicalRecoveryError) as raised:
+            if route == "source":
+                writer._noncanonical_read_owned_bytes(source, failure_id="DRIFT")
+            else:
+                writer._read_exact_history_blob(history, digest(b"12345\n"))
+
+    assert raised.value.failure_id == (
+        f"WI-LEDGER-NONCANONICAL-{'DRIFT' if route == 'source' else 'HISTORY-CONFLICT'}"
+    )
+    assert readline_sizes == [validator.MAX_LEDGER_LINE_BYTES + 3]
+
+
+def test_noncanonical_raw_reader_rejects_tiny_blank_padding_before_aggregate_growth(
+    tmp_path: Path,
+) -> None:
+    writer, source, _history, validator, readline_sizes, fdopen_without_read = (
+        _read_routes_with_tiny_validator(tmp_path, b"\n" * 7)
+    )
+
+    with (
+        patch.object(writer, "load_validator", return_value=validator),
+        patch.object(writer.os, "fdopen", side_effect=fdopen_without_read),
+    ):
+        with pytest.raises(writer.LedgerNoncanonicalRecoveryError) as raised:
+            writer._noncanonical_read_owned_bytes(source, failure_id="DRIFT")
+
+    assert raised.value.failure_id == "WI-LEDGER-NONCANONICAL-DRIFT"
+    assert readline_sizes == [validator.MAX_LEDGER_LINE_BYTES + 3] * 7
+
+
+def test_noncanonical_raw_readers_preserve_ordinary_opaque_physical_bytes(
+    tmp_path: Path,
+) -> None:
+    writer = load_writer()
+    raw = b"\r\n \t\r\n{\"date\":\"2026-09-10\",\"note\":\"opaque\"}\r\nlast"
+    source = tmp_path / "agent-runs.jsonl"
+    history = tmp_path / "agent-runs.history.opaque.jsonl"
+    source.write_bytes(raw)
+    history.write_bytes(raw)
+
+    assert writer._noncanonical_read_owned_bytes(source, failure_id="DRIFT") == raw
+    assert writer._read_exact_history_blob(history, digest(raw)) == raw
 
 
 def test_preflight_is_read_only_and_accepts_uppercase_digest(tmp_path: Path) -> None:
@@ -415,7 +520,7 @@ def test_oversized_history_refuses_without_mutation(tmp_path: Path) -> None:
     result = run_recovery(item, digest(raw), "--apply-admitted")
 
     assert result.returncode == 1
-    assert "WI-LEDGER-NONCANONICAL-MALFORMED" in result.stderr
+    assert "WI-LEDGER-NONCANONICAL-DRIFT" in result.stderr
     assert file_snapshot(item) == before
     assert_no_owned_temps(item)
 

@@ -204,6 +204,14 @@ Universal Time (UTC) value bind preflight, apply, replay, and any pre-append
 rollback. ASCII hexadecimal digest casing is accepted and normalized; the
 history filename and marker store lowercase.
 
+Raw acquisition preserves every admitted byte, including CRLF/LF terminators,
+blank or whitespace-only lines, and an unterminated final line. Each physical
+line is limited to the existing 131,072-byte body plus an optional CRLF
+terminator, with at most 4,096 nonblank events and a finite aggregate ceiling
+of `4,096 * (131,072 + 2)` bytes. Blank padding and terminators consume that
+aggregate ceiling; this intentionally tightens the former unlimited blank-line
+admission while still allowing 4,096 maximum-body CRLF events.
+
 ```powershell
 $ledger = 'work-items\active\<slug>\agent-runs.jsonl'
 $sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $ledger).Hash
