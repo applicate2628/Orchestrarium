@@ -14,7 +14,7 @@ Cross-surface timestamps do not inherit the REST tie-breaker. Same-time evidence
 
 Use one author predicate for success, failure, finding, and in-progress evidence:
 
-- REST objects require `user.login == "chatgpt-codex-connector[bot]"` and `user.type == "Bot"`.
+- REST objects require `user.login == "chatgpt-codex-connector[bot]"` and `user.type == "Bot"`. If an embedded REST author type differs, a fresh authoritative connector-account lookup must return `Bot` and match both nonempty numeric REST user ID and node ID on that reaction; otherwise identity is indeterminate.
 - GraphQL objects require the exact same-node pair `author.login == "chatgpt-codex-connector"` and `author.__typename == "Bot"`, as returned by that queried surface.
 - A numeric REST `user.id` may be recorded as evidence, but it is not a separately invented allowlist. Do not translate the REST `[bot]` suffix onto GraphQL, strip it from REST, or borrow an author field from another surface.
 
@@ -28,7 +28,7 @@ A submitted review or REST issue-comment result that carries no exact trigger id
 
 ## Clean and failure semantics
 
-A clean result is semantic, not phrase-pinned. Connector author identity, current-head reviewed-commit binding, post-trigger order, complete collections, explicit unambiguous final no-findings meaning, no current findings, and no unresolved current connector threads are all required. Wording, emoji, and boilerplate may change. Summary-only completion remains nonauthorizing.
+A clean result is semantic, not phrase-pinned. Connector author identity, current-head reviewed-commit binding, post-trigger order, complete collections, explicit unambiguous final no-findings meaning, no current findings, and no unresolved current connector threads are all required. An automatic `New commits` run additionally needs unique hosted run evidence and a reaction timestamp strictly later than the verified run start or observed head transition, never poll time or commit-author time. Wording, emoji, and boilerplate may change. Summary-only completion remains nonauthorizing.
 
 Failure signatures are the opposite: each retryable or non-retryable terminal signature is an exact repo-local predicate with its normalized body, surface, connector author identity, current-head binding, ordering, and unresolved-trigger attribution. Error-like prose that is not exact-listed remains indeterminate.
 

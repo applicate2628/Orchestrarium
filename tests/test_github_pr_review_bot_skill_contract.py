@@ -66,6 +66,36 @@ def test_clean_review_result_taxonomy_includes_semantic_issue_comments() -> None
     assert "Didn't find any major issues" not in body
 
 
+def test_automatic_run_clean_evidence_requires_authoritative_identity_and_correlation() -> None:
+    bodies = [path.read_text(encoding="utf-8") for path in SKILL_PATHS]
+
+    assert bodies[0] == bodies[1]
+    required_contract = (
+        "fresh authoritative connector-account lookup",
+        "embedded REST author type differs",
+        "nonempty numeric REST user ID and node ID",
+        "equal the reaction's corresponding identifiers",
+        "login, suffix, or avatar alone",
+        "automatic `New commits` run",
+        "unique hosted automatic-run evidence",
+        "summary may identify a running or completed run but is never `clean` alone",
+        "strictly later than the verified run start or observed head transition",
+        "not poll time or commit-author timestamp",
+        "no current finding comments or unresolved current connector threads",
+        "no competing run",
+    )
+    for clause in required_contract:
+        assert clause in bodies[0], f"missing automatic-run clean guard: {clause}"
+
+    protocol = PROTOCOL_PATH.read_text(encoding="utf-8")
+    for clause in (
+        "authoritative connector-account lookup",
+        "automatic `New commits` run",
+            "Summary-only completion remains nonauthorizing",
+    ):
+        assert clause in protocol, f"missing protocol automatic-run guard: {clause}"
+
+
 def test_retryable_terminal_failure_uses_the_exact_incident_predicate() -> None:
     bodies = [path.read_text(encoding="utf-8") for path in SKILL_PATHS]
 
