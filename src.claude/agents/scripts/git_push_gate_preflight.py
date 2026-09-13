@@ -664,7 +664,9 @@ def _mask_non_newlines(chars: list[str], start: int, end: int) -> None:
         if chars[index] not in "\r\n":
             chars[index] = " "
 
-def _posix_heredoc_specs(line: str) -> tuple[list[tuple[str, bool]], bool]:
+def _posix_heredoc_specs(
+    line: str, quote: str | None = None
+) -> tuple[list[tuple[str, bool]], bool, str | None]:
     """Return literal heredoc delimiters from one command line.
 
     The parse is all-or-nothing.  POSIX ``<<<`` is an ordinary here-string
@@ -674,7 +676,6 @@ def _posix_heredoc_specs(line: str) -> tuple[list[tuple[str, bool]], bool]:
     grammar and make the whole header uncertain.
     """
     specs: list[tuple[str, bool]] = []
-    quote: str | None = None
     index = 0
     while index < len(line):
         character = line[index]
@@ -708,7 +709,7 @@ def _posix_heredoc_specs(line: str) -> tuple[list[tuple[str, bool]], bool]:
         while index < len(line) and line[index] in " \t":
             index += 1
         if index >= len(line):
-            return [], False
+            return [], False, quote
 
         value: list[str] = []
         while index < len(line) and line[index] not in " \t;|&()<>":
@@ -716,14 +717,14 @@ def _posix_heredoc_specs(line: str) -> tuple[list[tuple[str, bool]], bool]:
             if character == "\\":
                 index += 1
                 if index >= len(line):
-                    return [], False
+                    return [], False, quote
                 value.append(line[index])
                 index += 1
                 continue
             if character == "'":
                 end = line.find("'", index + 1)
                 if end < 0:
-                    return [], False
+                    return [], False, quote
                 value.extend(line[index + 1:end])
                 index = end + 1
                 continue
@@ -733,7 +734,7 @@ def _posix_heredoc_specs(line: str) -> tuple[list[tuple[str, bool]], bool]:
                     character = line[index]
                     if character == "\\":
                         if index + 1 >= len(line):
-                            return [], False
+                            return [], False, quote
                         escaped = line[index + 1]
                         if escaped in '$`"\\':
                             value.append(escaped)
@@ -743,22 +744,22 @@ def _posix_heredoc_specs(line: str) -> tuple[list[tuple[str, bool]], bool]:
                         index += 1
                         continue
                     if character in "$`":
-                        return [], False
+                        return [], False, quote
                     value.append(character)
                     index += 1
                 if index >= len(line):
-                    return [], False
+                    return [], False, quote
                 index += 1
                 continue
             if character in "$`":
-                return [], False
+                return [], False, quote
             value.append(character)
             index += 1
         delimiter = "".join(value)
         if not delimiter:
-            return [], False
+            return [], False, quote
         specs.append((delimiter, strip_tabs))
-    return specs, True
+    return specs, True, quote
 
 def _powershell_data_regions(command: str) -> tuple[tuple[DataRegion, ...], str]:
     lines = command.splitlines(keepends=True)
@@ -872,10 +873,11 @@ def _mask_shell_data_regions(command: str, dialect: str) -> tuple[str, tuple[Dat
         pending_regions.extend(ps_regions)
 
     line_index = 0
+    posix_quote: str | None = None
     while line_index < len(lines):
         content = _line_content(lines[line_index])
         if dialect in ("posix", "posix-compat"):
-            specs, valid = _posix_heredoc_specs(content)
+            specs, valid, posix_quote = _posix_heredoc_specs(content, posix_quote)
             if not valid:
                 return command, (), "SCG-AMBIGUOUS-DATA"
             if specs:

@@ -4269,6 +4269,32 @@ class TestCanonicalPublicationCommandGrammar(unittest.TestCase):
         for command in fixtures:
             self.assert_gate([], command, should_deny=False, transcript=False)
 
+    def test_posix_multiline_quote_state_does_not_open_false_heredoc(self) -> None:
+        module = _load_gate_module(CANONICAL_HOOK, "posix_multiline_quote_state")
+        preflight = module._a3_preflight
+        quoted_shift = "python -c @'\nx = 1 << 2\n'@"
+        parsed = preflight.parse_shell_command(quoted_shift, "posix")
+        result = preflight.build_preflight(
+            {
+                "tool_name": "Bash",
+                "cwd": str(REPO_ROOT),
+                "tool_input": {"command": quoted_shift, "workdir": str(REPO_ROOT)},
+            }
+        )
+        self.assertEqual(parsed.status, "SCG-PARSED")
+        self.assertFalse(preflight.find_git_push_records(parsed))
+        self.assertEqual(result.reason_id, "PFP-ALLOW-NON-PUSH")
+
+        for command in (
+            "python -c @'\nx = 1 << 2\n'@\ngit push origin main",
+            "printf '<<EOF'\ngit push origin main",
+            "printf \\<<EOF\ngit push origin main",
+            "# <<EOF\ngit push origin main",
+        ):
+            with self.subTest(command=command):
+                candidate = preflight.parse_shell_command(command, "posix")
+                self.assertTrue(preflight.find_git_push_records(candidate))
+
     def test_real_command_after_heredoc_terminator_remains_visible(self) -> None:
         command = "cat <<EOF\ngit push origin hidden\nEOF\ngit push origin main"
         for script, module in self._modules("post_heredoc"):
