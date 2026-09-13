@@ -141,25 +141,53 @@ def _is_scratch_target(target: str) -> bool:
     return "/.scratch/" in norm or norm.startswith(".scratch/") or norm == ".scratch"
 
 
-def _content_to_scan(tool_input: dict) -> str:
-    """Join the string values being written (content, new_string, command, patch...).
+_PATCH_FILE_HEADER = re.compile(r"^\*\*\* (?:Add|Update|Delete|Move) File:\s*(?P<target>.+?)\s*$")
+_PATCH_MOVE_HEADER = re.compile(r"^\*\*\* Move to:\s*(?P<target>.+?)\s*$")
 
-    apply_patch and other tools vary in key names, so scan every string value
-    rather than enumerating keys — except the path keys, which are the target,
-    not written content (the target leak is handled separately if needed).
+
+def _patch_written_content(patch: str) -> list[tuple[str, str]]:
+    """Return target-routed added lines, or one unknown fallback for malformed input."""
+
+    current_target = ""
+    parts: list[tuple[str, str]] = []
+    recognized_header = False
+    for line in patch.splitlines():
+        header = _PATCH_FILE_HEADER.fullmatch(line) or _PATCH_MOVE_HEADER.fullmatch(line)
+        if header is not None:
+            current_target = header.group("target")
+            recognized_header = True
+            continue
+        if line.startswith("+") and not line.startswith("+++"):
+            parts.append((current_target, line[1:]))
+    if not recognized_header:
+        return [("", patch)]
+    return parts
+
+
+def _content_to_scan(tool_input: dict) -> list[tuple[str, str]]:
+    """Return written string content paired with its known target when available.
+
+    Apply-patch routing headers and removed/context lines are not written content.
+    Other supported Write/Edit controls retain the existing scan of every string
+    value except their target-path keys.
     """
     path_keys = {"file_path", "notebook_path", "path"}
-    parts: list[str] = []
+    target = _target_path(tool_input)
+    parts: list[tuple[str, str]] = []
     for key, val in tool_input.items():
         if key in path_keys:
             continue
-        if isinstance(val, str):
-            parts.append(val)
+        if key == "patch" and isinstance(val, str):
+            parts.extend(_patch_written_content(val))
+        elif isinstance(val, str):
+            parts.append((target, val))
         elif isinstance(val, list):
             for item in val:
-                if isinstance(item, str):
-                    parts.append(item)
-    return "\n".join(parts)
+                if key == "patch" and isinstance(item, str):
+                    parts.extend(_patch_written_content(item))
+                elif isinstance(item, str):
+                    parts.append((target, item))
+    return parts
 
 
 def main() -> int:
@@ -173,27 +201,24 @@ def main() -> int:
         return 0  # nothing to inspect; allow
 
     target = _target_path(tool_input)
-    if target and _is_scratch_target(target):
-        return 0  # .scratch/ is the designated local-only evidence area; allow
-
-    text = _content_to_scan(tool_input)
-    if not text:
-        return 0
-
-    hits = find_machine_paths(text)
-    if hits:
-        shown = ", ".join(hits[:5])
-        emit_advisory(
-            envelope,
-            "[machine-local-path AUDIT] candidate machine-local path(s) in write to "
-            f"{target or '<unknown target>'}: {shown} "
-            "(machine-local-path-provenance rule: use a repo-neutral placeholder "
-            "such as <repo>, %USERPROFILE%, or ${CLAUDE_PROJECT_DIR}, or keep the "
-            "exact path only under .scratch/. AUDIT mode -- allowing this write.)",
-        )
-        # Exit 0: the advisory reaches the model via hookSpecificOutput.
-        # additionalContext (see hook_common.emit_advisory) -- never exit 2 (block).
-        return 0
+    for content_target, text in _content_to_scan(tool_input):
+        effective_target = content_target or target
+        if effective_target and _is_scratch_target(effective_target):
+            continue  # .scratch/ is the designated local-only evidence area; allow
+        hits = find_machine_paths(text)
+        if hits:
+            shown = ", ".join(hits[:5])
+            emit_advisory(
+                envelope,
+                "[machine-local-path AUDIT] candidate machine-local path(s) in write to "
+                f"{effective_target or '<unknown target>'}: {shown} "
+                "(machine-local-path-provenance rule: use a repo-neutral placeholder "
+                "such as <repo>, %USERPROFILE%, or ${CLAUDE_PROJECT_DIR}, or keep the "
+                "exact path only under .scratch/. AUDIT mode -- allowing this write.)",
+            )
+            # Exit 0: the advisory reaches the model via hookSpecificOutput.
+            # additionalContext (see hook_common.emit_advisory) -- never exit 2 (block).
+            return 0
     # AUDIT mode: always allow the write. (Promotion to a blocking PreToolUse
     # deny -- exit 2 -- is a separate reviewed step once the false-positive
     # rate is measured.)

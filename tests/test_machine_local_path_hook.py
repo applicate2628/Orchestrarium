@@ -29,6 +29,9 @@ CL = REPO_ROOT / "src.claude" / "agents" / "hooks"
 CX = REPO_ROOT / "src.codex" / "skills" / "lead" / "hooks"
 
 MACHINE_PATH_SCRIPTS = (CL / "check-machine-local-path.py", CX / "check-machine-local-path.py")
+CANONICAL_MACHINE_PATH_SCRIPT = (
+    REPO_ROOT / "scripts" / "universal-hooks" / "hooks" / "check-machine-local-path.py"
+)
 
 
 def run_hook(script: Path, envelope: object, raw_stdin: str | None = None) -> subprocess.CompletedProcess:
@@ -65,6 +68,13 @@ def _decode_context(stdout: str) -> tuple[str, str]:
 
 
 class TestMachineLocalPathHook(unittest.TestCase):
+    def assert_canonical_flagged(self, tool_input: dict, flagged: bool) -> str:
+        p = run_hook(CANONICAL_MACHINE_PATH_SCRIPT, {"tool_input": tool_input})
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(p.stderr, "")
+        self.assertEqual(bool(p.stdout.strip()), flagged, f"stdout={p.stdout!r}")
+        return _decode_context(p.stdout)[1] if flagged else ""
+
     def assert_flagged(self, tool_input: dict, flagged: bool) -> None:
         for script in MACHINE_PATH_SCRIPTS:
             with self.subTest(script=script.parent.parent.name):
@@ -111,6 +121,71 @@ class TestMachineLocalPathHook(unittest.TestCase):
 
     def test_apply_patch_style_input_flagged(self) -> None:
         self.assert_flagged({"input": f"*** Update\n+ C:/{_USERS}/realuser/secret"}, True)
+
+    def test_patch_routing_headers_and_removed_content_are_not_written_content(self) -> None:
+        for operation in ("Add", "Update", "Delete", "Move"):
+            with self.subTest(operation=operation):
+                self.assert_canonical_flagged(
+                    {
+                        "patch": (
+                            f"*** {operation} File: C:/{_USERS}/realuser/routing.md\n"
+                            f"- C:/{_USERS}/realuser/removed.md\n"
+                            "*** End Patch\n"
+                        )
+                    },
+                    False,
+                )
+
+    def test_patch_public_written_machine_path_is_flagged(self) -> None:
+        self.assert_canonical_flagged(
+            {
+                "patch": (
+                    "*** Update File: docs/public.md\n"
+                    f"+ C:/{_USERS}/realuser/written.md\n"
+                    "*** End Patch\n"
+                )
+            },
+            True,
+        )
+
+    def test_patch_scratch_written_machine_path_is_not_flagged(self) -> None:
+        self.assert_canonical_flagged(
+            {
+                "patch": (
+                    "*** Update File: .scratch/private.md\n"
+                    f"+ C:/{_USERS}/realuser/written.md\n"
+                    "*** End Patch\n"
+                )
+            },
+            False,
+        )
+
+    def test_patch_mixed_scratch_and_public_targets_flags_only_public_write(self) -> None:
+        context = self.assert_canonical_flagged(
+            {
+                "patch": (
+                    "*** Update File: .scratch/private.md\n"
+                    f"+ C:/{_USERS}/realuser/private.md\n"
+                    "*** Update File: docs/public.md\n"
+                    f"+ C:/{_USERS}/realuser/public.md\n"
+                    "*** End Patch\n"
+                )
+            },
+            True,
+        )
+        self.assertIn("docs/public.md", context)
+
+    def test_patch_malformed_metadata_keeps_unknown_target_fallback(self) -> None:
+        context = self.assert_canonical_flagged(
+            {
+                "patch": (
+                    "*** Update File docs/public.md\n"
+                    f"+ C:/{_USERS}/realuser/written.md\n"
+                )
+            },
+            True,
+        )
+        self.assertIn("<unknown target>", context)
 
     def test_ellipsis_placeholder_not_flagged(self) -> None:
         self.assert_flagged({"file_path": "README.md", "content": "see C:/Users/.../foo"}, False)

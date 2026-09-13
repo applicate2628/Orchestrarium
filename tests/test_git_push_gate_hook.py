@@ -4334,6 +4334,45 @@ class TestCanonicalPublicationCommandGrammar(unittest.TestCase):
         for command in fixtures:
             self.assert_gate([], command, should_deny=False, transcript=False, tool_name="PowerShell")
 
+    def test_parsed_powershell_compound_nonpublication_is_not_parse_uncertain(self) -> None:
+        module = _load_gate_module(CANONICAL_HOOK, "parsed_nonpublication_preflight")
+        preflight = module._a3_preflight
+        command = "$code = @'\n['git', 'cat-file', 'blob', 'HEAD:fixture']\n'@\npython -c $code"
+        parsed = preflight.parse_shell_command(command, "powershell")
+        result = preflight.build_preflight(
+            {
+                "tool_name": "PowerShell",
+                "cwd": str(REPO_ROOT),
+                "tool_input": {"command": command, "workdir": str(REPO_ROOT)},
+            }
+        )
+
+        self.assertEqual(parsed.status, "SCG-PARSED")
+        self.assertFalse(preflight.find_git_push_records(parsed))
+        self.assertFalse(parsed.candidates)
+        self.assertEqual((result.outcome, result.reason_id), ("ALLOW_FINAL", "PFP-ALLOW-NON-PUSH"))
+
+        for candidate in (
+            "$code = @'\ngit cat-file blob HEAD:fixture\n'@\ngit push origin main",
+            "$code = @'\ngit push origin hidden",
+            "git push origin main",
+            "python -c \"print('x')\"; git push origin main",
+        ):
+            with self.subTest(command=candidate):
+                candidate_parsed = preflight.parse_shell_command(candidate, "powershell")
+                candidate_result = preflight.build_preflight(
+                    {
+                        "tool_name": "PowerShell",
+                        "cwd": str(REPO_ROOT),
+                        "tool_input": {"command": candidate, "workdir": str(REPO_ROOT)},
+                    }
+                )
+                self.assertTrue(
+                    preflight.find_git_push_records(candidate_parsed)
+                    or candidate_parsed.candidates
+                )
+                self.assertNotEqual(candidate_result.reason_id, "PFP-ALLOW-NON-PUSH")
+
     def test_real_command_after_here_string_terminator_remains_visible(self) -> None:
         commands = (
             "$x = @'\ngit push origin hidden\n'@\ngit push origin main",

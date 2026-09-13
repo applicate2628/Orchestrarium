@@ -4,6 +4,7 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-09-13
 
+- **Machine-path warnings distinguish patch routing from written content.** Recognized file headers, removed lines and unchanged context no longer trigger the advisory; added content is checked per destination, so a scratch file does not hide warnings in another file. Malformed inputs retain the existing conservative fallback. Publication authorization is unchanged.
 - **Task scratch is temporary, not an archive.** Required load-bearing results are promoted to canonical artifacts before completion; owners then settle their scratch while unfinished, foreign, ambiguous, and denied state remains preserved.
 - **Completed work can retain historical scratch evidence without inventing a successful producing run.** The existing close manifest accepts optional Version 3 retention with Version 1 bug rows, exact pre-close evidence bindings, and a receipt that remains valid after later authorized cleanup. Ordinary files, directories, relative-root calls and explicit row order are covered; older manifest versions remain supported.
 - **Ledger lock failures remain failures.** Append and settlement no longer print success when the lock cannot be acquired; valid writes and exact replay behavior are unchanged.
