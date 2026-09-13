@@ -21,6 +21,11 @@ CHECKPOINT_POLICY_SURFACES = (
     "src.codex/skills/lead/operating-model.md",
     "src.claude/agents/contracts/operating-model.md",
 )
+ROLLBACK_SAFETY_SURFACES = (
+    "shared/AGENTS.shared.md",
+    "src.codex/AGENTS.codex.md",
+    "shared/references/spine/verification-and-decision-discipline.md",
+)
 RULE_LABEL = "**Git disposition checkpoint:**"
 
 SCENARIO_FRAGMENTS = {
@@ -121,6 +126,21 @@ class GitDispositionContractTests(unittest.TestCase):
             "continue the next item or state its blocker. No final/\"what next?\" with known work",
             shared,
         )
+
+    def test_destructive_history_rewrite_requires_preservation_preconditions(self) -> None:
+        required = (
+            "explicit user authority",
+            "fresh dirty/index census",
+            "preservation of every unrelated working-tree byte and staged change",
+            "`git reset --hard HEAD~N`",
+            "no other work depends on them",
+            "nondestructive, reversible route",
+        )
+        for path in ROLLBACK_SAFETY_SURFACES:
+            with self.subTest(path=path):
+                text = _read(path)
+                for fragment in required:
+                    self.assertIn(fragment, text)
 
 
 if __name__ == "__main__":

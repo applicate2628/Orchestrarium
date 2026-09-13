@@ -250,6 +250,270 @@ def write_empty_bug_dispositions(root: Path, item_slug: str, instant: str) -> Pa
     return write_bug_dispositions(root, item_slug, instant, [])
 
 
+def seed_retained_scratch_manifest(
+    module,
+    root: Path,
+    slug: str,
+    instant: str,
+    *,
+    leaf_name: str = "historical-evidence",
+    regular_file: bool = False,
+):
+    seed_active(module, root, slug)
+    item = root / "work-items" / "active" / slug
+    retained = root / ".scratch" / "work-items" / slug / "run-001" / leaf_name
+    if regular_file:
+        write(retained, f"preserve {leaf_name} historical evidence\n")
+    else:
+        write(retained / "proof.txt", "preserve this historical evidence\n")
+    pointer = item / "historical-evidence.md"
+    write(pointer, f"{leaf_name}\n")
+    retained_before = module._payload_digest(retained)[1]
+    pointer_before = pointer.read_bytes()
+    manifest = {
+        "schemaVersion": 3,
+        "workItem": slug,
+        "closedAt": instant,
+        "bugs": [],
+        "evidenceRetention": [
+            {
+                "path": retained.relative_to(root).as_posix(),
+                "disposition": "retain",
+                "treeSha256": retained_before,
+                "canonicalPointer": pointer.relative_to(item).as_posix(),
+                "canonicalPointerSha256": hashlib.sha256(pointer_before).hexdigest(),
+            }
+        ],
+    }
+    (item / "bug-dispositions.json").write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return item, retained, pointer, retained_before, pointer_before, manifest
+
+
+def test_close_retains_declared_unmatched_scratch_evidence_root(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "retained-scratch-root"
+    instant = "2026-08-11T10:00:00Z"
+    item, retained, pointer, retained_before, pointer_before, manifest = seed_retained_scratch_manifest(
+        module, root, slug, instant
+    )
+
+    archived = module.close_item(root, slug, closure(instant).encode(), instant)
+
+    assert module._payload_digest(retained)[1] == retained_before
+    assert archived == root / "work-items" / "archive" / "2026-08" / slug
+    archived_pointer = archived / pointer.name
+    assert archived_pointer.read_bytes() == pointer_before
+    receipt = json.loads((archived / "bug-dispositions-receipt.json").read_text(encoding="utf-8"))
+    assert receipt["evidenceRetention"] == manifest["evidenceRetention"]
+
+    shutil.rmtree(retained.parent)
+    assert module.close_item(root, slug, closure(instant).encode(), instant) == archived
+
+
+def test_close_retains_declared_unmatched_regular_file_scratch_evidence(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "retained-scratch-file"
+    instant = "2026-08-11T10:00:30Z"
+    _item, retained, pointer, retained_before, pointer_before, manifest = seed_retained_scratch_manifest(
+        module,
+        root,
+        slug,
+        instant,
+        leaf_name="receiving_probe.py",
+        regular_file=True,
+    )
+
+    archived = module.close_item(root, slug, closure(instant).encode(), instant)
+
+    assert retained.is_file()
+    assert module._payload_digest(retained)[1] == retained_before
+    assert (archived / pointer.name).read_bytes() == pointer_before
+    receipt = json.loads((archived / "bug-dispositions-receipt.json").read_text(encoding="utf-8"))
+    assert receipt["evidenceRetention"] == manifest["evidenceRetention"]
+    retained.unlink()
+    assert module.close_item(root, slug, closure(instant).encode(), instant) == archived
+
+
+def test_close_retention_receipt_accepts_relative_repository_root(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "retained-relative-root"
+    instant = "2026-08-11T10:00:45Z"
+    item, retained, _pointer, retained_before, _pointer_before, manifest = seed_retained_scratch_manifest(
+        module, root, slug, instant
+    )
+    closure_path = root / "closure.md"
+    closure_path.write_text(closure(instant), encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "close",
+            "--root",
+            ".",
+            "--slug",
+            slug,
+            "--closure-file",
+            str(closure_path),
+            "--terminal-instant",
+            instant,
+        ],
+        cwd=root,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    archived = root / "work-items" / "archive" / "2026-08" / slug
+    assert result.stdout.strip() == str(archived)
+    assert module._payload_digest(retained)[1] == retained_before
+    receipt = json.loads((archived / "bug-dispositions-receipt.json").read_text(encoding="utf-8"))
+    assert receipt["evidenceRetention"] == manifest["evidenceRetention"]
+    assert not item.exists()
+
+
+def test_close_retention_receipt_preserves_unsorted_manifest_row_order(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "retained-unsorted-order"
+    instant = "2026-08-11T10:01:15Z"
+    item, retained, _pointer, retained_before, _pointer_before, manifest = seed_retained_scratch_manifest(
+        module, root, slug, instant, leaf_name="zeta-capture"
+    )
+    file_leaf = root / ".scratch" / "work-items" / slug / "run-002" / "alpha_probe.py"
+    write(file_leaf, "preserve alpha_probe.py historical evidence\n")
+    file_pointer = item / "alpha-probe.md"
+    write(file_pointer, "alpha_probe.py\n")
+    manifest["evidenceRetention"].append(
+        {
+            "path": file_leaf.relative_to(root).as_posix(),
+            "disposition": "retain",
+            "treeSha256": module._payload_digest(file_leaf)[1],
+            "canonicalPointer": file_pointer.relative_to(item).as_posix(),
+            "canonicalPointerSha256": hashlib.sha256(file_pointer.read_bytes()).hexdigest(),
+        }
+    )
+    (item / "bug-dispositions.json").write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    closure_path = root / "closure.md"
+    closure_path.write_text(closure(instant), encoding="utf-8")
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "close",
+            "--root",
+            ".",
+            "--slug",
+            slug,
+            "--closure-file",
+            str(closure_path),
+            "--terminal-instant",
+            instant,
+        ],
+        cwd=root,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    archived = root / "work-items" / "archive" / "2026-08" / slug
+    receipt = json.loads((archived / "bug-dispositions-receipt.json").read_text(encoding="utf-8"))
+    assert receipt["evidenceRetention"] == manifest["evidenceRetention"]
+    assert module._payload_digest(retained)[1] == retained_before
+    assert file_leaf.read_text(encoding="utf-8") == "preserve alpha_probe.py historical evidence\n"
+    file_leaf.unlink()
+    shutil.rmtree(retained)
+    assert module.close_item(root, slug, closure_path.read_bytes(), instant) == archived
+
+
+def test_retained_scratch_hash_drift_and_close_rollback_preserve_active_state(tmp_path: Path) -> None:
+    module = load_module()
+    instant = "2026-08-11T10:01:00Z"
+
+    drift_root = tmp_path / "drift"
+    drift_slug = "retained-scratch-drift"
+    drift_item, retained, _pointer, retained_before, _pointer_before, manifest = seed_retained_scratch_manifest(
+        module, drift_root, drift_slug, instant
+    )
+    manifest["evidenceRetention"][0]["treeSha256"] = "0" * 64
+    (drift_item / "bug-dispositions.json").write_text(json.dumps(manifest) + "\n", encoding="utf-8")
+    try:
+        module.close_item(drift_root, drift_slug, closure(instant).encode(), instant)
+    except module.LifecycleError as exc:
+        assert exc.failure_id == "WI-BUG-DISPOSITIONS-DRIFT"
+    else:
+        raise AssertionError("retained scratch hash drift was accepted")
+    assert module._payload_digest(retained)[1] == retained_before
+    assert drift_item.is_dir()
+
+    rollback_root = tmp_path / "rollback"
+    rollback_slug = "retained-scratch-rollback"
+    item, retained, pointer, retained_before, pointer_before, _manifest = seed_retained_scratch_manifest(
+        module, rollback_root, rollback_slug, instant
+    )
+    try:
+        module.close_item(
+            rollback_root,
+            rollback_slug,
+            closure(instant).encode(),
+            instant,
+            inject_readme_failure=True,
+        )
+    except module.LifecycleError as exc:
+        assert exc.failure_id == "WI-README-STALE"
+    else:
+        raise AssertionError("injected close failure did not roll back")
+    assert item.is_dir()
+    assert pointer.read_bytes() == pointer_before
+    assert module._payload_digest(retained)[1] == retained_before
+    assert not (rollback_root / "work-items" / "archive" / "2026-08" / rollback_slug).exists()
+
+
+def test_retained_scratch_pointer_parent_link_is_rejected_before_archive(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    slug = "retained-pointer-parent-link"
+    instant = "2026-08-11T10:02:00Z"
+    item, retained, _pointer, retained_before, _pointer_before, manifest = seed_retained_scratch_manifest(
+        module, root, slug, instant
+    )
+    external = tmp_path / "external-pointer"
+    write(external / "proof.md", "historical-evidence\n")
+    linked_parent = item / "linked-parent"
+    try:
+        os.symlink(external, linked_parent, target_is_directory=True)
+    except OSError as exc:
+        raise AssertionError("parent-link retention regression requires symlink support") from exc
+    external_pointer = external / "proof.md"
+    manifest["evidenceRetention"][0]["canonicalPointer"] = "linked-parent/proof.md"
+    manifest["evidenceRetention"][0]["canonicalPointerSha256"] = hashlib.sha256(
+        external_pointer.read_bytes()
+    ).hexdigest()
+    (item / "bug-dispositions.json").write_text(json.dumps(manifest) + "\n", encoding="utf-8")
+
+    try:
+        module.close_item(root, slug, closure(instant).encode(), instant)
+    except module.LifecycleError as exc:
+        assert exc.failure_id == "WI-BUG-DISPOSITIONS-INVALID"
+    else:
+        raise AssertionError("canonical pointer escaped through a linked parent")
+
+    assert item.is_dir()
+    assert module._payload_digest(retained)[1] == retained_before
+    assert external_pointer.read_text(encoding="utf-8") == "historical-evidence\n"
+    assert not (root / "work-items" / "archive" / "2026-08" / slug).exists()
+
+
 def successor_binding_bytes(
     source_slug: str,
     successor_bytes: bytes,

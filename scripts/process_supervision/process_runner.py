@@ -26,6 +26,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Protocol, Sequence
@@ -44,6 +45,8 @@ MAX_ENVIRONMENT_NAME_BYTES = 128
 MAX_ENVIRONMENT_VALUE_BYTES = 64 * 1024
 MAX_ENVIRONMENT_BYTES = 128 * 1024
 MAX_STDIN_BYTES = 16 * 1024 * 1024
+# Concurrent complete-line backlog, distinct from provider receipt/event limits.
+MAX_DIALOGUE_PENDING_LINES = 4096
 MAX_JSON_HEADER_BYTES = 512 * 1024
 MAX_REQUEST_BUNDLE_BYTES = 17_301_556
 MAX_WINDOWS_COMMAND_LINE_UNITS = 32_766
@@ -2534,7 +2537,7 @@ class _DialogueLineRouterV1:
     def __init__(self) -> None:
         self._condition = threading.Condition()
         self._buffer = bytearray()
-        self._lines: list[bytes] = []
+        self._lines: deque[bytes] = deque()
         self._queued_bytes = 0
         self._eof = False
         self._failed = False
@@ -2549,6 +2552,13 @@ class _DialogueLineRouterV1:
                 self._condition.notify_all()
                 return
             self._buffer.extend(data)
+            if self._buffer.count(b"\n") > MAX_DIALOGUE_PENDING_LINES - len(
+                self._lines
+            ):
+                self._buffer.clear()
+                self._failed = True
+                self._condition.notify_all()
+                return
             while not self._failed:
                 newline = self._buffer.find(b"\n")
                 if newline < 0:
@@ -2577,7 +2587,7 @@ class _DialogueLineRouterV1:
                         "PSV1-KIMI-ACP-PROTOCOL", "stdin-delivery"
                     )
                 if self._lines:
-                    line = self._lines.pop(0)
+                    line = self._lines.popleft()
                     self._queued_bytes -= len(line)
                     return line
                 if self._eof:

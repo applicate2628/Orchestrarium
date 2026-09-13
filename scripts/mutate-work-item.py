@@ -810,10 +810,18 @@ class ScratchDisposition:
     snapshot: object | None
 
 
+@dataclass(frozen=True)
+class EvidenceRetentionPlan:
+    path: Path
+    tree_sha256: str
+    canonical_pointer: Path
+    canonical_pointer_sha256: str
+
+
 BUG_DISPOSITIONS_MANIFEST = "bug-dispositions.json"
 BUG_DISPOSITIONS_RECEIPT = "bug-dispositions-receipt.json"
 BUG_DISPOSITIONS_SCHEMA_VERSION = 1
-BUG_DISPOSITIONS_SCHEMA_VERSIONS = {1, 2}
+BUG_DISPOSITIONS_SCHEMA_VERSIONS = {1, 2, 3}
 BUG_DISPOSITIONS_OWNER = "mutate-work-item:close-item-bug-dispositions-v1"
 SHA256_RE = re.compile(r"[0-9a-f]{64}")
 BUG_DISPOSITION_ACTIONS = {"terminalize", "preserve-current"}
@@ -3679,6 +3687,7 @@ def _scratch_disposition_plan(
     item: Path,
     *,
     archived: bool,
+    retention_paths: frozenset[Path] = frozenset(),
 ) -> tuple[ScratchDisposition, ...]:
     ledger = item / "agent-runs.jsonl"
     owner_root = root / ".scratch" / "work-items" / item.name
@@ -3688,7 +3697,10 @@ def _scratch_disposition_plan(
     except classifier.OwnedTreeClassificationError as exc:
         raise LifecycleError("WI-SCRATCH-UNSAFE-ENTRY", str(exc)) from exc
     if not ledger.exists():
-        if owner_inspection.exists:
+        if archived and retention_paths:
+            return ()
+        originals, tombstones = _scratch_namespace_entries(owner_root)
+        if owner_inspection.exists and (set(originals) != set(retention_paths) or tombstones):
             raise LifecycleError(
                 "WI-SCRATCH-OWNERSHIP-INCOMPLETE",
                 "canonical scratch namespace exists without a terminal owner declaration",
@@ -3717,7 +3729,8 @@ def _scratch_disposition_plan(
         for entry in event.get("scratchEvidence", []):
             recorded.append((event["runId"], entry))
     if not recorded:
-        if owner_inspection.exists:
+        originals, tombstones = _scratch_namespace_entries(owner_root)
+        if owner_inspection.exists and (set(originals) != set(retention_paths) or tombstones):
             raise LifecycleError(
                 "WI-SCRATCH-OWNERSHIP-INCOMPLETE",
                 "canonical scratch namespace exists without a terminal owner declaration",
@@ -3798,7 +3811,15 @@ def _scratch_disposition_plan(
             )
         )
 
-    if originals_present - expected_originals or tombstones_present - expected_tombstones:
+    if retention_paths & expected_originals:
+        raise LifecycleError(
+            "WI-SCRATCH-OWNERSHIP-INCOMPLETE",
+            "declared scratch evidence cannot also be retained by close",
+        )
+    if (
+        originals_present - expected_originals - set(retention_paths)
+        or tombstones_present - expected_tombstones
+    ):
         raise LifecycleError(
             "WI-SCRATCH-OWNERSHIP-INCOMPLETE",
             "scratch namespace contains an undeclared evidence root",
@@ -3945,19 +3966,114 @@ def _load_bug_disposition_manifest(
             "WI-BUG-DISPOSITIONS-INVALID",
             f"invalid {BUG_DISPOSITIONS_MANIFEST}: {slug}",
         ) from exc
+    schema_version = payload.get("schemaVersion") if isinstance(payload, dict) else None
+    expected_keys = {"schemaVersion", "workItem", "closedAt", "bugs"}
+    if schema_version == 3:
+        expected_keys.add("evidenceRetention")
     if (
         not isinstance(payload, dict)
-        or set(payload) != {"schemaVersion", "workItem", "closedAt", "bugs"}
-        or payload.get("schemaVersion") not in BUG_DISPOSITIONS_SCHEMA_VERSIONS
+        or set(payload) != expected_keys
+        or schema_version not in BUG_DISPOSITIONS_SCHEMA_VERSIONS
         or payload.get("workItem") != slug
         or payload.get("closedAt") != terminal_instant
         or not isinstance(payload.get("bugs"), list)
+        or (schema_version == 3 and (not isinstance(payload.get("evidenceRetention"), list) or not payload["evidenceRetention"]))
     ):
         raise _bug_disposition_fail(
             "WI-BUG-DISPOSITIONS-INVALID",
             f"bug disposition manifest header differs: {slug}",
         )
     return manifest, data, payload
+
+
+def _prepare_evidence_retention(
+    root: Path,
+    item: Path,
+    manifest: dict,
+) -> tuple[EvidenceRetentionPlan, ...]:
+    if manifest["schemaVersion"] != 3:
+        return ()
+    owner_root = root / ".scratch" / "work-items" / item.name
+    classifier = _scratch_classifier_module()
+    try:
+        originals, tombstones = _scratch_namespace_entries(owner_root)
+    except classifier.OwnedTreeClassificationError as exc:
+        raise LifecycleError("WI-SCRATCH-UNSAFE-ENTRY", str(exc)) from exc
+    rows = manifest["evidenceRetention"]
+    plans: list[EvidenceRetentionPlan] = []
+    seen: set[Path] = set()
+    for row in rows:
+        if (
+            not isinstance(row, dict)
+            or set(row) != {"path", "disposition", "treeSha256", "canonicalPointer", "canonicalPointerSha256"}
+            or row.get("disposition") != "retain"
+            or not isinstance(row.get("path"), str)
+            or not isinstance(row.get("canonicalPointer"), str)
+            or not isinstance(row.get("treeSha256"), str)
+            or not isinstance(row.get("canonicalPointerSha256"), str)
+            or SHA256_RE.fullmatch(row["treeSha256"]) is None
+            or SHA256_RE.fullmatch(row["canonicalPointerSha256"]) is None
+        ):
+            raise LifecycleError("WI-BUG-DISPOSITIONS-INVALID", "invalid evidenceRetention row")
+        relative = Path(row["path"])
+        candidate = root / relative
+        if (
+            relative.is_absolute()
+            or any(part in {"", ".", ".."} for part in relative.parts)
+            or relative.parts[:3] != (".scratch", "work-items", item.name)
+            or len(relative.parts) != 5
+            or candidate not in originals
+            or candidate in seen
+        ):
+            raise LifecycleError("WI-BUG-DISPOSITIONS-INVALID", "evidenceRetention path is not one unmatched scratch root")
+        pointer_relative = Path(row["canonicalPointer"])
+        pointer = item / pointer_relative
+        if (
+            pointer_relative.is_absolute()
+            or any(part in {"", ".", ".."} for part in pointer_relative.parts)
+        ):
+            raise LifecycleError("WI-BUG-DISPOSITIONS-INVALID", "evidenceRetention canonical pointer is unsafe")
+        try:
+            _lifecycle_reject_unreduced_reparse(
+                pointer,
+                failure_id="WI-BUG-DISPOSITIONS-INVALID",
+                message="evidenceRetention canonical pointer crosses a link or reparse point",
+            )
+            resolved_item = item.resolve(strict=True)
+            resolved_pointer = pointer.resolve(strict=True)
+        except (LifecycleError, OSError) as exc:
+            raise LifecycleError(
+                "WI-BUG-DISPOSITIONS-INVALID", "evidenceRetention canonical pointer is unsafe"
+            ) from exc
+        if (
+            not resolved_pointer.is_relative_to(resolved_item)
+            or not pointer.is_file()
+        ):
+            raise LifecycleError("WI-BUG-DISPOSITIONS-INVALID", "evidenceRetention canonical pointer is unsafe")
+        pointer_bytes = pointer.read_bytes()
+        if (
+            hashlib.sha256(pointer_bytes).hexdigest() != row["canonicalPointerSha256"]
+            or candidate.name not in pointer_bytes.decode("utf-8", errors="replace")
+        ):
+            raise LifecycleError("WI-BUG-DISPOSITIONS-DRIFT", "evidenceRetention canonical pointer differs")
+        try:
+            inspection = classifier.inspect_root_no_follow(candidate)
+        except classifier.OwnedTreeClassificationError as exc:
+            raise LifecycleError("WI-SCRATCH-UNSAFE-ENTRY", str(exc)) from exc
+        if (
+            inspection.is_link_or_reparse
+            or not (inspection.is_directory or inspection.is_regular_file)
+        ):
+            raise LifecycleError(
+                "WI-BUG-DISPOSITIONS-INVALID",
+                "evidenceRetention root is not an ordinary file or directory",
+            )
+        digest = _payload_digest(candidate)[1]
+        if digest != row["treeSha256"]:
+            raise LifecycleError("WI-BUG-DISPOSITIONS-DRIFT", "evidenceRetention tree hash differs")
+        seen.add(candidate)
+        plans.append(EvidenceRetentionPlan(candidate, digest, pointer, row["canonicalPointerSha256"]))
+    return tuple(plans)
 
 
 def _context_bug_files(root: Path, slug: str) -> dict[str, Path]:
@@ -4275,6 +4391,7 @@ def _bug_disposition_receipt_bytes(
     closure_data: bytes,
     plans: tuple[BugDispositionPlan, ...],
     readme_sha256: str,
+    evidence_retention: tuple[EvidenceRetentionPlan, ...] = (),
 ) -> bytes:
     manifest = json.loads(manifest_data.decode("utf-8"))
     schema_version = manifest["schemaVersion"]
@@ -4311,6 +4428,24 @@ def _bug_disposition_receipt_bytes(
             }
             for plan in plans
         ],
+        **(
+            {
+                "evidenceRetention": [
+                    {
+                        "path": plan.path.relative_to(root).as_posix(),
+                        "disposition": "retain",
+                        "treeSha256": plan.tree_sha256,
+                        "canonicalPointer": plan.canonical_pointer.relative_to(
+                            _work_items_root(root) / "active" / slug
+                        ).as_posix(),
+                        "canonicalPointerSha256": plan.canonical_pointer_sha256,
+                    }
+                    for plan in evidence_retention
+                ]
+            }
+            if schema_version == 3
+            else {}
+        ),
     }
     return (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
 
@@ -4354,6 +4489,8 @@ def _verify_archived_bug_dispositions(
         "readmeSha256",
         "bugs",
     }
+    if schema_version == 3:
+        expected_keys.add("evidenceRetention")
     if (
         not isinstance(receipt, dict)
         or set(receipt) != expected_keys
@@ -4366,6 +4503,7 @@ def _verify_archived_bug_dispositions(
         or not isinstance(receipt.get("readmeSha256"), str)
         or not SHA256_RE.fullmatch(receipt["readmeSha256"])
         or not isinstance(receipt.get("bugs"), list)
+        or (schema_version == 3 and not isinstance(receipt.get("evidenceRetention"), list))
     ):
         raise _bug_disposition_fail(
             "WI-IMMUTABLE-ARCHIVE", f"bug disposition receipt binding differs: {slug}"
@@ -4382,6 +4520,17 @@ def _verify_archived_bug_dispositions(
         raise _bug_disposition_fail(
             "WI-IMMUTABLE-ARCHIVE", f"bug disposition receipt ids differ: {slug}"
         )
+    if schema_version == 3:
+        manifest_retention = manifest["evidenceRetention"]
+        receipt_retention = receipt["evidenceRetention"]
+        if (
+            len(receipt_retention) != len(manifest_retention)
+            or any(not isinstance(row, dict) for row in receipt_retention)
+            or receipt_retention != manifest_retention
+        ):
+            raise _bug_disposition_fail(
+                "WI-IMMUTABLE-ARCHIVE", f"retained scratch receipt differs: {slug}"
+            )
     work_items = _work_items_root(root)
     for decision in rows:
         if not isinstance(decision, dict):
@@ -4536,7 +4685,20 @@ def close_item(
             _verify_archived_bug_dispositions(
                 root, archived, archived_closure_data, terminal_instant
             )
-        scratch_plan = _scratch_disposition_plan(root, archived, archived=True)
+        archived_retention_paths = frozenset()
+        if manifest_present:
+            _manifest_path, _manifest_data, archived_manifest = _load_bug_disposition_manifest(
+                archived, slug, terminal_instant
+            )
+            if archived_manifest["schemaVersion"] == 3:
+                archived_retention_paths = frozenset(
+                    root / Path(row["path"])
+                    for row in archived_manifest["evidenceRetention"]
+                    if isinstance(row, dict) and isinstance(row.get("path"), str)
+                )
+        scratch_plan = _scratch_disposition_plan(
+            root, archived, archived=True, retention_paths=archived_retention_paths
+        )
         if inject_readme_failure:
             raise LifecycleError("WI-README-STALE", "injected failure after canonical success")
         refresh_readme(root)
@@ -4546,7 +4708,16 @@ def close_item(
     if locations != [active]:
         raise LifecycleError("WI-INVALID-TARGET", f"close requires one active item: {slug}")
     _validate_item_before_close(active)
-    scratch_plan = _scratch_disposition_plan(root, active, archived=False)
+    _manifest_path, _manifest_preview, manifest_preview = _load_bug_disposition_manifest(
+        active, slug, terminal_instant
+    )
+    evidence_retention = _prepare_evidence_retention(root, active, manifest_preview)
+    scratch_plan = _scratch_disposition_plan(
+        root,
+        active,
+        archived=False,
+        retention_paths=frozenset(plan.path for plan in evidence_retention),
+    )
     _manifest, manifest_data, bug_plans = _prepare_bug_dispositions(
         root,
         active,
@@ -4593,6 +4764,9 @@ def close_item(
         if inject_readme_failure:
             raise LifecycleError("WI-README-STALE", "injected failure after canonical success")
         readme_sha256 = refresh_readme(root)
+        for retention in evidence_retention:
+            if _payload_digest(retention.path)[1] != retention.tree_sha256:
+                raise LifecycleError("WI-BUG-DISPOSITIONS-DRIFT", "retained scratch evidence changed after preflight")
         receipt_data = _bug_disposition_receipt_bytes(
             root,
             slug,
@@ -4601,6 +4775,7 @@ def close_item(
             archived_closure_data,
             bug_plans,
             readme_sha256,
+            evidence_retention,
         )
         _atomic_write(receipt_path, receipt_data)
         _verify_archived_bug_dispositions(

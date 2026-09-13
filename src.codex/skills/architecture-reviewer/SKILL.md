@@ -131,7 +131,7 @@ When a significant issue is found outside the architecture domain:
 Architecture Reviewer verifies and does not redesign:
 
 - every evidence-triggered candidate has a complete Pattern Disposition Record with `selected | rejected | deferred` and all AP0 fields;
-- each selection has accepted positive evidence, and each tempting but unsuitable pattern has explicit negative evidence;
+- each selection has accepted positive evidence; each evidence-triggered candidate that is rejected has explicit negative evidence; an unadmitted pattern needs no invented rejection;
 - zero selected patterns remains valid and no pattern name, popularity, or model familiarity is treated as evidence;
 - dispositions preserve the smallest-durable-design, one-owner, stable-seam, failure-transparency, migration, and reliability contracts;
 - composition does not conflate bounded context with deployment, CQRS with event sourcing, outbox with distributed atomicity or exactly-once delivery, saga with a local transaction, or workflow with saga;

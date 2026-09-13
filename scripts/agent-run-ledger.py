@@ -1167,12 +1167,10 @@ def _append_event_transaction(
             holder = lock_path.read_text(encoding="utf-8").strip()
         except OSError:
             pass
-        print(
-            f"FAIL: ledger locked ({lock_path}; holder: {holder or 'unknown'}). "
-            "No automatic takeover — verify the holder pid is dead, remove the lock file, retry.",
-            file=sys.stderr,
+        raise LedgerWriteLockError(
+            f"ledger locked ({lock_path}; holder: {holder or 'unknown'}). "
+            "No automatic takeover — verify the holder pid is dead, remove the lock file, retry."
         )
-        return 1
 
     try:
         previous = ledger_path.read_text(encoding="utf-8") if ledger_path.exists() else ""
@@ -1215,7 +1213,7 @@ def command_append(args: argparse.Namespace) -> int:
     try:
         event = build_event(args, validator)
         _append_event_transaction(item, validator, lambda _previous: event)
-    except ValueError as exc:
+    except (ValueError, LedgerWriteLockError) as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
         return 1
 
@@ -1309,7 +1307,7 @@ def command_settle_launch(args: argparse.Namespace) -> int:
             validator,
             lambda previous: _settle_launch_from_ledger(previous, args, validator),
         )
-    except ValueError as exc:
+    except (ValueError, LedgerWriteLockError) as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
         return 1
     if appended:

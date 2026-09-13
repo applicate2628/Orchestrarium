@@ -222,6 +222,31 @@ def test_kimi_acp_line_router_bounds_all_retained_bytes_and_reclaims_reads(
     assert overflow.value.failure_id == "PSV1-KIMI-ACP-PROTOCOL"
 
 
+def test_kimi_acp_line_router_rejects_tiny_line_count_before_materializing() -> None:
+    runner = _load_runner()
+    lines = runner._DialogueLineRouterV1()
+
+    lines.feed(b"\n" * 4097)
+
+    assert len(lines._lines) <= 4096
+    with pytest.raises(runner.ProcessSupervisionError) as overflow:
+        lines.read_line(time.monotonic() + 1.0, lambda: False)
+    assert overflow.value.failure_id == "PSV1-KIMI-ACP-PROTOCOL"
+
+
+def test_kimi_acp_line_router_reclaims_count_for_paced_final_response() -> None:
+    runner = _load_runner()
+    lines = runner._DialogueLineRouterV1()
+    lines.feed(b"\n" * 4096)
+
+    assert lines.read_line(time.monotonic() + 1.0, lambda: False) == b"\n"
+    lines.feed(b"FINAL\n")
+
+    for _ in range(4095):
+        assert lines.read_line(time.monotonic() + 1.0, lambda: False) == b"\n"
+    assert lines.read_line(time.monotonic() + 1.0, lambda: False) == b"FINAL\n"
+
+
 def test_kimi_acp_cleanup_uses_one_finite_grace_after_operation_timeout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

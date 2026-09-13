@@ -779,7 +779,7 @@ _DECLARED_ACTIONS = (('direct', 'file', '@AGENTS'),
   '@ROOT/src.codex/skills/manual-repo-transfer/SKILL.md'),
  ('check_common_skill_body_pin',
   'repo-cleanup',
-  '3cf6f3fbf116f3db34a907ba36f91c961bded187dd52ef554f630e8ac0eec4ff',
+  '2b8c84ae6abf3aed1eab313f041a92b3e442fd2277b6747b1a4613ac00df92a9',
   '@ROOT/src.codex/skills/repo-cleanup/SKILL.md'),
  ('check_common_skill_body_pin',
   'mathtype-book-page',
@@ -1572,7 +1572,7 @@ _APAT_ACTIONS = (
     *(("check_contains", "@SKILLS/architect/SKILL.md", f'<!-- APAT-SEMANTIC id="AP{number}.', f"APAT-E006-INSTALLED-MISSING: codex architect AP{number} marker") for number in range(6)),
     ("check_contains", "@SKILLS/architect/SKILL.md", "<!-- APAT-BLOCK:ARCHITECT-DISPOSITION:BEGIN -->", "APAT-E006-INSTALLED-MISSING: codex architect AP0-AP5 projection section marker"),
     ("check_contains", "@SKILLS/architecture-reviewer/SKILL.md", "<!-- APAT-BLOCK:ARCHITECTURE-REVIEW:BEGIN -->", "APAT-E006-INSTALLED-MISSING: codex architecture-reviewer APAT projection section marker"),
-    ("check_contains", "@SKILLS/architecture-reviewer/SKILL.md", "each tempting but unsuitable pattern has explicit negative evidence", "APAT-E006-INSTALLED-MISSING: codex architecture-reviewer APAT negative-selection wording"),
+    ("check_contains", "@SKILLS/architecture-reviewer/SKILL.md", "each evidence-triggered candidate that is rejected has explicit negative evidence; an unadmitted pattern needs no invented rejection", "APAT-E006-INSTALLED-MISSING: codex architecture-reviewer APAT negative-selection wording"),
 )
 
 _APAT_DEV_ACTIONS = (

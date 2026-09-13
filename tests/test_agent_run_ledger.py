@@ -171,6 +171,67 @@ def test_append_records_event_and_validator_passes(tmp_path: Path):
     assert event["evidence"][0]["kind"] == "command"
 
 
+def test_append_lock_timeout_fails_loud_without_writing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    ledger = load_ledger_module()
+    item = prepare_valid_work_item(tmp_path)
+    lock = item / "agent-runs.jsonl.lock"
+    lock.write_text("pid=fixture-append\n", encoding="utf-8")
+    args = ledger.build_parser().parse_args(
+        [
+            "--work-item", str(item), "append", "--run-id", "lock-append-001",
+            "--role", "qa-engineer", "--execution-role", "internal",
+            "--status", "completed", "--gate", "none", "--scope", "lock diagnostic",
+            "--event-kind", "standalone",
+        ]
+    )
+    before = (item / "agent-runs.jsonl").read_bytes() if (item / "agent-runs.jsonl").exists() else b""
+    monkeypatch.setattr(ledger.time, "sleep", lambda _seconds: None)
+
+    assert ledger.command_append(args) == 1
+
+    captured = capsys.readouterr()
+    assert ledger.APPEND_SUCCESS_MARKER not in captured.out
+    assert "FAIL: ledger locked" in captured.err
+    after = (item / "agent-runs.jsonl").read_bytes() if (item / "agent-runs.jsonl").exists() else b""
+    assert after == before
+    assert lock.read_text(encoding="utf-8") == "pid=fixture-append\n"
+
+
+def test_settle_lock_timeout_fails_loud_without_writing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    ledger = load_ledger_module()
+    item = prepare_valid_work_item(tmp_path)
+    launch = run_ledger(
+        item, "append", "--run-id", "lock-launch-001", "--role", "qa-engineer",
+        "--execution-role", "internal", "--status", "running", "--gate", "none",
+        "--scope", "lock diagnostic", "--event-kind", "launch",
+    )
+    assert launch.returncode == 0, launch.stderr
+    lock = item / "agent-runs.jsonl.lock"
+    lock.write_text("pid=fixture-settle\n", encoding="utf-8")
+    args = ledger.build_parser().parse_args(
+        [
+            "--work-item", str(item), "settle-launch", "--launch-run-id", "lock-launch-001",
+            "--run-id", "lock-terminal-001", "--status", "completed", "--gate", "none",
+            "--started-at", "2026-09-13T00:00:00Z", "--updated-at", "2026-09-13T00:01:00Z",
+        ]
+    )
+    before = (item / "agent-runs.jsonl").read_bytes()
+    monkeypatch.setattr(ledger.time, "sleep", lambda _seconds: None)
+
+    assert ledger.command_settle_launch(args) == 1
+
+    captured = capsys.readouterr()
+    assert ledger.SETTLE_SUCCESS_MARKER not in captured.out
+    assert ledger.SETTLE_ALREADY_MARKER not in captured.out
+    assert "FAIL: ledger locked" in captured.err
+    assert (item / "agent-runs.jsonl").read_bytes() == before
+    assert lock.read_text(encoding="utf-8") == "pid=fixture-settle\n"
+
+
 def test_kimi_unsupported_effort_is_durable_and_validator_accepted(tmp_path: Path):
     item = prepare_valid_work_item(tmp_path)
     common = (

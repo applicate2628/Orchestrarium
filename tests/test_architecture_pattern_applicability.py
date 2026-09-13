@@ -319,6 +319,31 @@ def test_canonical_contract_inventory_and_dispositions() -> None:
     _assert_disposition_complete(records, disposition)
 
 
+def test_candidate_evidence_and_wire_order_stay_applicability_bound() -> None:
+    """Source-clause coverage for admitted candidates and semantic wire ordering."""
+
+    canonical = _read(CANONICAL, FAILURE_IDS[0])
+    expected_review_clause = (
+        "each evidence-triggered candidate that is rejected has explicit negative evidence; "
+        "an unadmitted pattern needs no invented rejection"
+    )
+    assert expected_review_clause in canonical
+    assert "Architect owns applicability decisions" in canonical
+
+    russian = _read(RUSSIAN, FAILURE_IDS[7])
+    assert "явные отрицательные данные каждого отклонённого кандидата" in russian
+    assert "недопущенный паттерн не требует выдуманного отклонения" in russian
+
+    for path in BLOCKS["ARCHITECTURE-REVIEW"]:
+        text = _read(path, FAILURE_IDS[1])
+        assert expected_review_clause in text
+
+    architect = _read(BLOCKS["ARCHITECT-DISPOSITION"][0], FAILURE_IDS[1])
+    assert "actual wire shape and codec" in architect
+    assert "field order only when protocol semantics require it" in architect
+    assert not (ROOT / "src.claude/skills/architect/SKILL.md").exists()
+
+
 def test_source_projection_parity() -> None:
     canonical = _read(CANONICAL, FAILURE_IDS[1])
     for block, paths in BLOCKS.items():
