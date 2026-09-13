@@ -465,6 +465,20 @@ def test_undeclared_canonical_namespace_blocks_close(tmp_path: Path) -> None:
     mutator = load_module(MUTATOR, "undeclared_namespace_mutator")
     item = root / "work-items" / "active" / "legacy-item"
     write(item / "status.md", quick_status())
+    write(
+        item / "bug-dispositions.json",
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "workItem": "legacy-item",
+                "closedAt": "2026-08-09T01:00:00Z",
+                "bugs": [],
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+    )
     historical_scratch = root / ".scratch" / "work-items" / "legacy-item" / "historical"
     write(historical_scratch / "keep.txt", "unowned bytes")
     mutator.refresh_readme(root, allow_marker_bootstrap=True)

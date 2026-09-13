@@ -35,7 +35,7 @@ CONSUMERS = {
         ),
     },
     "tests/test_slice_b_fix_controls.py": {
-        "test_kimi_admission_failure_commits_nonauthorizing_terminal_without_downstream_side_effects": (
+        "test_kimi_command_resolution_failure_commits_nonauthorizing_terminal_without_downstream_side_effects": (
             "requires_windows_kimi"
         ),
     },

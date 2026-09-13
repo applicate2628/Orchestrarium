@@ -20,4 +20,3 @@ shared/references/spine/*.md text eol=lf
 # Revision manifests remain text; only files inside each skill payload are byte-exact.
 tests/fixtures/canonical-skill-priors/*/*/** -text
 tests/fixtures/native-luna-policy-priors/** -text
-graphify-out/graph.json merge=graphify

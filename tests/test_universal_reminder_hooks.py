@@ -761,8 +761,10 @@ class TestTurnAnchorEmitsValidContext(unittest.TestCase):
                 "keep mandatory gates",
             ),
             "cleanup preserves user state": (
-                "clean owned processes and temporary or dead artifacts",
-                "preserve user or unclear state",
+                "settle every owned process/resource",
+                "remove temporary or dead alternatives",
+                "preserve pre-existing user state",
+                "ambiguous ownership as a destructive-action blocker",
             ),
             "standalone questions remain terminal": (
                 "A standalone question with no active task may end normally",
@@ -792,7 +794,7 @@ class TestTurnAnchorEmitsValidContext(unittest.TestCase):
             "status/freshness",
             "sync/update/reindex",
             "mandatory gates",
-            "preserve user or unclear state",
+            "preserve pre-existing user state",
         ):
             self.assertIn(required, combined)
 

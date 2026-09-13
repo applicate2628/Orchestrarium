@@ -43,7 +43,7 @@ Each transient row contains:
 
 An absent or unknown field, invalid exception, or missing settlement result classifies the row as `unclassified`, preserves the resource, and yields `REVISE`. Pre-existing user state is untouched. Ambiguous ownership never authorizes deletion.
 
-Agent-owned residue includes temporary/generated artifacts, half-finished alternatives, dead or superseded code/helpers/docs/names/registry entries, live process descendants, temporary worktrees or branches, locks, handles, subscriptions, transactions, quarantine/recovery roots, tombstones, and temporary reports/plans/logs/captures/caches/scratch roots without an accepted canonical pointer.
+Agent-owned residue includes temporary/generated artifacts, half-finished alternatives, dead or superseded code/helpers/docs/names/registry entries, live process descendants, temporary worktrees or branches, locks, handles, subscriptions, transactions, quarantine/recovery roots, tombstones, and temporary reports/plans/logs/captures/caches/scratch roots. An accepted canonical pointer does not make scratch archival: the producer must promote required results before task completion, then settle owned temporary scratch; unfinished, foreign, ambiguous, or denied state remains preserved and `REVISE`.
 
 ### Ephemeral volume hysteresis
 
