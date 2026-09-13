@@ -612,6 +612,36 @@ def _kimi_private_config(
     return source + separator + table
 
 
+def _kimi_receipt_json(value: object) -> str:
+    """Serialize Kimi receipt evidence with the protocol's ASCII byte accounting."""
+
+    return json.dumps(value, ensure_ascii=True, separators=(",", ":"))
+
+
+def empty_kimi_observed_receipt(
+    *, observations_omitted: bool = False
+) -> dict[str, object]:
+    observed: dict[str, object] = {"toolCalls": [], "permissionDecisions": []}
+    if observations_omitted:
+        observed["observationsOmitted"] = True
+    return observed
+
+
+def kimi_observed_receipt_budget(selected: dict[str, object]) -> int:
+    """Reserve an exact serialized receipt budget before any Kimi launch side effect."""
+
+    empty = empty_kimi_observed_receipt()
+    omitted = empty_kimi_observed_receipt(observations_omitted=True)
+    empty_chars = len(_kimi_receipt_json(empty))
+    selected_overhead = len(
+        _kimi_receipt_json({"selected": selected, "observed": empty})
+    ) - empty_chars
+    omission_allowance = len(_kimi_receipt_json(omitted)) - empty_chars
+    if selected_overhead + empty_chars + omission_allowance > AGENT_RUN_MAX_LINE_CHARS:
+        raise ValueError("E_KIMI_RECEIPT_BUDGET")
+    return AGENT_RUN_MAX_LINE_CHARS - selected_overhead - omission_allowance
+
+
 @dataclass
 class KimiAcpOneShotV1:
     """Own one finite, correlated Kimi ACP request sequence."""
@@ -621,6 +651,7 @@ class KimiAcpOneShotV1:
     mcp_servers: tuple[KimiMcpServerV1, ...] = ()
     permission: str = "reject"
     result_max_bytes: int = RESULT_MAX_BYTES_DEFAULT
+    observed_budget_chars: int | None = None
     result_bytes: bytes = field(default=b"", init=False)
     session_id: str | None = field(default=None, init=False)
     _next_id: int = field(default=1, init=False)
@@ -628,6 +659,9 @@ class KimiAcpOneShotV1:
     _permission_decisions: list[dict[str, str]] = field(
         default_factory=list, init=False
     )
+    _observed_serialized_chars: int = field(default=0, init=False)
+    _observation_budget_chars: int = field(default=0, init=False)
+    _observations_omitted: bool = field(default=False, init=False)
 
     def __post_init__(self) -> None:
         if (
@@ -638,12 +672,37 @@ class KimiAcpOneShotV1:
             or type(self.result_max_bytes) is not int
             or self.result_max_bytes <= 0
             or self.result_max_bytes > RESULT_MAX_BYTES_HARD
+            or (
+                self.observed_budget_chars is not None
+                and (
+                    type(self.observed_budget_chars) is not int
+                    or self.observed_budget_chars <= 0
+                    or self.observed_budget_chars > AGENT_RUN_MAX_LINE_CHARS
+                )
+            )
         ):
             raise ValueError("E_KIMI_ACP_PROTOCOL")
         try:
             self.prompt_bytes.decode("utf-8", errors="strict")
         except UnicodeDecodeError as exc:
             raise ValueError("E_KIMI_ACP_PROTOCOL") from exc
+        empty = empty_kimi_observed_receipt()
+        empty_chars = len(_kimi_receipt_json(empty))
+        omission_allowance = len(
+            _kimi_receipt_json(empty_kimi_observed_receipt(observations_omitted=True))
+        ) - empty_chars
+        budget = (
+            self.observed_budget_chars
+            if self.observed_budget_chars is not None
+            else AGENT_RUN_MAX_LINE_CHARS - omission_allowance
+        )
+        if (
+            budget < empty_chars
+            or budget + omission_allowance > AGENT_RUN_MAX_LINE_CHARS
+        ):
+            raise ValueError("E_KIMI_ACP_PROTOCOL")
+        self._observed_serialized_chars = empty_chars
+        self._observation_budget_chars = budget
 
     @staticmethod
     def _decode_line(line: bytes) -> dict[str, object]:
@@ -712,11 +771,20 @@ class KimiAcpOneShotV1:
             or len(self._permission_decisions) > AGENT_RUN_MAX_EVENTS
         ):
             raise ValueError("E_KIMI_ACP_PROTOCOL")
-        encoded = json.dumps(
-            self.observed_receipt(), ensure_ascii=True, separators=(",", ":")
-        )
-        if len(encoded) > AGENT_RUN_MAX_LINE_CHARS:
+        if self._observed_serialized_chars > self._observation_budget_chars:
             raise ValueError("E_KIMI_ACP_PROTOCOL")
+
+    def _retain_observation_delta(self, delta: int) -> bool:
+        if self._observations_omitted:
+            return False
+        if delta > 0 and (
+            self._observed_serialized_chars + delta
+            > self._observation_budget_chars
+        ):
+            self._observations_omitted = True
+            return False
+        self._observed_serialized_chars += delta
+        return True
 
     def _record_tool_update(self, update: dict[str, object]) -> None:
         update_kind = update.get("sessionUpdate")
@@ -735,19 +803,36 @@ class KimiAcpOneShotV1:
         if update_kind == "tool_call":
             if tool_id in self._tool_calls or title is None or status is None:
                 raise ValueError("E_KIMI_ACP_PROTOCOL")
-            self._tool_calls[tool_id] = {
+            if self._observations_omitted:
+                return
+            observed = {
                 "id": receipt_id,
                 "title": title,
                 "status": status,
             }
+            if len(self._tool_calls) >= AGENT_RUN_MAX_EVENTS:
+                raise ValueError("E_KIMI_ACP_PROTOCOL")
+            delta = len(_kimi_receipt_json(observed)) + (1 if self._tool_calls else 0)
+            if self._retain_observation_delta(delta):
+                self._tool_calls[tool_id] = observed
         elif update_kind == "tool_call_update":
             observed = self._tool_calls.get(tool_id)
-            if observed is None or (title is None and status is None):
+            if title is None and status is None:
                 raise ValueError("E_KIMI_ACP_PROTOCOL")
+            if observed is None:
+                if self._observations_omitted:
+                    return
+                raise ValueError("E_KIMI_ACP_PROTOCOL")
+            replacement = dict(observed)
             if title is not None:
-                observed["title"] = title
+                replacement["title"] = title
             if status is not None:
-                observed["status"] = status
+                replacement["status"] = status
+            delta = len(_kimi_receipt_json(replacement)) - len(
+                _kimi_receipt_json(observed)
+            )
+            if self._retain_observation_delta(delta):
+                self._tool_calls[tool_id] = replacement
         else:
             raise ValueError("E_KIMI_ACP_PROTOCOL")
         self._validate_observation_bounds()
@@ -806,18 +891,28 @@ class KimiAcpOneShotV1:
         )
         if channel.write_line(payload) != len(payload):
             raise ValueError("E_KIMI_ACP_PROTOCOL")
-        self._permission_decisions.append(
-            {"id": tool_id, "title": title, "decision": self.permission}
+        if self._observations_omitted:
+            return
+        observed = {"id": tool_id, "title": title, "decision": self.permission}
+        if len(self._permission_decisions) >= AGENT_RUN_MAX_EVENTS:
+            raise ValueError("E_KIMI_ACP_PROTOCOL")
+        delta = len(_kimi_receipt_json(observed)) + (
+            1 if self._permission_decisions else 0
         )
+        if self._retain_observation_delta(delta):
+            self._permission_decisions.append(observed)
         self._validate_observation_bounds()
 
     def observed_receipt(self) -> dict[str, object]:
-        return {
+        observed: dict[str, object] = {
             "toolCalls": [dict(observed) for observed in self._tool_calls.values()],
             "permissionDecisions": [
                 dict(observed) for observed in self._permission_decisions
             ],
         }
+        if self._observations_omitted:
+            observed["observationsOmitted"] = True
+        return observed
 
     def _response(self, channel, request_id: int, *, collect: bool = False) -> dict[str, object]:
         chunks = bytearray()
@@ -4747,10 +4842,6 @@ def kimi_selected_receipt(
     }
 
 
-def empty_kimi_observed_receipt() -> dict[str, object]:
-    return {"toolCalls": [], "permissionDecisions": []}
-
-
 def _validate_kimi_receipt_fields(
     selected: object, observed: object
 ) -> None:
@@ -4759,7 +4850,13 @@ def _validate_kimi_receipt_fields(
         or set(selected)
         != {"tools", "mcpNames", "subagents", "permission", "cwdSelected"}
         or not isinstance(observed, dict)
-        or set(observed) != {"toolCalls", "permissionDecisions"}
+        or set(observed)
+        not in (
+            {"toolCalls", "permissionDecisions"},
+            {"toolCalls", "permissionDecisions", "observationsOmitted"},
+        )
+        or "observationsOmitted" in observed
+        and observed.get("observationsOmitted") is not True
     ):
         raise ValueError("provider result Kimi capability evidence mismatch")
 
@@ -4817,11 +4914,7 @@ def _validate_kimi_receipt_fields(
         ):
             raise ValueError("provider result Kimi capability evidence mismatch")
     if len(
-        json.dumps(
-            {"selected": selected, "observed": observed},
-            ensure_ascii=True,
-            separators=(",", ":"),
-        )
+        _kimi_receipt_json({"selected": selected, "observed": observed})
     ) > AGENT_RUN_MAX_LINE_CHARS:
         raise ValueError("provider result Kimi capability evidence mismatch")
 
@@ -5631,6 +5724,14 @@ def launch(provider: str, argv: list[str]) -> int:
             return fail("E_KIMI_WINDOWS_ONLY: Kimi bundle review is Windows-only")
         if prevalidated.control.terminal_receipt is None:
             return fail("--terminal-receipt is required for external launches")
+        kimi_observed_budget = (
+            kimi_observed_receipt_budget(
+                kimi_selected_receipt(prevalidated.control.kimi_capabilities)
+            )
+            if provider == "kimi"
+            and prevalidated.control.kimi_capabilities_file is not None
+            else None
+        )
         receipt = TerminalReceiptV1.reserve(prevalidated.control.terminal_receipt)
     except ValueError as exc:
         return fail(str(exc))
@@ -5644,6 +5745,7 @@ def launch(provider: str, argv: list[str]) -> int:
                     runner,
                     prevalidated=prevalidated,
                     reserved_run=reserved_run,
+                    kimi_observed_budget=kimi_observed_budget,
                 )
         except KeyboardInterrupt:
             if receipt.committed:
@@ -5778,6 +5880,7 @@ def _launch_with_runner(
     *,
     prevalidated: PolicyBoundLaunch,
     reserved_run: ReservedExternalRunV1,
+    kimi_observed_budget: int | None = None,
 ) -> int:
     control = prevalidated.control
     topic = prevalidated.topic
@@ -5926,6 +6029,7 @@ def _launch_with_runner(
                 control.kimi_capabilities.mcp_servers,
                 control.kimi_capabilities.permission,
                 control.result_max_bytes,
+                kimi_observed_budget,
             )
         except Exception as exc:
             return finalize_reserved_run_once(

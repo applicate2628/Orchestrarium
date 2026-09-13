@@ -160,7 +160,9 @@ _BINARY_SIMPLE_PATTERNS = tuple(
     if binary_rule
 )
 _BINARY_ASCII_RUN = re.compile(rb"[\x09\x20-\x7e]+")
-_IDENTIFIER_PREFIX = re.compile(r"[A-Za-z_][A-Za-z0-9_]*$")
+_IDENTIFIER_PREFIX = re.compile(
+    r"[A-Za-z_][A-Za-z0-9_]*(?:(?:::|[-._:/\\])[A-Za-z_][A-Za-z0-9_]*)*(?:::|[-._:/\\])?$"
+)
 _VALUE = r"[A-Za-z0-9_./+=-]"
 _DIGIT_SHAPE = rf"(?:{_VALUE}{{5,}}[0-9]{_VALUE}*|{_VALUE}*[0-9]{_VALUE}{{5,}})"
 _QUOTED = rf"""["'`!@#$%^&*?|](?:{_VALUE}{{12,}}|{_DIGIT_SHAPE})["'`!@#$%^&*?|]"""

@@ -1042,6 +1042,198 @@ def test_kimi_explicit_receipt_includes_only_bounded_observed_evidence(
     assert not lifecycle.run_dir.exists()
 
 
+def test_kimi_selected_receipt_budget_rejects_before_receipt_or_provider_start(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    owner = _load_owner()
+    capabilities_file = tmp_path / "large-valid-capabilities.json"
+    _write_kimi_capabilities(
+        capabilities_file,
+        tools=[f"tool-{index:04d}-{'x' * 96}" for index in range(4096)],
+    )
+    selection = owner.read_kimi_capability_selection(capabilities_file)
+    assert capabilities_file.stat().st_size <= owner.PROMPT_SNAPSHOT_MAX_BYTES
+    control = owner.Control(
+        terminal_receipt=tmp_path / "must-not-reserve.receipt",
+        kimi_capabilities_file=capabilities_file,
+        kimi_capabilities=selection,
+    )
+    prevalidated = owner.PolicyBoundLaunch(
+        control,
+        "fixture",
+        (),
+        "kimi-code/k3",
+        "unsupported",
+        owner.ExternalRoleProvenance("none", "none"),
+        None,
+    )
+    monkeypatch.setattr(
+        owner,
+        "_prevalidate_policy_bound_external_launch",
+        lambda _provider, _argv: prevalidated,
+    )
+    monkeypatch.setattr(
+        owner.TerminalReceiptV1,
+        "reserve",
+        classmethod(
+            lambda *_args, **_kwargs: pytest.fail(
+                "oversized selected receipt reached reservation"
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        owner,
+        "_resolve_launch_provider_command",
+        lambda *_args: pytest.fail("oversized selected receipt reached provider start"),
+    )
+
+    assert owner.launch("kimi", ["fixture"]) == 1
+    assert "E_KIMI_RECEIPT_BUDGET" in capsys.readouterr().err
+
+
+def test_kimi_receipt_budget_has_exact_minimum_and_one_over_boundaries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = _load_owner()
+    selected = owner.kimi_selected_receipt(owner.KimiCapabilitySelectionV1())
+    empty = owner.empty_kimi_observed_receipt()
+    omitted = {**empty, "observationsOmitted": True}
+    exact_limit = len(owner._kimi_receipt_json({"selected": selected, "observed": omitted}))
+
+    monkeypatch.setattr(owner, "AGENT_RUN_MAX_LINE_CHARS", exact_limit)
+    remaining = owner.kimi_observed_receipt_budget(selected)
+
+    assert remaining == len(owner._kimi_receipt_json(empty))
+    monkeypatch.setattr(owner, "AGENT_RUN_MAX_LINE_CHARS", exact_limit - 1)
+    with pytest.raises(ValueError, match="^E_KIMI_RECEIPT_BUDGET$"):
+        owner.kimi_observed_receipt_budget(selected)
+
+
+def test_kimi_observed_receipt_uses_incremental_budget_and_marks_real_omission(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    owner = _load_owner()
+    title = "Read ASCII " + "\u00e9" * 24 + " \U0001f680"
+    longer_title = title + " updated " + "\u00df" * 20
+    short_title = "Read concise"
+    update = {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "tool-1",
+        "title": title,
+        "status": "in_progress",
+    }
+    longer_update = {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "tool-1",
+        "title": longer_title,
+    }
+    short_update = {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "tool-1",
+        "title": short_title,
+        "status": "completed",
+    }
+    permission = _permission_request(
+        [{"optionId": "deny-custom", "name": "Reject", "kind": "reject_once"}]
+    )
+    permission["toolCall"] = {"toolCallId": "tool-1", "title": title}
+
+    class _Channel:
+        def write_line(self, payload: bytes) -> int:
+            return len(payload)
+
+    unbounded = owner.KimiAcpOneShotV1(b"safe task", str(tmp_path))
+    unbounded._record_tool_update(update)
+    unbounded._record_tool_update(longer_update)
+    longest_observed_chars = len(owner._kimi_receipt_json(unbounded.observed_receipt()))
+    unbounded._record_tool_update(short_update)
+    object.__setattr__(unbounded, "session_id", "session-1")
+    unbounded._handle_permission_request(
+        _Channel(), {"id": 1, "params": {"sessionId": "session-1", "options": permission["options"], "toolCall": permission["toolCall"]}}, collect=True
+    )
+    expected = unbounded.observed_receipt()
+    empty = owner.empty_kimi_observed_receipt()
+    omission_allowance = (
+        len(owner._kimi_receipt_json({**empty, "observationsOmitted": True}))
+        - len(owner._kimi_receipt_json(empty))
+    )
+    selected = owner.kimi_selected_receipt(
+        owner.KimiCapabilitySelectionV1(tools=("Read",))
+    )
+    retained_budget = max(
+        longest_observed_chars,
+        len(owner._kimi_receipt_json(expected)),
+    )
+    selected_overhead = len(
+        owner._kimi_receipt_json({"selected": selected, "observed": empty})
+    ) - len(owner._kimi_receipt_json(empty))
+    monkeypatch.setattr(
+        owner,
+        "AGENT_RUN_MAX_LINE_CHARS",
+        selected_overhead + retained_budget + omission_allowance,
+    )
+    budget = owner.kimi_observed_receipt_budget(selected)
+    assert budget == retained_budget
+    exchange = owner.KimiAcpOneShotV1(
+        b"safe task", str(tmp_path), observed_budget_chars=budget
+    )
+    object.__setattr__(exchange, "session_id", "session-1")
+    for item in (update, longer_update, short_update):
+        exchange._record_tool_update(item)
+        assert exchange._observed_serialized_chars == len(
+            owner._kimi_receipt_json(exchange.observed_receipt())
+        )
+    exchange._handle_permission_request(
+        _Channel(), {"id": 1, "params": {"sessionId": "session-1", "options": permission["options"], "toolCall": permission["toolCall"]}}, collect=True
+    )
+    assert exchange.observed_receipt() == expected
+    assert exchange._observed_serialized_chars == len(
+        owner._kimi_receipt_json(exchange.observed_receipt())
+    )
+
+    exchange._record_tool_update(
+        {
+            "sessionUpdate": "tool_call",
+            "toolCallId": "tool-2",
+            "title": "Read " + "long-ascii-" * 80 + "\u00e9\U0001f680",
+            "status": "in_progress",
+        }
+    )
+    observed = exchange.observed_receipt()
+    assert observed["observationsOmitted"] is True
+    assert observed["toolCalls"] == expected["toolCalls"]
+    assert observed["permissionDecisions"] == expected["permissionDecisions"]
+    assert len(owner._kimi_receipt_json(observed)) == (
+        exchange._observed_serialized_chars + omission_allowance
+    )
+    assert len(owner._kimi_receipt_json(observed)) <= budget + omission_allowance
+
+    capabilities = owner.KimiCapabilitySelectionV1(tools=("Read",))
+    code, payload, _notes, lifecycle = _finalize_kimi(
+        owner,
+        tmp_path,
+        monkeypatch,
+        capsys,
+        stdout=b"artifact\nGATE: PASS\n",
+        stderr=b"",
+        capabilities=capabilities,
+        observed=observed,
+    )
+    assert code == 0
+    assert payload["resultText"] == "artifact\nGATE: PASS\n"
+    assert payload["observed"]["observationsOmitted"] is True
+    assert len(
+        owner._kimi_receipt_json(
+            {"selected": selected, "observed": payload["observed"]}
+        )
+    ) <= owner.AGENT_RUN_MAX_LINE_CHARS
+    assert not lifecycle.run_dir.exists()
+
+
 @pytest.mark.parametrize(
     ("provider", "model", "effort"),
     (
@@ -1149,6 +1341,18 @@ def test_provider_result_parser_rejects_malformed_or_non_kimi_capability_fields(
                 ],
                 "permissionDecisions": [],
             },
+        },
+        {
+            "selected": selected,
+            "observed": {**observed, "observationsOmitted": False},
+        },
+        {
+            "selected": selected,
+            "observed": {**observed, "observationsOmitted": "true"},
+        },
+        {
+            "selected": selected,
+            "observed": {**observed, "unexpected": True},
         },
     ):
         changed = {**payload, **changes}

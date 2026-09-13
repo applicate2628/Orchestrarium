@@ -739,6 +739,60 @@ class TestPublicationSafetyScanner(unittest.TestCase):
                     self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
                     self.assertIn("class=value-token", proc.stderr)
 
+    def test_public_token_annotation_rejects_separator_delimited_credential_components(self) -> None:
+        marker = public_token_annotation()
+        value = "PUBLIC_PROTOCOL_RESULT_MARKER"
+        cases = {
+            "authorization-hyphen": f'authorization-token="{value}"; {marker}',
+            "access-dot": f'access.token="{value}"; {marker}',
+            "auth-underscore": f'auth_token="{value}"; {marker}',
+        }
+        for name, fixture in cases.items():
+            with self.subTest(name=name):
+                proc = self._run_cached_process(CANONICAL_SCANNER, fixture)
+                self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+                self.assertIn("class=value-token", proc.stderr)
+
+    def test_public_token_annotation_preserves_separator_delimited_noncredential_contexts(self) -> None:
+        marker = public_token_annotation()
+        value = "PUBLIC_PROTOCOL_RESULT_MARKER"
+        rows = {
+            "namespace-dot": f'protocol.token="{value}"; {marker}',
+            "namespace-hyphen": f'protocol-token="{value}"; {marker}',
+            "earlier-prose": f'authorization - token="{value}"; {marker}',
+        }
+        self._assert_cached_pass_batch(CANONICAL_SCANNER, rows)
+
+    def test_public_token_annotation_preserves_existing_credential_separator_boundaries(self) -> None:
+        marker = public_token_annotation()
+        value = "PUBLIC_PROTOCOL_RESULT_MARKER"
+        separators = (".", "-", "_", ":", "::", "/", "\\")
+        for separator in separators:
+            with self.subTest(separator=separator, kind="credential"):
+                identifier = f"authorization{separator}token"
+                unannotated = f'{identifier}="{value}"'
+                annotated = f"{unannotated}; {marker}"
+                baseline = self._run_cached_process(CANONICAL_SCANNER, unannotated)
+                candidate = self._run_cached_process(CANONICAL_SCANNER, annotated)
+                expected = baseline.returncode
+                self.assertEqual(candidate.returncode, expected, candidate.stdout + candidate.stderr)
+                if expected:
+                    self.assertIn("class=value-token", candidate.stderr)
+
+            with self.subTest(separator=separator, kind="public"):
+                public = f'protocol{separator}token="{value}"; {marker}'
+                rc, output = self._run_cached_full(CANONICAL_SCANNER, public)
+                self.assertEqual(rc, 0, output)
+
+            with self.subTest(separator=separator, kind="whitespace-boundary"):
+                prose = f'authorization {separator} token="{value}"; {marker}'
+                rc, output = self._run_cached_full(CANONICAL_SCANNER, prose)
+                self.assertEqual(rc, 0, output)
+
+        statement_boundary = f'authorization="ordinary"; token="{value}"; {marker}'
+        rc, output = self._run_cached_full(CANONICAL_SCANNER, statement_boundary)
+        self.assertEqual(rc, 0, output)
+
     def test_public_token_annotation_preserves_noncredential_components(self) -> None:
         marker = public_token_annotation()
         value = "PUBLIC_PROTOCOL_RESULT_MARKER"
