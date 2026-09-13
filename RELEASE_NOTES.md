@@ -4,6 +4,7 @@ This file is the canonical release log for tracked Orchestrarium monorepo change
 
 ## 2026-09-13
 
+- **PR corrections preserve task scope without new approval machinery.** Lead checks semantic task scope while the existing gate binds repository, remote, branch and PR; unrelated work still needs consent. Kimi's explicit engineering route is now unambiguous in project guidance. Regression fixtures match compact rules, the reviewed ledger-test fingerprint and the universal Architect installation projection.
 - **Quoted shifts no longer look like publication-related here-documents.** The POSIX shell parser preserves quote state across lines, so an inline script's quoted `<<` remains data. Genuine here-documents, malformed publication candidates and actual pushes keep their existing checks; no Python exception or shell relabeling was added.
 - **Machine-path warnings distinguish patch routing from written content.** Recognized file headers, removed lines and unchanged context no longer trigger the advisory; added content is checked per destination, so a scratch file does not hide warnings in another file. Malformed inputs retain the existing conservative fallback. Publication authorization is unchanged.
 - **Task scratch is temporary, not an archive.** Required load-bearing results are promoted to canonical artifacts before completion; owners then settle their scratch while unfinished, foreign, ambiguous, and denied state remains preserved.

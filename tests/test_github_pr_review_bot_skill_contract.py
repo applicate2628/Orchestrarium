@@ -185,7 +185,26 @@ def test_pr_cycle_preserves_provider_parity_and_owner_pointers() -> None:
         lead = path.read_text(encoding="utf-8")
         assert "authorization-continuity rule before asking again" in lead
     shared = SHARED_GOVERNANCE_PATH.read_text(encoding="utf-8")
-    assert "apply the checked current PR-bound grant" in shared
+    assert "apply checked current PR-bound grant" in shared
+
+
+def test_pr_grant_scope_is_behavioral_not_branchwide_gate_state() -> None:
+    required = (
+        "Lead behaviorally reuses an active same-PR grant only",
+        "unrelated same-branch work requires fresh consent",
+        "gate mechanically binds repository, remote, head branch, and pull request",
+        "not semantic task scope or branch-wide consent",
+    )
+    protocol = PROTOCOL_PATH.read_text(encoding="utf-8")
+    for clause in required:
+        assert clause in protocol
+    bodies = [path.read_text(encoding="utf-8") for path in SKILL_PATHS]
+    assert bodies[0] == bodies[1]
+    for clause in required:
+        assert clause in bodies[0]
+    shared = SHARED_GOVERNANCE_PATH.read_text(encoding="utf-8")
+    assert "not unrelated same-branch work" in shared
+    assert "not semantic scope/branchwide consent" in shared
 
 
 def test_issue_comment_order_is_repo_local_total_order_for_rest_comments() -> None:

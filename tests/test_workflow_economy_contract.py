@@ -216,7 +216,7 @@ class TestWorkflowEconomyContract(unittest.TestCase):
             "Grok unavailable in 1.x",
             "Quick-fix: no pre-implementation review ceremony",
             "one canonical artifact",
-            "root: one concise ledger entry",
+            "root: concise ledger entry",
             "progress-only artifact",
             "progress-only artifact/`REVISE`",
             "human publication/leak-check gates",
@@ -370,11 +370,11 @@ class TestWorkflowEconomyContract(unittest.TestCase):
     def test_kimi_advisory_selection_is_optional_and_lead_selectable(self) -> None:
         shared_required = (
             "At readiness/decision",
-            "explicit Kimi choice by Lead",
-            "bounded independent read-only view",
-            "no Kimi call/skip otherwise",
+            "Lead may choose Kimi",
+            "bounded independent read-only ambiguity/option comparison",
+            "otherwise no Kimi call/skip",
             "not `auto`/gate/counter",
-            "evidence for availability/quota",
+            "availability/quota evidence",
             "fixed wrapper `kimi-code/k3`",
             "independent verification; nonauthorizing",
         )

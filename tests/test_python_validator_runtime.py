@@ -246,6 +246,9 @@ def _materialize_installed_pack(
     else:
         pack = target / ".claude"
         shutil.copytree(ROOT / "src.claude", pack)
+        universal_architect = target / ".agents" / "skills" / "architect"
+        shutil.copytree(ROOT / "src.codex" / "skills" / "architect", universal_architect)
+        _create_directory_link(pack / "skills" / "architect", universal_architect)
         shutil.copy2(ROOT / "shared" / "AGENTS.shared.md", pack / "AGENTS.md")
         scripts = pack / "agents" / "scripts"
     for name in (
