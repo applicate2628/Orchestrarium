@@ -1088,6 +1088,7 @@ def test_kimi_selected_receipt_budget_rejects_before_receipt_or_provider_start(
         "_resolve_launch_provider_command",
         lambda *_args: pytest.fail("oversized selected receipt reached provider start"),
     )
+    monkeypatch.setattr(owner, "os", SimpleNamespace(name="nt"))
 
     assert owner.launch("kimi", ["fixture"]) == 1
     assert "E_KIMI_RECEIPT_BUDGET" in capsys.readouterr().err
