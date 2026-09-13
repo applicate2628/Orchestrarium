@@ -157,14 +157,28 @@ def _patch_written_content(patch: str) -> list[tuple[str, str]]:
             current_target = header.group("target")
             recognized_header = True
             continue
-        if line.startswith("+") and not line.startswith("+++"):
+        if line.startswith("+"):
             parts.append((current_target, line[1:]))
     if not recognized_header:
         return [("", patch)]
     return parts
 
 
-def _content_to_scan(tool_input: dict) -> list[tuple[str, str]]:
+def _native_apply_patch_command(envelope: dict, tool_input: dict) -> str | None:
+    """Return only the verified native apply-patch carrier with complete framing."""
+
+    command = tool_input.get("command")
+    if envelope.get("tool_name") != "apply_patch":
+        return None
+    if not isinstance(command, str):
+        return None
+    lines = command.splitlines()
+    if len(lines) < 2 or lines[0] != "*** Begin Patch" or lines[-1] != "*** End Patch":
+        return None
+    return command
+
+
+def _content_to_scan(envelope: dict, tool_input: dict) -> list[tuple[str, str]]:
     """Return written string content paired with its known target when available.
 
     Apply-patch routing headers and removed/context lines are not written content.
@@ -173,12 +187,15 @@ def _content_to_scan(tool_input: dict) -> list[tuple[str, str]]:
     """
     path_keys = {"file_path", "notebook_path", "path"}
     target = _target_path(tool_input)
+    native_command = _native_apply_patch_command(envelope, tool_input)
     parts: list[tuple[str, str]] = []
     for key, val in tool_input.items():
         if key in path_keys:
             continue
         if key == "patch" and isinstance(val, str):
             parts.extend(_patch_written_content(val))
+        elif key == "command" and native_command is not None:
+            parts.extend(_patch_written_content(native_command))
         elif isinstance(val, str):
             parts.append((target, val))
         elif isinstance(val, list):
@@ -201,7 +218,7 @@ def main() -> int:
         return 0  # nothing to inspect; allow
 
     target = _target_path(tool_input)
-    for content_target, text in _content_to_scan(tool_input):
+    for content_target, text in _content_to_scan(envelope, tool_input):
         effective_target = content_target or target
         if effective_target and _is_scratch_target(effective_target):
             continue  # .scratch/ is the designated local-only evidence area; allow

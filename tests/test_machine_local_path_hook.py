@@ -68,8 +68,17 @@ def _decode_context(stdout: str) -> tuple[str, str]:
 
 
 class TestMachineLocalPathHook(unittest.TestCase):
-    def assert_canonical_flagged(self, tool_input: dict, flagged: bool) -> str:
-        p = run_hook(CANONICAL_MACHINE_PATH_SCRIPT, {"tool_input": tool_input})
+    @staticmethod
+    def native_apply_patch(command: str) -> dict:
+        return {"command": command}
+
+    def assert_canonical_flagged(
+        self, tool_input: dict, flagged: bool, *, tool_name: str | None = None
+    ) -> str:
+        envelope = {"tool_input": tool_input}
+        if tool_name is not None:
+            envelope["tool_name"] = tool_name
+        p = run_hook(CANONICAL_MACHINE_PATH_SCRIPT, envelope)
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertEqual(p.stderr, "")
         self.assertEqual(bool(p.stdout.strip()), flagged, f"stdout={p.stdout!r}")
@@ -184,6 +193,93 @@ class TestMachineLocalPathHook(unittest.TestCase):
                 )
             },
             True,
+        )
+        self.assertIn("<unknown target>", context)
+
+    def test_native_apply_patch_command_routes_framed_scratch_content(self) -> None:
+        self.assert_canonical_flagged(
+            self.native_apply_patch(
+                "*** Begin Patch\n"
+                "*** Add File: .scratch/private.md\n"
+                f"+ C:/{_USERS}/realuser/written.md\n"
+                "*** End Patch\n"
+            ),
+            False,
+            tool_name="apply_patch",
+        )
+
+    def test_native_apply_patch_command_flags_public_written_content(self) -> None:
+        self.assert_canonical_flagged(
+            self.native_apply_patch(
+                "*** Begin Patch\n"
+                "*** Update File: docs/public.md\n"
+                f"+ C:/{_USERS}/realuser/written.md\n"
+                "*** End Patch\n"
+            ),
+            True,
+            tool_name="apply_patch",
+        )
+
+    def test_native_apply_patch_command_flags_triple_plus_added_code(self) -> None:
+        self.assert_canonical_flagged(
+            self.native_apply_patch(
+                "*** Begin Patch\n"
+                "*** Update File: docs/public.md\n"
+                f'+++counter; const p = "C:/{_USERS}/realuser/private";\n'
+                "*** End Patch\n"
+            ),
+            True,
+            tool_name="apply_patch",
+        )
+
+    def test_native_apply_patch_command_ignores_header_only(self) -> None:
+        self.assert_canonical_flagged(
+            self.native_apply_patch(
+                "*** Begin Patch\n"
+                f"*** Add File: C:/{_USERS}/realuser/routing.md\n"
+                "*** End Patch\n"
+            ),
+            False,
+            tool_name="apply_patch",
+        )
+
+    def test_native_apply_patch_command_isolates_mixed_targets(self) -> None:
+        context = self.assert_canonical_flagged(
+            self.native_apply_patch(
+                "*** Begin Patch\n"
+                "*** Update File: .scratch/private.md\n"
+                f"+ C:/{_USERS}/realuser/private.md\n"
+                "*** Update File: docs/public.md\n"
+                f"+ C:/{_USERS}/realuser/public.md\n"
+                "*** End Patch\n"
+            ),
+            True,
+            tool_name="apply_patch",
+        )
+        self.assertIn("docs/public.md", context)
+
+    def test_non_apply_patch_command_remains_ordinary_scanned_data(self) -> None:
+        self.assert_canonical_flagged(
+            {
+                "command": (
+                    "*** Begin Patch\n"
+                    "*** Add File: .scratch/private.md\n"
+                    f"+ C:/{_USERS}/realuser/written.md\n"
+                    "*** End Patch\n"
+                ),
+            },
+            True,
+            tool_name="Bash",
+        )
+
+    def test_native_apply_patch_command_without_framing_keeps_unknown_target_fallback(self) -> None:
+        context = self.assert_canonical_flagged(
+            self.native_apply_patch(
+                "*** Update File: .scratch/private.md\n"
+                f"+ C:/{_USERS}/realuser/written.md\n"
+            ),
+            True,
+            tool_name="apply_patch",
         )
         self.assertIn("<unknown target>", context)
 
