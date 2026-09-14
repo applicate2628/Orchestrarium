@@ -4303,6 +4303,9 @@ def test_kimi_serialized_metadata_cannot_escape_credential_scan(
     "https://example.invalid/mcp?custom=synthetic%2Durl%2Dsecret",
     "https://example.invalid/mcp?synthetic%2Durl%2Dsecret",
     "https://example.invalid/mcp?synthetic-url-secret",
+    "https://example.invalid/synthetic%2Durl%2Dsecret/mcp",
+    "https://example.invalid/synthetic-url-secret/mcp",
+    "https://example.invalid/mcp#synthetic%2Durl%2Dsecret",
     "https://example.invalid/mcp?&synthetic%2Durl%2Dsecret&",
 ))
 def test_kimi_url_credential_cannot_escape_terminal(

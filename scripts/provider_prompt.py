@@ -286,6 +286,17 @@ def _kimi_mcp_credential_needles(
             if component:
                 add(component)
                 add(unquote(component, errors="strict"))
+        for component in url.path.split("/"):
+            if not component:
+                continue
+            decoded = unquote(component, errors="strict")
+            if decoded.casefold() in {"mcp", "sse"}:
+                continue
+            add(component)
+            add(decoded)
+        if url.fragment:
+            add(url.fragment)
+            add(unquote(url.fragment, errors="strict"))
         for field in url.query.split("&"):
             _name, separator, component = field.partition("=")
             component = component if separator else field

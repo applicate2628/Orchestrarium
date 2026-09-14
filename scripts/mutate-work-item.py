@@ -828,6 +828,9 @@ SHA256_RE = re.compile(r"[0-9a-f]{64}")
 BUG_DISPOSITION_ACTIONS = {"terminalize", "preserve-current"}
 BUG_DISPOSITION_PLACEHOLDER_CONTEXTS = {"adjacent-finding", "standalone"}
 BUG_DISPOSITION_TEXT_LIMIT = 2048
+LEDGER_LOCATION_INTENT_MAX_FILES = 1024
+LEDGER_LOCATION_INTENT_MAX_FILE_BYTES = 256 * 1024
+LEDGER_LOCATION_INTENT_MAX_TOTAL_BYTES = 8 * 1024 * 1024
 BUG_SUPERSESSION_OWNER = "mutate-work-item:current-bug-supersession-v1"
 BUG_SUPERSESSION_KIND = "current-bug-supersession-v1"
 BUG_SUCCESSOR_BINDING_FIELDS = {
@@ -6972,7 +6975,11 @@ def _load_transition_intent(root: Path, path: Path) -> dict:
 
 
 def _ledger_location_proof_object(
-    path: Path, *, failure_id: str, unreadable: str
+    path: Path,
+    *,
+    failure_id: str,
+    unreadable: str,
+    maximum_bytes: int | None = None,
 ) -> tuple[dict, bytes]:
     _lifecycle_reject_unreduced_reparse(
         path,
@@ -6989,7 +6996,13 @@ def _ledger_location_proof_object(
         return value
 
     try:
-        raw = path.read_bytes()
+        if maximum_bytes is None:
+            raw = path.read_bytes()
+        else:
+            with path.open("rb") as stream:
+                raw = stream.read(maximum_bytes + 1)
+            if len(raw) > maximum_bytes:
+                raise LifecycleError(failure_id, "ledger location proof exceeds byte limit")
         payload = json.loads(
             raw.decode("utf-8", errors="strict"),
             object_pairs_hook=reject_duplicate_pairs,
@@ -7180,19 +7193,52 @@ def _matching_ledger_location_intents(
             "transition staging root is not a directory",
         )
     matches: list[tuple[dict, Path, bytes]] = []
+    candidates: list[Path] = []
+    declared_bytes = 0
     try:
-        candidates = sorted(transition_root.glob("*.json"))
+        for path in transition_root.iterdir():
+            if path.suffix != ".json":
+                continue
+            if len(candidates) >= LEDGER_LOCATION_INTENT_MAX_FILES:
+                raise LifecycleError(
+                    "WI-LIFECYCLE-TRANSITION-INTENT-INVALID",
+                    "transition intent inventory limit exceeded",
+                )
+            size = path.lstat().st_size
+            if size > LEDGER_LOCATION_INTENT_MAX_FILE_BYTES:
+                raise LifecycleError(
+                    "WI-LIFECYCLE-TRANSITION-INTENT-INVALID",
+                    "transition intent byte limit exceeded",
+                )
+            declared_bytes += size
+            if declared_bytes > LEDGER_LOCATION_INTENT_MAX_TOTAL_BYTES:
+                raise LifecycleError(
+                    "WI-LIFECYCLE-TRANSITION-INTENT-INVALID",
+                    "transition intent cumulative byte limit exceeded",
+                )
+            candidates.append(path)
+        candidates.sort()
+    except LifecycleError:
+        raise
     except OSError as exc:
         raise LifecycleError(
             "WI-LIFECYCLE-TRANSITION-INTENT-INVALID",
             "transition staging root is unreadable",
         ) from exc
+    loaded_bytes = 0
     for path in candidates:
         payload, raw = _ledger_location_proof_object(
             path,
             failure_id="WI-LIFECYCLE-TRANSITION-INTENT-INVALID",
             unreadable="transition intent is unreadable",
+            maximum_bytes=LEDGER_LOCATION_INTENT_MAX_FILE_BYTES,
         )
+        loaded_bytes += len(raw)
+        if loaded_bytes > LEDGER_LOCATION_INTENT_MAX_TOTAL_BYTES:
+            raise LifecycleError(
+                "WI-LIFECYCLE-TRANSITION-INTENT-INVALID",
+                "transition intent cumulative byte limit exceeded",
+            )
         if payload.get("slug") != slug:
             continue
         _validate_ledger_location_intent(

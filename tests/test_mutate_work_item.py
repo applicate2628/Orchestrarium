@@ -9768,6 +9768,82 @@ class PartialMigrationRecoveryCliTests(unittest.TestCase):
                 self.assertNotIn("WI-TEST-PRIMARY", output.getvalue())
 
 
+def test_ledger_location_intent_discovery_bounds_file_count_before_loading(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    transition_root = root / ".scratch" / "work-items-lifecycle-transitions"
+    transition_root.mkdir(parents=True)
+    for index in range(1025):
+        (transition_root / f"intent-{index:04d}.json").write_text("{}", encoding="utf-8")
+    loaded: list[Path] = []
+    original = module._ledger_location_proof_object
+
+    def track(path: Path, **kwargs):
+        loaded.append(path)
+        return original(path, **kwargs)
+
+    with patch.object(module, "_ledger_location_proof_object", side_effect=track):
+        with unittest.TestCase().assertRaises(module.LifecycleError) as caught:
+            module._matching_ledger_location_intents(
+                root, root, slug="target", logical_work_item="work-items/active/target"
+            )
+
+    assert caught.exception.failure_id == "WI-LIFECYCLE-TRANSITION-INTENT-INVALID"
+    assert "inventory limit" in str(caught.exception)
+    assert loaded == []
+
+
+def test_ledger_location_intent_discovery_bounds_each_file_before_full_read(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    transition_root = root / ".scratch" / "work-items-lifecycle-transitions"
+    transition_root.mkdir(parents=True)
+    oversized = transition_root / "oversized.json"
+    oversized.write_bytes(b" " * (256 * 1024 + 1))
+    observed_reads: list[Path] = []
+    original_read_bytes = Path.read_bytes
+
+    def track_read(path: Path) -> bytes:
+        if path == oversized:
+            observed_reads.append(path)
+        return original_read_bytes(path)
+
+    with patch.object(Path, "read_bytes", track_read):
+        with unittest.TestCase().assertRaises(module.LifecycleError) as caught:
+            module._matching_ledger_location_intents(
+                root, root, slug="target", logical_work_item="work-items/active/target"
+            )
+
+    assert caught.exception.failure_id == "WI-LIFECYCLE-TRANSITION-INTENT-INVALID"
+    assert "byte limit" in str(caught.exception)
+    assert observed_reads == []
+
+def test_ledger_location_intent_discovery_bounds_cumulative_bytes_before_loading(tmp_path: Path) -> None:
+    module = load_module()
+    root = tmp_path / "repo"
+    transition_root = root / ".scratch" / "work-items-lifecycle-transitions"
+    transition_root.mkdir(parents=True)
+    payload = b"{}" + b" " * (256 * 1024 - 2)
+    for index in range(33):
+        (transition_root / f"intent-{index:02d}.json").write_bytes(payload)
+    loaded: list[Path] = []
+    original = module._ledger_location_proof_object
+
+    def track(path: Path, **kwargs):
+        loaded.append(path)
+        return original(path, **kwargs)
+
+    with patch.object(module, "_ledger_location_proof_object", side_effect=track):
+        with unittest.TestCase().assertRaises(module.LifecycleError) as caught:
+            module._matching_ledger_location_intents(
+                root, root, slug="target", logical_work_item="work-items/active/target"
+            )
+
+    assert caught.exception.failure_id == "WI-LIFECYCLE-TRANSITION-INTENT-INVALID"
+    assert "cumulative byte limit" in str(caught.exception)
+    assert loaded == []
+
+
 class _UnittestAdapter(unittest.TestCase):
     """Run the module's pytest-style functions under the plan's unittest CLI."""
 
