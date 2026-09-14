@@ -294,11 +294,23 @@ def test_python_prompt_owner_returns_complete_result_and_reclaims_artifacts(
     )
     env_capture = tmp_path / f"{provider}.env"
     fake = tmp_path / f"fake-{provider}.py"
+    prompt = tmp_path / "prompt.md"
+    prompt.write_text("review this\n", encoding="utf-8")
     fake.write_text(
         "import json,os,pathlib,runpy,sys\n"
         "args=sys.argv[1:]\n"
         "if 'app-server' in args:\n"
         f"    runpy.run_path({str(FAKE_CODEX_HOOKS_HOST)!r}, run_name='__main__')\n"
+        "else:\n"
+        "    prompt_body = sys.stdin.buffer.read()\n"
+        "    expected_prompt = (\n"
+        "        b'ORCHESTRARIUM_EXTERNAL_GOVERNANCE_V1\\n'\n"
+        f"        + pathlib.Path({str(projection / 'external-prompt-governance.md')!r}).read_bytes()\n"
+        "        + b'END_ORCHESTRARIUM_EXTERNAL_GOVERNANCE_V1\\n\\n'\n"
+        f"        + pathlib.Path({str(prompt)!r}).read_bytes()\n"
+        "    )\n"
+        "    if prompt_body != expected_prompt:\n"
+        "        raise SystemExit('unexpected provider prompt')\n"
         f"pathlib.Path({str(env_capture)!r}).write_text("
         "os.environ.get('ORCHESTRARIUM_DISPATCHED_REVIEW', ''), encoding='utf-8')\n"
         + (
@@ -308,8 +320,6 @@ def test_python_prompt_owner_returns_complete_result_and_reclaims_artifacts(
         ),
         encoding="utf-8",
     )
-    prompt = tmp_path / "prompt.md"
-    prompt.write_text("review this\n", encoding="utf-8")
     terminal_receipt = (tmp_path / f"{provider}.receipt").resolve()
     env = os.environ.copy()
     env[bin_env] = str(fake)
