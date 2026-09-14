@@ -1,0 +1,46 @@
+name: PR10 finalizer diagnostics
+
+on:
+  push:
+    branches:
+      - automation/pr10-finalize-1f31e84
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: hotfix/lifecycle-successor-transfer
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run exact editor with captured diagnostics
+        shell: bash
+        run: |
+          set +e
+          git fetch --no-tags origin automation/pr10-finalize-1f31e84
+          git show FETCH_HEAD:.github/pr10_finalize.py > /tmp/pr10_finalize.py
+          python /tmp/pr10_finalize.py > /tmp/pr10-apply.log 2>&1
+          rc=$?
+          cat /tmp/pr10-apply.log
+          git diff --stat > /tmp/pr10-partial-stat.txt
+          git diff > /tmp/pr10-partial-diff.patch
+          printf '%s\n' "$rc" > /tmp/pr10-apply.rc
+          exit "$rc"
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr10-finalizer-diagnostics
+          if-no-files-found: ignore
+          path: |
+            /tmp/pr10-apply.log
+            /tmp/pr10-apply.rc
+            /tmp/pr10-partial-stat.txt
+            /tmp/pr10-partial-diff.patch
