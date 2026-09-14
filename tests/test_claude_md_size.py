@@ -33,8 +33,8 @@ EXPECTED_PAYLOADS: dict[str, tuple[int, str]] = {
         "488c41acb051ccf6100422b28b3d4ded846e8d9cdd88fb937fb9b383f8d70319",
     ),
     "hook-behavior-contracts": (
-        17_997,
-        "6a04609faa133108c92c5906e5419db87450b6f6b6fb27e2f8ea7c8efcff6e0c",
+        18_131,
+        "4212588f126b74fae8c7351f6c0188461e17dc912d7d2fb8ad8298020ba2dfa1",
     ),
     # Payload pins force deliberate review of current hook behavior, placement,
     # and installer truth before a canonical-reference edit can pass.

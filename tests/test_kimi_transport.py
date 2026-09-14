@@ -554,6 +554,11 @@ def test_kimi_wrapper_entry_freezes_policy_bound_max_provenance(
 ) -> None:
     owner = _load_owner()
     captured: list[object] = []
+    # Exercise policy composition on every host; receipt I/O is a separate suite.
+    monkeypatch.setattr(owner, "os", SimpleNamespace(**{**vars(os), "name": "nt"}))
+    monkeypatch.setattr(owner.TerminalReceiptV1, "reserve", classmethod(
+        lambda _cls, _path: SimpleNamespace(committed=False, close=lambda: None)
+    ))
 
     def stop_before_provider(
         _provider, _argv, _runner, *, prevalidated, reserved_run, **_kwargs
@@ -1875,7 +1880,7 @@ def test_kimi_auth_is_cli_owned_without_config_or_credential_reads(
     assert not (user_home / ".kimi-code").exists()
 
 
-def test_kimi_mcp_credential_needles_select_only_named_or_structured_credentials() -> None:
+def test_kimi_mcp_credential_needles_cover_opaque_values_and_structured_credentials() -> None:
     owner = _load_owner()
     assert _SYNTHETIC_AUTH_VALUE.encode("ascii") == (
         b"Bear" + b"er bearer-" + b"payload"
@@ -1913,29 +1918,15 @@ def test_kimi_mcp_credential_needles_select_only_named_or_structured_credentials
 
     needles = owner._kimi_mcp_credential_needles(selection)
 
-    assert needles == (
-        b"env-token",
-        b"private-key",
-        b"password-value",
+    assert set(needles) == {
+        b"env-token", b"private-key", b"password-value",
         _SYNTHETIC_AUTH_VALUE.encode("ascii"),
         _SYNTHETIC_AUTH_PAYLOAD.encode("ascii"),
-        b"Basic basic-payload",
-        b"basic-payload",
-        b"sid=cookie-value; theme=public-theme",
-        b"cookie-value",
-        b"public-theme",
-    )
-    assert not any(
-        public in needles
-        for public in (
-            b"public-path",
-            b"public-lang",
-            b"public-timeout",
-            b"public-language",
-            b"public-region",
-            b"public-header-timeout",
-        )
-    )
+        b"Basic basic-payload", b"basic-payload",
+        b"sid=cookie-value; theme=public-theme", b"cookie-value", b"public-theme",
+    }
+    assert len(needles) == len(set(needles))
+
 
 
 @pytest.mark.parametrize(
@@ -4212,3 +4203,234 @@ def test_fake_kimi_acp_oversize_answer_fails_and_reaps_process(tmp_path: Path) -
     assert result.resources_closed is True
     assert result.tree.tree_empty is True
     assert close_result.outcome == "closed"
+
+
+@pytest.mark.parametrize("mutation", ("rewrite", "grow", "replace", "remove"))
+def test_kimi_capability_snapshot_rejects_drift_during_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutation: str
+) -> None:
+    owner = _load_owner()
+    path = tmp_path / "capabilities.json"
+    _write_kimi_capabilities(path)
+    original = path.read_bytes()
+    fdopen = owner.os.fdopen
+
+    class MutatingReader:
+        def __init__(self, descriptor, mode):
+            self.stream = fdopen(descriptor, mode)
+
+        def __enter__(self):
+            self.stream.__enter__()
+            return self
+
+        def fileno(self):
+            return self.stream.fileno()
+
+        def read(self, size):
+            raw = self.stream.read(size)
+            if mutation in {"rewrite", "grow"}:
+                path.write_bytes(original if mutation == "rewrite" else original + b" ")
+                stamp = path.stat()
+                os.utime(path, ns=(stamp.st_atime_ns, stamp.st_mtime_ns + 1_000_000_000))
+            return raw
+
+        def __exit__(self, *args):
+            result = self.stream.__exit__(*args)
+            if mutation == "replace":
+                replacement = path.with_suffix(".replacement")
+                replacement.write_bytes(original)
+                os.replace(replacement, path)
+            elif mutation == "remove":
+                path.unlink()
+            return result
+
+    monkeypatch.setattr(owner.os, "fdopen", MutatingReader)
+    with pytest.raises(ValueError, match="^E_KIMI_CAPABILITIES_INVALID$"):
+        owner.read_kimi_capability_selection(path)
+
+
+@pytest.mark.parametrize("name", ("DB_DSN", "X-Service-Key", "apiKey", "authenticationToken"))
+@pytest.mark.parametrize("carrier", ("env", "headers"))
+def test_kimi_custom_selected_value_cannot_escape_terminal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], name: str, carrier: str,
+) -> None:
+    owner = _load_owner()
+    canary = "synthetic-selected-value"
+    server = owner.KimiMcpServerV1(
+        name="fixture", **{carrier: (owner.KimiNameValueV1(name, canary),)}
+    )
+    selection = owner.KimiCapabilitySelectionV1(mcp_servers=(server,))
+    code, payload, _, lifecycle = _finalize_kimi(
+        owner, tmp_path, monkeypatch, capsys,
+        stdout=canary.encode() + b"\nGATE: PASS\n", stderr=b"",
+        capabilities=selection, credential_needles=owner._kimi_mcp_credential_needles(selection),
+    )
+    assert code != 0
+    assert payload["token"] == "UNVERIFIED:E_EXTERNAL_PROVIDER_CREDENTIAL_ECHO"
+    assert canary not in json.dumps(payload)
+    assert canary not in (tmp_path / "kimi-terminal.receipt").read_text(encoding="utf-8")
+    assert not lifecycle.run_dir.exists()
+
+
+@pytest.mark.parametrize("value", ('synthetic-"quote', "synthetic-\\slash", "synthetic-\u03c0"))
+def test_kimi_serialized_metadata_cannot_escape_credential_scan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], value: str,
+) -> None:
+    owner = _load_owner()
+    selection = owner.KimiCapabilitySelectionV1(
+        tools=(value,), mcp_servers=(owner.KimiMcpServerV1(
+            name="fixture", env=(owner.KimiNameValueV1("TOKEN", value),),
+        ),),
+    )
+    code, payload, _, lifecycle = _finalize_kimi(
+        owner, tmp_path, monkeypatch, capsys, stdout=b"safe\nGATE: PASS\n", stderr=b"",
+        capabilities=selection, credential_needles=owner._kimi_mcp_credential_needles(selection),
+    )
+    assert code != 0
+    assert payload["token"] == "UNVERIFIED:E_EXTERNAL_PROVIDER_CREDENTIAL_ECHO"
+    assert "selected" not in payload and not lifecycle.run_dir.exists()
+    public = json.dumps(payload)
+    receipt = (tmp_path / "kimi-terminal.receipt").read_text(encoding="utf-8")
+    for encoding in (False, True):
+        escaped = json.dumps(value, ensure_ascii=encoding)[1:-1]
+        assert escaped not in public and escaped not in receipt
+
+
+@pytest.mark.parametrize("url", (
+    "https://fixture:synthetic%2Durl%2Dsecret@example.invalid/mcp",
+    "https://example.invalid/mcp?custom=synthetic%2Durl%2Dsecret",
+    "https://example.invalid/mcp?synthetic%2Durl%2Dsecret",
+    "https://example.invalid/mcp?synthetic-url-secret",
+    "https://example.invalid/mcp?&synthetic%2Durl%2Dsecret&",
+))
+def test_kimi_url_credential_cannot_escape_terminal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], url: str,
+) -> None:
+    owner = _load_owner()
+    selection = owner.KimiCapabilitySelectionV1(mcp_servers=(
+        owner.KimiMcpServerV1(name="fixture", transport="http", url=url),
+    ))
+    code, payload, _, lifecycle = _finalize_kimi(
+        owner, tmp_path, monkeypatch, capsys,
+        stdout=b"synthetic-url-secret\nGATE: PASS\n", stderr=b"",
+        capabilities=selection, credential_needles=owner._kimi_mcp_credential_needles(selection),
+    )
+    assert code != 0
+    assert payload["token"] == "UNVERIFIED:E_EXTERNAL_PROVIDER_CREDENTIAL_ECHO"
+    assert "synthetic-url-secret" not in json.dumps(payload)
+    assert "synthetic-url-secret" not in (tmp_path / "kimi-terminal.receipt").read_text(encoding="utf-8")
+    assert not lifecycle.run_dir.exists()
+
+
+@pytest.mark.parametrize("carrier", ("environment_url", "encoded_query"))
+def test_kimi_structured_selected_credential_surfaces_are_guarded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], carrier: str,
+) -> None:
+    owner = _load_owner()
+    canary = "synthetic-extra-value"
+    options = {
+        "environment_url": {"env": (owner.KimiNameValueV1(
+            "DB_DSN", "https://fixture:" + canary + "@example.invalid/db"
+        ),)},
+        "encoded_query": {"url": "https://example.invalid/mcp?custom=synthetic%2Dextra%2Dvalue"},
+    }
+    echo = "synthetic%2Dextra%2Dvalue" if carrier == "encoded_query" else canary
+    selection = owner.KimiCapabilitySelectionV1(mcp_servers=(
+        owner.KimiMcpServerV1(name="fixture", **options[carrier]),
+    ))
+    code, payload, _, lifecycle = _finalize_kimi(
+        owner, tmp_path, monkeypatch, capsys, stdout=echo.encode() + b"\nGATE: PASS\n", stderr=b"",
+        capabilities=selection, credential_needles=owner._kimi_mcp_credential_needles(selection),
+    )
+    assert code != 0
+    assert payload["token"] == "UNVERIFIED:E_EXTERNAL_PROVIDER_CREDENTIAL_ECHO"
+    assert echo not in json.dumps(payload)
+    assert echo not in (tmp_path / "kimi-terminal.receipt").read_text(encoding="utf-8")
+    assert not lifecycle.run_dir.exists()
+
+
+@pytest.mark.parametrize('carrier', ('arguments', 'public_url', 'public_controls'))
+def test_benign_selected_controls_succeed(tmp_path, monkeypatch, capsys, carrier):
+    owner = _load_owner()
+    url = 'https://example.invalid/mcp'
+    options = {
+        'arguments': {'args': ('--port', '8080', '--flag', '1')},
+        'public_url': {'url': url},
+        'public_controls': {
+            'env': (owner.KimiNameValueV1('PATH', 'public-value'),),
+            'headers': (owner.KimiNameValueV1('Accept-Language', 'en'),),
+        },
+    }
+    selection = owner.KimiCapabilitySelectionV1(mcp_servers=(
+        owner.KimiMcpServerV1(name='fixture', **options[carrier]),
+    ))
+    output = url if carrier == 'public_url' else 'safe public-value en'
+    code, payload, _, lifecycle = _finalize_kimi(
+        owner, tmp_path, monkeypatch, capsys,
+        stdout=output.encode()+b'\nGATE: PASS\n', stderr=b'',
+        capabilities=selection, credential_needles=owner._kimi_mcp_credential_needles(selection),
+    )
+    assert code == 0, payload
+    assert payload['gate'] == 'PASS'
+    assert not lifecycle.run_dir.exists()
+
+
+@pytest.mark.parametrize("invalid", (
+    "https://example.invalid/mcp?custom=%FF", "https://[::1", "synthetic-\ud800", "synthetic-\x00",
+))
+def test_kimi_unscannable_selection_has_only_minimal_prelaunch_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], invalid: str,
+) -> None:
+    owner = _load_owner()
+    canary = "synthetic-valid-private-value"
+    selection = owner.KimiCapabilitySelectionV1(
+        tools=(canary,), mcp_servers=(owner.KimiMcpServerV1(
+            name="fixture", env=(owner.KimiNameValueV1("X-Custom", canary),
+                                 owner.KimiNameValueV1("X-Other", invalid)),
+        ),),
+    )
+    receipt_path = tmp_path / "minimal.receipt"
+    control = owner.Control(terminal_receipt=receipt_path, kimi_capabilities=selection)
+    prevalidated = owner.PolicyBoundLaunch(
+        control, "fixture", (), "kimi-code/k3", "high",
+        owner.ExternalRoleProvenance("none", "none"), None,
+    )
+    monkeypatch.setattr(owner, "_resolve_launch_provider_command", lambda *_: (["fixture"], None))
+    monkeypatch.setattr(owner, "resolve_provider_auth_configuration", lambda *_: SimpleNamespace(needles=()))
+    monkeypatch.setattr(owner.RunCaptureLifecycle, "create", classmethod(
+        lambda *_: pytest.fail("invalid credential selection reached capture/provider setup")
+    ))
+    with owner.ReservedExternalRunV1(owner.TerminalReceiptV1.reserve(receipt_path)) as reserved:
+        code = owner._launch_with_runner(
+            "kimi", [], object(), prevalidated=prevalidated, reserved_run=reserved,
+        )
+    public = capsys.readouterr().out
+    payload = json.loads(public.split("=", 1)[1])
+    assert code == 1
+    assert payload["token"] == "UNVERIFIED:E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE"
+    assert "selected" not in payload and "observed" not in payload
+    assert canary not in public and canary not in receipt_path.read_text(encoding="utf-8")
+    assert payload["cleanupStatus"] == "complete"
+
+
+def test_kimi_unchanged_snapshot_allows_distinct_handle_and_path_ctime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = _load_owner()
+    path = tmp_path / "capabilities.json"
+    _write_kimi_capabilities(path, tools=["ReadFile"])
+    real_fstat = owner.os.fstat
+
+    def descriptor_metadata(descriptor):
+        metadata = real_fstat(descriptor)
+        fields = {name: getattr(metadata, name) for name in dir(metadata) if name.startswith("st_")}
+        fields["st_ctime_ns"] += 2_000_000_000
+        return SimpleNamespace(**fields)
+
+    monkeypatch.setattr(owner.os, "fstat", descriptor_metadata)
+    assert owner.read_kimi_capability_selection(path).tools == ("ReadFile",)

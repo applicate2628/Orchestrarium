@@ -607,7 +607,7 @@ def test_kimi_command_resolution_failure_commits_nonauthorizing_terminal_without
         "resolve_provider_auth_configuration",
         "ledger_helper",
         "run_ledger",
-        "materialize_kimi_agent_payload",
+        "_kimi_agent_profile",
         "run_provider_process",
     ):
         monkeypatch.setattr(OWNER, name, forbidden(name))
@@ -683,7 +683,7 @@ def test_missing_or_malformed_external_policy_loader_stops_before_kimi_side_effe
 @pytest.mark.parametrize(
     ("task_class", "role"),
     (
-        ("engineering", "backend-engineer"),
+        ("engineering", "lead"),
         ("review", "architecture-reviewer"),
         ("review", "security-reviewer"),
         ("planning", "lead"),
@@ -713,6 +713,7 @@ def test_policy_denies_unadmitted_kimi_roles_before_side_effects(
 @pytest.mark.parametrize(
     ("task_class", "role", "execution_role"),
     (
+        ("engineering", "backend-engineer", "external-worker"),
         ("exploration", "explorer", "external-worker"),
         ("exploration", "analyst", "external-worker"),
         ("planning", "planner", "external-worker"),
@@ -813,7 +814,7 @@ def test_kimi_consultant_wrapper_uses_real_policy_before_every_side_effect(
     assert prevalidated.provenance is not None
     assert prevalidated.provenance.assigned_internal_role == "consultant"
     assert prevalidated.model == "kimi-code/k3"
-    assert prevalidated.effort == "unsupported"
+    assert prevalidated.effort == "high"
 
 
 def test_kimi_launch_rejects_non_windows_before_runner(

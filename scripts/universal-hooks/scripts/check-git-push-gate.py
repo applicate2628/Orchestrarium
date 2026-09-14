@@ -420,6 +420,10 @@ PR_BINDING_SIDECAR_BYTE_CAP = 8192
 TRANSCRIPT_HISTORY_BYTE_CAP = 32 * 1024 * 1024
 TRANSCRIPT_HISTORY_RECORD_CAP = 50_000
 TRANSCRIPT_HISTORY_LINE_BYTE_CAP = 4 * 1024 * 1024
+# Recovery handles histories beyond the ordinary in-memory caps, but never
+# treats a prefix as complete authorization evidence.
+TRANSCRIPT_RECOVERY_BYTE_CAP = 128 * 1024 * 1024
+TRANSCRIPT_RECOVERY_RECORD_CAP = 200_000
 PROCESS_OUTPUT_BYTE_CAP = 256 * 1024
 PROCESS_TIMEOUT_SECONDS = 8.0
 ORACLE_TIMEOUT_SECONDS = 45.0
@@ -1546,11 +1550,24 @@ def _stream_stable_pr_grant(
     try:
         with path.open("rb") as stream:
             before = os.fstat(stream.fileno())
+            if before.st_size > TRANSCRIPT_RECOVERY_BYTE_CAP:
+                return "absent", None, HISTORY_STATUS_LIMIT
+            total_bytes = 0
+            total_records = 0
             while True:
-                raw_line = stream.readline(TRANSCRIPT_HISTORY_LINE_BYTE_CAP + 1)
+                raw_line = stream.readline(min(
+                    TRANSCRIPT_HISTORY_LINE_BYTE_CAP,
+                    TRANSCRIPT_RECOVERY_BYTE_CAP - total_bytes,
+                ) + 1)
                 if not raw_line:
                     break
-                if len(raw_line) > TRANSCRIPT_HISTORY_LINE_BYTE_CAP:
+                total_bytes += len(raw_line)
+                total_records += 1
+                if (
+                    len(raw_line) > TRANSCRIPT_HISTORY_LINE_BYTE_CAP
+                    or total_bytes > TRANSCRIPT_RECOVERY_BYTE_CAP
+                    or total_records > TRANSCRIPT_RECOVERY_RECORD_CAP
+                ):
                     return "absent", None, HISTORY_STATUS_LIMIT
                 if not raw_line.strip():
                     continue

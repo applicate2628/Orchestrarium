@@ -2457,7 +2457,7 @@ def test_intermediate_role_byte_drift_fails_before_transaction(
     def transaction_entered(*_args: object, **_kwargs: object) -> str:
         raise AssertionError("transaction entered")
 
-    monkeypatch.setattr(installer.tempfile, "mkdtemp", transaction_entered)
+    monkeypatch.setattr(installer._InstallTransaction, "__enter__", transaction_entered)
     result = installer.install(
         "codex",
         ["--target", str(project), "--force", "--allow-unsafe-target", "--no-hypothesis-hook"],
@@ -2537,7 +2537,7 @@ def test_stock_role_or_registration_mutation_fails_before_transaction(
     def transaction_entered(*_args: object, **_kwargs: object) -> str:
         raise AssertionError("transaction entered")
 
-    monkeypatch.setattr(installer.tempfile, "mkdtemp", transaction_entered)
+    monkeypatch.setattr(installer._InstallTransaction, "__enter__", transaction_entered)
     result = installer.install(
         "codex",
         ["--target", str(project), "--force", "--allow-unsafe-target", "--no-hypothesis-hook"],
@@ -3603,7 +3603,9 @@ def test_global_codex_install_uses_shared_agents_skills_root(tmp_path: Path) -> 
     assert (home / ".agents" / "skills" / "lead" / "SKILL.md").is_file()
     # Codex itself may seed runtime-owned `.system` skills under CODEX_HOME;
     # Orchestrarium's role bodies must not be duplicated there.
-    assert not (home / ".codex" / "skills" / "lead").exists()
+    assert (home / ".codex" / "skills" / "lead").resolve() == (
+        home / ".agents" / "skills" / "lead"
+    ).resolve()
     assert (home / ".codex" / "agents" / "architect.toml").is_file()
 
 
@@ -3634,5 +3636,23 @@ def test_live_codex_docs_use_shared_agents_global_root() -> None:
     for path in live_codex_docs:
         text = path.read_text(encoding="utf-8")
         assert "$HOME/.agents/" in text, path.relative_to(ROOT)
-        for stale_root in stale_global_roots:
-            assert stale_root not in text, f"{path.relative_to(ROOT)}: {stale_root}"
+        compatibility_markers = {
+            ("INSTALL.md", "~/.codex/skills"): (
+                "$HOME/.agents/skills/",
+                "as a compatibility entrypoint through per-Orchestrarium-skill directory projections",
+            ),
+            ("docs/provider-runtime-layouts.md", "~/.codex/skills"): (
+                "$HOME/.agents/skills/", "| Legacy skill compatibility |",
+            ),
+            ("INSTALL.md", "$HOME/.codex/contracts"): (
+                "$HOME/.agents/contracts/", "remain compatibility projections for current consumers",
+            ),
+        }
+        for line in text.splitlines():
+            for stale_root in stale_global_roots:
+                if stale_root not in line:
+                    continue
+                markers = compatibility_markers.get((path.relative_to(ROOT).as_posix(), stale_root))
+                assert markers is not None and all(marker in line for marker in markers), (
+                    f"{path.relative_to(ROOT)}: {stale_root}"
+                )

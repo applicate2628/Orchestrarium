@@ -214,6 +214,10 @@ def test_kimi_grok_live_inventory_and_nonexecution_language() -> None:
             continue
         if KIMI_ADMISSION_TRIGGER.search(text):
             for boundary, pattern in KIMI_ADMISSION_TERMS.items():
+                if boundary == "explicit" and relative_path == "shared/AGENTS.shared.md":
+                    assert "Lead may choose Kimi for bounded independent read-only" in text
+                    assert "Kimi: not `auto`/gate/counter" in text
+                    continue
                 assert pattern.search(text), (
                     f"Kimi admission lacks {boundary} in {relative_path}"
                 )

@@ -256,40 +256,16 @@ class KimiNameValueV1:
 
 
 def _merge_credential_needles(*groups: tuple[bytes, ...]) -> tuple[bytes, ...]:
-    merged: list[bytes] = []
-    for group in groups:
-        for needle in group:
-            if needle not in merged:
-                merged.append(needle)
-    return tuple(merged)
+    return tuple(dict.fromkeys(needle for group in groups for needle in group))
 
 
 def _kimi_mcp_credential_needles(
     selection: "KimiCapabilitySelectionV1",
 ) -> tuple[bytes, ...]:
-    """Select exact credential values from parsed Kimi MCP configuration only."""
+    """Protect selected values by default, retaining known public controls."""
+    from urllib.parse import unquote, unquote_plus, urlsplit
 
-    credential_components = {
-        "auth",
-        "authentication",
-        "authorization",
-        "access",
-        "bearer",
-        "refresh",
-        "session",
-        "oauth",
-        "jwt",
-        "credential",
-        "secret",
-        "csrf",
-        "password",
-        "token",
-        "cookie",
-    }
-    needles: list[bytes] = []
-
-    def components(name: str) -> tuple[str, ...]:
-        return tuple(part.casefold() for part in re.findall(r"[A-Za-z0-9]+", name))
+    needles: dict[bytes, None] = {}
 
     def add(value: str) -> None:
         if not value:
@@ -297,41 +273,50 @@ def _kimi_mcp_credential_needles(
         try:
             encoded = value.encode("utf-8", errors="strict")
         except UnicodeEncodeError as exc:
-            raise ValueError(
-                "E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE"
-            ) from exc
+            raise ValueError("E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE") from exc
         if b"\x00" in encoded:
             raise ValueError("E_EXTERNAL_PROVIDER_CREDENTIAL_SCAN_UNAVAILABLE")
-        if encoded not in needles:
-            needles.append(encoded)
+        needles[encoded] = None
+
+    def add_url_credentials(value: str) -> None:
+        # A public endpoint is not itself a credential. Protect its credential
+        # components, including their encoded and decoded representations.
+        url = urlsplit(value)
+        for component in (url.username, url.password):
+            if component:
+                add(component)
+                add(unquote(component, errors="strict"))
+        for field in url.query.split("&"):
+            _name, separator, component = field.partition("=")
+            component = component if separator else field
+            add(component)
+            add(unquote_plus(component, errors="strict"))
 
     for server in selection.mcp_servers:
-        for entry in (*server.env, *server.headers):
-            name_parts = components(entry.name)
-            name_part_set = set(name_parts)
-            is_authorization = name_parts in {
-                ("authorization",),
-                ("proxy", "authorization"),
-            }
-            is_cookie = name_parts == ("cookie",)
-            is_api_key = {"api", "key"}.issubset(name_part_set)
-            has_private_components = {"private", "key"}.issubset(name_part_set)
-            if not (
-                name_part_set.intersection(credential_components)
-                or is_api_key
-                or has_private_components
-            ):
-                continue
-            add(entry.value)
-            if is_authorization:
-                scheme, separator, payload = entry.value.partition(" ")
-                if scheme.casefold() in {"bearer", "basic"} and separator:
-                    add(payload.strip())
-            elif is_cookie:
-                for item in entry.value.split(";"):
-                    _name, separator, value = item.partition("=")
-                    if separator:
-                        add(value.strip())
+        # Preserve the existing public controls; all other names default private.
+        # Carrier-specific exceptions avoid applying environment semantics to headers.
+        for entries, public_names in (
+            (server.env, {"path", "lang", "timeout"}),
+            (server.headers, {"accept-language", "x-region", "x-timeout"}),
+        ):
+            for entry in entries:
+                if entry.name.casefold() in public_names:
+                    continue
+                add(entry.value)
+                if "://" in entry.value:
+                    add_url_credentials(entry.value)
+                name = tuple(re.findall(r"[a-z0-9]+", entry.name.casefold()))
+                if name in {("authorization",), ("proxy", "authorization")}:
+                    scheme, separator, payload = entry.value.partition(" ")
+                    if scheme.casefold() in {"bearer", "basic"} and separator:
+                        add(payload.strip())
+                elif name == ("cookie",):
+                    for item in entry.value.split(";"):
+                        _name, separator, value = item.partition("=")
+                        if separator:
+                            add(value.strip())
+        if server.url:
+            add_url_credentials(server.url)
     return tuple(needles)
 
 
@@ -501,8 +486,23 @@ def read_kimi_capability_selection(path: Path) -> KimiCapabilitySelectionV1:
             ):
                 raise ValueError("identity")
             raw = stream.read(PROMPT_SNAPSHOT_MAX_BYTES + 1)
-        if len(raw) > PROMPT_SNAPSHOT_MAX_BYTES:
-            raise ValueError("size")
+            after_read = os.fstat(stream.fileno())
+        validate_no_reparse_components(candidate)
+        after_path = candidate.lstat()
+        stable_fields = (
+            "st_dev", "st_ino", "st_mode", "st_size", "st_mtime_ns", "st_ctime_ns"
+        )
+        # Windows pathname and descriptor ctime have different semantics.
+        # Compare each interface with its own earlier observation.
+        if (
+            tuple(getattr(opened, name) for name in stable_fields)
+            != tuple(getattr(after_read, name) for name in stable_fields)
+            or tuple(getattr(before, name) for name in stable_fields)
+            != tuple(getattr(after_path, name) for name in stable_fields)
+            or len(raw) != opened.st_size
+            or len(raw) > PROMPT_SNAPSHOT_MAX_BYTES
+        ):
+            raise ValueError("snapshot changed or exceeded size limit")
 
         def unique(pairs):
             document: dict[str, object] = {}
@@ -4755,7 +4755,16 @@ def provider_output_safety_scan_terminal(
 ) -> str | None:
     """Reuse the sole credential/path detectors for every public terminal line."""
 
-    credential = credential_scan_terminal(needles, stdout=stdout, stderr=stderr)
+    # A terminal JSON string (or a provider echo) may escape quotes, backslashes
+    # and non-ASCII credentials. Scan the actual serializer representations too.
+    escaped = tuple(
+        json.dumps(needle.decode("utf-8", errors="strict"), ensure_ascii=ascii_only)[1:-1].encode("utf-8")
+        for needle in needles
+        for ascii_only in (False, True)
+    )
+    credential = credential_scan_terminal(
+        _merge_credential_needles(needles, escaped), stdout=stdout, stderr=stderr
+    )
     if credential is not None:
         return credential
     if provider != "kimi" and not serialized_line:

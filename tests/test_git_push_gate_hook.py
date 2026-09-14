@@ -9597,5 +9597,51 @@ class TestPublicationSafetyTrustedScanR5Proof(unittest.TestCase):
                         self.assertNotIn(sentinel, combined)
 
 
+class TestBoundedPrGrantRecovery(unittest.TestCase):
+    def test_recovery_total_limits_include_blank_lines_and_allow_exact_boundary(self):
+        module = _load_gate_module(CANONICAL_HOOK, "bounded_pr_grant_recovery")
+        cases = (
+            (b"{}\n{}\n", 5, 10, "limit"),
+            (b"{}\n{}\n", 100, 1, "limit"),
+            (b"\n\n\n", 100, 2, "limit"),
+            (b"{}\n{}\n", 6, 2, "found"),
+        )
+        for payload, byte_cap, record_cap, expected in cases:
+            with self.subTest(payload=payload, byte_cap=byte_cap, record_cap=record_cap):
+                with synthetic_raw_transcript(payload) as transcript_path, \
+                     mock.patch.object(module, "TRANSCRIPT_RECOVERY_BYTE_CAP", byte_cap, create=True), \
+                     mock.patch.object(module, "TRANSCRIPT_RECOVERY_RECORD_CAP", record_cap, create=True), \
+                     mock.patch.object(module, "_canonicalize_numeric_pr_grant") as canonicalize:
+                    result = module._recover_stable_pr_grant(
+                        str(transcript_path), str(REPO_ROOT.resolve())
+                    )
+                self.assertEqual(result, ("absent", None, expected))
+                canonicalize.assert_not_called()
+
+    def test_recovery_byte_limit_covers_growth_after_initial_size_check(self):
+        module = _load_gate_module(CANONICAL_HOOK, "growing_pr_grant_recovery")
+        real_fstat = module.os.fstat
+        with synthetic_raw_transcript(b"{}\n") as transcript_path:
+            snapshots = []
+
+            def append_after_snapshot(descriptor):
+                before = real_fstat(descriptor)
+                snapshots.append(before)
+                if len(snapshots) == 1:
+                    with Path(transcript_path).open("ab") as writer:
+                        writer.write(b"{}\n")
+                return before
+
+            with mock.patch.object(module, "TRANSCRIPT_RECOVERY_BYTE_CAP", 5), \
+                 mock.patch.object(module.os, "fstat", append_after_snapshot), \
+                 mock.patch.object(module, "_canonicalize_numeric_pr_grant") as canonicalize:
+                result = module._recover_stable_pr_grant(
+                    str(transcript_path), str(REPO_ROOT.resolve())
+                )
+        self.assertEqual(result, ("absent", None, "limit"))
+        self.assertEqual(len(snapshots), 1)
+        canonicalize.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

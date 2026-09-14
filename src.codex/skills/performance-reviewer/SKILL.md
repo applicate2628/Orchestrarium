@@ -52,7 +52,7 @@ description: "Performance gate: latency, throughput, memory, CPU, benchmarks, bu
 
 The configured bug registry (default `work-items/bugs/<date>-<slug>.md`) owns the record schema and statuses; performance roles do not create a separate registry or enum.
 
-- When the gate decision is `REVISE` or `BLOCKED`, include a proposed bug record in-band in the returned artifact for the root or lifecycle owner, preserving Description, Metric (metric / budget / actual / baseline), and Files involved; the reviewer remains proposal-only unless the dispatcher explicitly grants registry-write authority.
+- When the gate decision is `REVISE` or `BLOCKED`, include a proposed registry record in-band in the returned artifact for the root or lifecycle owner, preserving Description, Metric (metric / budget / actual / baseline), and Files involved; the reviewer remains proposal-only unless the dispatcher explicitly grants registry-write authority. Writing the record is a narrow canonical-artifact exception only when the sandbox permits that path; it does not otherwise broaden this role's write posture.
 - When confirming a fix, require reviewer confirmation and user approval before its disposition; the lifecycle owner alone terminalizes or archives the bug.
 
 ## Cross-domain escalation

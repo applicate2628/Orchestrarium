@@ -372,7 +372,7 @@ def test_close_retention_receipt_accepts_relative_repository_root(tmp_path: Path
 
     assert result.returncode == 0, result.stdout + result.stderr
     archived = root / "work-items" / "archive" / "2026-08" / slug
-    assert result.stdout.strip() == str(archived)
+    assert result.stdout.strip() == str(archived.resolve())
     assert module._payload_digest(retained)[1] == retained_before
     receipt = json.loads((archived / "bug-dispositions-receipt.json").read_text(encoding="utf-8"))
     assert receipt["evidenceRetention"] == manifest["evidenceRetention"]
