@@ -57,7 +57,7 @@ jobs:
               end = text.find(end_marker, index)
               if end < 0:
                   raise SystemExit(f'block end missing for {marker!r}')
-              text = text[:end] + f"        '''), {spaces})" + text[end + len(end_marker):]
+              text = text[:end] + f"        ''', {spaces})" + text[end + len(end_marker):]
 
           wrap('for intent_path in sorted(transition_root.glob', 8)
           wrap('for intent_path in _bounded_transition_intent_inventory(', 8)
