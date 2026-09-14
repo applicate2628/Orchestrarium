@@ -2511,7 +2511,7 @@ def validate_transcript_diagnostic(
             raise ValueError("unread transcript has reader status")
     elif diagnostic.current_turn == _TRANSCRIPT_NOT_RUN:
         raise ValueError("string transcript lacks current-turn status")
-    if diagnostic.history != "limit" and diagnostic.recovery != _TRANSCRIPT_NOT_RUN:
+    if diagnostic.history not in ("limit", "found") and diagnostic.recovery != _TRANSCRIPT_NOT_RUN:
         raise ValueError("unexpected transcript recovery status")
     return diagnostic
 

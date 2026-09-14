@@ -254,11 +254,12 @@ def _deny_reason() -> str:
 def _reconciliation_reason() -> str:
     return (
         "root Stop reconciliation: before finalizing, reconcile explicit task "
-        "state already in the conversation. Choose exactly one: standalone "
-        "question with no active primary task answered; user paused, cancelled, or reprioritized; blocked "
-        "on a needed user decision; requested task complete with evidence; or "
-        "work remains. On re-entry, finalize the first four. If work remains, "
-        "perform the next authorized action first. A passed slice or proposed "
+        "state already in the conversation. Choose one: standalone "
+        "question with no active primary task; user paused/cancelled/reprioritized; every "
+        "remaining authorized action is concretely blocked; task complete with evidence; or "
+        "work remains. On re-entry finalize first four. If work remains, "
+        "perform the next authorized action first. A needed user decision pauses "
+        "only dependent work; independent ready work remains. A passed slice or proposed "
         "final is not completion."
     )
 

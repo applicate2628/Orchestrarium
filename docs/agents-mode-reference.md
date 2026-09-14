@@ -15,6 +15,10 @@ Luna is not an agents-mode key, external-provider enum value, preset value, or a
 
 Canonical operator-overlay output is now `.agents-mode.yaml` on every provider line. Legacy extensionless `.agents-mode` files remain compatibility input only and must not be recreated as the preferred output.
 
+## Kimi per-run thinking
+
+The explicit Kimi wrapper accepts `--kimi-effort high|max`, with `high` as the omission default. This is a per-run wrapper control, not a new `agents-mode` key. Agent Client Protocol (ACP) model and thinking options are set and read back before the prompt; user-global configuration is not rewritten. Receipts retain empty provider CLI launch flags and record the selected session effort; historical `unsupported` receipts remain readable. This is session-configuration evidence, not hidden model-use attestation, and it does not change role authority, tools or publication gates.
+
 ## Codex review-loop route
 
 The installed Codex `review-loop` skill has a narrow local route that does not alter these global defaults: its surgical and deep verdicts are separate fresh external Codex processes with explicit `externalProvider: codex`, separate prompt files, attempt IDs, and receipts. They never use `auto`, Claude, `fast`, `priority`, or `ultrafast`; standard speed applies. Claude is available there only when the user explicitly selects an approved API-key route, never as fallback. Explicit Kimi may supply the deep/wide read-only nonauthorizing angle; a failed Kimi lane remains UNVERIFIED. The Claude-line review-loop contract and ordinary `agents-mode` provider profiles are unchanged.

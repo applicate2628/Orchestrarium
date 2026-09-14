@@ -62,6 +62,10 @@ The continuing grant replaces only repeated human confirmation. Every push attem
 
 The continuing route is deliberately narrower than Git's full branch grammar. The provider head must contain 1–255 ASCII characters drawn only from `A-Z`, `a-z`, `0-9`, `.`, `_`, `/`, and `-`, and it must also pass direct-argument `git check-ref-format --branch`. A simple stored binding accepts one ordinary direct `git push <remote> HEAD:refs/heads/<head>` or `git -C <absolute-root> push <remote> HEAD:refs/heads/<head>` command; quoting every fixed token is not required. Existing Version 1 grants retain their owning shell's canonical literal serialization with an absolute resolved Git executable. Force, delete, tags, wrappers, chained or ambiguous commands, unsafe destinations, drift, stale/reused receipts, and generic fallback remain denied. The existing one-turn `[approve-publication]` marker and all-dry-run behavior remain separate compatibility paths.
 
+## Stable transcript recovery
+
+Transcript recovery distinguishes `identity-drift` from unreadable input/output. Only a first identity drift permits one fresh, complete reread under the existing limits; the entire first reducer and grant are discarded. After that drift, only a stable second snapshot proceeds through the existing grant and revocation checks. An appended revocation or repeated drift denies; unreadable, invalid, limit and absent outcomes do not retry. Both streaming recovery paths report their actual result, including the simple-grant reread after a readable history. This recovery does not prove the cause of an older unexplained refusal and does not change human approval, grant syntax, range scanning or publication authority.
+
 ## Terms and Abbreviations
 
 - **HEAD** — the current local Git commit selected for publication.

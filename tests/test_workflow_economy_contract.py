@@ -228,18 +228,37 @@ class TestWorkflowEconomyContract(unittest.TestCase):
     def test_targeted_continuation_and_abstraction_clarifications_preserve_existing_gates(self) -> None:
         spine = self._read(SPINE)
         self.assertIn(
-            "Keep each function at a coherent abstraction level; separate high-level scenario flow from "
-            "parsing, storage, or transport only when mixing them harms local reasoning or independent change.",
+            "clear names/flow/invariants/ownership",
             spine,
         )
         self.assertIn(
-            "Do not force pass-through wrappers, fragmentation, length limits, or splits that break atomic "
-            "invariants or measured hot paths.",
+            "abstraction level",
+            spine,
+        )
+        self.assertIn("local/independent reasoning/change", spine)
+        self.assertIn("operations—not pass-through helpers", spine)
+        self.assertIn("no forced wrappers/fragmentation/length limits/splits", spine)
+        self.assertIn("atomic invariants/measured hot paths", spine)
+        self.assertIn("read all needed; minimize edits, not reads", spine)
+        for required in (
+            "Task-free questions may end.",
+            "Decisions pause dependents; independent ready work continues",
+            "end only when remaining authorized work is concretely blocked.",
+        ):
+            self.assertIn(required, spine)
+        self.assertNotIn(
+            "required user decision overrides",
             spine,
         )
 
         for relative in LEAD_SKILL_PROJECTIONS:
             text = self._read(relative)
+            self.assertIn(
+                "a required user decision pauses only dependent work; independent ready work continues; stopping requires every remaining authorized action be concretely blocked",
+                text,
+                relative,
+            )
+            self.assertNotIn("genuine user-required decision overrides", text, relative)
             self.assertIn(
                 "**Wait** only for an artifact or gate decision that blocks a dependent next action; independent "
                 "admitted work continues.",

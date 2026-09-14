@@ -2,6 +2,12 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-09-14
+
+- **Transcript recovery handles one changing snapshot without weakening publication checks.** Identity drift is distinct from unreadable input/output. Only the first drift permits one fresh, complete reread with unchanged limits; the first result is discarded. A stable second snapshot still applies existing grant and revocation checks, while repeated drift, malformed input and other failures deny. Both recovery paths report their actual status. This does not establish the cause of an older unexplained refusal.
+- **Continuation and review rules avoid unnecessary stops and extra review loops.** A side question does not finish active work, and a needed decision pauses only dependent work while independent ready work continues. Accepted results settle once and advance; anti-layering remains inside an already-triggered architecture review. Function-level abstraction guidance preserves useful separation without forced fragmentation or damage to measured hot paths. The one-shot Stop reminder remains a backstop, not a guarantee of model obedience.
+- **Kimi supports explicit per-run high and max thinking.** The wrapper accepts `--kimi-effort high|max`, defaulting to `high`, and reads back the Agent Client Protocol (ACP) model and thinking settings before the prompt. Global configuration is unchanged; historical unsupported-effort receipts remain compatible. Receipts report selected session configuration, not hidden model-use attestation. Real source and installed max runs passed.
+
 ## 2026-09-13
 
 - **PR corrections preserve task scope without new approval machinery.** Lead checks semantic task scope while the existing gate binds repository, remote, branch and PR; unrelated work still needs consent. Kimi's explicit engineering route is now unambiguous in project guidance. Regression fixtures match compact rules, the reviewed ledger-test fingerprint and the universal Architect installation projection.

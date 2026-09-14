@@ -5977,7 +5977,54 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
                 state, grant, status = module._stream_stable_pr_grant(
                     str(transcript_path), str(REPO_ROOT.resolve())
                 )
-        self.assertEqual((state, grant, status), ("absent", None, "unreadable"))
+        self.assertEqual((state, grant, status), ("absent", None, "identity-drift"))
+
+    def test_stream_recovery_retries_only_an_initial_identity_drift(self) -> None:
+        """A recovery retry may use only a fresh complete replacement snapshot."""
+        module = _load_gate_module(CANONICAL_HOOK, "pr_grant_stream_recovery")
+        initial = module.ActivePrGrant(
+            "https://github.com/acme/project/pull/7", "acme", "project", 7
+        )
+        replacement = module.ActivePrGrant(
+            "https://github.com/acme/project/pull/8", "acme", "project", 8
+        )
+        cases = (
+            (
+                "second-active",
+                (("active", initial, "identity-drift"), ("active", replacement, "found")),
+                ("active", replacement, "found"),
+                2,
+            ),
+            (
+                "appended-revocation",
+                (("active", initial, "identity-drift"), ("revoked", None, "found")),
+                ("revoked", None, "found"),
+                2,
+            ),
+            (
+                "repeated-drift",
+                (("active", initial, "identity-drift"), ("absent", None, "identity-drift")),
+                ("absent", None, "identity-drift"),
+                2,
+            ),
+            (
+                "unreadable",
+                (("absent", None, "unreadable"),),
+                ("absent", None, "unreadable"),
+                1,
+            ),
+        )
+        for label, snapshots, expected, calls in cases:
+            with self.subTest(label=label), mock.patch.object(
+                module, "_stream_stable_pr_grant", side_effect=snapshots
+            ) as stream:
+                self.assertEqual(
+                    module._recover_stable_pr_grant(
+                        "transcript.jsonl", str(REPO_ROOT.resolve())
+                    ),
+                    expected,
+                )
+                self.assertEqual(stream.call_count, calls)
 
     def test_compaction_summary_cannot_reconstruct_grant(self) -> None:
         summary = user(f"summary quotes {self.GRANT}")
@@ -6350,6 +6397,16 @@ class TestTranscriptFailureDiagnostics(unittest.TestCase):
         self.assertIn("Publication denied", output)
         self.assertNotIn("PR-scoped publication denied", output)
         self.assertIn(expected, output)
+
+    def test_found_history_recovery_status_is_valid_for_simple_grant_rereads(self) -> None:
+        module = _load_gate_module(CANONICAL_HOOK, "found_history_recovery")
+        diagnostic = module._a3_preflight.TranscriptDiagnostic(
+            "string", "found", "found", "identity-drift"
+        )
+        self.assertEqual(
+            module._a3_preflight.validate_transcript_diagnostic(diagnostic),
+            diagnostic,
+        )
 
     def test_missing_null_and_non_string_envelope_categories_are_distinct(self) -> None:
         canary = "PRIVATE_TRANSCRIPT_CANARY_7719"

@@ -364,6 +364,7 @@ from hook_common import (
     CURRENT_TURN_BYTE_CAP,
     HISTORY_STATUS_ABSENT,
     HISTORY_STATUS_FOUND,
+    HISTORY_STATUS_IDENTITY_DRIFT,
     HISTORY_STATUS_INVALID,
     HISTORY_STATUS_LIMIT,
     HISTORY_STATUS_UNREADABLE,
@@ -1584,9 +1585,21 @@ def _stream_stable_pr_grant(
         current.st_size,
         current.st_mtime_ns,
     ):
-        return "absent", None, HISTORY_STATUS_UNREADABLE
+        return "absent", None, HISTORY_STATUS_IDENTITY_DRIFT
     state, grant = reducer.finish()
     return state, grant, HISTORY_STATUS_FOUND
+
+
+def _recover_stable_pr_grant(
+    transcript_path: str, envelope_repository_workdir: str
+) -> tuple[str, ActivePrGrant | SimplePrIntent | None, str]:
+    """Retry only one complete reread after a discarded identity-drift snapshot."""
+    state, grant, status = _stream_stable_pr_grant(
+        transcript_path, envelope_repository_workdir
+    )
+    if status == HISTORY_STATUS_IDENTITY_DRIFT:
+        return _stream_stable_pr_grant(transcript_path, envelope_repository_workdir)
+    return state, grant, status
 
 
 def _binding_sidecar_path(transcript_path: str) -> Path:
@@ -3592,7 +3605,7 @@ def evaluate_heavy(preflight: PreflightResult) -> bool:
     stream_recovery = history_status == HISTORY_STATUS_LIMIT
     transcript_diagnostic = preflight.transcript_diagnostic
     if stream_recovery:
-        pr_state, pr_grant, recovery_status = _stream_stable_pr_grant(
+        pr_state, pr_grant, recovery_status = _recover_stable_pr_grant(
             preflight.transcript_path, preflight.repository_workdir
         )
         transcript_diagnostic = _with_transcript_read_status(
@@ -3614,8 +3627,11 @@ def evaluate_heavy(preflight: PreflightResult) -> bool:
             and isinstance(pr_grant, SimplePrIntent)
             and not pr_grant.sha256
         ):
-            pr_state, pr_grant, stable_status = _stream_stable_pr_grant(
+            pr_state, pr_grant, stable_status = _recover_stable_pr_grant(
                 preflight.transcript_path, preflight.repository_workdir
+            )
+            transcript_diagnostic = _with_transcript_read_status(
+                transcript_diagnostic, history_status, stable_status
             )
             if stable_status != HISTORY_STATUS_FOUND:
                 raise PrRouteDenied(
