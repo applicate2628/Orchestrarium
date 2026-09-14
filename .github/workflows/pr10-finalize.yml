@@ -41,7 +41,7 @@ jobs:
           git fetch --no-tags origin "$AUTOMATION_BRANCH"
           git show FETCH_HEAD:.github/pr10_finalize.py > /tmp/pr10_finalize.py
           python -m py_compile /tmp/pr10_finalize.py
-          python -m pip install --disable-pip-version-check pytest
+          python -m pip install --disable-pip-version-check pytest jsonschema PyYAML
           git status --short
 
       - name: Capture exact-head full-suite baseline
