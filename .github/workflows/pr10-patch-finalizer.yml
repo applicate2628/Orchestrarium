@@ -27,20 +27,16 @@ jobs:
           path = Path('.github/pr10_finalize.py')
           text = path.read_text(encoding='utf-8')
           if 'def iblock(' not in text:
-              needle = '''def block(value: str) -> str:
-              return dedent(value).lstrip("\\n")
-
-
-          '''
-              replacement = '''def block(value: str) -> str:
-              return dedent(value).lstrip("\\n")
-
-
-          def iblock(value: str, spaces: int) -> str:
-              return indent(block(value), " " * spaces)
-
-
-          '''
+              needle = (
+                  'def block(value: str) -> str:\n'
+                  '    return dedent(value).lstrip("\\n")\n\n\n'
+              )
+              replacement = (
+                  'def block(value: str) -> str:\n'
+                  '    return dedent(value).lstrip("\\n")\n\n\n'
+                  'def iblock(value: str, spaces: int) -> str:\n'
+                  '    return indent(block(value), " " * spaces)\n\n\n'
+              )
               if text.count(needle) != 1:
                   raise SystemExit('block helper anchor differs')
               text = text.replace(needle, replacement, 1)
