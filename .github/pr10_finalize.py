@@ -10,6 +10,10 @@ def block(value: str) -> str:
     return dedent(value).lstrip("\n")
 
 
+def iblock(value: str, spaces: int) -> str:
+    return indent(block(value), " " * spaces)
+
+
 def read(path: str) -> str:
     return (ROOT / path).read_text(encoding="utf-8")
 
@@ -334,12 +338,12 @@ replace_once(
 )
 replace_once(
     mutate,
-    block(
+    iblock(
         '''
                 for intent_path in sorted(transition_root.glob("*.json")):
                     intent = _load_transition_intent(root, intent_path)
-        '''),
-    block(
+        ''', 8),
+    iblock(
         '''
                 for intent_path in _bounded_transition_intent_inventory(
                     transition_root,
@@ -347,7 +351,7 @@ replace_once(
                     unreadable="transition staging root is unreadable",
                 ):
                     intent = _load_transition_intent(root, intent_path)
-        ''')
+        ''', 8)
 )
 replace_once(
     mutate,
@@ -663,7 +667,7 @@ replace_between(
 test_gate = "tests/test_git_push_gate_hook.py"
 replace_once(
     test_gate,
-    block(
+    iblock(
         '''
                     changed = mock.Mock(
                         st_dev=observed.st_dev,
@@ -672,8 +676,8 @@ replace_once(
                         st_mtime_ns=observed.st_mtime_ns + 1,
                     )
                     with mock.patch.object(module.os, "fstat", side_effect=(observed, changed)):
-        '''),
-    block(
+        ''', 12),
+    iblock(
         '''
                     changed = mock.Mock(
                         st_dev=observed.st_dev,
@@ -686,7 +690,7 @@ replace_once(
                     with mock.patch.object(
                         module.os, "fstat", side_effect=(observed, changed, changed)
                     ):
-        ''')
+        ''', 12)
 )
 methods = block(
     '''
