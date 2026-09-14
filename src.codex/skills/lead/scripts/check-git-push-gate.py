@@ -1541,19 +1541,26 @@ def _derive_pr_grant(
 def _stream_stable_pr_grant(
     transcript_path: str, envelope_repository_workdir: str
 ) -> tuple[str, ActivePrGrant | SimplePrIntent | None, str]:
-    """Reduce a complete stable JSONL transcript with bounded memory."""
+    """Reduce one complete, identity-stable JSONL transcript."""
 
     if not transcript_path:
         return "absent", None, HISTORY_STATUS_ABSENT
     path = Path(transcript_path)
     reducer = _PrGrantReducer(envelope_repository_workdir)
     try:
+        path_before = path.stat()
         with path.open("rb") as stream:
             before = os.fstat(stream.fileno())
+            identity_fields = ("st_dev", "st_ino", "st_mode")
+            if tuple(getattr(before, name) for name in identity_fields) != tuple(
+                getattr(path_before, name) for name in identity_fields
+            ):
+                return "absent", None, HISTORY_STATUS_IDENTITY_DRIFT
             if before.st_size > TRANSCRIPT_RECOVERY_BYTE_CAP:
                 return "absent", None, HISTORY_STATUS_LIMIT
             total_bytes = 0
             total_records = 0
+            content_digest = hashlib.sha256()
             while True:
                 raw_line = stream.readline(min(
                     TRANSCRIPT_HISTORY_LINE_BYTE_CAP,
@@ -1563,6 +1570,7 @@ def _stream_stable_pr_grant(
                     break
                 total_bytes += len(raw_line)
                 total_records += 1
+                content_digest.update(raw_line)
                 if (
                     len(raw_line) > TRANSCRIPT_HISTORY_LINE_BYTE_CAP
                     or total_bytes > TRANSCRIPT_RECOVERY_BYTE_CAP
@@ -1578,29 +1586,39 @@ def _stream_stable_pr_grant(
                 if not isinstance(entry, dict):
                     return "absent", None, HISTORY_STATUS_INVALID
                 reducer.consume(entry, raw_line)
+            first_digest = content_digest.digest()
             after = os.fstat(stream.fileno())
+            stream.seek(0)
+            verify_digest = hashlib.sha256()
+            verify_bytes = 0
+            while True:
+                remaining = TRANSCRIPT_RECOVERY_BYTE_CAP - verify_bytes
+                chunk = stream.read(min(1024 * 1024, remaining) + 1)
+                if not chunk:
+                    break
+                verify_bytes += len(chunk)
+                if verify_bytes > TRANSCRIPT_RECOVERY_BYTE_CAP:
+                    return "absent", None, HISTORY_STATUS_LIMIT
+                verify_digest.update(chunk)
+            after_verify = os.fstat(stream.fileno())
             current = path.stat()
     except PrRouteDenied:
         raise
     except Exception:
         return "absent", None, HISTORY_STATUS_UNREADABLE
 
-    identity_before = (
-        before.st_dev,
-        before.st_ino,
-        before.st_size,
-        before.st_mtime_ns,
+    stable_fields = (
+        "st_dev", "st_ino", "st_mode", "st_size", "st_mtime_ns", "st_ctime_ns"
     )
-    if identity_before != (
-        after.st_dev,
-        after.st_ino,
-        after.st_size,
-        after.st_mtime_ns,
-    ) or identity_before != (
-        current.st_dev,
-        current.st_ino,
-        current.st_size,
-        current.st_mtime_ns,
+    descriptor_before = tuple(getattr(before, name) for name in stable_fields)
+    if (
+        descriptor_before != tuple(getattr(after, name) for name in stable_fields)
+        or descriptor_before
+        != tuple(getattr(after_verify, name) for name in stable_fields)
+        or tuple(getattr(path_before, name) for name in stable_fields)
+        != tuple(getattr(current, name) for name in stable_fields)
+        or total_bytes != verify_bytes
+        or first_digest != verify_digest.digest()
     ):
         return "absent", None, HISTORY_STATUS_IDENTITY_DRIFT
     state, grant = reducer.finish()
@@ -1716,17 +1734,47 @@ def _read_binding_state(path: Path) -> PrBindingState | None:
         return None
     except OSError:
         raise PrRouteDenied("PRG-AUTH-MALFORMED") from None
-    if not stat.S_ISREG(observed.st_mode) or observed.st_size > PR_BINDING_SIDECAR_BYTE_CAP:
+    if (
+        not stat.S_ISREG(observed.st_mode)
+        or stat.S_ISLNK(observed.st_mode)
+        or observed.st_nlink != 1
+        or observed.st_size > PR_BINDING_SIDECAR_BYTE_CAP
+        or bool(
+            getattr(observed, "st_file_attributes", 0)
+            & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+        )
+    ):
         raise PrRouteDenied("PRG-AUTH-MALFORMED")
     try:
         with path.open("rb") as stream:
+            opened = os.fstat(stream.fileno())
+            identity_fields = ("st_dev", "st_ino", "st_mode", "st_nlink")
+            if tuple(getattr(opened, name) for name in identity_fields) != tuple(
+                getattr(observed, name) for name in identity_fields
+            ):
+                raise PrRouteDenied("PRG-AUTH-MALFORMED")
             raw = stream.read(PR_BINDING_SIDECAR_BYTE_CAP + 1)
+            after_read = os.fstat(stream.fileno())
+            stream.seek(0)
+            verified = stream.read(PR_BINDING_SIDECAR_BYTE_CAP + 1)
+            after_verify = os.fstat(stream.fileno())
         if len(raw) > PR_BINDING_SIDECAR_BYTE_CAP:
             raise PrRouteDenied("PRG-AUTH-MALFORMED")
         current = path.lstat()
+        stable_fields = (
+            "st_dev", "st_ino", "st_mode", "st_nlink", "st_size",
+            "st_mtime_ns", "st_ctime_ns",
+        )
+        opened_fields = tuple(getattr(opened, name) for name in stable_fields)
         if (
-            (observed.st_dev, observed.st_ino, observed.st_size, observed.st_mtime_ns)
-            != (current.st_dev, current.st_ino, current.st_size, current.st_mtime_ns)
+            opened_fields
+            != tuple(getattr(after_read, name) for name in stable_fields)
+            or opened_fields
+            != tuple(getattr(after_verify, name) for name in stable_fields)
+            or tuple(getattr(observed, name) for name in stable_fields)
+            != tuple(getattr(current, name) for name in stable_fields)
+            or raw != verified
+            or len(raw) != opened.st_size
         ):
             raise PrRouteDenied("PRG-AUTH-MALFORMED")
         value = json.loads(raw.decode("utf-8", errors="strict"))

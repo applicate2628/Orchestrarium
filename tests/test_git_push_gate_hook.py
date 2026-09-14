@@ -5970,14 +5970,133 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
             changed = mock.Mock(
                 st_dev=observed.st_dev,
                 st_ino=observed.st_ino,
+                st_mode=observed.st_mode,
                 st_size=observed.st_size + 1,
                 st_mtime_ns=observed.st_mtime_ns + 1,
+                st_ctime_ns=observed.st_ctime_ns + 1,
             )
-            with mock.patch.object(module.os, "fstat", side_effect=(observed, changed)):
+            with mock.patch.object(
+                module.os, "fstat", side_effect=(observed, changed, changed)
+            ):
                 state, grant, status = module._stream_stable_pr_grant(
                     str(transcript_path), str(REPO_ROOT.resolve())
                 )
         self.assertEqual((state, grant, status), ("absent", None, "identity-drift"))
+
+    def test_stable_stream_rejects_same_size_rewrite_with_restored_mtime(self) -> None:
+        module = _load_gate_module(CANONICAL_HOOK, "pr_grant_stream_byte_drift")
+        with synthetic_transcript(
+            [assistant("x" * 2048), user(self.GRANT)]
+        ) as transcript_path:
+            original = transcript_path.read_bytes()
+            replacement = original.replace(b"/pull/7", b"/pull/8", 1)
+            self.assertNotEqual(original, replacement)
+            self.assertEqual(len(original), len(replacement))
+            metadata = transcript_path.stat()
+            real_open = Path.open
+
+            class MutatingStream:
+                def __init__(self, stream):
+                    self._stream = stream
+                    self._mutated = False
+
+                def __enter__(self):
+                    self._stream.__enter__()
+                    return self
+
+                def __exit__(self, *args):
+                    return self._stream.__exit__(*args)
+
+                def __getattr__(self, name):
+                    return getattr(self._stream, name)
+
+                def seek(self, offset, whence=0):
+                    if not self._mutated and offset == 0 and whence == 0:
+                        self._stream.seek(0)
+                        self._stream.write(replacement)
+                        self._stream.flush()
+                        os.fsync(self._stream.fileno())
+                        os.utime(
+                            transcript_path,
+                            ns=(metadata.st_atime_ns, metadata.st_mtime_ns),
+                        )
+                        self._mutated = True
+                    return self._stream.seek(offset, whence)
+
+            def patched_open(path, mode="r", *args, **kwargs):
+                if Path(path) == transcript_path and mode == "rb":
+                    return MutatingStream(real_open(path, "r+b"))
+                return real_open(path, mode, *args, **kwargs)
+
+            with mock.patch.object(
+                module.Path, "open", autospec=True, side_effect=patched_open
+            ):
+                state, grant, status = module._stream_stable_pr_grant(
+                    str(transcript_path), str(REPO_ROOT.resolve())
+                )
+        self.assertEqual(
+            (state, grant, status), ("absent", None, "identity-drift")
+        )
+
+    def test_binding_state_rejects_descriptor_path_identity_swap(self) -> None:
+        module = _load_gate_module(CANONICAL_HOOK, "pr_binding_descriptor_swap")
+        payload = {
+            "v": 1,
+            "anchor": {"record": 1, "sha256": "0" * 64},
+            "state": "pending",
+            "repositoryIdentity": [1, 2],
+            "remote": "origin",
+            "headRef": "feature",
+            "prUrl": None,
+            "prId": None,
+            "headRepositoryId": None,
+        }
+        with tempfile.TemporaryDirectory() as root:
+            root_path = Path(root)
+            original = root_path / "binding.json"
+            replacement = root_path / "replacement.json"
+            original.write_text(json.dumps(payload), encoding="utf-8")
+            replacement.write_text(
+                json.dumps({**payload, "remote": "upstream"}), encoding="utf-8"
+            )
+
+            class RacingPath:
+                def lstat(self):
+                    return original.lstat()
+
+                def open(self, *args, **kwargs):
+                    return replacement.open(*args, **kwargs)
+
+            with self.assertRaises(module.PrRouteDenied) as raised:
+                module._read_binding_state(RacingPath())
+        self.assertEqual(raised.exception.failure_id, "PRG-AUTH-MALFORMED")
+
+    def test_binding_state_rejects_external_hardlink(self) -> None:
+        module = _load_gate_module(CANONICAL_HOOK, "pr_binding_hardlink")
+        payload = {
+            "v": 1,
+            "anchor": {"record": 1, "sha256": "0" * 64},
+            "state": "pending",
+            "repositoryIdentity": [1, 2],
+            "remote": "origin",
+            "headRef": "feature",
+            "prUrl": None,
+            "prId": None,
+            "headRepositoryId": None,
+        }
+        with tempfile.TemporaryDirectory() as root:
+            root_path = Path(root)
+            external = root_path / "external.json"
+            linked = root_path / "binding.json"
+            external.write_text(json.dumps(payload), encoding="utf-8")
+            try:
+                os.link(external, linked)
+            except OSError as exc:
+                self.skipTest(f"hardlink unavailable: {exc}")
+            with self.assertRaises(module.PrRouteDenied) as raised:
+                module._read_binding_state(linked)
+        self.assertEqual(raised.exception.failure_id, "PRG-AUTH-MALFORMED")
+
 
     def test_stream_recovery_retries_only_an_initial_identity_drift(self) -> None:
         """A recovery retry may use only a fresh complete replacement snapshot."""

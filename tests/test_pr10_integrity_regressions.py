@@ -280,3 +280,172 @@ def test_noncanonical_replay_rejects_hardlinked_canonical_ledger(tmp_path: Path)
 
     assert canonical.exists()
     assert external.read_bytes() == marker_bytes
+
+
+def test_transition_intent_inventory_counts_every_directory_entry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lifecycle = load_module(MUTATE, "pr10_transition_inventory_entries")
+    root = tmp_path / "repo"
+    transition_root = root / ".scratch" / "work-items-lifecycle-transitions"
+    transition_root.mkdir(parents=True)
+    (transition_root / "one.txt").write_text("x", encoding="utf-8")
+    (transition_root / "two.txt").write_text("x", encoding="utf-8")
+    monkeypatch.setattr(
+        lifecycle, "TRANSITION_INTENT_INVENTORY_MAX_ENTRIES", 1
+    )
+
+    with pytest.raises(lifecycle.LifecycleError) as caught:
+        list(lifecycle._iter_transition_intents(root))
+
+    assert caught.value.failure_id == "WI-LIFECYCLE-TRANSITION-INTENT-INVALID"
+
+
+def test_transition_intent_inventory_refuses_before_recovery_decode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lifecycle = load_module(MUTATE, "pr10_transition_inventory_decode")
+    root = tmp_path / "repo"
+    transition_root = root / ".scratch" / "work-items-lifecycle-transitions"
+    transition_root.mkdir(parents=True)
+    (transition_root / "one.json").write_text("{}\n", encoding="utf-8")
+    (transition_root / "two.json").write_text("{}\n", encoding="utf-8")
+    monkeypatch.setattr(
+        lifecycle, "TRANSITION_INTENT_INVENTORY_MAX_ENTRIES", 1
+    )
+    monkeypatch.setattr(
+        lifecycle,
+        "_recover_transition",
+        lambda *_args, **_kwargs: pytest.fail(
+            "over-limit inventory reached transition decode"
+        ),
+    )
+
+    with pytest.raises(lifecycle.LifecycleError) as caught:
+        lifecycle._recover_all_transitions(root)
+
+    assert caught.value.failure_id == "WI-LIFECYCLE-TRANSITION-INTENT-INVALID"
+
+
+def test_transition_intent_loader_rejects_symlink_before_json_decode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lifecycle = load_module(MUTATE, "pr10_transition_intent_nofollow")
+    root = tmp_path / "repo"
+    outside = tmp_path / "outside-intent.json"
+    outside.write_text("{}\n", encoding="utf-8")
+    link = root / ".scratch" / "work-items-lifecycle-transitions" / "linked.json"
+    link.parent.mkdir(parents=True)
+    try:
+        link.symlink_to(outside)
+    except OSError as exc:
+        pytest.skip(f"symlink unavailable: {exc}")
+    monkeypatch.setattr(
+        lifecycle.json,
+        "loads",
+        lambda *_args, **_kwargs: pytest.fail(
+            "linked transition intent reached JSON decode"
+        ),
+    )
+
+    with pytest.raises(lifecycle.LifecycleError) as caught:
+        lifecycle._load_transition_intent(root, link)
+
+    assert caught.value.failure_id == "WI-LIFECYCLE-TRANSITION-INTENT-INVALID"
+
+
+def test_transition_intent_loader_rejects_hardlink_before_json_decode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lifecycle = load_module(MUTATE, "pr10_transition_intent_hardlink")
+    root = tmp_path / "repo"
+    external = tmp_path / "outside-intent.json"
+    external.write_text("{}\n", encoding="utf-8")
+    intent = root / ".scratch" / "work-items-lifecycle-transitions" / "linked.json"
+    intent.parent.mkdir(parents=True)
+    try:
+        os.link(external, intent)
+    except OSError as exc:
+        pytest.skip(f"hardlink unavailable: {exc}")
+    monkeypatch.setattr(
+        lifecycle.json,
+        "loads",
+        lambda *_args, **_kwargs: pytest.fail(
+            "hardlinked transition intent reached JSON decode"
+        ),
+    )
+
+    with pytest.raises(lifecycle.LifecycleError) as caught:
+        lifecycle._load_transition_intent(root, intent)
+
+    assert caught.value.failure_id == "WI-LIFECYCLE-TRANSITION-INTENT-INVALID"
+
+
+def test_ledger_location_proof_rejects_hardlink_before_json_decode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lifecycle = load_module(MUTATE, "pr10_ledger_proof_hardlink")
+    external = tmp_path / "outside-proof.json"
+    external.write_text("{}\n", encoding="utf-8")
+    proof = tmp_path / "proof.json"
+    try:
+        os.link(external, proof)
+    except OSError as exc:
+        pytest.skip(f"hardlink unavailable: {exc}")
+    monkeypatch.setattr(
+        lifecycle.json,
+        "loads",
+        lambda *_args, **_kwargs: pytest.fail(
+            "hardlinked ledger proof reached JSON decode"
+        ),
+    )
+
+    with pytest.raises(lifecycle.LifecycleError) as caught:
+        lifecycle._ledger_location_proof_object(
+            proof,
+            failure_id="WI-LIFECYCLE-TRANSITION-INTENT-INVALID",
+            unreadable="transition intent is unreadable",
+        )
+
+    assert caught.value.failure_id == "WI-LIFECYCLE-TRANSITION-INTENT-INVALID"
+
+
+def test_captured_snapshot_rejects_same_size_rewrite_with_restored_mtime(
+    tmp_path: Path,
+) -> None:
+    lifecycle = load_module(MUTATE, "pr10_snapshot_content_drift")
+    target = tmp_path / "snapshot.bin"
+    target.write_bytes(b"same-size")
+    snapshot = lifecycle._capture_file_snapshot(
+        target, failure_id="WI-SNAPSHOT-DRIFT"
+    )
+    metadata = target.stat()
+    target.write_bytes(b"new-bytes")
+    os.utime(target, ns=(metadata.st_atime_ns, metadata.st_mtime_ns))
+
+    with pytest.raises(lifecycle.LifecycleError) as caught:
+        lifecycle._verify_captured_file(snapshot, "WI-SNAPSHOT-DRIFT")
+
+    assert caught.value.failure_id == "WI-SNAPSHOT-DRIFT"
+
+
+def test_single_link_requirement_is_scoped_to_authority_files(tmp_path: Path) -> None:
+    lifecycle = load_module(MUTATE, "pr10_snapshot_link_scope")
+    external = tmp_path / "external.bin"
+    external.write_bytes(b"ordinary")
+    linked = tmp_path / "linked.bin"
+    try:
+        os.link(external, linked)
+    except OSError as exc:
+        pytest.skip(f"hardlink unavailable: {exc}")
+
+    snapshot = lifecycle._capture_file_snapshot(
+        linked, failure_id="WI-SNAPSHOT-GENERIC"
+    )
+    assert snapshot.data == b"ordinary"
+    with pytest.raises(lifecycle.LifecycleError):
+        lifecycle._capture_file_snapshot(
+            linked,
+            failure_id="WI-SNAPSHOT-AUTHORITY",
+            require_single_link=True,
+        )

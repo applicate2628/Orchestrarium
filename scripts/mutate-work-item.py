@@ -398,6 +398,18 @@ def _lifecycle_file_identity(info: os.stat_result) -> tuple[int, int]:
     return info.st_dev, info.st_ino
 
 
+def _lifecycle_file_snapshot_key(info: os.stat_result) -> tuple[int, ...]:
+    return (
+        info.st_dev,
+        info.st_ino,
+        info.st_mode,
+        info.st_nlink,
+        info.st_size,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
+    )
+
+
 def _lifecycle_path_has_reparse(path: Path) -> bool:
     try:
         info = path.lstat()
@@ -828,9 +840,10 @@ SHA256_RE = re.compile(r"[0-9a-f]{64}")
 BUG_DISPOSITION_ACTIONS = {"terminalize", "preserve-current"}
 BUG_DISPOSITION_PLACEHOLDER_CONTEXTS = {"adjacent-finding", "standalone"}
 BUG_DISPOSITION_TEXT_LIMIT = 2048
-LEDGER_LOCATION_INTENT_MAX_FILES = 1024
-LEDGER_LOCATION_INTENT_MAX_FILE_BYTES = 256 * 1024
-LEDGER_LOCATION_INTENT_MAX_TOTAL_BYTES = 8 * 1024 * 1024
+TRANSITION_INTENT_INVENTORY_MAX_ENTRIES = 1024
+TRANSITION_INTENT_FILE_BYTE_CAP = 256 * 1024
+TRANSITION_INTENT_INVENTORY_BYTE_CAP = 8 * 1024 * 1024
+LEDGER_LOCATION_PROOF_BYTE_CAP = 4 * 1024 * 1024
 BUG_SUPERSESSION_OWNER = "mutate-work-item:current-bug-supersession-v1"
 BUG_SUPERSESSION_KIND = "current-bug-supersession-v1"
 BUG_SUCCESSOR_BINDING_FIELDS = {
@@ -894,6 +907,7 @@ class CapturedFileSnapshot:
     length: int
     data: bytes
     parent_chain: CapturedPathParentChain
+    require_single_link: bool = False
 
 
 PARTIAL_MIGRATION_RECOVERY_INVENTORY_SHA256 = (
@@ -5473,7 +5487,11 @@ def revoke_legacy_ledger_obligation(
             failure_id="WI-LEDGER-MIGRATION-REVOCATION-FROZEN",
             message="transition staging root is a link or reparse point",
         )
-        for intent_path in sorted(transition_root.glob("*.json")):
+        for intent_path in _bounded_transition_intent_inventory(
+            transition_root,
+            failure_id="WI-LEDGER-MIGRATION-REVOCATION-FROZEN",
+            unreadable="transition staging root is unreadable",
+        ):
             intent = _load_transition_intent(root, intent_path)
             if intent.get("slug") == slug:
                 raise LifecycleError(
@@ -5562,6 +5580,53 @@ BUG_SUPERSESSION_INVENTORY_FIELDS = {
 BUG_SUPERSESSION_INVENTORY_LINK_FIELDS = {
     "path", "beforeSha256", "afterSha256", "afterBytesBase64",
 }
+
+
+def _bounded_transition_intent_inventory(
+    directory: Path, *, failure_id: str, unreadable: str
+) -> list[Path]:
+    """Inventory transition intents within finite count and byte budgets."""
+    candidates: list[Path] = []
+    total_bytes = 0
+    json_suffix = os.path.normcase(".json")
+    try:
+        with os.scandir(directory) as entries:
+            for entry_count, entry in enumerate(entries, start=1):
+                if entry_count > TRANSITION_INTENT_INVENTORY_MAX_ENTRIES:
+                    raise LifecycleError(
+                        failure_id, "transition intent inventory limit exceeded"
+                    )
+                if not os.path.normcase(entry.name).endswith(json_suffix):
+                    continue
+                path = Path(entry.path)
+                metadata = path.lstat()
+                if (
+                    not stat.S_ISREG(metadata.st_mode)
+                    or stat.S_ISLNK(metadata.st_mode)
+                    or metadata.st_nlink != 1
+                    or bool(
+                        getattr(metadata, "st_file_attributes", 0)
+                        & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+                    )
+                ):
+                    raise LifecycleError(
+                        failure_id, "transition intent is not an owned regular file"
+                    )
+                if metadata.st_size > TRANSITION_INTENT_FILE_BYTE_CAP:
+                    raise LifecycleError(
+                        failure_id, "transition intent byte limit exceeded"
+                    )
+                total_bytes += metadata.st_size
+                if total_bytes > TRANSITION_INTENT_INVENTORY_BYTE_CAP:
+                    raise LifecycleError(
+                        failure_id, "transition intent cumulative byte limit exceeded"
+                    )
+                candidates.append(path)
+    except LifecycleError:
+        raise
+    except OSError as exc:
+        raise LifecycleError(failure_id, unreadable) from exc
+    return sorted(candidates)
 
 
 def _validate_transfer_migration_receipt_bindings(
@@ -6869,9 +6934,20 @@ def _recover_bug_supersession_transition(
 
 def _load_transition_intent(root: Path, path: Path) -> dict:
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        snapshot = _capture_file_snapshot(
+            path,
+            failure_id="WI-LIFECYCLE-TRANSITION-INTENT-INVALID",
+            maximum_bytes=TRANSITION_INTENT_FILE_BYTE_CAP,
+            require_single_link=True,
+        )
+        payload = json.loads(snapshot.data.decode("utf-8", errors="strict"))
+    except LifecycleError:
+        raise
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        raise LifecycleError("WI-LIFECYCLE-TRANSITION-INTENT-INVALID", "transition intent is unreadable") from exc
+        raise LifecycleError(
+            "WI-LIFECYCLE-TRANSITION-INTENT-INVALID",
+            "transition intent is unreadable",
+        ) from exc
     is_v1 = (
         isinstance(payload, dict)
         and set(payload) == TRANSITION_INTENT_FIELDS
@@ -6979,30 +7055,25 @@ def _ledger_location_proof_object(
     *,
     failure_id: str,
     unreadable: str,
-    maximum_bytes: int | None = None,
+    maximum_bytes: int = LEDGER_LOCATION_PROOF_BYTE_CAP,
 ) -> tuple[dict, bytes]:
-    _lifecycle_reject_unreduced_reparse(
-        path,
-        failure_id=failure_id,
-        message="ledger location proof crosses a link or reparse point",
-    )
-
     def reject_duplicate_pairs(pairs: list[tuple[str, object]]) -> dict:
         value: dict[str, object] = {}
         for key, item in pairs:
             if key in value:
-                raise LifecycleError(failure_id, "ledger location proof repeats a JSON key")
+                raise LifecycleError(
+                    failure_id, "ledger location proof repeats a JSON key"
+                )
             value[key] = item
         return value
 
     try:
-        if maximum_bytes is None:
-            raw = path.read_bytes()
-        else:
-            with path.open("rb") as stream:
-                raw = stream.read(maximum_bytes + 1)
-            if len(raw) > maximum_bytes:
-                raise LifecycleError(failure_id, "ledger location proof exceeds byte limit")
+        raw = _capture_file_snapshot(
+            path,
+            failure_id=failure_id,
+            maximum_bytes=maximum_bytes,
+            require_single_link=True,
+        ).data
         payload = json.loads(
             raw.decode("utf-8", errors="strict"),
             object_pairs_hook=reject_duplicate_pairs,
@@ -7012,7 +7083,9 @@ def _ledger_location_proof_object(
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise LifecycleError(failure_id, unreadable) from exc
     if not isinstance(payload, dict):
-        raise LifecycleError(failure_id, "ledger location proof is not one JSON object")
+        raise LifecycleError(
+            failure_id, "ledger location proof is not one JSON object"
+        )
     return payload, raw
 
 
@@ -7193,48 +7266,21 @@ def _matching_ledger_location_intents(
             "transition staging root is not a directory",
         )
     matches: list[tuple[dict, Path, bytes]] = []
-    candidates: list[Path] = []
-    declared_bytes = 0
-    try:
-        for path in transition_root.iterdir():
-            if path.suffix != ".json":
-                continue
-            if len(candidates) >= LEDGER_LOCATION_INTENT_MAX_FILES:
-                raise LifecycleError(
-                    "WI-LIFECYCLE-TRANSITION-INTENT-INVALID",
-                    "transition intent inventory limit exceeded",
-                )
-            size = path.lstat().st_size
-            if size > LEDGER_LOCATION_INTENT_MAX_FILE_BYTES:
-                raise LifecycleError(
-                    "WI-LIFECYCLE-TRANSITION-INTENT-INVALID",
-                    "transition intent byte limit exceeded",
-                )
-            declared_bytes += size
-            if declared_bytes > LEDGER_LOCATION_INTENT_MAX_TOTAL_BYTES:
-                raise LifecycleError(
-                    "WI-LIFECYCLE-TRANSITION-INTENT-INVALID",
-                    "transition intent cumulative byte limit exceeded",
-                )
-            candidates.append(path)
-        candidates.sort()
-    except LifecycleError:
-        raise
-    except OSError as exc:
-        raise LifecycleError(
-            "WI-LIFECYCLE-TRANSITION-INTENT-INVALID",
-            "transition staging root is unreadable",
-        ) from exc
+    candidates = _bounded_transition_intent_inventory(
+        transition_root,
+        failure_id="WI-LIFECYCLE-TRANSITION-INTENT-INVALID",
+        unreadable="transition staging root is unreadable",
+    )
     loaded_bytes = 0
     for path in candidates:
         payload, raw = _ledger_location_proof_object(
             path,
             failure_id="WI-LIFECYCLE-TRANSITION-INTENT-INVALID",
             unreadable="transition intent is unreadable",
-            maximum_bytes=LEDGER_LOCATION_INTENT_MAX_FILE_BYTES,
+            maximum_bytes=TRANSITION_INTENT_FILE_BYTE_CAP,
         )
         loaded_bytes += len(raw)
-        if loaded_bytes > LEDGER_LOCATION_INTENT_MAX_TOTAL_BYTES:
+        if loaded_bytes > TRANSITION_INTENT_INVENTORY_BYTE_CAP:
             raise LifecycleError(
                 "WI-LIFECYCLE-TRANSITION-INTENT-INVALID",
                 "transition intent cumulative byte limit exceeded",
@@ -8044,9 +8090,15 @@ def _iter_transition_intents(root: Path) -> Iterable[Path]:
     if not directory.exists():
         return
     if not directory.is_dir() or _lifecycle_path_has_reparse(directory):
-        raise LifecycleError("WI-LIFECYCLE-TRANSITION-INTENT-INVALID", "transition staging root is unsafe")
-    for intent_path in sorted(directory.glob("*.json")):
-        yield intent_path
+        raise LifecycleError(
+            "WI-LIFECYCLE-TRANSITION-INTENT-INVALID",
+            "transition staging root is unsafe",
+        )
+    yield from _bounded_transition_intent_inventory(
+        directory,
+        failure_id="WI-LIFECYCLE-TRANSITION-INTENT-INVALID",
+        unreadable="transition staging root is unreadable",
+    )
 
 
 def _recover_all_transitions(root: Path) -> None:
@@ -9680,36 +9732,60 @@ def _capture_file_snapshot(
     *,
     failure_id: str,
     maximum_bytes: int = 4 * 1024 * 1024,
+    require_single_link: bool = False,
 ) -> CapturedFileSnapshot:
     parent_chain = _capture_path_parent_chain(path, failure_id)
     try:
-        if _lifecycle_path_has_reparse(path):
-            raise OSError("path is a link or reparse point")
+        observed = path.lstat()
+        if (
+            not stat.S_ISREG(observed.st_mode)
+            or stat.S_ISLNK(observed.st_mode)
+            or (require_single_link and observed.st_nlink != 1)
+            or observed.st_size > maximum_bytes
+            or bool(
+                getattr(observed, "st_file_attributes", 0)
+                & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+            )
+            or _lifecycle_path_has_reparse(path)
+        ):
+            raise OSError("snapshot is not a bounded owned regular file")
         descriptor = _open_readonly_nofollow(path)
         with os.fdopen(descriptor, "rb", closefd=True) as stream:
             before = os.fstat(stream.fileno())
             if (
                 not stat.S_ISREG(before.st_mode)
+                or (require_single_link and before.st_nlink != 1)
                 or bool(
                     getattr(before, "st_file_attributes", 0)
                     & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
                 )
-                or before.st_size > maximum_bytes
+                or _lifecycle_file_snapshot_key(before)[:5]
+                != _lifecycle_file_snapshot_key(observed)[:5]
             ):
-                raise OSError("snapshot is not a bounded regular file")
+                raise OSError("snapshot descriptor differs from its pathname")
             data = stream.read(maximum_bytes + 1)
+            middle = os.fstat(stream.fileno())
+            stream.seek(0)
+            verified = stream.read(maximum_bytes + 1)
             after = os.fstat(stream.fileno())
         current = path.lstat()
     except OSError as exc:
-        raise LifecycleError(failure_id, "file snapshot identity cannot be captured") from exc
+        raise LifecycleError(
+            failure_id, "file snapshot identity cannot be captured"
+        ) from exc
     identity = _lifecycle_file_identity(before)
+    before_key = _lifecycle_file_snapshot_key(before)
     if (
         len(data) > maximum_bytes
         or len(data) != before.st_size
-        or before.st_size != after.st_size
-        or _lifecycle_file_identity(after) != identity
+        or data != verified
+        or before_key != _lifecycle_file_snapshot_key(middle)
+        or before_key != _lifecycle_file_snapshot_key(after)
+        or _lifecycle_file_snapshot_key(observed)
+        != _lifecycle_file_snapshot_key(current)
         or _lifecycle_file_identity(current) != identity
         or stat.S_ISLNK(current.st_mode)
+        or (require_single_link and current.st_nlink != 1)
         or bool(
             getattr(current, "st_file_attributes", 0)
             & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
@@ -9718,24 +9794,50 @@ def _capture_file_snapshot(
     ):
         raise LifecycleError(failure_id, "file snapshot changed during capture")
     _verify_captured_parent_chain(parent_chain, failure_id)
-    return CapturedFileSnapshot(path, identity, len(data), data, parent_chain)
+    return CapturedFileSnapshot(
+        path, identity, len(data), data, parent_chain, require_single_link
+    )
 
 
 def _verify_captured_file(snapshot: CapturedFileSnapshot, failure_id: str) -> None:
     _verify_captured_parent_chain(snapshot.parent_chain, failure_id)
     try:
+        observed = snapshot.path.lstat()
         descriptor = _open_readonly_nofollow(snapshot.path)
         with os.fdopen(descriptor, "rb", closefd=True) as stream:
             before = os.fstat(stream.fileno())
+            if _lifecycle_file_snapshot_key(before)[:5] != (
+                _lifecycle_file_snapshot_key(observed)[:5]
+            ):
+                raise OSError("captured descriptor differs from its pathname")
             data = stream.read(snapshot.length + 1)
+            middle = os.fstat(stream.fileno())
+            stream.seek(0)
+            verified = stream.read(snapshot.length + 1)
             after = os.fstat(stream.fileno())
         current = snapshot.path.lstat()
     except OSError as exc:
-        raise LifecycleError(failure_id, "captured file path is no longer available") from exc
+        raise LifecycleError(
+            failure_id, "captured file path is no longer available"
+        ) from exc
+    before_key = _lifecycle_file_snapshot_key(before)
     if (
         _lifecycle_path_has_reparse(snapshot.path)
+        or not stat.S_ISREG(observed.st_mode)
         or not stat.S_ISREG(before.st_mode)
+        or stat.S_ISLNK(observed.st_mode)
         or stat.S_ISLNK(current.st_mode)
+        or (
+            snapshot.require_single_link
+            and any(
+                info.st_nlink != 1
+                for info in (observed, before, middle, after, current)
+            )
+        )
+        or bool(
+            getattr(observed, "st_file_attributes", 0)
+            & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+        )
         or bool(
             getattr(current, "st_file_attributes", 0)
             & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
@@ -9744,15 +9846,19 @@ def _verify_captured_file(snapshot: CapturedFileSnapshot, failure_id: str) -> No
             getattr(before, "st_file_attributes", 0)
             & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
         )
+        or before_key != _lifecycle_file_snapshot_key(middle)
+        or before_key != _lifecycle_file_snapshot_key(after)
+        or _lifecycle_file_snapshot_key(observed)
+        != _lifecycle_file_snapshot_key(current)
         or _lifecycle_file_identity(before) != snapshot.identity
-        or _lifecycle_file_identity(after) != snapshot.identity
         or _lifecycle_file_identity(current) != snapshot.identity
         or before.st_size != snapshot.length
-        or after.st_size != snapshot.length
-        or current.st_size != snapshot.length
+        or data != verified
         or data != snapshot.data
     ):
-        raise LifecycleError(failure_id, "captured file path identity or content changed")
+        raise LifecycleError(
+            failure_id, "captured file path identity or content changed"
+        )
 
 
 def _parse_migration_inventory_bytes(
