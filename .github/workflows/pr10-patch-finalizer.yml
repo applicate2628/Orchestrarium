@@ -1,0 +1,81 @@
+name: PR10 finalizer self-patch
+
+on:
+  push:
+    branches:
+      - automation/pr10-finalize-1f31e84
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: automation/pr10-finalize-1f31e84
+          fetch-depth: 0
+      - name: Patch indentation-sensitive replacement literals once
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('.github/pr10_finalize.py')
+          text = path.read_text(encoding='utf-8')
+          if 'def iblock(' not in text:
+              needle = '''def block(value: str) -> str:
+              return dedent(value).lstrip("\\n")
+
+
+          '''
+              replacement = '''def block(value: str) -> str:
+              return dedent(value).lstrip("\\n")
+
+
+          def iblock(value: str, spaces: int) -> str:
+              return indent(block(value), " " * spaces)
+
+
+          '''
+              if text.count(needle) != 1:
+                  raise SystemExit('block helper anchor differs')
+              text = text.replace(needle, replacement, 1)
+
+          def wrap(marker: str, spaces: int) -> None:
+              global text
+              index = text.find(marker)
+              if index < 0:
+                  return
+              start = text.rfind('    block(', 0, index)
+              if start < 0:
+                  if text.rfind('    iblock(', 0, index) >= 0:
+                      return
+                  raise SystemExit(f'block start missing for {marker!r}')
+              text = text[:start] + '    iblock(' + text[start + len('    block('):]
+              index += len('iblock') - len('block')
+              end_marker = "        ''')"
+              end = text.find(end_marker, index)
+              if end < 0:
+                  raise SystemExit(f'block end missing for {marker!r}')
+              text = text[:end] + f"        '''), {spaces})" + text[end + len(end_marker):]
+
+          wrap('for intent_path in sorted(transition_root.glob', 8)
+          wrap('for intent_path in _bounded_transition_intent_inventory(', 8)
+          wrap('with mock.patch.object(module.os, "fstat", side_effect=(observed, changed)):', 12)
+          wrap('side_effect=(observed, changed, changed)', 12)
+          path.write_text(text, encoding='utf-8', newline='\n')
+          PY
+          python -m py_compile .github/pr10_finalize.py
+          if git diff --quiet -- .github/pr10_finalize.py; then
+            echo 'Finalizer already patched.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .github/pr10_finalize.py
+          git commit -m 'ci: fix finalizer anchor indentation'
+          git push origin HEAD:automation/pr10-finalize-1f31e84
