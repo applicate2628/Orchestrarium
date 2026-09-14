@@ -303,7 +303,56 @@ def _kimi_mcp_credential_needles(
             add(component)
             add(unquote_plus(component, errors="strict"))
 
+    def is_credential_option(value: str) -> bool:
+        if not value.startswith(("-", "/")):
+            return False
+        compact = re.sub(r"[^a-z0-9]", "", value.lstrip("-/").casefold())
+        if compact.endswith(
+            (
+                "token",
+                "secret",
+                "password",
+                "passwd",
+                "credential",
+                "credentials",
+                "authorization",
+                "cookie",
+            )
+        ):
+            return True
+        return compact in {
+            "apikey",
+            "privatekey",
+            "clientkey",
+            "accesskey",
+            "authkey",
+            "signingkey",
+            "encryptionkey",
+        }
+
+    def add_argument_credential(value: str) -> None:
+        add(value)
+        decoded = unquote_plus(value, errors="strict")
+        add(decoded)
+        if "://" in value:
+            add_url_credentials(value)
+        scheme, separator, payload = decoded.partition(" ")
+        if scheme.casefold() in {"bearer", "basic"} and separator:
+            add(payload.strip())
+
     for server in selection.mcp_servers:
+        for index, argument in enumerate(server.args):
+            if "://" in argument:
+                add_url_credentials(argument)
+            option, separator, value = argument.partition("=")
+            if not is_credential_option(option):
+                continue
+            if separator:
+                add_argument_credential(value)
+            elif index + 1 < len(server.args):
+                candidate = server.args[index + 1]
+                if not is_credential_option(candidate.partition("=")[0]):
+                    add_argument_credential(candidate)
         # Preserve the existing public controls; all other names default private.
         # Carrier-specific exceptions avoid applying environment semantics to headers.
         for entries, public_names in (

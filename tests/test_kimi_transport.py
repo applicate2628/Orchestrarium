@@ -1890,7 +1890,11 @@ def test_kimi_mcp_credential_needles_cover_opaque_values_and_structured_credenti
             owner.KimiMcpServerV1(
                 name="local",
                 command="fixture",
-                args=(),
+                args=(
+                    "--api-token", "argument-token",
+                    "--client-secret=inline%2Dsecret",
+                    "--mode", "public-mode",
+                ),
                 env=(
                     owner.KimiNameValueV1("API_TOKEN", "env-token"),
                     owner.KimiNameValueV1("PRIVATE_KEY", "private-key"),
@@ -1920,6 +1924,7 @@ def test_kimi_mcp_credential_needles_cover_opaque_values_and_structured_credenti
 
     assert set(needles) == {
         b"env-token", b"private-key", b"password-value",
+        b"argument-token", b"inline%2Dsecret", b"inline-secret",
         _SYNTHETIC_AUTH_VALUE.encode("ascii"),
         _SYNTHETIC_AUTH_PAYLOAD.encode("ascii"),
         b"Basic basic-payload", b"basic-payload",
@@ -1935,6 +1940,8 @@ def test_kimi_mcp_credential_needles_cover_opaque_values_and_structured_credenti
         b"env-token",
         b"private-key",
         b"password-value",
+        b"argument-token",
+        b"inline-secret",
         _SYNTHETIC_AUTH_PAYLOAD.encode("ascii"),
         b"basic-payload",
         b"cookie-value",
@@ -1952,7 +1959,10 @@ def test_kimi_mcp_credential_echo_is_removed_from_success_and_receipt(
             owner.KimiMcpServerV1(
                 name="local",
                 command="fixture",
-                args=(),
+                args=(
+                    "--api-token", "argument-token",
+                    "--client-secret=inline%2Dsecret",
+                ),
                 env=(
                     owner.KimiNameValueV1("API_TOKEN", "env-token"),
                     owner.KimiNameValueV1("PRIVATE_KEY", "private-key"),
@@ -1994,6 +2004,21 @@ def test_kimi_mcp_credential_echo_is_removed_from_success_and_receipt(
         tmp_path / "kimi-terminal.receipt"
     ).read_text(encoding="utf-8")
     assert not lifecycle.run_dir.exists()
+
+
+def test_kimi_mcp_ordinary_arguments_remain_public() -> None:
+    owner = _load_owner()
+    selection = owner.KimiCapabilitySelectionV1(
+        mcp_servers=(
+            owner.KimiMcpServerV1(
+                name="local",
+                command="fixture",
+                args=("--port", "8080", "--mode", "public-mode"),
+            ),
+        )
+    )
+
+    assert owner._kimi_mcp_credential_needles(selection) == ()
 
 
 def test_kimi_mcp_credential_echo_keeps_nonzero_result_blocked(
