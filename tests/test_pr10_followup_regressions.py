@@ -64,7 +64,7 @@ def test_kimi_mcp_bare_environment_assignment_protects_value() -> None:
     assert b"/usr/bin" not in needles
 
 
-def test_kimi_capability_snapshot_excludes_writers_before_first_fstat(
+def test_kimi_capability_snapshot_opens_protected_reader_before_first_fstat(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     owner = load_module(PROVIDER, "pr10_capability_exclusion_owner")
@@ -84,32 +84,24 @@ def test_kimi_capability_snapshot_excludes_writers_before_first_fstat(
         encoding="utf-8",
     )
     events: list[str] = []
-
-    class Exclusion:
-        def __enter__(self):
-            events.append("enter")
-            return self
-
-        def __exit__(self, *_args):
-            events.append("exit")
-
-    monkeypatch.setattr(
-        owner,
-        "_kimi_capability_write_exclusion",
-        lambda _descriptor: Exclusion(),
-        raising=False,
-    )
+    original_open = owner._open_kimi_capability_reader
     original_fstat = owner.os.fstat
 
+    def protected_open(candidate: Path) -> int:
+        descriptor = original_open(candidate)
+        events.append("open")
+        return descriptor
+
     def guarded_fstat(descriptor: int):
-        assert events == ["enter"], "descriptor metadata was sampled before writer exclusion"
+        assert events == ["open"], "metadata was sampled before protected open"
         return original_fstat(descriptor)
 
+    monkeypatch.setattr(owner, "_open_kimi_capability_reader", protected_open)
     monkeypatch.setattr(owner.os, "fstat", guarded_fstat)
 
     owner.read_kimi_capability_selection(path)
 
-    assert events == ["enter", "exit"]
+    assert events == ["open"]
 
 
 def test_noncanonical_failed_apply_retains_owned_candidate_without_unlink(
@@ -146,32 +138,46 @@ def test_noncanonical_failed_apply_retains_owned_candidate_without_unlink(
     assert candidate.read_bytes() == marker_bytes
 
 
-def test_noncanonical_history_staging_is_validated_without_unlink(
+def test_noncanonical_history_cleanup_quarantines_fixed_name_swap(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    ledger = load_module(LEDGER, "pr10_history_cleanup_preservation_owner")
+    ledger = load_module(LEDGER, "pr10_history_cleanup_handoff_owner")
     history = tmp_path / "agent-runs.history.fixture.jsonl"
     staging = tmp_path / ".agent-runs.history.fixture.jsonl.tmp"
     owned = b"owned history bytes\n"
+    foreign = b"foreign history staging replacement\n"
     history.write_bytes(owned)
     try:
         os.link(history, staging)
     except OSError as exc:
         pytest.skip(f"hardlink unavailable: {exc}")
-    original_unlink = ledger.Path.unlink
+    original_replace = ledger.os.replace
+    raced = False
 
-    def forbid_staging_unlink(path: Path, *args, **kwargs):
-        if Path(path) == staging:
-            raise AssertionError("history staging must not be pathname-unlinked")
-        return original_unlink(path, *args, **kwargs)
+    def racing_replace(source, destination, *args, **kwargs):
+        nonlocal raced
+        if Path(source) == staging and not raced:
+            raced = True
+            replacement = staging.with_suffix(".foreign")
+            replacement.write_bytes(foreign)
+            original_replace(replacement, staging)
+        return original_replace(source, destination, *args, **kwargs)
 
-    monkeypatch.setattr(ledger.Path, "unlink", forbid_staging_unlink)
+    monkeypatch.setattr(ledger.os, "replace", racing_replace)
 
-    ledger._validate_owned_history_staging(history, staging)
+    with pytest.raises(ledger.LedgerNoncanonicalRecoveryError):
+        ledger._cleanup_owned_history_staging(history, staging)
 
+    assert raced is True
     assert history.read_bytes() == owned
-    assert staging.read_bytes() == owned
-    assert history.stat().st_ino == staging.stat().st_ino
+    assert history.stat().st_nlink == 1
+    assert not staging.exists()
+    preserved = [
+        path
+        for path in tmp_path.rglob("*")
+        if path.is_file() and path.read_bytes() == foreign
+    ]
+    assert preserved, "the foreign replacement must be quarantined, not deleted"
 
 
 def _noncanonical_replay_fixture(tmp_path: Path, module_name: str):

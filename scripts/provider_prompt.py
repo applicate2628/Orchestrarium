@@ -630,85 +630,51 @@ def _kimi_mcp_servers(value: object) -> tuple[KimiMcpServerV1, ...]:
     return tuple(result)
 
 
-def _kimi_capability_write_exclusion(descriptor: int):
-    """Exclude Windows writers before capability metadata or bytes are sampled."""
-    from contextlib import nullcontext
-
+def _open_kimi_capability_reader(path: Path) -> int:
+    """Open one capability file while denying Windows writers and replacement."""
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
     if os.name != "nt":
-        return nullcontext()
+        return os.open(path, flags)
 
     import ctypes
     import msvcrt
     from ctypes import wintypes
 
-    class Overlapped(ctypes.Structure):
-        _fields_ = (
-            ("Internal", ctypes.c_size_t),
-            ("InternalHigh", ctypes.c_size_t),
-            ("Offset", wintypes.DWORD),
-            ("OffsetHigh", wintypes.DWORD),
-            ("hEvent", wintypes.HANDLE),
-        )
-
-    class WindowsFileLock:
-        def __init__(self) -> None:
-            self.overlapped = Overlapped()
-            self.kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-            self.handle = wintypes.HANDLE(msvcrt.get_osfhandle(descriptor))
-            self.length = PROMPT_SNAPSHOT_MAX_BYTES + 1
-            self.lock_file_ex = self.kernel32.LockFileEx
-            self.lock_file_ex.argtypes = (
-                wintypes.HANDLE,
-                wintypes.DWORD,
-                wintypes.DWORD,
-                wintypes.DWORD,
-                wintypes.DWORD,
-                ctypes.POINTER(Overlapped),
-            )
-            self.lock_file_ex.restype = wintypes.BOOL
-            self.unlock_file_ex = self.kernel32.UnlockFileEx
-            self.unlock_file_ex.argtypes = (
-                wintypes.HANDLE,
-                wintypes.DWORD,
-                wintypes.DWORD,
-                wintypes.DWORD,
-                ctypes.POINTER(Overlapped),
-            )
-            self.unlock_file_ex.restype = wintypes.BOOL
-
-        def __enter__(self):
-            flags = 0x00000002 | 0x00000001
-            if not self.lock_file_ex(
-                self.handle,
-                flags,
-                0,
-                self.length & 0xFFFFFFFF,
-                self.length >> 32,
-                ctypes.byref(self.overlapped),
-            ):
-                raise OSError(
-                    ctypes.get_last_error(),
-                    "unable to exclude capability-file writers",
-                )
-            return self
-
-        def __exit__(self, exc_type, _exc, _traceback):
-            unlocked = self.unlock_file_ex(
-                self.handle,
-                0,
-                self.length & 0xFFFFFFFF,
-                self.length >> 32,
-                ctypes.byref(self.overlapped),
-            )
-            if not unlocked and exc_type is None:
-                raise OSError(
-                    ctypes.get_last_error(),
-                    "unable to release capability-file writer exclusion",
-                )
-            return False
-
-    return WindowsFileLock()
-
+    GENERIC_READ = 0x80000000
+    FILE_SHARE_READ = 0x00000001
+    OPEN_EXISTING = 3
+    FILE_ATTRIBUTE_NORMAL = 0x00000080
+    FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000
+    INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateFileW.argtypes = [
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.HANDLE,
+    ]
+    kernel32.CreateFileW.restype = wintypes.HANDLE
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    handle = kernel32.CreateFileW(
+        str(path),
+        GENERIC_READ,
+        FILE_SHARE_READ,
+        None,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT,
+        None,
+    )
+    if handle == INVALID_HANDLE_VALUE:
+        raise OSError(ctypes.get_last_error(), "CreateFileW(Kimi capabilities)")
+    try:
+        return msvcrt.open_osfhandle(int(handle), flags)
+    except BaseException:
+        kernel32.CloseHandle(handle)
+        raise
 
 
 def read_kimi_capability_selection(path: Path) -> KimiCapabilitySelectionV1:
@@ -724,24 +690,20 @@ def read_kimi_capability_selection(path: Path) -> KimiCapabilitySelectionV1:
             or _metadata_is_reparse(before)
         ):
             raise ValueError("file type")
-        descriptor = os.open(
-            candidate,
-            os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0),
-        )
+        descriptor = _open_kimi_capability_reader(candidate)
         with os.fdopen(descriptor, "rb") as stream:
-            with _kimi_capability_write_exclusion(stream.fileno()):
-                opened = os.fstat(stream.fileno())
-                if (opened.st_dev, opened.st_ino, opened.st_mode) != (
-                    before.st_dev,
-                    before.st_ino,
-                    before.st_mode,
-                ):
-                    raise ValueError("identity")
-                raw = stream.read(PROMPT_SNAPSHOT_MAX_BYTES + 1)
-                after_read = os.fstat(stream.fileno())
-                stream.seek(0)
-                confirmed_raw = stream.read(PROMPT_SNAPSHOT_MAX_BYTES + 1)
-                after_confirmation = os.fstat(stream.fileno())
+            opened = os.fstat(stream.fileno())
+            if (opened.st_dev, opened.st_ino, opened.st_mode) != (
+                before.st_dev,
+                before.st_ino,
+                before.st_mode,
+            ):
+                raise ValueError("identity")
+            raw = stream.read(PROMPT_SNAPSHOT_MAX_BYTES + 1)
+            after_read = os.fstat(stream.fileno())
+            stream.seek(0)
+            confirmed_raw = stream.read(PROMPT_SNAPSHOT_MAX_BYTES + 1)
+            after_confirmation = os.fstat(stream.fileno())
         validate_no_reparse_components(candidate)
         after_path = candidate.lstat()
         stable_fields = (

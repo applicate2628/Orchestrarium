@@ -4394,11 +4394,41 @@ def test_kimi_capability_snapshot_rejects_same_metadata_rewrite_between_reads(
     monkeypatch.setattr(owner.Path, "lstat", stable_lstat)
     monkeypatch.setattr(owner.os, "fstat", stable_fstat)
     monkeypatch.setattr(owner.os, "fdopen", RewritingReader)
+    monkeypatch.setattr(
+        owner,
+        "_open_kimi_capability_reader",
+        lambda candidate: os.open(
+            candidate,
+            os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0),
+        ),
+    )
 
     with pytest.raises(ValueError, match="^E_KIMI_CAPABILITIES_INVALID$"):
         owner.read_kimi_capability_selection(path)
 
     assert len(reads) == 2
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows capability writer exclusion")
+def test_kimi_capability_snapshot_excludes_windows_writers(tmp_path: Path) -> None:
+    owner = _load_owner()
+    path = tmp_path / "capabilities.json"
+    _write_kimi_capabilities(path, tools=["Read"])
+    original = path.read_bytes()
+    descriptor = owner._open_kimi_capability_reader(path)
+    replacement = path.with_suffix(".replacement")
+    replacement.write_bytes(original.replace(b'"Read"', b'"Bash"'))
+
+    try:
+        with pytest.raises(OSError):
+            path.write_bytes(replacement.read_bytes())
+        assert path.read_bytes() == original
+        with pytest.raises(OSError):
+            os.replace(replacement, path)
+        assert path.read_bytes() == original
+    finally:
+        os.close(descriptor)
+        replacement.unlink(missing_ok=True)
 
 
 @pytest.mark.parametrize("name", ("DB_DSN", "X-Service-Key", "apiKey", "authenticationToken"))

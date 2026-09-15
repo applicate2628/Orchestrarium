@@ -771,9 +771,9 @@ def _read_exact_history_blob(path: Path, expected_sha256: str) -> bytes | None:
         or _noncanonical_is_reparse(metadata)
     ):
         _noncanonical_fail("HISTORY-CONFLICT", "history blob is linked or non-ordinary")
-    # Publication retains exactly the history name and its reserved staging name
-    # on one inode because pathname-only unlink cannot prove ownership atomically.
-    # Admit only that known two-link state; any other hardlink is not authority.
+    # A crash after linking history but before private-handoff cleanup leaves the
+    # history name plus its reserved staging name on one inode. Admit only that
+    # known two-link recovery state; any other hardlink is not authority.
     links = getattr(metadata, "st_nlink", 1)
     if links != 1:
         staging = path.parent / f".{path.name}.tmp"
@@ -806,8 +806,8 @@ def _read_exact_history_blob(path: Path, expected_sha256: str) -> bytes | None:
     return value
 
 
-def _validate_owned_history_staging(history_path: Path, staging: Path) -> None:
-    """Validate the known two-link publication state without racy deletion."""
+def _cleanup_owned_history_staging(history_path: Path, staging: Path) -> None:
+    """Retire the admitted history hardlink without unlinking its fixed name."""
     try:
         staging_metadata = staging.lstat()
     except FileNotFoundError:
@@ -818,6 +818,7 @@ def _validate_owned_history_staging(history_path: Path, staging: Path) -> None:
         history_metadata = history_path.lstat()
     except OSError as exc:
         _noncanonical_fail("HISTORY-CONFLICT", str(exc))
+    identity = _noncanonical_file_identity(history_metadata)
     if (
         not stat.S_ISREG(history_metadata.st_mode)
         or stat.S_ISLNK(history_metadata.st_mode)
@@ -827,12 +828,68 @@ def _validate_owned_history_staging(history_path: Path, staging: Path) -> None:
         or _noncanonical_is_reparse(staging_metadata)
         or getattr(history_metadata, "st_nlink", 1) != 2
         or getattr(staging_metadata, "st_nlink", 1) != 2
-        or (history_metadata.st_dev, history_metadata.st_ino)
-        != (staging_metadata.st_dev, staging_metadata.st_ino)
+        or _noncanonical_file_identity(staging_metadata) != identity
     ):
         _noncanonical_fail(
             "HISTORY-CONFLICT", "reserved history staging path conflicts"
         )
+
+    handoff_directory = Path(
+        tempfile.mkdtemp(prefix=f".{staging.name}.cleanup-", dir=staging.parent)
+    )
+    handoff = handoff_directory / "staging"
+    removed = False
+    try:
+        try:
+            os.replace(staging, handoff)
+        except OSError as exc:
+            _noncanonical_fail("HISTORY-CONFLICT", str(exc))
+        try:
+            moved_metadata = handoff.lstat()
+            current_history = history_path.lstat()
+        except OSError as exc:
+            _noncanonical_fail("HISTORY-CONFLICT", str(exc))
+        if (
+            not stat.S_ISREG(moved_metadata.st_mode)
+            or stat.S_ISLNK(moved_metadata.st_mode)
+            or _noncanonical_is_reparse(moved_metadata)
+            or not stat.S_ISREG(current_history.st_mode)
+            or stat.S_ISLNK(current_history.st_mode)
+            or _noncanonical_is_reparse(current_history)
+            or getattr(moved_metadata, "st_nlink", 1) != 2
+            or getattr(current_history, "st_nlink", 1) != 2
+            or _noncanonical_file_identity(moved_metadata) != identity
+            or _noncanonical_file_identity(current_history) != identity
+        ):
+            _noncanonical_fail(
+                "HISTORY-CONFLICT", "history staging changed during private handoff"
+            )
+        try:
+            handoff.unlink()
+        except OSError as exc:
+            _noncanonical_fail("HISTORY-CONFLICT", str(exc))
+        removed = True
+        try:
+            final_history = history_path.lstat()
+        except OSError as exc:
+            _noncanonical_fail("HISTORY-CONFLICT", str(exc))
+        if (
+            not stat.S_ISREG(final_history.st_mode)
+            or stat.S_ISLNK(final_history.st_mode)
+            or _noncanonical_is_reparse(final_history)
+            or getattr(final_history, "st_nlink", 1) != 1
+            or _noncanonical_file_identity(final_history) != identity
+        ):
+            _noncanonical_fail(
+                "HISTORY-CONFLICT", "history identity changed during staging cleanup"
+            )
+    finally:
+        # A contested handoff is evidence. Remove only an empty private directory.
+        if removed or not handoff.exists():
+            try:
+                handoff_directory.rmdir()
+            except OSError:
+                pass
 
 
 def _write_exact_staging_file(
@@ -954,45 +1011,89 @@ def _replace_exact_staging_file(
     expected: bytes,
     identity: tuple[int, int, int, int],
 ) -> None:
-    """Re-admit the exact bounded candidate immediately before replacement."""
-    descriptor, opened = _noncanonical_open_ordinary(path, writable=False)
-    try:
+    """Publish only the admitted inode after a private same-directory handoff."""
+
+    def admit(candidate: Path) -> None:
+        descriptor, opened = _noncanonical_open_ordinary(candidate, writable=False)
+        try:
+            if (
+                _noncanonical_file_identity(opened) != identity
+                or getattr(opened, "st_nlink", 1) != 1
+            ):
+                _noncanonical_fail(
+                    "HISTORY-CONFLICT",
+                    f"staging descriptor identity changed: {candidate.name}",
+                )
+            with os.fdopen(descriptor, "rb") as stream:
+                descriptor = -1
+                actual = stream.read(len(expected) + 1)
+                after_read = os.fstat(stream.fileno())
+        except OSError as exc:
+            _noncanonical_fail("HISTORY-CONFLICT", str(exc))
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
+        try:
+            current = candidate.lstat()
+        except OSError as exc:
+            _noncanonical_fail("HISTORY-CONFLICT", str(exc))
         if (
-            _noncanonical_file_identity(opened) != identity
-            or getattr(opened, "st_nlink", 1) != 1
+            actual != expected
+            or _noncanonical_file_identity(after_read) != identity
+            or getattr(after_read, "st_nlink", 1) != 1
+            or not stat.S_ISREG(current.st_mode)
+            or stat.S_ISLNK(current.st_mode)
+            or _noncanonical_is_reparse(current)
+            or getattr(current, "st_nlink", 1) != 1
+            or _noncanonical_file_identity(current) != identity
         ):
             _noncanonical_fail(
                 "HISTORY-CONFLICT",
-                f"staging descriptor identity changed: {path.name}",
+                f"staging path changed before publication: {candidate.name}",
             )
-        with os.fdopen(descriptor, "rb") as stream:
-            descriptor = -1
-            actual = stream.read(len(expected) + 1)
-            after_read = os.fstat(stream.fileno())
-    except OSError as exc:
-        _noncanonical_fail("HISTORY-CONFLICT", str(exc))
-    finally:
-        if descriptor >= 0:
-            os.close(descriptor)
+
+    admit(path)
+    handoff_directory = Path(
+        tempfile.mkdtemp(prefix=f".{path.name}.publish-", dir=path.parent)
+    )
+    handoff = handoff_directory / "candidate"
+    published = False
     try:
-        current = path.lstat()
-    except OSError as exc:
-        _noncanonical_fail("HISTORY-CONFLICT", str(exc))
-    if (
-        actual != expected
-        or _noncanonical_file_identity(after_read) != identity
-        or getattr(after_read, "st_nlink", 1) != 1
-        or not stat.S_ISREG(current.st_mode)
-        or stat.S_ISLNK(current.st_mode)
-        or _noncanonical_is_reparse(current)
-        or getattr(current, "st_nlink", 1) != 1
-        or _noncanonical_file_identity(current) != identity
-    ):
-        _noncanonical_fail(
-            "HISTORY-CONFLICT",
-            f"staging path changed before publication: {path.name}",
-        )
-    os.replace(path, destination)
+        try:
+            os.replace(path, handoff)
+        except OSError as exc:
+            _noncanonical_fail("HISTORY-CONFLICT", str(exc))
+        # A fixed-name swap is now quarantined under an unpredictable private
+        # directory. Re-admit the moved object before the canonical name is touched.
+        admit(handoff)
+        try:
+            os.replace(handoff, destination)
+        except OSError as exc:
+            _noncanonical_fail("HISTORY-CONFLICT", str(exc))
+        published = True
+        try:
+            current = destination.lstat()
+        except OSError as exc:
+            _noncanonical_fail("READBACK-INDETERMINATE", str(exc))
+        if (
+            not stat.S_ISREG(current.st_mode)
+            or stat.S_ISLNK(current.st_mode)
+            or _noncanonical_is_reparse(current)
+            or getattr(current, "st_nlink", 1) != 1
+            or _noncanonical_file_identity(current) != identity
+        ):
+            _noncanonical_fail(
+                "READBACK-INDETERMINATE",
+                "published ledger identity changed at replacement",
+            )
+    finally:
+        # rmdir cannot remove a foreign file. A contested or failed handoff is
+        # deliberately preserved for diagnosis rather than pathname-cleaned.
+        if published or not handoff.exists():
+            try:
+                handoff_directory.rmdir()
+            except OSError:
+                pass
 
 
 def _publish_noncanonical_history_blob(
@@ -1003,7 +1104,7 @@ def _publish_noncanonical_history_blob(
     if existing is not None:
         if existing != original_bytes:
             _noncanonical_fail("HISTORY-CONFLICT", "history blob bytes changed")
-        _validate_owned_history_staging(history_path, staging)
+        _cleanup_owned_history_staging(history_path, staging)
         return
     _write_exact_staging_file(staging, original_bytes)
     try:
@@ -1020,7 +1121,7 @@ def _publish_noncanonical_history_blob(
             _noncanonical_fail("HISTORY-CONFLICT", "history blob bytes changed")
     except OSError as exc:
         _noncanonical_fail("HISTORY-CONFLICT", str(exc))
-    _validate_owned_history_staging(history_path, staging)
+    _cleanup_owned_history_staging(history_path, staging)
 
 
 def _noncanonical_recovery_state(
@@ -1078,14 +1179,17 @@ def _command_apply_noncanonical_history(
     replaced = False
     staging_identity = None
     try:
-        staging_identity = _write_exact_staging_file(candidate, marker_bytes)
-        _validate_noncanonical_marker_candidate(item, candidate, validator)
+        # The history blob is digest-bound and nonauthorizing. Publish that inert
+        # prerequisite before materializing the fixed-name ledger candidate, so a
+        # post-history interruption leaves no candidate path to recover or clean.
         _publish_noncanonical_history_blob(
             item, history_path, expected_sha256, original
         )
         if inject_failure == "post-history-publish":
             print("FAIL: injected post-history-publish interruption", file=sys.stderr)
             return False, history_path
+        staging_identity = _write_exact_staging_file(candidate, marker_bytes)
+        _validate_noncanonical_marker_candidate(item, candidate, validator)
         if inject_failure == "pre-ledger-replace":
             print("FAIL: injected pre-ledger-replace interruption", file=sys.stderr)
             return False, history_path
