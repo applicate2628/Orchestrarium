@@ -36,94 +36,41 @@ jobs:
           path = Path("scripts/provider_prompt.py")
           text = path.read_text(encoding="utf-8")
 
-          old_header = '''            if words and words[-1] in {"header", "headers"} and "file" not in words:
-                  carrier = add_header_argument
-          '''
-          new_header = '''            if (
+          condition = 'if words and words[-1] in {"header", "headers"} and "file" not in words:'
+          replacement = '''if (
                   words == ("h",)
                   or (
                       words
                       and words[-1] in {"header", "headers"}
                       and "file" not in words
                   )
-              ):
-                  carrier = add_header_argument
-          '''
-          if text.count(old_header) != 1:
-              raise SystemExit("generated header-carrier block drifted")
-          text = text.replace(old_header, new_header, 1)
+              ):'''
+          if text.count(condition) != 1:
+              raise SystemExit("generated header-carrier condition drifted")
+          text = text.replace(condition, replacement, 1)
 
-          old_read = '''        with os.fdopen(descriptor, "rb") as stream:
-              with _kimi_capability_write_exclusion(stream.fileno()):
-                  opened = os.fstat(stream.fileno())
-                  if (opened.st_dev, opened.st_ino, opened.st_mode) != (
-                      before.st_dev,
-                      before.st_ino,
-                      before.st_mode,
-                  ):
-                      raise ValueError("identity")
-                  raw = stream.read(PROMPT_SNAPSHOT_MAX_BYTES + 1)
-                  after_read = os.fstat(stream.fileno())
-                  stream.seek(0)
-                  confirmed_raw = stream.read(PROMPT_SNAPSHOT_MAX_BYTES + 1)
-                  after_confirmation = os.fstat(stream.fileno())
-                  validate_no_reparse_components(candidate)
-                  after_path = candidate.lstat()
-                  stable_fields = (
-                      "st_dev", "st_ino", "st_mode", "st_size", "st_mtime_ns", "st_ctime_ns"
-                  )
-                  # Windows pathname and descriptor ctime have different semantics.
-                  # Compare each interface with its own earlier observation.
-                  if (
-                      tuple(getattr(opened, name) for name in stable_fields)
-                      != tuple(getattr(after_read, name) for name in stable_fields)
-                      or tuple(getattr(opened, name) for name in stable_fields)
-                      != tuple(getattr(after_confirmation, name) for name in stable_fields)
-                      or tuple(getattr(before, name) for name in stable_fields)
-                      != tuple(getattr(after_path, name) for name in stable_fields)
-                      or raw != confirmed_raw
-                      or len(raw) != opened.st_size
-                      or len(raw) > PROMPT_SNAPSHOT_MAX_BYTES
-                  ):
-                      raise ValueError("snapshot changed or exceeded size limit")
-          '''
-          new_read = '''        with os.fdopen(descriptor, "rb") as stream:
-              with _kimi_capability_write_exclusion(stream.fileno()):
-                  opened = os.fstat(stream.fileno())
-                  if (opened.st_dev, opened.st_ino, opened.st_mode) != (
-                      before.st_dev,
-                      before.st_ino,
-                      before.st_mode,
-                  ):
-                      raise ValueError("identity")
-                  raw = stream.read(PROMPT_SNAPSHOT_MAX_BYTES + 1)
-                  after_read = os.fstat(stream.fileno())
-                  stream.seek(0)
-                  confirmed_raw = stream.read(PROMPT_SNAPSHOT_MAX_BYTES + 1)
-                  after_confirmation = os.fstat(stream.fileno())
-              validate_no_reparse_components(candidate)
-              after_path = candidate.lstat()
-              stable_fields = (
-                  "st_dev", "st_ino", "st_mode", "st_size", "st_mtime_ns", "st_ctime_ns"
-              )
-              # Windows pathname and descriptor ctime have different semantics.
-              # Compare each interface with its own earlier observation.
-              if (
-                  tuple(getattr(opened, name) for name in stable_fields)
-                  != tuple(getattr(after_read, name) for name in stable_fields)
-                  or tuple(getattr(opened, name) for name in stable_fields)
-                  != tuple(getattr(after_confirmation, name) for name in stable_fields)
-                  or tuple(getattr(before, name) for name in stable_fields)
-                  != tuple(getattr(after_path, name) for name in stable_fields)
-                  or raw != confirmed_raw
-                  or len(raw) != opened.st_size
-                  or len(raw) > PROMPT_SNAPSHOT_MAX_BYTES
-              ):
-                  raise ValueError("snapshot changed or exceeded size limit")
-          '''
-          if text.count(old_read) != 1:
-              raise SystemExit("generated capability-read block drifted")
-          text = text.replace(old_read, new_read, 1)
+          lines = text.splitlines(keepends=True)
+          lock_index = next(
+              index
+              for index, line in enumerate(lines)
+              if "with _kimi_capability_write_exclusion(stream.fileno()):" in line
+          )
+          path_check_index = next(
+              index
+              for index in range(lock_index + 1, len(lines))
+              if lines[index].strip() == "validate_no_reparse_components(candidate)"
+          )
+          raise_index = next(
+              index
+              for index in range(path_check_index, len(lines))
+              if lines[index].strip()
+              == 'raise ValueError("snapshot changed or exceeded size limit")'
+          )
+          for index in range(path_check_index, raise_index + 1):
+              if not lines[index].startswith("    "):
+                  raise SystemExit("capability path-check indentation drifted")
+              lines[index] = lines[index][4:]
+          text = "".join(lines)
           path.write_text(text, encoding="utf-8")
 
           manifest_path = Path("shared/provider-prompt-projections.v1.json")
