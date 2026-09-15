@@ -214,6 +214,43 @@ def test_noncanonical_staging_rejects_external_hardlink(tmp_path: Path) -> None:
     assert external.read_bytes() == expected
 
 
+def test_noncanonical_staging_existing_candidate_read_is_bounded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ledger = load_module(LEDGER, "pr10_noncanonical_bounded_staging_owner")
+    expected = b"exact staging bytes\n"
+    staging = tmp_path / "agent-runs.jsonl.tmp"
+    staging.write_bytes(expected + b"foreign trailing bytes")
+    original_fdopen = ledger.os.fdopen
+    requested_sizes = []
+
+    class TrackingReader:
+        def __init__(self, descriptor, mode):
+            self.stream = original_fdopen(descriptor, mode)
+
+        def __enter__(self):
+            self.stream.__enter__()
+            return self
+
+        def fileno(self):
+            return self.stream.fileno()
+
+        def read(self, size=-1):
+            requested_sizes.append(size)
+            return self.stream.read(size)
+
+        def __exit__(self, *args):
+            return self.stream.__exit__(*args)
+
+    monkeypatch.setattr(ledger.os, "fdopen", TrackingReader)
+
+    with pytest.raises(ledger.LedgerNoncanonicalRecoveryError):
+        ledger._write_exact_staging_file(staging, expected)
+
+    assert requested_sizes == [len(expected) + 1]
+    assert staging.exists()
+
+
 def _noncanonical_replay_fixture(tmp_path: Path, module_name: str):
     ledger = load_module(LEDGER, module_name)
     item = tmp_path / "work-items" / "active" / "noncanonical-replay"
@@ -230,6 +267,79 @@ def _noncanonical_replay_fixture(tmp_path: Path, module_name: str):
     )
     marker_bytes = (ledger.serialize_event(marker) + "\n").encode("utf-8")
     return ledger, item, expected_sha256, marker_bytes
+
+
+@pytest.mark.parametrize("operation", ("apply", "rollback"))
+def test_noncanonical_recovery_preserves_foreign_candidate(
+    tmp_path: Path, operation: str
+) -> None:
+    ledger, item, expected_sha256, marker_bytes = _noncanonical_replay_fixture(
+        tmp_path, f"pr10_foreign_candidate_{operation}_owner"
+    )
+    history = item / f"agent-runs.history.{expected_sha256}.jsonl"
+    original = history.read_bytes()
+    canonical = item / "agent-runs.jsonl"
+    canonical.write_bytes(original if operation == "apply" else marker_bytes)
+    candidate = item / "agent-runs.jsonl.tmp"
+    foreign = b"foreign staging candidate\n"
+    candidate.write_bytes(foreign)
+    command = (
+        ledger._command_apply_noncanonical_history
+        if operation == "apply"
+        else ledger._command_rollback_noncanonical_history
+    )
+
+    with pytest.raises(ledger.LedgerNoncanonicalRecoveryError):
+        command(
+            item, expected_sha256, "linked-ledger-replay",
+            "2026-09-10T12:00:00Z", ledger.load_validator(), None,
+        )
+
+    assert candidate.read_bytes() == foreign
+
+
+@pytest.mark.parametrize("operation", ("apply", "rollback"))
+def test_noncanonical_recovery_cleanup_preserves_same_bytes_replacement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str
+) -> None:
+    ledger, item, expected_sha256, marker_bytes = _noncanonical_replay_fixture(
+        tmp_path, f"pr10_replaced_candidate_{operation}_owner"
+    )
+    history = item / f"agent-runs.history.{expected_sha256}.jsonl"
+    original = history.read_bytes()
+    canonical = item / "agent-runs.jsonl"
+    canonical.write_bytes(original if operation == "apply" else marker_bytes)
+    candidate = item / "agent-runs.jsonl.tmp"
+    original_write = ledger._write_exact_staging_file
+    replacement_identity = {}
+
+    def replace_after_write(path: Path, expected: bytes):
+        owned = original_write(path, expected)
+        if path == candidate:
+            replacement = path.with_suffix(".replacement")
+            replacement.write_bytes(expected)
+            metadata = replacement.stat()
+            replacement_identity["value"] = (metadata.st_dev, metadata.st_ino)
+            os.replace(replacement, path)
+        return owned
+
+    monkeypatch.setattr(ledger, "_write_exact_staging_file", replace_after_write)
+    monkeypatch.setattr(ledger, "_validate_noncanonical_marker_candidate", lambda *_: None)
+    command = (
+        ledger._command_apply_noncanonical_history
+        if operation == "apply"
+        else ledger._command_rollback_noncanonical_history
+    )
+
+    completed, _history = command(
+        item, expected_sha256, "linked-ledger-replay",
+        "2026-09-10T12:00:00Z", ledger.load_validator(), "pre-ledger-replace",
+    )
+
+    assert completed is False
+    assert candidate.exists()
+    metadata = candidate.stat()
+    assert (metadata.st_dev, metadata.st_ino) == replacement_identity["value"]
 
 
 def test_noncanonical_replay_rejects_symlinked_canonical_ledger(tmp_path: Path) -> None:

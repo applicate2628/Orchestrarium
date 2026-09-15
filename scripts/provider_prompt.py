@@ -266,6 +266,8 @@ def _kimi_mcp_credential_needles(
     from urllib.parse import unquote, unquote_plus, urlsplit
 
     needles: dict[bytes, None] = {}
+    public_env_names = {"path", "lang", "timeout"}
+    public_header_names = {"accept-language", "x-region", "x-timeout"}
 
     def add(value: str) -> None:
         if not value:
@@ -303,10 +305,32 @@ def _kimi_mcp_credential_needles(
             add(component)
             add(unquote_plus(component, errors="strict"))
 
-    def is_credential_option(value: str) -> bool:
-        if not value.startswith(("-", "/")):
+    def split_option(argument: str) -> tuple[str | None, str | None]:
+        if not argument.startswith(("-", "/")):
+            return None, None
+        prefix_length = len(argument) - len(argument.lstrip("-/"))
+        if prefix_length == len(argument):
+            return argument, None
+        delimiters = [
+            position
+            for position in (argument.find("=", prefix_length), argument.find(":", prefix_length))
+            if position >= 0
+        ]
+        if not delimiters:
+            return argument, None
+        boundary = min(delimiters)
+        return argument[:boundary], argument[boundary + 1 :]
+
+    def option_words(option: str) -> tuple[str, ...]:
+        body = option.lstrip("-/")
+        body = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "-", body)
+        return tuple(re.findall(r"[a-z0-9]+", body.casefold()))
+
+    def is_credential_option(option: str | None) -> bool:
+        if option is None:
             return False
-        compact = re.sub(r"[^a-z0-9]", "", value.lstrip("-/").casefold())
+        words = option_words(option)
+        compact = "".join(words)
         if compact.endswith(
             (
                 "token",
@@ -320,6 +344,26 @@ def _kimi_mcp_credential_needles(
             )
         ):
             return True
+        if any(
+            word
+            in {
+                "token",
+                "secret",
+                "password",
+                "passwd",
+                "credential",
+                "credentials",
+                "authorization",
+                "cookie",
+            }
+            for word in words
+        ):
+            return True
+        if "key" in words and any(
+            word in {"api", "private", "client", "access", "auth", "signing", "encryption"}
+            for word in words
+        ):
+            return True
         return compact in {
             "apikey",
             "privatekey",
@@ -329,6 +373,14 @@ def _kimi_mcp_credential_needles(
             "signingkey",
             "encryptionkey",
         }
+
+    def is_option_argument(argument: str) -> bool:
+        option, _value = split_option(argument)
+        if option is None:
+            return False
+        if option.startswith("/") and "/" in option[1:]:
+            return False
+        return bool(option.lstrip("-/"))
 
     def add_argument_credential(value: str) -> None:
         add(value)
@@ -340,41 +392,79 @@ def _kimi_mcp_credential_needles(
         if scheme.casefold() in {"bearer", "basic"} and separator:
             add(payload.strip())
 
+    def add_header_value(name: str, value: str) -> None:
+        normalized = tuple(re.findall(r"[a-z0-9]+", name.casefold()))
+        if name.strip().casefold() in public_header_names:
+            return
+        add_argument_credential(value.strip())
+        if normalized in {("authorization",), ("proxy", "authorization")}:
+            scheme, separator, payload = value.strip().partition(" ")
+            if scheme.casefold() in {"bearer", "basic"} and separator:
+                add(payload.strip())
+        elif normalized == ("cookie",):
+            for item in value.split(";"):
+                _name, separator, payload = item.partition("=")
+                if separator:
+                    add(payload.strip())
+
+    def add_header_argument(value: str) -> None:
+        name, separator, payload = value.partition(":")
+        if not separator:
+            add_argument_credential(value)
+            return
+        add_header_value(name.strip(), payload)
+
+    def add_env_value(name: str, value: str) -> None:
+        if name.strip().casefold() in public_env_names:
+            return
+        add_argument_credential(value.strip())
+
+    def add_env_argument(value: str) -> None:
+        name, separator, payload = value.partition("=")
+        if not separator:
+            add_argument_credential(value)
+            return
+        add_env_value(name, payload)
+
     for server in selection.mcp_servers:
-        for index, argument in enumerate(server.args):
-            if "://" in argument:
-                add_url_credentials(argument)
-            option, separator, value = argument.partition("=")
-            if not is_credential_option(option):
+        arguments = server.args
+        index = 0
+        while index < len(arguments):
+            argument = arguments[index]
+            option, inline_value = split_option(argument)
+            normalized_option = option.lstrip("-/").casefold() if option else ""
+            carrier = None
+            if normalized_option in {"header", "h"}:
+                carrier = add_header_argument
+            elif normalized_option in {"env", "e"}:
+                carrier = add_env_argument
+
+            if carrier is not None:
+                if inline_value is not None:
+                    carrier(inline_value)
+                elif index + 1 < len(arguments) and not is_option_argument(arguments[index + 1]):
+                    carrier(arguments[index + 1])
+                    index += 1
+                index += 1
                 continue
-            if separator:
-                add_argument_credential(value)
-            elif index + 1 < len(server.args):
-                candidate = server.args[index + 1]
-                if not is_credential_option(candidate.partition("=")[0]):
-                    add_argument_credential(candidate)
+
+            if is_credential_option(option):
+                if inline_value is not None:
+                    add_argument_credential(inline_value)
+                elif index + 1 < len(arguments) and not is_option_argument(arguments[index + 1]):
+                    add_argument_credential(arguments[index + 1])
+                    index += 1
+            elif inline_value is not None and "://" in inline_value:
+                add_url_credentials(inline_value)
+            elif option is None and "://" in argument:
+                add_url_credentials(argument)
+            index += 1
+
         # Preserve the existing public controls; all other names default private.
-        # Carrier-specific exceptions avoid applying environment semantics to headers.
-        for entries, public_names in (
-            (server.env, {"path", "lang", "timeout"}),
-            (server.headers, {"accept-language", "x-region", "x-timeout"}),
-        ):
-            for entry in entries:
-                if entry.name.casefold() in public_names:
-                    continue
-                add(entry.value)
-                if "://" in entry.value:
-                    add_url_credentials(entry.value)
-                name = tuple(re.findall(r"[a-z0-9]+", entry.name.casefold()))
-                if name in {("authorization",), ("proxy", "authorization")}:
-                    scheme, separator, payload = entry.value.partition(" ")
-                    if scheme.casefold() in {"bearer", "basic"} and separator:
-                        add(payload.strip())
-                elif name == ("cookie",):
-                    for item in entry.value.split(";"):
-                        _name, separator, value = item.partition("=")
-                        if separator:
-                            add(value.strip())
+        for entry in server.env:
+            add_env_value(entry.name, entry.value)
+        for entry in server.headers:
+            add_header_value(entry.name, entry.value)
         if server.url:
             add_url_credentials(server.url)
     return tuple(needles)
@@ -547,6 +637,9 @@ def read_kimi_capability_selection(path: Path) -> KimiCapabilitySelectionV1:
                 raise ValueError("identity")
             raw = stream.read(PROMPT_SNAPSHOT_MAX_BYTES + 1)
             after_read = os.fstat(stream.fileno())
+            stream.seek(0)
+            confirmed_raw = stream.read(PROMPT_SNAPSHOT_MAX_BYTES + 1)
+            after_confirmation = os.fstat(stream.fileno())
         validate_no_reparse_components(candidate)
         after_path = candidate.lstat()
         stable_fields = (
@@ -557,8 +650,11 @@ def read_kimi_capability_selection(path: Path) -> KimiCapabilitySelectionV1:
         if (
             tuple(getattr(opened, name) for name in stable_fields)
             != tuple(getattr(after_read, name) for name in stable_fields)
+            or tuple(getattr(opened, name) for name in stable_fields)
+            != tuple(getattr(after_confirmation, name) for name in stable_fields)
             or tuple(getattr(before, name) for name in stable_fields)
             != tuple(getattr(after_path, name) for name in stable_fields)
+            or raw != confirmed_raw
             or len(raw) != opened.st_size
             or len(raw) > PROMPT_SNAPSHOT_MAX_BYTES
         ):
