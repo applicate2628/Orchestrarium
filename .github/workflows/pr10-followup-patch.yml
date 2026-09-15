@@ -67,9 +67,9 @@ jobs:
               == 'raise ValueError("snapshot changed or exceeded size limit")'
           )
           for index in range(path_check_index, raise_index + 1):
-              if not lines[index].startswith("    "):
+              if not lines[index].startswith("        "):
                   raise SystemExit("capability path-check indentation drifted")
-              lines[index] = lines[index][4:]
+              lines[index] = lines[index][8:]
           text = "".join(lines)
           path.write_text(text, encoding="utf-8")
 
