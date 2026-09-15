@@ -1933,6 +1933,66 @@ def test_kimi_mcp_credential_needles_cover_opaque_values_and_structured_credenti
     assert len(needles) == len(set(needles))
 
 
+def test_kimi_mcp_argument_options_and_carriers_protect_credentials() -> None:
+    owner = _load_owner()
+    selection = owner.KimiCapabilitySelectionV1(
+        mcp_servers=(
+            owner.KimiMcpServerV1(
+                name="fixture",
+                command="fixture",
+                args=(
+                    "/api-token:slash-colon-secret",
+                    "--api-token:dash-colon-secret",
+                    "--aws-secret-access-key", "compound-secret",
+                    "--endpoint=https://url-user:url-pass@example.invalid/"
+                    "private%2Dsegment?token=query%2Dsecret#fragment%2Dsecret",
+                    "--header", "Authorization: Bearer header-secret",
+                    "-H", "Proxy-Authorization: Basic proxy-secret",
+                    "--header=Cookie: sid=cookie-secret; theme=private-theme",
+                    "--header", "X-Custom-Header: private-header",
+                    "--env", "API_TOKEN=env-secret",
+                    "-e", "CUSTOM_SETTING=private-env",
+                ),
+            ),
+        )
+    )
+
+    needles = set(owner._kimi_mcp_credential_needles(selection))
+
+    assert {
+        b"slash-colon-secret", b"dash-colon-secret", b"compound-secret",
+        b"url-user", b"url-pass", b"private%2Dsegment", b"private-segment",
+        b"query%2Dsecret", b"query-secret",
+        b"fragment%2Dsecret", b"fragment-secret",
+        b"header-secret", b"proxy-secret", b"cookie-secret", b"private-theme",
+        b"private-header", b"env-secret", b"private-env",
+    } <= needles
+    assert b"example.invalid" not in needles
+    assert b"--endpoint=https:" not in needles
+
+
+def test_kimi_mcp_argument_parser_preserves_public_controls() -> None:
+    owner = _load_owner()
+    selection = owner.KimiCapabilitySelectionV1(
+        mcp_servers=(
+            owner.KimiMcpServerV1(
+                name="fixture",
+                command="fixture",
+                args=(
+                    "--port", "8080",
+                    "--mode", "public-mode",
+                    "--endpoint=https://example.invalid/mcp",
+                    "--header", "Accept-Language: en",
+                    "-H", "X-Region: eu",
+                    "--env", "PATH=/usr/bin",
+                    "-e", "TIMEOUT=30",
+                ),
+            ),
+        )
+    )
+
+    assert owner._kimi_mcp_credential_needles(selection) == ()
+
 
 @pytest.mark.parametrize(
     "canary",
@@ -4259,6 +4319,9 @@ def test_kimi_capability_snapshot_rejects_drift_during_read(
                 os.utime(path, ns=(stamp.st_atime_ns, stamp.st_mtime_ns + 1_000_000_000))
             return raw
 
+        def seek(self, *args):
+            return self.stream.seek(*args)
+
         def __exit__(self, *args):
             result = self.stream.__exit__(*args)
             if mutation == "replace":
@@ -4272,6 +4335,70 @@ def test_kimi_capability_snapshot_rejects_drift_during_read(
     monkeypatch.setattr(owner.os, "fdopen", MutatingReader)
     with pytest.raises(ValueError, match="^E_KIMI_CAPABILITIES_INVALID$"):
         owner.read_kimi_capability_selection(path)
+
+
+def test_kimi_capability_snapshot_rejects_same_metadata_rewrite_between_reads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    owner = _load_owner()
+    path = tmp_path / "capabilities.json"
+    _write_kimi_capabilities(path, tools=["Read"])
+    original = path.read_bytes()
+    changed = original.replace(b'"Read"', b'"Bash"')
+    assert changed != original and len(changed) == len(original)
+
+    path_snapshot = path.lstat()
+    original_lstat = owner.Path.lstat
+    original_fstat = owner.os.fstat
+    original_fdopen = owner.os.fdopen
+    frozen_descriptor_metadata = {}
+    reads = []
+
+    def stable_lstat(candidate: Path):
+        if Path(candidate) == path:
+            return path_snapshot
+        return original_lstat(candidate)
+
+    def stable_fstat(descriptor: int):
+        observed = original_fstat(descriptor)
+        return frozen_descriptor_metadata.setdefault("value", observed)
+
+    class RewritingReader:
+        def __init__(self, descriptor, mode):
+            self.stream = original_fdopen(descriptor, mode)
+
+        def __enter__(self):
+            self.stream.__enter__()
+            return self
+
+        def fileno(self):
+            return self.stream.fileno()
+
+        def read(self, size=-1):
+            raw = self.stream.read(size)
+            reads.append(raw)
+            if len(reads) == 1:
+                path.write_bytes(changed)
+                os.utime(
+                    path,
+                    ns=(path_snapshot.st_atime_ns, path_snapshot.st_mtime_ns),
+                )
+            return raw
+
+        def seek(self, *args):
+            return self.stream.seek(*args)
+
+        def __exit__(self, *args):
+            return self.stream.__exit__(*args)
+
+    monkeypatch.setattr(owner.Path, "lstat", stable_lstat)
+    monkeypatch.setattr(owner.os, "fstat", stable_fstat)
+    monkeypatch.setattr(owner.os, "fdopen", RewritingReader)
+
+    with pytest.raises(ValueError, match="^E_KIMI_CAPABILITIES_INVALID$"):
+        owner.read_kimi_capability_selection(path)
+
+    assert len(reads) == 2
 
 
 @pytest.mark.parametrize("name", ("DB_DSN", "X-Service-Key", "apiKey", "authenticationToken"))

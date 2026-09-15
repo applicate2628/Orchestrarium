@@ -838,19 +838,56 @@ def _cleanup_owned_history_staging(history_path: Path, staging: Path) -> None:
         _noncanonical_fail("HISTORY-CONFLICT", str(exc))
 
 
-def _write_exact_staging_file(path: Path, expected: bytes) -> None:
-    def accept_existing() -> None:
-        descriptor, opened = _noncanonical_open_ordinary(path, writable=False)
-        if getattr(opened, "st_nlink", 1) != 1:
-            os.close(descriptor)
-            _noncanonical_fail("HISTORY-CONFLICT", f"staging path has extra hardlinks: {path.name}")
+def _write_exact_staging_file(
+    path: Path, expected: bytes
+) -> tuple[int, int, int, int]:
+    def confirm_path(identity: tuple[int, int, int, int]) -> None:
         try:
-            with os.fdopen(descriptor, "rb") as stream:
-                actual = stream.read()
+            metadata = path.lstat()
         except OSError as exc:
             _noncanonical_fail("HISTORY-CONFLICT", str(exc))
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or stat.S_ISLNK(metadata.st_mode)
+            or _noncanonical_is_reparse(metadata)
+            or getattr(metadata, "st_nlink", 1) != 1
+            or _noncanonical_file_identity(metadata) != identity
+        ):
+            _noncanonical_fail(
+                "HISTORY-CONFLICT", f"staging path identity changed: {path.name}"
+            )
+
+    def accept_existing() -> tuple[int, int, int, int]:
+        descriptor, opened = _noncanonical_open_ordinary(path, writable=False)
+        identity = _noncanonical_file_identity(opened)
+        if getattr(opened, "st_nlink", 1) != 1:
+            os.close(descriptor)
+            _noncanonical_fail(
+                "HISTORY-CONFLICT", f"staging path has extra hardlinks: {path.name}"
+            )
+        try:
+            with os.fdopen(descriptor, "rb") as stream:
+                descriptor = -1
+                actual = stream.read(len(expected) + 1)
+                after_read = os.fstat(stream.fileno())
+        except OSError as exc:
+            _noncanonical_fail("HISTORY-CONFLICT", str(exc))
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
+        if (
+            _noncanonical_file_identity(after_read) != identity
+            or getattr(after_read, "st_nlink", 1) != 1
+        ):
+            _noncanonical_fail(
+                "HISTORY-CONFLICT", f"staging descriptor identity changed: {path.name}"
+            )
         if actual != expected:
-            _noncanonical_fail("HISTORY-CONFLICT", f"staging path conflicts: {path.name}")
+            _noncanonical_fail(
+                "HISTORY-CONFLICT", f"staging path conflicts: {path.name}"
+            )
+        confirm_path(identity)
+        return identity
 
     try:
         path.lstat()
@@ -859,35 +896,84 @@ def _write_exact_staging_file(path: Path, expected: bytes) -> None:
     except OSError as exc:
         _noncanonical_fail("HISTORY-CONFLICT", str(exc))
     else:
-        accept_existing()
-        return
+        return accept_existing()
 
-    descriptor = None
-    flags = os.O_CREAT | os.O_EXCL | os.O_RDWR | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    flags = (
+        os.O_CREAT
+        | os.O_EXCL
+        | os.O_RDWR
+        | getattr(os, "O_BINARY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
     try:
         descriptor = os.open(path, flags, 0o600)
+    except FileExistsError:
+        return accept_existing()
+    except OSError as exc:
+        _noncanonical_fail("HISTORY-CONFLICT", str(exc))
+
+    try:
         opened = os.fstat(descriptor)
+        identity = _noncanonical_file_identity(opened)
         if (
             not stat.S_ISREG(opened.st_mode)
             or _noncanonical_is_reparse(opened)
             or getattr(opened, "st_nlink", 1) != 1
         ):
-            _noncanonical_fail("HISTORY-CONFLICT", f"created staging path is not ordinary: {path.name}")
+            _noncanonical_fail(
+                "HISTORY-CONFLICT", f"created staging path is not ordinary: {path.name}"
+            )
         with os.fdopen(descriptor, "w+b") as stream:
-            descriptor = None
+            descriptor = -1
             stream.write(expected)
             stream.flush()
             os.fsync(stream.fileno())
             stream.seek(0)
-            if stream.read() != expected:
-                _noncanonical_fail("HISTORY-CONFLICT", f"staging readback changed: {path.name}")
-    except FileExistsError:
-        accept_existing()
+            actual = stream.read(len(expected) + 1)
+            after_read = os.fstat(stream.fileno())
     except OSError as exc:
         _noncanonical_fail("HISTORY-CONFLICT", str(exc))
     finally:
-        if descriptor is not None:
+        if descriptor >= 0:
             os.close(descriptor)
+    if (
+        _noncanonical_file_identity(after_read) != identity
+        or getattr(after_read, "st_nlink", 1) != 1
+    ):
+        _noncanonical_fail(
+            "HISTORY-CONFLICT", f"created staging identity changed: {path.name}"
+        )
+    if actual != expected:
+        _noncanonical_fail(
+            "HISTORY-CONFLICT", f"staging readback changed: {path.name}"
+        )
+    confirm_path(identity)
+    return identity
+
+
+def _cleanup_exact_staging_file(
+    path: Path, identity: tuple[int, int, int, int]
+) -> None:
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        _noncanonical_fail("HISTORY-CONFLICT", str(exc))
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or stat.S_ISLNK(metadata.st_mode)
+        or _noncanonical_is_reparse(metadata)
+        or getattr(metadata, "st_nlink", 1) != 1
+        or _noncanonical_file_identity(metadata) != identity
+    ):
+        return
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        _noncanonical_fail("HISTORY-CONFLICT", str(exc))
 
 
 def _publish_noncanonical_history_blob(
@@ -971,8 +1057,9 @@ def _command_apply_noncanonical_history(
     ledger_path = item / "agent-runs.jsonl"
     candidate = ledger_path.with_suffix(".jsonl.tmp")
     replaced = False
+    staging_identity = None
     try:
-        _write_exact_staging_file(candidate, marker_bytes)
+        staging_identity = _write_exact_staging_file(candidate, marker_bytes)
         _validate_noncanonical_marker_candidate(item, candidate, validator)
         _publish_noncanonical_history_blob(
             item, history_path, expected_sha256, original
@@ -999,8 +1086,8 @@ def _command_apply_noncanonical_history(
             _noncanonical_fail("READBACK-INDETERMINATE", str(exc))
         _noncanonical_fail("CANDIDATE-INVALID", str(exc))
     finally:
-        if not replaced:
-            candidate.unlink(missing_ok=True)
+        if not replaced and staging_identity is not None:
+            _cleanup_exact_staging_file(candidate, staging_identity)
     return False, history_path
 
 
@@ -1034,8 +1121,9 @@ def _command_rollback_noncanonical_history(
         )
     candidate = ledger_path.with_suffix(".jsonl.tmp")
     replaced = False
+    staging_identity = None
     try:
-        _write_exact_staging_file(candidate, original)
+        staging_identity = _write_exact_staging_file(candidate, original)
         if inject_failure == "pre-ledger-replace":
             print("FAIL: injected pre-ledger-replace interruption", file=sys.stderr)
             return False, history_path
@@ -1055,8 +1143,8 @@ def _command_rollback_noncanonical_history(
             _noncanonical_fail("READBACK-INDETERMINATE", str(exc))
         _noncanonical_fail("CANDIDATE-INVALID", str(exc))
     finally:
-        if not replaced:
-            candidate.unlink(missing_ok=True)
+        if not replaced and staging_identity is not None:
+            _cleanup_exact_staging_file(candidate, staging_identity)
     return False, history_path
 
 
