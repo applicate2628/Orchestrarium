@@ -432,11 +432,25 @@ def _kimi_mcp_credential_needles(
         while index < len(arguments):
             argument = arguments[index]
             option, inline_value = split_option(argument)
-            normalized_option = option.lstrip("-/").casefold() if option else ""
+            words = option_words(option) if option else ()
             carrier = None
-            if normalized_option in {"header", "h"}:
+            if (
+        words == ("h",)
+        or (
+            words
+            and words[-1] in {"header", "headers"}
+            and "file" not in words
+        )
+    ):
                 carrier = add_header_argument
-            elif normalized_option in {"env", "e"}:
+            elif words in {
+                ("e",),
+                ("env",),
+                ("environment",),
+                ("env", "var"),
+                ("environment", "variable"),
+                ("set", "env"),
+            }:
                 carrier = add_env_argument
 
             if carrier is not None:
@@ -456,8 +470,14 @@ def _kimi_mcp_credential_needles(
                     index += 1
             elif inline_value is not None and "://" in inline_value:
                 add_url_credentials(inline_value)
-            elif option is None and "://" in argument:
-                add_url_credentials(argument)
+            elif option is None:
+                name, separator, value = argument.partition("=")
+                if separator and re.fullmatch(
+                    r"[A-Za-z_][A-Za-z0-9_]*", name, re.ASCII
+                ):
+                    add_env_value(name, value)
+                elif "://" in argument:
+                    add_url_credentials(argument)
             index += 1
 
         # Preserve the existing public controls; all other names default private.
@@ -610,6 +630,87 @@ def _kimi_mcp_servers(value: object) -> tuple[KimiMcpServerV1, ...]:
     return tuple(result)
 
 
+def _kimi_capability_write_exclusion(descriptor: int):
+    """Exclude Windows writers before capability metadata or bytes are sampled."""
+    from contextlib import nullcontext
+
+    if os.name != "nt":
+        return nullcontext()
+
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    class Overlapped(ctypes.Structure):
+        _fields_ = (
+            ("Internal", ctypes.c_size_t),
+            ("InternalHigh", ctypes.c_size_t),
+            ("Offset", wintypes.DWORD),
+            ("OffsetHigh", wintypes.DWORD),
+            ("hEvent", wintypes.HANDLE),
+        )
+
+    class WindowsFileLock:
+        def __init__(self) -> None:
+            self.overlapped = Overlapped()
+            self.kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            self.handle = wintypes.HANDLE(msvcrt.get_osfhandle(descriptor))
+            self.length = PROMPT_SNAPSHOT_MAX_BYTES + 1
+            self.lock_file_ex = self.kernel32.LockFileEx
+            self.lock_file_ex.argtypes = (
+                wintypes.HANDLE,
+                wintypes.DWORD,
+                wintypes.DWORD,
+                wintypes.DWORD,
+                wintypes.DWORD,
+                ctypes.POINTER(Overlapped),
+            )
+            self.lock_file_ex.restype = wintypes.BOOL
+            self.unlock_file_ex = self.kernel32.UnlockFileEx
+            self.unlock_file_ex.argtypes = (
+                wintypes.HANDLE,
+                wintypes.DWORD,
+                wintypes.DWORD,
+                wintypes.DWORD,
+                ctypes.POINTER(Overlapped),
+            )
+            self.unlock_file_ex.restype = wintypes.BOOL
+
+        def __enter__(self):
+            flags = 0x00000002 | 0x00000001
+            if not self.lock_file_ex(
+                self.handle,
+                flags,
+                0,
+                self.length & 0xFFFFFFFF,
+                self.length >> 32,
+                ctypes.byref(self.overlapped),
+            ):
+                raise OSError(
+                    ctypes.get_last_error(),
+                    "unable to exclude capability-file writers",
+                )
+            return self
+
+        def __exit__(self, exc_type, _exc, _traceback):
+            unlocked = self.unlock_file_ex(
+                self.handle,
+                0,
+                self.length & 0xFFFFFFFF,
+                self.length >> 32,
+                ctypes.byref(self.overlapped),
+            )
+            if not unlocked and exc_type is None:
+                raise OSError(
+                    ctypes.get_last_error(),
+                    "unable to release capability-file writer exclusion",
+                )
+            return False
+
+    return WindowsFileLock()
+
+
+
 def read_kimi_capability_selection(path: Path) -> KimiCapabilitySelectionV1:
     """Read one identity-bound Kimi capability file without displaying its values."""
 
@@ -628,18 +729,19 @@ def read_kimi_capability_selection(path: Path) -> KimiCapabilitySelectionV1:
             os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0),
         )
         with os.fdopen(descriptor, "rb") as stream:
-            opened = os.fstat(stream.fileno())
-            if (opened.st_dev, opened.st_ino, opened.st_mode) != (
-                before.st_dev,
-                before.st_ino,
-                before.st_mode,
-            ):
-                raise ValueError("identity")
-            raw = stream.read(PROMPT_SNAPSHOT_MAX_BYTES + 1)
-            after_read = os.fstat(stream.fileno())
-            stream.seek(0)
-            confirmed_raw = stream.read(PROMPT_SNAPSHOT_MAX_BYTES + 1)
-            after_confirmation = os.fstat(stream.fileno())
+            with _kimi_capability_write_exclusion(stream.fileno()):
+                opened = os.fstat(stream.fileno())
+                if (opened.st_dev, opened.st_ino, opened.st_mode) != (
+                    before.st_dev,
+                    before.st_ino,
+                    before.st_mode,
+                ):
+                    raise ValueError("identity")
+                raw = stream.read(PROMPT_SNAPSHOT_MAX_BYTES + 1)
+                after_read = os.fstat(stream.fileno())
+                stream.seek(0)
+                confirmed_raw = stream.read(PROMPT_SNAPSHOT_MAX_BYTES + 1)
+                after_confirmation = os.fstat(stream.fileno())
         validate_no_reparse_components(candidate)
         after_path = candidate.lstat()
         stable_fields = (

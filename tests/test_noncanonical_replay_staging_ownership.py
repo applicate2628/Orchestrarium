@@ -48,7 +48,7 @@ def test_existing_history_replay_preserves_foreign_regular_staging(tmp_path: Pat
     assert staging.read_bytes() == foreign
 
 
-def test_existing_history_replay_cleans_only_same_inode_crash_link(tmp_path: Path) -> None:
+def test_existing_history_replay_preserves_same_inode_reserved_link(tmp_path: Path) -> None:
     ledger, item, history, staging, digest, original = _existing_history(
         tmp_path, "replay_owned_staging_owner"
     )
@@ -63,5 +63,6 @@ def test_existing_history_replay_cleans_only_same_inode_crash_link(tmp_path: Pat
     ledger._publish_noncanonical_history_blob(item, history, digest, original)
 
     assert history.read_bytes() == original
-    assert history.stat().st_nlink == 1
-    assert not staging.exists()
+    assert staging.read_bytes() == original
+    assert history.stat().st_nlink == 2
+    assert staging.stat().st_ino == history.stat().st_ino

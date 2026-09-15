@@ -771,9 +771,9 @@ def _read_exact_history_blob(path: Path, expected_sha256: str) -> bytes | None:
         or _noncanonical_is_reparse(metadata)
     ):
         _noncanonical_fail("HISTORY-CONFLICT", "history blob is linked or non-ordinary")
-    # A crash after os.link() but before staging cleanup leaves exactly the
-    # history name plus its owned staging name on the same inode. Admit only that
-    # known two-link crash state; an arbitrary external hardlink is not authority.
+    # Publication retains exactly the history name and its reserved staging name
+    # on one inode because pathname-only unlink cannot prove ownership atomically.
+    # Admit only that known two-link state; any other hardlink is not authority.
     links = getattr(metadata, "st_nlink", 1)
     if links != 1:
         staging = path.parent / f".{path.name}.tmp"
@@ -806,7 +806,8 @@ def _read_exact_history_blob(path: Path, expected_sha256: str) -> bytes | None:
     return value
 
 
-def _cleanup_owned_history_staging(history_path: Path, staging: Path) -> None:
+def _validate_owned_history_staging(history_path: Path, staging: Path) -> None:
+    """Validate the known two-link publication state without racy deletion."""
     try:
         staging_metadata = staging.lstat()
     except FileNotFoundError:
@@ -832,10 +833,6 @@ def _cleanup_owned_history_staging(history_path: Path, staging: Path) -> None:
         _noncanonical_fail(
             "HISTORY-CONFLICT", "reserved history staging path conflicts"
         )
-    try:
-        staging.unlink()
-    except OSError as exc:
-        _noncanonical_fail("HISTORY-CONFLICT", str(exc))
 
 
 def _write_exact_staging_file(
@@ -951,29 +948,51 @@ def _write_exact_staging_file(
     return identity
 
 
-def _cleanup_exact_staging_file(
-    path: Path, identity: tuple[int, int, int, int]
+def _replace_exact_staging_file(
+    path: Path,
+    destination: Path,
+    expected: bytes,
+    identity: tuple[int, int, int, int],
 ) -> None:
+    """Re-admit the exact bounded candidate immediately before replacement."""
+    descriptor, opened = _noncanonical_open_ordinary(path, writable=False)
     try:
-        metadata = path.lstat()
-    except FileNotFoundError:
-        return
+        if (
+            _noncanonical_file_identity(opened) != identity
+            or getattr(opened, "st_nlink", 1) != 1
+        ):
+            _noncanonical_fail(
+                "HISTORY-CONFLICT",
+                f"staging descriptor identity changed: {path.name}",
+            )
+        with os.fdopen(descriptor, "rb") as stream:
+            descriptor = -1
+            actual = stream.read(len(expected) + 1)
+            after_read = os.fstat(stream.fileno())
+    except OSError as exc:
+        _noncanonical_fail("HISTORY-CONFLICT", str(exc))
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+    try:
+        current = path.lstat()
     except OSError as exc:
         _noncanonical_fail("HISTORY-CONFLICT", str(exc))
     if (
-        not stat.S_ISREG(metadata.st_mode)
-        or stat.S_ISLNK(metadata.st_mode)
-        or _noncanonical_is_reparse(metadata)
-        or getattr(metadata, "st_nlink", 1) != 1
-        or _noncanonical_file_identity(metadata) != identity
+        actual != expected
+        or _noncanonical_file_identity(after_read) != identity
+        or getattr(after_read, "st_nlink", 1) != 1
+        or not stat.S_ISREG(current.st_mode)
+        or stat.S_ISLNK(current.st_mode)
+        or _noncanonical_is_reparse(current)
+        or getattr(current, "st_nlink", 1) != 1
+        or _noncanonical_file_identity(current) != identity
     ):
-        return
-    try:
-        path.unlink()
-    except FileNotFoundError:
-        return
-    except OSError as exc:
-        _noncanonical_fail("HISTORY-CONFLICT", str(exc))
+        _noncanonical_fail(
+            "HISTORY-CONFLICT",
+            f"staging path changed before publication: {path.name}",
+        )
+    os.replace(path, destination)
 
 
 def _publish_noncanonical_history_blob(
@@ -984,7 +1003,7 @@ def _publish_noncanonical_history_blob(
     if existing is not None:
         if existing != original_bytes:
             _noncanonical_fail("HISTORY-CONFLICT", "history blob bytes changed")
-        _cleanup_owned_history_staging(history_path, staging)
+        _validate_owned_history_staging(history_path, staging)
         return
     _write_exact_staging_file(staging, original_bytes)
     try:
@@ -1001,7 +1020,7 @@ def _publish_noncanonical_history_blob(
             _noncanonical_fail("HISTORY-CONFLICT", "history blob bytes changed")
     except OSError as exc:
         _noncanonical_fail("HISTORY-CONFLICT", str(exc))
-    _cleanup_owned_history_staging(history_path, staging)
+    _validate_owned_history_staging(history_path, staging)
 
 
 def _noncanonical_recovery_state(
@@ -1070,7 +1089,9 @@ def _command_apply_noncanonical_history(
         if inject_failure == "pre-ledger-replace":
             print("FAIL: injected pre-ledger-replace interruption", file=sys.stderr)
             return False, history_path
-        os.replace(candidate, ledger_path)
+        _replace_exact_staging_file(
+            candidate, ledger_path, marker_bytes, staging_identity
+        )
         replaced = True
         if inject_failure == "post-ledger-replace-readback":
             _noncanonical_fail(
@@ -1085,9 +1106,6 @@ def _command_apply_noncanonical_history(
         if replaced:
             _noncanonical_fail("READBACK-INDETERMINATE", str(exc))
         _noncanonical_fail("CANDIDATE-INVALID", str(exc))
-    finally:
-        if not replaced and staging_identity is not None:
-            _cleanup_exact_staging_file(candidate, staging_identity)
     return False, history_path
 
 
@@ -1127,7 +1145,9 @@ def _command_rollback_noncanonical_history(
         if inject_failure == "pre-ledger-replace":
             print("FAIL: injected pre-ledger-replace interruption", file=sys.stderr)
             return False, history_path
-        os.replace(candidate, ledger_path)
+        _replace_exact_staging_file(
+            candidate, ledger_path, original, staging_identity
+        )
         replaced = True
         if inject_failure == "post-ledger-replace-readback":
             _noncanonical_fail(
@@ -1142,9 +1162,6 @@ def _command_rollback_noncanonical_history(
         if replaced:
             _noncanonical_fail("READBACK-INDETERMINATE", str(exc))
         _noncanonical_fail("CANDIDATE-INVALID", str(exc))
-    finally:
-        if not replaced and staging_identity is not None:
-            _cleanup_exact_staging_file(candidate, staging_identity)
     return False, history_path
 
 

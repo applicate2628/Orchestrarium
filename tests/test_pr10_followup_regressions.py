@@ -112,63 +112,66 @@ def test_kimi_capability_snapshot_excludes_writers_before_first_fstat(
     assert events == ["enter", "exit"]
 
 
-def test_noncanonical_cleanup_never_unlinks_a_swapped_candidate(
+def test_noncanonical_failed_apply_retains_owned_candidate_without_unlink(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    ledger = load_module(LEDGER, "pr10_cleanup_swap_owner")
-    candidate = tmp_path / "agent-runs.jsonl.tmp"
-    candidate.write_bytes(b"owned staging bytes\n")
-    identity = ledger._noncanonical_file_identity(candidate.stat())
-    foreign = b"foreign replacement\n"
+    ledger, item, expected_sha256, original, marker_bytes = _noncanonical_replay_fixture(
+        tmp_path, "pr10_failed_apply_retention_owner"
+    )
+    canonical = item / "agent-runs.jsonl"
+    canonical.write_bytes(original)
+    candidate = item / "agent-runs.jsonl.tmp"
+    monkeypatch.setattr(
+        ledger, "_validate_noncanonical_marker_candidate", lambda *_args: None
+    )
     original_unlink = ledger.Path.unlink
-    raced = False
 
-    def racing_unlink(path: Path, *args, **kwargs):
-        nonlocal raced
-        if Path(path) == candidate and not raced:
-            raced = True
-            replacement = candidate.with_suffix(".foreign")
-            replacement.write_bytes(foreign)
-            os.replace(replacement, candidate)
+    def forbid_candidate_unlink(path: Path, *args, **kwargs):
+        if Path(path) == candidate:
+            raise AssertionError("fixed candidate must not be pathname-unlinked")
         return original_unlink(path, *args, **kwargs)
 
-    monkeypatch.setattr(ledger.Path, "unlink", racing_unlink)
+    monkeypatch.setattr(ledger.Path, "unlink", forbid_candidate_unlink)
 
-    ledger._cleanup_exact_staging_file(candidate, identity)
+    completed, _history = ledger._command_apply_noncanonical_history(
+        item,
+        expected_sha256,
+        "linked-ledger-replay",
+        "2026-09-10T12:00:00Z",
+        ledger.load_validator(),
+        "pre-ledger-replace",
+    )
 
-    assert candidate.read_bytes() == foreign
+    assert completed is False
+    assert candidate.read_bytes() == marker_bytes
 
 
-def test_noncanonical_history_cleanup_never_unlinks_a_swapped_name(
+def test_noncanonical_history_staging_is_validated_without_unlink(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    ledger = load_module(LEDGER, "pr10_history_cleanup_swap_owner")
+    ledger = load_module(LEDGER, "pr10_history_cleanup_preservation_owner")
     history = tmp_path / "agent-runs.history.fixture.jsonl"
     staging = tmp_path / ".agent-runs.history.fixture.jsonl.tmp"
-    history.write_bytes(b"owned history bytes\n")
+    owned = b"owned history bytes\n"
+    history.write_bytes(owned)
     try:
         os.link(history, staging)
     except OSError as exc:
         pytest.skip(f"hardlink unavailable: {exc}")
-    foreign = b"foreign replacement\n"
     original_unlink = ledger.Path.unlink
-    raced = False
 
-    def racing_unlink(path: Path, *args, **kwargs):
-        nonlocal raced
-        if Path(path) == staging and not raced:
-            raced = True
-            replacement = staging.with_suffix(".foreign")
-            replacement.write_bytes(foreign)
-            os.replace(replacement, staging)
+    def forbid_staging_unlink(path: Path, *args, **kwargs):
+        if Path(path) == staging:
+            raise AssertionError("history staging must not be pathname-unlinked")
         return original_unlink(path, *args, **kwargs)
 
-    monkeypatch.setattr(ledger.Path, "unlink", racing_unlink)
+    monkeypatch.setattr(ledger.Path, "unlink", forbid_staging_unlink)
 
-    ledger._cleanup_owned_history_staging(history, staging)
+    ledger._validate_owned_history_staging(history, staging)
 
-    assert staging.read_bytes() == foreign
-    assert history.read_bytes() == b"owned history bytes\n"
+    assert history.read_bytes() == owned
+    assert staging.read_bytes() == owned
+    assert history.stat().st_ino == staging.stat().st_ino
 
 
 def _noncanonical_replay_fixture(tmp_path: Path, module_name: str):
@@ -205,19 +208,20 @@ def test_noncanonical_publish_never_commits_a_swapped_candidate(
     canonical.write_bytes(initial)
     candidate = item / "agent-runs.jsonl.tmp"
     foreign = b"foreign candidate published at replace boundary\n"
-    original_replace = ledger.os.replace
+    original_write = ledger._write_exact_staging_file
     raced = False
 
-    def racing_replace(source, destination):
+    def write_then_swap(path: Path, expected: bytes):
         nonlocal raced
-        if Path(source) == candidate and Path(destination) == canonical and not raced:
+        identity = original_write(path, expected)
+        if path == candidate and not raced:
             raced = True
             replacement = candidate.with_suffix(".foreign")
             replacement.write_bytes(foreign)
-            original_replace(replacement, candidate)
-        return original_replace(source, destination)
+            os.replace(replacement, candidate)
+        return identity
 
-    monkeypatch.setattr(ledger.os, "replace", racing_replace)
+    monkeypatch.setattr(ledger, "_write_exact_staging_file", write_then_swap)
     monkeypatch.setattr(
         ledger, "_validate_noncanonical_marker_candidate", lambda *_args: None
     )
