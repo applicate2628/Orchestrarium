@@ -1,0 +1,24 @@
+name: PR 10 identity publication red
+
+on:
+  push:
+    branches:
+      - hotfix/lifecycle-successor-transfer
+    paths:
+      - .github/workflows/pr10-identity-publish-red.yml
+
+permissions:
+  contents: read
+
+jobs:
+  reproduce:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: hotfix/lifecycle-successor-transfer
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --disable-pip-version-check pytest jsonschema
+      - run: python -m pytest -q tests/test_pr10_identity_bound_publish.py
