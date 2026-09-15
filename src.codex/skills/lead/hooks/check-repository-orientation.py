@@ -73,17 +73,30 @@ def _nearest_git_root(start: Path) -> Path | None:
         return None
 
 
-def _target_strings(tool_input: dict) -> list[str]:
+def _target_strings(tool_input: dict, *, tool_name: str = "") -> list[str]:
     targets: list[str] = []
     for key in ("file_path", "notebook_path", "path"):
         value = tool_input.get(key)
         if isinstance(value, str) and value.strip():
             targets.append(value.strip())
     patch = tool_input.get("patch") or tool_input.get("input")
+    if not isinstance(patch, str) and tool_name == "apply_patch":
+        command = tool_input.get("command")
+        if isinstance(command, str):
+            lines = command.splitlines()
+            if (
+                len(lines) >= 2
+                and lines[0] == "*** Begin Patch"
+                and lines[-1] == "*** End Patch"
+            ):
+                patch = command
     if isinstance(patch, str):
         targets.extend(
             match.group(1).strip()
-            for match in re.finditer(r"(?m)^\*\*\* (?:Add|Update|Delete) File:\s*(.+)$", patch)
+            for match in re.finditer(
+                r"(?m)^\*\*\* (?:(?:Add|Update|Delete) File|Move to):\s*(.+)$",
+                patch,
+            )
         )
     return targets
 
@@ -279,13 +292,13 @@ def main() -> int:
             return 0
         cwd_value = envelope.get("cwd")
         cwd = Path(cwd_value).resolve(strict=False) if isinstance(cwd_value, str) and cwd_value else Path.cwd().resolve()
-        raw_targets = _target_strings(tool_input)
+        tool_name = str(envelope.get("tool_name", "")).lower()
+        raw_targets = _target_strings(tool_input, tool_name=tool_name)
         target_paths = [_as_path(value, cwd) for value in raw_targets]
         root = _nearest_git_root(target_paths[0] if target_paths else cwd) or _nearest_git_root(cwd)
         if root is None:
             return 0
 
-        tool_name = str(envelope.get("tool_name", "")).lower()
         risky = False
         action_targets: list[Path] = []
         if tool_name in _MUTATION_TOOLS:

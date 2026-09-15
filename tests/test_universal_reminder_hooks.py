@@ -105,11 +105,12 @@ class McpContinuityContract(unittest.TestCase):
         self.assertEqual(set(output), {"hookEventName", "additionalContext"})
         self.assertEqual(output["hookEventName"], "SessionStart")
         self.assertEqual(output["additionalContext"], policy.SESSION_START_CONTEXT)
-        self.assertIn(
-            "CodeGraph follows `status -> sync -> fresh status -> repeat query`",
-            output["additionalContext"],
-        )
-        self.assertIn("Non-normative workflow examples only", output["additionalContext"])
+        for marker in (
+            "discover connected MCP/tools at runtime",
+            "confirm fresh",
+            "Use another path only if refresh fails",
+        ):
+            self.assertIn(marker, output["additionalContext"])
 
 
 class TestMcpMomentumDiscrimination(unittest.TestCase):
@@ -706,11 +707,15 @@ class TestTurnAnchorEmitsValidContext(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         context = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"]
         self.assertEqual(context, policy.TURN_ANCHOR_CONTEXT)
-        self.assertIn("MCP", context)
-        self.assertIn("Root main conversation", context)
-        self.assertIn("Dispatched subagent", context)
-        self.assertIn("Never adopt $lead", context)
-        self.assertIn("no provider or leaf may recursively launch another wrapper", context)
+        for marker in (
+            "Root Lead",
+            "Under the current default",
+            "provider and leaf agents",
+            "do not spawn or recursively launch wrappers",
+            "MCP/tools",
+            "mandatory gates",
+        ):
+            self.assertIn(marker, context)
 
     def test_python_emits_wellformed_userpromptsubmit_context(self) -> None:
         result = subprocess.run(
@@ -721,8 +726,9 @@ class TestTurnAnchorEmitsValidContext(unittest.TestCase):
         payload = json.loads(result.stdout)
         out = payload["hookSpecificOutput"]
         self.assertEqual(out["hookEventName"], "UserPromptSubmit")
-        self.assertIn("Root main conversation", out["additionalContext"])
-        self.assertIn("Dispatched subagent", out["additionalContext"])
+        self.assertIn("Root Lead", out["additionalContext"])
+        self.assertIn("provider and leaf agents", out["additionalContext"])
+        self.assertIn("do not spawn or recursively launch wrappers", out["additionalContext"])
 
     def test_root_pre_final_decision_covers_ready_incident_and_stop_exceptions(self) -> None:
         result = subprocess.run(
@@ -731,57 +737,66 @@ class TestTurnAnchorEmitsValidContext(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         context = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"]
-        root_context = context.split("Dispatched subagent:", 1)[0]
-        sentences = [
-            sentence.casefold().strip()
-            for sentence in root_context.replace("\n", " ").split(".")
-            if sentence.strip()
-        ]
-
-        def has_clause(*facts: str) -> bool:
-            return any(
-                all(fact.casefold() in sentence for fact in facts)
-                for sentence in sentences
-            )
-
         scenarios = {
-            "ready work after an earlier milestone": (
-                ("work completed earlier", "ready work remains", "permission to stop"),
-                ("any action is ready", "highest-priority", "now"),
+            "resume after compaction or a side question": (
+                "resume the current primary task after compaction or a side question",
+                "Side questions, status, and clarifications are commentary; then resume",
             ),
-            "primary goal may end only at a terminal condition": (
-                (
-                    "end only if",
-                    "selected primary goal",
-                    "reconciled complete",
-                    "explicitly stops",
-                    "every remaining authorized action",
-                    "concretely blocked",
-                ),
+            "terminal conditions remain exact": (
+                "Stop only when it is complete, the user pauses, cancels, or stops it",
+                "every remaining authorized action is concretely blocked",
             ),
-            "one blocked lane leaves independent work ready": (
-                ("block pauses only", "dependent lane"),
-                ("reload", "unavailable agent", "independent work"),
+            "one block does not freeze independent work": (
+                "pauses only dependent work",
+                "run useful independent ready work now",
             ),
-            "user decision pauses only dependent actions": (
-                ("decision only the user can make", "dependent actions", "independent ready work"),
+            "root-only useful delegation": (
+                "Delegate useful ready work by task to the matching specialist",
+                "Root owns dispatch",
+                "provider and leaf agents",
+                "do not spawn or recursively launch wrappers",
             ),
-            "milestones and questions stay non-final": (
-                ("milestones", "progress", "questions", "commentary", "not a final response"),
+            "scoped lanes and gates": (
+                "Give each lane only needed tools and context",
+                "keep mandatory gates",
             ),
-            "standalone question has no active goal": (
-                ("standalone question", "no active task", "end normally"),
+            "cleanup preserves user state": (
+                "settle every owned process/resource",
+                "remove temporary or dead alternatives",
+                "preserve pre-existing user state",
+                "ambiguous ownership as a destructive-action blocker",
             ),
-            "continuation never invents work": (
-                ("do not invent work", "useless tool calls"),
+            "standalone questions remain terminal": (
+                "A standalone question with no active task may end normally",
             ),
         }
-        for scenario, clauses in scenarios.items():
+        for scenario, fragments in scenarios.items():
             with self.subTest(scenario=scenario):
-                self.assertTrue(
-                    all(has_clause(*clause) for clause in clauses),
-                    f"turn anchor does not cover scenario: {scenario}",
-                )
+                for fragment in fragments:
+                    self.assertIn(fragment, context)
+
+    def test_policy_contexts_omit_repeated_manuals_but_keep_required_checks(self) -> None:
+        spec = importlib.util.spec_from_file_location("compact_mcp_policy_test", MCP_POLICY)
+        assert spec is not None and spec.loader is not None
+        policy = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(policy)
+        combined = policy.SESSION_START_CONTEXT + "\n" + policy.TURN_ANCHOR_CONTEXT
+        for removed_manual in (
+            "Non-normative interface example only",
+            "Non-normative workflow example",
+            "Graphify follows",
+            "CodeGraph follows",
+            "because a once-per-session reminder is overwritten",
+        ):
+            self.assertNotIn(removed_manual, combined)
+        for required in (
+            "MCP/tools",
+            "status/freshness",
+            "sync/update/reindex",
+            "mandatory gates",
+            "preserve pre-existing user state",
+        ):
+            self.assertIn(required, combined)
 
     def test_missing_policy_dependency_fails_open(self) -> None:
         with tempfile.TemporaryDirectory() as td:

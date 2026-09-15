@@ -70,17 +70,15 @@ REFERENCE_REL = "shared/references/architecture-layering-hygiene.md"
 STAMP_REL = "scripts/arch-layering-slices.stamp"
 
 
-# Roles whose Architecture layering hygiene slice canonically lives under skills/<role>/SKILL.md on
-# the Claude line too, not agents/<role>.md. These are the "dual" role-skills from the roles-as-skills
-# curated subset (agents/<role>.md is a thin delegate wrapper): the slice moved with the rest of the
-# role contract when the role became skill-canonical, matching how codex_path() below already targets
-# skills/<role>/SKILL.md for every role.
-CLAUDE_SKILL_CANONICAL_ROLES = {"architect"}
+# Roles whose Claude-side consumers use the universal Codex role-contract body rather than a
+# Claude-owned agent or skill source. The existing installed `.claude/skills/architect` projection
+# remains a runtime alias; source maintenance resolves this body through codex_path().
+CLAUDE_UNIVERSAL_BODY_ROLES = {"architect"}
 
 
 def claude_path(root: Path, role: str) -> Path:
-    if role in CLAUDE_SKILL_CANONICAL_ROLES:
-        return root / "src.claude" / "skills" / role / "SKILL.md"
+    if role in CLAUDE_UNIVERSAL_BODY_ROLES:
+        return codex_path(root, role)
     return root / "src.claude" / "agents" / f"{role}.md"
 
 
@@ -124,14 +122,15 @@ def read_stamp(root: Path):
 
 def write_stamp(root: Path, sha: str) -> None:
     p = root / STAMP_REL
-    p.write_text(
-        "# Review stamp for the inlined architecture-layering role slices.\n"
-        "# SHA-256 of shared/references/architecture-layering-hygiene.md (CRLF-normalized) that the\n"
-        "# inlined slices were last reviewed for fidelity against. Regenerate with:\n"
-        "#   python scripts/validate-arch-layering-slices.py --update-stamp\n"
-        "# ONLY after re-reviewing every role slice against the changed reference.\n"
-        f"{sha}\n",
-        encoding="utf-8",
+    p.write_bytes(
+        (
+            "# Review stamp for the inlined architecture-layering role slices.\n"
+            "# SHA-256 of shared/references/architecture-layering-hygiene.md (CRLF-normalized) that the\n"
+            "# inlined slices were last reviewed for fidelity against. Regenerate with:\n"
+            "#   python scripts/validate-arch-layering-slices.py --update-stamp\n"
+            "# ONLY after re-reviewing every role slice against the changed reference.\n"
+            f"{sha}\n"
+        ).encode("utf-8")
     )
 
 

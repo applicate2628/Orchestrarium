@@ -13,7 +13,7 @@ description: "Latency, throughput, memory, slow: profiling, benchmarks, budgets.
 
 ## Input contract
 
-- Require accepted research and design artifacts unless the task is explicitly a performance investigation.
+- Consume only the artifacts required by the admitted route. Do not require accepted Research or Design artifacts unless the admitted route requires them.
 - Take only the workloads, environments, budgets, and constraints needed for the performance question.
 - Escalate architecture changes instead of smuggling them in under optimization work.
 
@@ -40,7 +40,7 @@ description: "Latency, throughput, memory, slow: profiling, benchmarks, budgets.
 
 ## Performance issue registry
 
-When a performance issue is found, create or update a file in `work-items/performance/<date>-<slug>.md` (the same flat list-item registry shape as `work-items/bugs/`), with frontmatter `severity: high | medium | low`, `status: open`, `found-by: performance-engineer`, `context: <work-item slug or "standalone">`, and body sections: Description (what is slow or over budget), Metric (metric / budget / actual / baseline, with baseline required before optimization or explicitly declared absent), Files involved. Status moves `open -> fixed` only after the performance reviewer confirms AND the user approves; `wontfix` records the accepted-tradeoff reason.
+When a performance defect is found, use the configured bug registry (default `work-items/bugs/<date>-<slug>.md`) and its existing schema/statuses; do not create a performance-specific registry or enum. Preserve the Description, Metric (metric / budget / actual / baseline, with baseline required before optimization or explicitly declared absent), and Files involved evidence. A fix disposition still requires performance-reviewer confirmation and user approval; the lifecycle owner alone terminalizes or archives the bug.
 
 ## Architecture layering hygiene (performance)
 
@@ -51,7 +51,7 @@ Performance-relevant layering; full narrative + checklist: `shared/references/ar
 - **Never split a measured-critical or order-sensitive sequence across a boundary** (a hot loop, an order-sensitive reduction, a transaction, a streaming stage stays in one unit; the seam sits at its input/output).
 - **Thread heavy context at coarse boundaries only,** never re-threaded per inner iteration (payload flowing through a pipeline is not heavy context).
 - **Observability disabled path is zero-residue on a measured loop (D2 — compile-elision facet):** on a measured/hot path the disabled diagnostic path carries NO residual branch, call, or flag-load — a runtime-variable-flag per-iteration check is insufficient (it costs the load and can block vectorization); require a build-time-constant-folded guard or a compose-time non-instrumented path. Probe is structural-link first (owner absent from the measured unit's link/import/macro-expansion set), release-build asm/IR only where the perf budget demands the zero-residue proof; review-bound on a runtime that cannot elide.
-- **No serializing lock on a measured parallel loop; atomic-vs-merge tradeoff (D5 — perf facet):** a lock on a measured/hot parallel loop serializes the region AND (for an order-sensitive accumulation) is a determinism hazard — never place one there; a lock-free atomic summary is allowed ONLY for an exactly-associative integer/bitwise reduction, while an order-sensitive or floating-point reduction must route through the C1-owned canonical deterministic merge (pay the determinism cost, not a lock or a races-and-reorders accumulation).
+- **Measure correctness-required locks in hot parallel regions (D5 — performance facet):** a lock may guard classified order-insensitive state and needs no automatic profile on a cold path. In a reviewer-verified hot region, measure the lock against the accepted budget: it passes only when correctness and budget pass, and fails when the budget fails; do not impose a blanket lock-free mandate. Lock acquisition order never supplies numerical merge order: exactly-associative integer/bitwise summaries may be atomic, while floating-point or other order-sensitive reductions use the C1-owned canonical merge.
 
 ## Non-goals
 

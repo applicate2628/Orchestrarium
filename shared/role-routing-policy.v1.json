@@ -166,7 +166,7 @@
     },
     "analyst": {
       "defaultProfile": "balanced-high",
-      "allowedProfiles": ["balanced-high", "frontier-high", "frontier-xhigh", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
+      "allowedProfiles": ["balanced-medium", "balanced-high", "frontier-high", "frontier-xhigh", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
     },
     "planner": {
       "defaultProfile": "balanced-high",
@@ -218,6 +218,10 @@
     }
   },
   "skillOnlyRoles": {
+    "consultant": {
+      "defaultProfile": "frontier-high",
+      "allowedProfiles": ["balanced-high", "frontier-high", "frontier-xhigh", "apex-max", "astra-medium", "astra-high", "astra-xhigh", "astra-max"]
+    },
     "product-analyst": {
       "defaultProfile": "balanced-high",
       "allowedProfiles": ["balanced-medium", "balanced-high", "frontier-high", "astra-low", "astra-medium", "astra-high", "astra-xhigh"]
@@ -330,9 +334,9 @@
     "mechanical": ["mechanical-worker"],
     "exploration": ["explorer", "analyst", "product-analyst"],
     "engineering": ["worker", "backend-engineer", "platform-engineer", "scientific-software-engineer", "knowledge-archivist", "frontend-engineer", "qt-ui-engineer", "model-view-engineer", "data-engineer", "toolchain-engineer", "geometry-engineer", "graphics-engineer", "visualization-engineer"],
-    "planning": ["analyst", "planner", "architect", "ux-designer"],
-    "review": ["qa-engineer", "architecture-reviewer", "security-reviewer", "performance-reviewer", "accessibility-reviewer", "ux-reviewer", "ui-test-engineer"],
-    "critical-design": ["architect", "architecture-reviewer", "algorithm-scientist", "computational-scientist", "performance-engineer", "reliability-engineer"],
+    "planning": ["analyst", "planner", "architect", "ux-designer", "consultant"],
+    "review": ["qa-engineer", "architecture-reviewer", "security-reviewer", "performance-reviewer", "accessibility-reviewer", "ux-reviewer", "ui-test-engineer", "consultant"],
+    "critical-design": ["architect", "architecture-reviewer", "algorithm-scientist", "computational-scientist", "performance-engineer", "reliability-engineer", "consultant"],
     "critical-security": ["security-engineer", "security-reviewer"],
     "recovery": ["default", "worker", "platform-engineer"]
   },
@@ -343,13 +347,14 @@
     },
     "kimi": {
       "modelTier": "model-only",
-      "effort": "unsupported",
-      "allowedTaskClasses": ["exploration", "planning", "review"],
-      "requiredMutationClass": "read-only",
+      "effort": "high",
+      "allowedTaskClasses": ["exploration", "engineering", "planning", "review"],
+      "advisoryTaskClasses": ["planning"],
+      "requiredMutationClass": ["read-only", "bounded-write"],
       "independentVerification": true,
-      "executionDisposition": "explicit-read-only",
+      "executionDisposition": "explicit-wrapper",
       "availability": "available",
-      "effortMappingLoss": "no-native-effort-control"
+      "effortMappingLoss": "none"
     },
     "grok": {
       "modelTier": "model-only",

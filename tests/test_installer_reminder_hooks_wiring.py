@@ -22,3 +22,10 @@ def test_reminder_hook_wiring(provider: str, tmp_path: Path) -> None:
     assert specs["check-scratch-valuables"][1] == "SessionStart"
     assert specs["turn-anchor-reminder"][1] == "UserPromptSubmit"
     assert specs["check-mcp-momentum"][2] == "Grep|Bash|PowerShell|shell_command|exec_command"
+    if provider == "codex":
+        assert specs["check-parallel-mcp-momentum"][1:] == (
+            "PreToolUse",
+            "Edit|Write|NotebookEdit|apply_patch|Bash|PowerShell|shell_command|exec_command",
+        )
+    else:
+        assert "check-parallel-mcp-momentum" not in specs

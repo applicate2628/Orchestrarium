@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 from tests.test_ledger_h1_effective_view import (
@@ -343,9 +344,12 @@ class ActiveC3RecoveryTests(unittest.TestCase):
         module = load_validator()
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            item = root / "work-items" / "active" / "reader-a"
-            item.mkdir(parents=True)
-            (item / "target.md").write_text("synthetic artifact\n", encoding="utf-8")
+            artifacts, items, paths, _expected = synthetic_artifacts(module, root)
+            ledger_path = paths[0]
+            owner_context = module._load_effective_ledger_group(
+                root, compatibility_artifacts=artifacts
+            )[ledger_path]
+            item = items[0]
             target = event(
                 "revise-a-0001",
                 "reader-a",
@@ -390,7 +394,6 @@ class ActiveC3RecoveryTests(unittest.TestCase):
                     module._NO_LEDGER_AUTHORITY,
                 ),
             )
-            ledger_path = "work-items/active/reader-a/agent-runs.jsonl"
             context = module.LedgerValidationContextV1(
                 ledger_path,
                 rows,
@@ -400,7 +403,7 @@ class ActiveC3RecoveryTests(unittest.TestCase):
                 module.LedgerCompatibilityObservationV1("active", (), ()),
                 ("reader-a\0revise-a-0001",),
                 (),
-                module._LedgerInvocationTokenV1({ledger_path: rows}),
+                replace(owner_context.invocation_token, rows_by_path={ledger_path: rows}),
             )
             telemetry: dict[str, int] = {}
             errors: list[str] = []

@@ -32,6 +32,12 @@ Clean result определяется семантически, а не фикс
 
 Для failure signatures действует противоположное правило: каждая retryable или non-retryable terminal signature — точный repo-local predicate, включающий normalized body, surface, connector author identity, current-head binding, ordering и unresolved-trigger attribution. Error-like prose, не включённая в exact list, остаётся indeterminate.
 
+## Непрерывность авторизации
+
+Установленный skill `$github-pr-review-bot` перед повторным запросом подтверждения проверяет последнее genuine-user разрешение publication gate, точный revoke и более позднюю no-push инструкцию. Для нового согласия публичный маркер — отдельное целое сообщение `[approve-pr-publication]`, raw либо внутри одной сбалансированной пары одинарных backticks или двойных звёздочек. Только маркер текущего turn инициализирует сохранённую привязку. Активная привязка для того же PR head branch и admitted scope повторно использует уже существующее разрешение; другой target/branch, widened scope, revoke, reset после потери binding state или более поздняя no-push инструкция требуют нового разрешения. Current-head binding, protection, human review и свежие leak/range checks остаются обязательными.
+
+Согласие выводится только из оригинальных genuine-user JSONL records, физически присутствующих в transcript. При byte/record cap gate читает полный стабильный transcript вперёд с bounded memory; compaction summaries не восстанавливают согласие. Текущий маркер привязывает ровно один проверенный repository, remote, открытый PR и head branch в одной фиксированной transcript-adjacent записи. Missing/corrupt state сбрасывает историческое simple-marker consent и приводит к отказу; точный revoke сохраняет состояние `revoked` до отказа. Существующие точные Version 1 URL, equal-Markdown-link и numeric grants остаются поддерживаемым compatibility input.
+
 ## Retry lineage
 
 Terminal failure и его authorized successor составляют один lineage не более чем с одним successor trigger. Retry никогда не выполняется автоматически. До создания привяжите explicit user authorization и запишите creating transition. Засчитывайте retry только после полного hosted refresh, который однозначно связывает successor trigger identifier, creation time и unchanged head. Definite failed create требует доказательства отсутствия successor; ambiguous create переходит в reconciliation и не может быть повторён. Failed successor не может разрешить ещё одного successor.

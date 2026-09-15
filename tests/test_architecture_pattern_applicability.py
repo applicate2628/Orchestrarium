@@ -140,7 +140,6 @@ BLOCKS = {
     ),
     "ARCHITECT-DISPOSITION": (
         ROOT / "src.codex/skills/architect/SKILL.md",
-        ROOT / "src.claude/skills/architect/SKILL.md",
     ),
     "ARCHITECTURE-REVIEW": (
         ROOT / "src.codex/skills/architecture-reviewer/SKILL.md",
@@ -320,6 +319,31 @@ def test_canonical_contract_inventory_and_dispositions() -> None:
     _assert_disposition_complete(records, disposition)
 
 
+def test_candidate_evidence_and_wire_order_stay_applicability_bound() -> None:
+    """Source-clause coverage for admitted candidates and semantic wire ordering."""
+
+    canonical = _read(CANONICAL, FAILURE_IDS[0])
+    expected_review_clause = (
+        "each evidence-triggered candidate that is rejected has explicit negative evidence; "
+        "an unadmitted pattern needs no invented rejection"
+    )
+    assert expected_review_clause in canonical
+    assert "Architect owns applicability decisions" in canonical
+
+    russian = _read(RUSSIAN, FAILURE_IDS[7])
+    assert "явные отрицательные данные каждого отклонённого кандидата" in russian
+    assert "недопущенный паттерн не требует выдуманного отклонения" in russian
+
+    for path in BLOCKS["ARCHITECTURE-REVIEW"]:
+        text = _read(path, FAILURE_IDS[1])
+        assert expected_review_clause in text
+
+    architect = _read(BLOCKS["ARCHITECT-DISPOSITION"][0], FAILURE_IDS[1])
+    assert "actual wire shape and codec" in architect
+    assert "field order only when protocol semantics require it" in architect
+    assert not (ROOT / "src.claude/skills/architect/SKILL.md").exists()
+
+
 def test_source_projection_parity() -> None:
     canonical = _read(CANONICAL, FAILURE_IDS[1])
     for block, paths in BLOCKS.items():
@@ -468,6 +492,63 @@ def test_canonical_runtime_claim_does_not_overstate_static_delivery() -> None:
     assert text.count(marker) == 1, f"{FAILURE_IDS[6]}: canonical runtime marker count"
 
 
+def test_claude_architect_source_composition_has_one_universal_body() -> None:
+    universal = ROOT / "src.codex/skills/architect/SKILL.md"
+    duplicate = ROOT / "src.claude/skills/architect/SKILL.md"
+    wrapper = ROOT / "src.claude/agents/architect.md"
+    inline_policy = ROOT / "src.claude/CLAUDE.md"
+    validator = ROOT / "src.claude/agents/scripts/validate-skill-pack.py"
+
+    assert universal.is_file()
+    assert not duplicate.exists()
+    assert "The universal Architect skill (`.agents/skills/architect/SKILL.md`, sourced from `src.codex/skills/architect/SKILL.md`) is the sole role-contract body owner" in _read(wrapper, FAILURE_IDS[0])
+    assert "Architect's sole role-contract body is the universal `.agents/skills/architect/SKILL.md` projection." in _read(inline_policy, FAILURE_IDS[0])
+    assert "('check_not_exists',\n  'src.claude/skills/architect/SKILL.md'" in _read(validator, FAILURE_IDS[0])
+
+
+def test_claude_validator_maps_architect_apat_to_each_layout_owner() -> None:
+    validator = ROOT / "src.claude/agents/scripts/validate-skill-pack.py"
+    validation = subprocess.run(
+        [sys.executable, "-B", str(validator), "--root", str(ROOT)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=120,
+        check=False,
+    )
+    architect_label = "APAT-E006-INSTALLED-MISSING: claude architect "
+    architect_passes = tuple(
+        line for line in validation.stdout.splitlines()
+        if "PASS" in line and architect_label in line
+    )
+    assert validation.returncode == 0 and len(architect_passes) == 8, (
+        f"{FAILURE_IDS[5]}: full Claude source validation did not check the "
+        f"universal Architect owner\n{validation.stdout}\n{validation.stderr}"
+    )
+
+    declaration = _load_validator_declaration(validator)
+    scopes = dict(declaration.ACTIONS)
+
+    def architect_actions(scope: str) -> tuple[tuple[str, ...], ...]:
+        return tuple(
+            action for action in scopes[scope]
+            if architect_label in action[-1]
+        )
+
+    source_actions = architect_actions("dev_repo")
+    installed_actions = architect_actions("installed")
+    assert len(source_actions) == len(installed_actions) == 8
+    assert {action[1] for action in source_actions} == {
+        "@ROOT/src.codex/skills/architect/SKILL.md"
+    }
+    assert {action[1] for action in installed_actions} == {
+        "@PACK/skills/architect/SKILL.md"
+    }
+    assert not architect_actions("all")
+
+
 @pytest.mark.parametrize(
     "provider,installer,source_roles,installed_roles,validator",
     (
@@ -554,6 +635,12 @@ def test_installed_parity_and_validator(
         assert installed_path.read_bytes() == source.read_bytes(), (
             f"{FAILURE_IDS[5]}: {provider} installed drift for {source.name}"
         )
+
+    if provider == "claude":
+        claude_architect = target / ".claude/skills/architect"
+        universal_architect = target / ".agents/skills/architect"
+        assert claude_architect.is_symlink(), "Claude Architect projection must remain a link"
+        assert claude_architect.resolve() == universal_architect.resolve()
 
     installed_validator = target / validator
     validation = subprocess.run(

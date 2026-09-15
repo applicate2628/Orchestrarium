@@ -1,0 +1,561 @@
+from __future__ import annotations
+
+import hashlib
+import importlib.util
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+
+ROOT = Path(__file__).resolve().parents[1]
+MUTATE = ROOT / "scripts" / "mutate-work-item.py"
+VALIDATOR = ROOT / "scripts" / "validate-work-item-state.py"
+LEDGER = ROOT / "scripts" / "agent-run-ledger.py"
+CHECKER = ROOT / "scripts" / "check-work-items-state.py"
+LEGACY_TRANSFER_TESTS = ROOT / "tests" / "test_legacy_obligation_migration.py"
+
+
+def load_module(path: Path, name: str):
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_h1_artifact_set_digest_binds_directory_snapshot_bytes() -> None:
+    lifecycle = load_module(MUTATE, "pr10_h1_digest_owner")
+    base = [
+        {
+            "logicalPath": "work-items/ledger-h1-migration-receipts",
+            "kind": "directory",
+            "byteLength": 17,
+            "sha256": "a" * 64,
+        }
+    ]
+    changed_digest = [dict(base[0], sha256="b" * 64)]
+    changed_length = [dict(base[0], byteLength=18)]
+
+    observed = lifecycle._ledger_h1_artifact_set_digest(base)
+
+    assert lifecycle._ledger_h1_artifact_set_digest(changed_digest) != observed
+    assert lifecycle._ledger_h1_artifact_set_digest(changed_length) != observed
+
+
+def _transfer_receipt_payload(validator, archive_path: str, ledger: bytes, operation_id: str) -> dict:
+    ledger_sha256 = hashlib.sha256(ledger).hexdigest()
+    return {
+        "schemaVersion": 2,
+        "owner": "mutate-work-item:archive-with-successor-v2",
+        "operationId": operation_id,
+        "archivePath": archive_path,
+        "ledgerSha256": ledger_sha256,
+        "archiveIdentity": validator.archived_ledger_identity(archive_path, ledger_sha256),
+        "obligations": [],
+    }
+
+
+def test_transfer_receipt_symlink_never_supplies_authority(tmp_path: Path) -> None:
+    validator = load_module(VALIDATOR, "pr10_transfer_symlink_validator")
+    root = tmp_path / "repo"
+    archive = root / "work-items" / "archive" / "2026-09" / "source-item"
+    archive.mkdir(parents=True)
+    ledger = b"{}\n"
+    (archive / "agent-runs.jsonl").write_bytes(ledger)
+    archive_path = archive.relative_to(root).as_posix()
+    payload = _transfer_receipt_payload(validator, archive_path, ledger, "transfer-symlink-op")
+    external = tmp_path / "external-receipt.json"
+    external.write_text(json.dumps(payload), encoding="utf-8")
+    receipt = archive / "lifecycle-transition-receipt.json"
+    try:
+        receipt.symlink_to(external)
+    except OSError as exc:
+        pytest.skip(f"symlink unavailable: {exc}")
+
+    errors: list[str] = []
+    receipts = validator._transfer_receipts(root, errors)
+
+    assert receipts == {}
+    assert any("WI-OBLIGATION-TRANSFER-OWNER" in error for error in errors)
+
+
+def test_transfer_receipt_archive_path_is_assertion_not_locator(tmp_path: Path) -> None:
+    validator = load_module(VALIDATOR, "pr10_transfer_path_validator")
+    root = tmp_path / "repo"
+    archive = root / "work-items" / "archive" / "2026-09" / "source-item"
+    archive.mkdir(parents=True)
+    external_archive = tmp_path / "outside-ledger"
+    external_archive.mkdir()
+    ledger = b"{}\n"
+    (external_archive / "agent-runs.jsonl").write_bytes(ledger)
+    unsafe_archive_path = "../outside-ledger"
+    payload = _transfer_receipt_payload(
+        validator, unsafe_archive_path, ledger, "transfer-escape-op"
+    )
+    (archive / "lifecycle-transition-receipt.json").write_text(
+        json.dumps(payload), encoding="utf-8"
+    )
+
+    errors: list[str] = []
+    receipts = validator._transfer_receipts(root, errors)
+
+    assert receipts == {}
+    assert errors
+
+
+def _break_transfer_relation(fixture: dict) -> None:
+    backlog = (
+        fixture["root"]
+        / "work-items"
+        / "backlog"
+        / f"{fixture['successorSlug']}.md"
+    )
+    text = backlog.read_text(encoding="utf-8")
+    text = "\n".join(
+        line
+        for line in text.splitlines()
+        if not line.startswith("Continues:")
+        and not line.startswith("Obligation-transfer:")
+    ) + "\n"
+    backlog.write_text(text, encoding="utf-8")
+
+
+def test_transfer_chain_endpoint_must_retain_owner_relation(tmp_path: Path) -> None:
+    fixtures = load_module(LEGACY_TRANSFER_TESTS, "pr10_legacy_transfer_fixtures")
+    fixture = fixtures.transfer_fixture(tmp_path)
+    fixtures.run_transfer(fixture)
+    _break_transfer_relation(fixture)
+
+    with pytest.raises(fixture["lifecycle"].LifecycleError) as caught:
+        fixture["lifecycle"].audit(fixture["root"])
+
+    assert caught.value.failure_id == "WI-OBLIGATION-TRANSFER-OWNER"
+
+
+def test_active_only_checker_cannot_hide_broken_transfer_owner(tmp_path: Path) -> None:
+    fixtures = load_module(LEGACY_TRANSFER_TESTS, "pr10_checker_transfer_fixtures")
+    fixture = fixtures.transfer_fixture(tmp_path)
+    fixtures.run_transfer(fixture)
+    _break_transfer_relation(fixture)
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(CHECKER),
+            "--root",
+            str(fixture["root"]),
+            "--active-only",
+        ],
+        cwd=ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "WI-OBLIGATION-TRANSFER-OWNER" in result.stdout + result.stderr
+
+
+def test_captured_successor_detects_same_size_in_place_rewrite(tmp_path: Path) -> None:
+    lifecycle = load_module(MUTATE, "pr10_successor_capture_owner")
+    successor = tmp_path / "successor.md"
+    successor.write_bytes(b"accepted-version")
+    snapshot = lifecycle._capture_file_snapshot(
+        successor, failure_id="WI-BUG-SUCCESSOR-BINDING"
+    )
+    successor.write_bytes(b"rewritten-versio")
+    assert len(successor.read_bytes()) == len(snapshot.data)
+
+    with pytest.raises(lifecycle.LifecycleError) as caught:
+        lifecycle._verify_captured_file(snapshot, "WI-BUG-SUCCESSOR-BINDING")
+
+    assert caught.value.failure_id == "WI-BUG-SUCCESSOR-BINDING"
+
+
+def test_noncanonical_staging_rejects_existing_symlink(tmp_path: Path) -> None:
+    ledger = load_module(LEDGER, "pr10_noncanonical_staging_owner")
+    external = tmp_path / "external"
+    expected = b"exact staging bytes\n"
+    external.write_bytes(expected)
+    staging = tmp_path / "agent-runs.jsonl.tmp"
+    try:
+        staging.symlink_to(external)
+    except OSError as exc:
+        pytest.skip(f"symlink unavailable: {exc}")
+
+    with pytest.raises(ledger.LedgerNoncanonicalRecoveryError):
+        ledger._write_exact_staging_file(staging, expected)
+
+    assert staging.is_symlink()
+    assert external.read_bytes() == expected
+
+
+def test_noncanonical_staging_rejects_external_hardlink(tmp_path: Path) -> None:
+    ledger = load_module(LEDGER, "pr10_noncanonical_hardlink_owner")
+    external = tmp_path / "external-hardlink-source"
+    expected = b"exact staging bytes\n"
+    external.write_bytes(expected)
+    staging = tmp_path / "agent-runs.jsonl.tmp"
+    try:
+        os.link(external, staging)
+    except OSError as exc:
+        pytest.skip(f"hardlink unavailable: {exc}")
+
+    with pytest.raises(ledger.LedgerNoncanonicalRecoveryError):
+        ledger._write_exact_staging_file(staging, expected)
+
+    assert staging.exists()
+    assert external.read_bytes() == expected
+
+
+def test_noncanonical_staging_existing_candidate_read_is_bounded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ledger = load_module(LEDGER, "pr10_noncanonical_bounded_staging_owner")
+    expected = b"exact staging bytes\n"
+    staging = tmp_path / "agent-runs.jsonl.tmp"
+    staging.write_bytes(expected + b"foreign trailing bytes")
+    original_fdopen = ledger.os.fdopen
+    requested_sizes = []
+
+    class TrackingReader:
+        def __init__(self, descriptor, mode):
+            self.stream = original_fdopen(descriptor, mode)
+
+        def __enter__(self):
+            self.stream.__enter__()
+            return self
+
+        def fileno(self):
+            return self.stream.fileno()
+
+        def read(self, size=-1):
+            requested_sizes.append(size)
+            return self.stream.read(size)
+
+        def __exit__(self, *args):
+            return self.stream.__exit__(*args)
+
+    monkeypatch.setattr(ledger.os, "fdopen", TrackingReader)
+
+    with pytest.raises(ledger.LedgerNoncanonicalRecoveryError):
+        ledger._write_exact_staging_file(staging, expected)
+
+    assert requested_sizes == [len(expected) + 1]
+    assert staging.exists()
+
+
+def _noncanonical_replay_fixture(tmp_path: Path, module_name: str):
+    ledger = load_module(LEDGER, module_name)
+    item = tmp_path / "work-items" / "active" / "noncanonical-replay"
+    item.mkdir(parents=True)
+    original = (
+        b'{"date":"2026-09-10","lane":"example","execution_role":"analyst",'
+        b'"result":"historical note"}\n'
+    )
+    expected_sha256 = hashlib.sha256(original).hexdigest()
+    history = item / f"agent-runs.history.{expected_sha256}.jsonl"
+    history.write_bytes(original)
+    marker = ledger._noncanonical_history_marker(
+        item, expected_sha256, original, "linked-ledger-replay", "2026-09-10T12:00:00Z"
+    )
+    marker_bytes = (ledger.serialize_event(marker) + "\n").encode("utf-8")
+    return ledger, item, expected_sha256, marker_bytes
+
+
+@pytest.mark.parametrize("operation", ("apply", "rollback"))
+def test_noncanonical_recovery_preserves_foreign_candidate(
+    tmp_path: Path, operation: str
+) -> None:
+    ledger, item, expected_sha256, marker_bytes = _noncanonical_replay_fixture(
+        tmp_path, f"pr10_foreign_candidate_{operation}_owner"
+    )
+    history = item / f"agent-runs.history.{expected_sha256}.jsonl"
+    original = history.read_bytes()
+    canonical = item / "agent-runs.jsonl"
+    canonical.write_bytes(original if operation == "apply" else marker_bytes)
+    candidate = item / "agent-runs.jsonl.tmp"
+    foreign = b"foreign staging candidate\n"
+    candidate.write_bytes(foreign)
+    command = (
+        ledger._command_apply_noncanonical_history
+        if operation == "apply"
+        else ledger._command_rollback_noncanonical_history
+    )
+
+    with pytest.raises(ledger.LedgerNoncanonicalRecoveryError):
+        command(
+            item, expected_sha256, "linked-ledger-replay",
+            "2026-09-10T12:00:00Z", ledger.load_validator(), None,
+        )
+
+    assert candidate.read_bytes() == foreign
+
+
+@pytest.mark.parametrize("operation", ("apply", "rollback"))
+def test_noncanonical_recovery_cleanup_preserves_same_bytes_replacement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str
+) -> None:
+    ledger, item, expected_sha256, marker_bytes = _noncanonical_replay_fixture(
+        tmp_path, f"pr10_replaced_candidate_{operation}_owner"
+    )
+    history = item / f"agent-runs.history.{expected_sha256}.jsonl"
+    original = history.read_bytes()
+    canonical = item / "agent-runs.jsonl"
+    canonical.write_bytes(original if operation == "apply" else marker_bytes)
+    candidate = item / "agent-runs.jsonl.tmp"
+    original_write = ledger._write_exact_staging_file
+    replacement_identity = {}
+
+    def replace_after_write(path: Path, expected: bytes):
+        owned = original_write(path, expected)
+        if path == candidate:
+            replacement = path.with_suffix(".replacement")
+            replacement.write_bytes(expected)
+            metadata = replacement.stat()
+            replacement_identity["value"] = (metadata.st_dev, metadata.st_ino)
+            os.replace(replacement, path)
+        return owned
+
+    monkeypatch.setattr(ledger, "_write_exact_staging_file", replace_after_write)
+    monkeypatch.setattr(ledger, "_validate_noncanonical_marker_candidate", lambda *_: None)
+    command = (
+        ledger._command_apply_noncanonical_history
+        if operation == "apply"
+        else ledger._command_rollback_noncanonical_history
+    )
+
+    completed, _history = command(
+        item, expected_sha256, "linked-ledger-replay",
+        "2026-09-10T12:00:00Z", ledger.load_validator(), "pre-ledger-replace",
+    )
+
+    assert completed is False
+    assert candidate.exists()
+    metadata = candidate.stat()
+    assert (metadata.st_dev, metadata.st_ino) == replacement_identity["value"]
+
+
+def test_noncanonical_replay_rejects_symlinked_canonical_ledger(tmp_path: Path) -> None:
+    ledger, item, expected_sha256, marker_bytes = _noncanonical_replay_fixture(
+        tmp_path, "pr10_noncanonical_replay_symlink_owner"
+    )
+    external = tmp_path / "external-canonical-ledger"
+    external.write_bytes(marker_bytes)
+    canonical = item / "agent-runs.jsonl"
+    try:
+        canonical.symlink_to(external)
+    except OSError as exc:
+        pytest.skip(f"symlink unavailable: {exc}")
+
+    with pytest.raises(ledger.LedgerNoncanonicalRecoveryError):
+        ledger._noncanonical_recovery_state(
+            item,
+            expected_sha256,
+            "linked-ledger-replay",
+            "2026-09-10T12:00:00Z",
+            ledger.load_validator(),
+        )
+
+    assert canonical.is_symlink()
+    assert external.read_bytes() == marker_bytes
+
+
+def test_noncanonical_replay_rejects_hardlinked_canonical_ledger(tmp_path: Path) -> None:
+    ledger, item, expected_sha256, marker_bytes = _noncanonical_replay_fixture(
+        tmp_path, "pr10_noncanonical_replay_hardlink_owner"
+    )
+    external = tmp_path / "external-canonical-ledger-hardlink"
+    external.write_bytes(marker_bytes)
+    canonical = item / "agent-runs.jsonl"
+    try:
+        os.link(external, canonical)
+    except OSError as exc:
+        pytest.skip(f"hardlink unavailable: {exc}")
+
+    with pytest.raises(ledger.LedgerNoncanonicalRecoveryError):
+        ledger._noncanonical_recovery_state(
+            item,
+            expected_sha256,
+            "linked-ledger-replay",
+            "2026-09-10T12:00:00Z",
+            ledger.load_validator(),
+        )
+
+    assert canonical.exists()
+    assert external.read_bytes() == marker_bytes
+
+
+def test_transition_intent_inventory_counts_every_directory_entry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lifecycle = load_module(MUTATE, "pr10_transition_inventory_entries")
+    root = tmp_path / "repo"
+    transition_root = root / ".scratch" / "work-items-lifecycle-transitions"
+    transition_root.mkdir(parents=True)
+    (transition_root / "one.txt").write_text("x", encoding="utf-8")
+    (transition_root / "two.txt").write_text("x", encoding="utf-8")
+    monkeypatch.setattr(
+        lifecycle, "TRANSITION_INTENT_INVENTORY_MAX_ENTRIES", 1
+    )
+
+    with pytest.raises(lifecycle.LifecycleError) as caught:
+        list(lifecycle._iter_transition_intents(root))
+
+    assert caught.value.failure_id == "WI-LIFECYCLE-TRANSITION-INTENT-INVALID"
+
+
+def test_transition_intent_inventory_refuses_before_recovery_decode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lifecycle = load_module(MUTATE, "pr10_transition_inventory_decode")
+    root = tmp_path / "repo"
+    transition_root = root / ".scratch" / "work-items-lifecycle-transitions"
+    transition_root.mkdir(parents=True)
+    (transition_root / "one.json").write_text("{}\n", encoding="utf-8")
+    (transition_root / "two.json").write_text("{}\n", encoding="utf-8")
+    monkeypatch.setattr(
+        lifecycle, "TRANSITION_INTENT_INVENTORY_MAX_ENTRIES", 1
+    )
+    monkeypatch.setattr(
+        lifecycle,
+        "_recover_transition",
+        lambda *_args, **_kwargs: pytest.fail(
+            "over-limit inventory reached transition decode"
+        ),
+    )
+
+    with pytest.raises(lifecycle.LifecycleError) as caught:
+        lifecycle._recover_all_transitions(root)
+
+    assert caught.value.failure_id == "WI-LIFECYCLE-TRANSITION-INTENT-INVALID"
+
+
+def test_transition_intent_loader_rejects_symlink_before_json_decode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lifecycle = load_module(MUTATE, "pr10_transition_intent_nofollow")
+    root = tmp_path / "repo"
+    outside = tmp_path / "outside-intent.json"
+    outside.write_text("{}\n", encoding="utf-8")
+    link = root / ".scratch" / "work-items-lifecycle-transitions" / "linked.json"
+    link.parent.mkdir(parents=True)
+    try:
+        link.symlink_to(outside)
+    except OSError as exc:
+        pytest.skip(f"symlink unavailable: {exc}")
+    monkeypatch.setattr(
+        lifecycle.json,
+        "loads",
+        lambda *_args, **_kwargs: pytest.fail(
+            "linked transition intent reached JSON decode"
+        ),
+    )
+
+    with pytest.raises(lifecycle.LifecycleError) as caught:
+        lifecycle._load_transition_intent(root, link)
+
+    assert caught.value.failure_id == "WI-LIFECYCLE-TRANSITION-INTENT-INVALID"
+
+
+def test_transition_intent_loader_rejects_hardlink_before_json_decode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lifecycle = load_module(MUTATE, "pr10_transition_intent_hardlink")
+    root = tmp_path / "repo"
+    external = tmp_path / "outside-intent.json"
+    external.write_text("{}\n", encoding="utf-8")
+    intent = root / ".scratch" / "work-items-lifecycle-transitions" / "linked.json"
+    intent.parent.mkdir(parents=True)
+    try:
+        os.link(external, intent)
+    except OSError as exc:
+        pytest.skip(f"hardlink unavailable: {exc}")
+    monkeypatch.setattr(
+        lifecycle.json,
+        "loads",
+        lambda *_args, **_kwargs: pytest.fail(
+            "hardlinked transition intent reached JSON decode"
+        ),
+    )
+
+    with pytest.raises(lifecycle.LifecycleError) as caught:
+        lifecycle._load_transition_intent(root, intent)
+
+    assert caught.value.failure_id == "WI-LIFECYCLE-TRANSITION-INTENT-INVALID"
+
+
+def test_ledger_location_proof_rejects_hardlink_before_json_decode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lifecycle = load_module(MUTATE, "pr10_ledger_proof_hardlink")
+    external = tmp_path / "outside-proof.json"
+    external.write_text("{}\n", encoding="utf-8")
+    proof = tmp_path / "proof.json"
+    try:
+        os.link(external, proof)
+    except OSError as exc:
+        pytest.skip(f"hardlink unavailable: {exc}")
+    monkeypatch.setattr(
+        lifecycle.json,
+        "loads",
+        lambda *_args, **_kwargs: pytest.fail(
+            "hardlinked ledger proof reached JSON decode"
+        ),
+    )
+
+    with pytest.raises(lifecycle.LifecycleError) as caught:
+        lifecycle._ledger_location_proof_object(
+            proof,
+            failure_id="WI-LIFECYCLE-TRANSITION-INTENT-INVALID",
+            unreadable="transition intent is unreadable",
+        )
+
+    assert caught.value.failure_id == "WI-LIFECYCLE-TRANSITION-INTENT-INVALID"
+
+
+def test_captured_snapshot_rejects_same_size_rewrite_with_restored_mtime(
+    tmp_path: Path,
+) -> None:
+    lifecycle = load_module(MUTATE, "pr10_snapshot_content_drift")
+    target = tmp_path / "snapshot.bin"
+    target.write_bytes(b"same-size")
+    snapshot = lifecycle._capture_file_snapshot(
+        target, failure_id="WI-SNAPSHOT-DRIFT"
+    )
+    metadata = target.stat()
+    target.write_bytes(b"new-bytes")
+    os.utime(target, ns=(metadata.st_atime_ns, metadata.st_mtime_ns))
+
+    with pytest.raises(lifecycle.LifecycleError) as caught:
+        lifecycle._verify_captured_file(snapshot, "WI-SNAPSHOT-DRIFT")
+
+    assert caught.value.failure_id == "WI-SNAPSHOT-DRIFT"
+
+
+def test_single_link_requirement_is_scoped_to_authority_files(tmp_path: Path) -> None:
+    lifecycle = load_module(MUTATE, "pr10_snapshot_link_scope")
+    external = tmp_path / "external.bin"
+    external.write_bytes(b"ordinary")
+    linked = tmp_path / "linked.bin"
+    try:
+        os.link(external, linked)
+    except OSError as exc:
+        pytest.skip(f"hardlink unavailable: {exc}")
+
+    snapshot = lifecycle._capture_file_snapshot(
+        linked, failure_id="WI-SNAPSHOT-GENERIC"
+    )
+    assert snapshot.data == b"ordinary"
+    with pytest.raises(lifecycle.LifecycleError):
+        lifecycle._capture_file_snapshot(
+            linked,
+            failure_id="WI-SNAPSHOT-AUTHORITY",
+            require_single_link=True,
+        )

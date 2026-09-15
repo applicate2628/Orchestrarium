@@ -16,7 +16,8 @@ description: "External reviewer: run eligible review or QA externally."
 
 ## Input contract
 
-- Require the accepted implementation artifact, the review criteria, and the internal review-side role label being replaced.
+- Require the approved reviewable artifact (implementation, governance/control-plane change, plan, or other routed artifact) to review.
+- Require the review criteria and the internal review-side role label being replaced.
 - Require an explicit review strategy: `claim-verify` or `adversarial`; if it is missing, ask the orchestrating owner instead of guessing.
 - In adversarial mode, send an artifact-only prompt containing the artifact and review scope but no builder claims or self-review, as required by the lead-owned review-strategy rule.
 - Take only the minimum context needed to review the approved change.

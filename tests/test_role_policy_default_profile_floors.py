@@ -14,8 +14,8 @@ ROOT = Path(__file__).resolve().parents[1]
 RESOLVER_PATH = ROOT / "scripts" / "resolve-agents-mode.py"
 SKILL_ONLY_BY_TASK = {
     "exploration": {"product-analyst"},
-    "planning": {"ux-designer"},
-    "critical-design": {"performance-engineer", "reliability-engineer"},
+    "planning": {"ux-designer", "consultant"},
+    "critical-design": {"performance-engineer", "reliability-engineer", "consultant"},
     "engineering": {
         "frontend-engineer",
         "qt-ui-engineer",
@@ -27,6 +27,7 @@ SKILL_ONLY_BY_TASK = {
         "visualization-engineer",
     },
     "review": {
+        "consultant",
         "performance-reviewer",
         "accessibility-reviewer",
         "ux-reviewer",
@@ -57,15 +58,16 @@ def test_reminder_does_not_claim_the_installed_resolver_is_absent() -> None:
     assert "is NOT shipped to install targets" not in source
 
 
-def test_installed_resolver_is_a_runtime_helper_while_reminder_stays_self_contained() -> None:
+def test_installed_resolver_and_sibling_scalar_helper_keep_distinct_runtime_ownership() -> None:
     installer = (ROOT / "scripts" / "production_installer.py").read_text(encoding="utf-8")
     reminder = (
         ROOT / "src.codex" / "skills" / "lead" / "scripts" / "agents-mode-reminder.py"
     ).read_text(encoding="utf-8")
 
     assert '"resolve-agents-mode.py",' in installer
-    assert "SELF-CONTAINED first-match read" in reminder
-    assert "does not import" in reminder
+    assert "agents_mode_runtime.py" in reminder
+    assert "owns the first-match read" in reminder
+    assert "from agents_mode_runtime import resolve_scalar" in reminder
 
 
 def test_role_migration_and_luna_docs_have_no_stale_create_only_contract() -> None:
@@ -225,6 +227,70 @@ def test_ordinary_resolver_keeps_named_default_but_explicit_tuple_uses_generic_s
     assert explicit["fallback"] == "none"
 
 
+def test_analyst_exploration_admits_medium_without_changing_named_default() -> None:
+    host = {
+        "explicitModelControl": True,
+        "explicitReasoningEffortControl": True,
+        "reportedModels": ["gpt-5.6-terra"],
+        "reportedEfforts": ["medium", "high"],
+        "reportedAgentTypes": ["analyst"],
+    }
+    description = RESOLVER.describe_ordinary_native_role_options(
+        "analyst",
+        "exploration",
+        host,
+        repo_root=ROOT,
+    )
+    scope = {
+        "authority": "parent-dispatcher-only",
+        "allowedTools": ["functions.exec"],
+        "changeSurface": [],
+    }
+
+    assert description["status"] == "available"
+    assert description["mutationClass"] == "read-only"
+    assert description["defaultProfile"] == "balanced-high"
+    assert description["defaultModel"] == "gpt-5.6-terra"
+    assert description["defaultEffort"] == "high"
+    assert [
+        (option["profile"], option["model"], option["effort"])
+        for option in description["options"]
+    ] == [
+        ("balanced-medium", "gpt-5.6-terra", "medium"),
+        ("balanced-high", "gpt-5.6-terra", "high"),
+    ]
+
+    default = RESOLVER.resolve_ordinary_native_dispatch(
+        description,
+        caller_rationale="Use the existing analyst default for this bounded exploration.",
+        approved_execution_scope=scope,
+    )
+    explicit = RESOLVER.resolve_ordinary_native_dispatch(
+        description,
+        requested_model="gpt-5.6-terra",
+        requested_effort="medium",
+        caller_rationale="Routine bounded classification favors moderate reasoning.",
+        approved_execution_scope=scope,
+    )
+
+    assert default["resolvedProfile"] == "balanced-high"
+    assert default["resolvedModel"] == "gpt-5.6-terra"
+    assert default["resolvedEffort"] == "high"
+    assert default["invocation"] == {
+        "mode": "named-role-default",
+        "agentType": "analyst",
+    }
+    assert explicit["status"] == "resolved"
+    assert explicit["resolvedProfile"] == "balanced-medium"
+    assert explicit["resolvedModel"] == "gpt-5.6-terra"
+    assert explicit["resolvedEffort"] == "medium"
+    assert explicit["invocation"]["mode"] == "generic-explicit-profile"
+    assert explicit["invocation"]["forkTurns"] == "none"
+    assert "agentType" not in explicit["invocation"]
+    assert explicit["failurePolicy"] == default["failurePolicy"]
+    assert explicit["fallback"] == "none"
+
+
 def test_ordinary_discovery_filters_reported_host_capabilities_and_max_needs_approval() -> None:
     description = RESOLVER.describe_ordinary_native_role_options(
         "scientific-software-engineer",
@@ -279,6 +345,35 @@ def test_every_ordinary_eligibility_edge_has_default_and_astra_options() -> None
                 policy["profiles"][profile]["codexModel"] == "gpt-6-astra"
                 for profile in intersection
             ), (task_name, role_name)
+
+
+def test_empty_post_filter_options_deny_every_eligible_ordinary_role() -> None:
+    policy, _ = RESOLVER.load_role_policy(ROOT)
+    host = {
+        "explicitModelControl": True,
+        "explicitReasoningEffortControl": True,
+        "reportedModels": ["host-model-not-present-in-policy"],
+        "reportedEfforts": ["medium"],
+    }
+
+    for task_name, role_names in policy["taskRoleEligibility"].items():
+        if task_name in {"micro", "mechanical-read", "mechanical"}:
+            continue
+        for role_name in role_names:
+            description = RESOLVER.describe_ordinary_native_role_options(
+                role_name,
+                task_name,
+                host,
+                repo_root=ROOT,
+            )
+            assert description == {
+                "schemaVersion": 1,
+                "status": "denied",
+                "stableId": "E_ORDINARY_NATIVE_SELECTION_INVALID",
+                "taskClass": task_name,
+                "role": role_name,
+                "fallback": "none",
+            }, (task_name, role_name)
 
 
 def test_ordinary_native_cli_projects_explicit_host_controls_without_launching() -> None:

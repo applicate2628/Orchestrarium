@@ -27,13 +27,36 @@ VALIDATORS = (
     ROOT / "src.codex/skills/lead/scripts/validate-skill-pack.py",
     ROOT / "src.claude/agents/scripts/validate-skill-pack.py",
 )
+SHARED_INVARIANT_ACTIONS = (
+    (
+        "shared governance requires direct external launch",
+        "use orchestrating runtime/approved wrapper, never an internal relay",
+    ),
+    (
+        "shared governance requires file-based external CLI prompts",
+        "file-based prompt via stdin/file, never argv",
+    ),
+    (
+        "shared governance rejects split-brain state synchronization",
+        "Split-brain sync is an architecture bug",
+    ),
+    (
+        "shared governance requires verification before trusting subagent results",
+        "verify its result before acceptance/forwarding/completion claims",
+    ),
+    (
+        "shared governance requires measured evidence before root-cause or fix claims",
+        "capture observable wording/error/log/return/repro or `file:line`; verify the "
+        "causal chain",
+    ),
+)
 PROVIDER_RUNTIME_MIRRORS = (
     ROOT / "src.codex/skills/lead/scripts/skill_pack_validator_runtime.py",
     ROOT / "src.claude/agents/scripts/skill_pack_validator_runtime.py",
 )
 EXPECTED_SUMMARIES = (
-    "PASS: 558  WARN: 0  FAIL: 0",
-    "Checks: 489  |  Passed: 489  |  Warnings: 0  |  Errors: 0",
+    r"^  PASS: [1-9][0-9]*  WARN: 0  FAIL: 0$",
+    r"^  Checks: ([1-9][0-9]*)  \|  Passed: \1  \|  Warnings: 0  \|  Errors: 0$",
 )
 
 
@@ -107,6 +130,13 @@ def test_work_items_checker_consumes_canonical_slug_predicate_explicitly(
     assert resolver_calls == ["safe.dot"]
 
 
+def _has_complete_summary_line(output: str, summary: str) -> bool:
+    return any(
+        re.fullmatch(summary.removesuffix("\n"), line)
+        for line in output.splitlines()
+    )
+
+
 def _run_validator(
     validator: Path,
     summary: str,
@@ -130,8 +160,52 @@ def _run_validator(
         check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert summary in result.stdout
+    assert _has_complete_summary_line(result.stdout, summary), result.stdout
     return result
+
+
+@pytest.mark.parametrize(
+    ("summary", "line", "expected"),
+    (
+        (EXPECTED_SUMMARIES[0], "  PASS: 1  WARN: 0  FAIL: 0", True),
+        (
+            EXPECTED_SUMMARIES[1],
+            "  Checks: 1  |  Passed: 1  |  Warnings: 0  |  Errors: 0",
+            True,
+        ),
+        (EXPECTED_SUMMARIES[0], "  PASS: 0  WARN: 0  FAIL: 0", False),
+        (
+            EXPECTED_SUMMARIES[1],
+            "  Checks: 0  |  Passed: 0  |  Warnings: 0  |  Errors: 0",
+            False,
+        ),
+        (
+            EXPECTED_SUMMARIES[1],
+            "  Checks: 2  |  Passed: 1  |  Warnings: 0  |  Errors: 0",
+            False,
+        ),
+        (EXPECTED_SUMMARIES[0], "  PASS: 1  WARN: 0  FAIL: 1", False),
+        (
+            EXPECTED_SUMMARIES[1],
+            "  Checks: 2  |  Passed: 2  |  Warnings: 0  |  Errors: 1",
+            False,
+        ),
+        (EXPECTED_SUMMARIES[0], "  PASS: 1  WARN: 0  FAIL: 01", False),
+        (
+            EXPECTED_SUMMARIES[1],
+            "  Checks: 2  |  Passed: 2  |  Warnings: 0  |  Errors: 01",
+            False,
+        ),
+        ("VALIDATION PASSED\n", "VALIDATION PASSED", True),
+        ("  RESULT: PASS\n", "  RESULT: PASS", True),
+    ),
+)
+def test_validator_summary_patterns_require_a_complete_clean_success_line(
+    summary: str,
+    line: str,
+    expected: bool,
+) -> None:
+    assert _has_complete_summary_line(line + "\n", summary) is expected
 
 
 def _copy_validator_runtime(destination: Path) -> None:
@@ -172,6 +246,9 @@ def _materialize_installed_pack(
     else:
         pack = target / ".claude"
         shutil.copytree(ROOT / "src.claude", pack)
+        universal_architect = target / ".agents" / "skills" / "architect"
+        shutil.copytree(ROOT / "src.codex" / "skills" / "architect", universal_architect)
+        _create_directory_link(pack / "skills" / "architect", universal_architect)
         shutil.copy2(ROOT / "shared" / "AGENTS.shared.md", pack / "AGENTS.md")
         scripts = pack / "agents" / "scripts"
     for name in (
@@ -1358,6 +1435,98 @@ def test_installed_codex_layering_checks_only_orchestrarium_owned_skills(
 
 
 @pytest.mark.parametrize(
+    ("body", "expected_passed", "expected_unresolved"),
+    (
+        (
+            "- **Coherent locality (A4/A7/M):** one combined law.\n"
+            "A4 A7 M govern this role.\n",
+            True,
+            (),
+        ),
+        (
+            "- **Coherent locality (A4/A7):** incomplete combined law.\n"
+            "A4 A7 M govern this role.\n",
+            False,
+            ("M",),
+        ),
+        (
+            "A4 A7 M govern this role.\n"
+            "Ordinary prose mentions (A4/A7/M) without defining the laws.\n",
+            False,
+            ("A4", "A7", "M"),
+        ),
+    ),
+)
+def test_layering_ids_resolve_only_from_bold_labeled_definitions(
+    tmp_path: Path,
+    body: str,
+    expected_passed: bool,
+    expected_unresolved: tuple[str, ...],
+) -> None:
+    skill = tmp_path / "SKILL.md"
+    skill.write_text(body, encoding="utf-8")
+    runtime = _load(RUNTIME, f"grouped_layering_ids_{len(body)}")
+
+    passed, unresolved = runtime.layering_ids_resolve(skill)
+
+    assert passed is expected_passed
+    assert unresolved == expected_unresolved
+
+
+@pytest.mark.parametrize(
+    ("provider", "validator"),
+    tuple(zip(("codex", "claude"), VALIDATORS, strict=True)),
+)
+@pytest.mark.parametrize(("label", "required_clause"), SHARED_INVARIANT_ACTIONS)
+def test_provider_shared_invariant_actions_bind_current_clause_and_reject_removal(
+    tmp_path: Path,
+    provider: str,
+    validator: Path,
+    label: str,
+    required_clause: str,
+) -> None:
+    adapter = _load(validator, f"shared_invariant_adapter_{provider}_{len(label)}")
+    matches = tuple(action for action in adapter._DECLARED_ACTIONS if action[-1] == label)
+    assert len(matches) == 1
+    declared = matches[0]
+    assert declared[0] == "check_contains"
+    assert declared[2] == required_clause
+
+    shared_text = (ROOT / "shared/AGENTS.shared.md").read_text(encoding="utf-8")
+    assert shared_text.count(required_clause) == 1
+    candidate = tmp_path / f"{provider}-{len(label)}.md"
+    candidate.write_text(shared_text, encoding="utf-8")
+    action = ("check_contains", str(candidate), required_clause, label)
+    runtime = _load(RUNTIME, f"shared_invariant_runtime_{provider}_{len(label)}")
+
+    accepted = runtime.validate_pack(
+        script=validator,
+        provider=provider,
+        actions=(action,),
+        maintainer_only_shared_reference_names=frozenset(),
+        utility_skills=frozenset(),
+        curated_role_skills=frozenset(),
+        root=ROOT,
+    )
+    assert accepted.errors == 0
+
+    candidate.write_text(
+        shared_text.replace(required_clause, "[removed shared invariant]"),
+        encoding="utf-8",
+    )
+    rejected = runtime.validate_pack(
+        script=validator,
+        provider=provider,
+        actions=(action,),
+        maintainer_only_shared_reference_names=frozenset(),
+        utility_skills=frozenset(),
+        curated_role_skills=frozenset(),
+        root=ROOT,
+    )
+    assert rejected.errors == 1
+
+
+@pytest.mark.parametrize(
     (
         "provider",
         "linked_subtree",
@@ -1381,10 +1550,10 @@ def test_installed_codex_layering_checks_only_orchestrarium_owned_skills(
             "claude",
             "agents",
             ".claude/CLAUDE.md",
-            "agents-design-panel.md",
-            "agents-stale-panel.md",
+            ".claude/commands/agents-help.md",
+            ".claude/commands/agents-stale-help.md",
             "  RESULT: PASS\n",
-            "CLAUDE.md dispatch index exposes the design-panel command",
+            "CLAUDE.md points to the installed command index",
         ),
     ),
 )

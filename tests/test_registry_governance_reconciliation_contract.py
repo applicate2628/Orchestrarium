@@ -22,14 +22,26 @@ CONTROL_SURFACES = (
     ROOT / "references-claude" / "ru" / "periodic-control-matrix.md",
 )
 
+SHARED_OPERATING_MODEL = ROOT / "shared" / "references" / "subagent-operating-model.md"
+
 CODEX_ARCHIVIST_INTERFACE = (
     ROOT / "src.codex" / "skills" / "knowledge-archivist" / "agents" / "openai.yaml"
 )
+
+SUMMARY_COUNT_FORWARD_FIXTURE = {
+    "adjacent-finding": 8,
+    "standalone": 8,
+    "active-overlay": 7,
+    "buildtrees-successor": 1,
+    "unclassified": 0,
+}
 
 
 def test_archivist_full_registry_mode_separates_structure_from_semantics() -> None:
     required = (
         "Registry Governance Reconciliation (mandatory complete mode)",
+        "after a verified change to cross-registry schema, lifecycle, or relations",
+        "A single-item or single-registry change uses Work-cycle reconciliation",
         "structural gate",
         "semantic currency",
         "for EVERY current record",
@@ -44,9 +56,34 @@ def test_archivist_full_registry_mode_separates_structure_from_semantics() -> No
             assert token in text, f"{path}: missing reconciliation contract token {token!r}"
 
 
+def test_registry_summary_counts_reconcile_from_exact_forward_fixture() -> None:
+    # Source-contract fixture only; this does not add or claim a registry counter engine.
+    physical_current_record_count = 24
+    assert sum(SUMMARY_COUNT_FORWARD_FIXTURE.values()) == physical_current_record_count
+    assert SUMMARY_COUNT_FORWARD_FIXTURE["adjacent-finding"] == 8
+    assert SUMMARY_COUNT_FORWARD_FIXTURE["standalone"] == 8
+
+    required = (
+        "Derive every summary count mechanically from the exact emitted row set",
+        "require the grouped total to equal the physical current-record count",
+        "explicit `unclassified` remainder instead of dropping it",
+    )
+    for path in ARCHIVIST_BINDINGS:
+        text = path.read_text(encoding="utf-8")
+        for token in required:
+            assert token in text, f"{path}: missing summary reconciliation token {token!r}"
+
+    shared = SHARED_OPERATING_MODEL.read_text(encoding="utf-8")
+    assert "derive summary counts from the exact emitted rows" in shared
+    assert "require grouped totals to equal the physical current-record count" in shared
+    assert "explicit `unclassified` remainder with no dropped rows" in shared
+
+
 def test_lead_must_consume_every_registry_exception_before_close() -> None:
     required = (
         "Registry reconciliation intake",
+        "only when its complete-mode trigger applies",
+        "bounded Work-cycle reconciliation for affected single-item or single-registry state",
         "route every non-consistent semantic row",
         "do not claim the registries current or close the parent item",
         "structural AND semantic gates both return `PASS`",

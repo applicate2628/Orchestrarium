@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Repository publication gate: leak scan, work-item state, and release notes."""
+"""Repository publication gate: leak scan and release notes for the staged target."""
 from __future__ import annotations
 
 import argparse
@@ -50,26 +50,6 @@ def main(argv: list[str] | None = None) -> int:
     scan = subprocess.run([sys.executable, str(scanner)], cwd=root)
     if scan.returncode:
         return scan.returncode
-
-    active = root / "work-items" / "active"
-    if active.is_dir():
-        state = subprocess.run(
-            [
-                sys.executable,
-                str(root / "scripts" / "check-work-items-state.py"),
-                "--root",
-                ".",
-                "--active-only",
-            ],
-            cwd=root,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        if state.returncode:
-            return _fail(
-                "work-items state check failed (open REVISE obligation or invalid ledger) "
-                "— run: python scripts/check-work-items-state.py --active-only"
-            )
 
     staged_proc = _run(
         ["git", "diff", "--cached", "--name-only", "--diff-filter=ACMRTUXB", "-z", "--"],

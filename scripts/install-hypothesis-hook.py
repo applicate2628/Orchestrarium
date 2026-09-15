@@ -294,6 +294,7 @@ def build_codex_entry(
     host_os: str,
     hook_event: str = "PreToolUse",
     tool_matcher: str | None = None,
+    status_message: str | None = None,
 ) -> dict[str, Any]:
     """Build the Codex shell-form entry for a resolved HookTarget."""
     tokens = (target.executable, *target.args)
@@ -302,14 +303,15 @@ def build_codex_entry(
         if host_os == "windows"
         else " ".join(shlex.quote(token) for token in tokens)
     )
+    handler = {
+        "type": "command",
+        "command": command_str,
+    }
+    if status_message is not None:
+        handler["statusMessage"] = status_message
     return _with_event_matcher(
         {
-            "hooks": [
-                {
-                    "type": "command",
-                    "command": command_str,
-                }
-            ],
+            "hooks": [handler],
         },
         hook_event,
         tool_matcher,
@@ -543,6 +545,11 @@ def main() -> int:
         ),
     )
     parser.add_argument(
+        "--status-message",
+        default=None,
+        help="Optional Codex command-handler statusMessage shown while the hook runs",
+    )
+    parser.add_argument(
         "--remove",
         action="store_true",
         help="Remove our hook entry instead of installing it",
@@ -638,7 +645,11 @@ def main() -> int:
                 )
             elif args.platform == "codex":
                 entry = build_codex_entry(
-                    hook_target, args.host_os, args.hook_event, args.tool_matcher
+                    hook_target,
+                    args.host_os,
+                    args.hook_event,
+                    args.tool_matcher,
+                    args.status_message,
                 )
             else:
                 entry = build_generic_entry(

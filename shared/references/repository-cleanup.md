@@ -4,7 +4,7 @@
 
 ## Ownership
 
-The coordinator performs only `scan -> classify -> route -> recheck`. It may classify workspace resources itself, but it projects lifecycle, Git, and transfer results from the exact existing owner evidence. It does not recompute those owners' predicates or turn its report into approval.
+The coordinator performs only `scan -> classify -> route -> recheck`. It may classify workspace resources itself, but it projects lifecycle, Git, and transfer results from the exact existing owner evidence. When `work-items/` is selected, it enumerates every immediate child exactly once as `category | derived | repository-local exception | unknown`; audit `PASS` does not satisfy this census. It does not recompute those owners' predicates or turn its report into approval.
 
 Existing owners remain authoritative:
 
@@ -13,6 +13,8 @@ Existing owners remain authoritative:
 - the exact Git-operation owner changes Git state;
 - `$manual-repo-transfer` owns final inventory, bundle creation, trusted verification, and receiver restoration;
 - each producing role owns settlement of its process trees, temporary worktrees or branches, locks, and generated residue.
+
+Task scratch under `.scratch/work-items/<work-item-slug>/` is disposable work-item storage, not an archive: producers promote required load-bearing results to canonical artifacts, finish the task rather than endlessly sorting scratch, then the producing owner settles its temporary state. Retain legacy scratch only until its recovery or transition settles; unfinished, foreign, ambiguous, or denied state remains preserved.
 
 The coordinator has no mutation engine, persistent state, receipt ledger, registry, cache, resumable state, or generic process killer. Every destructive action still requires the existing owner's genuine current-user authorization and safety checks.
 
@@ -36,7 +38,7 @@ No agent deletes anything within `.scratch/trash/`, including during later clean
 
 No actor may claim lane or task `PASS`, hand off, commit, push, or declare transfer readiness while non-canonical agent-owned residue remains, except for the bounded independent-action rule above; even there, cleanup itself remains non-`PASS` and the residue stays visible. This includes temporary or generated files, half-finished alternatives, dead or superseded code, temporary plans/reports/logs without an accepted pointer, live process descendants, handles, locks, temporary worktrees or branches, and quarantine or recovery roots.
 
-Pre-existing user state remains untouched. Ambiguous ownership preserves the state and blocks destructive action. Each selected resource has a current-invocation `ResourceRowV1`; unknown ownership, identity, classification, settlement, or disposition makes that row `unclassified` and yields `REVISE`.
+Pre-existing user state remains untouched. Ambiguous ownership preserves the state and blocks destructive action. Each selected resource has a current-invocation `ResourceRowV1`; `unknown` remains preserved, and unknown ownership, identity, classification, settlement, or disposition makes that row `unclassified` and yields `REVISE`.
 
 The only general exemption is owner/config-identified disposable material on an ephemeral temp volume. The fixed safe-floor and preferred-target hysteresis, its input validation, and the exact `ResourceRowV1` evidence are canonically owned by the installed `$repo-cleanup` `SKILL.md`; there is no repository-local threshold override.
 

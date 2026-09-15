@@ -16,7 +16,7 @@ REFERENCE_REL = "shared/references/c-abi-external-adapter-boundaries.md"
 ROLE_PAIRS = {
     "architect": (
         ROOT / "src.codex" / "skills" / "architect" / "SKILL.md",
-        ROOT / "src.claude" / "skills" / "architect" / "SKILL.md",
+        ROOT / "src.codex" / "skills" / "architect" / "SKILL.md",
     ),
     "architecture-reviewer": (
         ROOT / "src.codex" / "skills" / "architecture-reviewer" / "SKILL.md",

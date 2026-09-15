@@ -15,6 +15,17 @@ LEAD_SKILLS = (
     "src.codex/skills/lead/SKILL.md",
     "src.claude/skills/lead/SKILL.md",
 )
+CHECKPOINT_POLICY_SURFACES = (
+    "shared/AGENTS.shared.md",
+    *LEAD_SKILLS,
+    "src.codex/skills/lead/operating-model.md",
+    "src.claude/agents/contracts/operating-model.md",
+)
+ROLLBACK_SAFETY_SURFACES = (
+    "shared/AGENTS.shared.md",
+    "src.codex/AGENTS.codex.md",
+    "shared/references/spine/verification-and-decision-discipline.md",
+)
 RULE_LABEL = "**Git disposition checkpoint:**"
 
 SCENARIO_FRAGMENTS = {
@@ -70,6 +81,66 @@ class GitDispositionContractTests(unittest.TestCase):
                 with self.subTest(path=path, scenario=scenario):
                     for fragment in fragments:
                         self.assertIn(fragment, rule)
+
+    def test_open_gate_blocks_only_dependent_checkpoint_work(self) -> None:
+        full_projection = (
+            "Lead creates a timely local Git commit checkpoint",
+            "coherent and separable",
+            "staging only that scope",
+            "Any open gate blocks its dependent changes",
+            "unrelated ready work and eligible checkpoints continue",
+            "neither completion nor publication",
+            "Human review, leak checking, and explicit publication authority still govern push and release",
+        )
+        compact_shared_projection = (
+            "Lead creates a timely local Git commit checkpoint",
+            "coherent and separable",
+            "staging only that scope",
+            "An open gate blocks dependent changes, not unrelated ready work or eligible checkpoints",
+            "neither completion nor publication",
+            "Human review, leak checking, and explicit publication authority still govern push/release",
+        )
+        for path in CHECKPOINT_POLICY_SURFACES:
+            text = _read(path)
+            required = full_projection
+            if path == "shared/AGENTS.shared.md" and all(
+                fragment in text for fragment in compact_shared_projection
+            ):
+                required = compact_shared_projection
+            with self.subTest(path=path):
+                for fragment in required:
+                    self.assertIn(fragment, text)
+                self.assertNotIn(
+                    "Do not begin install validation, commit, push, publication",
+                    text,
+                )
+                self.assertNotIn(
+                    "while primary review/verification is open, no install validation/commit/push/publication",
+                    text,
+                )
+
+    def test_shared_rule_preserves_continuation_and_no_false_completion_tail(self) -> None:
+        shared = _read("shared/AGENTS.shared.md")
+        self.assertIn(
+            "A passed plan/work-item slice is not goal completion: record it, reopen the plan, "
+            "continue the next item or state its blocker. No final/\"what next?\" with known work",
+            shared,
+        )
+
+    def test_destructive_history_rewrite_requires_preservation_preconditions(self) -> None:
+        required = (
+            "explicit user authority",
+            "fresh dirty/index census",
+            "preservation of every unrelated working-tree byte and staged change",
+            "`git reset --hard HEAD~N`",
+            "no other work depends on them",
+            "nondestructive, reversible route",
+        )
+        for path in ROLLBACK_SAFETY_SURFACES:
+            with self.subTest(path=path):
+                text = _read(path)
+                for fragment in required:
+                    self.assertIn(fragment, text)
 
 
 if __name__ == "__main__":

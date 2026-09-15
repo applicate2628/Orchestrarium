@@ -32,10 +32,10 @@ INFORMATIONAL_REMINDER_HOOK_STEMS = frozenset(
 )
 CWD_SCANNING_HOOK_STEMS = frozenset({"check-scratch-valuables"})
 CANONICAL_TRUST_GUIDANCE = (
-    "After reinstall, start interactive `codex` — not `codex exec` — and choose **Trust all and continue** for all 12 affected entries.",
+    "After reinstall, start interactive `codex` — not `codex exec` — and choose **Trust all and continue** for all 13 affected entries.",
     "Do not press Esc and do not choose **`Continue without trusting`**, because all hooks and guards remain installed but inactive.",
     "`codex exec` silently skips untrusted hook entries instead of showing the trust prompt, so interactive `codex` must run first.",
-    "The trust modal does not time out and the operator must review all 12 entries before making the explicit choice.",
+    "The trust modal does not time out and the operator must review all 13 entries before making the explicit choice.",
 )
 BYPASS_TOKENS = (
     "bypass_" + "hook_trust",
@@ -136,7 +136,7 @@ def _owned_python_targets(platform: str) -> tuple[Path, ...]:
     )
 
 
-@pytest.mark.parametrize(("platform", "expected_count"), (("codex", 12), ("claude", 13)))
+@pytest.mark.parametrize(("platform", "expected_count"), (("codex", 13), ("claude", 13)))
 def test_hook_specs_membership_is_owned_by_universal_manifest(
     platform: str, expected_count: int
 ) -> None:
@@ -325,6 +325,17 @@ def test_installer_derives_touched_identities_from_before_after_hooks_json(
         assert canonical_script == ROOT / "scripts" / "check-hook-health.py"
     assert FakeHealth.generated
     assert not [call for call in invocations if "--codex-trust-mode" in call]
+    registration_calls = [
+        call
+        for call in invocations
+        if "--script-marker" in call and "--script-path" in call and "--remove" not in call
+    ]
+    assert len(registration_calls) == len(specs)
+    seen_statuses = {
+        call[call.index("--script-marker") + 1]: call[call.index("--status-message") + 1]
+        for call in registration_calls
+    }
+    assert seen_statuses == PRODUCTION_INSTALLER._CODEX_HOOK_STATUS_MESSAGES
 
 
 def _health_envelope(

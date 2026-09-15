@@ -9,8 +9,9 @@ SPINE = ROOT / "shared/AGENTS.shared.md"
 DETAIL = ROOT / "shared/references/spine/functional-first-delivery.md"
 ARCHITECT_SKILLS = (
     ROOT / "src.codex/skills/architect/SKILL.md",
-    ROOT / "src.claude/skills/architect/SKILL.md",
 )
+CLAUDE_ARCHITECT_WRAPPER = ROOT / "src.claude/agents/architect.md"
+CLAUDE_INLINE_POLICY = ROOT / "src.claude/CLAUDE.md"
 LEAD_SKILLS = (
     ROOT / "src.codex/skills/lead/SKILL.md",
     ROOT / "src.claude/skills/lead/SKILL.md",
@@ -30,7 +31,9 @@ class TestEarlyArchitectRouting(unittest.TestCase):
     def test_current_second_consumer_needing_new_seam_routes_before_implementation(self) -> None:
         spine = self._read(SPINE)
         detail = self._read(DETAIL)
-        claude_architect = self._read(ARCHITECT_SKILLS[1])
+        universal_architect = self._read(ARCHITECT_SKILLS[0])
+        claude_wrapper = self._read(CLAUDE_ARCHITECT_WRAPPER)
+        claude_inline_policy = self._read(CLAUDE_INLINE_POLICY)
 
         self.assertIn(
             "Unsettled structure=>`$architect`; implementer cannot invent",
@@ -38,7 +41,7 @@ class TestEarlyArchitectRouting(unittest.TestCase):
         )
         self.assertIn("architecture before implementation", spine)
         self.assertIn(
-            "accepted requirement/current second consumer/verified external-contract evolution",
+            "accepted requirement or declared future direction/evidenced domain variability/current second consumer/verified external-contract evolution",
             spine,
         )
         self.assertIn(
@@ -61,13 +64,17 @@ class TestEarlyArchitectRouting(unittest.TestCase):
             ARCHITECT_SKILLS,
             "For a bounded early package, the decision, owner, seam, protected surface, material-alternative disposition, and falsifying probe are explicit",
         )
-        self.assertNotIn(
-            "Adopting this role inline approves nothing — the `architecture-reviewer` independent gate remains a separate dispatch regardless of invocation mode.",
-            claude_architect,
+        self.assertIn(
+            "The universal Architect skill (`.agents/skills/architect/SKILL.md`, sourced from `src.codex/skills/architect/SKILL.md`) is the sole role-contract body owner",
+            claude_wrapper,
         )
         self.assertIn(
-            "Adopting this role inline approves nothing — when the architecture-reviewer gate is triggered, it remains a separate dispatch regardless of invocation mode.",
-            claude_architect,
+            "the `architecture-reviewer` gate remains a separate dispatch regardless of invocation mode.",
+            claude_wrapper,
+        )
+        self.assertIn(
+            "Architect's sole role-contract body is the universal `.agents/skills/architect/SKILL.md` projection.",
+            claude_inline_policy,
         )
 
     def test_restart_cancel_persist_with_unknown_owner_routes_to_architect(self) -> None:

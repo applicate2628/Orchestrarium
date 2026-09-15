@@ -23,6 +23,7 @@ EXPECTED_HIT_FILES = frozenset({
     "src.claude/agents/contracts/external-dispatch.md",
     "src.claude/agents/contracts/operating-model.md",
     "src.claude/agents/contracts/subagent-contracts.md",
+    "src.claude/agents/external-worker.md",
     "src.claude/commands/agents-external-brigade.md",
     "src.claude/commands/agents-help.md",
     "src.claude/commands/agents-init-project.md",
@@ -32,6 +33,7 @@ EXPECTED_HIT_FILES = frozenset({
     "src.codex/skills/consultant/agents/openai.yaml",
     "src.codex/skills/design-panel/SKILL.md",
     "src.codex/skills/external-brigade/SKILL.md",
+    "src.codex/skills/external-worker/SKILL.md",
     "src.codex/skills/init-project/SKILL.md",
     "src.codex/skills/init-project/agents/openai.yaml",
     "src.codex/skills/lead/external-dispatch.md",
@@ -42,6 +44,38 @@ EXPECTED_HIT_FILES = frozenset({
     "shared/references/cross-pack-reconciliation.md",
     "shared/references/spine/governance-glossary.md",
 })
+KIMI_WORKER_SURFACES = frozenset(
+    {
+        "src.claude/agents/external-worker.md",
+        "src.codex/skills/external-worker/SKILL.md",
+    }
+)
+KIMI_WORKER_ADMISSION_TERMS = (
+    "explicit Kimi engineering",
+    "`engineering` mutation class",
+    "taxonomy mapping",
+    "`external-worker`",
+    "validated capability file",
+    "caller-scoped worker tools",
+    "result remains nonauthorizing",
+    "integration owner independently verifies every change",
+    "empty tools, Model Context Protocol servers, and subagents with permission `reject`",
+)
+KIMI_LOCAL_SCALAR_NONADMISSION_TERMS = (
+    "selectable here: auto | codex | claude",
+    "kimi is explicit-only",
+    "not initialized as a project-local scalar",
+)
+KIMI_ADVISORY_TOGGLE_SURFACES = frozenset(
+    {"src.codex/skills/second-opinion/SKILL.md"}
+)
+KIMI_ADVISORY_TOGGLE_TERMS = (
+    "independent advisory memo",
+    "Shipped `auto` stays on the Codex/Claude pair",
+    "Kimi is explicit-only",
+    "canonical Windows wrapper",
+    "Grok remains unavailable",
+)
 
 SEMANTIC_TERMS = re.compile(
     r"\b(?:route|use|select(?:ed|ion)?|resolved|execution|launch(?:er|ed|ing)?|spawn|probe|read-only)\b",
@@ -53,7 +87,9 @@ GROK_NONEXECUTION_TERMS = re.compile(
 )
 KIMI_ADMISSION_TERMS = {
     "explicit": re.compile(r"\bexplicit(?:-only)?\b", re.IGNORECASE),
-    "read-only": re.compile(r"\bread-only\b", re.IGNORECASE),
+    "read-only/read-tools boundary": re.compile(
+        r"\b(?:read-only|read tools)\b", re.IGNORECASE
+    ),
     "independent verification": re.compile(
         r"\bindependent(?:ly)?\s+verif(?:y|ies|ied|ication)\b", re.IGNORECASE
     ),
@@ -157,8 +193,31 @@ def test_kimi_grok_live_inventory_and_nonexecution_language() -> None:
 
     for relative_path, lines in hits.items():
         text = "\n".join(lines)
+        if relative_path in KIMI_WORKER_SURFACES:
+            for required in KIMI_WORKER_ADMISSION_TERMS:
+                assert required in text, (
+                    f"Kimi engineering admission lacks {required!r} in {relative_path}"
+                )
+            continue
+        if "not initialized as a project-local scalar" in text:
+            for required in KIMI_LOCAL_SCALAR_NONADMISSION_TERMS:
+                assert required in text, (
+                    f"Kimi local-scalar non-admission lacks {required!r} in {relative_path}"
+                )
+            continue
+        if relative_path in KIMI_ADVISORY_TOGGLE_SURFACES:
+            full_text = (ROOT / relative_path).read_text(encoding="utf-8")
+            for required in KIMI_ADVISORY_TOGGLE_TERMS:
+                assert required in full_text, (
+                    f"Kimi advisory-toggle boundary lacks {required!r} in {relative_path}"
+                )
+            continue
         if KIMI_ADMISSION_TRIGGER.search(text):
             for boundary, pattern in KIMI_ADMISSION_TERMS.items():
+                if boundary == "explicit" and relative_path == "shared/AGENTS.shared.md":
+                    assert "Lead may choose Kimi for bounded independent read-only" in text
+                    assert "Kimi: not `auto`/gate/counter" in text
+                    continue
                 assert pattern.search(text), (
                     f"Kimi admission lacks {boundary} in {relative_path}"
                 )

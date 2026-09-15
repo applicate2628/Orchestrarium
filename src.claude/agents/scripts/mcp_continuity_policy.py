@@ -20,59 +20,34 @@ from typing import Any, Mapping, NamedTuple
 
 SESSION_START_CONTEXT = "\n".join(
     (
-        "[MCP / tools reminder - re-shown at session start and after every compaction]",
-        "MCP servers may be connected in this environment. For codebase, architecture, API/docs, search, browser, debugger, profiler, or repository-understanding tasks, make MCP/tool-discovery an explicit checkpoint before falling back to ad-hoc shell reads.",
-        "MCP tools load on demand: use the platform's runtime tool discovery to see the connected servers and load a tool's schema, then call the relevant tool. Non-normative interface example only: ToolSearch may provide that discovery on some hosts; its name never selects a tool. If a relevant MCP is unavailable or broken, say so briefly instead of silently substituting a weaker path.",
-        'CONNECTED but uninitialized is not unavailable: do NOT skip a connected MCP reporting "not initialized", "no index", "empty", or "no data yet". Many servers require or build their own index/state on first use — when they report no index, INITIALIZE them per the server\'s own instructions and use or await the result — never silently substitute ad-hoc shell/grep. Only a genuinely absent server (not connected, not installed, or absent from runtime tool discovery) may be skipped with an explanation.',
-        "When mcpMode: force is active, relevant MCP use is a standing instruction. Under mcpMode: auto, still consider MCP first when it fits the task and record why it was skipped if the task explicitly asked for MCP.",
-        "For any stateful or indexed repository-understanding tool - whether MCP, CLI, or skill-backed - repository/project/branch/worktree/indexed-input changes invalidate any earlier answer: use the tool's own status/freshness probe; when it reports stale or pending, run its documented sync/update/reindex, confirm fresh, then repeat the intended query. Non-normative workflow examples only: Graphify follows `status/freshness -> sync/update/reindex -> confirm fresh -> repeat intended query`; CodeGraph follows `status -> sync -> fresh status -> repeat query`. These names never select a tool. If the tool is needed now, stale state does not justify skipping it or deferring refresh to an authorizer or later concurrent work. If refresh fails, report it explicitly. Use an alternate tool only when refresh genuinely fails, the tool is unavailable, the user forbids it, or refresh exceeds an explicit approved resource bound; report the reason; do not present stale output as current or any stale evidence as current. Stateless or live MCPs need no refresh. Other stateless or live tools likewise need no refresh.",
-        "Non-normative capability examples only, never selection logic: semantic code navigation and code-graph, Repomix or repository packers, language-server / LSP, current library / framework / API docs (use these instead of answering API questions from memory), debuggers and profilers, browser automation, memory, search, and fetch utilities.",
-        "This STILL APPLIES AFTER COMPACTION - do not forget MCP just because the context was summarized.",
-        "SUBAGENTS: dispatched agents inherit the runtime tool surface. In the dispatch prompt, explicitly allow relevant MCP discovery/use within the assigned role, scope, and safety limits; do not accidentally hide MCP availability, but keep any deliberate tool limits honest.",
+        "[MCP/tools reminder - session start and compaction]",
+        "For codebase, architecture, API/docs, search, browser, debugger, profiler, or repository-understanding work, discover connected MCP/tools at runtime, load the relevant schema, and use the fitting tool before ad-hoc shell reads. Under mcpMode: force this is mandatory; under mcpMode: auto, consider MCP first and explain a skip when MCP was explicitly requested.",
+        "A connected but uninitialized, empty, or unindexed tool is not unavailable: initialize it by its own instructions and use or await the result.",
+        "Before using stateful or indexed repository evidence after repository, project, branch, worktree, or indexed-input changes, check status/freshness; when stale or pending, sync/update/reindex, confirm fresh, and repeat the intended query. Never present stale evidence. Use another path only if refresh fails, the tool is unavailable, the user forbids it, or an explicit resource bound is exceeded; state why. Stateless or live tools need no refresh.",
+        "For dispatched work, give each lane only needed MCP/tools and context; keep its role, scope, safety limits, and mandatory gates unchanged.",
     )
 )
 
 TURN_ANCHOR_CONTEXT = (
-    "[turn anchor - re-shown every turn because a once-per-session reminder is overwritten"
-    " by whatever you did last]\n"
-    "Root main conversation (as Lead), pre-final decision: reconcile the selected primary goal"
-    " and its remaining authorized actions. End only if the selected primary goal is reconciled"
-    " complete, the user explicitly stops, pauses, or cancels it, or every remaining authorized"
-    " action is concretely blocked. A block pauses only its dependent lane. A reload need or"
-    " unavailable agent does not block independent work. If any action is ready, execute the"
-    " highest-priority one now. Work completed earlier in the turn is not permission to stop"
-    " while ready work remains.\n"
-    "Active-task continuity: a question, status check, or clarification does not end or replace"
-    " the active task. Report milestones, progress, questions, and clarifications in commentary,"
-    " not a final response; then execute ready work. A decision only the user can make pauses"
-    " dependent actions only; continue independent ready work. A standalone question with no"
-    " active task may end normally. Do not invent work or make useless tool calls.\n"
-    "Dispatched subagent: continue only the bounded work for your assigned profession, artifact,"
-    " and gate; then return evidence and an optional non-binding recommended next role to the"
-    " root, and stop. Never adopt $lead, dispatch a peer or downstream stage, advance the"
-    " pipeline, or write agent-runs.jsonl.\n"
-    "Universal no-self-residue checkpoint: before completion, commit, push, or handoff, settle"
-    " every agent-owned process/resource and remove dead or temporary alternatives; preserve"
-    " pre-existing user state, and treat ambiguous ownership as a destructive-action blocker.\n"
-    "Root-only delegation: at the first decision point of non-trivial work, the root main"
-    " conversation holding $lead classifies and routes to the matching specialist role/skill via"
-    " the host delegation surface; take external-launch flags from the external-dispatch contract,"
-    " never from memory. The root may directly launch a configured external wrapper; no provider"
-    " or leaf may recursively launch another wrapper.\n"
-    "MCP checkpoint: for repository navigation or understanding, discover and use the"
-    " relevant configured MCP before an ad-hoc shell search; if shell is genuinely the"
-    " right instrument, state why. Repository-understanding freshness: any stateful/indexed"
-    " tool (MCP, CLI, or skill-backed) is invalidated by repository/"
-    "project/branch/worktree/indexed-input changes; use status/freshness, then sync/update/"
-    "reindex, fresh recheck, then repeat the query. Non-normative workflow example only:"
-    " Graphify follows `status/freshness -> sync/update/reindex -> confirm fresh -> repeat"
-    " intended query`; this name never selects a tool. If the"
-    " tool is needed now, stale does not justify skipping or deferring refresh to an"
-    " authorizer or later concurrent work. Use"
-    " an alternate only after refresh genuinely fails, the tool is unavailable, the user"
-    " forbids it, or refresh exceeds an explicit approved resource bound; report why and"
-    " never present stale evidence; stateless/live MCPs are exempt. Other stateless/live"
-    " tools need no refresh."
+    "[turn anchor]\n"
+    "Root Lead: resume the current primary task after compaction or a side question. Side"
+    " questions, status, and clarifications are commentary; then resume. Stop only when it is"
+    " complete, the user pauses, cancels, or stops it, or every remaining authorized action is"
+    " concretely blocked. A block or required user decision pauses only dependent work; run"
+    " useful independent ready work now. Earlier progress is not completion. A standalone"
+    " question with no active task may end normally.\n"
+    "Delegate useful ready work by task to the matching specialist. Under the current default,"
+    " Root owns dispatch; provider and leaf agents do not spawn or recursively launch wrappers."
+    " Give each lane only needed tools and context; keep mandatory gates.\n"
+    "For repository understanding, discover fitting runtime MCP/tools before ad-hoc search."
+    " After repository, project, branch, worktree, or indexed-input changes, check"
+    " status/freshness, sync/update/reindex stale state, confirm fresh, and retry. Use fallback"
+    " only if refresh fails, the tool is unavailable, the user forbids it, or an explicit"
+    " resource bound is exceeded; state why and never use stale evidence.\n"
+    "Universal no-self-residue checkpoint: before completion, commit, push, or handoff, and"
+    " before transfer, settle every owned process/resource and remove temporary or dead"
+    " alternatives; preserve pre-existing user state and treat ambiguous ownership as a"
+    " destructive-action blocker. Do not invent work."
 )
 
 ADMITTED_TOOLS = frozenset(

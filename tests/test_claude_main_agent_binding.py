@@ -4,6 +4,7 @@ from __future__ import annotations
 import copy
 import importlib.util
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -109,6 +110,12 @@ def test_synthetic_claude_install_and_reinstall_preserve_settings(
     project = tmp_path / "project"
     settings_path = project / ".claude" / "settings.json"
     settings_path.parent.mkdir(parents=True)
+    claude_path = settings_path.parent / "CLAUDE.md"
+    user_preamble = "# User preamble\n\nKeep this operator-owned text.\n\n"
+    claude_path.write_text(
+        user_preamble + "@AGENTS.md\n\n# Claude Code Pack\n\nold managed bytes\n",
+        encoding="utf-8",
+    )
     settings = {
         "theme": "dark",
         "hooks": {"UserPromptSubmit": [{"hooks": [{"command": "user-hook"}]}]},
@@ -140,6 +147,32 @@ def test_synthetic_claude_install_and_reinstall_preserve_settings(
         assert after_first["agent"] == expected_agent
     assert (project / ".claude" / "agents" / "lead.md").is_file()
     assert (project / ".claude" / "skills" / "lead" / "SKILL.md").is_file()
+    installed_claude = claude_path.read_text(encoding="utf-8")
+    assert installed_claude.startswith(user_preamble)
+    assert installed_claude[len(user_preamble):] == (
+        ROOT / "src.claude" / "CLAUDE.md"
+    ).read_text(encoding="utf-8")
+    assert installed_claude.splitlines().count("@AGENTS.md") == 1
+    assert (settings_path.parent / "AGENTS.md").read_bytes() == (
+        ROOT / "shared" / "AGENTS.shared.md"
+    ).read_bytes()
+    composed = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts" / "validate-claude-md.py"),
+            "--claude-md",
+            str(claude_path),
+            "--agents-md",
+            str(settings_path.parent / "AGENTS.md"),
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    assert composed.returncode == 0, composed.stdout + composed.stderr
     if warning is None:
         assert "WARN: Claude main agent preserved" not in first_output
     else:
@@ -148,6 +181,7 @@ def test_synthetic_claude_install_and_reinstall_preserve_settings(
     assert INSTALLER.install("claude", arguments) == 0
     after_second = json.loads(settings_path.read_text(encoding="utf-8"))
     assert after_second == after_first
+    assert claude_path.read_text(encoding="utf-8") == installed_claude
 
 
 def test_failed_claude_install_rolls_back_settings_and_lead_definition(

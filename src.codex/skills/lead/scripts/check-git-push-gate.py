@@ -246,9 +246,10 @@ docstring and the module docstring's "A CRASH WHILE DECIDING" note above):
   5. Every exact direct push proving a standalone positive long `--dry-run`,
      with no negation, ambiguous option role, or conservative candidate → exit 0.
   6. Missing, unreadable, or invalid transcript data denies with
-     `PRG-TRANSCRIPT-UNAVAILABLE`. When full history exceeds its bound, a
-     readable stable suffix with no active grant denies with
-     `PRG-TRANSCRIPT-HISTORY-LIMIT`; an active suffix grant keeps its strict route.
+     `PRG-TRANSCRIPT-UNAVAILABLE`. When full history exceeds the in-memory
+     bound, reduce the complete stable JSONL file in forward order with bounded
+     memory. No active grant denies with `PRG-TRANSCRIPT-HISTORY-LIMIT`; an
+     active grant still enters the unchanged strict route.
   7. If the LAST GENUINE USER MESSAGE contains `[approve-publication]` AND
      that message is no longer than MARKER_MAX_MESSAGE_LENGTH characters →
      exit 0. The marker is honored ONLY from the user's own text — never from
@@ -361,14 +362,17 @@ from urllib.parse import quote, unquote_to_bytes, urlsplit
 
 from hook_common import (
     CURRENT_TURN_BYTE_CAP,
+    HISTORY_STATUS_ABSENT,
     HISTORY_STATUS_FOUND,
+    HISTORY_STATUS_IDENTITY_DRIFT,
+    HISTORY_STATUS_INVALID,
     HISTORY_STATUS_LIMIT,
+    HISTORY_STATUS_UNREADABLE,
     NO_OBSERVED_FAILURE,
     STATUS_FOUND,
     extract_model_shell_command_occurrences,
     extract_model_tool_calls_with_ids,
     extract_tool_outputs_with_ids,
-    extract_user_typed_text,
     is_user_message,
     parse_envelope,
     read_stdin_utf8,
@@ -379,13 +383,19 @@ from hook_common import (
 
 from git_push_gate_preflight import (
     PreflightResult,
+    TranscriptDiagnostic,
     validate_preflight_result,
+    validate_transcript_diagnostic,
     build_preflight_from_stdin,
     ShellParseResult,
     PrRouteDenied,
     resolve_command_dialect,
     parse_transcript_command,
     project_scan_range_binding,
+    extract_publication_user_reply,
+    is_simple_pr_approval,
+    normalize_publication_approval_text,
+    parse_publication_pr_grant,
 )
 
 
@@ -394,11 +404,6 @@ from git_push_gate_preflight import (
 # (see the consultant continuation-prompt untrusted-data rule), so unlike
 # [skip-bugfix-discipline] this marker never counts from the model's own reply.
 
-PR_GRANT_PREFIX = "[approve-pr-publication:v1 pr="
-PR_GRANT_NUMBER_REGEX = re.compile(r"^[1-9][0-9]*$")
-PR_GRANT_MARKDOWN_REGEX = re.compile(
-    r"^\[(?P<label>[^\]]+)\]\((?P<destination>[^)]+)\)$"
-)
 PR_URL_REGEX = re.compile(
     r"^(?P<url>https://github\.com/"
     r"(?P<owner>[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,98}[A-Za-z0-9])?)/"
@@ -406,10 +411,19 @@ PR_URL_REGEX = re.compile(
     r"(?P<number>[1-9][0-9]*))$"
 )
 PR_REVOKE_MARKER = "[revoke-pr-publication:v1]"
-PR_RESERVED_PREFIXES = ("[approve-pr-publication:", "[revoke-pr-publication:")
+PR_RESERVED_PREFIXES = (
+    "[approve-pr-publication:", "[revoke-pr-publication:",
+    "[approve-pr-publication pr=", "[approve-publication pr=",
+)
+PR_BINDING_SIDECAR_SUFFIX = ".pr-publication-binding-v1.json"
+PR_BINDING_SIDECAR_BYTE_CAP = 8192
 TRANSCRIPT_HISTORY_BYTE_CAP = 32 * 1024 * 1024
 TRANSCRIPT_HISTORY_RECORD_CAP = 50_000
-TRANSCRIPT_HISTORY_LINE_BYTE_CAP = 2 * 1024 * 1024
+TRANSCRIPT_HISTORY_LINE_BYTE_CAP = 4 * 1024 * 1024
+# Recovery handles histories beyond the ordinary in-memory caps, but never
+# treats a prefix as complete authorization evidence.
+TRANSCRIPT_RECOVERY_BYTE_CAP = 128 * 1024 * 1024
+TRANSCRIPT_RECOVERY_RECORD_CAP = 200_000
 PROCESS_OUTPUT_BYTE_CAP = 256 * 1024
 PROCESS_TIMEOUT_SECONDS = 8.0
 ORACLE_TIMEOUT_SECONDS = 45.0
@@ -489,6 +503,37 @@ class ActivePrGrant(NamedTuple):
     owner: str
     repo: str
     number: int
+
+
+class SimplePrIntent(NamedTuple):
+    record: int
+    sha256: str
+    prior_scoped_grant: ActivePrGrant | None
+
+
+class PrBindingState(NamedTuple):
+    anchor_record: int
+    anchor_sha256: str
+    state: str
+    repository_identity: tuple[int, int]
+    remote: str
+    head_ref: str
+    pr_url: str | None
+    pr_id: str | None
+    head_repository_id: str | None
+
+
+class PreparedPrPush(NamedTuple):
+    literal: LiteralPushCommand
+    repository_workdir: str
+    git_exe: str
+
+
+class VerifiedPrOracle(NamedTuple):
+    target: PushTarget
+    local_head: str
+    pr_id: str
+    head_repository_id: str
 
 
 class ProcessResult(NamedTuple):
@@ -1348,26 +1393,10 @@ def _mask_attached_io_numbers(command: str) -> str:
 
 
 def _parse_pr_grant(text: str) -> ActivePrGrant | None:
-    if not text.startswith(PR_GRANT_PREFIX) or not text.endswith("]"):
+    parsed = parse_publication_pr_grant(text)
+    if parsed is None:
         return None
-    target = text[len(PR_GRANT_PREFIX):-1]
-    if PR_GRANT_NUMBER_REGEX.fullmatch(target):
-        return ActivePrGrant(target, "", "", int(target))
-    markdown = PR_GRANT_MARKDOWN_REGEX.fullmatch(target)
-    if markdown:
-        if markdown.group("label") != markdown.group("destination"):
-            return None
-        target = markdown.group("label")
-    match = PR_URL_REGEX.fullmatch(target)
-    if not match:
-        return None
-    owner = match.group("owner")
-    repo = match.group("repo")
-    if owner in (".", "..") or repo in (".", ".."):
-        return None
-    return ActivePrGrant(
-        match.group("url"), owner, repo, int(match.group("number"))
-    )
+    return ActivePrGrant(parsed.url, parsed.owner, parsed.repo, parsed.number)
 
 
 def _canonicalize_numeric_pr_grant(
@@ -1409,132 +1438,407 @@ def _canonicalize_numeric_pr_grant(
     return ActivePrGrant(match.group("url"), owner, repo, number)
 
 
-def _derive_pr_grant(
-    entries: list[dict], envelope_repository_workdir: str
-) -> tuple[str, ActivePrGrant | None]:
-    state = "absent"
-    grant: ActivePrGrant | None = None
+@dataclass(slots=True)
+class _PrGrantReducer:
+    """Reduce genuine-user PR grant state in original transcript order."""
+
+    envelope_repository_workdir: str
+    state: str = "absent"
+    grant: ActivePrGrant | SimplePrIntent | None = None
     transcript_workdir: str | None = None
-    genuine_user_indexes = [
-        index for index, entry in enumerate(entries)
-        if is_user_message(entry) and extract_user_typed_text(entry)
-    ]
-    last_user_index = genuine_user_indexes[-1] if genuine_user_indexes else -1
-    for index, entry in enumerate(entries):
-        payload = entry.get("payload") if isinstance(entry, dict) else None
+    record_position: int = 0
+    last_genuine_user_position: int = -1
+    pending_numeric: tuple[ActivePrGrant, str | None, int] | None = None
+    prior_scoped_grant: ActivePrGrant | None = None
+
+    def consume(self, entry: dict, raw_record: bytes | None = None) -> None:
+        position = self.record_position
+        self.record_position += 1
+        payload = entry.get("payload")
         if entry.get("type") in ("session_meta", "turn_context"):
             raw_context = payload.get("cwd") if isinstance(payload, dict) else None
-            transcript_workdir = raw_context if type(raw_context) is str and raw_context else None
+            self.transcript_workdir = (
+                raw_context if type(raw_context) is str and raw_context else None
+            )
         if not is_user_message(entry):
-            continue
-        text = extract_user_typed_text(entry)
+            return
+        reply = extract_publication_user_reply(entry)
+        if reply.kind == "recognized-malformed":
+            self.state, self.grant, self.pending_numeric = "malformed", None, None
+            return
+        text = reply.text
         if not text:
-            continue
-        if text == PR_REVOKE_MARKER:
-            state, grant = "revoked", None
-            continue
-        parsed_grant = _parse_pr_grant(text)
+            return
+        normalized = normalize_publication_approval_text(text)
+
+        if self.pending_numeric is not None and self.pending_numeric[1] is None:
+            self.state, self.grant, self.pending_numeric = "malformed", None, None
+        self.last_genuine_user_position = position
+
+        if normalized == PR_REVOKE_MARKER:
+            self.state, self.grant, self.pending_numeric = "revoked", None, None
+            self.prior_scoped_grant = None
+            return
+        if is_simple_pr_approval(normalized):
+            digest = hashlib.sha256(raw_record).hexdigest() if raw_record else ""
+            self.state = "simple"
+            self.grant = SimplePrIntent(position + 1, digest, self.prior_scoped_grant)
+            self.pending_numeric = None
+            return
+        parsed_grant = _parse_pr_grant(normalized)
         if parsed_grant is not None:
-            if not parsed_grant.owner:
-                direct_context = entry.get("cwd")
-                if direct_context is not None and (
-                    type(direct_context) is not str or not direct_context
-                ):
-                    state, grant = "malformed", None
-                    continue
-                contexts = {
-                    value for value in (direct_context, transcript_workdir)
-                    if value is not None
-                }
-                if len(contexts) > 1:
-                    state, grant = "malformed", None
-                    continue
-                authorization_workdir = next(iter(contexts), None)
-                if authorization_workdir is None and index == last_user_index:
-                    authorization_workdir = envelope_repository_workdir
-                if authorization_workdir is None:
-                    state, grant = "malformed", None
-                    continue
-                parsed_grant = _canonicalize_numeric_pr_grant(
-                    parsed_grant.number, authorization_workdir
-                )
-            state, grant = "active", parsed_grant
-            continue
-        if text.startswith(PR_RESERVED_PREFIXES):
-            state, grant = "malformed", None
-    return state, grant
+            if parsed_grant.owner:
+                self.state, self.grant = "active", parsed_grant
+                self.prior_scoped_grant = parsed_grant
+                self.pending_numeric = None
+                return
+            direct_context = entry.get("cwd")
+            if direct_context is not None and (
+                type(direct_context) is not str or not direct_context
+            ):
+                self.state, self.grant, self.pending_numeric = "malformed", None, None
+                return
+            contexts = {
+                value
+                for value in (direct_context, self.transcript_workdir)
+                if value is not None
+            }
+            if len(contexts) > 1:
+                self.state, self.grant, self.pending_numeric = "malformed", None, None
+                return
+            authorization_workdir = next(iter(contexts), None)
+            self.state, self.grant = "active", None
+            self.pending_numeric = (parsed_grant, authorization_workdir, position)
+            return
+        if normalized.startswith(PR_RESERVED_PREFIXES):
+            self.state, self.grant, self.pending_numeric = "malformed", None, None
+
+    def finish(self) -> tuple[str, ActivePrGrant | SimplePrIntent | None]:
+        if self.pending_numeric is None:
+            return self.state, self.grant
+        parsed_grant, authorization_workdir, position = self.pending_numeric
+        if authorization_workdir is None:
+            if position != self.last_genuine_user_position:
+                self.state, self.grant, self.pending_numeric = "malformed", None, None
+                return self.state, self.grant
+            authorization_workdir = self.envelope_repository_workdir
+        self.grant = _canonicalize_numeric_pr_grant(
+            parsed_grant.number, authorization_workdir
+        )
+        self.state, self.pending_numeric = "active", None
+        return self.state, self.grant
 
 
-def _read_stable_transcript_suffix(transcript_path: str) -> tuple[list[dict], str]:
-    """Read one stable complete-record suffix under the history reader's caps."""
+def _derive_pr_grant(
+    entries: list[dict], envelope_repository_workdir: str
+) -> tuple[str, ActivePrGrant | SimplePrIntent | None]:
+    reducer = _PrGrantReducer(envelope_repository_workdir)
+    for entry in entries:
+        reducer.consume(entry)
+    return reducer.finish()
+
+
+def _stream_stable_pr_grant(
+    transcript_path: str, envelope_repository_workdir: str
+) -> tuple[str, ActivePrGrant | SimplePrIntent | None, str]:
+    """Reduce one complete, identity-stable JSONL transcript."""
+
     if not transcript_path:
-        return [], "absent"
+        return "absent", None, HISTORY_STATUS_ABSENT
     path = Path(transcript_path)
+    reducer = _PrGrantReducer(envelope_repository_workdir)
     try:
+        path_before = path.stat()
         with path.open("rb") as stream:
             before = os.fstat(stream.fileno())
-            eof = before.st_size
-            if eof > TRANSCRIPT_HISTORY_BYTE_CAP:
-                stream.seek(eof - TRANSCRIPT_HISTORY_BYTE_CAP)
-                raw = stream.read(TRANSCRIPT_HISTORY_BYTE_CAP)
-                if len(raw) != TRANSCRIPT_HISTORY_BYTE_CAP:
-                    return [], "unreadable"
-                sentinel, payload = raw[:1], raw[1:]
-                if sentinel != b"\n":
-                    newline = payload.find(b"\n")
-                    if newline < 0:
-                        return [], "limit"
-                    payload = payload[newline + 1 :]
-            else:
-                stream.seek(0)
-                payload = stream.read(eof)
-                if len(payload) != eof:
-                    return [], "unreadable"
+            identity_fields = ("st_dev", "st_ino", "st_mode")
+            if tuple(getattr(before, name) for name in identity_fields) != tuple(
+                getattr(path_before, name) for name in identity_fields
+            ):
+                return "absent", None, HISTORY_STATUS_IDENTITY_DRIFT
+            if before.st_size > TRANSCRIPT_RECOVERY_BYTE_CAP:
+                return "absent", None, HISTORY_STATUS_LIMIT
+            total_bytes = 0
+            total_records = 0
+            content_digest = hashlib.sha256()
+            while True:
+                raw_line = stream.readline(min(
+                    TRANSCRIPT_HISTORY_LINE_BYTE_CAP,
+                    TRANSCRIPT_RECOVERY_BYTE_CAP - total_bytes,
+                ) + 1)
+                if not raw_line:
+                    break
+                total_bytes += len(raw_line)
+                total_records += 1
+                content_digest.update(raw_line)
+                if (
+                    len(raw_line) > TRANSCRIPT_HISTORY_LINE_BYTE_CAP
+                    or total_bytes > TRANSCRIPT_RECOVERY_BYTE_CAP
+                    or total_records > TRANSCRIPT_RECOVERY_RECORD_CAP
+                ):
+                    return "absent", None, HISTORY_STATUS_LIMIT
+                if not raw_line.strip():
+                    continue
+                try:
+                    entry = json.loads(raw_line.decode("utf-8", errors="strict"))
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    return "absent", None, HISTORY_STATUS_INVALID
+                if not isinstance(entry, dict):
+                    return "absent", None, HISTORY_STATUS_INVALID
+                reducer.consume(entry, raw_line)
+            first_digest = content_digest.digest()
             after = os.fstat(stream.fileno())
+            stream.seek(0)
+            verify_digest = hashlib.sha256()
+            verify_bytes = 0
+            while True:
+                remaining = TRANSCRIPT_RECOVERY_BYTE_CAP - verify_bytes
+                chunk = stream.read(min(1024 * 1024, remaining) + 1)
+                if not chunk:
+                    break
+                verify_bytes += len(chunk)
+                if verify_bytes > TRANSCRIPT_RECOVERY_BYTE_CAP:
+                    return "absent", None, HISTORY_STATUS_LIMIT
+                verify_digest.update(chunk)
+            after_verify = os.fstat(stream.fileno())
             current = path.stat()
+    except PrRouteDenied:
+        raise
     except Exception:
-        return [], "unreadable"
+        return "absent", None, HISTORY_STATUS_UNREADABLE
 
-    identity_before = (
-        before.st_dev,
-        before.st_ino,
-        before.st_size,
-        before.st_mtime_ns,
+    stable_fields = (
+        "st_dev", "st_ino", "st_mode", "st_size", "st_mtime_ns", "st_ctime_ns"
     )
-    if identity_before != (
-        after.st_dev,
-        after.st_ino,
-        after.st_size,
-        after.st_mtime_ns,
-    ) or identity_before != (
-        current.st_dev,
-        current.st_ino,
-        current.st_size,
-        current.st_mtime_ns,
+    descriptor_before = tuple(getattr(before, name) for name in stable_fields)
+    if (
+        descriptor_before != tuple(getattr(after, name) for name in stable_fields)
+        or descriptor_before
+        != tuple(getattr(after_verify, name) for name in stable_fields)
+        or tuple(getattr(path_before, name) for name in stable_fields)
+        != tuple(getattr(current, name) for name in stable_fields)
+        or total_bytes != verify_bytes
+        or first_digest != verify_digest.digest()
     ):
-        return [], "unreadable"
+        return "absent", None, HISTORY_STATUS_IDENTITY_DRIFT
+    state, grant = reducer.finish()
+    return state, grant, HISTORY_STATUS_FOUND
 
-    raw_lines = payload.split(b"\n")
-    ended_with_newline = payload.endswith(b"\n")
-    if ended_with_newline:
-        raw_lines.pop()
-    entries: list[dict] = []
-    for index, raw_line in enumerate(raw_lines):
-        if not raw_line.strip():
-            continue
-        line_size = len(raw_line) + (1 if ended_with_newline or index < len(raw_lines) - 1 else 0)
-        if line_size > TRANSCRIPT_HISTORY_LINE_BYTE_CAP:
-            return [], "limit"
-        if len(entries) >= TRANSCRIPT_HISTORY_RECORD_CAP:
-            return [], "limit"
-        try:
-            entry = json.loads(raw_line.decode("utf-8", errors="strict"))
-        except (UnicodeDecodeError, json.JSONDecodeError):
-            return [], "invalid"
-        if not isinstance(entry, dict):
-            return [], "invalid"
-        entries.append(entry)
-    return entries, "found"
+
+def _recover_stable_pr_grant(
+    transcript_path: str, envelope_repository_workdir: str
+) -> tuple[str, ActivePrGrant | SimplePrIntent | None, str]:
+    """Retry only one complete reread after a discarded identity-drift snapshot."""
+    state, grant, status = _stream_stable_pr_grant(
+        transcript_path, envelope_repository_workdir
+    )
+    if status == HISTORY_STATUS_IDENTITY_DRIFT:
+        return _stream_stable_pr_grant(transcript_path, envelope_repository_workdir)
+    return state, grant, status
+
+
+def _binding_sidecar_path(transcript_path: str) -> Path:
+    if type(transcript_path) is not str or not transcript_path:
+        raise PrRouteDenied("PRG-TRANSCRIPT-UNAVAILABLE")
+    transcript = Path(transcript_path)
+    try:
+        if not transcript.is_file():
+            raise PrRouteDenied("PRG-TRANSCRIPT-UNAVAILABLE")
+    except OSError:
+        raise PrRouteDenied("PRG-TRANSCRIPT-UNAVAILABLE") from None
+    return Path(str(transcript) + PR_BINDING_SIDECAR_SUFFIX)
+
+
+def _repository_identity(repository_workdir: str) -> tuple[int, int]:
+    try:
+        observed = os.stat(repository_workdir, follow_symlinks=False)
+    except OSError:
+        raise PrRouteDenied("PRG-WORKDIR-INVALID") from None
+    return observed.st_dev, observed.st_ino
+
+
+def _binding_payload(state: PrBindingState) -> dict:
+    return {
+        "v": 1,
+        "anchor": {
+            "record": state.anchor_record,
+            "sha256": state.anchor_sha256,
+        },
+        "state": state.state,
+        "repositoryIdentity": list(state.repository_identity),
+        "remote": state.remote,
+        "headRef": state.head_ref,
+        "prUrl": state.pr_url,
+        "prId": state.pr_id,
+        "headRepositoryId": state.head_repository_id,
+    }
+
+
+def _validate_binding_payload(value: object) -> PrBindingState:
+    expected = {
+        "v", "anchor", "state", "repositoryIdentity", "remote", "headRef",
+        "prUrl", "prId", "headRepositoryId",
+    }
+    if not isinstance(value, dict) or set(value) != expected or value.get("v") != 1:
+        raise PrRouteDenied("PRG-AUTH-MALFORMED")
+    anchor = value.get("anchor")
+    identity = value.get("repositoryIdentity")
+    if (
+        not isinstance(anchor, dict)
+        or set(anchor) != {"record", "sha256"}
+        or type(anchor.get("record")) is not int
+        or anchor["record"] <= 0
+        or not isinstance(anchor.get("sha256"), str)
+        or re.fullmatch(r"[0-9a-f]{64}", anchor["sha256"]) is None
+        or not isinstance(identity, list)
+        or len(identity) != 2
+        or any(type(item) is not int or item < 0 for item in identity)
+        or value.get("state") not in {"pending", "bound", "revoked"}
+        or not isinstance(value.get("remote"), str)
+        or REMOTE_NAME_REGEX.fullmatch(value["remote"]) is None
+        or not isinstance(value.get("headRef"), str)
+        or not _portable_pr_head_ref(value["headRef"])
+    ):
+        raise PrRouteDenied("PRG-AUTH-MALFORMED")
+    pr_values = (value.get("prUrl"), value.get("prId"), value.get("headRepositoryId"))
+    if value["state"] == "pending":
+        if pr_values != (None, None, None):
+            raise PrRouteDenied("PRG-AUTH-MALFORMED")
+    elif value["state"] == "bound" and any(
+        not isinstance(item, str) or not item for item in pr_values
+    ):
+        raise PrRouteDenied("PRG-AUTH-MALFORMED")
+    elif value["state"] == "revoked" and pr_values != (None, None, None) and any(
+        not isinstance(item, str) or not item for item in pr_values
+    ):
+        raise PrRouteDenied("PRG-AUTH-MALFORMED")
+    if value["state"] == "bound" or (
+        value["state"] == "revoked" and pr_values != (None, None, None)
+    ):
+        if (
+            PR_URL_REGEX.fullmatch(value["prUrl"]) is None
+            or NODE_ID_REGEX.fullmatch(value["prId"]) is None
+            or NODE_ID_REGEX.fullmatch(value["headRepositoryId"]) is None
+        ):
+            raise PrRouteDenied("PRG-AUTH-MALFORMED")
+    return PrBindingState(
+        anchor["record"], anchor["sha256"], value["state"], tuple(identity),
+        value["remote"], value["headRef"], *pr_values,
+    )
+
+
+def _read_binding_state(path: Path) -> PrBindingState | None:
+    try:
+        observed = path.lstat()
+    except FileNotFoundError:
+        return None
+    except OSError:
+        raise PrRouteDenied("PRG-AUTH-MALFORMED") from None
+    if (
+        not stat.S_ISREG(observed.st_mode)
+        or stat.S_ISLNK(observed.st_mode)
+        or observed.st_nlink != 1
+        or observed.st_size > PR_BINDING_SIDECAR_BYTE_CAP
+        or bool(
+            getattr(observed, "st_file_attributes", 0)
+            & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+        )
+    ):
+        raise PrRouteDenied("PRG-AUTH-MALFORMED")
+    try:
+        with path.open("rb") as stream:
+            opened = os.fstat(stream.fileno())
+            identity_fields = ("st_dev", "st_ino", "st_mode", "st_nlink")
+            if tuple(getattr(opened, name) for name in identity_fields) != tuple(
+                getattr(observed, name) for name in identity_fields
+            ):
+                raise PrRouteDenied("PRG-AUTH-MALFORMED")
+            raw = stream.read(PR_BINDING_SIDECAR_BYTE_CAP + 1)
+            after_read = os.fstat(stream.fileno())
+            stream.seek(0)
+            verified = stream.read(PR_BINDING_SIDECAR_BYTE_CAP + 1)
+            after_verify = os.fstat(stream.fileno())
+        if len(raw) > PR_BINDING_SIDECAR_BYTE_CAP:
+            raise PrRouteDenied("PRG-AUTH-MALFORMED")
+        current = path.lstat()
+        stable_fields = (
+            "st_dev", "st_ino", "st_mode", "st_nlink", "st_size",
+            "st_mtime_ns", "st_ctime_ns",
+        )
+        opened_fields = tuple(getattr(opened, name) for name in stable_fields)
+        if (
+            opened_fields
+            != tuple(getattr(after_read, name) for name in stable_fields)
+            or opened_fields
+            != tuple(getattr(after_verify, name) for name in stable_fields)
+            or tuple(getattr(observed, name) for name in stable_fields)
+            != tuple(getattr(current, name) for name in stable_fields)
+            or raw != verified
+            or len(raw) != opened.st_size
+        ):
+            raise PrRouteDenied("PRG-AUTH-MALFORMED")
+        value = json.loads(raw.decode("utf-8", errors="strict"))
+    except PrRouteDenied:
+        raise
+    except Exception:
+        raise PrRouteDenied("PRG-AUTH-MALFORMED") from None
+    return _validate_binding_payload(value)
+
+
+def _write_binding_state(
+    path: Path, state: PrBindingState, *, create_only: bool
+) -> None:
+    payload = json.dumps(
+        _binding_payload(state), ensure_ascii=True, separators=(",", ":")
+    ).encode("utf-8")
+    if len(payload) > PR_BINDING_SIDECAR_BYTE_CAP:
+        raise PrRouteDenied("PRG-INTERNAL")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_BINARY"):
+        flags |= os.O_BINARY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    target = path if create_only else path.with_name(
+        path.name + ".tmp-" + secrets.token_hex(8)
+    )
+    fd: int | None = None
+    try:
+        fd = os.open(target, flags, 0o600)
+        offset = 0
+        while offset < len(payload):
+            written = os.write(fd, payload[offset:])
+            if written <= 0:
+                raise OSError("short sidecar write")
+            offset += written
+        os.fsync(fd)
+        os.close(fd)
+        fd = None
+        if not create_only:
+            os.replace(target, path)
+    except FileExistsError:
+        raise PrRouteDenied("PRG-BINDING-DRIFT") from None
+    except PrRouteDenied:
+        raise
+    except Exception:
+        raise PrRouteDenied("PRG-INTERNAL") from None
+    finally:
+        if fd is not None:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        if not create_only:
+            try:
+                target.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
+def _same_binding_anchor(state: PrBindingState, intent: SimplePrIntent) -> bool:
+    return (
+        state.anchor_record == intent.record
+        and state.anchor_sha256 == intent.sha256
+    )
 
 
 def _is_within(path: Path, parent: Path) -> bool:
@@ -2669,7 +2973,7 @@ def _repo_record(value: object, expected: str, failure_id: str) -> tuple[str, st
 
 def _verify_pr_oracle(
     grant: ActivePrGrant, literal: LiteralPushCommand, repository_workdir: str
-) -> tuple[PushTarget, str]:
+) -> VerifiedPrOracle:
     deadline = time.monotonic() + ORACLE_TIMEOUT_SECONDS
     git_exe = literal.executable
     gh_exe = _resolve_executable("gh", repository_workdir)
@@ -2833,7 +3137,9 @@ def _verify_pr_oracle(
     local_head_rows = local_head_text.splitlines()
     if len(local_head_rows) != 1 or not object_format.matches(local_head_rows[0]):
         raise PrRouteDenied("PRG-RECEIPT-MISMATCH")
-    return target, local_head_rows[0].lower()
+    return VerifiedPrOracle(
+        target, local_head_rows[0].lower(), pr_id, head_repo_id
+    )
 
 
 def _build_parsed_transcript_commands(
@@ -2983,49 +3289,371 @@ def _evaluate_active_pr_route(
     repository_workdir_source: str,
 ) -> bool:
     try:
-        effective = parsed.effective_publications
-        if (
-            parsed.strict_projection.status != "canonical"
-            or len(effective.records) != 1
-            or effective.records[0].kind != "DIRECT"
-        ):
-            raise PrRouteDenied("PRG-COMMAND-SHAPE")
-        dialect = _pr_command_dialect(dialect)
-        literal = _parse_pr_literal_shape(parsed, dialect)
-        if literal.repository_root is None:
-            repository_workdir = _normalize_repository_workdir(
-                repository_workdir
+        try:
+            prepared = _prepare_pr_push(
+                command, dialect, parsed, repository_workdir,
+                repository_workdir_source,
             )
-        else:
-            command_root = _normalize_repository_workdir(
-                literal.repository_root
+        except PrRouteDenied as exc:
+            if exc.failure_id == "PRG-COMMAND-SHAPE":
+                _raise_command_shape("legacy", dialect, parsed, "legacy-strict")
+            raise
+        try:
+            verified = _verify_pr_oracle(
+                grant, prepared.literal, prepared.repository_workdir
             )
-            if repository_workdir_source == "tool":
-                tool_root = _normalize_repository_workdir(repository_workdir)
-                if tool_root != command_root:
-                    raise PrRouteDenied("PRG-WORKDIR-INVALID")
-            elif repository_workdir_source != "envelope":
-                raise PrRouteDenied("PRG-WORKDIR-INVALID")
-            repository_workdir = command_root
-        git_exe = _resolve_executable("git", repository_workdir)
-        if git_exe is None:
-            raise PrRouteDenied("PRG-REMOTE-MISMATCH")
-        literal = _bind_pr_literal_executable(literal, git_exe)
-        repository_workdir = _prove_repository_root(
-            repository_workdir, git_exe
-        )
-        target, local_head = _verify_pr_oracle(
-            grant, literal, repository_workdir
-        )
+        except PrRouteDenied as exc:
+            if exc.failure_id == "PRG-COMMAND-SHAPE":
+                _raise_command_shape("legacy", dialect, parsed, "oracle")
+            raise
         binding = PushScanBinding(
-            "strict", target.remote, target.destination, local_head, local_head
+            "strict", verified.target.remote, verified.target.destination,
+            verified.local_head, verified.local_head,
         )
-        _run_authoritative_scan(binding, repository_workdir, git_exe)
+        _run_authoritative_scan(
+            binding, prepared.repository_workdir, prepared.git_exe
+        )
         return True
     except PrRouteDenied:
         raise
     except Exception:
         raise PrRouteDenied("PRG-INTERNAL") from None
+
+
+def _prepare_pr_push(
+    command: str,
+    dialect: str,
+    parsed: ShellParseResult,
+    repository_workdir: str,
+    repository_workdir_source: str,
+) -> PreparedPrPush:
+    effective = parsed.effective_publications
+    if (
+        parsed.strict_projection.status != "canonical"
+        or len(effective.records) != 1
+        or effective.records[0].kind != "DIRECT"
+    ):
+        raise PrRouteDenied("PRG-COMMAND-SHAPE")
+    dialect = _pr_command_dialect(dialect)
+    literal = _parse_pr_literal_shape(parsed, dialect)
+    if literal.repository_root is None:
+        repository_workdir = _normalize_repository_workdir(repository_workdir)
+    else:
+        command_root = _normalize_repository_workdir(literal.repository_root)
+        if repository_workdir_source == "tool":
+            tool_root = _normalize_repository_workdir(repository_workdir)
+            if tool_root != command_root:
+                raise PrRouteDenied("PRG-WORKDIR-INVALID")
+        elif repository_workdir_source != "envelope":
+            raise PrRouteDenied("PRG-WORKDIR-INVALID")
+        repository_workdir = command_root
+    git_exe = _resolve_executable("git", repository_workdir)
+    if git_exe is None:
+        raise PrRouteDenied("PRG-REMOTE-MISMATCH")
+    literal = _bind_pr_literal_executable(literal, git_exe)
+    repository_workdir = _prove_repository_root(repository_workdir, git_exe)
+    return PreparedPrPush(literal, repository_workdir, git_exe)
+
+
+def _raise_command_shape(
+    route: str,
+    dialect: str,
+    parsed: ShellParseResult,
+    stage: str,
+) -> None:
+    effective = parsed.effective_publications
+    direct = (
+        len(effective.records) == 1
+        and effective.records[0].kind == "DIRECT"
+    )
+    safe_dialect = dialect if dialect in {"powershell", "posix", "unsupported"} else "other"
+    strict = parsed.strict_projection.status
+    if strict not in {"canonical", "noncanonical"}:
+        strict = "other"
+    allowed_stages = {
+        "projection", "command-context", "git-global", "target",
+        "executable", "dialect", "root", "oracle", "legacy-strict",
+    }
+    safe_stage = stage if stage in allowed_stages else "projection"
+    error = PrRouteDenied("PRG-COMMAND-SHAPE")
+    error.command_shape_diagnostic = (
+        route if route in {"simple", "legacy"} else "legacy",
+        safe_dialect,
+        "true" if direct else "false",
+        strict,
+        safe_stage,
+    )
+    raise error
+
+
+def _prepare_simple_pr_push(
+    dialect: str,
+    parsed: ShellParseResult,
+    repository_workdir: str,
+    repository_workdir_source: str,
+) -> PreparedPrPush:
+    effective = parsed.effective_publications
+    if (
+        parsed.dialect != dialect
+        or dialect not in {"posix", "powershell"}
+        or not effective.exact_complete
+        or len(effective.records) != 1
+        or effective.records[0].kind != "DIRECT"
+        or len(parsed.commands) != 1
+        or len(parsed.pushes) != 1
+        or parsed.normalizations
+    ):
+        _raise_command_shape("simple", dialect, parsed, "projection")
+    push = effective.records[0].push
+    command = push.command
+    if (
+        push is not parsed.pushes[0]
+        or not push.only_direct_push
+        or not push.only_executable_command
+        or push.shell_context not in {"top-level", "call-operator"}
+        or command.control_keywords
+        or (
+            command.boundary_before != "start"
+            and not (
+                push.shell_context == "call-operator"
+                and command.boundary_before == "&"
+            )
+        )
+        or (
+            command.boundary_after != "end"
+            and not command.trailing_linebreak_only
+        )
+        or push.environment_assignments
+        or push.option_status != "GPO-PARSED"
+        or push.push_options
+        or push.dry_run
+        or len(push.positionals) != 2
+        or push.repository_context not in {"ambient", "redirected"}
+    ):
+        _raise_command_shape("simple", dialect, parsed, "command-context")
+    global_options = tuple(push.git_global_options)
+    if global_options:
+        if len(global_options) != 2 or global_options[0] != "-C":
+            _raise_command_shape("simple", dialect, parsed, "git-global")
+        command_root = _normalize_repository_workdir(global_options[1])
+        if repository_workdir_source == "tool":
+            if _normalize_repository_workdir(repository_workdir) != command_root:
+                raise PrRouteDenied("PRG-WORKDIR-INVALID")
+        elif repository_workdir_source != "envelope":
+            raise PrRouteDenied("PRG-WORKDIR-INVALID")
+        repository_workdir = command_root
+    else:
+        if push.repository_context != "ambient":
+            _raise_command_shape("simple", dialect, parsed, "command-context")
+        repository_workdir = _normalize_repository_workdir(repository_workdir)
+    remote, refspec = push.positionals
+    if not REMOTE_NAME_REGEX.fullmatch(remote):
+        _raise_command_shape("simple", dialect, parsed, "target")
+    prefix = "HEAD:refs/heads/"
+    if not refspec.startswith(prefix):
+        _raise_command_shape("simple", dialect, parsed, "target")
+    head_ref = refspec[len(prefix):]
+    if not _portable_pr_head_ref(head_ref):
+        _raise_command_shape("simple", dialect, parsed, "target")
+    git_exe = _resolve_executable("git", repository_workdir)
+    if git_exe is None:
+        raise PrRouteDenied("PRG-REMOTE-MISMATCH")
+    raw_executable = command.executable
+    if Path(raw_executable).is_absolute():
+        literal_executable = raw_executable
+    elif Path(raw_executable).name == raw_executable and raw_executable.casefold() in {
+        "git", "git.exe",
+    }:
+        literal_executable = git_exe
+    else:
+        _raise_command_shape("simple", dialect, parsed, "executable")
+    prepared_dialect = dialect
+    literal = LiteralPushCommand(
+        prepared_dialect, literal_executable, remote, refspec,
+        PushTarget(remote, f"refs/heads/{head_ref}", head_ref),
+        repository_workdir if global_options else None,
+    )
+    try:
+        literal = _bind_pr_literal_executable(literal, git_exe)
+    except PrRouteDenied as exc:
+        if exc.failure_id == "PRG-COMMAND-SHAPE":
+            _raise_command_shape("simple", dialect, parsed, "executable")
+        raise
+    try:
+        repository_workdir = _prove_repository_root(repository_workdir, git_exe)
+    except PrRouteDenied as exc:
+        if exc.failure_id == "PRG-COMMAND-SHAPE":
+            _raise_command_shape("simple", dialect, parsed, "root")
+        raise
+    return PreparedPrPush(literal, repository_workdir, git_exe)
+
+
+def _discover_unique_open_pr(
+    prepared: PreparedPrPush,
+) -> tuple[ActivePrGrant, str, str]:
+    gh_exe = _resolve_executable("gh", prepared.repository_workdir)
+    if gh_exe is None:
+        raise PrRouteDenied("PRG-PR-UNAVAILABLE")
+    _, text = _run_text(
+        [
+            gh_exe, "pr", "list", "--state", "open", "--head",
+            prepared.literal.target.head_ref, "--limit", "2", "--json",
+            "id,number,url,headRefName,headRepository",
+        ],
+        time.monotonic() + ORACLE_TIMEOUT_SECONDS,
+        "PRG-PR-UNAVAILABLE",
+        prepared.repository_workdir,
+    )
+    rows = _strict_json(text, list, "PRG-PR-UNAVAILABLE")
+    if len(rows) != 1 or not isinstance(rows[0], dict):
+        raise PrRouteDenied("PRG-PR-UNAVAILABLE")
+    row = rows[0]
+    match = (
+        PR_URL_REGEX.fullmatch(row.get("url"))
+        if isinstance(row.get("url"), str) else None
+    )
+    head_repository = row.get("headRepository")
+    if (
+        match is None
+        or row.get("number") != int(match.group("number"))
+        or row.get("headRefName") != prepared.literal.target.head_ref
+        or not isinstance(row.get("id"), str)
+        or NODE_ID_REGEX.fullmatch(row["id"]) is None
+        or not isinstance(head_repository, dict)
+        or not isinstance(head_repository.get("id"), str)
+        or NODE_ID_REGEX.fullmatch(head_repository["id"]) is None
+    ):
+        raise PrRouteDenied("PRG-PR-UNAVAILABLE")
+    return (
+        ActivePrGrant(
+            match.group("url"), match.group("owner"), match.group("repo"),
+            int(match.group("number")),
+        ),
+        row["id"],
+        head_repository["id"],
+    )
+
+
+def _evaluate_simple_pr_route(
+    intent: SimplePrIntent,
+    current_marker: bool,
+    preflight: PreflightResult,
+) -> bool:
+    if not intent.sha256:
+        raise PrRouteDenied("PRG-TRANSCRIPT-UNAVAILABLE")
+    prepared = _prepare_simple_pr_push(
+        preflight.dialect, preflight.parsed,
+        preflight.repository_workdir, preflight.repository_workdir_source,
+    )
+    identity = _repository_identity(prepared.repository_workdir)
+    sidecar_path = _binding_sidecar_path(preflight.transcript_path)
+    existing = _read_binding_state(sidecar_path)
+    pending = PrBindingState(
+        intent.record, intent.sha256, "pending", identity,
+        prepared.literal.remote, prepared.literal.target.head_ref,
+        None, None, None,
+    )
+    verified: VerifiedPrOracle | None = None
+    if existing is None and not current_marker:
+        grant = intent.prior_scoped_grant
+        if grant is None:
+            raise PrRouteDenied("PRG-AUTH-MALFORMED")
+        try:
+            verified = _verify_pr_oracle(
+                grant, prepared.literal, prepared.repository_workdir
+            )
+        except PrRouteDenied as exc:
+            if exc.failure_id == "PRG-COMMAND-SHAPE":
+                _raise_command_shape(
+                    "simple", preflight.dialect, preflight.parsed, "oracle"
+                )
+            raise
+        existing = PrBindingState(
+            intent.record, intent.sha256, "bound", identity,
+            prepared.literal.remote, prepared.literal.target.head_ref,
+            grant.url, verified.pr_id, verified.head_repository_id,
+        )
+        _write_binding_state(sidecar_path, existing, create_only=True)
+    elif existing is None:
+        _write_binding_state(sidecar_path, pending, create_only=True)
+        existing = pending
+    elif not _same_binding_anchor(existing, intent):
+        if not current_marker:
+            raise PrRouteDenied("PRG-BINDING-DRIFT")
+        _write_binding_state(sidecar_path, pending, create_only=False)
+        existing = pending
+    if (
+        existing.repository_identity != identity
+        or existing.remote != prepared.literal.remote
+        or existing.head_ref != prepared.literal.target.head_ref
+    ):
+        raise PrRouteDenied("PRG-BINDING-DRIFT")
+    if existing.state == "revoked":
+        raise PrRouteDenied("PRG-AUTH-MALFORMED")
+    if verified is not None:
+        pass
+    elif existing.state == "pending":
+        if not current_marker:
+            raise PrRouteDenied("PRG-BINDING-DRIFT")
+        grant, pr_id, head_repository_id = _discover_unique_open_pr(prepared)
+        try:
+            verified = _verify_pr_oracle(
+                grant, prepared.literal, prepared.repository_workdir
+            )
+        except PrRouteDenied as exc:
+            if exc.failure_id == "PRG-COMMAND-SHAPE":
+                _raise_command_shape(
+                    "simple", preflight.dialect, preflight.parsed, "oracle"
+                )
+            raise
+        if (
+            verified.pr_id != pr_id
+            or verified.head_repository_id != head_repository_id
+        ):
+            raise PrRouteDenied("PRG-BINDING-DRIFT")
+        existing = PrBindingState(
+            intent.record, intent.sha256, "bound", identity,
+            prepared.literal.remote, prepared.literal.target.head_ref,
+            grant.url, pr_id, head_repository_id,
+        )
+        _write_binding_state(sidecar_path, existing, create_only=False)
+    else:
+        match = PR_URL_REGEX.fullmatch(existing.pr_url or "")
+        if match is None:
+            raise PrRouteDenied("PRG-AUTH-MALFORMED")
+        grant = ActivePrGrant(
+            match.group("url"), match.group("owner"), match.group("repo"),
+            int(match.group("number")),
+        )
+        try:
+            verified = _verify_pr_oracle(
+                grant, prepared.literal, prepared.repository_workdir
+            )
+        except PrRouteDenied as exc:
+            if exc.failure_id == "PRG-COMMAND-SHAPE":
+                _raise_command_shape(
+                    "simple", preflight.dialect, preflight.parsed, "oracle"
+                )
+            raise
+        if (
+            verified.pr_id != existing.pr_id
+            or verified.head_repository_id != existing.head_repository_id
+        ):
+            raise PrRouteDenied("PRG-BINDING-DRIFT")
+    binding = PushScanBinding(
+        "strict", verified.target.remote, verified.target.destination,
+        verified.local_head, verified.local_head,
+    )
+    _run_authoritative_scan(binding, prepared.repository_workdir, prepared.git_exe)
+    return True
+
+
+def _revoke_simple_binding(transcript_path: str) -> None:
+    path = _binding_sidecar_path(transcript_path)
+    existing = _read_binding_state(path)
+    if existing is None or existing.state == "revoked":
+        return
+    _write_binding_state(path, existing._replace(state="revoked"), create_only=False)
 
 
 
@@ -3039,25 +3667,63 @@ def evaluate_heavy(preflight: PreflightResult) -> bool:
         record_cap=TRANSCRIPT_HISTORY_RECORD_CAP,
         line_byte_cap=TRANSCRIPT_HISTORY_LINE_BYTE_CAP,
     )
-    suffix_recovery = history_status == HISTORY_STATUS_LIMIT
-    if suffix_recovery:
-        history_entries, history_status = _read_stable_transcript_suffix(
-            preflight.transcript_path
+    stream_recovery = history_status == HISTORY_STATUS_LIMIT
+    transcript_diagnostic = preflight.transcript_diagnostic
+    if stream_recovery:
+        pr_state, pr_grant, recovery_status = _recover_stable_pr_grant(
+            preflight.transcript_path, preflight.repository_workdir
         )
-    if history_status != HISTORY_STATUS_FOUND:
-        raise PrRouteDenied("PRG-TRANSCRIPT-UNAVAILABLE")
-    pr_state, pr_grant = _derive_pr_grant(
-        history_entries, preflight.repository_workdir
-    )
+        transcript_diagnostic = _with_transcript_read_status(
+            transcript_diagnostic, history_status, recovery_status
+        )
+    else:
+        transcript_diagnostic = _with_transcript_read_status(
+            transcript_diagnostic, history_status, "not-run"
+        )
+        if history_status != HISTORY_STATUS_FOUND:
+            raise PrRouteDenied(
+                "PRG-TRANSCRIPT-UNAVAILABLE", transcript_diagnostic
+            )
+        pr_state, pr_grant = _derive_pr_grant(
+            history_entries, preflight.repository_workdir
+        )
+        if (
+            pr_state == "simple"
+            and isinstance(pr_grant, SimplePrIntent)
+            and not pr_grant.sha256
+        ):
+            pr_state, pr_grant, stable_status = _recover_stable_pr_grant(
+                preflight.transcript_path, preflight.repository_workdir
+            )
+            transcript_diagnostic = _with_transcript_read_status(
+                transcript_diagnostic, history_status, stable_status
+            )
+            if stable_status != HISTORY_STATUS_FOUND:
+                raise PrRouteDenied(
+                    "PRG-TRANSCRIPT-UNAVAILABLE", transcript_diagnostic
+                )
+    if stream_recovery and recovery_status != HISTORY_STATUS_FOUND:
+        raise PrRouteDenied(
+            "PRG-TRANSCRIPT-UNAVAILABLE", transcript_diagnostic
+        )
     if pr_state == "malformed":
         raise PrRouteDenied("PRG-AUTH-MALFORMED")
+    if pr_state == "revoked":
+        _revoke_simple_binding(preflight.transcript_path)
+        return False
     if pr_state == "active" and pr_grant is not None:
         return _evaluate_active_pr_route(
             pr_grant, preflight.command, preflight.dialect, preflight.parsed,
             preflight.repository_workdir, preflight.repository_workdir_source,
         )
-    if suffix_recovery:
-        raise PrRouteDenied("PRG-TRANSCRIPT-HISTORY-LIMIT")
+    if pr_state == "simple" and isinstance(pr_grant, SimplePrIntent):
+        return _evaluate_simple_pr_route(
+            pr_grant, preflight.simple_pr_approval, preflight
+        )
+    if stream_recovery:
+        raise PrRouteDenied(
+            "PRG-TRANSCRIPT-HISTORY-LIMIT", transcript_diagnostic
+        )
     grammar = preflight.generic_decision
     if preflight.push_instruction:
         if grammar.status != "PGG-ADMISSIBLE" or grammar.binding is None:
@@ -3079,6 +3745,62 @@ def evaluate_heavy(preflight: PreflightResult) -> bool:
         return True
     return False
 
+_TRANSCRIPT_FAILURE_IDS = frozenset((
+    "PRG-TRANSCRIPT-UNAVAILABLE",
+    "PRG-TRANSCRIPT-HISTORY-LIMIT",
+))
+
+
+def _with_transcript_read_status(
+    diagnostic: TranscriptDiagnostic | None,
+    history: str,
+    recovery: str,
+) -> TranscriptDiagnostic | None:
+    if diagnostic is None:
+        return None
+    return validate_transcript_diagnostic(
+        diagnostic._replace(history=history, recovery=recovery)
+    )
+
+
+def _denial_scope(failure_id: str) -> str:
+    if failure_id in _TRANSCRIPT_FAILURE_IDS:
+        return "Publication denied"
+    if failure_id.startswith("PGG-"):
+        return "Generic scan-derived publication denied"
+    return "PR-scoped publication denied"
+
+
+def _format_transcript_diagnostic(diagnostic: TranscriptDiagnostic) -> str:
+    checked = validate_transcript_diagnostic(diagnostic)
+    return (
+        "Transcript diagnostics: "
+        f"envelope={checked.envelope}; current-turn={checked.current_turn}; "
+        f"history={checked.history}; recovery={checked.recovery}."
+    )
+
+
+def _format_command_shape_diagnostic(value: object) -> str:
+    if (
+        not isinstance(value, tuple)
+        or len(value) != 5
+        or value[0] not in {"simple", "legacy"}
+        or value[1] not in {"powershell", "posix", "unsupported", "other"}
+        or value[2] not in {"true", "false"}
+        or value[3] not in {"canonical", "noncanonical", "other"}
+        or value[4] not in {
+            "projection", "command-context", "git-global", "target",
+            "executable", "dialect", "root", "oracle", "legacy-strict",
+        }
+    ):
+        return ""
+    return (
+        "Command diagnostics: "
+        f"route={value[0]}; dialect={value[1]}; direct={value[2]}; "
+        f"strict={value[3]}; stage={value[4]}."
+    )
+
+
 def _format_gate_denial(failure_id: str) -> str:
     if failure_id not in SCAN_DENIAL_REASONS:
         failure_id = "PRG-INTERNAL"
@@ -3086,11 +3808,7 @@ def _format_gate_denial(failure_id: str) -> str:
         failure_id,
         "Retry only after the publication gate can complete its checks normally.",
     )
-    scope = (
-        "Generic scan-derived publication denied"
-        if failure_id.startswith("PGG-")
-        else "PR-scoped publication denied"
-    )
+    scope = _denial_scope(failure_id)
     return f"{failure_id}: {scope}. {remediation}"
 
 
@@ -3107,12 +3825,18 @@ def compose_gate_result(preflight: PreflightResult) -> int:
         return 0
 
     failure_id: str | None = result.failure_id
+    transcript_diagnostic = result.transcript_diagnostic
+    command_shape_diagnostic = None
     if result.continuation == "EVALUATE_HEAVY":
         try:
             if evaluate_heavy(result):
                 return 0
         except PrRouteDenied as exc:
             failure_id = exc.failure_id
+            transcript_diagnostic = exc.transcript_diagnostic
+            command_shape_diagnostic = getattr(
+                exc, "command_shape_diagnostic", None
+            )
         except Exception:
             pass
 
@@ -3123,8 +3847,8 @@ def compose_gate_result(preflight: PreflightResult) -> int:
         **SCAN_DENIAL_REASONS,
         "PRG-AUTH-MALFORMED": "Use the exact version-1 PR approval or revocation line in a genuine user message.",
         "PRG-TRANSCRIPT-UNAVAILABLE": "Retry from a readable current session transcript; summaries cannot authorize publication.",
-        "PRG-TRANSCRIPT-HISTORY-LIMIT": "History exceeds the bounded PR-grant window and the readable suffix has no active grant. For one generic push, the user must send a new genuine message containing `[approve-publication]`; older approvals, summaries, assistant text, and tool output do not authorize.",
-        "PRG-COMMAND-SHAPE": "Use one exact absolute Git literal: `git push <remote> HEAD:refs/heads/<head>` or `git -C <absolute-root> push <remote> HEAD:refs/heads/<head>`.",
+        "PRG-TRANSCRIPT-HISTORY-LIMIT": "History exceeds the in-memory PR-grant window and the complete stable transcript has no active grant. The user must send a new genuine exact PR grant for repeated pushes or `[approve-publication]` for one generic push; summaries, assistant text, and tool output do not authorize.",
+        "PRG-COMMAND-SHAPE": "Use one solitary direct `git push <remote> HEAD:refs/heads/<head>` or `git -C <absolute-root> push <remote> HEAD:refs/heads/<head>` for a simple bound grant; existing Version 1 grants retain the exact absolute Git literal requirement.",
         "PRG-PR-UNAVAILABLE": "Restore authenticated GitHub state access, then retry so the pull request can be checked afresh.",
         "PRG-PR-STATE": "The pull request is not open; obtain a new grant only for an open pull request.",
         "PRG-BINDING-DRIFT": "Refresh the pull-request binding and retry with a current exact grant if needed.",
@@ -3159,8 +3883,21 @@ def compose_gate_result(preflight: PreflightResult) -> int:
             reason = _format_gate_denial(failure_id)
         else:
             remediation = pr_reasons.get(failure_id, pr_reasons["PRG-INTERNAL"])
-            scope = "Generic scan-derived publication denied" if failure_id.startswith("PGG-") else "PR-scoped publication denied"
+            scope = _denial_scope(failure_id)
             reason = f"{failure_id}: {scope}. {remediation}"
+            if (
+                failure_id in _TRANSCRIPT_FAILURE_IDS
+                and transcript_diagnostic is not None
+            ):
+                reason += " " + _format_transcript_diagnostic(
+                    transcript_diagnostic
+                )
+            if failure_id == "PRG-COMMAND-SHAPE":
+                detail = _format_command_shape_diagnostic(
+                    command_shape_diagnostic
+                )
+                if detail:
+                    reason += " " + detail
     else:
         reason = (
         "Git-push publication gate: this Bash command runs `git push` (an "

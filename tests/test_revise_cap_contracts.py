@@ -70,7 +70,8 @@ GENERIC_CAP_LINE = re.compile(
     r"(?i)(?=.*\bREVISE\b)(?=.*\b3\b)(?=.*(?:cap|cycle|iteration|round|предел|цикл|итерац|раунд))"
 )
 OWNER_CONTRACT = re.compile(
-    r"REVISE.*?escalate after (?P<cap>\d+) consecutive cycles for the same role and artifact",
+    r"REVISE.*?escalate(?:s)? after (?P<cap>\d+) consecutive "
+    r"(?:same-role/artifact cycles|cycles for the same role and artifact)",
     re.IGNORECASE,
 )
 def _text(path: Path) -> str:

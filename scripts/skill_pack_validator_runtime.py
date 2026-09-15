@@ -131,7 +131,8 @@ VALIDATOR_ENVIRONMENT_ALLOWLIST = (
 )
 
 
-LAW_ID_RE = re.compile(r"\b(A[1-9]|B[1-3]|C[1-6]|D[1-5])\b")
+LAW_ID_PATTERN = r"(?:A[1-9]|B[1-3]|C[1-6]|D[1-5]|M)"
+LAW_ID_RE = re.compile(rf"\b{LAW_ID_PATTERN}\b")
 ACTION_SCOPES = frozenset(
     {"all", "dev_repo", "dev_repo_nonstandalone", "installed"}
 )
@@ -1141,7 +1142,12 @@ def layering_ids_resolve(path: Path) -> tuple[bool, tuple[str, ...]]:
     text = _read(path)
     unresolved = []
     for law_id in sorted(set(LAW_ID_RE.findall(text))):
-        if not re.search(rf"\*\*[^*]*\({law_id}(?:\)| )[^*]*\*\*", text):
+        if not re.search(
+            rf"(?m)^\s*[-*]\s+\*\*[^*\n]*\("
+            rf"(?:{LAW_ID_PATTERN}/)*{re.escape(law_id)}"
+            rf"(?:/{LAW_ID_PATTERN})*(?:\)| )[^*\n]*\*\*",
+            text,
+        ):
             unresolved.append(law_id)
     return not unresolved, tuple(unresolved)
 
