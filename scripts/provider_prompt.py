@@ -435,13 +435,13 @@ def _kimi_mcp_credential_needles(
             words = option_words(option) if option else ()
             carrier = None
             if (
-        words == ("h",)
-        or (
-            words
-            and words[-1] in {"header", "headers"}
-            and "file" not in words
-        )
-    ):
+                words == ("h",)
+                or (
+                    words
+                    and words[-1] in {"header", "headers"}
+                    and "file" not in words
+                )
+            ):
                 carrier = add_header_argument
             elif words in {
                 ("e",),
