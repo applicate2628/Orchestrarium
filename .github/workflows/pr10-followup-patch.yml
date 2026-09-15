@@ -28,9 +28,117 @@ jobs:
         run: |
           sed -i '0,/if count != 1:/s//if count < 1:/' scripts/pr10_followup_patch.py
           python scripts/pr10_followup_patch.py
+          python - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+
+          path = Path("scripts/provider_prompt.py")
+          text = path.read_text(encoding="utf-8")
+
+          old_header = '''            if words and words[-1] in {"header", "headers"} and "file" not in words:
+                  carrier = add_header_argument
+          '''
+          new_header = '''            if (
+                  words == ("h",)
+                  or (
+                      words
+                      and words[-1] in {"header", "headers"}
+                      and "file" not in words
+                  )
+              ):
+                  carrier = add_header_argument
+          '''
+          if text.count(old_header) != 1:
+              raise SystemExit("generated header-carrier block drifted")
+          text = text.replace(old_header, new_header, 1)
+
+          old_read = '''        with os.fdopen(descriptor, "rb") as stream:
+              with _kimi_capability_write_exclusion(stream.fileno()):
+                  opened = os.fstat(stream.fileno())
+                  if (opened.st_dev, opened.st_ino, opened.st_mode) != (
+                      before.st_dev,
+                      before.st_ino,
+                      before.st_mode,
+                  ):
+                      raise ValueError("identity")
+                  raw = stream.read(PROMPT_SNAPSHOT_MAX_BYTES + 1)
+                  after_read = os.fstat(stream.fileno())
+                  stream.seek(0)
+                  confirmed_raw = stream.read(PROMPT_SNAPSHOT_MAX_BYTES + 1)
+                  after_confirmation = os.fstat(stream.fileno())
+                  validate_no_reparse_components(candidate)
+                  after_path = candidate.lstat()
+                  stable_fields = (
+                      "st_dev", "st_ino", "st_mode", "st_size", "st_mtime_ns", "st_ctime_ns"
+                  )
+                  # Windows pathname and descriptor ctime have different semantics.
+                  # Compare each interface with its own earlier observation.
+                  if (
+                      tuple(getattr(opened, name) for name in stable_fields)
+                      != tuple(getattr(after_read, name) for name in stable_fields)
+                      or tuple(getattr(opened, name) for name in stable_fields)
+                      != tuple(getattr(after_confirmation, name) for name in stable_fields)
+                      or tuple(getattr(before, name) for name in stable_fields)
+                      != tuple(getattr(after_path, name) for name in stable_fields)
+                      or raw != confirmed_raw
+                      or len(raw) != opened.st_size
+                      or len(raw) > PROMPT_SNAPSHOT_MAX_BYTES
+                  ):
+                      raise ValueError("snapshot changed or exceeded size limit")
+          '''
+          new_read = '''        with os.fdopen(descriptor, "rb") as stream:
+              with _kimi_capability_write_exclusion(stream.fileno()):
+                  opened = os.fstat(stream.fileno())
+                  if (opened.st_dev, opened.st_ino, opened.st_mode) != (
+                      before.st_dev,
+                      before.st_ino,
+                      before.st_mode,
+                  ):
+                      raise ValueError("identity")
+                  raw = stream.read(PROMPT_SNAPSHOT_MAX_BYTES + 1)
+                  after_read = os.fstat(stream.fileno())
+                  stream.seek(0)
+                  confirmed_raw = stream.read(PROMPT_SNAPSHOT_MAX_BYTES + 1)
+                  after_confirmation = os.fstat(stream.fileno())
+              validate_no_reparse_components(candidate)
+              after_path = candidate.lstat()
+              stable_fields = (
+                  "st_dev", "st_ino", "st_mode", "st_size", "st_mtime_ns", "st_ctime_ns"
+              )
+              # Windows pathname and descriptor ctime have different semantics.
+              # Compare each interface with its own earlier observation.
+              if (
+                  tuple(getattr(opened, name) for name in stable_fields)
+                  != tuple(getattr(after_read, name) for name in stable_fields)
+                  or tuple(getattr(opened, name) for name in stable_fields)
+                  != tuple(getattr(after_confirmation, name) for name in stable_fields)
+                  or tuple(getattr(before, name) for name in stable_fields)
+                  != tuple(getattr(after_path, name) for name in stable_fields)
+                  or raw != confirmed_raw
+                  or len(raw) != opened.st_size
+                  or len(raw) > PROMPT_SNAPSHOT_MAX_BYTES
+              ):
+                  raise ValueError("snapshot changed or exceeded size limit")
+          '''
+          if text.count(old_read) != 1:
+              raise SystemExit("generated capability-read block drifted")
+          text = text.replace(old_read, new_read, 1)
+          path.write_text(text, encoding="utf-8")
+
+          manifest_path = Path("shared/provider-prompt-projections.v1.json")
+          manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+          manifest["files"]["provider_prompt.py"]["sha256"] = hashlib.sha256(
+              path.read_bytes()
+          ).hexdigest()
+          manifest_path.write_text(
+              json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          PY
 
       - name: Install test runner
-        run: python -m pip install --disable-pip-version-check pytest
+        run: python -m pip install --disable-pip-version-check pytest jsonschema
 
       - name: Verify focused owners
         shell: bash
