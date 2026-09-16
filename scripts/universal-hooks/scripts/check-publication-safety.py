@@ -175,6 +175,9 @@ _PUBLIC_TOKEN_CREDENTIAL_CUES = (
     "CREDENTIAL", "SECRET", "IDENTITY", "CSRF", "PASSWORD",
 )
 _PUBLIC_TOKEN_AUTH_CUE_PREFIXES = ("AUTHENTICAT", "AUTHORIZ", "AUTHORIS")
+_PUBLIC_TOKEN_ANNOTATED_LEXICAL_IDENTIFIERS = frozenset(
+    {"accessibilitytoken", "authorshiptoken"}
+)
 _PUBLIC_TOKEN_LOWER_CREDENTIAL_STEMS = tuple(
     sorted(
         {
@@ -189,7 +192,6 @@ _PUBLIC_TOKEN_LOWER_CREDENTIAL_STEMS = tuple(
 _PUBLIC_TOKEN_LOWER_CREDENTIAL_PREFIX_PATTERN = "|".join(
     re.escape(stem)
     for stem in _PUBLIC_TOKEN_LOWER_CREDENTIAL_STEMS
-    if stem != "auth"
 )
 _PUBLIC_TOKEN_LOWER_CREDENTIAL_SUFFIX_PATTERN = "|".join(
     re.escape(stem) for stem in _PUBLIC_TOKEN_LOWER_CREDENTIAL_STEMS
@@ -1187,11 +1189,21 @@ def _is_annotated_public_token_match(
 ) -> bool:
     if family != "token" or subject_kind == "commit-message":
         return False
-    if match.groupdict().get("credential_token_identifier") is not None:
+    credential_identifier = match.groupdict().get("credential_token_identifier")
+    if (
+        credential_identifier is not None
+        and credential_identifier.casefold()
+        not in _PUBLIC_TOKEN_ANNOTATED_LEXICAL_IDENTIFIERS
+    ):
         return False
     rhs = match.group("rhs_value")
     if len(rhs) < 2 or rhs[0] not in {"'", '"'} or rhs[-1] != rhs[0]:
         return False
+    annotation_match = _PUBLIC_TOKEN_ANNOTATION_SUFFIX.fullmatch(
+        line[match.end("rhs_value"):]
+    )
+    if credential_identifier is not None:
+        return annotation_match is not None
     prefix = _IDENTIFIER_PREFIX.search(line[:match.start()])
     identifier = (prefix.group(0) if prefix is not None else "") + line[
         match.start():match.start() + len("token")
@@ -1204,9 +1216,7 @@ def _is_annotated_public_token_match(
         components.add(component)
     if any(cue in components for cue in _PUBLIC_TOKEN_CREDENTIAL_CUES):
         return False
-    return _PUBLIC_TOKEN_ANNOTATION_SUFFIX.fullmatch(
-        line[match.end("rhs_value"):]
-    ) is not None
+    return annotation_match is not None
 
 
 def _is_public_key_token_match(line: str, family: str, match: re.Match[str]) -> bool:
