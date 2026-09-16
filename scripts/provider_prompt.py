@@ -449,6 +449,14 @@ def _kimi_mcp_credential_needles(
                     add_env_value(name, value)
                 else:
                     add_argument_credential(argument)
+            else:
+                next_index = index + 1
+                if next_index < len(arguments):
+                    next_argument = arguments[next_index]
+                    if next_argument != "--":
+                        add_argument_credential(next_argument)
+                        if not is_option_argument(next_argument):
+                            index = next_index
             index += 1
 
         # Preserve the existing public controls; all other names default private.

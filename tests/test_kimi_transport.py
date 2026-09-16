@@ -2003,6 +2003,8 @@ def test_kimi_mcp_argument_values_default_private_except_public_controls() -> No
                 command="fixture",
                 args=(
                     "--auth", "opaque-secret",
+                    "--dash-auth", "-dash-private",
+                    "--slash-auth", "/slash-private",
                     "--custom-setting=inline-private",
                     "positional-private",
                     "--header-list", "Authorization: Bearer list-secret",
@@ -2019,6 +2021,8 @@ def test_kimi_mcp_argument_values_default_private_except_public_controls() -> No
 
     assert {
         b"opaque-secret",
+        b"-dash-private",
+        b"/slash-private",
         b"inline-private",
         b"positional-private",
         b"list-secret",
