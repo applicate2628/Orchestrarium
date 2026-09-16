@@ -57,6 +57,7 @@ import time
 import unittest
 from enum import Enum
 from pathlib import Path
+from types import SimpleNamespace
 from typing import NamedTuple
 from unittest import mock
 from urllib.parse import quote
@@ -6037,6 +6038,140 @@ class TestPrScopedPublicationGrant(unittest.TestCase):
         self.assertEqual(
             (state, grant, status), ("absent", None, "identity-drift")
         )
+
+    def test_stale_pending_writer_cannot_overwrite_newer_binding_state(self) -> None:
+        module = _load_gate_module(CANONICAL_HOOK, "pr_binding_pending_race")
+        identity = (11, 22)
+        target = module.PushTarget("origin", "refs/heads/feature", "feature")
+        prepared = module.PreparedPrPush(
+            module.LiteralPushCommand(
+                "posix", "git", "origin", "HEAD:refs/heads/feature", target
+            ),
+            str(REPO_ROOT.resolve()),
+            "git",
+        )
+        intent = module.SimplePrIntent(1, "a" * 64, None)
+        pending = module.PrBindingState(
+            intent.record, intent.sha256, "pending", identity,
+            "origin", "feature", None, None, None,
+        )
+        verified = module.VerifiedPrOracle(
+            target, "1" * 40, "synthetic-pr-id", "synthetic-head-repository-id"
+        )
+        concurrent_states = (
+            ("revoked", pending._replace(state="revoked")),
+            (
+                "rebound",
+                pending._replace(anchor_record=2, anchor_sha256="b" * 64),
+            ),
+        )
+
+        for label, concurrent in concurrent_states:
+            with self.subTest(label=label), synthetic_transcript([
+                user("[approve-pr-publication]")
+            ]) as transcript_path:
+                sidecar = Path(
+                    str(transcript_path) + module.PR_BINDING_SIDECAR_SUFFIX
+                )
+                sidecar.write_text(
+                    json.dumps(
+                        module._binding_payload(pending), separators=(",", ":")
+                    ),
+                    encoding="utf-8",
+                )
+
+                def replace_during_oracle(_prepared):
+                    sidecar.write_text(
+                        json.dumps(
+                            module._binding_payload(concurrent),
+                            separators=(",", ":"),
+                        ),
+                        encoding="utf-8",
+                    )
+                    return (
+                        module.ActivePrGrant(
+                            "https://github.com/acme/project/pull/7",
+                            "acme", "project", 7,
+                        ),
+                        verified.pr_id,
+                        verified.head_repository_id,
+                    )
+
+                preflight = SimpleNamespace(
+                    dialect="posix",
+                    parsed=object(),
+                    repository_workdir=str(REPO_ROOT.resolve()),
+                    repository_workdir_source="tool",
+                    transcript_path=str(transcript_path),
+                )
+                with mock.patch.object(
+                    module, "_prepare_simple_pr_push", return_value=prepared
+                ), mock.patch.object(
+                    module, "_repository_identity", return_value=identity
+                ), mock.patch.object(
+                    module, "_discover_unique_open_pr",
+                    side_effect=replace_during_oracle,
+                ), mock.patch.object(
+                    module, "_verify_pr_oracle", return_value=verified
+                ), mock.patch.object(
+                    module, "_run_authoritative_scan",
+                    side_effect=AssertionError("stale binding reached scan"),
+                ):
+                    with self.assertRaises(module.PrRouteDenied) as raised:
+                        module._evaluate_simple_pr_route(intent, True, preflight)
+
+                self.assertEqual(
+                    raised.exception.failure_id, "PRG-BINDING-DRIFT"
+                )
+                self.assertEqual(module._read_binding_state(sidecar), concurrent)
+                self.assertFalse(module._binding_lock_path(sidecar).exists())
+
+    def test_binding_write_lock_is_fail_closed_and_owned_cleanup_is_finite(self) -> None:
+        module = _load_gate_module(CANONICAL_HOOK, "pr_binding_lock_lifecycle")
+        pending = module.PrBindingState(
+            1, "a" * 64, "pending", (11, 22),
+            "origin", "feature", None, None, None,
+        )
+        revoked = pending._replace(state="revoked")
+        with tempfile.TemporaryDirectory() as root:
+            sidecar = Path(root) / "binding.json"
+            module._write_binding_state(sidecar, pending, expected=None)
+            lock_path = module._binding_lock_path(sidecar)
+            self.assertFalse(lock_path.exists())
+
+            lock_path.write_bytes(b"foreign-lock")
+            with self.assertRaises(module.PrRouteDenied) as raised:
+                module._write_binding_state(sidecar, revoked, expected=pending)
+            self.assertEqual(raised.exception.failure_id, "PRG-BINDING-DRIFT")
+            self.assertEqual(module._read_binding_state(sidecar), pending)
+            self.assertEqual(lock_path.read_bytes(), b"foreign-lock")
+
+            lock_path.unlink()
+            module._write_binding_state(sidecar, revoked, expected=pending)
+            self.assertEqual(module._read_binding_state(sidecar), revoked)
+            self.assertFalse(lock_path.exists())
+
+    def test_binding_owned_cleanup_preserves_replacement_identity(self) -> None:
+        module = _load_gate_module(CANONICAL_HOOK, "pr_binding_owned_cleanup")
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / "owned.tmp"
+            path.write_bytes(b"owned")
+            identity = module._binding_file_identity(path.lstat())
+
+            replacement = Path(root) / "replacement.tmp"
+            replacement.write_bytes(b"foreign")
+            os.replace(replacement, path)
+            self.assertFalse(module._unlink_owned_binding_file(path, identity))
+            self.assertEqual(path.read_bytes(), b"foreign")
+
+            owned = Path(root) / "second.tmp"
+            owned.write_bytes(b"owned")
+            owned_identity = module._binding_file_identity(owned.lstat())
+            self.assertTrue(
+                module._unlink_owned_binding_file(owned, owned_identity)
+            )
+            self.assertFalse(owned.exists())
+
 
     def test_binding_state_rejects_descriptor_path_identity_swap(self) -> None:
         module = _load_gate_module(CANONICAL_HOOK, "pr_binding_descriptor_swap")

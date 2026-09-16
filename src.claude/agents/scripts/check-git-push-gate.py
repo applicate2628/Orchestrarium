@@ -416,6 +416,7 @@ PR_RESERVED_PREFIXES = (
     "[approve-pr-publication pr=", "[approve-publication pr=",
 )
 PR_BINDING_SIDECAR_SUFFIX = ".pr-publication-binding-v1.json"
+PR_BINDING_LOCK_SUFFIX = ".lock"
 PR_BINDING_SIDECAR_BYTE_CAP = 8192
 TRANSCRIPT_HISTORY_BYTE_CAP = 32 * 1024 * 1024
 TRANSCRIPT_HISTORY_RECORD_CAP = 50_000
@@ -1785,53 +1786,168 @@ def _read_binding_state(path: Path) -> PrBindingState | None:
     return _validate_binding_payload(value)
 
 
+def _binding_lock_path(path: Path) -> Path:
+    return path.with_name(path.name + PR_BINDING_LOCK_SUFFIX)
+
+
+def _binding_file_identity(metadata: os.stat_result) -> tuple[int, int, int, int]:
+    return metadata.st_dev, metadata.st_ino, metadata.st_mode, metadata.st_nlink
+
+
+def _unlink_owned_binding_file(
+    path: Path, identity: tuple[int, int, int, int]
+) -> bool:
+    try:
+        current = path.lstat()
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    if (
+        _binding_file_identity(current) != identity
+        or not stat.S_ISREG(current.st_mode)
+        or stat.S_ISLNK(current.st_mode)
+        or current.st_nlink != 1
+        or bool(
+            getattr(current, "st_file_attributes", 0)
+            & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+        )
+    ):
+        return False
+    try:
+        path.unlink()
+    except OSError:
+        return False
+    return True
+
+
+def _acquire_binding_write_lock(path: Path) -> tuple[int, Path, tuple[int, int, int, int]]:
+    lock_path = _binding_lock_path(path)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_BINARY"):
+        flags |= os.O_BINARY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(lock_path, flags, 0o600)
+    except FileExistsError:
+        raise PrRouteDenied("PRG-BINDING-DRIFT") from None
+    except Exception:
+        raise PrRouteDenied("PRG-INTERNAL") from None
+    identity: tuple[int, int, int, int] | None = None
+    try:
+        metadata = os.fstat(descriptor)
+        identity = _binding_file_identity(metadata)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_nlink != 1
+            or bool(
+                getattr(metadata, "st_file_attributes", 0)
+                & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+            )
+        ):
+            raise PrRouteDenied("PRG-BINDING-DRIFT")
+        return descriptor, lock_path, identity
+    except BaseException:
+        try:
+            os.close(descriptor)
+        except OSError:
+            pass
+        if identity is not None:
+            _unlink_owned_binding_file(lock_path, identity)
+        raise
+
+
+def _release_binding_write_lock(
+    descriptor: int,
+    lock_path: Path,
+    identity: tuple[int, int, int, int],
+    *,
+    preserve_primary: bool,
+) -> None:
+    failure_id: str | None = None
+    try:
+        os.close(descriptor)
+    except OSError:
+        failure_id = "PRG-INTERNAL"
+    if not _unlink_owned_binding_file(lock_path, identity):
+        failure_id = failure_id or "PRG-BINDING-DRIFT"
+    if failure_id is not None and not preserve_primary:
+        raise PrRouteDenied(failure_id)
+
+
 def _write_binding_state(
-    path: Path, state: PrBindingState, *, create_only: bool
+    path: Path, state: PrBindingState, *, expected: PrBindingState | None
 ) -> None:
     payload = json.dumps(
         _binding_payload(state), ensure_ascii=True, separators=(",", ":")
     ).encode("utf-8")
     if len(payload) > PR_BINDING_SIDECAR_BYTE_CAP:
         raise PrRouteDenied("PRG-INTERNAL")
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
-    if hasattr(os, "O_BINARY"):
-        flags |= os.O_BINARY
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
-    target = path if create_only else path.with_name(
+    lock_fd, lock_path, lock_identity = _acquire_binding_write_lock(path)
+    target = path if expected is None else path.with_name(
         path.name + ".tmp-" + secrets.token_hex(8)
     )
-    fd: int | None = None
+    write_fd: int | None = None
+    target_identity: tuple[int, int, int, int] | None = None
+    committed = False
+    primary = True
     try:
-        fd = os.open(target, flags, 0o600)
-        offset = 0
-        while offset < len(payload):
-            written = os.write(fd, payload[offset:])
-            if written <= 0:
-                raise OSError("short sidecar write")
-            offset += written
-        os.fsync(fd)
-        os.close(fd)
-        fd = None
-        if not create_only:
-            os.replace(target, path)
-    except FileExistsError:
-        raise PrRouteDenied("PRG-BINDING-DRIFT") from None
-    except PrRouteDenied:
-        raise
-    except Exception:
-        raise PrRouteDenied("PRG-INTERNAL") from None
+        if _read_binding_state(path) != expected:
+            raise PrRouteDenied("PRG-BINDING-DRIFT")
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        if hasattr(os, "O_BINARY"):
+            flags |= os.O_BINARY
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        try:
+            write_fd = os.open(target, flags, 0o600)
+            target_metadata = os.fstat(write_fd)
+            target_identity = _binding_file_identity(target_metadata)
+            if (
+                not stat.S_ISREG(target_metadata.st_mode)
+                or target_metadata.st_nlink != 1
+                or bool(
+                    getattr(target_metadata, "st_file_attributes", 0)
+                    & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+                )
+            ):
+                raise OSError("sidecar staging file is not owned and ordinary")
+            offset = 0
+            while offset < len(payload):
+                written = os.write(write_fd, payload[offset:])
+                if written <= 0:
+                    raise OSError("short sidecar write")
+                offset += written
+            os.fsync(write_fd)
+            os.close(write_fd)
+            write_fd = None
+            if expected is not None:
+                if _read_binding_state(path) != expected:
+                    raise PrRouteDenied("PRG-BINDING-DRIFT")
+                os.replace(target, path)
+                committed = True
+            if _read_binding_state(path) != state:
+                raise PrRouteDenied("PRG-BINDING-DRIFT")
+            committed = True
+        except FileExistsError:
+            raise PrRouteDenied("PRG-BINDING-DRIFT") from None
+        except PrRouteDenied:
+            raise
+        except Exception:
+            raise PrRouteDenied("PRG-INTERNAL") from None
+        primary = False
     finally:
-        if fd is not None:
+        if write_fd is not None:
             try:
-                os.close(fd)
+                os.close(write_fd)
             except OSError:
                 pass
-        if not create_only:
-            try:
-                target.unlink(missing_ok=True)
-            except OSError:
-                pass
+        if not committed and target_identity is not None:
+            _unlink_owned_binding_file(target, target_identity)
+        _release_binding_write_lock(
+            lock_fd, lock_path, lock_identity, preserve_primary=primary
+        )
 
 
 def _same_binding_anchor(state: PrBindingState, intent: SimplePrIntent) -> bool:
@@ -3573,14 +3689,14 @@ def _evaluate_simple_pr_route(
             prepared.literal.remote, prepared.literal.target.head_ref,
             grant.url, verified.pr_id, verified.head_repository_id,
         )
-        _write_binding_state(sidecar_path, existing, create_only=True)
+        _write_binding_state(sidecar_path, existing, expected=None)
     elif existing is None:
-        _write_binding_state(sidecar_path, pending, create_only=True)
+        _write_binding_state(sidecar_path, pending, expected=None)
         existing = pending
     elif not _same_binding_anchor(existing, intent):
         if not current_marker:
             raise PrRouteDenied("PRG-BINDING-DRIFT")
-        _write_binding_state(sidecar_path, pending, create_only=False)
+        _write_binding_state(sidecar_path, pending, expected=existing)
         existing = pending
     if (
         existing.repository_identity != identity
@@ -3611,12 +3727,13 @@ def _evaluate_simple_pr_route(
             or verified.head_repository_id != head_repository_id
         ):
             raise PrRouteDenied("PRG-BINDING-DRIFT")
-        existing = PrBindingState(
+        bound = PrBindingState(
             intent.record, intent.sha256, "bound", identity,
             prepared.literal.remote, prepared.literal.target.head_ref,
             grant.url, pr_id, head_repository_id,
         )
-        _write_binding_state(sidecar_path, existing, create_only=False)
+        _write_binding_state(sidecar_path, bound, expected=existing)
+        existing = bound
     else:
         match = PR_URL_REGEX.fullmatch(existing.pr_url or "")
         if match is None:
@@ -3653,7 +3770,9 @@ def _revoke_simple_binding(transcript_path: str) -> None:
     existing = _read_binding_state(path)
     if existing is None or existing.state == "revoked":
         return
-    _write_binding_state(path, existing._replace(state="revoked"), create_only=False)
+    _write_binding_state(
+        path, existing._replace(state="revoked"), expected=existing
+    )
 
 
 
