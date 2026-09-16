@@ -206,6 +206,7 @@ MAX_LEDGER_LINE_CHARS = _JSONL_SCHEMA["maxLineChars"]
 MAX_LEDGER_LINE_BYTES = _JSONL_SCHEMA["maxLineBytes"]
 MAX_LEDGER_EVENTS = _JSONL_SCHEMA["maxEvents"]
 MAX_JSON_NESTING_DEPTH = _JSONL_SCHEMA["maxNestingDepth"]
+MAX_TRANSFER_RECEIPT_BYTES = 4 * 1024 * 1024
 SCRATCH_IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$", re.ASCII)
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$", re.ASCII)
 QUICK_FIX_TEMPLATE = "quick-fix"
@@ -4867,21 +4868,124 @@ def _transfer_status_relation(item: Path, errors: list[str]) -> tuple[str, str] 
     return values["continues"][0], values["obligation-transfer"][0]
 
 
+def _transfer_receipt_candidates(root: Path, errors: list[str]) -> tuple[Path, ...]:
+    archive_root = root / "work-items" / "archive"
+    if not os.path.lexists(archive_root):
+        return ()
+    if _is_link_or_reparse(archive_root) or not archive_root.is_dir():
+        fail(
+            errors,
+            "WI-OBLIGATION-TRANSFER-OWNER: transfer archive root is unavailable, linked, or a reparse point",
+        )
+        return ()
+
+    def children(directory: Path) -> tuple[Path, ...]:
+        try:
+            return tuple(sorted(directory.iterdir(), key=lambda item: item.name.encode("utf-8")))
+        except OSError as exc:
+            fail(
+                errors,
+                f"WI-OBLIGATION-TRANSFER-OWNER: transfer archive component is unreadable: {exc}",
+            )
+            return ()
+
+    candidates: list[Path] = []
+    for month in children(archive_root):
+        if _is_link_or_reparse(month):
+            fail(
+                errors,
+                "WI-OBLIGATION-TRANSFER-OWNER: transfer archive component is a link or reparse point",
+            )
+            continue
+        if not month.is_dir():
+            continue
+        for item in children(month):
+            if _is_link_or_reparse(item):
+                fail(
+                    errors,
+                    "WI-OBLIGATION-TRANSFER-OWNER: transfer archive component is a link or reparse point",
+                )
+                continue
+            if not item.is_dir():
+                continue
+            receipt = item / "lifecycle-transition-receipt.json"
+            if os.path.lexists(receipt):
+                candidates.append(receipt)
+    return tuple(candidates)
+
+
+def _transfer_authority_metadata(root: Path, path: Path) -> os.stat_result:
+    try:
+        relative = path.relative_to(root).as_posix()
+    except ValueError as exc:
+        raise ValueError("transfer authority path escapes repository") from exc
+    confined = confine_legacy_projection_path(
+        root,
+        relative,
+        prefix=("work-items", "archive"),
+        leaf_kind="file",
+        failure_id="WI-OBLIGATION-TRANSFER-OWNER",
+    )
+    return os.lstat(confined)
+
+
+def _transfer_stat_key(metadata: os.stat_result) -> tuple[int, ...]:
+    return (
+        metadata.st_dev,
+        metadata.st_ino,
+        metadata.st_mode,
+        metadata.st_size,
+        getattr(metadata, "st_mtime_ns", int(metadata.st_mtime * 1_000_000_000)),
+    )
+
+
+def _read_transfer_authority_bytes(
+    root: Path, path: Path, *, maximum_bytes: int | None = None
+) -> bytes:
+    before = _transfer_authority_metadata(root, path)
+    if maximum_bytes is not None and before.st_size > maximum_bytes:
+        raise ValueError(
+            f"JSON exceeds maximum raw UTF-8 length {maximum_bytes} bytes"
+        )
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags)
+    try:
+        opened = os.fstat(descriptor)
+        if _transfer_stat_key(opened) != _transfer_stat_key(before):
+            raise ValueError("transfer authority descriptor identity differs")
+        with os.fdopen(descriptor, "rb") as stream:
+            descriptor = -1
+            raw = stream.read(maximum_bytes + 1 if maximum_bytes is not None else -1)
+            after = os.fstat(stream.fileno())
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+    if maximum_bytes is not None and len(raw) > maximum_bytes:
+        raise ValueError(
+            f"JSON exceeds maximum raw UTF-8 length {maximum_bytes} bytes"
+        )
+    path_after = _transfer_authority_metadata(root, path)
+    if (
+        len(raw) != before.st_size
+        or _transfer_stat_key(after) != _transfer_stat_key(before)
+        or _transfer_stat_key(path_after) != _transfer_stat_key(before)
+    ):
+        raise ValueError("transfer authority changed during read")
+    return raw
+
+
 def _transfer_receipts(
     root: Path, errors: list[str]
 ) -> dict[str, tuple[Path, dict, Path]]:
     receipts: dict[str, tuple[Path, dict, Path]] = {}
-    work_items = root / "work-items"
-    for path in sorted((work_items / "archive").glob("*/*/lifecycle-transition-receipt.json")):
-        if _is_link_or_reparse(path):
-            fail(
-                errors,
-                "WI-OBLIGATION-TRANSFER-OWNER: transfer receipt is a link or reparse point",
-            )
-            continue
+    for path in _transfer_receipt_candidates(root, errors):
         try:
             payload = decode_json_object(
-                path.read_bytes(), source=str(path), maximum_bytes=max(1, path.stat().st_size)
+                _read_transfer_authority_bytes(
+                    root, path, maximum_bytes=MAX_TRANSFER_RECEIPT_BYTES
+                ),
+                source=str(path),
+                maximum_bytes=MAX_TRANSFER_RECEIPT_BYTES,
             )
         except (OSError, ValueError) as exc:
             fail(errors, f"WI-OBLIGATION-TRANSFER-OWNER: transfer receipt is unreadable: {exc}")
@@ -4923,8 +5027,10 @@ def _transfer_receipts(
             continue
         ledger = archive / "agent-runs.jsonl"
         try:
-            physical_ledger_sha = hashlib.sha256(ledger.read_bytes()).hexdigest()
-        except OSError as exc:
+            physical_ledger_sha = hashlib.sha256(
+                _read_transfer_authority_bytes(root, ledger)
+            ).hexdigest()
+        except (OSError, ValueError) as exc:
             fail(errors, f"WI-OBLIGATION-TRANSFER-DRIFT: transfer ledger is unavailable: {exc}")
             continue
         if physical_ledger_sha != ledger_sha256:
@@ -4932,7 +5038,6 @@ def _transfer_receipts(
             continue
         receipts[operation_id] = (path, payload, archive)
     return receipts
-
 
 def validate_transfer_receipt_obligation_coverage(
     root: Path,

@@ -1878,6 +1878,53 @@ def test_transfer_receipt_leaf_link_is_rejected_before_authority_read(
     assert external.read_bytes() == receipt_bytes
 
 
+@pytest.mark.parametrize("linked_component", ("month", "item"))
+def test_transfer_receipt_linked_ancestor_never_supplies_authority(
+    tmp_path: Path, linked_component: str
+) -> None:
+    fixture = transfer_fixture(tmp_path)
+    receipt = run_transfer(fixture)
+    archive = fixture["root"].joinpath(*receipt["archivePath"].split("/"))
+    month = archive.parent
+    linked = month if linked_component == "month" else archive
+    external = fixture["root"] / f"outside-transfer-{linked_component}"
+    shutil.move(str(linked), str(external))
+    make_directory_link(linked, external)
+
+    validator = load_validator()
+    errors: list[str] = []
+    receipts = validator._transfer_receipts(fixture["root"], errors)
+
+    assert receipts == {}
+    assert any(
+        error.startswith("WI-OBLIGATION-TRANSFER-OWNER:")
+        and "link or reparse point" in error
+        for error in errors
+    )
+
+
+def test_transfer_receipt_uses_fixed_predecode_byte_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fixture = transfer_fixture(tmp_path)
+    receipt = run_transfer(fixture)
+    archive = fixture["root"].joinpath(*receipt["archivePath"].split("/"))
+    receipt_path = archive / "lifecycle-transition-receipt.json"
+    receipt_path.write_bytes(receipt_path.read_bytes() + b" " * 512)
+    validator = load_validator()
+    monkeypatch.setattr(validator, "MAX_TRANSFER_RECEIPT_BYTES", 64, raising=False)
+
+    errors: list[str] = []
+    receipts = validator._transfer_receipts(fixture["root"], errors)
+
+    assert receipts == {}
+    assert any(
+        error.startswith("WI-OBLIGATION-TRANSFER-OWNER:")
+        and "64 bytes" in error
+        for error in errors
+    )
+
+
 def test_archive_with_successor_transfer_rejects_coverage_owner_and_drift_matrix_without_mutation(
     tmp_path: Path,
 ) -> None:

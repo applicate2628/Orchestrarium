@@ -2,6 +2,10 @@
 
 This file is the canonical release log for tracked Orchestrarium monorepo changes that matter at publication time.
 
+## 2026-09-16
+
+- **Transferred-obligation authority reads now stay inside ordinary archive paths and fixed memory bounds.** The validator inventories the two archive levels without following linked or reparse-point month/item directories, then binds receipt and ledger reads to the checked ordinary pathname and descriptor. Lifecycle transition receipts are rejected before JSON parsing when they exceed the fixed 4 MiB limit. **Why it matters:** an external directory can no longer supply archived transfer authority, and an oversized receipt cannot force an unbounded allocation during audit or successor resolution.
+
 ## 2026-09-14
 
 - **Kimi selections and public results share stronger integrity and confidentiality checks.** Capability files exclude Windows writers before the first descriptor metadata or byte sample and must then yield the same bounded byte image twice, so an in-place same-metadata rewrite is refused. MCP argument values are private by default; only the explicit `port`, `mode`, `flag`, and endpoint controls remain public, while credential components embedded in endpoints are still protected. Unknown environment/header names remain private; structured header/environment carrier aliases, bare environment assignments, inline, separated, positional, and option-like values, and URL credentials (including user-info, non-service path segments, fragments, and encoded query values) are covered in raw and JSON-escaped output. Stable ordered deduplication removes repeated linear searches without adding a dependency or a second credential policy.
