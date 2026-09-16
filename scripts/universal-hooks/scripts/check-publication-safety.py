@@ -195,7 +195,7 @@ _PUBLIC_TOKEN_LOWER_CREDENTIAL_SUFFIX_PATTERN = "|".join(
     re.escape(stem) for stem in _PUBLIC_TOKEN_LOWER_CREDENTIAL_STEMS
 )
 _CONCATENATED_CREDENTIAL_TOKEN = re.compile(
-    rf"(?<![A-Za-z0-9_])(?P<credential_token_identifier>(?i:"
+    rf"(?<![A-Za-z0-9])(?P<credential_token_identifier>(?i:"
     rf"(?:(?:{_PUBLIC_TOKEN_LOWER_CREDENTIAL_PREFIX_PATTERN})[a-z0-9]*|"
     rf"[a-z0-9]*(?:{_PUBLIC_TOKEN_LOWER_CREDENTIAL_SUFFIX_PATTERN}))token))"
     rf"\s*[:=]\s*(?P<rhs_value>{_QUOTED}|{_BARE})"

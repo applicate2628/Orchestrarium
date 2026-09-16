@@ -763,6 +763,7 @@ class TestPublicationSafetyScanner(unittest.TestCase):
             "access-suffix": f'myaccesstoken="{value}"; {marker}',
             "api-prefix-with-middle": f'apiresponsetoken="{value}"; {marker}',
             "mixed-case": f'aPItoken="{value}"; {marker}',
+            "underscore-prefix": f'config_accesstoken="{value}"; {marker}',
         }
         for scanner in (CANONICAL_SCANNER, *SCANNERS):
             for name, fixture in cases.items():
@@ -780,6 +781,7 @@ class TestPublicationSafetyScanner(unittest.TestCase):
             "embedded-api": f'rapidtoken="{value}"; {marker}',
             "embedded-api-long": f'capitaltoken="{value}"; {marker}',
             "authorship": f'authorshiptoken="{value}"; {marker}',
+            "underscore-prefix": f'config_protocoltoken="{value}"; {marker}',
         }
         for scanner in (CANONICAL_SCANNER, *SCANNERS):
             self._assert_cached_pass_batch(scanner, rows)
