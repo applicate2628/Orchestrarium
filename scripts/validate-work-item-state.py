@@ -207,6 +207,8 @@ MAX_LEDGER_LINE_BYTES = _JSONL_SCHEMA["maxLineBytes"]
 MAX_LEDGER_EVENTS = _JSONL_SCHEMA["maxEvents"]
 MAX_JSON_NESTING_DEPTH = _JSONL_SCHEMA["maxNestingDepth"]
 MAX_TRANSFER_RECEIPT_BYTES = 4 * 1024 * 1024
+MAX_TRANSFER_LEDGER_BYTES = MAX_LEDGER_EVENTS * (MAX_LEDGER_LINE_BYTES + 2)
+_TRANSFER_AUTHORITY_DIGEST_CHUNK_BYTES = 64 * 1024
 SCRATCH_IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$", re.ASCII)
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$", re.ASCII)
 QUICK_FIX_TEMPLATE = "quick-fix"
@@ -4974,6 +4976,51 @@ def _read_transfer_authority_bytes(
     return raw
 
 
+def _transfer_authority_sha256(
+    root: Path, path: Path, *, maximum_bytes: int
+) -> str:
+    before = _transfer_authority_metadata(root, path)
+    if before.st_size > maximum_bytes:
+        raise ValueError(
+            f"transfer authority exceeds maximum raw length {maximum_bytes} bytes"
+        )
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags)
+    digest = hashlib.sha256()
+    total = 0
+    try:
+        opened = os.fstat(descriptor)
+        if _transfer_stat_key(opened) != _transfer_stat_key(before):
+            raise ValueError("transfer authority descriptor identity differs")
+        with os.fdopen(descriptor, "rb") as stream:
+            descriptor = -1
+            while True:
+                remaining = maximum_bytes - total
+                chunk = stream.read(
+                    min(_TRANSFER_AUTHORITY_DIGEST_CHUNK_BYTES, remaining + 1)
+                )
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > maximum_bytes:
+                    raise ValueError(
+                        f"transfer authority exceeds maximum raw length {maximum_bytes} bytes"
+                    )
+                digest.update(chunk)
+            after = os.fstat(stream.fileno())
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+    path_after = _transfer_authority_metadata(root, path)
+    if (
+        total != before.st_size
+        or _transfer_stat_key(after) != _transfer_stat_key(before)
+        or _transfer_stat_key(path_after) != _transfer_stat_key(before)
+    ):
+        raise ValueError("transfer authority changed during read")
+    return digest.hexdigest()
+
+
 def _transfer_receipts(
     root: Path, errors: list[str]
 ) -> dict[str, tuple[Path, dict, Path]]:
@@ -5027,9 +5074,9 @@ def _transfer_receipts(
             continue
         ledger = archive / "agent-runs.jsonl"
         try:
-            physical_ledger_sha = hashlib.sha256(
-                _read_transfer_authority_bytes(root, ledger)
-            ).hexdigest()
+            physical_ledger_sha = _transfer_authority_sha256(
+                root, ledger, maximum_bytes=MAX_TRANSFER_LEDGER_BYTES
+            )
         except (OSError, ValueError) as exc:
             fail(errors, f"WI-OBLIGATION-TRANSFER-DRIFT: transfer ledger is unavailable: {exc}")
             continue

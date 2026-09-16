@@ -753,6 +753,37 @@ class TestPublicationSafetyScanner(unittest.TestCase):
                 self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
                 self.assertIn("class=value-token", proc.stderr)
 
+    def test_public_token_annotation_rejects_concatenated_credential_cues(self) -> None:
+        marker = public_token_annotation()
+        value = "PUBLIC_PROTOCOL_RESULT_MARKER"
+        cases = {
+            "access-prefix": f'accesstoken="{value}"; {marker}',
+            "api-prefix": f'apitoken="{value}"; {marker}',
+            "session-prefix": f'sessiontoken="{value}"; {marker}',
+            "access-suffix": f'myaccesstoken="{value}"; {marker}',
+            "api-prefix-with-middle": f'apiresponsetoken="{value}"; {marker}',
+            "mixed-case": f'aPItoken="{value}"; {marker}',
+        }
+        for scanner in (CANONICAL_SCANNER, *SCANNERS):
+            for name, fixture in cases.items():
+                with self.subTest(scanner=scanner, name=name):
+                    proc = self._run_cached_process(scanner, fixture)
+                    self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+                    self.assertIn("class=value-token", proc.stderr)
+
+    def test_public_token_annotation_preserves_lowercase_concatenated_public_names(self) -> None:
+        marker = public_token_annotation()
+        value = "PUBLIC_PROTOCOL_RESULT_MARKER"
+        rows = {
+            "protocol": f'protocoltoken="{value}"; {marker}',
+            "result": f'resulttoken="{value}"; {marker}',
+            "embedded-api": f'rapidtoken="{value}"; {marker}',
+            "embedded-api-long": f'capitaltoken="{value}"; {marker}',
+            "authorship": f'authorshiptoken="{value}"; {marker}',
+        }
+        for scanner in (CANONICAL_SCANNER, *SCANNERS):
+            self._assert_cached_pass_batch(scanner, rows)
+
     def test_public_token_annotation_preserves_separator_delimited_noncredential_contexts(self) -> None:
         marker = public_token_annotation()
         value = "PUBLIC_PROTOCOL_RESULT_MARKER"

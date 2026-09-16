@@ -170,13 +170,43 @@ _BARE = rf"(?:[A-Za-z0-9_+/=-]{{5,}}[0-9][A-Za-z0-9_+/=-]*|[A-Za-z0-9_+/=-]*[0-9
 _CALLABLE_RHS = re.compile(
     r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*\s*\("
 )
+_PUBLIC_TOKEN_CREDENTIAL_CUES = (
+    "AUTH", "ACCESS", "API", "BEARER", "REFRESH", "SESSION", "OAUTH", "JWT",
+    "CREDENTIAL", "SECRET", "IDENTITY", "CSRF", "PASSWORD",
+)
+_PUBLIC_TOKEN_AUTH_CUE_PREFIXES = ("AUTHENTICAT", "AUTHORIZ", "AUTHORIS")
+_PUBLIC_TOKEN_LOWER_CREDENTIAL_STEMS = tuple(
+    sorted(
+        {
+            *(cue.lower() for cue in _PUBLIC_TOKEN_CREDENTIAL_CUES),
+            "authentication",
+            "authorization",
+            "authorisation",
+        },
+        key=lambda value: (-len(value), value),
+    )
+)
+_PUBLIC_TOKEN_LOWER_CREDENTIAL_PREFIX_PATTERN = "|".join(
+    re.escape(stem)
+    for stem in _PUBLIC_TOKEN_LOWER_CREDENTIAL_STEMS
+    if stem != "auth"
+)
+_PUBLIC_TOKEN_LOWER_CREDENTIAL_SUFFIX_PATTERN = "|".join(
+    re.escape(stem) for stem in _PUBLIC_TOKEN_LOWER_CREDENTIAL_STEMS
+)
+_CONCATENATED_CREDENTIAL_TOKEN = re.compile(
+    rf"(?<![A-Za-z0-9_])(?P<credential_token_identifier>(?i:"
+    rf"(?:(?:{_PUBLIC_TOKEN_LOWER_CREDENTIAL_PREFIX_PATTERN})[a-z0-9]*|"
+    rf"[a-z0-9]*(?:{_PUBLIC_TOKEN_LOWER_CREDENTIAL_SUFFIX_PATTERN}))token))"
+    rf"\s*[:=]\s*(?P<rhs_value>{_QUOTED}|{_BARE})"
+)
 _KEYWORDS = (
     ("password", r"password", "Password", "PASSWORD"),
     ("secret", r"secret", "Secret", "SECRET"),
     ("token", r"token", "Token", "TOKEN"),
     ("api-key", r"api[_-]?key", "ApiKey", "APIKEY"),
 )
-_VALUE_RULES = tuple(
+_VALUE_RULES = (("token", _CONCATENATED_CREDENTIAL_TOKEN),) + tuple(
     (
         family,
         re.compile(
@@ -188,11 +218,6 @@ _VALUE_RULES = tuple(
     for family, keyword, title, upper in _KEYWORDS
 )
 _VALUE_PATTERNS = tuple(pattern for _family, pattern in _VALUE_RULES)
-_PUBLIC_TOKEN_CREDENTIAL_CUES = (
-    "AUTH", "ACCESS", "API", "BEARER", "REFRESH", "SESSION", "OAUTH", "JWT",
-    "CREDENTIAL", "SECRET", "IDENTITY", "CSRF", "PASSWORD",
-)
-_PUBLIC_TOKEN_AUTH_CUE_PREFIXES = ("AUTHENTICAT", "AUTHORIZ", "AUTHORIS")
 _IDENTIFIER_COMPONENT = re.compile(
     r"[A-Z]+(?=[A-Z][a-z]|[0-9]|$)|[A-Z]?[a-z]+|[A-Z]+|[0-9]+"
 )
@@ -1161,6 +1186,8 @@ def _is_annotated_public_token_match(
     subject_kind: str,
 ) -> bool:
     if family != "token" or subject_kind == "commit-message":
+        return False
+    if match.groupdict().get("credential_token_identifier") is not None:
         return False
     rhs = match.group("rhs_value")
     if len(rhs) < 2 or rhs[0] not in {"'", '"'} or rhs[-1] != rhs[0]:

@@ -108,6 +108,86 @@ def test_transfer_receipt_archive_path_is_assertion_not_locator(tmp_path: Path) 
     assert errors
 
 
+def _write_transfer_authority_fixture(
+    tmp_path: Path, validator, operation_id: str, ledger: bytes
+) -> tuple[Path, Path]:
+    root = tmp_path / "repo"
+    archive = root / "work-items" / "archive" / "2026-09" / "source-item"
+    archive.mkdir(parents=True)
+    ledger_path = archive / "agent-runs.jsonl"
+    ledger_path.write_bytes(ledger)
+    archive_path = archive.relative_to(root).as_posix()
+    payload = _transfer_receipt_payload(validator, archive_path, ledger, operation_id)
+    (archive / "lifecycle-transition-receipt.json").write_text(
+        json.dumps(payload), encoding="utf-8"
+    )
+    return root, ledger_path
+
+
+def test_transfer_ledger_digest_never_uses_unbounded_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    validator = load_module(VALIDATOR, "pr10_transfer_streaming_digest_validator")
+    operation_id = "transfer-streaming-digest-op"
+    root, _ledger_path = _write_transfer_authority_fixture(
+        tmp_path, validator, operation_id, b'{"schemaVersion":1}\n'
+    )
+    original_fdopen = validator.os.fdopen
+    requested_sizes: list[int] = []
+
+    class TrackingReader:
+        def __init__(self, descriptor: int, mode: str) -> None:
+            self.stream = original_fdopen(descriptor, mode)
+
+        def __enter__(self):
+            self.stream.__enter__()
+            return self
+
+        def fileno(self) -> int:
+            return self.stream.fileno()
+
+        def read(self, size: int = -1) -> bytes:
+            requested_sizes.append(size)
+            return self.stream.read(size)
+
+        def __exit__(self, *args):
+            return self.stream.__exit__(*args)
+
+    monkeypatch.setattr(validator.os, "fdopen", TrackingReader)
+
+    errors: list[str] = []
+    receipts = validator._transfer_receipts(root, errors)
+
+    assert operation_id in receipts
+    assert errors == []
+    assert requested_sizes
+    assert -1 not in requested_sizes
+
+
+def test_transfer_ledger_digest_enforces_fixed_cumulative_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    validator = load_module(VALIDATOR, "pr10_transfer_ledger_limit_validator")
+    operation_id = "transfer-ledger-limit-op"
+    ledger = b'{"schemaVersion":1}\n' * 8
+    root, _ledger_path = _write_transfer_authority_fixture(
+        tmp_path, validator, operation_id, ledger
+    )
+    monkeypatch.setattr(
+        validator, "MAX_TRANSFER_LEDGER_BYTES", len(ledger) - 1, raising=False
+    )
+
+    errors: list[str] = []
+    receipts = validator._transfer_receipts(root, errors)
+
+    assert receipts == {}
+    assert any(
+        error.startswith("WI-OBLIGATION-TRANSFER-DRIFT:")
+        and f"{len(ledger) - 1} bytes" in error
+        for error in errors
+    )
+
+
 def _break_transfer_relation(fixture: dict) -> None:
     backlog = (
         fixture["root"]
